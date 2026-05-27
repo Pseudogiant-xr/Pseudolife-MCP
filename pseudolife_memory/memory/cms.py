@@ -44,6 +44,7 @@ from pseudolife_memory.utils.config import MemoryConfig
 
 if TYPE_CHECKING:
     from pseudolife_memory.memory.nli import NLIContradictionScorer
+    from pseudolife_memory.memory.reranker import CrossEncoderReranker
 
 logger = logging.getLogger(__name__)
 
@@ -86,12 +87,19 @@ class ContinuumMemorySystem:
         config: MemoryConfig,
         reference_bank=None,
         nli_scorer: "NLIContradictionScorer | None" = None,
+        reranker: "CrossEncoderReranker | None" = None,
     ) -> None:
         self.config = config
         self._nli_scorer = nli_scorer
         self._nli_candidate_cap: int = (
             getattr(config.nli, "max_candidates", 8) if hasattr(config, "nli") else 8
         )
+        # Optional cross-encoder reranker. Constructed by the caller
+        # (MemoryService) only when ``config.reranker.enabled = True`` or
+        # ``rerank=True`` is passed per-call to :meth:`retrieve`. The
+        # reranker itself lazy-loads its model on the first ``rerank()``,
+        # so the cost of attaching an unused reranker is zero.
+        self._reranker = reranker
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
         # ── Construct the N-band chain from the MIRAS config ──────────────────
@@ -322,10 +330,15 @@ class ContinuumMemorySystem:
         bands: list[str] | None = None,
         sources: list[str] | None = None,
         min_logical_turn: int | None = None,
+        query_text: str | None = None,
+        min_score: float | None = None,
+        disable_recency_boost: bool = False,
+        rerank: bool | None = None,
     ) -> tuple[RetrievalResult, dict]:
         """Like :meth:`retrieve` but also returns a structured trace dict
         describing exactly what happened — per-tier scores + per-entry
-        breakdown of recency / source-weight / chain-residual contributions.
+        breakdown of recency / source-weight / chain-residual / reranker
+        contributions.
 
         Used by the ``GET /api/memory/trace`` endpoint for debugging
         retrieval misses ("why didn't it recall X?") and by tests that
@@ -346,6 +359,7 @@ class ContinuumMemorySystem:
             "tiers": [],
             "chain_residual": {"enabled": False, "synthetic_hits": []},
             "reference_pool": [],
+            "reranker": {"fired": False, "candidates": []},
             "final_topk": [],
         }
         result = self.retrieve(
@@ -354,6 +368,10 @@ class ContinuumMemorySystem:
             bands=bands,
             sources=sources,
             min_logical_turn=min_logical_turn,
+            query_text=query_text,
+            min_score=min_score,
+            disable_recency_boost=disable_recency_boost,
+            rerank=rerank,
             _trace=trace,
         )
         return result, trace
@@ -369,6 +387,7 @@ class ContinuumMemorySystem:
         query_text: str | None = None,
         min_score: float | None = None,
         disable_recency_boost: bool = False,
+        rerank: bool | None = None,
         _trace: dict | None = None,
     ) -> RetrievalResult:
         """Retrieve from CMS bands and merge results.
@@ -656,6 +675,73 @@ class ContinuumMemorySystem:
                 ]
 
         combined = neural + ref_pool
+
+        # ── Pool 3: optional cross-encoder reranking ─────────────────────────
+        # Tier B. When enabled (via config.reranker.enabled or rerank=True
+        # per call), re-score the top-N combined candidates with a
+        # cross-encoder and fuse with the bi-encoder score. Only fires when
+        # we have query_text — without it the cross-encoder has nothing to
+        # attend over. Falls through silently if the reranker is unavailable
+        # (no model loaded, hub down) so retrieval never breaks because of
+        # an optional component.
+        rerank_enabled = (
+            rerank
+            if rerank is not None
+            else getattr(self.config.reranker, "enabled", False)
+            if hasattr(self.config, "reranker")
+            else False
+        )
+        if (
+            rerank_enabled
+            and self._reranker is not None
+            and query_text
+            and combined
+            and self._reranker.is_available()
+        ):
+            top_n = getattr(self.config.reranker, "top_n", 20)
+            head = combined[:top_n]
+            tail = combined[top_n:]
+            head_texts = [e.text for e, _, _ in head]
+            head_orig_scores = [float(s) for _, s, _ in head]
+            ce_scores = self._reranker.rerank(query_text, head_texts)
+            if ce_scores:
+                fused = self._reranker.fuse(head_orig_scores, ce_scores)
+                reranked = [
+                    (entry, fused_s, surprise)
+                    for (entry, _, surprise), fused_s in zip(head, fused)
+                ]
+                reranked.sort(key=lambda x: x[1], reverse=True)
+                combined = reranked + tail
+                if _trace is not None:
+                    _trace["reranker"] = {
+                        "fired": True,
+                        "model": getattr(
+                            self.config.reranker, "model_name", "?",
+                        ),
+                        "top_n": top_n,
+                        "fusion_weight": getattr(
+                            self.config.reranker, "fusion_weight", None,
+                        ),
+                        "candidates": [
+                            {
+                                "text_preview": entry.text[:80] + (
+                                    "…" if len(entry.text) > 80 else ""
+                                ),
+                                "original_score": round(orig, 4),
+                                "ce_score": round(ce, 4),
+                                "fused_score": round(fused_s, 4),
+                            }
+                            for (entry, _, _), orig, ce, fused_s in zip(
+                                head, head_orig_scores, ce_scores, fused,
+                            )
+                        ],
+                    }
+            elif _trace is not None:
+                _trace["reranker"] = {
+                    "fired": False,
+                    "reason": "rerank_failed_or_unavailable",
+                }
+
         if _trace is not None:
             _trace["final_topk"] = [
                 {

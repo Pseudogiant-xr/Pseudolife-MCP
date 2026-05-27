@@ -25,8 +25,8 @@ persistent associative memory on disk.
 | Tool | Purpose |
 |------|---------|
 | `memory_store(text, source?)` | Remember a fact, decision, observation |
-| `memory_search(query, top_k?, sources?, bands?, min_score?, disable_recency_boost?)` | Retrieve by associative similarity |
-| `memory_trace(query, top_k?, sources?, bands?)` | Search + full ranking trace — debug why an entry didn't surface |
+| `memory_search(query, top_k?, sources?, bands?, min_score?, disable_recency_boost?, rerank?)` | Retrieve by associative similarity |
+| `memory_trace(query, top_k?, sources?, bands?, rerank?)` | Search + full ranking trace — debug why an entry didn't surface |
 | `memory_recent(n?, sources?)` | List newest stores (debug + session start) |
 | `memory_list_sources()` | Enumerate every source tag in the bank with entry counts |
 | `memory_supersede(old_text, new_text)` | Explicit correction — mark old fact obsolete |
@@ -98,6 +98,12 @@ The built-in defaults are tuned for Claude's use case:
 - **No NLI scorer** — the `cross-encoder/nli-deberta-v3-xsmall`
   contradiction model is ~278 MB and optional. The four-path detector
   works without it. Install with `pip install .[nli]` if you want it.
+- **Cross-encoder reranker off** — the `ms-marco-MiniLM-L-6-v2` reranker
+  (~80 MB) is wired into the pipeline but disabled by default. Flip it
+  on either globally (`memory.reranker.enabled = true` in config) or
+  per-call (`memory_search(..., rerank=True)`). First call lazy-loads
+  the model from the HuggingFace hub; subsequent calls cost ~10ms per
+  reranked candidate. Details below under **Cross-encoder reranking**.
 - **No HyDE / no reflection** — both rely on an LLM callback. Claude *is*
   the LLM, so the natural way to reflect is for Claude to call
   `memory_store` with a self-composed summary.
@@ -166,6 +172,39 @@ At least one filter is required — bare `memory_delete()` returns an
 error to prevent accidental wholesale deletion. For "keep the history
 but mark it wrong" use `memory_supersede` instead.
 
+**Cross-encoder reranking (Tier B):**
+```
+memory_search("which python testing framework do we use", rerank=True)
+```
+After the bi-encoder retrieval builds the top-N candidate set, run
+`cross-encoder/ms-marco-MiniLM-L-6-v2` over each `(query, candidate)`
+pair and fuse the resulting relevance score with the bi-encoder score:
+```
+final = fusion_weight * sigmoid(ce_score) + (1 - fusion_weight) * original
+```
+The default `fusion_weight = 0.7` leans on the cross-encoder but
+preserves enough of the bi-encoder signal that recency / source /
+supersession multipliers still nudge order on near-ties. Off by
+default — enable per call with `rerank=True`, or globally via:
+```yaml
+memory:
+  reranker:
+    enabled: true
+    model_name: cross-encoder/ms-marco-MiniLM-L-6-v2
+    top_n: 20            # rerank the top-N candidates only
+    fusion_weight: 0.7   # 1.0 = pure CE, 0.0 = pure bi-encoder
+```
+First call lazy-loads the ~80 MB model from the HuggingFace Hub; later
+calls cost ~10 ms per reranked candidate on CPU (≈ 200 ms wall-clock
+added to a top-20 search). If the model fails to load, the reranker
+disables itself silently and retrieval falls back to bi-encoder ranking
+— search never breaks because of an optional component.
+
+`memory_trace(..., rerank=True)` surfaces the per-candidate
+`original_score`, `ce_score`, and `fused_score` under `trace.reranker`
+so you can see exactly how the cross-encoder reshuffled the
+bi-encoder ordering.
+
 ## Data layout
 
 Everything lives under `PSEUDOLIFE_MCP_DATA_DIR`:
@@ -190,13 +229,16 @@ pip install -e .[dev]
 pytest tests/ -v
 ```
 
-40 tests cover the MemoryService methods (store / search / recent /
-supersede / stats / save / trace / list_sources / delete) and the new
-`memory_search` scoring overrides, plus MCP-level dispatch (tool
+59 tests cover the MemoryService methods (store / search / recent /
+supersede / stats / save / trace / list_sources / delete), the
+`memory_search` scoring overrides, the cross-encoder reranker
+(15 unit tests + 4 integration), and MCP-level dispatch (tool
 registration, docstring sanity, end-to-end invocation through the
 FastMCP machinery). The delete suite includes a persistence round-trip
-test (store → delete → save → reload → verify gone). Test suite uses a
-fresh embedder per module via the `warm_service` fixture so the ~1.5s
+test (store → delete → save → reload → verify gone). Reranker tests
+monkeypatch `sentence_transformers.CrossEncoder` with a deterministic
+stub so the suite stays fast and offline. Test suite uses a fresh
+embedder per module via the `warm_service` fixture so the ~1.5s
 sentence-transformers load doesn't dominate runtime.
 
 ## Differences from PseudoLife
@@ -210,6 +252,7 @@ sentence-transformers load doesn't dominate runtime.
 | Reflection | Yes (Slice D, runs on daemon thread) | No (caller can summarize) |
 | Contrastive | Yes (Slice F) | Yes — fires on `memory_supersede` and any negative-signal text |
 | NLI scorer | Bundled (278 MB) | Optional (`pip install .[nli]`) |
+| Cross-encoder reranker | — | Optional (`rerank=True` per call, ~80 MB) |
 | Reference bank | Yes | Yes |
 | Schema version | v5 | v5 (same on-disk format) |
 

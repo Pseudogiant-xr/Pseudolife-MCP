@@ -482,3 +482,146 @@ def test_save_then_reload_restores_memories(tmp_path) -> None:
     # The text should be findable verbatim.
     texts = [e["text"] for e in result["entries"]]
     assert any("MCP wrapper preserves memory" in t for t in texts)
+
+
+# ---------------------------------------------------------------------------
+# Cross-encoder reranking (Tier B)
+# ---------------------------------------------------------------------------
+#
+# These tests drive ``service.search`` / ``service.trace`` with the
+# reranker enabled — but they never load the real cross-encoder. Instead
+# we monkeypatch ``sentence_transformers.CrossEncoder`` with a tiny stub
+# that scores pairs by shared whitespace tokens. That keeps the suite
+# fast and offline while still exercising the wiring end-to-end:
+# config flag → service → CMS.retrieve → reranker.rerank → fuse → resort.
+
+
+class _StubCrossEncoder:
+    """Deterministic stand-in for ``sentence_transformers.CrossEncoder``."""
+
+    def __init__(self, model_name: str) -> None:
+        self.model_name = model_name
+
+    def predict(self, pairs):  # type: ignore[no-untyped-def]
+        out = []
+        for q, c in pairs:
+            shared = set(q.lower().split()) & set(c.lower().split())
+            # 2 * matches - 1 logit, so 0 matches → -1 (sigmoid<0.5),
+            # 3+ matches → strongly positive.
+            out.append(2.0 * len(shared) - 1.0)
+        return out
+
+
+def _reset_reranker(svc: MemoryService) -> None:
+    """Drop any previously-loaded model so the monkeypatch takes effect.
+
+    The reranker caches its model on the first call; without this reset
+    a stub installed in test N+1 won't be picked up because test N
+    already cached the real (or earlier-patched) CrossEncoder.
+    """
+    svc._ensure_init()  # noqa: SLF001 — fixture wiring.
+    assert svc._reranker is not None
+    svc._reranker._model = None  # noqa: SLF001
+    svc._reranker._disabled = False  # noqa: SLF001
+
+
+class TestReranker:
+    def test_search_with_rerank_true_fires_reranker(
+        self,
+        pristine_service: MemoryService,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """rerank=True per-call enables reranking even when config is off."""
+        import sentence_transformers  # noqa: PLC0415
+        monkeypatch.setattr(sentence_transformers, "CrossEncoder", _StubCrossEncoder)
+        _reset_reranker(pristine_service)
+
+        pristine_service.store(
+            "We use pytest as our python testing framework",
+            source="project",
+        )
+        pristine_service.store(
+            "The user's cat Jacque is a Ragdoll who lives in the kitchen",
+            source="general",
+        )
+        out = pristine_service.trace(
+            "what python testing framework do we use", rerank=True,
+        )
+        assert out["trace"]["reranker"]["fired"] is True
+        assert "candidates" in out["trace"]["reranker"]
+        # Per-candidate breakdown should carry the three scoring columns.
+        cand = out["trace"]["reranker"]["candidates"][0]
+        for key in ("original_score", "ce_score", "fused_score"):
+            assert key in cand, f"missing {key!r} in rerank trace"
+
+    def test_rerank_false_disables_even_when_config_enabled(
+        self,
+        pristine_service: MemoryService,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """rerank=False overrides config.reranker.enabled=True."""
+        import sentence_transformers  # noqa: PLC0415
+        monkeypatch.setattr(sentence_transformers, "CrossEncoder", _StubCrossEncoder)
+        _reset_reranker(pristine_service)
+
+        # Flip the config flag on so the default would be to rerank.
+        original = pristine_service.config.memory.reranker.enabled
+        pristine_service.config.memory.reranker.enabled = True
+        try:
+            pristine_service.store("Python is fun", source="x")
+            out = pristine_service.trace("python", rerank=False)
+            assert out["trace"]["reranker"]["fired"] is False
+        finally:
+            pristine_service.config.memory.reranker.enabled = original
+
+    def test_rerank_promotes_lexically_aligned_candidate(
+        self,
+        pristine_service: MemoryService,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Reranking should reorder candidates by cross-encoder score.
+
+        We store a query-aligned memory and a distractor. With the stub
+        cross-encoder, the aligned memory's CE score will dwarf the
+        distractor's, so the fused score puts it at index 0.
+        """
+        import sentence_transformers  # noqa: PLC0415
+        monkeypatch.setattr(sentence_transformers, "CrossEncoder", _StubCrossEncoder)
+        _reset_reranker(pristine_service)
+
+        pristine_service.store(
+            "PseudoLife uses ChromaDB for the reference document bank",
+            source="project",
+        )
+        pristine_service.store(
+            "Coffee is brewed in the morning by the espresso machine",
+            source="kitchen",
+        )
+        out = pristine_service.search(
+            "PseudoLife uses ChromaDB reference document bank",
+            top_k=5,
+            rerank=True,
+        )
+        assert out["count"] >= 1
+        # The lexically-aligned memory should land at the top.
+        assert "PseudoLife" in out["entries"][0]["text"]
+
+    def test_rerank_failure_falls_back_to_biencoder(
+        self,
+        pristine_service: MemoryService,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """If the cross-encoder errors, we still return bi-encoder results."""
+        import sentence_transformers  # noqa: PLC0415
+
+        def _broken(*args, **kwargs):  # type: ignore[no-untyped-def]
+            raise RuntimeError("CrossEncoder unavailable")
+
+        monkeypatch.setattr(sentence_transformers, "CrossEncoder", _broken)
+        _reset_reranker(pristine_service)
+
+        pristine_service.store("A simple test fact", source="x")
+        out = pristine_service.search("simple test fact", rerank=True)
+        # Bi-encoder result still surfaces despite the rerank failure.
+        assert out["count"] >= 1
+        assert "simple test fact" in out["entries"][0]["text"]

@@ -33,6 +33,14 @@ dev = [
 nli = [
     "transformers>=4.40",
 ]
+# Cross-encoder reranker — small (~80 MB MS MARCO MiniLM-L-6-v2).
+# Off by default; flip ``memory.reranker.enabled = True`` in config or
+# pass ``rerank=True`` per call to enable. Bumps the floor on
+# sentence-transformers so the CrossEncoder API is stable; the rest of
+# the codebase already pulls sentence-transformers in for the embedder.
+rerank = [
+    "sentence-transformers>=2.5",
+]
 pdf = [
     "PyMuPDF>=1.24",
 ]

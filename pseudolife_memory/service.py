@@ -44,6 +44,7 @@ from pseudolife_memory.memory.context_builder import ContextBuilder
 from pseudolife_memory.memory.contrastive import ContrastiveUpdater
 from pseudolife_memory.memory.embedding import EmbeddingPipeline
 from pseudolife_memory.memory.reference_bank import ReferenceBank
+from pseudolife_memory.memory.reranker import CrossEncoderReranker
 from pseudolife_memory.memory.titans_memory import MemoryEntry, RetrievalResult
 from pseudolife_memory.utils.config import (
     AppConfig,
@@ -134,6 +135,7 @@ class MemoryService:
         self._reference: ReferenceBank | None = None
         self._contrastive: ContrastiveUpdater | None = None
         self._context_builder: ContextBuilder | None = None
+        self._reranker: CrossEncoderReranker | None = None
         self._last_user_query: str | None = None
 
     # ------------------------------------------------------------------
@@ -176,9 +178,21 @@ class MemoryService:
             # tier still works.
             logger.warning("ReferenceBank disabled: %s", exc)
             self._reference = None
+        # Reranker is always *constructible* (the model is lazy-loaded on
+        # the first rerank()), so attach one unconditionally and let the
+        # rerank-enabled flag in cms.retrieve gate actual firing. Reading
+        # from config means a user can disable the reranker entirely by
+        # setting config.memory.reranker.enabled = False without paying
+        # any cost.
+        self._reranker = CrossEncoderReranker(
+            model_name=self.config.memory.reranker.model_name,
+            fusion_weight=self.config.memory.reranker.fusion_weight,
+            top_n=self.config.memory.reranker.top_n,
+        )
         self._cms = ContinuumMemorySystem(
             self.config.memory,
             reference_bank=self._reference,
+            reranker=self._reranker,
         )
         # Restore persisted state if any (silently no-ops on fresh install).
         try:
@@ -238,6 +252,7 @@ class MemoryService:
         bands: list[str] | None = None,
         min_score: float | None = None,
         disable_recency_boost: bool = False,
+        rerank: bool | None = None,
     ) -> dict[str, Any]:
         """Retrieve relevant memories ranked by associative similarity.
 
@@ -251,6 +266,14 @@ class MemoryService:
         per-band recency uplift so ranking depends on raw similarity ×
         source-multiplier × supersession only — useful for state-probe
         queries where popularity bias is unwelcome.
+
+        ``rerank`` overrides ``config.memory.reranker.enabled``:
+
+        * ``None`` (default) — follow the config flag.
+        * ``True`` — apply the cross-encoder reranker on the top-N
+          candidates even if config disables it. First call lazy-loads
+          ``cross-encoder/ms-marco-MiniLM-L-6-v2`` (~80MB).
+        * ``False`` — skip reranking even if config enables it.
         """
         with self._lock:
             self._ensure_init()
@@ -267,6 +290,7 @@ class MemoryService:
                 query_text=query,
                 min_score=min_score,
                 disable_recency_boost=disable_recency_boost,
+                rerank=rerank,
             )
             # Stash the query so memory_supersede / contrastive flows have
             # something to anchor against on the next call.
@@ -290,6 +314,7 @@ class MemoryService:
         top_k: int | None = None,
         sources: list[str] | None = None,
         bands: list[str] | None = None,
+        rerank: bool | None = None,
     ) -> dict[str, Any]:
         """Like :meth:`search` but also returns the structured ranking trace.
 
@@ -297,6 +322,10 @@ class MemoryService:
         raw_score, recency, source/supersession multipliers, and the
         drop_reason (or ``kept=True``) — so callers can see *why* a
         fact didn't surface.
+
+        ``rerank`` plumbs the cross-encoder override through to
+        ``cms.retrieve_with_trace`` so the trace ``reranker`` field
+        records both whether it fired and per-candidate ce/fused scores.
         """
         with self._lock:
             self._ensure_init()
@@ -308,7 +337,12 @@ class MemoryService:
                 }
             embedding = self._embedder.encode_single(query)
             result, trace = self._cms.retrieve_with_trace(
-                embedding, top_k=top_k, bands=bands, sources=sources,
+                embedding,
+                top_k=top_k,
+                bands=bands,
+                sources=sources,
+                query_text=query,
+                rerank=rerank,
             )
             return {
                 "query": query,

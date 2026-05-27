@@ -168,6 +168,41 @@ class NLIConfig:
 
 
 @dataclass
+class RerankerConfig:
+    """Cross-encoder reranker over the merged retrieval pool (Tier B).
+
+    Bi-encoder retrieval (dense MiniLM-L6) is cheap but loses signal on
+    near-duplicates and ambiguous queries — a query and a relevant doc
+    can have low cosine similarity while a less-relevant one wins on
+    surface tokens. A cross-encoder attends over (query, candidate)
+    jointly and re-scores them at the cost of one transformer pass per
+    pair. We run it on the top-N candidates only (default 20) so the
+    cost stays bounded.
+
+    Off by default — install with ``pip install .[rerank]`` (which just
+    pulls a slightly newer sentence-transformers anyway), set
+    ``enabled = True`` in config, or pass ``rerank=True`` per-call to
+    ``memory_search`` / ``memory_trace``.
+
+    Score fusion
+    ------------
+    The fused score is::
+
+        final = fusion_weight * sigmoid(ce_score) + (1 - fusion_weight) * original
+
+    where ``ce_score`` is the cross-encoder logit and ``original`` is the
+    bi-encoder's adjusted score (cosine × recency × source × supersession).
+    ``fusion_weight = 0.7`` (default) leans on the cross-encoder but
+    preserves enough of the bi-encoder signal that recency/source/
+    supersession multipliers still nudge the order on near-ties.
+    """
+    enabled: bool = False
+    model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    top_n: int = 20
+    fusion_weight: float = 0.7
+
+
+@dataclass
 class ContrastiveConfig:
     """Contrastive retrieval objective (Slice F, v0.7.6).
 
@@ -246,6 +281,8 @@ class MemoryConfig:
     reference: ReferenceConfig = field(default_factory=ReferenceConfig)
     # NLI contradiction-detection (fourth path)
     nli: NLIConfig = field(default_factory=NLIConfig)
+    # Cross-encoder reranker over the merged retrieval pool (Tier B).
+    reranker: RerankerConfig = field(default_factory=RerankerConfig)
     # HyDE-lite query expansion (Slice E, v0.7.6).
     hyde: HydeConfig = field(default_factory=HydeConfig)
     # Periodic reflection / dreaming (Slice D, v0.7.6).
@@ -356,6 +393,10 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             config.memory.reference = _dict_to_dataclass(ReferenceConfig, mem_raw["reference"])
         if "nli" in mem_raw:
             config.memory.nli = _dict_to_dataclass(NLIConfig, mem_raw["nli"])
+        if "reranker" in mem_raw:
+            config.memory.reranker = _dict_to_dataclass(
+                RerankerConfig, mem_raw["reranker"],
+            )
         if "hyde" in mem_raw:
             config.memory.hyde = _dict_to_dataclass(HydeConfig, mem_raw["hyde"])
         if "reflection" in mem_raw:

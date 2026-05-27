@@ -106,6 +106,7 @@ def memory_search(
     bands: list[str] | None = None,
     min_score: float | None = None,
     disable_recency_boost: bool = False,
+    rerank: bool | None = None,
 ) -> dict[str, Any]:
     """Retrieve memories relevant to a query by associative similarity.
 
@@ -129,6 +130,12 @@ def memory_search(
         disable_recency_boost: When True, ignore the per-band recency
             uplift — useful for state-probe queries where popularity
             bias is unwelcome.
+        rerank: Override the config's reranker flag. ``None`` (default)
+            follows config; ``True`` forces cross-encoder reranking of
+            the top-N candidates (~200ms extra after a one-time ~80MB
+            model fetch); ``False`` disables reranking even when config
+            enables it. Useful when you suspect the bi-encoder is
+            mis-ordering near-duplicates.
 
     Returns:
         ``{"query": str, "count": int, "entries": [<entry>...]}``.
@@ -143,6 +150,7 @@ def memory_search(
         bands=bands,
         min_score=min_score,
         disable_recency_boost=disable_recency_boost,
+        rerank=rerank,
     )
 
 
@@ -152,6 +160,7 @@ def memory_trace(
     top_k: int = 8,
     sources: list[str] | None = None,
     bands: list[str] | None = None,
+    rerank: bool | None = None,
 ) -> dict[str, Any]:
     """Search + structured ranking trace — debug why an entry didn't surface.
 
@@ -165,14 +174,20 @@ def memory_trace(
 
     Args:
         query, top_k, sources, bands: Same semantics as ``memory_search``.
+        rerank: Override the reranker flag — same semantics as
+            ``memory_search.rerank``. When True, the trace's ``reranker``
+            block includes per-candidate ``original_score``, ``ce_score``,
+            and ``fused_score`` so you can see exactly how the
+            cross-encoder reshuffled the bi-encoder ordering.
 
     Returns:
         ``{"query", "count", "entries", "trace"}``. The trace contains
         ``config``, ``filters``, ``tiers`` (per-band candidate breakdown),
-        ``chain_residual``, ``reference_pool``, and ``final_topk``.
+        ``chain_residual``, ``reference_pool``, ``reranker``, and
+        ``final_topk``.
     """
     return service.trace(
-        query=query, top_k=top_k, sources=sources, bands=bands,
+        query=query, top_k=top_k, sources=sources, bands=bands, rerank=rerank,
     )
 
 
