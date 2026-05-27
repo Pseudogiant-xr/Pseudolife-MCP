@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pseudolife-mcp"
+version = "0.1.0"
+description = "PseudoLife neural memory exposed as an MCP server for Claude Code"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+
+# Core deps — same memory stack as PseudoLife (torch + MIRAS + ChromaDB),
+# minus the LLM backends, FastAPI, and Electron-side machinery. MCP SDK on
+# top so Claude Code can attach over stdio.
+dependencies = [
+    "torch>=2.1.0",
+    "sentence-transformers>=2.2.0",
+    "numpy>=1.24.0",
+    "pyyaml>=6.0",
+    "chromadb>=0.5.0",
+    "mcp>=1.0.0",
+    "PyPDF2>=3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+]
+# NLI contradiction scorer — heavy (~278 MB DeBERTa-xsmall checkpoint).
+# Off by default; the four-path contradiction detector still runs without it.
+nli = [
+    "transformers>=4.40",
+]
+pdf = [
+    "PyMuPDF>=1.24",
+]
+
+[project.scripts]
+pseudolife-mcp = "pseudolife_memory.mcp_server:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pseudolife_memory*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
