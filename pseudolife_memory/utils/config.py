@@ -168,6 +168,47 @@ class NLIConfig:
 
 
 @dataclass
+class BM25Config:
+    """BM25 sparse-lexical retrieval pool (Tier B2).
+
+    Runs the standard Okapi BM25 scorer across every band entry in
+    parallel with the bi-encoder dense retrieval. The two pools are
+    weighted-sum-fused before the cross-encoder reranker fires, so a
+    query like ``process_chunk_v2`` — where the dense embedder has
+    little to latch onto — still surfaces the entry whose text
+    contains the exact token.
+
+    Off by default. Enable globally via
+    ``memory.bm25.enabled = true`` in config, or pass ``bm25=True``
+    per call to ``memory_search`` / ``memory_trace``.
+
+    Score fusion
+    ------------
+    BM25 raw scores are min-max normalised into ``[0, 1]`` per query
+    (so unbounded BM25 magnitudes don't drown the bi-encoder's
+    cosine-bounded scores). The contribution to the combined score is::
+
+        final = dense_score + weight * normalized_bm25
+
+    ``weight = 0.3`` (default) treats BM25 as a *boost* — the dense
+    pool still drives ordering on most queries, but lexically-aligned
+    entries get nudged up. New entries that only BM25 finds enter the
+    pool at ``weight * normalized_bm25`` (no dense contribution), which
+    is intentionally below the typical dense hit so BM25-only matches
+    don't displace strong semantic matches.
+    """
+    enabled: bool = False
+    k1: float = 1.5
+    b: float = 0.75
+    weight: float = 0.3
+    top_n: int = 20
+    # Floor on the *normalised* BM25 score — entries below this aren't
+    # injected into the result pool. Keeps high-frequency-but-irrelevant
+    # docs from polluting recall.
+    min_score: float = 0.1
+
+
+@dataclass
 class RerankerConfig:
     """Cross-encoder reranker over the merged retrieval pool (Tier B).
 
@@ -281,6 +322,8 @@ class MemoryConfig:
     reference: ReferenceConfig = field(default_factory=ReferenceConfig)
     # NLI contradiction-detection (fourth path)
     nli: NLIConfig = field(default_factory=NLIConfig)
+    # BM25 sparse lexical pool, fused with dense retrieval (Tier B2).
+    bm25: BM25Config = field(default_factory=BM25Config)
     # Cross-encoder reranker over the merged retrieval pool (Tier B).
     reranker: RerankerConfig = field(default_factory=RerankerConfig)
     # HyDE-lite query expansion (Slice E, v0.7.6).
@@ -393,6 +436,10 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             config.memory.reference = _dict_to_dataclass(ReferenceConfig, mem_raw["reference"])
         if "nli" in mem_raw:
             config.memory.nli = _dict_to_dataclass(NLIConfig, mem_raw["nli"])
+        if "bm25" in mem_raw:
+            config.memory.bm25 = _dict_to_dataclass(
+                BM25Config, mem_raw["bm25"],
+            )
         if "reranker" in mem_raw:
             config.memory.reranker = _dict_to_dataclass(
                 RerankerConfig, mem_raw["reranker"],

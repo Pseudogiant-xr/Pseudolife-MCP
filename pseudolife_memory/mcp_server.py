@@ -107,6 +107,7 @@ def memory_search(
     min_score: float | None = None,
     disable_recency_boost: bool = False,
     rerank: bool | None = None,
+    bm25: bool | None = None,
 ) -> dict[str, Any]:
     """Retrieve memories relevant to a query by associative similarity.
 
@@ -136,6 +137,12 @@ def memory_search(
             model fetch); ``False`` disables reranking even when config
             enables it. Useful when you suspect the bi-encoder is
             mis-ordering near-duplicates.
+        bm25: Override the config's BM25 flag. ``None`` follows config;
+            ``True`` runs sparse lexical retrieval in parallel with
+            dense and fuses the two — catches exact-keyword queries
+            (function names like ``process_chunk_v2``, version strings,
+            error codes) that dense embeddings can underweight;
+            ``False`` disables it.
 
     Returns:
         ``{"query": str, "count": int, "entries": [<entry>...]}``.
@@ -151,6 +158,7 @@ def memory_search(
         min_score=min_score,
         disable_recency_boost=disable_recency_boost,
         rerank=rerank,
+        bm25=bm25,
     )
 
 
@@ -161,6 +169,7 @@ def memory_trace(
     sources: list[str] | None = None,
     bands: list[str] | None = None,
     rerank: bool | None = None,
+    bm25: bool | None = None,
 ) -> dict[str, Any]:
     """Search + structured ranking trace — debug why an entry didn't surface.
 
@@ -179,15 +188,20 @@ def memory_trace(
             block includes per-candidate ``original_score``, ``ce_score``,
             and ``fused_score`` so you can see exactly how the
             cross-encoder reshuffled the bi-encoder ordering.
+        bm25: Override the BM25 flag — same semantics as
+            ``memory_search.bm25``. When True, the trace's ``bm25``
+            block records raw + normalised scores per hit, any
+            BM25-only injections, and the candidate-pool size.
 
     Returns:
         ``{"query", "count", "entries", "trace"}``. The trace contains
         ``config``, ``filters``, ``tiers`` (per-band candidate breakdown),
-        ``chain_residual``, ``reference_pool``, ``reranker``, and
-        ``final_topk``.
+        ``chain_residual``, ``bm25``, ``reference_pool``, ``reranker``,
+        and ``final_topk``.
     """
     return service.trace(
-        query=query, top_k=top_k, sources=sources, bands=bands, rerank=rerank,
+        query=query, top_k=top_k, sources=sources, bands=bands,
+        rerank=rerank, bm25=bm25,
     )
 
 

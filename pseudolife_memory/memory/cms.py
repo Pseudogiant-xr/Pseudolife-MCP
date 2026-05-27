@@ -40,6 +40,7 @@ from pseudolife_memory.memory.miras.band import MIRASBand, build_band
 from pseudolife_memory.memory.meta_filter import is_meta_statement
 from pseudolife_memory.memory.contradiction import detect_contradictions, decay_contradicted_entries
 from pseudolife_memory.memory.slots import extract_slots
+from pseudolife_memory.memory.bm25 import BM25Index, normalize_scores
 from pseudolife_memory.utils.config import MemoryConfig
 
 if TYPE_CHECKING:
@@ -334,6 +335,7 @@ class ContinuumMemorySystem:
         min_score: float | None = None,
         disable_recency_boost: bool = False,
         rerank: bool | None = None,
+        bm25: bool | None = None,
     ) -> tuple[RetrievalResult, dict]:
         """Like :meth:`retrieve` but also returns a structured trace dict
         describing exactly what happened — per-tier scores + per-entry
@@ -358,6 +360,7 @@ class ContinuumMemorySystem:
             },
             "tiers": [],
             "chain_residual": {"enabled": False, "synthetic_hits": []},
+            "bm25": {"fired": False, "hits": []},
             "reference_pool": [],
             "reranker": {"fired": False, "candidates": []},
             "final_topk": [],
@@ -372,6 +375,7 @@ class ContinuumMemorySystem:
             min_score=min_score,
             disable_recency_boost=disable_recency_boost,
             rerank=rerank,
+            bm25=bm25,
             _trace=trace,
         )
         return result, trace
@@ -388,6 +392,7 @@ class ContinuumMemorySystem:
         min_score: float | None = None,
         disable_recency_boost: bool = False,
         rerank: bool | None = None,
+        bm25: bool | None = None,
         _trace: dict | None = None,
     ) -> RetrievalResult:
         """Retrieve from CMS bands and merge results.
@@ -614,6 +619,114 @@ class ContinuumMemorySystem:
                 seen_texts.add(entry.text)
                 if entry.bank:
                     hit_band_names.add(entry.bank)
+
+        # ── Pool 1.75: BM25 sparse lexical channel (Tier B2) ─────────────────
+        # Dense embeddings underweight rare-but-exact tokens
+        # (function names, version strings, error codes). BM25 weights
+        # tokens by IDF so those tokens count for a lot. Runs in
+        # parallel with the dense+slot pools, then weighted-sum-fuses
+        # with the existing neural pool: entries in both pools get a
+        # boost; entries only BM25 found enter at weight × normalised
+        # score (below a typical dense hit).
+        #
+        # Off by default. Enable via config.bm25.enabled or pass
+        # bm25=True per call.
+        bm25_enabled = (
+            bm25
+            if bm25 is not None
+            else getattr(self.config.bm25, "enabled", False)
+            if hasattr(self.config, "bm25")
+            else False
+        )
+        if bm25_enabled and query_text:
+            bm25_cfg = self.config.bm25
+            # Build the candidate pool: every entry across every (filtered)
+            # band. Cheaper than rebuilding the slot graph; rebuild-per-query
+            # is acceptable up to ~tens of thousands of entries.
+            candidates: list[MemoryEntry] = []
+            for band in self.bands:
+                if band_filter is not None and band.name not in band_filter:
+                    continue
+                for entry in band.entries:
+                    if not _keep(entry):
+                        continue
+                    if source_filter is not None and entry.source not in source_filter:
+                        continue
+                    if min_logical_turn is not None:
+                        entry_turn = getattr(entry, "last_logical_turn", None)
+                        if entry_turn is None or entry_turn < min_logical_turn:
+                            continue
+                    candidates.append(entry)
+
+            if candidates:
+                idx = BM25Index(candidates, k1=bm25_cfg.k1, b=bm25_cfg.b)
+                raw_hits = idx.score(query_text, top_k=bm25_cfg.top_n)
+                norm_hits = normalize_scores(raw_hits)
+
+                # Build an entry-text → normalised score map for fusion.
+                bm25_lookup: dict[str, float] = {
+                    e.text: s for e, s in norm_hits if s >= bm25_cfg.min_score
+                }
+
+                # Boost entries already in the neural pool.
+                boosted: list[tuple[MemoryEntry, float, float]] = []
+                for entry, score, surprise in neural:
+                    boost = bm25_lookup.get(entry.text, 0.0)
+                    if boost > 0.0:
+                        boosted.append((entry, score + bm25_cfg.weight * boost, surprise))
+                    else:
+                        boosted.append((entry, score, surprise))
+                neural = boosted
+
+                # Inject BM25-only matches not yet in the pool.
+                bm25_only_added: list[dict] = []
+                for entry, norm_score in norm_hits:
+                    if entry.text in seen_texts:
+                        continue
+                    if norm_score < bm25_cfg.min_score:
+                        continue
+                    # Score = weight × normalised BM25 — intentionally low
+                    # so BM25-only hits don't displace strong dense hits,
+                    # but high enough to outrank weak dense matches.
+                    injected_score = bm25_cfg.weight * norm_score
+                    neural.append((entry, injected_score, 0.0))
+                    seen_texts.add(entry.text)
+                    if entry.bank:
+                        hit_band_names.add(entry.bank)
+                    bm25_only_added.append({
+                        "text_preview": entry.text[:80] + (
+                            "…" if len(entry.text) > 80 else ""
+                        ),
+                        "normalized_score": round(float(norm_score), 4),
+                        "injected_score": round(float(injected_score), 4),
+                    })
+
+                if _trace is not None:
+                    _trace["bm25"] = {
+                        "fired": True,
+                        "k1": bm25_cfg.k1,
+                        "b": bm25_cfg.b,
+                        "weight": bm25_cfg.weight,
+                        "min_score": bm25_cfg.min_score,
+                        "candidates_scored": len(candidates),
+                        "raw_hits": len(raw_hits),
+                        "hits": [
+                            {
+                                "text_preview": e.text[:80] + (
+                                    "…" if len(e.text) > 80 else ""
+                                ),
+                                "raw_bm25": round(float(r), 4),
+                                "normalized": round(float(n), 4),
+                            }
+                            for (e, r), (_, n) in zip(raw_hits, norm_hits)
+                        ],
+                        "injected": bm25_only_added,
+                    }
+            elif _trace is not None:
+                _trace["bm25"] = {
+                    "fired": False,
+                    "reason": "no_candidates_after_filters",
+                }
 
         neural.sort(key=lambda x: x[1], reverse=True)
         neural = neural[:k]

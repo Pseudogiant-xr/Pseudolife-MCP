@@ -253,6 +253,7 @@ class MemoryService:
         min_score: float | None = None,
         disable_recency_boost: bool = False,
         rerank: bool | None = None,
+        bm25: bool | None = None,
     ) -> dict[str, Any]:
         """Retrieve relevant memories ranked by associative similarity.
 
@@ -274,6 +275,15 @@ class MemoryService:
           candidates even if config disables it. First call lazy-loads
           ``cross-encoder/ms-marco-MiniLM-L-6-v2`` (~80MB).
         * ``False`` — skip reranking even if config enables it.
+
+        ``bm25`` overrides ``config.memory.bm25.enabled``:
+
+        * ``None`` (default) — follow the config flag.
+        * ``True`` — run BM25 sparse-lexical retrieval in parallel with
+          the dense pool and fuse the two. Catches exact-keyword queries
+          (function names, version strings, error codes) that dense
+          retrieval can underweight. Pure-stdlib, no extra deps.
+        * ``False`` — skip BM25 even if config enables it.
         """
         with self._lock:
             self._ensure_init()
@@ -291,6 +301,7 @@ class MemoryService:
                 min_score=min_score,
                 disable_recency_boost=disable_recency_boost,
                 rerank=rerank,
+                bm25=bm25,
             )
             # Stash the query so memory_supersede / contrastive flows have
             # something to anchor against on the next call.
@@ -315,6 +326,7 @@ class MemoryService:
         sources: list[str] | None = None,
         bands: list[str] | None = None,
         rerank: bool | None = None,
+        bm25: bool | None = None,
     ) -> dict[str, Any]:
         """Like :meth:`search` but also returns the structured ranking trace.
 
@@ -326,6 +338,10 @@ class MemoryService:
         ``rerank`` plumbs the cross-encoder override through to
         ``cms.retrieve_with_trace`` so the trace ``reranker`` field
         records both whether it fired and per-candidate ce/fused scores.
+
+        ``bm25`` plumbs the BM25 override through; when enabled, the
+        trace's ``bm25`` field records raw + normalised scores per hit
+        and any BM25-only injections.
         """
         with self._lock:
             self._ensure_init()
@@ -343,6 +359,7 @@ class MemoryService:
                 sources=sources,
                 query_text=query,
                 rerank=rerank,
+                bm25=bm25,
             )
             return {
                 "query": query,

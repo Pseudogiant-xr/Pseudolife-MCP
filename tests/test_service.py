@@ -625,3 +625,99 @@ class TestReranker:
         # Bi-encoder result still surfaces despite the rerank failure.
         assert out["count"] >= 1
         assert "simple test fact" in out["entries"][0]["text"]
+
+
+# ---------------------------------------------------------------------------
+# BM25 hybrid retrieval (Tier B2)
+# ---------------------------------------------------------------------------
+
+
+class TestBM25:
+    def test_search_with_bm25_true_fires_pool(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        """bm25=True per-call enables the BM25 pool even when config is off."""
+        pristine_service.store(
+            "the function process_chunk_v2 returns a tuple of (chunks, metadata)",
+            source="code",
+        )
+        out = pristine_service.trace(
+            "process_chunk_v2", bm25=True,
+        )
+        assert out["trace"]["bm25"]["fired"] is True
+        assert out["trace"]["bm25"]["candidates_scored"] >= 1
+        # The exact-token query should surface the entry.
+        assert any(
+            "process_chunk_v2" in e["text"] for e in out["entries"]
+        )
+
+    def test_bm25_false_disables_even_when_config_enabled(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        """bm25=False overrides config.bm25.enabled=True."""
+        original = pristine_service.config.memory.bm25.enabled
+        pristine_service.config.memory.bm25.enabled = True
+        try:
+            pristine_service.store("python tooling notes", source="x")
+            out = pristine_service.trace("python", bm25=False)
+            assert out["trace"]["bm25"]["fired"] is False
+        finally:
+            pristine_service.config.memory.bm25.enabled = original
+
+    def test_bm25_catches_exact_keyword_dense_might_miss(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        """The classic hybrid win: a rare identifier-style token."""
+        pristine_service.store(
+            "we ship the bug fix in release v9.42.0 next Monday",
+            source="release",
+        )
+        pristine_service.store(
+            "lunch was nice today, the soup was warm",
+            source="general",
+        )
+        out = pristine_service.search("v9.42.0", bm25=True, top_k=5)
+        assert out["count"] >= 1
+        # The exact-token entry should be at or near the top.
+        top_texts = [e["text"] for e in out["entries"][:2]]
+        assert any("v9.42.0" in t for t in top_texts), (
+            f"v9.42.0 entry didn't surface in top-2; got {top_texts!r}"
+        )
+
+    def test_bm25_trace_records_per_hit_scores(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        """Each BM25 hit in the trace carries raw + normalised scores."""
+        pristine_service.store(
+            "pseudolife uses ChromaDB for the reference document bank",
+            source="project",
+        )
+        out = pristine_service.trace(
+            "ChromaDB reference document bank", bm25=True,
+        )
+        bm25_block = out["trace"]["bm25"]
+        assert bm25_block["fired"] is True
+        assert len(bm25_block["hits"]) >= 1
+        hit = bm25_block["hits"][0]
+        for key in ("text_preview", "raw_bm25", "normalized"):
+            assert key in hit, f"missing {key!r} in bm25 trace hit"
+
+    def test_bm25_respects_source_filter(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        """BM25 should obey the per-query source filter so it can't sneak
+        filtered entries into the result set."""
+        pristine_service.store(
+            "important keyword zarpok lives in this entry",
+            source="alpha",
+        )
+        pristine_service.store(
+            "the keyword zarpok also appears here in beta",
+            source="beta",
+        )
+        out = pristine_service.search(
+            "zarpok", bm25=True, sources=["alpha"], top_k=5,
+        )
+        # Only the alpha-sourced entry can show up.
+        for entry in out["entries"]:
+            assert entry["source"] == "alpha"

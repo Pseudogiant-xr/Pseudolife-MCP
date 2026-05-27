@@ -25,8 +25,8 @@ persistent associative memory on disk.
 | Tool | Purpose |
 |------|---------|
 | `memory_store(text, source?)` | Remember a fact, decision, observation |
-| `memory_search(query, top_k?, sources?, bands?, min_score?, disable_recency_boost?, rerank?)` | Retrieve by associative similarity |
-| `memory_trace(query, top_k?, sources?, bands?, rerank?)` | Search + full ranking trace — debug why an entry didn't surface |
+| `memory_search(query, top_k?, sources?, bands?, min_score?, disable_recency_boost?, rerank?, bm25?)` | Retrieve by associative similarity |
+| `memory_trace(query, top_k?, sources?, bands?, rerank?, bm25?)` | Search + full ranking trace — debug why an entry didn't surface |
 | `memory_recent(n?, sources?)` | List newest stores (debug + session start) |
 | `memory_list_sources()` | Enumerate every source tag in the bank with entry counts |
 | `memory_supersede(old_text, new_text)` | Explicit correction — mark old fact obsolete |
@@ -104,6 +104,13 @@ The built-in defaults are tuned for Claude's use case:
   per-call (`memory_search(..., rerank=True)`). First call lazy-loads
   the model from the HuggingFace hub; subsequent calls cost ~10ms per
   reranked candidate. Details below under **Cross-encoder reranking**.
+- **BM25 hybrid lexical pool off** — a pure-stdlib BM25 sparse-retrieval
+  channel runs in parallel with the dense embedder when enabled, fusing
+  scores so exact-keyword queries (`process_chunk_v2`, `v0.7.6`,
+  error codes) still surface even if the embedder underweights them.
+  Off by default; flip via `memory.bm25.enabled = true` or
+  `memory_search(..., bm25=True)`. Details below under
+  **BM25 hybrid retrieval**.
 - **No HyDE / no reflection** — both rely on an LLM callback. Claude *is*
   the LLM, so the natural way to reflect is for Claude to call
   `memory_store` with a self-composed summary.
@@ -205,6 +212,43 @@ disables itself silently and retrieval falls back to bi-encoder ranking
 so you can see exactly how the cross-encoder reshuffled the
 bi-encoder ordering.
 
+**BM25 hybrid retrieval (Tier B2):**
+```
+memory_search("process_chunk_v2", bm25=True)
+memory_search("ship blocker for v9.42.0", bm25=True)
+```
+Dense MiniLM-L6 embeddings are great for *semantic* similarity but
+can underweight tokens with no real semantic neighbours — function
+names, version strings, error codes, hex hashes. BM25 is the classic
+sparse-lexical scorer (Okapi BM25 with Lucene-style IDF) that weights
+tokens by inverse document frequency, so rare-but-exact tokens count
+for a lot. The BM25 pool runs in parallel with dense retrieval and
+fuses with weighted score-sum:
+```
+final = dense_score + weight * normalized_bm25_score
+```
+Entries already in the dense pool get *boosted*; entries only BM25
+found enter at `weight * normalized_bm25` (intentionally below a
+typical dense hit so semantic recall still drives ordering). The
+tokenizer keeps underscored identifiers and dotted version strings
+whole, lowercases everything, and filters a tiny stop list.
+Configure globally with:
+```yaml
+memory:
+  bm25:
+    enabled: true
+    k1: 1.5       # term-frequency saturation
+    b: 0.75       # length-normalisation
+    weight: 0.3   # contribution to the fused score
+    top_n: 20     # how many BM25 hits to consider
+    min_score: 0.1  # floor on normalised BM25 (drops noise)
+```
+No new dependencies — pure stdlib. Cost is one O(N tokens) index
+rebuild per query, ≈ 20-50ms on a 40K-entry bank.
+
+`memory_trace(..., bm25=True)` records per-hit `raw_bm25`,
+`normalized`, and any BM25-only injections under `trace.bm25`.
+
 ## Data layout
 
 Everything lives under `PSEUDOLIFE_MCP_DATA_DIR`:
@@ -229,10 +273,11 @@ pip install -e .[dev]
 pytest tests/ -v
 ```
 
-59 tests cover the MemoryService methods (store / search / recent /
+87 tests cover the MemoryService methods (store / search / recent /
 supersede / stats / save / trace / list_sources / delete), the
 `memory_search` scoring overrides, the cross-encoder reranker
-(15 unit tests + 4 integration), and MCP-level dispatch (tool
+(15 unit + 4 integration), the BM25 hybrid lexical pool
+(23 unit + 5 integration), and MCP-level dispatch (tool
 registration, docstring sanity, end-to-end invocation through the
 FastMCP machinery). The delete suite includes a persistence round-trip
 test (store → delete → save → reload → verify gone). Reranker tests
@@ -253,6 +298,7 @@ sentence-transformers load doesn't dominate runtime.
 | Contrastive | Yes (Slice F) | Yes — fires on `memory_supersede` and any negative-signal text |
 | NLI scorer | Bundled (278 MB) | Optional (`pip install .[nli]`) |
 | Cross-encoder reranker | — | Optional (`rerank=True` per call, ~80 MB) |
+| BM25 hybrid pool | — | Optional (`bm25=True` per call, stdlib only) |
 | Reference bank | Yes | Yes |
 | Schema version | v5 | v5 (same on-disk format) |
 
