@@ -73,7 +73,11 @@ mcp = FastMCP("PseudoLife Memory")
 
 
 @mcp.tool()
-def memory_store(text: str, source: str = "claude") -> dict[str, Any]:
+def memory_store(
+    text: str,
+    source: str = "claude",
+    tags: list[str] | None = None,
+) -> dict[str, Any]:
     """Store a fact, observation, or decision in neural memory.
 
     Use proactively when you learn something durable: a user preference,
@@ -84,9 +88,16 @@ def memory_store(text: str, source: str = "claude") -> dict[str, Any]:
 
     Args:
         text: The fact to remember. One claim per call works best.
-        source: Free-form tag for filtering ("pseudolife", "general",
-            "v0.7.6"). Default "claude". Pass a stable tag per
-            project/topic so ``memory_search`` can scope its results.
+        source: Free-form single-value tag for filtering ("pseudolife",
+            "general", "v0.7.6"). Default "claude". Pass a stable tag
+            per project/topic so ``memory_search`` can scope its results.
+        tags: Optional multi-valued labels alongside ``source``.
+            Cross-cutting marks like ``["decision", "blocker"]`` or
+            ``["consolidated"]``. Normalised at store time (lowercased,
+            stripped, deduped). Filter by these with
+            ``memory_search(..., tags=[...])``. While an episode is
+            open (see ``memory_episode_start``), entries also carry the
+            current episode's id + title automatically.
 
     Returns:
         ``{"stored": bool, "surprise": float, "reason": str|None}``.
@@ -95,7 +106,7 @@ def memory_store(text: str, source: str = "claude") -> dict[str, Any]:
         error. ``reason="filtered_meta"`` means the text looked like a
         self-referential statement about the memory system itself.
     """
-    return service.store(text=text, source=source)
+    return service.store(text=text, source=source, tags=tags)
 
 
 @mcp.tool()
@@ -104,6 +115,8 @@ def memory_search(
     top_k: int = 8,
     sources: list[str] | None = None,
     bands: list[str] | None = None,
+    episodes: list[str] | None = None,
+    tags: list[str] | None = None,
     min_score: float | None = None,
     disable_recency_boost: bool = False,
     rerank: bool | None = None,
@@ -143,18 +156,27 @@ def memory_search(
             (function names like ``process_chunk_v2``, version strings,
             error codes) that dense embeddings can underweight;
             ``False`` disables it.
+        episodes: When provided, only return entries whose
+            ``episode_id`` is in this list. List the available
+            episodes via ``memory_episode_list``. None = no filter.
+        tags: When provided, only return entries whose ``tags`` share at
+            least one element with this list (OR within the list,
+            AND with the other filters). None = no filter.
 
     Returns:
         ``{"query": str, "count": int, "entries": [<entry>...]}``.
-        Each entry includes text, source, bank, timestamp, score, and
-        a ``superseded`` flag — when ``True``, prefer the entry's
-        ``superseded_by_text`` over its own text.
+        Each entry includes text, source, bank, timestamp, score,
+        episode_id / episode_title (or null), tags, and a ``superseded``
+        flag — when ``True``, prefer the entry's ``superseded_by_text``
+        over its own text.
     """
     return service.search(
         query=query,
         top_k=top_k,
         sources=sources,
         bands=bands,
+        episodes=episodes,
+        tags=tags,
         min_score=min_score,
         disable_recency_boost=disable_recency_boost,
         rerank=rerank,
@@ -168,6 +190,8 @@ def memory_trace(
     top_k: int = 8,
     sources: list[str] | None = None,
     bands: list[str] | None = None,
+    episodes: list[str] | None = None,
+    tags: list[str] | None = None,
     rerank: bool | None = None,
     bm25: bool | None = None,
 ) -> dict[str, Any]:
@@ -201,6 +225,7 @@ def memory_trace(
     """
     return service.trace(
         query=query, top_k=top_k, sources=sources, bands=bands,
+        episodes=episodes, tags=tags,
         rerank=rerank, bm25=bm25,
     )
 
@@ -224,13 +249,15 @@ def memory_delete(
     text: str | None = None,
     substring: str | None = None,
     source: str | None = None,
+    episode: str | None = None,
+    tag: str | None = None,
 ) -> dict[str, Any]:
     """Remove memories matching any of the provided filters.
 
     Hygiene tool — call when you stored junk during testing, when a
     source tag accumulated noise, or when a specific wrong fact needs
     to be purged outright. (For "this is now wrong, but keep the
-    history" use ``memory_supersede`` instead.)
+    history" use ``memory_supersede`` or ``memory_consolidate`` instead.)
 
     At least one filter is required; bare ``memory_delete()`` returns
     an error so accidental wholesale deletion is impossible. Filters
@@ -240,17 +267,26 @@ def memory_delete(
         text: Exact text match.
         substring: Remove any entry whose text contains this substring.
         source: Remove every entry tagged with this source.
+        episode: Remove every entry stamped with this episode id —
+            handy for wiping an experimental session wholesale.
+        tag: Remove every entry that carries this tag (single value).
 
     Returns:
         ``{"deleted_count": N, "deleted_texts": [...]}``. The texts
         list is capped at 20 to keep responses small on large purges.
     """
-    return service.delete(text=text, substring=substring, source=source)
+    return service.delete(
+        text=text, substring=substring, source=source,
+        episode=episode, tag=tag,
+    )
 
 
 @mcp.tool()
 def memory_recent(
-    n: int = 10, sources: list[str] | None = None,
+    n: int = 10,
+    sources: list[str] | None = None,
+    episodes: list[str] | None = None,
+    tags: list[str] | None = None,
 ) -> dict[str, Any]:
     """List the N most recently stored memories, newest first.
 
@@ -261,8 +297,14 @@ def memory_recent(
     Args:
         n: How many to return. Default 10.
         sources: Optional source-tag filter.
+        episodes: Optional episode-id filter. AND-combined with the
+            other filters. None = no filter.
+        tags: Optional tag filter. Entry matches when its tag set
+            intersects this list. None = no filter.
     """
-    return service.recent(n=n, sources=sources)
+    return service.recent(
+        n=n, sources=sources, episodes=episodes, tags=tags,
+    )
 
 
 @mcp.tool()
@@ -313,6 +355,195 @@ def memory_save() -> dict[str, Any]:
     matters for the neural bands.
     """
     return service.save()
+
+
+@mcp.tool()
+def memory_episode_start(
+    title: str, hint: str | None = None,
+) -> dict[str, Any]:
+    """Open a new episode — a bracketed working session.
+
+    Every memory stored while the episode is open carries the episode
+    id + title automatically, enabling later queries like
+    ``memory_search(..., episodes=[id])`` ("what did we work on in this
+    session?") and ``memory_episode_summary(id)`` for a structured
+    rundown.
+
+    If another episode is already open, this auto-closes it (with a
+    ``closed_by_new_start=True`` flag on the closed one) before opening
+    the new episode — graceful degradation when ``memory_episode_end``
+    was forgotten.
+
+    Args:
+        title: Human label for the episode. Surfaces in retrieval
+            responses and in ``memory_episode_list``.
+        hint: Optional longer descriptor / goal.
+
+    Returns:
+        ``{"id": str, "title": str, "started_at": float, "ended_at":
+        None, "hint": str|None, "closed_by_new_start": bool}``.
+    """
+    return service.episode_start(title=title, hint=hint)
+
+
+@mcp.tool()
+def memory_episode_end() -> dict[str, Any]:
+    """Close the currently-open episode.
+
+    Returns the closed episode dict (with ``ended_at`` set), or an
+    empty dict when no episode is open. Stores made after this call
+    will have ``episode_id=None`` until you call
+    ``memory_episode_start`` again.
+    """
+    return service.episode_end()
+
+
+@mcp.tool()
+def memory_episode_list(
+    limit: int = 20, include_open: bool = True,
+) -> dict[str, Any]:
+    """List episodes newest-first with per-episode entry counts.
+
+    Use to discover what sessions are available before scoping a search
+    or summary. Each row includes ``id``, ``title``, ``started_at``,
+    ``ended_at`` (null if currently open), ``hint``, and
+    ``entry_count``.
+
+    Args:
+        limit: Max episodes returned. Default 20.
+        include_open: When False, hide the currently-open episode.
+    """
+    return service.episode_list(limit=limit, include_open=include_open)
+
+
+@mcp.tool()
+def memory_episode_summary(id: str) -> dict[str, Any]:
+    """Stats + tag distribution + recent entries for an episode.
+
+    Useful at the end of a session ("summarise what I worked on") or
+    when planning a consolidation pass on an old session.
+
+    Args:
+        id: The episode id (from ``memory_episode_start`` /
+            ``memory_episode_list``).
+
+    Returns:
+        ``{"found": bool, "id", "title", "started_at", "ended_at",
+        "entry_count", "tag_distribution": [...], "source_distribution":
+        [...], "recent_entries": [<entry>...]}``. Returns
+        ``{"found": False, "id": id}`` when the id is unknown.
+    """
+    return service.episode_summary(id=id)
+
+
+@mcp.tool()
+def memory_list_tags() -> dict[str, Any]:
+    """Enumerate every tag in the bank, with occurrence counts.
+
+    Sister tool to ``memory_list_sources``. Run before
+    ``memory_search(..., tags=[...])`` to discover tags Claude has
+    actually stored rather than guessing. Sorted by count descending;
+    ``total`` counts occurrences (an entry with two tags counts as 2).
+    """
+    return service.list_tags()
+
+
+@mcp.tool()
+def memory_consolidation_candidates(
+    query: str | None = None,
+    episode: str | None = None,
+    sources: list[str] | None = None,
+    tags: list[str] | None = None,
+    top_k: int = 20,
+    min_cohesion: float = 0.6,
+    min_cluster_size: int = 2,
+    max_clusters: int = 10,
+) -> dict[str, Any]:
+    """Surface clusters of mutually-similar memories ripe for consolidation.
+
+    The memory bank accumulates near-duplicate facts over time — the
+    same decision phrased five different ways across five sessions.
+    This tool clusters such candidates by mutual cosine similarity so
+    Claude can read the cluster, synthesise a single canonical note,
+    and commit it via ``memory_consolidate``.
+
+    Two modes:
+
+    * **Query-driven** (``query`` given): embed the query, retrieve the
+      top-N candidates through the standard search pipeline (filters,
+      rerank, BM25 all apply), then cluster.
+    * **Episode-scoped** (``query=None``, ``episode=...``): treat the
+      episode's entries as the candidate pool. Useful for "summarise
+      this session" workflows.
+
+    At least one of ``query`` / ``episode`` must be given — without an
+    anchor there's no principled cluster to surface.
+
+    Args:
+        query: Topic to consolidate around. None when episode-scoping.
+        episode: Restrict to this episode id.
+        sources / tags: Same semantics as ``memory_search``.
+        top_k: Candidate pool size before clustering. Default 20.
+        min_cohesion: Minimum cosine between seed and cluster member.
+            Default 0.6. Lower to surface looser groups (noisier);
+            raise to only flag near-duplicates.
+        min_cluster_size: Drop clusters smaller than this. Default 2.
+        max_clusters: Hard cap on returned clusters. Default 10.
+
+    Returns:
+        ``{"query": str|None, "episode": str|None, "count": int,
+        "clusters": [{"cohesion": float, "seed_score": float,
+        "size": int, "members": [<entry>...]}, ...]}``. Members are
+        ordered highest-relevance first.
+    """
+    return service.consolidation_candidates(
+        query=query,
+        episode=episode,
+        sources=sources,
+        tags=tags,
+        top_k=top_k,
+        min_cohesion=min_cohesion,
+        min_cluster_size=min_cluster_size,
+        max_clusters=max_clusters,
+    )
+
+
+@mcp.tool()
+def memory_consolidate(
+    replaces: list[str],
+    new_text: str,
+    source: str | None = None,
+    tags: list[str] | None = None,
+) -> dict[str, Any]:
+    """Atomic supersede-and-store — replace a cluster with one canonical note.
+
+    Pair with ``memory_consolidation_candidates``: read a cluster's
+    members, decide on a synthesis, then call this with the cluster's
+    texts in ``replaces`` and your synthesis in ``new_text``. Every
+    entry matching one of ``replaces`` (exact text first, embedding
+    fallback for paraphrases) gets marked superseded by ``new_text``;
+    the synthesis is then stored as a fresh memory.
+
+    Supersession is preserved so retrieval still surfaces the
+    historical predecessors with the consolidated note as their
+    successor — *the memory bank gets shorter without losing the
+    audit trail*.
+
+    Args:
+        replaces: Texts (or near-paraphrases) of the entries to retire.
+            At least one is required.
+        new_text: The consolidated synthesis. Stored as a fresh memory.
+        source: Defaults to ``"consolidation"`` for audit clarity.
+        tags: Optional tags on the new entry — ``["consolidated"]``
+            makes consolidations easy to find later.
+
+    Returns:
+        ``{"superseded_count": int, "superseded_texts": [...],
+        "new_memory_stored": bool, "new_memory_surprise": float}``.
+    """
+    return service.consolidate(
+        replaces=replaces, new_text=new_text, source=source, tags=tags,
+    )
 
 
 @mcp.tool()

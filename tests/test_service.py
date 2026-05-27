@@ -721,3 +721,364 @@ class TestBM25:
         # Only the alpha-sourced entry can show up.
         for entry in out["entries"]:
             assert entry["source"] == "alpha"
+
+
+# ---------------------------------------------------------------------------
+# Tier C — episode lifecycle + tag filters on service surface
+# ---------------------------------------------------------------------------
+
+
+class TestEpisodes:
+    """Service-level coverage of the episode lifecycle tools.
+
+    The integration boundary is the MCP-facing surface: tool callers see
+    plain dicts, the underlying ``EpisodeManager`` is exercised by
+    ``test_episodes.py``. These tests verify that the lifecycle hooks
+    actually stamp entries through the lock + ``_ensure_init`` path.
+    """
+
+    def test_episode_start_returns_id_title_and_started_at(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        out = pristine_service.episode_start("alpha-session")
+        assert "id" in out and isinstance(out["id"], str) and len(out["id"]) == 32
+        assert out["title"] == "alpha-session"
+        assert out["started_at"] > 0
+        assert out["ended_at"] is None
+
+    def test_store_during_open_episode_stamps_entry(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        ep = pristine_service.episode_start("work-session")
+        pristine_service.store("decision made about X", source="claude")
+        recent = pristine_service.recent(n=1)
+        assert recent["entries"][0]["episode_id"] == ep["id"]
+        assert recent["entries"][0]["episode_title"] == "work-session"
+
+    def test_store_after_episode_end_does_not_stamp(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        pristine_service.episode_start("done-session")
+        pristine_service.episode_end()
+        pristine_service.store("post-episode thought", source="claude")
+        recent = pristine_service.recent(n=1)
+        assert recent["entries"][0]["episode_id"] is None
+        assert recent["entries"][0]["episode_title"] is None
+
+    def test_episode_end_returns_closed_episode_with_ended_at(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        opened = pristine_service.episode_start("to-be-closed")
+        closed = pristine_service.episode_end()
+        assert closed["id"] == opened["id"]
+        assert closed["ended_at"] is not None and closed["ended_at"] >= closed["started_at"]
+
+    def test_episode_end_with_none_open_returns_empty(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        out = pristine_service.episode_end()
+        assert out == {} or out is None or out.get("id") is None
+
+    def test_episode_list_returns_newest_first(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        import time
+        a = pristine_service.episode_start("first")
+        pristine_service.episode_end()
+        time.sleep(0.02)  # Windows clock resolution — distinguish timestamps
+        b = pristine_service.episode_start("second")
+        pristine_service.episode_end()
+        listing = pristine_service.episode_list()
+        ids = [e["id"] for e in listing["episodes"]]
+        # b started after a → b first.
+        assert ids.index(b["id"]) < ids.index(a["id"])
+        assert listing["count"] == 2
+
+    def test_episode_summary_returns_stats_and_recent_entries(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        ep = pristine_service.episode_start("stats-session")
+        pristine_service.store("first decision", source="claude", tags=["a"])
+        pristine_service.store("second decision", source="general", tags=["a", "b"])
+        summary = pristine_service.episode_summary(ep["id"])
+        assert summary["id"] == ep["id"]
+        assert summary["title"] == "stats-session"
+        assert summary["entry_count"] == 2
+        # Tag distribution counts unique tags across entries.
+        tag_dist = {t["tag"]: t["count"] for t in summary["tag_distribution"]}
+        assert tag_dist.get("a") == 2
+        assert tag_dist.get("b") == 1
+        # Recent entries surfaces text+source for each.
+        assert len(summary["recent_entries"]) == 2
+
+    def test_episode_summary_for_missing_id_returns_not_found(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        out = pristine_service.episode_summary("no-such-id")
+        assert out.get("found") is False
+
+    def test_search_filtered_by_episode_returns_only_matching(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        ep_a = pristine_service.episode_start("alpha")
+        pristine_service.store(
+            "alpha-only context: choosing stdio transport for MCP",
+            source="claude",
+        )
+        pristine_service.episode_end()
+        ep_b = pristine_service.episode_start("beta")
+        pristine_service.store(
+            "beta context: a completely unrelated topic about cats",
+            source="claude",
+        )
+        pristine_service.episode_end()
+
+        out = pristine_service.search(
+            "transport", episodes=[ep_a["id"]], top_k=5, min_score=0.0,
+        )
+        # The single alpha entry must appear; the beta one must not.
+        texts = [e["text"] for e in out["entries"]]
+        assert any("alpha-only" in t for t in texts)
+        assert not any("beta context" in t for t in texts)
+
+    def test_recent_filtered_by_episode(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        ep_a = pristine_service.episode_start("a")
+        pristine_service.store("entry in a", source="claude")
+        pristine_service.episode_end()
+        pristine_service.episode_start("b")
+        pristine_service.store("entry in b", source="claude")
+        pristine_service.episode_end()
+
+        out = pristine_service.recent(n=10, episodes=[ep_a["id"]])
+        texts = [e["text"] for e in out["entries"]]
+        assert "entry in a" in texts
+        assert "entry in b" not in texts
+
+
+class TestTagsSurface:
+    """Tag plumbing at the service level."""
+
+    def test_store_accepts_tags_parameter(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        pristine_service.store(
+            "tagged fact",
+            source="claude",
+            tags=["decision", "blocker"],
+        )
+        recent = pristine_service.recent(n=1)
+        assert recent["entries"][0]["tags"] == ["decision", "blocker"]
+
+    def test_list_tags_counts_unique_tags(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        pristine_service.store("a", source="x", tags=["red"])
+        pristine_service.store("b", source="x", tags=["red", "blue"])
+        pristine_service.store("c", source="x", tags=["blue", "green"])
+        out = pristine_service.list_tags()
+        counts = {row["tag"]: row["count"] for row in out["tags"]}
+        assert counts.get("red") == 2
+        assert counts.get("blue") == 2
+        assert counts.get("green") == 1
+        assert out["total"] == 5  # tag-occurrence total
+
+    def test_list_tags_sorted_by_count_desc(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        pristine_service.store("a", source="x", tags=["popular"])
+        pristine_service.store("b", source="x", tags=["popular"])
+        pristine_service.store("c", source="x", tags=["popular", "rare"])
+        out = pristine_service.list_tags()
+        order = [row["tag"] for row in out["tags"]]
+        assert order[0] == "popular"
+        assert order[-1] == "rare"
+
+    def test_search_with_tags_filter_drops_untagged(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        pristine_service.store(
+            "implemented feature behind a v1 flag",
+            source="claude", tags=["feature-flag"],
+        )
+        pristine_service.store(
+            "regular note about feature implementation",
+            source="claude",
+        )
+        out = pristine_service.search(
+            "feature", tags=["feature-flag"], min_score=0.0, top_k=5,
+        )
+        # All surfaced entries must carry the tag.
+        for entry in out["entries"]:
+            assert "feature-flag" in entry["tags"]
+
+    def test_delete_by_tag_filter_removes_only_tagged(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        pristine_service.store("retire me", source="x", tags=["retired"])
+        pristine_service.store("keep me", source="x", tags=["fresh"])
+        out = pristine_service.delete(tag="retired")
+        assert out["deleted_count"] == 1
+        assert "retire me" in out["deleted_texts"]
+        # Survivor still queryable.
+        recent = pristine_service.recent(n=10)
+        texts = [e["text"] for e in recent["entries"]]
+        assert "keep me" in texts
+        assert "retire me" not in texts
+
+    def test_delete_by_episode_filter_removes_only_that_episode(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        ep_a = pristine_service.episode_start("trash-session")
+        pristine_service.store("garbage 1", source="x")
+        pristine_service.store("garbage 2", source="x")
+        pristine_service.episode_end()
+        pristine_service.episode_start("keep-session")
+        pristine_service.store("treasure", source="x")
+        pristine_service.episode_end()
+
+        out = pristine_service.delete(episode=ep_a["id"])
+        assert out["deleted_count"] == 2
+        recent = pristine_service.recent(n=10)
+        texts = [e["text"] for e in recent["entries"]]
+        assert "treasure" in texts
+        assert "garbage 1" not in texts
+        assert "garbage 2" not in texts
+
+
+class TestConsolidation:
+    """Service-level cluster surfacing + atomic consolidate operation.
+
+    The clustering algorithm itself is exercised by ``test_consolidation.py``;
+    these tests focus on the service-layer wiring: query → embed →
+    cluster → dict, plus the consolidate-and-supersede round-trip.
+    """
+
+    def test_consolidation_candidates_returns_cluster_dicts(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        """Three near-duplicate facts about the same topic should form
+        one cluster when surfaced via ``consolidation_candidates``."""
+        # All three describe stdio transport — same semantic content,
+        # different phrasings. The bi-encoder should find them similar.
+        pristine_service.store(
+            "MCP uses stdio transport — no port conflicts",
+            source="claude",
+        )
+        pristine_service.store(
+            "stdio transport was chosen for MCP because ports clash",
+            source="claude",
+        )
+        pristine_service.store(
+            "decided on stdio for MCP transport (port-free)",
+            source="claude",
+        )
+        # An unrelated fact that shouldn't join the cluster.
+        pristine_service.store(
+            "Python 3.11 is the minimum supported version",
+            source="claude",
+        )
+        out = pristine_service.consolidation_candidates(
+            query="MCP transport choice", top_k=10, min_cohesion=0.4,
+        )
+        assert out["query"] == "MCP transport choice"
+        assert isinstance(out["clusters"], list)
+        assert len(out["clusters"]) >= 1
+        first = out["clusters"][0]
+        assert "cohesion" in first and "members" in first
+        member_texts = {m["text"] for m in first["members"]}
+        # At least two stdio-related entries should cluster together.
+        stdio_in_cluster = sum(
+            1 for t in member_texts if "stdio" in t.lower()
+        )
+        assert stdio_in_cluster >= 2
+
+    def test_consolidation_candidates_respects_episode_filter(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        """When scoped to one episode, candidates from other episodes
+        should not leak in."""
+        ep_a = pristine_service.episode_start("topic-A")
+        pristine_service.store("alpha fact one", source="claude")
+        pristine_service.store("alpha fact two", source="claude")
+        pristine_service.episode_end()
+        pristine_service.episode_start("topic-B")
+        pristine_service.store("beta-only fact about something", source="claude")
+        pristine_service.episode_end()
+
+        out = pristine_service.consolidation_candidates(
+            query=None, episode=ep_a["id"], top_k=20, min_cohesion=0.4,
+        )
+        # Every member that surfaces must be from episode A.
+        for cluster in out["clusters"]:
+            for member in cluster["members"]:
+                assert member["episode_id"] == ep_a["id"]
+
+    def test_consolidation_candidates_empty_bank_returns_empty(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        out = pristine_service.consolidation_candidates(
+            query="anything", top_k=10,
+        )
+        assert out["clusters"] == []
+
+    def test_consolidate_supersedes_old_and_stores_new(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        """The atomic operation: every entry in ``replaces`` gets marked
+        superseded, the new entry is stored as a fresh memory."""
+        pristine_service.store("fact A v1", source="claude")
+        pristine_service.store("fact A v2", source="claude")
+        pristine_service.store("fact A v3", source="claude")
+
+        out = pristine_service.consolidate(
+            replaces=["fact A v1", "fact A v2", "fact A v3"],
+            new_text="Consolidated: fact A current state",
+            source="consolidation",
+            tags=["consolidated"],
+        )
+        assert out["superseded_count"] == 3
+        assert out["new_memory_stored"] is True
+
+        # Old entries surface as superseded; new one is current.
+        recent = pristine_service.recent(n=10)
+        by_text = {e["text"]: e for e in recent["entries"]}
+        for old in ("fact A v1", "fact A v2", "fact A v3"):
+            assert by_text[old]["superseded"] is True
+            assert by_text[old]["superseded_by_text"] == (
+                "Consolidated: fact A current state"
+            )
+        assert by_text["Consolidated: fact A current state"]["superseded"] is False
+        assert by_text["Consolidated: fact A current state"]["tags"] == ["consolidated"]
+        assert by_text["Consolidated: fact A current state"]["source"] == "consolidation"
+
+    def test_consolidate_default_source_is_consolidation(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        """Source defaults to ``"consolidation"`` for audit clarity."""
+        pristine_service.store("old fact", source="claude")
+        out = pristine_service.consolidate(
+            replaces=["old fact"], new_text="new fact",
+        )
+        recent = pristine_service.recent(n=5)
+        new_entry = next(
+            e for e in recent["entries"] if e["text"] == "new fact"
+        )
+        assert new_entry["source"] == "consolidation"
+        assert out["superseded_count"] == 1
+
+    def test_consolidate_empty_replaces_returns_no_op(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        """Defensive: an empty ``replaces`` list with a ``new_text``
+        could be interpreted as 'just store this' — but the explicit
+        consolidate semantics demand at least one supersession. Reject
+        cleanly."""
+        out = pristine_service.consolidate(
+            replaces=[], new_text="anything",
+        )
+        assert out.get("error") or out["superseded_count"] == 0
+        # No new memory stored either — the caller should use
+        # ``memory_store`` for that.
+        assert out["new_memory_stored"] is False

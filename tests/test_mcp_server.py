@@ -36,6 +36,14 @@ def test_all_tools_registered() -> None:
         "memory_save",
         "document_ingest",
         "document_search",
+        # Tier C — episode lifecycle + tag listing + consolidation.
+        "memory_episode_start",
+        "memory_episode_end",
+        "memory_episode_list",
+        "memory_episode_summary",
+        "memory_list_tags",
+        "memory_consolidation_candidates",
+        "memory_consolidate",
     ])
 
 
@@ -151,3 +159,126 @@ def test_memory_delete_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:
     texts = [e["text"] for e in recent["entries"]]
     assert "Junk" not in texts
     assert "Keep" in texts
+
+
+# ---------------------------------------------------------------------------
+# Tier C — episode lifecycle + consolidation tool dispatch
+# ---------------------------------------------------------------------------
+
+
+def test_memory_episode_lifecycle_via_mcp_dispatch(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """start → store → end → list — the canonical Claude workflow."""
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
+    import importlib
+    import pseudolife_memory.mcp_server as mod
+    importlib.reload(mod)
+
+    started = _invoke(
+        "memory_episode_start",
+        {"title": "Tier C work", "hint": "implementing episodes"},
+    )
+    assert started["title"] == "Tier C work"
+    assert started["hint"] == "implementing episodes"
+    ep_id = started["id"]
+
+    _invoke("memory_store", {"text": "decision A", "source": "claude"})
+    closed = _invoke("memory_episode_end", {})
+    assert closed["id"] == ep_id
+    assert closed["ended_at"] is not None
+
+    listing = _invoke("memory_episode_list", {"limit": 5})
+    assert any(e["id"] == ep_id for e in listing["episodes"])
+
+
+def test_memory_episode_summary_via_mcp_dispatch(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
+    import importlib
+    import pseudolife_memory.mcp_server as mod
+    importlib.reload(mod)
+
+    ep = _invoke("memory_episode_start", {"title": "summary session"})
+    _invoke(
+        "memory_store",
+        {"text": "fact one", "source": "claude", "tags": ["alpha"]},
+    )
+    _invoke(
+        "memory_store",
+        {"text": "fact two", "source": "claude", "tags": ["alpha", "beta"]},
+    )
+    out = _invoke("memory_episode_summary", {"id": ep["id"]})
+    assert out["found"] is True
+    assert out["entry_count"] == 2
+    tags = {row["tag"]: row["count"] for row in out["tag_distribution"]}
+    assert tags["alpha"] == 2
+    assert tags["beta"] == 1
+
+
+def test_memory_list_tags_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
+    import importlib
+    import pseudolife_memory.mcp_server as mod
+    importlib.reload(mod)
+
+    _invoke("memory_store", {"text": "a", "source": "x", "tags": ["red"]})
+    _invoke("memory_store", {"text": "b", "source": "x", "tags": ["red", "blue"]})
+    out = _invoke("memory_list_tags", {})
+    counts = {row["tag"]: row["count"] for row in out["tags"]}
+    assert counts["red"] == 2
+    assert counts["blue"] == 1
+
+
+def test_memory_consolidation_candidates_via_mcp_dispatch(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
+    import importlib
+    import pseudolife_memory.mcp_server as mod
+    importlib.reload(mod)
+
+    _invoke("memory_store", {"text": "stdio MCP transport choice", "source": "c"})
+    _invoke("memory_store", {"text": "MCP transport is stdio (no port)", "source": "c"})
+    _invoke("memory_store", {"text": "stdio chosen for MCP for port-freedom", "source": "c"})
+    _invoke("memory_store", {"text": "unrelated cat picture note", "source": "c"})
+
+    out = _invoke(
+        "memory_consolidation_candidates",
+        {"query": "MCP transport", "top_k": 10, "min_cohesion": 0.4},
+    )
+    assert "clusters" in out
+    # At least one cluster surfaces, and at least 2 stdio-related entries
+    # land in it together.
+    assert len(out["clusters"]) >= 1
+    member_texts = {m["text"] for m in out["clusters"][0]["members"]}
+    stdio_count = sum(1 for t in member_texts if "stdio" in t.lower())
+    assert stdio_count >= 2
+
+
+def test_memory_consolidate_via_mcp_dispatch(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
+    import importlib
+    import pseudolife_memory.mcp_server as mod
+    importlib.reload(mod)
+
+    _invoke("memory_store", {"text": "old phrasing one", "source": "c"})
+    _invoke("memory_store", {"text": "old phrasing two", "source": "c"})
+    out = _invoke(
+        "memory_consolidate",
+        {
+            "replaces": ["old phrasing one", "old phrasing two"],
+            "new_text": "Consolidated: current phrasing",
+            "tags": ["consolidated"],
+        },
+    )
+    assert out["superseded_count"] == 2
+    assert out["new_memory_stored"] is True
+    recent = _invoke("memory_recent", {"n": 10})
+    by_text = {e["text"]: e for e in recent["entries"]}
+    assert by_text["old phrasing one"]["superseded"] is True
+    assert by_text["Consolidated: current phrasing"]["superseded"] is False
+    assert "consolidated" in by_text["Consolidated: current phrasing"]["tags"]

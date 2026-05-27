@@ -40,6 +40,10 @@ from typing import Any
 import torch
 
 from pseudolife_memory.memory.cms import ContinuumMemorySystem
+from pseudolife_memory.memory.consolidation import (
+    Cluster,
+    cluster_candidates,
+)
 from pseudolife_memory.memory.context_builder import ContextBuilder
 from pseudolife_memory.memory.contrastive import ContrastiveUpdater
 from pseudolife_memory.memory.embedding import EmbeddingPipeline
@@ -79,6 +83,12 @@ def _entry_to_dict(
         "surprise_score": round(entry.surprise_score, 4),
         "superseded": entry.superseded_at is not None,
         "superseded_by_text": entry.superseded_by_text,
+        # Tier C (schema v6) — None / [] for entries stored before
+        # episodes / tags existed, so MCP responses never crash on legacy
+        # state.
+        "episode_id": entry.episode_id,
+        "episode_title": entry.episode_title,
+        "tags": list(entry.tags),
     }
     if entry.slots:
         out["slots"] = [
@@ -209,8 +219,17 @@ class MemoryService:
     # Tool: store
     # ------------------------------------------------------------------
 
-    def store(self, text: str, source: str = "claude") -> dict[str, Any]:
+    def store(
+        self,
+        text: str,
+        source: str = "claude",
+        tags: list[str] | None = None,
+    ) -> dict[str, Any]:
         """Embed and store a memory through the CMS pipeline.
+
+        ``tags`` (schema v6) is an optional multi-valued label list.
+        Normalised by the underlying CMS (lowercased / stripped /
+        deduped). Tags exist alongside ``source``, not as a replacement.
 
         Returns ``{"stored": bool, "surprise": float, "reason": str|None}``.
         Stores can be rejected by either the meta-filter (looks like
@@ -224,7 +243,9 @@ class MemoryService:
             if not text:
                 return {"stored": False, "surprise": 0.0, "reason": "empty"}
             embedding = self._embedder.encode_single(text)
-            stored, surprise = self._cms.store(text, embedding, source=source)
+            stored, surprise = self._cms.store(
+                text, embedding, source=source, tags=tags,
+            )
             reason: str | None = None
             if not stored:
                 # Mirror the gates in CMS.store so callers know why.
@@ -250,6 +271,8 @@ class MemoryService:
         top_k: int | None = None,
         sources: list[str] | None = None,
         bands: list[str] | None = None,
+        episodes: list[str] | None = None,
+        tags: list[str] | None = None,
         min_score: float | None = None,
         disable_recency_boost: bool = False,
         rerank: bool | None = None,
@@ -297,6 +320,8 @@ class MemoryService:
                 top_k=top_k,
                 bands=bands,
                 sources=sources,
+                episodes=episodes,
+                tags=tags,
                 query_text=query,
                 min_score=min_score,
                 disable_recency_boost=disable_recency_boost,
@@ -325,6 +350,8 @@ class MemoryService:
         top_k: int | None = None,
         sources: list[str] | None = None,
         bands: list[str] | None = None,
+        episodes: list[str] | None = None,
+        tags: list[str] | None = None,
         rerank: bool | None = None,
         bm25: bool | None = None,
     ) -> dict[str, Any]:
@@ -357,6 +384,8 @@ class MemoryService:
                 top_k=top_k,
                 bands=bands,
                 sources=sources,
+                episodes=episodes,
+                tags=tags,
                 query_text=query,
                 rerank=rerank,
                 bm25=bm25,
@@ -376,21 +405,37 @@ class MemoryService:
     # ------------------------------------------------------------------
 
     def recent(
-        self, n: int = 10, sources: list[str] | None = None,
+        self,
+        n: int = 10,
+        sources: list[str] | None = None,
+        episodes: list[str] | None = None,
+        tags: list[str] | None = None,
     ) -> dict[str, Any]:
         """List the N most recently stored memories across all bands.
 
-        Useful for debugging ("what did I just store?"). Unlike ``search``,
-        this returns by ``timestamp`` not relevance.
+        Useful for debugging ("what did I just store?"). Unlike
+        ``search``, this returns by ``timestamp`` not relevance.
+
+        ``episodes`` and ``tags`` (schema v6) AND-combine with
+        ``sources``. Each filter is OR within itself.
         """
         with self._lock:
             self._ensure_init()
             assert self._cms is not None
             source_filter = set(sources) if sources else None
+            episode_filter = set(episodes) if episodes else None
+            # Tag filter mirrors retrieval semantics: normalised, set
+            # intersection non-empty test.
+            from pseudolife_memory.memory.episodes import normalize_tags as _norm
+            tag_filter = set(_norm(tags)) if tags else None
             all_entries: list[MemoryEntry] = []
             for band in self._cms.bands:
                 for entry in band.entries:
                     if source_filter and entry.source not in source_filter:
+                        continue
+                    if episode_filter and entry.episode_id not in episode_filter:
+                        continue
+                    if tag_filter and not (set(entry.tags) & tag_filter):
                         continue
                     all_entries.append(entry)
             all_entries.sort(key=lambda e: e.timestamp, reverse=True)
@@ -491,6 +536,8 @@ class MemoryService:
         text: str | None = None,
         substring: str | None = None,
         source: str | None = None,
+        episode: str | None = None,
+        tag: str | None = None,
     ) -> dict[str, Any]:
         """Remove memories matching any of the provided filters.
 
@@ -508,6 +555,7 @@ class MemoryService:
             assert self._cms is not None
             removed = self._cms.delete_entries(
                 text=text, substring=substring, source=source,
+                episode=episode, tag=tag,
             )
             return {
                 "deleted_count": len(removed),
@@ -590,3 +638,358 @@ class MemoryService:
             assert self._cms is not None
             self._cms.save(self.config.memory.save_dir)
             return {"saved_to": self.config.memory.save_dir}
+
+    # ------------------------------------------------------------------
+    # Tier C — episode lifecycle + tag hygiene
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _episode_to_dict(ep) -> dict[str, Any]:
+        """Serialise an :class:`Episode` for MCP transport."""
+        return {
+            "id": ep.id,
+            "title": ep.title,
+            "started_at": ep.started_at,
+            "ended_at": ep.ended_at,
+            "hint": ep.hint,
+            "closed_by_new_start": ep.closed_by_new_start,
+        }
+
+    def episode_start(
+        self, title: str, hint: str | None = None,
+    ) -> dict[str, Any]:
+        """Open a new episode. Auto-closes any currently-open episode.
+
+        Every memory stored while the episode is open carries
+        ``episode_id`` / ``episode_title`` for later episode-scoped
+        retrieval. Returns the freshly-opened episode dict.
+        """
+        with self._lock:
+            self._ensure_init()
+            assert self._cms is not None
+            ep = self._cms.episodes.start(title=title, hint=hint)
+            return self._episode_to_dict(ep)
+
+    def episode_end(self) -> dict[str, Any]:
+        """Close the currently-open episode. Empty dict if none open."""
+        with self._lock:
+            self._ensure_init()
+            assert self._cms is not None
+            closed = self._cms.episodes.end()
+            return self._episode_to_dict(closed) if closed is not None else {}
+
+    def episode_list(
+        self, limit: int = 20, include_open: bool = True,
+    ) -> dict[str, Any]:
+        """List episodes newest-first, with per-episode entry counts.
+
+        Counts walk all bands once and bucket by ``episode_id``, so they
+        match what retrieval would see — entries promoted to deeper
+        bands are still counted under their original episode.
+        """
+        with self._lock:
+            self._ensure_init()
+            assert self._cms is not None
+            eps = self._cms.episodes.list(
+                limit=limit, include_open=include_open,
+            )
+            counts: dict[str, int] = {}
+            for band in self._cms.bands:
+                for entry in band.entries:
+                    if entry.episode_id:
+                        counts[entry.episode_id] = counts.get(entry.episode_id, 0) + 1
+            rows = []
+            for ep in eps:
+                row = self._episode_to_dict(ep)
+                row["entry_count"] = counts.get(ep.id, 0)
+                rows.append(row)
+            return {"count": len(rows), "episodes": rows}
+
+    def episode_summary(self, id: str) -> dict[str, Any]:
+        """Return stats + tag distribution + recent entries for an episode.
+
+        Returns ``{"found": False, "id": id}`` when the id is unknown so
+        callers can branch without parsing an error.
+        """
+        with self._lock:
+            self._ensure_init()
+            assert self._cms is not None
+            ep = self._cms.episodes.get(id)
+            if ep is None:
+                return {"found": False, "id": id}
+
+            entries: list[MemoryEntry] = []
+            for band in self._cms.bands:
+                for e in band.entries:
+                    if e.episode_id == id:
+                        entries.append(e)
+            entries.sort(key=lambda e: e.timestamp, reverse=True)
+
+            tag_counts: dict[str, int] = {}
+            for e in entries:
+                for t in e.tags:
+                    tag_counts[t] = tag_counts.get(t, 0) + 1
+            tag_rows = sorted(
+                ({"tag": t, "count": c} for t, c in tag_counts.items()),
+                key=lambda r: (-r["count"], r["tag"]),
+            )
+
+            source_counts: dict[str, int] = {}
+            for e in entries:
+                source_counts[e.source] = source_counts.get(e.source, 0) + 1
+            source_rows = sorted(
+                ({"source": s, "count": c} for s, c in source_counts.items()),
+                key=lambda r: (-r["count"], r["source"]),
+            )
+
+            return {
+                "found": True,
+                **self._episode_to_dict(ep),
+                "entry_count": len(entries),
+                "tag_distribution": tag_rows,
+                "source_distribution": source_rows,
+                # Cap recent entries — even a small dict times N entries
+                # gets unwieldy on long episodes. Use ``memory_recent``
+                # filtered by episode for the full list.
+                "recent_entries": [_entry_to_dict(e) for e in entries[:20]],
+            }
+
+    # ------------------------------------------------------------------
+    # Tier C — consolidation workflow
+    # ------------------------------------------------------------------
+
+    def consolidation_candidates(
+        self,
+        query: str | None = None,
+        episode: str | None = None,
+        sources: list[str] | None = None,
+        tags: list[str] | None = None,
+        top_k: int = 20,
+        min_cohesion: float = 0.6,
+        min_cluster_size: int = 2,
+        max_clusters: int = 10,
+    ) -> dict[str, Any]:
+        """Surface clusters of mutually-similar memories for consolidation.
+
+        Two modes:
+
+        * **Query-driven** (``query`` given): embed the query, run
+          retrieval through the standard CMS pipeline (so filters /
+          rerank / BM25 all apply), then cluster the top-N hits by
+          mutual similarity. Returns clusters scoped to the topic.
+        * **Episode-scoped** (``query=None``, ``episode`` given): walk
+          the episode's entries directly, treat them as the candidate
+          pool, cluster. Returns clusters within the session — useful
+          for "summarise what we worked on" style consolidation.
+
+        The clustering algorithm is exposed in
+        :mod:`pseudolife_memory.memory.consolidation`. This method is
+        glue: filter + score → cluster → serialise.
+
+        Args:
+            query: Topic to consolidate around. None when episode-scoping.
+            episode: Restrict to this episode id. AND-combined with the
+                tag / source filters.
+            sources / tags: Same semantics as ``search``.
+            top_k: Max candidates considered. Beyond this, the candidate
+                pool is too noisy for clustering to be meaningful.
+            min_cohesion: Min cosine between seed and cluster member.
+                Default 0.6 is conservative — surface only clearly-
+                related groups.
+            min_cluster_size: Drop clusters with fewer members.
+                Default 2 (the natural floor).
+            max_clusters: Hard cap on returned clusters.
+
+        Returns:
+            ``{"query": str|None, "episode": str|None, "count": int,
+            "clusters": [{"cohesion", "seed_score", "size", "members":
+            [<entry>...]}, ...]}``. Each member is the same dict shape
+            as ``search``'s entries — text, source, tags, episode,
+            timestamp, etc.
+        """
+        with self._lock:
+            self._ensure_init()
+            assert self._cms is not None and self._embedder is not None
+
+            # Build the candidate pool — either via retrieval (query) or
+            # by direct band scan (episode).
+            candidates: list[tuple[MemoryEntry, float]] = []
+            if query:
+                embedding = self._embedder.encode_single(query)
+                result = self._cms.retrieve(
+                    embedding,
+                    top_k=top_k,
+                    sources=sources,
+                    episodes=[episode] if episode else None,
+                    tags=tags,
+                    query_text=query,
+                    # Wider net than the default — clustering wants more
+                    # to work with.
+                    min_score=0.0,
+                )
+                candidates = list(zip(result.entries, result.scores))
+            elif episode:
+                # Pull every entry tagged with this episode, ordered by
+                # recency. Score is 1.0 across the board so the seed
+                # decision falls back to insertion order — fine for a
+                # one-episode scan.
+                seen_texts: set[str] = set()
+                for band in self._cms.bands:
+                    for e in band.entries:
+                        if e.episode_id != episode:
+                            continue
+                        if e.text in seen_texts:
+                            continue
+                        if sources and e.source not in sources:
+                            continue
+                        if tags and not (set(e.tags) & set(tags)):
+                            continue
+                        candidates.append((e, 1.0))
+                        seen_texts.add(e.text)
+                # Cap to ``top_k`` to keep clustering bounded.
+                candidates = candidates[:top_k]
+            else:
+                # Neither query nor episode — there's nothing principled
+                # to cluster, so return empty. Callers should pass at
+                # least one anchor.
+                return {
+                    "query": None,
+                    "episode": None,
+                    "count": 0,
+                    "clusters": [],
+                }
+
+            clusters: list[Cluster] = cluster_candidates(
+                candidates,
+                min_cohesion=min_cohesion,
+                min_cluster_size=min_cluster_size,
+                max_clusters=max_clusters,
+            )
+            return {
+                "query": query,
+                "episode": episode,
+                "count": len(clusters),
+                "clusters": [
+                    {
+                        "cohesion": round(c.cohesion, 4),
+                        "seed_score": round(c.seed_score, 4),
+                        "size": len(c.members),
+                        "members": [_entry_to_dict(m) for m in c.members],
+                    }
+                    for c in clusters
+                ],
+            }
+
+    def consolidate(
+        self,
+        replaces: list[str],
+        new_text: str,
+        source: str | None = None,
+        tags: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Atomic supersede-and-store: replace a cluster with one note.
+
+        The cluster of stale entries (``replaces`` — list of exact texts
+        or near-paraphrases) gets marked superseded by ``new_text``;
+        the new note is stored as a fresh memory carrying ``source``
+        (defaults to ``"consolidation"``) and ``tags``. Reuses the
+        existing supersession machinery so deeper-band promotion +
+        retrieval ordering already work correctly with consolidated
+        entries.
+
+        Defensive: empty ``replaces`` returns a no-op rather than just
+        storing ``new_text`` — the caller should use ``memory_store``
+        for that. Keeps the "consolidate" semantics unambiguous.
+
+        Args:
+            replaces: Exact or near-paraphrase texts to retire. Exact
+                match first; embedding-fallback per text.
+            new_text: The consolidated summary to store.
+            source: Defaults to ``"consolidation"`` for audit clarity.
+            tags: Optional tag list — useful for marking the new entry
+                as ``["consolidated"]`` so it's discoverable.
+
+        Returns:
+            ``{"superseded_count": N, "superseded_texts": [...],
+            "new_memory_stored": bool, "new_memory_surprise": float}``.
+        """
+        with self._lock:
+            self._ensure_init()
+            assert self._cms is not None and self._embedder is not None
+
+            replaces = [t for t in (replaces or []) if (t or "").strip()]
+            new_text = (new_text or "").strip()
+            if not replaces or not new_text:
+                return {
+                    "superseded_count": 0,
+                    "superseded_texts": [],
+                    "new_memory_stored": False,
+                    "error": "replaces and new_text must both be non-empty",
+                }
+
+            now = time.time()
+            superseded: list[str] = []
+            for old_text in replaces:
+                marked_this_round = False
+                # Exact-text pass for this specific replacement.
+                for band in self._cms.bands:
+                    for entry in band.entries:
+                        if (
+                            entry.text == old_text
+                            and entry.superseded_at is None
+                        ):
+                            entry.superseded_at = now
+                            entry.superseded_by_text = new_text
+                            superseded.append(entry.text)
+                            marked_this_round = True
+                if marked_this_round:
+                    continue
+                # Embedding fallback for paraphrases.
+                emb = self._embedder.encode_single(old_text)
+                result = self._cms.retrieve(emb, top_k=1, query_text=old_text)
+                if result.entries:
+                    target = result.entries[0]
+                    if target.superseded_at is None:
+                        target.superseded_at = now
+                        target.superseded_by_text = new_text
+                        superseded.append(target.text)
+
+            # Always store the consolidated entry — source defaults to
+            # ``"consolidation"`` for audit / filtering.
+            store_emb = self._embedder.encode_single(new_text)
+            stored, surprise = self._cms.store(
+                new_text,
+                store_emb,
+                source=source or "consolidation",
+                tags=tags,
+            )
+            return {
+                "superseded_count": len(superseded),
+                "superseded_texts": superseded,
+                "new_memory_stored": stored,
+                "new_memory_surprise": round(float(surprise), 4),
+            }
+
+    def list_tags(self) -> dict[str, Any]:
+        """Enumerate every tag in the bank, with occurrence counts.
+
+        Useful before scoped searches — surface tags Claude has actually
+        stored, instead of guessing. Sorted by count descending, ties
+        broken alphabetically. ``total`` is the sum of occurrence counts
+        (one entry with two tags counts as 2), not the unique tag count.
+        """
+        with self._lock:
+            self._ensure_init()
+            assert self._cms is not None
+            counts: dict[str, int] = {}
+            total = 0
+            for band in self._cms.bands:
+                for entry in band.entries:
+                    for t in entry.tags:
+                        counts[t] = counts.get(t, 0) + 1
+                        total += 1
+            rows = sorted(
+                ({"tag": t, "count": c} for t, c in counts.items()),
+                key=lambda r: (-r["count"], r["tag"]),
+            )
+            return {"tags": rows, "total": total}

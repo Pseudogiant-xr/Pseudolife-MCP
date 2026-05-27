@@ -65,6 +65,16 @@ class MemoryEntry:
     correctly even when the correction's own embedding misses
     retrieval. ``None`` for pre-v5 entries and for entries that have
     never been superseded.
+
+    ``episode_id`` / ``episode_title`` (schema v6, PseudoLife-MCP Tier C)
+    stamp the entry with the open episode at store time. ``None`` when no
+    episode was active. ``episode_title`` is denormalised so retrieval
+    responses can show the label without joining against the episode log.
+
+    ``tags`` (schema v6) is an open-ended multi-valued tag list alongside
+    the single-string ``source`` field. Tags are normalised at store time
+    (lowercase / stripped / deduplicated) and used as an OR-style filter
+    axis in retrieval. Empty list when the caller didn't set any.
     """
     text: str
     embedding: torch.Tensor
@@ -82,6 +92,14 @@ class MemoryEntry:
     slots: list[tuple[str, str, str, str]] = field(default_factory=list)
     # Text of the memory that triggered this entry's supersession. Schema v5.
     superseded_by_text: str | None = None
+    # Episode anchoring (schema v6, Tier C). ``episode_id`` is a uuid4 hex
+    # string; ``episode_title`` is the human label denormalised for display.
+    # Both ``None`` when no episode was open at store time.
+    episode_id: str | None = None
+    episode_title: str | None = None
+    # Multi-valued tag list (schema v6, Tier C). Normalised by the caller
+    # (lowercase / stripped / deduplicated). Empty when no tags were set.
+    tags: list[str] = field(default_factory=list)
 
     def __post_init__(self):
         if self.timestamp == 0.0:

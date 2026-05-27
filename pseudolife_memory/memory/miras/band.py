@@ -438,8 +438,15 @@ class MIRASBand:
                     "access_count": e.access_count,
                     "source": e.source,
                     "superseded_at": e.superseded_at,
+                    # v5 schema field — accidentally dropped pre-v6; restored
+                    # here so corrections survive a save/load cycle.
+                    "superseded_by_text": e.superseded_by_text,
                     "last_logical_turn": e.last_logical_turn,
                     "slots": e.slots,
+                    # v6 schema fields — episode anchoring + tags.
+                    "episode_id": e.episode_id,
+                    "episode_title": e.episode_title,
+                    "tags": e.tags,
                 }
                 for e in self.entries
             ],
@@ -489,11 +496,20 @@ class MIRASBand:
                 source=e.get("source", ""),
                 bank=self.name,
                 superseded_at=e.get("superseded_at"),
+                # ``superseded_by_text`` was declared in schema v5 but wasn't
+                # actually persisted until v6's serialiser fix. Pre-v6 entries
+                # default to ``None``; v6+ entries restore the field.
+                superseded_by_text=e.get("superseded_by_text"),
                 # ``last_logical_turn`` was added in schema v3; pre-v3 entries
                 # don't have it and stay ``None`` (no breaking change).
                 last_logical_turn=e.get("last_logical_turn"),
                 # ``slots`` was added in schema v4; pre-v4 entries get [].
                 slots=e.get("slots", []),
+                # v6 fields — episode anchoring + tags. Pre-v6 entries default
+                # to ``None`` / ``[]`` so existing on-disk state still loads.
+                episode_id=e.get("episode_id"),
+                episode_title=e.get("episode_title"),
+                tags=list(e.get("tags") or []),
             )
             for e in state["entries"]
         ]

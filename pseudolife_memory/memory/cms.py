@@ -41,6 +41,7 @@ from pseudolife_memory.memory.meta_filter import is_meta_statement
 from pseudolife_memory.memory.contradiction import detect_contradictions, decay_contradicted_entries
 from pseudolife_memory.memory.slots import extract_slots
 from pseudolife_memory.memory.bm25 import BM25Index, normalize_scores
+from pseudolife_memory.memory.episodes import EpisodeManager, normalize_tags
 from pseudolife_memory.utils.config import MemoryConfig
 
 if TYPE_CHECKING:
@@ -70,7 +71,16 @@ logger = logging.getLogger(__name__)
 #                 supersession. Populated by
 #                 :func:`src.memory.contradiction.decay_contradicted_entries`.
 #                 Pre-v5 entries default to ``None`` on load.
-SCHEMA_VERSION = 5
+#                 (Pre-existing bug fixed in v6: v5 declared this field but
+#                 ``MIRASBand.get_state_dict`` never actually persisted it.
+#                 v6 fixes this on the same pass.)
+#   v6 (Tier C) — additive: entries carry ``episode_id`` / ``episode_title``
+#                 (episode anchoring) and ``tags`` (multi-valued labels
+#                 alongside the single-string ``source``). Top-level
+#                 ``episodes`` block holds the :class:`EpisodeManager`
+#                 state. Pre-v6 entries default to ``None`` / ``[]`` on
+#                 load; pre-v6 ``episodes`` block defaults to empty.
+SCHEMA_VERSION = 6
 
 
 class ContinuumMemorySystem:
@@ -168,6 +178,11 @@ class ContinuumMemorySystem:
         # itself doesn't name it.
         self._last_entity_seen: str | None = None
 
+        # Episode log (schema v6, Tier C). Owns the current-open episode
+        # pointer + the per-episode metadata persisted alongside band state.
+        # Stamped onto every entry that lands while an episode is open.
+        self.episodes = EpisodeManager()
+
     @property
     def total_memories(self) -> int:
         total = sum(b.size for b in self.bands)
@@ -184,6 +199,7 @@ class ContinuumMemorySystem:
         text: str,
         embedding: torch.Tensor,
         source: str = "",
+        tags: list[str] | None = None,
     ) -> tuple[bool, float]:
         """Store a new memory through the CMS pipeline.
 
@@ -255,6 +271,13 @@ class ContinuumMemorySystem:
             # Stamp logical turn (schema v3 — None when no turn open).
             if self._in_logical_turn:
                 entry.last_logical_turn = self._logical_turn_count + 1
+            # Stamp episode (schema v6, Tier C). No-op when no episode is
+            # open; otherwise fills entry.episode_id / entry.episode_title
+            # so the entry carries its context through promotion.
+            self.episodes.stamp(entry)
+            # Tag stamp (schema v6, Tier C). Normalised once here so
+            # downstream filters can do plain set-intersection.
+            entry.tags = normalize_tags(tags)
             # Extract structured slots (schema v4). ``last_entity_context``
             # threads recent-entity coreference across messages — letting
             # "I gave him away" inherit the previous turn's "Jacque" anchor.
@@ -330,6 +353,8 @@ class ContinuumMemorySystem:
         *,
         bands: list[str] | None = None,
         sources: list[str] | None = None,
+        episodes: list[str] | None = None,
+        tags: list[str] | None = None,
         min_logical_turn: int | None = None,
         query_text: str | None = None,
         min_score: float | None = None,
@@ -356,6 +381,12 @@ class ContinuumMemorySystem:
             "filters": {
                 "bands": list(bands) if bands else None,
                 "sources": list(sources) if sources else None,
+                # Tier C filters — normalised by the caller so the trace
+                # reflects exactly what the inner loop applied.
+                "episodes": list(episodes) if episodes else None,
+                "tags": (
+                    normalize_tags(tags) if tags else None
+                ),
                 "min_logical_turn": min_logical_turn,
             },
             "tiers": [],
@@ -370,6 +401,8 @@ class ContinuumMemorySystem:
             top_k=top_k,
             bands=bands,
             sources=sources,
+            episodes=episodes,
+            tags=tags,
             min_logical_turn=min_logical_turn,
             query_text=query_text,
             min_score=min_score,
@@ -387,6 +420,8 @@ class ContinuumMemorySystem:
         *,
         bands: list[str] | None = None,
         sources: list[str] | None = None,
+        episodes: list[str] | None = None,
+        tags: list[str] | None = None,
         min_logical_turn: int | None = None,
         query_text: str | None = None,
         min_score: float | None = None,
@@ -470,6 +505,14 @@ class ContinuumMemorySystem:
         # ramp lines up with the band's actual position in the continuum.
         band_filter: set[str] | None = set(bands) if bands else None
         source_filter: set[str] | None = set(sources) if sources else None
+        # Tier C filters — None or empty list both mean "no filter" so a
+        # typo doesn't silently drop every result.
+        episode_filter: set[str] | None = (
+            set(episodes) if episodes else None
+        )
+        tag_filter: set[str] | None = (
+            set(normalize_tags(tags)) if tags else None
+        )
 
         # ── Pool 1: neural memories — N bands, recency-weighted by depth ──────
         # The earlier the band, the stronger the recency boost. We schedule
@@ -535,6 +578,14 @@ class ContinuumMemorySystem:
                     continue
                 if source_filter is not None and entry.source not in source_filter:
                     if cand is not None: cand["drop_reason"] = f"source≠{sorted(source_filter)}"
+                    continue
+                if episode_filter is not None and entry.episode_id not in episode_filter:
+                    if cand is not None:
+                        cand["drop_reason"] = f"episode∉{sorted(episode_filter)}"
+                    continue
+                if tag_filter is not None and not (set(entry.tags) & tag_filter):
+                    if cand is not None:
+                        cand["drop_reason"] = f"tags∩{sorted(tag_filter)}=∅"
                     continue
                 if min_logical_turn is not None:
                     entry_turn = getattr(entry, "last_logical_turn", None)
@@ -612,6 +663,8 @@ class ContinuumMemorySystem:
                 seen_texts=seen_texts,
                 source_filter=source_filter,
                 band_filter=band_filter,
+                episode_filter=episode_filter,
+                tag_filter=tag_filter,
                 _trace=_trace,
             )
             for entry, score, surprise in slot_hits:
@@ -651,6 +704,10 @@ class ContinuumMemorySystem:
                     if not _keep(entry):
                         continue
                     if source_filter is not None and entry.source not in source_filter:
+                        continue
+                    if episode_filter is not None and entry.episode_id not in episode_filter:
+                        continue
+                    if tag_filter is not None and not (set(entry.tags) & tag_filter):
                         continue
                     if min_logical_turn is not None:
                         entry_turn = getattr(entry, "last_logical_turn", None)
@@ -745,6 +802,8 @@ class ContinuumMemorySystem:
             self._inject_chained_hits(
                 query_embedding, neural, seen_texts,
                 top_k=k, source_filter=source_filter,
+                episode_filter=episode_filter,
+                tag_filter=tag_filter,
                 min_logical_turn=min_logical_turn, keep=_keep,
             )
             if _trace is not None:
@@ -886,6 +945,8 @@ class ContinuumMemorySystem:
         source_filter: set[str] | None,
         min_logical_turn: int | None,
         keep,
+        episode_filter: set[str] | None = None,
+        tag_filter: set[str] | None = None,
     ) -> None:
         """HOPE-style: flow the query through every band's MLP and use the
         chained output to surface additional entries.
@@ -934,6 +995,10 @@ class ContinuumMemorySystem:
                     continue
                 if source_filter is not None and entry.source not in source_filter:
                     continue
+                if episode_filter is not None and entry.episode_id not in episode_filter:
+                    continue
+                if tag_filter is not None and not (set(entry.tags) & tag_filter):
+                    continue
                 if min_logical_turn is not None:
                     et = getattr(entry, "last_logical_turn", None)
                     if et is None or et < min_logical_turn:
@@ -963,6 +1028,8 @@ class ContinuumMemorySystem:
         seen_texts: set[str],
         source_filter: set[str] | None = None,
         band_filter: set[str] | None = None,
+        episode_filter: set[str] | None = None,
+        tag_filter: set[str] | None = None,
         _trace: dict | None = None,
     ) -> list[tuple["MemoryEntry", float, float]]:
         """Pull entries via slot-token overlap with the query.
@@ -1012,6 +1079,10 @@ class ContinuumMemorySystem:
                 if entry.text in seen_texts:
                     continue
                 if source_filter is not None and entry.source not in source_filter:
+                    continue
+                if episode_filter is not None and entry.episode_id not in episode_filter:
+                    continue
+                if tag_filter is not None and not (set(entry.tags) & tag_filter):
                     continue
                 if not entry.slots:
                     continue
@@ -1122,6 +1193,12 @@ class ContinuumMemorySystem:
                     # cat-Jacque ship added the field on MemoryEntry but
                     # missed this propagation path — see upstream issue.
                     promoted_copy.superseded_by_text = entry.superseded_by_text
+                    # Schema v6 (Tier C): episode anchoring + tags. Same
+                    # rationale — promotion is a pure relocation, so the
+                    # episode context and tag set follow the entry.
+                    promoted_copy.episode_id = entry.episode_id
+                    promoted_copy.episode_title = entry.episode_title
+                    promoted_copy.tags = list(entry.tags)
                 promoted.append(entry)
             else:
                 remaining.append(entry)
@@ -1162,6 +1239,10 @@ class ContinuumMemorySystem:
             "consolidation_events": self._consolidation_events,
             "tier_hits": self._tier_hits,
             "tier_queries": self._tier_queries,
+            # Episode log (schema v6) — JSON-compatible dict, round-trips
+            # losslessly through torch.save. Pre-v6 loaders ignore unknown
+            # keys; v6 loaders restore via EpisodeManager.from_dict.
+            "episodes": self.episodes.to_dict(),
         }
         torch.save(state, directory / "cms_state.pt")
 
@@ -1193,14 +1274,17 @@ class ContinuumMemorySystem:
 
         if schema_version == 1:
             self._load_schema_v1(state)
-        elif schema_version in (2, 3, 4, 5):
-            # v3 / v4 / v5 are all fully backwards-compatible with v2 —
+        elif schema_version in (2, 3, 4, 5, 6):
+            # v3 / v4 / v5 / v6 are all fully backwards-compatible with v2 —
             # each added optional entry fields with sensible defaults:
             # v3: ``last_logical_turn`` + top-level ``chain_residual``,
             # v4: entry-level ``slots`` (default []),
-            # v5: entry-level ``superseded_by_text`` (default None).
+            # v5: entry-level ``superseded_by_text`` (default None),
+            # v6: entry-level ``episode_id`` / ``episode_title`` (default None)
+            #     and ``tags`` (default []), plus top-level ``episodes``
+            #     block (default empty).
             # The shared loader's ``.get(..., default)`` accesses keep
-            # pre-v5 files loading cleanly.
+            # pre-v6 files loading cleanly.
             self._load_schema_v2(state)
         else:
             logger.warning(
@@ -1278,6 +1362,9 @@ class ContinuumMemorySystem:
             for b in self.bands
         }
         self._tier_queries = state.get("tier_queries", 0)
+        # v6 episode log — pre-v6 saves have no ``episodes`` key, in which
+        # case from_dict returns an empty manager.
+        self.episodes = EpisodeManager.from_dict(state.get("episodes") or {})
 
     def _load_legacy_hopfield(self, path: Path) -> None:
         """Migrate from the v0.3.x Hopfield memory format.
@@ -1335,6 +1422,10 @@ class ContinuumMemorySystem:
         self._interaction_count = 0
         self._surprise_history = {b.name: [] for b in self.bands}
         self._consolidation_events = []
+        # Tier C — reset the episode log too so test fixtures get clean
+        # bookkeeping on every ``clear``. Without this, ``pristine_service``
+        # leaks episodes from earlier tests in the same module.
+        self.episodes = EpisodeManager()
 
     def delete_entries(
         self,
@@ -1342,22 +1433,28 @@ class ContinuumMemorySystem:
         text: str | None = None,
         substring: str | None = None,
         source: str | None = None,
+        episode: str | None = None,
+        tag: str | None = None,
     ) -> list[str]:
         """Remove entries from every band matching any provided filter.
 
-        At least one of ``text`` / ``substring`` / ``source`` must be
-        provided — refuses to delete-everything implicitly. Filters
-        combine with OR (an entry matching any filter is dropped).
-        Returns the list of removed entry texts.
+        At least one of ``text`` / ``substring`` / ``source`` /
+        ``episode`` / ``tag`` must be provided — refuses to
+        delete-everything implicitly. Filters combine with OR (an entry
+        matching any filter is dropped). Returns the list of removed
+        entry texts.
 
         Marks each affected band's pattern matrix dirty so the next
         retrieve rebuilds without the gone entries.
         """
-        if text is None and substring is None and source is None:
+        if all(v is None for v in (text, substring, source, episode, tag)):
             raise ValueError(
                 "delete_entries requires at least one of: "
-                "text, substring, source.",
+                "text, substring, source, episode, tag.",
             )
+
+        # Normalise the tag filter to match how stored tags are keyed.
+        tag_norm = tag.strip().lower() if isinstance(tag, str) else None
 
         def _matches(entry: MemoryEntry) -> bool:
             if text is not None and entry.text == text:
@@ -1365,6 +1462,10 @@ class ContinuumMemorySystem:
             if substring is not None and substring in entry.text:
                 return True
             if source is not None and entry.source == source:
+                return True
+            if episode is not None and entry.episode_id == episode:
+                return True
+            if tag_norm is not None and tag_norm in entry.tags:
                 return True
             return False
 

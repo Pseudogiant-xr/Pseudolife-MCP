@@ -24,13 +24,20 @@ persistent associative memory on disk.
 
 | Tool | Purpose |
 |------|---------|
-| `memory_store(text, source?)` | Remember a fact, decision, observation |
-| `memory_search(query, top_k?, sources?, bands?, min_score?, disable_recency_boost?, rerank?, bm25?)` | Retrieve by associative similarity |
-| `memory_trace(query, top_k?, sources?, bands?, rerank?, bm25?)` | Search + full ranking trace — debug why an entry didn't surface |
-| `memory_recent(n?, sources?)` | List newest stores (debug + session start) |
+| `memory_store(text, source?, tags?)` | Remember a fact, decision, observation |
+| `memory_search(query, top_k?, sources?, bands?, episodes?, tags?, min_score?, disable_recency_boost?, rerank?, bm25?)` | Retrieve by associative similarity |
+| `memory_trace(query, top_k?, sources?, bands?, episodes?, tags?, rerank?, bm25?)` | Search + full ranking trace — debug why an entry didn't surface |
+| `memory_recent(n?, sources?, episodes?, tags?)` | List newest stores (debug + session start) |
 | `memory_list_sources()` | Enumerate every source tag in the bank with entry counts |
+| `memory_list_tags()` | Enumerate every multi-valued tag in the bank with occurrence counts |
 | `memory_supersede(old_text, new_text)` | Explicit correction — mark old fact obsolete |
-| `memory_delete(text?, substring?, source?)` | Remove memories matching any filter (hygiene) |
+| `memory_delete(text?, substring?, source?, episode?, tag?)` | Remove memories matching any filter (hygiene) |
+| `memory_episode_start(title, hint?)` | Open a bracketed working session — entries stored while open carry the episode id |
+| `memory_episode_end()` | Close the currently-open episode |
+| `memory_episode_list(limit?, include_open?)` | List episodes newest-first with per-episode entry counts |
+| `memory_episode_summary(id)` | Stats + tag/source distribution + recent entries within an episode |
+| `memory_consolidation_candidates(query?, episode?, top_k?, min_cohesion?, ...)` | Cluster mutually-similar memories ripe for consolidation |
+| `memory_consolidate(replaces, new_text, source?, tags?)` | Atomic supersede + store — replace a cluster with one canonical note |
 | `memory_stats()` | Per-band sizes, hit rates, totals |
 | `memory_save()` | Flush CMS tensors to disk |
 | `document_ingest(path, source?)` | Index a file (txt/md/pdf) in the reference bank |
@@ -249,6 +256,71 @@ rebuild per query, ≈ 20-50ms on a 40K-entry bank.
 `memory_trace(..., bm25=True)` records per-hit `raw_bm25`,
 `normalized`, and any BM25-only injections under `trace.bm25`.
 
+**Episodes + tags (Tier C, schema v6):**
+
+An *episode* is a bracketed working session. While an episode is open,
+every memory stored carries the episode's id + title automatically, so
+later queries can scope by session:
+
+```
+memory_episode_start("Tier C implementation work")
+memory_store("Decided to keep tags orthogonal to source instead of merging them")
+memory_search("design choices", episodes=[episode_id])
+memory_episode_summary(episode_id)   # stats + tag distribution + recent entries
+memory_episode_end()
+```
+
+Starting a new episode while one is already open auto-closes the prior
+one (with a `closed_by_new_start=True` flag for telemetry) — Claude
+isn't required to reliably call `memory_episode_end`. Episodes
+persist alongside CMS state in `cms_state.pt` under the `episodes`
+key. Pre-v6 saves load cleanly with an empty episode log.
+
+Tags are a parallel multi-valued axis to `source`: pass
+`tags=["decision", "blocker"]` on store, filter with
+`memory_search(..., tags=[...])`. Normalised at store time (lowercased,
+stripped, deduped). Set intersection non-empty for the filter to pass
+(OR within the filter list, AND with the other filters).
+
+**Consolidation workflow (Tier C):**
+
+Long-running banks accumulate near-duplicate memories — the same fact
+phrased five different ways across five sessions. The literature on
+agent memory ([HiMem 2026](https://arxiv.org/abs/2601.06377);
+[MIRIX 2024](https://arxiv.org/abs/2507.07957); the
+[ICML 2025 position paper](https://arxiv.org/abs/2502.06975)) calls
+consolidation — turning episodes into reusable semantic notes — *the*
+most-important under-implemented capability of long-term LLM memory.
+
+PseudoLife-MCP can't run an LLM inside the server (Claude Code doesn't
+yet expose MCP sampling — see [feature request #1785](https://github.com/anthropics/claude-code/issues/1785)).
+But it can surface clusters for Claude to consolidate manually:
+
+```
+memory_consolidation_candidates(query="MCP transport choice", top_k=20)
+# → {clusters: [{cohesion: 0.84, size: 3, members: [<entry>, ...]}, ...]}
+
+memory_consolidate(
+  replaces=["MCP uses stdio transport", "stdio was chosen for MCP", "decided on stdio for MCP"],
+  new_text="MCP transport is stdio — chosen over TCP to avoid port conflicts.",
+  tags=["consolidated"],
+)
+# → {superseded_count: 3, new_memory_stored: true, ...}
+```
+
+The clustering is deterministic greedy: highest-relevance entry seeds
+the cluster, any unclustered candidate whose cosine with the seed
+clears `min_cohesion` (default 0.6) joins, cohesion is the mean
+intra-cluster cosine, clusters are sorted by `cohesion × size`. Cost
+is O(N²) within the candidate pool, bounded to `top_k` candidates.
+
+`memory_consolidate` reuses the supersession machinery so the
+predecessors stay in the bank but rank below the canonical note —
+the audit trail survives but retrieval defaults to the current
+phrasing. Useful idiom: tag the consolidation with `["consolidated"]`
+so you can later scan with `memory_search(..., tags=["consolidated"])`
+to see what's been distilled.
+
 ## Data layout
 
 Everything lives under `PSEUDOLIFE_MCP_DATA_DIR`:
@@ -273,17 +345,21 @@ pip install -e .[dev]
 pytest tests/ -v
 ```
 
-87 tests cover the MemoryService methods (store / search / recent /
-supersede / stats / save / trace / list_sources / delete), the
-`memory_search` scoring overrides, the cross-encoder reranker
+160 tests cover the MemoryService methods (store / search / recent /
+supersede / stats / save / trace / list_sources / list_tags / delete),
+the `memory_search` scoring overrides, the cross-encoder reranker
 (15 unit + 4 integration), the BM25 hybrid lexical pool
-(23 unit + 5 integration), and MCP-level dispatch (tool
-registration, docstring sanity, end-to-end invocation through the
-FastMCP machinery). The delete suite includes a persistence round-trip
-test (store → delete → save → reload → verify gone). Reranker tests
-monkeypatch `sentence_transformers.CrossEncoder` with a deterministic
-stub so the suite stays fast and offline. Test suite uses a fresh
-embedder per module via the `warm_service` fixture so the ~1.5s
+(23 unit + 5 integration), schema v6 + episode lifecycle (12 + 14),
+tag plumbing through store/retrieval (10), greedy clustering for
+consolidation (10), the episode + tag service surface (16), the
+atomic consolidation operation (6), and MCP-level dispatch (tool
+registration + docstring sanity + end-to-end invocation for every
+exposed tool through the FastMCP machinery). The delete suite
+includes a persistence round-trip test (store → delete → save →
+reload → verify gone). Reranker tests monkeypatch
+`sentence_transformers.CrossEncoder` with a deterministic stub so the
+suite stays fast and offline. Test suite uses a fresh embedder per
+module via the `warm_service` fixture so the ~1.5s
 sentence-transformers load doesn't dominate runtime.
 
 ## Differences from PseudoLife
@@ -299,8 +375,11 @@ sentence-transformers load doesn't dominate runtime.
 | NLI scorer | Bundled (278 MB) | Optional (`pip install .[nli]`) |
 | Cross-encoder reranker | — | Optional (`rerank=True` per call, ~80 MB) |
 | BM25 hybrid pool | — | Optional (`bm25=True` per call, stdlib only) |
+| Episode anchoring | — | Yes (Tier C — schema v6, `memory_episode_*`) |
+| Multi-valued tags | Single `source` only | Yes (Tier C — `tags=[...]` on store/search/delete) |
+| Consolidation workflow | — | Yes (Tier C — `memory_consolidation_candidates` + `memory_consolidate`) |
 | Reference bank | Yes | Yes |
-| Schema version | v5 | v5 (same on-disk format) |
+| Schema version | v5 | v6 (additive — pre-v6 saves load cleanly with new fields defaulted) |
 
 The MCP build is **not** save-compatible with PseudoLife's data dir, even
 though the on-disk schema is the same — they're separate memory
@@ -310,15 +389,18 @@ read it cleanly.
 
 ## What's not built yet
 
-- **Multi-tag support** — `source` is currently a single free-form
-  string. Multi-tag would let you filter by `tags=["pseudolife", "v0.7.6"]`.
-  Likely lands as a schema-v6 additive field.
 - **Reflection via MCP sampling** — the MCP protocol has a `sampling`
   capability that lets servers ask the client (Claude) to generate text.
   Wiring that up would bring the periodic-reflection feature back without
-  needing a bundled LLM.
+  needing a bundled LLM. [Claude Code doesn't yet support
+  sampling](https://github.com/anthropics/claude-code/issues/1785) — until
+  it does, `memory_consolidation_candidates` + `memory_consolidate`
+  give Claude the same outcome through manual tool calls.
 - **Cross-machine sync** — memory lives on one PC's disk. Syncing
   `data/` via rclone / syncthing / git-lfs is left as an exercise.
+- **Hierarchical summarisation** — periodic auto-summaries at multiple
+  time scales (daily, weekly). Mostly subsumed by Tier C's episode +
+  consolidation flow; what's left is the *cadence* automation.
 
 ## License
 
