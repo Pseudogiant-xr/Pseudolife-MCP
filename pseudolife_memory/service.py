@@ -147,6 +147,7 @@ class MemoryService:
         self._context_builder: ContextBuilder | None = None
         self._reranker: CrossEncoderReranker | None = None
         self._last_user_query: str | None = None
+        self._last_saved_fingerprint = None
 
     # ------------------------------------------------------------------
     # Lazy construction
@@ -637,7 +638,63 @@ class MemoryService:
             self._ensure_init()
             assert self._cms is not None
             self._cms.save(self.config.memory.save_dir)
+            self._last_saved_fingerprint = self._entry_fingerprint()
             return {"saved_to": self.config.memory.save_dir}
+
+    def _entry_fingerprint(self):
+        """Cheap signature of mutating state: (live entry count, superseded
+        count). Changes on store/delete/supersede/consolidate; unaffected by
+        reads/searches. Gates the background autosave so idle periods cost no
+        disk writes. Caller must already hold self._lock."""
+        if self._cms is None:
+            return None
+        total = 0
+        superseded = 0
+        for band in self._cms.bands:
+            entries = band.entries
+            total += len(entries)
+            for e in entries:
+                if getattr(e, "superseded_at", None) is not None:
+                    superseded += 1
+        return (total, superseded)
+
+    def autosave_if_changed(self):
+        """Flush CMS tensors only if mutating state changed since last save.
+        Driven by the background autosave loop in mcp_server."""
+        with self._lock:
+            if self._cms is None:
+                return None
+            fp = self._entry_fingerprint()
+            if fp == self._last_saved_fingerprint:
+                return None
+            self._cms.save(self.config.memory.save_dir)
+            self._last_saved_fingerprint = fp
+            return {"saved_to": self.config.memory.save_dir, "auto": True}
+
+    def flush(self):
+        """Unconditional save for clean-exit / signal handlers. Captures the
+        latest state (incl. band migrations). No-op if never initialised."""
+        with self._lock:
+            if self._cms is None:
+                return None
+            self._cms.save(self.config.memory.save_dir)
+            self._last_saved_fingerprint = self._entry_fingerprint()
+            return {"saved_to": self.config.memory.save_dir, "flush": True}
+
+    def warmup(self):
+        """Eagerly load embedder + reranker + NLI so the first real tool call
+        is warm. Safe to run in a background thread at startup."""
+        try:
+            with self._lock:
+                self._ensure_init()
+                self._last_saved_fingerprint = self._entry_fingerprint()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("warmup init failed: %s", exc)
+            return
+        try:
+            self.search("warmup probe", top_k=1)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("warmup search failed: %s", exc)
 
     # ------------------------------------------------------------------
     # Tier C — episode lifecycle + tag hygiene

@@ -33,6 +33,10 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import atexit
+import signal
+import threading
+import time
 from typing import Any
 
 # Silence torch._dynamo's noisy fall-back warnings on systems without
@@ -578,6 +582,36 @@ def document_search(query: str, top_k: int = 5) -> dict[str, Any]:
     return service.search_documents(query=query, top_k=top_k)
 
 
+def _flush_on_exit() -> None:
+    # Gated, not unconditional: only persist if THIS process mutated state.
+    # An idle/read-only subprocess exiting must never clobber a sibling
+    # process's newer writes to the shared cms_state.pt.
+    try:
+        res = service.autosave_if_changed()
+        if res:
+            logger.info("durability: flushed changed CMS on exit -> %s", res.get("saved_to"))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("exit flush failed: %s", exc)
+
+
+def _autosave_loop(interval: float) -> None:
+    while True:
+        time.sleep(interval)
+        try:
+            res = service.autosave_if_changed()
+            if res:
+                logger.info("durability: autosaved CMS (state changed)")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("autosave loop error: %s", exc)
+
+
+def _warmup() -> None:
+    t = time.time()
+    logger.info("warmup: preloading embedder + reranker + NLI ...")
+    service.warmup()
+    logger.info("warmup: pipeline ready in %.1fs", time.time() - t)
+
+
 def main() -> None:
     """Console-script entrypoint. Starts the stdio transport."""
     logger.info(
@@ -585,6 +619,24 @@ def main() -> None:
         service.data_dir,
         _config_path or "<defaults>",
     )
+    # Durability: flush unsaved CMS state on clean exit + on SIGTERM/SIGINT
+    # (e.g. gateway restart). SIGKILL cannot be caught -- bounded loss is
+    # covered by the periodic autosave below.
+    atexit.register(_flush_on_exit)
+    for _sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            signal.signal(_sig, lambda *_a: sys.exit(0))
+        except Exception:  # noqa: BLE001
+            pass
+    # Debounced durability: periodically flush only when state changed.
+    _interval = float(os.environ.get("PSEUDOLIFE_MCP_AUTOSAVE_SECONDS", "30"))
+    threading.Thread(
+        target=_autosave_loop, args=(_interval,), daemon=True, name="pl-autosave"
+    ).start()
+    # Cold-start mitigation: warm the model pipeline in the background so the
+    # first real tool call does not pay init latency (a few seconds with HF
+    # offline env set).
+    threading.Thread(target=_warmup, daemon=True, name="pl-warmup").start()
     mcp.run()  # stdio transport by default.
 
 
