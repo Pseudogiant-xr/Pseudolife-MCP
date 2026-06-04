@@ -50,6 +50,8 @@ from pseudolife_memory.memory.embedding import EmbeddingPipeline
 from pseudolife_memory.memory.reference_bank import ReferenceBank
 from pseudolife_memory.memory.reranker import CrossEncoderReranker
 from pseudolife_memory.memory.titans_memory import MemoryEntry, RetrievalResult
+from pseudolife_memory.memory.cortex import CortexStore
+from pseudolife_memory.memory.slots import Slot
 from pseudolife_memory.utils.config import (
     AppConfig,
     ContextConfig,
@@ -102,6 +104,40 @@ def _entry_to_dict(
     return out
 
 
+def _cortex_record_to_dict(rec) -> dict[str, Any]:
+    """Serialise a :class:`CortexRecord` for transport (JSON-safe)."""
+    return {
+        "entity": rec.entity,
+        "attribute": rec.attribute,
+        "value": rec.value,
+        "polarity": rec.polarity,
+        "status": rec.status,
+        "confidence": round(float(rec.confidence), 4),
+        "origin": rec.origin,
+        "support": sorted(rec.support),
+        "provenance": sorted(rec.provenance),
+        "asserted_at": rec.asserted_at,
+        "last_confirmed": rec.last_confirmed,
+        "supersedes_value": rec.supersedes_value,
+        "superseded_by_value": rec.superseded_by_value,
+        "superseded_at": rec.superseded_at,
+    }
+
+
+# Map a store ``source`` tag to a cortex ``origin`` tier (provenance-of-kind).
+# MCP can't see the conversation, so origin is defaulted from source (or set
+# explicitly by the caller). Unknown sources -> None (origin left blank).
+_SOURCE_ORIGIN = {
+    "conversation": "user", "user": "user",
+    "claude": "agent", "assistant": "agent", "agent": "agent",
+    "tool": "action", "action": "action",
+}
+
+
+def _origin_from_source(source: str | None) -> str | None:
+    return _SOURCE_ORIGIN.get((source or "").strip().lower())
+
+
 class MemoryService:
     """Thin orchestration over CMS + embedder + reference bank + contrastive.
 
@@ -146,6 +182,7 @@ class MemoryService:
         self._contrastive: ContrastiveUpdater | None = None
         self._context_builder: ContextBuilder | None = None
         self._reranker: CrossEncoderReranker | None = None
+        self._cortex: CortexStore | None = None
         self._last_user_query: str | None = None
         self._last_saved_fingerprint = None
 
@@ -216,6 +253,19 @@ class MemoryService:
         )
         self._context_builder = ContextBuilder(self.config.context)
 
+        # Cortex — sibling slot-keyed canonical-fact store (schema v7).
+        # Co-persisted next to memory_state; deliberately outside the
+        # band / promotion / decay machinery.
+        cc = self.config.memory.cortex
+        self._cortex = CortexStore(
+            supersede_confidence_margin=cc.supersede_confidence_margin,
+            reinforce_rate=cc.reinforce_rate,
+        )
+        try:
+            self._cortex.load(self._cortex_path())
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Cortex load skipped: %s", exc)
+
     # ------------------------------------------------------------------
     # Tool: store
     # ------------------------------------------------------------------
@@ -225,6 +275,7 @@ class MemoryService:
         text: str,
         source: str = "claude",
         tags: list[str] | None = None,
+        origin: str | None = None,
     ) -> dict[str, Any]:
         """Embed and store a memory through the CMS pipeline.
 
@@ -232,17 +283,23 @@ class MemoryService:
         Normalised by the underlying CMS (lowercased / stripped /
         deduped). Tags exist alongside ``source``, not as a replacement.
 
-        Returns ``{"stored": bool, "surprise": float, "reason": str|None}``.
-        Stores can be rejected by either the meta-filter (looks like
-        self-reference) or the surprise gate (already known) — the
-        ``reason`` field surfaces which.
+        ``origin`` (``"user"`` / ``"action"`` / ``"agent"``) records who asserted
+        any canonical facts auto-promoted from this text into the cortex. When
+        omitted it is defaulted from ``source`` (conversation->user, claude->
+        agent, tool->action). See :meth:`_promote_slots`.
+
+        Returns ``{"stored": bool, "surprise": float, "reason": str|None,
+        "cortex_promoted": int}``. Stores can be rejected by either the
+        meta-filter (looks like self-reference) or the surprise gate (already
+        known) — the ``reason`` field surfaces which.
         """
         with self._lock:
             self._ensure_init()
             assert self._embedder is not None and self._cms is not None
             text = (text or "").strip()
             if not text:
-                return {"stored": False, "surprise": 0.0, "reason": "empty"}
+                return {"stored": False, "surprise": 0.0, "reason": "empty",
+                        "cortex_promoted": 0}
             embedding = self._embedder.encode_single(text)
             stored, surprise = self._cms.store(
                 text, embedding, source=source, tags=tags,
@@ -256,11 +313,48 @@ class MemoryService:
                     reason = "below_surprise_threshold"
                 else:
                     reason = "rejected"
+            # Deterministic cortex promotion: lift slot-shaped facts into the
+            # canonical layer with NO model cooperation (the no-LLM floor). Runs
+            # on a real store AND on a restatement (below_surprise_threshold) so
+            # re-asserting a known fact still confirms its slot — but never on
+            # meta-filtered junk.
+            promoted = 0
+            cc = self.config.memory.cortex
+            if cc.enabled and cc.auto_promote and reason != "filtered_meta":
+                promoted = self._promote_slots(text, source=source, origin=origin)
             return {
                 "stored": stored,
                 "surprise": round(float(surprise), 4),
                 "reason": reason,
+                "cortex_promoted": promoted,
             }
+
+    def _promote_slots(self, text: str, *, source: str, origin: str | None) -> int:
+        """Lift any slot-shaped facts in ``text`` into the cortex deterministically
+        (regex ``extract_slots``, no LLM). Caller MUST already hold ``self._lock``
+        — writes go straight to ``self._cortex`` (not via ``cortex_write``, which
+        would re-acquire the non-reentrant lock). Returns the number written."""
+        from pseudolife_memory.memory.slots import extract_slots
+        assert self._cortex is not None and self._embedder is not None
+        sup = origin if origin is not None else _origin_from_source(source)
+        conf = self.config.memory.cortex.promote_confidence
+        prov = [source] if source else []
+        written = 0
+        for s in extract_slots(text):
+            value = s.value if getattr(s, "polarity", "+") != "-" else ("NOT " + s.value)
+            claim = f"{s.entity} {s.attribute} {value}".strip()
+            try:
+                self._cortex.write_fact(
+                    Slot(s.entity, s.attribute, value),
+                    self._embedder.encode_single(claim),
+                    confidence=conf,
+                    provenance=prov,
+                    support=sup,
+                )
+                written += 1
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("cortex auto-promote skipped (%s): %s", claim, exc)
+        return written
 
     # ------------------------------------------------------------------
     # Tool: search
@@ -638,6 +732,7 @@ class MemoryService:
             self._ensure_init()
             assert self._cms is not None
             self._cms.save(self.config.memory.save_dir)
+            self._save_cortex()
             self._last_saved_fingerprint = self._entry_fingerprint()
             return {"saved_to": self.config.memory.save_dir}
 
@@ -656,7 +751,17 @@ class MemoryService:
             for e in entries:
                 if getattr(e, "superseded_at", None) is not None:
                     superseded += 1
-        return (total, superseded)
+        # Fold the cortex into the signature so confirm (last_confirmed bump),
+        # insert (record count) and supersede (log growth) all trigger autosave.
+        cortex_sig = (0, 0, 0.0)
+        if self._cortex is not None:
+            recs = self._cortex.records
+            cortex_sig = (
+                len(recs),
+                len(self._cortex.supersession_log),
+                round(sum(r.last_confirmed for r in recs), 3),
+            )
+        return (total, superseded, cortex_sig)
 
     def autosave_if_changed(self):
         """Flush CMS tensors only if mutating state changed since last save.
@@ -668,6 +773,7 @@ class MemoryService:
             if fp == self._last_saved_fingerprint:
                 return None
             self._cms.save(self.config.memory.save_dir)
+            self._save_cortex()
             self._last_saved_fingerprint = fp
             return {"saved_to": self.config.memory.save_dir, "auto": True}
 
@@ -678,8 +784,187 @@ class MemoryService:
             if self._cms is None:
                 return None
             self._cms.save(self.config.memory.save_dir)
+            self._save_cortex()
             self._last_saved_fingerprint = self._entry_fingerprint()
             return {"saved_to": self.config.memory.save_dir, "flush": True}
+
+    # ------------------------------------------------------------------
+    # Cortex — sibling slot-keyed canonical-fact store (schema v7)
+    # ------------------------------------------------------------------
+
+    def _cortex_path(self) -> str:
+        return str(self.data_dir / "cortex_state.pt")
+
+    def _save_cortex(self) -> None:
+        if self._cortex is not None:
+            try:
+                self._cortex.save(self._cortex_path())
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Cortex save failed: %s", exc)
+
+    def cortex_write(
+        self,
+        entity: str,
+        attribute: str,
+        value: str,
+        *,
+        confidence: float = 0.7,
+        provenance: list[str] | None = None,
+        support: str | None = None,
+        now: float | None = None,
+    ) -> dict[str, Any]:
+        """Write / confirm / supersede a canonical fact at the
+        ``(entity, attribute)`` slot. The claim is embedded through the same
+        pipeline as memories so cortex search shares the embedding space.
+
+        ``support`` records who asserted the fact — ``"user"`` (the human stated
+        it), ``"action"`` (a tool/agent action confirmed it), or ``"agent"`` (the
+        agent merely said it). It accumulates on the record (``origin`` = the
+        strongest tier seen), so corroboration is first-class.
+
+        Returns ``{"action": "inserted"|"confirmed"|"superseded"|"contested",
+        ...record fields}``.
+        """
+        with self._lock:
+            self._ensure_init()
+            assert self._embedder is not None and self._cortex is not None
+            claim = f"{entity} {attribute} {value}".strip()
+            emb = self._embedder.encode_single(claim)
+            res = self._cortex.write_fact(
+                Slot(entity, attribute, value),
+                emb,
+                confidence=confidence,
+                provenance=provenance or (),
+                support=support,
+                now=now,
+            )
+            return {"action": res.action, **_cortex_record_to_dict(res.record)}
+
+    def cortex_lookup(self, entity: str, attribute: str) -> dict[str, Any] | None:
+        """Exact slot lookup — the one ``current`` fact, or ``None``."""
+        with self._lock:
+            self._ensure_init()
+            assert self._cortex is not None
+            rec = self._cortex.lookup(entity, attribute)
+            return _cortex_record_to_dict(rec) if rec is not None else None
+
+    def cortex_search(
+        self, query: str, top_k: int = 5, min_score: float = 0.0,
+    ) -> dict[str, Any]:
+        """Fuzzy search over ``current`` canonical facts only."""
+        with self._lock:
+            self._ensure_init()
+            assert self._embedder is not None and self._cortex is not None
+            emb = self._embedder.encode_single(query)
+            hits = self._cortex.search(emb, top_k=top_k, min_score=min_score)
+            return {
+                "count": len(hits),
+                "entries": [
+                    {**_cortex_record_to_dict(r), "score": round(float(s), 4)}
+                    for r, s in hits
+                ],
+            }
+
+    def cortex_stats(self) -> dict[str, Any]:
+        """Cortex sizes: total / current / superseded / slots."""
+        with self._lock:
+            self._ensure_init()
+            assert self._cortex is not None
+            return self._cortex.stats()
+
+    def cortex_vocab(self, limit: int = 120) -> dict[str, Any]:
+        """Existing canonical slot keys (entity.attribute), for the dream
+        extractor to reuse — the prompt-side half of key normalisation."""
+        with self._lock:
+            self._ensure_init()
+            assert self._cortex is not None
+            slots = self._cortex.vocab(limit)
+            return {"slots": slots, "count": len(slots)}
+
+    def cortex_dump(self) -> dict[str, Any]:
+        """All current canonical facts (entity, attribute, value, origin, …) for
+        introspection / cleanup. Sorted by (entity, attribute)."""
+        with self._lock:
+            self._ensure_init()
+            assert self._cortex is not None
+            rows = [_cortex_record_to_dict(r) for r in self._cortex.current_records()]
+            rows.sort(key=lambda d: (d["entity"].lower(), d["attribute"].lower()))
+            return {"count": len(rows), "entries": rows}
+
+    def cortex_forget(self, entity: str, attribute: str | None = None) -> dict[str, Any]:
+        """Hard-delete facts at an entity (or one exact slot). Persists. Use for
+        purging test / garbage facts — normal corrections go through supersession."""
+        with self._lock:
+            self._ensure_init()
+            assert self._cortex is not None
+            removed = self._cortex.forget(entity, attribute)
+            if removed:
+                self._save_cortex()
+            return {"removed": removed, "entity": entity, "attribute": attribute}
+
+    # ------------------------------------------------------------------
+    # Dream pass — episode cursor + regex floor (LLM step is gateway-side)
+    # ------------------------------------------------------------------
+
+    def dream_pull(self, limit: int = 20) -> dict[str, Any]:
+        """Recent episodic conversation turns not yet consolidated (timestamp >
+        cortex.dream_cursor), oldest-first, capped at ``limit``. The gateway
+        runs LLM/regex extraction over these, then calls ``dream_commit``."""
+        with self._lock:
+            self._ensure_init()
+            assert self._cms is not None and self._cortex is not None
+            cursor = self._cortex.dream_cursor
+            rows: list[MemoryEntry] = []
+            for band in self._cms.bands:
+                for e in band.entries:
+                    if e.source != "conversation":
+                        continue
+                    if e.timestamp <= cursor:
+                        continue
+                    rows.append(e)
+            rows.sort(key=lambda e: e.timestamp)
+            rows = rows[: max(0, int(limit))]
+            return {
+                "cursor": cursor,
+                "count": len(rows),
+                "entries": [
+                    {
+                        "text": e.text,
+                        "timestamp": e.timestamp,
+                        "episode_id": e.episode_id,
+                    }
+                    for e in rows
+                ],
+            }
+
+    def extract_slots_regex(self, texts: list[str]) -> dict[str, Any]:
+        """Deterministic no-LLM claim-extraction floor. Runs the existing
+        ``slots.extract_slots`` over each text and returns claim dicts. The
+        gateway dream uses this when the active model yields nothing usable, so
+        the regex implementation lives in exactly one place."""
+        from pseudolife_memory.memory.slots import extract_slots
+        claims: list[dict[str, Any]] = []
+        for t in (texts or []):
+            for s in extract_slots(t or ""):
+                value = s.value if s.polarity != "-" else ("NOT " + s.value)
+                claims.append({
+                    "entity": s.entity,
+                    "attribute": s.attribute,
+                    "value": value,
+                    "confidence": 0.55,
+                })
+        return {"claims": claims}
+
+    def dream_commit(self, cursor: float) -> dict[str, Any]:
+        """Advance the dream cursor (monotonic) and persist it with the cortex."""
+        with self._lock:
+            self._ensure_init()
+            assert self._cortex is not None
+            c = float(cursor or 0.0)
+            if c > self._cortex.dream_cursor:
+                self._cortex.dream_cursor = c
+                self._save_cortex()
+            return {"dream_cursor": self._cortex.dream_cursor}
 
     def warmup(self):
         """Eagerly load embedder + reranker + NLI so the first real tool call
