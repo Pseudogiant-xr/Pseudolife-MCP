@@ -44,6 +44,11 @@ def test_all_tools_registered() -> None:
         "memory_list_tags",
         "memory_consolidation_candidates",
         "memory_consolidate",
+        # Cortex — canonical-fact layer.
+        "memory_fact_get",
+        "memory_fact_set",
+        "memory_fact_forget",
+        "memory_facts",
     ])
 
 
@@ -102,6 +107,44 @@ def test_memory_store_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:
     assert out["stored"] is True
     assert out["reason"] is None
     assert "surprise" in out
+    assert "cortex_promoted" in out
+
+
+def test_memory_fact_set_get_forget_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
+    import importlib
+    import pseudolife_memory.mcp_server as mod
+    importlib.reload(mod)
+
+    set_out = _invoke("memory_fact_set", {
+        "entity": "project", "attribute": "language", "value": "rust", "origin": "user",
+    })
+    assert set_out["action"] == "inserted"
+    # case/separator-insensitive lookup
+    got = _invoke("memory_fact_get", {"entity": "Project", "attribute": "language"})
+    assert got["record"]["value"] == "rust"
+    assert got["record"]["origin"] == "user"
+    # forget purges the slot
+    forget = _invoke("memory_fact_forget", {"entity": "project"})
+    assert forget["removed"] == 1
+    assert _invoke("memory_fact_get", {"entity": "project", "attribute": "language"})["record"] is None
+
+
+def test_store_auto_promotes_and_search_surfaces_cortex(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
+    import importlib
+    import pseudolife_memory.mcp_server as mod
+    importlib.reload(mod)
+
+    out = _invoke("memory_store", {
+        "text": "I have a Ragdoll cat named Jacque", "source": "conversation",
+    })
+    assert out["cortex_promoted"] >= 1                      # slot auto-promoted
+    facts = _invoke("memory_facts", {})
+    assert any(e["entity"] == "Jacque" and e["origin"] == "user" for e in facts["entries"])
+    # cortex-first: the canonical fact is surfaced in search
+    res = _invoke("memory_search", {"query": "Ragdoll cat named Jacque", "top_k": 5})
+    assert "cortex" in res and any(f["entity"] == "Jacque" for f in res["cortex"])
 
 
 def test_memory_stats_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:

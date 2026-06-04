@@ -81,6 +81,7 @@ def memory_store(
     text: str,
     source: str = "claude",
     tags: list[str] | None = None,
+    origin: str | None = None,
 ) -> dict[str, Any]:
     """Store a fact, observation, or decision in neural memory.
 
@@ -89,6 +90,11 @@ def memory_store(
     chatter — the surprise gate already drops near-duplicates, but
     treating ``memory_store`` as "log everything" wastes your context
     on retrieval.
+
+    Slot-shaped facts in ``text`` ("X is Y", "named X", "my X") are also
+    auto-promoted into the canonical **cortex** layer, so a current value
+    survives out of context and out-ranks stale restatements. No extra call
+    needed — see ``memory_fact_get`` / ``memory_fact_set``.
 
     Args:
         text: The fact to remember. One claim per call works best.
@@ -102,15 +108,22 @@ def memory_store(
             ``memory_search(..., tags=[...])``. While an episode is
             open (see ``memory_episode_start``), entries also carry the
             current episode's id + title automatically.
+        origin: Who asserted this — ``"user"`` (the human stated it),
+            ``"action"`` (a tool/observation confirmed it), or ``"agent"``
+            (you concluded it). Recorded on any auto-promoted cortex fact so
+            its trustworthiness is explicit. Omit to default from ``source``
+            (conversation->user, claude->agent, tool->action). Set
+            ``origin="user"`` when storing something the human told you.
 
     Returns:
-        ``{"stored": bool, "surprise": float, "reason": str|None}``.
-        ``stored=False`` with ``reason="below_surprise_threshold"``
-        means the bank already knows this — that's a feature, not an
-        error. ``reason="filtered_meta"`` means the text looked like a
-        self-referential statement about the memory system itself.
+        ``{"stored": bool, "surprise": float, "reason": str|None,
+        "cortex_promoted": int}``. ``stored=False`` with
+        ``reason="below_surprise_threshold"`` means the bank already knows
+        this — a feature, not an error. ``reason="filtered_meta"`` means the
+        text looked like a self-referential statement about the memory system.
+        ``cortex_promoted`` is how many canonical facts were lifted out.
     """
-    return service.store(text=text, source=source, tags=tags)
+    return service.store(text=text, source=source, tags=tags, origin=origin)
 
 
 @mcp.tool()
@@ -168,13 +181,16 @@ def memory_search(
             AND with the other filters). None = no filter.
 
     Returns:
-        ``{"query": str, "count": int, "entries": [<entry>...]}``.
-        Each entry includes text, source, bank, timestamp, score,
-        episode_id / episode_title (or null), tags, and a ``superseded``
-        flag — when ``True``, prefer the entry's ``superseded_by_text``
-        over its own text.
+        ``{"query": str, "count": int, "entries": [<entry>...], "cortex":
+        [<fact>...]}``. ``entries`` are associative recall hits (text, source,
+        bank, timestamp, score, episode, tags, ``superseded`` flag — when True
+        prefer ``superseded_by_text``). ``cortex`` (when present) lists canonical
+        facts for the query — ``{entity, attribute, value, origin, confidence,
+        score}`` — surfaced AHEAD of recall because they're the current,
+        deduped answer; ``origin`` says whether the user stated it, a tool
+        confirmed it, or you concluded it (treat ``agent`` as revisable).
     """
-    return service.search(
+    result = service.search(
         query=query,
         top_k=top_k,
         sources=sources,
@@ -186,6 +202,28 @@ def memory_search(
         rerank=rerank,
         bm25=bm25,
     )
+    # Cortex-first: surface canonical facts above associative recall, and drop
+    # any recall hit that merely restates a surfaced fact (currency, not noise).
+    cc = service.config.memory.cortex
+    if cc.enabled and cc.search_first and (query or "").strip():
+        facts = service.cortex_search(query, top_k=5, min_score=0.3).get("entries", [])
+        if facts:
+            result["cortex"] = [
+                {
+                    "entity": f["entity"], "attribute": f["attribute"],
+                    "value": f["value"], "origin": f.get("origin", ""),
+                    "confidence": f["confidence"], "score": f.get("score"),
+                }
+                for f in facts
+            ]
+            dup_vals = [f["value"].lower() for f in facts if len(f.get("value", "")) >= 5]
+            kept = [
+                e for e in result.get("entries", [])
+                if not any(v in (e.get("text", "").lower()) for v in dup_vals)
+            ]
+            result["entries"] = kept
+            result["count"] = len(kept)
+    return result
 
 
 @mcp.tool()
@@ -232,6 +270,96 @@ def memory_trace(
         episodes=episodes, tags=tags,
         rerank=rerank, bm25=bm25,
     )
+
+
+@mcp.tool()
+def memory_fact_get(entity: str, attribute: str) -> dict[str, Any]:
+    """Look up the one CURRENT canonical value at a slot, or null.
+
+    The cortex keeps a single current value per ``(entity, attribute)`` slot
+    (supersession-not-decay), so this is the unambiguous "what is X now?" query —
+    no ranking, no stale duplicates. Most canonical facts are captured
+    automatically from your stores; use this to read one back deterministically.
+
+    Args:
+        entity: The thing, e.g. ``"nebula-serpent"`` or ``"Jacque"``. Matched
+            case/separator-insensitively (NEBULA-SERPENT == nebula_serpent).
+        attribute: The property, e.g. ``"grid_size"`` / ``"type"``.
+
+    Returns:
+        ``{"record": {entity, attribute, value, origin, confidence, support,
+        ...} | null}``. ``origin`` is user / action / agent.
+    """
+    return {"record": service.cortex_lookup(entity, attribute)}
+
+
+@mcp.tool()
+def memory_fact_set(
+    entity: str,
+    attribute: str,
+    value: str,
+    origin: str | None = None,
+    confidence: float = 0.8,
+) -> dict[str, Any]:
+    """Assert a canonical fact deliberately (insert / confirm / supersede a slot).
+
+    Use when a fact matters and you want it canonical immediately rather than
+    relying on auto-capture — or to CORRECT one: setting a new value at an
+    existing slot supersedes the old (kept for audit). A higher ``confidence``
+    here out-ranks a low-confidence auto-promoted guess.
+
+    Args:
+        entity: The thing being described (e.g. ``"project"``).
+        attribute: The property (e.g. ``"language"``).
+        value: The current value (e.g. ``"rust"``).
+        origin: ``"user"`` / ``"action"`` / ``"agent"`` — who asserts it.
+            Defaults to ``"agent"`` (you). Set ``"user"`` for things the human
+            told you; a later user-origin set promotes the fact's origin.
+        confidence: 0..1, default 0.8 (deliberate assertion > 0.5 auto floor).
+
+    Returns:
+        ``{"action": "inserted"|"confirmed"|"superseded"|"contested",
+        ...record}``.
+    """
+    return service.cortex_write(
+        entity, attribute, value,
+        confidence=confidence, support=(origin or "agent"),
+    )
+
+
+@mcp.tool()
+def memory_fact_forget(entity: str, attribute: str | None = None) -> dict[str, Any]:
+    """Hard-delete canonical fact(s) — a whole entity or one slot.
+
+    Cleanup for test/garbage facts; leaves no audit trail (for "now wrong but
+    keep history" use ``memory_fact_set`` with a new value instead). Does not
+    touch associative memory — see ``memory_delete`` for that.
+
+    Args:
+        entity: The entity to purge.
+        attribute: When given, delete only that one slot; otherwise every slot
+            under the entity.
+
+    Returns:
+        ``{"removed": int, "entity": str, "attribute": str|null}``.
+    """
+    return service.cortex_forget(entity, attribute)
+
+
+@mcp.tool()
+def memory_facts(limit: int = 120) -> dict[str, Any]:
+    """List all CURRENT canonical facts (introspection / audit of the cortex).
+
+    Args:
+        limit: Max facts to return (sorted by entity, attribute).
+
+    Returns:
+        ``{"count": int, "entries": [{entity, attribute, value, origin,
+        confidence, ...}, ...]}``.
+    """
+    dump = service.cortex_dump()
+    entries = dump.get("entries", [])[: max(0, int(limit))]
+    return {"count": len(entries), "entries": entries}
 
 
 @mcp.tool()

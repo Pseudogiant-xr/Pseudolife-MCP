@@ -303,6 +303,28 @@ class HydeConfig:
 
 
 @dataclass
+class CortexConfig:
+    """Sibling slot-keyed canonical-fact store (schema v7).
+
+    The cortex is the *cortical* layer to the continuum's *hippocampus*:
+    identity-not-similarity, supersession-not-decay, currency-not-frequency —
+    one current value per ``(entity, attribute)`` slot. It is populated
+    deterministically from slot-shaped facts on every ``store`` (``auto_promote``,
+    the no-LLM floor) and/or by explicit ``memory_fact_set`` tool calls.
+
+    ``promote_confidence`` is deliberately a low floor so a deliberate
+    ``fact_set`` (or a user-tier assertion) out-ranks an auto-promoted guess via
+    ``supersede_confidence_margin``.
+    """
+    enabled: bool = True
+    auto_promote: bool = True
+    promote_confidence: float = 0.5
+    search_first: bool = True
+    supersede_confidence_margin: float = 0.15
+    reinforce_rate: float = 0.34
+
+
+@dataclass
 class MemoryConfig:
     embedding_dim: int = 384
     # Legacy Hopfield config (kept for fallback)
@@ -332,6 +354,8 @@ class MemoryConfig:
     reflection: ReflectionConfig = field(default_factory=ReflectionConfig)
     # Contrastive retrieval objective (Slice F, v0.7.6).
     contrastive: ContrastiveConfig = field(default_factory=ContrastiveConfig)
+    # Cortex — sibling slot-keyed canonical-fact store (schema v7).
+    cortex: CortexConfig = field(default_factory=CortexConfig)
     memory_engine: str = "titans"  # "titans" or "hopfield"
     surprise_threshold: float = 0.3
     top_k: int = 8       # neural memory slots (instant + short + long)
@@ -454,6 +478,8 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             config.memory.contrastive = _dict_to_dataclass(
                 ContrastiveConfig, mem_raw["contrastive"],
             )
+        if "cortex" in mem_raw:
+            config.memory.cortex = _dict_to_dataclass(CortexConfig, mem_raw["cortex"])
     if "context" in raw:
         config.context = _dict_to_dataclass(ContextConfig, raw["context"])
     if "chunking" in raw:
