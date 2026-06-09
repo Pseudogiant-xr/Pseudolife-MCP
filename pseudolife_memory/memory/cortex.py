@@ -71,6 +71,16 @@ def _norm_support(s: str | None) -> str | None:
     return s if s in SUPPORT_PRECEDENCE else None
 
 
+# Provenance tier rank for the supersession guard. A write may only SUPERSEDE a
+# slot whose current value is backed by an equal-or-weaker tier; a weaker-tier
+# write is parked as a contender instead of silently overwriting. Unknown/"" = 0.
+_TIER_RANK = {"user": 3, "action": 2, "agent": 1}
+
+
+def _rank(origin: str | None) -> int:
+    return _TIER_RANK.get((origin or "").strip().casefold(), 0)
+
+
 @dataclass
 class CortexRecord:
     """One canonical fact at a slot, with lifecycle + provenance.
@@ -125,9 +135,14 @@ class CortexStore:
         self,
         supersede_confidence_margin: float = 0.15,
         reinforce_rate: float = 0.34,
+        protect_provenance: bool = True,
     ) -> None:
         self.supersede_confidence_margin = float(supersede_confidence_margin)
         self.reinforce_rate = float(reinforce_rate)
+        # When True (default), a conflicting write weaker than the slot's current
+        # tier (or below the confidence margin) is parked as a contender rather
+        # than superseding. False -> pure newer-wins (legacy behavior).
+        self.protect_provenance = bool(protect_provenance)
         self.records: list[CortexRecord] = []
         # slot key -> index into ``records`` of the *current* record.
         self._current: dict[tuple[str, str], int] = {}
@@ -175,8 +190,12 @@ class CortexStore:
             cur.confidence = min(1.0, max(self._reinforce(cur.confidence), float(confidence)))
             return WriteResult("confirmed", cur)
 
-        # Genuine conflict at the same slot.
-        if self._should_supersede(cur, confidence, t):
+        # Genuine conflict at the same slot. Provenance guard: only a write whose
+        # tier is >= the current value's tier may supersede; a weaker-tier write
+        # (or one below the confidence margin) is parked as a contender instead of
+        # silently overwriting. (Guard off -> tier ignored, pure newer-wins.)
+        tier_ok = (not self.protect_provenance) or _rank(sup) >= _rank(cur.origin)
+        if tier_ok and self._should_supersede(cur, confidence, t):
             cur.status = "superseded"
             cur.superseded_at = t
             cur.superseded_by_value = slot.value
@@ -184,8 +203,12 @@ class CortexStore:
             new = self._insert(slot, emb, confidence, prov, t, supersedes=cur.value, support=sup)
             return WriteResult("superseded", new)
 
-        self._log(cur, slot.value, confidence, t, "contested", "below_confidence_margin")
-        return WriteResult("contested", cur)
+        reason = "tier_downgrade" if not tier_ok else "below_confidence_margin"
+        if not self.protect_provenance:
+            # Legacy behavior: drop the conflicting value, keep current.
+            self._log(cur, slot.value, confidence, t, "contested", reason)
+            return WriteResult("contested", cur)
+        return self._contend(cur, slot, emb, confidence, prov, t, sup, reason)
 
     def _insert(
         self,
@@ -239,6 +262,62 @@ class CortexStore:
             "confidence_delta": round(float(new_conf) - float(cur.confidence), 4),
             "timestamp": t,
         })
+
+    # ------------------------------------------------------------------
+    # Contenders — a conflicting write that may not supersede is parked here
+    # ------------------------------------------------------------------
+
+    def _active_contender(self, key: tuple[str, str]) -> "CortexRecord | None":
+        """The one active (status='contested') contender at a slot, or None."""
+        for r in self.records:
+            if r.key == key and r.status == "contested":
+                return r
+        return None
+
+    def contenders_for(self, entity: str, attribute: str) -> list["CortexRecord"]:
+        """Active contenders at a slot (0 or 1 under the at-most-one invariant)."""
+        key = (_norm_key(entity), _norm_key(attribute))
+        return [r for r in self.records if r.key == key and r.status == "contested"]
+
+    def _contend(self, cur, slot, emb, confidence, prov, t, sup, reason):
+        """Park a conflicting value as a contender at ``cur``'s slot rather than
+        superseding. Keeps the current value canonical. At most one active
+        contender per slot: a matching value confirms (reinforces) the existing
+        contender; a different value supersedes the prior contender."""
+        existing = self._active_contender(cur.key)
+        if existing is not None and _norm_value(existing.value) == _norm_value(slot.value):
+            existing.last_confirmed = t
+            existing.provenance |= prov
+            if sup:
+                existing.support.add(sup)
+            existing.confidence = min(
+                1.0, max(self._reinforce(existing.confidence), float(confidence)),
+            )
+            self._log(cur, slot.value, confidence, t, "contested", "contender_confirmed")
+            return WriteResult("contested", existing)
+        supersedes_val = None
+        if existing is not None:
+            existing.status = "superseded"
+            existing.superseded_at = t
+            existing.superseded_by_value = slot.value
+            supersedes_val = existing.value
+        rec = CortexRecord(
+            entity=slot.entity,
+            attribute=slot.attribute,
+            value=slot.value,
+            polarity=getattr(slot, "polarity", "+"),
+            confidence=float(confidence),
+            status="contested",
+            provenance=set(prov),
+            asserted_at=t,
+            last_confirmed=t,
+            supersedes_value=supersedes_val,
+            embedding=emb,
+            support={sup} if sup else set(),
+        )
+        self.records.append(rec)   # deliberately NOT registered in self._current
+        self._log(cur, slot.value, confidence, t, "contested", reason)
+        return WriteResult("contested", rec)
 
     # ------------------------------------------------------------------
     # Read path — lookup (exact slot) + search (fuzzy, current only)
