@@ -126,6 +126,34 @@ def memory_store(
     return service.store(text=text, source=source, tags=tags, origin=origin)
 
 
+def _restates_fact(entry_text: str, value: str) -> bool:
+    """True when an associative recall hit merely RESTATES a surfaced cortex
+    value — so the cortex block already covers it and showing it again is noise.
+
+    Tightened from a bare substring test (which dropped any hit that *mentioned*
+    the value, e.g. losing "claude code is the client" to the value "claude").
+    A hit is a restatement only when ALL of:
+      * the value is at least 5 chars (shorter values are too ambiguous to dedup);
+      * it appears bounded by non-alphanumeric edges (a whole token/phrase, so
+        "postgres" does not match inside "postgresql"); and
+      * it DOMINATES the hit (the value is >= half the normalised text), i.e. the
+        hit adds little beyond the value itself. A hit that references the value
+        while carrying real extra context is kept.
+    """
+    t = " ".join((entry_text or "").lower().split())
+    v = " ".join((value or "").lower().split())
+    if len(v) < 5 or not t:
+        return False
+    i = t.find(v)
+    if i == -1:
+        return False
+    if (i > 0 and t[i - 1].isalnum()) or (
+        i + len(v) < len(t) and t[i + len(v)].isalnum()
+    ):
+        return False  # substring inside a larger token, not a real mention
+    return len(v) >= 0.5 * len(t)
+
+
 @mcp.tool()
 def memory_search(
     query: str,
@@ -222,10 +250,10 @@ def memory_search(
                 }
                 for f in facts
             ]
-            dup_vals = [f["value"].lower() for f in facts if len(f.get("value", "")) >= 5]
+            fact_vals = [f.get("value", "") for f in facts]
             kept = [
                 e for e in result.get("entries", [])
-                if not any(v in (e.get("text", "").lower()) for v in dup_vals)
+                if not any(_restates_fact(e.get("text", ""), v) for v in fact_vals)
             ]
             result["entries"] = kept
             result["count"] = len(kept)
