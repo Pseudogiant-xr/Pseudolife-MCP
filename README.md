@@ -24,7 +24,7 @@ persistent associative memory on disk.
 
 | Tool | Purpose |
 |------|---------|
-| `memory_store(text, source?, tags?)` | Remember a fact, decision, observation |
+| `memory_store(text, source?, tags?, origin?)` | Remember a fact, decision, observation (slot-shaped facts auto-promote to the cortex) |
 | `memory_search(query, top_k?, sources?, bands?, episodes?, tags?, min_score?, disable_recency_boost?, rerank?, bm25?)` | Retrieve by associative similarity |
 | `memory_trace(query, top_k?, sources?, bands?, episodes?, tags?, rerank?, bm25?)` | Search + full ranking trace — debug why an entry didn't surface |
 | `memory_recent(n?, sources?, episodes?, tags?)` | List newest stores (debug + session start) |
@@ -38,6 +38,11 @@ persistent associative memory on disk.
 | `memory_episode_summary(id)` | Stats + tag/source distribution + recent entries within an episode |
 | `memory_consolidation_candidates(query?, episode?, top_k?, min_cohesion?, ...)` | Cluster mutually-similar memories ripe for consolidation |
 | `memory_consolidate(replaces, new_text, source?, tags?)` | Atomic supersede + store — replace a cluster with one canonical note |
+| `memory_fact_get(entity, attribute)` | The one CURRENT canonical value at a slot (+ any parked contenders) |
+| `memory_fact_set(entity, attribute, value, origin?, confidence?)` | Assert a canonical fact deliberately (insert / confirm / supersede / contest) |
+| `memory_fact_resolve(entity, attribute, accept)` | Settle a contested fact after checking in — adopt (`true`) or discard (`false`) the contender |
+| `memory_fact_forget(entity, attribute?)` | Hard-delete canonical fact(s) at a slot/entity (no audit trail) |
+| `memory_facts(limit?)` | List all current canonical facts (cortex introspection) |
 | `memory_stats()` | Per-band sizes, hit rates, totals |
 | `memory_save()` | Flush CMS tensors to disk |
 | `document_ingest(path, source?)` | Index a file (txt/md/pdf) in the reference bank |
@@ -321,6 +326,47 @@ phrasing. Useful idiom: tag the consolidation with `["consolidated"]`
 so you can later scan with `memory_search(..., tags=["consolidated"])`
 to see what's been distilled.
 
+### Canonical facts — the cortex (schema v7)
+
+Alongside the associative continuum (the 8 MIRAS bands) sits the **cortex**: a
+slot-keyed canonical-fact store. Where the continuum is similarity-ranked and
+decaying, the cortex is **identity-not-similarity, supersession-not-decay,
+currency-not-frequency** — one *current* value per `(entity, attribute)` slot,
+retrievable out of the context window.
+
+- **Auto-capture.** Slot-shaped facts in any `memory_store(...)` ("X is Y",
+  "named X", "my X") are promoted into the cortex automatically at a 0.5
+  confidence floor — weak models get a canonical layer with zero extra calls.
+- **Deterministic read.** `memory_fact_get("project", "language")` returns the
+  one current value — no ranking, no stale duplicates. `memory_search` also
+  surfaces matching facts ahead of associative hits (a `"cortex"` block).
+- **Deliberate write / correction.** `memory_fact_set(entity, attribute, value,
+  origin="user")` asserts a fact at higher confidence; setting a new value at an
+  existing slot supersedes the old (kept as audit history).
+
+### Provenance contenders — never silently overwrite a user fact
+
+Every cortex fact carries a provenance tier: **`user` > `action` > `agent`**
+(set via `origin=`, or defaulted from `source`). A write may only *supersede* a
+slot whose current value is backed by an equal-or-weaker tier. A **weaker-tier**
+write (e.g. an `agent` value conflicting with a `user`-stated fact), or one below
+the confidence margin, is **not applied** — it's parked as a *contender*:
+
+```python
+memory_fact_set("db", "host", "10.0.0.5", origin="user")   # current
+memory_fact_set("db", "host", "10.0.0.9", origin="agent")  # -> action="contested"
+# current stays 10.0.0.5; "10.0.0.9" is parked. memory_fact_get shows both;
+# memory_search flags the fact "contested": true.
+memory_fact_resolve("db", "host", accept=True)   # human said yes -> adopt (user-confirmed)
+# or accept=False -> discard the contender, current unchanged.
+```
+
+This catches the case where the agent *decides* to update something and the human
+only said "yes/proceed": the discrepancy surfaces (at the write, in search, and in
+`memory_fact_get`) so the agent can check in rather than overwrite. Set
+`memory.cortex.protect_provenance: false` in `config.yaml` to disable and restore
+pure newer-wins.
+
 ## Data layout
 
 Everything lives under `PSEUDOLIFE_MCP_DATA_DIR`:
@@ -329,6 +375,7 @@ Everything lives under `PSEUDOLIFE_MCP_DATA_DIR`:
 data/
 ├── memory_state/
 │   └── cms_state.pt        # 8-tier MIRAS tensors + metadata
+├── cortex_state.pt         # Slot-keyed canonical facts (cortex, schema v7)
 ├── chromadb/               # Reference bank (RAG documents)
 └── config.yaml             # Optional overrides
 ```
@@ -345,15 +392,18 @@ pip install -e .[dev]
 pytest tests/ -v
 ```
 
-160 tests cover the MemoryService methods (store / search / recent /
+205 tests cover the MemoryService methods (store / search / recent /
 supersede / stats / save / trace / list_sources / list_tags / delete),
 the `memory_search` scoring overrides, the cross-encoder reranker
 (15 unit + 4 integration), the BM25 hybrid lexical pool
 (23 unit + 5 integration), schema v6 + episode lifecycle (12 + 14),
 tag plumbing through store/retrieval (10), greedy clustering for
 consolidation (10), the episode + tag service surface (16), the
-atomic consolidation operation (6), and MCP-level dispatch (tool
-registration + docstring sanity + end-to-end invocation for every
+atomic consolidation operation (6), the cortex canonical-fact store
+(slot dedup / supersession / no-decay / key-normalisation + the
+provenance tier-rank guard, contenders, and `resolve`), auto-promotion
+on `store`, and the cortex service + MCP surface, and MCP-level dispatch
+(tool registration + docstring sanity + end-to-end invocation for every
 exposed tool through the FastMCP machinery). The delete suite
 includes a persistence round-trip test (store → delete → save →
 reload → verify gone). Reranker tests monkeypatch
@@ -378,8 +428,10 @@ sentence-transformers load doesn't dominate runtime.
 | Episode anchoring | — | Yes (Tier C — schema v6, `memory_episode_*`) |
 | Multi-valued tags | Single `source` only | Yes (Tier C — `tags=[...]` on store/search/delete) |
 | Consolidation workflow | — | Yes (Tier C — `memory_consolidation_candidates` + `memory_consolidate`) |
+| Canonical-fact cortex | Yes (redacted-side dream) | Yes (deterministic auto-promote + `memory_fact_*`; no LLM dream) |
+| Provenance contenders | — | Yes (tier-rank guard `user>action>agent`; `memory_fact_resolve`) |
 | Reference bank | Yes | Yes |
-| Schema version | v5 | v6 (additive — pre-v6 saves load cleanly with new fields defaulted) |
+| Schema version | v5 | v7 (additive — pre-v6 saves load cleanly; cortex co-persists in `cortex_state.pt`) |
 
 The MCP build is **not** save-compatible with PseudoLife's data dir, even
 though the on-disk schema is the same — they're separate memory

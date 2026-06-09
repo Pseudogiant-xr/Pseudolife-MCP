@@ -71,6 +71,16 @@ def _norm_support(s: str | None) -> str | None:
     return s if s in SUPPORT_PRECEDENCE else None
 
 
+# Provenance tier rank for the supersession guard. A write may only SUPERSEDE a
+# slot whose current value is backed by an equal-or-weaker tier; a weaker-tier
+# write is parked as a contender instead of silently overwriting. Unknown/"" = 0.
+_TIER_RANK = {"user": 3, "action": 2, "agent": 1}
+
+
+def _rank(origin: str | None) -> int:
+    return _TIER_RANK.get((origin or "").strip().casefold(), 0)
+
+
 @dataclass
 class CortexRecord:
     """One canonical fact at a slot, with lifecycle + provenance.
@@ -125,9 +135,14 @@ class CortexStore:
         self,
         supersede_confidence_margin: float = 0.15,
         reinforce_rate: float = 0.34,
+        protect_provenance: bool = True,
     ) -> None:
         self.supersede_confidence_margin = float(supersede_confidence_margin)
         self.reinforce_rate = float(reinforce_rate)
+        # When True (default), a conflicting write weaker than the slot's current
+        # tier (or below the confidence margin) is parked as a contender rather
+        # than superseding. False -> pure newer-wins (legacy behavior).
+        self.protect_provenance = bool(protect_provenance)
         self.records: list[CortexRecord] = []
         # slot key -> index into ``records`` of the *current* record.
         self._current: dict[tuple[str, str], int] = {}
@@ -175,8 +190,12 @@ class CortexStore:
             cur.confidence = min(1.0, max(self._reinforce(cur.confidence), float(confidence)))
             return WriteResult("confirmed", cur)
 
-        # Genuine conflict at the same slot.
-        if self._should_supersede(cur, confidence, t):
+        # Genuine conflict at the same slot. Provenance guard: only a write whose
+        # tier is >= the current value's tier may supersede; a weaker-tier write
+        # (or one below the confidence margin) is parked as a contender instead of
+        # silently overwriting. (Guard off -> tier ignored, pure newer-wins.)
+        tier_ok = (not self.protect_provenance) or _rank(sup) >= _rank(cur.origin)
+        if tier_ok and self._should_supersede(cur, confidence, t):
             cur.status = "superseded"
             cur.superseded_at = t
             cur.superseded_by_value = slot.value
@@ -184,8 +203,12 @@ class CortexStore:
             new = self._insert(slot, emb, confidence, prov, t, supersedes=cur.value, support=sup)
             return WriteResult("superseded", new)
 
-        self._log(cur, slot.value, confidence, t, "contested", "below_confidence_margin")
-        return WriteResult("contested", cur)
+        reason = "tier_downgrade" if not tier_ok else "below_confidence_margin"
+        if not self.protect_provenance:
+            # Legacy behavior: drop the conflicting value, keep current.
+            self._log(cur, slot.value, confidence, t, "contested", reason)
+            return WriteResult("contested", cur)
+        return self._contend(cur, slot, emb, confidence, prov, t, sup, reason)
 
     def _insert(
         self,
@@ -239,6 +262,98 @@ class CortexStore:
             "confidence_delta": round(float(new_conf) - float(cur.confidence), 4),
             "timestamp": t,
         })
+
+    # ------------------------------------------------------------------
+    # Contenders — a conflicting write that may not supersede is parked here
+    # ------------------------------------------------------------------
+
+    def _active_contender(self, key: tuple[str, str]) -> "CortexRecord | None":
+        """The one active (status='contested') contender at a slot, or None."""
+        for r in self.records:
+            if r.key == key and r.status == "contested":
+                return r
+        return None
+
+    def contenders_for(self, entity: str, attribute: str) -> list["CortexRecord"]:
+        """Active contenders at a slot (0 or 1 under the at-most-one invariant)."""
+        key = (_norm_key(entity), _norm_key(attribute))
+        return [r for r in self.records if r.key == key and r.status == "contested"]
+
+    def _contend(self, cur, slot, emb, confidence, prov, t, sup, reason):
+        """Park a conflicting value as a contender at ``cur``'s slot rather than
+        superseding. Keeps the current value canonical. At most one active
+        contender per slot: a matching value confirms (reinforces) the existing
+        contender; a different value supersedes the prior contender."""
+        existing = self._active_contender(cur.key)
+        if existing is not None and _norm_value(existing.value) == _norm_value(slot.value):
+            existing.last_confirmed = t
+            existing.provenance |= prov
+            if sup:
+                existing.support.add(sup)
+            existing.confidence = min(
+                1.0, max(self._reinforce(existing.confidence), float(confidence)),
+            )
+            self._log(cur, slot.value, confidence, t, "contested", "contender_confirmed")
+            return WriteResult("contested", existing)
+        supersedes_val = None
+        if existing is not None:
+            existing.status = "superseded"
+            existing.superseded_at = t
+            existing.superseded_by_value = slot.value
+            supersedes_val = existing.value
+        rec = CortexRecord(
+            entity=slot.entity,
+            attribute=slot.attribute,
+            value=slot.value,
+            polarity=getattr(slot, "polarity", "+"),
+            confidence=float(confidence),
+            status="contested",
+            provenance=set(prov),
+            asserted_at=t,
+            last_confirmed=t,
+            supersedes_value=supersedes_val,
+            embedding=emb,
+            support={sup} if sup else set(),
+        )
+        self.records.append(rec)   # deliberately NOT registered in self._current
+        self._log(cur, slot.value, confidence, t, "contested", reason)
+        return WriteResult("contested", rec)
+
+    def resolve(self, entity, attribute, accept: bool, now: float | None = None):
+        """Resolve the active contender at a slot. ``accept=True`` promotes it to
+        current (old current -> superseded; contender stamped user-confirmed);
+        ``accept=False`` retires it (current untouched). Returns a ``WriteResult``
+        or ``None`` when there is no active contender."""
+        key = (_norm_key(entity), _norm_key(attribute))
+        t = time.time() if now is None else float(now)
+        c_idx = next(
+            (i for i, r in enumerate(self.records)
+             if r.key == key and r.status == "contested"),
+            None,
+        )
+        if c_idx is None:
+            return None
+        contender = self.records[c_idx]
+        cur_idx = self._current.get(key)
+        cur = self.records[cur_idx] if cur_idx is not None else None
+        if accept:
+            if cur is not None:
+                cur.status = "superseded"
+                cur.superseded_at = t
+                cur.superseded_by_value = contender.value
+            contender.status = "current"
+            contender.support.add("user")
+            contender.last_confirmed = t
+            contender.supersedes_value = cur.value if cur is not None else contender.supersedes_value
+            self._current[key] = c_idx
+            self._log(cur or contender, contender.value, contender.confidence, t,
+                      "resolved", "accepted")
+            return WriteResult("superseded", contender)
+        contender.status = "retired"
+        contender.superseded_at = t
+        self._log(cur or contender, contender.value, contender.confidence, t,
+                  "resolved", "rejected")
+        return WriteResult("contested", cur or contender)
 
     # ------------------------------------------------------------------
     # Read path — lookup (exact slot) + search (fuzzy, current only)
@@ -386,27 +501,40 @@ class CortexStore:
         self._reindex_current()
 
     def _reindex_current(self) -> None:
-        """Rebuild the slot -> current-record index. If two ``current`` records
-        now share a normalised slot (e.g. legacy facts written before key
-        normalisation, like ``NEBULA-SERPENT`` vs ``nebula-serpent``), keep the
-        most-recently-confirmed and demote the rest to ``superseded`` so the
-        single-current-per-slot invariant self-heals on load."""
+        """Rebuild the slot -> current index and self-heal the one-record-per-status
+        invariants. If two records share a normalised slot at the same LIVE status
+        (``current`` or ``contested``) — e.g. legacy facts written before key
+        normalisation, like ``NEBULA-SERPENT`` vs ``nebula-serpent`` — keep the
+        most-recently-confirmed and demote the rest to ``superseded``."""
         self._current = {}
-        for i, rec in enumerate(self.records):
-            if rec.status != "current":
-                continue
-            prev = self._current.get(rec.key)
-            if prev is None:
-                self._current[rec.key] = i
-                continue
-            keep, drop = ((i, prev) if rec.last_confirmed >= self.records[prev].last_confirmed
-                         else (prev, i))
+        seen_contested: dict[tuple[str, str], int] = {}
+
+        def _demote(keep: int, drop: int) -> None:
             loser = self.records[drop]
             loser.status = "superseded"
             if loser.superseded_at is None:
                 loser.superseded_at = self.records[keep].last_confirmed
             loser.superseded_by_value = self.records[keep].value
-            self._current[rec.key] = keep
+
+        for i, rec in enumerate(self.records):
+            if rec.status == "current":
+                prev = self._current.get(rec.key)
+                if prev is None:
+                    self._current[rec.key] = i
+                else:
+                    keep, drop = ((i, prev) if rec.last_confirmed >= self.records[prev].last_confirmed
+                                 else (prev, i))
+                    _demote(keep, drop)
+                    self._current[rec.key] = keep
+            elif rec.status == "contested":
+                prev = seen_contested.get(rec.key)
+                if prev is None:
+                    seen_contested[rec.key] = i
+                else:
+                    keep, drop = ((i, prev) if rec.last_confirmed >= self.records[prev].last_confirmed
+                                 else (prev, i))
+                    _demote(keep, drop)
+                    seen_contested[rec.key] = keep
 
     def stats(self) -> dict:
         current = sum(1 for r in self.records if r.status == "current")

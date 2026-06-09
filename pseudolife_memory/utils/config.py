@@ -320,6 +320,10 @@ class CortexConfig:
     auto_promote: bool = True
     promote_confidence: float = 0.5
     search_first: bool = True
+    # When True, a conflicting write weaker than a slot's current provenance tier
+    # (user>action>agent), or below the confidence margin, is parked as a visible
+    # contender instead of silently superseding. False -> pure newer-wins.
+    protect_provenance: bool = True
     supersede_confidence_margin: float = 0.15
     reinforce_rate: float = 0.34
 

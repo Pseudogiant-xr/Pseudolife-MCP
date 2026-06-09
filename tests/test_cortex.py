@@ -248,6 +248,161 @@ def test_load_missing_file_is_empty_not_error():
         assert store.lookup("anything", "here") is None
 
 
+# ---------------------------------------------------------------------------
+# Provenance-aware contenders — a weaker-tier (or below-margin) conflicting
+# write is parked as a status="contested" contender, not silently superseded.
+# ---------------------------------------------------------------------------
+
+
+def test_agent_write_contends_user_fact_not_supersede():
+    store = CortexStore()
+    store.write_fact(Slot("box", "ip", "10.0.0.1"), _unit(20), support="user", now=1.0)
+    res = store.write_fact(Slot("box", "ip", "10.0.0.2"), _unit(21), support="agent", now=2.0)
+    assert res.action == "contested"          # parked, not superseded
+    assert store.lookup("box", "ip").value == "10.0.0.1"   # user fact still current
+    conts = store.contenders_for("box", "ip")
+    assert len(conts) == 1 and conts[0].value == "10.0.0.2"
+    assert conts[0].status == "contested"
+
+
+def test_action_over_agent_supersedes_but_agent_over_action_contends():
+    store = CortexStore()
+    store.write_fact(Slot("svc", "port", "8080"), _unit(22), support="agent", now=1.0)
+    r1 = store.write_fact(Slot("svc", "port", "9090"), _unit(23), support="action", now=2.0)
+    assert r1.action == "superseded"          # action (2) >= agent (1)
+    assert store.lookup("svc", "port").value == "9090"
+    r2 = store.write_fact(Slot("svc", "port", "7070"), _unit(24), support="agent", now=3.0)
+    assert r2.action == "contested"           # agent (1) < action (2)
+    assert store.lookup("svc", "port").value == "9090"
+
+
+def test_user_write_supersedes_lower_tier():
+    store = CortexStore()
+    store.write_fact(Slot("p", "lang", "go"), _unit(25), support="agent", now=1.0)
+    r = store.write_fact(Slot("p", "lang", "rust"), _unit(26), support="user", now=2.0)
+    assert r.action == "superseded"
+    assert store.lookup("p", "lang").value == "rust"
+
+
+def test_below_margin_same_tier_now_records_contender():
+    store = CortexStore(supersede_confidence_margin=0.15)
+    store.write_fact(Slot("box", "ip", "192.168.0.104"), _unit(27), confidence=0.9,
+                     support="agent", now=1.0)
+    res = store.write_fact(Slot("box", "ip", "10.0.0.5"), _unit(28), confidence=0.5,
+                           support="agent", now=2.0)
+    assert res.action == "contested"
+    assert store.lookup("box", "ip").value == "192.168.0.104"
+    assert len(store.contenders_for("box", "ip")) == 1
+
+
+def test_at_most_one_active_contender_newer_value_supersedes_prior():
+    store = CortexStore()
+    store.write_fact(Slot("k", "v", "current"), _unit(29), support="user", now=1.0)
+    store.write_fact(Slot("k", "v", "first"), _unit(30), support="agent", now=2.0)
+    store.write_fact(Slot("k", "v", "second"), _unit(31), support="agent", now=3.0)
+    conts = store.contenders_for("k", "v")
+    assert len(conts) == 1 and conts[0].value == "second"
+    # the prior contender is retained as superseded history, not current/contested
+    hist = [r for r in store.records_for("k", "v") if r.value == "first"]
+    assert hist and hist[0].status == "superseded"
+
+
+def test_contender_confirm_reinforces_same_value():
+    store = CortexStore()
+    store.write_fact(Slot("k", "v", "cur"), _unit(32), support="user", now=1.0)
+    store.write_fact(Slot("k", "v", "alt"), _unit(33), confidence=0.5, support="agent", now=2.0)
+    c0 = store.contenders_for("k", "v")[0].confidence
+    for i in range(10):
+        store.write_fact(Slot("k", "v", "alt"), _unit(33), support="agent", now=3.0 + i)
+    conts = store.contenders_for("k", "v")
+    assert len(conts) == 1 and conts[0].confidence > c0   # reinforced, still one
+
+
+def test_unknown_tier_contests_known_but_known_supersedes_legacy_unknown():
+    store = CortexStore()
+    # known user fact, unknown-tier write -> contends
+    store.write_fact(Slot("a", "b", "x"), _unit(34), support="user", now=1.0)
+    r1 = store.write_fact(Slot("a", "b", "y"), _unit(35), now=2.0)        # no support
+    assert r1.action == "contested"
+    # legacy unknown fact, known agent write -> supersedes (1 >= 0)
+    store.write_fact(Slot("c", "d", "x"), _unit(36), now=1.0)            # no support
+    r2 = store.write_fact(Slot("c", "d", "y"), _unit(37), support="agent", now=2.0)
+    assert r2.action == "superseded"
+    assert store.lookup("c", "d").value == "y"
+
+
+def test_resolve_accept_promotes_contender_and_marks_user_confirmed():
+    store = CortexStore()
+    store.write_fact(Slot("box", "ip", "10.0.0.1"), _unit(40), support="user", now=1.0)
+    store.write_fact(Slot("box", "ip", "10.0.0.2"), _unit(41), support="agent", now=2.0)
+    res = store.resolve("box", "ip", accept=True, now=3.0)
+    assert res is not None and res.action == "superseded"
+    cur = store.lookup("box", "ip")
+    assert cur.value == "10.0.0.2" and cur.status == "current"
+    assert "user" in cur.support               # human confirmed -> user-tier
+    assert store.contenders_for("box", "ip") == []
+    old = [r for r in store.records_for("box", "ip") if r.value == "10.0.0.1"]
+    assert old and old[0].status == "superseded"
+
+
+def test_resolve_reject_retires_contender_current_unchanged():
+    store = CortexStore()
+    store.write_fact(Slot("box", "ip", "10.0.0.1"), _unit(42), support="user", now=1.0)
+    store.write_fact(Slot("box", "ip", "10.0.0.2"), _unit(43), support="agent", now=2.0)
+    res = store.resolve("box", "ip", accept=False, now=3.0)
+    assert res is not None
+    assert store.lookup("box", "ip").value == "10.0.0.1"
+    assert store.contenders_for("box", "ip") == []
+    retired = [r for r in store.records_for("box", "ip") if r.value == "10.0.0.2"]
+    assert retired and retired[0].status == "retired"
+
+
+def test_resolve_no_contender_returns_none():
+    store = CortexStore()
+    store.write_fact(Slot("box", "ip", "10.0.0.1"), _unit(44), support="user", now=1.0)
+    assert store.resolve("box", "ip", accept=True) is None
+
+
+def test_contested_and_retired_survive_persistence_roundtrip():
+    with tempfile.TemporaryDirectory() as d:
+        store = CortexStore()
+        store.write_fact(Slot("box", "ip", "10.0.0.1"), _unit(50), support="user", now=1.0)
+        store.write_fact(Slot("box", "ip", "10.0.0.2"), _unit(51), support="agent", now=2.0)
+        p = Path(d) / "cortex_state.pt"
+        store.save(p)
+        loaded = CortexStore()
+        loaded.load(p)
+        assert loaded.lookup("box", "ip").value == "10.0.0.1"
+        conts = loaded.contenders_for("box", "ip")
+        assert len(conts) == 1 and conts[0].value == "10.0.0.2"
+
+
+def test_load_reconciles_duplicate_contested_to_one_active():
+    with tempfile.TemporaryDirectory() as d:
+        store = CortexStore()
+        store.write_fact(Slot("box", "ip", "10.0.0.1"), _unit(52), support="user", now=1.0)
+        # hand-craft two contested records at the same slot (legacy/dup)
+        store.records.append(CortexRecord(entity="box", attribute="ip", value="A",
+                                          status="contested", last_confirmed=2.0))
+        store.records.append(CortexRecord(entity="box", attribute="ip", value="B",
+                                          status="contested", last_confirmed=3.0))
+        p = Path(d) / "c.pt"
+        store.save(p)
+        loaded = CortexStore()
+        loaded.load(p)
+        conts = loaded.contenders_for("box", "ip")
+        assert len(conts) == 1 and conts[0].value == "B"   # newest kept
+
+
+def test_protect_provenance_false_restores_pure_newer_wins():
+    store = CortexStore(protect_provenance=False)
+    store.write_fact(Slot("box", "ip", "10.0.0.1"), _unit(60), support="user", now=1.0)
+    r = store.write_fact(Slot("box", "ip", "10.0.0.2"), _unit(61), support="agent", now=2.0)
+    assert r.action == "superseded"            # tier ignored
+    assert store.lookup("box", "ip").value == "10.0.0.2"
+    assert store.contenders_for("box", "ip") == []
+
+
 if __name__ == "__main__":
     import sys
     import traceback

@@ -260,6 +260,7 @@ class MemoryService:
         self._cortex = CortexStore(
             supersede_confidence_margin=cc.supersede_confidence_margin,
             reinforce_rate=cc.reinforce_rate,
+            protect_provenance=cc.protect_provenance,
         )
         try:
             self._cortex.load(self._cortex_path())
@@ -823,7 +824,9 @@ class MemoryService:
         strongest tier seen), so corroboration is first-class.
 
         Returns ``{"action": "inserted"|"confirmed"|"superseded"|"contested",
-        ...record fields}``.
+        ...record fields}``. On ``"contested"`` the returned record is the parked
+        *contender* and a ``"current"`` key carries the canonical value that won,
+        so the caller sees both sides of the conflict.
         """
         with self._lock:
             self._ensure_init()
@@ -838,7 +841,11 @@ class MemoryService:
                 support=support,
                 now=now,
             )
-            return {"action": res.action, **_cortex_record_to_dict(res.record)}
+            out = {"action": res.action, **_cortex_record_to_dict(res.record)}
+            if res.action == "contested":
+                cur = self._cortex.lookup(entity, attribute)
+                out["current"] = _cortex_record_to_dict(cur) if cur is not None else None
+            return out
 
     def cortex_lookup(self, entity: str, attribute: str) -> dict[str, Any] | None:
         """Exact slot lookup — the one ``current`` fact, or ``None``."""
@@ -848,22 +855,63 @@ class MemoryService:
             rec = self._cortex.lookup(entity, attribute)
             return _cortex_record_to_dict(rec) if rec is not None else None
 
+    def cortex_contenders(self, entity: str, attribute: str) -> dict[str, Any]:
+        """Active contenders parked at a slot — a conflicting lower-tier / below-
+        margin value that did NOT supersede the current fact (0 or 1)."""
+        with self._lock:
+            self._ensure_init()
+            assert self._cortex is not None
+            recs = self._cortex.contenders_for(entity, attribute)
+            return {
+                "entity": entity, "attribute": attribute,
+                "contenders": [_cortex_record_to_dict(r) for r in recs],
+            }
+
+    def cortex_resolve(self, entity: str, attribute: str, accept: bool) -> dict[str, Any]:
+        """Promote (accept) or retire (reject) the active contender at a slot.
+        Persists. Returns ``{"resolved": False, "reason": "no_contender"}`` when
+        there is nothing parked to resolve."""
+        with self._lock:
+            self._ensure_init()
+            assert self._cortex is not None
+            res = self._cortex.resolve(entity, attribute, accept)
+            if res is None:
+                return {"resolved": False, "reason": "no_contender",
+                        "entity": entity, "attribute": attribute}
+            self._save_cortex()
+            cur = self._cortex.lookup(entity, attribute)
+            return {
+                "resolved": True,
+                "accepted": bool(accept),
+                "action": res.action,
+                "current": _cortex_record_to_dict(cur) if cur is not None else None,
+                "record": _cortex_record_to_dict(res.record),
+            }
+
     def cortex_search(
         self, query: str, top_k: int = 5, min_score: float = 0.0,
     ) -> dict[str, Any]:
-        """Fuzzy search over ``current`` canonical facts only."""
+        """Fuzzy search over ``current`` canonical facts only. Each entry is
+        flagged ``"contested": bool`` and, when true, carries
+        ``"contender_value"`` / ``"contender_origin"`` for the parked rival, so a
+        discrepancy is visible during normal recall."""
         with self._lock:
             self._ensure_init()
             assert self._embedder is not None and self._cortex is not None
             emb = self._embedder.encode_single(query)
             hits = self._cortex.search(emb, top_k=top_k, min_score=min_score)
-            return {
-                "count": len(hits),
-                "entries": [
-                    {**_cortex_record_to_dict(r), "score": round(float(s), 4)}
-                    for r, s in hits
-                ],
-            }
+            entries = []
+            for r, s in hits:
+                d = {**_cortex_record_to_dict(r), "score": round(float(s), 4)}
+                conts = self._cortex.contenders_for(r.entity, r.attribute)
+                if conts:
+                    d["contested"] = True
+                    d["contender_value"] = conts[0].value
+                    d["contender_origin"] = conts[0].origin
+                else:
+                    d["contested"] = False
+                entries.append(d)
+            return {"count": len(entries), "entries": entries}
 
     def cortex_stats(self) -> dict[str, Any]:
         """Cortex sizes: total / current / superseded / slots."""
