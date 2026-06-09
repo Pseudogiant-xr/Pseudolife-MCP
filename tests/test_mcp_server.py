@@ -49,6 +49,7 @@ def test_all_tools_registered() -> None:
         "memory_fact_set",
         "memory_fact_forget",
         "memory_facts",
+        "memory_fact_resolve",
     ])
 
 
@@ -325,3 +326,48 @@ def test_memory_consolidate_via_mcp_dispatch(
     assert by_text["old phrasing one"]["superseded"] is True
     assert by_text["Consolidated: current phrasing"]["superseded"] is False
     assert "consolidated" in by_text["Consolidated: current phrasing"]["tags"]
+
+
+# ---------------------------------------------------------------------------
+# Cortex — provenance contenders + resolve dispatch
+# ---------------------------------------------------------------------------
+
+
+def test_memory_fact_get_returns_contenders_via_mcp(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
+    import importlib
+    import pseudolife_memory.mcp_server as mod
+    importlib.reload(mod)
+
+    _invoke("memory_fact_set", {"entity": "project", "attribute": "language",
+                                "value": "go", "origin": "user"})
+    _invoke("memory_fact_set", {"entity": "project", "attribute": "language",
+                                "value": "rust", "origin": "agent"})
+    got = _invoke("memory_fact_get", {"entity": "project", "attribute": "language"})
+    assert got["record"]["value"] == "go"                 # user fact current
+    assert any(c["value"] == "rust" for c in got["contenders"])
+
+
+def test_memory_fact_resolve_accept_and_reject_via_mcp(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
+    import importlib
+    import pseudolife_memory.mcp_server as mod
+    importlib.reload(mod)
+
+    _invoke("memory_fact_set", {"entity": "svc", "attribute": "port",
+                                "value": "8080", "origin": "user"})
+    _invoke("memory_fact_set", {"entity": "svc", "attribute": "port",
+                                "value": "9090", "origin": "agent"})
+    acc = _invoke("memory_fact_resolve", {"entity": "svc", "attribute": "port",
+                                          "accept": True})
+    assert acc["resolved"] is True
+    got = _invoke("memory_fact_get", {"entity": "svc", "attribute": "port"})
+    assert got["record"]["value"] == "9090"
+    # nothing left to resolve
+    none = _invoke("memory_fact_resolve", {"entity": "svc", "attribute": "port",
+                                           "accept": False})
+    assert none["resolved"] is False

@@ -213,6 +213,12 @@ def memory_search(
                     "entity": f["entity"], "attribute": f["attribute"],
                     "value": f["value"], "origin": f.get("origin", ""),
                     "confidence": f["confidence"], "score": f.get("score"),
+                    "contested": f.get("contested", False),
+                    **(
+                        {"contender_value": f.get("contender_value"),
+                         "contender_origin": f.get("contender_origin", "")}
+                        if f.get("contested") else {}
+                    ),
                 }
                 for f in facts
             ]
@@ -288,9 +294,15 @@ def memory_fact_get(entity: str, attribute: str) -> dict[str, Any]:
 
     Returns:
         ``{"record": {entity, attribute, value, origin, confidence, support,
-        ...} | null}``. ``origin`` is user / action / agent.
+        ...} | null, "contenders": [...]}``. ``origin`` is user / action / agent.
+        ``contenders`` lists any parked rival value(s) that conflicted with this
+        slot but were too weak to supersede (see ``memory_fact_resolve``) — a
+        non-empty list means a discrepancy is waiting to be settled with the human.
     """
-    return {"record": service.cortex_lookup(entity, attribute)}
+    return {
+        "record": service.cortex_lookup(entity, attribute),
+        "contenders": service.cortex_contenders(entity, attribute)["contenders"],
+    }
 
 
 @mcp.tool()
@@ -308,6 +320,11 @@ def memory_fact_set(
     existing slot supersedes the old (kept for audit). A higher ``confidence``
     here out-ranks a low-confidence auto-promoted guess.
 
+    If your value conflicts with a higher-tier fact (e.g. a user-stated one) it is
+    NOT applied — it's parked as a contender and the response ``action`` is
+    ``"contested"`` (with the winning value under ``"current"``). Check in with the
+    human, then settle it via ``memory_fact_resolve``.
+
     Args:
         entity: The thing being described (e.g. ``"project"``).
         attribute: The property (e.g. ``"language"``).
@@ -318,8 +335,8 @@ def memory_fact_set(
         confidence: 0..1, default 0.8 (deliberate assertion > 0.5 auto floor).
 
     Returns:
-        ``{"action": "inserted"|"confirmed"|"superseded"|"contested",
-        ...record}``.
+        ``{"action": "inserted"|"confirmed"|"superseded"|"contested", ...record}``;
+        on ``"contested"`` also a ``"current"`` key with the value that won.
     """
     return service.cortex_write(
         entity, attribute, value,
@@ -344,6 +361,33 @@ def memory_fact_forget(entity: str, attribute: str | None = None) -> dict[str, A
         ``{"removed": int, "entity": str, "attribute": str|null}``.
     """
     return service.cortex_forget(entity, attribute)
+
+
+@mcp.tool()
+def memory_fact_resolve(entity: str, attribute: str, accept: bool) -> dict[str, Any]:
+    """Resolve a CONTESTED canonical fact after checking in with the human.
+
+    When your write conflicts with a higher-tier fact (e.g. a user-stated value),
+    the cortex KEEPS the current value and parks yours as a *contender* — you'll
+    see ``action="contested"`` on the write, ``contested: true`` in ``memory_search``,
+    and the contender under ``memory_fact_get``. That's your cue to ask the human,
+    then call this to settle it:
+
+    - ``accept=true``  -> adopt the contender as the new current value (recorded as
+      user-confirmed; the old value is kept as superseded history).
+    - ``accept=false`` -> discard the contender (retired); the current value stays.
+
+    Args:
+        entity: The slot entity (case/separator-insensitive).
+        attribute: The slot attribute.
+        accept: REQUIRED. ``true`` adopts the contender, ``false`` discards it.
+
+    Returns:
+        ``{"resolved": bool, "accepted": bool, "action": str, "current": {...},
+        "record": {...}}``, or ``{"resolved": false, "reason": "no_contender"}``
+        when nothing is parked at the slot.
+    """
+    return service.cortex_resolve(entity, attribute, accept)
 
 
 @mcp.tool()
