@@ -319,6 +319,42 @@ class CortexStore:
         self._log(cur, slot.value, confidence, t, "contested", reason)
         return WriteResult("contested", rec)
 
+    def resolve(self, entity, attribute, accept: bool, now: float | None = None):
+        """Resolve the active contender at a slot. ``accept=True`` promotes it to
+        current (old current -> superseded; contender stamped user-confirmed);
+        ``accept=False`` retires it (current untouched). Returns a ``WriteResult``
+        or ``None`` when there is no active contender."""
+        key = (_norm_key(entity), _norm_key(attribute))
+        t = time.time() if now is None else float(now)
+        c_idx = next(
+            (i for i, r in enumerate(self.records)
+             if r.key == key and r.status == "contested"),
+            None,
+        )
+        if c_idx is None:
+            return None
+        contender = self.records[c_idx]
+        cur_idx = self._current.get(key)
+        cur = self.records[cur_idx] if cur_idx is not None else None
+        if accept:
+            if cur is not None:
+                cur.status = "superseded"
+                cur.superseded_at = t
+                cur.superseded_by_value = contender.value
+            contender.status = "current"
+            contender.support.add("user")
+            contender.last_confirmed = t
+            contender.supersedes_value = cur.value if cur is not None else contender.supersedes_value
+            self._current[key] = c_idx
+            self._log(cur or contender, contender.value, contender.confidence, t,
+                      "resolved", "accepted")
+            return WriteResult("superseded", contender)
+        contender.status = "retired"
+        contender.superseded_at = t
+        self._log(cur or contender, contender.value, contender.confidence, t,
+                  "resolved", "rejected")
+        return WriteResult("contested", cur or contender)
+
     # ------------------------------------------------------------------
     # Read path — lookup (exact slot) + search (fuzzy, current only)
     # ------------------------------------------------------------------

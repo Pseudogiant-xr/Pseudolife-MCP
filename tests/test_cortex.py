@@ -331,6 +331,38 @@ def test_unknown_tier_contests_known_but_known_supersedes_legacy_unknown():
     assert store.lookup("c", "d").value == "y"
 
 
+def test_resolve_accept_promotes_contender_and_marks_user_confirmed():
+    store = CortexStore()
+    store.write_fact(Slot("box", "ip", "10.0.0.1"), _unit(40), support="user", now=1.0)
+    store.write_fact(Slot("box", "ip", "10.0.0.2"), _unit(41), support="agent", now=2.0)
+    res = store.resolve("box", "ip", accept=True, now=3.0)
+    assert res is not None and res.action == "superseded"
+    cur = store.lookup("box", "ip")
+    assert cur.value == "10.0.0.2" and cur.status == "current"
+    assert "user" in cur.support               # human confirmed -> user-tier
+    assert store.contenders_for("box", "ip") == []
+    old = [r for r in store.records_for("box", "ip") if r.value == "10.0.0.1"]
+    assert old and old[0].status == "superseded"
+
+
+def test_resolve_reject_retires_contender_current_unchanged():
+    store = CortexStore()
+    store.write_fact(Slot("box", "ip", "10.0.0.1"), _unit(42), support="user", now=1.0)
+    store.write_fact(Slot("box", "ip", "10.0.0.2"), _unit(43), support="agent", now=2.0)
+    res = store.resolve("box", "ip", accept=False, now=3.0)
+    assert res is not None
+    assert store.lookup("box", "ip").value == "10.0.0.1"
+    assert store.contenders_for("box", "ip") == []
+    retired = [r for r in store.records_for("box", "ip") if r.value == "10.0.0.2"]
+    assert retired and retired[0].status == "retired"
+
+
+def test_resolve_no_contender_returns_none():
+    store = CortexStore()
+    store.write_fact(Slot("box", "ip", "10.0.0.1"), _unit(44), support="user", now=1.0)
+    assert store.resolve("box", "ip", accept=True) is None
+
+
 if __name__ == "__main__":
     import sys
     import traceback
