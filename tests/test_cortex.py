@@ -394,6 +394,15 @@ def test_load_reconciles_duplicate_contested_to_one_active():
         assert len(conts) == 1 and conts[0].value == "B"   # newest kept
 
 
+def test_protect_provenance_false_restores_pure_newer_wins():
+    store = CortexStore(protect_provenance=False)
+    store.write_fact(Slot("box", "ip", "10.0.0.1"), _unit(60), support="user", now=1.0)
+    r = store.write_fact(Slot("box", "ip", "10.0.0.2"), _unit(61), support="agent", now=2.0)
+    assert r.action == "superseded"            # tier ignored
+    assert store.lookup("box", "ip").value == "10.0.0.2"
+    assert store.contenders_for("box", "ip") == []
+
+
 if __name__ == "__main__":
     import sys
     import traceback

@@ -260,6 +260,7 @@ class MemoryService:
         self._cortex = CortexStore(
             supersede_confidence_margin=cc.supersede_confidence_margin,
             reinforce_rate=cc.reinforce_rate,
+            protect_provenance=cc.protect_provenance,
         )
         try:
             self._cortex.load(self._cortex_path())
