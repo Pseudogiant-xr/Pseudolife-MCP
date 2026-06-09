@@ -501,27 +501,40 @@ class CortexStore:
         self._reindex_current()
 
     def _reindex_current(self) -> None:
-        """Rebuild the slot -> current-record index. If two ``current`` records
-        now share a normalised slot (e.g. legacy facts written before key
-        normalisation, like ``NEBULA-SERPENT`` vs ``nebula-serpent``), keep the
-        most-recently-confirmed and demote the rest to ``superseded`` so the
-        single-current-per-slot invariant self-heals on load."""
+        """Rebuild the slot -> current index and self-heal the one-record-per-status
+        invariants. If two records share a normalised slot at the same LIVE status
+        (``current`` or ``contested``) — e.g. legacy facts written before key
+        normalisation, like ``NEBULA-SERPENT`` vs ``nebula-serpent`` — keep the
+        most-recently-confirmed and demote the rest to ``superseded``."""
         self._current = {}
-        for i, rec in enumerate(self.records):
-            if rec.status != "current":
-                continue
-            prev = self._current.get(rec.key)
-            if prev is None:
-                self._current[rec.key] = i
-                continue
-            keep, drop = ((i, prev) if rec.last_confirmed >= self.records[prev].last_confirmed
-                         else (prev, i))
+        seen_contested: dict[tuple[str, str], int] = {}
+
+        def _demote(keep: int, drop: int) -> None:
             loser = self.records[drop]
             loser.status = "superseded"
             if loser.superseded_at is None:
                 loser.superseded_at = self.records[keep].last_confirmed
             loser.superseded_by_value = self.records[keep].value
-            self._current[rec.key] = keep
+
+        for i, rec in enumerate(self.records):
+            if rec.status == "current":
+                prev = self._current.get(rec.key)
+                if prev is None:
+                    self._current[rec.key] = i
+                else:
+                    keep, drop = ((i, prev) if rec.last_confirmed >= self.records[prev].last_confirmed
+                                 else (prev, i))
+                    _demote(keep, drop)
+                    self._current[rec.key] = keep
+            elif rec.status == "contested":
+                prev = seen_contested.get(rec.key)
+                if prev is None:
+                    seen_contested[rec.key] = i
+                else:
+                    keep, drop = ((i, prev) if rec.last_confirmed >= self.records[prev].last_confirmed
+                                 else (prev, i))
+                    _demote(keep, drop)
+                    seen_contested[rec.key] = keep
 
     def stats(self) -> dict:
         current = sum(1 for r in self.records if r.status == "current")
