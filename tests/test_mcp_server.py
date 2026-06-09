@@ -371,3 +371,40 @@ def test_memory_fact_resolve_accept_and_reject_via_mcp(
     none = _invoke("memory_fact_resolve", {"entity": "svc", "attribute": "port",
                                            "accept": False})
     assert none["resolved"] is False
+
+
+# ---------------------------------------------------------------------------
+# Cortex-first dedup — only drop a recall hit that genuinely RESTATES a fact,
+# not one that merely mentions the value while adding context.
+# ---------------------------------------------------------------------------
+
+
+def test_restates_fact_drops_only_dominant_restatements() -> None:
+    from pseudolife_memory.mcp_server import _restates_fact  # noqa: PLC0415
+
+    # Genuine restatement: the entry is essentially just the value -> drop.
+    assert _restates_fact("postgres", "postgres") is True
+    assert _restates_fact("Production-Database", "production-database") is True
+    assert _restates_fact("host is 10.0.0.5", "10.0.0.5") is True
+
+    # Mentions the value but adds substantial context -> KEEP (the over-drop bug).
+    assert _restates_fact("claude code is the MCP client here", "claude") is False
+    assert _restates_fact(
+        "we migrated the production-database last week after the outage",
+        "production-database",
+    ) is False
+    assert _restates_fact(
+        "the db host is 10.0.0.5 per the ops runbook, set during the incident",
+        "10.0.0.5",
+    ) is False
+
+
+def test_restates_fact_requires_word_boundary_and_min_length() -> None:
+    from pseudolife_memory.mcp_server import _restates_fact  # noqa: PLC0415
+
+    # Substring inside a larger token is not a real mention.
+    assert _restates_fact("postgresql", "postgres") is False
+    # Short values (<5 chars) are too ambiguous to dedup on.
+    assert _restates_fact("rust", "rust") is False
+    # Empty / missing.
+    assert _restates_fact("anything", "") is False
