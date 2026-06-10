@@ -1,0 +1,13 @@
+# PostgreSQL 16 + Apache AGE + pgvector for PseudoLife-MCP.
+#
+# Base: the official Apache AGE image (itself based on postgres:16,
+# Debian), which ships the AGE extension prebuilt — the component with
+# no clean Windows-native path. pgvector comes from the PGDG apt repo
+# already configured in the postgres base image.
+#
+# AGE pinned to a release tag (not _latest) so rebuilds are reproducible.
+FROM apache/age:release_PG16_1.5.0
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-16-pgvector \
+    && rm -rf /var/lib/apt/lists/*
