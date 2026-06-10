@@ -51,55 +51,97 @@ persistent associative memory on disk.
 Each tool returns plain JSON. See `pseudolife_memory/mcp_server.py` for
 docstrings — those are what Claude reads to decide when to call which tool.
 
+## Architecture (v0.2)
+
+One **memory daemon** owns the bank and serves MCP over HTTP; every
+Claude Code session (and any LAN agent, e.g. a redacted box) attaches to
+it through a thin stdio **shim**. **Postgres 16 + pgvector** (in Docker)
+is the durable source of truth — the in-memory MIRAS bands are a
+write-through cache hydrated at startup; band MLP weights live in an
+atomically-saved, disposable `weights.pt`.
+
+```
+Claude session A ─┐
+Claude session B ─┤ stdio shim ─HTTP─► pseudolife-mcp daemon ─► Postgres (Docker)
+redacted (LAN) ─────┘   (per session)       (single writer)         pgvector + AGE
+```
+
+This kills two v0.1 hazards by construction: a single writer means
+concurrent sessions can't clobber each other, and entries are
+transactional so a crash can't wipe the bank (only the retrainable
+weights cache rides the periodic save).
+
 ## Install (Windows)
 
-Requires Python 3.10+ and ~600 MB of disk (torch + ChromaDB + the
-all-MiniLM-L6-v2 embedding model, fetched on first run).
+Requires Python 3.10+, Docker Desktop, and ~600 MB of disk (torch +
+ChromaDB + the all-MiniLM-L6-v2 embedding model, fetched on first run).
 
 ```powershell
 cd C:\Users\HAMO9\ClaudeCode\PseudoLife-MCP
 python -m venv .venv
 .venv\Scripts\activate
 pip install -e .
+
+# 1. Start Postgres 16 + pgvector + AGE (one-time build, then persistent).
+docker compose -f ops/docker-compose.yml up -d --build
+
+# 2. Register the daemon to auto-start at logon (binds 127.0.0.1:8765).
+ops\install-autostart.ps1
+Start-ScheduledTask -TaskName "PseudoLife-MCP Daemon"
 ```
 
-That's it. The `pseudolife-mcp` console-script is now on your PATH.
+The `pseudolife-mcp` console-script is now on your PATH with three modes:
+`pseudolife-mcp serve` (the daemon), `pseudolife-mcp` (the stdio shim —
+auto-starts the daemon if absent), and `pseudolife-mcp embedded` (the
+v0.1 in-process stdio server; no daemon, no Postgres — an escape hatch).
 
 ## Wire into Claude Code
 
-Add this to your **`.mcp.json`** (project-level) or
-**`~/.claude/mcp_servers.json`** (user-level):
+Point `.mcp.json` (project) or `~/.claude/mcp_servers.json` (user) at the
+**shim**. It connects every session to the shared daemon:
 
 ```json
 {
   "mcpServers": {
     "pseudolife-memory": {
-      "command": "C:\\Users\\HAMO9\\ClaudeCode\\PseudoLife-MCP\\.venv\\Scripts\\python.exe",
-      "args": ["-m", "pseudolife_memory.mcp_server"],
+      "command": "C:\\Users\\HAMO9\\ClaudeCode\\PseudoLife-MCP\\.venv\\Scripts\\pseudolife-mcp.exe",
       "env": {
-        "PSEUDOLIFE_MCP_DATA_DIR": "C:\\Users\\HAMO9\\ClaudeCode\\PseudoLife-MCP\\data"
+        "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:8765",
+        "PSEUDOLIFE_MCP_DATABASE_URL": "postgresql://pseudolife:pseudolife@127.0.0.1:5433/pseudolife_memory",
+        "PSEUDOLIFE_MCP_DATA_DIR": "C:\\Users\\HAMO9\\.pseudolife-mcp"
       }
     }
   }
 }
 ```
 
-**Why explicit paths:** Claude Code may launch the server from any cwd.
-Pointing at the venv's `python.exe` and an absolute data dir means memory
-state lives in one stable location regardless of which project you start
-Claude from.
+The shim is torch-free, so sessions attach near-instantly; the daemon
+pays the one-time embedder warmup once for everyone. On first run with a
+v≤0.1 `cms_state.pt` present in `PSEUDOLIFE_MCP_DATA_DIR`, the daemon
+auto-migrates it into Postgres and renames the originals `*.pre-v8.bak`
+(never deletes them).
 
-After editing `.mcp.json`, restart Claude Code. The first tool call
-takes 3-5 seconds (lazy embedder init); subsequent calls are sub-100ms.
+**Sharing memory on the LAN (e.g. a redacted box):** run the daemon with
+`PSEUDOLIFE_MCP_HOST=0.0.0.0` and a `PSEUDOLIFE_MCP_TOKEN`; remote
+clients set the same `PSEUDOLIFE_MCP_DAEMON_URL` + `PSEUDOLIFE_MCP_TOKEN`.
+The daemon **refuses to bind a non-loopback host without a token**, and
+Postgres itself stays loopback-only — the LAN only ever sees the daemon.
+
+**Backups:** `ops\backup.ps1` runs `pg_dump` inside the container into
+`data\backups\` with 7-day rotation.
 
 ## Configuration
 
-Two env vars, both optional:
+Connection / deployment env vars:
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATA_DIR` | `./data` (cwd-relative) | Where memory tensors + ChromaDB live |
-| `PSEUDOLIFE_MCP_CONFIG` | `<data_dir>/config.yaml` if present, else built-ins | Override MIRAS / embedding / memory config |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v8). Unset → v0.1 file-only mode. |
+| `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). |
+| `PSEUDOLIFE_MCP_HOST` / `_PORT` | `127.0.0.1` / `8765` | Daemon bind address. |
+| `PSEUDOLIFE_MCP_TOKEN` | _(unset)_ | Bearer token; **required** to bind a non-loopback host. |
+| `PSEUDOLIFE_MCP_DATA_DIR` | `./data` (cwd-relative) | Weights cache + legacy-migration source + ChromaDB. |
+| `PSEUDOLIFE_MCP_CONFIG` | `<data_dir>/config.yaml` if present, else built-ins | Override MIRAS / embedding / memory config. |
 
 The built-in defaults are tuned for Claude's use case:
 
