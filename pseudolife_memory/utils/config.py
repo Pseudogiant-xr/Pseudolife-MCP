@@ -329,6 +329,17 @@ class CortexConfig:
 
 
 @dataclass
+class MetaFilterConfig:
+    """Self-reference meta-statement filter on the store path.
+
+    Designed for PseudoLife's chat flow where model responses are
+    auto-captured. In the MCP build every store is deliberate, so
+    ``MemoryService._apply_mcp_defaults`` disables it.
+    """
+    enabled: bool = True
+
+
+@dataclass
 class MemoryConfig:
     embedding_dim: int = 384
     # Legacy Hopfield config (kept for fallback)
@@ -360,6 +371,16 @@ class MemoryConfig:
     contrastive: ContrastiveConfig = field(default_factory=ContrastiveConfig)
     # Cortex — sibling slot-keyed canonical-fact store (schema v7).
     cortex: CortexConfig = field(default_factory=CortexConfig)
+    # Meta-statement filter on the store path (off in the MCP build).
+    meta_filter: MetaFilterConfig = field(default_factory=MetaFilterConfig)
+    # Neural/exact retrieval blend (band.retrieve). Effective neural weight
+    # ramps with per-band update_count: w = blend * min(1, updates/warmup).
+    # warmup_updates=0 restores the fixed v0.1 blend.
+    neural_blend_weight: float = 0.6
+    neural_warmup_updates: int = 50
+    # Base recency half-life at band depth 0; doubles per depth.
+    # 3600 (1h) suits chat; the MCP build sets 86400 (1 day).
+    recency_base_half_life_s: float = 3600.0
     memory_engine: str = "titans"  # "titans" or "hopfield"
     surprise_threshold: float = 0.3
     top_k: int = 8       # neural memory slots (instant + short + long)
@@ -442,6 +463,9 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             ref_top_k=mem_raw.get("ref_top_k", 3),
             save_dir=mem_raw.get("save_dir", "./memory_state"),
             show_superseded=mem_raw.get("show_superseded", False),
+            neural_blend_weight=mem_raw.get("neural_blend_weight", 0.6),
+            neural_warmup_updates=mem_raw.get("neural_warmup_updates", 50),
+            recency_base_half_life_s=mem_raw.get("recency_base_half_life_s", 3600.0),
         )
         if "fast_bank" in mem_raw:
             config.memory.fast_bank = _dict_to_dataclass(MemoryBankConfig, mem_raw["fast_bank"])
@@ -484,6 +508,10 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             )
         if "cortex" in mem_raw:
             config.memory.cortex = _dict_to_dataclass(CortexConfig, mem_raw["cortex"])
+        if "meta_filter" in mem_raw:
+            config.memory.meta_filter = _dict_to_dataclass(
+                MetaFilterConfig, mem_raw["meta_filter"],
+            )
     if "context" in raw:
         config.context = _dict_to_dataclass(ContextConfig, raw["context"])
     if "chunking" in raw:
