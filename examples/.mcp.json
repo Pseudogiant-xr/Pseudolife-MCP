@@ -1,0 +1,12 @@
+{
+  "_comment": "Copy this to your project's .mcp.json or merge it into ~/.claude/mcp_servers.json. Uses system Python (where pseudolife-mcp is editable-installed); swap for a .venv path if you prefer isolation.",
+  "mcpServers": {
+    "pseudolife-memory": {
+      "command": "C:\\Users\\HAMO9\\AppData\\Local\\Programs\\Python\\Python311\\python.exe",
+      "args": ["-m", "pseudolife_memory.mcp_server"],
+      "env": {
+        "PSEUDOLIFE_MCP_DATA_DIR": "C:\\Users\\HAMO9\\ClaudeCode\\PseudoLife-MCP\\data"
+      }
+    }
+  }
+}

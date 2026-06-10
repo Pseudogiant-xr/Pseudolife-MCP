@@ -126,6 +126,11 @@ class ContinuumMemorySystem:
                 "ContinuumMemorySystem requires at least one MIRAS band. "
                 "Check memory.miras.bands in config.yaml."
             )
+        # Push the retrieval-blend config onto each band (bands are built
+        # from MIRASBandSpec, which doesn't carry memory-level knobs).
+        for b in self.bands:
+            b.neural_blend_weight = getattr(config, "neural_blend_weight", 0.6)
+            b.neural_warmup_updates = getattr(config, "neural_warmup_updates", 50)
 
         # ── v0.4.x attribute shims ────────────────────────────────────────────
         # Code paths from before v0.5 read ``cms.instant`` / ``cms.short_term``
@@ -219,7 +224,7 @@ class ContinuumMemorySystem:
         Returns:
             Tuple of ``(was_stored, surprise_score)``.
         """
-        if is_meta_statement(text, role=source):
+        if self.config.meta_filter.enabled and is_meta_statement(text, role=source):
             return False, 0.0
 
         # ── Surprise telemetry (min across bands) ─────────────────────────────
@@ -539,9 +544,10 @@ class ContinuumMemorySystem:
             else:
                 frac = depth / (n - 1)
                 boost = 0.4 * (1.0 - frac)
-                # Geometric half-life: 1h → 2h → 4h … (skip recency at
-                # depth=n-1 anyway because boost=0).
-                half_life = 3600.0 * (2.0 ** depth)
+                # Geometric half-life: base → 2×base → 4×base … (skip
+                # recency at depth=n-1 anyway because boost=0). Base is
+                # config-driven: 1h chat default, 24h in the MCP build.
+                half_life = self.config.recency_base_half_life_s * (2.0 ** depth)
 
             band_result = band.retrieve(query_embedding, top_k=k)
             tier_trace: dict | None = None

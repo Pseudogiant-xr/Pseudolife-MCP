@@ -105,6 +105,22 @@ The built-in defaults are tuned for Claude's use case:
 
 - **Surprise threshold `0.2`** (vs PseudoLife's `0.3`) — Claude stores
   deliberately, so the gate doesn't need to be aggressive.
+- **Meta-filter off** (`memory.meta_filter.enabled = false` in the MCP
+  build) — the filter exists to drop auto-captured chat noise ("I don't
+  have anything saved about that"); every MCP store is a deliberate tool
+  call, and the filter's patterns collided with legitimate dev facts
+  about memory systems themselves.
+- **Recency base half-life 24h** (`memory.recency_base_half_life_s =
+  86400`, vs the 1h chat default) — Claude Code sessions are hours-to-
+  days apart; with a 1h half-life the recency boost was effectively
+  always zero. Halves per band depth as before (1d → 2d → 4d → …).
+- **Neural warmup ramp** — each band's retrieval blend
+  (`w·neural + (1−w)·exact`) ramps `w` from 0 to
+  `memory.neural_blend_weight` (0.6) over the band's first
+  `memory.neural_warmup_updates` (50) optimisation steps, so a fresh or
+  sparsely-trained band scores by near-pure cosine instead of riding an
+  untrained MLP's output. `neural_warmup_updates: 0` restores the fixed
+  v0.1 blend exactly.
 - **MIRAS preset `continuum`** — the 8-tier `working / micro / instant /
   fast / medium / slow / archival / forever` continuum, same as PseudoLife.
 - **No NLI scorer** — the `cross-encoder/nli-deberta-v3-xsmall`
@@ -334,9 +350,16 @@ decaying, the cortex is **identity-not-similarity, supersession-not-decay,
 currency-not-frequency** — one *current* value per `(entity, attribute)` slot,
 retrievable out of the context window.
 
-- **Auto-capture.** Slot-shaped facts in any `memory_store(...)` ("X is Y",
-  "named X", "my X") are promoted into the cortex automatically at a 0.5
-  confidence floor — weak models get a canonical layer with zero extra calls.
+- **Auto-capture.** Slot-shaped facts in any `memory_store(...)` are promoted
+  into the cortex automatically at a 0.5 confidence floor — weak models get a
+  canonical layer with zero extra calls. The extractor is deterministic and
+  precision-first (v0.2): `<entity> <attr> is <value>` with the attribute
+  drawn from a closed dev lexicon (port / version / host / branch / default
+  timeout / …), `my <attr> is <value>` (→ entity `user`), `<Entity>'s <attr>
+  is <value>`, `the <attr> of <entity> is <value>`, and single-line
+  `<entity> <attr>: <value>` / `= <value>`. Questions, negations, code
+  fences, and entity-less subjects ("the default branch is master") are
+  deliberately skipped — name the entity, or use `memory_fact_set`.
 - **Deterministic read.** `memory_fact_get("project", "language")` returns the
   one current value — no ranking, no stale duplicates. `memory_search` also
   surfaces matching facts ahead of associative hits (a `"cortex"` block).
@@ -392,7 +415,7 @@ pip install -e .[dev]
 pytest tests/ -v
 ```
 
-205 tests cover the MemoryService methods (store / search / recent /
+236 tests cover the MemoryService methods (store / search / recent /
 supersede / stats / save / trace / list_sources / list_tags / delete),
 the `memory_search` scoring overrides, the cross-encoder reranker
 (15 unit + 4 integration), the BM25 hybrid lexical pool
@@ -404,7 +427,11 @@ atomic consolidation operation (6), the cortex canonical-fact store
 provenance tier-rank guard, contenders, and `resolve`), auto-promotion
 on `store`, and the cortex service + MCP surface, and MCP-level dispatch
 (tool registration + docstring sanity + end-to-end invocation for every
-exposed tool through the FastMCP machinery). The delete suite
+exposed tool through the FastMCP machinery). The v0.2 Phase 0 suites
+add the config knobs, the meta-filter gate + pruned patterns, the
+recency base half-life, the neural warmup ramp (incl. state
+round-trip), and the dev-fact extractor (positives + precision
+guards). The delete suite
 includes a persistence round-trip test (store → delete → save →
 reload → verify gone). Reranker tests monkeypatch
 `sentence_transformers.CrossEncoder` with a deterministic stub so the
