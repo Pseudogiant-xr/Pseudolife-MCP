@@ -32,6 +32,7 @@ Design notes
 from __future__ import annotations
 
 import logging
+import os
 import time
 from pathlib import Path
 from threading import Lock
@@ -151,8 +152,15 @@ class MemoryService:
         self,
         data_dir: str | Path | None = None,
         config_path: str | Path | None = None,
+        database_url: str | None = None,
     ) -> None:
         self._lock = Lock()
+        # Schema v8: when a database URL is configured (param or
+        # PSEUDOLIFE_MCP_DATABASE_URL), Postgres is the source of truth
+        # and the in-memory bands are a write-through cache. Without it,
+        # the v0.1 file mode is preserved bit-for-bit.
+        self._db_url = database_url or os.environ.get("PSEUDOLIFE_MCP_DATABASE_URL")
+        self._storage = None
         # Resolve data directory first — that's where memory_state lives
         # AND where the default config sits (if config_path not given).
         self.data_dir = Path(data_dir) if data_dir else Path.cwd() / "data"
@@ -244,16 +252,38 @@ class MemoryService:
             fusion_weight=self.config.memory.reranker.fusion_weight,
             top_n=self.config.memory.reranker.top_n,
         )
+        if self._db_url:
+            from pseudolife_memory.storage.postgres import PostgresStorage
+            self._storage = PostgresStorage(self._db_url)
+            logger.info("storage: postgres (%s)",
+                        self._db_url.rsplit("@", 1)[-1])
         self._cms = ContinuumMemorySystem(
             self.config.memory,
             reference_bank=self._reference,
             reranker=self._reranker,
+            storage=self._storage,
         )
-        # Restore persisted state if any (silently no-ops on fresh install).
-        try:
-            self._cms.load(self.config.memory.save_dir)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("CMS load skipped: %s", exc)
+        if self._storage is not None:
+            from pseudolife_memory.storage import migrate as _migrate
+            from pseudolife_memory.storage import sync as _sync
+            try:
+                summary = _migrate.migrate_legacy(self.data_dir, self._storage)
+                if summary.get("migrated"):
+                    logger.warning("legacy .pt bank migrated: %s", summary)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("legacy migration failed (continuing): %s", exc)
+            n = _sync.hydrate_cms(self._cms, self._storage)
+            logger.info("hydrated %d entries from storage", n)
+            try:
+                self._cms.load_weights(self.config.memory.save_dir)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("weights load skipped: %s", exc)
+        else:
+            # File mode (v0.1) — restore persisted state if any.
+            try:
+                self._cms.load(self.config.memory.save_dir)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("CMS load skipped: %s", exc)
 
         self._contrastive = ContrastiveUpdater(
             self.config.memory.contrastive, self._embedder,
@@ -269,10 +299,17 @@ class MemoryService:
             reinforce_rate=cc.reinforce_rate,
             protect_provenance=cc.protect_provenance,
         )
-        try:
-            self._cortex.load(self._cortex_path())
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Cortex load skipped: %s", exc)
+        if self._storage is not None:
+            from pseudolife_memory.storage import sync as _sync
+            try:
+                _sync.hydrate_cortex(self._cortex, self._storage)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Cortex hydration skipped: %s", exc)
+        else:
+            try:
+                self._cortex.load(self._cortex_path())
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Cortex load skipped: %s", exc)
 
     # ------------------------------------------------------------------
     # Tool: store
@@ -330,6 +367,8 @@ class MemoryService:
             cc = self.config.memory.cortex
             if cc.enabled and cc.auto_promote and reason != "filtered_meta":
                 promoted = self._promote_slots(text, source=source, origin=origin)
+                if promoted and self._storage is not None:
+                    self._save_cortex()
             return {
                 "stored": stored,
                 "surprise": round(float(surprise), 4),
@@ -597,6 +636,7 @@ class MemoryService:
 
             now = time.time()
             superseded: list[str] = []
+            superseded_entries: list[MemoryEntry] = []
 
             # Exact-text pass.
             for band in self._cms.bands:
@@ -605,6 +645,7 @@ class MemoryService:
                         entry.superseded_at = now
                         entry.superseded_by_text = new_text
                         superseded.append(entry.text)
+                        superseded_entries.append(entry)
 
             # If no exact match, fall back to top-1 retrieval on old_text.
             if not superseded:
@@ -616,6 +657,17 @@ class MemoryService:
                         target.superseded_at = now
                         target.superseded_by_text = new_text
                         superseded.append(target.text)
+                        superseded_entries.append(target)
+
+            # Write-through the supersession marks.
+            if self._storage is not None:
+                for e in superseded_entries:
+                    if e.db_id is not None:
+                        self._storage.update_entry(
+                            e.db_id,
+                            superseded_at=e.superseded_at,
+                            superseded_by_text=e.superseded_by_text,
+                        )
 
             # Always store the correction text as a regular memory so future
             # retrieval surfaces the new state.
@@ -735,14 +787,13 @@ class MemoryService:
     # ------------------------------------------------------------------
 
     def save(self) -> dict[str, Any]:
-        """Persist CMS tensors to disk. ChromaDB persists itself."""
+        """Persist CMS state. ChromaDB persists itself."""
         with self._lock:
             self._ensure_init()
             assert self._cms is not None
-            self._cms.save(self.config.memory.save_dir)
-            self._save_cortex()
+            out = self._persist_all(kind="explicit")
             self._last_saved_fingerprint = self._entry_fingerprint()
-            return {"saved_to": self.config.memory.save_dir}
+            return out
 
     def _entry_fingerprint(self):
         """Cheap signature of mutating state: (live entry count, superseded
@@ -780,10 +831,10 @@ class MemoryService:
             fp = self._entry_fingerprint()
             if fp == self._last_saved_fingerprint:
                 return None
-            self._cms.save(self.config.memory.save_dir)
-            self._save_cortex()
+            out = self._persist_all(kind="auto")
             self._last_saved_fingerprint = fp
-            return {"saved_to": self.config.memory.save_dir, "auto": True}
+            out["auto"] = True
+            return out
 
     def flush(self):
         """Unconditional save for clean-exit / signal handlers. Captures the
@@ -791,10 +842,10 @@ class MemoryService:
         with self._lock:
             if self._cms is None:
                 return None
-            self._cms.save(self.config.memory.save_dir)
-            self._save_cortex()
+            out = self._persist_all(kind="flush")
             self._last_saved_fingerprint = self._entry_fingerprint()
-            return {"saved_to": self.config.memory.save_dir, "flush": True}
+            out["flush"] = True
+            return out
 
     # ------------------------------------------------------------------
     # Cortex — sibling slot-keyed canonical-fact store (schema v7)
@@ -804,11 +855,44 @@ class MemoryService:
         return str(self.data_dir / "cortex_state.pt")
 
     def _save_cortex(self) -> None:
-        if self._cortex is not None:
-            try:
+        if self._cortex is None:
+            return
+        try:
+            if self._storage is not None:
+                from pseudolife_memory.storage import sync as _sync
+                _sync.snapshot_cortex(self._cortex, self._storage)
+            else:
                 self._cortex.save(self._cortex_path())
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Cortex save failed: %s", exc)
+
+    def _persist_all(self, *, kind: str) -> dict[str, Any]:
+        """Shared body of save/autosave/flush. Caller holds the lock.
+
+        Storage mode: weights are the only file artifact (atomic);
+        entries are already transactional in PG, so we only sync the
+        lazily-updated access counts and snapshot the cortex.
+        File mode: legacy full-bank torch.save (v0.1 behavior).
+        """
+        assert self._cms is not None
+        if self._storage is not None:
+            self._cms.save_weights(self.config.memory.save_dir)
+            pairs = [
+                (e.db_id, e.access_count)
+                for band in self._cms.bands
+                for e in band.entries
+                if e.db_id is not None
+            ]
+            try:
+                self._storage.update_access_counts(pairs)
             except Exception as exc:  # noqa: BLE001
-                logger.warning("Cortex save failed: %s", exc)
+                logger.warning("access-count sync failed: %s", exc)
+            self._save_cortex()
+            return {"saved_to": self.config.memory.save_dir,
+                    "mode": "postgres+weights", "kind": kind}
+        self._cms.save(self.config.memory.save_dir)
+        self._save_cortex()
+        return {"saved_to": self.config.memory.save_dir, "kind": kind}
 
     def cortex_write(
         self,
@@ -848,6 +932,7 @@ class MemoryService:
                 support=support,
                 now=now,
             )
+            self._save_cortex()
             out = {"action": res.action, **_cortex_record_to_dict(res.record)}
             if res.action == "contested":
                 cur = self._cortex.lookup(entity, attribute)
@@ -1065,6 +1150,7 @@ class MemoryService:
             self._ensure_init()
             assert self._cms is not None
             ep = self._cms.episodes.start(title=title, hint=hint)
+            self._persist_episodes()
             return self._episode_to_dict(ep)
 
     def episode_end(self) -> dict[str, Any]:
@@ -1073,7 +1159,21 @@ class MemoryService:
             self._ensure_init()
             assert self._cms is not None
             closed = self._cms.episodes.end()
+            self._persist_episodes()
             return self._episode_to_dict(closed) if closed is not None else {}
+
+    def _persist_episodes(self) -> None:
+        """Write-through the episode log (small; start auto-closes priors,
+        so a full upsert sweep is the simplest correct sync). Caller holds
+        the lock. No-op in file mode."""
+        if self._storage is None or self._cms is None:
+            return
+        from pseudolife_memory.storage.sync import episode_row
+        try:
+            for ep in self._cms.episodes.episodes.values():
+                self._storage.upsert_episode(episode_row(ep))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("episode write-through failed: %s", exc)
 
     def episode_list(
         self, limit: int = 20, include_open: bool = True,

@@ -48,7 +48,7 @@ pdf = [
 ]
 
 [project.scripts]
-pseudolife-mcp = "pseudolife_memory.mcp_server:main"
+pseudolife-mcp = "pseudolife_memory.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

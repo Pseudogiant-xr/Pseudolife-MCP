@@ -817,32 +817,55 @@ def _warmup() -> None:
     logger.info("warmup: pipeline ready in %.1fs", time.time() - t)
 
 
-def main() -> None:
-    """Console-script entrypoint. Starts the stdio transport."""
+_durability_started = False
+
+
+def start_background_durability() -> None:
+    """Idempotent: atexit flush + debounced autosave loop + model warmup.
+
+    Shared by the embedded-stdio entry point and the HTTP daemon
+    (:mod:`pseudolife_memory.daemon`).
+    """
+    global _durability_started
+    if _durability_started:
+        return
+    _durability_started = True
+    # Durability: flush unsaved state on clean exit. SIGKILL cannot be
+    # caught — bounded loss is covered by the periodic autosave (and in
+    # storage mode entries are transactional anyway; only weights ride
+    # the cadence).
+    atexit.register(_flush_on_exit)
+    _interval = float(os.environ.get("PSEUDOLIFE_MCP_AUTOSAVE_SECONDS", "30"))
+    threading.Thread(
+        target=_autosave_loop, args=(_interval,), daemon=True, name="pl-autosave"
+    ).start()
+    # Cold-start mitigation: warm the model pipeline in the background so
+    # the first real tool call does not pay init latency.
+    threading.Thread(target=_warmup, daemon=True, name="pl-warmup").start()
+
+
+def _run_embedded_stdio() -> None:
+    """v0.1-style in-process stdio server (also the shim's escape hatch)."""
     logger.info(
-        "PseudoLife-MCP starting (data_dir=%s, config=%s)",
+        "PseudoLife-MCP embedded stdio starting (data_dir=%s, config=%s)",
         service.data_dir,
         _config_path or "<defaults>",
     )
-    # Durability: flush unsaved CMS state on clean exit + on SIGTERM/SIGINT
-    # (e.g. gateway restart). SIGKILL cannot be caught -- bounded loss is
-    # covered by the periodic autosave below.
-    atexit.register(_flush_on_exit)
     for _sig in (signal.SIGTERM, signal.SIGINT):
         try:
             signal.signal(_sig, lambda *_a: sys.exit(0))
         except Exception:  # noqa: BLE001
             pass
-    # Debounced durability: periodically flush only when state changed.
-    _interval = float(os.environ.get("PSEUDOLIFE_MCP_AUTOSAVE_SECONDS", "30"))
-    threading.Thread(
-        target=_autosave_loop, args=(_interval,), daemon=True, name="pl-autosave"
-    ).start()
-    # Cold-start mitigation: warm the model pipeline in the background so the
-    # first real tool call does not pay init latency (a few seconds with HF
-    # offline env set).
-    threading.Thread(target=_warmup, daemon=True, name="pl-warmup").start()
-    mcp.run()  # stdio transport by default.
+    start_background_durability()
+    mcp.run()  # stdio transport.
+
+
+def main() -> None:
+    """Legacy entrypoint (``python -m pseudolife_memory.mcp_server``):
+    the v0.1 embedded stdio server. The ``pseudolife-mcp`` console script
+    dispatches via :mod:`pseudolife_memory.cli` instead (shim / serve /
+    embedded) — the cli module stays torch-free so the shim starts fast."""
+    _run_embedded_stdio()
 
 
 if __name__ == "__main__":

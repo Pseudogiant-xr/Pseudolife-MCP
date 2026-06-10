@@ -117,6 +117,10 @@ class MIRASBand:
         self.neural_blend_weight: float = 0.6
         self.neural_warmup_updates: int = 50
 
+        # Optional eviction callback (v0.2): the CMS sets this so a
+        # capacity eviction also removes the entry's storage row.
+        self.on_evict = None
+
     # ------------------------------------------------------------------
     # Read-only helpers
     # ------------------------------------------------------------------
@@ -349,8 +353,10 @@ class MIRASBand:
         now = now_seconds()
         scores = [self.retention.source_weighted_score(e, now) for e in self.entries]
         worst = min(range(len(scores)), key=lambda i: scores[i])
-        self.entries.pop(worst)
+        evicted = self.entries.pop(worst)
         self._dirty = True
+        if self.on_evict is not None:
+            self.on_evict(evicted)
 
     # ------------------------------------------------------------------
     # Retrieval

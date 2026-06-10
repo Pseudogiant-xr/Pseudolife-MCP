@@ -44,7 +44,10 @@ CREATE TABLE IF NOT EXISTS entries (
   superseded_at DOUBLE PRECISION,
   superseded_by_text TEXT,
   last_logical_turn INTEGER,
-  episode_id TEXT REFERENCES episodes(id),
+  -- Denormalized episode stamp (id + title travel with the entry); no FK
+  -- so entry inserts never depend on episode-row ordering and episodes
+  -- can be pruned independently.
+  episode_id TEXT,
   episode_title TEXT,
   tags JSONB NOT NULL DEFAULT '[]',
   slots JSONB NOT NULL DEFAULT '[]'
@@ -126,6 +129,10 @@ def ensure_schema(conn) -> dict:
     layer. Records ``schema_version`` in ``meta`` (insert-or-keep).
     """
     with conn.cursor() as cur:
+        # Bound every DDL statement so a stray lock holder surfaces as an
+        # error instead of an indefinite hang (the v0.1 lesson, applied to
+        # the new storage layer).
+        cur.execute("SET lock_timeout = '5s'; SET statement_timeout = '30s';")
         cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
         age_available = True
         try:
@@ -135,6 +142,16 @@ def ensure_schema(conn) -> dict:
             conn.rollback()
             logger.info("AGE extension unavailable (%s) — Cypher layer off.", exc)
         cur.execute(SCHEMA_SQL)
+        # One-time upgrade: drop the old episode FK only when it's actually
+        # present. Guarding avoids taking an ACCESS EXCLUSIVE lock on every
+        # init (which could block behind any open transaction on entries).
+        cur.execute(
+            "SELECT 1 FROM pg_constraint WHERE conname = 'entries_episode_id_fkey'"
+        )
+        if cur.fetchone() is not None:
+            cur.execute(
+                "ALTER TABLE entries DROP CONSTRAINT entries_episode_id_fkey"
+            )
         cur.execute(
             """
             INSERT INTO meta (key, value) VALUES ('schema_version', %s::jsonb)

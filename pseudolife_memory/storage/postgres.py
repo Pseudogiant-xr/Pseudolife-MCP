@@ -62,7 +62,11 @@ class PostgresStorage:
 
     def __init__(self, dsn: str) -> None:
         self.dsn = dsn
-        self.conn = psycopg.connect(dsn)
+        self.conn = psycopg.connect(dsn, connect_timeout=10)
+        # Never block forever on a lock — a stuck/orphaned writer should
+        # raise here, not hang the whole daemon.
+        self.conn.execute("SET lock_timeout = '5s'")
+        self.conn.commit()
         self.capabilities = ensure_schema(self.conn)
         register_vector(self.conn)
 
@@ -177,6 +181,44 @@ class PostgresStorage:
         ).fetchone()
         self.conn.commit()
         return int(row[0])
+
+    def replace_facts(self, rows: list[dict]) -> None:
+        """Snapshot-style cortex persistence: one transaction, full rewrite.
+
+        The cortex is small by design (one current record per slot plus
+        audit history), so a transactional truncate+insert is simpler and
+        safer than row diffing.
+        """
+        with self.conn.cursor() as cur:
+            cur.execute("DELETE FROM facts")
+            for f in rows:
+                values = []
+                for c in _FACT_COLS:
+                    v = f.get(c)
+                    if c == "embedding":
+                        v = _embedding_in(v)
+                    elif c in _FACT_JSONB:
+                        v = Jsonb(v if v is not None else [])
+                    values.append(v)
+                cur.execute(
+                    f"INSERT INTO facts ({', '.join(_FACT_COLS)}) "
+                    f"VALUES ({', '.join(['%s'] * len(_FACT_COLS))})",
+                    values,
+                )
+        self.conn.commit()
+
+    def update_access_counts(self, pairs: list[tuple[int, int]]) -> None:
+        """Bulk-sync (entry_id, access_count) — called on the save cadence,
+        not per retrieval, to keep reads cheap."""
+        if not pairs:
+            return
+        with self.conn.cursor() as cur:
+            cur.executemany(
+                "UPDATE entries SET access_count = %s "
+                "WHERE id = %s AND access_count <> %s",
+                [(c, i, c) for (i, c) in pairs],
+            )
+        self.conn.commit()
 
     def delete_fact_ids(self, ids: list[int]) -> int:
         if not ids:
