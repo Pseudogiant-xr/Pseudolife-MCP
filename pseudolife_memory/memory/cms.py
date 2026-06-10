@@ -126,6 +126,11 @@ class ContinuumMemorySystem:
                 "ContinuumMemorySystem requires at least one MIRAS band. "
                 "Check memory.miras.bands in config.yaml."
             )
+        # Push the retrieval-blend config onto each band (bands are built
+        # from MIRASBandSpec, which doesn't carry memory-level knobs).
+        for b in self.bands:
+            b.neural_blend_weight = getattr(config, "neural_blend_weight", 0.6)
+            b.neural_warmup_updates = getattr(config, "neural_warmup_updates", 50)
 
         # ── v0.4.x attribute shims ────────────────────────────────────────────
         # Code paths from before v0.5 read ``cms.instant`` / ``cms.short_term``

@@ -110,6 +110,13 @@ class MIRASBand:
         self._pattern_matrix: torch.Tensor | None = None
         self._dirty: bool = True
 
+        # Warmup ramp for the neural/exact retrieval blend (v0.2 Phase 0).
+        # ``update_count`` tracks optimisation steps; the CMS pushes the
+        # configured blend / warmup onto each band after construction.
+        self.update_count: int = 0
+        self.neural_blend_weight: float = 0.6
+        self.neural_warmup_updates: int = 50
+
     # ------------------------------------------------------------------
     # Read-only helpers
     # ------------------------------------------------------------------
@@ -244,6 +251,7 @@ class MIRASBand:
         self.update_rule.step(self.memory, loss, eta=eta)
 
         surprise_value = float(loss.item())
+        self.update_count += 1
 
         # Update surprise EMA with the theta gate — same form as v0.4.x.
         theta = self.memory.compute_theta(x)
@@ -348,15 +356,31 @@ class MIRASBand:
     # Retrieval
     # ------------------------------------------------------------------
 
+    def _effective_neural_weight(self) -> float:
+        """Neural-blend weight ramped by training maturity.
+
+        A fresh MLP's output is noise; weighting it 0.6 degrades retrieval
+        below plain cosine until the band has trained. Ramp linearly with
+        ``update_count``; ``neural_warmup_updates=0`` restores the fixed
+        v0.1 blend.
+        """
+        w = self.neural_blend_weight
+        if self.neural_warmup_updates <= 0:
+            return w
+        return w * min(1.0, self.update_count / self.neural_warmup_updates)
+
     def retrieve(
         self, query_embedding: torch.Tensor, top_k: int = 5
     ) -> RetrievalResult:
         """Top-k entries by blended (neural + exact) similarity.
 
-        Same blend as v0.4.x: ``0.6 * neural + 0.4 * exact``, where
-        "neural" is the cosine similarity between stored embeddings and
-        the *predicted* output of the memory module, and "exact" is the
-        cosine similarity between stored embeddings and the raw query.
+        Blend as v0.4.x — ``w * neural + (1-w) * exact`` — where "neural"
+        is the cosine similarity between stored embeddings and the
+        *predicted* output of the memory module, "exact" is the cosine
+        similarity between stored embeddings and the raw query, and ``w``
+        ramps from 0 to ``neural_blend_weight`` over the band's first
+        ``neural_warmup_updates`` optimisation steps (see
+        :meth:`_effective_neural_weight`).
         """
         if not self.entries:
             return RetrievalResult(entries=[], scores=[], surprises=[])
@@ -376,7 +400,8 @@ class MIRASBand:
 
         neural_scores = self._pattern_matrix @ predicted
         exact_scores = self._pattern_matrix @ query
-        scores = 0.6 * neural_scores + 0.4 * exact_scores
+        w = self._effective_neural_weight()
+        scores = w * neural_scores + (1.0 - w) * exact_scores
 
         k = min(top_k, len(self.entries))
         top_scores, top_indices = torch.topk(scores, k)
@@ -423,6 +448,7 @@ class MIRASBand:
             "memory_state": self.memory.state_dict(),
             "optimizer_state": self.update_rule.state_dict(),
             "surprise_ema": self.surprise_ema,
+            "update_count": self.update_count,
             "axes": {
                 "update_rule": self.update_rule.name,
                 "objective": self.objective.name,
@@ -486,6 +512,8 @@ class MIRASBand:
 
         # Surprise EMA + entries are architecture-agnostic — always load.
         self.surprise_ema = state.get("surprise_ema", 0.0)
+        # ``update_count`` added in v0.2 (warmup ramp); pre-v8 saves -> 0.
+        self.update_count = state.get("update_count", 0)
         self.entries = [
             MemoryEntry(
                 text=e["text"],
