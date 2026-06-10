@@ -60,12 +60,6 @@ _NAMED_RE = re.compile(
     r"\b(?:named|called)\s+(?P<name>[A-Z][A-Za-z0-9]+(?:\s+[A-Z][A-Za-z0-9]+)?)",
 )
 
-# "my <noun>" — possession declaration where the noun is the entity.
-_MY_NOUN_RE = re.compile(
-    r"\bmy\s+(?P<noun>[a-z]+(?:'s)?(?:\s+[a-z]+)?)",
-    re.IGNORECASE,
-)
-
 # "I have a [breed-or-color] cat/dog/car/..." — type declaration with optional
 # attribute.  Captures both the type ("cat") and an optional attribute
 # ("Ragdoll", "blue").
@@ -100,6 +94,140 @@ _LOSS_RE = re.compile(
     r"thr[eo]w(?:s|ing|n)?\s+(?:away|out)|threw\s+(?:away|out))\b",
     re.IGNORECASE,
 )
+
+
+# ---------------------------------------------------------------------------
+# Dev-fact extraction (v0.2 Phase 0)
+# ---------------------------------------------------------------------------
+# Lexicon-gated, token-based, precision-first: the attribute position of
+# every pattern must end in a known attribute word, so prose like "my point
+# is that…" or "Claude Code is the client" never promotes. False positives
+# poison the cortex; misses just mean Claude calls memory_fact_set.
+
+_ATTR_LEXICON = frozenset({
+    "default", "port", "version", "timeout", "host", "hostname", "address",
+    "ip", "path", "dir", "directory", "folder", "branch", "language",
+    "status", "name", "url", "endpoint", "model", "device", "scope",
+    "threshold", "capacity", "schema", "license", "framework", "editor",
+    "shell", "os", "database", "db", "username", "email", "timezone",
+    "gpu", "cpu", "machine", "server", "repo", "repository", "transport",
+    "protocol", "format", "engine", "runtime", "interval", "limit",
+})
+_ARTICLES = {"the", "a", "an", "our", "this", "that", "its"}
+_VALUE_STOPWORDS = {"that", "because", "when", "why", "how", "what", "if"}
+_NEGATION_FIRST = {"not", "no", "never", "n't", "isn't", "aren't"}
+_FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
+_KV_LINE_RE = re.compile(
+    r"^(?P<key>[A-Za-z][\w.\- ]{0,59}?)\s*[:=]\s*(?P<value>\S.{0,79})$"
+)
+_COPULA_RE = re.compile(r"\bis\b", re.IGNORECASE)
+_SENT_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|;\s*")
+
+
+def _dev_tokens(s: str) -> list[str]:
+    return re.findall(r"[\w.\-/\\']+", s)
+
+
+def _attr_suffix(tokens: list[str]) -> int:
+    """Index where a 1-2 word lexicon attribute suffix starts, or -1."""
+    if tokens and tokens[-1].lower() in _ATTR_LEXICON:
+        if len(tokens) >= 2 and tokens[-2].lower() in _ATTR_LEXICON:
+            return len(tokens) - 2
+        return len(tokens) - 1
+    return -1
+
+
+def _clean_entity(tokens: list[str]) -> str:
+    while tokens and tokens[0].lower() in _ARTICLES:
+        tokens = tokens[1:]
+    if not tokens or len(tokens) > 4:
+        return ""
+    ent = " ".join(tokens)
+    return ent[:-2] if ent.lower().endswith("'s") else ent
+
+
+def _clean_value(raw: str) -> str:
+    v = raw.strip().rstrip(".,;!").strip()
+    first = v.split(" ", 1)[0].lower() if v else ""
+    if not v or len(v) > 80 or first in _VALUE_STOPWORDS or first in _NEGATION_FIRST:
+        return ""
+    return v
+
+
+def _dev_slot_from_copula(sent: str) -> Slot | None:
+    """`<entity> <attr-lexicon> is <value>` plus the my / possessive / of forms."""
+    if "?" in sent:
+        return None
+    m = _COPULA_RE.search(sent)
+    if m is None:
+        return None
+    value = _clean_value(sent[m.end():])
+    if not value:
+        return None
+    subject = _dev_tokens(sent[:m.start()])
+    if not subject:
+        return None
+    low = [t.lower() for t in subject]
+
+    # "my <attr> is <value>" → entity "user". The whole remainder must be
+    # the attribute (1-2 lexicon words) — "my point is…" never promotes.
+    if low[0] == "my":
+        rest = subject[1:]
+        if rest and _attr_suffix(rest) == 0 and len(rest) <= 2:
+            return Slot("user", " ".join(rest).lower(), value)
+        return None
+
+    # "the <attr> of <entity> is <value>".
+    if "of" in low:
+        o = low.index("of")
+        attr_part, ent_part = subject[:o], subject[o + 1:]
+        stripped = [t for t in attr_part if t.lower() not in _ARTICLES]
+        if stripped and _attr_suffix(stripped) == 0 and len(stripped) <= 2:
+            entity = _clean_entity(ent_part)
+            if entity:
+                return Slot(entity, " ".join(stripped).lower(), value)
+        return None
+
+    # "<entity…> <attr-lexicon ×1-2> is <value>"  (covers possessives —
+    # the tokenizer keeps "GND-Share's" whole and _clean_entity strips 's).
+    a = _attr_suffix(subject)
+    if a > 0:
+        entity = _clean_entity(subject[:a])
+        if entity:
+            return Slot(entity, " ".join(subject[a:]).lower(), value)
+    return None
+
+
+def extract_dev_slots(text: str) -> list[Slot]:
+    """Deterministic dev-fact extraction (no LLM). See ``_ATTR_LEXICON``."""
+    text = _FENCE_RE.sub(" ", text or "")
+    out: list[Slot] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    def _add(slot: Slot | None) -> None:
+        if slot is None:
+            return
+        key = (slot.entity.lower(), slot.attribute, slot.value)
+        if key not in seen:
+            seen.add(key)
+            out.append(slot)
+
+    for line in text.splitlines():
+        line = line.strip()
+        m = _KV_LINE_RE.match(line)
+        if m:
+            key_toks = _dev_tokens(m.group("key"))
+            a = _attr_suffix(key_toks)
+            if a > 0:  # require entity tokens before the attribute
+                entity = _clean_entity(key_toks[:a])
+                value = _clean_value(m.group("value"))
+                if entity and value:
+                    _add(Slot(entity, " ".join(key_toks[a:]).lower(), value))
+                    continue
+        for sent in _SENT_SPLIT_RE.split(line):
+            if sent.strip():
+                _add(_dev_slot_from_copula(sent.strip()))
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -173,6 +301,12 @@ def extract_slots(
     # 4. Loss / state-change — emit ``owned=False`` against the referent.
     if referent and _LOSS_RE.search(text):
         slots.append(Slot(referent, "owned", "False"))
+
+    # 5. Dev-shaped facts (v0.2) — lexicon-gated copula / key:value forms.
+    existing = {(s.entity.lower(), s.attribute, s.value) for s in slots}
+    for s in extract_dev_slots(text):
+        if (s.entity.lower(), s.attribute, s.value) not in existing:
+            slots.append(s)
 
     return slots
 
