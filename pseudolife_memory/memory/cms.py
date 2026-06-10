@@ -188,6 +188,11 @@ class ContinuumMemorySystem:
         # Stamped onto every entry that lands while an episode is open.
         self.episodes = EpisodeManager()
 
+        # v0.2: set when the weights file (and its backup) failed to load
+        # and the band MLPs restarted from fresh init. Entries are NOT
+        # affected (they live in storage); surfaced via stats().
+        self.weights_reset: bool = False
+
     @property
     def total_memories(self) -> int:
         total = sum(b.size for b in self.bands)
@@ -1252,6 +1257,68 @@ class ContinuumMemorySystem:
         }
         torch.save(state, directory / "cms_state.pt")
 
+    # ------------------------------------------------------------------
+    # Weights-only persistence (v0.2 — entries live in Postgres)
+    # ------------------------------------------------------------------
+
+    def save_weights(self, directory: str | Path) -> None:
+        """Atomically persist band weights + counters to ``weights.pt``.
+
+        No entries: in storage mode they are transactional in Postgres,
+        so this file is a disposable, retrainable cache. tmp+rename plus
+        a single ``.bak`` rotation — see :mod:`utils.atomic_io`.
+        """
+        from pseudolife_memory.utils.atomic_io import atomic_torch_save
+        directory = Path(directory)
+        state = {
+            "schema_version": SCHEMA_VERSION,
+            "kind": "weights",
+            "preset_name": self.config.miras.preset,
+            "bands": {b.name: b.get_weights_state() for b in self.bands},
+            "interaction_count": self._interaction_count,
+            "logical_turn_count": self._logical_turn_count,
+            "surprise_history": self._surprise_history,
+            "consolidation_events": self._consolidation_events,
+            "tier_hits": self._tier_hits,
+            "tier_queries": self._tier_queries,
+        }
+        atomic_torch_save(state, directory / "weights.pt")
+
+    def load_weights(self, directory: str | Path) -> bool:
+        """Restore band weights + counters from ``weights.pt`` (or .bak).
+
+        Returns True on success, False when absent (fresh install) or
+        corrupt — the corrupt case additionally sets ``weights_reset``
+        so ``stats()`` surfaces that the MLPs restarted from scratch.
+        Never touches band entries.
+        """
+        from pseudolife_memory.utils.atomic_io import (
+            WeightsCorrupt, load_with_backup,
+        )
+        path = Path(directory) / "weights.pt"
+        if not path.exists() and not path.with_suffix(".pt.bak").exists():
+            return False
+        try:
+            state, used_backup = load_with_backup(path)
+        except WeightsCorrupt as exc:
+            logger.warning("weights.pt unrecoverable (%s) — fresh MLPs; "
+                           "entries are unaffected.", exc)
+            self.weights_reset = True
+            return False
+        if used_backup:
+            logger.warning("weights.pt corrupt — restored from .bak.")
+        named = {b.name: b for b in self.bands}
+        for name, bstate in (state.get("bands") or {}).items():
+            if name in named:
+                named[name].load_weights_state(bstate)
+        self._interaction_count = state.get("interaction_count", 0)
+        self._logical_turn_count = state.get("logical_turn_count", 0)
+        self._surprise_history.update(state.get("surprise_history") or {})
+        self._consolidation_events = state.get("consolidation_events") or []
+        self._tier_hits.update(state.get("tier_hits") or {})
+        self._tier_queries = state.get("tier_queries", 0)
+        return True
+
     def load(self, directory: str | Path) -> None:
         """Load the CMS state.
 
@@ -1527,6 +1594,9 @@ class ContinuumMemorySystem:
             "interaction_count": self._interaction_count,
             "logical_turn_count": self._logical_turn_count,
             "retrieval_queries": self._tier_queries,
+            # v0.2: True when weights.pt (and .bak) failed to load and the
+            # band MLPs restarted fresh. Entries are unaffected.
+            "weights_reset": self.weights_reset,
             # v0.4.x flat fields. Populate from the named banks when they
             # exist (titans preset), zero otherwise.
             "instant_bank_size": self.instant.size if self.instant else 0,
