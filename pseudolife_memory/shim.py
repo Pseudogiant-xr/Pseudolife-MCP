@@ -101,6 +101,12 @@ async def _proxy(url: str, token: str | None) -> None:
             @server.call_tool()
             async def _call_tool(name: str, arguments: dict | None):
                 result = await remote.call_tool(name, arguments or {})
+                # Forward structured output too — the tools advertise an
+                # outputSchema, so a content-only proxy would trip the
+                # downstream client's structured-output validation.
+                structured = getattr(result, "structuredContent", None)
+                if structured is not None:
+                    return result.content, structured
                 return result.content
 
             async with stdio_server() as (r, w):

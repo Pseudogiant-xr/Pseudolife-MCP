@@ -35,7 +35,7 @@ def _admin_url() -> str:
     return _DEFAULT_ADMIN
 
 
-def test_db_url() -> str:
+def resolve_test_db_url() -> str:
     url = os.environ.get("PSEUDOLIFE_TEST_DATABASE_URL")
     if url:
         return url
@@ -54,7 +54,7 @@ def pg_url() -> str:
                 conn.execute(f'CREATE DATABASE "{_TEST_DB}"')
     except Exception as exc:  # noqa: BLE001
         pytest.skip(f"no test Postgres reachable: {exc}")
-    return test_db_url()
+    return resolve_test_db_url()
 
 
 @pytest.fixture()
