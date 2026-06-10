@@ -26,7 +26,8 @@ $taskName = "PseudoLife-MCP Daemon"
 $envPrefix = "`$env:PSEUDOLIFE_MCP_HOST='$BindHost'; " +
              "`$env:PSEUDOLIFE_MCP_PORT='$Port'; " +
              "`$env:PSEUDOLIFE_MCP_DATABASE_URL='$DatabaseUrl'; " +
-             "`$env:PSEUDOLIFE_MCP_DATA_DIR='$DataDir'; "
+             "`$env:PSEUDOLIFE_MCP_DATA_DIR='$DataDir'; " +
+             "`$env:CUDA_VISIBLE_DEVICES='-1'; "  # CPU-only contract
 if ($Token) { $envPrefix += "`$env:PSEUDOLIFE_MCP_TOKEN='$Token'; " }
 
 $inner = "$envPrefix & '$PythonExe' -m pseudolife_memory.cli serve"
