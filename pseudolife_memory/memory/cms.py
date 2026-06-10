@@ -539,9 +539,10 @@ class ContinuumMemorySystem:
             else:
                 frac = depth / (n - 1)
                 boost = 0.4 * (1.0 - frac)
-                # Geometric half-life: 1h → 2h → 4h … (skip recency at
-                # depth=n-1 anyway because boost=0).
-                half_life = 3600.0 * (2.0 ** depth)
+                # Geometric half-life: base → 2×base → 4×base … (skip
+                # recency at depth=n-1 anyway because boost=0). Base is
+                # config-driven: 1h chat default, 24h in the MCP build.
+                half_life = self.config.recency_base_half_life_s * (2.0 ** depth)
 
             band_result = band.retrieve(query_embedding, top_k=k)
             tier_trace: dict | None = None
