@@ -219,7 +219,7 @@ class ContinuumMemorySystem:
         Returns:
             Tuple of ``(was_stored, surprise_score)``.
         """
-        if is_meta_statement(text, role=source):
+        if self.config.meta_filter.enabled and is_meta_statement(text, role=source):
             return False, 0.0
 
         # ── Surprise telemetry (min across bands) ─────────────────────────────

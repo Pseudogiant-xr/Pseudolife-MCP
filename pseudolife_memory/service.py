@@ -200,12 +200,19 @@ class MemoryService:
           deliberately, so the gate doesn't need to be aggressive.
         * Smaller embedder batch size: MCP calls one-at-a-time, no point
           paying the warmup overhead of a large batch.
+        * Meta-filter OFF: it exists to drop auto-captured chat noise;
+          every MCP store is a deliberate tool call.
+        * Recency base half-life 24h (vs 1h): Claude Code sessions are
+          hours-to-days apart, so a 1h half-life made the recency boost
+          effectively always zero.
 
         Leaves the MIRAS preset alone — the ``continuum`` 8-tier default
         is fine for Claude's use too.
         """
         config.memory.surprise_threshold = 0.2
         config.embedding.batch_size = 16
+        config.memory.meta_filter.enabled = False
+        config.memory.recency_base_half_life_s = 86400.0
 
     def _ensure_init(self) -> None:
         if self._cms is not None:

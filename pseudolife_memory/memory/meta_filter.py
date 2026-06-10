@@ -33,8 +33,9 @@ _META_PATTERNS: list[re.Pattern] = [
         r"\bfrom (?:my|the) (?:memory banks?|neural memory|retrieved memories)\b",
         r"\bmy TITANS (?:memory|system)\b",
         r"\bmy (?:instant|short-term|long-term|reference) (?:bank|memory)\b",
-        r"\bsurprise (?:score|gating|threshold)\b",
-        r"\bmemory (?:bank|banks|system|module|pipeline)\b.*\b(?:stores?|contains?|holds?)\b",
+        # NOTE (v0.2): the former `surprise score/gating/threshold` and
+        # `memory bank … stores` patterns were removed — they rejected
+        # legitimate dev facts about memory systems themselves.
     ]
 ]
 
