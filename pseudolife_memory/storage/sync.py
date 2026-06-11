@@ -1,0 +1,157 @@
+"""Conversions + hydration between in-memory structures and PostgresStorage.
+
+The bands / cortex stay the hot path; these helpers are the only place
+that knows how a :class:`MemoryEntry` or :class:`CortexRecord` maps onto
+a schema-v8 row. Cortex persistence is snapshot-style (full rewrite per
+mutation): the cortex is small by design, and one transactional rewrite
+is simpler and strictly safer than row diffing. Per-row upserts arrive
+with Phase 2 when entity links make ids meaningful.
+"""
+
+from __future__ import annotations
+
+from dataclasses import asdict
+from typing import Any
+
+import torch
+
+from pseudolife_memory.memory.cortex import CortexRecord, CortexStore
+from pseudolife_memory.memory.episodes import Episode, EpisodeManager
+from pseudolife_memory.memory.titans_memory import MemoryEntry
+
+_CORTEX_LOG_KEY = "cortex_supersession_log"
+_CORTEX_CURSOR_KEY = "cortex_dream_cursor"
+
+
+# ── entries ──────────────────────────────────────────────────────────────
+
+def entry_to_row(entry: MemoryEntry) -> dict[str, Any]:
+    return {
+        "band": entry.bank,
+        "text": entry.text,
+        "embedding": entry.embedding,
+        "surprise": float(entry.surprise_score),
+        "ts": float(entry.timestamp),
+        "access_count": int(entry.access_count),
+        "source": entry.source,
+        "superseded_at": entry.superseded_at,
+        "superseded_by_text": entry.superseded_by_text,
+        "last_logical_turn": entry.last_logical_turn,
+        "episode_id": entry.episode_id,
+        "episode_title": entry.episode_title,
+        "tags": list(entry.tags),
+        "slots": [list(s) for s in entry.slots],
+    }
+
+
+def row_to_entry(row: dict[str, Any], device: str = "cpu") -> MemoryEntry:
+    return MemoryEntry(
+        text=row["text"],
+        embedding=torch.as_tensor(row["embedding"], dtype=torch.float32).to(device),
+        surprise_score=row["surprise"],
+        timestamp=row["ts"],
+        access_count=row["access_count"],
+        source=row["source"],
+        bank=row["band"],
+        superseded_at=row["superseded_at"],
+        superseded_by_text=row["superseded_by_text"],
+        last_logical_turn=row["last_logical_turn"],
+        slots=[tuple(s) for s in (row["slots"] or [])],
+        episode_id=row["episode_id"],
+        episode_title=row["episode_title"],
+        tags=list(row["tags"] or []),
+        db_id=row["id"],
+    )
+
+
+def hydrate_cms(cms, storage) -> int:
+    """Fill band entries + episode log from storage. Returns entry count.
+
+    Rows whose ``band`` no longer exists (preset change) land in the
+    first band rather than being dropped.
+    """
+    named = {b.name: b for b in cms.bands}
+    count = 0
+    for row in storage.load_entries():
+        band = named.get(row["band"], cms.bands[0])
+        band.entries.append(row_to_entry(row, device=band.device))
+        band._dirty = True
+        count += 1
+    em = EpisodeManager()
+    for ep in storage.load_episodes():
+        em.episodes[ep["id"]] = Episode(**ep)
+    # An episode left open by a dead daemon stays open — same semantics
+    # as the torch.save round-trip (auto-close happens on next start()).
+    open_eps = [e for e in em.episodes.values() if e.ended_at is None]
+    em.current_id = open_eps[-1].id if open_eps else None
+    cms.episodes = em
+    return count
+
+
+def episode_row(ep: Episode) -> dict[str, Any]:
+    return asdict(ep)
+
+
+# ── cortex ───────────────────────────────────────────────────────────────
+
+def _record_to_row(r: CortexRecord) -> dict[str, Any]:
+    from pseudolife_memory.memory.cortex import _norm_key
+
+    return {
+        "entity": r.entity,
+        "attribute": r.attribute,
+        "entity_norm": _norm_key(r.entity),
+        "attribute_norm": _norm_key(r.attribute),
+        "value": r.value,
+        "polarity": r.polarity,
+        "status": r.status,
+        "confidence": float(r.confidence),
+        "origin": r.origin or None,
+        "support": sorted(r.support),
+        "provenance": sorted(r.provenance),
+        "asserted_at": float(r.asserted_at),
+        "last_confirmed": float(r.last_confirmed),
+        "supersedes_value": r.supersedes_value,
+        "superseded_by_value": r.superseded_by_value,
+        "superseded_at": r.superseded_at,
+        "embedding": r.embedding,
+        "entity_id": None,          # linked in Phase 2
+        "object_entity_id": None,   # linked in Phase 2
+    }
+
+
+def snapshot_cortex(cortex: CortexStore, storage) -> int:
+    """Transactionally rewrite the facts table from the in-memory cortex."""
+    rows = [_record_to_row(r) for r in cortex.records]
+    storage.replace_facts(rows)
+    storage.meta_set(_CORTEX_LOG_KEY, cortex.supersession_log[-200:])
+    storage.meta_set(_CORTEX_CURSOR_KEY, cortex.dream_cursor)
+    return len(rows)
+
+
+def hydrate_cortex(cortex: CortexStore, storage) -> int:
+    """Fill the cortex from the facts table. Returns record count."""
+    cortex.records = []
+    for row in storage.load_facts():
+        emb = row["embedding"]
+        cortex.records.append(CortexRecord(
+            entity=row["entity"],
+            attribute=row["attribute"],
+            value=row["value"],
+            polarity=row["polarity"],
+            confidence=row["confidence"],
+            status=row["status"],
+            provenance=set(row["provenance"] or []),
+            asserted_at=row["asserted_at"],
+            last_confirmed=row["last_confirmed"],
+            supersedes_value=row["supersedes_value"],
+            superseded_by_value=row["superseded_by_value"],
+            superseded_at=row["superseded_at"],
+            embedding=(torch.as_tensor(emb, dtype=torch.float32)
+                       if emb is not None else None),
+            support=set(row["support"] or []),
+        ))
+    cortex.supersession_log = list(storage.meta_get(_CORTEX_LOG_KEY, []) or [])
+    cortex.dream_cursor = float(storage.meta_get(_CORTEX_CURSOR_KEY, 0.0) or 0.0)
+    cortex._reindex_current()
+    return len(cortex.records)

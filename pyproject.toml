@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pseudolife-mcp"
-version = "0.1.0"
+version = "0.2.0"
 description = "PseudoLife neural memory exposed as an MCP server for Claude Code"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -21,6 +21,9 @@ dependencies = [
     "chromadb>=0.5.0",
     "mcp>=1.0.0",
     "PyPDF2>=3.0",
+    "psycopg[binary]>=3.1",
+    "pgvector>=0.3",
+    "uvicorn>=0.30",
 ]
 
 [project.optional-dependencies]
@@ -46,7 +49,7 @@ pdf = [
 ]
 
 [project.scripts]
-pseudolife-mcp = "pseudolife_memory.mcp_server:main"
+pseudolife-mcp = "pseudolife_memory.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

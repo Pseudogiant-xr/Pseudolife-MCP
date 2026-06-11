@@ -117,6 +117,10 @@ class MIRASBand:
         self.neural_blend_weight: float = 0.6
         self.neural_warmup_updates: int = 50
 
+        # Optional eviction callback (v0.2): the CMS sets this so a
+        # capacity eviction also removes the entry's storage row.
+        self.on_evict = None
+
     # ------------------------------------------------------------------
     # Read-only helpers
     # ------------------------------------------------------------------
@@ -349,8 +353,10 @@ class MIRASBand:
         now = now_seconds()
         scores = [self.retention.source_weighted_score(e, now) for e in self.entries]
         worst = min(range(len(scores)), key=lambda i: scores[i])
-        self.entries.pop(worst)
+        evicted = self.entries.pop(worst)
         self._dirty = True
+        if self.on_evict is not None:
+            self.on_evict(evicted)
 
     # ------------------------------------------------------------------
     # Retrieval
@@ -444,6 +450,37 @@ class MIRASBand:
         consults ``axes`` to decide whether to keep or discard the optimiser
         state across rule-type changes.
         """
+        state = self.get_weights_state()
+        state["entries"] = [
+            {
+                "text": e.text,
+                "embedding": e.embedding.cpu(),
+                "surprise_score": e.surprise_score,
+                "timestamp": e.timestamp,
+                "access_count": e.access_count,
+                "source": e.source,
+                "superseded_at": e.superseded_at,
+                # v5 schema field — accidentally dropped pre-v6; restored
+                # here so corrections survive a save/load cycle.
+                "superseded_by_text": e.superseded_by_text,
+                "last_logical_turn": e.last_logical_turn,
+                "slots": e.slots,
+                # v6 schema fields — episode anchoring + tags.
+                "episode_id": e.episode_id,
+                "episode_title": e.episode_title,
+                "tags": e.tags,
+            }
+            for e in self.entries
+        ]
+        return state
+
+    def get_weights_state(self) -> dict:
+        """Weights-only state (v0.2): module/optimizer/EMA/update_count.
+
+        Entries are deliberately absent — in storage mode they live in
+        Postgres and are hydrated separately, so the weights file can be
+        lost without losing memories.
+        """
         return {
             "memory_state": self.memory.state_dict(),
             "optimizer_state": self.update_rule.state_dict(),
@@ -455,28 +492,23 @@ class MIRASBand:
                 "retention_policy": self.retention.name,
                 "memory_module": type(self.memory).__name__,
             },
-            "entries": [
-                {
-                    "text": e.text,
-                    "embedding": e.embedding.cpu(),
-                    "surprise_score": e.surprise_score,
-                    "timestamp": e.timestamp,
-                    "access_count": e.access_count,
-                    "source": e.source,
-                    "superseded_at": e.superseded_at,
-                    # v5 schema field — accidentally dropped pre-v6; restored
-                    # here so corrections survive a save/load cycle.
-                    "superseded_by_text": e.superseded_by_text,
-                    "last_logical_turn": e.last_logical_turn,
-                    "slots": e.slots,
-                    # v6 schema fields — episode anchoring + tags.
-                    "episode_id": e.episode_id,
-                    "episode_title": e.episode_title,
-                    "tags": e.tags,
-                }
-                for e in self.entries
-            ],
         }
+
+    def load_weights_state(self, state: dict) -> None:
+        """Restore weights/optimizer/EMA/update_count WITHOUT touching
+        ``self.entries`` — hydration from storage owns those."""
+        try:
+            self.memory.load_state_dict(state["memory_state"])
+            self.memory.to(self.device)
+        except Exception as exc:  # noqa: BLE001
+            import logging  # noqa: PLC0415
+            logging.getLogger(__name__).warning(
+                "MIRASBand %r: memory weights mismatch saved state (%s); "
+                "weights stay at fresh init.", self.name, exc,
+            )
+        self.update_rule.load_state_dict(state.get("optimizer_state", {}))
+        self.surprise_ema = state.get("surprise_ema", 0.0)
+        self.update_count = state.get("update_count", 0)
 
     def load_state_dict(self, state: dict) -> None:
         """Restore a previously-saved bank.
@@ -492,28 +524,10 @@ class MIRASBand:
           a config change that swaps the module body would silently wipe
           the user's memory entries.
         """
-        # Memory weights — best-effort. A shape mismatch means the user
-        # changed presets / band module body; we can't port the weights,
-        # but the entries (text + embeddings) are still useful.
-        try:
-            self.memory.load_state_dict(state["memory_state"])
-            self.memory.to(self.device)
-        except Exception as exc:  # noqa: BLE001
-            import logging  # noqa: PLC0415
-            logging.getLogger(__name__).warning(
-                "MIRASBand %r: memory weights mismatch saved state "
-                "(%s). Restoring entries only; weights stay at fresh init.",
-                self.name, exc,
-            )
-
-        # Optimizer — best-effort; UpdateRule.load_state_dict already
-        # silently drops mismatched layouts.
-        self.update_rule.load_state_dict(state.get("optimizer_state", {}))
-
-        # Surprise EMA + entries are architecture-agnostic — always load.
-        self.surprise_ema = state.get("surprise_ema", 0.0)
-        # ``update_count`` added in v0.2 (warmup ramp); pre-v8 saves -> 0.
-        self.update_count = state.get("update_count", 0)
+        # Weights / optimizer / EMA / update_count — shared with the
+        # weights-only path; shape mismatches degrade to fresh weights
+        # while entries still restore.
+        self.load_weights_state(state)
         self.entries = [
             MemoryEntry(
                 text=e["text"],

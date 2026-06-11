@@ -99,8 +99,13 @@ class ContinuumMemorySystem:
         reference_bank=None,
         nli_scorer: "NLIContradictionScorer | None" = None,
         reranker: "CrossEncoderReranker | None" = None,
+        storage=None,
     ) -> None:
         self.config = config
+        # Optional write-through backend (PostgresStorage). When set,
+        # every entry mutation lands in storage before returning; the
+        # in-memory bands are a cache hydrated at startup.
+        self.storage = storage
         self._nli_scorer = nli_scorer
         self._nli_candidate_cap: int = (
             getattr(config.nli, "max_candidates", 8) if hasattr(config, "nli") else 8
@@ -131,6 +136,8 @@ class ContinuumMemorySystem:
         for b in self.bands:
             b.neural_blend_weight = getattr(config, "neural_blend_weight", 0.6)
             b.neural_warmup_updates = getattr(config, "neural_warmup_updates", 50)
+            # Capacity eviction must not leave ghost rows in storage.
+            b.on_evict = self._on_band_evict
 
         # ── v0.4.x attribute shims ────────────────────────────────────────────
         # Code paths from before v0.5 read ``cms.instant`` / ``cms.short_term``
@@ -187,6 +194,11 @@ class ContinuumMemorySystem:
         # pointer + the per-episode metadata persisted alongside band state.
         # Stamped onto every entry that lands while an episode is open.
         self.episodes = EpisodeManager()
+
+        # v0.2: set when the weights file (and its backup) failed to load
+        # and the band MLPs restarted from fresh init. Entries are NOT
+        # affected (they live in storage); surfaced via stats().
+        self.weights_reset: bool = False
 
     @property
     def total_memories(self) -> int:
@@ -245,6 +257,7 @@ class ContinuumMemorySystem:
         # surprise.
         device = "cuda" if torch.cuda.is_available() else "cpu"
         contradiction_found = False
+        all_contradicted: list[MemoryEntry] = []
         for band in self.bands:
             contradicted = detect_contradictions(
                 text, embedding, band.entries,
@@ -253,6 +266,7 @@ class ContinuumMemorySystem:
                 nli_candidate_cap=self._nli_candidate_cap,
             )
             if contradicted:
+                all_contradicted.extend(contradicted)
                 # Decay factor is band-policy-specific; pull it from the band's
                 # retention policy rather than hardcoding 0.3.
                 # ``superseding_text=text`` records the new memory's text on
@@ -268,6 +282,18 @@ class ContinuumMemorySystem:
 
         if not contradiction_found and overall_surprise < self.config.surprise_threshold:
             return False, overall_surprise
+
+        # Write-through: persist supersession marks set by the
+        # contradiction decay above (entries already have rows).
+        if self.storage is not None:
+            for c in all_contradicted:
+                if c.db_id is not None:
+                    self.storage.update_entry(
+                        c.db_id,
+                        superseded_at=c.superseded_at,
+                        superseded_by_text=c.superseded_by_text,
+                        surprise=float(c.surprise_score),
+                    )
 
         # ── Land the write in the first band ──────────────────────────────────
         self.bands[0].store(text, embedding, source=source, surprise=overall_surprise)
@@ -301,6 +327,12 @@ class ContinuumMemorySystem:
                 if attr in ("name", "type"):
                     self._last_entity_seen = ent
                     break
+            # Write-through: the entry is fully stamped (turn / episode /
+            # tags / slots) — persist it now and remember its row id so
+            # later promotion / supersession / deletion can address it.
+            if self.storage is not None:
+                from pseudolife_memory.storage.sync import entry_to_row
+                entry.db_id = self.storage.insert_entry(entry_to_row(entry))
         self._interaction_count += 1
 
         # ── Walk the promotion chain (band[i] → band[i+1]) ────────────────────
@@ -1205,6 +1237,15 @@ class ContinuumMemorySystem:
                     promoted_copy.episode_id = entry.episode_id
                     promoted_copy.episode_title = entry.episode_title
                     promoted_copy.tags = list(entry.tags)
+                    # Promotion is a relocation, not a copy: the storage
+                    # row moves bands with the entry.
+                    promoted_copy.db_id = entry.db_id
+                    if self.storage is not None and entry.db_id is not None:
+                        self.storage.update_entry(
+                            entry.db_id,
+                            band=destination.name,
+                            access_count=entry.access_count,
+                        )
                 promoted.append(entry)
             else:
                 remaining.append(entry)
@@ -1251,6 +1292,68 @@ class ContinuumMemorySystem:
             "episodes": self.episodes.to_dict(),
         }
         torch.save(state, directory / "cms_state.pt")
+
+    # ------------------------------------------------------------------
+    # Weights-only persistence (v0.2 — entries live in Postgres)
+    # ------------------------------------------------------------------
+
+    def save_weights(self, directory: str | Path) -> None:
+        """Atomically persist band weights + counters to ``weights.pt``.
+
+        No entries: in storage mode they are transactional in Postgres,
+        so this file is a disposable, retrainable cache. tmp+rename plus
+        a single ``.bak`` rotation — see :mod:`utils.atomic_io`.
+        """
+        from pseudolife_memory.utils.atomic_io import atomic_torch_save
+        directory = Path(directory)
+        state = {
+            "schema_version": SCHEMA_VERSION,
+            "kind": "weights",
+            "preset_name": self.config.miras.preset,
+            "bands": {b.name: b.get_weights_state() for b in self.bands},
+            "interaction_count": self._interaction_count,
+            "logical_turn_count": self._logical_turn_count,
+            "surprise_history": self._surprise_history,
+            "consolidation_events": self._consolidation_events,
+            "tier_hits": self._tier_hits,
+            "tier_queries": self._tier_queries,
+        }
+        atomic_torch_save(state, directory / "weights.pt")
+
+    def load_weights(self, directory: str | Path) -> bool:
+        """Restore band weights + counters from ``weights.pt`` (or .bak).
+
+        Returns True on success, False when absent (fresh install) or
+        corrupt — the corrupt case additionally sets ``weights_reset``
+        so ``stats()`` surfaces that the MLPs restarted from scratch.
+        Never touches band entries.
+        """
+        from pseudolife_memory.utils.atomic_io import (
+            WeightsCorrupt, load_with_backup,
+        )
+        path = Path(directory) / "weights.pt"
+        if not path.exists() and not path.with_suffix(".pt.bak").exists():
+            return False
+        try:
+            state, used_backup = load_with_backup(path)
+        except WeightsCorrupt as exc:
+            logger.warning("weights.pt unrecoverable (%s) — fresh MLPs; "
+                           "entries are unaffected.", exc)
+            self.weights_reset = True
+            return False
+        if used_backup:
+            logger.warning("weights.pt corrupt — restored from .bak.")
+        named = {b.name: b for b in self.bands}
+        for name, bstate in (state.get("bands") or {}).items():
+            if name in named:
+                named[name].load_weights_state(bstate)
+        self._interaction_count = state.get("interaction_count", 0)
+        self._logical_turn_count = state.get("logical_turn_count", 0)
+        self._surprise_history.update(state.get("surprise_history") or {})
+        self._consolidation_events = state.get("consolidation_events") or []
+        self._tier_hits.update(state.get("tier_hits") or {})
+        self._tier_queries = state.get("tier_queries", 0)
+        return True
 
     def load(self, directory: str | Path) -> None:
         """Load the CMS state.
@@ -1476,19 +1579,32 @@ class ContinuumMemorySystem:
             return False
 
         removed: list[str] = []
+        removed_ids: list[int] = []
         for band in self.bands:
             kept: list[MemoryEntry] = []
             band_changed = False
             for entry in band.entries:
                 if _matches(entry):
                     removed.append(entry.text)
+                    if entry.db_id is not None:
+                        removed_ids.append(entry.db_id)
                     band_changed = True
                 else:
                     kept.append(entry)
             if band_changed:
                 band.entries = kept
                 band._dirty = True
+        if self.storage is not None and removed_ids:
+            self.storage.delete_entry_ids(removed_ids)
         return removed
+
+    def _on_band_evict(self, entry: MemoryEntry) -> None:
+        """Capacity eviction callback — keep storage in lockstep."""
+        if self.storage is not None and entry.db_id is not None:
+            try:
+                self.storage.delete_entry_ids([entry.db_id])
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("evict write-through failed: %s", exc)
 
     def stats(self) -> dict:
         """Memory statistics.
@@ -1527,6 +1643,9 @@ class ContinuumMemorySystem:
             "interaction_count": self._interaction_count,
             "logical_turn_count": self._logical_turn_count,
             "retrieval_queries": self._tier_queries,
+            # v0.2: True when weights.pt (and .bak) failed to load and the
+            # band MLPs restarted fresh. Entries are unaffected.
+            "weights_reset": self.weights_reset,
             # v0.4.x flat fields. Populate from the named banks when they
             # exist (titans preset), zero otherwise.
             "instant_bank_size": self.instant.size if self.instant else 0,

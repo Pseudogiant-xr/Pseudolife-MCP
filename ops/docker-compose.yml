@@ -1,0 +1,30 @@
+# PseudoLife-MCP storage substrate: PG 16 + AGE + pgvector.
+#
+#   docker compose -f ops/docker-compose.yml up -d --build
+#
+# Bound to 127.0.0.1 only — the LAN sees the MCP daemon, never Postgres.
+# Host port 5433 avoids collisions with any native Postgres install.
+services:
+  pseudolife-pg:
+    build:
+      context: .
+      dockerfile: Dockerfile.pg
+    image: pseudolife-pg:16
+    container_name: pseudolife-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pseudolife
+      POSTGRES_PASSWORD: pseudolife
+      POSTGRES_DB: pseudolife_memory
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - pseudolife_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pseudolife -d pseudolife_memory"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pseudolife_pgdata:

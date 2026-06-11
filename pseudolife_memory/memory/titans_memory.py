@@ -100,6 +100,9 @@ class MemoryEntry:
     # Multi-valued tag list (schema v6, Tier C). Normalised by the caller
     # (lowercase / stripped / deduplicated). Empty when no tags were set.
     tags: list[str] = field(default_factory=list)
+    # Storage row id (schema v8, transient — NOT persisted in .pt saves).
+    # None in file mode or before the write-through insert returns.
+    db_id: int | None = None
 
     def __post_init__(self):
         if self.timestamp == 0.0:
