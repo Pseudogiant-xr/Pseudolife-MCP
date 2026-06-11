@@ -50,6 +50,13 @@ def test_all_tools_registered() -> None:
         "memory_fact_forget",
         "memory_facts",
         "memory_fact_resolve",
+        # Phase 2 — knowledge graph + ontology-lite + AGE Cypher.
+        "memory_graph_relate",
+        "memory_graph_unrelate",
+        "memory_alias",
+        "memory_graph",
+        "memory_relation_define",
+        "memory_graph_query",
     ])
 
 

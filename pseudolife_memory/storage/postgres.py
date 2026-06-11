@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any
 
 import numpy as np
@@ -39,6 +40,20 @@ _FACT_COLS = (
     "entity_id", "object_entity_id",
 )
 _FACT_JSONB = {"support", "provenance"}
+
+# Ontology-lite builtin relations (spec §5.3) — the closed vocabulary a
+# weak model starts from. Referenced inverses must come first (FK).
+_BUILTIN_RELATIONS = (
+    # (name, description, transitive, inverse_of)
+    ("depends-on", "src requires dst to function", True, None),
+    ("part-of", "src is a component of dst", True, None),
+    ("hosts", "src is the host/platform for dst", False, None),
+    ("runs-on", "src executes on host/platform dst", False, "hosts"),
+    ("uses", "src makes use of dst", False, None),
+    ("configures", "src sets configuration for dst", False, None),
+    ("stores-data-in", "src persists its data in dst", False, None),
+    ("related-to", "untyped catch-all association", False, None),
+)
 
 # Mutable entry fields update_entry accepts — everything else is identity.
 _ENTRY_UPDATABLE = {
@@ -69,6 +84,22 @@ class PostgresStorage:
         self.conn.commit()
         self.capabilities = ensure_schema(self.conn)
         register_vector(self.conn)
+        self._seed_relations()
+
+    def _seed_relations(self) -> None:
+        with self.conn.cursor() as cur:
+            for name, desc, transitive, inverse in _BUILTIN_RELATIONS:
+                cur.execute(
+                    """
+                    INSERT INTO relations
+                      (name, description, transitive, inverse_of, builtin,
+                       created_at)
+                    VALUES (%s, %s, %s, %s, TRUE, %s)
+                    ON CONFLICT (name) DO NOTHING
+                    """,
+                    (name, desc, transitive, inverse, time.time()),
+                )
+        self.conn.commit()
 
     def close(self) -> None:
         try:
@@ -257,3 +288,175 @@ class PostgresStorage:
             "SELECT value FROM meta WHERE key = %s", (key,),
         ).fetchone()
         return default if row is None else row[0]
+
+    # ── graph: entities / aliases ───────────────────────────────────────
+
+    def ensure_entity(
+        self, canonical: str, display: str | None = None,
+        etype: str | None = None,
+    ) -> int:
+        """Upsert by canonical name; first non-null etype wins (soft typing
+        is advisory, so a later conflicting hint must not silently retype)."""
+        row = self.conn.execute(
+            """
+            INSERT INTO entities (canonical, display, etype, created_at)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (canonical) DO UPDATE
+              SET etype = COALESCE(entities.etype, EXCLUDED.etype)
+            RETURNING id
+            """,
+            (canonical, display or canonical, etype, time.time()),
+        ).fetchone()
+        self.conn.commit()
+        return int(row[0])
+
+    def find_entity(self, name_norm: str) -> dict | None:
+        """Resolve a normalized name via canonical first, then aliases."""
+        cols = ("id", "canonical", "display", "etype")
+        row = self.conn.execute(
+            "SELECT id, canonical, display, etype FROM entities "
+            "WHERE canonical = %s",
+            (name_norm,),
+        ).fetchone()
+        if row is None:
+            row = self.conn.execute(
+                """
+                SELECT e.id, e.canonical, e.display, e.etype
+                FROM entity_aliases a JOIN entities e ON e.id = a.entity_id
+                WHERE a.alias = %s
+                """,
+                (name_norm,),
+            ).fetchone()
+        if row is None:
+            return None
+        d = dict(zip(cols, row))
+        d["aliases"] = [
+            r[0] for r in self.conn.execute(
+                "SELECT alias FROM entity_aliases WHERE entity_id = %s "
+                "ORDER BY alias",
+                (d["id"],),
+            ).fetchall()
+        ]
+        return d
+
+    def add_alias(self, alias_norm: str, entity_id: int) -> None:
+        self.conn.execute(
+            """
+            INSERT INTO entity_aliases (alias, entity_id) VALUES (%s, %s)
+            ON CONFLICT (alias) DO UPDATE SET entity_id = EXCLUDED.entity_id
+            """,
+            (alias_norm, entity_id),
+        )
+        self.conn.commit()
+
+    def entity_id_map(self) -> dict[str, int]:
+        """Every normalized name (canonical + alias) → entity id. Used to
+        link fact rows on cortex snapshot; canonical wins on collision."""
+        m: dict[str, int] = {}
+        for alias, eid in self.conn.execute(
+            "SELECT alias, entity_id FROM entity_aliases",
+        ).fetchall():
+            m[alias] = eid
+        for canonical, eid in self.conn.execute(
+            "SELECT canonical, id FROM entities",
+        ).fetchall():
+            m[canonical] = eid
+        return m
+
+    # ── graph: relations registry ───────────────────────────────────────
+
+    def load_relations(self) -> list[dict]:
+        cols = ("name", "description", "src_type", "dst_type", "transitive",
+                "inverse_of", "builtin")
+        return [
+            dict(zip(cols, r)) for r in self.conn.execute(
+                f"SELECT {', '.join(cols)} FROM relations ORDER BY name",
+            ).fetchall()
+        ]
+
+    def upsert_relation(
+        self, name: str, description: str, *,
+        src_type: str | None = None, dst_type: str | None = None,
+        transitive: bool = False, inverse_of: str | None = None,
+    ) -> None:
+        self.conn.execute(
+            """
+            INSERT INTO relations
+              (name, description, src_type, dst_type, transitive,
+               inverse_of, builtin, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, FALSE, %s)
+            ON CONFLICT (name) DO UPDATE SET
+              description = EXCLUDED.description,
+              src_type = EXCLUDED.src_type,
+              dst_type = EXCLUDED.dst_type,
+              transitive = EXCLUDED.transitive,
+              inverse_of = EXCLUDED.inverse_of
+            """,
+            (name, description, src_type, dst_type, transitive,
+             inverse_of, time.time()),
+        )
+        self.conn.commit()
+
+    # ── graph: edges ────────────────────────────────────────────────────
+
+    def upsert_edge(
+        self, src_id: int, relation: str, dst_id: int, *,
+        confidence: float = 0.8, origin: str | None = None,
+    ) -> dict:
+        """Insert or re-assert. Re-assertion bumps confidence (+0.05,
+        capped 0.99), revives a superseded edge, and keeps the stronger
+        origin claim if the new call omitted one."""
+        row = self.conn.execute(
+            """
+            INSERT INTO edges
+              (src_id, relation, dst_id, confidence, origin, asserted_at)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (src_id, relation, dst_id) DO UPDATE SET
+              confidence = LEAST(
+                0.99, GREATEST(EXCLUDED.confidence, edges.confidence + 0.05)),
+              origin = COALESCE(EXCLUDED.origin, edges.origin),
+              superseded_at = NULL,
+              asserted_at = EXCLUDED.asserted_at
+            RETURNING id, confidence
+            """,
+            (src_id, relation, dst_id, confidence, origin, time.time()),
+        ).fetchone()
+        self.conn.commit()
+        return {"id": int(row[0]), "confidence": float(row[1])}
+
+    def supersede_edge(self, src_id: int, relation: str, dst_id: int) -> bool:
+        cur = self.conn.execute(
+            """
+            UPDATE edges SET superseded_at = %s
+            WHERE src_id = %s AND relation = %s AND dst_id = %s
+              AND superseded_at IS NULL
+            """,
+            (time.time(), src_id, relation, dst_id),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def load_graph(self) -> dict:
+        """Whole live graph (entities + aliases + non-superseded edges) —
+        small by design, loaded per query for on-read inference."""
+        ent_cols = ("id", "canonical", "display", "etype")
+        entities = [
+            dict(zip(ent_cols, r)) for r in self.conn.execute(
+                "SELECT id, canonical, display, etype FROM entities "
+                "ORDER BY id",
+            ).fetchall()
+        ]
+        aliases: dict[int, list[str]] = {}
+        for alias, eid in self.conn.execute(
+            "SELECT alias, entity_id FROM entity_aliases ORDER BY alias",
+        ).fetchall():
+            aliases.setdefault(eid, []).append(alias)
+        edge_cols = ("id", "src_id", "relation", "dst_id", "confidence",
+                     "origin", "asserted_at")
+        edges = [
+            dict(zip(edge_cols, r)) for r in self.conn.execute(
+                f"SELECT {', '.join(edge_cols)} FROM edges "
+                "WHERE superseded_at IS NULL ORDER BY id",
+            ).fetchall()
+        ]
+        return {"entities": entities, "aliases": aliases, "edges": edges}

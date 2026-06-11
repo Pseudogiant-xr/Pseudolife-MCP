@@ -43,6 +43,12 @@ persistent associative memory on disk.
 | `memory_fact_resolve(entity, attribute, accept)` | Settle a contested fact after checking in — adopt (`true`) or discard (`false`) the contender |
 | `memory_fact_forget(entity, attribute?)` | Hard-delete canonical fact(s) at a slot/entity (no audit trail) |
 | `memory_facts(limit?)` | List all current canonical facts (cortex introspection) |
+| `memory_graph_relate(src, relation, dst, origin?, confidence?, src_type?, dst_type?)` | Assert a typed edge between entities (closed relation vocabulary; re-assertion bumps confidence) |
+| `memory_graph_unrelate(src, relation, dst)` | Retract an edge (superseded, kept for audit) |
+| `memory_alias(entity, alias)` | Bind an alternative name — all fact/graph lookups resolve aliases first |
+| `memory_graph(entity, depth?, include_facts?, to?)` | Entity neighborhood (≤3 hops): nodes + facts + edges, with transitive/inverse edges derived on read |
+| `memory_relation_define(name, description, transitive?, inverse_of?, src_type?, dst_type?)` | Grow the closed relation vocabulary (deliberate, strong-model act) |
+| `memory_graph_query(cypher, limit?)` | Read-only openCypher via Apache AGE (strong-model power tool) |
 | `memory_stats()` | Per-band sizes, hit rates, totals |
 | `memory_save()` | Flush CMS tensors to disk |
 | `document_ingest(path, source?)` | Index a file (txt/md/pdf) in the reference bank |
@@ -70,6 +76,31 @@ This kills two v0.1 hazards by construction: a single writer means
 concurrent sessions can't clobber each other, and entries are
 transactional so a crash can't wipe the bank (only the retrainable
 weights cache rides the periodic save).
+
+### Knowledge graph (ontology-lite)
+
+The cortex's canonical facts are joined to a typed entity graph
+(Postgres mode only). Edges use a **closed relation vocabulary** —
+builtins `depends-on`*, `part-of`*, `runs-on`↔`hosts`, `uses`,
+`configures`, `stores-data-in`, `related-to` (* = transitive) — so a
+weak model can't fragment the graph with `depends_on`/`dependsOn`
+variants: common forms normalize automatically, true unknowns are
+rejected *with suggestions*. Soft type hints warn but never reject.
+Transitive closure and inverse mirroring are computed **on read** by
+NetworkX inside `memory_graph`; derived edges arrive marked
+`derived: true` with rule provenance, so multi-hop conclusions read as
+plain facts — the server reasons, the model reads.
+
+When the Apache AGE extension is present (it is, in the bundled compose
+image), entities/edges are mirrored into an AGE graph and
+`memory_graph_query` accepts read-only openCypher. Heal a drifted
+mirror with `pseudolife-mcp age-sync`.
+
+**Weak-model deployments (redacted):** expose only `memory_search`,
+`memory_store`, `memory_fact_get`/`memory_fact_set`, `memory_graph`,
+and `memory_graph_relate`. Do NOT expose `memory_graph_query` (Cypher
+composition is a degrees-of-freedom hazard), `memory_relation_define`,
+`memory_delete`, or `memory_fact_forget`.
 
 ## Install (Windows)
 
@@ -457,7 +488,7 @@ pip install -e .[dev]
 pytest tests/ -v
 ```
 
-236 tests cover the MemoryService methods (store / search / recent /
+283 tests cover the MemoryService methods (store / search / recent /
 supersede / stats / save / trace / list_sources / list_tags / delete),
 the `memory_search` scoring overrides, the cross-encoder reranker
 (15 unit + 4 integration), the BM25 hybrid lexical pool
@@ -473,9 +504,17 @@ exposed tool through the FastMCP machinery). The v0.2 Phase 0 suites
 add the config knobs, the meta-filter gate + pruned patterns, the
 recency base half-life, the neural warmup ramp (incl. state
 round-trip), and the dev-fact extractor (positives + precision
-guards). The delete suite
-includes a persistence round-trip test (store → delete → save →
-reload → verify gone). Reranker tests monkeypatch
+guards). The v0.2 Phase 1 suites add the Postgres storage layer
+(schema idempotency, vector round-trips, write-through consistency,
+legacy `.pt` migration, atomic weights + corrupt-file recovery), the
+HTTP daemon (health, token auth, two-concurrent-clients no-lost-writes)
+and the stdio shim spawn path — these skip cleanly when no test
+Postgres is reachable. The Phase 2 graph suite covers normalization,
+unknown-relation suggestions, soft type warnings, transitive/inverse
+on-read inference (marked `derived`), depth caps, paths, fact↔entity
+auto-linking, and the AGE Cypher layer (skip-if-unavailable). The
+delete suite includes a persistence round-trip test (store → delete →
+save → reload → verify gone). Reranker tests monkeypatch
 `sentence_transformers.CrossEncoder` with a deterministic stub so the
 suite stays fast and offline. Test suite uses a fresh embedder per
 module via the `warm_service` fixture so the ~1.5s

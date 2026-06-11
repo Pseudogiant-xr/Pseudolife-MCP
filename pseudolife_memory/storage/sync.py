@@ -115,14 +115,25 @@ def _record_to_row(r: CortexRecord) -> dict[str, Any]:
         "superseded_by_value": r.superseded_by_value,
         "superseded_at": r.superseded_at,
         "embedding": r.embedding,
-        "entity_id": None,          # linked in Phase 2
-        "object_entity_id": None,   # linked in Phase 2
+        "entity_id": None,          # linked by snapshot_cortex
+        "object_entity_id": None,   # linked by snapshot_cortex
     }
 
 
 def snapshot_cortex(cortex: CortexStore, storage) -> int:
-    """Transactionally rewrite the facts table from the in-memory cortex."""
+    """Transactionally rewrite the facts table from the in-memory cortex.
+
+    Auto-linking (spec §5.1): each row's subject — and its value, when
+    the value names a known entity or alias — gets resolved against the
+    entities table so the cortex and the graph stay joined.
+    """
+    from pseudolife_memory.graph import norm_name
+
     rows = [_record_to_row(r) for r in cortex.records]
+    emap = storage.entity_id_map()
+    for row in rows:
+        row["entity_id"] = emap.get(norm_name(row["entity"]))
+        row["object_entity_id"] = emap.get(norm_name(row["value"]))
     storage.replace_facts(rows)
     storage.meta_set(_CORTEX_LOG_KEY, cortex.supersession_log[-200:])
     storage.meta_set(_CORTEX_CURSOR_KEY, cortex.dream_cursor)

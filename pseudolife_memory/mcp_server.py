@@ -332,10 +332,19 @@ def memory_fact_get(entity: str, attribute: str) -> dict[str, Any]:
         slot but were too weak to supersede (see ``memory_fact_resolve``) — a
         non-empty list means a discrepancy is waiting to be settled with the human.
     """
-    return {
+    out = {
         "record": service.cortex_lookup(entity, attribute),
         "contenders": service.cortex_contenders(entity, attribute)["contenders"],
     }
+    # Graph join (Phase 2): when the subject has a graph node, surface its
+    # id + aliases so callers can pivot into memory_graph.
+    ref = service.entity_ref(entity)
+    if ref is not None:
+        out["entity_ref"] = {
+            "entity_id": ref["id"], "canonical": ref["canonical"],
+            "etype": ref["etype"], "aliases": ref["aliases"],
+        }
+    return out
 
 
 @mcp.tool()
@@ -753,6 +762,183 @@ def memory_consolidate(
     return service.consolidate(
         replaces=replaces, new_text=new_text, source=source, tags=tags,
     )
+
+
+@mcp.tool()
+def memory_graph_relate(
+    src: str,
+    relation: str,
+    dst: str,
+    origin: str | None = None,
+    confidence: float = 0.8,
+    src_type: str | None = None,
+    dst_type: str | None = None,
+) -> dict[str, Any]:
+    """Assert a typed relation between two entities (upsert a graph edge).
+
+    Use when two things are durably connected: ``("redacted", "runs-on",
+    "agent-box")``, ``("pseudolife-mcp", "stores-data-in", "postgres")``.
+    Entities are auto-created (and resolved through aliases — see
+    ``memory_alias``); re-asserting an existing edge bumps its confidence.
+    Edges are additive — remove a wrong one with ``memory_graph_unrelate``.
+
+    The relation must come from the closed registry (builtins:
+    ``depends-on``, ``part-of``, ``runs-on``, ``hosts``, ``uses``,
+    ``configures``, ``stores-data-in``, ``related-to``). Common variants
+    normalize automatically (``depends_on`` → ``depends-on``); a truly
+    unknown name is rejected WITH the top-3 closest matches — pick one,
+    fall back to ``related-to``, or (deliberately) grow the vocabulary via
+    ``memory_relation_define``.
+
+    Args:
+        src: Subject entity, e.g. ``"redacted"``.
+        relation: Registry relation name (separator-insensitive).
+        dst: Object entity, e.g. ``"agent-box"``.
+        origin: ``"user"`` / ``"action"`` / ``"agent"`` — who asserts it.
+        confidence: 0..1, default 0.8.
+        src_type / dst_type: Optional soft type hints for the entities
+            (e.g. ``"service"``, ``"host"``). First hint wins; a mismatch
+            against the relation's expected types WARNS but still stores.
+
+    Returns:
+        ``{"src", "relation", "dst", "confidence", "warnings": [...]}`` on
+        success; ``{"error": "unknown_relation", "suggestions": [...]}``
+        on a vocabulary miss.
+    """
+    return service.graph_relate(
+        src=src, relation=relation, dst=dst, origin=origin,
+        confidence=confidence, src_type=src_type, dst_type=dst_type,
+    )
+
+
+@mcp.tool()
+def memory_graph_unrelate(src: str, relation: str, dst: str) -> dict[str, Any]:
+    """Retract a relation — mark the edge superseded (kept for audit).
+
+    The edge disappears from ``memory_graph`` / Cypher results but stays
+    in the table with a supersession timestamp. Re-asserting the same
+    triple later revives it.
+
+    Returns:
+        ``{"removed": bool, "src", "relation", "dst"}``, or
+        ``{"removed": False, "reason": "unknown_entity", ...}`` when a
+        named entity doesn't exist.
+    """
+    return service.graph_unrelate(src=src, relation=relation, dst=dst)
+
+
+@mcp.tool()
+def memory_alias(entity: str, alias: str) -> dict[str, Any]:
+    """Bind an alternative name to an entity (e.g. ``pg`` → ``postgres``).
+
+    Every fact / graph lookup resolves aliases first, so facts stored
+    under either name land on the same node. The entity is auto-created
+    if it doesn't exist yet.
+
+    Returns:
+        ``{"entity", "canonical", "aliases": [...]}`` (the full alias list
+        after the bind).
+    """
+    return service.graph_alias(entity=entity, alias=alias)
+
+
+@mcp.tool()
+def memory_graph(
+    entity: str,
+    depth: int = 1,
+    include_facts: bool = True,
+    to: str | None = None,
+) -> dict[str, Any]:
+    """Read an entity's neighborhood: nodes, typed edges, canonical facts.
+
+    The server does the multi-hop reasoning for you: transitive relations
+    (``depends-on``, ``part-of``) arrive pre-closed and inverse pairs
+    (``runs-on``/``hosts``) pre-mirrored — derived edges are marked
+    ``derived: true`` with rule provenance (``via: ["transitive:depends-on"]``)
+    so conclusions read as plain facts.
+
+    Args:
+        entity: Root entity (alias-aware).
+        depth: Hops from the root, capped at 3. Default 1.
+        include_facts: Attach each node's current canonical facts
+            (``attribute`` / ``value`` / ``origin`` / ``confidence``).
+        to: Optional second entity — the shortest path between the two is
+            returned under ``paths`` (and its nodes are included even when
+            beyond ``depth``).
+
+    Returns:
+        ``{"found": bool, "entity", "depth", "nodes": [{entity, canonical,
+        etype, aliases, facts}], "edges": [{src, relation, dst, derived,
+        confidence|via}], "paths": [[entity, ...]]}``.
+    """
+    return service.graph_neighborhood(
+        entity=entity, depth=depth, include_facts=include_facts, to=to,
+    )
+
+
+@mcp.tool()
+def memory_relation_define(
+    name: str,
+    description: str,
+    transitive: bool = False,
+    inverse_of: str | None = None,
+    src_type: str | None = None,
+    dst_type: str | None = None,
+) -> dict[str, Any]:
+    """Add a relation to the closed vocabulary — a deliberate act.
+
+    The registry exists to stop relation-name drift (``depends_on`` /
+    ``dependsOn`` / ``uses`` fragmenting the graph), so define sparingly:
+    prefer the builtins, and reach for this only when a recurring
+    connection genuinely fits none of them. Builtins cannot be redefined.
+
+    Args:
+        name: Registry name (normalized: lowercase, separators → ``-``).
+        description: One line on what the relation means.
+        transitive: When True, ``memory_graph`` computes the closure on
+            read (A→B→C implies A→C, marked derived).
+        inverse_of: Existing relation this mirrors (``runs-on`` ↔
+            ``hosts``); derived inverse edges appear on read.
+        src_type / dst_type: Soft expected entity types — mismatches warn
+            on ``memory_graph_relate`` but never reject.
+
+    Returns:
+        ``{"defined": str, "transitive", "inverse_of", "src_type",
+        "dst_type"}`` or a structured error.
+    """
+    return service.relation_define(
+        name=name, description=description, transitive=transitive,
+        inverse_of=inverse_of, src_type=src_type, dst_type=dst_type,
+    )
+
+
+@mcp.tool()
+def memory_graph_query(cypher: str, limit: int = 50) -> dict[str, Any]:
+    """Read-only openCypher over the knowledge graph (requires AGE).
+
+    Power tool for queries ``memory_graph`` can't express — aggregation,
+    multi-relation patterns, degree counts. Vertices carry label
+    ``Entity`` with properties ``canonical`` / ``display`` / ``etype``;
+    edge labels are the relation names with ``-`` folded to ``_``
+    (``depends-on`` → ``depends_on``). Derived/inferred edges are NOT in
+    the mirror — only asserted ones; use ``memory_graph`` when you need
+    inference.
+
+    Example: ``MATCH (a:Entity)-[:depends_on]->(b:Entity) RETURN
+    a.display, b.display``.
+
+    Args:
+        cypher: A read-only query. Mutating clauses (CREATE / MERGE / SET
+            / DELETE / REMOVE / DROP) are rejected — mutate via
+            ``memory_graph_relate``.
+        limit: Max rows, default 50.
+
+    Returns:
+        ``{"count": int, "rows": [[col, ...], ...]}`` (agtype values as
+        strings), or ``{"error": "age_unavailable"}`` when the extension
+        isn't installed.
+    """
+    return service.graph_cypher(cypher=cypher, limit=limit)
 
 
 @mcp.tool()
