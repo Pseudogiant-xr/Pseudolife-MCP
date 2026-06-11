@@ -24,6 +24,7 @@ dependencies = [
     "psycopg[binary]>=3.1",
     "pgvector>=0.3",
     "uvicorn>=0.30",
+    "networkx>=3.0",
 ]
 
 [project.optional-dependencies]

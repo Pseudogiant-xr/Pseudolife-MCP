@@ -191,6 +191,7 @@ class MemoryService:
         self._context_builder: ContextBuilder | None = None
         self._reranker: CrossEncoderReranker | None = None
         self._cortex: CortexStore | None = None
+        self._age = None  # AgeGraph mirror when the extension is present
         self._last_user_query: str | None = None
         self._last_saved_fingerprint = None
 
@@ -257,6 +258,13 @@ class MemoryService:
             self._storage = PostgresStorage(self._db_url)
             logger.info("storage: postgres (%s)",
                         self._db_url.rsplit("@", 1)[-1])
+            if self._storage.capabilities.get("age_available"):
+                try:
+                    from pseudolife_memory.storage.age import AgeGraph
+                    self._age = AgeGraph(self._storage.conn)
+                    logger.info("AGE graph mirror active")
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("AGE init failed (Cypher layer off): %s", exc)
         self._cms = ContinuumMemorySystem(
             self.config.memory,
             reference_bank=self._reference,
@@ -398,10 +406,33 @@ class MemoryService:
                     provenance=prov,
                     support=sup,
                 )
+                self._ensure_subject_entity(s.entity)
                 written += 1
             except Exception as exc:  # noqa: BLE001
                 logger.debug("cortex auto-promote skipped (%s): %s", claim, exc)
         return written
+
+    def _ensure_subject_entity(self, entity: str) -> None:
+        """Fact writes create the subject's graph node (spec §5.1) so the
+        cortex and graph stay joined. No-op in file mode. Caller holds the
+        lock."""
+        if self._storage is None:
+            return
+        from pseudolife_memory.graph import norm_name
+        n = norm_name(entity)
+        if n and self._storage.find_entity(n) is None:
+            self._storage.ensure_entity(n, display=entity.strip())
+            self._age_mirror(lambda: self._age.upsert_entity(n, entity.strip()))
+
+    def _age_mirror(self, op) -> None:
+        """Run an AGE mirror op best-effort — the tables are the truth and
+        ``age-sync`` can rebuild the mirror, so a failure only logs."""
+        if self._age is None:
+            return
+        try:
+            op()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("AGE mirror op failed (run age-sync to heal): %s", exc)
 
     # ------------------------------------------------------------------
     # Tool: search
@@ -932,6 +963,7 @@ class MemoryService:
                 support=support,
                 now=now,
             )
+            self._ensure_subject_entity(entity)
             self._save_cortex()
             out = {"action": res.action, **_cortex_record_to_dict(res.record)}
             if res.action == "contested":
@@ -1029,6 +1061,11 @@ class MemoryService:
             assert self._cortex is not None
             rows = [_cortex_record_to_dict(r) for r in self._cortex.current_records()]
             rows.sort(key=lambda d: (d["entity"].lower(), d["attribute"].lower()))
+            if self._storage is not None:
+                from pseudolife_memory.graph import norm_name
+                emap = self._storage.entity_id_map()
+                for d in rows:
+                    d["entity_id"] = emap.get(norm_name(d["entity"]))
             return {"count": len(rows), "entries": rows}
 
     def cortex_forget(self, entity: str, attribute: str | None = None) -> dict[str, Any]:
@@ -1490,3 +1527,314 @@ class MemoryService:
                 key=lambda r: (-r["count"], r["tag"]),
             )
             return {"tags": rows, "total": total}
+
+    # ------------------------------------------------------------------
+    # Phase 2 — knowledge graph (Postgres mode only)
+    # ------------------------------------------------------------------
+
+    _GRAPH_UNAVAILABLE = {
+        "error": "graph_requires_postgres",
+        "hint": "The graph lives in Postgres — set PSEUDOLIFE_MCP_DATABASE_URL "
+                "(see ops/docker-compose.yml). File mode has no graph tables.",
+    }
+
+    def entity_ref(self, entity: str) -> dict[str, Any] | None:
+        """Resolve an entity name (alias-aware) to its graph node, or None.
+        Used to enrich fact answers with entity_id + alias info."""
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return None
+            from pseudolife_memory.graph import norm_name
+            return self._storage.find_entity(norm_name(entity))
+
+    def _resolve_or_create_entity(self, name: str, etype: str | None = None) -> dict:
+        """Alias-aware find; auto-create on miss. Caller holds the lock."""
+        from pseudolife_memory.graph import norm_name
+        st = self._storage
+        n = norm_name(name)
+        found = st.find_entity(n)
+        if found is not None:
+            if etype and not found.get("etype"):
+                st.ensure_entity(found["canonical"], etype=etype)
+                found["etype"] = etype
+            return found
+        eid = st.ensure_entity(n, display=name.strip(), etype=etype)
+        self._age_mirror(lambda: self._age.upsert_entity(n, name.strip(), etype))
+        return {"id": eid, "canonical": n, "display": name.strip(),
+                "etype": etype, "aliases": []}
+
+    def graph_relate(
+        self,
+        src: str,
+        relation: str,
+        dst: str,
+        origin: str | None = None,
+        confidence: float = 0.8,
+        src_type: str | None = None,
+        dst_type: str | None = None,
+    ) -> dict[str, Any]:
+        """Upsert a typed edge. Entities auto-create; the relation must be
+        in the registry (closed vocabulary) — a miss returns suggestions,
+        never stores under a drifted name. Soft type mismatches warn but
+        store anyway (a hard reject would put a weak model into retry
+        loops; a stored-with-warning edge keeps the bank growing)."""
+        from pseudolife_memory import graph as G
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return dict(self._GRAPH_UNAVAILABLE)
+            st = self._storage
+            registry = {r["name"]: r for r in st.load_relations()}
+            resolved, suggestions = G.resolve_relation(list(registry), relation)
+            if resolved is None:
+                return {
+                    "error": "unknown_relation",
+                    "relation": relation,
+                    "suggestions": suggestions,
+                    "hint": "Define it with memory_relation_define, or use "
+                            "'related-to' as the lawful fallback.",
+                }
+            src_e = self._resolve_or_create_entity(src, etype=src_type)
+            dst_e = self._resolve_or_create_entity(dst, etype=dst_type)
+            warnings: list[str] = []
+            rmeta = registry[resolved]
+            for side, ent, want in (
+                ("src", src_e, rmeta.get("src_type")),
+                ("dst", dst_e, rmeta.get("dst_type")),
+            ):
+                if want and ent.get("etype") and ent["etype"] != want:
+                    warnings.append(
+                        f"{side} '{ent['display']}' has type '{ent['etype']}' "
+                        f"but relation '{resolved}' expects '{want}' — "
+                        f"edge stored anyway",
+                    )
+            edge = st.upsert_edge(
+                src_e["id"], resolved, dst_e["id"],
+                confidence=confidence, origin=origin,
+            )
+            self._age_mirror(lambda: self._age.upsert_edge(
+                src_e["canonical"], resolved, dst_e["canonical"]))
+            return {
+                "src": src_e["display"],
+                "relation": resolved,
+                "dst": dst_e["display"],
+                "confidence": round(edge["confidence"], 4),
+                "warnings": warnings,
+            }
+
+    def graph_unrelate(self, src: str, relation: str, dst: str) -> dict[str, Any]:
+        """Mark an edge superseded (kept for audit, hidden from queries)."""
+        from pseudolife_memory import graph as G
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return dict(self._GRAPH_UNAVAILABLE)
+            st = self._storage
+            registry = [r["name"] for r in st.load_relations()]
+            resolved, suggestions = G.resolve_relation(registry, relation)
+            if resolved is None:
+                return {"error": "unknown_relation", "relation": relation,
+                        "suggestions": suggestions}
+            src_e = st.find_entity(G.norm_name(src))
+            dst_e = st.find_entity(G.norm_name(dst))
+            if src_e is None or dst_e is None:
+                missing = src if src_e is None else dst
+                return {"removed": False, "reason": "unknown_entity",
+                        "entity": missing}
+            removed = st.supersede_edge(src_e["id"], resolved, dst_e["id"])
+            if removed:
+                self._age_mirror(lambda: self._age.remove_edge(
+                    src_e["canonical"], resolved, dst_e["canonical"]))
+            return {"removed": removed, "src": src_e["display"],
+                    "relation": resolved, "dst": dst_e["display"]}
+
+    def graph_alias(self, entity: str, alias: str) -> dict[str, Any]:
+        """Bind ``alias`` → ``entity`` (auto-created). All fact and graph
+        lookups resolve aliases first."""
+        from pseudolife_memory.graph import norm_name
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return dict(self._GRAPH_UNAVAILABLE)
+            a = norm_name(alias)
+            if not a:
+                return {"error": "empty_alias"}
+            ent = self._resolve_or_create_entity(entity)
+            if a == ent["canonical"]:
+                return {"error": "alias_is_canonical", "entity": ent["display"]}
+            self._storage.add_alias(a, ent["id"])
+            ent = self._storage.find_entity(ent["canonical"])
+            return {"entity": ent["display"], "canonical": ent["canonical"],
+                    "aliases": ent["aliases"]}
+
+    def relation_define(
+        self,
+        name: str,
+        description: str,
+        transitive: bool = False,
+        inverse_of: str | None = None,
+        src_type: str | None = None,
+        dst_type: str | None = None,
+    ) -> dict[str, Any]:
+        """Grow the closed relation vocabulary — a deliberate, strong-model
+        act. Builtins cannot be redefined."""
+        from pseudolife_memory.graph import norm_name
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return dict(self._GRAPH_UNAVAILABLE)
+            st = self._storage
+            n = norm_name(name)
+            if not n or not (description or "").strip():
+                return {"error": "name_and_description_required"}
+            registry = {r["name"]: r for r in st.load_relations()}
+            if registry.get(n, {}).get("builtin"):
+                return {"error": "builtin_relation",
+                        "hint": f"'{n}' is a builtin and cannot be redefined."}
+            inv = None
+            if inverse_of:
+                inv = norm_name(inverse_of)
+                if inv not in registry and inv != n:
+                    return {"error": "unknown_inverse", "inverse_of": inv,
+                            "known": sorted(registry)}
+            st.upsert_relation(
+                n, description.strip(), src_type=src_type, dst_type=dst_type,
+                transitive=bool(transitive), inverse_of=inv,
+            )
+            return {"defined": n, "transitive": bool(transitive),
+                    "inverse_of": inv, "src_type": src_type,
+                    "dst_type": dst_type}
+
+    def graph_neighborhood(
+        self,
+        entity: str,
+        depth: int = 1,
+        include_facts: bool = True,
+        to: str | None = None,
+    ) -> dict[str, Any]:
+        """Subgraph within ``depth`` hops (cap 3): nodes with their current
+        facts, edges (derived ones marked with rule provenance), plus the
+        shortest path when ``to`` names a second entity."""
+        from pseudolife_memory import graph as G
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return dict(self._GRAPH_UNAVAILABLE)
+            st = self._storage
+            root = st.find_entity(G.norm_name(entity))
+            if root is None:
+                return {"found": False, "entity": entity}
+            to_id = None
+            to_missing = None
+            if to:
+                to_e = st.find_entity(G.norm_name(to))
+                if to_e is None:
+                    to_missing = to
+                else:
+                    to_id = to_e["id"]
+            g = st.load_graph()
+            registry = {
+                r["name"]: {"transitive": r["transitive"],
+                            "inverse_of": r["inverse_of"]}
+                for r in st.load_relations()
+            }
+            edges = [
+                {"src": e["src_id"], "relation": e["relation"],
+                 "dst": e["dst_id"], "confidence": e["confidence"],
+                 "origin": e["origin"]}
+                for e in g["edges"]
+            ]
+            sub = G.build_subgraph(edges, registry, root["id"],
+                                   depth=depth, to=to_id)
+            by_id = {e["id"]: e for e in g["entities"]}
+
+            facts_by_norm: dict[str, list[dict]] = {}
+            if include_facts and self._cortex is not None:
+                for rec in self._cortex.current_records():
+                    facts_by_norm.setdefault(
+                        G.norm_name(rec.entity), [],
+                    ).append({
+                        "attribute": rec.attribute,
+                        "value": rec.value,
+                        "origin": rec.origin,
+                        "confidence": round(float(rec.confidence), 4),
+                    })
+
+            nodes = []
+            for nid in sorted(sub["nodes"]):
+                e = by_id.get(nid)
+                if e is None:
+                    continue
+                node = {
+                    "entity": e["display"],
+                    "canonical": e["canonical"],
+                    "etype": e["etype"],
+                    "aliases": g["aliases"].get(nid, []),
+                }
+                if include_facts:
+                    node["facts"] = facts_by_norm.get(e["canonical"], [])
+                nodes.append(node)
+
+            def _disp(nid: int) -> str:
+                return by_id[nid]["display"] if nid in by_id else str(nid)
+
+            out_edges = []
+            for e in sub["edges"]:
+                row = {"src": _disp(e["src"]), "relation": e["relation"],
+                       "dst": _disp(e["dst"]), "derived": e["derived"]}
+                if e["derived"]:
+                    row["via"] = e["via"]
+                else:
+                    row["confidence"] = round(float(e["confidence"]), 4)
+                    if e.get("origin"):
+                        row["origin"] = e["origin"]
+                out_edges.append(row)
+
+            result: dict[str, Any] = {
+                "found": True,
+                "entity": root["display"],
+                "depth": max(1, min(int(depth), G.MAX_DEPTH)),
+                "nodes": nodes,
+                "edges": out_edges,
+                "paths": [[_disp(n) for n in p] for p in sub["paths"]],
+            }
+            if to_missing is not None:
+                result["to_not_found"] = to_missing
+            return result
+
+    def graph_cypher(self, cypher: str, limit: int = 50) -> dict[str, Any]:
+        """Read-only openCypher via AGE — strong-model tool (spec §5.2)."""
+        from pseudolife_memory.storage.age import is_mutating
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return dict(self._GRAPH_UNAVAILABLE)
+            if self._age is None:
+                return {
+                    "error": "age_unavailable",
+                    "hint": "The AGE extension is not installed on this "
+                            "Postgres. Use the ops/Dockerfile.pg compose "
+                            "image (apache/age PG16 + pgvector).",
+                }
+            keyword = is_mutating(cypher)
+            if keyword:
+                return {"error": "mutating_clause_rejected", "keyword": keyword,
+                        "hint": "memory_graph_query is read-only; mutate via "
+                                "memory_graph_relate / memory_graph_unrelate."}
+            try:
+                rows = self._age.cypher(cypher, limit=limit)
+            except Exception as exc:  # noqa: BLE001
+                self._storage.conn.rollback()
+                return {"error": "cypher_failed", "detail": str(exc)}
+            return {"count": len(rows), "rows": rows}
+
+    def age_sync(self) -> dict[str, Any]:
+        """Full AGE re-sync from the graph tables (heals a drifted mirror)."""
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return dict(self._GRAPH_UNAVAILABLE)
+            if self._age is None:
+                return {"error": "age_unavailable"}
+            return self._age.resync(self._storage)
