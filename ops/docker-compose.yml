@@ -1,6 +1,14 @@
 # PseudoLife-MCP storage substrate: PG 16 + AGE + pgvector.
 #
-#   docker compose -f ops/docker-compose.yml up -d --build
+#   docker compose -f ops/docker-compose.yml up -d --build   # start / rebuild
+#   docker compose -f ops/docker-compose.yml stop|start      # cycle, data safe
+#
+# ⚠️  THE BANK LIVES IN THE `pseudolife_pgdata` VOLUME. To rebuild the image
+#     (e.g. CVE hardening) use `up -d --build` or `stop`/`start` — these keep
+#     the volume. NEVER use `down -v`, `docker volume rm`, or
+#     `docker system prune --volumes`: they DELETE the memory bank. (The volume
+#     is declared `external` below so `down -v` skips it, but the manual volume
+#     commands still bite — and always `ops/backup.ps1` before any teardown.)
 #
 # Bound to 127.0.0.1 only — the LAN sees the MCP daemon, never Postgres.
 # Host port 5433 avoids collisions with any native Postgres install.
@@ -27,4 +35,10 @@ services:
       retries: 5
 
 volumes:
+  # External so `docker compose down -v` cannot remove it — the bank survives
+  # any container teardown/rebuild. Created once with:
+  #   docker volume create ops_pseudolife_pgdata
+  # (already exists from the original `up`; this just adopts it by name).
   pseudolife_pgdata:
+    external: true
+    name: ops_pseudolife_pgdata
