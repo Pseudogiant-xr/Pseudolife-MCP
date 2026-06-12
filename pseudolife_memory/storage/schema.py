@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 8
+SCHEMA_META_VERSION = 9
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -118,6 +118,41 @@ CREATE TABLE IF NOT EXISTS facts (
 );
 CREATE INDEX IF NOT EXISTS facts_slot_idx
   ON facts (entity_norm, attribute_norm, status);
+
+-- World-knowledge cortex (schema v9, additive). Same slot-keyed shape as `facts`
+-- so the cortex write/supersede/key-norm logic is reused, but PHYSICALLY SEPARATE
+-- for blast-radius isolation (a runaway research ingest can be truncated without
+-- touching the user/project `facts`). World provenance/freshness columns hold the
+-- per-fact citation (quote + url, NOT the full page) and the read-time decay anchor.
+CREATE TABLE IF NOT EXISTS world_facts (
+  id BIGSERIAL PRIMARY KEY,
+  entity TEXT NOT NULL,
+  attribute TEXT NOT NULL,
+  entity_norm TEXT NOT NULL,
+  attribute_norm TEXT NOT NULL,
+  value TEXT NOT NULL,
+  polarity TEXT NOT NULL DEFAULT '+',
+  status TEXT NOT NULL,
+  confidence REAL NOT NULL,
+  origin TEXT,                              -- 'source' for v1 (external-but-cited)
+  support JSONB NOT NULL DEFAULT '[]',
+  provenance JSONB NOT NULL DEFAULT '[]',
+  asserted_at DOUBLE PRECISION NOT NULL,
+  last_confirmed DOUBLE PRECISION NOT NULL,
+  supersedes_value TEXT,
+  superseded_by_value TEXT,
+  superseded_at DOUBLE PRECISION,
+  embedding vector(384),
+  -- world provenance + freshness (spec 2026-06-13, D5 quote-not-page)
+  source_url TEXT,
+  source_quote TEXT,
+  retrieved_at DOUBLE PRECISION,
+  freshness_class TEXT NOT NULL DEFAULT 'volatile',
+  content_hash TEXT,
+  source_doc_id BIGINT                      -- nullable; set only for opt-in full-doc corpus
+);
+CREATE INDEX IF NOT EXISTS world_facts_slot_idx
+  ON world_facts (entity_norm, attribute_norm, status);
 """
 
 

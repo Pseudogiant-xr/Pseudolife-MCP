@@ -89,7 +89,15 @@ class AgeGraph:
         self.name = name
         with conn.cursor() as cur:
             cur.execute("LOAD 'age';")
-            cur.execute('SET search_path = ag_catalog, "$user", public;')
+            # NOTE: do NOT include "$user" here. The DB role is `pseudolife`, which
+            # is ALSO this AGE graph's schema name, so "$user" would put the graph
+            # schema ahead of public on the shared daemon connection and shadow the
+            # real SCHEMA_SQL tables (facts/entries/...) with same-named tables that
+            # a later ensure_schema can create inside the graph schema. All AGE ops
+            # below are ag_catalog.-qualified, so the graph schema is not needed on
+            # the path. (ag_catalog, public) keeps cypher working AND plain tables
+            # resolving to the real bank.
+            cur.execute("SET search_path = ag_catalog, public;")
             cur.execute(
                 "SELECT 1 FROM ag_catalog.ag_graph WHERE name = %s", (name,),
             )
