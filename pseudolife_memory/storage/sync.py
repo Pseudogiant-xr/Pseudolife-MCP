@@ -166,3 +166,77 @@ def hydrate_cortex(cortex: CortexStore, storage) -> int:
     cortex.dream_cursor = float(storage.meta_get(_CORTEX_CURSOR_KEY, 0.0) or 0.0)
     cortex._reindex_current()
     return len(cortex.records)
+
+
+# ── world cortex (schema v9) ──────────────────────────────────────────────
+
+def _world_record_to_row(r) -> dict[str, Any]:
+    from pseudolife_memory.memory.cortex import _norm_key
+
+    return {
+        "entity": r.entity,
+        "attribute": r.attribute,
+        "entity_norm": _norm_key(r.entity),
+        "attribute_norm": _norm_key(r.attribute),
+        "value": r.value,
+        "polarity": r.polarity,
+        "status": r.status,
+        "confidence": float(r.confidence),
+        "origin": "source",
+        "support": ["source"],
+        "provenance": [],
+        "asserted_at": float(r.asserted_at),
+        "last_confirmed": float(r.last_confirmed),
+        "supersedes_value": r.supersedes_value,
+        "superseded_by_value": r.superseded_by_value,
+        "superseded_at": r.superseded_at,
+        "embedding": r.embedding,
+        "source_url": r.source_url or "",
+        "source_quote": r.source_quote or "",
+        "retrieved_at": float(r.retrieved_at or 0.0),
+        "freshness_class": r.freshness_class or "volatile",
+        "content_hash": r.content_hash,
+        "source_doc_id": r.source_doc_id,
+    }
+
+
+def snapshot_world_cortex(world, storage) -> int:
+    """Transactionally rewrite the world_facts table from the in-memory world cortex.
+    No entity-graph auto-linking in v1 (world facts are external)."""
+    rows = [_world_record_to_row(r) for r in world.records]
+    storage.replace_world_facts(rows)
+    return len(rows)
+
+
+def hydrate_world_cortex(world, storage) -> int:
+    """Fill the world cortex from the world_facts table. Returns record count."""
+    from pseudolife_memory.memory.world_cortex import WorldRecord
+
+    world.records = []
+    for row in storage.load_world_facts():
+        emb = row["embedding"]
+        world.records.append(WorldRecord(
+            entity=row["entity"],
+            attribute=row["attribute"],
+            value=row["value"],
+            polarity=row["polarity"],
+            confidence=row["confidence"],
+            status=row["status"],
+            source_url=row["source_url"] or "",
+            source_quote=row["source_quote"] or "",
+            freshness_class=row["freshness_class"] or "volatile",
+            retrieved_at=row["retrieved_at"] or 0.0,
+            content_hash=row["content_hash"],
+            source_doc_id=row["source_doc_id"],
+            asserted_at=row["asserted_at"],
+            last_confirmed=row["last_confirmed"],
+            supersedes_value=row["supersedes_value"],
+            superseded_by_value=row["superseded_by_value"],
+            superseded_at=row["superseded_at"],
+            embedding=(torch.as_tensor(emb, dtype=torch.float32)
+                       if emb is not None else None),
+        ))
+    world._current = {
+        r.key: i for i, r in enumerate(world.records) if r.status == "current"
+    }
+    return len(world.records)

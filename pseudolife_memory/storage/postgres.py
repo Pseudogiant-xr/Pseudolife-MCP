@@ -41,6 +41,18 @@ _FACT_COLS = (
 )
 _FACT_JSONB = {"support", "provenance"}
 
+# World-knowledge cortex columns (schema v9). Same slot-keyed shape as facts plus
+# per-fact citation + freshness; no entity_id/object_entity_id (world facts are not
+# graph-linked in v1). support/provenance are JSONB like the personal cortex.
+_WORLD_FACT_COLS = (
+    "entity", "attribute", "entity_norm", "attribute_norm", "value",
+    "polarity", "status", "confidence", "origin", "support", "provenance",
+    "asserted_at", "last_confirmed", "supersedes_value",
+    "superseded_by_value", "superseded_at", "embedding",
+    "source_url", "source_quote", "retrieved_at", "freshness_class",
+    "content_hash", "source_doc_id",
+)
+
 # Ontology-lite builtin relations (spec §5.3) — the closed vocabulary a
 # weak model starts from. Referenced inverses must come first (FK).
 _BUILTIN_RELATIONS = (
@@ -270,6 +282,42 @@ class PostgresStorage:
         cols = ("id",) + _FACT_COLS
         rows = self.conn.execute(
             f"SELECT {', '.join(cols)} FROM facts ORDER BY id",
+        ).fetchall()
+        out = []
+        for row in rows:
+            d = dict(zip(cols, row))
+            if d["embedding"] is not None:
+                d["embedding"] = np.asarray(d["embedding"], dtype=np.float32)
+            out.append(d)
+        return out
+
+    # ── world-knowledge cortex (schema v9; same snapshot pattern as facts) ──
+
+    def replace_world_facts(self, rows: list[dict]) -> None:
+        """Snapshot-style world cortex persistence: one transaction, full rewrite
+        (the world cortex is small/deduped, like the personal one)."""
+        with self.conn.cursor() as cur:
+            cur.execute("DELETE FROM world_facts")
+            for f in rows:
+                values = []
+                for c in _WORLD_FACT_COLS:
+                    v = f.get(c)
+                    if c == "embedding":
+                        v = _embedding_in(v)
+                    elif c in _FACT_JSONB:
+                        v = Jsonb(v if v is not None else [])
+                    values.append(v)
+                cur.execute(
+                    f"INSERT INTO world_facts ({', '.join(_WORLD_FACT_COLS)}) "
+                    f"VALUES ({', '.join(['%s'] * len(_WORLD_FACT_COLS))})",
+                    values,
+                )
+        self.conn.commit()
+
+    def load_world_facts(self) -> list[dict]:
+        cols = ("id",) + _WORLD_FACT_COLS
+        rows = self.conn.execute(
+            f"SELECT {', '.join(cols)} FROM world_facts ORDER BY id",
         ).fetchall()
         out = []
         for row in rows:
