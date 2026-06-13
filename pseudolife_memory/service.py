@@ -125,6 +125,31 @@ def _cortex_record_to_dict(rec) -> dict[str, Any]:
     }
 
 
+def _world_record_to_dict(rec, now=None) -> dict[str, Any]:
+    """Serialise a WorldRecord for transport, with read-time effective confidence
+    (age-decayed) and a stale flag, plus the per-fact citation."""
+    return {
+        "entity": rec.entity,
+        "attribute": rec.attribute,
+        "value": rec.value,
+        "polarity": rec.polarity,
+        "status": rec.status,
+        "confidence": round(float(rec.confidence), 4),
+        "effective_confidence": round(float(rec.effective_confidence(now)), 4),
+        "stale": bool(rec.is_stale(now)),
+        "origin": rec.origin,
+        "freshness_class": rec.freshness_class,
+        "source_url": rec.source_url,
+        "source_quote": rec.source_quote,
+        "retrieved_at": rec.retrieved_at,
+        "asserted_at": rec.asserted_at,
+        "last_confirmed": rec.last_confirmed,
+        "supersedes_value": rec.supersedes_value,
+        "superseded_by_value": rec.superseded_by_value,
+        "superseded_at": rec.superseded_at,
+    }
+
+
 # Map a store ``source`` tag to a cortex ``origin`` tier (provenance-of-kind).
 # MCP can't see the conversation, so origin is defaulted from source (or set
 # explicitly by the caller). Unknown sources -> None (origin left blank).
@@ -191,6 +216,7 @@ class MemoryService:
         self._context_builder: ContextBuilder | None = None
         self._reranker: CrossEncoderReranker | None = None
         self._cortex: CortexStore | None = None
+        self._world = None  # WorldCortexStore | None (world-knowledge cortex, v9)
         self._age = None  # AgeGraph mirror when the extension is present
         self._last_user_query: str | None = None
         self._last_saved_fingerprint = None
@@ -318,6 +344,18 @@ class MemoryService:
                 self._cortex.load(self._cortex_path())
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Cortex load skipped: %s", exc)
+
+        # World-knowledge cortex (schema v9) — sibling slot store for sourced
+        # EXTERNAL facts, persisted in its own world_facts table. Hydrated like
+        # the cortex; Postgres-only (no .pt fallback — it is a v0.2+ feature).
+        from pseudolife_memory.memory.world_cortex import WorldCortexStore
+        self._world = WorldCortexStore()
+        if self._storage is not None:
+            from pseudolife_memory.storage import sync as _sync
+            try:
+                _sync.hydrate_world_cortex(self._world, self._storage)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("World cortex hydration skipped: %s", exc)
 
     # ------------------------------------------------------------------
     # Tool: store
@@ -897,6 +935,15 @@ class MemoryService:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Cortex save failed: %s", exc)
 
+    def _save_world(self) -> None:
+        if getattr(self, "_world", None) is None or self._storage is None:
+            return
+        try:
+            from pseudolife_memory.storage import sync as _sync
+            _sync.snapshot_world_cortex(self._world, self._storage)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("World cortex save failed: %s", exc)
+
     def _persist_all(self, *, kind: str) -> dict[str, Any]:
         """Shared body of save/autosave/flush. Caller holds the lock.
 
@@ -1052,6 +1099,62 @@ class MemoryService:
             assert self._cortex is not None
             slots = self._cortex.vocab(limit)
             return {"slots": slots, "count": len(slots)}
+
+    # ── world-knowledge cortex (schema v9) ──────────────────────────────
+
+    def world_write(self, entity: str, attribute: str, value: str, *,
+                    confidence: float = 0.7, source_url: str = "",
+                    source_quote: str = "", freshness_class: str = "volatile",
+                    retrieved_at: float | None = None, content_hash: str | None = None,
+                    source_doc_id: int | None = None, now: float | None = None) -> dict[str, Any]:
+        """Assert a canonical WORLD fact (origin=source). Newer source supersedes."""
+        with self._lock:
+            self._ensure_init()
+            assert self._embedder is not None and self._world is not None
+            emb = self._embedder.encode_single(f"{entity} {attribute} {value}".strip())
+            action, rec = self._world.write_fact(
+                entity, attribute, value, emb,
+                confidence=confidence, source_url=source_url, source_quote=source_quote,
+                freshness_class=freshness_class, retrieved_at=retrieved_at,
+                content_hash=content_hash, source_doc_id=source_doc_id, now=now)
+            self._save_world()
+            return {"action": action, **_world_record_to_dict(rec)}
+
+    def world_lookup(self, entity: str, attribute: str) -> dict[str, Any] | None:
+        with self._lock:
+            self._ensure_init()
+            assert self._world is not None
+            rec = self._world.lookup(entity, attribute)
+            return _world_record_to_dict(rec) if rec is not None else None
+
+    def world_search(self, query: str, top_k: int = 5, min_score: float = 0.0) -> dict[str, Any]:
+        """Fuzzy search over current world facts; entries carry decayed
+        effective_confidence + stale flag + citation."""
+        with self._lock:
+            self._ensure_init()
+            assert self._embedder is not None and self._world is not None
+            emb = self._embedder.encode_single(query)
+            hits = self._world.search(emb, top_k=top_k, min_score=min_score)
+            entries = [{**_world_record_to_dict(r), "score": round(float(s), 4)}
+                       for r, s in hits]
+            return {"count": len(entries), "entries": entries}
+
+    def world_dump(self) -> dict[str, Any]:
+        with self._lock:
+            self._ensure_init()
+            assert self._world is not None
+            rows = [_world_record_to_dict(r) for r in self._world.current_records()]
+            rows.sort(key=lambda d: (d["entity"].lower(), d["attribute"].lower()))
+            return {"count": len(rows), "entries": rows}
+
+    def world_forget(self, entity: str, attribute: str | None = None) -> dict[str, Any]:
+        with self._lock:
+            self._ensure_init()
+            assert self._world is not None
+            removed = self._world.forget(entity, attribute)
+            if removed:
+                self._save_world()
+            return {"removed": removed, "entity": entity, "attribute": attribute}
 
     def cortex_dump(self) -> dict[str, Any]:
         """All current canonical facts (entity, attribute, value, origin, …) for

@@ -449,6 +449,85 @@ def memory_facts(limit: int = 120) -> dict[str, Any]:
 
 
 @mcp.tool()
+def memory_world_set(
+    entity: str,
+    attribute: str,
+    value: str,
+    source_url: str = "",
+    source_quote: str = "",
+    freshness_class: str = "volatile",
+    confidence: float = 0.85,
+    retrieved_at: float | None = None,
+    content_hash: str | None = None,
+) -> dict[str, Any]:
+    """Assert a canonical WORLD fact — sourced EXTERNAL knowledge, kept separate
+    from the user/project cortex (its own ``world_facts`` table, origin=source).
+
+    Use this for durable facts about the world that your frozen training data may
+    have wrong or stale (current model versions, prices, who holds a role, research
+    findings). A newer source supersedes an older value at the same slot. Trust is
+    age-decayed at read time by ``freshness_class``.
+
+    Args:
+        entity / attribute / value: the (slot, value), e.g. ``anthropic`` /
+            ``latest-model`` / ``opus-4.8``.
+        source_url: where the claim came from (the citation).
+        source_quote: the 1–2 sentences it was extracted from (shown as evidence).
+        freshness_class: ``evergreen`` (definitions/how-things-work; never decays) |
+            ``slow`` (months: leading X, a CEO) | ``volatile`` (weeks: latest
+            version, price). Default ``volatile`` (under-trust when unsure).
+        confidence: 0..1 source confidence (default 0.85).
+        retrieved_at: epoch seconds the source was fetched; omit for "now".
+        content_hash: optional hash of the source, to detect drift on revisit.
+
+    Returns:
+        ``{"action": "inserted"|"confirmed"|"superseded", ...record, effective_confidence, stale}``.
+    """
+    return service.world_write(
+        entity, attribute, value, confidence=confidence, source_url=source_url,
+        source_quote=source_quote, freshness_class=freshness_class,
+        retrieved_at=retrieved_at, content_hash=content_hash,
+    )
+
+
+@mcp.tool()
+def memory_world_search(query: str, top_k: int = 5) -> dict[str, Any]:
+    """Search current WORLD facts (sourced external knowledge) by similarity.
+
+    Each entry carries ``effective_confidence`` (age-decayed), a ``stale`` flag
+    (past 2×TTL → re-verify before relying on it), and its ``source_url`` /
+    ``source_quote`` so you can cite it. Prefer a fresh, sourced world fact over
+    your own (frozen) training intuition when they conflict.
+
+    Returns: ``{"count": int, "entries": [{entity, attribute, value, source_url,
+    source_quote, freshness_class, effective_confidence, stale, score}, ...]}``.
+    """
+    return service.world_search(query, top_k=top_k, min_score=0.0)
+
+
+@mcp.tool()
+def memory_world_facts(limit: int = 120) -> dict[str, Any]:
+    """List all current WORLD facts (introspection / audit of the world cortex).
+
+    Returns: ``{"count": int, "entries": [...]}`` sorted by (entity, attribute),
+    each with its citation + decayed effective_confidence + stale flag.
+    """
+    dump = service.world_dump()
+    entries = dump.get("entries", [])[: max(0, int(limit))]
+    return {"count": len(entries), "entries": entries}
+
+
+@mcp.tool()
+def memory_world_forget(entity: str, attribute: str | None = None) -> dict[str, Any]:
+    """Hard-delete WORLD fact(s) — a whole entity or one slot (cleanup; no audit
+    trail). Only touches the world cortex, never the user/project facts.
+
+    Returns: ``{"removed": int, "entity": str, "attribute": str|null}``.
+    """
+    return service.world_forget(entity, attribute)
+
+
+@mcp.tool()
 def memory_list_sources() -> dict[str, Any]:
     """Enumerate every source tag in the bank, with entry counts.
 
