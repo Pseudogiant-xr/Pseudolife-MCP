@@ -1019,11 +1019,24 @@ class MemoryService:
             return out
 
     def cortex_lookup(self, entity: str, attribute: str) -> dict[str, Any] | None:
-        """Exact slot lookup — the one ``current`` fact, or ``None``."""
+        """Exact slot lookup — the one ``current`` fact, or ``None``.
+
+        Alias-aware: on a direct slot miss, the entity name is resolved through
+        the graph's ``entity_aliases`` (Postgres) and the canonical name is
+        retried, so a fact stored under e.g. ``dev-box`` surfaces regardless of
+        which alias (``4090``) the caller queried — honouring the contract that
+        every fact lookup resolves aliases first."""
         with self._lock:
             self._ensure_init()
             assert self._cortex is not None
             rec = self._cortex.lookup(entity, attribute)
+            if rec is None and self._storage is not None:
+                from pseudolife_memory.graph import norm_name
+                node = self._storage.find_entity(norm_name(entity))
+                if node is not None:
+                    canon = node.get("canonical")
+                    if canon and norm_name(canon) != norm_name(entity):
+                        rec = self._cortex.lookup(canon, attribute)
             return _cortex_record_to_dict(rec) if rec is not None else None
 
     def cortex_contenders(self, entity: str, attribute: str) -> dict[str, Any]:
