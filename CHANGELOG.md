@@ -68,7 +68,7 @@ graph on top of the associative continuum.
 
 ## [0.1.0] - Initial release
 
-- In-process stdio MCP server exposing PseudoLife's memory layer: the MIRAS
+- In-process stdio MCP server exposing the neural memory layer: the MIRAS
   8-tier continuum (working → forever), ChromaDB reference bank, supersession,
   and contrastive learning. File-mode persistence (`cms_state.pt` + ChromaDB);
   no daemon, no Postgres. `memory_store` / `memory_search` / `memory_recent` /

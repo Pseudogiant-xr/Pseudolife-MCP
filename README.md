@@ -2,23 +2,39 @@
 
 **Persistent neural memory for Claude Code via the Model Context Protocol.**
 
-A stripped-down build of PseudoLife's memory stack —
-MIRAS 8-tier continuum + ChromaDB reference bank + supersession +
-contrastive learning — wrapped as an MCP server. Lets Claude (or any
-MCP-capable client) store and retrieve memories across sessions, surviving
-context compactions and `/clear` resets.
+An MCP server that gives Claude (or any MCP-capable client) a long-term
+memory that persists across sessions — surviving context compactions and
+`/clear` resets. Claude is the LLM; this server is its memory on disk.
 
 ## What this is
 
-PseudoLife is a desktop chat app with a TITANS-style neural memory. The
-**memory layer** is the interesting part: 8 parametric tiers updated by
-gradient descent at inference time, with surprise gating, contradiction
-detection, and supersession built in.
+A memory engine exposed over MCP. There's no chat UI and no bundled
+model — just tools Claude calls to store and recall what matters. It
+layers several complementary stores:
 
-PseudoLife-MCP takes just that memory layer and exposes it as an MCP
-server so Claude Code can use it directly — no Electron app, no LLM
-backend, no chat engine. Claude *is* the LLM; the MCP server is its
-persistent associative memory on disk.
+- **Associative continuum** — an 8-tier neural memory (working → forever)
+  whose tiers are small MLPs updated by gradient descent at store time,
+  with surprise gating, contradiction detection, supersession, and
+  contrastive learning. This is the fuzzy "what do I know that's related
+  to X" recall.
+- **Cortex** — a slot-keyed store of canonical facts (one *current* value
+  per `entity.attribute`), with deterministic reads, provenance tiers
+  (`user > action > agent`), and contender parking instead of silent
+  overwrites.
+- **Knowledge graph** — typed entities and edges over those facts, with a
+  closed relation vocabulary, on-read transitive/inverse inference, and
+  optional openCypher via Apache AGE.
+- **World cortex** — durable, *cited* facts about external reality (a
+  current version, a price, who holds a role) with age-decayed trust, kept
+  separate from your own facts.
+- **Reference bank** — a ChromaDB document store for RAG over files you
+  ingest.
+
+State lives in Postgres (the durable source of truth) behind a single
+long-lived daemon; every session attaches through a thin stdio shim. The
+result: Claude can pick up where it left off, correct itself when facts
+change, and reason over relationships — without you re-explaining context
+each session.
 
 ## Tools exposed
 
@@ -186,8 +202,8 @@ Connection / deployment env vars:
 
 The built-in defaults are tuned for Claude's use case:
 
-- **Surprise threshold `0.2`** (vs PseudoLife's `0.3`) — Claude stores
-  deliberately, so the gate doesn't need to be aggressive.
+- **Surprise threshold `0.2`** — Claude stores deliberately, so the gate
+  doesn't need to be aggressive.
 - **Meta-filter off** (`memory.meta_filter.enabled = false` in the MCP
   build) — the filter exists to drop auto-captured chat noise ("I don't
   have anything saved about that"); every MCP store is a deliberate tool
@@ -205,7 +221,7 @@ The built-in defaults are tuned for Claude's use case:
   untrained MLP's output. `neural_warmup_updates: 0` restores the fixed
   v0.1 blend exactly.
 - **MIRAS preset `continuum`** — the 8-tier `working / micro / instant /
-  fast / medium / slow / archival / forever` continuum, same as PseudoLife.
+  fast / medium / slow / archival / forever` continuum.
 - **No NLI scorer** — the `cross-encoder/nli-deberta-v3-xsmall`
   contradiction model is ~278 MB and optional. The four-path detector
   works without it. Install with `pip install .[nli]` if you want it.
@@ -571,34 +587,23 @@ never touches your real bank. Point them elsewhere with
 300; without any Postgres, the PG suites skip and the pure-logic suites still
 pass.
 
-## Differences from PseudoLife
+## Capabilities at a glance
 
-| | PseudoLife | PseudoLife-MCP |
-|---|---|---|
-| Transport | Electron + FastAPI (HTTP) | MCP stdio |
-| LLM | Claude / OpenAI / Gemini / LM Studio backends | None — caller is the LLM |
-| Chat engine | Full streaming chat with tools | None |
-| HyDE | Yes (Slice E) | No (caller can rephrase) |
-| Reflection | Yes (Slice D, runs on daemon thread) | No (caller can summarize) |
-| Contrastive | Yes (Slice F) | Yes — fires on `memory_supersede` and any negative-signal text |
-| NLI scorer | Bundled (278 MB) | Optional (`pip install .[nli]`) |
-| Cross-encoder reranker | — | Optional (`rerank=True` per call, ~80 MB) |
-| BM25 hybrid pool | — | Optional (`bm25=True` per call, stdlib only) |
-| Episode anchoring | — | Yes (Tier C — schema v6, `memory_episode_*`) |
-| Multi-valued tags | Single `source` only | Yes (Tier C — `tags=[...]` on store/search/delete) |
-| Consolidation workflow | — | Yes (Tier C — `memory_consolidation_candidates` + `memory_consolidate`) |
-| Canonical-fact cortex | Yes (redacted-side dream) | Yes (deterministic auto-promote + `memory_fact_*`; no LLM dream) |
-| Provenance contenders | — | Yes (tier-rank guard `user>action>agent`; `memory_fact_resolve`) |
-| Knowledge graph | — | Yes (typed entities/edges, closed relation vocab, on-read closure, AGE Cypher) |
-| World cortex | — | Yes (`memory_world_*` — cited external facts + freshness decay; manual ingest) |
-| Reference bank | Yes | Yes |
-| Schema version | v5 | v9 (Postgres; additive — adds cortex, knowledge graph + AGE, and the world cortex; legacy file-mode `.pt` banks auto-migrate) |
-
-The MCP build is **not** save-compatible with PseudoLife's data dir, even
-though the on-disk schema is the same — they're separate memory
-instances by design. If you want to inspect PseudoLife's memory from
-Claude, copy its `memory_state/` into the MCP's data dir; the loader will
-read it cleanly.
+| Capability | Status |
+|---|---|
+| Transport | MCP stdio shim → HTTP daemon |
+| Storage | Postgres 16 + pgvector (source of truth); ChromaDB for the reference bank |
+| Associative continuum | 8-tier MIRAS bands, surprise gating, supersession, contrastive learning |
+| Canonical-fact cortex | Deterministic auto-promote on `store` + `memory_fact_*` |
+| Provenance contenders | Tier-rank guard `user > action > agent`; `memory_fact_resolve` |
+| Knowledge graph | Typed entities/edges, closed relation vocab, on-read closure, AGE Cypher |
+| World cortex | `memory_world_*` — cited external facts + age-decayed freshness (manual ingest) |
+| Episodes + tags | `memory_episode_*`; multi-valued `tags=[...]` on store/search/delete |
+| Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
+| Cross-encoder reranker | Optional (`rerank=True` per call, ~80 MB) |
+| BM25 hybrid pool | Optional (`bm25=True` per call, stdlib only) |
+| NLI contradiction scorer | Optional (`pip install .[nli]`, ~278 MB) |
+| Schema version | v9 (additive; legacy file-mode `.pt` banks auto-migrate into Postgres) |
 
 ## What's not built yet
 
@@ -622,4 +627,4 @@ read it cleanly.
 
 ## License
 
-MIT. The PseudoLife memory stack this is derived from is also MIT.
+MIT — see [LICENSE](LICENSE).
