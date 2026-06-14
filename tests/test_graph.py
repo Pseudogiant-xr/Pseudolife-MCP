@@ -160,11 +160,16 @@ def svc(pg_url, tmp_path_factory):
     from pseudolife_memory.storage.schema import ensure_schema
 
     with _psy.connect(pg_url) as conn:
+        # Pin to public first (see pg_fixtures.pg_conn): the `pseudolife` role is
+        # also the AGE graph schema, so an unpinned search_path makes these
+        # unqualified table names resolve to graph-schema shadows.
+        conn.execute("SET search_path TO public, ag_catalog")
+        conn.commit()
         ensure_schema(conn)
         with conn.cursor() as cur:
             cur.execute(
-                "TRUNCATE edges, entity_aliases, relations, facts, entries, "
-                "episodes, entities, meta RESTART IDENTITY CASCADE",
+                "TRUNCATE edges, entity_aliases, relations, facts, world_facts, "
+                "entries, episodes, entities, meta RESTART IDENTITY CASCADE",
             )
         conn.commit()
         ensure_schema(conn)
@@ -257,6 +262,9 @@ def test_fact_set_links_entity_ids(svc, pg_url):
 
     svc.cortex_write("redacted", "backend", "postgres", support="user")
     with _psy.connect(pg_url) as conn:
+        # Pin to public so the unqualified `facts`/`entities` below read the real
+        # bank, not the AGE graph-schema shadows (see pg_fixtures.pg_conn).
+        conn.execute("SET search_path TO public, ag_catalog")
         row = conn.execute(
             """
             SELECT f.entity_id, f.object_entity_id, e.canonical, o.canonical

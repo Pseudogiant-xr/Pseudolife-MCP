@@ -50,6 +50,11 @@ def test_all_tools_registered() -> None:
         "memory_fact_forget",
         "memory_facts",
         "memory_fact_resolve",
+        # World cortex — sourced external-knowledge layer.
+        "memory_world_set",
+        "memory_world_search",
+        "memory_world_facts",
+        "memory_world_forget",
         # Phase 2 — knowledge graph + ontology-lite + AGE Cypher.
         "memory_graph_relate",
         "memory_graph_unrelate",

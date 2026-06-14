@@ -21,7 +21,7 @@ _DEFAULT_ADMIN = "postgresql://pseudolife:pseudolife@127.0.0.1:5433/postgres"
 _TEST_DB = "pseudolife_memory_test"
 
 _ALL_TABLES = (
-    "edges", "entity_aliases", "relations", "facts", "entries",
+    "edges", "entity_aliases", "relations", "facts", "world_facts", "entries",
     "episodes", "entities", "meta",
 )
 
@@ -63,6 +63,28 @@ def pg_conn(pg_url):
     from pseudolife_memory.storage.schema import ensure_schema
 
     with psycopg.connect(pg_url) as conn:
+        # Pin to public BEFORE any schema/truncate work — mirrors
+        # PostgresStorage.__init__. The DB role `pseudolife` is also the AGE
+        # graph's schema name, so the default ("$user", public) search_path
+        # resolves unqualified table names to the GRAPH schema once a graph
+        # exists. Without this, ensure_schema creates empty shadow tables in the
+        # `pseudolife` schema and TRUNCATE clears those instead of the real
+        # `public` bank — leaking rows across tests (order-dependent: only after
+        # some earlier test creates the AGE graph). ag_catalog keeps AGE
+        # functions reachable.
+        conn.execute("SET search_path TO public, ag_catalog")
+        conn.commit()
+        # Reap leaked backends from tests that built a MemoryService /
+        # PostgresStorage and never closed it. Such a connection holds locks on
+        # the public tables, so the TRUNCATE below would block and hit
+        # lock_timeout. Safe: this is the throwaway *_test DB; the real bank
+        # lives in a different database, never touched here.
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                "WHERE datname = current_database() AND pid <> pg_backend_pid()"
+            )
+        conn.commit()
         ensure_schema(conn)
         with conn.cursor() as cur:
             cur.execute(
