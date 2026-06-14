@@ -2,7 +2,7 @@
 
 **Persistent neural memory for Claude Code via the Model Context Protocol.**
 
-A stripped-down build of [PseudoLife](../PseudoLife-0.7)'s memory stack —
+A stripped-down build of PseudoLife's memory stack —
 MIRAS 8-tier continuum + ChromaDB reference bank + supersession +
 contrastive learning — wrapped as an MCP server. Lets Claude (or any
 MCP-capable client) store and retrieve memories across sessions, surviving
@@ -43,6 +43,10 @@ persistent associative memory on disk.
 | `memory_fact_resolve(entity, attribute, accept)` | Settle a contested fact after checking in — adopt (`true`) or discard (`false`) the contender |
 | `memory_fact_forget(entity, attribute?)` | Hard-delete canonical fact(s) at a slot/entity (no audit trail) |
 | `memory_facts(limit?)` | List all current canonical facts (cortex introspection) |
+| `memory_world_set(entity, attribute, value, source_url?, source_quote?, freshness_class?, confidence?, ...)` | Assert a canonical WORLD fact — sourced *external* knowledge (current model/version/price/role), kept in its own table; age-decayed trust by freshness |
+| `memory_world_search(query, top_k?)` | Search world facts by similarity — each carries `effective_confidence`, a `stale` flag, and its citation |
+| `memory_world_facts(limit?)` | List all current world facts (world-cortex introspection) |
+| `memory_world_forget(entity, attribute?)` | Hard-delete world fact(s) at a slot/entity (cleanup; never touches user/project facts) |
 | `memory_graph_relate(src, relation, dst, origin?, confidence?, src_type?, dst_type?)` | Assert a typed edge between entities (closed relation vocabulary; re-assertion bumps confidence) |
 | `memory_graph_unrelate(src, relation, dst)` | Retract an edge (superseded, kept for audit) |
 | `memory_alias(entity, alias)` | Bind an alternative name — all fact/graph lookups resolve aliases first |
@@ -108,7 +112,8 @@ Requires Python 3.10+, Docker Desktop, and ~600 MB of disk (torch +
 ChromaDB + the all-MiniLM-L6-v2 embedding model, fetched on first run).
 
 ```powershell
-cd C:\Users\HAMO9\ClaudeCode\PseudoLife-MCP
+git clone https://github.com/Pseudogiant-xr/PseudoLife-MCP.git
+cd PseudoLife-MCP
 python -m venv .venv
 .venv\Scripts\activate
 pip install -e .
@@ -135,16 +140,21 @@ Point `.mcp.json` (project) or `~/.claude/mcp_servers.json` (user) at the
 {
   "mcpServers": {
     "pseudolife-memory": {
-      "command": "C:\\Users\\HAMO9\\ClaudeCode\\PseudoLife-MCP\\.venv\\Scripts\\pseudolife-mcp.exe",
+      "command": "C:\\path\\to\\PseudoLife-MCP\\.venv\\Scripts\\pseudolife-mcp.exe",
       "env": {
         "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:8765",
         "PSEUDOLIFE_MCP_DATABASE_URL": "postgresql://pseudolife:pseudolife@127.0.0.1:5433/pseudolife_memory",
-        "PSEUDOLIFE_MCP_DATA_DIR": "C:\\Users\\HAMO9\\.pseudolife-mcp"
+        "PSEUDOLIFE_MCP_DATA_DIR": "%USERPROFILE%\\.pseudolife-mcp"
       }
     }
   }
 }
 ```
+
+Replace `C:\path\to\PseudoLife-MCP` with wherever you cloned the repo. The
+`PSEUDOLIFE_MCP_DATABASE_URL` matches the bundled `ops/docker-compose.yml`
+defaults (user/password `pseudolife`, host port `5433`) — change it only if you
+edit the compose file.
 
 The shim is torch-free, so sessions attach near-instantly; the daemon
 pays the one-time embedder warmup once for everyone. On first run with a
@@ -463,6 +473,36 @@ only said "yes/proceed": the discrepancy surfaces (at the write, in search, and 
 `memory.cortex.protect_provenance: false` in `config.yaml` to disable and restore
 pure newer-wins.
 
+### World knowledge — the world cortex (schema v9)
+
+A third layer sits beside the personal cortex: the **world cortex**, for durable
+facts about *external* reality that a frozen training cut-off may have wrong or
+stale — a current model version, a price, who holds a role, a research finding.
+It's a separate slot-keyed store (its own `world_facts` table, `origin=source`),
+so external claims never mingle with the user/project facts.
+
+```
+memory_world_set("anthropic", "latest-model", "opus-4.8",
+                 source_url="https://...", source_quote="Opus 4.8 is the latest...",
+                 freshness_class="volatile")   # weeks | "slow" months | "evergreen" never
+memory_world_search("which Claude model is current")
+# → entries with effective_confidence (age-decayed), a `stale` flag, and the citation
+```
+
+Each fact carries a **citation** (`source_url` + the 1–2 sentence `source_quote`,
+not the whole page) and a `freshness_class` that drives **age-decayed trust** at
+read time: past 2×TTL a fact is flagged `stale` (a lead to re-verify, not truth).
+The trust contract: prefer a fresh, *cited* world fact over frozen training
+intuition when they conflict — but cite it ("as of <date>, per <source>") rather
+than presenting it as your own knowledge; your own cortex/episodic facts stay the
+highest-trust ground truth. `memory_search` surfaces matching world facts in a
+separate block, and `memory_world_facts` lists them all for audit.
+
+> The world cortex here is populated **manually** via `memory_world_set`. The
+> live-web `research_ingest` action (fetch + distil cited world facts
+> automatically) is a redacted-agent-side capability that depends on that agent's
+> web tool — it is not part of the standalone MCP server.
+
 ## Data layout
 
 Everything lives under `PSEUDOLIFE_MCP_DATA_DIR`:
@@ -488,7 +528,7 @@ pip install -e .[dev]
 pytest tests/ -v
 ```
 
-283 tests cover the MemoryService methods (store / search / recent /
+300 tests cover the MemoryService methods (store / search / recent /
 supersede / stats / save / trace / list_sources / list_tags / delete),
 the `memory_search` scoring overrides, the cross-encoder reranker
 (15 unit + 4 integration), the BM25 hybrid lexical pool
@@ -498,7 +538,10 @@ consolidation (10), the episode + tag service surface (16), the
 atomic consolidation operation (6), the cortex canonical-fact store
 (slot dedup / supersession / no-decay / key-normalisation + the
 provenance tier-rank guard, contenders, and `resolve`), auto-promotion
-on `store`, and the cortex service + MCP surface, and MCP-level dispatch
+on `store`, the cortex service + MCP surface, the world cortex (sourced
+facts with citations + age-decayed freshness + `stale` flagging), the
+alias-resolved cortex lookup regression (a fact under a canonical name is
+reachable via any bound alias), and MCP-level dispatch
 (tool registration + docstring sanity + end-to-end invocation for every
 exposed tool through the FastMCP machinery). The v0.2 Phase 0 suites
 add the config knobs, the meta-filter gate + pruned patterns, the
@@ -520,6 +563,14 @@ suite stays fast and offline. Test suite uses a fresh embedder per
 module via the `warm_service` fixture so the ~1.5s
 sentence-transformers load doesn't dominate runtime.
 
+The PG-backed suites target a throwaway `pseudolife_memory_test` database on
+the bundled dev container (`ops/docker-compose.yml`, port 5433) — created on
+first run and reset per-test, so the whole suite is green on repeat runs and
+never touches your real bank. Point them elsewhere with
+`PSEUDOLIFE_TEST_DATABASE_URL`. With the container up, `pytest tests/` runs all
+300; without any Postgres, the PG suites skip and the pure-logic suites still
+pass.
+
 ## Differences from PseudoLife
 
 | | PseudoLife | PseudoLife-MCP |
@@ -538,8 +589,10 @@ sentence-transformers load doesn't dominate runtime.
 | Consolidation workflow | — | Yes (Tier C — `memory_consolidation_candidates` + `memory_consolidate`) |
 | Canonical-fact cortex | Yes (redacted-side dream) | Yes (deterministic auto-promote + `memory_fact_*`; no LLM dream) |
 | Provenance contenders | — | Yes (tier-rank guard `user>action>agent`; `memory_fact_resolve`) |
+| Knowledge graph | — | Yes (typed entities/edges, closed relation vocab, on-read closure, AGE Cypher) |
+| World cortex | — | Yes (`memory_world_*` — cited external facts + freshness decay; manual ingest) |
 | Reference bank | Yes | Yes |
-| Schema version | v5 | v7 (additive — pre-v6 saves load cleanly; cortex co-persists in `cortex_state.pt`) |
+| Schema version | v5 | v9 (Postgres; additive — adds cortex, knowledge graph + AGE, and the world cortex; legacy file-mode `.pt` banks auto-migrate) |
 
 The MCP build is **not** save-compatible with PseudoLife's data dir, even
 though the on-disk schema is the same — they're separate memory
@@ -561,6 +614,11 @@ read it cleanly.
 - **Hierarchical summarisation** — periodic auto-summaries at multiple
   time scales (daily, weekly). Mostly subsumed by Tier C's episode +
   consolidation flow; what's left is the *cadence* automation.
+- **Automated world-knowledge ingestion** — the world cortex stores and serves
+  cited external facts, but populating it from the live web (`research_ingest`)
+  needs a web-fetch tool the standalone server doesn't ship. Today, assert world
+  facts manually with `memory_world_set`; a redacted agent with web access can
+  automate it.
 
 ## License
 
