@@ -1,7 +1,7 @@
 # Cortex provenance-aware contenders — design spec
 
 Status: **approved (design)**, pending written-spec review + plan.
-Target: **PseudoLife-MCP** `origin/master` (`1c375fd`). Core-only; no redacted deps.
+Target: **PseudoLife-MCP** `origin/master` (`1c375fd`). Core-only; no external-agent deps.
 Touches `pseudolife_memory/memory/cortex.py`, `service.py`, `mcp_server.py`,
 `utils/config.py`, and tests.
 

@@ -1,9 +1,9 @@
 """The memory daemon — MCP over streamable HTTP (spec §3.1).
 
 One long-lived process owns the bank: every Claude Code session (and any
-LAN agent like redacted) connects here instead of spawning its own stdio
-server. Single writer by construction — the concurrency class of bugs
-from v0.1 cannot occur.
+LAN agent) connects here instead of spawning its own stdio server. Single
+writer by construction — the concurrency class of bugs from v0.1 cannot
+occur.
 
 Security model:
 * ``/health`` is always unauthenticated (cheap liveness probe).

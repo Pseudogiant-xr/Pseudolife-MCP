@@ -84,7 +84,7 @@ docstrings — those are what Claude reads to decide when to call which tool.
 ## Architecture (v0.2)
 
 One **memory daemon** owns the bank and serves MCP over HTTP; every
-Claude Code session (and any LAN agent, e.g. a redacted box) attaches to
+Claude Code session (and any LAN agent) attaches to
 it through a thin stdio **shim**. **Postgres 16 + pgvector** (in Docker)
 is the durable source of truth — the in-memory MIRAS bands are a
 write-through cache hydrated at startup; band MLP weights live in an
@@ -93,7 +93,7 @@ atomically-saved, disposable `weights.pt`.
 ```
 Claude session A ─┐
 Claude session B ─┤ stdio shim ─HTTP─► pseudolife-mcp daemon ─► Postgres (Docker)
-redacted (LAN) ─────┘   (per session)       (single writer)         pgvector + AGE
+LAN agent ────────┘   (per session)       (single writer)         pgvector + AGE
 ```
 
 This kills two v0.1 hazards by construction: a single writer means
@@ -120,7 +120,7 @@ image), entities/edges are mirrored into an AGE graph and
 `memory_graph_query` accepts read-only openCypher. Heal a drifted
 mirror with `pseudolife-mcp age-sync`.
 
-**Weak-model deployments (redacted):** expose only `memory_search`,
+**Weak-model deployments:** expose only `memory_search`,
 `memory_store`, `memory_fact_get`/`memory_fact_set`, `memory_graph`,
 and `memory_graph_relate`. Do NOT expose `memory_graph_query` (Cypher
 composition is a degrees-of-freedom hazard), `memory_relation_define`,
@@ -182,7 +182,7 @@ v≤0.1 `cms_state.pt` present in `PSEUDOLIFE_MCP_DATA_DIR`, the daemon
 auto-migrates it into Postgres and renames the originals `*.pre-v8.bak`
 (never deletes them).
 
-**Sharing memory on the LAN (e.g. a redacted box):** run the daemon with
+**Sharing memory on the LAN:** run the daemon with
 `PSEUDOLIFE_MCP_HOST=0.0.0.0` and a `PSEUDOLIFE_MCP_TOKEN`; remote
 clients set the same `PSEUDOLIFE_MCP_DAEMON_URL` + `PSEUDOLIFE_MCP_TOKEN`.
 The daemon **refuses to bind a non-loopback host without a token**, and
@@ -520,7 +520,7 @@ separate block, and `memory_world_facts` lists them all for audit.
 
 > The world cortex here is populated **manually** via `memory_world_set`. The
 > live-web `research_ingest` action (fetch + distil cited world facts
-> automatically) is a redacted-agent-side capability that depends on that agent's
+> automatically) is an agent-side capability that depends on the agent's
 > web tool — it is not part of the standalone MCP server.
 
 ## Dreaming — consolidating memories into facts
@@ -678,7 +678,7 @@ pass.
 - **Automated world-knowledge ingestion** — the world cortex stores and serves
   cited external facts, but populating it from the live web (`research_ingest`)
   needs a web-fetch tool the standalone server doesn't ship. Today, assert world
-  facts manually with `memory_world_set`; a redacted agent with web access can
+  facts manually with `memory_world_set`; an agent with web access can
   automate it.
 
 ## License

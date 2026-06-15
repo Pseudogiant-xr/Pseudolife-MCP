@@ -1,7 +1,7 @@
 # Cortex for PseudoLife-MCP — implementation spec (core-only)
 
 Status: proposed. Target repo: **PseudoLife-MCP** (`origin`), core-only, branched
-off `origin/master` (`adc39a8`). Deliberately excludes the redacted gateway "dream".
+off `origin/master` (`adc39a8`). Deliberately excludes the agent-side gateway "dream".
 
 ## 1. Why (model-agnostic motivation)
 
@@ -28,7 +28,7 @@ multi-source tiering. MCP is request/response with no lifecycle hooks and no
 automatic view of the conversation, so there is nothing for an async dream to ride
 on. Population is instead **deterministic + tool-driven** (below).
 
-## 2. What already exists in core (landed on the redacted branch `d65c540`)
+## 2. What already exists in core (landed in core, commit `d65c540`)
 
 These are in `pseudolife_memory/` (shared) and port to the MCP branch verbatim by
 `git checkout d65c540 -- <path>`:
@@ -37,7 +37,7 @@ These are in `pseudolife_memory/` (shared) and port to the MCP branch verbatim b
   confirm / supersede / contest, confidence margin + reinforce, **key
   normalization** (case + separator collapse) + load reconciliation,
   `support`/`origin` (user > action > agent) with corroboration promotion,
-  `forget` / `dump` / `vocab`, torch save/load. **No redacted/MCP deps.**
+  `forget` / `dump` / `vocab`, torch save/load. **No external-agent/MCP deps.**
 - `pseudolife_memory/service.py` — `cortex_write[+support]` / `cortex_lookup` /
   `cortex_search` / `cortex_stats` / `cortex_vocab` / `cortex_dump` /
   `cortex_forget`, `extract_slots_regex`, **cortex co-persistence already folded
@@ -77,7 +77,7 @@ def store(self, text, source="claude", tags=None, origin=None):
 Notes:
 - **Floor, not ceiling.** Regex only catches slot-shaped facts ("X is Y", "named X",
   "my X", loss/negation phrases). Rich/relational facts still need an explicit
-  `fact_set` (§5) — same boundary as redacted.
+  `fact_set` (§5) — same boundary for any client.
 - **Confidence 0.5** so an explicit `fact_set` (≥0.7) or a user-origin assertion
   cleanly out-ranks an auto-promoted guess via the existing supersede margin (0.15).
 - Reuses one embedder call per slot (cheap; same path as `cortex_write`).
@@ -175,7 +175,7 @@ New:
 ## 9. Rollout
 
 1. `git fetch origin && git checkout -b cortex-mcp origin/master`  (off `adc39a8`,
-   core-only — no `redacted/` dir).
+   core-only — no external-agent dir).
 2. Bring the landed core files:
    `git checkout d65c540 -- pseudolife_memory/memory/cortex.py
    pseudolife_memory/service.py tests/test_cortex.py tests/test_cortex_service.py`.
@@ -195,13 +195,13 @@ New:
    in context (drift happens *after* faithful recall).
 3. **No auto-injection** — MCP can surface the cortex in `memory_search` but cannot
    force the host to recall each turn. Full benefit for weak models depends on the
-   harness doing auto-recall (the redacted provider does; a bare MCP host may not).
+   harness doing auto-recall (a custom provider can; a bare MCP host may not).
 4. origin fidelity depends on the caller (no conversation feed) — most MCP stores
    default to `agent`.
 
 ## 11. Effort
 
-~1/3 of the redacted build. Store + service API + persistence + key-normalization +
+~1/3 of the full build. Store + service API + persistence + key-normalization +
 origin machinery are **already in core**. New code is one promotion hook, an origin
 defaulter, ~4 thin FastMCP tool wrappers + cortex-aware search, config, and ~6 tests.
 No daemon, no provider, no buffer, no dream, no vocab-feed.

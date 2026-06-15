@@ -900,8 +900,8 @@ def memory_graph_relate(
 ) -> dict[str, Any]:
     """Assert a typed relation between two entities (upsert a graph edge).
 
-    Use when two things are durably connected: ``("redacted", "runs-on",
-    "agent-box")``, ``("pseudolife-mcp", "stores-data-in", "postgres")``.
+    Use when two things are durably connected: ``("web-app", "runs-on",
+    "host-1")``, ``("pseudolife-mcp", "stores-data-in", "postgres")``.
     Entities are auto-created (and resolved through aliases — see
     ``memory_alias``); re-asserting an existing edge bumps its confidence.
     Edges are additive — remove a wrong one with ``memory_graph_unrelate``.
@@ -915,9 +915,9 @@ def memory_graph_relate(
     ``memory_relation_define``.
 
     Args:
-        src: Subject entity, e.g. ``"redacted"``.
+        src: Subject entity, e.g. ``"web-app"``.
         relation: Registry relation name (separator-insensitive).
-        dst: Object entity, e.g. ``"agent-box"``.
+        dst: Object entity, e.g. ``"host-1"``.
         origin: ``"user"`` / ``"action"`` / ``"agent"`` — who asserts it.
         confidence: 0..1, default 0.8.
         src_type / dst_type: Optional soft type hints for the entities

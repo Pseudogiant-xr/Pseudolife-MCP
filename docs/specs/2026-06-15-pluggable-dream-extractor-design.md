@@ -1,7 +1,7 @@
 # Pluggable dream extractor — design spec
 
 Status: **proposed (design)**, pending review + plan.
-Target: **PseudoLife-MCP** `origin/master`. Core-only; no redacted deps.
+Target: **PseudoLife-MCP** `origin/master`. Core-only; no external-agent deps.
 Touches `pseudolife_memory/service.py`, `mcp_server.py`, `daemon.py`,
 `utils/config.py`, a new `pseudolife_memory/memory/dream.py` (extractor
 abstraction + LLM client), `commands/` (a `/dream` recipe), docs, and tests.
@@ -15,8 +15,8 @@ public user:
 - The extraction work exists only as `MemoryService` methods (`dream_pull`,
   `extract_slots_regex`, `dream_commit`) and is **not exposed as MCP tools**.
 - The comment in `service.py` says the LLM step is "gateway-side." That was true
-  for the redacted deployment, where the *provider* is the gateway and routes
-  extraction to a background model (homelab 35B). **A public install has no such
+  for an external agent deployment, where the agent's *provider* is the gateway
+  and routes extraction to a background model. **A public install has no such
   gateway and no self-hosted model.**
 - The README/CHANGELOG advertise dreaming, but out of the box nothing runs it.
 
@@ -38,8 +38,8 @@ A single dream code path with a **graceful fallback chain** so that:
   OpenRouter, Groq, *or* a self-hosted model — all the same slot).
 
 Non-goals: changing the continuum/bands or the cortex write path; multi-slot
-reasoning; the redacted provider (it keeps its own background route and is
-unaffected).
+reasoning; any external agent provider (those live in their own repos, keep
+their own background routes, and are unaffected).
 
 ## 3. The three tiers
 
@@ -49,8 +49,8 @@ unaffected).
 | **1 — default** | the agent (Claude Code / any MCP client) is the gateway | the client already in use | highest | `/dream` command or scheduled routine |
 | **2 — opt-in** | BYO OpenAI-compatible endpoint | one base-URL + key + model | high; free if local | daemon sweep (headless) |
 
-Tier 2 generalizes the redacted background route: the homelab model is now just one
-backend behind a config triple, indistinguishable from Ollama or Haiku.
+Tier 2 generalizes the background-route pattern: a self-hosted model is now just
+one backend behind a config triple, indistinguishable from Ollama or Haiku.
 
 ## 4. Extractor abstraction (`memory/dream.py`)
 

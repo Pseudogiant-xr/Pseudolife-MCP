@@ -19,8 +19,8 @@
    is empty on a Claude Code bank (deliberate stores use varied sources). This
    plan makes eligibility config-driven (`DreamConfig.exclude_sources`, default
    `{"consolidation", "reflection"}`) and pulls *all other* sources.
-   **redacted-compat:** the live redacted engine relies on the `"conversation"`-only
-   behavior; after this lands, redacted should pin
+   **Back-compat:** any external deployment that relied on the
+   `"conversation"`-only behavior should pin
    `memory.dream.eligible_sources: ["conversation"]` in its config to keep the
    narrow behavior. Called out in Task 1 and the migration note.
 2. **`memory_dream_run` tool (added).** The spec listed `pull`/`status`/`commit`
@@ -632,10 +632,10 @@ git commit -m "docs(dream): /dream command + tier/config/privacy docs"
 - [ ] Manual smoke: store a slot-shaped fact, `memory_dream_run`, confirm it
   appears via `memory_fact_get` and a second run reports `pulled: 0`.
 
-## Migration note (redacted)
+## Migration note (back-compat)
 
 The eligible-source change broadens the default dream beyond
-`source == "conversation"`. The live redacted engine should pin
-`memory.dream.eligible_sources: ["conversation"]` in its config if it wants to
-keep consolidating only auto-captured turns. No schema change; cursor semantics
-unchanged.
+`source == "conversation"`. Any external deployment that wants to keep
+consolidating only auto-captured turns should pin
+`memory.dream.eligible_sources: ["conversation"]` in its config. No schema
+change; cursor semantics unchanged.

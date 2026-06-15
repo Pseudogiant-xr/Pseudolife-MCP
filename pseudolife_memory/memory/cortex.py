@@ -21,8 +21,8 @@ supplied by the caller (dependency injection) so the store stays embedder-
 agnostic and unit-testable without loading a sentence-transformer.
 
 Phase 1 scope: the store + write/read/persist paths. The dream pass that
-*populates* it (LLM/regex claim extraction over episodes) is a later phase and
-lives on the redacted side so it follows the agent's active model.
+*populates* it (LLM/regex claim extraction over recent memories) lives in
+``memory/dream.py`` as a pluggable extractor (regex floor → optional LLM).
 """
 from __future__ import annotations
 

@@ -12,7 +12,7 @@ the whole AGE graph from the tables anyway.
 
 AGE labels only allow ``[A-Za-z0-9_]``, so relation names are mirrored
 with ``-`` folded to ``_`` (``depends-on`` → ``depends_on``). Strong-model
-tool: the redacted deployment must not expose Cypher (spec §5.3.5).
+tool: weak-model deployments must not expose Cypher (spec §5.3.5).
 """
 
 from __future__ import annotations
