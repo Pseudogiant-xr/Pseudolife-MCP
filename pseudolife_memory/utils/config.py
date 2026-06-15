@@ -285,6 +285,35 @@ class ReflectionConfig:
 
 
 @dataclass
+class DreamConfig:
+    """Dream pass — MIRAS→cortex consolidation (pluggable extractor).
+
+    Tier 0 (regex floor) needs no config. ``eligible_sources`` / ``exclude_sources``
+    decide which stored memories a dream consolidates; ``min_batch`` / ``idle_seconds``
+    are the backlog+quiescence trigger used by ``dream_status`` (and, later, the
+    daemon sweep). Tier-2 extractor fields are defined now for config stability but
+    unused until the OpenAI-compatible extractor lands.
+    """
+    enabled: bool = True
+    # Which stored sources are eligible. None => every source EXCEPT exclude_sources.
+    eligible_sources: list[str] | None = None
+    exclude_sources: list[str] = field(
+        default_factory=lambda: ["consolidation", "reflection"]
+    )
+    # Backlog + quiescence trigger (consumed by dream_status / future sweep).
+    min_batch: int = 8
+    idle_seconds: float = 1800.0
+    max_batch: int = 40
+    sweep_interval_seconds: float = 600.0   # used by the Phase 3 daemon sweep
+    # Tier 2 (Phase 3) — BYO OpenAI-compatible extractor. Unused in Phases 1–2.
+    extractor_base_url: str | None = None
+    extractor_api_key: str | None = None
+    extractor_model: str | None = None
+    extractor_max_tokens: int = 400
+    extractor_timeout_seconds: float = 20.0
+
+
+@dataclass
 class HydeConfig:
     """HyDE-lite query expansion (Slice E, v0.7.6).
 
@@ -367,6 +396,8 @@ class MemoryConfig:
     hyde: HydeConfig = field(default_factory=HydeConfig)
     # Periodic reflection / dreaming (Slice D, v0.7.6).
     reflection: ReflectionConfig = field(default_factory=ReflectionConfig)
+    # Dream pass — MIRAS→cortex consolidation (pluggable extractor).
+    dream: DreamConfig = field(default_factory=DreamConfig)
     # Contrastive retrieval objective (Slice F, v0.7.6).
     contrastive: ContrastiveConfig = field(default_factory=ContrastiveConfig)
     # Cortex — sibling slot-keyed canonical-fact store (schema v7).
@@ -508,6 +539,8 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             )
         if "cortex" in mem_raw:
             config.memory.cortex = _dict_to_dataclass(CortexConfig, mem_raw["cortex"])
+        if "dream" in mem_raw:
+            config.memory.dream = _dict_to_dataclass(DreamConfig, mem_raw["dream"])
         if "meta_filter" in mem_raw:
             config.memory.meta_filter = _dict_to_dataclass(
                 MetaFilterConfig, mem_raw["meta_filter"],
