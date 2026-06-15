@@ -8,9 +8,51 @@ Three tiers:
 
 from __future__ import annotations
 
+import contextlib
+import http.server
+import json
+import threading
+import time
+
 import pytest
 
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
+
+
+# ── stub OpenAI-compatible server (Tier 2 tests; no PG, no embedder) ──────
+
+class _StubHandler(http.server.BaseHTTPRequestHandler):
+    responder = None  # (status, body_str) callable, set per subclass
+
+    def do_POST(self):  # noqa: N802
+        length = int(self.headers.get("content-length", 0))
+        self.rfile.read(length)
+        status, body = type(self).responder()
+        data = body.encode()
+        self.send_response(status)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def log_message(self, *a):  # silence
+        pass
+
+
+@contextlib.contextmanager
+def _stub_server(responder):
+    handler = type("H", (_StubHandler,), {"responder": staticmethod(responder)})
+    srv = http.server.HTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{srv.server_address[1]}"
+    finally:
+        srv.shutdown()
+
+
+def _chat_payload(claims):
+    return json.dumps({"choices": [{"message": {
+        "content": json.dumps({"claims": claims})}}]})
 
 
 # ── config ───────────────────────────────────────────────────────────────
@@ -43,6 +85,59 @@ def test_regex_extractor_empty_on_no_slots():
     from pseudolife_memory.memory.dream import RegexExtractor
 
     assert RegexExtractor().extract(["hello there"], vocab=[]) == []
+
+
+# ── OpenAICompatExtractor + factory (Tier 2) ─────────────────────────────
+
+def test_openai_extractor_parses_claims():
+    from pseudolife_memory.memory.dream import OpenAICompatExtractor
+
+    payload = _chat_payload([{"entity": "svc", "attribute": "port",
+                              "value": "8080", "confidence": 0.9}])
+    with _stub_server(lambda: (200, payload)) as base_url:
+        claims = OpenAICompatExtractor(base_url, "m").extract(["whatever"], vocab=[])
+    assert claims == [{"entity": "svc", "attribute": "port", "value": "8080",
+                       "confidence": 0.9, "origin": "agent"}]
+
+
+def test_openai_extractor_empty_on_timeout():
+    from pseudolife_memory.memory.dream import OpenAICompatExtractor
+
+    def slow():
+        time.sleep(1.0)
+        return (200, _chat_payload([]))
+
+    with _stub_server(slow) as base_url:
+        ext = OpenAICompatExtractor(base_url, "m", timeout_seconds=0.2)
+        assert ext.extract(["x"], vocab=[]) == []
+
+
+def test_openai_extractor_empty_on_malformed():
+    from pseudolife_memory.memory.dream import OpenAICompatExtractor
+
+    bad = json.dumps({"choices": [{"message": {"content": "not json at all"}}]})
+    with _stub_server(lambda: (200, bad)) as base_url:
+        assert OpenAICompatExtractor(base_url, "m").extract(["x"], vocab=[]) == []
+
+
+def test_build_extractor_selects_by_config(monkeypatch):
+    from pseudolife_memory.memory.dream import (
+        OpenAICompatExtractor, RegexExtractor, build_extractor,
+    )
+    from pseudolife_memory.utils.config import DreamConfig
+
+    monkeypatch.delenv("PSEUDOLIFE_DREAM_BASE_URL", raising=False)
+    monkeypatch.delenv("PSEUDOLIFE_DREAM_MODEL", raising=False)
+    # Unconfigured => regex floor.
+    assert isinstance(build_extractor(DreamConfig()), RegexExtractor)
+    # Configured via dataclass => Tier 2.
+    cfg = DreamConfig(extractor_base_url="http://x", extractor_model="m")
+    assert isinstance(build_extractor(cfg), OpenAICompatExtractor)
+    # Env overrides the (empty) dataclass.
+    monkeypatch.setenv("PSEUDOLIFE_DREAM_BASE_URL", "http://env")
+    monkeypatch.setenv("PSEUDOLIFE_DREAM_MODEL", "envm")
+    ext = build_extractor(DreamConfig())
+    assert isinstance(ext, OpenAICompatExtractor) and ext.base_url == "http://env"
 
 
 # ── driver / status (PG-backed; real embedder) ───────────────────────────
