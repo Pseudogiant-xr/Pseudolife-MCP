@@ -1231,22 +1231,15 @@ class MemoryService:
             }
 
     def extract_slots_regex(self, texts: list[str]) -> dict[str, Any]:
-        """Deterministic no-LLM claim-extraction floor. Runs the existing
-        ``slots.extract_slots`` over each text and returns claim dicts. The
-        gateway dream uses this when the active model yields nothing usable, so
-        the regex implementation lives in exactly one place."""
-        from pseudolife_memory.memory.slots import extract_slots
-        claims: list[dict[str, Any]] = []
-        for t in (texts or []):
-            for s in extract_slots(t or ""):
-                value = s.value if s.polarity != "-" else ("NOT " + s.value)
-                claims.append({
-                    "entity": s.entity,
-                    "attribute": s.attribute,
-                    "value": value,
-                    "confidence": 0.55,
-                })
-        return {"claims": claims}
+        """Deterministic no-LLM claim-extraction floor (delegates to
+        ``RegexExtractor`` so the regex implementation lives in exactly one
+        place). The gateway dream uses this when the active model yields nothing
+        usable."""
+        from pseudolife_memory.memory.dream import RegexExtractor
+        claims = RegexExtractor().extract(list(texts or []), vocab=[])
+        return {"claims": [{"entity": c["entity"], "attribute": c["attribute"],
+                            "value": c["value"], "confidence": c["confidence"]}
+                           for c in claims]}
 
     def dream_commit(self, cursor: float) -> dict[str, Any]:
         """Advance the dream cursor (monotonic) and persist it with the cortex."""
