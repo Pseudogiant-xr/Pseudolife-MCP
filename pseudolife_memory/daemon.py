@@ -113,6 +113,7 @@ def run_daemon(host: str | None = None, port: int | None = None) -> None:
         }
 
     mcp_server.start_background_durability()
+    mcp_server.start_dream_sweep()
 
     app = AuthHealthASGI(
         mcp_server.mcp.streamable_http_app(), token, _health,

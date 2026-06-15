@@ -140,6 +140,51 @@ def test_build_extractor_selects_by_config(monkeypatch):
     assert isinstance(ext, OpenAICompatExtractor) and ext.base_url == "http://env"
 
 
+# ── sweep gate (pure; fake service) ──────────────────────────────────────
+
+class _FakeService:
+    def __init__(self, *, enabled=True, would_fire=True, backlog=5):
+        from pseudolife_memory.utils.config import AppConfig
+        self.config = AppConfig()
+        self.config.memory.dream.enabled = enabled
+        self._would_fire = would_fire
+        self._backlog = backlog
+        self.ran = False
+
+    def dream_status(self):
+        return {"backlog": self._backlog, "idle_seconds": 0.0,
+                "dream_cursor": 0.0, "would_fire": self._would_fire}
+
+    def dream_run(self, extractor):
+        self.ran = True
+        return {"pulled": 1, "claims": 1, "inserted": 1, "confirmed": 0,
+                "contested": 0, "superseded": 0, "cursor": 123.0}
+
+
+def test_run_sweep_once_disabled():
+    from pseudolife_memory.memory.dream import run_sweep_once
+
+    svc = _FakeService(enabled=False)
+    out = run_sweep_once(svc)
+    assert out["fired"] is False and out["reason"] == "disabled" and not svc.ran
+
+
+def test_run_sweep_once_below_threshold():
+    from pseudolife_memory.memory.dream import run_sweep_once
+
+    svc = _FakeService(would_fire=False, backlog=2)
+    out = run_sweep_once(svc)
+    assert out["fired"] is False and out["backlog"] == 2 and not svc.ran
+
+
+def test_run_sweep_once_fires():
+    from pseudolife_memory.memory.dream import run_sweep_once
+
+    svc = _FakeService(would_fire=True)
+    out = run_sweep_once(svc)
+    assert out["fired"] is True and out["inserted"] == 1 and svc.ran
+
+
 # ── driver / status (PG-backed; real embedder) ───────────────────────────
 
 @pytest.fixture()

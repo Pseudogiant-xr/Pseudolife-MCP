@@ -145,3 +145,20 @@ def build_extractor(cfg) -> DreamExtractor:
             timeout_seconds=cfg.extractor_timeout_seconds,
         )
     return RegexExtractor()
+
+
+def run_sweep_once(service) -> dict:
+    """One headless sweep tick: if dreaming is enabled and the backlog+quiescence
+    trigger would fire, run a dream with the configured extractor. Session-
+    agnostic by construction (it keys on the cursor, not on session lifecycle).
+    Returns ``{"fired": bool, ...}``; never raises into the daemon's timer."""
+    cfg = service.config.memory.dream
+    if not cfg.enabled:
+        return {"fired": False, "reason": "disabled"}
+    status = service.dream_status()
+    if not status["would_fire"]:
+        return {"fired": False, "reason": "below_threshold",
+                "backlog": status["backlog"]}
+    result = service.dream_run(build_extractor(cfg))
+    logger.info("dream sweep fired: %s", result)
+    return {"fired": True, **result}

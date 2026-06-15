@@ -1151,6 +1151,35 @@ def start_background_durability() -> None:
     threading.Thread(target=_warmup, daemon=True, name="pl-warmup").start()
 
 
+def _dream_sweep_loop(interval: float) -> None:
+    from pseudolife_memory.memory.dream import run_sweep_once
+    while True:
+        time.sleep(interval)
+        try:
+            run_sweep_once(service)
+        except Exception as exc:  # noqa: BLE001 — a dream must never kill the daemon
+            logger.warning("dream sweep error: %s", exc)
+
+
+_dream_sweep_started = False
+
+
+def start_dream_sweep() -> None:
+    """Idempotent: start the headless dream sweep (Tier 0/2). Off when the
+    bank is empty or unconfigured — ``run_sweep_once`` gates on backlog +
+    quiescence each tick, so an idle bank does no LLM work. Daemon-only."""
+    global _dream_sweep_started
+    if _dream_sweep_started:
+        return
+    if not service.config.memory.dream.enabled:
+        return
+    _dream_sweep_started = True
+    interval = float(service.config.memory.dream.sweep_interval_seconds)
+    threading.Thread(
+        target=_dream_sweep_loop, args=(interval,), daemon=True, name="pl-dream",
+    ).start()
+
+
 def _run_embedded_stdio() -> None:
     """v0.1-style in-process stdio server (also the shim's escape hatch)."""
     logger.info(
