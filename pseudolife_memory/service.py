@@ -1292,6 +1292,29 @@ class MemoryService:
         return {"pulled": len(entries), "claims": len(claims),
                 "cursor": newest, **tally}
 
+    def dream_status(self) -> dict[str, Any]:
+        """Backlog (eligible unconsolidated memories), idle seconds since the most
+        recent store, and whether the trigger would fire. Read-only — safe for a
+        SessionStart nudge hook."""
+        import time as _t
+        cfg = self.config.memory.dream
+        backlog = self.dream_pull(limit=10**9)["count"]
+        with self._lock:
+            self._ensure_init()
+            assert self._cms is not None and self._cortex is not None
+            latest = max(
+                (e.timestamp for b in self._cms.bands for e in b.entries),
+                default=0.0,
+            )
+            cursor = self._cortex.dream_cursor
+        idle = (_t.time() - latest) if latest else 0.0
+        would_fire = bool(cfg.enabled and (
+            backlog >= cfg.min_batch
+            or (backlog >= 1 and idle >= cfg.idle_seconds)
+        ))
+        return {"backlog": backlog, "idle_seconds": idle,
+                "dream_cursor": cursor, "would_fire": would_fire}
+
     def warmup(self):
         """Eagerly load embedder + reranker + NLI so the first real tool call
         is warm. Safe to run in a background thread at startup."""

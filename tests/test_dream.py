@@ -78,3 +78,13 @@ def test_dream_run_promotes_and_advances_cursor(svc):
     # Idempotent: a second run over the same (now-consolidated) tail is a no-op.
     again = svc.dream_run(RegexExtractor())
     assert again["pulled"] == 0
+
+
+def test_dream_status_would_fire_on_idle(svc):
+    svc.config.memory.dream.min_batch = 100        # never fires on batch
+    svc.config.memory.dream.idle_seconds = 0.0     # everything counts as idle
+    svc.store("the relay port is 4001", source="notes")
+    st = svc.dream_status()
+    assert st["backlog"] >= 1
+    assert st["would_fire"] is True
+    assert "dream_cursor" in st and "idle_seconds" in st
