@@ -55,6 +55,11 @@ def test_all_tools_registered() -> None:
         "memory_world_search",
         "memory_world_facts",
         "memory_world_forget",
+        # Dream — MIRAS->cortex consolidation.
+        "memory_dream_pull",
+        "memory_dream_status",
+        "memory_dream_commit",
+        "memory_dream_run",
         # Phase 2 — knowledge graph + ontology-lite + AGE Cypher.
         "memory_graph_relate",
         "memory_graph_unrelate",
@@ -102,6 +107,19 @@ def _invoke(tool_name: str, args: dict) -> dict:
         item.text for item in content if hasattr(item, "text")
     ]
     return json.loads("".join(text_parts))
+
+
+def test_memory_dream_run_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
+    import importlib
+    import pseudolife_memory.mcp_server as mod
+    importlib.reload(mod)
+
+    _invoke("memory_store", {"text": "the beacon port is 7777", "source": "notes"})
+    out = _invoke("memory_dream_run", {})
+    assert "pulled" in out and "cursor" in out
+    got = _invoke("memory_fact_get", {"entity": "beacon", "attribute": "port"})
+    assert got["record"] is not None and "7777" in got["record"]["value"]
 
 
 def test_memory_store_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:

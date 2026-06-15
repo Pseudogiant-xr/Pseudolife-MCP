@@ -528,6 +528,48 @@ def memory_world_forget(entity: str, attribute: str | None = None) -> dict[str, 
 
 
 @mcp.tool()
+def memory_dream_status() -> dict[str, Any]:
+    """Read-only: how much unconsolidated memory is waiting for a dream.
+
+    Returns ``{backlog, idle_seconds, dream_cursor, would_fire}``. Safe to call
+    from a SessionStart hook to decide whether to nudge a ``/dream``.
+    """
+    return service.dream_status()
+
+
+@mcp.tool()
+def memory_dream_pull(limit: int = 40) -> dict[str, Any]:
+    """Eligible memories not yet consolidated (timestamp > dream_cursor),
+    oldest-first. The agent reads these, extracts canonical facts, writes them
+    with ``memory_fact_set``, then calls ``memory_dream_commit``.
+
+    Returns ``{cursor, count, entries:[{text, timestamp, episode_id}, ...]}``.
+    """
+    return service.dream_pull(limit=limit)
+
+
+@mcp.tool()
+def memory_dream_commit(cursor: float) -> dict[str, Any]:
+    """Advance the dream cursor (monotonic) after consolidating up to ``cursor``
+    (the newest timestamp from the pull). Returns ``{dream_cursor}``.
+    """
+    return service.dream_commit(cursor)
+
+
+@mcp.tool()
+def memory_dream_run() -> dict[str, Any]:
+    """Run one server-side dream with the regex floor (Tier 0, no LLM): pull ->
+    extract -> fact_set -> commit. For higher quality, the agent should instead
+    use ``memory_dream_pull`` + ``memory_fact_set`` (the ``/dream`` command).
+
+    Returns ``{pulled, claims, inserted, confirmed, contested, superseded,
+    cursor}``.
+    """
+    from pseudolife_memory.memory.dream import RegexExtractor
+    return service.dream_run(RegexExtractor())
+
+
+@mcp.tool()
 def memory_list_sources() -> dict[str, Any]:
     """Enumerate every source tag in the bank, with entry counts.
 
