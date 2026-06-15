@@ -1206,11 +1206,17 @@ class MemoryService:
         with self._lock:
             self._ensure_init()
             assert self._cms is not None and self._cortex is not None
+            cfg = self.config.memory.dream
+            excluded = set(cfg.exclude_sources or [])
+            allowed = set(cfg.eligible_sources) if cfg.eligible_sources else None
             cursor = self._cortex.dream_cursor
             rows: list[MemoryEntry] = []
             for band in self._cms.bands:
                 for e in band.entries:
-                    if e.source != "conversation":
+                    if allowed is not None:
+                        if e.source not in allowed:
+                            continue
+                    elif e.source in excluded:
                         continue
                     if e.timestamp <= cursor:
                         continue

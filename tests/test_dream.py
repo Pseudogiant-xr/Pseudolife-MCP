@@ -43,3 +43,23 @@ def test_regex_extractor_empty_on_no_slots():
     from pseudolife_memory.memory.dream import RegexExtractor
 
     assert RegexExtractor().extract(["hello there"], vocab=[]) == []
+
+
+# ── driver / status (PG-backed; real embedder) ───────────────────────────
+
+@pytest.fixture()
+def svc(pg_conn, pg_url, tmp_path):  # noqa: F811
+    from pseudolife_memory.service import MemoryService
+
+    s = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    yield s
+    s.flush()
+
+
+def test_dream_pull_includes_non_conversation_sources(svc):
+    svc.store("the widget port is 9999", source="notes")          # newly eligible
+    svc.store("a consolidated synthesis", source="consolidation")  # stays excluded
+    out = svc.dream_pull(limit=10)
+    texts = [e["text"] for e in out["entries"]]
+    assert any("widget port" in t for t in texts)
+    assert all("consolidated synthesis" not in t for t in texts)
