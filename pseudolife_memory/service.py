@@ -1206,11 +1206,17 @@ class MemoryService:
         with self._lock:
             self._ensure_init()
             assert self._cms is not None and self._cortex is not None
+            cfg = self.config.memory.dream
+            excluded = set(cfg.exclude_sources or [])
+            allowed = set(cfg.eligible_sources) if cfg.eligible_sources else None
             cursor = self._cortex.dream_cursor
             rows: list[MemoryEntry] = []
             for band in self._cms.bands:
                 for e in band.entries:
-                    if e.source != "conversation":
+                    if allowed is not None:
+                        if e.source not in allowed:
+                            continue
+                    elif e.source in excluded:
                         continue
                     if e.timestamp <= cursor:
                         continue
@@ -1231,22 +1237,15 @@ class MemoryService:
             }
 
     def extract_slots_regex(self, texts: list[str]) -> dict[str, Any]:
-        """Deterministic no-LLM claim-extraction floor. Runs the existing
-        ``slots.extract_slots`` over each text and returns claim dicts. The
-        gateway dream uses this when the active model yields nothing usable, so
-        the regex implementation lives in exactly one place."""
-        from pseudolife_memory.memory.slots import extract_slots
-        claims: list[dict[str, Any]] = []
-        for t in (texts or []):
-            for s in extract_slots(t or ""):
-                value = s.value if s.polarity != "-" else ("NOT " + s.value)
-                claims.append({
-                    "entity": s.entity,
-                    "attribute": s.attribute,
-                    "value": value,
-                    "confidence": 0.55,
-                })
-        return {"claims": claims}
+        """Deterministic no-LLM claim-extraction floor (delegates to
+        ``RegexExtractor`` so the regex implementation lives in exactly one
+        place). The gateway dream uses this when the active model yields nothing
+        usable."""
+        from pseudolife_memory.memory.dream import RegexExtractor
+        claims = RegexExtractor().extract(list(texts or []), vocab=[])
+        return {"claims": [{"entity": c["entity"], "attribute": c["attribute"],
+                            "value": c["value"], "confidence": c["confidence"]}
+                           for c in claims]}
 
     def dream_commit(self, cursor: float) -> dict[str, Any]:
         """Advance the dream cursor (monotonic) and persist it with the cortex."""
@@ -1258,6 +1257,63 @@ class MemoryService:
                 self._cortex.dream_cursor = c
                 self._save_cortex()
             return {"dream_cursor": self._cortex.dream_cursor}
+
+    def dream_run(self, extractor, *, limit: int | None = None) -> dict[str, Any]:
+        """One dream cycle: pull eligible unconsolidated memories, extract claims
+        via ``extractor`` (regex floor fallback if it yields nothing), write each
+        to the cortex, advance the dream cursor. Returns a summary. The single
+        consolidation path shared by the MCP tool and (later) the daemon sweep."""
+        from pseudolife_memory.memory.dream import RegexExtractor
+        cap = int(limit if limit is not None else self.config.memory.dream.max_batch)
+        pulled = self.dream_pull(limit=cap)
+        entries = pulled["entries"]
+        if not entries:
+            return {"pulled": 0, "claims": 0, "inserted": 0, "confirmed": 0,
+                    "contested": 0, "superseded": 0, "cursor": pulled["cursor"]}
+        texts = [e["text"] for e in entries]
+        vocab = self.cortex_vocab().get("slots", [])
+        try:
+            claims = extractor.extract(texts, vocab)
+        except Exception as exc:  # noqa: BLE001 — an extractor must never break a dream
+            logger.warning("dream extractor failed (%s); using regex floor", exc)
+            claims = []
+        if not claims:
+            claims = RegexExtractor().extract(texts, vocab)
+        tally = {"inserted": 0, "confirmed": 0, "contested": 0, "superseded": 0}
+        for c in claims:
+            res = self.cortex_write(
+                c["entity"], c["attribute"], c["value"],
+                confidence=float(c.get("confidence", 0.55)),
+                support=c.get("origin", "agent"),
+            )
+            tally[res["action"]] = tally.get(res["action"], 0) + 1
+        newest = max(e["timestamp"] for e in entries)
+        self.dream_commit(newest)
+        return {"pulled": len(entries), "claims": len(claims),
+                "cursor": newest, **tally}
+
+    def dream_status(self) -> dict[str, Any]:
+        """Backlog (eligible unconsolidated memories), idle seconds since the most
+        recent store, and whether the trigger would fire. Read-only — safe for a
+        SessionStart nudge hook."""
+        import time as _t
+        cfg = self.config.memory.dream
+        backlog = self.dream_pull(limit=10**9)["count"]
+        with self._lock:
+            self._ensure_init()
+            assert self._cms is not None and self._cortex is not None
+            latest = max(
+                (e.timestamp for b in self._cms.bands for e in b.entries),
+                default=0.0,
+            )
+            cursor = self._cortex.dream_cursor
+        idle = (_t.time() - latest) if latest else 0.0
+        would_fire = bool(cfg.enabled and (
+            backlog >= cfg.min_batch
+            or (backlog >= 1 and idle >= cfg.idle_seconds)
+        ))
+        return {"backlog": backlog, "idle_seconds": idle,
+                "dream_cursor": cursor, "would_fire": would_fire}
 
     def warmup(self):
         """Eagerly load embedder + reranker + NLI so the first real tool call

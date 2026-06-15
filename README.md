@@ -63,6 +63,10 @@ each session.
 | `memory_world_search(query, top_k?)` | Search world facts by similarity — each carries `effective_confidence`, a `stale` flag, and its citation |
 | `memory_world_facts(limit?)` | List all current world facts (world-cortex introspection) |
 | `memory_world_forget(entity, attribute?)` | Hard-delete world fact(s) at a slot/entity (cleanup; never touches user/project facts) |
+| `memory_dream_status()` | Read-only: backlog of unconsolidated memories + whether a dream would fire (safe for a SessionStart nudge) |
+| `memory_dream_pull(limit?)` | Recent memories not yet consolidated — the agent extracts canonical facts from these (Tier 1) |
+| `memory_dream_commit(cursor)` | Advance the dream cursor after consolidating up to `cursor` |
+| `memory_dream_run()` | One server-side dream with the regex floor — headless, no LLM (Tier 0) |
 | `memory_graph_relate(src, relation, dst, origin?, confidence?, src_type?, dst_type?)` | Assert a typed edge between entities (closed relation vocabulary; re-assertion bumps confidence) |
 | `memory_graph_unrelate(src, relation, dst)` | Retract an edge (superseded, kept for audit) |
 | `memory_alias(entity, alias)` | Bind an alternative name — all fact/graph lookups resolve aliases first |
@@ -518,6 +522,58 @@ separate block, and `memory_world_facts` lists them all for audit.
 > live-web `research_ingest` action (fetch + distil cited world facts
 > automatically) is a redacted-agent-side capability that depends on that agent's
 > web tool — it is not part of the standalone MCP server.
+
+## Dreaming — consolidating memories into facts
+
+A **dream** distils the recent associative stream (MIRAS) into canonical cortex
+facts: pull unconsolidated memories → extract `(entity, attribute, value)` →
+`memory_fact_set` → advance a monotonic cursor so each memory is processed once.
+Because it keys on the **cursor**, not on "sessions", returning to an old session
+later just appends more tail — nothing is reprocessed, and there is no
+"session finished" event to detect.
+
+Extraction is pluggable; pick the tier that fits — **no self-hosted model is
+required**:
+
+| Tier | How it runs | Needs | Quality |
+|------|-------------|-------|---------|
+| **0 — baseline** | `memory_dream_run` (regex floor) — headless, on-box, free | nothing | weak (`X is Y`, `key: value`, port/version) |
+| **1 — default** | the **agent itself** is the gateway: the `/dream` command | the agent you already run | highest |
+| **2 — opt-in** | daemon auto-sweep calls a configured OpenAI-compatible endpoint | one base-URL + key + model | high; free if local |
+
+**Tier 1 — `/dream` (recommended).** Copy `examples/commands/dream.md` to
+`.claude/commands/dream.md` in any project, then run `/dream`. The agent reads
+`memory_dream_pull`, extracts durable current-state facts, writes them with
+`memory_fact_set`, and commits the cursor. To run it on a cadence instead of by
+hand, point a scheduled agent/cron job at the same prompt.
+
+**Tier 0 — zero-config.** Call `memory_dream_run` (or schedule it) for a fully
+headless pass with the deterministic regex floor — no LLM, nothing leaves the
+machine.
+
+**Tier 2 — headless auto-sweep.** Point the daemon at any OpenAI-compatible
+endpoint and it dreams on its own — no agent, no manual trigger:
+
+```powershell
+$env:PSEUDOLIFE_DREAM_BASE_URL = "http://localhost:11434/v1"   # e.g. Ollama
+$env:PSEUDOLIFE_DREAM_MODEL    = "qwen2.5:7b"
+# $env:PSEUDOLIFE_DREAM_API_KEY = "sk-..."   # for hosted endpoints (Haiku, OpenRouter, ...)
+```
+
+The daemon runs a background sweep every `memory.dream.sweep_interval_seconds`;
+each tick it checks the same backlog+quiescence trigger and, if it fires, runs a
+dream with the configured extractor (falling back to the regex floor on any
+endpoint failure). The same env vars also upgrade `memory_dream_run`. A local
+model (Ollama/LM Studio) keeps all text on-box; a hosted endpoint does not.
+
+What gets consolidated and when is configurable under `memory.dream`
+(`eligible_sources` / `exclude_sources`, and the `min_batch` / `idle_seconds`
+backlog+quiescence thresholds that `memory_dream_status` reports).
+
+**Privacy & cost.** Tier 0 is on-box and free. Tier 1 spends the agent tokens
+you already pay for (a scheduled daily dream is small but non-zero). Tier 2 with a
+*cloud* endpoint sends memory text off-box — a local model (e.g. Ollama) keeps it
+on-machine.
 
 ## Data layout
 

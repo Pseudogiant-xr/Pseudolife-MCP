@@ -4,6 +4,27 @@ All notable changes to PseudoLife-MCP are documented here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Dream consolidation (Tiers 0–2).** Pull recent associative memories, extract
+  canonical `(entity, attribute, value)` facts, write them to the cortex, and
+  advance a monotonic cursor so each memory is consolidated once (session-agnostic
+  — no "session finished" event needed). A pluggable `DreamExtractor`
+  (`memory/dream.py`) feeds one shared `service.dream_run` driver that owns cursor
+  discipline and the regex fallback. Three tiers:
+  - **Tier 0** — `memory_dream_run` (regex floor, headless, no LLM, on-box/free).
+  - **Tier 1** — agent-driven via `memory_dream_pull` / `memory_dream_status` /
+    `memory_dream_commit` and a copy-in `/dream` command
+    (`examples/commands/dream.md`).
+  - **Tier 2** — `OpenAICompatExtractor` + a daemon background sweep that fires on
+    a configurable backlog+quiescence trigger, pointed at any OpenAI-compatible
+    endpoint (Ollama, LM Studio, Haiku, OpenRouter, self-hosted) via
+    `PSEUDOLIFE_DREAM_BASE_URL` / `_MODEL` / `_API_KEY`.
+
+  Eligible sources and the trigger thresholds are configurable under
+  `memory.dream`. Design: `docs/specs/2026-06-15-pluggable-dream-extractor-design.md`.
+
 ## [0.2.0] - 2026-06-14
 
 The v0.2 line moves the bank off local files and onto a single-writer daemon
