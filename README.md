@@ -539,7 +539,7 @@ required**:
 |------|-------------|-------|---------|
 | **0 — baseline** | `memory_dream_run` (regex floor) — headless, on-box, free | nothing | weak (`X is Y`, `key: value`, port/version) |
 | **1 — default** | the **agent itself** is the gateway: the `/dream` command | the agent you already run | highest |
-| **2 — opt-in** *(planned)* | daemon calls a configured OpenAI-compatible endpoint | one base-URL + key + model | high; free if local |
+| **2 — opt-in** | daemon auto-sweep calls a configured OpenAI-compatible endpoint | one base-URL + key + model | high; free if local |
 
 **Tier 1 — `/dream` (recommended).** Copy `examples/commands/dream.md` to
 `.claude/commands/dream.md` in any project, then run `/dream`. The agent reads
@@ -550,6 +550,21 @@ hand, point a scheduled agent/cron job at the same prompt.
 **Tier 0 — zero-config.** Call `memory_dream_run` (or schedule it) for a fully
 headless pass with the deterministic regex floor — no LLM, nothing leaves the
 machine.
+
+**Tier 2 — headless auto-sweep.** Point the daemon at any OpenAI-compatible
+endpoint and it dreams on its own — no agent, no manual trigger:
+
+```powershell
+$env:PSEUDOLIFE_DREAM_BASE_URL = "http://localhost:11434/v1"   # e.g. Ollama
+$env:PSEUDOLIFE_DREAM_MODEL    = "qwen2.5:7b"
+# $env:PSEUDOLIFE_DREAM_API_KEY = "sk-..."   # for hosted endpoints (Haiku, OpenRouter, ...)
+```
+
+The daemon runs a background sweep every `memory.dream.sweep_interval_seconds`;
+each tick it checks the same backlog+quiescence trigger and, if it fires, runs a
+dream with the configured extractor (falling back to the regex floor on any
+endpoint failure). The same env vars also upgrade `memory_dream_run`. A local
+model (Ollama/LM Studio) keeps all text on-box; a hosted endpoint does not.
 
 What gets consolidated and when is configurable under `memory.dream`
 (`eligible_sources` / `exclude_sources`, and the `min_batch` / `idle_seconds`

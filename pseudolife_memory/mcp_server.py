@@ -558,15 +558,18 @@ def memory_dream_commit(cursor: float) -> dict[str, Any]:
 
 @mcp.tool()
 def memory_dream_run() -> dict[str, Any]:
-    """Run one server-side dream with the regex floor (Tier 0, no LLM): pull ->
-    extract -> fact_set -> commit. For higher quality, the agent should instead
-    use ``memory_dream_pull`` + ``memory_fact_set`` (the ``/dream`` command).
+    """Run one server-side dream with the configured extractor: pull -> extract
+    -> fact_set -> commit. Uses the regex floor (Tier 0, no LLM) unless a
+    ``memory.dream`` extractor endpoint is configured (Tier 2), in which case it
+    uses that. For the highest quality without any config, the agent should
+    instead use ``memory_dream_pull`` + ``memory_fact_set`` (the ``/dream``
+    command).
 
     Returns ``{pulled, claims, inserted, confirmed, contested, superseded,
     cursor}``.
     """
-    from pseudolife_memory.memory.dream import RegexExtractor
-    return service.dream_run(RegexExtractor())
+    from pseudolife_memory.memory.dream import build_extractor
+    return service.dream_run(build_extractor(service.config.memory.dream))
 
 
 @mcp.tool()
