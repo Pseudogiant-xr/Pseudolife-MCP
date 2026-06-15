@@ -1258,6 +1258,40 @@ class MemoryService:
                 self._save_cortex()
             return {"dream_cursor": self._cortex.dream_cursor}
 
+    def dream_run(self, extractor, *, limit: int | None = None) -> dict[str, Any]:
+        """One dream cycle: pull eligible unconsolidated memories, extract claims
+        via ``extractor`` (regex floor fallback if it yields nothing), write each
+        to the cortex, advance the dream cursor. Returns a summary. The single
+        consolidation path shared by the MCP tool and (later) the daemon sweep."""
+        from pseudolife_memory.memory.dream import RegexExtractor
+        cap = int(limit if limit is not None else self.config.memory.dream.max_batch)
+        pulled = self.dream_pull(limit=cap)
+        entries = pulled["entries"]
+        if not entries:
+            return {"pulled": 0, "claims": 0, "inserted": 0, "confirmed": 0,
+                    "contested": 0, "superseded": 0, "cursor": pulled["cursor"]}
+        texts = [e["text"] for e in entries]
+        vocab = self.cortex_vocab().get("slots", [])
+        try:
+            claims = extractor.extract(texts, vocab)
+        except Exception as exc:  # noqa: BLE001 — an extractor must never break a dream
+            logger.warning("dream extractor failed (%s); using regex floor", exc)
+            claims = []
+        if not claims:
+            claims = RegexExtractor().extract(texts, vocab)
+        tally = {"inserted": 0, "confirmed": 0, "contested": 0, "superseded": 0}
+        for c in claims:
+            res = self.cortex_write(
+                c["entity"], c["attribute"], c["value"],
+                confidence=float(c.get("confidence", 0.55)),
+                support=c.get("origin", "agent"),
+            )
+            tally[res["action"]] = tally.get(res["action"], 0) + 1
+        newest = max(e["timestamp"] for e in entries)
+        self.dream_commit(newest)
+        return {"pulled": len(entries), "claims": len(claims),
+                "cursor": newest, **tally}
+
     def warmup(self):
         """Eagerly load embedder + reranker + NLI so the first real tool call
         is warm. Safe to run in a background thread at startup."""

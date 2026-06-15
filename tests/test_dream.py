@@ -63,3 +63,18 @@ def test_dream_pull_includes_non_conversation_sources(svc):
     texts = [e["text"] for e in out["entries"]]
     assert any("widget port" in t for t in texts)
     assert all("consolidated synthesis" not in t for t in texts)
+
+
+def test_dream_run_promotes_and_advances_cursor(svc):
+    from pseudolife_memory.memory.dream import RegexExtractor
+
+    svc.store("the gadget version is 3.2", source="notes")
+    out = svc.dream_run(RegexExtractor())
+    assert out["pulled"] >= 1
+    assert out["inserted"] + out["confirmed"] >= 1
+    assert out["cursor"] > 0
+    fact = svc.cortex_lookup("gadget", "version")
+    assert fact is not None and "3.2" in fact["value"]
+    # Idempotent: a second run over the same (now-consolidated) tail is a no-op.
+    again = svc.dream_run(RegexExtractor())
+    assert again["pulled"] == 0
