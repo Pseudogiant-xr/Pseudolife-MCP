@@ -4,6 +4,19 @@ All notable changes to PseudoLife-MCP are documented here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Dream consolidation (Tiers 0–1).** `memory_dream_run` (regex floor, headless,
+  no LLM) plus `memory_dream_pull` / `memory_dream_status` / `memory_dream_commit`
+  for agent-driven dreaming, and a copy-in `/dream` command
+  (`examples/commands/dream.md`). A pluggable `DreamExtractor` (`memory/dream.py`)
+  feeds one shared `service.dream_run` driver that owns cursor discipline and the
+  regex fallback. Eligible sources and the backlog+idle trigger are configurable
+  under `memory.dream`. (Tier 2 BYO-endpoint extractor + daemon sweep are designed
+  but not yet built — see
+  `docs/specs/2026-06-15-pluggable-dream-extractor-design.md`.)
+
 ## [0.2.0] - 2026-06-14
 
 The v0.2 line moves the bank off local files and onto a single-writer daemon
