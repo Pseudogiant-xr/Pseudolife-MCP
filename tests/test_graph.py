@@ -182,7 +182,7 @@ def svc(pg_url, tmp_path_factory):
 
 
 def test_relate_unknown_relation_suggestions(svc):
-    out = svc.graph_relate("redacted", "dependsOn", "daemon")
+    out = svc.graph_relate("web-app", "dependsOn", "daemon")
     assert out["error"] == "unknown_relation"
     assert "depends-on" in out["suggestions"]
     assert "related-to" in out["hint"]
@@ -190,7 +190,7 @@ def test_relate_unknown_relation_suggestions(svc):
 
 def test_relate_normalizes_variant_and_warns_on_type(svc):
     out = svc.graph_relate(
-        "redacted", "runs_on", "agent-box",
+        "web-app", "runs_on", "agent-box",
         src_type="service", dst_type="host",
     )
     assert out["relation"] == "runs-on"
@@ -201,7 +201,7 @@ def test_relate_normalizes_variant_and_warns_on_type(svc):
         src_type="service", dst_type="environment",
     )
     assert r["defined"] == "deployed-to"
-    out2 = svc.graph_relate("redacted", "deployed-to", "agent-box")
+    out2 = svc.graph_relate("web-app", "deployed-to", "agent-box")
     assert any("expects 'environment'" in w for w in out2["warnings"])
     assert out2["relation"] == "deployed-to"  # stored despite the warning
 
@@ -218,17 +218,17 @@ def test_alias_resolves_in_relate(svc):
 
 
 def test_graph_neighborhood_facts_and_derived(svc):
-    svc.graph_relate("redacted", "depends-on", "pseudolife-mcp", origin="user")
+    svc.graph_relate("web-app", "depends-on", "pseudolife-mcp", origin="user")
     svc.graph_relate("pseudolife-mcp", "depends-on", "postgres")
     svc.cortex_write("postgres", "port", "5433", support="user")
 
-    out = svc.graph_neighborhood("redacted", depth=2)
+    out = svc.graph_neighborhood("web-app", depth=2)
     assert out["found"]
     names = {n["canonical"] for n in out["nodes"]}
-    assert {"redacted", "pseudolife-mcp", "postgres"} <= names
+    assert {"web-app", "pseudolife-mcp", "postgres"} <= names
     derived = [e for e in out["edges"] if e["derived"]]
     assert any(
-        e["src"] == "redacted" and e["dst"] == "postgres"
+        e["src"] == "web-app" and e["dst"] == "postgres"
         and e["via"] == ["transitive:depends-on"]
         for e in derived
     )
@@ -242,8 +242,8 @@ def test_graph_neighborhood_facts_and_derived(svc):
 
 
 def test_graph_path_between_two_entities(svc):
-    out = svc.graph_neighborhood("redacted", depth=1, to="postgres")
-    assert out["paths"] and out["paths"][0][0] == "redacted"
+    out = svc.graph_neighborhood("web-app", depth=1, to="postgres")
+    assert out["paths"] and out["paths"][0][0] == "web-app"
     assert out["paths"][0][-1] == "postgres"
 
 
@@ -260,7 +260,7 @@ def test_fact_set_links_entity_ids(svc, pg_url):
     object_entity_id (value naming a known entity)."""
     import psycopg as _psy
 
-    svc.cortex_write("redacted", "backend", "postgres", support="user")
+    svc.cortex_write("web-app", "backend", "postgres", support="user")
     with _psy.connect(pg_url) as conn:
         # Pin to public so the unqualified `facts`/`entities` below read the real
         # bank, not the AGE graph-schema shadows (see pg_fixtures.pg_conn).
@@ -271,14 +271,14 @@ def test_fact_set_links_entity_ids(svc, pg_url):
             FROM facts f
             JOIN entities e ON e.id = f.entity_id
             JOIN entities o ON o.id = f.object_entity_id
-            WHERE f.entity_norm = 'redacted' AND f.attribute_norm = 'backend'
+            WHERE f.entity_norm = 'web-app' AND f.attribute_norm = 'backend'
               AND f.status = 'current'
             """,
         ).fetchone()
     assert row is not None
-    assert row[2] == "redacted" and row[3] == "postgres"
-    ref = svc.entity_ref("redacted")
-    assert ref is not None and ref["canonical"] == "redacted"
+    assert row[2] == "web-app" and row[3] == "postgres"
+    ref = svc.entity_ref("web-app")
+    assert ref is not None and ref["canonical"] == "web-app"
 
 
 # ── AGE layer (skip when extension absent) ───────────────────────────────
@@ -294,7 +294,7 @@ def test_age_cypher_roundtrip(svc):
     sync = svc.age_sync()  # heal any drift from earlier tests
     assert sync["entities"] > 0
     out = svc.graph_cypher(
-        "MATCH (a:Entity {canonical: 'redacted'})-[:depends_on]->(b:Entity) "
+        "MATCH (a:Entity {canonical: 'web-app'})-[:depends_on]->(b:Entity) "
         "RETURN b.canonical",
     )
     assert out.get("error") is None, out
