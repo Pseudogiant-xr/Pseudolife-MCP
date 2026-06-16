@@ -174,8 +174,52 @@ def test_non_loopback_without_token_refused():
         "PSEUDOLIFE_MCP_PORT": str(_free_port()),
     }
     env.pop("PSEUDOLIFE_MCP_TOKEN", None)
+    env.pop("PSEUDOLIFE_MCP_TRUST_BIND", None)
     proc = subprocess.run(
         [sys.executable, "-m", "pseudolife_memory.cli", "serve"],
         env=env, capture_output=True, timeout=60,
     )
     assert proc.returncode == 2
+
+
+def test_non_loopback_with_trust_bind_allowed(tmp_path):
+    """PSEUDOLIFE_MCP_TRUST_BIND bypasses the loopback guard (container case).
+
+    The daemon should come up healthy on a 0.0.0.0 bind with no token —
+    the container's port publish (not the bind host) is the boundary.
+    """
+    url = resolve_test_db_url()
+    if not _pg_reachable(url):
+        pytest.skip("no test Postgres reachable")
+    port = _free_port()
+    env = {
+        **os.environ,
+        "PSEUDOLIFE_MCP_HOST": "0.0.0.0",
+        "PSEUDOLIFE_MCP_PORT": str(port),
+        "PSEUDOLIFE_MCP_DATABASE_URL": url,
+        "PSEUDOLIFE_MCP_DATA_DIR": str(tmp_path),
+        "PSEUDOLIFE_MCP_TRUST_BIND": "1",
+    }
+    env.pop("PSEUDOLIFE_MCP_TOKEN", None)
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "pseudolife_memory.cli", "serve"],
+        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    try:
+        deadline = time.time() + 60
+        health = None
+        while time.time() < deadline:
+            health = _health(port)
+            if health is not None:
+                break
+            if proc.poll() is not None:
+                pytest.fail(f"daemon exited early ({proc.returncode})")
+            time.sleep(0.5)
+        assert health is not None and health["status"] == "ok"
+        assert health["auth"] is False
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()

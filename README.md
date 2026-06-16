@@ -83,17 +83,21 @@ docstrings — those are what Claude reads to decide when to call which tool.
 
 ## Architecture (v0.2)
 
-One **memory daemon** owns the bank and serves MCP over HTTP; every
-Claude Code session (and any LAN agent) attaches to
-it through a thin stdio **shim**. **Postgres 16 + pgvector** (in Docker)
-is the durable source of truth — the in-memory MIRAS bands are a
-write-through cache hydrated at startup; band MLP weights live in an
-atomically-saved, disposable `weights.pt`.
+One **memory daemon** owns the bank and serves MCP over streamable HTTP
+at `/mcp`; every Claude Code session (and any LAN agent) attaches to it.
+**Postgres 16 + pgvector** (in Docker) is the durable source of truth —
+the in-memory MIRAS bands are a write-through cache hydrated at startup;
+band MLP weights live in an atomically-saved, disposable `weights.pt`.
+
+The daemon runs **either** containerized (recommended — portable, no host
+Python) **or** as a host process. Claude Code attaches **either** directly
+over HTTP (recommended) **or** through a thin torch-free stdio **shim**:
 
 ```
-Claude session A ─┐
-Claude session B ─┤ stdio shim ─HTTP─► pseudolife-mcp daemon ─► Postgres (Docker)
-LAN agent ────────┘   (per session)       (single writer)         pgvector + AGE
+Claude session A ─┐  HTTP (recommended)
+Claude session B ─┼───────────────────► pseudolife-mcp daemon ─► Postgres (Docker)
+LAN agent ────────┘  or stdio shim         (single writer)        pgvector + AGE
+                     (per session)         host proc OR Docker
 ```
 
 This kills two v0.1 hazards by construction: a single writer means
@@ -126,10 +130,36 @@ and `memory_graph_relate`. Do NOT expose `memory_graph_query` (Cypher
 composition is a degrees-of-freedom hazard), `memory_relation_define`,
 `memory_delete`, or `memory_fact_forget`.
 
-## Install (Windows)
+## Install — containerized (recommended, any OS)
 
-Requires Python 3.10+, Docker Desktop, and ~600 MB of disk (torch +
-ChromaDB + the all-MiniLM-L6-v2 embedding model, fetched on first run).
+The whole stack — Postgres **and** the memory daemon — runs in Docker.
+No host Python, no torch install, no version skew; the daemon image bakes
+in CPU-only torch and the `all-MiniLM-L6-v2` weights, so it runs
+identically on Windows / macOS / Linux. Requires only Docker (~2.5 GB
+daemon image + the Postgres image, built once).
+
+```bash
+git clone https://github.com/Pseudogiant-xr/PseudoLife-MCP.git
+cd PseudoLife-MCP
+
+# 1. One-time: create the two persistent volumes (bank + daemon state).
+docker volume create ops_pseudolife_pgdata
+docker volume create ops_pseudolife_data
+
+# 2. Build + start both services (Postgres, then the daemon).
+docker compose -f ops/docker-compose.yml up -d --build
+```
+
+The daemon serves MCP at `http://127.0.0.1:8765/mcp` and restarts with
+Docker — no logon task needed. First build downloads the model into the
+image (once); every container start after that is offline and fast. Wire
+Claude Code in over **HTTP** (below).
+
+## Install — host process (Windows, for GPU / dev)
+
+Runs Postgres in Docker but the daemon on host Python. Use this if you
+want to hack on the daemon or run the embedder on a local GPU. Requires
+Python 3.10+, Docker Desktop, and ~600 MB of disk.
 
 ```powershell
 git clone https://github.com/Pseudogiant-xr/PseudoLife-MCP.git
@@ -139,7 +169,7 @@ python -m venv .venv
 pip install -e .
 
 # 1. Start Postgres 16 + pgvector + AGE (one-time build, then persistent).
-docker compose -f ops/docker-compose.yml up -d --build
+docker compose -f ops/docker-compose.yml up -d --build pseudolife-pg
 
 # 2. Register the daemon to auto-start at logon (binds 127.0.0.1:8765).
 ops\install-autostart.ps1
@@ -153,8 +183,41 @@ v0.1 in-process stdio server; no daemon, no Postgres — an escape hatch).
 
 ## Wire into Claude Code
 
-Point `.mcp.json` (project) or `~/.claude/mcp_servers.json` (user) at the
-**shim**. It connects every session to the shared daemon:
+**HTTP transport (recommended — required for the containerized stack).**
+The daemon already serves MCP over HTTP, so point Claude Code straight at
+it — no shim, no host command, nothing OS-specific:
+
+```json
+{
+  "mcpServers": {
+    "pseudolife-memory": {
+      "type": "http",
+      "url": "http://127.0.0.1:8765/mcp"
+    }
+  }
+}
+```
+
+If you ran the daemon with a `PSEUDOLIFE_MCP_TOKEN`, add the bearer header:
+
+```json
+{
+  "mcpServers": {
+    "pseudolife-memory": {
+      "type": "http",
+      "url": "http://127.0.0.1:8765/mcp",
+      "headers": { "Authorization": "Bearer <your-token>" }
+    }
+  }
+}
+```
+
+This is the cleanest cross-OS setup: the only host-side state is this URL.
+
+**stdio shim (host-process installs only).** If you run the daemon on host
+Python and prefer stdio, point at the **shim** instead — it find-or-starts
+the daemon and proxies. It does *not* work with the containerized daemon
+(nothing to spawn on the host):
 
 ```json
 {
@@ -201,6 +264,7 @@ Connection / deployment env vars:
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). |
 | `PSEUDOLIFE_MCP_HOST` / `_PORT` | `127.0.0.1` / `8765` | Daemon bind address. |
 | `PSEUDOLIFE_MCP_TOKEN` | _(unset)_ | Bearer token; **required** to bind a non-loopback host. |
+| `PSEUDOLIFE_MCP_TRUST_BIND` | _(unset)_ | Set `1` to allow a non-loopback bind without a token when the boundary is external (containerized, loopback-published). The compose daemon sets this; never set it for a host daemon. |
 | `PSEUDOLIFE_MCP_DATA_DIR` | `./data` (cwd-relative) | Weights cache + legacy-migration source + ChromaDB. |
 | `PSEUDOLIFE_MCP_CONFIG` | `<data_dir>/config.yaml` if present, else built-ins | Override MIRAS / embedding / memory config. |
 

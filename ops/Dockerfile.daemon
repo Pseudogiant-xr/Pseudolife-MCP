@@ -1,0 +1,60 @@
+# PseudoLife-MCP memory daemon — the whole compute side in one image.
+#
+#   docker compose -f ops/docker-compose.yml up -d --build   # start / rebuild
+#
+# Self-contained + OS-agnostic: pinned Python, CPU-only torch, and the
+# embedding model weights are baked in, so the image runs identically on
+# Windows / macOS / Linux with no host Python and no first-run download.
+#
+# The daemon serves MCP over streamable HTTP at /mcp (and /health). Point
+# Claude Code at http://127.0.0.1:8765/mcp — no stdio shim needed.
+#
+# Build context is the repo ROOT (see docker-compose.yml: context: ..),
+# so paths below are relative to the project root.
+FROM python:3.12-slim
+
+# HF cache lives at a fixed path so the baked weights resolve at runtime
+# under HF_HUB_OFFLINE=1. CPU-only by contract — no CUDA in this image.
+ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    HF_HOME=/opt/hf \
+    CUDA_VISIBLE_DEVICES=-1 \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1 \
+    PSEUDOLIFE_MCP_HOST=0.0.0.0 \
+    PSEUDOLIFE_MCP_PORT=8765 \
+    PSEUDOLIFE_MCP_DATA_DIR=/data
+
+WORKDIR /app
+
+# 1) CPU-only torch first, from PyTorch's CPU wheel index. Installing it
+#    up front means the editable install below sees torch already
+#    satisfied and never pulls the multi-GB CUDA build from PyPI.
+RUN pip install --index-url https://download.pytorch.org/whl/cpu "torch>=2.1.0"
+
+# 2) The package + its remaining deps (resolved from PyPI; torch is
+#    already satisfied). Copy only what the install needs for layer cache
+#    friendliness, then the package source.
+COPY pyproject.toml README.md /app/
+COPY pseudolife_memory /app/pseudolife_memory
+RUN pip install /app
+
+# 3) Bake the embedding model (~90 MB) into the image so cold start needs
+#    no network — kills the HF HEAD-check flakiness and the slow first run.
+#    The image sets HF_HUB_OFFLINE=1 for runtime; override to 0 for just this
+#    step so the one-time download is allowed at build time.
+RUN HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 \
+    python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+
+# Runtime data (neural weights, ChromaDB, cortex snapshot) lives here on a
+# mounted volume so it survives container recreation.
+RUN mkdir -p /data
+VOLUME ["/data"]
+
+EXPOSE 8765
+
+# Liveness: /health is unauthenticated by design (see daemon.py).
+HEALTHCHECK --interval=15s --timeout=5s --start-period=90s --retries=5 \
+    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8765/health', timeout=3).status==200 else 1)"
+
+CMD ["python", "-m", "pseudolife_memory.cli", "serve"]

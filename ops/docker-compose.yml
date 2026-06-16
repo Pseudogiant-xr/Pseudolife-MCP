@@ -1,17 +1,25 @@
-# PseudoLife-MCP storage substrate: PG 16 + AGE + pgvector.
+# PseudoLife-MCP full stack: Postgres substrate + the memory daemon.
 #
-#   docker compose -f ops/docker-compose.yml up -d --build   # start / rebuild
-#   docker compose -f ops/docker-compose.yml stop|start      # cycle, data safe
+#   First time on a fresh machine (creates the two persistent volumes):
+#     docker volume create ops_pseudolife_pgdata
+#     docker volume create ops_pseudolife_data
+#   Then, every time:
+#     docker compose -f ops/docker-compose.yml up -d --build   # start / rebuild
+#     docker compose -f ops/docker-compose.yml stop|start      # cycle, data safe
 #
-# ⚠️  THE BANK LIVES IN THE `pseudolife_pgdata` VOLUME. To rebuild the image
+# ⚠️  TWO VOLUMES HOLD STATE. `pseudolife_pgdata` is the canonical bank
+#     (entries + facts + graph). `pseudolife_data` holds the daemon's learned
+#     neural weights + ChromaDB + cortex snapshot. To rebuild images
 #     (e.g. CVE hardening) use `up -d --build` or `stop`/`start` — these keep
-#     the volume. NEVER use `down -v`, `docker volume rm`, or
-#     `docker system prune --volumes`: they DELETE the memory bank. (The volume
-#     is declared `external` below so `down -v` skips it, but the manual volume
-#     commands still bite — and always `ops/backup.ps1` before any teardown.)
+#     both volumes. NEVER use `down -v`, `docker volume rm`, or
+#     `docker system prune --volumes`: they DELETE state. (Both volumes are
+#     `external` below so `down -v` skips them, but the manual volume commands
+#     still bite — and always `ops/backup.ps1` before any teardown.)
 #
-# Bound to 127.0.0.1 only — the LAN sees the MCP daemon, never Postgres.
-# Host port 5433 avoids collisions with any native Postgres install.
+# Ports bind 127.0.0.1 only. Postgres (5433) is never exposed beyond the
+# compose network + loopback; the daemon (8765) is the only thing Claude
+# Code talks to — point it at  http://127.0.0.1:8765/mcp  (HTTP transport,
+# no stdio shim). Host port 5433 avoids collisions with a native Postgres.
 services:
   pseudolife-pg:
     build:
@@ -34,6 +42,37 @@ services:
       timeout: 5s
       retries: 5
 
+  pseudolife-daemon:
+    build:
+      # Context is the repo root (compose file lives in ops/), so the
+      # Dockerfile can copy the pseudolife_memory package + pyproject.
+      context: ..
+      dockerfile: ops/Dockerfile.daemon
+    image: pseudolife-daemon:0.2.0
+    container_name: pseudolife-daemon
+    restart: unless-stopped
+    depends_on:
+      pseudolife-pg:
+        condition: service_healthy
+    environment:
+      # Reaches Postgres over the compose network by service name (internal
+      # port 5432, not the host-published 5433).
+      PSEUDOLIFE_MCP_DATABASE_URL: postgresql://pseudolife:pseudolife@pseudolife-pg:5432/pseudolife_memory
+      PSEUDOLIFE_MCP_HOST: 0.0.0.0
+      PSEUDOLIFE_MCP_PORT: "8765"
+      PSEUDOLIFE_MCP_DATA_DIR: /data
+      # The 0.0.0.0 bind is safe here: the port below publishes only to
+      # 127.0.0.1, so the network boundary is the Docker mapping, not the
+      # bind host. This flag tells the daemon's guard exactly that.
+      PSEUDOLIFE_MCP_TRUST_BIND: "1"
+      CUDA_VISIBLE_DEVICES: "-1"
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+    ports:
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - pseudolife_data:/data
+
 volumes:
   # External so `docker compose down -v` cannot remove it — the bank survives
   # any container teardown/rebuild. Created once with:
@@ -42,3 +81,9 @@ volumes:
   pseudolife_pgdata:
     external: true
     name: ops_pseudolife_pgdata
+  # Daemon state (neural weights + ChromaDB + cortex snapshot). External for
+  # the same reason as the bank — survives any container teardown/rebuild.
+  # Create once with:  docker volume create ops_pseudolife_data
+  pseudolife_data:
+    external: true
+    name: ops_pseudolife_data

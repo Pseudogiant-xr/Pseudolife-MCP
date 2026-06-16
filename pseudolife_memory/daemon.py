@@ -94,14 +94,33 @@ def run_daemon(host: str | None = None, port: int | None = None) -> None:
     host = host or os.environ.get("PSEUDOLIFE_MCP_HOST", DEFAULT_HOST)
     port = int(port or os.environ.get("PSEUDOLIFE_MCP_PORT", DEFAULT_PORT))
     token = os.environ.get("PSEUDOLIFE_MCP_TOKEN") or None
+    trust_bind = os.environ.get("PSEUDOLIFE_MCP_TRUST_BIND", "").lower() in (
+        "1", "true", "yes", "on",
+    )
 
     if host not in _LOOPBACK and token is None:
-        logger.error(
-            "Refusing to bind %s without PSEUDOLIFE_MCP_TOKEN — the memory "
-            "bank must not listen on the network unauthenticated. Set the "
-            "token (and give it to LAN clients) or bind 127.0.0.1.", host,
-        )
-        sys.exit(2)
+        # Inside a container the process MUST bind 0.0.0.0, but the real
+        # network boundary is the Docker port publish (compose binds it to
+        # 127.0.0.1). PSEUDOLIFE_MCP_TRUST_BIND is the operator's explicit
+        # assertion that exposure is enforced outside this process, so the
+        # 0.0.0.0 bind here is not a LAN exposure. The host-daemon default
+        # (no flag) still refuses — see ops/docker-compose.yml.
+        if trust_bind:
+            logger.warning(
+                "Binding %s without a token because PSEUDOLIFE_MCP_TRUST_BIND "
+                "is set — relying on an external network boundary (e.g. a "
+                "container port published only to 127.0.0.1). Do NOT set this "
+                "when running the daemon directly on a host.", host,
+            )
+        else:
+            logger.error(
+                "Refusing to bind %s without PSEUDOLIFE_MCP_TOKEN — the memory "
+                "bank must not listen on the network unauthenticated. Set the "
+                "token (and give it to LAN clients), bind 127.0.0.1, or set "
+                "PSEUDOLIFE_MCP_TRUST_BIND=1 if the boundary is external "
+                "(containerised, loopback-published).", host,
+            )
+            sys.exit(2)
 
     def _health() -> dict:
         svc = mcp_server.service

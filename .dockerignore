@@ -1,0 +1,23 @@
+# Keep the daemon image build context small + reproducible. The image
+# bakes its own model weights and gets its data from a mounted volume,
+# so none of the local state below belongs in the build.
+.git
+.venv
+venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+*.egg-info
+
+# Local bank / weights / caches — provided at runtime via the data volume.
+data
+memory_state
+chromadb
+*.pt
+*.pt.bak
+*.pt.pre-v8.bak
+
+# Docs/scratch that don't affect the build.
+*.md
+!README.md
+docs

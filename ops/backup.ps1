@@ -21,16 +21,18 @@ $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $out = Join-Path $OutDir "pseudolife_memory-$stamp.sql.gz"
 
 Write-Host "Dumping $Db from container $Container -> $out"
+# Dump + gzip INSIDE the container, then copy the artifact out. This avoids
+# piping binary through PowerShell entirely — `Set-Content -Encoding Byte`
+# was removed in PowerShell 7, and `>` redirection mangles bytes as UTF-16.
 # -Fc would be smaller but plain+gzip is trivially restorable with psql.
-docker exec $Container pg_dump -U $User -d $Db |
-    & { $input | Set-Content -Encoding Byte -NoNewline -Path ($out -replace '\.gz$','') }
-# Compress (PowerShell-native gzip via .NET).
-$raw = $out -replace '\.gz$',''
-$in = [IO.File]::OpenRead($raw)
-$fs = [IO.File]::Create($out)
-$gz = New-Object IO.Compression.GzipStream($fs, [IO.Compression.CompressionMode]::Compress)
-$in.CopyTo($gz); $gz.Close(); $fs.Close(); $in.Close()
-Remove-Item $raw
+$tmp = "/tmp/pl_backup-$stamp.sql.gz"
+docker exec $Container sh -c "pg_dump -U $User -d $Db | gzip -9 > $tmp"
+if ($LASTEXITCODE -ne 0) { throw "pg_dump failed inside container $Container" }
+docker cp "${Container}:$tmp" $out
+docker exec $Container rm -f $tmp
+if (-not (Test-Path $out) -or (Get-Item $out).Length -eq 0) {
+    throw "backup artifact missing or empty: $out"
+}
 
 # Rotation.
 Get-ChildItem $OutDir -Filter "pseudolife_memory-*.sql.gz" |
