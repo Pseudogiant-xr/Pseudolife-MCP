@@ -1,0 +1,33 @@
+# Optional CPU llama.cpp server exposing an OpenAI-compatible API for the dream
+# extractor. The default GGUF is BAKED IN (via a throwaway download stage) so
+# the stack is batteries-included: `docker compose --profile extractor up`
+# needs no manual model step and works offline after the build.
+#
+# Default rung = Gemma 4 E2B (Q4_K_M, ~2.9GB) — the smallest "just works" CPU
+# candidate (spec rung 1). Bake E4B (rung 2) instead with:
+#   --build-arg MODEL_URL=https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/resolve/main/gemma-4-E4B-it-Q4_K_M.gguf
+# Or, for the benchmark, leave the baked default and mount a different GGUF over
+# /models/extractor.gguf at run time (see ops/docker-compose.yml).
+#
+# NOTE: making this sidecar default-on (and which rung) is a post-benchmark
+# decision (see docs/specs/2026-06-18-pluggable-llm-extraction-design.md §4).
+
+ARG MODEL_URL=https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_M.gguf
+
+# Stage 1 — fetch the GGUF with a curl-equipped image (the llama.cpp server
+# image is minimal and may lack curl/wget).
+FROM curlimages/curl:latest AS fetch
+ARG MODEL_URL
+RUN curl -fSL --retry 3 --retry-delay 5 "$MODEL_URL" -o /tmp/extractor.gguf
+
+# Stage 2 — the OpenAI-compatible CPU server with the model baked in.
+FROM ghcr.io/ggml-org/llama.cpp:server
+COPY --from=fetch /tmp/extractor.gguf /models/extractor.gguf
+EXPOSE 8081
+# llama-server is the image ENTRYPOINT; these are its args. --jinja enables the
+# chat template so response_format / JSON-object output works; the bind is
+# 0.0.0.0 because the compose network (not the host) is the boundary — this
+# service is never published to the host.
+CMD ["--model", "/models/extractor.gguf", \
+     "--host", "0.0.0.0", "--port", "8081", \
+     "--ctx-size", "8192", "--jinja"]

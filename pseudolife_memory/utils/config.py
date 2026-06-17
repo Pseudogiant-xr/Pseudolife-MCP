@@ -309,7 +309,11 @@ class DreamConfig:
     extractor_base_url: str | None = None
     extractor_api_key: str | None = None
     extractor_model: str | None = None
-    extractor_max_tokens: int = 400
+    # Output budget for the extractor call. Sized for REASONING models (e.g. the
+    # default Gemma sidecar emits a thinking trace before the JSON): too low and
+    # the model spends the budget on reasoning and returns empty content, which
+    # the extractor reads as "no claims" and falls back to the regex floor.
+    extractor_max_tokens: int = 1024
     extractor_timeout_seconds: float = 20.0
 
 

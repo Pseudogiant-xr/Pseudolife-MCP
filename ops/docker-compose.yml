@@ -68,10 +68,36 @@ services:
       CUDA_VISIBLE_DEVICES: "-1"
       HF_HUB_OFFLINE: "1"
       TRANSFORMERS_OFFLINE: "1"
+      # Route dream consolidation through the opt-in extractor sidecar (start it
+      # with `--profile extractor`). Uncomment both, then recreate the daemon:
+      # PSEUDOLIFE_DREAM_BASE_URL: http://pseudolife-extractor:8081/v1
+      # PSEUDOLIFE_DREAM_MODEL: extractor
     ports:
       - "127.0.0.1:8765:8765"
     volumes:
       - pseudolife_data:/data
+
+  # Opt-in CPU LLM extractor for higher-quality dream consolidation. OFF by
+  # default (profiles:) — start it explicitly:
+  #     docker compose -f ops/docker-compose.yml --profile extractor up -d
+  # then enable routing via the two PSEUDOLIFE_DREAM_* env vars in the
+  # pseudolife-daemon block above and recreate the daemon.
+  pseudolife-extractor:
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile.extractor
+    image: pseudolife-extractor:gemma4-e2b
+    container_name: pseudolife-extractor
+    restart: unless-stopped
+    profiles: ["extractor"]
+    # Internal-only: the daemon reaches it by service name on the compose
+    # network. Never published to host (no `ports:`).
+    expose:
+      - "8081"
+    # Benchmark/swap: mount a different GGUF over the baked default without a
+    # rebuild, e.g.:
+    #   volumes:
+    #     - ../evals/models/gemma-4-E4B-it-Q4_K_M.gguf:/models/extractor.gguf:ro
 
 volumes:
   # External so `docker compose down -v` cannot remove it — the bank survives
