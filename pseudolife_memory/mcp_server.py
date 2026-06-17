@@ -222,6 +222,8 @@ def memory_search(
         score}`` — surfaced AHEAD of recall because they're the current,
         deduped answer; ``origin`` says whether the user stated it, a tool
         confirmed it, or you concluded it (treat ``agent`` as revisable).
+        ``low_confidence=True`` means no confident match — prefer to abstain
+        ("I don't have that") rather than answer from the weak ``entries``.
     """
     result = service.search(
         query=query,
@@ -262,6 +264,9 @@ def memory_search(
             ]
             result["entries"] = kept
             result["count"] = len(kept)
+    # A confident cortex answer must never be flagged low-confidence: the
+    # cortex block IS the answer even when associative recall is weak/empty.
+    result["low_confidence"] = result.get("low_confidence", False) and not result.get("cortex")
     return result
 
 

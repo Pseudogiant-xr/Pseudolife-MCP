@@ -421,6 +421,11 @@ class MemoryConfig:
     # pipeline are hidden from retrieval so the LLM sees only current facts.
     # Flip to True for debugging or historical inspection.
     show_superseded: bool = False
+    # Abstention: when the top search score is below this floor, memory_search
+    # returns low_confidence=True so the agent declines instead of using weak
+    # distractor hits. 0.0 = off (only an empty result is low-confidence).
+    # Tuned on a dev split by the benchmark ladder; default off to preserve recall.
+    search_confidence_floor: float = 0.0
 
 
 @dataclass
@@ -494,6 +499,7 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             ref_top_k=mem_raw.get("ref_top_k", 3),
             save_dir=mem_raw.get("save_dir", "./memory_state"),
             show_superseded=mem_raw.get("show_superseded", False),
+            search_confidence_floor=mem_raw.get("search_confidence_floor", 0.0),
             neural_blend_weight=mem_raw.get("neural_blend_weight", 0.6),
             neural_warmup_updates=mem_raw.get("neural_warmup_updates", 50),
             recency_base_half_life_s=mem_raw.get("recency_base_half_life_s", 3600.0),

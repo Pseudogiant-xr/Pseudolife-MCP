@@ -524,7 +524,7 @@ class MemoryService:
             assert self._embedder is not None and self._cms is not None
             query = (query or "").strip()
             if not query:
-                return {"entries": [], "query": "", "count": 0}
+                return {"entries": [], "query": "", "count": 0, "low_confidence": True}
             embedding = self._embedder.encode_single(query)
             result = self._cms.retrieve(
                 embedding,
@@ -542,9 +542,14 @@ class MemoryService:
             # Stash the query so memory_supersede / contrastive flows have
             # something to anchor against on the next call.
             self._last_user_query = query
+            from pseudolife_memory.memory.abstain import low_confidence
             return {
                 "query": query,
                 "count": len(result.entries),
+                "low_confidence": low_confidence(
+                    list(result.scores),
+                    self.config.memory.search_confidence_floor,
+                ),
                 "entries": [
                     _entry_to_dict(e, s)
                     for e, s in zip(result.entries, result.scores)
