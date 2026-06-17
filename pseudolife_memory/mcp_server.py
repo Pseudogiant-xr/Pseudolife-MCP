@@ -562,7 +562,7 @@ def memory_dream_commit(cursor: float) -> dict[str, Any]:
 
 
 @mcp.tool()
-def memory_dream_run() -> dict[str, Any]:
+def memory_dream_run(limit: int | None = None) -> dict[str, Any]:
     """Run one server-side dream with the configured extractor: pull -> extract
     -> fact_set -> commit. Uses the regex floor (Tier 0, no LLM) unless a
     ``memory.dream`` extractor endpoint is configured (Tier 2), in which case it
@@ -570,11 +570,17 @@ def memory_dream_run() -> dict[str, Any]:
     instead use ``memory_dream_pull`` + ``memory_fact_set`` (the ``/dream``
     command).
 
+    ``limit`` caps how many memories this call consolidates (default the
+    configured ``max_batch``). Loop with a large ``limit`` until ``pulled``
+    is 0 to drain the full backlog in one shot.
+
     Returns ``{pulled, claims, inserted, confirmed, contested, superseded,
     cursor}``.
     """
     from pseudolife_memory.memory.dream import build_extractor
-    return service.dream_run(build_extractor(service.config.memory.dream))
+    return service.dream_run(
+        build_extractor(service.config.memory.dream), limit=limit,
+    )
 
 
 @mcp.tool()
