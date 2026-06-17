@@ -120,8 +120,13 @@ consolidation sweep (off hot-path):                                │ claims
   `memory_search`: when the top adjusted score is below the floor, return an
   empty result set flagged `low_confidence: true` instead of weak distractors,
   so the agent abstains rather than fabricates.
-- Default conservative (off or low) to avoid harming normal recall; the benchmark
-  tunes it on a dev split, never the test set.
+- Default conservative (off or low) to avoid harming normal recall.
+- **Tested, not guessed (§7 axis).** Sweep a small set of thresholds
+  (e.g. `{off, 0.15, 0.25, 0.35}`) on a **dev split** and report the tradeoff:
+  *abstention precision/recall on the unanswerable subset* vs *gold-recoverable
+  on the answerable subset*. Pick the knee, freeze it, and only then touch the
+  test split. The shipped default is whatever the dev-split knee says — not a
+  guess.
 
 ## 7. Benchmark harness (dev-only `evals/`)
 
@@ -133,6 +138,10 @@ consolidation sweep (off hot-path):                                │ claims
 - Output: a per-rung table + the minimum-viable verdict against §3.
 - Baseline: naive-RAG (pgvector top-k over raw turns, same embedder) as in the
   2026-06-17 screen.
+- **Abstention sub-sweep:** with the best extractor rung fixed, sweep
+  `min_score ∈ {off, 0.15, 0.25, 0.35}` on the dev split and emit the
+  abstention-precision/recall vs gold-recoverable curve (§6) to pick the
+  shipped default.
 
 ## 8. Error handling / degradation
 
