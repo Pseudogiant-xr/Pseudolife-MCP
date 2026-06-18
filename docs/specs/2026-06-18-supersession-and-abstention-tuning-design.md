@@ -117,9 +117,17 @@ embedder-agnostic, as today). Round-trips through the existing `save`/`load`
 defaults to `None`, so:
 - **Backward compatible** — legacy banks load with `slot_embedding=None`; no
   destructive migration (important given the bank-wipe history).
-- **Lazy backfill** — the resolver computes-and-caches a slot embedding for any
-  current record still missing one (in the service layer, where the embedder
-  lives), so the first dream after upgrade heals the bank incrementally.
+- **Backfill on confirm** — when a `cortex_write` caller (a dream, or
+  `memory_fact_set`) confirms a record that predates v8, `write_fact` backfills
+  its `slot_embedding` from the supplied value. The resolver deliberately does
+  *not* eagerly backfill every current record: that would pull never-dreamed
+  auto-promoted "junk" slots (the deterministic floor emits entities like
+  *"Update the checkout-service"*) into the fuzzy-match candidate set and expand
+  the false-merge surface. Records heal as dreams touch them; an untouched legacy
+  slot simply isn't a fuzzy-match candidate until then. *(Implementation note:
+  the original draft put the backfill loop in the resolver; it was moved to the
+  `write_fact` confirm path during implementation for exactly this precision
+  reason.)*
 
 Alternative (no schema bump): recompute all current-slot embeddings on the fly,
 once per `dream_run` batch, and reuse across the batch's claims. Cheaper to ship,
@@ -223,9 +231,10 @@ section.
   the extractor (`dream_run` already wraps extraction in try/except).
 - **No current slots / empty cortex** → nothing to match against → exact-key
   insert. First-ever dream on a fresh bank is unaffected.
-- **Legacy records without `slot_embedding`** → lazily computed in the resolver;
-  a transient embedder failure there just skips that candidate (it can't match
-  this round, heals next dream).
+- **Legacy records without `slot_embedding`** → not fuzzy-match candidates until
+  a `cortex_write` confirms them (then `write_fact` backfills); `resolve_slot`
+  skips any record whose `slot_embedding` is `None`, so a missing embedding is
+  never a crash, only a (temporary) non-match.
 - **Guard knob mis-set too high** → conservative failure: more abstention, never
   fabrication; caught by the §5 sweep before shipping a default.
 
@@ -276,7 +285,7 @@ section.
 1. Supersession fix lives in the **dream path**, not `write_fact` — deliberate
    writes stay exact-keyed.
 2. Match on a **value-free slot embedding**, persisted as `CortexRecord.slot_embedding`
-   (schema v8, additive, lazy-backfilled) — not the existing full-claim embedding.
+   (schema v8, additive, backfilled on confirm) — not the existing full-claim embedding.
 3. Precision rests on a **calibrated threshold** (can't hard-require attribute
    match); distractors are in the calibration corpus.
 4. Both knobs ship **behaviour-preserving at default**; flipping
