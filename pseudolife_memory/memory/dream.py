@@ -98,6 +98,11 @@ class OpenAICompatExtractor:
                 "response_format": {"type": "json_object"},
                 "max_tokens": self.max_tokens,
                 "temperature": 0,
+                # Reasoning models (Qwen3, etc.) otherwise spend the entire
+                # token budget on a <think> trace and return EMPTY content, so
+                # extraction silently falls back to the regex floor. Templates
+                # that don't define this kwarg (e.g. Gemma) just ignore it.
+                "chat_template_kwargs": {"enable_thinking": False},
             }).encode()
             req = urllib.request.Request(
                 f"{self.base_url}/chat/completions", data=body,
@@ -105,7 +110,12 @@ class OpenAICompatExtractor:
             )
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 data = json.loads(resp.read().decode())
-            content = data["choices"][0]["message"]["content"]
+            content = data["choices"][0]["message"]["content"] or ""
+            # Chatty/reasoning models often wrap the object in ```json fences or
+            # emit leading prose; parse the outermost {...} object.
+            s, e = content.find("{"), content.rfind("}")
+            if s != -1 and e > s:
+                content = content[s:e + 1]
             parsed = json.loads(content)
             raw = parsed.get("claims", []) if isinstance(parsed, dict) else []
         except Exception as exc:  # noqa: BLE001 — never break a dream
