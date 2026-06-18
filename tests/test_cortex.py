@@ -440,6 +440,22 @@ def test_slot_embedding_round_trips_and_legacy_loads_none():
     assert r2.slot_embedding is None
 
 
+def test_resolve_slot_matches_above_threshold_only():
+    store = CortexStore()
+    store.write_fact(Slot("payments-db", "host", "x"), _unit(1), slot_embedding=_unit(10))
+    store.write_fact(Slot("cache", "ttl", "y"), _unit(2), slot_embedding=_unit(20))
+    store.write_fact(Slot("no-slotemb", "attr", "z"), _unit(3))  # slot_embedding None
+
+    # exact-vector query clears a high floor -> adopt that slot
+    assert store.resolve_slot(_unit(10), 0.9) == ("payments-db", "host")
+    # dissimilar query (random unit vec) clears nothing -> None
+    assert store.resolve_slot(_unit(99), 0.9) is None
+    # threshold <= 0 disables resolution -> None
+    assert store.resolve_slot(_unit(10), 0.0) is None
+    # records without a slot_embedding are never matched
+    assert store.resolve_slot(_unit(3), 0.9) is None
+
+
 if __name__ == "__main__":
     import sys
     import traceback

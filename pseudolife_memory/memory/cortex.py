@@ -438,6 +438,32 @@ class CortexStore:
         scored.sort(key=lambda rs: rs[1], reverse=True)
         return scored[: max(0, int(top_k))]
 
+    def resolve_slot(
+        self, slot_embedding: torch.Tensor, threshold: float,
+    ) -> tuple[str, str] | None:
+        """Best current slot whose value-free ``slot_embedding`` matches
+        ``slot_embedding`` at cosine >= ``threshold`` — for paraphrase-robust dream
+        resolution. Returns the canonical ``(entity, attribute)`` or ``None``.
+        ``threshold <= 0`` disables (returns ``None``). Records without a stored
+        slot embedding are ignored."""
+        if threshold is None or float(threshold) <= 0.0:
+            return None
+        cands = [
+            r for r in self.records
+            if r.status == "current" and r.slot_embedding is not None
+        ]
+        if not cands:
+            return None
+        q = slot_embedding.detach().to("cpu", torch.float32).reshape(-1)
+        q = q / (q.norm() + 1e-12)
+        mat = torch.stack([r.slot_embedding.reshape(-1) for r in cands])
+        mat = mat / (mat.norm(dim=1, keepdim=True) + 1e-12)
+        sims = (mat @ q).tolist()
+        best = max(range(len(cands)), key=lambda i: sims[i])
+        if sims[best] >= float(threshold):
+            return (cands[best].entity, cands[best].attribute)
+        return None
+
     # ------------------------------------------------------------------
     # Persistence — co-located sibling of cms_state.pt; torch.save round-trip
     # ------------------------------------------------------------------
