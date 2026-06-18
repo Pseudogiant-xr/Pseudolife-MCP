@@ -416,6 +416,30 @@ def test_cortex_config_new_knobs_default_and_parse():
     assert parsed.dream_slot_match_threshold == 0.9
 
 
+def test_write_fact_stores_slot_embedding():
+    store = CortexStore()
+    res = store.write_fact(Slot("svc", "port", "8080"), _unit(1), slot_embedding=_unit(7))
+    assert res.record.slot_embedding is not None
+    assert torch.allclose(res.record.slot_embedding, _unit(7))
+
+
+def test_slot_embedding_round_trips_and_legacy_loads_none():
+    from pseudolife_memory.memory.cortex import SCHEMA_VERSION
+    assert SCHEMA_VERSION == 8
+    store = CortexStore()
+    store.write_fact(Slot("a", "b", "c"), _unit(1), slot_embedding=_unit(5))
+    store.write_fact(Slot("d", "e", "f"), _unit(2))  # no slot_embedding (legacy-like)
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / "cortex.pt"
+        store.save(p)
+        store2 = CortexStore()
+        store2.load(p)
+    r1 = store2.lookup("a", "b")
+    r2 = store2.lookup("d", "e")
+    assert r1.slot_embedding is not None and torch.allclose(r1.slot_embedding, _unit(5))
+    assert r2.slot_embedding is None
+
+
 if __name__ == "__main__":
     import sys
     import traceback

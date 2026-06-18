@@ -37,7 +37,7 @@ import torch
 
 from pseudolife_memory.memory.slots import Slot
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 # Any run of separators (space . _ - /) is one boundary, so trivial naming
 # variants collapse to ONE slot identity. Without this the dream extractor forks
@@ -103,6 +103,9 @@ class CortexRecord:
     superseded_by_value: str | None = None
     superseded_at: float | None = None
     embedding: torch.Tensor | None = None
+    # Value-free slot embedding (entity+attribute) for paraphrase-robust dream
+    # slot resolution; None on legacy (pre-v8) records, lazily backfilled.
+    slot_embedding: torch.Tensor | None = None
     # Tiers that have asserted/confirmed this fact: {"user","action","agent"}.
     support: set[str] = field(default_factory=set)
 
@@ -167,16 +170,19 @@ class CortexStore:
         provenance: Iterable[str] = (),
         support: str | None = None,
         now: float | None = None,
+        slot_embedding: torch.Tensor | None = None,
     ) -> WriteResult:
         t = time.time() if now is None else float(now)
         prov = {p for p in provenance if p}
         sup = _norm_support(support)
         emb = embedding.detach().to("cpu", torch.float32).clone()
+        semb = (slot_embedding.detach().to("cpu", torch.float32).clone()
+                if slot_embedding is not None else None)
         key = (_norm_key(slot.entity), _norm_key(slot.attribute))
 
         idx = self._current.get(key)
         if idx is None:
-            return WriteResult("inserted", self._insert(slot, emb, confidence, prov, t, support=sup))
+            return WriteResult("inserted", self._insert(slot, emb, confidence, prov, t, support=sup, slot_embedding=semb))
 
         cur = self.records[idx]
         if _norm_value(cur.value) == _norm_value(slot.value):
@@ -200,7 +206,7 @@ class CortexStore:
             cur.superseded_at = t
             cur.superseded_by_value = slot.value
             self._log(cur, slot.value, confidence, t, "supersede", "newer_wins")
-            new = self._insert(slot, emb, confidence, prov, t, supersedes=cur.value, support=sup)
+            new = self._insert(slot, emb, confidence, prov, t, supersedes=cur.value, support=sup, slot_embedding=semb)
             return WriteResult("superseded", new)
 
         reason = "tier_downgrade" if not tier_ok else "below_confidence_margin"
@@ -208,7 +214,7 @@ class CortexStore:
             # Legacy behavior: drop the conflicting value, keep current.
             self._log(cur, slot.value, confidence, t, "contested", reason)
             return WriteResult("contested", cur)
-        return self._contend(cur, slot, emb, confidence, prov, t, sup, reason)
+        return self._contend(cur, slot, emb, confidence, prov, t, sup, reason, semb)
 
     def _insert(
         self,
@@ -219,6 +225,7 @@ class CortexStore:
         t: float,
         supersedes: str | None = None,
         support: str | None = None,
+        slot_embedding: torch.Tensor | None = None,
     ) -> CortexRecord:
         rec = CortexRecord(
             entity=slot.entity,
@@ -232,6 +239,7 @@ class CortexStore:
             last_confirmed=t,
             supersedes_value=supersedes,
             embedding=emb,
+            slot_embedding=slot_embedding,
             support={support} if support else set(),
         )
         self.records.append(rec)
@@ -279,7 +287,7 @@ class CortexStore:
         key = (_norm_key(entity), _norm_key(attribute))
         return [r for r in self.records if r.key == key and r.status == "contested"]
 
-    def _contend(self, cur, slot, emb, confidence, prov, t, sup, reason):
+    def _contend(self, cur, slot, emb, confidence, prov, t, sup, reason, slot_embedding=None):
         """Park a conflicting value as a contender at ``cur``'s slot rather than
         superseding. Keeps the current value canonical. At most one active
         contender per slot: a matching value confirms (reinforces) the existing
@@ -313,6 +321,7 @@ class CortexStore:
             last_confirmed=t,
             supersedes_value=supersedes_val,
             embedding=emb,
+            slot_embedding=slot_embedding,
             support={sup} if sup else set(),
         )
         self.records.append(rec)   # deliberately NOT registered in self._current
@@ -457,6 +466,7 @@ class CortexStore:
                     "superseded_by_value": r.superseded_by_value,
                     "superseded_at": r.superseded_at,
                     "embedding": r.embedding,
+                    "slot_embedding": r.slot_embedding,
                     "support": sorted(r.support),
                 }
                 for r in self.records
@@ -495,6 +505,7 @@ class CortexStore:
                 superseded_by_value=d.get("superseded_by_value"),
                 superseded_at=d.get("superseded_at"),
                 embedding=d.get("embedding"),
+                slot_embedding=d.get("slot_embedding"),
                 support=set(d.get("support", [])),
             )
             self.records.append(rec)
