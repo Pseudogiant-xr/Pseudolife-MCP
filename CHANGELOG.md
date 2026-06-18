@@ -24,6 +24,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
   Eligible sources and the trigger thresholds are configurable under
   `memory.dream`. Design: `docs/specs/2026-06-15-pluggable-dream-extractor-design.md`.
+- **Abstention signal.** `memory_search` now returns `low_confidence` — `True`
+  when the top score falls below `memory.search_confidence_floor` (default `0.0`
+  = off), so the agent can choose to abstain rather than answer from a weak
+  match. A cortex hit always overrides it (a canonical fact *is* the answer).
+- **One-shot dream sweep.** `memory_dream_run(limit=…)` consolidates the whole
+  eligible backlog in a single call (omit for the configured batch size).
+- **Opt-in CPU LLM extractor sidecar.** A llama.cpp `compose --profile extractor`
+  service (`ops/Dockerfile.extractor`, Gemma 4 E2B baked in) exposes an
+  OpenAI-compatible endpoint for higher-quality dream consolidation, off by
+  default. Plus `evals/` — an extractor-ladder benchmark that picks the minimum
+  viable model (verdict: Gemma 4 E2B clears; see `evals/README.md`).
+
+### Fixed
+- **Reasoning models in `OpenAICompatExtractor`.** Thinking models (Qwen3, etc.)
+  spent the entire token budget on a `<think>` trace and returned empty content,
+  silently falling back to the regex floor. The extractor now sends
+  `chat_template_kwargs:{enable_thinking:false}` and tolerantly parses the
+  outermost JSON object (stripping ```json fences / leading prose). Non-thinking
+  templates (e.g. Gemma) ignore the kwarg; extraction got both faster and more
+  accurate across the board.
 
 ## [0.2.0] - 2026-06-14
 

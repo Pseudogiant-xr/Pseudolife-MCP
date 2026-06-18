@@ -1,0 +1,17 @@
+{
+  "rung": "gemma-e4b",
+  "label": "Gemma 4 E4B (CPU sidecar)",
+  "kind": "llm",
+  "extract_seconds": 31.4,
+  "consolidation": {
+    "pulled": 26,
+    "claims": 10,
+    "inserted": 10,
+    "superseded": 0
+  },
+  "gold_recoverable": 1.0,
+  "stale_leak": 0.1,
+  "tokens_per_query": 2.3,
+  "search_latency_ms": 4.1,
+  "status": "ok"
+}

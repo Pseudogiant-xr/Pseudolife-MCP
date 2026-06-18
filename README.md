@@ -41,7 +41,7 @@ each session.
 | Tool | Purpose |
 |------|---------|
 | `memory_store(text, source?, tags?, origin?)` | Remember a fact, decision, observation (slot-shaped facts auto-promote to the cortex) |
-| `memory_search(query, top_k?, sources?, bands?, episodes?, tags?, min_score?, disable_recency_boost?, rerank?, bm25?)` | Retrieve by associative similarity |
+| `memory_search(query, top_k?, sources?, bands?, episodes?, tags?, min_score?, disable_recency_boost?, rerank?, bm25?)` | Retrieve by associative similarity; returns `low_confidence` when the top score is below `search_confidence_floor` (off by default) |
 | `memory_trace(query, top_k?, sources?, bands?, episodes?, tags?, rerank?, bm25?)` | Search + full ranking trace — debug why an entry didn't surface |
 | `memory_recent(n?, sources?, episodes?, tags?)` | List newest stores (debug + session start) |
 | `memory_list_sources()` | Enumerate every source tag in the bank with entry counts |
@@ -66,7 +66,7 @@ each session.
 | `memory_dream_status()` | Read-only: backlog of unconsolidated memories + whether a dream would fire (safe for a SessionStart nudge) |
 | `memory_dream_pull(limit?)` | Recent memories not yet consolidated — the agent extracts canonical facts from these (Tier 1) |
 | `memory_dream_commit(cursor)` | Advance the dream cursor after consolidating up to `cursor` |
-| `memory_dream_run()` | One server-side dream with the regex floor — headless, no LLM (Tier 0) |
+| `memory_dream_run(limit?)` | One server-side dream with the configured extractor (regex floor if none) — headless; `limit` sweeps the whole backlog in one pass (Tier 0/2) |
 | `memory_graph_relate(src, relation, dst, origin?, confidence?, src_type?, dst_type?)` | Assert a typed edge between entities (closed relation vocabulary; re-assertion bumps confidence) |
 | `memory_graph_unrelate(src, relation, dst)` | Retract an edge (superseded, kept for audit) |
 | `memory_alias(entity, alias)` | Bind an alternative name — all fact/graph lookups resolve aliases first |
@@ -306,6 +306,13 @@ The built-in defaults are tuned for Claude's use case:
   Off by default; flip via `memory.bm25.enabled = true` or
   `memory_search(..., bm25=True)`. Details below under
   **BM25 hybrid retrieval**.
+- **Abstention off** (`memory.search_confidence_floor = 0.0`) — set it
+  above zero and `memory_search` returns `low_confidence: true` whenever
+  the top match scores below the floor, so the agent can abstain instead
+  of answering from a weak hit. A cortex fact in the result always
+  overrides it (a canonical answer is not low-confidence). Embedder scores
+  for this model sit ~0.4–0.98; ~0.65 is a sensible starting floor (see
+  `evals/` for the calibration sweep).
 - **No HyDE / no reflection** — both rely on an LLM callback. Claude *is*
   the LLM, so the natural way to reflect is for Claude to call
   `memory_store` with a self-composed summary.
@@ -629,6 +636,23 @@ each tick it checks the same backlog+quiescence trigger and, if it fires, runs a
 dream with the configured extractor (falling back to the regex floor on any
 endpoint failure). The same env vars also upgrade `memory_dream_run`. A local
 model (Ollama/LM Studio) keeps all text on-box; a hosted endpoint does not.
+
+**Tier 2, batteries-included — the CPU extractor sidecar.** If you don't already
+run a local endpoint, the stack ships an opt-in llama.cpp sidecar with a small
+model baked in (Gemma 4 E2B — the benchmarked minimum-viable extractor). It's a
+compose *profile*, off by default and never published to the host:
+
+```bash
+docker compose -f ops/docker-compose.yml --profile extractor up -d
+```
+
+Then uncomment the two `PSEUDOLIFE_DREAM_*` lines in the `pseudolife-daemon`
+service (already templated to `http://pseudolife-extractor:8081/v1`, model
+`extractor`) and recreate the daemon. Reasoning models work too — the extractor
+disables their `<think>` trace so they return structured output instead of an
+empty budget. The `evals/` extractor-ladder benchmark is how that default model
+was chosen (Gemma 4 E2B beats naive-RAG at ~25× fewer tokens/query); see
+`evals/README.md`.
 
 What gets consolidated and when is configurable under `memory.dream`
 (`eligible_sources` / `exclude_sources`, and the `min_batch` / `idle_seconds`

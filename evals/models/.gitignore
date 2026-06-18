@@ -1,0 +1,4 @@
+# Benchmark GGUFs are large and fetched on demand (see evals/README.md).
+# Keep the dir, ignore its contents.
+*
+!.gitignore
