@@ -403,6 +403,19 @@ def test_protect_provenance_false_restores_pure_newer_wins():
     assert store.contenders_for("box", "ip") == []
 
 
+def test_cortex_config_new_knobs_default_and_parse():
+    from pseudolife_memory.utils.config import CortexConfig, _dict_to_dataclass
+    c = CortexConfig()
+    assert c.guard_min_score == 0.3            # default = today's hardcoded guard
+    assert c.dream_slot_match_threshold == 0.0  # default = off (exact-key only)
+    parsed = _dict_to_dataclass(
+        CortexConfig,
+        {"guard_min_score": 0.65, "dream_slot_match_threshold": 0.9},
+    )
+    assert parsed.guard_min_score == 0.65
+    assert parsed.dream_slot_match_threshold == 0.9
+
+
 if __name__ == "__main__":
     import sys
     import traceback

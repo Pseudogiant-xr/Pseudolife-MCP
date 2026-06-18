@@ -359,6 +359,13 @@ class CortexConfig:
     protect_provenance: bool = True
     supersede_confidence_margin: float = 0.15
     reinforce_rate: float = 0.34
+    # Cortex guard for memory_search abstention: a current fact must score >= this
+    # to be surfaced (and to suppress low_confidence). Default 0.3 = today.
+    guard_min_score: float = 0.3
+    # Dream-path slot resolver: a paraphrased dreamed claim adopts an existing
+    # current slot when its value-free slot embedding cosine >= this. <=0 disables
+    # (exact-key only = today's behaviour). Positive = the cosine floor.
+    dream_slot_match_threshold: float = 0.0
 
 
 @dataclass
