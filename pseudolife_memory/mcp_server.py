@@ -241,7 +241,7 @@ def memory_search(
     # any recall hit that merely restates a surfaced fact (currency, not noise).
     cc = service.config.memory.cortex
     if cc.enabled and cc.search_first and (query or "").strip():
-        facts = service.cortex_search(query, top_k=5, min_score=0.3).get("entries", [])
+        facts = service.cortex_search(query, top_k=5, min_score=cc.guard_min_score).get("entries", [])
         if facts:
             result["cortex"] = [
                 {

@@ -61,3 +61,21 @@ def test_no_cortex_keeps_low_confidence(tmp_path, monkeypatch):
     res = mod.memory_search("nonexistent thing")
     assert not res.get("cortex")
     assert res["low_confidence"] is True
+
+
+def test_guard_min_score_is_passed_through(tmp_path, monkeypatch):
+    mod = _reload_mcp_filemode(tmp_path, monkeypatch)
+    captured = {}
+
+    def fake_cortex_search(query, top_k=5, min_score=0.0):
+        captured["min_score"] = min_score
+        return {"entries": []}
+
+    monkeypatch.setattr(mod.service, "search", lambda **kw: {
+        "query": kw.get("query", ""), "count": 0, "entries": [],
+        "low_confidence": False,
+    })
+    monkeypatch.setattr(mod.service, "cortex_search", fake_cortex_search)
+    mod.service.config.memory.cortex.guard_min_score = 0.65
+    mod.memory_search("anything")
+    assert captured["min_score"] == 0.65
