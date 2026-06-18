@@ -194,6 +194,10 @@ class CortexStore:
             if sup:
                 cur.support.add(sup)
             cur.confidence = min(1.0, max(self._reinforce(cur.confidence), float(confidence)))
+            # Backfill slot_embedding on first confirmation via a caller that supplies
+            # one — covers records auto-promoted (pre-v8) without a slot embedding.
+            if semb is not None and cur.slot_embedding is None:
+                cur.slot_embedding = semb
             return WriteResult("confirmed", cur)
 
         # Genuine conflict at the same slot. Provenance guard: only a write whose

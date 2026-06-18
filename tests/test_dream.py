@@ -228,3 +228,44 @@ def test_dream_status_would_fire_on_idle(svc):
     assert st["backlog"] >= 1
     assert st["would_fire"] is True
     assert "dream_cursor" in st and "idle_seconds" in st
+
+
+class _StubExtractor:
+    """Returns a fixed claim list regardless of input (drives dream_run)."""
+    def __init__(self, claims):
+        self._claims = claims
+    def extract(self, texts, vocab):
+        return [dict(c) for c in self._claims]
+
+
+def test_dream_resolves_paraphrased_slot_and_supersedes(svc):
+    svc.config.memory.cortex.dream_slot_match_threshold = 0.3  # on
+    svc.store("payments-db host is db-prod-1", source="notes")
+    svc.dream_run(_StubExtractor([{
+        "entity": "payments-db", "attribute": "host",
+        "value": "db-prod-1", "confidence": 0.6, "origin": "agent"}]))
+    svc.store("payments database host is db-prod-2", source="notes")
+    out = svc.dream_run(_StubExtractor([{
+        "entity": "payments database", "attribute": "host",
+        "value": "db-prod-2", "confidence": 0.6, "origin": "agent"}]))
+    # paraphrased entity resolved onto the existing slot -> supersede, not fork
+    assert out["superseded"] >= 1
+    cur = svc.cortex_lookup("payments-db", "host")
+    assert cur is not None and "db-prod-2" in cur["value"]
+    assert svc.cortex_lookup("payments database", "host") is None  # no sibling slot
+
+
+def test_dream_threshold_off_forks_sibling(svc):
+    svc.config.memory.cortex.dream_slot_match_threshold = 0.0  # off (default)
+    svc.store("payments-db host is db-prod-1", source="notes")
+    svc.dream_run(_StubExtractor([{
+        "entity": "payments-db", "attribute": "host",
+        "value": "db-prod-1", "confidence": 0.6, "origin": "agent"}]))
+    svc.store("payments database host is db-prod-2", source="notes")
+    svc.dream_run(_StubExtractor([{
+        "entity": "payments database", "attribute": "host",
+        "value": "db-prod-2", "confidence": 0.6, "origin": "agent"}]))
+    a = svc.cortex_lookup("payments-db", "host")
+    b = svc.cortex_lookup("payments database", "host")
+    assert a is not None and "db-prod-1" in a["value"]   # NOT superseded
+    assert b is not None and "db-prod-2" in b["value"]   # separate sibling slot

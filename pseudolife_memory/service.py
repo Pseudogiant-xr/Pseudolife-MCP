@@ -1007,9 +1007,11 @@ class MemoryService:
             assert self._embedder is not None and self._cortex is not None
             claim = f"{entity} {attribute} {value}".strip()
             emb = self._embedder.encode_single(claim)
+            slot_emb = self._embedder.encode_single(f"{entity} {attribute}".strip())
             res = self._cortex.write_fact(
                 Slot(entity, attribute, value),
                 emb,
+                slot_embedding=slot_emb,
                 confidence=confidence,
                 provenance=provenance or (),
                 support=support,
@@ -1263,6 +1265,30 @@ class MemoryService:
                 self._save_cortex()
             return {"dream_cursor": self._cortex.dream_cursor}
 
+    def _resolve_dream_slot(self, entity: str, attribute: str) -> tuple[str, str]:
+        """Map a dreamed claim's (entity, attribute) onto an existing current slot
+        when a confident value-free slot-embedding match exists, so a paraphrased
+        update supersedes instead of forking a sibling. Dream-path only; returns
+        the original pair when disabled, on an exact-key hit, or below threshold.
+        Never raises — a resolver failure falls back to the original slot."""
+        threshold = float(self.config.memory.cortex.dream_slot_match_threshold)
+        if threshold <= 0.0:
+            return entity, attribute
+        try:
+            with self._lock:
+                self._ensure_init()
+                assert self._embedder is not None and self._cortex is not None
+                # Exact slot already exists -> let the normal write path supersede.
+                if self._cortex.lookup(entity, attribute) is not None:
+                    return entity, attribute
+                slot_emb = self._embedder.encode_single(
+                    f"{entity} {attribute}".strip())
+                match = self._cortex.resolve_slot(slot_emb, threshold)
+            return match or (entity, attribute)
+        except Exception as exc:  # noqa: BLE001 — resolution must never break a dream
+            logger.warning("dream slot resolve failed (%s); using literal slot", exc)
+            return entity, attribute
+
     def dream_run(self, extractor, *, limit: int | None = None) -> dict[str, Any]:
         """One dream cycle: pull eligible unconsolidated memories, extract claims
         via ``extractor`` (regex floor fallback if it yields nothing), write each
@@ -1286,8 +1312,9 @@ class MemoryService:
             claims = RegexExtractor().extract(texts, vocab)
         tally = {"inserted": 0, "confirmed": 0, "contested": 0, "superseded": 0}
         for c in claims:
+            ent, attr = self._resolve_dream_slot(c["entity"], c["attribute"])
             res = self.cortex_write(
-                c["entity"], c["attribute"], c["value"],
+                ent, attr, c["value"],
                 confidence=float(c.get("confidence", 0.55)),
                 support=c.get("origin", "agent"),
             )
