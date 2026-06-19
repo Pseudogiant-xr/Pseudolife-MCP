@@ -1,0 +1,41 @@
+{
+  "rung": "gemma-e2b",
+  "status": "ok",
+  "curve": [
+    {
+      "threshold": 0.0,
+      "superseded": 0,
+      "stale_leak": 0.1,
+      "gold_recoverable": 1.0,
+      "false_merge": 0
+    },
+    {
+      "threshold": 0.8,
+      "superseded": 1,
+      "stale_leak": 0.1,
+      "gold_recoverable": 1.0,
+      "false_merge": 1
+    },
+    {
+      "threshold": 0.85,
+      "superseded": 0,
+      "stale_leak": 0.1,
+      "gold_recoverable": 1.0,
+      "false_merge": 0
+    },
+    {
+      "threshold": 0.9,
+      "superseded": 0,
+      "stale_leak": 0.1,
+      "gold_recoverable": 1.0,
+      "false_merge": 0
+    },
+    {
+      "threshold": 0.95,
+      "superseded": 0,
+      "stale_leak": 0.1,
+      "gold_recoverable": 1.0,
+      "false_merge": 0
+    }
+  ]
+}

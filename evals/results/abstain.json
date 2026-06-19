@@ -1,36 +1,186 @@
 {
-  "rung": "qwen-27b",
+  "rung": "gemma-e2b",
   "status": "ok",
   "curve": [
     {
+      "guard": 0.3,
       "floor": 0.0,
       "abstain_recall_unanswerable": 0.0,
       "false_abstain_answerable": 0.0
     },
     {
+      "guard": 0.3,
       "floor": 0.5,
       "abstain_recall_unanswerable": 0.167,
       "false_abstain_answerable": 0.0
     },
     {
+      "guard": 0.3,
       "floor": 0.65,
       "abstain_recall_unanswerable": 0.333,
       "false_abstain_answerable": 0.0
     },
     {
+      "guard": 0.3,
       "floor": 0.7,
       "abstain_recall_unanswerable": 0.333,
       "false_abstain_answerable": 0.0
     },
     {
+      "guard": 0.3,
       "floor": 0.75,
       "abstain_recall_unanswerable": 0.333,
       "false_abstain_answerable": 0.0
     },
     {
+      "guard": 0.3,
       "floor": 0.8,
       "abstain_recall_unanswerable": 0.333,
       "false_abstain_answerable": 0.0
+    },
+    {
+      "guard": 0.5,
+      "floor": 0.0,
+      "abstain_recall_unanswerable": 0.0,
+      "false_abstain_answerable": 0.0
+    },
+    {
+      "guard": 0.5,
+      "floor": 0.5,
+      "abstain_recall_unanswerable": 0.333,
+      "false_abstain_answerable": 0.0
+    },
+    {
+      "guard": 0.5,
+      "floor": 0.65,
+      "abstain_recall_unanswerable": 0.5,
+      "false_abstain_answerable": 0.0
+    },
+    {
+      "guard": 0.5,
+      "floor": 0.7,
+      "abstain_recall_unanswerable": 0.5,
+      "false_abstain_answerable": 0.0
+    },
+    {
+      "guard": 0.5,
+      "floor": 0.75,
+      "abstain_recall_unanswerable": 0.5,
+      "false_abstain_answerable": 0.0
+    },
+    {
+      "guard": 0.5,
+      "floor": 0.8,
+      "abstain_recall_unanswerable": 0.5,
+      "false_abstain_answerable": 0.0
+    },
+    {
+      "guard": 0.65,
+      "floor": 0.0,
+      "abstain_recall_unanswerable": 0.0,
+      "false_abstain_answerable": 0.0
+    },
+    {
+      "guard": 0.65,
+      "floor": 0.5,
+      "abstain_recall_unanswerable": 0.333,
+      "false_abstain_answerable": 0.0
+    },
+    {
+      "guard": 0.65,
+      "floor": 0.65,
+      "abstain_recall_unanswerable": 0.5,
+      "false_abstain_answerable": 0.0
+    },
+    {
+      "guard": 0.65,
+      "floor": 0.7,
+      "abstain_recall_unanswerable": 0.667,
+      "false_abstain_answerable": 0.0
+    },
+    {
+      "guard": 0.65,
+      "floor": 0.75,
+      "abstain_recall_unanswerable": 0.833,
+      "false_abstain_answerable": 0.1
+    },
+    {
+      "guard": 0.65,
+      "floor": 0.8,
+      "abstain_recall_unanswerable": 0.833,
+      "false_abstain_answerable": 0.1
+    },
+    {
+      "guard": 0.75,
+      "floor": 0.0,
+      "abstain_recall_unanswerable": 0.0,
+      "false_abstain_answerable": 0.0
+    },
+    {
+      "guard": 0.75,
+      "floor": 0.5,
+      "abstain_recall_unanswerable": 0.333,
+      "false_abstain_answerable": 0.0
+    },
+    {
+      "guard": 0.75,
+      "floor": 0.65,
+      "abstain_recall_unanswerable": 0.5,
+      "false_abstain_answerable": 0.0
+    },
+    {
+      "guard": 0.75,
+      "floor": 0.7,
+      "abstain_recall_unanswerable": 0.667,
+      "false_abstain_answerable": 0.0
+    },
+    {
+      "guard": 0.75,
+      "floor": 0.75,
+      "abstain_recall_unanswerable": 0.833,
+      "false_abstain_answerable": 0.1
+    },
+    {
+      "guard": 0.75,
+      "floor": 0.8,
+      "abstain_recall_unanswerable": 1.0,
+      "false_abstain_answerable": 0.2
+    },
+    {
+      "guard": 0.85,
+      "floor": 0.0,
+      "abstain_recall_unanswerable": 0.0,
+      "false_abstain_answerable": 0.0
+    },
+    {
+      "guard": 0.85,
+      "floor": 0.5,
+      "abstain_recall_unanswerable": 0.333,
+      "false_abstain_answerable": 0.0
+    },
+    {
+      "guard": 0.85,
+      "floor": 0.65,
+      "abstain_recall_unanswerable": 0.5,
+      "false_abstain_answerable": 0.0
+    },
+    {
+      "guard": 0.85,
+      "floor": 0.7,
+      "abstain_recall_unanswerable": 0.667,
+      "false_abstain_answerable": 0.0
+    },
+    {
+      "guard": 0.85,
+      "floor": 0.75,
+      "abstain_recall_unanswerable": 0.833,
+      "false_abstain_answerable": 0.1
+    },
+    {
+      "guard": 0.85,
+      "floor": 0.8,
+      "abstain_recall_unanswerable": 1.0,
+      "false_abstain_answerable": 0.2
     }
   ]
 }

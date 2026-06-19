@@ -162,13 +162,20 @@ TOP_K = 5
 # Same-entity/different-attribute and different-entity/same-attribute pairs that
 # must remain DISTINCT slots after consolidation. A resolver false-merge collapses
 # one of these onto the other -> measured as false_merge in the supersession sweep.
+#
+# IMPORTANT: these entities/attributes must NOT collide with PAIRS or UNANSWERABLE —
+# otherwise a no-merge text re-asserts a pair's value and contaminates the
+# supersession measurement (and an UNANSWERABLE probe would stop being unanswerable).
 NO_MERGE = [
-    {"a": ("payments-db", "host"), "b": ("payments-db", "password"),
-     "a_text": "The payments-db host is db-prod-1.",
-     "b_text": "The payments-db password is set in the vault under pdb-secret."},
-    {"a": ("cache-layer", "engine"), "b": ("search-index", "engine"),
-     "a_text": "Our cache-layer uses the redis engine.",
-     "b_text": "The search-index uses the lucene engine."},
+    # same entity, different attribute -> must remain two slots
+    {"a": ("invoice-service", "port"), "b": ("invoice-service", "region"),
+     "a_text": "The invoice-service port is 7000.",
+     "b_text": "The invoice-service region is us-west-2."},
+    # different entity, same attribute (adversarial: 'ledger-db engine' vs
+    # 'ledger-cache engine' are lexically close) -> must remain two slots
+    {"a": ("ledger-db", "engine"), "b": ("ledger-cache", "engine"),
+     "a_text": "The ledger-db uses the postgres engine.",
+     "b_text": "The ledger-cache uses the memcached engine."},
 ]
 
 
