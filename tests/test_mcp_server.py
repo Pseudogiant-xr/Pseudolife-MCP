@@ -125,6 +125,20 @@ def test_memory_dream_run_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:
     assert got["record"] is None
 
 
+def test_start_dream_sweep_warns_without_extractor(tmp_path: Path, monkeypatch, caplog) -> None:
+    import importlib
+    import logging
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("PSEUDOLIFE_DREAM_BASE_URL", raising=False)
+    monkeypatch.delenv("PSEUDOLIFE_DREAM_MODEL", raising=False)
+    import pseudolife_memory.mcp_server as mod
+    importlib.reload(mod)
+    with caplog.at_level(logging.WARNING, logger="pseudolife-mcp"):
+        mod.start_dream_sweep()   # dream enabled by default, no extractor configured
+    msgs = " ".join(r.getMessage().lower() for r in caplog.records)
+    assert "extractor" in msgs and "cortex" in msgs
+
+
 def test_memory_store_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:
     """Tool calls reach the service and produce the expected shape.
 
