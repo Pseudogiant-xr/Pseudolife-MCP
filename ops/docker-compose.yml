@@ -105,6 +105,15 @@ services:
     restart: unless-stopped
     expose:
       - "8081"
+    # The base llama.cpp image bakes a healthcheck against port 8080; our server
+    # listens on 8081, so override it (else the container reports "unhealthy"
+    # despite serving fine). start_period covers model load.
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
     # Benchmark/swap: mount a different GGUF over the baked default without a
     # rebuild, e.g.:
     #   volumes:
