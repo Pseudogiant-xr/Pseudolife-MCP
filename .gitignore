@@ -1,3 +1,6 @@
+# Local compose env overrides (machine-specific volume names etc.) — never committed.
+.env
+
 # Python
 __pycache__/
 *.py[cod]

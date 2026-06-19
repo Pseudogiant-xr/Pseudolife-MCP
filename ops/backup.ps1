@@ -5,7 +5,7 @@
 #
 # Runs pg_dump INSIDE the container (no local postgres client needed).
 param(
-    [string]$Container = "pseudolife-pg",
+    [string]$Container = "pseudolife-mcp-postgres",
     [string]$Db = "pseudolife_memory",
     [string]$User = "pseudolife",
     [string]$OutDir = "",
