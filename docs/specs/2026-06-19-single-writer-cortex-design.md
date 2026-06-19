@@ -99,11 +99,31 @@ and a **two-writers** problem; the small model is the victim, not the cause
 
 - Add a `NoOpExtractor` to `dream.py` whose `extract()` returns `[]`.
   `build_extractor()` returns it (instead of the cortex-writing `RegexExtractor`)
-  when no LLM base-url/model resolves from config or env. The dream then pulls,
-  extracts nothing, and advances its cursor — a clean no-op, no regex facts.
+  when no LLM base-url/model resolves from config or env.
+- **Remove the hardcoded regex fallback inside `dream_run`.** `dream_run`
+  currently has, independent of `build_extractor`, a load-bearing fallback
+  (`service.py:1311-1312`):
+  ```python
+  if not claims:
+      claims = RegexExtractor().extract(texts, vocab)
+  ```
+  This is the real source of regex→cortex writes when the LLM yields nothing,
+  and it would defeat the whole design: a `NoOpExtractor` returns `[]`, which
+  trips this fallback and writes regex facts anyway. The plan must delete this
+  block (and the `from ...dream import RegexExtractor` import at `service.py:1297`)
+  and update the docstring (`service.py:1293-1296`, which currently promises a
+  "regex floor fallback if it yields nothing"). After removal, an extractor that
+  yields nothing — whether the no-op, or an LLM that returned junk/empty —
+  writes nothing; the dream just advances the cursor. This is the single change
+  that makes the LLM the *sole* automatic writer; the `build_extractor` change
+  alone is insufficient.
 - `RegexExtractor` **stays in the tree** as an *explicit* opt-in (parallel to the
-  `auto_promote` knob) for anyone who deliberately wants the regex floor; it is
-  just no longer the default `build_extractor` result.
+  `auto_promote` knob) for anyone who deliberately wants the regex floor — but it
+  is never reached automatically: not as the `build_extractor` default, and not
+  via the (removed) `dream_run` fallback.
+- The per-claim `_resolve_dream_slot` call in `dream_run` (`service.py:1315`) is
+  unchanged and harmless: at the shipped `dream_slot_match_threshold = 0.0` (§5)
+  it is exact-key only, so it needs no change here.
 - **Soft requirement.** On daemon startup, if `dream.enabled` is true but
   `build_extractor()` resolves to the no-op, log a single clear `WARNING`:
   cortex auto-population is disabled (no extractor LLM; regex floor removed);
@@ -118,8 +138,9 @@ In `ops/docker-compose.yml`:
 - Set (uncomment) `PSEUDOLIFE_DREAM_BASE_URL:
   http://pseudolife-extractor:8081/v1` and `PSEUDOLIFE_DREAM_MODEL: extractor`
   in the daemon block.
-- Add `pseudolife-extractor` to the daemon's `depends_on`. (The extractor has no
-  external deps and is internal-only via `expose`, unchanged.)
+- Add `pseudolife-extractor` to the daemon's **existing** `depends_on` list (it
+  already depends on `pseudolife-pg`; this is an added entry, not a new key). (The
+  extractor has no external deps and is internal-only via `expose`, unchanged.)
 
 The local Gemma sidecar is now a standard member of the stack — the "default and
 required" posture, enforced at the deployment layer and surfaced by the §3.2
@@ -197,7 +218,12 @@ considering enabling it should read this note first.
   `test_build_extractor_selects_by_config`); returns the LLM extractor when
   base-url/model are set (unchanged).
 - **No-op dream:** a `dream_run` with the no-op extractor pulls, promotes
-  nothing, and still advances the cursor.
+  nothing, and still advances the cursor. **Regression-critical** — this test
+  fails today because of the `dream_run` regex fallback (§3.2), so it directly
+  guards the removal of that fallback.
+- **Empty-LLM dream:** a `dream_run` whose extractor returns `[]` (simulating an
+  LLM that emitted no parseable claims) also writes nothing — proving the regex
+  fallback is gone, not merely bypassed for the no-op type.
 - **`cortex_dedup`:** siblings (high slot-cosine, differing values) merge under
   one canonical with the others retired; `dry_run=True` mutates nothing and
   returns the same report; distinct slots (different attributes, low cosine) are
@@ -222,7 +248,9 @@ considering enabling it should read this note first.
   `True → False`.
 - `pseudolife_memory/memory/dream.py` — `NoOpExtractor`; `build_extractor`
   returns it when unconfigured.
-- `pseudolife_memory/service.py` — startup/dream warning when no extractor;
+- `pseudolife_memory/service.py` — **remove the `dream_run` regex fallback**
+  (`service.py:1311-1312`), its `RegexExtractor` import (`:1297`), and update the
+  docstring (`:1293-1296`); startup/dream warning when no extractor;
   `cortex_dedup` method.
 - `ops/docker-compose.yml` — extractor default-on; daemon `PSEUDOLIFE_DREAM_*` +
   `depends_on`.
@@ -234,13 +262,20 @@ considering enabling it should read this note first.
   drawbacks; cleanup tool usage. Flag (do **not** auto-edit) that the user's
   global `~/.claude/CLAUDE.md` line "memory_store() automatically promotes
   slot-shaped facts to cortex" is now stale.
+- **In-tree docstrings made stale by the default flip** (update for
+  self-consistency): `config.py:340-351` (`CortexConfig` — describes auto-promote
+  as the populate-on-every-store no-LLM floor); `dream.py:5-7` (module docstring's
+  "regex floor") and `dream.py:69-70` (`OpenAICompatExtractor` "falls back to the
+  regex floor"); `service.py:1293-1296` (`dream_run`, already listed above).
 
 ## 9. Decisions (locked at design)
 
 1. The **LLM dream is the sole automatic cortex writer**; regex auto-promote
    ships **off** by default (knob retained).
-2. The regex floor is removed as a *cortex* writer even when no LLM is present
-   (`NoOpExtractor`); no-LLM deployments populate cortex only via
+2. The regex floor is removed as a *cortex* writer even when no LLM is present —
+   via **both** `build_extractor → NoOpExtractor` **and** deleting the hardcoded
+   `dream_run` regex fallback (`service.py:1311-1312`), which is the actually
+   load-bearing one. No-LLM deployments populate cortex only via
    `memory_fact_set`. `extract_slots` is retained for the recall-time slot-view.
 3. The local extractor sidecar is **default-on and required** at the deployment
    layer; missing extractor degrades with a warning, not a crash.
