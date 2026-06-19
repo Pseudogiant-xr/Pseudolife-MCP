@@ -277,3 +277,23 @@ def test_dream_threshold_off_forks_sibling(svc):
     b = svc.cortex_lookup("payments database", "host")
     assert a is not None and "db-prod-1" in a["value"]   # NOT superseded
     assert b is not None and "db-prod-2" in b["value"]   # separate sibling slot
+
+
+def test_dream_with_noop_extractor_writes_nothing(svc):
+    from pseudolife_memory.memory.dream import NoOpExtractor
+    svc.config.memory.cortex.auto_promote = False   # no store-path promotion either
+    svc.store("the build timeout is 4500 seconds", source="notes")
+    out = svc.dream_run(NoOpExtractor())
+    assert out["pulled"] >= 1
+    assert out["inserted"] == 0 and out["confirmed"] == 0
+    assert out["cursor"] > 0                          # cursor still advances
+    assert svc.cortex_lookup("build", "timeout") is None
+
+
+def test_dream_empty_llm_claims_write_nothing(svc):
+    # An LLM that emitted no parseable claims must NOT fall back to the regex floor.
+    svc.config.memory.cortex.auto_promote = False
+    svc.store("the relay port is 4001", source="notes")
+    out = svc.dream_run(_StubExtractor([]))
+    assert out["inserted"] == 0 and out["confirmed"] == 0
+    assert svc.cortex_lookup("relay", "port") is None

@@ -1291,10 +1291,10 @@ class MemoryService:
 
     def dream_run(self, extractor, *, limit: int | None = None) -> dict[str, Any]:
         """One dream cycle: pull eligible unconsolidated memories, extract claims
-        via ``extractor`` (regex floor fallback if it yields nothing), write each
-        to the cortex, advance the dream cursor. Returns a summary. The single
-        consolidation path shared by the MCP tool and (later) the daemon sweep."""
-        from pseudolife_memory.memory.dream import RegexExtractor
+        via ``extractor`` (an extractor that yields nothing writes nothing —
+        single-writer cortex, no regex fallback), write each to the cortex, advance
+        the dream cursor. Returns a summary. The single consolidation path shared by
+        the MCP tool and (later) the daemon sweep."""
         cap = int(limit if limit is not None else self.config.memory.dream.max_batch)
         pulled = self.dream_pull(limit=cap)
         entries = pulled["entries"]
@@ -1306,10 +1306,8 @@ class MemoryService:
         try:
             claims = extractor.extract(texts, vocab)
         except Exception as exc:  # noqa: BLE001 — an extractor must never break a dream
-            logger.warning("dream extractor failed (%s); using regex floor", exc)
+            logger.warning("dream extractor failed (%s); writing nothing this cycle", exc)
             claims = []
-        if not claims:
-            claims = RegexExtractor().extract(texts, vocab)
         tally = {"inserted": 0, "confirmed": 0, "contested": 0, "superseded": 0}
         for c in claims:
             ent, attr = self._resolve_dream_slot(c["entity"], c["attribute"])
