@@ -1265,6 +1265,32 @@ class MemoryService:
                 self._save_cortex()
             return {"dream_cursor": self._cortex.dream_cursor}
 
+    def cortex_dedup(self, threshold: float = 0.90, dry_run: bool = True) -> dict[str, Any]:
+        """One-time, reviewed cleanup of paraphrase sibling slots left by past
+        regex auto-promotes. Dry-run by default (reports, writes nothing). Reuses
+        the value-free slot embedding, backfilling any current record missing one.
+        Ops-only (see ``ops/dedup_cortex.py``) — back up the bank before applying.
+
+        Returns ``{"dry_run", "threshold", "clusters", "merged"}`` where
+        ``clusters`` is a list of ``{"canonical", "retired"}`` and ``merged`` is
+        the number of sibling slots retired."""
+        with self._lock:
+            self._ensure_init()
+            assert self._cortex is not None and self._embedder is not None
+            for r in self._cortex.current_records():
+                if r.slot_embedding is None:
+                    r.slot_embedding = self._embedder.encode_single(
+                        f"{r.entity} {r.attribute}".strip())
+            report = self._cortex.dedup_siblings(float(threshold), apply=not dry_run)
+            if not dry_run and report and self._storage is not None:
+                self._save_cortex()
+        return {
+            "dry_run": bool(dry_run),
+            "threshold": float(threshold),
+            "clusters": report,
+            "merged": sum(len(c["retired"]) for c in report),
+        }
+
     def _resolve_dream_slot(self, entity: str, attribute: str) -> tuple[str, str]:
         """Map a dreamed claim's (entity, attribute) onto an existing current slot
         when a confident value-free slot-embedding match exists, so a paraphrased

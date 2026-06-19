@@ -468,6 +468,68 @@ class CortexStore:
             return (cands[best].entity, cands[best].attribute)
         return None
 
+    def dedup_siblings(self, threshold: float, *, apply: bool) -> list[dict]:
+        """Collapse current slots whose value-free slot embeddings match at cosine
+        >= ``threshold`` — paraphrase fragments of one fact, as past regex
+        auto-promotes forked. Per cluster, keep the canonical (strongest provenance
+        tier, then most-recent) and retire the rest (``status`` -> ``superseded``;
+        audit trail kept). Returns a report of ``{"canonical", "retired"}`` per
+        merged cluster; only mutates when ``apply`` is True. Records without a
+        ``slot_embedding`` are skipped — backfill first (the service does)."""
+        cands = [r for r in self.current_records() if r.slot_embedding is not None]
+        if len(cands) < 2:
+            return []
+        mat = torch.stack([r.slot_embedding.reshape(-1) for r in cands])
+        mat = mat / (mat.norm(dim=1, keepdim=True) + 1e-12)
+        sims = mat @ mat.t()                       # NxN cosine (rows L2-normed)
+
+        parent = list(range(len(cands)))
+
+        def find(i: int) -> int:
+            while parent[i] != i:
+                parent[i] = parent[parent[i]]
+                i = parent[i]
+            return i
+
+        for i in range(len(cands)):
+            for j in range(i + 1, len(cands)):
+                if float(sims[i][j]) >= float(threshold):
+                    parent[find(i)] = find(j)
+
+        clusters: dict[int, list[int]] = {}
+        for i in range(len(cands)):
+            clusters.setdefault(find(i), []).append(i)
+
+        report: list[dict] = []
+        now = time.time()
+        changed = False
+        for members in clusters.values():
+            if len(members) < 2:
+                continue
+            recs = [cands[m] for m in members]
+            canonical = max(
+                recs,
+                key=lambda r: (_rank(r.origin), r.last_confirmed or r.asserted_at),
+            )
+            losers = [r for r in recs if r is not canonical]
+            report.append({
+                "canonical": (canonical.entity, canonical.attribute, canonical.value),
+                "retired": [(r.entity, r.attribute, r.value) for r in losers],
+            })
+            if apply:
+                for r in losers:
+                    r.status = "superseded"
+                    r.superseded_by_value = canonical.value
+                    r.superseded_at = now
+                changed = True
+
+        if apply and changed:
+            self._current = {}
+            for i, r in enumerate(self.records):
+                if r.status == "current":
+                    self._current[r.key] = i
+        return report
+
     # ------------------------------------------------------------------
     # Persistence — co-located sibling of cms_state.pt; torch.save round-trip
     # ------------------------------------------------------------------
