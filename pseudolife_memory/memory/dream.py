@@ -47,6 +47,17 @@ class RegexExtractor:
         return claims
 
 
+class NoOpExtractor:
+    """No-LLM, no-write floor. Returns no claims, so a dream with no configured
+    extractor writes nothing to the cortex. Single-writer cortex: the LLM dream
+    is the sole *automatic* writer of canonical facts; the regex (``extract_slots``)
+    is for the recall-time slot-view only, and ``RegexExtractor`` is an explicit
+    opt-in, never reached automatically."""
+
+    def extract(self, texts: list[str], vocab: list[str]) -> list[Claim]:
+        return []
+
+
 _SYSTEM_PROMPT = (
     "You consolidate notes into canonical facts. Extract durable, current-state "
     'facts as JSON: {"claims":[{"entity":..,"attribute":..,"value":..,'
@@ -142,7 +153,8 @@ class OpenAICompatExtractor:
 def build_extractor(cfg) -> DreamExtractor:
     """Pick the extractor from config: an OpenAI-compatible endpoint when a
     base-URL + model are set (env vars ``PSEUDOLIFE_DREAM_BASE_URL`` /
-    ``_MODEL`` / ``_API_KEY`` override the dataclass), else the regex floor."""
+    ``_MODEL`` / ``_API_KEY`` override the dataclass), else a no-op (no automatic
+    regex writes — single-writer cortex; see the 2026-06-19 design)."""
     import os
 
     base_url = os.environ.get("PSEUDOLIFE_DREAM_BASE_URL") or cfg.extractor_base_url
@@ -154,7 +166,7 @@ def build_extractor(cfg) -> DreamExtractor:
             max_tokens=cfg.extractor_max_tokens,
             timeout_seconds=cfg.extractor_timeout_seconds,
         )
-    return RegexExtractor()
+    return NoOpExtractor()
 
 
 def run_sweep_once(service) -> dict:

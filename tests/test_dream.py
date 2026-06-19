@@ -87,6 +87,14 @@ def test_regex_extractor_empty_on_no_slots():
     assert RegexExtractor().extract(["hello there"], vocab=[]) == []
 
 
+def test_noop_extractor_returns_empty():
+    from pseudolife_memory.memory.dream import NoOpExtractor
+
+    # Even on clearly slot-shaped text, the no-op writes nothing (single-writer:
+    # the LLM dream is the sole automatic cortex writer).
+    assert NoOpExtractor().extract(["the build timeout is 4500 seconds"], vocab=[]) == []
+
+
 # ── OpenAICompatExtractor + factory (Tier 2) ─────────────────────────────
 
 def test_openai_extractor_parses_claims():
@@ -122,14 +130,14 @@ def test_openai_extractor_empty_on_malformed():
 
 def test_build_extractor_selects_by_config(monkeypatch):
     from pseudolife_memory.memory.dream import (
-        OpenAICompatExtractor, RegexExtractor, build_extractor,
+        NoOpExtractor, OpenAICompatExtractor, build_extractor,
     )
     from pseudolife_memory.utils.config import DreamConfig
 
     monkeypatch.delenv("PSEUDOLIFE_DREAM_BASE_URL", raising=False)
     monkeypatch.delenv("PSEUDOLIFE_DREAM_MODEL", raising=False)
-    # Unconfigured => regex floor.
-    assert isinstance(build_extractor(DreamConfig()), RegexExtractor)
+    # Unconfigured => no-op (the regex floor is no longer an automatic cortex writer).
+    assert isinstance(build_extractor(DreamConfig()), NoOpExtractor)
     # Configured via dataclass => Tier 2.
     cfg = DreamConfig(extractor_base_url="http://x", extractor_model="m")
     assert isinstance(build_extractor(cfg), OpenAICompatExtractor)
