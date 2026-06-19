@@ -139,17 +139,31 @@ tokens_per_query <= 0.6 * naive.tokens_per_query
 The lowest rung (in ladder order) that clears is the **minimum viable**
 extractor — the cheapest model worth shipping as the default.
 
-The abstention sub-sweep (`--abstain`) sweeps `search_confidence_floor` over
-`{0.0, 0.5, 0.65, 0.70, 0.75, 0.80}` (the floors bracket the embedder's actual
+The abstention sub-sweep (`--abstain`) sweeps a **2-D grid** of the cortex guard
+`guard_min_score ∈ {0.3, 0.5, 0.65, 0.75, 0.85}` × `search_confidence_floor ∈
+{0.0, 0.5, 0.65, 0.70, 0.75, 0.80}` (the floors bracket the embedder's actual
 score distribution — answerable max-scores 0.75–0.98, unanswerable 0.38–0.78;
-floors below ~0.5 never fire) and reports, per floor:
+floors below ~0.5 never fire) and reports, per cell:
 
 - **`abstain_recall_unanswerable`** ↑ — fraction of never-stated probes that
   correctly return `low_confidence=True`.
 - **`false_abstain_answerable`** ↓ — fraction of answerable questions wrongly
   flagged low-confidence.
 
-Pick the highest floor that keeps `false_abstain_answerable` at/near zero.
+Pick the `(guard, floor)` pair that maximises `abstain_recall` while keeping
+`false_abstain_answerable` at/near zero. The guard is the binding constraint:
+any cortex fact scoring `≥ guard_min_score` is surfaced as an answer and
+suppresses abstention, so the floor alone can't recover near-misses where a weak
+topically-adjacent fact is present.
+
+The supersession sub-sweep (`--supersede`) ingests the update-pair corpus plus
+`NO_MERGE` distractors (same-entity/different-attribute and
+different-entity/same-attribute pairs that must stay distinct) and sweeps
+`dream_slot_match_threshold ∈ {off, 0.80, 0.85, 0.90, 0.95}`, reporting
+`superseded` ↑, `stale_leak` ↓ (the win) and `false_merge` ↓ — distractor slots
+wrongly collapsed (the cost). The shipped default is the lowest threshold that
+drives `stale_leak` down at `false_merge = 0`; if none does, the resolver stays
+off.
 
 ## Findings — 2026-06-18 sweep
 
@@ -183,4 +197,47 @@ Qwen3.6-27B (4090)               1.0     0.0      2.1        6.2
   (guard `min_score=0.3`) suppresses abstention. A floor of ~0.65 captures all
   the available abstention with zero false-abstain; raising it further buys
   nothing. Tightening the cortex-guard min_score is the lever for more recall
-  (future work).
+  (future work — done in the 2026-06-19 sweep below).
+
+## Findings — 2026-06-19 guard + supersession calibration
+
+The two knobs added on `feat/supersession-abstention-tuning`
+(`cortex.guard_min_score`, `cortex.dream_slot_match_threshold`), calibrated on
+`gemma-e2b`.
+
+**Abstention guard (Feature B) — a clear win.** On the `(guard, floor)` grid,
+the knee at `false_abstain = 0` is `abstain_recall = 0.667`:
+
+```
+guard  floor   abstain_recall   false_abstain
+0.30   0.70        0.333            0.0      (today's hardcoded behaviour)
+0.65   0.70        0.667            0.0      ← recommended
+0.65   0.75        0.833            0.1      ✗ (false-abstains appear)
+0.75   0.80        1.000            0.2      ✗
+```
+
+Raising the guard `0.3 → 0.65` (paired with `search_confidence_floor = 0.70`)
+**doubles** abstention recall at zero false-abstain. Pushing the floor higher
+trades into wrongly abstaining on answerable queries. **Recommended for an
+abstention-on deployment: `guard_min_score = 0.65`, `search_confidence_floor =
+0.70`.** Both knobs ship at their behaviour-preserving defaults (`0.3` / `0.0`).
+
+**Dream slot resolver (Feature A) — no measurable benefit; ships off.** Sweeping
+`dream_slot_match_threshold` (distractor-clean corpus) moved nothing:
+
+```
+threshold   superseded   stale_leak   false_merge
+off (0.0)        0           0.1            0
+0.80             1           0.1            1     ← a false-merge, no leak win
+0.85–0.95        0           0.1            0
+```
+
+`stale_leak` is flat at 0.1 at every threshold, and `0.80` *introduces* a
+false-merge. **Root cause is not paraphrase** — tracing the residual leak showed
+the deterministic regex **auto-promote** (`service.py:_promote_slots`, every
+`store`) and the LLM dream write to the cortex with different `(entity,
+attribute)` conventions, fragmenting one fact across sibling slots. No fuzzy
+resolver can safely reconcile that. The resolver ships **off by default**; see
+`docs/specs/2026-06-19-single-writer-cortex-design.md` for the structural fix
+(make the LLM dream the sole cortex writer). Anyone considering enabling the
+resolver should note the false-merge risk above.

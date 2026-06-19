@@ -35,6 +35,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   OpenAI-compatible endpoint for higher-quality dream consolidation, off by
   default. Plus `evals/` — an extractor-ladder benchmark that picks the minimum
   viable model (verdict: Gemma 4 E2B clears; see `evals/README.md`).
+- **Tunable cortex abstention guard.** `memory.cortex.guard_min_score` (default
+  `0.3` = prior hard-coded behaviour) sets the score at/above which a cortex fact
+  counts as a confident answer and suppresses `low_confidence`. Raising it lets
+  weak topically-adjacent facts stop blocking abstention. Calibrated as a pair
+  with `search_confidence_floor`; the `evals/` guard sweep recommends
+  `guard_min_score = 0.65` + `search_confidence_floor = 0.70` (doubles abstention
+  recall at zero false-abstain). Behaviour-preserving at the default.
+- **Dream slot resolver (off by default).** `memory.cortex.dream_slot_match_threshold`
+  (default `0.0` = off) lets the dream pass map a paraphrased `(entity, attribute)`
+  onto an existing slot (value-free `slot_embedding`, schema v8, additive) before
+  writing, to catch small-model supersession forks. Calibration found no
+  measurable benefit on the benchmark (stale-leak flat, a false-merge at `0.80`):
+  the residual fragmentation traces to the deterministic regex auto-promote, not
+  paraphrase — see `docs/specs/2026-06-19-single-writer-cortex-design.md` for the
+  structural fix. Shipped off; enable only with the false-merge risk in mind.
 
 ### Fixed
 - **Reasoning models in `OpenAICompatExtractor`.** Thinking models (Qwen3, etc.)

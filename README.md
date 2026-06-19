@@ -310,9 +310,23 @@ The built-in defaults are tuned for Claude's use case:
   above zero and `memory_search` returns `low_confidence: true` whenever
   the top match scores below the floor, so the agent can abstain instead
   of answering from a weak hit. A cortex fact in the result always
-  overrides it (a canonical answer is not low-confidence). Embedder scores
-  for this model sit ~0.4–0.98; ~0.65 is a sensible starting floor (see
-  `evals/` for the calibration sweep).
+  overrides it — but *which* cortex facts count is now tunable via
+  `memory.cortex.guard_min_score` (default `0.3` = prior hard-coded
+  behaviour): only facts scoring at/above it are treated as a confident
+  answer, so weak topically-adjacent facts stop suppressing abstention.
+  The two are calibrated as a **pair**; the `evals/` sweep recommends
+  `guard_min_score = 0.65` + `search_confidence_floor = 0.70` for an
+  abstention-on deployment (doubles abstention recall at zero false-abstain).
+- **Dream slot resolver off** (`memory.cortex.dream_slot_match_threshold =
+  0.0`) — a positive cosine floor lets the dream pass map a paraphrased
+  `(entity, attribute)` onto an existing slot before writing, to catch
+  small-model supersession forks. ⚠️ Calibration found **no measurable
+  benefit** on the benchmark (stale-leak flat; a false-merge at `0.80`):
+  the residual fragmentation comes from the deterministic regex
+  auto-promote, not paraphrase. Left off; enable only with the
+  false-merge risk in mind. See
+  `docs/specs/2026-06-19-single-writer-cortex-design.md` for the
+  structural fix.
 - **No HyDE / no reflection** — both rely on an LLM callback. Claude *is*
   the LLM, so the natural way to reflect is for Claude to call
   `memory_store` with a self-composed summary.
