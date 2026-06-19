@@ -12,7 +12,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   advance a monotonic cursor so each memory is consolidated once (session-agnostic
   — no "session finished" event needed). A pluggable `DreamExtractor`
   (`memory/dream.py`) feeds one shared `service.dream_run` driver that owns cursor
-  discipline and the regex fallback. Three tiers:
+  discipline. (Single-writer cortex — see Changed — makes the LLM dream the sole
+  automatic writer; the regex is opt-in only.) Three tiers:
   - **Tier 0** — `memory_dream_run` (regex floor, headless, no LLM, on-box/free).
   - **Tier 1** — agent-driven via `memory_dream_pull` / `memory_dream_status` /
     `memory_dream_commit` and a copy-in `/dream` command
@@ -50,6 +51,33 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the residual fragmentation traces to the deterministic regex auto-promote, not
   paraphrase — see `docs/specs/2026-06-19-single-writer-cortex-design.md` for the
   structural fix. Shipped off; enable only with the false-merge risk in mind.
+
+### Changed
+- **Single-writer cortex.** The LLM **dream** pass is now the sole *automatic*
+  writer of canonical facts (plus explicit `memory_fact_set`). The deterministic
+  regex auto-promote on `store` (`memory.cortex.auto_promote`) now defaults
+  **off**, and the `dream_run` regex fallback is removed — an extractor that
+  yields nothing writes nothing. Rationale: the regex mis-splits compound entity
+  names (`"payments database host"` → `payments` / `database host`) and, running
+  alongside the LLM dream, fragments one fact across sibling slots — the real
+  cause of the residual stale-leak, not small-model paraphrase. New
+  `NoOpExtractor` is the default when no extractor LLM is configured; the daemon
+  logs a startup warning in that case. Behaviour change: a plain `store()` no
+  longer populates the cortex. Design:
+  `docs/specs/2026-06-19-single-writer-cortex-design.md`.
+- **Extractor sidecar default-on.** `ops/docker-compose.yml` now starts the Gemma
+  CPU extractor with the stack (dropped its `profiles` gate) and routes dream
+  consolidation to it. Clearer names (anti-PEBKAC): compose project `pseudolife-mcp`
+  (was the folder default `ops`); containers `pseudolife-mcp-{postgres,daemon,extractor}`;
+  new-install volumes default to `pseudolife-mcp-{bank,state}`, env-overridable so
+  existing installs keep `ops_pseudolife_*` via `ops/.env`.
+
+### Added (cleanup tooling)
+- **`ops/dedup_cortex.py`.** One-time, dry-run-first, reversible cleanup that
+  collapses paraphrase sibling slots left by past auto-promotes
+  (`MemoryService.cortex_dedup` / `CortexStore.dedup_siblings`): clusters current
+  slots by value-free slot-embedding cosine, keeps the canonical (provenance tier,
+  then recency), retires the rest (audit trail kept). Back up before `--apply`.
 
 ### Fixed
 - **Reasoning models in `OpenAICompatExtractor`.** Thinking models (Qwen3, etc.)

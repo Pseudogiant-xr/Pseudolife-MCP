@@ -2,9 +2,13 @@
 
 A dream consolidates the recent associative stream into canonical
 ``(entity, attribute, value)`` facts. The *extraction* step is pluggable:
-``RegexExtractor`` is the zero-dependency floor; an OpenAI-compatible LLM
-extractor (Tier 2) lands in a later phase. The shared driver lives in
-``MemoryService.dream_run`` so cursor discipline and fallback live in one place.
+the ``OpenAICompatExtractor`` (an OpenAI-compatible LLM) is the cortex writer;
+``NoOpExtractor`` is the default when none is configured (single-writer cortex:
+the LLM dream is the sole *automatic* writer, so no extractor means no automatic
+cortex writes). ``RegexExtractor`` remains as an explicit opt-in only — it is
+never selected automatically (the store-path auto-promote and the old
+``dream_run`` regex fallback are both gone). The shared driver lives in
+``MemoryService.dream_run`` so cursor discipline lives in one place.
 """
 from __future__ import annotations
 
@@ -77,8 +81,9 @@ class OpenAICompatExtractor:
     """Tier 2 — extract claims via any OpenAI-compatible ``/chat/completions``
     endpoint (Ollama, LM Studio, Anthropic/Haiku, OpenRouter, a self-hosted
     model — all the same slot). Bounded by ``max_tokens`` + a hard timeout; on
-    ANY failure (network, timeout, malformed JSON) returns ``[]`` so the dream
-    driver falls back to the regex floor. Uses stdlib urllib — no new deps."""
+    ANY failure (network, timeout, malformed JSON) returns ``[]`` — and under the
+    single-writer cortex the dream then writes nothing this cycle (no regex
+    fallback). Uses stdlib urllib — no new deps."""
 
     def __init__(self, base_url: str, model: str, *, api_key: str | None = None,
                  max_tokens: int = 400, timeout_seconds: float = 20.0) -> None:
@@ -111,8 +116,9 @@ class OpenAICompatExtractor:
                 "temperature": 0,
                 # Reasoning models (Qwen3, etc.) otherwise spend the entire
                 # token budget on a <think> trace and return EMPTY content, so
-                # extraction silently falls back to the regex floor. Templates
-                # that don't define this kwarg (e.g. Gemma) just ignore it.
+                # extraction yields nothing and the cortex gets no write this
+                # cycle. Templates that don't define this kwarg (e.g. Gemma)
+                # just ignore it.
                 "chat_template_kwargs": {"enable_thinking": False},
             }).encode()
             req = urllib.request.Request(

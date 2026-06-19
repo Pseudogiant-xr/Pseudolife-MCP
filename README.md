@@ -40,7 +40,7 @@ each session.
 
 | Tool | Purpose |
 |------|---------|
-| `memory_store(text, source?, tags?, origin?)` | Remember a fact, decision, observation (slot-shaped facts auto-promote to the cortex) |
+| `memory_store(text, source?, tags?, origin?)` | Remember a fact, decision, observation (canonical facts reach the cortex via the dream pass / `memory_fact_set`) |
 | `memory_search(query, top_k?, sources?, bands?, episodes?, tags?, min_score?, disable_recency_boost?, rerank?, bm25?)` | Retrieve by associative similarity; returns `low_confidence` when the top score is below `search_confidence_floor` (off by default) |
 | `memory_trace(query, top_k?, sources?, bands?, episodes?, tags?, rerank?, bm25?)` | Search + full ranking trace — debug why an entry didn't surface |
 | `memory_recent(n?, sources?, episodes?, tags?)` | List newest stores (debug + session start) |
@@ -143,12 +143,17 @@ git clone https://github.com/Pseudogiant-xr/PseudoLife-MCP.git
 cd PseudoLife-MCP
 
 # 1. One-time: create the two persistent volumes (bank + daemon state).
-docker volume create ops_pseudolife_pgdata
-docker volume create ops_pseudolife_data
+docker volume create pseudolife-mcp-bank
+docker volume create pseudolife-mcp-state
 
-# 2. Build + start both services (Postgres, then the daemon).
+# 2. Build + start all three services (Postgres, extractor, then the daemon).
 docker compose -f ops/docker-compose.yml up -d --build
 ```
+
+> **Upgrading from a pre-rename install** (volumes `ops_pseudolife_pgdata` /
+> `ops_pseudolife_data`)? Don't rename those volumes — keep pointing at them by
+> creating `ops/.env` with `PSEUDOLIFE_BANK_VOLUME=ops_pseudolife_pgdata` and
+> `PSEUDOLIFE_STATE_VOLUME=ops_pseudolife_data` before `up`. See the compose header.
 
 The daemon serves MCP at `http://127.0.0.1:8765/mcp` and restarts with
 Docker — no logon task needed. First build downloads the model into the
@@ -530,7 +535,7 @@ phrasing. Useful idiom: tag the consolidation with `["consolidated"]`
 so you can later scan with `memory_search(..., tags=["consolidated"])`
 to see what's been distilled.
 
-### Canonical facts — the cortex (schema v7)
+### Canonical facts — the cortex (schema v8)
 
 Alongside the associative continuum (the 8 MIRAS bands) sits the **cortex**: a
 slot-keyed canonical-fact store. Where the continuum is similarity-ranked and
@@ -538,16 +543,19 @@ decaying, the cortex is **identity-not-similarity, supersession-not-decay,
 currency-not-frequency** — one *current* value per `(entity, attribute)` slot,
 retrievable out of the context window.
 
-- **Auto-capture.** Slot-shaped facts in any `memory_store(...)` are promoted
-  into the cortex automatically at a 0.5 confidence floor — weak models get a
-  canonical layer with zero extra calls. The extractor is deterministic and
-  precision-first (v0.2): `<entity> <attr> is <value>` with the attribute
-  drawn from a closed dev lexicon (port / version / host / branch / default
-  timeout / …), `my <attr> is <value>` (→ entity `user`), `<Entity>'s <attr>
-  is <value>`, `the <attr> of <entity> is <value>`, and single-line
-  `<entity> <attr>: <value>` / `= <value>`. Questions, negations, code
-  fences, and entity-less subjects ("the default branch is master") are
-  deliberately skipped — name the entity, or use `memory_fact_set`.
+- **Single-writer capture.** The LLM **dream** pass (the extractor sidecar) is the
+  sole *automatic* writer of canonical facts, plus deliberate `memory_fact_set`
+  calls. The deterministic regex auto-promote on `store` is now **opt-in**
+  (`memory.cortex.auto_promote`, default **off**): it mis-splits compound entity
+  names (`"payments database host"` → `payments` / `database host`) and fragments
+  slots, so it ships off — see
+  `docs/specs/2026-06-19-single-writer-cortex-design.md`. (When enabled it still
+  uses the precision-first dev lexicon: `<entity> <attr> is <value>` with the
+  attribute drawn from a closed set — port / version / host / branch / default
+  timeout / … — plus `my <attr> is <value>`, `<Entity>'s <attr> is <value>`,
+  `the <attr> of <entity> is <value>`, and single-line `<entity> <attr>: <value>`.)
+  A one-time `ops/dedup_cortex.py` (dry-run-first, reversible) collapses sibling
+  slots left by past auto-promotes.
 - **Deterministic read.** `memory_fact_get("project", "language")` returns the
   one current value — no ranking, no stale duplicates. `memory_search` also
   surfaces matching facts ahead of associative hits (a `"cortex"` block).
@@ -647,26 +655,21 @@ $env:PSEUDOLIFE_DREAM_MODEL    = "qwen2.5:7b"
 
 The daemon runs a background sweep every `memory.dream.sweep_interval_seconds`;
 each tick it checks the same backlog+quiescence trigger and, if it fires, runs a
-dream with the configured extractor (falling back to the regex floor on any
-endpoint failure). The same env vars also upgrade `memory_dream_run`. A local
-model (Ollama/LM Studio) keeps all text on-box; a hosted endpoint does not.
+dream with the configured extractor. Under the single-writer cortex an extractor
+that yields nothing (a failed/empty LLM call, or none configured) writes nothing
+this cycle — there is no regex fallback. The same env vars also upgrade
+`memory_dream_run`. A local model keeps all text on-box; a hosted endpoint does not.
 
-**Tier 2, batteries-included — the CPU extractor sidecar.** If you don't already
-run a local endpoint, the stack ships an opt-in llama.cpp sidecar with a small
-model baked in (Gemma 4 E2B — the benchmarked minimum-viable extractor). It's a
-compose *profile*, off by default and never published to the host:
-
-```bash
-docker compose -f ops/docker-compose.yml --profile extractor up -d
-```
-
-Then uncomment the two `PSEUDOLIFE_DREAM_*` lines in the `pseudolife-daemon`
-service (already templated to `http://pseudolife-extractor:8081/v1`, model
-`extractor`) and recreate the daemon. Reasoning models work too — the extractor
-disables their `<think>` trace so they return structured output instead of an
-empty budget. The `evals/` extractor-ladder benchmark is how that default model
-was chosen (Gemma 4 E2B beats naive-RAG at ~25× fewer tokens/query); see
-`evals/README.md`.
+**Tier 2, batteries-included — the CPU extractor sidecar (default-on).** The stack
+ships a llama.cpp sidecar with a small model baked in (Gemma 4 E2B — the
+benchmarked minimum-viable extractor), and `ops/docker-compose.yml` starts it by
+default and routes dream consolidation to it. It's internal-only (never published
+to the host). Single-writer cortex relies on it: with no extractor configured, the
+cortex is populated only by `memory_fact_set` and the daemon logs a startup
+warning. Reasoning models work too — the extractor disables their `<think>` trace
+so they return structured output instead of an empty budget. The `evals/`
+extractor-ladder benchmark is how that default model was chosen (Gemma 4 E2B beats
+naive-RAG at ~25× fewer tokens/query); see `evals/README.md`.
 
 What gets consolidated and when is configurable under `memory.dream`
 (`eligible_sources` / `exclude_sources`, and the `min_batch` / `idle_seconds`
@@ -752,7 +755,7 @@ pass.
 | Transport | MCP stdio shim → HTTP daemon |
 | Storage | Postgres 16 + pgvector (source of truth); ChromaDB for the reference bank |
 | Associative continuum | 8-tier MIRAS bands, surprise gating, supersession, contrastive learning |
-| Canonical-fact cortex | Deterministic auto-promote on `store` + `memory_fact_*` |
+| Canonical-fact cortex | Single-writer: LLM dream pass + `memory_fact_*` (regex auto-promote opt-in, default off) |
 | Provenance contenders | Tier-rank guard `user > action > agent`; `memory_fact_resolve` |
 | Knowledge graph | Typed entities/edges, closed relation vocab, on-read closure, AGE Cypher |
 | World cortex | `memory_world_*` — cited external facts + age-decayed freshness (manual ingest) |

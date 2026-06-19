@@ -43,14 +43,14 @@ other.
 ## Prerequisites
 
 The benchmark talks to a **host-published** llama.cpp on `127.0.0.1:8081`.
-Note this is *separate* from the opt-in compose sidecar
-(`docker compose --profile extractor`), which is internal-only (`expose:`, not
-`ports:`) and reachable only by the daemon on the compose network.
+Note this is *separate* from the default-on compose sidecar
+(`pseudolife-mcp-extractor`), which is internal-only (`expose:`, not `ports:`)
+and reachable only by the daemon on the compose network.
 
 **Gemma E2B** (default baked image):
 
 ```bash
-docker run -d --name pl-extractor-bench -p 127.0.0.1:8081:8081 \
+docker run -d --name pseudolife-mcp-extractor-bench -p 127.0.0.1:8081:8081 \
   pseudolife-extractor:gemma4-e2b
 ```
 
@@ -60,16 +60,16 @@ port. Either bake a second image:
 ```bash
 docker build -f ops/Dockerfile.extractor -t pseudolife-extractor:gemma4-e4b \
   --build-arg MODEL_URL=https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/resolve/main/gemma-4-E4B-it-Q4_K_M.gguf ops
-docker rm -f pl-extractor-bench
-docker run -d --name pl-extractor-bench -p 127.0.0.1:8081:8081 \
+docker rm -f pseudolife-mcp-extractor-bench
+docker run -d --name pseudolife-mcp-extractor-bench -p 127.0.0.1:8081:8081 \
   pseudolife-extractor:gemma4-e4b
 ```
 
 …or mount any GGUF over the baked default without a rebuild:
 
 ```bash
-docker rm -f pl-extractor-bench
-docker run -d --name pl-extractor-bench -p 127.0.0.1:8081:8081 \
+docker rm -f pseudolife-mcp-extractor-bench
+docker run -d --name pseudolife-mcp-extractor-bench -p 127.0.0.1:8081:8081 \
   -v /abs/path/gemma-4-E4B-it-Q4_K_M.gguf:/models/extractor.gguf:ro \
   pseudolife-extractor:gemma4-e2b
 ```
@@ -204,6 +204,11 @@ Qwen3.6-27B (4090)               1.0     0.0      2.1        6.2
 The two knobs added on `feat/supersession-abstention-tuning`
 (`cortex.guard_min_score`, `cortex.dream_slot_match_threshold`), calibrated on
 `gemma-e2b`.
+
+> Single-writer note: `build_service` pins `cortex.auto_promote = False`, so the
+> sweep measures the dream extractor alone — not the regex auto-promote floor,
+> whose slot fragmentation was the real cause of the residual stale-leak (see the
+> single-writer-cortex design). This is also the shipped default now.
 
 **Abstention guard (Feature B) — a clear win.** On the `(guard, floor)` grid,
 the knee at `false_abstain = 0` is `abstain_recall = 0.667`:
