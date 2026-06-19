@@ -272,6 +272,10 @@ def build_service(tmp_dir: Path):
     # measures "did the extractor surface the CURRENT value" directly. (The
     # incremental-dream parking behaviour is noted as a separate product finding.)
     svc.config.memory.cortex.protect_provenance = False
+    # Single-writer: measure the DREAM extractor alone, not the regex auto-promote
+    # floor (which fragments compound slots). Explicit so the bench is independent
+    # of the shipped default (which is now also False).
+    svc.config.memory.cortex.auto_promote = False
     return svc
 
 
