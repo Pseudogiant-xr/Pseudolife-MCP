@@ -337,20 +337,24 @@ class HydeConfig:
 
 @dataclass
 class CortexConfig:
-    """Sibling slot-keyed canonical-fact store (schema v7).
+    """Sibling slot-keyed canonical-fact store (schema v8).
 
     The cortex is the *cortical* layer to the continuum's *hippocampus*:
     identity-not-similarity, supersession-not-decay, currency-not-frequency —
-    one current value per ``(entity, attribute)`` slot. It is populated
-    deterministically from slot-shaped facts on every ``store`` (``auto_promote``,
-    the no-LLM floor) and/or by explicit ``memory_fact_set`` tool calls.
+    one current value per ``(entity, attribute)`` slot. Single-writer cortex: it
+    is populated by the LLM **dream** pass (the sole automatic writer) and by
+    explicit ``memory_fact_set`` tool calls. ``auto_promote`` is an opt-in
+    (default **off**) deterministic regex floor that runs on every ``store``;
+    it is off by default because the regex mis-splits compound entity names
+    (``"payments database host"`` -> ``payments`` / ``database host``) and so
+    fragments slots — see ``docs/specs/2026-06-19-single-writer-cortex-design.md``.
 
     ``promote_confidence`` is deliberately a low floor so a deliberate
     ``fact_set`` (or a user-tier assertion) out-ranks an auto-promoted guess via
     ``supersede_confidence_margin``.
     """
     enabled: bool = True
-    auto_promote: bool = True
+    auto_promote: bool = False
     promote_confidence: float = 0.5
     search_first: bool = True
     # When True, a conflicting write weaker than a slot's current provenance tier

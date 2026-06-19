@@ -117,6 +117,7 @@ def test_service_restart_roundtrip(pg_conn, pg_url, tmp_path):
     from pseudolife_memory.service import MemoryService
 
     svc = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    svc.config.memory.cortex.auto_promote = True   # opt-in (default off)
     r = svc.store("the quorvax pipeline default timeout is 250 ms",
                   source="wt-test")
     assert r["stored"] is True and r["cortex_promoted"] == 1

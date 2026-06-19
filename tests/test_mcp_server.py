@@ -118,8 +118,11 @@ def test_memory_dream_run_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:
     _invoke("memory_store", {"text": "the beacon port is 7777", "source": "notes"})
     out = _invoke("memory_dream_run", {})
     assert "pulled" in out and "cursor" in out
+    # Single-writer cortex: no extractor LLM is configured in tests, so the dream
+    # writes nothing (no regex floor fallback). The promote-with-extractor path is
+    # covered at the service level in test_dream.py.
     got = _invoke("memory_fact_get", {"entity": "beacon", "attribute": "port"})
-    assert got["record"] is not None and "7777" in got["record"]["value"]
+    assert got["record"] is None
 
 
 def test_memory_store_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:
@@ -166,6 +169,7 @@ def test_store_auto_promotes_and_search_surfaces_cortex(tmp_path: Path, monkeypa
     import importlib
     import pseudolife_memory.mcp_server as mod
     importlib.reload(mod)
+    mod.service.config.memory.cortex.auto_promote = True   # opt-in (default off)
 
     out = _invoke("memory_store", {
         "text": "I have a Ragdoll cat named Jacque", "source": "conversation",

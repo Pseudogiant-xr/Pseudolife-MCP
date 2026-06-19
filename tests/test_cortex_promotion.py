@@ -18,6 +18,7 @@ _SENTENCE = "I have a Ragdoll cat named Jacque"
 def test_store_auto_promotes_slot_to_cortex():
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
         svc = MemoryService(data_dir=d)
+        svc.config.memory.cortex.auto_promote = True   # opt-in (default off)
         svc.store(_SENTENCE, source="conversation")
         rec = svc.cortex_lookup("Jacque", "type")
         assert rec is not None
@@ -28,6 +29,7 @@ def test_store_auto_promotes_slot_to_cortex():
 def test_origin_defaults_to_agent_for_claude_source():
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
         svc = MemoryService(data_dir=d)
+        svc.config.memory.cortex.auto_promote = True   # opt-in (default off)
         svc.store(_SENTENCE, source="claude")
         rec = svc.cortex_lookup("Jacque", "type")
         assert rec is not None and rec["origin"] == "agent"
@@ -36,9 +38,20 @@ def test_origin_defaults_to_agent_for_claude_source():
 def test_explicit_origin_overrides_source_default():
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
         svc = MemoryService(data_dir=d)
+        svc.config.memory.cortex.auto_promote = True   # opt-in (default off)
         svc.store(_SENTENCE, source="claude", origin="user")
         rec = svc.cortex_lookup("Jacque", "type")
         assert rec is not None and rec["origin"] == "user"
+
+
+def test_store_does_not_auto_promote_by_default():
+    # Single-writer cortex: auto_promote ships OFF, so a plain store() writes
+    # nothing to the cortex (the LLM dream / memory_fact_set are the writers).
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
+        svc = MemoryService(data_dir=d)
+        out = svc.store(_SENTENCE, source="conversation")
+        assert out["cortex_promoted"] == 0
+        assert svc.cortex_lookup("Jacque", "type") is None
 
 
 def test_auto_promote_disabled_writes_nothing_to_cortex():
@@ -55,6 +68,7 @@ def test_promoted_fact_is_low_confidence_floor():
     # assertion can out-rank them via the supersede margin.
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
         svc = MemoryService(data_dir=d)
+        svc.config.memory.cortex.auto_promote = True   # opt-in (default off)
         svc.store(_SENTENCE, source="conversation")
         rec = svc.cortex_lookup("Jacque", "type")
         assert rec is not None and rec["confidence"] <= 0.55
