@@ -91,15 +91,14 @@ def memory_store(
     treating ``memory_store`` as "log everything" wastes your context
     on retrieval.
 
-    Slot-shaped facts in ``text`` are auto-promoted into the canonical
-    **cortex** layer when they match the deterministic extractor:
-    ``<entity> <attribute> is <value>`` where the attribute is a known
-    dev word (port / version / host / branch / default timeout / …),
-    ``my <attr> is <value>``, ``<Entity>'s <attr> is <value>``, or a
-    single-line ``<entity> <attr>: <value>``. Name the entity explicitly
-    — "the default branch is master" is skipped as entity-less. For
-    anything the extractor misses, ``memory_fact_set`` is the deliberate
-    path. See ``memory_fact_get`` / ``memory_fact_set``.
+    This writes to the associative stream. Canonical **cortex** facts are
+    written by the background **dream** pass (an LLM extractor consolidating the
+    recent stream) and by explicit ``memory_fact_set`` — a plain ``memory_store``
+    does *not* itself promote to the cortex (single-writer cortex; the legacy
+    regex auto-promote is opt-in via ``memory.cortex.auto_promote``, default off).
+    So for a fact you want canonical *now*, use ``memory_fact_set``; for durable
+    notes the dream will distil, ``memory_store`` is right. See ``memory_fact_get``
+    / ``memory_fact_set``.
 
     Args:
         text: The fact to remember. One claim per call works best.
