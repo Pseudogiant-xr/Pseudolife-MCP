@@ -159,6 +159,18 @@ UNANSWERABLE = [
 
 TOP_K = 5
 
+# Same-entity/different-attribute and different-entity/same-attribute pairs that
+# must remain DISTINCT slots after consolidation. A resolver false-merge collapses
+# one of these onto the other -> measured as false_merge in the supersession sweep.
+NO_MERGE = [
+    {"a": ("payments-db", "host"), "b": ("payments-db", "password"),
+     "a_text": "The payments-db host is db-prod-1.",
+     "b_text": "The payments-db password is set in the vault under pdb-secret."},
+    {"a": ("cache-layer", "engine"), "b": ("search-index", "engine"),
+     "a_text": "Our cache-layer uses the redis engine.",
+     "b_text": "The search-index uses the lucene engine."},
+]
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -392,7 +404,8 @@ def run_rung(name: str) -> dict:
 # Floors bracket the embedder's ACTUAL score distribution for this corpus
 # (answerable max-scores 0.75–0.98; unanswerable 0.38–0.78). Floors below ~0.5
 # never fire — everything scores above them. The interesting band is 0.65–0.80.
-def run_abstain(name: str, floors=(0.0, 0.5, 0.65, 0.70, 0.75, 0.80)) -> dict:
+def run_abstain(name: str, floors=(0.0, 0.5, 0.65, 0.70, 0.75, 0.80),
+                guards=(0.3, 0.5, 0.65, 0.75, 0.85)) -> dict:
     rung = RUNGS[name]
     if rung["kind"] == "llm" and not probe(rung["base_url"]):
         return {"rung": name, "status": "unreachable"}
@@ -405,29 +418,65 @@ def run_abstain(name: str, floors=(0.0, 0.5, 0.65, 0.70, 0.75, 0.80)) -> dict:
             consolidate(svc, make_extractor(rung))
 
         curve = []
-        for f in floors:
-            svc.config.memory.search_confidence_floor = f
-            # Abstention recall on the unanswerable set (want low_confidence).
-            abst = 0
-            for _ent, _attr, q in UNANSWERABLE:
-                r = svc.search(q, top_k=TOP_K)
-                has_cortex = bool(
-                    svc.cortex_search(q, top_k=5, min_score=0.3).get("entries"))
-                if r.get("low_confidence") and not has_cortex:
-                    abst += 1
-            # False-abstention on the answerable set (want to NOT abstain).
-            wrong = 0
-            for p in PAIRS:
-                r = svc.search(p["question"], top_k=TOP_K)
-                has_cortex = bool(
-                    svc.cortex_search(p["question"], top_k=5,
-                                      min_score=0.3).get("entries"))
-                if r.get("low_confidence") and not has_cortex:
-                    wrong += 1
+        for g in guards:
+            for f in floors:
+                svc.config.memory.search_confidence_floor = f
+                # Abstention recall on the unanswerable set (want low_confidence).
+                abst = 0
+                for _ent, _attr, q in UNANSWERABLE:
+                    r = svc.search(q, top_k=TOP_K)
+                    has_cortex = bool(
+                        svc.cortex_search(q, top_k=5, min_score=g).get("entries"))
+                    if r.get("low_confidence") and not has_cortex:
+                        abst += 1
+                # False-abstention on the answerable set (want to NOT abstain).
+                wrong = 0
+                for p in PAIRS:
+                    r = svc.search(p["question"], top_k=TOP_K)
+                    has_cortex = bool(
+                        svc.cortex_search(p["question"], top_k=5,
+                                          min_score=g).get("entries"))
+                    if r.get("low_confidence") and not has_cortex:
+                        wrong += 1
+                curve.append({
+                    "guard": g, "floor": f,
+                    "abstain_recall_unanswerable": round(abst / len(UNANSWERABLE), 3),
+                    "false_abstain_answerable": round(wrong / len(PAIRS), 3),
+                })
+    return {"rung": name, "status": "ok", "curve": curve}
+
+
+def run_supersede(name: str, thresholds=(0.0, 0.80, 0.85, 0.90, 0.95)) -> dict:
+    """Feature-A calibration: sweep dream_slot_match_threshold on a paraphrasing
+    rung. Reports superseded / stale_leak (win) vs false_merge (cost)."""
+    rung = RUNGS[name]
+    if rung["kind"] == "llm" and not probe(rung["base_url"]):
+        return {"rung": name, "status": "unreachable"}
+    import tempfile
+    curve = []
+    for thr in thresholds:
+        with tempfile.TemporaryDirectory(prefix=f"plsup_{name}_",
+                                         ignore_cleanup_errors=True) as td:
+            svc = build_service(Path(td))
+            svc.config.memory.cortex.dream_slot_match_threshold = thr
+            ingest(svc)
+            for pair in NO_MERGE:                      # add the no-merge slots
+                svc.store(pair["a_text"], source="bench")
+                svc.store(pair["b_text"], source="bench")
+            _, tally = consolidate(svc, make_extractor(rung))
+            m = measure_cortex(svc)
+            false_merge = 0
+            for pair in NO_MERGE:
+                a = svc.cortex_lookup(*pair["a"])
+                b = svc.cortex_lookup(*pair["b"])
+                if a is None or b is None:             # one slot vanished -> merged
+                    false_merge += 1
             curve.append({
-                "floor": f,
-                "abstain_recall_unanswerable": round(abst / len(UNANSWERABLE), 3),
-                "false_abstain_answerable": round(wrong / len(PAIRS), 3),
+                "threshold": thr,
+                "superseded": tally.get("superseded", 0),
+                "stale_leak": m["stale_leak"],
+                "gold_recoverable": m["gold_recoverable"],
+                "false_merge": false_merge,
             })
     return {"rung": name, "status": "ok", "curve": curve}
 
@@ -502,10 +551,21 @@ def report() -> None:
     ab = res.get("abstain")
     if ab and ab.get("status") == "ok":
         print(f"\n[abstention sub-sweep] rung={ab['rung']}")
-        print(f"   {'floor':>6}{'abstain_recall(unans)':>24}{'false_abstain(ans)':>22}")
+        print(f"   {'guard':>6}{'floor':>6}{'abstain_recall(unans)':>24}{'false_abstain(ans)':>22}")
         for row in ab["curve"]:
-            print(f"   {row['floor']:>6}{row['abstain_recall_unanswerable']:>24}"
+            print(f"   {row['guard']:>6}{row['floor']:>6}"
+                  f"{row['abstain_recall_unanswerable']:>24}"
                   f"{row['false_abstain_answerable']:>22}")
+
+    sup = res.get("supersede")
+    if sup and sup.get("status") == "ok":
+        print(f"\n[supersession sub-sweep] rung={sup['rung']}")
+        print(f"   {'threshold':>10}{'superseded':>12}{'stale_leak':>12}"
+              f"{'gold_recov':>12}{'false_merge':>12}")
+        for row in sup["curve"]:
+            print(f"   {row['threshold']:>10}{row['superseded']:>12}"
+                  f"{row['stale_leak']:>12}{row['gold_recoverable']:>12}"
+                  f"{row['false_merge']:>12}")
 
 
 # ---------------------------------------------------------------------------
@@ -522,6 +582,8 @@ def main() -> int:
     ap.add_argument("--rung", choices=list(RUNGS), help="run one rung")
     ap.add_argument("--abstain", choices=list(RUNGS),
                     help="run the abstention threshold sub-sweep on this rung")
+    ap.add_argument("--supersede", choices=list(RUNGS),
+                    help="dream slot-match threshold sub-sweep")
     ap.add_argument("--report", action="store_true",
                     help="aggregate results/*.json into the table + verdict")
     ap.add_argument("--list", action="store_true", help="list rungs + endpoints")
@@ -541,6 +603,11 @@ def main() -> int:
     if args.abstain:
         out = run_abstain(args.abstain)
         (RESULTS_DIR / "abstain.json").write_text(json.dumps(out, indent=2))
+        print(json.dumps(out, indent=2))
+        return 0
+    if args.supersede:
+        out = run_supersede(args.supersede)
+        (RESULTS_DIR / "supersede.json").write_text(json.dumps(out, indent=2))
         print(json.dumps(out, indent=2))
         return 0
     if args.rung:
