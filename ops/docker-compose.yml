@@ -1,32 +1,44 @@
-# PseudoLife-MCP full stack: Postgres substrate + the memory daemon.
+# PseudoLife-MCP full stack: Postgres substrate + the memory daemon + the
+# extractor sidecar. The compose PROJECT is named `pseudolife-mcp` (below) so it
+# shows up clearly in Docker Desktop instead of as the folder name ("ops").
 #
 #   First time on a fresh machine (creates the two persistent volumes):
-#     docker volume create ops_pseudolife_pgdata
-#     docker volume create ops_pseudolife_data
+#     docker volume create pseudolife-mcp-bank
+#     docker volume create pseudolife-mcp-state
 #   Then, every time:
 #     docker compose -f ops/docker-compose.yml up -d --build   # start / rebuild
 #     docker compose -f ops/docker-compose.yml stop|start      # cycle, data safe
 #
-# ⚠️  TWO VOLUMES HOLD STATE. `pseudolife_pgdata` is the canonical bank
-#     (entries + facts + graph). `pseudolife_data` holds the daemon's learned
-#     neural weights + ChromaDB + cortex snapshot. To rebuild images
-#     (e.g. CVE hardening) use `up -d --build` or `stop`/`start` — these keep
-#     both volumes. NEVER use `down -v`, `docker volume rm`, or
-#     `docker system prune --volumes`: they DELETE state. (Both volumes are
-#     `external` below so `down -v` skips them, but the manual volume commands
-#     still bite — and always `ops/backup.ps1` before any teardown.)
+# ── EXISTING INSTALL (volumes created before the rename) ──────────────────────
+# Earlier installs created `ops_pseudolife_pgdata` / `ops_pseudolife_data`. Do NOT
+# rename those volumes (renaming external volumes is a data-migration). Instead,
+# keep pointing at them by creating `ops/.env` with:
+#     PSEUDOLIFE_BANK_VOLUME=ops_pseudolife_pgdata
+#     PSEUDOLIFE_STATE_VOLUME=ops_pseudolife_data
+# If you forget, `up` fails SAFELY with "external volume not found" (external
+# volumes are never auto-created or wiped) — it just reminds you to set the .env.
+#
+# ⚠️  TWO VOLUMES HOLD STATE. The bank volume (default `pseudolife-mcp-bank`) is
+#     the canonical bank (entries + facts + graph). The state volume (default
+#     `pseudolife-mcp-state`) holds the daemon's learned neural weights + ChromaDB
+#     + cortex snapshot. To rebuild images (e.g. CVE hardening) use `up -d --build`
+#     or `stop`/`start` — these keep both volumes. NEVER use `down -v`,
+#     `docker volume rm`, or `docker system prune --volumes`: they DELETE state.
+#     (Both volumes are `external` below so `down -v` skips them, but the manual
+#     volume commands still bite — and always `ops/backup.ps1` before any teardown.)
 #
 # Ports bind 127.0.0.1 only. Postgres (5433) is never exposed beyond the
 # compose network + loopback; the daemon (8765) is the only thing Claude
 # Code talks to — point it at  http://127.0.0.1:8765/mcp  (HTTP transport,
 # no stdio shim). Host port 5433 avoids collisions with a native Postgres.
+name: pseudolife-mcp
 services:
   pseudolife-pg:
     build:
       context: .
       dockerfile: Dockerfile.pg
     image: pseudolife-pg:16
-    container_name: pseudolife-pg
+    container_name: pseudolife-mcp-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: pseudolife
@@ -49,11 +61,13 @@ services:
       context: ..
       dockerfile: ops/Dockerfile.daemon
     image: pseudolife-daemon:0.2.0
-    container_name: pseudolife-daemon
+    container_name: pseudolife-mcp-daemon
     restart: unless-stopped
     depends_on:
       pseudolife-pg:
         condition: service_healthy
+      pseudolife-extractor:
+        condition: service_started
     environment:
       # Reaches Postgres over the compose network by service name (internal
       # port 5432, not the host-published 5433).
@@ -68,30 +82,27 @@ services:
       CUDA_VISIBLE_DEVICES: "-1"
       HF_HUB_OFFLINE: "1"
       TRANSFORMERS_OFFLINE: "1"
-      # Route dream consolidation through the opt-in extractor sidecar (start it
-      # with `--profile extractor`). Uncomment both, then recreate the daemon:
-      # PSEUDOLIFE_DREAM_BASE_URL: http://pseudolife-extractor:8081/v1
-      # PSEUDOLIFE_DREAM_MODEL: extractor
+      # Single-writer cortex: the LLM dream pass is the sole automatic cortex
+      # writer, so the extractor sidecar (below) is a default stack member and
+      # dream consolidation routes to it.
+      PSEUDOLIFE_DREAM_BASE_URL: http://pseudolife-extractor:8081/v1
+      PSEUDOLIFE_DREAM_MODEL: extractor
     ports:
       - "127.0.0.1:8765:8765"
     volumes:
       - pseudolife_data:/data
 
-  # Opt-in CPU LLM extractor for higher-quality dream consolidation. OFF by
-  # default (profiles:) — start it explicitly:
-  #     docker compose -f ops/docker-compose.yml --profile extractor up -d
-  # then enable routing via the two PSEUDOLIFE_DREAM_* env vars in the
-  # pseudolife-daemon block above and recreate the daemon.
+  # CPU LLM extractor for dream consolidation. Default-on (single-writer cortex):
+  # without it, the cortex is populated only by explicit memory_fact_set, and the
+  # daemon logs a startup warning. Internal-only — the daemon reaches it by service
+  # name on the compose network; never published to host (no `ports:`).
   pseudolife-extractor:
     build:
       context: ..
       dockerfile: ops/Dockerfile.extractor
     image: pseudolife-extractor:gemma4-e2b
-    container_name: pseudolife-extractor
+    container_name: pseudolife-mcp-extractor
     restart: unless-stopped
-    profiles: ["extractor"]
-    # Internal-only: the daemon reaches it by service name on the compose
-    # network. Never published to host (no `ports:`).
     expose:
       - "8081"
     # Benchmark/swap: mount a different GGUF over the baked default without a
@@ -100,16 +111,16 @@ services:
     #     - ../evals/models/gemma-4-E4B-it-Q4_K_M.gguf:/models/extractor.gguf:ro
 
 volumes:
-  # External so `docker compose down -v` cannot remove it — the bank survives
-  # any container teardown/rebuild. Created once with:
-  #   docker volume create ops_pseudolife_pgdata
-  # (already exists from the original `up`; this just adopts it by name).
+  # External so `docker compose down -v` cannot remove them — the bank survives
+  # any container teardown/rebuild. New installs create the clean defaults:
+  #   docker volume create pseudolife-mcp-bank
+  # Existing installs override to their pre-rename names via ops/.env (see header).
   pseudolife_pgdata:
     external: true
-    name: ops_pseudolife_pgdata
-  # Daemon state (neural weights + ChromaDB + cortex snapshot). External for
-  # the same reason as the bank — survives any container teardown/rebuild.
-  # Create once with:  docker volume create ops_pseudolife_data
+    name: ${PSEUDOLIFE_BANK_VOLUME:-pseudolife-mcp-bank}
+  # Daemon state (neural weights + ChromaDB + cortex snapshot). External for the
+  # same reason as the bank — survives any container teardown/rebuild.
+  #   docker volume create pseudolife-mcp-state
   pseudolife_data:
     external: true
-    name: ops_pseudolife_data
+    name: ${PSEUDOLIFE_STATE_VOLUME:-pseudolife-mcp-state}
