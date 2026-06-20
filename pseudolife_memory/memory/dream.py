@@ -93,12 +93,20 @@ _LESSON_SYSTEM_PROMPT = (
     "failure/dead-end, or a user correction. Produce durable, actionable lessons "
     'as JSON: {"lessons":[{"task":..,"aspect":..,"lesson":..,"about":..,'
     '"polarity":"+"|"-","outcome":"success"|"failure"|"correction",'
-    '"confidence":0..1}]}. task = the kind of task (reuse a stable wording across '
-    "signals); aspect = approach | pitfall | tool-choice | correction; lesson = "
-    "the actionable takeaway; about = the tool/source/approach the lesson "
-    'concerns; polarity = "+" for do-this, "-" for avoid/dead-end. Cluster related '
-    'signals into one lesson; skip anything not durable. Return {"lessons":[]} if '
-    "nothing qualifies."
+    '"confidence":0..1}]}.\n'
+    "- task = the kind of task, reusing stable wording across signals.\n"
+    "- aspect = approach | pitfall | tool-choice | correction.\n"
+    "- lesson = the actionable takeaway, phrased as what to DO (or what to avoid).\n"
+    "- about = the tool/source/approach the lesson concerns.\n"
+    "- outcome = the signal class it came from.\n"
+    '- polarity = "+" when the lesson is something to DO — an approach that worked, '
+    'or the corrected, now-correct way; "-" ONLY when the lesson is something to '
+    'AVOID (a dead-end), phrased as "avoid X". A CORRECTION is almost always "+": '
+    "state the new correct behavior to follow, never the mistake.\n"
+    "Cluster related signals into one lesson. SKIP trivial or non-durable signals "
+    "— generic knowledge any competent agent already has (e.g. basic "
+    "language/library usage), one-off chatter, or anything a future run would not "
+    'benefit from recalling. Return {"lessons":[]} if nothing qualifies.'
 )
 
 

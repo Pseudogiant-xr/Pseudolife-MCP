@@ -165,6 +165,58 @@ wrongly collapsed (the cost). The shipped default is the lowest threshold that
 drives `stale_leak` down at `false_merge = 0`; if none does, the resolver stays
 off.
 
+---
+
+# Lesson-synthesis benchmark (`lesson_synthesis_bench.py`)
+
+A separate eval for the **procedural** path (schema v10): how well does each model
+turn outcome SIGNALS into LESSONS (`extract_lessons`)? It stresses the parts the
+declarative sweep doesn't — **clustering** related signals, and the
+discriminators **polarity** (`+` do / `-` avoid) and **direction** (don't invert
+a correction). Six fixtures, scored on count, polarity, outcome, and a
+direction/faithfulness token check; full self-contained (stdlib only).
+
+Runs inside the daemon container, which reaches both endpoints
+(`pseudolife-extractor:8081` for Gemma, `host.docker.internal:1234` for the
+4090):
+
+```bash
+docker cp evals/lesson_synthesis_bench.py pseudolife-mcp-daemon:/tmp/lb.py
+docker exec pseudolife-mcp-daemon python /tmp/lb.py --target all
+```
+
+The prime optimisation target is the shipped **Gemma 2B** sidecar (what an
+end-user runs); **Qwen3.6-27B** (4090) is the quality CEILING, not the target.
+The `_LESSON_SYSTEM_PROMPT` here is tuned, then ported to `memory/dream.py`.
+
+## Findings — 2026-06-21
+
+Baseline (original prompt) vs the ceiling, then after a prompt iteration:
+
+```
+model                      full-pass  polarity  notes
+Gemma 2B (baseline)           4/6       4/5     missed correction-polarity + noise-skip
+Qwen3.6-27B (ceiling)         4/4*      3/3     *2 simple cases timed out cold-start
+Gemma 2B (tuned prompt)       5/6       5/5     correction-polarity FIXED
+```
+
+- The ceiling confirmed the two gaps were **prompt-fixable** (the 27B got both
+  right; Gemma is capable, it just needed clearer instructions).
+- A prompt tweak — an explicit polarity rule (**a correction is almost always
+  `+`: state the corrected, now-correct behavior, not the mistake**) plus a
+  bulleted field spec — lifted Gemma from **4/6 → 5/6** with polarity/outcome/
+  direction all 5/5 and clean clustering. Ported to `memory/dream.py`.
+- **Remaining gap — `noise_skip`:** Gemma 2B still emits a low-value lesson for a
+  trivial signal ("printed hello") where the 27B correctly returns `[]`. A second,
+  more aggressive skip instruction did **not** fix it and *regressed* clustering
+  (merged 3→2, mis-polarised a success), so it was reverted. Accepted as a
+  genuine small-model capability gap; **low real-world risk** because signals come
+  from deliberate `memory_outcome` calls + correction auto-tags, not arbitrary
+  chatter. Revisit if a larger default sidecar (Gemma E4B) is ever shipped.
+- Gemma already handles the **merged fail→success** case and **clustering** well
+  — better than the v1 live smoke suggested (that smoke's inversion was not
+  systematic at temperature 0).
+
 ## Findings — 2026-06-18 sweep
 
 ```
