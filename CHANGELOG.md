@@ -7,6 +7,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Procedural / outcome memory — "lessons" (schema v10).** A fourth memory
+  layer beside the personal and world cortex that learns from the agent's *own
+  work*: what worked, what was a dead end, and what the user corrected. Keyed by
+  `(task-type, aspect)`, each lesson carries an `outcome`
+  (`success`/`failure`/`correction`) and a `polarity` (`+` do / `-` avoid) in its
+  own `lessons` table (blast-radius isolated). Capture is cheap and in-session
+  (`memory_outcome` logs a *signal*; user-tier `memory_fact_set` corrections are
+  auto-tagged); synthesis is **single-writer** — the dream's LLM extractor distils
+  accumulated `outcome_signals` into lessons (`extract_lessons`), with no
+  deterministic floor (no extractor ⇒ no lessons, signals retained + age-pruned).
+  Lessons are **graph-traversable**: a task-type becomes an `etype='task-type'`
+  entity and each lesson adds a `prefers`/`avoids` edge (two new builtin
+  relations) to the tool/source it concerns. New tools: `memory_outcome`,
+  `memory_lesson_search` (embedding-on-query), `memory_lessons`,
+  `memory_lesson_forget`. Config under `memory.lessons`. The auto-injected
+  "lessons from past work" prompt block, an outcome-coloured graph view, and a
+  Cypher-side AGE edge-property upgrade are deferred follow-ons. Design:
+  `docs/specs/2026-06-20-procedural-outcome-memory-design.md`.
 - **Dream consolidation (Tiers 0–2).** Pull recent associative memories, extract
   canonical `(entity, attribute, value)` facts, write them to the cortex, and
   advance a monotonic cursor so each memory is consolidated once (session-agnostic

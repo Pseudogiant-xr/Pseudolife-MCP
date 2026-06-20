@@ -21,8 +21,8 @@ _DEFAULT_ADMIN = "postgresql://pseudolife:pseudolife@127.0.0.1:5433/postgres"
 _TEST_DB = "pseudolife_memory_test"
 
 _ALL_TABLES = (
-    "edges", "entity_aliases", "relations", "facts", "world_facts", "entries",
-    "episodes", "entities", "meta",
+    "edges", "entity_aliases", "relations", "facts", "world_facts", "lessons",
+    "outcome_signals", "entries", "episodes", "entities", "meta",
 )
 
 

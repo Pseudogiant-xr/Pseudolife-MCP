@@ -240,3 +240,85 @@ def hydrate_world_cortex(world, storage) -> int:
         r.key: i for i, r in enumerate(world.records) if r.status == "current"
     }
     return len(world.records)
+
+
+# ── procedural / outcome memory (lessons, schema v10) ──────────────────────
+
+def _lesson_record_to_row(r) -> dict[str, Any]:
+    from pseudolife_memory.memory.cortex import _norm_key
+
+    return {
+        "entity": r.entity,
+        "attribute": r.attribute,
+        "entity_norm": _norm_key(r.entity),
+        "attribute_norm": _norm_key(r.attribute),
+        "value": r.value,
+        "about": r.about,
+        "polarity": r.polarity,
+        "outcome": r.outcome,
+        "status": r.status,
+        "confidence": float(r.confidence),
+        "origin": r.origin or None,
+        "support": sorted(r.support),
+        "provenance": sorted(r.provenance),
+        "asserted_at": float(r.asserted_at),
+        "last_confirmed": float(r.last_confirmed),
+        "supersedes_value": r.supersedes_value,
+        "superseded_by_value": r.superseded_by_value,
+        "superseded_at": r.superseded_at,
+        "embedding": r.embedding,
+        "entity_id": None,          # linked by snapshot_lessons
+        "object_entity_id": None,   # linked by snapshot_lessons
+    }
+
+
+def snapshot_lessons(lessons, storage) -> int:
+    """Transactionally rewrite the lessons table from the in-memory store.
+
+    Graph linking: the task-type (``entity``) resolves to its entity id, and the
+    ``about`` tool/source — when it names a known entity/alias — to the object id,
+    so the lesson row and the ``prefers``/``avoids`` graph edge stay joined.
+    """
+    from pseudolife_memory.graph import norm_name
+
+    rows = [_lesson_record_to_row(r) for r in lessons.records]
+    emap = storage.entity_id_map()
+    for row in rows:
+        row["entity_id"] = emap.get(norm_name(row["entity"]))
+        if row.get("about"):
+            row["object_entity_id"] = emap.get(norm_name(row["about"]))
+    storage.replace_lessons(rows)
+    return len(rows)
+
+
+def hydrate_lessons(lessons, storage) -> int:
+    """Fill the lesson store from the lessons table. Returns record count."""
+    from pseudolife_memory.memory.lessons import LessonRecord
+
+    lessons.records = []
+    for row in storage.load_lessons():
+        emb = row["embedding"]
+        lessons.records.append(LessonRecord(
+            entity=row["entity"],
+            attribute=row["attribute"],
+            value=row["value"],
+            about=row["about"],
+            polarity=row["polarity"],
+            outcome=row["outcome"],
+            confidence=row["confidence"],
+            status=row["status"],
+            origin=row["origin"],
+            support=set(row["support"] or []),
+            provenance=set(row["provenance"] or []),
+            asserted_at=row["asserted_at"],
+            last_confirmed=row["last_confirmed"],
+            supersedes_value=row["supersedes_value"],
+            superseded_by_value=row["superseded_by_value"],
+            superseded_at=row["superseded_at"],
+            embedding=(torch.as_tensor(emb, dtype=torch.float32)
+                       if emb is not None else None),
+        ))
+    lessons._current = {
+        r.key: i for i, r in enumerate(lessons.records) if r.status == "current"
+    }
+    return len(lessons.records)

@@ -1,4 +1,5 @@
-"""Schema v8 DDL — entries / episodes / meta / cortex facts / graph tables.
+"""Schema v10 DDL — entries / episodes / meta / cortex facts / world facts /
+lessons + outcome signals / graph tables.
 
 Everything is ``CREATE TABLE IF NOT EXISTS`` so :func:`ensure_schema` is
 idempotent and safe to run on every daemon start. The graph tables
@@ -15,7 +16,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 9
+SCHEMA_META_VERSION = 10
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -153,6 +154,60 @@ CREATE TABLE IF NOT EXISTS world_facts (
 );
 CREATE INDEX IF NOT EXISTS world_facts_slot_idx
   ON world_facts (entity_norm, attribute_norm, status);
+
+-- Procedural / outcome memory ("lessons", schema v10, additive). Slot-keyed like
+-- `facts`, but the slot is (task-type, aspect) and each lesson carries an `outcome`
+-- (success|failure|correction) alongside `polarity` (+ do-this / - avoid). Kept
+-- PHYSICALLY SEPARATE from `facts`/`world_facts` for blast-radius isolation. Graph-
+-- linked like the personal cortex: `entity_id` -> the task-type entity,
+-- `object_entity_id` -> the tool/source the lesson is about (the `prefers`/`avoids`
+-- edge endpoint). Written solely by the dream (single-writer); see
+-- docs/specs/2026-06-20-procedural-outcome-memory-design.md.
+CREATE TABLE IF NOT EXISTS lessons (
+  id BIGSERIAL PRIMARY KEY,
+  entity TEXT NOT NULL,
+  attribute TEXT NOT NULL,
+  entity_norm TEXT NOT NULL,
+  attribute_norm TEXT NOT NULL,
+  value TEXT NOT NULL,
+  about TEXT,                                 -- the tool/source the lesson is about
+  polarity TEXT NOT NULL DEFAULT '+',
+  outcome TEXT NOT NULL DEFAULT 'success',   -- success | failure | correction
+  status TEXT NOT NULL,
+  confidence REAL NOT NULL,
+  origin TEXT,
+  support JSONB NOT NULL DEFAULT '[]',
+  provenance JSONB NOT NULL DEFAULT '[]',     -- contributing episode + signal ids
+  asserted_at DOUBLE PRECISION NOT NULL,
+  last_confirmed DOUBLE PRECISION NOT NULL,
+  supersedes_value TEXT,
+  superseded_by_value TEXT,
+  superseded_at DOUBLE PRECISION,
+  embedding vector(384),
+  entity_id BIGINT REFERENCES entities(id),
+  object_entity_id BIGINT REFERENCES entities(id)
+);
+CREATE INDEX IF NOT EXISTS lessons_slot_idx
+  ON lessons (entity_norm, attribute_norm, status);
+
+-- In-session outcome signals: a cheap, append-only log the dream drains into
+-- lessons. `consumed_at` is the dream's drain cursor (NULL = pending). Never a
+-- user-visible memory; pruned by age so it can't grow unbounded when no extractor
+-- is configured to synthesise lessons.
+CREATE TABLE IF NOT EXISTS outcome_signals (
+  id BIGSERIAL PRIMARY KEY,
+  task TEXT NOT NULL,
+  outcome TEXT NOT NULL,                      -- success | failure | correction
+  about TEXT,
+  detail TEXT,
+  polarity TEXT,
+  origin TEXT,
+  episode_id TEXT,
+  created_at DOUBLE PRECISION NOT NULL,
+  consumed_at DOUBLE PRECISION
+);
+CREATE INDEX IF NOT EXISTS outcome_signals_pending_idx
+  ON outcome_signals (consumed_at, created_at);
 """
 
 

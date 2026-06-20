@@ -532,6 +532,73 @@ def memory_world_forget(entity: str, attribute: str | None = None) -> dict[str, 
 
 
 @mcp.tool()
+def memory_outcome(
+    task: str,
+    outcome: str,
+    about: str | None = None,
+    detail: str | None = None,
+    polarity: str | None = None,
+) -> dict[str, Any]:
+    """Record a PROCEDURAL outcome signal — what happened while doing a task, so the
+    agent can learn from its own work across sessions. Cheap and immediate: this
+    logs a *signal*; the dream later synthesises durable LESSONS from accumulated
+    signals (single-writer — this never writes a lesson directly).
+
+    Use it the moment you notice an outcome worth remembering:
+      * a success — an approach / tool / source that worked well for this kind of task;
+      * a dead-end (failure) — something that did NOT work, so a future run avoids it;
+      * a correction — the user overrode an assumption (these are also auto-captured).
+
+    Args:
+        task: the kind of task, in stable wording ("deploy engine to host",
+            "debug a failing PG migration"). Becomes a graph ``task-type`` node.
+        outcome: ``success`` | ``failure`` | ``correction``.
+        about: the tool / source / approach the outcome concerns (the edge object,
+            e.g. ``tar --same-owner``). Optional but makes the lesson traversable.
+        detail: what worked / what the dead-end was (free text).
+        polarity: ``+`` do-this | ``-`` avoid; usually omit (inferred from outcome).
+
+    Returns: ``{"recorded": bool, "signal_id": int, "task": str, "outcome": str}``.
+    """
+    return service.record_outcome(
+        task, outcome, about=about, detail=detail, polarity=polarity)
+
+
+@mcp.tool()
+def memory_lesson_search(query: str, top_k: int = 5) -> dict[str, Any]:
+    """Search learned LESSONS (procedural memory) by similarity to the task at hand.
+
+    Call this at the START of a task to recall what worked, what to avoid, and what
+    the user corrected last time — fewer wasted steps. Dead-ends come back with
+    ``polarity`` ``-`` and ``outcome`` ``failure``; heed them.
+
+    Returns: ``{"count": int, "entries": [{task, aspect, lesson, about, polarity,
+    outcome, confidence, score}, ...]}``.
+    """
+    return service.lesson_search(query, top_k=top_k)
+
+
+@mcp.tool()
+def memory_lessons(limit: int = 120) -> dict[str, Any]:
+    """List all current LESSONS (introspection / audit of procedural memory).
+
+    Returns: ``{"count": int, "entries": [...]}`` sorted by (task, aspect), each
+    with its polarity, outcome, ``about`` object, confidence, and provenance.
+    """
+    return service.lessons_dump(limit=limit)
+
+
+@mcp.tool()
+def memory_lesson_forget(task: str, aspect: str | None = None) -> dict[str, Any]:
+    """Delete LESSON(s) — a whole task-type or one aspect (cleanup / manual
+    correction). Only touches the lessons store.
+
+    Returns: ``{"removed": int, "task": str, "aspect": str|null}``.
+    """
+    return service.lesson_forget(task, aspect)
+
+
+@mcp.tool()
 def memory_dream_status() -> dict[str, Any]:
     """Read-only: how much unconsolidated memory is waiting for a dream.
 

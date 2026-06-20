@@ -53,6 +53,22 @@ _WORLD_FACT_COLS = (
     "content_hash", "source_doc_id",
 )
 
+# Procedural / outcome memory columns (schema v10). Same slot-keyed shape as facts
+# plus `outcome` (success|failure|correction); graph-linked like the personal cortex
+# (entity_id -> task-type entity, object_entity_id -> the tool/source the lesson is
+# about). support/provenance are JSONB (provenance = episode + signal ids).
+_LESSON_COLS = (
+    "entity", "attribute", "entity_norm", "attribute_norm", "value", "about",
+    "polarity", "outcome", "status", "confidence", "origin", "support",
+    "provenance", "asserted_at", "last_confirmed", "supersedes_value",
+    "superseded_by_value", "superseded_at", "embedding",
+    "entity_id", "object_entity_id",
+)
+_SIGNAL_COLS = (
+    "task", "outcome", "about", "detail", "polarity", "origin",
+    "episode_id", "created_at",
+)
+
 # Ontology-lite builtin relations (spec §5.3) — the closed vocabulary a
 # weak model starts from. Referenced inverses must come first (FK).
 _BUILTIN_RELATIONS = (
@@ -65,6 +81,12 @@ _BUILTIN_RELATIONS = (
     ("configures", "src sets configuration for dst", False, None),
     ("stores-data-in", "src persists its data in dst", False, None),
     ("related-to", "untyped catch-all association", False, None),
+    # Procedural / outcome memory (schema v10): a task-type entity prefers/avoids
+    # the tool/source a lesson is about. Untyped like the other builtins.
+    ("prefers", "src (a task-type) prefers approach/tool dst (positive lesson)",
+     False, None),
+    ("avoids", "src (a task-type) should avoid dead-end dst (negative lesson)",
+     False, None),
 )
 
 # Mutable entry fields update_entry accepts — everything else is identity.
@@ -326,6 +348,92 @@ class PostgresStorage:
                 d["embedding"] = np.asarray(d["embedding"], dtype=np.float32)
             out.append(d)
         return out
+
+    # ── procedural / outcome memory (schema v10; same snapshot pattern) ─────
+
+    def replace_lessons(self, rows: list[dict]) -> None:
+        """Snapshot-style lesson persistence: one transaction, full rewrite (the
+        lesson store is small/deduped, like the personal and world cortex)."""
+        with self.conn.cursor() as cur:
+            cur.execute("DELETE FROM lessons")
+            for f in rows:
+                values = []
+                for c in _LESSON_COLS:
+                    v = f.get(c)
+                    if c == "embedding":
+                        v = _embedding_in(v)
+                    elif c in _FACT_JSONB:
+                        v = Jsonb(v if v is not None else [])
+                    values.append(v)
+                cur.execute(
+                    f"INSERT INTO lessons ({', '.join(_LESSON_COLS)}) "
+                    f"VALUES ({', '.join(['%s'] * len(_LESSON_COLS))})",
+                    values,
+                )
+        self.conn.commit()
+
+    def load_lessons(self) -> list[dict]:
+        cols = ("id",) + _LESSON_COLS
+        rows = self.conn.execute(
+            f"SELECT {', '.join(cols)} FROM lessons ORDER BY id",
+        ).fetchall()
+        out = []
+        for row in rows:
+            d = dict(zip(cols, row))
+            if d["embedding"] is not None:
+                d["embedding"] = np.asarray(d["embedding"], dtype=np.float32)
+            out.append(d)
+        return out
+
+    # ── outcome signals (append-only log the dream drains into lessons) ─────
+
+    def add_signal(self, task: str, outcome: str, about: str | None = None,
+                   detail: str | None = None, polarity: str | None = None,
+                   origin: str | None = None, episode_id: str | None = None,
+                   now: float | None = None) -> int:
+        t = time.time() if now is None else float(now)
+        row = self.conn.execute(
+            f"INSERT INTO outcome_signals ({', '.join(_SIGNAL_COLS)}) "
+            f"VALUES ({', '.join(['%s'] * len(_SIGNAL_COLS))}) RETURNING id",
+            (task, outcome, about, detail, polarity, origin, episode_id, t),
+        ).fetchone()
+        self.conn.commit()
+        return int(row[0])
+
+    def pending_signals(self, limit: int | None = None) -> list[dict]:
+        cols = ("id",) + _SIGNAL_COLS
+        sql = (
+            f"SELECT {', '.join(cols)} FROM outcome_signals "
+            "WHERE consumed_at IS NULL ORDER BY created_at, id"
+        )
+        if limit is not None:
+            sql += f" LIMIT {int(limit)}"
+        rows = self.conn.execute(sql).fetchall()
+        return [dict(zip(cols, r)) for r in rows]
+
+    def consume_signals(self, ids: list[int], now: float | None = None) -> int:
+        """Mark signals consumed (the dream's drain cursor). Idempotent: an
+        already-consumed signal is skipped."""
+        if not ids:
+            return 0
+        t = time.time() if now is None else float(now)
+        cur = self.conn.execute(
+            "UPDATE outcome_signals SET consumed_at = %s "
+            "WHERE id = ANY(%s) AND consumed_at IS NULL",
+            (t, list(ids)),
+        )
+        self.conn.commit()
+        return cur.rowcount
+
+    def prune_signals(self, older_than_ts: float) -> int:
+        """Delete signals (consumed or not) older than the cutoff, so the log
+        can't grow unbounded when no extractor is configured to drain it."""
+        cur = self.conn.execute(
+            "DELETE FROM outcome_signals WHERE created_at < %s",
+            (float(older_than_ts),),
+        )
+        self.conn.commit()
+        return cur.rowcount
 
     # ── meta ────────────────────────────────────────────────────────────
 

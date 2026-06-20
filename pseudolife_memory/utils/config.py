@@ -373,6 +373,25 @@ class CortexConfig:
 
 
 @dataclass
+class LessonsConfig:
+    """Procedural / outcome memory ("lessons", schema v10) — a third slot-keyed
+    store beside the personal and world cortex. Keyed by ``(task-type, aspect)``,
+    each lesson carries an ``outcome`` (success|failure|correction) and ``polarity``
+    (do/avoid). Written solely by the dream from cheap in-session outcome signals
+    (single-writer). See ``docs/specs/2026-06-20-procedural-outcome-memory-design.md``.
+    """
+    enabled: bool = True
+    top_k: int = 5
+    min_confidence: float = 0.0
+    # Unconsumed (and consumed) signals older than this are pruned on the dream
+    # sweep so the append-only log can't grow unbounded when no extractor drains it.
+    signal_retention_days: int = 30
+    # When False, the dream skips signal drain / lesson synthesis (signals still
+    # pruned by retention).
+    synthesize_in_dream: bool = True
+
+
+@dataclass
 class MetaFilterConfig:
     """Self-reference meta-statement filter on the store path.
 
@@ -417,6 +436,8 @@ class MemoryConfig:
     contrastive: ContrastiveConfig = field(default_factory=ContrastiveConfig)
     # Cortex — sibling slot-keyed canonical-fact store (schema v7).
     cortex: CortexConfig = field(default_factory=CortexConfig)
+    # Procedural / outcome memory — lessons store (schema v10).
+    lessons: LessonsConfig = field(default_factory=LessonsConfig)
     # Meta-statement filter on the store path (off in the MCP build).
     meta_filter: MetaFilterConfig = field(default_factory=MetaFilterConfig)
     # Neural/exact retrieval blend (band.retrieve). Effective neural weight
@@ -560,6 +581,10 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             )
         if "cortex" in mem_raw:
             config.memory.cortex = _dict_to_dataclass(CortexConfig, mem_raw["cortex"])
+        if "lessons" in mem_raw:
+            config.memory.lessons = _dict_to_dataclass(
+                LessonsConfig, mem_raw["lessons"],
+            )
         if "dream" in mem_raw:
             config.memory.dream = _dict_to_dataclass(DreamConfig, mem_raw["dream"])
         if "meta_filter" in mem_raw:

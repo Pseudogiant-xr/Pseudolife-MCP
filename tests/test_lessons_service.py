@@ -1,0 +1,152 @@
+"""Procedural / outcome memory — service-level integration (PG-backed).
+
+Builds a real MemoryService against the throwaway test DB (loads the embedder
+offline). Skips cleanly without a PG server.
+"""
+
+from __future__ import annotations
+
+import tempfile
+
+import pytest
+
+from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
+
+
+class StubExtractor:
+    """Declarative extractor that yields nothing; synthesises canned lessons."""
+
+    def __init__(self, lessons=None):
+        self._lessons = lessons or []
+
+    def extract(self, texts, vocab):
+        return []
+
+    def extract_lessons(self, signals):
+        return list(self._lessons)
+
+
+class NoLessonExtractor:
+    """Has no extract_lessons — models the NoOpExtractor / plain regex floor."""
+
+    def extract(self, texts, vocab):
+        return []
+
+
+@pytest.fixture()
+def svc(pg_conn, pg_url):
+    from pseudolife_memory.service import MemoryService
+
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
+        s = MemoryService(data_dir=d, database_url=pg_url)
+        try:
+            yield s
+        finally:
+            if s._storage is not None:
+                s._storage.close()
+
+
+def _lesson(task="deploy engine to host", aspect="approach",
+            lesson="use tar --no-same-owner", **over):
+    c = {"task": task, "aspect": aspect, "lesson": lesson, "about": "tar",
+         "polarity": "+", "outcome": "success", "confidence": 0.7}
+    c.update(over)
+    return c
+
+
+def test_record_outcome_writes_signal_not_lesson(svc):
+    res = svc.record_outcome("deploy engine to host", "failure",
+                             about="tar --same-owner",
+                             detail="chown errors aborted extract", polarity="-")
+    assert res["recorded"] and res["outcome"] == "failure"
+    # No lesson written by the signal alone (single-writer).
+    assert svc.lessons_dump()["count"] == 0
+    # The signal is pending in storage.
+    pend = svc._storage.pending_signals()
+    assert len(pend) == 1 and pend[0]["task"] == "deploy engine to host"
+
+
+def test_synthesize_writes_lessons_edges_and_consumes_signals(svc):
+    svc.record_outcome("deploy engine to host", "success", about="tar")
+    svc.record_outcome("deploy engine to host", "failure",
+                       about="tar --same-owner", polarity="-")
+    ext = StubExtractor([
+        _lesson(),
+        _lesson(aspect="pitfall", lesson="tar --same-owner aborts on chown",
+                about="tar --same-owner", polarity="-", outcome="failure"),
+    ])
+    rep = svc.synthesize_lessons(ext)
+    assert rep["signals"] == 2 and rep["lessons"] == 2
+
+    dump = svc.lessons_dump()
+    assert dump["count"] == 2
+    pol = {d["aspect"]: d["polarity"] for d in dump["entries"]}
+    assert pol["approach"] == "+" and pol["pitfall"] == "-"
+
+    # Signals consumed — a second synthesis is a no-op.
+    assert svc._storage.pending_signals() == []
+    assert svc.synthesize_lessons(ext)["lessons"] == 0
+
+    # Graph edges: task-type entity now prefers/avoids the tools.
+    nb = svc.graph_neighborhood("deploy engine to host", depth=1)
+    assert nb["found"] is True
+    rels = {(e["relation"], e["dst"]) for e in nb["edges"]}
+    assert ("prefers", "tar") in rels
+    assert ("avoids", "tar --same-owner") in rels
+
+
+def test_no_extractor_leaves_signals_pending(svc):
+    svc.record_outcome("some task", "success", about="thing")
+    rep = svc.synthesize_lessons(NoLessonExtractor())
+    assert rep["lessons"] == 0 and rep.get("skipped") == "no-extractor"
+    assert len(svc._storage.pending_signals()) == 1  # untouched
+
+
+def test_correction_autotag_on_user_supersede(svc):
+    svc.cortex_write("server", "port", "8080", support="user")
+    svc.cortex_write("server", "port", "9090", support="user")  # user correction
+    pend = svc._storage.pending_signals()
+    corr = [s for s in pend if s["outcome"] == "correction"]
+    assert len(corr) == 1
+    assert corr[0]["about"] == "server"
+    assert "8080" in corr[0]["detail"] and "9090" in corr[0]["detail"]
+
+
+def test_agent_supersede_does_not_autotag(svc):
+    # Agent/dream-tier supersession must NOT emit a correction (no feedback loop).
+    svc.cortex_write("server", "port", "8080", support="agent")
+    svc.cortex_write("server", "port", "9090", support="agent")
+    pend = svc._storage.pending_signals()
+    assert [s for s in pend if s["outcome"] == "correction"] == []
+
+
+def test_lesson_search_returns_polarity_and_outcome(svc):
+    svc.record_outcome("db migration", "failure", about="online ALTER")
+    svc.synthesize_lessons(StubExtractor([
+        _lesson(task="db migration", aspect="pitfall",
+                lesson="online ALTER locks the table under load",
+                about="online ALTER", polarity="-", outcome="failure"),
+    ]))
+    hits = svc.lesson_search("how should I run a database migration", top_k=5)
+    assert hits["count"] >= 1
+    top = hits["entries"][0]
+    assert top["polarity"] == "-" and top["outcome"] == "failure"
+    assert top["about"] == "online ALTER"
+
+
+def test_dream_run_includes_lesson_synthesis(svc):
+    svc.record_outcome("deploy engine to host", "success", about="tar")
+    out = svc.dream_run(StubExtractor([_lesson()]))
+    assert "lessons" in out
+    assert out["lessons"]["lessons"] == 1
+    assert svc.lessons_dump()["count"] == 1
+
+
+def test_lesson_forget(svc):
+    svc.synthesize_lessons(StubExtractor([_lesson()])) if False else None
+    svc.record_outcome("t", "success", about="x")
+    svc.synthesize_lessons(StubExtractor([_lesson(task="t", about="x")]))
+    assert svc.lessons_dump()["count"] == 1
+    rem = svc.lesson_forget("t")
+    assert rem["removed"] == 1
+    assert svc.lessons_dump()["count"] == 0

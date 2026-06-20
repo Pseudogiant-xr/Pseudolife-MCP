@@ -27,6 +27,9 @@ layers several complementary stores:
 - **World cortex** — durable, *cited* facts about external reality (a
   current version, a price, who holds a role) with age-decayed trust, kept
   separate from your own facts.
+- **Procedural memory (lessons)** — what worked, what was a dead end, and
+  what the user corrected, keyed to a *task-type* and learned from the
+  agent's own work. Dead-ends are first-class and traversable in the graph.
 - **Reference bank** — a ChromaDB document store for RAG over files you
   ingest.
 
@@ -63,6 +66,10 @@ each session.
 | `memory_world_search(query, top_k?)` | Search world facts by similarity — each carries `effective_confidence`, a `stale` flag, and its citation |
 | `memory_world_facts(limit?)` | List all current world facts (world-cortex introspection) |
 | `memory_world_forget(entity, attribute?)` | Hard-delete world fact(s) at a slot/entity (cleanup; never touches user/project facts) |
+| `memory_outcome(task, outcome, about?, detail?, polarity?)` | Record a PROCEDURAL outcome signal (`success`/`failure`/`correction`) — what worked / dead-ended / got corrected while doing a task; the dream later distils signals into lessons |
+| `memory_lesson_search(query, top_k?)` | Recall learned LESSONS for the task at hand — dead-ends come back with `polarity` `-` / `outcome` `failure` |
+| `memory_lessons(limit?)` | List all current lessons (procedural-memory introspection) |
+| `memory_lesson_forget(task, aspect?)` | Delete lesson(s) at a task-type/aspect (cleanup / manual correction) |
 | `memory_dream_status()` | Read-only: backlog of unconsolidated memories + whether a dream would fire (safe for a SessionStart nudge) |
 | `memory_dream_pull(limit?)` | Recent memories not yet consolidated — the agent extracts canonical facts from these (Tier 1) |
 | `memory_dream_commit(cursor)` | Advance the dream cursor after consolidating up to `cursor` |
@@ -616,6 +623,43 @@ separate block, and `memory_world_facts` lists them all for audit.
 > automatically) is an agent-side capability that depends on the agent's
 > web tool — it is not part of the standalone MCP server.
 
+### Procedural memory — the lessons store (schema v10)
+
+A fourth layer learns from the agent's *own work*. Where the cortex stores
+*declarative* facts ("X is Y"), the lessons store is *procedural*: keyed by a
+**task-type** and an **aspect** (`approach` / `pitfall` / `tool-choice` /
+`correction`), each lesson carries an **outcome** (`success` / `failure` /
+`correction`) and a **polarity** (`+` do-this / `-` avoid). Its own `lessons`
+table keeps it isolated from the personal and world cortex.
+
+Capture is cheap and in-session; synthesis is single-writer (the dream):
+
+```
+# during a task, log what happened — this writes a SIGNAL, not a lesson:
+memory_outcome("deploy engine to host", "failure",
+               about="tar --same-owner", detail="chown errors aborted the extract")
+memory_outcome("deploy engine to host", "success", about="tar --no-same-owner")
+# user corrections are auto-captured when a user-tier memory_fact_set supersedes a value.
+
+# the dream later distils accumulated signals into durable lessons; recall them at task start:
+memory_lesson_search("how do I deploy the engine to a host")
+# → [{task, aspect, lesson, about, polarity:"-"|"+", outcome, confidence, score}, ...]
+```
+
+Lessons are also **traversable in the graph**: a task-type becomes an
+`etype='task-type'` entity, and each lesson adds a `prefers` (positive) or
+`avoids` (negative / dead-end) edge to the tool/source it concerns — so
+`memory_graph("deploy engine to host")` shows what to reach for and what to
+avoid. Retrieval is embedding-on-query (mirrors `memory_world_search`); the
+graph edges power structured traversal.
+
+> Single-writer: `memory_outcome` only ever logs a signal — the dream's LLM
+> extractor is the sole writer of lessons. With no extractor configured, signals
+> accumulate (pruned by retention) and no lessons are synthesised, exactly as the
+> cortex behaves without an extractor. An auto-injected "lessons from past work"
+> prompt block is a provider/client concern, like the world-knowledge block — not
+> part of the standalone server.
+
 ## Dreaming — consolidating memories into facts
 
 A **dream** distils the recent associative stream (MIRAS) into canonical cortex
@@ -759,12 +803,13 @@ pass.
 | Provenance contenders | Tier-rank guard `user > action > agent`; `memory_fact_resolve` |
 | Knowledge graph | Typed entities/edges, closed relation vocab, on-read closure, AGE Cypher |
 | World cortex | `memory_world_*` — cited external facts + age-decayed freshness (manual ingest) |
+| Procedural memory | `memory_outcome` (signals) → dream-synthesised `memory_lessons`/`memory_lesson_search`; `prefers`/`avoids` graph edges; single-writer |
 | Episodes + tags | `memory_episode_*`; multi-valued `tags=[...]` on store/search/delete |
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
 | Cross-encoder reranker | Optional (`rerank=True` per call, ~80 MB) |
 | BM25 hybrid pool | Optional (`bm25=True` per call, stdlib only) |
 | NLI contradiction scorer | Optional (`pip install .[nli]`, ~278 MB) |
-| Schema version | v9 (additive; legacy file-mode `.pt` banks auto-migrate into Postgres) |
+| Schema version | v10 (additive; legacy file-mode `.pt` banks auto-migrate into Postgres) |
 
 ## What's not built yet
 
@@ -785,6 +830,11 @@ pass.
   needs a web-fetch tool the standalone server doesn't ship. Today, assert world
   facts manually with `memory_world_set`; an agent with web access can
   automate it.
+- **Lessons auto-injection + outcome-coloured graph view** — the lessons store,
+  tools, and `prefers`/`avoids` edges ship here; the auto-injected "lessons from
+  past work" prompt block is a provider/client concern (like the world-knowledge
+  block), and a human-facing outcome-coloured graph visualisation + a Cypher-side
+  AGE upgrade (mirroring edge properties) are deferred follow-ons.
 
 ## License
 

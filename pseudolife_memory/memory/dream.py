@@ -26,6 +26,16 @@ class Claim(TypedDict):
     origin: str          # "user" | "action" | "agent"
 
 
+class LessonClaim(TypedDict):
+    task: str            # the task-type ("deploy engine to host")
+    aspect: str          # approach | pitfall | tool-choice | correction
+    lesson: str          # the actionable takeaway
+    about: str           # the tool/source/approach the lesson concerns
+    polarity: str        # "+" do-this | "-" avoid (dead end)
+    outcome: str         # success | failure | correction
+    confidence: float
+
+
 class DreamExtractor(Protocol):
     def extract(self, texts: list[str], vocab: list[str]) -> list[Claim]:
         """Return canonical claims for ``texts``. ``vocab`` is the existing
@@ -75,6 +85,36 @@ def _vocab_hint(vocab: list[str]) -> str:
     if not vocab:
         return ""
     return "\n\nExisting slot keys (reuse if applicable): " + ", ".join(vocab[:60])
+
+
+_LESSON_SYSTEM_PROMPT = (
+    "You consolidate an agent's work-outcome signals into reusable LESSONS. Each "
+    "signal records something that happened while doing a task: a success, a "
+    "failure/dead-end, or a user correction. Produce durable, actionable lessons "
+    'as JSON: {"lessons":[{"task":..,"aspect":..,"lesson":..,"about":..,'
+    '"polarity":"+"|"-","outcome":"success"|"failure"|"correction",'
+    '"confidence":0..1}]}. task = the kind of task (reuse a stable wording across '
+    "signals); aspect = approach | pitfall | tool-choice | correction; lesson = "
+    "the actionable takeaway; about = the tool/source/approach the lesson "
+    'concerns; polarity = "+" for do-this, "-" for avoid/dead-end. Cluster related '
+    'signals into one lesson; skip anything not durable. Return {"lessons":[]} if '
+    "nothing qualifies."
+)
+
+
+def _format_signals(signals: list[dict]) -> str:
+    """Render outcome signals as compact lines for the synthesis prompt."""
+    lines = []
+    for s in signals or []:
+        parts = [f"[{s.get('outcome', '?')}]", f"task={s.get('task', '')!r}"]
+        if s.get("about"):
+            parts.append(f"about={s['about']!r}")
+        if s.get("detail"):
+            parts.append(f"detail={s['detail']!r}")
+        if s.get("polarity"):
+            parts.append(f"polarity={s['polarity']}")
+        lines.append(" ".join(parts))
+    return "\n".join(lines)
 
 
 class OpenAICompatExtractor:
@@ -154,6 +194,68 @@ class OpenAICompatExtractor:
             claims.append(Claim(entity=entity, attribute=attribute, value=value,
                                 confidence=conf, origin="agent"))
         return claims
+
+    def extract_lessons(self, signals: list[dict]) -> list[LessonClaim]:
+        """Synthesise procedural lessons from outcome signals via the same
+        endpoint. Returns ``[]`` on any failure (single-writer: the dream then
+        writes no lessons this cycle and the signals stay pending)."""
+        import json
+        import urllib.request
+
+        if not signals:
+            return []
+        headers = {"content-type": "application/json"}
+        if self.api_key:
+            headers["authorization"] = f"Bearer {self.api_key}"
+        try:
+            body = json.dumps({
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": _LESSON_SYSTEM_PROMPT},
+                    {"role": "user", "content": _format_signals(signals)},
+                ],
+                "response_format": {"type": "json_object"},
+                "max_tokens": self.max_tokens,
+                "temperature": 0,
+                "chat_template_kwargs": {"enable_thinking": False},
+            }).encode()
+            req = urllib.request.Request(
+                f"{self.base_url}/chat/completions", data=body,
+                headers=headers, method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                data = json.loads(resp.read().decode())
+            content = data["choices"][0]["message"]["content"] or ""
+            s, e = content.find("{"), content.rfind("}")
+            if s != -1 and e > s:
+                content = content[s:e + 1]
+            parsed = json.loads(content)
+            raw = parsed.get("lessons", []) if isinstance(parsed, dict) else []
+        except Exception as exc:  # noqa: BLE001 — never break a dream
+            logger.warning("OpenAICompatExtractor.extract_lessons failed: %s", exc)
+            return []
+        out: list[LessonClaim] = []
+        for c in raw if isinstance(raw, list) else []:
+            if not isinstance(c, dict):
+                continue
+            task = str(c.get("task", "")).strip()
+            lesson = str(c.get("lesson", "")).strip()
+            if not (task and lesson):
+                continue
+            aspect = str(c.get("aspect", "") or "lesson").strip() or "lesson"
+            about = str(c.get("about", "") or "").strip() or None
+            polarity = "-" if str(c.get("polarity", "+")).strip() == "-" else "+"
+            outcome = str(c.get("outcome", "success")).strip()
+            if outcome not in ("success", "failure", "correction"):
+                outcome = "success"
+            try:
+                conf = max(0.0, min(1.0, float(c.get("confidence", 0.6))))
+            except (TypeError, ValueError):
+                conf = 0.6
+            out.append(LessonClaim(
+                task=task, aspect=aspect, lesson=lesson, about=about,
+                polarity=polarity, outcome=outcome, confidence=conf))
+        return out
 
 
 def build_extractor(cfg) -> DreamExtractor:

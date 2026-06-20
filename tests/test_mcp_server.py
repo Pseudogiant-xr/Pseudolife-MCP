@@ -55,6 +55,11 @@ def test_all_tools_registered() -> None:
         "memory_world_search",
         "memory_world_facts",
         "memory_world_forget",
+        # Procedural / outcome memory — lessons (schema v10).
+        "memory_outcome",
+        "memory_lesson_search",
+        "memory_lessons",
+        "memory_lesson_forget",
         # Dream — MIRAS->cortex consolidation.
         "memory_dream_pull",
         "memory_dream_status",

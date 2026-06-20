@@ -150,6 +150,28 @@ def _world_record_to_dict(rec, now=None) -> dict[str, Any]:
     }
 
 
+def _lesson_record_to_dict(rec) -> dict[str, Any]:
+    """Serialise a LessonRecord for transport. Uses procedural field names
+    (task / aspect / lesson) rather than the slot's entity/attribute/value."""
+    return {
+        "task": rec.entity,
+        "aspect": rec.attribute,
+        "lesson": rec.value,
+        "about": rec.about,
+        "polarity": rec.polarity,
+        "outcome": rec.outcome,
+        "status": rec.status,
+        "confidence": round(float(rec.confidence), 4),
+        "origin": rec.origin,
+        "provenance": sorted(rec.provenance),
+        "asserted_at": rec.asserted_at,
+        "last_confirmed": rec.last_confirmed,
+        "supersedes_value": rec.supersedes_value,
+        "superseded_by_value": rec.superseded_by_value,
+        "superseded_at": rec.superseded_at,
+    }
+
+
 # Map a store ``source`` tag to a cortex ``origin`` tier (provenance-of-kind).
 # MCP can't see the conversation, so origin is defaulted from source (or set
 # explicitly by the caller). Unknown sources -> None (origin left blank).
@@ -217,6 +239,7 @@ class MemoryService:
         self._reranker: CrossEncoderReranker | None = None
         self._cortex: CortexStore | None = None
         self._world = None  # WorldCortexStore | None (world-knowledge cortex, v9)
+        self._lessons = None  # LessonStore | None (procedural / outcome memory, v10)
         self._age = None  # AgeGraph mirror when the extension is present
         self._last_user_query: str | None = None
         self._last_saved_fingerprint = None
@@ -356,6 +379,18 @@ class MemoryService:
                 _sync.hydrate_world_cortex(self._world, self._storage)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("World cortex hydration skipped: %s", exc)
+
+        # Procedural / outcome memory (schema v10) — sibling slot store for the
+        # lessons the agent learns from its own work (what worked / dead-ended /
+        # got corrected). Postgres-only (a v0.2+ feature; no .pt fallback).
+        from pseudolife_memory.memory.lessons import LessonStore
+        self._lessons = LessonStore()
+        if self._storage is not None:
+            from pseudolife_memory.storage import sync as _sync
+            try:
+                _sync.hydrate_lessons(self._lessons, self._storage)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Lesson store hydration skipped: %s", exc)
 
     # ------------------------------------------------------------------
     # Tool: store
@@ -949,6 +984,15 @@ class MemoryService:
         except Exception as exc:  # noqa: BLE001
             logger.warning("World cortex save failed: %s", exc)
 
+    def _save_lessons(self) -> None:
+        if getattr(self, "_lessons", None) is None or self._storage is None:
+            return
+        try:
+            from pseudolife_memory.storage import sync as _sync
+            _sync.snapshot_lessons(self._lessons, self._storage)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Lesson store save failed: %s", exc)
+
     def _persist_all(self, *, kind: str) -> dict[str, Any]:
         """Shared body of save/autosave/flush. Caller holds the lock.
 
@@ -1019,6 +1063,14 @@ class MemoryService:
             )
             self._ensure_subject_entity(entity)
             self._save_cortex()
+            # Auto-tag a user correction: a user-tier write that REPLACED an older
+            # value is a genuine "Y -> Z" correction signal for procedural memory.
+            # Gated to support=="user" so dream/agent consolidation (support=agent)
+            # never feeds itself a correction (no synthesis feedback loop).
+            if (res.action == "superseded"
+                    and (support or "").strip().lower() == "user"):
+                self._emit_correction_signal(
+                    entity, attribute, res.record.supersedes_value, value)
             out = {"action": res.action, **_cortex_record_to_dict(res.record)}
             if res.action == "contested":
                 cur = self._cortex.lookup(entity, attribute)
@@ -1176,6 +1228,173 @@ class MemoryService:
                 self._save_world()
             return {"removed": removed, "entity": entity, "attribute": attribute}
 
+    # ------------------------------------------------------------------
+    # Procedural / outcome memory — lessons (schema v10)
+    # ------------------------------------------------------------------
+
+    def _current_episode_id(self) -> str | None:
+        try:
+            return self._cms.episodes.current_id if self._cms is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _emit_correction_signal(self, entity, attribute, old, new) -> None:
+        """Record a correction signal for a user-driven supersession. Caller holds
+        the lock. Best-effort: never let signal capture break a cortex write."""
+        if self._storage is None or not self.config.memory.lessons.enabled:
+            return
+        try:
+            self._storage.add_signal(
+                task=entity, outcome="correction", about=entity,
+                detail=f"{attribute}: {old} → {new}", polarity=None,
+                origin="action", episode_id=self._current_episode_id())
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("correction signal emit failed: %s", exc)
+
+    def record_outcome(self, task: str, outcome: str, about: str | None = None,
+                       detail: str | None = None, polarity: str | None = None,
+                       origin: str = "action") -> dict[str, Any]:
+        """Record a cheap in-session outcome signal (success | failure |
+        correction). Single-writer: this never writes a lesson — the dream
+        synthesises lessons from the accumulated signals."""
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return {"recorded": False, "reason": "signals require Postgres storage"}
+            if not self.config.memory.lessons.enabled:
+                return {"recorded": False, "reason": "lessons disabled"}
+            oc = outcome if outcome in ("success", "failure", "correction") else "success"
+            sid = self._storage.add_signal(
+                task=task, outcome=oc, about=about, detail=detail,
+                polarity=polarity, origin=origin,
+                episode_id=self._current_episode_id())
+            return {"recorded": True, "signal_id": sid, "task": task, "outcome": oc}
+
+    def lesson_write(self, task: str, aspect: str, lesson: str, *,
+                     about: str | None = None, outcome: str = "success",
+                     polarity: str = "+", confidence: float = 0.6,
+                     origin: str = "agent",
+                     provenance: set[str] | list[str] | None = None,
+                     now: float | None = None) -> dict[str, Any]:
+        """Write / confirm / supersede a lesson at the ``(task, aspect)`` slot and
+        keep the graph joined: upsert the task-type entity, the ``about`` object,
+        and the ``prefers`` (positive) / ``avoids`` (negative) edge between them.
+
+        This is the dream's writer (single author); it is not an agent-facing tool.
+        """
+        with self._lock:
+            self._ensure_init()
+            assert self._embedder is not None and self._lessons is not None
+            emb = self._embedder.encode_single(f"{task} {aspect} {lesson}".strip())
+            action, rec = self._lessons.write_fact(
+                task, aspect, lesson, emb, about=about, outcome=outcome,
+                polarity=polarity, confidence=confidence, origin=origin,
+                provenance=provenance, now=now)
+            self._link_lesson_graph(task, rec.about, rec.polarity)
+            self._save_lessons()
+            return {"action": action, **_lesson_record_to_dict(rec)}
+
+    def _link_lesson_graph(self, task: str, about: str | None, polarity: str) -> None:
+        """Upsert the task-type entity + object entity + prefers/avoids edge so a
+        lesson is traversable via memory_graph. Caller holds the lock; no-op in
+        file mode."""
+        if self._storage is None:
+            return
+        from pseudolife_memory.graph import norm_name
+        st = self._storage
+        tn = norm_name(task)
+        if not tn:
+            return
+        tid = st.ensure_entity(tn, display=task.strip(), etype="task-type")
+        self._age_mirror(lambda: self._age.upsert_entity(tn, task.strip(), "task-type"))
+        if not about:
+            return
+        an = norm_name(about)
+        if not an or an == tn:
+            return
+        oid = st.ensure_entity(an, display=about.strip())
+        self._age_mirror(lambda: self._age.upsert_entity(an, about.strip()))
+        relation = "avoids" if polarity == "-" else "prefers"
+        st.upsert_edge(tid, relation, oid, confidence=0.7, origin="action")
+        self._age_mirror(lambda: self._age.upsert_edge(tn, relation, an))
+
+    def lesson_search(self, query: str, top_k: int | None = None,
+                      min_score: float = 0.0) -> dict[str, Any]:
+        """Embedding-on-query retrieval over current lessons (mirrors world_search).
+        Returns lessons with polarity/outcome so a caller can surface dead-ends."""
+        with self._lock:
+            self._ensure_init()
+            assert self._embedder is not None and self._lessons is not None
+            k = int(top_k if top_k is not None else self.config.memory.lessons.top_k)
+            floor = max(float(min_score), float(self.config.memory.lessons.min_confidence))
+            emb = self._embedder.encode_single(query)
+            hits = self._lessons.search(emb, top_k=k, min_score=floor)
+            entries = [{**_lesson_record_to_dict(r), "score": round(float(s), 4)}
+                       for r, s in hits]
+            return {"count": len(entries), "entries": entries}
+
+    def lessons_dump(self, limit: int = 120) -> dict[str, Any]:
+        with self._lock:
+            self._ensure_init()
+            assert self._lessons is not None
+            rows = [_lesson_record_to_dict(r) for r in self._lessons.current_records()]
+            rows.sort(key=lambda d: (d["task"].lower(), d["aspect"].lower()))
+            return {"count": len(rows), "entries": rows[: max(0, int(limit))]}
+
+    def lesson_forget(self, task: str, aspect: str | None = None) -> dict[str, Any]:
+        with self._lock:
+            self._ensure_init()
+            assert self._lessons is not None
+            removed = self._lessons.forget(task, aspect)
+            if removed:
+                self._save_lessons()
+            return {"removed": removed, "task": task, "aspect": aspect}
+
+    def synthesize_lessons(self, extractor, *, limit: int | None = None) -> dict[str, Any]:
+        """Drain pending outcome signals and synthesise lessons via ``extractor``.
+
+        Single-writer: an extractor with no ``extract_lessons`` (the no-op / a
+        plain regex floor) writes nothing and leaves the signals pending. Old
+        signals are pruned by retention so the log can't grow unbounded.
+        """
+        import time as _t
+        cfg = self.config.memory.lessons
+        if self._storage is None:
+            return {"signals": 0, "lessons": 0, "skipped": "no-storage"}
+        if not (cfg.enabled and cfg.synthesize_in_dream):
+            return {"signals": 0, "lessons": 0, "skipped": "disabled"}
+        cutoff = _t.time() - cfg.signal_retention_days * 86400
+        with self._lock:
+            self._ensure_init()
+            self._storage.prune_signals(cutoff)
+            signals = self._storage.pending_signals(limit=limit)
+        if not signals:
+            return {"signals": 0, "lessons": 0}
+        fn = getattr(extractor, "extract_lessons", None)
+        if fn is None:
+            return {"signals": len(signals), "lessons": 0, "skipped": "no-extractor"}
+        try:
+            claims = fn(signals)
+        except Exception as exc:  # noqa: BLE001 — never let synthesis break the dream
+            logger.warning("lesson synthesis failed (%s); leaving signals pending", exc)
+            return {"signals": len(signals), "lessons": 0, "error": str(exc)}
+        written = 0
+        for c in claims:
+            try:
+                self.lesson_write(
+                    c["task"], c.get("aspect", "lesson"), c["lesson"],
+                    about=c.get("about"), outcome=c.get("outcome", "success"),
+                    polarity=c.get("polarity", "+"),
+                    confidence=float(c.get("confidence", 0.6)),
+                    origin=c.get("origin", "agent"),
+                    provenance=set(c.get("provenance") or []))
+                written += 1
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("lesson write skipped (%s): %s", exc, c)
+        with self._lock:
+            self._storage.consume_signals([s["id"] for s in signals])
+        return {"signals": len(signals), "lessons": written}
+
     def cortex_dump(self) -> dict[str, Any]:
         """All current canonical facts (entity, attribute, value, origin, …) for
         introspection / cleanup. Sorted by (entity, attribute)."""
@@ -1325,8 +1544,12 @@ class MemoryService:
         pulled = self.dream_pull(limit=cap)
         entries = pulled["entries"]
         if not entries:
+            # No new memories to consolidate, but outcome signals may still be
+            # pending — synthesise lessons regardless.
+            lessons = self.synthesize_lessons(extractor)
             return {"pulled": 0, "claims": 0, "inserted": 0, "confirmed": 0,
-                    "contested": 0, "superseded": 0, "cursor": pulled["cursor"]}
+                    "contested": 0, "superseded": 0, "cursor": pulled["cursor"],
+                    "lessons": lessons}
         texts = [e["text"] for e in entries]
         vocab = self.cortex_vocab().get("slots", [])
         try:
@@ -1345,8 +1568,9 @@ class MemoryService:
             tally[res["action"]] = tally.get(res["action"], 0) + 1
         newest = max(e["timestamp"] for e in entries)
         self.dream_commit(newest)
+        lessons = self.synthesize_lessons(extractor)
         return {"pulled": len(entries), "claims": len(claims),
-                "cursor": newest, **tally}
+                "cursor": newest, **tally, "lessons": lessons}
 
     def dream_status(self) -> dict[str, Any]:
         """Backlog (eligible unconsolidated memories), idle seconds since the most
