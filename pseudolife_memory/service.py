@@ -255,6 +255,25 @@ class MemoryService:
         process default. See :mod:`pseudolife_memory.writer_context`."""
         return resolve_writer(self._writer_id)
 
+    def _assert_public_search_path(self) -> None:
+        """Fail loud if the shared connection would resolve unqualified tables to
+        the role-named ``pseudolife`` shadow schema instead of the real ``public``
+        bank (the role / AGE-graph name collision — v0.4 T7). ``$user`` expands to
+        the role ``pseudolife``, which is also a legacy AGE graph's schema name."""
+        if self._storage is None:
+            return
+        path = self._storage.conn.execute("SHOW search_path").fetchone()[0]
+        schemas = [s.strip().strip('"') for s in path.split(",")]
+        if "public" not in schemas:
+            raise RuntimeError(
+                f"search_path must include 'public' (got {path!r}); the real bank "
+                "lives in public — refusing to run against a shadow schema.")
+        if "$user" in schemas and schemas.index("$user") < schemas.index("public"):
+            raise RuntimeError(
+                f"search_path resolves $user (role 'pseudolife' == a legacy AGE "
+                f"graph schema) ahead of public (got {path!r}) — this shadows the "
+                "real bank. Pin search_path to public first.")
+
     # ------------------------------------------------------------------
     # Lazy construction
     # ------------------------------------------------------------------
@@ -318,11 +337,17 @@ class MemoryService:
             self._storage = PostgresStorage(self._db_url)
             logger.info("storage: postgres (%s)",
                         self._db_url.rsplit("@", 1)[-1])
+            # Invariant: unqualified tables MUST resolve to the real `public`
+            # bank, never the role-named `pseudolife` shadow schema (v0.4
+            # collision fix). PostgresStorage pins this; fail loud if regressed.
+            self._assert_public_search_path()
             if self._storage.capabilities.get("age_available"):
                 try:
                     from pseudolife_memory.storage.age import AgeGraph
-                    self._age = AgeGraph(self._storage.conn)
-                    logger.info("AGE graph mirror active")
+                    graph_name = (os.environ.get("PSEUDOLIFE_GRAPH_NAME")
+                                  or self.config.graph.name)
+                    self._age = AgeGraph(self._storage.conn, name=graph_name)
+                    logger.info("AGE graph mirror active (graph=%s)", graph_name)
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("AGE init failed (Cypher layer off): %s", exc)
         self._cms = ContinuumMemorySystem(

@@ -18,11 +18,17 @@ tool: weak-model deployments must not expose Cypher (spec §5.3.5).
 from __future__ import annotations
 
 import logging
+import os
 import re
 
 logger = logging.getLogger(__name__)
 
-GRAPH_NAME = "pseudolife"
+# Default graph name. NOT "pseudolife" — that is the DB role name, and naming the
+# AGE graph after the role makes AGE create a schema called `pseudolife` that can
+# shadow the real `public` bank (v0.4 collision fix). Override with
+# PSEUDOLIFE_GRAPH_NAME; the live migration (ops/migrate_v04.py) renames any
+# legacy `pseudolife` graph to this.
+GRAPH_NAME = os.environ.get("PSEUDOLIFE_GRAPH_NAME", "pseudolife_graph")
 
 # Read-only screen for memory_graph_query: any mutating clause keyword
 # (even inside a string literal — a coarse screen is the point) rejects.

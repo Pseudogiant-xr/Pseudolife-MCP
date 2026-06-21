@@ -477,6 +477,16 @@ class ChunkingConfig:
 
 
 @dataclass
+class GraphConfig:
+    """Apache AGE graph mirror. ``name`` must NOT be the DB role name
+    (``pseudolife``): naming the graph after the role makes AGE create a schema
+    of the same name that can shadow the real ``public`` bank (v0.4 collision
+    fix). Default ``pseudolife_graph``; env ``PSEUDOLIFE_GRAPH_NAME`` overrides
+    at the storage layer."""
+    name: str = "pseudolife_graph"
+
+
+@dataclass
 class StorageConfig:
     """Postgres persistence policy.
 
@@ -504,6 +514,7 @@ class AppConfig:
     context: ContextConfig = field(default_factory=ContextConfig)
     chunking: ChunkingConfig = field(default_factory=ChunkingConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)
+    graph: GraphConfig = field(default_factory=GraphConfig)
 
 
 def _dict_to_dataclass(cls: type, data: dict[str, Any]) -> Any:
