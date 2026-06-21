@@ -1,38 +1,18 @@
-"""MIRAS framework — pluggable memory-bank components.
+"""MIRAS framework — the Continuum Memory System's band layer.
 
-A memory bank under MIRAS is defined by four orthogonal axes:
-
-* :class:`MemoryModule` — the parametric mapping from key embeddings to
-  value embeddings (MLP / Linear / etc.)
-* :class:`UpdateRule` — the optimisation step that ingests a new sample
-  (SGD-momentum / Adam / Lion / …)
-* :class:`RetentionObjective` — the loss between predicted and target
-  embeddings (L2 / Lp / negative-cosine / KV association)
-* :class:`RetentionPolicy` — weight-decay strength + eviction scoring +
-  contradiction-decay multiplier
-
-A :class:`MIRASBand` is the unit of memory that combines all four plus a
-frequency (``update_interval``) and capacity (``max_entries``). The
-:mod:`src.memory.cms` orchestrator chains N bands together.
-
-The ``titans`` preset reproduces v0.4.x behaviour bit-for-bit; other
-presets (``moneta`` / ``yaad`` / ``memora``) pick different points in
-this space — see :mod:`src.memory.miras.presets`.
+v0.5: bands are plain **cosine** vector stores (the test-time neural memory was
+removed — see ``docs/2026-06-21-neural-memory-investigation.md``; the machinery
+is archived on ``archive/neural-memory-titans``). A band combines a capacity
+(``max_entries``), a consolidation cadence (``update_interval``), promotion
+thresholds, and a :class:`RetentionPolicy` (eviction + contradiction-decay). The
+:mod:`src.memory.cms` orchestrator chains N bands into a recency-tiered store.
 """
 
-from pseudolife_memory.memory.miras.protocols import (
-    MemoryModule,
-    UpdateRule,
-    RetentionObjective,
-    RetentionPolicy,
-)
+from pseudolife_memory.memory.miras.protocols import RetentionPolicy
 from pseudolife_memory.memory.miras.band import MIRASBand, build_band
 from pseudolife_memory.memory.miras.presets import preset_bands, PRESET_REGISTRY
 
 __all__ = [
-    "MemoryModule",
-    "UpdateRule",
-    "RetentionObjective",
     "RetentionPolicy",
     "MIRASBand",
     "build_band",

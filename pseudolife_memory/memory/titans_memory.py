@@ -1,45 +1,19 @@
-"""TITANS Neural Long-Term Memory Module — compat shim over MIRAS.
+"""Core memory data classes.
 
-In v0.4.x this module owned the bank implementation. In v0.5 the
-implementation moved to :mod:`src.memory.miras`, which generalises the
-v0.4.x design to a 4-axis configurable framework (see
-:mod:`src.memory.miras` for details).
-
-What's left here
-----------------
-
-* :class:`MemoryEntry` and :class:`RetrievalResult` — these are pure data
-  classes referenced throughout the codebase (and persisted in saved
-  state). They stay here as the source of truth.
-* :class:`MemoryMLP` — a thin deprecated alias for
-  :class:`src.memory.miras.modules.MLP3Module`. Kept so any external
-  scripts that imported it keep working.
-* :class:`TitansMemoryBank` — a deprecated subclass of
-  :class:`src.memory.miras.MIRASBand` that translates the v0.4.x
-  constructor kwargs into the ``titans`` preset's components.
-
-When the v0.5.0 CMS refactor lands, ``cms.py`` stops instantiating
-:class:`TitansMemoryBank` directly and uses
-:func:`src.memory.miras.build_band` instead, at which point this shim
-is only kept for the migration loader's benefit.
-
-References:
-    - Titans: Learning to Memorize at Test Time (arXiv:2501.00663)
-    - Nested Learning: The Illusion of Deep Learning (arXiv:2512.24695)
+Despite the legacy filename, this module no longer owns any bank or neural
+implementation — it defines only the :class:`MemoryEntry` and
+:class:`RetrievalResult` dataclasses, which are referenced throughout the
+codebase (and persisted in saved state). The episodic store lives in
+:mod:`src.memory.miras` (plain cosine bands as of v0.5); the removed neural
+machinery is archived on the ``archive/neural-memory-titans`` branch.
 """
 
 from __future__ import annotations
 
 import time
-import warnings
 from dataclasses import dataclass, field
 
 import torch
-
-# Import the new home of the implementation. The cycle
-# ``titans_memory → miras.band → titans_memory`` is broken by ``miras.band``
-# importing only :class:`MemoryEntry` / :class:`RetrievalResult`, which are
-# defined in this module before the import below runs.
 
 
 @dataclass
@@ -117,97 +91,7 @@ class RetrievalResult:
     surprises: list[float]
 
 
-# ---------------------------------------------------------------------------
-# Backwards-compat shims — defined below the dataclasses so that
-# ``miras.band`` can import ``MemoryEntry`` / ``RetrievalResult`` from here
-# without circular-import grief.
-# ---------------------------------------------------------------------------
-
-from pseudolife_memory.memory.miras.band import MIRASBand  # noqa: E402
-from pseudolife_memory.memory.miras.modules import MLP3Module  # noqa: E402
-from pseudolife_memory.memory.miras.update_rules import SGDMomentumUpdate  # noqa: E402
-from pseudolife_memory.memory.miras.objectives import L2ReconstructionObjective  # noqa: E402
-from pseudolife_memory.memory.miras.retention import balanced  # noqa: E402
-
-
-class MemoryMLP(MLP3Module):
-    """Deprecated alias for :class:`src.memory.miras.modules.MLP3Module`.
-
-    Kept so external scripts that ``from pseudolife_memory.memory.titans_memory import
-    MemoryMLP`` continue to work. Behaviour is identical — MLP3Module is
-    a verbatim reimplementation under the MIRAS protocol contract.
-    """
-
-    def __init__(self, dim: int, hidden_dim: int = 512):
-        warnings.warn(
-            "MemoryMLP is deprecated; use src.memory.miras.modules.MLP3Module instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        super().__init__(dim=dim, hidden_dim=hidden_dim)
-
-    # The legacy class had an ``_init_weights`` private method (with a
-    # leading underscore) and the rest of the codebase calls
-    # ``bank.memory._init_weights()`` during ``ContinuumMemorySystem.clear``.
-    # The MIRAS rename is :meth:`init_weights` (public). Provide the alias
-    # so the existing CMS code keeps working until task 5 lands.
-    def _init_weights(self) -> None:
-        self.init_weights()
-
-
-class TitansMemoryBank(MIRASBand):
-    """Deprecated compat shim: builds a :class:`MIRASBand` with the
-    ``titans`` preset components from the v0.4.x kwargs.
-
-    Behaviour is bit-for-bit identical to v0.4.x — same MLP3, same
-    SGD-momentum + weight_decay + grad clip 1.0, same L2 reconstruction
-    loss, same balanced eviction policy.
-
-    Direct instantiation is discouraged in v0.5+; use
-    :func:`src.memory.miras.build_band` with a
-    :class:`src.utils.config.MIRASBandSpec` instead.
-    """
-
-    def __init__(
-        self,
-        embedding_dim: int = 384,
-        hidden_dim: int = 512,
-        max_entries: int = 5000,
-        learning_rate: float = 0.01,
-        weight_decay: float = 0.001,
-        device: str = "cuda",
-        name: str = "memory",
-        # Optional: the CMS calls ``store(entry)`` and tracks promotion
-        # itself, so the band-level promotion thresholds aren't used here.
-        update_interval: int = 1,
-        promotion_access_count: int = 2,
-        promotion_surprise: float = 0.5,
-    ):
-        device = device if torch.cuda.is_available() else "cpu"
-        module = MLP3Module(dim=embedding_dim, hidden_dim=hidden_dim)
-        rule = SGDMomentumUpdate(
-            params=module.parameters(),
-            base_lr=learning_rate,
-            momentum=0.9,
-            weight_decay=weight_decay,
-            max_grad_norm=1.0,
-        )
-        objective = L2ReconstructionObjective()
-        policy = balanced(weight_decay=weight_decay)
-
-        super().__init__(
-            name=name,
-            embedding_dim=embedding_dim,
-            memory_module=module,
-            update_rule=rule,
-            objective=objective,
-            retention=policy,
-            max_entries=max_entries,
-            update_interval=update_interval,
-            promotion_access_count=promotion_access_count,
-            promotion_surprise=promotion_surprise,
-            device=device,
-        )
-
-        # Legacy attributes some callers may read.
-        self.hidden_dim = hidden_dim
+# v0.5: the deprecated ``MemoryMLP`` / ``TitansMemoryBank`` compat shims were
+# removed with the neural memory. This module now only defines the
+# ``MemoryEntry`` / ``RetrievalResult`` dataclasses that the rest of the package
+# imports. The neural machinery lives on the ``archive/neural-memory-titans`` branch.
