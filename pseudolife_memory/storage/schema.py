@@ -16,7 +16,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 10
+SCHEMA_META_VERSION = 11
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -208,6 +208,30 @@ CREATE TABLE IF NOT EXISTS outcome_signals (
 );
 CREATE INDEX IF NOT EXISTS outcome_signals_pending_idx
   ON outcome_signals (consumed_at, created_at);
+
+-- v11 writer-aware temporal/provenance stamp (additive; backfilled from
+-- asserted_at). tx_time = wall-clock record time (DISPLAY only); valid_time =
+-- event time (when it became true); (hlc_phys, hlc_logical) = the ordering
+-- authority (a hybrid logical clock, immune to wall-clock steps); writer_id /
+-- session_id = who wrote this version; version = per-slot OCC counter (dormant
+-- until storage.write_mode='occ'). See
+-- docs/specs/2026-06-21-writer-aware-temporal-memory-design.md.
+DO $$
+DECLARE t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['facts','world_facts','lessons','edges'] LOOP
+    EXECUTE format('ALTER TABLE %I ADD COLUMN IF NOT EXISTS tx_time DOUBLE PRECISION', t);
+    EXECUTE format('ALTER TABLE %I ADD COLUMN IF NOT EXISTS valid_time DOUBLE PRECISION', t);
+    EXECUTE format('ALTER TABLE %I ADD COLUMN IF NOT EXISTS hlc_phys BIGINT', t);
+    EXECUTE format('ALTER TABLE %I ADD COLUMN IF NOT EXISTS hlc_logical INT', t);
+    EXECUTE format('ALTER TABLE %I ADD COLUMN IF NOT EXISTS writer_id TEXT', t);
+    EXECUTE format('ALTER TABLE %I ADD COLUMN IF NOT EXISTS session_id TEXT', t);
+    EXECUTE format('ALTER TABLE %I ADD COLUMN IF NOT EXISTS version INT NOT NULL DEFAULT 1', t);
+    EXECUTE format('UPDATE %I SET tx_time = asserted_at WHERE tx_time IS NULL', t);
+    EXECUTE format('UPDATE %I SET valid_time = asserted_at WHERE valid_time IS NULL', t);
+    EXECUTE format('UPDATE %I SET writer_id = ''legacy'' WHERE writer_id IS NULL', t);
+  END LOOP;
+END $$;
 """
 
 
@@ -216,7 +240,8 @@ def ensure_schema(conn) -> dict:
 
     ``vector`` is required (raises if unavailable); ``age`` is optional —
     returns ``{"age_available": bool}`` so callers can gate the Cypher
-    layer. Records ``schema_version`` in ``meta`` (insert-or-keep).
+    layer. Records ``schema_version`` in ``meta`` (upsert to the current value,
+    so an upgraded bank reports its real version, not the first-init one).
     """
     with conn.cursor() as cur:
         # Bound every DDL statement so a stray lock holder surfaces as an
@@ -245,7 +270,7 @@ def ensure_schema(conn) -> dict:
         cur.execute(
             """
             INSERT INTO meta (key, value) VALUES ('schema_version', %s::jsonb)
-            ON CONFLICT (key) DO NOTHING
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
             """,
             (str(SCHEMA_META_VERSION),),
         )
