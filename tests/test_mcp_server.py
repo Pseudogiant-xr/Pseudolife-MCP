@@ -50,6 +50,7 @@ def test_all_tools_registered() -> None:
         "memory_fact_forget",
         "memory_facts",
         "memory_fact_resolve",
+        "memory_history",
         # World cortex — sourced external-knowledge layer.
         "memory_world_set",
         "memory_world_search",

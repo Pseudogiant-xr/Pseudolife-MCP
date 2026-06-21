@@ -143,6 +143,52 @@ def _fact_row(db_url: str, entity: str) -> dict | None:
     return {"writer_id": row[0], "session_id": row[1]}
 
 
+# ── ops: retire by writer ────────────────────────────────────────────────
+
+def test_retire_by_writer_supersedes_only_that_writer():
+    """ops/retire_by_writer supersedes a rogue writer's current facts and leaves
+    everyone else's intact."""
+    import tempfile
+    import uuid
+
+    from ops import retire_by_writer
+    from pseudolife_memory import writer_context
+    from pseudolife_memory.service import MemoryService
+
+    pg_url = resolve_test_db_url()
+    if not _pg_reachable(pg_url):
+        pytest.skip("no test Postgres reachable")
+
+    # Unique writer + entity names → deterministic counts despite the persistent
+    # shared test DB.
+    tag = uuid.uuid4().hex[:8]
+    rogue, ea, eb = f"rogue-{tag}", f"alpha-{tag}", f"beta-{tag}"
+
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
+        svc = MemoryService(data_dir=d, database_url=pg_url)
+        try:
+            tok = writer_context.set_writer_context(rogue, "sess-x")
+            svc.cortex_write(ea, "k", "1", support="user")
+            writer_context.reset_writer_context(tok)
+            svc.cortex_write(eb, "k", "2", support="user")  # writer "unknown"
+
+            with psycopg.connect(pg_url) as conn:
+                plan = retire_by_writer.run(conn, rogue, apply=False)
+                assert plan["counts"]["facts"] == 1          # only the rogue fact
+                assert retire_by_writer.run(
+                    conn, rogue, apply=True)["retired"] == 1
+                rogue_status = conn.execute(
+                    "SELECT status FROM public.facts WHERE entity=%s", (ea,)
+                ).fetchone()[0]
+                other_status = conn.execute(
+                    "SELECT status FROM public.facts WHERE entity=%s", (eb,)
+                ).fetchone()[0]
+            assert rogue_status == "superseded" and other_status == "current"
+        finally:
+            if svc._storage is not None:
+                svc._storage.close()
+
+
 def test_fact_write_attributes_writer_from_header(daemon):
     asyncio.run(_call_with_writer(
         daemon["url"], "codex-test", "memory_fact_set",

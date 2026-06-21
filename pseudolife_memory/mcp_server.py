@@ -437,6 +437,27 @@ def memory_fact_resolve(entity: str, attribute: str, accept: bool) -> dict[str, 
 
 
 @mcp.tool()
+def memory_history(entity: str, attribute: str) -> dict[str, Any]:
+    """The change history of a canonical fact — how it evolved and who changed it.
+
+    Returns every version at the ``(entity, attribute)`` slot (the current value
+    plus superseded ones), oldest→newest, each with its temporal/provenance
+    stamp: ``writer_id`` + ``session_id`` (which session/agent wrote it),
+    ``tx_time`` (when), ``valid_time`` (when it became true), and a human
+    ``age``. Use it to answer "what did this used to be?" or "who set this?".
+
+    Args:
+        entity: The slot entity (case/separator-insensitive).
+        attribute: The slot attribute.
+
+    Returns:
+        ``{"entity", "attribute", "count": int, "versions": [{value, status,
+        writer_id, session_id, tx_time, valid_time, age, ...}, ...]}``.
+    """
+    return service.history(entity, attribute)
+
+
+@mcp.tool()
 def memory_facts(limit: int = 120) -> dict[str, Any]:
     """List all CURRENT canonical facts (introspection / audit of the cortex).
 

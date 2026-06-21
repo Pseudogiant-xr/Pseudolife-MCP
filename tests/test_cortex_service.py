@@ -48,6 +48,31 @@ def test_cortex_copersists_across_service_restart():
         assert got["provenance"] == ["epX"]
 
 
+def test_cortex_read_includes_relative_age_and_stamp():
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
+        svc = MemoryService(data_dir=d)
+        svc.cortex_write("server", "port", "8080", support="user")
+        got = svc.cortex_lookup("server", "port")
+        assert got is not None
+        assert got.get("age") == "just now"          # written moments ago
+        assert got["tx_time"] and got["writer_id"]   # temporal stamp surfaced
+
+
+def test_memory_history_returns_version_timeline():
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
+        svc = MemoryService(data_dir=d)
+        svc.cortex_write("server", "port", "8080", support="user", now=1000.0)
+        svc.cortex_write("server", "port", "9090", support="user", now=2000.0)
+        hist = svc.history("server", "port")
+        assert hist["count"] >= 2
+        values = [v["value"] for v in hist["versions"]]
+        assert "8080" in values and "9090" in values
+        for v in hist["versions"]:               # each version is attributed
+            assert "writer_id" in v and "tx_time" in v
+        txs = [v["tx_time"] for v in hist["versions"]]
+        assert txs == sorted(txs)                # oldest -> newest
+
+
 if __name__ == "__main__":
     import sys
     import traceback

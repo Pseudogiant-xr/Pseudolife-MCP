@@ -477,6 +477,14 @@ class ChunkingConfig:
 
 
 @dataclass
+class TimeConfig:
+    """Presentation of the temporal stamp (v0.4). ``relative_age`` adds a human
+    ``age`` field (e.g. "3 days ago") to serialised canonical facts so the agent
+    reads a sense of time without parsing epoch seconds."""
+    relative_age: bool = True
+
+
+@dataclass
 class GraphConfig:
     """Apache AGE graph mirror. ``name`` must NOT be the DB role name
     (``pseudolife``): naming the graph after the role makes AGE create a schema
@@ -515,6 +523,7 @@ class AppConfig:
     chunking: ChunkingConfig = field(default_factory=ChunkingConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)
     graph: GraphConfig = field(default_factory=GraphConfig)
+    time: TimeConfig = field(default_factory=TimeConfig)
 
 
 def _dict_to_dataclass(cls: type, data: dict[str, Any]) -> Any:
@@ -626,5 +635,9 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
         config.chunking = _dict_to_dataclass(ChunkingConfig, raw["chunking"])
     if "storage" in raw:
         config.storage = _dict_to_dataclass(StorageConfig, raw["storage"])
+    if "graph" in raw:
+        config.graph = _dict_to_dataclass(GraphConfig, raw["graph"])
+    if "time" in raw:
+        config.time = _dict_to_dataclass(TimeConfig, raw["time"])
 
     return config

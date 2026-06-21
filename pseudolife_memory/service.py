@@ -45,7 +45,7 @@ from pseudolife_memory.memory.consolidation import (
     Cluster,
     cluster_candidates,
 )
-from pseudolife_memory.memory.context_builder import ContextBuilder
+from pseudolife_memory.memory.context_builder import ContextBuilder, _relative_time
 from pseudolife_memory.memory.contrastive import ContrastiveUpdater
 from pseudolife_memory.memory.embedding import EmbeddingPipeline
 from pseudolife_memory.memory.reference_bank import ReferenceBank
@@ -106,9 +106,13 @@ def _entry_to_dict(
     return out
 
 
-def _cortex_record_to_dict(rec) -> dict[str, Any]:
-    """Serialise a :class:`CortexRecord` for transport (JSON-safe)."""
-    return {
+def _cortex_record_to_dict(rec, relative_age: bool = True) -> dict[str, Any]:
+    """Serialise a :class:`CortexRecord` for transport (JSON-safe).
+
+    Surfaces the v0.4 temporal/provenance stamp (tx_time, valid_time, writer_id,
+    session_id) and — when ``relative_age`` is on — a human ``age`` string so the
+    agent reads a sense of time without parsing epoch seconds."""
+    d = {
         "entity": rec.entity,
         "attribute": rec.attribute,
         "value": rec.value,
@@ -123,7 +127,15 @@ def _cortex_record_to_dict(rec) -> dict[str, Any]:
         "supersedes_value": rec.supersedes_value,
         "superseded_by_value": rec.superseded_by_value,
         "superseded_at": rec.superseded_at,
+        # v0.4 writer-aware temporal stamp.
+        "tx_time": rec.tx_time,
+        "valid_time": rec.valid_time,
+        "writer_id": rec.writer_id,
+        "session_id": rec.session_id,
     }
+    if relative_age:
+        d["age"] = _relative_time(rec.tx_time or rec.asserted_at)
+    return d
 
 
 def _world_record_to_dict(rec, now=None) -> dict[str, Any]:
@@ -1136,7 +1148,10 @@ class MemoryService:
                     canon = node.get("canonical")
                     if canon and norm_name(canon) != norm_name(entity):
                         rec = self._cortex.lookup(canon, attribute)
-            return _cortex_record_to_dict(rec) if rec is not None else None
+            if rec is None:
+                return None
+            return _cortex_record_to_dict(
+                rec, relative_age=self.config.time.relative_age)
 
     def cortex_contenders(self, entity: str, attribute: str) -> dict[str, Any]:
         """Active contenders parked at a slot — a conflicting lower-tier / below-
@@ -1453,7 +1468,9 @@ class MemoryService:
         with self._lock:
             self._ensure_init()
             assert self._cortex is not None
-            rows = [_cortex_record_to_dict(r) for r in self._cortex.current_records()]
+            ra = self.config.time.relative_age
+            rows = [_cortex_record_to_dict(r, relative_age=ra)
+                    for r in self._cortex.current_records()]
             rows.sort(key=lambda d: (d["entity"].lower(), d["attribute"].lower()))
             if self._storage is not None:
                 from pseudolife_memory.graph import norm_name
@@ -1461,6 +1478,23 @@ class MemoryService:
                 for d in rows:
                     d["entity_id"] = emap.get(norm_name(d["entity"]))
             return {"count": len(rows), "entries": rows}
+
+    def history(self, entity: str, attribute: str) -> dict[str, Any]:
+        """The version timeline at a ``(entity, attribute)`` slot — current +
+        superseded records, oldest→newest by tx_time, each attributed
+        (writer_id / session_id) with its temporal stamp. The agent's "how did
+        this fact change, and who changed it?" view (v0.4 T8)."""
+        with self._lock:
+            self._ensure_init()
+            assert self._cortex is not None
+            ra = self.config.time.relative_age
+            recs = self._cortex.records_for(entity, attribute)
+            recs = sorted(recs, key=lambda r: (r.tx_time or r.asserted_at))
+            return {
+                "entity": entity, "attribute": attribute, "count": len(recs),
+                "versions": [_cortex_record_to_dict(r, relative_age=ra)
+                             for r in recs],
+            }
 
     def cortex_forget(self, entity: str, attribute: str | None = None) -> dict[str, Any]:
         """Hard-delete facts at an entity (or one exact slot). Persists. Use for
