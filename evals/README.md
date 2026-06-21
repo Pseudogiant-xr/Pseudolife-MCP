@@ -298,3 +298,43 @@ resolver can safely reconcile that. The resolver ships **off by default**; see
 `docs/specs/2026-06-19-single-writer-cortex-design.md` for the structural fix
 (make the LLM dream the sole cortex writer). Anyone considering enabling the
 resolver should note the false-merge risk above.
+
+---
+
+# Neural-blend retrieval eval (`neural_blend_bench.py`)
+
+Answers the F1 question from the 2026-06-21 fresh-eyes review: **does the MIRAS
+neural retrieval blend beat plain cosine?** Ingests a paraphrase-recall corpus
+once (training the per-band MLPs through the real `store` path), then re-runs the
+SAME queries on the SAME trained state toggling only the blend weight `w`:
+`OFF` (w=0, cosine) vs `ON` (w=0.6, shipped) vs `PURE` (w=1, MLP-only). Cortex
+empty, reranker/BM25/recency off, so only the blend differs. File-mode, CPU,
+fixed seed; never touches the live bank.
+
+```bash
+PYTHONPATH=. TORCHDYNAMO_DISABLE=1 .venv/Scripts/python evals/neural_blend_bench.py --diagnose
+PYTHONPATH=. TORCHDYNAMO_DISABLE=1 .venv/Scripts/python evals/neural_blend_bench.py --n 150 --objective kv
+```
+
+`--diagnose` adds the per-band `cos(M(x), x)` probe (≈1.0 ⇒ M learned identity =
+redundant; low ⇒ noise). `--objective {l2|kv|neg_sim|huber}` overrides every
+band's objective to test whether a different in-regime objective helps.
+
+## Findings — 2026-06-21
+
+Pure cosine **beats** the shipped blend at every scale, and the gap widens with
+data; MLP-only ranking is ≈ random; the `kv` objective doesn't rescue it.
+
+```
+corpus   OFF(cosine) MRR   ON(0.6) MRR   PURE(1.0) MRR   ON-OFF
+n=73          0.979           0.934          0.044       ΔMRR -0.045
+n=120         0.944           0.892          0.024       ΔMRR -0.052
+n=150         0.936           0.875          0.018       ΔMRR -0.061
+```
+
+Diagnostic `cos(M(x), x) ≈ 0.35–0.48` — a lossy, rotated reconstruction (not
+identity, not noise), so blending it in corrupts clean cosine. Root cause is a
+**regime mismatch** (TITANS/HOPE are end-to-end-trained sequence models; here
+the memory is a self-reconstruction autoencoder over frozen embeddings with no
+training loop), not a tunable bug. Full analysis:
+`docs/2026-06-21-neural-memory-investigation.md`.

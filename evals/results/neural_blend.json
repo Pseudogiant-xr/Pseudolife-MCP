@@ -1,0 +1,92 @@
+{
+  "corpus_size": 150,
+  "seed": 13,
+  "top_k": 10,
+  "conditions": {
+    "OFF  (w=0.0, cosine)": {
+      "all": {
+        "recall@1": 0.887,
+        "recall@3": 0.993,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 0.937,
+        "n": 150
+      },
+      "low_overlap": {
+        "recall@1": 0.843,
+        "recall@3": 0.991,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 0.913,
+        "n": 108
+      },
+      "high_overlap": {
+        "recall@1": 1.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 1.0,
+        "n": 42
+      },
+      "overlap_median": 0.167
+    },
+    "ON   (w=0.6, shipped)": {
+      "all": {
+        "recall@1": 0.82,
+        "recall@3": 0.94,
+        "recall@5": 0.953,
+        "recall@10": 0.96,
+        "mrr": 0.88,
+        "n": 150
+      },
+      "low_overlap": {
+        "recall@1": 0.759,
+        "recall@3": 0.926,
+        "recall@5": 0.944,
+        "recall@10": 0.954,
+        "mrr": 0.843,
+        "n": 108
+      },
+      "high_overlap": {
+        "recall@1": 0.976,
+        "recall@3": 0.976,
+        "recall@5": 0.976,
+        "recall@10": 0.976,
+        "mrr": 0.976,
+        "n": 42
+      },
+      "overlap_median": 0.167
+    },
+    "PURE (w=1.0, MLP-only)": {
+      "all": {
+        "recall@1": 0.007,
+        "recall@3": 0.02,
+        "recall@5": 0.027,
+        "recall@10": 0.067,
+        "mrr": 0.018,
+        "n": 150
+      },
+      "low_overlap": {
+        "recall@1": 0.0,
+        "recall@3": 0.0,
+        "recall@5": 0.0,
+        "recall@10": 0.028,
+        "mrr": 0.003,
+        "n": 108
+      },
+      "high_overlap": {
+        "recall@1": 0.024,
+        "recall@3": 0.071,
+        "recall@5": 0.095,
+        "recall@10": 0.167,
+        "mrr": 0.055,
+        "n": 42
+      },
+      "overlap_median": 0.167
+    }
+  },
+  "verdict": {
+    "delta_mrr": -0.057,
+    "delta_recall@5": -0.047
+  }
+}
