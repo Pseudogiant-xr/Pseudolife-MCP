@@ -477,6 +477,23 @@ class ChunkingConfig:
 
 
 @dataclass
+class StorageConfig:
+    """Postgres persistence policy.
+
+    ``write_mode`` selects the canonical write path:
+
+    * ``snapshot`` (default, the only live path) — the cortex is small, so each
+      save is a transactional full rewrite (``replace_facts``). Single-writer by
+      construction via the daemon's lock.
+    * ``occ`` — optimistic concurrency control (per-row compare-and-swap on
+      ``version``) for a future multi-process writer topology. **Phase 2**: the
+      seam exists (``version`` column, ``replace_facts_occ`` stub) but the real
+      path is unbuilt; selecting it raises ``NotImplementedError``.
+    """
+    write_mode: str = "snapshot"
+
+
+@dataclass
 class AppConfig:
     backend: str = "lmstudio"
     claude: ClaudeConfig = field(default_factory=ClaudeConfig)
@@ -486,6 +503,7 @@ class AppConfig:
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     context: ContextConfig = field(default_factory=ContextConfig)
     chunking: ChunkingConfig = field(default_factory=ChunkingConfig)
+    storage: StorageConfig = field(default_factory=StorageConfig)
 
 
 def _dict_to_dataclass(cls: type, data: dict[str, Any]) -> Any:
@@ -595,5 +613,7 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
         config.context = _dict_to_dataclass(ContextConfig, raw["context"])
     if "chunking" in raw:
         config.chunking = _dict_to_dataclass(ChunkingConfig, raw["chunking"])
+    if "storage" in raw:
+        config.storage = _dict_to_dataclass(StorageConfig, raw["storage"])
 
     return config

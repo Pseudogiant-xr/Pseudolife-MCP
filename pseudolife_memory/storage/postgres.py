@@ -290,6 +290,22 @@ class PostgresStorage:
                 )
         self.conn.commit()
 
+    def replace_facts_occ(self, rows: list[dict]) -> None:
+        """Optimistic-concurrency cortex persistence (Phase-2 seam, dormant).
+
+        The future multi-process writer topology replaces the snapshot rewrite
+        with per-row compare-and-swap on ``version`` (write only if the stored
+        version matches the one we read; bump on success; surface a conflict
+        otherwise). The schema already carries ``version`` for this, but the
+        path itself — CAS, conflict resolution, cache invalidation — is a
+        separate plan. ``StorageConfig.write_mode='snapshot'`` is the only live
+        path in v0.4; selecting ``occ`` lands here.
+        """
+        raise NotImplementedError(
+            "write_mode=occ (per-row compare-and-swap) is Phase 2 — "
+            "the live path is write_mode=snapshot (replace_facts)."
+        )
+
     def update_access_counts(self, pairs: list[tuple[int, int]]) -> None:
         """Bulk-sync (entry_id, access_count) — called on the save cadence,
         not per retrieval, to keep reads cheap."""
