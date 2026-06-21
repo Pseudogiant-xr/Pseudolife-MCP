@@ -58,6 +58,14 @@ class LessonRecord:
     superseded_by_value: str | None = None
     superseded_at: float | None = None
     embedding: torch.Tensor | None = None
+    # v11 writer-aware temporal stamp (see memory/hlc.py + the v0.4 design).
+    tx_time: float | None = None
+    valid_time: float | None = None
+    hlc_phys: int | None = None
+    hlc_logical: int | None = None
+    writer_id: str | None = None
+    session_id: str | None = None
+    version: int = 1
 
     @property
     def key(self) -> tuple[str, str]:

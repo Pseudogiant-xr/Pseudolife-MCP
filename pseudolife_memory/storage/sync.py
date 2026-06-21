@@ -23,6 +23,31 @@ _CORTEX_LOG_KEY = "cortex_supersession_log"
 _CORTEX_CURSOR_KEY = "cortex_dream_cursor"
 
 
+# v11 writer-aware temporal stamp — shared mapping for every canonical record.
+def _stamp_to_row(r) -> dict[str, Any]:
+    return {
+        "tx_time": r.tx_time,
+        "valid_time": r.valid_time,
+        "hlc_phys": r.hlc_phys,
+        "hlc_logical": r.hlc_logical,
+        "writer_id": r.writer_id,
+        "session_id": r.session_id,
+        "version": getattr(r, "version", 1) or 1,
+    }
+
+
+def _stamp_from_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "tx_time": row.get("tx_time"),
+        "valid_time": row.get("valid_time"),
+        "hlc_phys": row.get("hlc_phys"),
+        "hlc_logical": row.get("hlc_logical"),
+        "writer_id": row.get("writer_id"),
+        "session_id": row.get("session_id"),
+        "version": row.get("version", 1) or 1,
+    }
+
+
 # ── entries ──────────────────────────────────────────────────────────────
 
 def entry_to_row(entry: MemoryEntry) -> dict[str, Any]:
@@ -117,6 +142,7 @@ def _record_to_row(r: CortexRecord) -> dict[str, Any]:
         "embedding": r.embedding,
         "entity_id": None,          # linked by snapshot_cortex
         "object_entity_id": None,   # linked by snapshot_cortex
+        **_stamp_to_row(r),
     }
 
 
@@ -161,6 +187,7 @@ def hydrate_cortex(cortex: CortexStore, storage) -> int:
             embedding=(torch.as_tensor(emb, dtype=torch.float32)
                        if emb is not None else None),
             support=set(row["support"] or []),
+            **_stamp_from_row(row),
         ))
     cortex.supersession_log = list(storage.meta_get(_CORTEX_LOG_KEY, []) or [])
     cortex.dream_cursor = float(storage.meta_get(_CORTEX_CURSOR_KEY, 0.0) or 0.0)
@@ -197,6 +224,7 @@ def _world_record_to_row(r) -> dict[str, Any]:
         "freshness_class": r.freshness_class or "volatile",
         "content_hash": r.content_hash,
         "source_doc_id": r.source_doc_id,
+        **_stamp_to_row(r),
     }
 
 
@@ -235,6 +263,7 @@ def hydrate_world_cortex(world, storage) -> int:
             superseded_at=row["superseded_at"],
             embedding=(torch.as_tensor(emb, dtype=torch.float32)
                        if emb is not None else None),
+            **_stamp_from_row(row),
         ))
     world._current = {
         r.key: i for i, r in enumerate(world.records) if r.status == "current"
@@ -269,6 +298,7 @@ def _lesson_record_to_row(r) -> dict[str, Any]:
         "embedding": r.embedding,
         "entity_id": None,          # linked by snapshot_lessons
         "object_entity_id": None,   # linked by snapshot_lessons
+        **_stamp_to_row(r),
     }
 
 
@@ -317,6 +347,7 @@ def hydrate_lessons(lessons, storage) -> int:
             superseded_at=row["superseded_at"],
             embedding=(torch.as_tensor(emb, dtype=torch.float32)
                        if emb is not None else None),
+            **_stamp_from_row(row),
         ))
     lessons._current = {
         r.key: i for i, r in enumerate(lessons.records) if r.status == "current"

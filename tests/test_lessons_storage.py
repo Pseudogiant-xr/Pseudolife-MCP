@@ -40,11 +40,11 @@ def _lesson_row(entity="deploy engine to host", attribute="approach",
 def test_schema_v10(pg_conn):
     from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
 
-    assert SCHEMA_META_VERSION == 10
+    assert SCHEMA_META_VERSION >= 10              # lessons landed at v10
     row = pg_conn.execute(
         "SELECT value FROM meta WHERE key = 'schema_version'"
     ).fetchone()
-    assert row is not None and int(row[0]) == 10
+    assert row is not None and int(row[0]) == SCHEMA_META_VERSION
     for t in ("lessons", "outcome_signals"):
         reg = pg_conn.execute("SELECT to_regclass(%s)", (f"public.{t}",)).fetchone()
         assert reg[0] is not None, f"{t} table not created"

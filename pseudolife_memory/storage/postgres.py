@@ -32,13 +32,19 @@ _ENTRY_COLS = (
 )
 _ENTRY_JSONB = {"tags", "slots"}
 
+# v11 writer-aware temporal/provenance stamp — shared by every canonical store.
+_STAMP_COLS = (
+    "tx_time", "valid_time", "hlc_phys", "hlc_logical",
+    "writer_id", "session_id", "version",
+)
+
 _FACT_COLS = (
     "entity", "attribute", "entity_norm", "attribute_norm", "value",
     "polarity", "status", "confidence", "origin", "support", "provenance",
     "asserted_at", "last_confirmed", "supersedes_value",
     "superseded_by_value", "superseded_at", "embedding",
     "entity_id", "object_entity_id",
-)
+) + _STAMP_COLS
 _FACT_JSONB = {"support", "provenance"}
 
 # World-knowledge cortex columns (schema v9). Same slot-keyed shape as facts plus
@@ -51,7 +57,7 @@ _WORLD_FACT_COLS = (
     "superseded_by_value", "superseded_at", "embedding",
     "source_url", "source_quote", "retrieved_at", "freshness_class",
     "content_hash", "source_doc_id",
-)
+) + _STAMP_COLS
 
 # Procedural / outcome memory columns (schema v10). Same slot-keyed shape as facts
 # plus `outcome` (success|failure|correction); graph-linked like the personal cortex
@@ -63,7 +69,7 @@ _LESSON_COLS = (
     "provenance", "asserted_at", "last_confirmed", "supersedes_value",
     "superseded_by_value", "superseded_at", "embedding",
     "entity_id", "object_entity_id",
-)
+) + _STAMP_COLS
 _SIGNAL_COLS = (
     "task", "outcome", "about", "detail", "polarity", "origin",
     "episode_id", "created_at",
@@ -239,6 +245,8 @@ class PostgresStorage:
                 v = _embedding_in(v)
             elif c in _FACT_JSONB:
                 v = Jsonb(v if v is not None else [])
+            elif c == "version" and v is None:
+                v = 1            # NOT NULL DEFAULT 1; never insert explicit NULL
             values.append(v)
         if f.get("id") is not None:
             sets = ", ".join(f"{c} = %s" for c in _FACT_COLS)
@@ -272,6 +280,8 @@ class PostgresStorage:
                         v = _embedding_in(v)
                     elif c in _FACT_JSONB:
                         v = Jsonb(v if v is not None else [])
+                    elif c == "version" and v is None:
+                        v = 1            # NOT NULL DEFAULT 1; never insert explicit NULL
                     values.append(v)
                 cur.execute(
                     f"INSERT INTO facts ({', '.join(_FACT_COLS)}) "
@@ -328,6 +338,8 @@ class PostgresStorage:
                         v = _embedding_in(v)
                     elif c in _FACT_JSONB:
                         v = Jsonb(v if v is not None else [])
+                    elif c == "version" and v is None:
+                        v = 1            # NOT NULL DEFAULT 1; never insert explicit NULL
                     values.append(v)
                 cur.execute(
                     f"INSERT INTO world_facts ({', '.join(_WORLD_FACT_COLS)}) "
@@ -364,6 +376,8 @@ class PostgresStorage:
                         v = _embedding_in(v)
                     elif c in _FACT_JSONB:
                         v = Jsonb(v if v is not None else [])
+                    elif c == "version" and v is None:
+                        v = 1            # NOT NULL DEFAULT 1; never insert explicit NULL
                     values.append(v)
                 cur.execute(
                     f"INSERT INTO lessons ({', '.join(_LESSON_COLS)}) "
