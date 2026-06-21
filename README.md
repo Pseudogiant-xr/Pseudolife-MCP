@@ -1,6 +1,6 @@
 # PseudoLife-MCP
 
-**Persistent neural memory for Claude Code via the Model Context Protocol.**
+**Persistent long-term memory for Claude Code via the Model Context Protocol.**
 
 An MCP server that gives Claude (or any MCP-capable client) a long-term
 memory that persists across sessions — surviving context compactions and
@@ -12,11 +12,13 @@ A memory engine exposed over MCP. There's no chat UI and no bundled
 model — just tools Claude calls to store and recall what matters. It
 layers several complementary stores:
 
-- **Associative continuum** — an 8-tier neural memory (working → forever)
-  whose tiers are small MLPs updated by gradient descent at store time,
-  with surprise gating, contradiction detection, supersession, and
-  contrastive learning. This is the fuzzy "what do I know that's related
-  to X" recall.
+- **Associative continuum** — an 8-tier recency-tiered embedding store
+  (working → forever) ranked by **cosine** similarity, with novelty-gated
+  storage, contradiction detection, and supersession. This is the fuzzy
+  "what do I know that's related to X" recall. (A test-time-trained neural
+  blend was trialled and removed in v0.5 — it underperformed plain cosine;
+  see `docs/2026-06-21-neural-memory-investigation.md`. The research code is
+  archived on the `archive/neural-memory-titans` branch.)
 - **Cortex** — a slot-keyed store of canonical facts (one *current* value
   per `entity.attribute`), with deterministic reads, provenance tiers
   (`user > action > agent`), and contender parking instead of silent
@@ -94,8 +96,8 @@ docstrings — those are what Claude reads to decide when to call which tool.
 One **memory daemon** owns the bank and serves MCP over streamable HTTP
 at `/mcp`; every Claude Code session (and any LAN agent) attaches to it.
 **Postgres 16 + pgvector** (in Docker) is the durable source of truth —
-the in-memory MIRAS bands are a write-through cache hydrated at startup;
-band MLP weights live in an atomically-saved, disposable `weights.pt`.
+the in-memory MIRAS bands are a write-through cache hydrated at startup
+(a small `weights.pt` persists only band counters — there are no MLP weights).
 
 The daemon runs **either** containerized (recommended — portable, no host
 Python) **or** as a host process. Claude Code attaches **either** directly
@@ -296,15 +298,10 @@ The built-in defaults are tuned for Claude's use case:
   86400`, vs the 1h chat default) — Claude Code sessions are hours-to-
   days apart; with a 1h half-life the recency boost was effectively
   always zero. Halves per band depth as before (1d → 2d → 4d → …).
-- **Neural warmup ramp** — each band's retrieval blend
-  (`w·neural + (1−w)·exact`) ramps `w` from 0 to
-  `memory.neural_blend_weight` (0.6) over the band's first
-  `memory.neural_warmup_updates` (50) optimisation steps, so a fresh or
-  sparsely-trained band scores by near-pure cosine instead of riding an
-  untrained MLP's output. `neural_warmup_updates: 0` restores the fixed
-  v0.1 blend exactly.
 - **MIRAS preset `continuum`** — the 8-tier `working / micro / instant /
-  fast / medium / slow / archival / forever` continuum.
+  fast / medium / slow / archival / forever` continuum. Bands are plain
+  cosine vector stores (v0.5); a band spec is capacity + consolidation
+  cadence + promotion thresholds + an eviction policy.
 - **No NLI scorer** — the `cross-encoder/nli-deberta-v3-xsmall`
   contradiction model is ~278 MB and optional. The four-path detector
   works without it. Install with `pip install .[nli]` if you want it.
@@ -772,7 +769,7 @@ Everything lives under `PSEUDOLIFE_MCP_DATA_DIR`:
 ```
 data/
 ├── memory_state/
-│   └── cms_state.pt        # 8-tier MIRAS tensors + metadata
+│   └── cms_state.pt        # 8-tier MIRAS entries + metadata (file mode)
 ├── cortex_state.pt         # Slot-keyed canonical facts (cortex, schema v7)
 ├── chromadb/               # Reference bank (RAG documents)
 └── config.yaml             # Optional overrides
@@ -780,7 +777,7 @@ data/
 
 To wipe Claude's memory: delete the `data/` directory and restart the
 MCP server. To wipe just documents: delete `data/chromadb/`. To wipe just
-neural memory: delete `data/memory_state/`.
+the episodic bands (file mode): delete `data/memory_state/`.
 
 ## Testing
 
@@ -807,8 +804,7 @@ reachable via any bound alias), and MCP-level dispatch
 (tool registration + docstring sanity + end-to-end invocation for every
 exposed tool through the FastMCP machinery). The v0.2 Phase 0 suites
 add the config knobs, the meta-filter gate + pruned patterns, the
-recency base half-life, the neural warmup ramp (incl. state
-round-trip), and the dev-fact extractor (positives + precision
+recency base half-life, and the dev-fact extractor (positives + precision
 guards). The v0.2 Phase 1 suites add the Postgres storage layer
 (schema idempotency, vector round-trips, write-through consistency,
 legacy `.pt` migration, atomic weights + corrupt-file recovery), the
@@ -839,7 +835,7 @@ pass.
 |---|---|
 | Transport | MCP stdio shim → HTTP daemon |
 | Storage | Postgres 16 + pgvector (source of truth); ChromaDB for the reference bank |
-| Associative continuum | 8-tier MIRAS bands, surprise gating, supersession, contrastive learning |
+| Associative continuum | 8-tier cosine MIRAS bands, novelty-gated storage, contradiction detection, supersession |
 | Canonical-fact cortex | Single-writer: LLM dream pass + `memory_fact_*` (regex auto-promote opt-in, default off) |
 | Provenance contenders | Tier-rank guard `user > action > agent`; `memory_fact_resolve` |
 | Knowledge graph | Typed entities/edges, closed relation vocab, on-read closure, AGE Cypher |

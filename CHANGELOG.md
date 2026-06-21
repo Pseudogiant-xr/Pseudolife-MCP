@@ -4,7 +4,26 @@ All notable changes to PseudoLife-MCP are documented here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.0] — cosine spine
+
+### Changed
+- **Removed the test-time-trained neural memory; bands are now plain cosine
+  vector stores.** An A/B eval ([`docs/2026-06-21-neural-memory-investigation.md`])
+  showed the MIRAS neural-retrieval blend *underperformed* pure cosine at every
+  scale (the L2-self-reconstruction MLP over frozen embeddings is a regime
+  mismatch for standalone retrieval — TITANS/HOPE are end-to-end sequence
+  models). `band.retrieve` is now pure cosine; the store gate uses **novelty**
+  surprise (`1 − max cos(x, existing)`). Deleted `memory/miras/objectives.py`,
+  `update_rules.py`, `modules.py`, the HOPE chained-read, the neural-blend
+  config (`neural_blend_weight` / `neural_warmup_updates`), `chain_residual`,
+  and the dead `MemoryMLP` / `TitansMemoryBank`. The contrastive feature keeps
+  suppression (drops the band-MLP step). `memory_stats` per-band fields no
+  longer include `objective` / `update_rule` / `base_lr` / `memory_module`.
+  `weights.pt` now persists only counters (no MLP weights); legacy state with
+  weight blocks loads tolerantly (entries restored, weights ignored). The full
+  neural machinery is archived on the `archive/neural-memory-titans` branch
+  for a future sequence-model experiment. `MIRASBandSpec` keeps only capacity /
+  cadence / promotion / eviction.
 
 ### Fixed
 - **Durable-save failures no longer silent (F3).** A failed cortex/world/lessons
