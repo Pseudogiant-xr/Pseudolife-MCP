@@ -240,6 +240,10 @@ class MemoryService:
         self._cortex: CortexStore | None = None
         self._world = None  # WorldCortexStore | None (world-knowledge cortex, v9)
         self._lessons = None  # LessonStore | None (procedural / outcome memory, v10)
+        from pseudolife_memory.memory.hlc import HybridLogicalClock
+        self._hlc = HybridLogicalClock()  # write ordering authority (memory/hlc.py)
+        # Default writer identity; the daemon overrides per-connection (v0.4 T4).
+        self._writer_id = os.environ.get("PSEUDOLIFE_WRITER_ID") or "unknown"
         self._age = None  # AgeGraph mirror when the extension is present
         self._last_user_query: str | None = None
         self._last_saved_fingerprint = None
@@ -1060,6 +1064,8 @@ class MemoryService:
                 provenance=provenance or (),
                 support=support,
                 now=now,
+                hlc=self._hlc.tick(),
+                writer_id=self._writer_id,
             )
             self._ensure_subject_entity(entity)
             self._save_cortex()

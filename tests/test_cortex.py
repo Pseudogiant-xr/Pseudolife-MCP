@@ -31,6 +31,20 @@ def _unit(seed: int, dim: int = 8) -> torch.Tensor:
     return v / v.norm()
 
 
+def test_backwards_wall_clock_still_supersedes():
+    """v0.4 regression: HLC — not wall-clock — decides ordering, so a genuinely
+    later write whose wall time stepped BACKWARDS still supersedes (the old
+    asserted_at comparison would have dropped it as stale)."""
+    s = CortexStore()
+    e = _unit(1)
+    s.write_fact(Slot("server", "port", "8080"), e, support="user",
+                 now=2000.0, hlc=(2000000, 0))
+    r = s.write_fact(Slot("server", "port", "9090"), e, support="user",
+                     now=1.0, hlc=(2000001, 0))   # wall time back, HLC forward
+    assert r.action == "superseded"
+    assert s.lookup("server", "port").value == "9090"
+
+
 def test_same_fact_ten_times_yields_one_current_record_with_all_provenance():
     store = CortexStore()
     emb = _unit(1)

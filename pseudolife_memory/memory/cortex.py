@@ -108,6 +108,17 @@ class CortexRecord:
     slot_embedding: torch.Tensor | None = None
     # Tiers that have asserted/confirmed this fact: {"user","action","agent"}.
     support: set[str] = field(default_factory=set)
+    # v11 writer-aware temporal stamp. (hlc_phys, hlc_logical) is the ordering
+    # authority (see memory/hlc.py); tx_time is wall-clock display; valid_time is
+    # event time; writer_id/session_id record who wrote this version; version is
+    # the OCC counter (dormant until write_mode='occ'). All default to legacy/None.
+    tx_time: float | None = None
+    valid_time: float | None = None
+    hlc_phys: int | None = None
+    hlc_logical: int | None = None
+    writer_id: str | None = None
+    session_id: str | None = None
+    version: int = 1
 
     @property
     def key(self) -> tuple[str, str]:
@@ -171,8 +182,17 @@ class CortexStore:
         support: str | None = None,
         now: float | None = None,
         slot_embedding: torch.Tensor | None = None,
+        hlc: tuple[int, int] | None = None,
+        tx_time: float | None = None,
+        valid_time: float | None = None,
+        writer_id: str | None = None,
+        session_id: str | None = None,
     ) -> WriteResult:
         t = time.time() if now is None else float(now)
+        txt = t if tx_time is None else float(tx_time)
+        vt = txt if valid_time is None else float(valid_time)
+        stamp = dict(hlc=hlc, tx_time=txt, valid_time=vt,
+                     writer_id=writer_id, session_id=session_id)
         prov = {p for p in provenance if p}
         sup = _norm_support(support)
         emb = embedding.detach().to("cpu", torch.float32).clone()
@@ -182,7 +202,9 @@ class CortexStore:
 
         idx = self._current.get(key)
         if idx is None:
-            return WriteResult("inserted", self._insert(slot, emb, confidence, prov, t, support=sup, slot_embedding=semb))
+            return WriteResult("inserted", self._insert(
+                slot, emb, confidence, prov, t, support=sup,
+                slot_embedding=semb, **stamp))
 
         cur = self.records[idx]
         if _norm_value(cur.value) == _norm_value(slot.value):
@@ -198,6 +220,16 @@ class CortexStore:
             # one — covers records auto-promoted (pre-v8) without a slot embedding.
             if semb is not None and cur.slot_embedding is None:
                 cur.slot_embedding = semb
+            # Re-confirmation advances the ordering clock + last toucher; tx_time
+            # tracks the latest touch. valid_time (when it first became true) is
+            # NOT moved — re-asserting the same value doesn't change when it held.
+            cur.tx_time = txt
+            if hlc is not None:
+                cur.hlc_phys, cur.hlc_logical = hlc
+            if writer_id:
+                cur.writer_id = writer_id
+            if session_id:
+                cur.session_id = session_id
             return WriteResult("confirmed", cur)
 
         # Genuine conflict at the same slot. Provenance guard: only a write whose
@@ -205,12 +237,13 @@ class CortexStore:
         # (or one below the confidence margin) is parked as a contender instead of
         # silently overwriting. (Guard off -> tier ignored, pure newer-wins.)
         tier_ok = (not self.protect_provenance) or _rank(sup) >= _rank(cur.origin)
-        if tier_ok and self._should_supersede(cur, confidence, t):
+        if tier_ok and self._should_supersede(cur, confidence, hlc, t):
             cur.status = "superseded"
             cur.superseded_at = t
             cur.superseded_by_value = slot.value
             self._log(cur, slot.value, confidence, t, "supersede", "newer_wins")
-            new = self._insert(slot, emb, confidence, prov, t, supersedes=cur.value, support=sup, slot_embedding=semb)
+            new = self._insert(slot, emb, confidence, prov, t, supersedes=cur.value,
+                               support=sup, slot_embedding=semb, **stamp)
             return WriteResult("superseded", new)
 
         reason = "tier_downgrade" if not tier_ok else "below_confidence_margin"
@@ -230,6 +263,11 @@ class CortexStore:
         supersedes: str | None = None,
         support: str | None = None,
         slot_embedding: torch.Tensor | None = None,
+        hlc: tuple[int, int] | None = None,
+        tx_time: float | None = None,
+        valid_time: float | None = None,
+        writer_id: str | None = None,
+        session_id: str | None = None,
     ) -> CortexRecord:
         rec = CortexRecord(
             entity=slot.entity,
@@ -245,6 +283,12 @@ class CortexStore:
             embedding=emb,
             slot_embedding=slot_embedding,
             support={support} if support else set(),
+            tx_time=tx_time,
+            valid_time=valid_time,
+            hlc_phys=(hlc[0] if hlc else None),
+            hlc_logical=(hlc[1] if hlc else None),
+            writer_id=writer_id,
+            session_id=session_id,
         )
         self.records.append(rec)
         self._current[rec.key] = len(self.records) - 1
@@ -254,13 +298,19 @@ class CortexStore:
         return min(1.0, c + (1.0 - c) * self.reinforce_rate)
 
     def _should_supersede(
-        self, current: CortexRecord, candidate_conf: float, candidate_t: float,
+        self, current: CortexRecord, candidate_conf: float,
+        candidate_hlc: tuple[int, int] | None, candidate_t: float,
     ) -> bool:
-        # Newer wins, unless the candidate is materially less confident.
-        if candidate_t < current.asserted_at:
-            return False
+        # HLC is the ordering authority (immune to wall-clock steps). Fall back to
+        # wall-clock only when neither side carries an HLC (legacy records).
+        cur_hlc = (current.hlc_phys or 0, current.hlc_logical or 0)
+        cand_hlc = candidate_hlc or (0, 0)
+        if cand_hlc < cur_hlc:
+            return False                      # strictly-earlier HLC never wins
+        if cand_hlc == cur_hlc and candidate_t < current.asserted_at:
+            return False                      # legacy/no-HLC tiebreak (old behaviour)
         if candidate_conf < current.confidence - self.supersede_confidence_margin:
-            return False
+            return False                      # materially less confident
         return True
 
     def _log(self, cur, new_value, new_conf, t, decision, reason):
