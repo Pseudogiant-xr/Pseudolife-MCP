@@ -53,11 +53,12 @@ def test_both_corrupt_raises(tmp_path):
         pass
 
 
-def test_cms_weights_roundtrip_without_entries(tmp_path):
+def test_cms_weights_roundtrip_counters_only(tmp_path):
+    """v0.5: weights.pt carries only counters (no MLP weights — bands are
+    cosine stores). Counters round-trip; band entries are never touched."""
     cms = ContinuumMemorySystem(MemoryConfig())
-    cms.store("a fact to train on", _emb(1), source="t")
+    cms.store("a fact", _emb(1), source="t")
     cms.store("another fact", _emb(2), source="t")
-    assert cms.bands[0].update_count >= 1
     cms.save_weights(tmp_path)
 
     cms2 = ContinuumMemorySystem(MemoryConfig())
@@ -66,7 +67,7 @@ def test_cms_weights_roundtrip_without_entries(tmp_path):
     cms2.bands[0].store("hydrated entry", _emb(3), source="t")
     ok = cms2.load_weights(tmp_path)
     assert ok is True and cms2.weights_reset is False
-    assert cms2.bands[0].update_count == cms.bands[0].update_count
+    assert cms2._interaction_count == cms._interaction_count  # counters restored
     assert [e.text for e in cms2.bands[0].entries] == ["hydrated entry"]
 
 
@@ -78,5 +79,4 @@ def test_cms_weights_corrupt_sets_flag(tmp_path):
     cms2 = ContinuumMemorySystem(MemoryConfig())
     ok = cms2.load_weights(tmp_path)  # .bak doesn't exist -> corrupt
     assert ok is False and cms2.weights_reset is True
-    assert cms2.bands[0].update_count == 0  # fresh init
     assert cms2.stats()["weights_reset"] is True
