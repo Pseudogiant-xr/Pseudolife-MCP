@@ -104,31 +104,6 @@ def recency_heavy(weight_decay: float = 0.005) -> RetentionPolicy:
     )
 
 
-def elastic_net(weight_decay: float = 0.005) -> RetentionPolicy:
-    """L1 + L2 retention. Promotes sparse weight updates.
-
-    Used by the fast tiers of the ``continuum`` preset: each update lands
-    sharply on a few weight coordinates rather than smearing across all of
-    them. The result is many distinct local patterns held simultaneously
-    without interference — the right behaviour for tiers that ingest every
-    message and must keep recent context queryable for the next few turns.
-
-    The implementation mixes L1 magnitude (sparsity-inducing) with L2
-    (the v0.4.x default smoothing). Eviction scoring is recency-heavy: at
-    fast tiers, freshness dominates.
-    """
-    return RetentionPolicy(
-        weight_decay=weight_decay,
-        # Sparsity coefficient for the L1 term — applied as ``α · sign(W)``
-        # added to the gradient inside SurpriseModulatedUpdate. Keep modest
-        # so we don't whiplash the weights.
-        l1_coef=weight_decay * 0.5,
-        decay_factor_on_contradiction=0.15,
-        eviction_score=_recency_heavy_score,
-        name="elastic_net",
-    )
-
-
 def surprise_heavy(weight_decay: float = 0.0005) -> RetentionPolicy:
     """Surprise-biased eviction + gentler contradiction decay.
 
@@ -150,7 +125,6 @@ POLICY_REGISTRY = {
     "balanced": balanced,
     "recency_heavy": recency_heavy,
     "surprise_heavy": surprise_heavy,
-    "elastic_net": elastic_net,
 }
 
 

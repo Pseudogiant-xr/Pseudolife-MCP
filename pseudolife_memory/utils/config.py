@@ -82,19 +82,11 @@ class MIRASBandSpec:
     :mod:`src.memory.miras` so a YAML reader can map 1:1.
     """
     name: str = "band"
-    hidden_dim: int = 512
     max_entries: int = 5000
-    learning_rate: float = 0.01
     update_interval: int = 1
     promotion_access_count: int = 2
     promotion_surprise: float = 0.5
-    # MIRAS axes — string keys into the registries in src.memory.miras.
-    memory_module: str = "mlp3"          # mlp3 / mlp2 / linear
-    update_rule: str = "sgd_momentum"    # sgd_momentum / adam / lion / momentum_only
-    objective: str = "l2"                # l2 / lp / neg_sim / kv
-    objective_p: float = 2.0             # consumed only by ``objective: lp``
     retention_policy: str = "balanced"   # balanced / recency_heavy / surprise_heavy
-    weight_decay: float = 0.001
 
 
 @dataclass
@@ -116,30 +108,16 @@ class MIRASConfig:
         agentic deployments.
     bands:
         Per-tier specs. Populated from the preset for non-``custom``.
-    chain_residual:
-        When True, retrieval flows the query forward through each band's
-        MLP and adds the chained output as an extra synthesized retrieval
-        signal — HOPE-style sequential read. ``stop_gradient`` between
-        tiers keeps each tier's local optimisation independent (no BPTT,
-        no training-time wiring). Off by default; on in the ``continuum``
-        preset.
     """
     preset: str = "continuum"
     bands: list[MIRASBandSpec] = field(default_factory=list)
-    chain_residual: bool = False
 
     def __post_init__(self) -> None:
         # Importing inside __post_init__ to dodge a circular import:
         # presets.py types its return as MIRASBandSpec, which lives here.
         if self.preset != "custom":
-            from pseudolife_memory.memory.miras.presets import preset_bands, preset_chain_residual  # noqa: PLC0415
+            from pseudolife_memory.memory.miras.presets import preset_bands  # noqa: PLC0415
             self.bands = preset_bands(self.preset)
-            # Presets can opt their default chain_residual setting; the
-            # YAML may override with an explicit value.  Use the
-            # default-only-if-untouched pattern: if chain_residual is at
-            # its dataclass default (False), apply the preset's default.
-            if not self.chain_residual:
-                self.chain_residual = preset_chain_residual(self.preset)
         elif not self.bands:
             raise ValueError(
                 "MIRASConfig: preset='custom' requires a non-empty bands list "
@@ -440,11 +418,6 @@ class MemoryConfig:
     lessons: LessonsConfig = field(default_factory=LessonsConfig)
     # Meta-statement filter on the store path (off in the MCP build).
     meta_filter: MetaFilterConfig = field(default_factory=MetaFilterConfig)
-    # Neural/exact retrieval blend (band.retrieve). Effective neural weight
-    # ramps with per-band update_count: w = blend * min(1, updates/warmup).
-    # warmup_updates=0 restores the fixed v0.1 blend.
-    neural_blend_weight: float = 0.6
-    neural_warmup_updates: int = 50
     # Base recency half-life at band depth 0; doubles per depth.
     # 3600 (1h) suits chat; the MCP build sets 86400 (1 day).
     recency_base_half_life_s: float = 3600.0
@@ -574,8 +547,6 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             save_dir=mem_raw.get("save_dir", "./memory_state"),
             show_superseded=mem_raw.get("show_superseded", False),
             search_confidence_floor=mem_raw.get("search_confidence_floor", 0.0),
-            neural_blend_weight=mem_raw.get("neural_blend_weight", 0.6),
-            neural_warmup_updates=mem_raw.get("neural_warmup_updates", 50),
             recency_base_half_life_s=mem_raw.get("recency_base_half_life_s", 3600.0),
         )
         if "fast_bank" in mem_raw:
