@@ -58,6 +58,29 @@ def test_cortex_read_includes_relative_age_and_stamp():
         assert got["tx_time"] and got["writer_id"]   # temporal stamp surfaced
 
 
+def test_failed_cortex_save_surfaces_as_persistence_error():
+    """A durable-save failure must NOT be swallowed: it surfaces to the caller
+    and bumps the health-visible persist-error counter (F3)."""
+    from pseudolife_memory.service import MemoryService, PersistenceError
+
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
+        svc = MemoryService(data_dir=d)
+        svc._ensure_init()
+        assert svc._cortex is not None
+
+        def _boom(*a, **k):
+            raise OSError("disk full")
+
+        svc._cortex.save = _boom  # force the durable write to fail
+        raised = False
+        try:
+            svc.cortex_write("server", "port", "8080", support="user")
+        except PersistenceError:
+            raised = True
+        assert raised, "a failed cortex save must surface, not be swallowed"
+        assert svc._persist_errors >= 1
+
+
 def test_memory_history_returns_version_timeline():
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
         svc = MemoryService(data_dir=d)

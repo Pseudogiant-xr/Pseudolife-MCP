@@ -123,12 +123,17 @@ def run_daemon(host: str | None = None, port: int | None = None) -> None:
             sys.exit(2)
 
     def _health() -> dict:
+        from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
+
         svc = mcp_server.service
         return {
             "status": "ok",
-            "schema": 8,
+            "schema": SCHEMA_META_VERSION,
             "storage": "postgres" if getattr(svc, "_db_url", None) else "files",
             "auth": token is not None,
+            # Durable-save failures since start (see service.PersistenceError);
+            # >0 means writes succeeded in memory but a snapshot did not persist.
+            "persist_errors": getattr(svc, "_persist_errors", 0),
         }
 
     mcp_server.start_background_durability()

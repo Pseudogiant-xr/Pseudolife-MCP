@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pseudolife-mcp"
-version = "0.2.0"
+version = "0.4.0"
 description = "PseudoLife neural memory exposed as an MCP server for Claude Code"
 readme = "README.md"
 requires-python = ">=3.10"

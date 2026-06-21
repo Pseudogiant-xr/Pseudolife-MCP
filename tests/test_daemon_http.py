@@ -90,9 +90,12 @@ def daemon(tmp_path_factory):
 
 
 def test_health_unauthenticated(daemon):
+    from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
+
     h = daemon["health"]
-    assert h["status"] == "ok" and h["schema"] == 8
+    assert h["status"] == "ok" and h["schema"] == SCHEMA_META_VERSION
     assert h["storage"] == "postgres" and h["auth"] is True
+    assert h["persist_errors"] == 0  # healthy: no swallowed save failures
 
 
 def test_tool_call_requires_token(daemon):

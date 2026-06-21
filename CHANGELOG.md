@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **Durable-save failures no longer silent (F3).** A failed cortex/world/lessons
+  snapshot used to be swallowed with a `logger.warning` while the tool call
+  returned success — silent data loss in a memory system. The saves now raise
+  `PersistenceError` (surfaced to the caller on tool paths; the background
+  autosave/flush threads already catch, so they survive) and bump a
+  health-visible `persist_errors` counter. The AGE *mirror* stays best-effort
+  (rebuildable via age-sync) — only content persistence is hardened.
+- **Version/schema drift (F5).** `pyproject` version `0.2.0 → 0.4.0`; `/health`
+  now reports `schema` from `SCHEMA_META_VERSION` (was hardcoded `8`) plus the
+  new `persist_errors`; the `mcp_server.py` header rewritten to describe the
+  HTTP-daemon + auth architecture (was the obsolete v0.1 stdio/no-auth model);
+  clarified that `cortex.SCHEMA_VERSION` is the file-mode snapshot format number,
+  distinct from the Postgres `SCHEMA_META_VERSION`.
+
 ### Added
 - **Writer-aware temporal memory (schema v11).** Every canonical write (cortex,
   world, lessons) now carries a temporal/provenance stamp: `tx_time` (write

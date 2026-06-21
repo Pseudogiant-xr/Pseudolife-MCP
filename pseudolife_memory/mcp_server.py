@@ -1,31 +1,39 @@
-"""MCP server entrypoint — exposes PseudoLife memory tools over stdio.
+"""MCP tool surface — exposes the PseudoLife memory tools to Claude Code.
 
 Built on the FastMCP decorator API from the official ``mcp`` Python SDK.
-Each ``@mcp.tool()`` becomes a JSON-RPC tool Claude Code can call:
+Each ``@mcp.tool()`` becomes a JSON-RPC tool. The set spans memory
+(``memory_store`` / ``memory_search`` / ``memory_recent`` / ``memory_stats``),
+the canonical-fact cortex (``memory_fact_get`` / ``memory_fact_set`` /
+``memory_history`` / ``memory_facts`` / ``memory_fact_resolve``), the world
+cortex (``memory_world_*``), procedural lessons (``memory_outcome`` /
+``memory_lesson_*``), the knowledge graph (``memory_graph*`` /
+``memory_relation_define`` / ``memory_alias``), the dream pass
+(``memory_dream_*``), and the reference bank (``document_*``).
 
-    memory_store              Remember a fact, decision, observation
-    memory_search             Retrieve by associative similarity
-    memory_recent             List most-recently-stored memories
-    memory_supersede          Mark an old fact obsolete + store correction
-    memory_stats              Bank sizes, hit rates, totals
-    memory_save               Flush CMS tensors to disk
-    document_ingest           Add a file (txt/md/pdf) to the reference bank
-    document_search           RAG search the reference bank only
+Transport (current architecture)
+--------------------------------
+This module is the shared tool layer for **two** entry points:
+
+* **HTTP daemon** (the shipped path — :mod:`pseudolife_memory.daemon`): one
+  long-lived process owns the bank; every session connects over streamable
+  HTTP. ``/health`` is open; all other routes require
+  ``Authorization: Bearer <PSEUDOLIFE_MCP_TOKEN>`` when a token is set, and a
+  non-loopback bind without a token is refused. Single-writer by construction.
+* **Embedded stdio** (:func:`_run_embedded_stdio`, also the shim's escape
+  hatch): the v0.1-style in-process server over stdin/stdout. No auto dream
+  sweep here — the daemon owns that cadence.
 
 Configuration
 -------------
-* ``PSEUDOLIFE_MCP_DATA_DIR`` — where memory tensors + ChromaDB live.
-  Defaults to ``./data`` relative to the cwd when Claude Code launches
-  the server. **Recommended: set this explicitly** in your ``.mcp.json``
-  so the data path is stable regardless of which directory you start
-  Claude Code from.
-* ``PSEUDOLIFE_MCP_CONFIG`` — path to a ``config.yaml``. Optional; sane
-  defaults are baked in by :class:`MemoryService`.
-
-Transport: stdio. The MCP client (Claude Code) launches this script as
-a subprocess and communicates via stdin/stdout — no network port, no
-auth, single-tenant per process. That's exactly the threat model we
-want for "Claude's personal memory on the user's PC".
+* ``PSEUDOLIFE_MCP_DATABASE_URL`` — Postgres DSN; when set, PG is the source of
+  truth (schema v11) and the in-memory bands are a write-through cache. Unset →
+  v0.1 file-only mode.
+* ``PSEUDOLIFE_MCP_DATA_DIR`` — where weights + ChromaDB live. **Set this
+  explicitly** so the data path is stable regardless of cwd.
+* ``PSEUDOLIFE_MCP_CONFIG`` — path to a ``config.yaml`` (optional; sane
+  defaults baked in by :class:`MemoryService`).
+* ``PSEUDOLIFE_WRITER_ID`` / ``PSEUDOLIFE_GRAPH_NAME`` — writer attribution +
+  AGE graph name (v0.4); see :mod:`pseudolife_memory.daemon`.
 """
 
 from __future__ import annotations

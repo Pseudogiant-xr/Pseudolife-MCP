@@ -66,6 +66,15 @@ from pseudolife_memory.utils.config import (
 logger = logging.getLogger(__name__)
 
 
+class PersistenceError(RuntimeError):
+    """A durable save (cortex / world / lessons snapshot) failed — the in-memory
+    write succeeded but did NOT reach Postgres/disk. Surfaced to the caller and
+    counted in ``MemoryService._persist_errors`` (health-visible), never silently
+    swallowed: silent save loss is the one failure a memory system must not hide.
+    The AGE *mirror* stays best-effort (rebuildable via age-sync) — see
+    ``_age_mirror`` — but content persistence does not."""
+
+
 def _entry_to_dict(
     entry: MemoryEntry,
     score: float | None = None,
@@ -260,6 +269,9 @@ class MemoryService:
         self._age = None  # AgeGraph mirror when the extension is present
         self._last_user_query: str | None = None
         self._last_saved_fingerprint = None
+        # Count of durable-save failures (cortex/world/lessons). Exposed via the
+        # daemon /health probe so swallowed-then-surfaced saves are observable.
+        self._persist_errors = 0
 
     def _resolve_writer(self) -> tuple[str, str | None]:
         """The ``(writer_id, session_id)`` to attribute the current write to —
@@ -1020,8 +1032,10 @@ class MemoryService:
                 _sync.snapshot_cortex(self._cortex, self._storage)
             else:
                 self._cortex.save(self._cortex_path())
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Cortex save failed: %s", exc)
+        except Exception as exc:
+            self._persist_errors += 1
+            logger.error("Cortex save failed (NOT durably persisted): %s", exc)
+            raise PersistenceError(f"cortex save failed: {exc}") from exc
 
     def _save_world(self) -> None:
         if getattr(self, "_world", None) is None or self._storage is None:
@@ -1029,8 +1043,10 @@ class MemoryService:
         try:
             from pseudolife_memory.storage import sync as _sync
             _sync.snapshot_world_cortex(self._world, self._storage)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("World cortex save failed: %s", exc)
+        except Exception as exc:
+            self._persist_errors += 1
+            logger.error("World cortex save failed (NOT durably persisted): %s", exc)
+            raise PersistenceError(f"world cortex save failed: {exc}") from exc
 
     def _save_lessons(self) -> None:
         if getattr(self, "_lessons", None) is None or self._storage is None:
@@ -1038,8 +1054,10 @@ class MemoryService:
         try:
             from pseudolife_memory.storage import sync as _sync
             _sync.snapshot_lessons(self._lessons, self._storage)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Lesson store save failed: %s", exc)
+        except Exception as exc:
+            self._persist_errors += 1
+            logger.error("Lesson store save failed (NOT durably persisted): %s", exc)
+            raise PersistenceError(f"lesson store save failed: {exc}") from exc
 
     def _persist_all(self, *, kind: str) -> dict[str, Any]:
         """Shared body of save/autosave/flush. Caller holds the lock.
