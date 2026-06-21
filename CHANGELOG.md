@@ -7,6 +7,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Writer-aware temporal memory (schema v11).** Every canonical write (cortex,
+  world, lessons) now carries a temporal/provenance stamp: `tx_time` (write
+  time), `valid_time` (event time — a lesson inherits its source signal's
+  observation time, not the dream's write time: bitemporal), an
+  `(hlc_phys, hlc_logical)` **Hybrid Logical Clock** that is the ordering
+  authority for supersession (monotonic, immune to wall-clock steps — "newer
+  wins" no longer depends on jittery wall time), and `writer_id`/`session_id`.
+  The daemon reads an `X-PL-Writer` header per request (the shim forwards
+  `PSEUDOLIFE_WRITER_ID`) and a per-connection `session_id`, so concurrent
+  sessions/agents are distinguishable. Reads surface the stamp + a human `age`;
+  new `memory_history(entity, attribute)` returns the per-slot version timeline.
+  A dormant `write_mode=occ` seam (`version` column + `replace_facts_occ` stub)
+  is laid for a future multi-process writer (Phase 2; raises `NotImplementedError`).
+  **Collision fix:** the AGE graph is renamed off the DB role name
+  (`pseudolife` → `pseudolife_graph`), every connection pins `search_path` to
+  `public`, and a guarded backup-first migration (`ops/migrate_v04.py`) renames
+  legacy graphs + drops shadow tables. `ops/retire_by_writer.py` supersedes a
+  rogue writer's rows. Design + plan:
+  `docs/specs/2026-06-21-writer-aware-temporal-memory-{design,plan}.md`.
 - **Procedural / outcome memory — "lessons" (schema v10).** A fourth memory
   layer beside the personal and world cortex that learns from the agent's *own
   work*: what worked, what was a dead end, and what the user corrected. Keyed by

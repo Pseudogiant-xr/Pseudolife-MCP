@@ -62,6 +62,7 @@ each session.
 | `memory_fact_resolve(entity, attribute, accept)` | Settle a contested fact after checking in — adopt (`true`) or discard (`false`) the contender |
 | `memory_fact_forget(entity, attribute?)` | Hard-delete canonical fact(s) at a slot/entity (no audit trail) |
 | `memory_facts(limit?)` | List all current canonical facts (cortex introspection) |
+| `memory_history(entity, attribute)` | The version timeline at a slot — current + superseded, each with its temporal/provenance stamp (who changed it, when) |
 | `memory_world_set(entity, attribute, value, source_url?, source_quote?, freshness_class?, confidence?, ...)` | Assert a canonical WORLD fact — sourced *external* knowledge (current model/version/price/role), kept in its own table; age-decayed trust by freshness |
 | `memory_world_search(query, top_k?)` | Search world facts by similarity — each carries `effective_confidence`, a `stale` flag, and its citation |
 | `memory_world_facts(limit?)` | List all current world facts (world-cortex introspection) |
@@ -279,6 +280,8 @@ Connection / deployment env vars:
 | `PSEUDOLIFE_MCP_TRUST_BIND` | _(unset)_ | Set `1` to allow a non-loopback bind without a token when the boundary is external (containerized, loopback-published). The compose daemon sets this; never set it for a host daemon. |
 | `PSEUDOLIFE_MCP_DATA_DIR` | `./data` (cwd-relative) | Weights cache + legacy-migration source + ChromaDB. |
 | `PSEUDOLIFE_MCP_CONFIG` | `<data_dir>/config.yaml` if present, else built-ins | Override MIRAS / embedding / memory config. |
+| `PSEUDOLIFE_WRITER_ID` | `unknown` | Identifies this writer on every canonical write (schema v11). The shim forwards it as the `X-PL-Writer` header; the compose daemon sets `claude-code`. |
+| `PSEUDOLIFE_GRAPH_NAME` | `pseudolife_graph` | AGE graph name. Must not be the DB role name (`pseudolife`) — that caused the v0.4 shadow-schema collision. |
 
 The built-in defaults are tuned for Claude's use case:
 
@@ -660,6 +663,44 @@ graph edges power structured traversal.
 > prompt block is a provider/client concern, like the world-knowledge block — not
 > part of the standalone server.
 
+### Sense of time + multi-writer attribution (schema v11)
+
+Every canonical write (cortex, world, lessons) now carries a **temporal /
+provenance stamp** so the agent has a real sense of *when* a fact held and *who*
+set it — and so concurrent writers can't silently clobber each other:
+
+- **`tx_time`** — when this version was *written* (wall-clock display).
+- **`valid_time`** — when the fact became *true* (event time). A lesson
+  synthesised from an outcome signal inherits the signal's observation time, not
+  the dream's write time, so the two clocks stay honest (bitemporal).
+- **`(hlc_phys, hlc_logical)`** — a **Hybrid Logical Clock** that is the
+  *ordering authority* for supersession. Wall clocks can jump backwards (NTP
+  steps, clock skew across sessions); the HLC is monotonic, so "newer wins" is
+  jitter-proof — a later write always supersedes, even if its wall time reads
+  earlier. Wall time is display-only.
+- **`writer_id` / `session_id`** — which writer/session made the change. The
+  daemon reads an `X-PL-Writer` header per request (the stdio shim forwards
+  `PSEUDOLIFE_WRITER_ID`) and mints a per-connection session id, so a Codex
+  session, a second Claude session, and the dream are all distinguishable.
+
+Reads surface this: serialised facts include the stamp plus a human `age`
+("3 days ago"), and **`memory_history(entity, attribute)`** returns the full
+version timeline — current + superseded, oldest→newest, each attributed. The
+supersession log records the writer/session too.
+
+> **Writer topology.** The live path is a single daemon with a coarse lock
+> (`write_mode=snapshot`) — correct by construction. The schema also lays a
+> dormant `write_mode=occ` seam (a `version` column + per-row compare-and-swap)
+> for a future multi-process writer; selecting it raises `NotImplementedError`
+> until that Phase-2 path is built.
+>
+> **Collision fix.** The DB role is `pseudolife`; the AGE graph used to be named
+> `pseudolife` too, so AGE created a `pseudolife` schema that could shadow the
+> real `public` bank. The graph is now `pseudolife_graph`, every connection pins
+> `search_path` to `public`, and a guarded, backup-first migration
+> (`ops/migrate_v04.py`) renames any legacy graph and drops shadow tables.
+> `ops/retire_by_writer.py` supersedes a rogue writer's rows in one shot.
+
 ## Dreaming — consolidating memories into facts
 
 A **dream** distils the recent associative stream (MIRAS) into canonical cortex
@@ -804,12 +845,13 @@ pass.
 | Knowledge graph | Typed entities/edges, closed relation vocab, on-read closure, AGE Cypher |
 | World cortex | `memory_world_*` — cited external facts + age-decayed freshness (manual ingest) |
 | Procedural memory | `memory_outcome` (signals) → dream-synthesised `memory_lessons`/`memory_lesson_search`; `prefers`/`avoids` graph edges; single-writer |
+| Sense of time + multi-writer | Per-write stamp (tx/valid time, HLC ordering, writer/session); `memory_history`; relative `age` on reads; `write_mode` seam (snapshot live, occ Phase-2) |
 | Episodes + tags | `memory_episode_*`; multi-valued `tags=[...]` on store/search/delete |
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
 | Cross-encoder reranker | Optional (`rerank=True` per call, ~80 MB) |
 | BM25 hybrid pool | Optional (`bm25=True` per call, stdlib only) |
 | NLI contradiction scorer | Optional (`pip install .[nli]`, ~278 MB) |
-| Schema version | v10 (additive; legacy file-mode `.pt` banks auto-migrate into Postgres) |
+| Schema version | v11 (additive temporal/provenance stamp; legacy file-mode `.pt` banks auto-migrate into Postgres) |
 
 ## What's not built yet
 
