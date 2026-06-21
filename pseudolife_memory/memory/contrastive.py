@@ -125,7 +125,6 @@ class ContrastiveUpdater:
             if target is None:
                 return 0
             self._suppress_entry(target)
-            self._contrast_band(cms, target)
             self._write_audit_marker(cms, target, current_message)
             self.fire_count += 1
             logger.info(
@@ -162,7 +161,11 @@ class ContrastiveUpdater:
             return None
         return top_entry
 
-    # ── Suppression + band update ─────────────────────────────────────────
+    # ── Suppression ───────────────────────────────────────────────────────
+    # v0.5: the contrastive *band-MLP* negative step was removed with the
+    # neural memory (the bands are plain cosine stores now). Suppression — the
+    # load-bearing effect — remains: the wrong entry is marked superseded so
+    # retrieval hides it.
 
     @staticmethod
     def _suppress_entry(entry: "MemoryEntry") -> None:
@@ -173,29 +176,6 @@ class ContrastiveUpdater:
         different signal source.
         """
         entry.superseded_at = time.time()
-
-    def _contrast_band(
-        self,
-        cms: "ContinuumMemorySystem",
-        target: "MemoryEntry",
-    ) -> None:
-        """Apply contrastive update on whichever band owns the target."""
-        for band in getattr(cms, "bands", []):
-            # Identity check — entries live in exactly one band.
-            for entry in band.entries:
-                if entry is target:
-                    try:
-                        band.contrastive_update(target.embedding, scale=self.config.scale)
-                    except Exception as exc:  # noqa: BLE001
-                        logger.debug(
-                            "Band %r contrastive_update failed: %s",
-                            band.name, exc,
-                        )
-                    return
-        # Target not found in any band — entry was evicted between
-        # retrieval and this call. Suppression still applies on the
-        # detached MemoryEntry, but band update is moot.
-        logger.debug("Contrastive: target not found in any band; band update skipped.")
 
     def _write_audit_marker(
         self,

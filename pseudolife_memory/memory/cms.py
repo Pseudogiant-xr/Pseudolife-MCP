@@ -131,12 +131,8 @@ class ContinuumMemorySystem:
                 "ContinuumMemorySystem requires at least one MIRAS band. "
                 "Check memory.miras.bands in config.yaml."
             )
-        # Push the retrieval-blend config onto each band (bands are built
-        # from MIRASBandSpec, which doesn't carry memory-level knobs).
+        # Capacity eviction must not leave ghost rows in storage.
         for b in self.bands:
-            b.neural_blend_weight = getattr(config, "neural_blend_weight", 0.6)
-            b.neural_warmup_updates = getattr(config, "neural_warmup_updates", 50)
-            # Capacity eviction must not leave ghost rows in storage.
             b.on_evict = self._on_band_evict
 
         # ── v0.4.x attribute shims ────────────────────────────────────────────
@@ -826,36 +822,6 @@ class ContinuumMemorySystem:
         neural.sort(key=lambda x: x[1], reverse=True)
         neural = neural[:k]
 
-        # ── Optional: HOPE-style chained-residual read ─────────────────────────
-        # When ``config.miras.chain_residual`` is enabled (currently only the
-        # ``continuum`` preset), flow the query forward through every band's
-        # MLP — each tier sees its predecessor's output added to the query,
-        # producing a progressively-abstracted representation. The final
-        # chained output is then matched against every entry's embedding to
-        # surface "neural-pattern" hits the per-band retrieval missed. We
-        # ``stop_gradient`` between tiers so each tier's local optimisation
-        # stays independent — no BPTT, no training-time complexity.
-        if getattr(self.config.miras, "chain_residual", False) and self.bands:
-            pre_chain = len(neural)
-            self._inject_chained_hits(
-                query_embedding, neural, seen_texts,
-                top_k=k, source_filter=source_filter,
-                episode_filter=episode_filter,
-                tag_filter=tag_filter,
-                min_logical_turn=min_logical_turn, keep=_keep,
-            )
-            if _trace is not None:
-                # Anything appended to ``neural`` after pre_chain came from
-                # the chained read.
-                _trace["chain_residual"]["enabled"] = True
-                _trace["chain_residual"]["synthetic_hits"] = [
-                    {
-                        "text_preview": e.text[:80] + ("…" if len(e.text) > 80 else ""),
-                        "score": round(float(s), 4),
-                    }
-                    for e, s, _ in neural[pre_chain:]
-                ]
-
         # Update per-tier instrumentation. ``hit_band_names`` is the set of
         # tiers that contributed at least one entry to the *post-merge*
         # result — gives a usage-rate signal we can surface via /api/memory/stats.
@@ -972,83 +938,6 @@ class ContinuumMemorySystem:
             scores=list(scores),
             surprises=list(surprises),
         )
-
-    def _inject_chained_hits(
-        self,
-        query_embedding: "torch.Tensor",
-        neural: list[tuple["MemoryEntry", float, float]],
-        seen_texts: set[str],
-        *,
-        top_k: int,
-        source_filter: set[str] | None,
-        min_logical_turn: int | None,
-        keep,
-        episode_filter: set[str] | None = None,
-        tag_filter: set[str] | None = None,
-    ) -> None:
-        """HOPE-style: flow the query through every band's MLP and use the
-        chained output to surface additional entries.
-
-        ``stop_gradient`` on the per-tier outputs keeps tiers independently
-        optimised — the chained read is purely a retrieval-time signal.
-        Mutates ``neural`` in place by appending new ``(entry, score, surprise)``
-        tuples whose post-multiplier score clears the same MIN_SCORE threshold
-        the parallel-pool scoring used.
-        """
-        import torch.nn.functional as F  # noqa: PLC0415
-
-        device = self.bands[0].device
-        q = query_embedding.to(device)
-        q = F.normalize(q.unsqueeze(0), p=2, dim=1).squeeze(0)
-
-        # Forward chain: each tier sees q + previous-tier output, with
-        # stop_gradient on the previous-tier contribution.
-        chained = q
-        for band in self.bands:
-            band.memory.eval()
-            with torch.no_grad():
-                tier_out = band.memory(chained)
-                tier_out = F.normalize(tier_out.unsqueeze(0), p=2, dim=1).squeeze(0)
-            # Residual: average with running chained vector to keep magnitude
-            # stable across N hops.
-            chained = F.normalize(
-                (chained + tier_out).unsqueeze(0), p=2, dim=1,
-            ).squeeze(0).detach()
-
-        # Match the final chained representation against every band's stored
-        # patterns. The score is plain cosine against the chained vector —
-        # no further depth-weighting because the chain itself already
-        # encodes a slow-band-biased view.
-        MIN_SCORE = 0.25
-        for band in self.bands:
-            if not band.entries:
-                continue
-            if band._dirty:
-                band._rebuild_pattern_matrix()
-            if band._pattern_matrix is None:
-                continue
-            scores = band._pattern_matrix @ chained
-            for entry, score_t in zip(band.entries, scores.tolist()):
-                if entry.text in seen_texts or not keep(entry):
-                    continue
-                if source_filter is not None and entry.source not in source_filter:
-                    continue
-                if episode_filter is not None and entry.episode_id not in episode_filter:
-                    continue
-                if tag_filter is not None and not (set(entry.tags) & tag_filter):
-                    continue
-                if min_logical_turn is not None:
-                    et = getattr(entry, "last_logical_turn", None)
-                    if et is None or et < min_logical_turn:
-                        continue
-                if score_t < MIN_SCORE:
-                    continue
-                neural.append((entry, float(score_t), entry.surprise_score))
-                seen_texts.add(entry.text)
-
-        # Re-sort and cap to top_k after the chained additions.
-        neural.sort(key=lambda x: x[1], reverse=True)
-        del neural[top_k:]
 
     def compute_surprise(self, embedding: torch.Tensor) -> float:
         """Aggregate surprise across all bands (min — anything any band
@@ -1278,7 +1167,6 @@ class ContinuumMemorySystem:
         state = {
             "schema_version": SCHEMA_VERSION,
             "preset_name": self.config.miras.preset,
-            "chain_residual": getattr(self.config.miras, "chain_residual", False),
             "bands": {b.name: b.get_state_dict() for b in self.bands},
             "interaction_count": self._interaction_count,
             "logical_turn_count": self._logical_turn_count,
@@ -1310,7 +1198,6 @@ class ContinuumMemorySystem:
             "schema_version": SCHEMA_VERSION,
             "kind": "weights",
             "preset_name": self.config.miras.preset,
-            "bands": {b.name: b.get_weights_state() for b in self.bands},
             "interaction_count": self._interaction_count,
             "logical_turn_count": self._logical_turn_count,
             "surprise_history": self._surprise_history,
@@ -1343,10 +1230,6 @@ class ContinuumMemorySystem:
             return False
         if used_backup:
             logger.warning("weights.pt corrupt — restored from .bak.")
-        named = {b.name: b for b in self.bands}
-        for name, bstate in (state.get("bands") or {}).items():
-            if name in named:
-                named[name].load_weights_state(bstate)
         self._interaction_count = state.get("interaction_count", 0)
         self._logical_turn_count = state.get("logical_turn_count", 0)
         self._surprise_history.update(state.get("surprise_history") or {})
@@ -1526,7 +1409,6 @@ class ContinuumMemorySystem:
         for band in self.bands:
             band.entries.clear()
             band._dirty = True
-            band.memory.init_weights()
             band.surprise_ema = 0.0
         self._interaction_count = 0
         self._surprise_history = {b.name: [] for b in self.bands}
@@ -1620,11 +1502,7 @@ class ContinuumMemorySystem:
                 "size": b.size,
                 "capacity": b.max_entries,
                 "update_interval": b.update_interval,
-                "base_lr": b.base_lr,
-                "objective": b.objective.name,
-                "update_rule": b.update_rule.name,
                 "retention_policy": b.retention.name,
-                "memory_module": type(b.memory).__name__,
                 # v0.6 instrumentation: fraction of retrievals where this
                 # tier contributed at least one entry to the merged result.
                 # Lets us measure whether deep continua actually help.
@@ -1638,7 +1516,6 @@ class ContinuumMemorySystem:
         result = {
             "bands": bands_summary,
             "preset": self.config.miras.preset,
-            "chain_residual": getattr(self.config.miras, "chain_residual", False),
             "total_memories": self.total_memories,
             "interaction_count": self._interaction_count,
             "logical_turn_count": self._logical_turn_count,
