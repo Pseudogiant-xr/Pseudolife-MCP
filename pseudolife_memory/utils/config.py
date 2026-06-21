@@ -422,8 +422,11 @@ class MemoryConfig:
     # 3600 (1h) suits chat; the MCP build sets 86400 (1 day).
     recency_base_half_life_s: float = 3600.0
     memory_engine: str = "titans"  # "titans" or "hopfield"
-    surprise_threshold: float = 0.3
-    top_k: int = 8       # neural memory slots (instant + short + long)
+    # v0.5 store gate is novelty-based (1 - max cos to existing entries). 0.0 =
+    # permissive (store everything; novelty still scores eviction/promotion);
+    # raise to dedup near-duplicate stores.
+    surprise_threshold: float = 0.0
+    top_k: int = 8       # episodic retrieval slots across bands
     ref_top_k: int = 3   # max reference bank results injected alongside memories
     save_dir: str = "./memory_state"
     # When False (default), entries marked superseded by the contradiction

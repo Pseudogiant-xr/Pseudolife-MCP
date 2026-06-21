@@ -126,8 +126,9 @@ def test_pre_v6_save_loads_with_defaults(tmp_path: Path) -> None:
         "chain_residual": getattr(cfg.miras, "chain_residual", False),
         "bands": {
             band_name: {
-                "memory_state": cms.bands[0].memory.state_dict(),
-                "optimizer_state": cms.bands[0].update_rule.state_dict(),
+                # Legacy pre-v0.5 MLP weight blocks — the loader ignores these.
+                "memory_state": {"net.0.weight": torch.zeros(2, 2)},
+                "optimizer_state": {"name": "sgd_momentum"},
                 "surprise_ema": 0.0,
                 "axes": {},
                 "entries": [
@@ -253,8 +254,9 @@ def test_pre_v6_save_loads_with_empty_episode_manager(tmp_path: Path) -> None:
         "chain_residual": False,
         "bands": {
             band_name: {
-                "memory_state": cms.bands[0].memory.state_dict(),
-                "optimizer_state": cms.bands[0].update_rule.state_dict(),
+                # Legacy pre-v0.5 MLP weight blocks — the loader ignores these.
+                "memory_state": {"net.0.weight": torch.zeros(2, 2)},
+                "optimizer_state": {"name": "sgd_momentum"},
                 "surprise_ema": 0.0,
                 "axes": {},
                 "entries": [],

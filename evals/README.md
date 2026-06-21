@@ -301,40 +301,15 @@ resolver should note the false-merge risk above.
 
 ---
 
-# Neural-blend retrieval eval (`neural_blend_bench.py`)
+# Neural-blend retrieval eval (`neural_blend_bench.py`) — archived
 
-Answers the F1 question from the 2026-06-21 fresh-eyes review: **does the MIRAS
-neural retrieval blend beat plain cosine?** Ingests a paraphrase-recall corpus
-once (training the per-band MLPs through the real `store` path), then re-runs the
-SAME queries on the SAME trained state toggling only the blend weight `w`:
-`OFF` (w=0, cosine) vs `ON` (w=0.6, shipped) vs `PURE` (w=1, MLP-only). Cortex
-empty, reranker/BM25/recency off, so only the blend differs. File-mode, CPU,
-fixed seed; never touches the live bank.
-
-```bash
-PYTHONPATH=. TORCHDYNAMO_DISABLE=1 .venv/Scripts/python evals/neural_blend_bench.py --diagnose
-PYTHONPATH=. TORCHDYNAMO_DISABLE=1 .venv/Scripts/python evals/neural_blend_bench.py --n 150 --objective kv
-```
-
-`--diagnose` adds the per-band `cos(M(x), x)` probe (≈1.0 ⇒ M learned identity =
-redundant; low ⇒ noise). `--objective {l2|kv|neg_sim|huber}` overrides every
-band's objective to test whether a different in-regime objective helps.
-
-## Findings — 2026-06-21
-
-Pure cosine **beats** the shipped blend at every scale, and the gap widens with
-data; MLP-only ranking is ≈ random; the `kv` objective doesn't rescue it.
-
-```
-corpus   OFF(cosine) MRR   ON(0.6) MRR   PURE(1.0) MRR   ON-OFF
-n=73          0.979           0.934          0.044       ΔMRR -0.045
-n=120         0.944           0.892          0.024       ΔMRR -0.052
-n=150         0.936           0.875          0.018       ΔMRR -0.061
-```
-
-Diagnostic `cos(M(x), x) ≈ 0.35–0.48` — a lossy, rotated reconstruction (not
-identity, not noise), so blending it in corrupts clean cosine. Root cause is a
-**regime mismatch** (TITANS/HOPE are end-to-end-trained sequence models; here
-the memory is a self-reconstruction autoencoder over frozen embeddings with no
-training loop), not a tunable bug. Full analysis:
+The F1 eval that drove the v0.5 removal of the neural retrieval blend. Findings
+(2026-06-21): pure cosine **beat** the shipped `w=0.6` blend at every scale
+(n=73 MRR 0.979 vs 0.934 → n=150 0.936 vs 0.875), MLP-only ranking was ≈ random,
+and `cos(M(x), x) ≈ 0.4` (a lossy reconstruction that corrupts clean cosine) —
+a regime mismatch, not a tunable bug. Full analysis:
 `docs/2026-06-21-neural-memory-investigation.md`.
+
+The harness depends on the (now-removed) band MLP, so it lives on the
+**`archive/neural-memory-titans`** branch alongside the neural machinery; it's
+not runnable against the v0.5 cosine bands on `master`.

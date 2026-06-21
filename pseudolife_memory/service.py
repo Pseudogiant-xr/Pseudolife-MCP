@@ -308,8 +308,11 @@ class MemoryService:
 
         Differences from the user-facing chat defaults:
 
-        * Lower ``surprise_threshold`` (0.3 → 0.2): Claude stores
-          deliberately, so the gate doesn't need to be aggressive.
+        * ``surprise_threshold`` 0.0: the v0.5 gate measures *novelty*
+          (``1 − max cos`` to existing entries); Claude stores deliberately,
+          so the gate stays permissive (store everything; novelty still drives
+          eviction/promotion scoring). Raise it to enable dedup of
+          near-duplicate stores.
         * Smaller embedder batch size: MCP calls one-at-a-time, no point
           paying the warmup overhead of a large batch.
         * Meta-filter OFF: it exists to drop auto-captured chat noise;
@@ -321,7 +324,7 @@ class MemoryService:
         Leaves the MIRAS preset alone — the ``continuum`` 8-tier default
         is fine for Claude's use too.
         """
-        config.memory.surprise_threshold = 0.2
+        config.memory.surprise_threshold = 0.0
         config.embedding.batch_size = 16
         config.memory.meta_filter.enabled = False
         config.memory.recency_base_half_life_s = 86400.0
