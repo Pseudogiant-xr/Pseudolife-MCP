@@ -100,8 +100,17 @@ class LessonStore:
         provenance: set[str] | list[str] | None = None,
         support: set[str] | list[str] | None = None,
         now: float | None = None,
+        hlc: tuple[int, int] | None = None,
+        tx_time: float | None = None,
+        valid_time: float | None = None,
+        writer_id: str | None = None,
+        session_id: str | None = None,
     ) -> tuple[str, LessonRecord]:
         t = time.time() if now is None else float(now)
+        txt = t if tx_time is None else float(tx_time)
+        vt = txt if valid_time is None else float(valid_time)
+        stamp = dict(hlc=hlc, tx_time=txt, valid_time=vt,
+                     writer_id=writer_id, session_id=session_id)
         emb = (
             embedding.detach().to("cpu", torch.float32).clone()
             if embedding is not None else None
@@ -115,7 +124,7 @@ class LessonStore:
         if idx is None:
             return ("inserted", self._insert(
                 entity, attribute, value, about, emb, outcome, polarity,
-                confidence, origin, prov, supp, t))
+                confidence, origin, prov, supp, t, **stamp))
 
         cur = self.records[idx]
         if _norm_value(cur.value) == _norm_value(value):
@@ -133,6 +142,14 @@ class LessonStore:
                 cur.origin = origin
             if emb is not None:
                 cur.embedding = emb
+            # Re-deriving advances tx_time + last writer; valid_time is preserved.
+            cur.tx_time = txt
+            if hlc is not None:
+                cur.hlc_phys, cur.hlc_logical = hlc
+            if writer_id:
+                cur.writer_id = writer_id
+            if session_id:
+                cur.session_id = session_id
             return ("confirmed", cur)
 
         # Different value → the newer lesson wins (single author, no tier guard).
@@ -141,18 +158,26 @@ class LessonStore:
         cur.superseded_by_value = value
         new = self._insert(
             entity, attribute, value, about, emb, outcome, polarity, confidence,
-            origin, prov, supp, t, supersedes=cur.value)
+            origin, prov, supp, t, supersedes=cur.value, **stamp)
         return ("superseded", new)
 
     def _insert(self, entity, attribute, value, about, emb, outcome, polarity,
                 confidence, origin, provenance, support, t,
-                supersedes: str | None = None) -> LessonRecord:
+                supersedes: str | None = None,
+                hlc: tuple[int, int] | None = None,
+                tx_time: float | None = None, valid_time: float | None = None,
+                writer_id: str | None = None,
+                session_id: str | None = None) -> LessonRecord:
         rec = LessonRecord(
             entity=entity, attribute=attribute, value=value, about=about,
             polarity=polarity, outcome=outcome, confidence=float(confidence),
             status="current", origin=origin, support=set(support),
             provenance=set(provenance), asserted_at=t, last_confirmed=t,
             supersedes_value=supersedes, embedding=emb,
+            tx_time=tx_time, valid_time=valid_time,
+            hlc_phys=(hlc[0] if hlc else None),
+            hlc_logical=(hlc[1] if hlc else None),
+            writer_id=writer_id, session_id=session_id,
         )
         self.records.append(rec)
         self._current[rec.key] = len(self.records) - 1

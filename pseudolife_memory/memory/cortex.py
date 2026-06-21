@@ -241,7 +241,8 @@ class CortexStore:
             cur.status = "superseded"
             cur.superseded_at = t
             cur.superseded_by_value = slot.value
-            self._log(cur, slot.value, confidence, t, "supersede", "newer_wins")
+            self._log(cur, slot.value, confidence, t, "supersede", "newer_wins",
+                      writer_id=writer_id, session_id=session_id)
             new = self._insert(slot, emb, confidence, prov, t, supersedes=cur.value,
                                support=sup, slot_embedding=semb, **stamp)
             return WriteResult("superseded", new)
@@ -249,9 +250,11 @@ class CortexStore:
         reason = "tier_downgrade" if not tier_ok else "below_confidence_margin"
         if not self.protect_provenance:
             # Legacy behavior: drop the conflicting value, keep current.
-            self._log(cur, slot.value, confidence, t, "contested", reason)
+            self._log(cur, slot.value, confidence, t, "contested", reason,
+                      writer_id=writer_id, session_id=session_id)
             return WriteResult("contested", cur)
-        return self._contend(cur, slot, emb, confidence, prov, t, sup, reason, semb)
+        return self._contend(cur, slot, emb, confidence, prov, t, sup, reason, semb,
+                             writer_id=writer_id, session_id=session_id)
 
     def _insert(
         self,
@@ -313,7 +316,8 @@ class CortexStore:
             return False                      # materially less confident
         return True
 
-    def _log(self, cur, new_value, new_conf, t, decision, reason):
+    def _log(self, cur, new_value, new_conf, t, decision, reason,
+             writer_id=None, session_id=None):
         self.supersession_log.append({
             "entity": cur.entity,
             "attribute": cur.attribute,
@@ -323,6 +327,9 @@ class CortexStore:
             "reason": reason,
             "confidence_delta": round(float(new_conf) - float(cur.confidence), 4),
             "timestamp": t,
+            # Who made the change (v0.4 writer keying) — None on legacy/no-context.
+            "writer_id": writer_id,
+            "session_id": session_id,
         })
 
     # ------------------------------------------------------------------
@@ -341,7 +348,8 @@ class CortexStore:
         key = (_norm_key(entity), _norm_key(attribute))
         return [r for r in self.records if r.key == key and r.status == "contested"]
 
-    def _contend(self, cur, slot, emb, confidence, prov, t, sup, reason, slot_embedding=None):
+    def _contend(self, cur, slot, emb, confidence, prov, t, sup, reason,
+                 slot_embedding=None, writer_id=None, session_id=None):
         """Park a conflicting value as a contender at ``cur``'s slot rather than
         superseding. Keeps the current value canonical. At most one active
         contender per slot: a matching value confirms (reinforces) the existing
@@ -355,7 +363,12 @@ class CortexStore:
             existing.confidence = min(
                 1.0, max(self._reinforce(existing.confidence), float(confidence)),
             )
-            self._log(cur, slot.value, confidence, t, "contested", "contender_confirmed")
+            if writer_id:
+                existing.writer_id = writer_id
+            if session_id:
+                existing.session_id = session_id
+            self._log(cur, slot.value, confidence, t, "contested", "contender_confirmed",
+                      writer_id=writer_id, session_id=session_id)
             return WriteResult("contested", existing)
         supersedes_val = None
         if existing is not None:
@@ -377,9 +390,12 @@ class CortexStore:
             embedding=emb,
             slot_embedding=slot_embedding,
             support={sup} if sup else set(),
+            writer_id=writer_id,
+            session_id=session_id,
         )
         self.records.append(rec)   # deliberately NOT registered in self._current
-        self._log(cur, slot.value, confidence, t, "contested", reason)
+        self._log(cur, slot.value, confidence, t, "contested", reason,
+                  writer_id=writer_id, session_id=session_id)
         return WriteResult("contested", rec)
 
     def resolve(self, entity, attribute, accept: bool, now: float | None = None):

@@ -53,6 +53,7 @@ from pseudolife_memory.memory.reranker import CrossEncoderReranker
 from pseudolife_memory.memory.titans_memory import MemoryEntry, RetrievalResult
 from pseudolife_memory.memory.cortex import CortexStore
 from pseudolife_memory.memory.slots import Slot
+from pseudolife_memory.writer_context import resolve_writer
 from pseudolife_memory.utils.config import (
     AppConfig,
     ContextConfig,
@@ -247,6 +248,12 @@ class MemoryService:
         self._age = None  # AgeGraph mirror when the extension is present
         self._last_user_query: str | None = None
         self._last_saved_fingerprint = None
+
+    def _resolve_writer(self) -> tuple[str, str | None]:
+        """The ``(writer_id, session_id)`` to attribute the current write to —
+        per-request when inside the daemon (``X-PL-Writer`` header), else the
+        process default. See :mod:`pseudolife_memory.writer_context`."""
+        return resolve_writer(self._writer_id)
 
     # ------------------------------------------------------------------
     # Lazy construction
@@ -1056,6 +1063,7 @@ class MemoryService:
             claim = f"{entity} {attribute} {value}".strip()
             emb = self._embedder.encode_single(claim)
             slot_emb = self._embedder.encode_single(f"{entity} {attribute}".strip())
+            writer_id, session_id = self._resolve_writer()
             res = self._cortex.write_fact(
                 Slot(entity, attribute, value),
                 emb,
@@ -1065,7 +1073,8 @@ class MemoryService:
                 support=support,
                 now=now,
                 hlc=self._hlc.tick(),
-                writer_id=self._writer_id,
+                writer_id=writer_id,
+                session_id=session_id,
             )
             self._ensure_subject_entity(entity)
             self._save_cortex()
@@ -1190,11 +1199,13 @@ class MemoryService:
             self._ensure_init()
             assert self._embedder is not None and self._world is not None
             emb = self._embedder.encode_single(f"{entity} {attribute} {value}".strip())
+            writer_id, session_id = self._resolve_writer()
             action, rec = self._world.write_fact(
                 entity, attribute, value, emb,
                 confidence=confidence, source_url=source_url, source_quote=source_quote,
                 freshness_class=freshness_class, retrieved_at=retrieved_at,
-                content_hash=content_hash, source_doc_id=source_doc_id, now=now)
+                content_hash=content_hash, source_doc_id=source_doc_id, now=now,
+                hlc=self._hlc.tick(), writer_id=writer_id, session_id=session_id)
             self._save_world()
             return {"action": action, **_world_record_to_dict(rec)}
 
@@ -1292,10 +1303,12 @@ class MemoryService:
             self._ensure_init()
             assert self._embedder is not None and self._lessons is not None
             emb = self._embedder.encode_single(f"{task} {aspect} {lesson}".strip())
+            writer_id, session_id = self._resolve_writer()
             action, rec = self._lessons.write_fact(
                 task, aspect, lesson, emb, about=about, outcome=outcome,
                 polarity=polarity, confidence=confidence, origin=origin,
-                provenance=provenance, now=now)
+                provenance=provenance, now=now,
+                hlc=self._hlc.tick(), writer_id=writer_id, session_id=session_id)
             self._link_lesson_graph(task, rec.about, rec.polarity)
             self._save_lessons()
             return {"action": action, **_lesson_record_to_dict(rec)}

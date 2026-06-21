@@ -84,8 +84,15 @@ async def _proxy(url: str, token: str | None) -> None:
     from mcp.server.lowlevel import Server
     from mcp.server.stdio import stdio_server
 
-    headers = {"Authorization": f"Bearer {token}"} if token else None
-    async with streamablehttp_client(url + "/mcp", headers=headers) as (
+    headers: dict[str, str] = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    # Identify this session to the daemon so writes are attributed to the right
+    # writer (v0.4 keying). The daemon falls back to its own default if unset.
+    writer_id = os.environ.get("PSEUDOLIFE_WRITER_ID")
+    if writer_id:
+        headers["X-PL-Writer"] = writer_id
+    async with streamablehttp_client(url + "/mcp", headers=headers or None) as (
         read, write, _get_session_id,
     ):
         async with ClientSession(read, write) as remote:

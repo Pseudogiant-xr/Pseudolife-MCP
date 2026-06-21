@@ -108,10 +108,19 @@ class WorldCortexStore:
         source_doc_id: int | None = None,
         polarity: str = "+",
         now: float | None = None,
+        hlc: tuple[int, int] | None = None,
+        tx_time: float | None = None,
+        valid_time: float | None = None,
+        writer_id: str | None = None,
+        session_id: str | None = None,
     ) -> tuple[str, WorldRecord]:
         t = time.time() if now is None else float(now)
         ra = t if retrieved_at is None else float(retrieved_at)
         fc = freshness.normalize_class(freshness_class)
+        txt = t if tx_time is None else float(tx_time)
+        vt = txt if valid_time is None else float(valid_time)
+        stamp = dict(hlc=hlc, tx_time=txt, valid_time=vt,
+                     writer_id=writer_id, session_id=session_id)
         emb = (
             embedding.detach().to("cpu", torch.float32).clone()
             if embedding is not None else None
@@ -122,7 +131,7 @@ class WorldCortexStore:
         if idx is None:
             return ("inserted", self._insert(
                 entity, attribute, value, emb, confidence, source_url, source_quote,
-                fc, ra, content_hash, source_doc_id, polarity, t))
+                fc, ra, content_hash, source_doc_id, polarity, t, **stamp))
 
         cur = self.records[idx]
         if _norm_value(cur.value) == _norm_value(value):
@@ -140,6 +149,15 @@ class WorldCortexStore:
                 cur.content_hash = content_hash
             if source_doc_id is not None:
                 cur.source_doc_id = source_doc_id
+            # Re-sourcing advances tx_time + last toucher; valid_time (when it
+            # first held) is not moved — mirrors the personal cortex.
+            cur.tx_time = txt
+            if hlc is not None:
+                cur.hlc_phys, cur.hlc_logical = hlc
+            if writer_id:
+                cur.writer_id = writer_id
+            if session_id:
+                cur.session_id = session_id
             return ("confirmed", cur)
 
         # Different value → the newer source wins (no tier guard for world facts).
@@ -148,18 +166,27 @@ class WorldCortexStore:
         cur.superseded_by_value = value
         new = self._insert(
             entity, attribute, value, emb, confidence, source_url, source_quote,
-            fc, ra, content_hash, source_doc_id, polarity, t, supersedes=cur.value)
+            fc, ra, content_hash, source_doc_id, polarity, t, supersedes=cur.value,
+            **stamp)
         return ("superseded", new)
 
     def _insert(self, entity, attribute, value, emb, confidence, source_url,
                 source_quote, fc, ra, content_hash, source_doc_id, polarity, t,
-                supersedes: str | None = None) -> WorldRecord:
+                supersedes: str | None = None,
+                hlc: tuple[int, int] | None = None,
+                tx_time: float | None = None, valid_time: float | None = None,
+                writer_id: str | None = None,
+                session_id: str | None = None) -> WorldRecord:
         rec = WorldRecord(
             entity=entity, attribute=attribute, value=value, polarity=polarity,
             confidence=float(confidence), status="current",
             source_url=source_url, source_quote=source_quote, freshness_class=fc,
             retrieved_at=ra, content_hash=content_hash, source_doc_id=source_doc_id,
             asserted_at=t, last_confirmed=t, supersedes_value=supersedes, embedding=emb,
+            tx_time=tx_time, valid_time=valid_time,
+            hlc_phys=(hlc[0] if hlc else None),
+            hlc_logical=(hlc[1] if hlc else None),
+            writer_id=writer_id, session_id=session_id,
         )
         self.records.append(rec)
         self._current[rec.key] = len(self.records) - 1
