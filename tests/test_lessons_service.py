@@ -142,6 +142,32 @@ def test_dream_run_includes_lesson_synthesis(svc):
     assert svc.lessons_dump()["count"] == 1
 
 
+def test_synthesized_lesson_valid_time_is_signal_event_time(svc):
+    """Bitemporal: a lesson's valid_time (when the knowledge became true) is the
+    contributing signal's created_at, NOT the dream's write time (tx_time)."""
+    import time
+
+    svc.lessons_dump()  # force lazy init so _storage exists
+    event_t = time.time() - 100.0  # observed ~100s ago; recent enough to survive prune
+    svc._storage.add_signal("deploy engine to host", "success",
+                            about="tar", origin="action", now=event_t)
+    rep = svc.synthesize_lessons(StubExtractor([_lesson()]))
+    assert rep["lessons"] == 1
+    rec = svc._lessons.lookup("deploy engine to host", "approach")
+    assert rec is not None
+    assert abs(rec.valid_time - event_t) < 1e-6      # event time = signal created_at
+    assert rec.tx_time is not None and rec.tx_time > rec.valid_time  # written later
+    assert rec.valid_time != rec.tx_time             # two distinct anchors
+
+
+def test_cortex_write_valid_time_defaults_to_tx_time(svc):
+    """A plain canonical write has no separate event time → valid_time == tx_time."""
+    svc.cortex_write("widget", "color", "blue", support="user")
+    rec = svc._cortex.lookup("widget", "color")
+    assert rec is not None
+    assert rec.valid_time == rec.tx_time
+
+
 def test_lesson_forget(svc):
     svc.synthesize_lessons(StubExtractor([_lesson()])) if False else None
     svc.record_outcome("t", "success", about="x")

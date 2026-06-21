@@ -1292,7 +1292,8 @@ class MemoryService:
                      polarity: str = "+", confidence: float = 0.6,
                      origin: str = "agent",
                      provenance: set[str] | list[str] | None = None,
-                     now: float | None = None) -> dict[str, Any]:
+                     now: float | None = None,
+                     valid_time: float | None = None) -> dict[str, Any]:
         """Write / confirm / supersede a lesson at the ``(task, aspect)`` slot and
         keep the graph joined: upsert the task-type entity, the ``about`` object,
         and the ``prefers`` (positive) / ``avoids`` (negative) edge between them.
@@ -1307,7 +1308,7 @@ class MemoryService:
             action, rec = self._lessons.write_fact(
                 task, aspect, lesson, emb, about=about, outcome=outcome,
                 polarity=polarity, confidence=confidence, origin=origin,
-                provenance=provenance, now=now,
+                provenance=provenance, now=now, valid_time=valid_time,
                 hlc=self._hlc.tick(), writer_id=writer_id, session_id=session_id)
             self._link_lesson_graph(task, rec.about, rec.polarity)
             self._save_lessons()
@@ -1397,6 +1398,12 @@ class MemoryService:
         except Exception as exc:  # noqa: BLE001 — never let synthesis break the dream
             logger.warning("lesson synthesis failed (%s); leaving signals pending", exc)
             return {"signals": len(signals), "lessons": 0, "error": str(exc)}
+        # Bitemporal event time: the synthesised lesson became *true* when its
+        # underlying outcomes were observed, not when the dream wrote it. Claims
+        # don't map 1:1 to signals, so use the earliest contributing signal's
+        # created_at as the batch valid_time (None → store defaults to tx_time).
+        created = [s["created_at"] for s in signals if s.get("created_at")]
+        batch_valid_time = min(created) if created else None
         written = 0
         for c in claims:
             try:
@@ -1406,7 +1413,8 @@ class MemoryService:
                     polarity=c.get("polarity", "+"),
                     confidence=float(c.get("confidence", 0.6)),
                     origin=c.get("origin", "agent"),
-                    provenance=set(c.get("provenance") or []))
+                    provenance=set(c.get("provenance") or []),
+                    valid_time=batch_valid_time)
                 written += 1
             except Exception as exc:  # noqa: BLE001
                 logger.warning("lesson write skipped (%s): %s", exc, c)
