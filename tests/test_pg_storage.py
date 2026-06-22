@@ -12,7 +12,7 @@ def test_ensure_schema_idempotent(pg_conn):
 
     flags1 = ensure_schema(pg_conn)
     flags2 = ensure_schema(pg_conn)
-    assert flags1["age_available"] is True  # ops container ships AGE
+    assert flags1 == {}  # AGE removed; ensure_schema returns empty dict
     assert flags1 == flags2
 
 

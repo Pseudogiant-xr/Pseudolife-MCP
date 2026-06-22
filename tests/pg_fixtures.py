@@ -64,15 +64,11 @@ def pg_conn(pg_url):
 
     with psycopg.connect(pg_url) as conn:
         # Pin to public BEFORE any schema/truncate work — mirrors
-        # PostgresStorage.__init__. The DB role `pseudolife` is also the AGE
-        # graph's schema name, so the default ("$user", public) search_path
-        # resolves unqualified table names to the GRAPH schema once a graph
-        # exists. Without this, ensure_schema creates empty shadow tables in the
-        # `pseudolife` schema and TRUNCATE clears those instead of the real
-        # `public` bank — leaking rows across tests (order-dependent: only after
-        # some earlier test creates the AGE graph). ag_catalog keeps AGE
-        # functions reachable.
-        conn.execute("SET search_path TO public, ag_catalog")
+        # PostgresStorage.__init__. The DB role `pseudolife` can clash with
+        # schema names, so the default ("$user", public) search_path could
+        # shadow the real bank. Pinning to public before truncate ensures
+        # we always clear the real tables.
+        conn.execute("SET search_path TO public")
         conn.commit()
         # Reap leaked backends from tests that built a MemoryService /
         # PostgresStorage and never closed it. Such a connection holds locks on

@@ -122,13 +122,10 @@ class PostgresStorage:
         # raise here, not hang the whole daemon.
         self.conn.execute("SET lock_timeout = '5s'")
         # Pin the namespace to public BEFORE ensure_schema runs. The DB role is
-        # `pseudolife`, which is also the AGE graph's schema name, so the cluster
-        # default ("$user", public) search_path would resolve plain tables to the
-        # GRAPH schema — and let ensure_schema create empty `facts`/`entries`/...
-        # shadows there that mask the real bank in public. Pinning to public makes
-        # SCHEMA_SQL creation + every read/write target the real tables; ag_catalog
-        # is included so AGE's functions remain reachable on this shared connection.
-        self.conn.execute("SET search_path TO public, ag_catalog")
+        # `pseudolife`, which can clash with schema names, so the cluster default
+        # ("$user", public) search_path could shadow the real bank. Pinning to
+        # public makes SCHEMA_SQL creation + every read/write target the real tables.
+        self.conn.execute("SET search_path TO public")
         self.conn.commit()
         self.capabilities = ensure_schema(self.conn)
         register_vector(self.conn)

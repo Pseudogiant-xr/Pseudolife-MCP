@@ -66,13 +66,12 @@ def test_all_tools_registered() -> None:
         "memory_dream_status",
         "memory_dream_commit",
         "memory_dream_run",
-        # Phase 2 — knowledge graph + ontology-lite + AGE Cypher.
+        # Phase 2 — knowledge graph + ontology-lite.
         "memory_graph_relate",
         "memory_graph_unrelate",
         "memory_alias",
         "memory_graph",
         "memory_relation_define",
-        "memory_graph_query",
     ])
 
 

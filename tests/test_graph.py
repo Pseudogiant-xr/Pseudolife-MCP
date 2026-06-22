@@ -3,8 +3,7 @@
 Three tiers:
 * pure-logic tests over :mod:`pseudolife_memory.graph` (no PG, fast);
 * PG-backed storage tests (skip cleanly without a test server);
-* service-level tests with the real embedder (one shared service);
-* AGE tests, skipped when the extension isn't installed.
+* service-level tests with the real embedder (one shared service).
 """
 
 from __future__ import annotations
@@ -160,10 +159,8 @@ def svc(pg_url, tmp_path_factory):
     from pseudolife_memory.storage.schema import ensure_schema
 
     with _psy.connect(pg_url) as conn:
-        # Pin to public first (see pg_fixtures.pg_conn): the `pseudolife` role is
-        # also the AGE graph schema, so an unpinned search_path makes these
-        # unqualified table names resolve to graph-schema shadows.
-        conn.execute("SET search_path TO public, ag_catalog")
+        # Pin to public first (see pg_fixtures.pg_conn) — mirrors PostgresStorage.
+        conn.execute("SET search_path TO public")
         conn.commit()
         ensure_schema(conn)
         with conn.cursor() as cur:
@@ -262,9 +259,8 @@ def test_fact_set_links_entity_ids(svc, pg_url):
 
     svc.cortex_write("web-app", "backend", "postgres", support="user")
     with _psy.connect(pg_url) as conn:
-        # Pin to public so the unqualified `facts`/`entities` below read the real
-        # bank, not the AGE graph-schema shadows (see pg_fixtures.pg_conn).
-        conn.execute("SET search_path TO public, ag_catalog")
+        # Pin to public so the unqualified `facts`/`entities` below read the real bank.
+        conn.execute("SET search_path TO public")
         row = conn.execute(
             """
             SELECT f.entity_id, f.object_entity_id, e.canonical, o.canonical
@@ -281,39 +277,13 @@ def test_fact_set_links_entity_ids(svc, pg_url):
     assert ref is not None and ref["canonical"] == "web-app"
 
 
-# ── AGE layer (skip when extension absent) ───────────────────────────────
-
-def _age_or_skip(svc):
-    svc.warmup()  # make sure _ensure_init ran
-    if svc._age is None:
-        pytest.skip("AGE extension not available on the test Postgres")
-
-
-def test_age_cypher_roundtrip(svc):
-    _age_or_skip(svc)
-    sync = svc.age_sync()  # heal any drift from earlier tests
-    assert sync["entities"] > 0
-    out = svc.graph_cypher(
-        "MATCH (a:Entity {canonical: 'web-app'})-[:depends_on]->(b:Entity) "
-        "RETURN b.canonical",
-    )
-    assert out.get("error") is None, out
-    assert any("pseudolife-mcp" in r[0] for r in out["rows"])
-
-
-def test_age_cypher_rejects_mutation(svc):
-    _age_or_skip(svc)
-    out = svc.graph_cypher("MATCH (n) DETACH DELETE n")
-    assert out["error"] == "mutating_clause_rejected"
-    out2 = svc.graph_cypher("CREATE (n:Entity {canonical: 'evil'})")
-    assert out2["error"] == "mutating_clause_rejected"
-
-
-def test_age_multi_column_return(svc):
-    _age_or_skip(svc)
-    out = svc.graph_cypher(
-        "MATCH (a:Entity)-[:depends_on]->(b:Entity) "
-        "RETURN a.canonical, b.canonical",
-    )
-    assert out.get("error") is None, out
-    assert all(len(r) == 2 for r in out["rows"])
+def test_no_age_imports_remain():
+    """AGE is removed — no module should import it or call cypher()."""
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parents[1] / "pseudolife_memory"
+    offenders = []
+    for p in root.rglob("*.py"):
+        text = p.read_text(encoding="utf-8")
+        if "storage.age" in text or "AgeGraph" in text or ".cypher(" in text:
+            offenders.append(p.name)
+    assert offenders == [], f"AGE references remain in: {offenders}"

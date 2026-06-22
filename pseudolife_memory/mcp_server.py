@@ -1143,35 +1143,6 @@ def memory_relation_define(
 
 
 @mcp.tool()
-def memory_graph_query(cypher: str, limit: int = 50) -> dict[str, Any]:
-    """Read-only openCypher over the knowledge graph (requires AGE).
-
-    Power tool for queries ``memory_graph`` can't express — aggregation,
-    multi-relation patterns, degree counts. Vertices carry label
-    ``Entity`` with properties ``canonical`` / ``display`` / ``etype``;
-    edge labels are the relation names with ``-`` folded to ``_``
-    (``depends-on`` → ``depends_on``). Derived/inferred edges are NOT in
-    the mirror — only asserted ones; use ``memory_graph`` when you need
-    inference.
-
-    Example: ``MATCH (a:Entity)-[:depends_on]->(b:Entity) RETURN
-    a.display, b.display``.
-
-    Args:
-        cypher: A read-only query. Mutating clauses (CREATE / MERGE / SET
-            / DELETE / REMOVE / DROP) are rejected — mutate via
-            ``memory_graph_relate``.
-        limit: Max rows, default 50.
-
-    Returns:
-        ``{"count": int, "rows": [[col, ...], ...]}`` (agtype values as
-        strings), or ``{"error": "age_unavailable"}`` when the extension
-        isn't installed.
-    """
-    return service.graph_cypher(cypher=cypher, limit=limit)
-
-
-@mcp.tool()
 def document_ingest(path: str, source: str | None = None) -> dict[str, Any]:
     """Read a file (.txt / .md / .pdf) and index it in the reference bank.
 

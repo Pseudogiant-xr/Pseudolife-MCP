@@ -238,10 +238,9 @@ END $$;
 def ensure_schema(conn) -> dict:
     """Create extensions + tables idempotently. Returns capability flags.
 
-    ``vector`` is required (raises if unavailable); ``age`` is optional —
-    returns ``{"age_available": bool}`` so callers can gate the Cypher
-    layer. Records ``schema_version`` in ``meta`` (upsert to the current value,
-    so an upgraded bank reports its real version, not the first-init one).
+    ``vector`` is required (raises if unavailable). Records
+    ``schema_version`` in ``meta`` (upsert to the current value, so an
+    upgraded bank reports its real version, not the first-init one).
     """
     with conn.cursor() as cur:
         # Bound every DDL statement so a stray lock holder surfaces as an
@@ -249,13 +248,6 @@ def ensure_schema(conn) -> dict:
         # the new storage layer).
         cur.execute("SET lock_timeout = '5s'; SET statement_timeout = '30s';")
         cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-        age_available = True
-        try:
-            cur.execute("CREATE EXTENSION IF NOT EXISTS age;")
-        except Exception as exc:  # noqa: BLE001
-            age_available = False
-            conn.rollback()
-            logger.info("AGE extension unavailable (%s) — Cypher layer off.", exc)
         cur.execute(SCHEMA_SQL)
         # One-time upgrade: drop the old episode FK only when it's actually
         # present. Guarding avoids taking an ACCESS EXCLUSIVE lock on every
@@ -275,4 +267,4 @@ def ensure_schema(conn) -> dict:
             (str(SCHEMA_META_VERSION),),
         )
     conn.commit()
-    return {"age_available": age_available}
+    return {}

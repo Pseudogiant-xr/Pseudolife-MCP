@@ -467,16 +467,6 @@ class TimeConfig:
 
 
 @dataclass
-class GraphConfig:
-    """Apache AGE graph mirror. ``name`` must NOT be the DB role name
-    (``pseudolife``): naming the graph after the role makes AGE create a schema
-    of the same name that can shadow the real ``public`` bank (v0.4 collision
-    fix). Default ``pseudolife_graph``; env ``PSEUDOLIFE_GRAPH_NAME`` overrides
-    at the storage layer."""
-    name: str = "pseudolife_graph"
-
-
-@dataclass
 class StorageConfig:
     """Postgres persistence policy.
 
@@ -504,7 +494,6 @@ class AppConfig:
     context: ContextConfig = field(default_factory=ContextConfig)
     chunking: ChunkingConfig = field(default_factory=ChunkingConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)
-    graph: GraphConfig = field(default_factory=GraphConfig)
     time: TimeConfig = field(default_factory=TimeConfig)
 
 
@@ -615,8 +604,6 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
         config.chunking = _dict_to_dataclass(ChunkingConfig, raw["chunking"])
     if "storage" in raw:
         config.storage = _dict_to_dataclass(StorageConfig, raw["storage"])
-    if "graph" in raw:
-        config.graph = _dict_to_dataclass(GraphConfig, raw["graph"])
     if "time" in raw:
         config.time = _dict_to_dataclass(TimeConfig, raw["time"])
 

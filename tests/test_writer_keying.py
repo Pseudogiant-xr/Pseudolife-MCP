@@ -132,7 +132,7 @@ async def _call_with_writer(url: str, writer: str, tool: str, args: dict):
 
 def _fact_row(db_url: str, entity: str) -> dict | None:
     with psycopg.connect(db_url) as conn:
-        conn.execute("SET search_path TO public, ag_catalog")
+        conn.execute("SET search_path TO public")
         row = conn.execute(
             "SELECT writer_id, session_id FROM public.facts "
             "WHERE entity = %s AND status = 'current'",

@@ -70,9 +70,7 @@ class PersistenceError(RuntimeError):
     """A durable save (cortex / world / lessons snapshot) failed — the in-memory
     write succeeded but did NOT reach Postgres/disk. Surfaced to the caller and
     counted in ``MemoryService._persist_errors`` (health-visible), never silently
-    swallowed: silent save loss is the one failure a memory system must not hide.
-    The AGE *mirror* stays best-effort (rebuildable via age-sync) — see
-    ``_age_mirror`` — but content persistence does not."""
+    swallowed: silent save loss is the one failure a memory system must not hide."""
 
 
 def _entry_to_dict(
@@ -266,7 +264,6 @@ class MemoryService:
         self._hlc = HybridLogicalClock()  # write ordering authority (memory/hlc.py)
         # Default writer identity; the daemon overrides per-connection (v0.4 T4).
         self._writer_id = os.environ.get("PSEUDOLIFE_WRITER_ID") or "unknown"
-        self._age = None  # AgeGraph mirror when the extension is present
         self._last_user_query: str | None = None
         self._last_saved_fingerprint = None
         # Count of durable-save failures (cortex/world/lessons). Exposed via the
@@ -282,8 +279,8 @@ class MemoryService:
     def _assert_public_search_path(self) -> None:
         """Fail loud if the shared connection would resolve unqualified tables to
         the role-named ``pseudolife`` shadow schema instead of the real ``public``
-        bank (the role / AGE-graph name collision — v0.4 T7). ``$user`` expands to
-        the role ``pseudolife``, which is also a legacy AGE graph's schema name."""
+        bank (v0.4 T7). ``$user`` expands to the role ``pseudolife``, which is also
+        a legacy AGE graph's schema name — keep public pinned."""
         if self._storage is None:
             return
         path = self._storage.conn.execute("SHOW search_path").fetchone()[0]
@@ -368,15 +365,6 @@ class MemoryService:
             # bank, never the role-named `pseudolife` shadow schema (v0.4
             # collision fix). PostgresStorage pins this; fail loud if regressed.
             self._assert_public_search_path()
-            if self._storage.capabilities.get("age_available"):
-                try:
-                    from pseudolife_memory.storage.age import AgeGraph
-                    graph_name = (os.environ.get("PSEUDOLIFE_GRAPH_NAME")
-                                  or self.config.graph.name)
-                    self._age = AgeGraph(self._storage.conn, name=graph_name)
-                    logger.info("AGE graph mirror active (graph=%s)", graph_name)
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("AGE init failed (Cypher layer off): %s", exc)
         self._cms = ContinuumMemorySystem(
             self.config.memory,
             reference_bank=self._reference,
@@ -558,17 +546,6 @@ class MemoryService:
         n = norm_name(entity)
         if n and self._storage.find_entity(n) is None:
             self._storage.ensure_entity(n, display=entity.strip())
-            self._age_mirror(lambda: self._age.upsert_entity(n, entity.strip()))
-
-    def _age_mirror(self, op) -> None:
-        """Run an AGE mirror op best-effort — the tables are the truth and
-        ``age-sync`` can rebuild the mirror, so a failure only logs."""
-        if self._age is None:
-            return
-        try:
-            op()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("AGE mirror op failed (run age-sync to heal): %s", exc)
 
     # ------------------------------------------------------------------
     # Tool: search
@@ -1387,17 +1364,14 @@ class MemoryService:
         if not tn:
             return
         tid = st.ensure_entity(tn, display=task.strip(), etype="task-type")
-        self._age_mirror(lambda: self._age.upsert_entity(tn, task.strip(), "task-type"))
         if not about:
             return
         an = norm_name(about)
         if not an or an == tn:
             return
         oid = st.ensure_entity(an, display=about.strip())
-        self._age_mirror(lambda: self._age.upsert_entity(an, about.strip()))
         relation = "avoids" if polarity == "-" else "prefers"
         st.upsert_edge(tid, relation, oid, confidence=0.7, origin="action")
-        self._age_mirror(lambda: self._age.upsert_edge(tn, relation, an))
 
     def lesson_search(self, query: str, top_k: int | None = None,
                       min_score: float = 0.0) -> dict[str, Any]:
@@ -2126,7 +2100,6 @@ class MemoryService:
                 found["etype"] = etype
             return found
         eid = st.ensure_entity(n, display=name.strip(), etype=etype)
-        self._age_mirror(lambda: self._age.upsert_entity(n, name.strip(), etype))
         return {"id": eid, "canonical": n, "display": name.strip(),
                 "etype": etype, "aliases": []}
 
@@ -2179,8 +2152,6 @@ class MemoryService:
                 src_e["id"], resolved, dst_e["id"],
                 confidence=confidence, origin=origin,
             )
-            self._age_mirror(lambda: self._age.upsert_edge(
-                src_e["canonical"], resolved, dst_e["canonical"]))
             return {
                 "src": src_e["display"],
                 "relation": resolved,
@@ -2209,9 +2180,6 @@ class MemoryService:
                 return {"removed": False, "reason": "unknown_entity",
                         "entity": missing}
             removed = st.supersede_edge(src_e["id"], resolved, dst_e["id"])
-            if removed:
-                self._age_mirror(lambda: self._age.remove_edge(
-                    src_e["canonical"], resolved, dst_e["canonical"]))
             return {"removed": removed, "src": src_e["display"],
                     "relation": resolved, "dst": dst_e["display"]}
 
@@ -2369,38 +2337,3 @@ class MemoryService:
                 result["to_not_found"] = to_missing
             return result
 
-    def graph_cypher(self, cypher: str, limit: int = 50) -> dict[str, Any]:
-        """Read-only openCypher via AGE — strong-model tool (spec §5.2)."""
-        from pseudolife_memory.storage.age import is_mutating
-        with self._lock:
-            self._ensure_init()
-            if self._storage is None:
-                return dict(self._GRAPH_UNAVAILABLE)
-            if self._age is None:
-                return {
-                    "error": "age_unavailable",
-                    "hint": "The AGE extension is not installed on this "
-                            "Postgres. Use the ops/Dockerfile.pg compose "
-                            "image (apache/age PG16 + pgvector).",
-                }
-            keyword = is_mutating(cypher)
-            if keyword:
-                return {"error": "mutating_clause_rejected", "keyword": keyword,
-                        "hint": "memory_graph_query is read-only; mutate via "
-                                "memory_graph_relate / memory_graph_unrelate."}
-            try:
-                rows = self._age.cypher(cypher, limit=limit)
-            except Exception as exc:  # noqa: BLE001
-                self._storage.conn.rollback()
-                return {"error": "cypher_failed", "detail": str(exc)}
-            return {"count": len(rows), "rows": rows}
-
-    def age_sync(self) -> dict[str, Any]:
-        """Full AGE re-sync from the graph tables (heals a drifted mirror)."""
-        with self._lock:
-            self._ensure_init()
-            if self._storage is None:
-                return dict(self._GRAPH_UNAVAILABLE)
-            if self._age is None:
-                return {"error": "age_unavailable"}
-            return self._age.resync(self._storage)
