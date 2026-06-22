@@ -146,6 +146,15 @@ def test_build_extractor_selects_by_config(monkeypatch):
     monkeypatch.setenv("PSEUDOLIFE_DREAM_MODEL", "envm")
     ext = build_extractor(DreamConfig())
     assert isinstance(ext, OpenAICompatExtractor) and ext.base_url == "http://env"
+    # Default timeout is CPU-realistic (a full 1024-tok gen at ~30 tok/s ≈ 30s).
+    assert ext.timeout >= 120.0
+    # Env overrides timeout + max_tokens (junk values fall back to the dataclass).
+    monkeypatch.setenv("PSEUDOLIFE_DREAM_TIMEOUT_SECONDS", "200")
+    monkeypatch.setenv("PSEUDOLIFE_DREAM_MAX_TOKENS", "256")
+    ext2 = build_extractor(DreamConfig())
+    assert ext2.timeout == 200.0 and ext2.max_tokens == 256
+    monkeypatch.setenv("PSEUDOLIFE_DREAM_TIMEOUT_SECONDS", "notanumber")
+    assert build_extractor(DreamConfig()).timeout == DreamConfig().extractor_timeout_seconds
 
 
 # ── sweep gate (pure; fake service) ──────────────────────────────────────

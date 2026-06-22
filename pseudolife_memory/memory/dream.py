@@ -269,9 +269,19 @@ class OpenAICompatExtractor:
 def build_extractor(cfg) -> DreamExtractor:
     """Pick the extractor from config: an OpenAI-compatible endpoint when a
     base-URL + model are set (env vars ``PSEUDOLIFE_DREAM_BASE_URL`` /
-    ``_MODEL`` / ``_API_KEY`` override the dataclass), else a no-op (no automatic
-    regex writes — single-writer cortex; see the 2026-06-19 design)."""
+    ``_MODEL`` / ``_API_KEY`` / ``_TIMEOUT_SECONDS`` / ``_MAX_TOKENS`` override
+    the dataclass), else a no-op (no automatic regex writes — single-writer
+    cortex; see the 2026-06-19 design)."""
     import os
+
+    def _env_num(name, fallback, cast):
+        raw = os.environ.get(name)
+        if not raw:
+            return fallback
+        try:
+            return cast(raw)
+        except (TypeError, ValueError):
+            return fallback
 
     base_url = os.environ.get("PSEUDOLIFE_DREAM_BASE_URL") or cfg.extractor_base_url
     model = os.environ.get("PSEUDOLIFE_DREAM_MODEL") or cfg.extractor_model
@@ -279,8 +289,10 @@ def build_extractor(cfg) -> DreamExtractor:
     if base_url and model:
         return OpenAICompatExtractor(
             base_url, model, api_key=api_key,
-            max_tokens=cfg.extractor_max_tokens,
-            timeout_seconds=cfg.extractor_timeout_seconds,
+            max_tokens=_env_num("PSEUDOLIFE_DREAM_MAX_TOKENS",
+                                 cfg.extractor_max_tokens, int),
+            timeout_seconds=_env_num("PSEUDOLIFE_DREAM_TIMEOUT_SECONDS",
+                                     cfg.extractor_timeout_seconds, float),
         )
     return NoOpExtractor()
 

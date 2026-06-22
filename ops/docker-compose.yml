@@ -93,6 +93,10 @@ services:
       # dream consolidation routes to it.
       PSEUDOLIFE_DREAM_BASE_URL: http://pseudolife-extractor:8081/v1
       PSEUDOLIFE_DREAM_MODEL: extractor
+      # The CPU Gemma sidecar generates at ~30 tok/s, so dream extraction needs
+      # well over the old 20s default (a full 1024-tok generation alone is ~30s).
+      # 120s gives headroom; bump here if you swap in a slower/larger model.
+      PSEUDOLIFE_DREAM_TIMEOUT_SECONDS: "120"
     ports:
       - "127.0.0.1:8765:8765"
     volumes:

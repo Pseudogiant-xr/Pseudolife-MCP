@@ -292,7 +292,13 @@ class DreamConfig:
     # the model spends the budget on reasoning and returns empty content, which
     # the extractor reads as "no claims" and falls back to the regex floor.
     extractor_max_tokens: int = 1024
-    extractor_timeout_seconds: float = 20.0
+    # The default CPU sidecar (Gemma E2B Q4) generates at ~30 tok/s, so a full
+    # ``extractor_max_tokens`` (1024) generation alone is ~30s — plus prompt
+    # processing of the texts + vocab hint. 20s was too tight (the dream timed
+    # out → claims:0 → no cortex write). 120s gives comfortable headroom; the
+    # dream is a background sweep so latency is irrelevant. Override per-deploy
+    # with ``PSEUDOLIFE_DREAM_TIMEOUT_SECONDS`` (see ``build_extractor``).
+    extractor_timeout_seconds: float = 120.0
 
 
 @dataclass
