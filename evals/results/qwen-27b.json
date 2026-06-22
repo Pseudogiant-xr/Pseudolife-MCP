@@ -2,16 +2,16 @@
   "rung": "qwen-27b",
   "label": "Qwen3.6-27B (4090)",
   "kind": "llm",
-  "extract_seconds": 6.2,
+  "extract_seconds": 9.0,
   "consolidation": {
     "pulled": 26,
-    "claims": 10,
-    "inserted": 9,
-    "superseded": 1
+    "claims": 16,
+    "inserted": 16,
+    "superseded": 0
   },
   "gold_recoverable": 1.0,
   "stale_leak": 0.0,
-  "tokens_per_query": 2.1,
-  "search_latency_ms": 3.9,
+  "tokens_per_query": 1.4,
+  "search_latency_ms": 3.2,
   "status": "ok"
 }
