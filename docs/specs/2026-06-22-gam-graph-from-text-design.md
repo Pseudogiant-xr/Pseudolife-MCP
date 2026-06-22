@@ -61,6 +61,20 @@ bench calls the endpoint and scores against gold directly. Forces
 `CUDA_VISIBLE_DEVICES=-1` for the CPU rung; leaves the 4090 alone except the
 explicit Qwen ceiling call.
 
+### Benchmark result (2026-06-22, `evals/relations_bench.py`, Gemma E2B floor)
+
+| variant | P | R | F1 | pair-recall | related-to | parse-fail |
+|---|---|---|---|---|---|---|
+| **separate** | 0.75 | 0.75 | **0.75** | 0.85 | 0.05 | 0 |
+| combined | 0.59 | 0.50 | 0.54 | 0.65 | 0.06 | 0 |
+
+**Decision: ship the `separate` `extract_relations()` call** (a 3rd dream call,
+mirroring `extract_lessons`) — it beats combined on F1 *and* latency on the weak
+2B. **No registry expansion** — the `related-to` fallback share is only 0.05, so
+the closed vocab covers real text. The pair-recall→F1 gap (0.85→0.75) is relation
+*mislabeling*, a later prompt-tuning lever, not a structural issue. Qwen ceiling
+rungs were unreachable (4090 off / homelab down) — Gemma floor is the gate anyway.
+
 ## Extraction → validation → graph write
 
 - **Output type:** `RelationClaim {src: str, relation: str, dst: str,
