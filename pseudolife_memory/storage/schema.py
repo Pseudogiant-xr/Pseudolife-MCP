@@ -6,8 +6,7 @@ idempotent and safe to run on every daemon start. The graph tables
 (entities / entity_aliases / relations / edges) are created in Phase 1 so
 the schema is complete, but only consumed from Phase 2 onward.
 
-The ``vector`` extension is REQUIRED; ``age`` is probed and optional —
-its absence only disables the Phase 2 Cypher layer.
+The ``vector`` extension is REQUIRED. Apache AGE is no longer used or probed.
 """
 
 from __future__ import annotations

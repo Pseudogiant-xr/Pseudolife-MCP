@@ -4,6 +4,18 @@ All notable changes to PseudoLife-MCP are documented here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — graph foundation
+
+### Changed
+- Graph layer: single source of truth (Postgres `entities` hub + NetworkX
+  read-model) behind a swappable `GraphStore` port. Apache AGE removed.
+
+### Removed
+- `memory_graph_query` (raw read-only Cypher) MCP tool and the `pseudolife-mcp
+  age-sync` CLI mode. Multi-hop queries are served by `memory_graph`
+  (neighborhood + derived/inverse edges + shortest path). The Postgres image no
+  longer requires the Apache AGE extension.
+
 ## [0.5.1] — dream resilience
 
 ### Fixed

@@ -33,7 +33,7 @@ Configuration
 * ``PSEUDOLIFE_MCP_CONFIG`` — path to a ``config.yaml`` (optional; sane
   defaults baked in by :class:`MemoryService`).
 * ``PSEUDOLIFE_WRITER_ID`` / ``PSEUDOLIFE_GRAPH_NAME`` — writer attribution +
-  AGE graph name (v0.4); see :mod:`pseudolife_memory.daemon`.
+  graph name identifier (v0.4); see :mod:`pseudolife_memory.daemon`.
 """
 
 from __future__ import annotations
@@ -1045,9 +1045,9 @@ def memory_graph_relate(
 def memory_graph_unrelate(src: str, relation: str, dst: str) -> dict[str, Any]:
     """Retract a relation — mark the edge superseded (kept for audit).
 
-    The edge disappears from ``memory_graph`` / Cypher results but stays
-    in the table with a supersession timestamp. Re-asserting the same
-    triple later revives it.
+    The edge disappears from ``memory_graph`` results but stays in the
+    table with a supersession timestamp. Re-asserting the same triple
+    later revives it.
 
     Returns:
         ``{"removed": bool, "src", "relation", "dst"}``, or

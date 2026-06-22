@@ -24,8 +24,9 @@ layers several complementary stores:
   (`user > action > agent`), and contender parking instead of silent
   overwrites.
 - **Knowledge graph** — typed entities and edges over those facts, with a
-  closed relation vocabulary, on-read transitive/inverse inference, and
-  optional openCypher via Apache AGE.
+  closed relation vocabulary, on-read transitive/inverse inference. Backed by
+  a Postgres `entities` hub (source of truth) + NetworkX derived read-model
+  behind a swappable `GraphStore` interface; no AGE/Cypher dependency.
 - **World cortex** — durable, *cited* facts about external reality (a
   current version, a price, who holds a role) with age-decayed trust, kept
   separate from your own facts.
@@ -82,7 +83,6 @@ each session.
 | `memory_alias(entity, alias)` | Bind an alternative name — all fact/graph lookups resolve aliases first |
 | `memory_graph(entity, depth?, include_facts?, to?)` | Entity neighborhood (≤3 hops): nodes + facts + edges, with transitive/inverse edges derived on read |
 | `memory_relation_define(name, description, transitive?, inverse_of?, src_type?, dst_type?)` | Grow the closed relation vocabulary (deliberate, strong-model act) |
-| `memory_graph_query(cypher, limit?)` | Read-only openCypher via Apache AGE (strong-model power tool) |
 | `memory_stats()` | Per-band sizes, hit rates, totals |
 | `memory_save()` | Flush CMS tensors to disk |
 | `document_ingest(path, source?)` | Index a file (txt/md/pdf) in the reference bank |
@@ -106,7 +106,7 @@ over HTTP (recommended) **or** through a thin torch-free stdio **shim**:
 ```
 Claude session A ─┐  HTTP (recommended)
 Claude session B ─┼───────────────────► pseudolife-mcp daemon ─► Postgres (Docker)
-LAN agent ────────┘  or stdio shim         (single writer)        pgvector + AGE
+LAN agent ────────┘  or stdio shim         (single writer)        pgvector
                      (per session)         host proc OR Docker
 ```
 
@@ -129,15 +129,14 @@ NetworkX inside `memory_graph`; derived edges arrive marked
 `derived: true` with rule provenance, so multi-hop conclusions read as
 plain facts — the server reasons, the model reads.
 
-When the Apache AGE extension is present (it is, in the bundled compose
-image), entities/edges are mirrored into an AGE graph and
-`memory_graph_query` accepts read-only openCypher. Heal a drifted
-mirror with `pseudolife-mcp age-sync`.
+The graph store is Postgres `entities` hub as source of truth, with a
+NetworkX derived read-model built on demand — behind a swappable `GraphStore`
+interface. There is no AGE/Cypher dependency; `memory_graph` serves
+multi-hop queries (neighborhood + derived/inverse edges + shortest path).
 
 **Weak-model deployments:** expose only `memory_search`,
 `memory_store`, `memory_fact_get`/`memory_fact_set`, `memory_graph`,
-and `memory_graph_relate`. Do NOT expose `memory_graph_query` (Cypher
-composition is a degrees-of-freedom hazard), `memory_relation_define`,
+and `memory_graph_relate`. Do NOT expose `memory_relation_define`,
 `memory_delete`, or `memory_fact_forget`.
 
 ## Install — containerized (recommended, any OS)
@@ -191,7 +190,7 @@ python -m venv .venv
 .venv\Scripts\activate
 pip install -e .
 
-# 1. Start Postgres 16 + pgvector + AGE (one-time build, then persistent).
+# 1. Start Postgres 16 + pgvector (one-time build, then persistent).
 docker compose -f ops/docker-compose.yml up -d --build pseudolife-pg
 
 # 2. Register the daemon to auto-start at logon (binds 127.0.0.1:8765).
@@ -291,7 +290,7 @@ Connection / deployment env vars:
 | `PSEUDOLIFE_MCP_DATA_DIR` | `./data` (cwd-relative) | Weights cache + legacy-migration source + ChromaDB. |
 | `PSEUDOLIFE_MCP_CONFIG` | `<data_dir>/config.yaml` if present, else built-ins | Override MIRAS / embedding / memory config. |
 | `PSEUDOLIFE_WRITER_ID` | `unknown` | Identifies this writer on every canonical write (schema v11). The shim forwards it as the `X-PL-Writer` header; the compose daemon sets `claude-code`. |
-| `PSEUDOLIFE_GRAPH_NAME` | `pseudolife_graph` | AGE graph name. Must not be the DB role name (`pseudolife`) — that caused the v0.4 shadow-schema collision. |
+| `PSEUDOLIFE_GRAPH_NAME` | `pseudolife_graph` | Graph name identifier. Must not be the DB role name (`pseudolife`) — that caused the v0.4 shadow-schema collision. |
 
 The built-in defaults are tuned for Claude's use case:
 
@@ -699,12 +698,12 @@ supersession log records the writer/session too.
 > for a future multi-process writer; selecting it raises `NotImplementedError`
 > until that Phase-2 path is built.
 >
-> **Collision fix.** The DB role is `pseudolife`; the AGE graph used to be named
-> `pseudolife` too, so AGE created a `pseudolife` schema that could shadow the
-> real `public` bank. The graph is now `pseudolife_graph`, every connection pins
-> `search_path` to `public`, and a guarded, backup-first migration
-> (`ops/migrate_v04.py`) renames any legacy graph and drops shadow tables.
-> `ops/retire_by_writer.py` supersedes a rogue writer's rows in one shot.
+> **Collision fix (v0.4).** The DB role is `pseudolife`; the old AGE graph was
+> also named `pseudolife`, which caused AGE to create a `pseudolife` schema that
+> shadowed the real `public` bank. The graph identifier is now `pseudolife_graph`,
+> every connection pins `search_path` to `public`, and a guarded, backup-first
+> migration (`ops/migrate_v04.py`) renames any legacy graph and drops shadow
+> tables. `ops/retire_by_writer.py` supersedes a rogue writer's rows in one shot.
 
 ## Dreaming — consolidating memories into facts
 
@@ -801,7 +800,7 @@ pip install -e .[dev]
 pytest tests/ -v
 ```
 
-385 tests cover the MemoryService methods (store / search / recent /
+384 tests cover the MemoryService methods (store / search / recent /
 supersede / stats / save / trace / list_sources / list_tags / delete),
 the `memory_search` scoring overrides, the cross-encoder reranker
 (15 unit + 4 integration), the BM25 hybrid lexical pool
@@ -827,7 +826,7 @@ and the stdio shim spawn path — these skip cleanly when no test
 Postgres is reachable. The Phase 2 graph suite covers normalization,
 unknown-relation suggestions, soft type warnings, transitive/inverse
 on-read inference (marked `derived`), depth caps, paths, fact↔entity
-auto-linking, and the AGE Cypher layer (skip-if-unavailable). The
+auto-linking. The
 delete suite includes a persistence round-trip test (store → delete →
 save → reload → verify gone). Reranker tests monkeypatch
 `sentence_transformers.CrossEncoder` with a deterministic stub so the
@@ -847,7 +846,7 @@ the bundled dev container (`ops/docker-compose.yml`, port 5433) — created on
 first run and reset per-test, so the whole suite is green on repeat runs and
 never touches your real bank. Point them elsewhere with
 `PSEUDOLIFE_TEST_DATABASE_URL`. With the container up, `pytest tests/` runs all
-385; without any Postgres, the PG suites skip and the pure-logic suites still
+384; without any Postgres, the PG suites skip and the pure-logic suites still
 pass.
 
 ## Capabilities at a glance
@@ -859,7 +858,7 @@ pass.
 | Associative continuum | 8-tier cosine MIRAS bands, novelty-gated storage, contradiction detection, supersession |
 | Canonical-fact cortex | Single-writer: LLM dream pass + `memory_fact_*` (regex auto-promote opt-in, default off) |
 | Provenance contenders | Tier-rank guard `user > action > agent`; `memory_fact_resolve` |
-| Knowledge graph | Typed entities/edges, closed relation vocab, on-read closure, AGE Cypher |
+| Knowledge graph | Typed entities/edges, closed relation vocab, on-read closure (Postgres + NetworkX, no AGE/Cypher) |
 | World cortex | `memory_world_*` — cited external facts + age-decayed freshness (manual ingest) |
 | Procedural memory | `memory_outcome` (signals) → dream-synthesised `memory_lessons`/`memory_lesson_search`; `prefers`/`avoids` graph edges; single-writer |
 | Sense of time + multi-writer | Per-write stamp (tx/valid time, HLC ordering, writer/session); `memory_history`; relative `age` on reads; `write_mode` seam (snapshot live, occ Phase-2) |
@@ -892,8 +891,8 @@ pass.
 - **Lessons auto-injection + outcome-coloured graph view** — the lessons store,
   tools, and `prefers`/`avoids` edges ship here; the auto-injected "lessons from
   past work" prompt block is a provider/client concern (like the world-knowledge
-  block), and a human-facing outcome-coloured graph visualisation + a Cypher-side
-  AGE upgrade (mirroring edge properties) are deferred follow-ons.
+  block), and a human-facing outcome-coloured graph visualisation are deferred
+  follow-ons.
 
 ## License
 
