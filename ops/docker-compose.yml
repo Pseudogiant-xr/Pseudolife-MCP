@@ -79,12 +79,8 @@ services:
       # 127.0.0.1, so the network boundary is the Docker mapping, not the
       # bind host. This flag tells the daemon's guard exactly that.
       PSEUDOLIFE_MCP_TRUST_BIND: "1"
-      # Writer identity stamped on every canonical write (schema v11). The graph
-      # name must NOT be the DB role name (`pseudolife`) — that caused the v0.4
-      # shadow-schema collision; `pseudolife_graph` is the safe name the
-      # migration renames to.
+      # Writer identity stamped on every canonical write (schema v11).
       PSEUDOLIFE_WRITER_ID: claude-code
-      PSEUDOLIFE_GRAPH_NAME: pseudolife_graph
       CUDA_VISIBLE_DEVICES: "-1"
       HF_HUB_OFFLINE: "1"
       TRANSFORMERS_OFFLINE: "1"

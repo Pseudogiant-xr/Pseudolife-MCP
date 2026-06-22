@@ -26,7 +26,7 @@ def run(conn, writer_id: str, session_id: str | None = None,
         apply: bool = False) -> dict:
     """Plan (and with ``apply=True`` execute) the retirement on an open psycopg
     connection. Returns the plan dict. Dry-run mutates nothing."""
-    conn.execute("SET search_path TO public, ag_catalog")
+    conn.execute("SET search_path TO public")
     where = "writer_id = %s AND status = 'current'"
     params: list = [writer_id]
     if session_id:

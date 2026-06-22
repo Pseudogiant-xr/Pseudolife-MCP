@@ -243,7 +243,7 @@ def reset_bench() -> str:
     url = bench_url()
     from pseudolife_memory.storage.schema import ensure_schema
     with psycopg.connect(url, connect_timeout=5) as conn:
-        conn.execute("SET search_path TO public, ag_catalog")
+        conn.execute("SET search_path TO public")
         conn.commit()
         with conn.cursor() as cur:  # reap any leaked backends holding locks
             cur.execute(
