@@ -4,6 +4,33 @@ All notable changes to PseudoLife-MCP are documented here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] — dream resilience
+
+### Fixed
+- **The dream stopped skipping memories on a failed extraction.** The extractor
+  masked failures (timeout / network / malformed response) as an empty `[]`
+  result, so `dream_run` advanced its cursor past those memories permanently —
+  on the live CPU Gemma sidecar this skipped every dream during a too-short
+  timeout window. `OpenAICompatExtractor` now **raises `ExtractorError`** on
+  failure; `dream_run` **holds the cursor** (returns `extractor_failed`) so the
+  memories are retried next sweep, and `synthesize_lessons` already leaves its
+  signals pending. A genuine empty result (a successful call with no canonical
+  facts) still writes nothing and advances, as before.
+- **Extractor timeout was too short for CPU inference.** The default CPU sidecar
+  (Gemma E2B Q4) generates at ~30 tok/s, so a full generation easily exceeded the
+  old 20s timeout → `claims:0`. `extractor_timeout_seconds` default 20s → **240s**
+  and `extractor_max_tokens` 1024 → **2048** (headroom for dense batches + slower
+  end-user laptops). Both are now env-overridable —
+  `PSEUDOLIFE_DREAM_TIMEOUT_SECONDS` / `PSEUDOLIFE_DREAM_MAX_TOKENS` (set in
+  `ops/docker-compose.yml`) — alongside the existing `_BASE_URL` / `_MODEL` /
+  `_API_KEY`.
+
+### Added
+- **`ops/wslconfig.example`** — a `.wslconfig` template that caps Docker
+  Desktop's WSL2 VM (the stack needs ~2–4 GB resident; WSL2 otherwise balloons to
+  ~50% of host RAM and caches without releasing). Copy to `%USERPROFILE%\.wslconfig`
+  and `wsl --shutdown` to apply.
+
 ## [0.5.0] — cosine spine
 
 ### Changed

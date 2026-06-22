@@ -91,7 +91,7 @@ each session.
 Each tool returns plain JSON. See `pseudolife_memory/mcp_server.py` for
 docstrings — those are what Claude reads to decide when to call which tool.
 
-## Architecture (v0.2)
+## Architecture
 
 One **memory daemon** owns the bank and serves MCP over streamable HTTP
 at `/mcp`; every Claude Code session (and any LAN agent) attaches to it.
@@ -164,6 +164,14 @@ docker compose -f ops/docker-compose.yml up -d --build
 > `ops_pseudolife_data`)? Don't rename those volumes — keep pointing at them by
 > creating `ops/.env` with `PSEUDOLIFE_BANK_VOLUME=ops_pseudolife_pgdata` and
 > `PSEUDOLIFE_STATE_VOLUME=ops_pseudolife_data` before `up`. See the compose header.
+
+> **Windows + Docker memory.** Docker Desktop's WSL2 backend (the `Vmmem` /
+> `VmmemWSL` process) defaults to claiming up to ~50% of host RAM and caches
+> aggressively without releasing it. The stack itself needs only ~2–4 GB resident,
+> so cap the VM: copy `ops/wslconfig.example` to `%USERPROFILE%\.wslconfig`
+> (tune `memory=` to your machine), then `wsl --shutdown` to apply. After a
+> `wsl --shutdown`, if the daemon becomes unreachable on `127.0.0.1:8765`, run
+> `docker restart pseudolife-mcp-daemon` to re-establish the host port forward.
 
 The daemon serves MCP at `http://127.0.0.1:8765/mcp` and restarts with
 Docker — no logon task needed. First build downloads the model into the
@@ -275,7 +283,7 @@ Connection / deployment env vars:
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v8). Unset → v0.1 file-only mode. |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v11). Unset → v0.1 file-only mode. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). |
 | `PSEUDOLIFE_MCP_HOST` / `_PORT` | `127.0.0.1` / `8765` | Daemon bind address. |
 | `PSEUDOLIFE_MCP_TOKEN` | _(unset)_ | Bearer token; **required** to bind a non-loopback host. |
@@ -732,15 +740,21 @@ endpoint and it dreams on its own — no agent, no manual trigger:
 ```powershell
 $env:PSEUDOLIFE_DREAM_BASE_URL = "http://localhost:11434/v1"   # e.g. Ollama
 $env:PSEUDOLIFE_DREAM_MODEL    = "qwen2.5:7b"
-# $env:PSEUDOLIFE_DREAM_API_KEY = "sk-..."   # for hosted endpoints (Haiku, OpenRouter, ...)
+# $env:PSEUDOLIFE_DREAM_API_KEY = "sk-..."           # hosted endpoints (Haiku, OpenRouter, ...)
+# $env:PSEUDOLIFE_DREAM_TIMEOUT_SECONDS = "240"      # raise for a slow CPU / big model (default 240)
+# $env:PSEUDOLIFE_DREAM_MAX_TOKENS      = "2048"     # extractor output budget (default 2048)
 ```
 
 The daemon runs a background sweep every `memory.dream.sweep_interval_seconds`;
 each tick it checks the same backlog+quiescence trigger and, if it fires, runs a
-dream with the configured extractor. Under the single-writer cortex an extractor
-that yields nothing (a failed/empty LLM call, or none configured) writes nothing
-this cycle — there is no regex fallback. The same env vars also upgrade
-`memory_dream_run`. A local model keeps all text on-box; a hosted endpoint does not.
+dream with the configured extractor. Under the single-writer cortex a *successful*
+pass that finds no canonical facts writes nothing and advances the cursor; a
+**failed** call (timeout, network, malformed output) instead **holds the cursor**,
+so those memories are retried next sweep rather than skipped — there is no regex
+fallback either way. The extractor timeout defaults to **240s** (a CPU model emits
+~30 tok/s, so a full `PSEUDOLIFE_DREAM_MAX_TOKENS` generation is ~70s) — raise it
+for slower hardware. The same env vars also upgrade `memory_dream_run`. A local
+model keeps all text on-box; a hosted endpoint does not.
 
 **Tier 2, batteries-included — the CPU extractor sidecar (default-on).** The stack
 ships a llama.cpp sidecar with a small model baked in (Gemma 4 E2B — the
@@ -787,7 +801,7 @@ pip install -e .[dev]
 pytest tests/ -v
 ```
 
-300 tests cover the MemoryService methods (store / search / recent /
+385 tests cover the MemoryService methods (store / search / recent /
 supersede / stats / save / trace / list_sources / list_tags / delete),
 the `memory_search` scoring overrides, the cross-encoder reranker
 (15 unit + 4 integration), the BM25 hybrid lexical pool
@@ -819,14 +833,21 @@ save → reload → verify gone). Reranker tests monkeypatch
 `sentence_transformers.CrossEncoder` with a deterministic stub so the
 suite stays fast and offline. Test suite uses a fresh embedder per
 module via the `warm_service` fixture so the ~1.5s
-sentence-transformers load doesn't dominate runtime.
+sentence-transformers load doesn't dominate runtime. Later suites (v0.3–v0.5)
+add the pluggable dream extractor (including the regression that a *failed*
+extraction raises `ExtractorError` and holds the cursor — memories are retried,
+not skipped — plus env-overridable timeout / max-tokens), procedural lessons
+(signals → dream-synthesised lessons + `prefers`/`avoids` graph edges),
+writer-aware temporal memory (HLC-ordered supersession, `memory_history`,
+writer/session keying), the single-writer cortex (auto-promote off + the
+`cortex_dedup` sibling-slot merge), and the v0.5 cosine spine.
 
 The PG-backed suites target a throwaway `pseudolife_memory_test` database on
 the bundled dev container (`ops/docker-compose.yml`, port 5433) — created on
 first run and reset per-test, so the whole suite is green on repeat runs and
 never touches your real bank. Point them elsewhere with
 `PSEUDOLIFE_TEST_DATABASE_URL`. With the container up, `pytest tests/` runs all
-300; without any Postgres, the PG suites skip and the pure-logic suites still
+385; without any Postgres, the PG suites skip and the pure-logic suites still
 pass.
 
 ## Capabilities at a glance
