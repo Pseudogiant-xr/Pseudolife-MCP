@@ -299,6 +299,12 @@ class DreamConfig:
     # the dream is a background sweep (600s interval) so latency is irrelevant.
     # Override per-deploy with ``PSEUDOLIFE_DREAM_TIMEOUT_SECONDS``.
     extractor_timeout_seconds: float = 240.0
+    # GAM #2 graph-from-text: the dream also extracts (src,relation,dst) triples
+    # into the graph (separate extract_relations call — the bench winner). Edges
+    # are dream-inferred, so a modest confidence below explicit graph_relate (0.8)
+    # and lessons (0.7).
+    extract_relations: bool = True
+    relation_confidence: float = 0.6
 
 
 @dataclass

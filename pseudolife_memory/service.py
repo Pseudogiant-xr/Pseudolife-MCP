@@ -1377,6 +1377,56 @@ class MemoryService:
         relation = "avoids" if polarity == "-" else "prefers"
         self._graph.upsert_edge(tid, relation, oid, confidence=0.7, origin="action")
 
+    def _link_dream_relations(self, relations: list[dict]) -> int:
+        """Upsert dream-extracted (src,relation,dst) edges. Closed-vocab
+        (resolve_relation; unknown -> related-to), entities resolved alias-aware
+        and pinned to the Postgres hub, self-loops dropped, origin='agent'.
+        Caller holds the lock; no-op in file mode. Returns edges written."""
+        if self._storage is None or not relations:
+            return 0
+        from pseudolife_memory import graph as G
+        known = [r["name"] for r in self._graph.load_relations()]
+        conf = float(self.config.memory.dream.relation_confidence)
+        n = 0
+        for r in relations:
+            raw_src, raw_dst = str(r.get("src", "")), str(r.get("dst", ""))
+            src_n, dst_n = G.norm_name(raw_src), G.norm_name(raw_dst)
+            if not src_n or not dst_n or src_n == dst_n:
+                continue
+            resolved, _ = G.resolve_relation(known, str(r.get("relation", "")))
+            relation = resolved or "related-to"
+            src_e = self._resolve_or_create_entity(raw_src)
+            dst_e = self._resolve_or_create_entity(raw_dst)
+            self._graph.upsert_edge(src_e["id"], relation, dst_e["id"],
+                                    confidence=conf, origin="agent")
+            n += 1
+        return n
+
+    def _dream_extract_relations(self, extractor, texts: list[str]) -> int:
+        """Gated, best-effort graph-from-text for one dream batch: run the LLM
+        relations call UNLOCKED (slow network), then write edges LOCKED. A
+        failure logs and returns 0 — it must never break fact consolidation or
+        drop claims (relations are best-effort, like lessons)."""
+        cfg = self.config.memory.dream
+        rel_fn = getattr(extractor, "extract_relations", None)
+        if not (cfg.extract_relations and rel_fn is not None and texts):
+            return 0
+        try:
+            with self._lock:
+                self._ensure_init()
+                if self._storage is None:
+                    return 0
+                registry = [(r["name"], r["description"])
+                            for r in self._graph.load_relations()
+                            if r["name"] not in ("prefers", "avoids")]
+            rels = rel_fn(texts, registry)
+            with self._lock:
+                return self._link_dream_relations(rels)
+        except Exception as exc:  # noqa: BLE001 — best-effort; never break the dream
+            logger.warning("dream relation extraction failed (%s); claims kept",
+                           exc)
+            return 0
+
     def lesson_search(self, query: str, top_k: int | None = None,
                       min_score: float = 0.0) -> dict[str, Any]:
         """Embedding-on-query retrieval over current lessons (mirrors world_search).

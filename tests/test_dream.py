@@ -361,3 +361,46 @@ def test_dream_run_does_not_advance_cursor_on_failure(svc):
         {"entity": "relay", "attribute": "port", "value": "4001"}]))
     assert again["pulled"] >= 1
     assert svc.cortex_lookup("relay", "port") is not None
+
+
+# ── GAM #2 graph-from-text: _dream_extract_relations (PG-backed) ─────────
+
+class _RelStubExtractor:
+    """Stub extractor exposing extract + extract_relations for dream tests."""
+    def __init__(self, claims=None, relations=None, fail_relations=False):
+        self._claims = claims or []
+        self._relations = relations or []
+        self._fail = fail_relations
+    def extract(self, texts, vocab):
+        return [dict(c) for c in self._claims]
+    def extract_relations(self, texts, relations):
+        if self._fail:
+            from pseudolife_memory.memory.dream import ExtractorError
+            raise ExtractorError("boom")
+        return [dict(r) for r in self._relations]
+
+
+def test_dream_extract_relations_populates_graph(svc):
+    n = svc._dream_extract_relations(_RelStubExtractor(relations=[
+        {"src": "checkout-service", "relation": "runs_on", "dst": "host-1"},
+        {"src": "Acme", "relation": "no-such-rel", "dst": "Beta"},   # -> related-to
+        {"src": "loop", "relation": "uses", "dst": "loop"},          # self-loop dropped
+    ]), ["some text"])
+    assert n == 2
+    g = svc.graph_neighborhood("checkout-service", depth=1)
+    edges = {(e["src"], e["relation"], e["dst"]) for e in g["edges"]}
+    assert ("checkout-service", "runs-on", "host-1") in edges  # normalized relation
+    g2 = svc.graph_neighborhood("acme", depth=1)
+    assert any(e["relation"] == "related-to" for e in g2["edges"])  # fallback kept
+
+
+def test_dream_extract_relations_failure_is_isolated(svc):
+    # A relations failure must not raise — returns 0, leaves the dream intact.
+    assert svc._dream_extract_relations(
+        _RelStubExtractor(relations=[], fail_relations=True), ["x"]) == 0
+
+
+def test_dream_extract_relations_disabled(svc):
+    svc.config.memory.dream.extract_relations = False
+    assert svc._dream_extract_relations(_RelStubExtractor(relations=[
+        {"src": "a-svc", "relation": "uses", "dst": "b-svc"}]), ["x"]) == 0
