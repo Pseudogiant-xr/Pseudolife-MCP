@@ -55,6 +55,34 @@ def _chat_payload(claims):
         "content": json.dumps({"claims": claims})}}]})
 
 
+def _chat_relations_payload(relations):
+    return json.dumps({"choices": [{"message": {
+        "content": json.dumps({"relations": relations})}}]})
+
+
+def test_openai_extractor_parses_relations():
+    from pseudolife_memory.memory.dream import OpenAICompatExtractor
+
+    payload = _chat_relations_payload([
+        {"src": "checkout-service", "relation": "runs-on", "dst": "host-1",
+         "confidence": 0.8}])
+    with _stub_server(lambda: (200, payload)) as base_url:
+        rels = OpenAICompatExtractor(base_url, "m").extract_relations(
+            ["whatever"], [("runs-on", "src executes on host dst")])
+    assert rels == [{"src": "checkout-service", "relation": "runs-on",
+                     "dst": "host-1", "confidence": 0.8}]
+
+
+def test_openai_extractor_relations_raises_on_malformed():
+    from pseudolife_memory.memory.dream import ExtractorError, OpenAICompatExtractor
+
+    bad = json.dumps({"choices": [{"message": {"content": "not json"}}]})
+    with _stub_server(lambda: (200, bad)) as base_url:
+        with pytest.raises(ExtractorError):
+            OpenAICompatExtractor(base_url, "m").extract_relations(
+                ["x"], [("runs-on", "d")])
+
+
 # ── config ───────────────────────────────────────────────────────────────
 
 def test_dream_config_defaults():

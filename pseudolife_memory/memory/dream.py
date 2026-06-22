@@ -36,6 +36,13 @@ class LessonClaim(TypedDict):
     confidence: float
 
 
+class RelationClaim(TypedDict):
+    src: str
+    relation: str
+    dst: str
+    confidence: float
+
+
 class DreamExtractor(Protocol):
     def extract(self, texts: list[str], vocab: list[str]) -> list[Claim]:
         """Return canonical claims for ``texts``. ``vocab`` is the existing
@@ -108,6 +115,24 @@ _LESSON_SYSTEM_PROMPT = (
     "language/library usage), one-off chatter, or anything a future run would not "
     'benefit from recalling. Return {"lessons":[]} if nothing qualifies.'
 )
+
+
+_RELATIONS_PROMPT_HEAD = (
+    "You extract durable RELATIONSHIPS between named entities from notes, as "
+    'JSON: {"relations":[{"src":..,"relation":..,"dst":..}]}. Use ONLY these '
+    "relation names:\n"
+)
+_RELATIONS_PROMPT_TAIL = (
+    "\nIf a real connection fits none of the specific ones, use 'related-to'. "
+    "src and dst are entity names (services, hosts, tools, components). Skip "
+    "opinions, chit-chat, and anything with no entity-to-entity relationship. "
+    'Return {"relations":[]} if nothing qualifies.'
+)
+
+
+def _relations_prompt(relations: list[tuple[str, str]]) -> str:
+    body = "\n".join(f"- {n}: {d}" for n, d in relations)
+    return _RELATIONS_PROMPT_HEAD + body + _RELATIONS_PROMPT_TAIL
 
 
 def _format_signals(signals: list[dict]) -> str:
@@ -273,6 +298,62 @@ class OpenAICompatExtractor:
             out.append(LessonClaim(
                 task=task, aspect=aspect, lesson=lesson, about=about,
                 polarity=polarity, outcome=outcome, confidence=conf))
+        return out
+
+    def extract_relations(self, texts: list[str],
+                          relations: list[tuple[str, str]]) -> list[RelationClaim]:
+        """Extract (src, relation, dst) triples from ``texts`` via the same
+        endpoint. ``relations`` are (name, description) pairs seeding the closed
+        vocabulary. Raises ExtractorError on failure (vs a genuine empty [])."""
+        import json
+        import urllib.request
+
+        texts = [t for t in (texts or []) if t]
+        if not texts:
+            return []
+        headers = {"content-type": "application/json"}
+        if self.api_key:
+            headers["authorization"] = f"Bearer {self.api_key}"
+        try:
+            body = json.dumps({
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": _relations_prompt(relations)},
+                    {"role": "user", "content": "\n\n".join(texts)},
+                ],
+                "response_format": {"type": "json_object"},
+                "max_tokens": self.max_tokens,
+                "temperature": 0,
+                "chat_template_kwargs": {"enable_thinking": False},
+            }).encode()
+            req = urllib.request.Request(
+                f"{self.base_url}/chat/completions", data=body,
+                headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                data = json.loads(resp.read().decode())
+            content = data["choices"][0]["message"]["content"] or ""
+            s, e = content.find("{"), content.rfind("}")
+            if s != -1 and e > s:
+                content = content[s:e + 1]
+            parsed = json.loads(content)
+            raw = parsed.get("relations", []) if isinstance(parsed, dict) else []
+        except Exception as exc:  # noqa: BLE001
+            raise ExtractorError(f"extract_relations failed: {exc}") from exc
+        out: list[RelationClaim] = []
+        for r in raw if isinstance(raw, list) else []:
+            if not isinstance(r, dict):
+                continue
+            src = str(r.get("src", "")).strip()
+            rel = str(r.get("relation", "")).strip()
+            dst = str(r.get("dst", "")).strip()
+            if not (src and rel and dst):
+                continue
+            try:
+                conf = max(0.0, min(1.0, float(r.get("confidence", 0.6))))
+            except (TypeError, ValueError):
+                conf = 0.6
+            out.append(RelationClaim(src=src, relation=rel, dst=dst,
+                                     confidence=conf))
         return out
 
 
