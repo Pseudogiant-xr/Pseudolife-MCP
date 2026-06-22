@@ -456,3 +456,14 @@ def test_dream_relations_enable_multihop(svc):
     g = svc.graph_neighborhood("mobile-app", depth=3)
     derived = {(e["src"], e["dst"]) for e in g["edges"] if e["derived"]}
     assert ("mobile-app", "user-service") in derived  # transitive multi-hop
+
+
+def test_dream_relations_reject_lesson_only_predicates(svc):
+    # prefers/avoids are lesson-only; graph-from-text must not write them even if
+    # the model emits one — it falls back to related-to.
+    n = svc._dream_extract_relations(_RelStubExtractor(relations=[
+        {"src": "deploy-task", "relation": "prefers", "dst": "rsync"}]), ["text"])
+    assert n == 1
+    g = svc.graph_neighborhood("deploy-task", depth=1)
+    rels = {e["relation"] for e in g["edges"]}
+    assert "related-to" in rels and "prefers" not in rels

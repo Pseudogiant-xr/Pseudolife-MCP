@@ -1385,7 +1385,8 @@ class MemoryService:
         if self._storage is None or not relations:
             return 0
         from pseudolife_memory import graph as G
-        known = [r["name"] for r in self._graph.load_relations()]
+        known = [r["name"] for r in self._graph.load_relations()
+                 if r["name"] not in ("prefers", "avoids")]
         conf = float(self.config.memory.dream.relation_confidence)
         n = 0
         for r in relations:
