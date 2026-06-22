@@ -1,4 +1,4 @@
-"""Schema v10 DDL — entries / episodes / meta / cortex facts / world facts /
+"""Schema v11 DDL — entries / episodes / meta / cortex facts / world facts /
 lessons + outcome signals / graph tables.
 
 Everything is ``CREATE TABLE IF NOT EXISTS`` so :func:`ensure_schema` is

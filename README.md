@@ -290,7 +290,6 @@ Connection / deployment env vars:
 | `PSEUDOLIFE_MCP_DATA_DIR` | `./data` (cwd-relative) | Weights cache + legacy-migration source + ChromaDB. |
 | `PSEUDOLIFE_MCP_CONFIG` | `<data_dir>/config.yaml` if present, else built-ins | Override MIRAS / embedding / memory config. |
 | `PSEUDOLIFE_WRITER_ID` | `unknown` | Identifies this writer on every canonical write (schema v11). The shim forwards it as the `X-PL-Writer` header; the compose daemon sets `claude-code`. |
-| `PSEUDOLIFE_GRAPH_NAME` | `pseudolife_graph` | Graph name identifier. Must not be the DB role name (`pseudolife`) — that caused the v0.4 shadow-schema collision. |
 
 The built-in defaults are tuned for Claude's use case:
 

@@ -280,8 +280,9 @@ class MemoryService:
     def _assert_public_search_path(self) -> None:
         """Fail loud if the shared connection would resolve unqualified tables to
         the role-named ``pseudolife`` shadow schema instead of the real ``public``
-        bank (v0.4 T7). ``$user`` expands to the role ``pseudolife``, which is also
-        a legacy AGE graph's schema name — keep public pinned."""
+        bank. ``$user`` expands to the DB role ``pseudolife``, which is also a
+        schema name — if it lands ahead of ``public`` in search_path it silently
+        shadows the real bank, so we refuse to run in that configuration."""
         if self._storage is None:
             return
         path = self._storage.conn.execute("SHOW search_path").fetchone()[0]
@@ -292,8 +293,8 @@ class MemoryService:
                 "lives in public — refusing to run against a shadow schema.")
         if "$user" in schemas and schemas.index("$user") < schemas.index("public"):
             raise RuntimeError(
-                f"search_path resolves $user (role 'pseudolife' == a legacy AGE "
-                f"graph schema) ahead of public (got {path!r}) — this shadows the "
+                f"search_path resolves $user (role 'pseudolife', which is also a "
+                f"schema name) ahead of public (got {path!r}) — this shadows the "
                 "real bank. Pin search_path to public first.")
 
     # ------------------------------------------------------------------
@@ -2126,7 +2127,6 @@ class MemoryService:
             self._ensure_init()
             if self._storage is None:
                 return dict(self._GRAPH_UNAVAILABLE)
-            st = self._storage
             registry = {r["name"]: r for r in self._graph.load_relations()}
             resolved, suggestions = G.resolve_relation(list(registry), relation)
             if resolved is None:
@@ -2221,7 +2221,6 @@ class MemoryService:
             self._ensure_init()
             if self._storage is None:
                 return dict(self._GRAPH_UNAVAILABLE)
-            st = self._storage
             n = norm_name(name)
             if not n or not (description or "").strip():
                 return {"error": "name_and_description_required"}

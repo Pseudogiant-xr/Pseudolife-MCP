@@ -32,8 +32,7 @@ Configuration
   explicitly** so the data path is stable regardless of cwd.
 * ``PSEUDOLIFE_MCP_CONFIG`` — path to a ``config.yaml`` (optional; sane
   defaults baked in by :class:`MemoryService`).
-* ``PSEUDOLIFE_WRITER_ID`` / ``PSEUDOLIFE_GRAPH_NAME`` — writer attribution +
-  graph name identifier (v0.4); see :mod:`pseudolife_memory.daemon`.
+* ``PSEUDOLIFE_WRITER_ID`` — writer attribution; see :mod:`pseudolife_memory.daemon`.
 """
 
 from __future__ import annotations
