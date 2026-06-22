@@ -441,3 +441,18 @@ def test_dream_run_no_entries_returns_relations_key(svc):
     out = svc.dream_run(_RelStubExtractor())   # no stored memories → pulled==0
     assert out["pulled"] == 0
     assert "relations" in out and out["relations"] == 0
+
+
+# ── GAM #2 Task 4: multi-hop over text-populated graph (Tier-B capability) ──
+
+def test_dream_relations_enable_multihop(svc):
+    # depends-on is transitive: A->B->C should yield a DERIVED A->C edge,
+    # i.e. multi-hop works on graph populated purely from ingested text.
+    svc.store("mobile-app depends on graphql-gateway; graphql-gateway "
+              "depends on user-service", source="notes")
+    svc.dream_run(_RelStubExtractor(relations=[
+        {"src": "mobile-app", "relation": "depends-on", "dst": "graphql-gateway"},
+        {"src": "graphql-gateway", "relation": "depends-on", "dst": "user-service"}]))
+    g = svc.graph_neighborhood("mobile-app", depth=3)
+    derived = {(e["src"], e["dst"]) for e in g["edges"] if e["derived"]}
+    assert ("mobile-app", "user-service") in derived  # transitive multi-hop
