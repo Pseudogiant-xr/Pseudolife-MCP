@@ -669,7 +669,7 @@ def memory_dream_run(limit: int | None = None) -> dict[str, Any]:
     is 0 to drain the full backlog in one shot.
 
     Returns ``{pulled, claims, inserted, confirmed, contested, superseded,
-    cursor}``.
+    relations, cursor, lessons}``.
     """
     from pseudolife_memory.memory.dream import build_extractor
     return service.dream_run(

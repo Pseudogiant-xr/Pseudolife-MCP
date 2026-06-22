@@ -1683,8 +1683,8 @@ class MemoryService:
             # pending — synthesise lessons regardless.
             lessons = self.synthesize_lessons(extractor)
             return {"pulled": 0, "claims": 0, "inserted": 0, "confirmed": 0,
-                    "contested": 0, "superseded": 0, "cursor": pulled["cursor"],
-                    "lessons": lessons}
+                    "contested": 0, "superseded": 0, "relations": 0,
+                    "cursor": pulled["cursor"], "lessons": lessons}
         texts = [e["text"] for e in entries]
         vocab = self.cortex_vocab().get("slots", [])
         try:
@@ -1696,7 +1696,7 @@ class MemoryService:
             logger.warning("dream extractor failed (%s); cursor NOT advanced, "
                            "will retry next sweep", exc)
             return {"pulled": len(entries), "claims": 0, "inserted": 0,
-                    "confirmed": 0, "contested": 0, "superseded": 0,
+                    "confirmed": 0, "contested": 0, "superseded": 0, "relations": 0,
                     "cursor": self._cortex.dream_cursor, "extractor_failed": True,
                     "lessons": {"signals": 0, "lessons": 0}}
         tally = {"inserted": 0, "confirmed": 0, "contested": 0, "superseded": 0}

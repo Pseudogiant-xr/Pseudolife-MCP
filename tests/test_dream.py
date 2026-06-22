@@ -433,3 +433,11 @@ def test_dream_run_relations_failure_keeps_claims(svc):
         fail_relations=True))
     assert out["claims"] == 1 and out["relations"] == 0     # claim kept
     assert svc.cortex_lookup("relay", "port") is not None
+
+
+def test_dream_run_no_entries_returns_relations_key(svc):
+    # Regression: the empty-entries early-return must include "relations": 0
+    # so callers can rely on a uniform contract shape.
+    out = svc.dream_run(_RelStubExtractor())   # no stored memories → pulled==0
+    assert out["pulled"] == 0
+    assert "relations" in out and out["relations"] == 0
