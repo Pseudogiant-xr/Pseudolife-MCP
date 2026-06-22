@@ -1710,9 +1710,11 @@ class MemoryService:
             tally[res["action"]] = tally.get(res["action"], 0) + 1
         newest = max(e["timestamp"] for e in entries)
         self.dream_commit(newest)
+        relations_n = self._dream_extract_relations(extractor, texts)
         lessons = self.synthesize_lessons(extractor)
         return {"pulled": len(entries), "claims": len(claims),
-                "cursor": newest, **tally, "lessons": lessons}
+                "cursor": newest, "relations": relations_n, **tally,
+                "lessons": lessons}
 
     def dream_status(self) -> dict[str, Any]:
         """Backlog (eligible unconsolidated memories), idle seconds since the most

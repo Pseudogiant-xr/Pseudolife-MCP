@@ -404,3 +404,32 @@ def test_dream_extract_relations_disabled(svc):
     svc.config.memory.dream.extract_relations = False
     assert svc._dream_extract_relations(_RelStubExtractor(relations=[
         {"src": "a-svc", "relation": "uses", "dst": "b-svc"}]), ["x"]) == 0
+
+
+# ── GAM #2 Task 3: dream_run wires _dream_extract_relations ──────────────
+
+def test_dream_run_populates_relations_end_to_end(svc):
+    svc.store("checkout-service runs on host-1 and uses redis", source="notes")
+    out = svc.dream_run(_RelStubExtractor(
+        claims=[{"entity": "checkout-service", "attribute": "role",
+                 "value": "payments", "confidence": 0.6}],
+        relations=[{"src": "checkout-service", "relation": "runs-on",
+                    "dst": "host-1"},
+                   {"src": "checkout-service", "relation": "uses",
+                    "dst": "redis"}]))
+    assert out["claims"] == 1
+    assert out["relations"] == 2
+    g = svc.graph_neighborhood("checkout-service", depth=1)
+    edges = {(e["src"], e["relation"], e["dst"]) for e in g["edges"]}
+    assert ("checkout-service", "runs-on", "host-1") in edges
+    assert ("checkout-service", "uses", "redis") in edges
+
+
+def test_dream_run_relations_failure_keeps_claims(svc):
+    svc.store("the relay port is 4001", source="notes")
+    out = svc.dream_run(_RelStubExtractor(
+        claims=[{"entity": "relay", "attribute": "port", "value": "4001",
+                 "confidence": 0.6}],
+        fail_relations=True))
+    assert out["claims"] == 1 and out["relations"] == 0     # claim kept
+    assert svc.cortex_lookup("relay", "port") is not None
