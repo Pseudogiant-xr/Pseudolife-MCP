@@ -228,6 +228,7 @@ class MemoryService:
         # the v0.1 file mode is preserved bit-for-bit.
         self._db_url = database_url or os.environ.get("PSEUDOLIFE_MCP_DATABASE_URL")
         self._storage = None
+        self._graph = None  # GraphStore
         # Resolve data directory first — that's where memory_state lives
         # AND where the default config sits (if config_path not given).
         self.data_dir = Path(data_dir) if data_dir else Path.cwd() / "data"
@@ -365,6 +366,8 @@ class MemoryService:
             # bank, never the role-named `pseudolife` shadow schema (v0.4
             # collision fix). PostgresStorage pins this; fail loud if regressed.
             self._assert_public_search_path()
+            from pseudolife_memory.memory.graph_store import PostgresNetworkxGraphStore
+            self._graph = PostgresNetworkxGraphStore(self._storage)
         self._cms = ContinuumMemorySystem(
             self.config.memory,
             reference_bank=self._reference,
@@ -1371,7 +1374,7 @@ class MemoryService:
             return
         oid = st.ensure_entity(an, display=about.strip())
         relation = "avoids" if polarity == "-" else "prefers"
-        st.upsert_edge(tid, relation, oid, confidence=0.7, origin="action")
+        self._graph.upsert_edge(tid, relation, oid, confidence=0.7, origin="action")
 
     def lesson_search(self, query: str, top_k: int | None = None,
                       min_score: float = 0.0) -> dict[str, Any]:
@@ -2124,7 +2127,7 @@ class MemoryService:
             if self._storage is None:
                 return dict(self._GRAPH_UNAVAILABLE)
             st = self._storage
-            registry = {r["name"]: r for r in st.load_relations()}
+            registry = {r["name"]: r for r in self._graph.load_relations()}
             resolved, suggestions = G.resolve_relation(list(registry), relation)
             if resolved is None:
                 return {
@@ -2148,7 +2151,7 @@ class MemoryService:
                         f"but relation '{resolved}' expects '{want}' — "
                         f"edge stored anyway",
                     )
-            edge = st.upsert_edge(
+            edge = self._graph.upsert_edge(
                 src_e["id"], resolved, dst_e["id"],
                 confidence=confidence, origin=origin,
             )
@@ -2168,7 +2171,7 @@ class MemoryService:
             if self._storage is None:
                 return dict(self._GRAPH_UNAVAILABLE)
             st = self._storage
-            registry = [r["name"] for r in st.load_relations()]
+            registry = [r["name"] for r in self._graph.load_relations()]
             resolved, suggestions = G.resolve_relation(registry, relation)
             if resolved is None:
                 return {"error": "unknown_relation", "relation": relation,
@@ -2179,7 +2182,7 @@ class MemoryService:
                 missing = src if src_e is None else dst
                 return {"removed": False, "reason": "unknown_entity",
                         "entity": missing}
-            removed = st.supersede_edge(src_e["id"], resolved, dst_e["id"])
+            removed = self._graph.supersede_edge(src_e["id"], resolved, dst_e["id"])
             return {"removed": removed, "src": src_e["display"],
                     "relation": resolved, "dst": dst_e["display"]}
 
@@ -2222,7 +2225,7 @@ class MemoryService:
             n = norm_name(name)
             if not n or not (description or "").strip():
                 return {"error": "name_and_description_required"}
-            registry = {r["name"]: r for r in st.load_relations()}
+            registry = {r["name"]: r for r in self._graph.load_relations()}
             if registry.get(n, {}).get("builtin"):
                 return {"error": "builtin_relation",
                         "hint": f"'{n}' is a builtin and cannot be redefined."}
@@ -2232,7 +2235,7 @@ class MemoryService:
                 if inv not in registry and inv != n:
                     return {"error": "unknown_inverse", "inverse_of": inv,
                             "known": sorted(registry)}
-            st.upsert_relation(
+            self._graph.upsert_relation(
                 n, description.strip(), src_type=src_type, dst_type=dst_type,
                 transitive=bool(transitive), inverse_of=inv,
             )
@@ -2267,21 +2270,13 @@ class MemoryService:
                     to_missing = to
                 else:
                     to_id = to_e["id"]
-            g = st.load_graph()
-            registry = {
-                r["name"]: {"transitive": r["transitive"],
-                            "inverse_of": r["inverse_of"]}
-                for r in st.load_relations()
-            }
-            edges = [
-                {"src": e["src_id"], "relation": e["relation"],
-                 "dst": e["dst_id"], "confidence": e["confidence"],
-                 "origin": e["origin"]}
-                for e in g["edges"]
-            ]
-            sub = G.build_subgraph(edges, registry, root["id"],
-                                   depth=depth, to=to_id)
-            by_id = {e["id"]: e for e in g["entities"]}
+            reg_for_view = self._graph.subgraph(
+                root["id"], depth=depth, to_id=to_id)
+            sub = {"nodes": reg_for_view["nodes"],
+                   "edges": reg_for_view["edges"],
+                   "paths": reg_for_view["paths"]}
+            by_id = reg_for_view["entities"]
+            aliases = reg_for_view["aliases"]
 
             facts_by_norm: dict[str, list[dict]] = {}
             if include_facts and self._cortex is not None:
@@ -2304,7 +2299,7 @@ class MemoryService:
                     "entity": e["display"],
                     "canonical": e["canonical"],
                     "etype": e["etype"],
-                    "aliases": g["aliases"].get(nid, []),
+                    "aliases": aliases.get(nid, []),
                 }
                 if include_facts:
                     node["facts"] = facts_by_norm.get(e["canonical"], [])
