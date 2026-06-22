@@ -139,6 +139,9 @@ to `"unknown mode {mode!r}; use: serve | embedded | (no arg = shim)"`.
 - `storage/postgres.py:131`: change `self.conn.execute("SET search_path TO public, ag_catalog")`
   to `self.conn.execute("SET search_path TO public")`. Update the comment block
   (125-130) to drop the AGE-schema reasoning (keep the "pin to public" point).
+- `tests/pg_fixtures.py:75`: same change — `SET search_path TO public, ag_catalog`
+  → `SET search_path TO public`; trim the AGE-graph-schema sentence from the
+  comment (70-74), keep the "pin to public before truncate" rationale.
 - `utils/config.py`: `GraphConfig` (lines 470-476) exists only for the AGE graph
   name. Delete the whole `class GraphConfig` (470-476), the
   `graph: GraphConfig = field(default_factory=GraphConfig)` line (507), and the
