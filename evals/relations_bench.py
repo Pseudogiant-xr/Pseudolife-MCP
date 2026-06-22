@@ -59,11 +59,20 @@ RUNGS: dict[str, dict] = {
                   "base_url": os.environ.get("PSEUDOLIFE_BENCH_GEMMA_URL",
                                              "http://127.0.0.1:8081/v1"),
                   "model": "extractor"},
+    # Same :8081 endpoint as e2b — the bench container's GGUF is swapped to E4B
+    # before running this rung (see evals/README.md). NOTE (2026-06-23): E4B
+    # returns an EMPTY array for the 'separate' prompt and only engages with the
+    # 'combined' prompt — the opposite of E2B. Optimal prompt shape is model-specific.
+    "gemma-e4b": {"label": "Gemma 4 E4B (CPU bench)",
+                  "base_url": os.environ.get("PSEUDOLIFE_BENCH_GEMMA_URL",
+                                             "http://127.0.0.1:8081/v1"),
+                  "model": "extractor"},
     "qwen-a3b": {"label": "Qwen3.6-35B-A3B (homelab)",
                  "base_url": "http://192.168.0.130:1236/v1",
                  "model": "Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf"},
     "qwen-27b": {"label": "Qwen3.6-27B (4090 ceiling)",
-                 "base_url": "http://192.168.0.10:1234/v1",
+                 "base_url": os.environ.get("PSEUDOLIFE_BENCH_QWEN_URL",
+                                            "http://127.0.0.1:1234/v1"),
                  "model": "Qwen3.6-27B-UD-Q4_K_XL.gguf"},
 }
 
