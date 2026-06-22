@@ -68,21 +68,80 @@ def test_shim_autostarts_daemon_and_proxies(tmp_path):
     try:
         asyncio.run(asyncio.wait_for(_drive(), timeout=90))
     finally:
-        # The shim spawned a detached daemon — reap it via /health port.
-        import urllib.request
-        try:
-            urllib.request.urlopen(
-                f"http://127.0.0.1:{port}/health", timeout=1
-            )
-        except Exception:  # noqa: BLE001
-            pass
-        # Best-effort: kill any serve process bound to our port.
-        if sys.platform == "win32":
-            subprocess.run(
-                ["powershell", "-NoProfile", "-Command",
-                 f"Get-NetTCPConnection -LocalPort {port} -State Listen "
-                 f"-ErrorAction SilentlyContinue | "
-                 f"ForEach-Object {{ Stop-Process -Id $_.OwningProcess -Force "
-                 f"-ErrorAction SilentlyContinue }}"],
-                capture_output=True,
-            )
+        _reap_daemon(port)
+
+
+def test_shim_survives_idle_gap(tmp_path):
+    """Two calls separated by an idle gap must both succeed.
+
+    Behavioural guard for the per-call upstream design. NOTE: this does NOT
+    reproduce the original production hang on its own — that was triggered by
+    Docker's loopback proxy reaping the idle connection (Desktop -> host shim
+    -> *Docker* daemon), and this test connects straight to a host uvicorn with
+    no proxy in between, so the old persistent-session shim passes it too. What
+    it does guard: that the shim survives an idle pause and serves sequential
+    calls, so a future change can't reintroduce a session that wedges after
+    idle even without the proxy. The real fix is structural — the shim no
+    longer holds any long-lived upstream connection that *could* be reaped.
+    """
+    import asyncio
+
+    url = resolve_test_db_url()
+    if not _pg_reachable(url):
+        pytest.skip("no test Postgres reachable")
+
+    port = _free_port()
+    env = {
+        **os.environ,
+        "PSEUDOLIFE_MCP_DAEMON_URL": f"http://127.0.0.1:{port}",
+        "PSEUDOLIFE_MCP_HOST": "127.0.0.1",
+        "PSEUDOLIFE_MCP_PORT": str(port),
+        "PSEUDOLIFE_MCP_DATABASE_URL": url,
+        "PSEUDOLIFE_MCP_DATA_DIR": str(tmp_path),
+    }
+    env.pop("PSEUDOLIFE_MCP_TOKEN", None)  # loopback, no token needed
+
+    async def _drive():
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
+
+        params = StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "pseudolife_memory.cli"],  # no arg -> shim
+            env=env,
+        )
+
+        def _has_bands(res) -> bool:
+            return "bands" in " ".join(getattr(c, "text", "") for c in res.content)
+
+        async with stdio_client(params) as (r, w):
+            async with ClientSession(r, w) as s:
+                await s.initialize()
+                assert _has_bands(await s.call_tool("memory_stats", {}))
+                # Idle past uvicorn's default keep-alive (5s): a persistent
+                # upstream would be reaped here and the next call would hang.
+                await asyncio.sleep(8.0)
+                assert _has_bands(await s.call_tool("memory_stats", {}))
+
+    try:
+        asyncio.run(asyncio.wait_for(_drive(), timeout=120))
+    finally:
+        _reap_daemon(port)
+
+
+def _reap_daemon(port: int) -> None:
+    """Best-effort cleanup of the detached daemon the shim auto-spawned."""
+    import urllib.request
+    try:
+        urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=1)
+    except Exception:  # noqa: BLE001
+        pass
+    if sys.platform == "win32":
+        subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             f"Get-NetTCPConnection -LocalPort {port} -State Listen "
+             f"-ErrorAction SilentlyContinue | "
+             f"ForEach-Object {{ Stop-Process -Id $_.OwningProcess -Force "
+             f"-ErrorAction SilentlyContinue }}"],
+            capture_output=True,
+        )

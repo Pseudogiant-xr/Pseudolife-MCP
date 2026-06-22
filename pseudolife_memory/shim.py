@@ -78,6 +78,8 @@ def ensure_daemon(url: str) -> dict:
 
 
 async def _proxy(url: str, token: str | None) -> None:
+    import contextlib
+
     import mcp.types as types
     from mcp.client.session import ClientSession
     from mcp.client.streamable_http import streamablehttp_client
@@ -92,34 +94,48 @@ async def _proxy(url: str, token: str | None) -> None:
     writer_id = os.environ.get("PSEUDOLIFE_WRITER_ID")
     if writer_id:
         headers["X-PL-Writer"] = writer_id
-    async with streamablehttp_client(url + "/mcp", headers=headers or None) as (
-        read, write, _get_session_id,
-    ):
-        async with ClientSession(read, write) as remote:
-            await remote.initialize()
-            remote_tools = (await remote.list_tools()).tools
+    @contextlib.asynccontextmanager
+    async def _upstream():
+        # A FRESH upstream connection per call. The shim owns no state and the
+        # daemon owns the bank, so a short-lived connection costs only a local
+        # handshake and CANNOT go stale. A single long-lived session (the prior
+        # design) gets reaped after an idle gap — uvicorn's keep-alive (~5s) and
+        # Docker's loopback proxy both drop idle connections — and the mcp client
+        # has no reconnect, so the first call after an idle pause hung on a dead
+        # stream until the client timeout (~4 min). Per-call connect sidesteps
+        # that whole failure class. Writer attribution (X-PL-Writer) rides every
+        # connection's headers, so it survives; only the daemon-side session_id
+        # (audit granularity, not correctness) becomes per-call.
+        async with streamablehttp_client(url + "/mcp", headers=headers or None) as (
+            read, write, _get_session_id,
+        ):
+            async with ClientSession(read, write) as remote:
+                await remote.initialize()
+                yield remote
 
-            server: Server = Server("pseudolife-memory")
+    server: Server = Server("pseudolife-memory")
 
-            @server.list_tools()
-            async def _list_tools() -> list[types.Tool]:
-                return remote_tools
+    @server.list_tools()
+    async def _list_tools() -> list[types.Tool]:
+        async with _upstream() as remote:
+            return (await remote.list_tools()).tools
 
-            @server.call_tool()
-            async def _call_tool(name: str, arguments: dict | None):
-                result = await remote.call_tool(name, arguments or {})
-                # Forward structured output too — the tools advertise an
-                # outputSchema, so a content-only proxy would trip the
-                # downstream client's structured-output validation.
-                structured = getattr(result, "structuredContent", None)
-                if structured is not None:
-                    return result.content, structured
-                return result.content
+    @server.call_tool()
+    async def _call_tool(name: str, arguments: dict | None):
+        async with _upstream() as remote:
+            result = await remote.call_tool(name, arguments or {})
+            # Forward structured output too — the tools advertise an
+            # outputSchema, so a content-only proxy would trip the
+            # downstream client's structured-output validation.
+            structured = getattr(result, "structuredContent", None)
+            if structured is not None:
+                return result.content, structured
+            return result.content
 
-            async with stdio_server() as (r, w):
-                await server.run(
-                    r, w, server.create_initialization_options(),
-                )
+    async with stdio_server() as (r, w):
+        await server.run(
+            r, w, server.create_initialization_options(),
+        )
 
 
 def run_shim() -> None:
