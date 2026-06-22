@@ -1,0 +1,26 @@
+# Example WSL2 config for running the PseudoLife-MCP Docker stack on Windows.
+#
+# WHY: Docker Desktop's WSL2 backend (the "VmmemWSL"/"Vmmem" process) by default
+# may grow to ~50% of host RAM and caches aggressively without handing memory
+# back to Windows. The PseudoLife stack itself is small — measured resident:
+#   postgres ~30 MiB, daemon ~400 MiB, extractor (Gemma E2B Q4) ~1.4 GiB
+#   => ~2 GiB resident (~4 GiB incl. the full model mmap).
+# So capping WSL2 well above that is plenty and keeps RAM free for Windows.
+#
+# HOW: copy this file to your user profile as ".wslconfig", then apply with
+#   wsl --shutdown     (closes WSL/Docker; Docker Desktop restarts the backend)
+#
+#   PowerShell:  Copy-Item ops\wslconfig.example "$env:USERPROFILE\.wslconfig"
+#   then:        wsl --shutdown
+#
+# Tune `memory` to your machine. Guidance:
+#   16 GB laptop -> memory=6GB   ;  32 GB laptop -> memory=8GB
+#   64 GB+ desktop -> memory=16GB (or omit to use the WSL default)
+
+[wsl2]
+memory=8GB
+processors=6
+
+[experimental]
+# Gradually return unused cached memory from the VM back to Windows.
+autoMemoryReclaim=gradual

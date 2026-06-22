@@ -1662,8 +1662,15 @@ class MemoryService:
         try:
             claims = extractor.extract(texts, vocab)
         except Exception as exc:  # noqa: BLE001 — an extractor must never break a dream
-            logger.warning("dream extractor failed (%s); writing nothing this cycle", exc)
-            claims = []
+            # Transient failure (timeout/network/parse): do NOT advance the cursor
+            # so these memories are retried next sweep instead of being silently
+            # skipped (the bug behind the dream-timeout incident).
+            logger.warning("dream extractor failed (%s); cursor NOT advanced, "
+                           "will retry next sweep", exc)
+            return {"pulled": len(entries), "claims": 0, "inserted": 0,
+                    "confirmed": 0, "contested": 0, "superseded": 0,
+                    "cursor": self._cortex.dream_cursor, "extractor_failed": True,
+                    "lessons": {"signals": 0, "lessons": 0}}
         tally = {"inserted": 0, "confirmed": 0, "contested": 0, "superseded": 0}
         for c in claims:
             ent, attr = self._resolve_dream_slot(c["entity"], c["attribute"])

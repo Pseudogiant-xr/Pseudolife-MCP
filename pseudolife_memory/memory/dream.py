@@ -125,13 +125,21 @@ def _format_signals(signals: list[dict]) -> str:
     return "\n".join(lines)
 
 
+class ExtractorError(Exception):
+    """An extractor call failed (network, timeout, HTTP error, malformed
+    response) — as opposed to succeeding with zero claims. Callers use this to
+    distinguish a transient failure (don't advance the dream cursor / leave
+    signals pending, retry next sweep) from a genuine empty result."""
+
+
 class OpenAICompatExtractor:
     """Tier 2 — extract claims via any OpenAI-compatible ``/chat/completions``
     endpoint (Ollama, LM Studio, Anthropic/Haiku, OpenRouter, a self-hosted
-    model — all the same slot). Bounded by ``max_tokens`` + a hard timeout; on
-    ANY failure (network, timeout, malformed JSON) returns ``[]`` — and under the
-    single-writer cortex the dream then writes nothing this cycle (no regex
-    fallback). Uses stdlib urllib — no new deps."""
+    model — all the same slot). Bounded by ``max_tokens`` + a hard timeout. On
+    failure (network, timeout, malformed JSON) it **raises** :class:`ExtractorError`
+    so the caller can tell failure from a genuine empty result and avoid skipping
+    memories (advancing the cursor) on a transient blip. A successful call with no
+    extractable claims returns ``[]``. Uses stdlib urllib — no new deps."""
 
     def __init__(self, base_url: str, model: str, *, api_key: str | None = None,
                  max_tokens: int = 400, timeout_seconds: float = 20.0) -> None:
@@ -183,9 +191,10 @@ class OpenAICompatExtractor:
                 content = content[s:e + 1]
             parsed = json.loads(content)
             raw = parsed.get("claims", []) if isinstance(parsed, dict) else []
-        except Exception as exc:  # noqa: BLE001 — never break a dream
-            logger.warning("OpenAICompatExtractor failed: %s", exc)
-            return []
+        except Exception as exc:  # noqa: BLE001
+            # Signal failure (vs genuine empty) so the dream doesn't advance its
+            # cursor past these memories on a transient timeout/network blip.
+            raise ExtractorError(f"extract failed: {exc}") from exc
         claims: list[Claim] = []
         for c in raw if isinstance(raw, list) else []:
             if not isinstance(c, dict):
@@ -239,9 +248,10 @@ class OpenAICompatExtractor:
                 content = content[s:e + 1]
             parsed = json.loads(content)
             raw = parsed.get("lessons", []) if isinstance(parsed, dict) else []
-        except Exception as exc:  # noqa: BLE001 — never break a dream
-            logger.warning("OpenAICompatExtractor.extract_lessons failed: %s", exc)
-            return []
+        except Exception as exc:  # noqa: BLE001
+            # Raise (vs return []) so synthesize_lessons leaves the signals
+            # pending and retries, rather than consuming them on a failed call.
+            raise ExtractorError(f"extract_lessons failed: {exc}") from exc
         out: list[LessonClaim] = []
         for c in raw if isinstance(raw, list) else []:
             if not isinstance(c, dict):

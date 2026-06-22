@@ -94,9 +94,10 @@ services:
       PSEUDOLIFE_DREAM_BASE_URL: http://pseudolife-extractor:8081/v1
       PSEUDOLIFE_DREAM_MODEL: extractor
       # The CPU Gemma sidecar generates at ~30 tok/s, so dream extraction needs
-      # well over the old 20s default (a full 1024-tok generation alone is ~30s).
-      # 120s gives headroom; bump here if you swap in a slower/larger model.
-      PSEUDOLIFE_DREAM_TIMEOUT_SECONDS: "120"
+      # well over the old 20s default (a full 2048-tok generation is ~70s). 240s
+      # gives headroom incl. slower end-user laptops; bump for a larger model.
+      PSEUDOLIFE_DREAM_TIMEOUT_SECONDS: "240"
+      PSEUDOLIFE_DREAM_MAX_TOKENS: "2048"
     ports:
       - "127.0.0.1:8765:8765"
     volumes:

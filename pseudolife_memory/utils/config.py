@@ -287,18 +287,18 @@ class DreamConfig:
     extractor_base_url: str | None = None
     extractor_api_key: str | None = None
     extractor_model: str | None = None
-    # Output budget for the extractor call. Sized for REASONING models (e.g. the
-    # default Gemma sidecar emits a thinking trace before the JSON): too low and
-    # the model spends the budget on reasoning and returns empty content, which
-    # the extractor reads as "no claims" and falls back to the regex floor.
-    extractor_max_tokens: int = 1024
+    # Output budget for the extractor call. Sized generously so a dense dream
+    # batch can emit all its claim JSON without truncation (a truncated response
+    # parses to fewer/zero claims). 2048 ≈ 40-80 claims. Override per-deploy with
+    # ``PSEUDOLIFE_DREAM_MAX_TOKENS``.
+    extractor_max_tokens: int = 2048
     # The default CPU sidecar (Gemma E2B Q4) generates at ~30 tok/s, so a full
-    # ``extractor_max_tokens`` (1024) generation alone is ~30s — plus prompt
-    # processing of the texts + vocab hint. 20s was too tight (the dream timed
-    # out → claims:0 → no cortex write). 120s gives comfortable headroom; the
-    # dream is a background sweep so latency is irrelevant. Override per-deploy
-    # with ``PSEUDOLIFE_DREAM_TIMEOUT_SECONDS`` (see ``build_extractor``).
-    extractor_timeout_seconds: float = 120.0
+    # ``extractor_max_tokens`` (2048) generation is ~70s — plus prompt processing
+    # of the texts + vocab hint. The old 20s default timed the dream out (claims:0
+    # → no cortex write). 240s gives headroom for slower end-user CPUs/laptops too;
+    # the dream is a background sweep (600s interval) so latency is irrelevant.
+    # Override per-deploy with ``PSEUDOLIFE_DREAM_TIMEOUT_SECONDS``.
+    extractor_timeout_seconds: float = 240.0
 
 
 @dataclass

@@ -108,8 +108,10 @@ def test_openai_extractor_parses_claims():
                        "confidence": 0.9, "origin": "agent"}]
 
 
-def test_openai_extractor_empty_on_timeout():
-    from pseudolife_memory.memory.dream import OpenAICompatExtractor
+def test_openai_extractor_raises_on_timeout():
+    # Failure must RAISE (not return []) so the dream can tell it apart from a
+    # genuine empty result and avoid advancing the cursor past these memories.
+    from pseudolife_memory.memory.dream import ExtractorError, OpenAICompatExtractor
 
     def slow():
         time.sleep(1.0)
@@ -117,15 +119,17 @@ def test_openai_extractor_empty_on_timeout():
 
     with _stub_server(slow) as base_url:
         ext = OpenAICompatExtractor(base_url, "m", timeout_seconds=0.2)
-        assert ext.extract(["x"], vocab=[]) == []
+        with pytest.raises(ExtractorError):
+            ext.extract(["x"], vocab=[])
 
 
-def test_openai_extractor_empty_on_malformed():
-    from pseudolife_memory.memory.dream import OpenAICompatExtractor
+def test_openai_extractor_raises_on_malformed():
+    from pseudolife_memory.memory.dream import ExtractorError, OpenAICompatExtractor
 
     bad = json.dumps({"choices": [{"message": {"content": "not json at all"}}]})
     with _stub_server(lambda: (200, bad)) as base_url:
-        assert OpenAICompatExtractor(base_url, "m").extract(["x"], vocab=[]) == []
+        with pytest.raises(ExtractorError):
+            OpenAICompatExtractor(base_url, "m").extract(["x"], vocab=[])
 
 
 def test_build_extractor_selects_by_config(monkeypatch):
@@ -306,3 +310,26 @@ def test_dream_empty_llm_claims_write_nothing(svc):
     out = svc.dream_run(_StubExtractor([]))
     assert out["inserted"] == 0 and out["confirmed"] == 0
     assert svc.cortex_lookup("relay", "port") is None
+
+
+class _FailingExtractor:
+    """Simulates a transient extractor failure (timeout / network / malformed)."""
+    def extract(self, texts, vocab):
+        from pseudolife_memory.memory.dream import ExtractorError
+        raise ExtractorError("boom")
+
+
+def test_dream_run_does_not_advance_cursor_on_failure(svc):
+    # Regression for the dream-timeout incident: a failed extraction must NOT
+    # advance the cursor (else those memories are silently skipped forever).
+    svc.config.memory.cortex.auto_promote = False
+    svc.store("the relay port is 4001", source="notes")
+    before = svc.dream_status()["dream_cursor"]
+    out = svc.dream_run(_FailingExtractor())
+    assert out.get("extractor_failed") is True and out["claims"] == 0
+    assert svc.dream_status()["dream_cursor"] == before     # cursor held
+    # The same memory is still pending and a later good run consolidates it.
+    again = svc.dream_run(_StubExtractor([
+        {"entity": "relay", "attribute": "port", "value": "4001"}]))
+    assert again["pulled"] >= 1
+    assert svc.cortex_lookup("relay", "port") is not None
