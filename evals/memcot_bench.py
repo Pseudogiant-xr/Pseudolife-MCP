@@ -88,3 +88,43 @@ def spot_entities(text: str, known: set[str]) -> list[str]:
     reading; the mechanical controller matches against the known vocabulary.
     """
     return [name for name in known if value_present(text, name)]
+
+
+from dataclasses import dataclass, field  # noqa: E402
+from typing import Protocol  # noqa: E402
+
+
+@dataclass
+class LoopState:
+    entities: set[str] = field(default_factory=set)
+    texts: list[str] = field(default_factory=list)
+    facts: list[str] = field(default_factory=list)
+    iterations: int = 0
+    queries_issued: int = 0
+    latency_ms: float = 0.0
+    low_confidence: bool = False
+    top_score: float = 0.0
+
+
+def assembled_context(state: LoopState) -> list[str]:
+    """Everything the arm 'read' — scored for gold presence + token cost."""
+    return list(state.texts) + list(state.facts) + sorted(state.entities)
+
+
+class Controller(Protocol):
+    def seed_queries(self, question: str) -> list[str]: ...
+    def expand(self, question: str, newly: list[str]) -> tuple[list[str], bool]: ...
+
+
+class MechanicalController:
+    """Deterministic controller: re-query with each newly discovered entity;
+    stop when an iteration discovers nothing new. The LLM seam is a future
+    subclass implementing the same two methods over a served model."""
+
+    def seed_queries(self, question: str) -> list[str]:
+        return [question]
+
+    def expand(self, question: str, newly: list[str]) -> tuple[list[str], bool]:
+        if not newly:
+            return [], True
+        return [f"{question} {name}" for name in newly], False

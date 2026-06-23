@@ -47,3 +47,25 @@ def test_spot_entities_word_boundary():
     known = {"checkout-svc", "jvm-21"}
     assert mb.spot_entities("checkout-svc depends-on billing-lib", known) == ["checkout-svc"]
     assert mb.spot_entities("nothing relevant here", known) == []
+
+
+def test_assembled_context_unions_texts_facts_entities():
+    st = mb.LoopState(entities={"jvm-21"}, texts=["t1"], facts=["runtime=jvm-21"])
+    assert mb.assembled_context(st) == ["t1", "runtime=jvm-21", "jvm-21"]
+
+
+def test_mechanical_controller_seeds_with_question():
+    c = mb.MechanicalController()
+    assert c.seed_queries("what runs checkout-svc?") == ["what runs checkout-svc?"]
+
+
+def test_mechanical_controller_expands_on_new_entities():
+    c = mb.MechanicalController()
+    queries, stop = c.expand("q", ["billing-lib", "jvm-21"])
+    assert stop is False
+    assert queries == ["q billing-lib", "q jvm-21"]
+
+
+def test_mechanical_controller_stops_when_no_new_entities():
+    c = mb.MechanicalController()
+    assert c.expand("q", []) == ([], True)
