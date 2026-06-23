@@ -230,7 +230,7 @@ def _means(recs: list[dict]) -> dict:
                 "mean_tokens": 0.0, "mean_latency_ms": 0.0}
     return {
         "n": n,
-        "recall": sum(1 for r in recs if r["recovered"]) / n,
+        "recall": round(sum(1 for r in recs if r["recovered"]) / n, 3),
         "mean_iterations": round(sum(r["iterations"] for r in recs) / n, 2),
         "mean_tokens": round(sum(r["tokens"] for r in recs) / n, 1),
         "mean_latency_ms": round(sum(r["latency_ms"] for r in recs) / n, 1),

@@ -168,7 +168,7 @@ def test_aggregate_buckets_by_hops_and_overall():
     ]
     agg = mb.aggregate(recs)
     assert agg["overall"]["n"] == 3
-    assert abs(agg["overall"]["recall"] - 2 / 3) < 1e-6
+    assert abs(agg["overall"]["recall"] - round(2 / 3, 3)) < 1e-9
     assert agg["by_hops"][2]["n"] == 2
     assert abs(agg["by_hops"][2]["recall"] - 0.5) < 1e-6
     assert agg["by_hops"][2]["mean_tokens"] == 25.0
