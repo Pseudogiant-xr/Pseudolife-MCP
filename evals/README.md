@@ -337,8 +337,7 @@ particular) should become part of the default query path.
 - Requires **no served LLM** — the loop controller is a deterministic
   `MechanicalController` that expands queries from known entities already in
   the retrieved context. No model endpoint, no network access.
-- The corpus is seeded into the bench DB via `memory_save` + `memory_graph_relate`
-  at the start of each run, with a fixed random seed for deterministic edges.
+- The corpus is seeded into the bench DB at the start of each run — snippets via the service `store` method, edges via `graph_relate`. There is no randomness: determinism comes from the fixed corpus literals (`CORPUS`/`DISTRACTORS`), so every run is reproducible.
 
 ## Arms
 
@@ -360,7 +359,7 @@ All commands from the repo root. No LLM endpoint required.
 # run the bench and write evals/results/memcot.json
 python evals/memcot_bench.py --run
 
-# print the seeded corpus (snippets + hop-class labels + graph edges)
+# print the eval questions (hop-class, question, and gold answer)
 python evals/memcot_bench.py --show-corpus
 
 # adjust retrieval width per iteration (default: 5)
@@ -406,3 +405,4 @@ loop+graph (A)        1.000        1.0     1.0     1.0     3.0    137.4    69.1
 - **Cost of arm A:** ≈ 3 iterations / 137 tok / 69 ms per query vs. baseline
   1 iter / 59 tok / 6 ms — roughly 2× tokens and 11× latency for a 3× recall
   gain on multi-hop corpora.
+- **1-hop cost reflects the unenforced gate.** Arm A runs the full hop-cap on every question, so even 1-hop lookups cost ~3 iterations — recall is not regressed, but the wasted cost on easy questions is exactly what a real (currently unenforced) gate would suppress.
