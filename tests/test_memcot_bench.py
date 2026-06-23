@@ -141,3 +141,34 @@ def test_hop_cap_is_respected():
                      mb.MechanicalController(), use_graph=True,
                      known_entities=known, hop_cap=1)
     assert st.iterations <= 1
+
+
+def test_gold_recovered_checks_assembled_context():
+    st = mb.LoopState(entities={"jvm-21"}, texts=["unrelated"])
+    assert mb.gold_recovered(st, "jvm-21") is True
+    assert mb.gold_recovered(st, "k8s-prod") is False
+
+
+def test_tokens_read_sums_assembled_context():
+    st = mb.LoopState(texts=["abcd" * 4], facts=["x=y"])  # 16 + 3 chars
+    assert mb.tokens_read(st) == mb.approx_tokens("abcd" * 4) + mb.approx_tokens("x=y")
+
+
+def test_would_gate_fires_on_thin_or_low_conf():
+    assert mb.would_gate(mb.LoopState(low_confidence=True, top_score=0.9)) is True
+    assert mb.would_gate(mb.LoopState(low_confidence=False, top_score=0.3)) is True
+    assert mb.would_gate(mb.LoopState(low_confidence=False, top_score=0.8)) is False
+
+
+def test_aggregate_buckets_by_hops_and_overall():
+    recs = [
+        {"hops": 1, "recovered": True, "iterations": 1, "tokens": 10, "latency_ms": 1.0},
+        {"hops": 2, "recovered": False, "iterations": 2, "tokens": 20, "latency_ms": 2.0},
+        {"hops": 2, "recovered": True, "iterations": 2, "tokens": 30, "latency_ms": 4.0},
+    ]
+    agg = mb.aggregate(recs)
+    assert agg["overall"]["n"] == 3
+    assert abs(agg["overall"]["recall"] - 2 / 3) < 1e-6
+    assert agg["by_hops"][2]["n"] == 2
+    assert abs(agg["by_hops"][2]["recall"] - 0.5) < 1e-6
+    assert agg["by_hops"][2]["mean_tokens"] == 25.0

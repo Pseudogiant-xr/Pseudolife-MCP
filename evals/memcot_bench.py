@@ -192,3 +192,53 @@ def run_loop(svc, question: str, controller: Controller, *, use_graph: bool,
             break
     state.latency_ms = (time.perf_counter() - t0) * 1000
     return state
+
+
+def run_baseline(svc, question: str, *, top_k: int = 5) -> LoopState:
+    """Single-shot search — the control arm."""
+    state = LoopState(iterations=1, queries_issued=1)
+    t0 = time.perf_counter()
+    res = svc.search(question, top_k=top_k)
+    state.low_confidence = bool(res.get("low_confidence"))
+    entries = res.get("entries", [])
+    state.top_score = float(entries[0]["score"]) if entries else 0.0
+    for e in entries:
+        txt = e.get("text", "")
+        if txt:
+            state.texts.append(txt)
+    state.latency_ms = (time.perf_counter() - t0) * 1000
+    return state
+
+
+def gold_recovered(state: LoopState, gold: str) -> bool:
+    return any(value_present(s, gold) for s in assembled_context(state))
+
+
+def tokens_read(state: LoopState) -> int:
+    return sum(approx_tokens(s) for s in assembled_context(state))
+
+
+def would_gate(state: LoopState, thin: float = 0.5) -> bool:
+    """Whether a shipped gate WOULD enter the loop (reported, not enforced)."""
+    return bool(state.low_confidence) or state.top_score < thin
+
+
+def _means(recs: list[dict]) -> dict:
+    n = len(recs)
+    if n == 0:
+        return {"n": 0, "recall": 0.0, "mean_iterations": 0.0,
+                "mean_tokens": 0.0, "mean_latency_ms": 0.0}
+    return {
+        "n": n,
+        "recall": sum(1 for r in recs if r["recovered"]) / n,
+        "mean_iterations": round(sum(r["iterations"] for r in recs) / n, 2),
+        "mean_tokens": round(sum(r["tokens"] for r in recs) / n, 1),
+        "mean_latency_ms": round(sum(r["latency_ms"] for r in recs) / n, 1),
+    }
+
+
+def aggregate(records: list[dict]) -> dict:
+    by_hops = {}
+    for h in sorted({r["hops"] for r in records}):
+        by_hops[h] = _means([r for r in records if r["hops"] == h])
+    return {"overall": _means(records), "by_hops": by_hops}
