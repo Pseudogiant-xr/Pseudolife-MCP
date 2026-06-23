@@ -8,6 +8,7 @@ docs/specs/2026-06-23-memcot-live-wiring-design.md.
 from __future__ import annotations
 
 import json  # noqa: E402
+import os  # noqa: E402
 import re
 import urllib.request  # noqa: E402
 from dataclasses import dataclass, field
@@ -130,7 +131,7 @@ def _parse_name_list(raw: str) -> list[str]:
         arr = json.loads(raw[start:end + 1])
     except Exception:
         return []
-    return [str(x) for x in arr if isinstance(x, str)]
+    return [x for x in arr if isinstance(x, str)]
 
 
 def _seed_prompt(query: str, hits: list[str], vocab: list[str]) -> str:
@@ -167,26 +168,25 @@ class LLMController:
 def simple_complete(dream_cfg, prompt: str) -> str:
     """Minimal OpenAI-compatible /chat/completions call using the dream
     extractor endpoint. Returns "" on any failure (caller treats as no seeds)."""
-    import os
-    base = (os.environ.get("PSEUDOLIFE_DREAM_BASE_URL")
-            or dream_cfg.extractor_base_url)
-    model = os.environ.get("PSEUDOLIFE_DREAM_MODEL") or dream_cfg.extractor_model
-    if not base or not model:
-        return ""
-    key = os.environ.get("PSEUDOLIFE_DREAM_API_KEY") or dream_cfg.extractor_api_key
-    body = json.dumps({
-        "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.0,
-        "max_tokens": 256,
-        "stream": False,
-    }).encode()
-    headers = {"Content-Type": "application/json"}
-    if key:
-        headers["Authorization"] = f"Bearer {key}"
-    req = urllib.request.Request(base.rstrip("/") + "/chat/completions",
-                                 data=body, headers=headers, method="POST")
     try:
+        base = (os.environ.get("PSEUDOLIFE_DREAM_BASE_URL")
+                or dream_cfg.extractor_base_url)
+        model = os.environ.get("PSEUDOLIFE_DREAM_MODEL") or dream_cfg.extractor_model
+        if not base or not model:
+            return ""
+        key = os.environ.get("PSEUDOLIFE_DREAM_API_KEY") or dream_cfg.extractor_api_key
+        body = json.dumps({
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.0,
+            "max_tokens": 256,
+            "stream": False,
+        }).encode()
+        headers = {"Content-Type": "application/json"}
+        if key:
+            headers["Authorization"] = f"Bearer {key}"
+        req = urllib.request.Request(base.rstrip("/") + "/chat/completions",
+                                     data=body, headers=headers, method="POST")
         with urllib.request.urlopen(req, timeout=30.0) as resp:
             data = json.loads(resp.read())
         return data["choices"][0]["message"]["content"] or ""
