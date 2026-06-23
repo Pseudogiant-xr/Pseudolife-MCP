@@ -77,3 +77,27 @@ def test_run_recall_respects_max_entities():
                        "what does alpha run on", rc.MechanicalController(),
                        max_entities=1)
     assert len(st.entities) <= 1
+
+
+def test_llm_controller_seeds_from_completion_filtered_to_vocab():
+    calls = {}
+
+    def fake_complete(prompt):
+        calls["prompt"] = prompt
+        return '["alpha", "not-in-vocab"]'
+
+    c = rc.LLMController(fake_complete)
+    seeds = c.seed_entities("which thing runs alpha",
+                            ["alpha depends-on beta"], ["alpha", "beta", "gamma"])
+    assert seeds == ["alpha"]            # not-in-vocab dropped
+    assert "alpha" in calls["prompt"]    # vocab/query passed to the model
+
+
+def test_llm_controller_next_queries_match_mechanical():
+    c = rc.LLMController(lambda p: "[]")
+    assert c.next_queries("q", ["beta"]) == ["q beta"]
+
+
+def test_parse_name_list_tolerates_noise():
+    assert rc._parse_name_list('junk ["a", "b"] trailing') == ["a", "b"]
+    assert rc._parse_name_list("not json at all") == []
