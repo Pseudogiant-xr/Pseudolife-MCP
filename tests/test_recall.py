@@ -153,3 +153,18 @@ def test_recall_low_confidence_when_query_names_no_entity(tmp_path):
     out = svc.recall("what is the airspeed velocity of an unladen swallow?")
     assert out["low_confidence"] is True
     assert out["entities"] == []
+
+
+@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
+def test_memory_recall_tool_delegates(monkeypatch, tmp_path):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
+    from ladder_sweep import build_service
+    import pseudolife_memory.mcp_server as srv
+    svc = build_service(tmp_path)
+    svc.store("web-portal uses the gateway-proxy for calls.", source="bench")
+    svc.store("the gateway-proxy is deployed on the edge-cluster.", source="bench")
+    svc.graph_relate("web-portal", "uses", "gateway-proxy")
+    svc.graph_relate("gateway-proxy", "runs-on", "edge-cluster")
+    monkeypatch.setattr(srv, "service", svc, raising=False)
+    out = srv.memory_recall("what does web-portal run on?")
+    assert "edge-cluster" in {n["entity"] for n in out["entities"]}

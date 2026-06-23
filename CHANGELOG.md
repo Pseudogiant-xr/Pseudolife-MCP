@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased] — graph foundation
 
+### Added
+- **`memory_recall`** — read-only multi-hop graph-traversal retrieval (MemCoT
+  loop). Seeds from the query, walks the knowledge graph up to `hops`
+  iterations (max 5), and returns entities, edges, paths, and supporting texts.
+  Mechanical seed driver by default (deterministic, no LLM call); set
+  `PSEUDOLIFE_RECALL_DRIVER=llm` to use the dream endpoint for seed resolution.
+  `low_confidence: true` signals no seed matched — fall back to `memory_search`.
+
 ### Changed
 - Graph layer: single source of truth (Postgres `entities` hub + NetworkX
   read-model) behind a swappable `GraphStore` port. Apache AGE removed.

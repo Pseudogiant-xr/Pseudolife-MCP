@@ -1106,6 +1106,34 @@ def memory_graph(
 
 
 @mcp.tool()
+def memory_recall(query: str, hops: int = 3, top_k: int = 5) -> dict[str, Any]:
+    """Multi-hop retrieval: follow the knowledge graph to answer RELATIONAL
+    questions that single-shot ``memory_search`` can't (it returns flat
+    similarity, not chains).
+
+    Use ``memory_recall`` for questions whose answer is reached by following
+    links — "what does X ultimately run on?", "where does Y's data end up?",
+    "what is X connected to?", "how does A reach C?". Use ``memory_search`` for
+    direct lookups ("what is X's port?").
+
+    It searches for a seed entity, walks its graph neighbourhood one hop per
+    iteration (up to ``hops``, max 5), and gathers the bridging entities, facts,
+    edges, and paths. Read-only — it never writes.
+
+    Returns ``seeds``, ``entities`` (each with current facts), ``edges`` (with a
+    ``derived`` flag for inferred transitive/inverse links), ``paths``, the
+    supporting ``texts``, and ``iterations``. ``low_confidence: true`` means no
+    seed entity matched the query — fall back to ``memory_search``.
+
+    Args:
+        query: A natural-language relational question.
+        hops: Max graph hops / iterations (default 3, capped at 5).
+        top_k: Results per internal search (default 5).
+    """
+    return service.recall(query, hops=hops, top_k=top_k)
+
+
+@mcp.tool()
 def memory_relation_define(
     name: str,
     description: str,

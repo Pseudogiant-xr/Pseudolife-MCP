@@ -82,6 +82,7 @@ each session.
 | `memory_graph_unrelate(src, relation, dst)` | Retract an edge (superseded, kept for audit) |
 | `memory_alias(entity, alias)` | Bind an alternative name — all fact/graph lookups resolve aliases first |
 | `memory_graph(entity, depth?, include_facts?, to?)` | Entity neighborhood (≤3 hops): nodes + facts + edges, with transitive/inverse edges derived on read |
+| `memory_recall(query, hops?, top_k?)` | Multi-hop retrieval: seed from graph, follow edges up to `hops` iterations; returns entities, edges, paths, texts; `low_confidence: true` → fall back to `memory_search` |
 | `memory_relation_define(name, description, transitive?, inverse_of?, src_type?, dst_type?)` | Grow the closed relation vocabulary (deliberate, strong-model act) |
 | `memory_stats()` | Per-band sizes, hit rates, totals |
 | `memory_save()` | Flush CMS tensors to disk |
@@ -138,6 +139,39 @@ multi-hop queries (neighborhood + derived/inverse edges + shortest path).
 `memory_store`, `memory_fact_get`/`memory_fact_set`, `memory_graph`,
 and `memory_graph_relate`. Do NOT expose `memory_relation_define`,
 `memory_delete`, or `memory_fact_forget`.
+
+### memory_recall (multi-hop retrieval)
+
+`memory_recall(query, hops=3, top_k=5)` answers **relational questions**
+by iteratively following the knowledge graph — things `memory_search`
+can't do with a single flat similarity pass.
+
+**When to use it vs `memory_search`:**
+
+- Use `memory_recall` for chain-of-links questions: "what does X ultimately
+  run on?", "where does Y's data end up?", "how does A reach C?".
+- Use `memory_search` for direct lookups: "what is X's port?", "what did I
+  decide about Y?" — those are flat similarity queries and `memory_search` is
+  faster and simpler.
+
+**How it works.** `memory_recall` searches for a seed entity in the query,
+then walks its graph neighbourhood one hop per iteration (up to `hops`,
+capped at 5), accumulating bridging entities, facts, edges, and paths. It is
+**read-only** — it never writes to the bank or the graph.
+
+**Return shape:**
+`seeds`, `entities` (each with current canonical facts), `edges` (with a
+`derived` flag for inferred transitive/inverse links), `paths`, supporting
+`texts`, and `iterations`.
+
+**`low_confidence: true`** means no seed entity matched the query — the graph
+had no starting point. In that case fall back to `memory_search`.
+
+**Driver config.** By default `memory_recall` uses the **mechanical** seed
+driver (token-intersection heuristic — no LLM call, deterministic, fast).
+Set `PSEUDOLIFE_RECALL_DRIVER=llm` to use the dream endpoint for seed
+resolution (better recall on ambiguous entity names; requires the dream
+extractor to be configured).
 
 ## Install — containerized (recommended, any OS)
 
