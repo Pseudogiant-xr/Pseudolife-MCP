@@ -1,0 +1,34 @@
+{
+  "v0": {
+    "seed_precision": 0.262,
+    "seed_recall": 1.0,
+    "answer_recall": 1.0,
+    "mean_entities": 11.25,
+    "mean_graph_calls": 11.25,
+    "mean_latency_ms": 73.5
+  },
+  "A": {
+    "seed_precision": 1.0,
+    "seed_recall": 1.0,
+    "answer_recall": 1.0,
+    "mean_entities": 2.75,
+    "mean_graph_calls": 2.75,
+    "mean_latency_ms": 24.1
+  },
+  "A+B": {
+    "seed_precision": 1.0,
+    "seed_recall": 1.0,
+    "answer_recall": 1.0,
+    "mean_entities": 2.75,
+    "mean_graph_calls": 2.75,
+    "mean_latency_ms": 22.9
+  },
+  "C": {
+    "seed_precision": 0.75,
+    "seed_recall": 1.0,
+    "answer_recall": 1.0,
+    "mean_entities": 4.25,
+    "mean_graph_calls": 4.25,
+    "mean_latency_ms": 31.2
+  }
+}
