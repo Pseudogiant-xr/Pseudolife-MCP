@@ -313,3 +313,96 @@ a regime mismatch, not a tunable bug. Full analysis:
 The harness depends on the (now-removed) band MLP, so it lives on the
 **`archive/neural-memory-titans`** branch alongside the neural machinery; it's
 not runnable against the v0.5 cosine bands on `master`.
+
+---
+
+# MemCoT retrieval-loop bench (`memcot_bench.py`)
+
+Dev-only harness that asks: **does an iterative retrieval loop unlock multi-hop
+recall, and does graph traversal do the real work?** It runs a fixed 9-question
+multi-hop corpus through three arms and isolates two attribution deltas —
+lift from looping alone (arm B − baseline) and lift from adding graph traversal
+(arm A − B).
+
+This is **not** part of the test suite or the shipped package. It informs the
+decision of whether a MemCoT retrieval loop (and the graph edge path in
+particular) should become part of the default query path.
+
+## Isolation & safety
+
+- Runs against a dedicated **`pseudolife_memory_bench`** database (created if
+  missing, seeded fresh on each run). The live bank (`pseudolife_memory`) is
+  **never** touched.
+- Forces **CPU** (`CUDA_VISIBLE_DEVICES=-1`) for the embedder; no GPU is used.
+- Requires **no served LLM** — the loop controller is a deterministic
+  `MechanicalController` that expands queries from known entities already in
+  the retrieved context. No model endpoint, no network access.
+- The corpus is seeded into the bench DB via `memory_save` + `memory_graph_relate`
+  at the start of each run, with a fixed random seed for deterministic edges.
+
+## Arms
+
+| arm | description |
+|-----|-------------|
+| `baseline` | Single-shot `memory_search` — one query, no loop, no graph. |
+| `loop-no-graph` (B) | Iterative loop: re-queries with expanded terms, but expands only via vector search (no graph edges). |
+| `loop+graph` (A) | Iterative loop: expansion uses **graph edges** (`memory_graph`) to traverse to related entities before re-querying. |
+
+**Attribution deltas:**
+- `lift_from_looping` = arm B − baseline (benefit of re-querying alone)
+- `lift_from_graph` = arm A − arm B (additional benefit of graph traversal)
+
+## Running
+
+All commands from the repo root. No LLM endpoint required.
+
+```bash
+# run the bench and write evals/results/memcot.json
+python evals/memcot_bench.py --run
+
+# print the seeded corpus (snippets + hop-class labels + graph edges)
+python evals/memcot_bench.py --show-corpus
+
+# adjust retrieval width per iteration (default: 5)
+python evals/memcot_bench.py --run --top-k 3
+
+# cap the number of loop iterations per query (default: 3)
+python evals/memcot_bench.py --run --hop-cap 2
+```
+
+Results are written to `evals/results/memcot.json` with keys `baseline`,
+`loop_no_graph`, `loop_graph`, `lift_from_looping`, `lift_from_graph`.
+
+## Findings — 2026-06-23
+
+```
+arm              overall recall   1-hop   2-hop   3-hop   iters   tok/q   ms/q
+baseline              0.333        1.0     0.0     0.0     1.0     59.1     6.0
+loop-no-graph (B)     0.444        1.0     0.25    0.0     2.44   113.2    29.7
+loop+graph (A)        1.000        1.0     1.0     1.0     3.0    137.4    69.1
+```
+
+**Attribution:**
+- `lift_from_looping` (B − baseline) = **+0.111** — re-querying alone recovers
+  some 2-hop questions but fails entirely on 3-hop.
+- `lift_from_graph` (A − B) = **+0.556** — graph traversal is where almost all
+  the lift comes from; it is the mechanism that closes 2-hop and 3-hop recall.
+
+**Key findings:**
+
+- **Single-shot retrieval cannot do multi-hop.** It recovers only 1-hop
+  questions (recall 1.0) and fails completely on 2-hop and 3-hop (recall 0.0).
+- **The graph traversal — not mere re-querying — is what unlocks multi-hop.**
+  The lift is heavily concentrated in A − B (+0.556) versus B − baseline
+  (+0.111). Looping without graph edges gets partial 2-hop credit but still
+  misses 3-hop entirely.
+- **No 1-hop regression.** All three arms achieve recall 1.0 on 1-hop
+  questions — the loop and graph path introduce no degradation on simple queries.
+- **A confidence gate alone cannot trigger the loop.** `gate_would_fire = 0/9`:
+  the confidence heuristic never fires on multi-hop questions because
+  single-shot returns high-scoring *distractors* confidently. A confidence-only
+  signal is insufficient to decide when to loop; structural signals (hop-class
+  or explicit entity-link structure) are needed.
+- **Cost of arm A:** ≈ 3 iterations / 137 tok / 69 ms per query vs. baseline
+  1 iter / 59 tok / 6 ms — roughly 2× tokens and 11× latency for a 3× recall
+  gain on multi-hop corpora.
