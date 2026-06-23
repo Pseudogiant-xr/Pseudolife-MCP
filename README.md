@@ -327,8 +327,11 @@ Connection / deployment env vars:
 
 The built-in defaults are tuned for Claude's use case:
 
-- **Surprise threshold `0.2`** — Claude stores deliberately, so the gate
-  doesn't need to be aggressive.
+- **Surprise threshold `0.0`** — the v0.5 store gate measures *novelty*
+  (`1 − max cos` to existing entries). Claude stores deliberately, so the
+  gate stays permissive (store everything; novelty still drives
+  eviction/promotion scoring). Raise it above zero to dedup near-duplicate
+  stores.
 - **Meta-filter off** (`memory.meta_filter.enabled = false` in the MCP
   build) — the filter exists to drop auto-captured chat noise ("I don't
   have anything saved about that"); every MCP store is a deliberate tool
@@ -731,12 +734,14 @@ supersession log records the writer/session too.
 > for a future multi-process writer; selecting it raises `NotImplementedError`
 > until that Phase-2 path is built.
 >
-> **Collision fix (v0.4).** The DB role is `pseudolife`; the old AGE graph was
-> also named `pseudolife`, which caused AGE to create a `pseudolife` schema that
-> shadowed the real `public` bank. The graph identifier is now `pseudolife_graph`,
-> every connection pins `search_path` to `public`, and a guarded, backup-first
-> migration (`ops/migrate_v04.py`) renames any legacy graph and drops shadow
-> tables. `ops/retire_by_writer.py` supersedes a rogue writer's rows in one shot.
+> **Collision fix (v0.4) + AGE removal.** The DB role is `pseudolife`; the old
+> Apache AGE graph was also named `pseudolife`, which made AGE create a
+> `pseudolife` schema that shadowed the real `public` bank. AGE has since been
+> removed entirely — edges live in the relational `edges` table (the source of
+> truth), so the collision can no longer recur. `ops/migrate_drop_age.py` drops
+> the AGE graph + extension from an existing bank (back up first), and every
+> connection still pins `search_path` to `public` (asserted on startup).
+> `ops/retire_by_writer.py` supersedes a rogue writer's rows in one shot.
 
 ## Dreaming — consolidating memories into facts
 
@@ -816,7 +821,7 @@ Everything lives under `PSEUDOLIFE_MCP_DATA_DIR`:
 data/
 ├── memory_state/
 │   └── cms_state.pt        # 8-tier MIRAS entries + metadata (file mode)
-├── cortex_state.pt         # Slot-keyed canonical facts (cortex, schema v7)
+├── cortex_state.pt         # Slot-keyed canonical facts (cortex, schema v8)
 ├── chromadb/               # Reference bank (RAG documents)
 └── config.yaml             # Optional overrides
 ```

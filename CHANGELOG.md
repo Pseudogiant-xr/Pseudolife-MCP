@@ -27,7 +27,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `memory_graph_query` (raw read-only Cypher) MCP tool and the `pseudolife-mcp
   age-sync` CLI mode. Multi-hop queries are served by `memory_graph`
   (neighborhood + derived/inverse edges + shortest path). The Postgres image no
-  longer requires the Apache AGE extension.
+  longer requires the Apache AGE extension. Run `ops/migrate_drop_age.py` once
+  (back up first) to drop the AGE graph + extension from an existing bank — it
+  supersedes the v0.4 `ops/migrate_v04.py` collision-fix migration.
 
 ## [0.5.1] — dream resilience
 
@@ -108,9 +110,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   is laid for a future multi-process writer (Phase 2; raises `NotImplementedError`).
   **Collision fix:** the AGE graph is renamed off the DB role name
   (`pseudolife` → `pseudolife_graph`), every connection pins `search_path` to
-  `public`, and a guarded backup-first migration (`ops/migrate_v04.py`) renames
-  legacy graphs + drops shadow tables. `ops/retire_by_writer.py` supersedes a
-  rogue writer's rows. Design + plan:
+  `public`, and a guarded backup-first migration (`ops/migrate_v04.py`, later
+  superseded by `ops/migrate_drop_age.py` when AGE was removed) renames legacy
+  graphs + drops shadow tables. `ops/retire_by_writer.py` supersedes a rogue
+  writer's rows. Design + plan:
   `docs/specs/2026-06-21-writer-aware-temporal-memory-{design,plan}.md`.
 - **Procedural / outcome memory — "lessons" (schema v10).** A fourth memory
   layer beside the personal and world cortex that learns from the agent's *own
