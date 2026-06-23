@@ -393,6 +393,20 @@ class MetaFilterConfig:
 
 
 @dataclass
+class RecallConfig:
+    """memory_recall — live MemCoT iterative retrieval (read-only).
+
+    ``driver`` selects seed resolution: "mechanical" (word-match vocab; default,
+    no model) or "llm" (the dream extractor names seeds). Env override:
+    ``PSEUDOLIFE_RECALL_DRIVER``.
+    """
+    driver: str = "mechanical"
+    default_hops: int = 3
+    default_top_k: int = 5
+    max_entities: int = 50
+
+
+@dataclass
 class MemoryConfig:
     embedding_dim: int = 384
     # Legacy Hopfield config (kept for fallback)
@@ -428,6 +442,8 @@ class MemoryConfig:
     cortex: CortexConfig = field(default_factory=CortexConfig)
     # Procedural / outcome memory — lessons store (schema v10).
     lessons: LessonsConfig = field(default_factory=LessonsConfig)
+    # memory_recall — live MemCoT iterative retrieval (read-only).
+    recall: RecallConfig = field(default_factory=RecallConfig)
     # Meta-statement filter on the store path (off in the MCP build).
     meta_filter: MetaFilterConfig = field(default_factory=MetaFilterConfig)
     # Base recency half-life at band depth 0; doubles per depth.

@@ -2384,3 +2384,59 @@ class MemoryService:
                 result["to_not_found"] = to_missing
             return result
 
+    def _recall_vocab(self) -> list[str]:
+        """Live entity vocabulary (display names + aliases) for seed matching.
+        Short locked read; released before the lock-free recall loop."""
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return []
+            g = self._storage.load_graph()
+        names: list[str] = [e["display"] for e in g.get("entities", [])]
+        for al in g.get("aliases", {}).values():
+            names.extend(al)
+        return list(dict.fromkeys(n for n in names if n))
+
+    def recall(self, query: str, hops: int | None = None,
+               top_k: int | None = None, driver: str | None = None) -> dict[str, Any]:
+        """Read-only multi-hop retrieval: search → graph-expand → re-query.
+
+        Composes the public ``search`` + ``graph_neighborhood`` (each manages the
+        lock); ``recall`` holds no lock itself. Returns the bridging
+        edges/facts/paths single-shot search can't produce. ``low_confidence`` is
+        True when no seed entity resolves (caller falls back to ``search``)."""
+        from pseudolife_memory.memory.recall import (
+            LLMController, MechanicalController, run_recall, simple_complete,
+        )
+        cfg = self.config.memory.recall
+        hops = cfg.default_hops if hops is None else max(1, min(int(hops), 5))
+        top_k = cfg.default_top_k if top_k is None else int(top_k)
+        driver = driver or os.environ.get("PSEUDOLIFE_RECALL_DRIVER", cfg.driver)
+        query = (query or "").strip()
+        if not query:
+            return {"query": "", "seeds": [], "entities": [], "edges": [],
+                    "paths": [], "texts": [], "iterations": 0, "hops": hops,
+                    "low_confidence": True}
+        vocab = self._recall_vocab()
+        if driver == "llm":
+            dcfg = self.config.memory.dream
+            controller = LLMController(lambda p: simple_complete(dcfg, p))
+        else:
+            controller = MechanicalController()
+        state = run_recall(
+            self.search, self.graph_neighborhood, vocab, query, controller,
+            hops=hops, top_k=top_k, max_entities=cfg.max_entities,
+        )
+        return {
+            "query": query,
+            "seeds": state.seeds,
+            "entities": [{"entity": n, "facts": state.entity_facts.get(n, [])}
+                         for n in state.entities],
+            "edges": state.edges,
+            "paths": state.paths,
+            "texts": state.texts,
+            "iterations": state.iterations,
+            "hops": hops,
+            "low_confidence": state.low_confidence,
+        }
+

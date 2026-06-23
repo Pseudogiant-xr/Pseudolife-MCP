@@ -1,5 +1,8 @@
+import os
 import sys
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from pseudolife_memory.memory import recall as rc  # noqa: E402
@@ -101,3 +104,52 @@ def test_llm_controller_next_queries_match_mechanical():
 def test_parse_name_list_tolerates_noise():
     assert rc._parse_name_list('junk ["a", "b"] trailing') == ["a", "b"]
     assert rc._parse_name_list("not json at all") == []
+
+
+# ---------------------------------------------------------------------------
+# PG-backed integration tests (require bench Postgres on 127.0.0.1:5433)
+# ---------------------------------------------------------------------------
+
+_ADMIN = os.environ.get(
+    "PSEUDOLIFE_BENCH_ADMIN_URL",
+    "postgresql://pseudolife:pseudolife@127.0.0.1:5433/postgres",
+)
+
+
+def _pg_up() -> bool:
+    try:
+        import psycopg
+        with psycopg.connect(_ADMIN, connect_timeout=3):
+            return True
+    except Exception:
+        return False
+
+
+@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
+def test_recall_bridges_two_hop_on_real_service(tmp_path):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
+    from ladder_sweep import build_service  # reuse isolated bench DB
+    svc = build_service(tmp_path)
+    svc.store("checkout-svc depends on the billing-lib package.", source="bench")
+    svc.store("billing-lib is compiled against the jdk-21 toolchain.", source="bench")
+    assert not svc.graph_relate("checkout-svc", "depends-on", "billing-lib").get("error")
+    assert not svc.graph_relate("billing-lib", "runs-on", "jdk-21").get("error")
+
+    out = svc.recall("what does checkout-svc run on?")
+    assert out["low_confidence"] is False
+    assert "checkout-svc" in out["seeds"]
+    visited = {n["entity"] for n in out["entities"]}
+    assert "jdk-21" in visited                       # bridged 2 hops via graph
+    assert any(e["dst"] == "jdk-21" for e in out["edges"])
+
+
+@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
+def test_recall_low_confidence_when_query_names_no_entity(tmp_path):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
+    from ladder_sweep import build_service
+    svc = build_service(tmp_path)
+    svc.store("checkout-svc depends on the billing-lib package.", source="bench")
+    svc.graph_relate("checkout-svc", "depends-on", "billing-lib")
+    out = svc.recall("what is the airspeed velocity of an unladen swallow?")
+    assert out["low_confidence"] is True
+    assert out["entities"] == []
