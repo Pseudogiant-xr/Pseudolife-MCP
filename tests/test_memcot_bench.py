@@ -1,6 +1,9 @@
+import os
 import re
 import sys
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
 import memcot_bench as mb  # noqa: E402
@@ -172,3 +175,33 @@ def test_aggregate_buckets_by_hops_and_overall():
     assert agg["by_hops"][2]["n"] == 2
     assert abs(agg["by_hops"][2]["recall"] - 0.5) < 1e-6
     assert agg["by_hops"][2]["mean_tokens"] == 25.0
+
+
+_BENCH_PG = os.environ.get(
+    "PSEUDOLIFE_BENCH_ADMIN_URL",
+    "postgresql://pseudolife:pseudolife@127.0.0.1:5433/postgres",
+)
+
+
+def _pg_reachable() -> bool:
+    try:
+        import psycopg
+        with psycopg.connect(_BENCH_PG, connect_timeout=3):
+            return True
+    except Exception:
+        return False
+
+
+@pytest.mark.skipif(not _pg_reachable(), reason="bench Postgres not reachable")
+def test_run_all_arm_graph_beats_baseline_on_a_two_hop_case():
+    import tempfile
+    from ladder_sweep import build_service
+    with tempfile.TemporaryDirectory(prefix="plmemcot_", ignore_cleanup_errors=True) as td:
+        svc = mb.build_service(Path(td)) if hasattr(mb, "build_service") else build_service(Path(td))
+        mb.seed_bench(svc)
+        results = mb.run_all(svc)
+    # structural
+    for arm in ("baseline", "loop_no_graph", "loop_graph"):
+        assert "overall" in results[arm]
+    # core hypothesis smoke: graph loop recall >= baseline overall
+    assert results["loop_graph"]["overall"]["recall"] >= results["baseline"]["overall"]["recall"]

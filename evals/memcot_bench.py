@@ -242,3 +242,113 @@ def aggregate(records: list[dict]) -> dict:
     for h in sorted({r["hops"] for r in records}):
         by_hops[h] = _means([r for r in records if r["hops"] == h])
     return {"overall": _means(records), "by_hops": by_hops}
+
+
+# ---------------------------------------------------------------------------
+# Real-service layer: seed, run, report, main
+# ---------------------------------------------------------------------------
+import json  # noqa: E402
+
+RESULTS_DIR = Path(__file__).resolve().parent / "results"
+
+
+def seed_bench(svc) -> None:
+    """Ingest snippets + distractors as memories AND seed the graph edges."""
+    for rec in CORPUS:
+        svc.store(rec["snippet"], source="bench")
+    for d in DISTRACTORS:
+        svc.store(d, source="bench")
+    for rec in CORPUS:
+        for (src, rel, dst) in rec["edges"]:
+            out = svc.graph_relate(src, rel, dst, origin="bench")
+            if out.get("error"):
+                raise RuntimeError(f"seed edge failed: {src} {rel} {dst}: {out}")
+
+
+def run_all(svc, *, top_k: int = 5, hop_cap: int = 3) -> dict:
+    base_recs, b_recs, a_recs = [], [], []
+    gate_fire = 0
+    for q in QUESTIONS:
+        question, gold, hops = q["question"], q["gold"], q["hops"]
+        base = run_baseline(svc, question, top_k=top_k)
+        if would_gate(base):
+            gate_fire += 1
+        b = run_loop(svc, question, MechanicalController(), use_graph=False,
+                     known_entities=KNOWN_ENTITIES, hop_cap=hop_cap, top_k=top_k)
+        a = run_loop(svc, question, MechanicalController(), use_graph=True,
+                     known_entities=KNOWN_ENTITIES, hop_cap=hop_cap, top_k=top_k)
+        for st, sink in ((base, base_recs), (b, b_recs), (a, a_recs)):
+            sink.append({"hops": hops, "recovered": gold_recovered(st, gold),
+                         "iterations": st.iterations, "tokens": tokens_read(st),
+                         "latency_ms": st.latency_ms})
+    base_agg = aggregate(base_recs)
+    b_agg = aggregate(b_recs)
+    a_agg = aggregate(a_recs)
+    return {
+        "baseline": base_agg, "loop_no_graph": b_agg, "loop_graph": a_agg,
+        "gate_would_fire": gate_fire, "questions": len(QUESTIONS),
+        "lift_from_looping": round(
+            b_agg["overall"]["recall"] - base_agg["overall"]["recall"], 3),
+        "lift_from_graph": round(
+            a_agg["overall"]["recall"] - b_agg["overall"]["recall"], 3),
+    }
+
+
+def report(results: dict) -> None:
+    arms = [("baseline", "single-shot search"),
+            ("loop_no_graph", "loop, no graph (B)"),
+            ("loop_graph", "loop + graph (A)")]
+    hdr = f"{'arm':<24}{'recall':>8}{'iters':>7}{'tok/q':>8}{'lat ms':>8}"
+    print("\n" + hdr)
+    print("-" * len(hdr))
+    for key, label in arms:
+        o = results[key]["overall"]
+        print(f"{label:<24}{o['recall']:>8}{o['mean_iterations']:>7}"
+              f"{o['mean_tokens']:>8}{o['mean_latency_ms']:>8}")
+    print("\nby hop-class (recall):")
+    print(f"{'arm':<24}{'1-hop':>8}{'2-hop':>8}{'3-hop':>8}")
+    for key, label in arms:
+        bh = results[key]["by_hops"]
+        cells = "".join(f"{bh.get(h, {}).get('recall', '—'):>8}" for h in (1, 2, 3))
+        print(f"{label:<24}{cells}")
+    print(f"\nlift_from_looping (B - baseline): {results['lift_from_looping']}")
+    print(f"lift_from_graph   (A - B):        {results['lift_from_graph']}")
+    print(f"gate would fire on {results['gate_would_fire']}/{results['questions']} "
+          f"questions")
+
+
+def main() -> int:
+    import argparse
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--run", action="store_true", help="run all three arms")
+    ap.add_argument("--show-corpus", action="store_true")
+    ap.add_argument("--top-k", type=int, default=5)
+    ap.add_argument("--hop-cap", type=int, default=3)
+    args = ap.parse_args()
+
+    if args.show_corpus:
+        for q in QUESTIONS:
+            print(f"  [{q['hops']}-hop] {q['question']}  -> {q['gold']}")
+        return 0
+    if args.run:
+        import tempfile
+        from ladder_sweep import build_service
+        RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="plmemcot_",
+                                         ignore_cleanup_errors=True) as td:
+            svc = build_service(Path(td))
+            seed_bench(svc)
+            results = run_all(svc, top_k=args.top_k, hop_cap=args.hop_cap)
+        (RESULTS_DIR / "memcot.json").write_text(json.dumps(results, indent=2))
+        report(results)
+        return 0
+    ap.print_help()
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
