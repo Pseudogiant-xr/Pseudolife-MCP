@@ -6,3 +6,8 @@
 # graph is now the Postgres `entities` hub + NetworkX derive-on-read behind the
 # GraphStore port — no Cypher/AGE dependency, so the heavy AGE base is gone.
 FROM pgvector/pgvector:pg16
+
+# Patch base-image OS packages (security: perl / libsqlite3 / ncurses / ...).
+# Only updates Debian libraries — the Postgres server, the pgvector extension,
+# and the data (which lives in the external volume, not the image) are untouched.
+RUN apt-get update && apt-get -y upgrade && rm -rf /var/lib/apt/lists/*

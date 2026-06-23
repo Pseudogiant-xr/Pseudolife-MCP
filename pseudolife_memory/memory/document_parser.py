@@ -40,7 +40,7 @@ def extract_text(path: Path) -> str:
 
 
 def _extract_pdf(path: Path) -> str:
-    """Extract text from PDF using PyMuPDF (fitz) or PyPDF2 as fallback."""
+    """Extract text from PDF using PyMuPDF (fitz) or pypdf as fallback."""
     # Try PyMuPDF first (better extraction quality)
     try:
         import fitz  # PyMuPDF
@@ -53,14 +53,14 @@ def _extract_pdf(path: Path) -> str:
     except ImportError:
         pass
 
-    # Fall back to PyPDF2
+    # Fall back to pypdf (maintained successor to PyPDF2; same PdfReader API)
     try:
-        from PyPDF2 import PdfReader
+        from pypdf import PdfReader
         reader = PdfReader(str(path))
         pages = [page.extract_text() or "" for page in reader.pages]
         return "\n\n".join(pages)
     except ImportError:
-        raise ValueError("No PDF library available. Install PyMuPDF or PyPDF2.")
+        raise ValueError("No PDF library available. Install PyMuPDF or pypdf.")
     except Exception as e:
         raise ValueError(f"Failed to read PDF: {e}")
 

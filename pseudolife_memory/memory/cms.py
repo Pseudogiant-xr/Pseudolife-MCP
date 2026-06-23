@@ -1261,7 +1261,9 @@ class ContinuumMemorySystem:
                 self._load_legacy_hopfield(legacy_path)
             return
 
-        state = torch.load(state_path, weights_only=False, map_location="cpu")
+        # weights_only=True: the CMS snapshot is tensors + plain containers, so
+        # the safe loader handles it without unpickling arbitrary objects (CWE-502).
+        state = torch.load(state_path, weights_only=True, map_location="cpu")
         schema_version = state.get("schema_version", 1)
 
         if schema_version == 1:
@@ -1367,7 +1369,7 @@ class ContinuumMemorySystem:
         fresh init.
         """
         try:
-            state = torch.load(path, weights_only=False, map_location="cpu")
+            state = torch.load(path, weights_only=True, map_location="cpu")
             first_band = self.bands[0]
             last_band = self.bands[-1]
 

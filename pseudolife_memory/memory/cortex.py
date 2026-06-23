@@ -641,8 +641,10 @@ class CortexStore:
         if not path.exists():
             return
         try:
-            state = torch.load(str(path), weights_only=False)
-        except TypeError:  # older torch without the kwarg
+            # weights_only=True: cortex snapshot is tensors + plain containers;
+            # never unpickle arbitrary objects from a possibly-tampered .pt (CWE-502).
+            state = torch.load(str(path), weights_only=True)
+        except TypeError:  # older torch without the kwarg (defaults to safe in 2.6+)
             state = torch.load(str(path))
         self.supersede_confidence_margin = state.get(
             "supersede_confidence_margin", self.supersede_confidence_margin,

@@ -41,12 +41,14 @@ def atomic_torch_save(obj: Any, path: str | Path) -> None:
 
 
 def _load_one(path: Path) -> Any:
-    """``weights_only=True`` first (no arbitrary pickle execution); fall
-    back to a full unpickle for legacy saves containing non-tensor types."""
-    try:
-        return torch.load(path, map_location="cpu", weights_only=True)
-    except Exception:  # noqa: BLE001
-        return torch.load(path, map_location="cpu", weights_only=False)
+    """Load with ``weights_only=True`` ONLY — never fall back to a full
+    unpickle (CWE-502). The weights file holds tensors + plain counters, which
+    the safe loader fully supports, so a file that fails it is treated as
+    corrupt (caller resets to fresh weights; entries live in Postgres, so no
+    data loss) rather than risking arbitrary-code execution from a tampered
+    ``.pt``. The previous ``weights_only=False`` fallback turned any load
+    failure into an unpickle of attacker-controllable bytes."""
+    return torch.load(path, map_location="cpu", weights_only=True)
 
 
 def load_with_backup(path: str | Path) -> tuple[Any, bool]:

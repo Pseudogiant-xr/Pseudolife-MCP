@@ -71,6 +71,7 @@ def test_all_tools_registered() -> None:
         "memory_graph_unrelate",
         "memory_alias",
         "memory_graph",
+        "memory_recall",
         "memory_relation_define",
     ])
 

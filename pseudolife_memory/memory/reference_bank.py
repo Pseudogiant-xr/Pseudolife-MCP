@@ -43,7 +43,7 @@ def _read_file(path: Path) -> str:
         suffix = path.suffix.lower()
         if suffix == ".pdf":
             try:
-                from PyPDF2 import PdfReader
+                from pypdf import PdfReader
                 reader = PdfReader(str(path))
                 pages = [page.extract_text() or "" for page in reader.pages]
                 return "\n\n".join(pages)

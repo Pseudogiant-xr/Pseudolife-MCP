@@ -33,7 +33,9 @@ def migrate_legacy(data_dir: str | Path, storage) -> dict:
     entries = episodes = facts = 0
 
     if cms_path.exists():
-        state = torch.load(str(cms_path), map_location="cpu", weights_only=False)
+        # weights_only=True: legacy CMS snapshot is tensors + plain containers;
+        # avoid unpickling arbitrary objects from an imported .pt bank (CWE-502).
+        state = torch.load(str(cms_path), map_location="cpu", weights_only=True)
         # Episodes first (entries carry episode_id FKs).
         ep_payload = (state.get("episodes") or {}).get("episodes") or {}
         for _eid, ep in ep_payload.items():
