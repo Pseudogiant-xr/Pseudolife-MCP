@@ -128,3 +128,67 @@ class MechanicalController:
         if not newly:
             return [], True
         return [f"{question} {name}" for name in newly], False
+
+
+import time  # noqa: E402
+
+
+def run_loop(svc, question: str, controller: Controller, *, use_graph: bool,
+             known_entities: set[str], hop_cap: int = 3,
+             top_k: int = 5) -> LoopState:
+    """Iterative search(+graph) loop. Depth=1 graph expansion per iteration so
+    N hops costs N iterations (honest iteration cost)."""
+    state = LoopState()
+    # Seed entities from the question itself (the LLM would read them; we spot).
+    seeds = spot_entities(question, known_entities)
+    state.entities.update(seeds)
+    pending = list(seeds)              # entities awaiting graph expansion
+    queries = controller.seed_queries(question)
+    t0 = time.perf_counter()
+    while True:
+        state.iterations += 1
+        newly: list[str] = []
+        # 1) search step
+        for q in queries:
+            state.queries_issued += 1
+            res = svc.search(q, top_k=top_k)
+            if state.iterations == 1 and q == question:
+                state.low_confidence = bool(res.get("low_confidence"))
+                entries0 = res.get("entries", [])
+                state.top_score = float(entries0[0]["score"]) if entries0 else 0.0
+            for e in res.get("entries", []):
+                txt = e.get("text", "")
+                if txt and txt not in state.texts:
+                    state.texts.append(txt)
+                    for nm in spot_entities(txt, known_entities):
+                        if nm not in state.entities:
+                            state.entities.add(nm)
+                            newly.append(nm)
+        # 2) graph expansion step (arm A only): expand entities found so far
+        next_pending: list[str] = []
+        if use_graph:
+            for nm in pending:
+                nb = svc.graph_neighborhood(nm, depth=1)
+                if not nb.get("found"):
+                    continue
+                for node in nb.get("nodes", []):
+                    en = node.get("entity", "")
+                    if en and en not in state.entities:
+                        state.entities.add(en)
+                        newly.append(en)
+                        next_pending.append(en)
+                    for f in node.get("facts", []):
+                        fs = f"{f.get('attribute')}={f.get('value')}"
+                        if fs not in state.facts:
+                            state.facts.append(fs)
+            # Also queue newly discovered entities from search for graph expansion
+            for nm in newly:
+                if nm not in next_pending and nm not in pending:
+                    next_pending.append(nm)
+        # 3) controller decides continuation
+        queries, stop = controller.expand(question, newly)
+        pending = next_pending
+        if stop or not queries or state.iterations >= hop_cap:
+            break
+    state.latency_ms = (time.perf_counter() - t0) * 1000
+    return state
