@@ -27,26 +27,56 @@ from ladder_sweep import approx_tokens, value_present  # noqa: E402
 # ---------------------------------------------------------------------------
 # Corpus — each fact appears twice: as an ingested snippet AND a seeded edge.
 # Questions span 1/2/3 hops; gold = terminal entity name.
+#
+# HARDENED (2026-06-23): an earlier tiny corpus let single-shot search hit 1.0
+# (top_k returned a third of it; terminals echoed the question), so no lift was
+# measurable. This version makes single-shot genuinely hard for multi-hop:
+#   * multi-hop TERMINAL snippets neither name the question's subject nor echo
+#     its predicate vocab (e.g. "targets jdk-21 for its bytecode", not "runs on
+#     jdk-21"), so vector search anchored on the subject can't surface them;
+#   * ~28 DISTRACTORS echo the question predicates ("runs on", "stores in",
+#     "cluster", "hardware") about NON-graph entities, crowding the top-k;
+#   * 1-hop GUARDRAILS keep subject+predicate in one snippet (single-shot SHOULD
+#     find these) so a loop regression on easy lookups is visible.
+# Every edge's snippet still co-mentions both endpoints (faithful to how a real
+# extractor would have built the edge from text).
 # ---------------------------------------------------------------------------
 CORPUS: list[dict] = [
-    # chain 1 (2-hop): checkout-svc -> billing-lib -> jvm-21
-    {"snippet": "The checkout-svc depends-on the billing-lib module.",
-     "edges": [("checkout-svc", "depends-on", "billing-lib")]},
-    {"snippet": "Internally, billing-lib runs-on the jvm-21 runtime.",
-     "edges": [("billing-lib", "runs-on", "jvm-21")]},
-    # chain 2 (3-hop): web-frontend -> api-gateway -> auth-svc -> session-store
-    {"snippet": "The web-frontend uses the api-gateway for all calls.",
-     "edges": [("web-frontend", "uses", "api-gateway")]},
-    {"snippet": "Our api-gateway depends-on the auth-svc for tokens.",
-     "edges": [("api-gateway", "depends-on", "auth-svc")]},
-    {"snippet": "The auth-svc stores-data-in the session-store backend.",
-     "edges": [("auth-svc", "stores-data-in", "session-store")]},
-    # chain 3 (2-hop): order-svc -> commerce-platform -> k8s-prod
-    {"snippet": "order-svc is part-of the commerce-platform.",
-     "edges": [("order-svc", "part-of", "commerce-platform")]},
-    {"snippet": "The commerce-platform runs-on the k8s-prod cluster.",
-     "edges": [("commerce-platform", "runs-on", "k8s-prod")]},
-    # 1-hop guardrail facts
+    # chain 1 (2-hop): checkout-service -> billing-engine -> jdk-21
+    {"snippet": "The checkout-service is built on top of the billing-engine library.",
+     "edges": [("checkout-service", "depends-on", "billing-engine")]},
+    {"snippet": "The billing-engine library targets jdk-21 for its bytecode.",
+     "edges": [("billing-engine", "runs-on", "jdk-21")]},
+    # chain 2 (3-hop): web-portal -> gateway-proxy -> token-issuer -> vault-kms
+    {"snippet": "The web-portal routes every request through the gateway-proxy.",
+     "edges": [("web-portal", "uses", "gateway-proxy")]},
+    {"snippet": "The gateway-proxy hands authentication off to the token-issuer.",
+     "edges": [("gateway-proxy", "depends-on", "token-issuer")]},
+    {"snippet": "The token-issuer keeps its signing secrets inside vault-kms.",
+     "edges": [("token-issuer", "stores-data-in", "vault-kms")]},
+    # chain 3 (2-hop): order-service -> commerce-suite -> nomad-cluster
+    {"snippet": "order-service ships as one module of the commerce-suite.",
+     "edges": [("order-service", "part-of", "commerce-suite")]},
+    {"snippet": "The commerce-suite is scheduled onto the nomad-cluster.",
+     "edges": [("commerce-suite", "runs-on", "nomad-cluster")]},
+    # chain 4 (2-hop): mobile-app -> sync-service -> dynamo-table
+    {"snippet": "The mobile-app talks to the sync-service for offline merges.",
+     "edges": [("mobile-app", "uses", "sync-service")]},
+    {"snippet": "The sync-service writes its merge journals to the dynamo-table.",
+     "edges": [("sync-service", "stores-data-in", "dynamo-table")]},
+    # chain 5 (3-hop): analytics-ui -> query-engine -> column-store -> bare-metal-7
+    {"snippet": "analytics-ui is wired directly to the query-engine.",
+     "edges": [("analytics-ui", "depends-on", "query-engine")]},
+    {"snippet": "The query-engine leans on the column-store for large scans.",
+     "edges": [("query-engine", "uses", "column-store")]},
+    {"snippet": "The column-store was provisioned on bare-metal-7.",
+     "edges": [("column-store", "runs-on", "bare-metal-7")]},
+    # chain 6 (2-hop): notify-service -> queue-broker -> kafka-cluster
+    {"snippet": "notify-service is a client of the queue-broker.",
+     "edges": [("notify-service", "depends-on", "queue-broker")]},
+    {"snippet": "The queue-broker is backed by the kafka-cluster.",
+     "edges": [("queue-broker", "runs-on", "kafka-cluster")]},
+    # 1-hop guardrail facts (subject + predicate in one snippet)
     {"snippet": "report-svc runs-on the jvm-17 runtime.",
      "edges": [("report-svc", "runs-on", "jvm-17")]},
     {"snippet": "cache-svc uses redis-7 for hot keys.",
@@ -55,25 +85,54 @@ CORPUS: list[dict] = [
      "edges": [("search-svc", "stores-data-in", "es-cluster")]},
 ]
 
+# Predicate-echoing noise about NON-graph entities — crowds the top-k so the
+# real multi-hop terminal (which does NOT echo the predicate) gets pushed out.
 DISTRACTORS: list[str] = [
-    "The internal wiki lives at wiki.corp.local.",
-    "Daily standups are at 9:30am in the main channel.",
-    "The frontend bundle is about 2MB after tree-shaking.",
-    "Release notes ship to the changelog every Friday.",
-    "The staging autoscaler kicks in above 70% CPU.",
+    "The reporting-dashboard runs on jdk-17 in production.",
+    "Batch ETL jobs run on the spark-runtime overnight.",
+    "The legacy-portal still runs on jdk-8.",
+    "Our CI workers run on ephemeral linux-vms.",
+    "Most microservices run on the staging-cluster during QA.",
+    "Cron tasks run on the scheduler-node.",
+    "The image-resizer runs on lambda-functions.",
+    "Developer laptops run on macos-14.",
+    "The sandbox environment runs on a single droplet.",
+    "The recommendation-model runs on a gpu-node.",
+    "The data-lake stores everything in parquet-files.",
+    "User uploads are persisted to the blob-store.",
+    "Session cookies are kept in an encrypted jar.",
+    "The audit-log writes records to cold-storage.",
+    "Metrics are stored in a prometheus-tsdb.",
+    "Nightly backups land in a glacier-archive.",
+    "Logs are shipped to an elk-stack.",
+    "The marketing-site is hosted on a static-cdn.",
+    "The payment-gateway integration uses the stripe-api.",
+    "The analytics-pipeline runs on airflow-workers.",
+    "The search-portal indexes documents hourly.",
+    "Feature flags live in a config-service.",
+    "The status-page polls each service every minute.",
+    "The chat-widget talks to a third-party saas.",
+    "The billing-dashboard renders invoices as pdfs.",
+    "Our test-suite runs on github-runners.",
+    "The on-call rotation is tracked in a spreadsheet.",
+    "The CDN purges its cache on every deploy.",
 ]
 
 QUESTIONS: list[dict] = [
-    # 1-hop
+    # 1-hop guardrails (single-shot SHOULD answer these)
     {"question": "What runtime does report-svc run on?", "gold": "jvm-17", "hops": 1},
     {"question": "What does cache-svc use for hot keys?", "gold": "redis-7", "hops": 1},
     {"question": "Where does search-svc store its data?", "gold": "es-cluster", "hops": 1},
     # 2-hop
-    {"question": "What runtime does checkout-svc run on?", "gold": "jvm-21", "hops": 2},
-    {"question": "What cluster does order-svc run on?", "gold": "k8s-prod", "hops": 2},
+    {"question": "What does the checkout-service run on?", "gold": "jdk-21", "hops": 2},
+    {"question": "Which cluster hosts the order-service?", "gold": "nomad-cluster", "hops": 2},
+    {"question": "Where does the mobile-app keep its data?", "gold": "dynamo-table", "hops": 2},
+    {"question": "What does notify-service run on?", "gold": "kafka-cluster", "hops": 2},
     # 3-hop
-    {"question": "Where does the web-frontend ultimately store data?",
-     "gold": "session-store", "hops": 3},
+    {"question": "Where does the web-portal's data ultimately get persisted?",
+     "gold": "vault-kms", "hops": 3},
+    {"question": "What hardware does the analytics-ui ultimately run on?",
+     "gold": "bare-metal-7", "hops": 3},
 ]
 
 KNOWN_ENTITIES: set[str] = {

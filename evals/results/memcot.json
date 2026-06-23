@@ -1,0 +1,102 @@
+{
+  "baseline": {
+    "overall": {
+      "n": 9,
+      "recall": 0.333,
+      "mean_iterations": 1.0,
+      "mean_tokens": 59.1,
+      "mean_latency_ms": 6.0
+    },
+    "by_hops": {
+      "1": {
+        "n": 3,
+        "recall": 1.0,
+        "mean_iterations": 1.0,
+        "mean_tokens": 53.7,
+        "mean_latency_ms": 6.5
+      },
+      "2": {
+        "n": 4,
+        "recall": 0.0,
+        "mean_iterations": 1.0,
+        "mean_tokens": 63.5,
+        "mean_latency_ms": 6.0
+      },
+      "3": {
+        "n": 2,
+        "recall": 0.0,
+        "mean_iterations": 1.0,
+        "mean_tokens": 58.5,
+        "mean_latency_ms": 5.2
+      }
+    }
+  },
+  "loop_no_graph": {
+    "overall": {
+      "n": 9,
+      "recall": 0.444,
+      "mean_iterations": 2.44,
+      "mean_tokens": 113.2,
+      "mean_latency_ms": 29.7
+    },
+    "by_hops": {
+      "1": {
+        "n": 3,
+        "recall": 1.0,
+        "mean_iterations": 2.67,
+        "mean_tokens": 150.7,
+        "mean_latency_ms": 51.9
+      },
+      "2": {
+        "n": 4,
+        "recall": 0.25,
+        "mean_iterations": 2.75,
+        "mean_tokens": 104.5,
+        "mean_latency_ms": 22.2
+      },
+      "3": {
+        "n": 2,
+        "recall": 0.0,
+        "mean_iterations": 1.5,
+        "mean_tokens": 74.5,
+        "mean_latency_ms": 11.1
+      }
+    }
+  },
+  "loop_graph": {
+    "overall": {
+      "n": 9,
+      "recall": 1.0,
+      "mean_iterations": 3.0,
+      "mean_tokens": 137.4,
+      "mean_latency_ms": 69.1
+    },
+    "by_hops": {
+      "1": {
+        "n": 3,
+        "recall": 1.0,
+        "mean_iterations": 3.0,
+        "mean_tokens": 160.3,
+        "mean_latency_ms": 97.1
+      },
+      "2": {
+        "n": 4,
+        "recall": 1.0,
+        "mean_iterations": 3.0,
+        "mean_tokens": 130.2,
+        "mean_latency_ms": 63.0
+      },
+      "3": {
+        "n": 2,
+        "recall": 1.0,
+        "mean_iterations": 3.0,
+        "mean_tokens": 117.5,
+        "mean_latency_ms": 39.5
+      }
+    }
+  },
+  "gate_would_fire": 0,
+  "questions": 9,
+  "lift_from_looping": 0.111,
+  "lift_from_graph": 0.556
+}
