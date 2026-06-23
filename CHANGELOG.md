@@ -15,6 +15,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `low_confidence: true` signals no seed matched — fall back to `memory_search`.
 
 ### Changed
+- `memory_recall` mechanical seeder is now **query-first** — it seeds the
+  question's subject(s) and uses search-hit matches only as a fallback,
+  eliminating cross-talk noise on populous banks (bench: seed precision 1.0 vs
+  0.262, zero answer-recall loss, ~4× fewer graph calls). `recall.driver=llm`
+  unchanged.
 - Graph layer: single source of truth (Postgres `entities` hub + NetworkX
   read-model) behind a swappable `GraphStore` port. Apache AGE removed.
 

@@ -43,11 +43,21 @@ def _two_hop():
     return _FakeSvc(snippets, edges)
 
 
-def test_mechanical_seeds_from_query_and_hits():
+def test_mechanical_seeds_query_first_subject_only():
+    # query names only "alpha"; the hit also mentions "beta", but query-first
+    # must seed ONLY the query subject (beta is reached later via the graph).
     c = rc.MechanicalController()
     seeds = c.seed_entities("what does alpha run on", ["alpha depends-on beta"],
                             ["alpha", "beta", "gamma"])
-    assert seeds == ["alpha", "beta"]  # both present in query+hits, vocab order
+    assert seeds == ["alpha"]
+
+
+def test_mechanical_seeds_fall_back_to_hits_when_query_bare():
+    # query names no known entity -> fall back to hit-derived matches.
+    c = rc.MechanicalController()
+    seeds = c.seed_entities("what does it run on?", ["alpha depends-on beta"],
+                            ["alpha", "beta", "gamma"])
+    assert seeds == ["alpha", "beta"]
 
 
 def test_run_recall_reaches_two_hop_terminal():
