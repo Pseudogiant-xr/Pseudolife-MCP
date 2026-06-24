@@ -68,9 +68,11 @@ def cohesion_score(edges: list[dict], member_ids: list[int]) -> float:
     if n <= 1:
         return 1.0
     members = set(member_ids)
-    actual = sum(1 for e in edges
-                 if e["src_id"] in members and e["dst_id"] in members
-                 and e["src_id"] != e["dst_id"])
+    # Count distinct unordered pairs so parallel relations between the same two
+    # entities can't push cohesion above 1.0.
+    actual = len({frozenset((e["src_id"], e["dst_id"])) for e in edges
+                  if e["src_id"] in members and e["dst_id"] in members
+                  and e["src_id"] != e["dst_id"]})
     possible = n * (n - 1) / 2
     return actual / possible if possible else 0.0
 
@@ -80,7 +82,7 @@ def remap_to_previous(communities: dict[int, list[int]],
     """Greedy overlap match: each new community inherits the prior community id it
     most overlaps; unmatched get fresh ids in deterministic (size-desc) order."""
     if not prior:
-        return communities
+        return {c: list(ids) for c, ids in communities.items()}  # copy — never alias input
     old_sets: dict[int, set] = {}
     for node, oid in prior.items():
         old_sets.setdefault(oid, set()).add(node)

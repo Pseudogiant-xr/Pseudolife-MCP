@@ -121,6 +121,48 @@ def test_suggest_questions_isolated_entity():
     assert any(q["type"] == "isolated_entity" and "lonely" in q["question"] for q in qs)
 
 
+def test_suggest_questions_verify_inferred():
+    # Hub e1 has 2 agent-origin (dream-inferred) edges -> a verify question.
+    edges = [
+        {"src_id": 1, "dst_id": 2, "relation": "r", "confidence": 0.9, "origin": "user"},
+        {"src_id": 1, "dst_id": 3, "relation": "r", "confidence": 0.5, "origin": "agent"},
+        {"src_id": 1, "dst_id": 4, "relation": "r", "confidence": 0.5, "origin": "agent"},
+    ]
+    entities = [{"id": i, "display": f"e{i}", "etype": None} for i in range(1, 5)]
+    comms = {0: [1, 2, 3, 4]}
+    qs = gi.suggest_questions(edges, entities, comms, gi._node_community(comms), [],
+                              gi.summarize_communities(comms, edges, entities), top_n=10)
+    assert any(q["type"] == "verify_inferred" and "e1" in q["question"] for q in qs)
+
+
+def test_suggest_questions_bridge_entity():
+    # Inject a 2-community split so the test doesn't depend on Louvain: node 3
+    # bridges {1,2,3} to {4,5} and carries the highest betweenness.
+    edges = [
+        {"src_id": 1, "dst_id": 2, "relation": "r", "confidence": 0.9, "origin": "user"},
+        {"src_id": 2, "dst_id": 3, "relation": "r", "confidence": 0.9, "origin": "user"},
+        {"src_id": 1, "dst_id": 3, "relation": "r", "confidence": 0.9, "origin": "user"},
+        {"src_id": 4, "dst_id": 5, "relation": "r", "confidence": 0.9, "origin": "user"},
+        {"src_id": 3, "dst_id": 4, "relation": "r", "confidence": 0.9, "origin": "user"},
+    ]
+    entities = [{"id": i, "display": f"e{i}", "etype": None} for i in range(1, 6)]
+    comms = {0: [1, 2, 3], 1: [4, 5]}
+    qs = gi.suggest_questions(edges, entities, comms, gi._node_community(comms), [],
+                              gi.summarize_communities(comms, edges, entities), top_n=10)
+    assert any(q["type"] == "bridge_entity" for q in qs)
+
+
+def test_suggest_questions_low_cohesion():
+    # Injected 6-node community with only 2 edges -> cohesion 2/15 < 0.15, size >= 5.
+    edges = [{"src_id": 1, "dst_id": 2, "relation": "r", "confidence": 0.9, "origin": "user"},
+             {"src_id": 3, "dst_id": 4, "relation": "r", "confidence": 0.9, "origin": "user"}]
+    entities = [{"id": i, "display": f"e{i}", "etype": None} for i in range(1, 7)]
+    comms = {0: [1, 2, 3, 4, 5, 6]}
+    qs = gi.suggest_questions(edges, entities, comms, gi._node_community(comms), [],
+                              gi.summarize_communities(comms, edges, entities), top_n=10)
+    assert any(q["type"] == "low_cohesion" for q in qs)
+
+
 def test_build_digest_assembles_all_sections():
     edges = [
         {"src_id": 1, "dst_id": 2, "relation": "uses", "confidence": 0.9, "origin": "user"},
@@ -144,4 +186,5 @@ def test_graph_insight_config_defaults():
     c = GraphInsightConfig()
     assert c.enabled is True and c.algorithm == "louvain"
     assert c.resolution == 1.0 and c.max_community_fraction == 0.25
-    assert c.betweenness_sample == 200
+    assert c.god_nodes_top_n == 10 and c.surprises_top_n == 10
+    assert c.questions_top_n == 7 and c.betweenness_sample == 200

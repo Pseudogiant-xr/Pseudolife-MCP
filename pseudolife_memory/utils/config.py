@@ -638,6 +638,12 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             )
         if "dream" in mem_raw:
             config.memory.dream = _dict_to_dataclass(DreamConfig, mem_raw["dream"])
+        if "recall" in mem_raw:
+            config.memory.recall = _dict_to_dataclass(RecallConfig, mem_raw["recall"])
+        if "graph_insight" in mem_raw:
+            config.memory.graph_insight = _dict_to_dataclass(
+                GraphInsightConfig, mem_raw["graph_insight"],
+            )
         if "meta_filter" in mem_raw:
             config.memory.meta_filter = _dict_to_dataclass(
                 MetaFilterConfig, mem_raw["meta_filter"],
