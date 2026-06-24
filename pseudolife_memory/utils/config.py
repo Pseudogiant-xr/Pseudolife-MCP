@@ -393,6 +393,20 @@ class MetaFilterConfig:
 
 
 @dataclass
+class GraphInsightConfig:
+    """Topology analytics computed during dream (Track B). Communities persisted;
+    god-nodes/surprises/questions stored as the meta['graph_digest'] snapshot."""
+    enabled: bool = True
+    algorithm: str = "louvain"          # "louvain" | "leiden" (leiden needs graspologic; falls back)
+    resolution: float = 1.0
+    max_community_fraction: float = 0.25
+    god_nodes_top_n: int = 10
+    surprises_top_n: int = 10
+    questions_top_n: int = 7
+    betweenness_sample: int = 200       # k-sample betweenness above this node count (0 = exact)
+
+
+@dataclass
 class RecallConfig:
     """memory_recall — live MemCoT iterative retrieval (read-only).
 
@@ -450,6 +464,8 @@ class MemoryConfig:
     lessons: LessonsConfig = field(default_factory=LessonsConfig)
     # memory_recall — live MemCoT iterative retrieval (read-only).
     recall: RecallConfig = field(default_factory=RecallConfig)
+    # Topology analytics computed during dream (Track B).
+    graph_insight: GraphInsightConfig = field(default_factory=GraphInsightConfig)
     # Meta-statement filter on the store path (off in the MCP build).
     meta_filter: MetaFilterConfig = field(default_factory=MetaFilterConfig)
     # Base recency half-life at band depth 0; doubles per depth.

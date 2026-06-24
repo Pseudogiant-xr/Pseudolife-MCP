@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 11
+SCHEMA_META_VERSION = 12
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -231,6 +231,22 @@ BEGIN
     EXECUTE format('UPDATE %I SET writer_id = ''legacy'' WHERE writer_id IS NULL', t);
   END LOOP;
 END $$;
+
+-- v12 community tables (graph-insight Track B). Persisted per dream sweep;
+-- entity_communities links each entity to its community (CASCADE on entity delete).
+CREATE TABLE IF NOT EXISTS communities (
+  id          BIGINT PRIMARY KEY,
+  label       TEXT,
+  size        INTEGER NOT NULL,
+  cohesion    DOUBLE PRECISION NOT NULL,
+  computed_at DOUBLE PRECISION NOT NULL
+);
+CREATE TABLE IF NOT EXISTS entity_communities (
+  entity_id    BIGINT PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE,
+  community_id BIGINT NOT NULL,
+  computed_at  DOUBLE PRECISION NOT NULL
+);
+CREATE INDEX IF NOT EXISTS entity_communities_cid_idx ON entity_communities (community_id);
 """
 
 

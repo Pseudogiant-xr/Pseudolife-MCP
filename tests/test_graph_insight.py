@@ -137,3 +137,11 @@ def test_build_digest_assembles_all_sections():
     assert digest["totals"] == {"entities": 5, "edges": 5, "communities": len(comms)}
     assert {"communities", "god_nodes", "surprises", "questions"} <= set(digest)
     assert digest["god_nodes"][0]["degree"] >= 1
+
+
+def test_graph_insight_config_defaults():
+    from pseudolife_memory.utils.config import GraphInsightConfig
+    c = GraphInsightConfig()
+    assert c.enabled is True and c.algorithm == "louvain"
+    assert c.resolution == 1.0 and c.max_community_fraction == 0.25
+    assert c.betweenness_sample == 200
