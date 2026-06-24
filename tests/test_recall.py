@@ -256,6 +256,33 @@ def test_recall_config_hub_defaults():
 
 
 @pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
+def test_get_neighbors_relation_filter(tmp_path, monkeypatch):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
+    from ladder_sweep import build_service
+    import pseudolife_memory.mcp_server as srv
+    svc = build_service(tmp_path)
+    svc.graph_relate("gnx", "depends-on", "gny")
+    svc.graph_relate("gnx", "runs-on", "gnz")
+    monkeypatch.setattr(srv, "service", svc, raising=False)
+    out = srv.get_neighbors("gnx", relation_filter="depends-on")
+    rels = {e["relation"] for e in out["edges"]}
+    assert rels == {"depends-on"}                 # runs-on filtered out
+
+
+@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
+def test_memory_path_tool_delegates(tmp_path, monkeypatch):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
+    from ladder_sweep import build_service
+    import pseudolife_memory.mcp_server as srv
+    svc = build_service(tmp_path)
+    svc.graph_relate("mp-a", "depends-on", "mp-b")
+    svc.graph_relate("mp-b", "depends-on", "mp-c")
+    monkeypatch.setattr(srv, "service", svc, raising=False)
+    out = srv.memory_path("mp-a", "mp-c")
+    assert out["path"] == ["mp-a", "mp-b", "mp-c"] and out["hops"] == 2
+
+
+@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
 def test_memory_recall_tool_delegates(monkeypatch, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service

@@ -338,3 +338,30 @@ def test_shortest_path_exceeds_max_hops():
              {"src_id": 3, "dst_id": 4}]
     assert G.shortest_path(edges, 1, 4, max_hops=2) is None
     assert G.shortest_path(edges, 1, 4, max_hops=3) == [1, 2, 3, 4]
+
+
+# ── service-level graph_path tests ──────────────────────────────────────
+
+def test_graph_path_returns_chain(svc):
+    svc.graph_relate("gp-a", "depends-on", "gp-b")
+    svc.graph_relate("gp-b", "depends-on", "gp-c")
+    out = svc.graph_path("gp-a", "gp-c")
+    assert out["found"] is True
+    assert out["path"] == ["gp-a", "gp-b", "gp-c"]
+    assert out["hops"] == 2
+    assert out["edges"][0]["src"] == "gp-a" and out["edges"][0]["dst"] == "gp-b"
+
+
+def test_graph_path_missing_endpoint(svc):
+    svc.graph_relate("gp-d", "depends-on", "gp-e")
+    out = svc.graph_path("gp-d", "gp-nope")
+    assert out["found"] is False
+    assert out["missing"] == "gp-nope"
+
+
+def test_graph_path_no_path_within_hops(svc):
+    svc.graph_relate("gp-f", "depends-on", "gp-g")
+    svc.graph_relate("gp-g", "depends-on", "gp-h")
+    out = svc.graph_path("gp-f", "gp-h", max_hops=1)
+    assert out["found"] is True
+    assert out["path"] == [] and out["hops"] is None

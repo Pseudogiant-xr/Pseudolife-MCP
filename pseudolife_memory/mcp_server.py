@@ -1106,6 +1106,32 @@ def memory_graph(
 
 
 @mcp.tool()
+def get_neighbors(entity: str, relation_filter: str | None = None) -> dict[str, Any]:
+    """Direct (1-hop) neighbors of an entity, with typed edges.
+
+    A focused shortcut for ``memory_graph(entity, depth=1)`` — use it for
+    "what is X directly connected to?". Optional ``relation_filter`` keeps
+    only edges whose relation contains that substring (case-insensitive).
+    """
+    out = service.graph_neighborhood(entity, depth=1)
+    if relation_filter and out.get("edges"):
+        rf = relation_filter.lower()
+        out = dict(out)
+        out["edges"] = [e for e in out["edges"]
+                        if rf in str(e.get("relation", "")).lower()]
+    return out
+
+
+@mcp.tool()
+def memory_path(source: str, target: str, max_hops: int = 8) -> dict[str, Any]:
+    """Shortest path between two entities — how ``source`` connects to
+    ``target``. Returns the entity chain and the typed edges along it, or an
+    empty path when none exists within ``max_hops``. Read-only.
+    """
+    return service.graph_path(source, target, max_hops=max_hops)
+
+
+@mcp.tool()
 def memory_recall(query: str, hops: int = 3, top_k: int = 5) -> dict[str, Any]:
     """Multi-hop retrieval: follow the knowledge graph to answer RELATIONAL
     questions that single-shot ``memory_search`` can't (it returns flat

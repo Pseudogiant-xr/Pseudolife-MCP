@@ -2384,6 +2384,50 @@ class MemoryService:
                 result["to_not_found"] = to_missing
             return result
 
+    def graph_path(self, source: str, target: str,
+                   max_hops: int = 8) -> dict[str, Any]:
+        """Targeted shortest path between two entities (how A connects to C).
+
+        Bidirectional BFS over the read-model; ``max_hops`` is a path-length
+        cutoff. Read-only. Returns ``{found, path, edges, hops, source,
+        target}`` — ``path=[]`` / ``hops=None`` when no path within max_hops.
+        """
+        from pseudolife_memory import graph as Gmod
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return dict(self._GRAPH_UNAVAILABLE)
+            st = self._storage
+            s = st.find_entity(Gmod.norm_name(source))
+            t = st.find_entity(Gmod.norm_name(target))
+            if s is None:
+                return {"found": False, "missing": source}
+            if t is None:
+                return {"found": False, "missing": target}
+            g = st.load_graph()
+        by_id = {e["id"]: e for e in g["entities"]}
+        rel: dict[tuple[int, int], str] = {}
+        for e in g["edges"]:
+            rel[(e["src_id"], e["dst_id"])] = e["relation"]
+        node_path = Gmod.shortest_path(g["edges"], s["id"], t["id"],
+                                       max_hops=max_hops)
+        if node_path is None:
+            return {"found": True, "path": [], "edges": [], "hops": None,
+                    "source": source, "target": target}
+        labels = [by_id[nid]["display"] for nid in node_path]
+        edges = []
+        for a, b in zip(node_path, node_path[1:]):
+            if (a, b) in rel:
+                edges.append({"src": by_id[a]["display"],
+                              "relation": rel[(a, b)],
+                              "dst": by_id[b]["display"]})
+            elif (b, a) in rel:
+                edges.append({"src": by_id[b]["display"],
+                              "relation": rel[(b, a)],
+                              "dst": by_id[a]["display"]})
+        return {"found": True, "path": labels, "edges": edges,
+                "hops": len(node_path) - 1, "source": source, "target": target}
+
     def _recall_vocab(self) -> list[str]:
         """Live entity vocabulary (display names + aliases) for seed matching.
         Short locked read; released before the lock-free recall loop."""
