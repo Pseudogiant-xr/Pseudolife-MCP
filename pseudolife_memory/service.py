@@ -879,7 +879,12 @@ class MemoryService:
         with self._lock:
             self._ensure_init()
             assert self._cms is not None
-            return self._cms.stats()
+            result = self._cms.stats()
+            if self._storage is not None:
+                _c = self._storage.load_communities()["communities"]
+                result["communities"] = len(_c)
+                result["graph_digest_at"] = (self._storage.get_meta("graph_digest") or {}).get("computed_at")
+            return result
 
     # ------------------------------------------------------------------
     # Tool: ingest_document
@@ -1713,9 +1718,14 @@ class MemoryService:
         self.dream_commit(newest)
         relations_n = self._dream_extract_relations(extractor, texts)
         lessons = self.synthesize_lessons(extractor)
+        try:
+            graph_insight = self._refresh_graph_insight()
+        except Exception as exc:  # noqa: BLE001 — insight must never break a dream
+            logger.warning("graph-insight refresh failed (%s); dream unaffected", exc)
+            graph_insight = {"refreshed": False, "error": str(exc)}
         return {"pulled": len(entries), "claims": len(claims),
                 "cursor": newest, "relations": relations_n, **tally,
-                "lessons": lessons}
+                "lessons": lessons, "graph_insight": graph_insight}
 
     def dream_status(self) -> dict[str, Any]:
         """Backlog (eligible unconsolidated memories), idle seconds since the most
@@ -2311,6 +2321,7 @@ class MemoryService:
             if self._storage is None:
                 return dict(self._GRAPH_UNAVAILABLE)
             st = self._storage
+            _comm = st.load_communities()["assignment"]
             root = st.find_entity(G.norm_name(entity))
             if root is None:
                 return {"found": False, "entity": entity}
@@ -2355,6 +2366,7 @@ class MemoryService:
                 }
                 if include_facts:
                     node["facts"] = facts_by_norm.get(e["canonical"], [])
+                node["community"] = _comm.get(nid)
                 nodes.append(node)
 
             def _disp(nid: int) -> str:
@@ -2383,6 +2395,84 @@ class MemoryService:
             if to_missing is not None:
                 result["to_not_found"] = to_missing
             return result
+
+    def _contested_facts(self) -> list[dict]:
+        """Contested cortex facts shaped for graph_insight.suggest_questions.
+        Mirrors how cortex_search detects contention: current_records() +
+        contenders_for(). CortexRecord exposes .entity/.attribute/.value."""
+        out = []
+        with self._lock:
+            self._ensure_init()
+            if self._cortex is None:
+                return out
+            for r in self._cortex.current_records():
+                conts = self._cortex.contenders_for(r.entity, r.attribute)
+                if conts:
+                    out.append({
+                        "entity": r.entity, "attribute": r.attribute, "value": r.value,
+                        "contender_value": conts[0].value,
+                        "contender_origin": conts[0].origin,
+                    })
+        return out
+
+    def _refresh_graph_insight(self) -> dict[str, Any]:
+        """Recompute communities + digest from the live graph and persist. Read
+        inputs under the lock, compute lock-free, persist under the lock."""
+        import time as _time
+        from pseudolife_memory.memory import graph_insight as gi
+        cfg = self.config.memory.graph_insight
+        if not cfg.enabled:
+            return {"refreshed": False, "reason": "disabled"}
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return {"refreshed": False, "reason": "no_storage"}
+            g = self._storage.load_graph()
+            prior = self._storage.load_communities()["assignment"]
+        if not g["edges"]:
+            return {"refreshed": False, "reason": "empty_graph"}
+        contested = self._contested_facts()
+        communities = gi.detect_communities(
+            g["edges"], resolution=cfg.resolution,
+            max_community_fraction=cfg.max_community_fraction, algorithm=cfg.algorithm)
+        communities = gi.remap_to_previous(communities, prior)
+        summaries = gi.summarize_communities(communities, g["edges"], g["entities"])
+        assignment = {eid: cid for cid, ids in communities.items() for eid in ids}
+        computed_at = _time.time()
+        digest = gi.build_digest(
+            communities, summaries, g["edges"], g["entities"], contested, computed_at,
+            god_top_n=cfg.god_nodes_top_n, surprises_top_n=cfg.surprises_top_n,
+            questions_top_n=cfg.questions_top_n, betweenness_sample=cfg.betweenness_sample)
+        with self._lock:
+            self._storage.replace_communities(assignment, summaries, computed_at)
+            self._storage.set_meta("graph_digest", digest)
+        return {"refreshed": True, "communities": len(summaries)}
+
+    def graph_digest(self) -> dict[str, Any]:
+        """The persisted digest snapshot, or {available: False} if dream hasn't run."""
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return {"available": False, "reason": "no_storage"}
+            digest = self._storage.get_meta("graph_digest")
+        if not digest:
+            return {"available": False, "reason": "no_digest"}
+        return {"available": True, "digest": digest}
+
+    def communities(self, community_id: int | None = None) -> dict[str, Any]:
+        """List communities, or the members of one when community_id is given."""
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return dict(self._GRAPH_UNAVAILABLE)
+            loaded = self._storage.load_communities()
+            g = self._storage.load_graph()
+        disp = {e["id"]: e["display"] for e in g["entities"]}
+        if community_id is None:
+            return {"communities": loaded["communities"]}
+        members = [disp.get(eid, str(eid)) for eid, cid in loaded["assignment"].items()
+                   if cid == community_id]
+        return {"community_id": community_id, "members": sorted(members)}
 
     def graph_path(self, source: str, target: str,
                    max_hops: int = 8) -> dict[str, Any]:

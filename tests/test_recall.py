@@ -237,6 +237,53 @@ def test_select_frontier_off_is_identity():
     assert rc._select_frontier(frontier, set(), None, None, None) == ["c", "a", "b"]
 
 
+# ---------------------------------------------------------------------------
+# graph-insight integration tests (require bench Postgres on 127.0.0.1:5433)
+# ---------------------------------------------------------------------------
+
+def _seed_two_communities(svc):
+    # cluster 1: alpha-svc <-> alpha-db <-> alpha-cache (triangle)
+    svc.graph_relate("alpha-svc", "depends-on", "alpha-db")
+    svc.graph_relate("alpha-db", "depends-on", "alpha-cache")
+    svc.graph_relate("alpha-svc", "depends-on", "alpha-cache")
+    # cluster 2: beta-svc <-> beta-db
+    svc.graph_relate("beta-svc", "depends-on", "beta-db")
+    # bridge
+    svc.graph_relate("alpha-cache", "relates-to", "beta-svc")
+
+
+@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
+def test_refresh_graph_insight_persists_and_is_stable(tmp_path):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
+    from ladder_sweep import build_service
+    svc = build_service(tmp_path)
+    _seed_two_communities(svc)
+    out = svc._refresh_graph_insight()  # noqa: SLF001
+    assert out["refreshed"] is True and out["communities"] >= 2
+    loaded = svc._storage.load_communities()  # noqa: SLF001
+    assert len(loaded["assignment"]) >= 5            # entities stamped
+    digest = svc.graph_digest()
+    assert digest["available"] is True
+    assert {"god_nodes", "surprises", "questions", "communities"} <= set(digest["digest"])
+    # Stable ids: a second refresh with no graph change keeps the assignment.
+    before = svc._storage.load_communities()["assignment"]  # noqa: SLF001
+    svc._refresh_graph_insight()  # noqa: SLF001
+    after = svc._storage.load_communities()["assignment"]  # noqa: SLF001
+    assert before == after
+
+
+@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
+def test_graph_neighborhood_carries_community(tmp_path):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
+    from ladder_sweep import build_service
+    svc = build_service(tmp_path)
+    _seed_two_communities(svc)
+    svc._refresh_graph_insight()  # noqa: SLF001
+    out = svc.graph_neighborhood("alpha-svc", depth=1)
+    node = next(n for n in out["nodes"] if n["entity"] == "alpha-svc")
+    assert isinstance(node["community"], int)
+
+
 def test_hub_threshold_percentile_and_floor():
     # All low-degree -> percentile lands at 1, floor wins.
     assert rc._hub_threshold([1, 1, 1, 1, 1], percentile=95.0, floor=4) == 4
