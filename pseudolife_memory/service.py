@@ -2397,6 +2397,17 @@ class MemoryService:
             names.extend(al)
         return list(dict.fromkeys(n for n in names if n))
 
+    def _graph_degrees(self) -> dict[str, int]:
+        """Asserted undirected degree by display name, from the read-model.
+        Short locked read; released before the lock-free recall loop."""
+        from pseudolife_memory.graph import degrees_by_name
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return {}
+            g = self._storage.load_graph()
+        return degrees_by_name(g["edges"], g["entities"])
+
     def recall(self, query: str, hops: int | None = None,
                top_k: int | None = None, driver: str | None = None) -> dict[str, Any]:
         """Read-only multi-hop retrieval: search → graph-expand → re-query.
@@ -2407,10 +2418,12 @@ class MemoryService:
         True when no seed entity resolves (caller falls back to ``search``)."""
         from pseudolife_memory.memory.recall import (
             LLMController, MechanicalController, run_recall, simple_complete,
+            _hub_threshold,
         )
         cfg = self.config.memory.recall
-        hops = cfg.default_hops if hops is None else max(1, min(int(hops), 5))
-        top_k = cfg.default_top_k if top_k is None else int(top_k)
+        hops = (max(1, min(int(cfg.default_hops), 5)) if hops is None
+                else max(1, min(int(hops), 5)))
+        top_k = (cfg.default_top_k if top_k is None else max(1, int(top_k)))
         driver = driver or os.environ.get("PSEUDOLIFE_RECALL_DRIVER", cfg.driver)
         query = (query or "").strip()
         if not query:
@@ -2423,9 +2436,15 @@ class MemoryService:
             controller = LLMController(lambda p: simple_complete(dcfg, p))
         else:
             controller = MechanicalController()
+        degrees = self._graph_degrees() if cfg.hub_gate else {}
+        threshold = (_hub_threshold(degrees.values(), cfg.hub_percentile,
+                                    cfg.hub_floor) if cfg.hub_gate else None)
         state = run_recall(
             self.search, self.graph_neighborhood, vocab, query, controller,
             hops=hops, top_k=top_k, max_entities=cfg.max_entities,
+            degree_fn=(degrees.get if cfg.hub_gate else None),
+            hub_threshold=threshold,
+            expand_budget=(cfg.expand_budget or None),
         )
         return {
             "query": query,

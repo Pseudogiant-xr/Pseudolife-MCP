@@ -246,6 +246,15 @@ def test_hub_threshold_percentile_and_floor():
     assert rc._hub_threshold([], percentile=95.0, floor=7) == 7
 
 
+def test_recall_config_hub_defaults():
+    from pseudolife_memory.utils.config import RecallConfig
+    c = RecallConfig()
+    assert c.hub_gate is True
+    assert c.hub_percentile == 95.0
+    assert c.hub_floor == 8
+    assert c.expand_budget == 0
+
+
 @pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
 def test_memory_recall_tool_delegates(monkeypatch, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
@@ -259,3 +268,44 @@ def test_memory_recall_tool_delegates(monkeypatch, tmp_path):
     monkeypatch.setattr(srv, "service", svc, raising=False)
     out = srv.memory_recall("what does web-portal run on?")
     assert "edge-cluster" in {n["entity"] for n in out["entities"]}
+
+
+# ---------------------------------------------------------------------------
+# Hub-gating integration tests (PG-backed)
+# ---------------------------------------------------------------------------
+
+def _seed_hub_graph(svc):
+    # checkout -> billing -> jdk-21 (gold), plus a shared-config hub that many
+    # heads depend on (degree 6), fanning out to unrelated services.
+    svc.graph_relate("checkout-service", "depends-on", "billing-engine")
+    svc.graph_relate("billing-engine", "runs-on", "jdk-21")
+    svc.graph_relate("checkout-service", "depends-on", "shared-config")
+    for head in ("order-service", "web-portal", "mobile-app",
+                 "analytics-ui", "notify-service"):
+        svc.graph_relate(head, "depends-on", "shared-config")
+
+
+@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
+def test_recall_hub_gating_keeps_gold_drops_blast_radius(tmp_path):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
+    from ladder_sweep import build_service
+    svc = build_service(tmp_path)
+    _seed_hub_graph(svc)
+    svc.config.memory.recall.hub_gate = True
+    svc.config.memory.recall.hub_floor = 3       # shared-config has degree 6
+    out = svc.recall("What does checkout-service run on?", hops=3)
+    names = {e["entity"] for e in out["entities"]}
+    assert "jdk-21" in names                      # gold still reached
+    assert "order-service" not in names           # hub not expanded through
+
+
+@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
+def test_recall_no_gating_pulls_in_hub_siblings(tmp_path):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
+    from ladder_sweep import build_service
+    svc = build_service(tmp_path)
+    _seed_hub_graph(svc)
+    svc.config.memory.recall.hub_gate = False
+    out = svc.recall("What does checkout-service run on?", hops=3)
+    names = {e["entity"] for e in out["entities"]}
+    assert "order-service" in names               # un-gated fan-out through hub

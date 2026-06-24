@@ -404,6 +404,12 @@ class RecallConfig:
     default_hops: int = 3
     default_top_k: int = 5
     max_entities: int = 50
+    # Hub-gating (graphify-derived): include high-degree hubs as results but
+    # don't expand THROUGH them. hub_floor / expand_budget are bench-tuned.
+    hub_gate: bool = True
+    hub_percentile: float = 95.0
+    hub_floor: int = 8
+    expand_budget: int = 0   # per-hop expansion cap; 0 = unlimited
 
 
 @dataclass
