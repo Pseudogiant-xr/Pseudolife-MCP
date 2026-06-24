@@ -310,6 +310,35 @@ Postgres itself stays loopback-only — the LAN only ever sees the daemon.
 **Backups:** `ops\backup.ps1` runs `pg_dump` inside the container into
 `data\backups\` with 7-day rotation.
 
+## Recommended agent setup (CLAUDE.md)
+
+The server's value depends entirely on the agent *using* it well — pulling
+context at task start and writing durable facts as they arise. Encode that as a
+standing instruction so it fires every session: add a block like the following to
+your `CLAUDE.md` (Claude Code), `AGENTS.md`, or the equivalent for your agent.
+
+```markdown
+## Memory — use it every session
+A persistent memory server is enabled (tools: `mcp__pseudolife-memory__*`).
+
+- **At task start**, call `memory_search` with a natural-language description of
+  the work to pull prior context, decisions, and gotchas. For "what is X now?",
+  `memory_fact_get(entity, attribute)` returns the one current canonical value.
+- **As durable things arise**, `memory_store` them (user preferences, decisions,
+  outcomes, corrections). One claim per call; set `origin` honestly
+  (`user`/`action`/`agent`); use a stable `source`/`tags` per project.
+- **For canonical single-value facts**, use `memory_fact_set`; correct a fact by
+  setting a new value at the same slot (the old one is kept for audit).
+- **Be judicious, and store tersely.** The dream consolidator extracts entities
+  and relations from the *text* of each memory, so a verbose multi-paragraph
+  status dump becomes a cluster of low-value graph nodes + edge-spam. Keep status
+  to a few sentences of durable essentials; put long detail in commits/specs.
+```
+
+The `dream` pass periodically distils stored memories into canonical facts and a
+knowledge graph; `memory_digest` / `memory_communities` then surface the graph's
+shape (hubs, communities, surprising links, questions worth answering).
+
 ## Configuration
 
 Connection / deployment env vars:
