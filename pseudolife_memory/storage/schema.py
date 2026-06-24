@@ -283,6 +283,27 @@ def ensure_schema(conn) -> dict:
             "ALTER TABLE entries ADD COLUMN IF NOT EXISTS reinforcements "
             "INTEGER NOT NULL DEFAULT 0"
         )
+        # v13 one-time upgrade: memory_traces was previously keyed on fact_id.
+        # Drop and recreate with the stable slot key (entity_norm, attribute_norm).
+        cur.execute(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name='memory_traces' AND column_name='fact_id'"
+        )
+        if cur.fetchone() is not None:
+            cur.execute("DROP TABLE memory_traces")
+            cur.execute(
+                "CREATE TABLE memory_traces ("
+                "  entity_norm    TEXT   NOT NULL,"
+                "  attribute_norm TEXT   NOT NULL,"
+                "  entry_id       BIGINT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,"
+                "  created_at     DOUBLE PRECISION NOT NULL,"
+                "  PRIMARY KEY (entity_norm, attribute_norm, entry_id)"
+                ")"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS memory_traces_entry_idx "
+                "ON memory_traces (entry_id)"
+            )
         # One-time upgrade: drop the old episode FK only when it's actually
         # present. Guarding avoids taking an ACCESS EXCLUSIVE lock on every
         # init (which could block behind any open transaction on entries).

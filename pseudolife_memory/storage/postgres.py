@@ -640,6 +640,55 @@ class PostgresStorage:
         self.conn.commit()
         return cur.rowcount > 0
 
+    def add_trace(self, entity_norm: str, attribute_norm: str,
+                  entry_id: int, now: float) -> bool:
+        """Link a cortex slot to a source episode. Idempotent on the PK; returns
+        True iff a NEW row was inserted (so the caller bumps reinforcements only on
+        genuine new formation, never on a re-assert)."""
+        row = self.conn.execute(
+            "INSERT INTO memory_traces (entity_norm, attribute_norm, entry_id, created_at) "
+            "VALUES (%s, %s, %s, %s) "
+            "ON CONFLICT (entity_norm, attribute_norm, entry_id) DO NOTHING "
+            "RETURNING entry_id",
+            (entity_norm, attribute_norm, entry_id, now),
+        ).fetchone()
+        self.conn.commit()
+        return row is not None
+
+    def traces_for_slot(self, entity_norm: str, attribute_norm: str) -> list[int]:
+        return [r[0] for r in self.conn.execute(
+            "SELECT entry_id FROM memory_traces "
+            "WHERE entity_norm = %s AND attribute_norm = %s ORDER BY entry_id",
+            (entity_norm, attribute_norm)).fetchall()]
+
+    def facts_for_entry(self, entry_id: int) -> list[dict]:
+        cols = ("id", "entity", "attribute", "value")
+        return [dict(zip(cols, r)) for r in self.conn.execute(
+            f"SELECT f.{', f.'.join(cols)} FROM facts f "
+            "JOIN memory_traces t ON f.entity_norm = t.entity_norm "
+            "AND f.attribute_norm = t.attribute_norm "
+            "WHERE t.entry_id = %s AND f.status = 'current' "
+            "ORDER BY f.id", (entry_id,)).fetchall()]
+
+    def get_entry(self, entry_id: int) -> dict | None:
+        cols = ("id", "text", "source", "ts")
+        row = self.conn.execute(
+            "SELECT id, text, source, ts FROM entries WHERE id = %s",
+            (entry_id,)).fetchone()
+        return dict(zip(cols, row)) if row else None
+
+    def bump_reinforcements(self, entry_id: int, delta: int) -> None:
+        self.conn.execute(
+            "UPDATE entries SET reinforcements = reinforcements + %s WHERE id = %s",
+            (delta, entry_id))
+        self.conn.commit()
+
+    def bump_access_count(self, entry_id: int, delta: int) -> None:
+        self.conn.execute(
+            "UPDATE entries SET access_count = access_count + %s WHERE id = %s",
+            (delta, entry_id))
+        self.conn.commit()
+
     def load_graph(self) -> dict:
         """Whole live graph (entities + aliases + non-superseded edges) —
         small by design, loaded per query for on-read inference."""

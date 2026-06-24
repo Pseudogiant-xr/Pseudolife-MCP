@@ -404,3 +404,31 @@ def test_get_set_meta_roundtrip(svc):
     st.set_meta("graph_digest", {"computed_at": 5.0, "god_nodes": []})
     assert st.get_meta("graph_digest")["computed_at"] == 5.0
     assert st.get_meta("does-not-exist") is None
+
+
+def test_memory_traces_storage_roundtrip(svc):
+    # Real ids: create two entities + a fact + an entry via the public paths.
+    svc.graph_relate("tr-a", "depends-on", "tr-b")
+    svc.cortex_write("tr-a", "role", "frontend", support="user")
+    st = svc._storage  # noqa: SLF001  (fixture lazy-inits _storage on first svc call)
+    svc.store("tr-a is the frontend role", source="general")
+    import time as _t
+    from pseudolife_memory.memory.cortex import _norm_key
+    entry_id = st.conn.execute(
+        "SELECT id FROM entries ORDER BY id DESC LIMIT 1").fetchone()[0]
+    en, an = _norm_key("tr-a"), _norm_key("role")
+    assert st.add_trace(en, an, entry_id, _t.time()) is True
+    assert st.add_trace(en, an, entry_id, _t.time()) is False   # idempotent on PK
+    assert st.traces_for_slot(en, an) == [entry_id]
+    assert any(f["entity"] == "tr-a" for f in st.facts_for_entry(entry_id))
+    assert st.get_entry(entry_id)["text"] == "tr-a is the frontend role"
+    assert st.get_entry(10_000_000) is None
+    st.bump_reinforcements(entry_id, 2)
+    assert st.conn.execute(
+        "SELECT reinforcements FROM entries WHERE id=%s", (entry_id,)).fetchone()[0] == 2
+    # DURABILITY (the anchor-correction regression guard): a later cortex_write
+    # triggers a full facts snapshot rewrite (DELETE+reinsert, new fact ids).
+    # The slot-keyed trace MUST survive it.
+    svc.cortex_write("tr-a", "language", "python", support="user")
+    assert st.traces_for_slot(en, an) == [entry_id]
+    assert any(f["entity"] == "tr-a" for f in st.facts_for_entry(entry_id))
