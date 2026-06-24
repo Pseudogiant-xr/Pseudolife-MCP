@@ -130,20 +130,25 @@ bank where no degree exceeds `hub_floor`, gating is inert by construction.
 
 ### 4. New MCP tools ([pseudolife_memory/mcp_server.py](../../pseudolife_memory/mcp_server.py))
 
-Both are thin `@mcp.tool()` wrappers over the existing `service.graph_neighborhood`
-(`memory_graph` already supports `depth=1` and `to=`), so there is no new graph
-logic — only a clearer affordance:
+- **`get_neighbors(entity, relation_filter=None)`** — a thin `@mcp.tool()`
+  wrapper over `graph_neighborhood(entity, depth=1)`, optionally filtering edges
+  by relation. No new graph logic; overlaps `memory_graph` purely as a clearer
+  affordance.
+- **`memory_path(source, target, max_hops=8)`** — a *dedicated* shortest-path
+  query, **not** a wrapper over `graph_neighborhood`'s `to=` branch. It backs a
+  small `service.graph_path(source, target, max_hops)` that runs a targeted
+  bidirectional BFS (`nx.bidirectional_shortest_path`) between the two entity
+  ids over the read-model graph (`self._graph`), with `max_hops` as a
+  path-length **cutoff** (return "no path within max_hops" past it).
 
-- **`memory_path(source, target, max_hops=8)`** → `graph_neighborhood(source, to=target)`,
-  surfacing the path + edges along it. Open item for the plan:
-  `graph_neighborhood` currently caps depth at 3, so reaching a `max_hops` > 3
-  path requires either raising that cap on the `to=` path-search branch or
-  documenting 3 as the real ceiling.
-- **`get_neighbors(entity, relation_filter=None)`** → `graph_neighborhood(entity, depth=1)`,
-  optionally filtering edges by relation.
-
-These overlap `memory_graph` by construction; their value is intent-signalling
-discoverability.
+  Rationale: `graph_neighborhood` finds a path by first materializing a
+  depth-bounded subgraph, then locating the target inside it. Raising that cap
+  to reach longer paths fans out exponentially around hubs — re-creating the
+  blast-radius problem the rest of Track A removes. A targeted bidirectional
+  search instead walks *toward* the target, so cost is bounded by actual path
+  length, not branching factor: no hub explosion, true shortest paths at any
+  reasonable distance, and `graph_neighborhood`'s depth-3 cap stays untouched
+  for its own neighborhood use.
 
 ## Validation
 
@@ -219,6 +224,8 @@ Dev-only, not CI.
 - `pseudolife_memory/service.py` — `recall()` wiring, `_graph_degrees()`,
   `_hub_threshold()`; top_k / default_hops clamps.
 - `pseudolife_memory/utils/config.py` — four `RecallConfig` knobs.
+- `pseudolife_memory/service.py` — also `graph_path()` (targeted bidirectional
+  shortest path over the read-model) backing `memory_path`.
 - `pseudolife_memory/mcp_server.py` — `memory_path`, `get_neighbors`.
 - `evals/memcot_bench.py` — 3-arm rework, adapter, hub fixture, `entities`
   metric.
