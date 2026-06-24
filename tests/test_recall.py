@@ -383,3 +383,35 @@ def test_recall_no_gating_pulls_in_hub_siblings(tmp_path):
     out = svc.recall("What does checkout-service run on?", hops=3)
     names = {e["entity"] for e in out["entities"]}
     assert "order-service" in names               # un-gated fan-out through hub
+
+
+# ---------------------------------------------------------------------------
+# MCP tool tests: memory_digest / memory_communities (Task 7)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
+def test_memory_digest_tool(tmp_path, monkeypatch):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
+    from ladder_sweep import build_service
+    import pseudolife_memory.mcp_server as srv
+    svc = build_service(tmp_path)
+    _seed_two_communities(svc)
+    svc._refresh_graph_insight()  # noqa: SLF001
+    monkeypatch.setattr(srv, "service", svc, raising=False)
+    out = srv.memory_digest()
+    assert out["available"] is True and "god_nodes" in out["digest"]
+
+
+@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
+def test_memory_communities_tool(tmp_path, monkeypatch):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
+    from ladder_sweep import build_service
+    import pseudolife_memory.mcp_server as srv
+    svc = build_service(tmp_path)
+    _seed_two_communities(svc)
+    svc._refresh_graph_insight()  # noqa: SLF001
+    monkeypatch.setattr(srv, "service", svc, raising=False)
+    listing = srv.memory_communities()
+    assert listing["communities"]
+    members = srv.memory_communities(community_id=listing["communities"][0]["id"])
+    assert "members" in members

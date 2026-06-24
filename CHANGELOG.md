@@ -18,6 +18,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   stay open. Offline-first (vendored OFL fonts, no CDN, no build step). A
   fixture-backed `pseudolife_memory.web.devserver` renders the UI without
   Postgres for development.
+- **Graph insight layer** — `dream` now computes graph communities (persisted),
+  god-nodes, surprising connections, and suggested questions. New read-only
+  tools `memory_digest` and `memory_communities`; `memory_graph` nodes carry a
+  `community` field.
 - **`memory_recall`** — read-only multi-hop graph-traversal retrieval (MemCoT
   loop). Seeds from the query, walks the knowledge graph up to `hops`
   iterations (max 5), and returns entities, edges, paths, and supporting texts.

@@ -1072,6 +1072,24 @@ def memory_alias(entity: str, alias: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+def memory_digest() -> dict[str, Any]:
+    """Topology digest of the knowledge graph as of the last dream: most-connected
+    entities (god-nodes), surprising cross-community connections, and questions
+    the graph is uniquely positioned to answer. Read-only; returns
+    {available: false} until a dream has produced one.
+    """
+    return service.graph_digest()
+
+
+@mcp.tool()
+def memory_communities(community_id: int | None = None) -> dict[str, Any]:
+    """List the graph's communities (clusters of related entities) with size and
+    cohesion, or — given a community_id — the members of that community. Read-only.
+    """
+    return service.communities(community_id=community_id)
+
+
+@mcp.tool()
 def memory_graph(
     entity: str,
     depth: int = 1,
