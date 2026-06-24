@@ -1751,10 +1751,16 @@ class MemoryService:
                     tally[res["action"]] = tally.get(res["action"], 0) + 1
                     if (traces_cfg.enabled and src_id is not None
                             and self._storage is not None):
-                        if self._storage.add_trace(
-                                _norm_key(ent), _norm_key(attr), src_id, _time.time()):
-                            self._storage.bump_reinforcements(src_id, 1)
-                            traces_n += 1
+                        # Serialize trace writes on the shared psycopg connection:
+                        # dream_run holds no outer lock (cortex_write locks internally
+                        # and has already released), so the trace writes must take
+                        # self._lock themselves. Scope it to JUST these calls — the
+                        # lock is non-reentrant, so including cortex_write would deadlock.
+                        with self._lock:
+                            if self._storage.add_trace(
+                                    _norm_key(ent), _norm_key(attr), src_id, _time.time()):
+                                self._storage.bump_reinforcements(src_id, 1)
+                                traces_n += 1
         except Exception as exc:  # noqa: BLE001 — an extractor must never break a dream
             logger.warning("dream extractor failed (%s); cursor NOT advanced, "
                            "will retry next sweep", exc)
