@@ -24,6 +24,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Mechanical seed driver by default (deterministic, no LLM call); set
   `PSEUDOLIFE_RECALL_DRIVER=llm` to use the dream endpoint for seed resolution.
   `low_confidence: true` signals no seed matched — fall back to `memory_search`.
+- **`memory_path` / `get_neighbors`** — two focused read-only graph MCP tools.
+  `memory_path` returns the shortest path between two entities (targeted
+  bidirectional search over the read-model, `max_hops` cutoff); `get_neighbors`
+  returns an entity's 1-hop neighbours with an optional relation filter.
 
 ### Changed
 - `memory_recall` mechanical seeder is now **query-first** — it seeds the
@@ -31,6 +35,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   eliminating cross-talk noise on populous banks (bench: seed precision 1.0 vs
   0.262, zero answer-recall loss, ~4× fewer graph calls). `recall.driver=llm`
   unchanged.
+- `memory_recall` now **hub-gates** graph expansion (graphify-derived) — high-degree
+  hub entities are still returned as results but are not expanded *through*, with
+  degree-aware frontier ordering and a per-hop budget. Cuts blast radius on
+  hub-adjacent queries with no recall loss (bench: mean −118 tokens/q, −6.7
+  entities/q, zero recall regression). Adaptive threshold
+  (`recall.hub_percentile` / `recall.hub_floor`); disable via `recall.hub_gate=false`.
 - Graph layer: single source of truth (Postgres `entities` hub + NetworkX
   read-model) behind a swappable `GraphStore` port. Apache AGE removed.
 - **Dream extractor default → Gemma 4 E2B QAT (UD-Q4_K_XL).** Switched the baked
