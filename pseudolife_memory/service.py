@@ -1598,6 +1598,7 @@ class MemoryService:
                         "text": e.text,
                         "timestamp": e.timestamp,
                         "episode_id": e.episode_id,
+                        "db_id": e.db_id,
                     }
                     for e in rows
                 ],
@@ -1695,37 +1696,45 @@ class MemoryService:
                     "contested": 0, "superseded": 0, "relations": 0,
                     "cursor": pulled["cursor"], "lessons": lessons,
                     "graph_insight": graph_insight}
-        texts = [e["text"] for e in entries]
+        from pseudolife_memory.memory.cortex import _norm_key
+        import time as _time
+        traces_cfg = self.config.memory.traces
         vocab = self.cortex_vocab().get("slots", [])
+        tally = {"inserted": 0, "confirmed": 0, "contested": 0, "superseded": 0}
+        traces_n = 0
         try:
-            claims = extractor.extract(texts, vocab)
+            for e in entries:
+                src_id = e.get("db_id")
+                for c in extractor.extract([e["text"]], vocab):
+                    ent, attr = self._resolve_dream_slot(c["entity"], c["attribute"])
+                    res = self.cortex_write(
+                        ent, attr, c["value"],
+                        confidence=float(c.get("confidence", 0.55)),
+                        support=c.get("origin", "agent"))
+                    tally[res["action"]] = tally.get(res["action"], 0) + 1
+                    if (traces_cfg.enabled and src_id is not None
+                            and self._storage is not None):
+                        if self._storage.add_trace(
+                                _norm_key(ent), _norm_key(attr), src_id, _time.time()):
+                            self._storage.bump_reinforcements(src_id, 1)
+                            traces_n += 1
         except Exception as exc:  # noqa: BLE001 — an extractor must never break a dream
-            # Transient failure (timeout/network/parse): do NOT advance the cursor
-            # so these memories are retried next sweep instead of being silently
-            # skipped (the bug behind the dream-timeout incident).
             logger.warning("dream extractor failed (%s); cursor NOT advanced, "
                            "will retry next sweep", exc)
             return {"pulled": len(entries), "claims": 0, "inserted": 0,
                     "confirmed": 0, "contested": 0, "superseded": 0, "relations": 0,
                     "cursor": self._cortex.dream_cursor, "extractor_failed": True,
                     "lessons": {"signals": 0, "lessons": 0}}
-        tally = {"inserted": 0, "confirmed": 0, "contested": 0, "superseded": 0}
-        for c in claims:
-            ent, attr = self._resolve_dream_slot(c["entity"], c["attribute"])
-            res = self.cortex_write(
-                ent, attr, c["value"],
-                confidence=float(c.get("confidence", 0.55)),
-                support=c.get("origin", "agent"),
-            )
-            tally[res["action"]] = tally.get(res["action"], 0) + 1
         newest = max(e["timestamp"] for e in entries)
         self.dream_commit(newest)
+        texts = [e["text"] for e in entries]
         relations_n = self._dream_extract_relations(extractor, texts)
         lessons = self.synthesize_lessons(extractor)
         graph_insight = self._safe_refresh_graph_insight()
-        return {"pulled": len(entries), "claims": len(claims),
+        return {"pulled": len(entries), "claims": sum(tally.values()),
                 "cursor": newest, "relations": relations_n, **tally,
-                "lessons": lessons, "graph_insight": graph_insight}
+                "lessons": lessons, "graph_insight": graph_insight,
+                "traces": traces_n}
 
     def dream_status(self) -> dict[str, Any]:
         """Backlog (eligible unconsolidated memories), idle seconds since the most

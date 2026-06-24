@@ -430,3 +430,26 @@ def test_dream_run_refreshes_digest_with_no_backlog(tmp_path):
     assert out["pulled"] == 0             # exercised the no-backlog path
     assert out["graph_insight"]["refreshed"] is True
     assert svc._storage.load_communities()["assignment"]  # communities persisted
+
+
+@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
+def test_dream_writes_fact_traces(tmp_path):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
+    from ladder_sweep import build_service
+    from pseudolife_memory.memory.dream import RegexExtractor
+    svc = build_service(tmp_path)
+    # A memory whose text the regex floor extracts a fact from (lexicon-gated
+    # attribute — "runtime"; verify RegexExtractor yields a claim for it).
+    svc.store("trace-svc runtime: jdk-21", source="general")
+    out = svc.dream_run(RegexExtractor())
+    assert out["pulled"] >= 1
+    assert out.get("traces", 0) >= 1
+    st = svc._storage  # noqa: SLF001
+    # The entry that produced the fact is now reinforced + linked.
+    eid = st.conn.execute("SELECT id FROM entries ORDER BY id DESC LIMIT 1").fetchone()[0]
+    assert st.facts_for_entry(eid)                      # entry -> fact(s)
+    assert st.conn.execute(
+        "SELECT reinforcements FROM entries WHERE id=%s", (eid,)).fetchone()[0] >= 1
+    # Durability: the trace survives a SUBSEQUENT cortex write (snapshot rewrite).
+    svc.cortex_write("unrelated-x", "kind", "probe", support="user")
+    assert st.facts_for_entry(eid)
