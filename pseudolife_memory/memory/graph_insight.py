@@ -132,3 +132,77 @@ def summarize_communities(communities: dict[int, list[int]], edges: list[dict],
             "cohesion": round(cohesion_score(edges, ids), 4),
         })
     return out
+
+
+_LOW_CONFIDENCE = 0.6
+_PERIPHERAL_DEGREE = 2
+
+
+def god_nodes(edges: list[dict], entities: list[dict], *, top_n: int = 10,
+              exclude_etypes: tuple[str, ...] = ()) -> list[dict]:
+    deg = degree_counts(edges)
+    excluded = {e["id"] for e in entities if e.get("etype") in exclude_etypes}
+    disp = {e["id"]: e["display"] for e in entities}
+    ranked = sorted(
+        ((eid, d) for eid, d in deg.items() if eid not in excluded),
+        key=lambda kv: (-kv[1], kv[0]),
+    )
+    return [{"entity_id": eid, "display": disp.get(eid, str(eid)), "degree": d}
+            for eid, d in ranked[:top_n]]
+
+
+def surprising_connections(edges: list[dict], entities: list[dict],
+                           node_community: dict[int, int], *,
+                           top_n: int = 10) -> list[dict]:
+    deg = degree_counts(edges)
+    disp = {e["id"]: e["display"] for e in entities}
+    god_cutoff = _god_degree_cutoff(deg)
+    scored = []
+    for e in edges:
+        u, v = e["src_id"], e["dst_id"]
+        if u == v:
+            continue
+        score, reasons = 0, []
+        if (e.get("confidence", 1.0) < _LOW_CONFIDENCE) or (e.get("origin") == "agent"):
+            score += 2
+            reasons.append("agent-inferred or low-confidence")
+        cu, cv = node_community.get(u), node_community.get(v)
+        cross = cu is not None and cv is not None and cu != cv
+        if cross:
+            score += 3
+            reasons.append(f"bridge between community {cu} and {cv}")
+        du, dv = deg.get(u, 0), deg.get(v, 0)
+        if min(du, dv) <= _PERIPHERAL_DEGREE and max(du, dv) >= god_cutoff:
+            score += 1
+            reasons.append("peripheral node reaches a hub")
+        if score <= 0:
+            continue
+        pair = tuple(sorted((cu, cv))) if cross else None
+        scored.append({
+            "src": disp.get(u, str(u)), "dst": disp.get(v, str(v)),
+            "relation": e.get("relation", ""), "confidence": e.get("confidence"),
+            "origin": e.get("origin"), "score": score,
+            "why": "; ".join(reasons), "_pair": pair,
+        })
+    scored.sort(key=lambda s: (-s["score"], s["src"], s["dst"]))
+    seen_pairs: set = set()
+    out = []
+    for s in scored:
+        pair = s.pop("_pair")
+        if pair is not None:
+            if pair in seen_pairs:
+                continue
+            seen_pairs.add(pair)
+        out.append(s)
+        if len(out) >= top_n:
+            break
+    return out
+
+
+def _god_degree_cutoff(deg: dict[int, int]) -> int:
+    """Degree at/above which a node counts as a 'hub' for peripheral->hub. The
+    10th-highest degree, floored at 5 (mirrors the god_nodes top-N notion)."""
+    if not deg:
+        return 5
+    top = sorted(deg.values(), reverse=True)
+    return max(5, top[min(len(top) - 1, 9)])

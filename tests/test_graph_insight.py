@@ -55,3 +55,49 @@ def test_summarize_communities_labels_by_top_degree():
     assert {s["id"] for s in summ} == set(comms.keys())
     for s in summ:
         assert s["size"] >= 1 and 0.0 <= s["cohesion"] <= 1.0 and s["label"].startswith("e")
+
+
+def test_god_nodes_ranks_by_degree():
+    # hub=1 connects to 2,3,4; leaf edge 5-6.
+    edges = [{"src_id": 1, "dst_id": 2}, {"src_id": 1, "dst_id": 3},
+             {"src_id": 1, "dst_id": 4}, {"src_id": 5, "dst_id": 6}]
+    entities = [{"id": i, "display": f"e{i}", "etype": None} for i in range(1, 7)]
+    gods = gi.god_nodes(edges, entities, top_n=2)
+    assert gods[0]["entity_id"] == 1 and gods[0]["degree"] == 3
+    assert gods[0]["display"] == "e1" and len(gods) == 2
+
+
+def test_god_nodes_excludes_etype():
+    edges = [{"src_id": 1, "dst_id": 2}, {"src_id": 1, "dst_id": 3}]
+    entities = [{"id": 1, "display": "hub", "etype": "structural"},
+                {"id": 2, "display": "a", "etype": None},
+                {"id": 3, "display": "b", "etype": None}]
+    gods = gi.god_nodes(edges, entities, top_n=5, exclude_etypes=("structural",))
+    assert all(g["entity_id"] != 1 for g in gods)
+
+
+def test_surprising_connections_flags_cross_community_bridge():
+    edges = [
+        {"src_id": 1, "dst_id": 2, "relation": "uses", "confidence": 0.9, "origin": "user"},
+        {"src_id": 4, "dst_id": 5, "relation": "uses", "confidence": 0.9, "origin": "user"},
+        # bridge between the two communities, agent-inferred + low confidence
+        {"src_id": 2, "dst_id": 4, "relation": "relates-to", "confidence": 0.5, "origin": "agent"},
+    ]
+    entities = [{"id": i, "display": f"e{i}", "etype": None} for i in range(1, 6)]
+    node_comm = {1: 0, 2: 0, 3: 0, 4: 1, 5: 1}
+    out = gi.surprising_connections(edges, entities, node_comm, top_n=5)
+    assert out and out[0]["src"] == "e2" and out[0]["dst"] == "e4"
+    assert "community" in out[0]["why"].lower()
+    assert out[0]["origin"] == "agent"
+
+
+def test_surprising_connections_dedup_by_community_pair():
+    # Two edges between the same community pair -> only one representative kept.
+    edges = [
+        {"src_id": 1, "dst_id": 3, "relation": "r", "confidence": 0.5, "origin": "agent"},
+        {"src_id": 2, "dst_id": 4, "relation": "r", "confidence": 0.5, "origin": "agent"},
+    ]
+    entities = [{"id": i, "display": f"e{i}", "etype": None} for i in range(1, 5)]
+    node_comm = {1: 0, 2: 0, 3: 1, 4: 1}
+    out = gi.surprising_connections(edges, entities, node_comm, top_n=5)
+    assert len(out) == 1
