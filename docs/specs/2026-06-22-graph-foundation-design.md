@@ -52,7 +52,7 @@ wrong framework."
 - Enterprise multi-agent work: activating the dormant OCC seam, tenancy /
   per-bank isolation, a scalable embedding/extraction tier. The near-term
   shared-bank-with-a-handful-of-trusted-writers case (user + brother + their two
-  redacted agents) needs **no** work here — the single daemon's coarse lock
+  agents) needs **no** work here — the single daemon's coarse lock
   serializes writes and v0.4 writer-keying attributes them; it is only a problem
   at hundreds of writers.
 - Building an actual AGE/graph-DB backend implementation — only the port + the
@@ -149,7 +149,7 @@ data loss.** Procedure (follows the standard "recreate only the daemon, never
 
 ## Breaking changes (acceptable)
 - **`memory_graph_query` (raw read-only Cypher) removed.** It is a strong-model
-  power-tool the redacted deployment already refuses to expose (weak-model
+  power-tool that weak-model deployments already refuse to expose (weak-model
   footgun), and removing it shrinks the 42-tool surface (fresh-eyes F4). Noted in
   CHANGELOG; multi-hop questions are served by `memory_graph` (neighborhood +
   derived edges + path), which needs no Cypher.
