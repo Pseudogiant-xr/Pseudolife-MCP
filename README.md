@@ -329,10 +329,12 @@ A persistent memory server is enabled (tools: `mcp__pseudolife-memory__*`).
   (`user`/`action`/`agent`); use a stable `source`/`tags` per project.
 - **For canonical single-value facts**, use `memory_fact_set`; correct a fact by
   setting a new value at the same slot (the old one is kept for audit).
-- **Be judicious, and store tersely.** The dream consolidator extracts entities
-  and relations from the *text* of each memory, so a verbose multi-paragraph
-  status dump becomes a cluster of low-value graph nodes + edge-spam. Keep status
-  to a few sentences of durable essentials; put long detail in commits/specs.
+- **Store dense detail freely, but route it.** Full memory text stays searchable,
+  but the dream also mines it into facts + graph edges — so verbose status under a
+  *normal* source pollutes the graph. Put dense status/logs under `source="status"`
+  (excluded from extraction by default: searchable, no pollution); reserve
+  `memory_fact_set` / `memory_graph_relate` for terse canonical facts and real
+  relations.
 ```
 
 The `dream` pass periodically distils stored memories into canonical facts and a

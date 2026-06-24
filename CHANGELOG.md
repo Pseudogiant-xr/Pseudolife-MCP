@@ -49,6 +49,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   backlog**, so manual graph edits (cleanup, direct `graph_relate`) are reflected
   in `memory_digest` / `memory_communities` without waiting for a memory-bearing
   dream.
+- Dream `exclude_sources` default now also skips `"status"` and `"log"` — store
+  verbose status/log dumps under those sources to keep them searchable (in the
+  bands) without the dream mining them into knowledge-graph clutter.
 - Graph layer: single source of truth (Postgres `entities` hub + NetworkX
   read-model) behind a swappable `GraphStore` port. Apache AGE removed.
 - **Dream extractor default → Gemma 4 E2B QAT (UD-Q4_K_XL).** Switched the baked

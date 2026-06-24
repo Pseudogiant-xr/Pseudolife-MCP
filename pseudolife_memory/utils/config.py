@@ -275,8 +275,11 @@ class DreamConfig:
     enabled: bool = True
     # Which stored sources are eligible. None => every source EXCEPT exclude_sources.
     eligible_sources: list[str] | None = None
+    # Sources the dream never consolidates — they stay in the searchable bands but
+    # are not mined for facts/graph edges. "status"/"log" are the convention for
+    # dense status dumps (recallable via memory_search, but no graph pollution).
     exclude_sources: list[str] = field(
-        default_factory=lambda: ["consolidation", "reflection"]
+        default_factory=lambda: ["consolidation", "reflection", "status", "log"]
     )
     # Backlog + quiescence trigger (consumed by dream_status / future sweep).
     min_batch: int = 8
