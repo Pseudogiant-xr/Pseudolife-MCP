@@ -481,6 +481,25 @@ def memory_facts(limit: int = 120) -> dict[str, Any]:
 
 
 @mcp.tool()
+def memory_get(entry_id: int) -> dict[str, Any]:
+    """Dereference a source-entry pointer from a fact's `source_entries`: returns
+    the full dense memory episode and `consolidated_into` (the facts it formed).
+    Reading it gently reinforces it. `{found: false, faded: true}` if the episode
+    has since been forgotten.
+    """
+    return service.get_entry(entry_id)
+
+
+@mcp.tool()
+def memory_reinforce(entry_id: int) -> dict[str, Any]:
+    """After reading an episode via `memory_get` and finding it genuinely useful,
+    call this to strengthen it — a deliberate 'this mattered' signal that helps the
+    episode resist forgetting. Read first, then reinforce.
+    """
+    return service.reinforce(entry_id)
+
+
+@mcp.tool()
 def memory_world_set(
     entity: str,
     attribute: str,

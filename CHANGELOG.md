@@ -7,6 +7,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased] — graph foundation
 
 ### Added
+- **Provenance-as-link (Phase 1)** — the dream now links each consolidated fact-slot
+  to the dense episodes it came from (`memory_traces`, keyed on the stable slot);
+  facts surface `source_entries`, and new `memory_get` / `memory_reinforce` tools
+  dereference and strengthen them.
 - **Cortex Console (web UI)** — an operator dashboard served by the daemon at
   `/ui/` (new `pseudolife_memory/web/`: a pure-ASGI `/api` REST layer 1:1 over
   `MemoryService` + a no-build vanilla SPA). Tabs: Observatory (health/stats,

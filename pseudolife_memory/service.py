@@ -1157,8 +1157,12 @@ class MemoryService:
                         rec = self._cortex.lookup(canon, attribute)
             if rec is None:
                 return None
-            return _cortex_record_to_dict(
-                rec, relative_age=self.config.time.relative_age)
+            d = _cortex_record_to_dict(rec, relative_age=self.config.time.relative_age)
+            if self._storage is not None:
+                from pseudolife_memory.memory.cortex import _norm_key
+                d["source_entries"] = self._storage.traces_for_slot(
+                    _norm_key(rec.entity), _norm_key(rec.attribute))
+            return d
 
     def cortex_contenders(self, entity: str, attribute: str) -> dict[str, Any]:
         """Active contenders parked at a slot — a conflicting lower-tier / below-
@@ -1215,6 +1219,10 @@ class MemoryService:
                     d["contender_origin"] = conts[0].origin
                 else:
                     d["contested"] = False
+                if self._storage is not None:
+                    from pseudolife_memory.memory.cortex import _norm_key
+                    d["source_entries"] = self._storage.traces_for_slot(
+                        _norm_key(r.entity), _norm_key(r.attribute))
                 entries.append(d)
             return {"count": len(entries), "entries": entries}
 
@@ -1529,9 +1537,12 @@ class MemoryService:
             rows.sort(key=lambda d: (d["entity"].lower(), d["attribute"].lower()))
             if self._storage is not None:
                 from pseudolife_memory.graph import norm_name
+                from pseudolife_memory.memory.cortex import _norm_key
                 emap = self._storage.entity_id_map()
                 for d in rows:
                     d["entity_id"] = emap.get(norm_name(d["entity"]))
+                    d["source_entries"] = self._storage.traces_for_slot(
+                        _norm_key(d["entity"]), _norm_key(d["attribute"]))
             return {"count": len(rows), "entries": rows}
 
     def history(self, entity: str, attribute: str) -> dict[str, Any]:
@@ -1550,6 +1561,32 @@ class MemoryService:
                 "versions": [_cortex_record_to_dict(r, relative_age=ra)
                              for r in recs],
             }
+
+    def get_entry(self, entry_id: int) -> dict[str, Any]:
+        """Dereference a trace pointer: the dense episode + the facts it formed.
+        Bumps access_count (ambient reinforcement). {found: False, faded: True}
+        when the episode has evicted."""
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return {"found": False, "faded": True}
+            row = self._storage.get_entry(int(entry_id))
+            if row is None:
+                return {"found": False, "faded": True}
+            self._storage.bump_access_count(int(entry_id), 1)
+            facts = self._storage.facts_for_entry(int(entry_id))
+        return {"found": True, "entry_id": row["id"], "text": row["text"],
+                "source": row.get("source"), "consolidated_into": facts}
+
+    def reinforce(self, entry_id: int) -> dict[str, Any]:
+        """The 'this episode was useful' signal — bump reinforcements (Phase-2
+        retention reads it). No-op on a faded episode."""
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None or self._storage.get_entry(int(entry_id)) is None:
+                return {"reinforced": False, "faded": True}
+            self._storage.bump_reinforcements(int(entry_id), 1)
+        return {"reinforced": True, "entry_id": int(entry_id)}
 
     def cortex_forget(self, entity: str, attribute: str | None = None) -> dict[str, Any]:
         """Hard-delete facts at an entity (or one exact slot). Persists. Use for

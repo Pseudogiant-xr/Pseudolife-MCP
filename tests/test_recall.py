@@ -453,3 +453,28 @@ def test_dream_writes_fact_traces(tmp_path):
     # Durability: the trace survives a SUBSEQUENT cortex write (snapshot rewrite).
     svc.cortex_write("unrelated-x", "kind", "probe", support="user")
     assert st.facts_for_entry(eid)
+
+
+@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
+def test_memory_get_and_reinforce_roundtrip(tmp_path, monkeypatch):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
+    from ladder_sweep import build_service
+    from pseudolife_memory.memory.dream import RegexExtractor
+    import pseudolife_memory.mcp_server as srv
+    svc = build_service(tmp_path)
+    svc.store("getme-svc runtime: jdk-22", source="general")
+    svc.dream_run(RegexExtractor())
+    st = svc._storage  # noqa: SLF001
+    eid = st.conn.execute("SELECT id FROM entries ORDER BY id DESC LIMIT 1").fetchone()[0]
+    monkeypatch.setattr(srv, "service", svc, raising=False)
+    got = srv.memory_get(eid)
+    assert got["found"] is True and "getme-svc" in got["text"]
+    assert got["consolidated_into"]                      # entry -> facts
+    # source_entries surfaces on a fact read (the fact advertises its episodes).
+    facts = srv.memory_facts()["entries"]
+    assert any(eid in (f.get("source_entries") or []) for f in facts)
+    before = st.conn.execute("SELECT reinforcements FROM entries WHERE id=%s", (eid,)).fetchone()[0]
+    assert srv.memory_reinforce(eid)["reinforced"] is True
+    after = st.conn.execute("SELECT reinforcements FROM entries WHERE id=%s", (eid,)).fetchone()[0]
+    assert after == before + 1
+    assert srv.memory_get(9_000_001) == {"found": False, "faded": True}
