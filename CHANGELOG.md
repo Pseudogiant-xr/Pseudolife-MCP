@@ -7,6 +7,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased] — graph foundation
 
 ### Added
+- **Cortex Console (web UI)** — an operator dashboard served by the daemon at
+  `/ui/` (new `pseudolife_memory/web/`: a pure-ASGI `/api` REST layer 1:1 over
+  `MemoryService` + a no-build vanilla SPA). Tabs: Observatory (health/stats,
+  MIRAS band continuum, dream gauges), Cortex (fact review with provenance +
+  version-history timeline + contested-fact resolve), World, Lessons, Episodes,
+  Stream (search + ranking-trace debugger), Graph (force-directed visualiser +
+  table view), and a Console config editor (28 knobs, live-vs-restart, atomic
+  save with backup). `/api/*` is bearer-gated like `/mcp`; `/ui` + `/health`
+  stay open. Offline-first (vendored OFL fonts, no CDN, no build step). A
+  fixture-backed `pseudolife_memory.web.devserver` renders the UI without
+  Postgres for development.
 - **`memory_recall`** — read-only multi-hop graph-traversal retrieval (MemCoT
   loop). Seeds from the query, walks the knowledge graph up to `hops`
   iterations (max 5), and returns entities, edges, paths, and supporting texts.
@@ -22,6 +33,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   unchanged.
 - Graph layer: single source of truth (Postgres `entities` hub + NetworkX
   read-model) behind a swappable `GraphStore` port. Apache AGE removed.
+- **Dream extractor default → Gemma 4 E2B QAT (UD-Q4_K_XL).** Switched the baked
+  sidecar model (`ops/Dockerfile.extractor` `MODEL_URL`) from PTQ Q4_K_M to the
+  quantization-aware-trained UD-Q4_K_XL — smaller (2.44 vs ~2.9 GB) and faster on
+  CPU at identical quality. Quant ladder (2026-06-24, `evals/`): facts gold 1.0 /
+  stale 0.0, relations F1 0.75 (separate), lessons 5/6 — all equal to the old
+  Q4_K_M, ~17–40% faster to consolidate. Lighter GGUF quants are dominated:
+  UD-Q3_K_XL regresses relations (F1 0.62) and is bigger+slower; UD-Q2_K_XL
+  craters lesson synthesis (3/6 — inverts polarity/outcome) and is the slowest.
+  GGUF size floor is ~2.2 GB; genuine sub-1 GB needs the LiteRT 2-bit/mmap mobile
+  build (a separate runtime, not wired here).
 
 ### Removed
 - `memory_graph_query` (raw read-only Cypher) MCP tool and the `pseudolife-mcp

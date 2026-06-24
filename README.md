@@ -887,6 +887,40 @@ never touches your real bank. Point them elsewhere with
 384; without any Postgres, the PG suites skip and the pure-logic suites still
 pass.
 
+## Cortex Console (web UI)
+
+An operator dashboard served by the daemon itself — point a browser at
+**`http://127.0.0.1:8765/ui/`** (the `/health` and `/mcp` endpoints are
+unchanged; the console is additive). It's a read-mostly instrument panel for
+seeing and steering the memory a human otherwise can't observe.
+
+- **Observatory** — health, per-layer counts, the 8-band MIRAS continuum
+  (capacity fill + hit rate), and dream backlog/quiescence gauges.
+- **Cortex** — canonical facts grouped by entity with provenance tiers and
+  confidence; click a fact for its **version-history timeline**; contested
+  slots surface inline with Accept/Discard (`memory_fact_resolve`).
+- **World / Lessons / Episodes** — cited external facts (freshness + decayed
+  trust), do/avoid procedural lessons, and the session timeline with summaries.
+- **Stream** — live search with rerank/BM25 toggles, the associative stream,
+  and a **ranking-trace debugger** (why an entry did/didn't surface).
+- **Graph** — an interactive force-directed visualiser of the knowledge graph
+  (drag, click-to-expand, derived vs explicit edges) with a table view.
+- **Console** — the config "knobs & dials": every safe scalar in `config.yaml`
+  with a description, live-vs-restart badge, diff-preview, and an atomic save
+  (timestamped backup; live knobs apply in-process).
+
+**Auth** mirrors `/mcp`: `/ui` (static shell) and `/health` are open; `/api/*`
+requires the same `PSEUDOLIFE_MCP_TOKEN` bearer when one is set (the console
+prompts for it and stores it locally). No build step, no CDN, fully offline —
+vanilla ES modules + vendored OFL fonts served straight from the daemon.
+
+**Developing the UI:** a fixture-backed dev server (no Postgres, no torch)
+renders the real frontend against canned data for fast iteration:
+
+```bash
+python -m pseudolife_memory.web.devserver   # http://127.0.0.1:8770/ui/
+```
+
 ## Capabilities at a glance
 
 | Capability | Status |
@@ -905,6 +939,7 @@ pass.
 | Cross-encoder reranker | Optional (`rerank=True` per call, ~80 MB) |
 | BM25 hybrid pool | Optional (`bm25=True` per call, stdlib only) |
 | NLI contradiction scorer | Optional (`pip install .[nli]`, ~278 MB) |
+| Web console | Cortex Console at `/ui/` — health/stats, fact review + history, graph visualiser, search/trace, config editor (read-mostly, token-gated like `/mcp`) |
 | Schema version | v11 (additive temporal/provenance stamp; legacy file-mode `.pt` banks auto-migrate into Postgres) |
 
 ## What's not built yet
@@ -926,11 +961,11 @@ pass.
   needs a web-fetch tool the standalone server doesn't ship. Today, assert world
   facts manually with `memory_world_set`; an agent with web access can
   automate it.
-- **Lessons auto-injection + outcome-coloured graph view** — the lessons store,
-  tools, and `prefers`/`avoids` edges ship here; the auto-injected "lessons from
-  past work" prompt block is a provider/client concern (like the world-knowledge
-  block), and a human-facing outcome-coloured graph visualisation are deferred
-  follow-ons.
+- **Lessons auto-injection** — the lessons store, tools, and `prefers`/`avoids`
+  edges ship here; the auto-injected "lessons from past work" prompt block is a
+  provider/client concern (like the world-knowledge block), still a deferred
+  follow-on. (A human-facing graph visualiser now ships in the
+  [Cortex Console](#cortex-console-web-ui).)
 
 ## License
 

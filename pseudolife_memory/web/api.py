@@ -1,0 +1,220 @@
+"""ASGI plumbing for the Cortex Console.
+
+Composes, in front of the FastMCP streamable app, three additional surfaces:
+
+* ``/health``        — open liveness probe (unchanged behaviour).
+* ``/`` , ``/ui/*``  — the static SPA shell (open; it's just code, no data).
+* ``/api/*``         — JSON over ``MemoryService``, behind the same bearer-token
+                       gate as ``/mcp``.
+
+Everything else (``/mcp`` and any MCP sub-path) is forwarded to the wrapped MCP
+app untouched. Implemented against the raw ASGI protocol (no Starlette
+middleware classes) to match :mod:`pseudolife_memory.daemon` and avoid coupling
+to the MCP SDK's internal middleware surface.
+
+Sync ``service`` calls are dispatched to a threadpool so a slow retrieval can't
+stall the event loop (and the concurrent ``/mcp`` traffic).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import mimetypes
+from pathlib import Path
+from typing import Any, Callable
+
+from pseudolife_memory.web.routes import ConsoleRoutes
+
+logger = logging.getLogger("pseudolife-mcp.web")
+
+STATIC_DIR = Path(__file__).parent / "static"
+_LOOPBACK = {"127.0.0.1", "::1", "localhost"}
+
+mimetypes.add_type("application/javascript", ".js")
+mimetypes.add_type("application/json", ".json")
+mimetypes.add_type("image/svg+xml", ".svg")
+mimetypes.add_type("font/woff2", ".woff2")
+
+
+async def _send_json(send, status: int, payload: Any) -> None:
+    body = json.dumps(payload, default=str).encode("utf-8")
+    await send({
+        "type": "http.response.start",
+        "status": status,
+        "headers": [(b"content-type", b"application/json; charset=utf-8"),
+                    (b"content-length", str(len(body)).encode()),
+                    (b"cache-control", b"no-store")],
+    })
+    await send({"type": "http.response.body", "body": body})
+
+
+async def _send_bytes(send, status: int, body: bytes, content_type: str,
+                      cache: str = "no-cache") -> None:
+    await send({
+        "type": "http.response.start",
+        "status": status,
+        "headers": [(b"content-type", content_type.encode()),
+                    (b"content-length", str(len(body)).encode()),
+                    (b"cache-control", cache.encode())],
+    })
+    await send({"type": "http.response.body", "body": body})
+
+
+async def _read_body(receive) -> bytes:
+    chunks = []
+    while True:
+        message = await receive()
+        if message["type"] == "http.request":
+            chunks.append(message.get("body", b"") or b"")
+            if not message.get("more_body"):
+                break
+        elif message["type"] == "http.disconnect":
+            break
+    return b"".join(chunks)
+
+
+def _parse_query(scope) -> dict[str, str]:
+    raw = scope.get("query_string", b"").decode("utf-8", "replace")
+    out: dict[str, str] = {}
+    if not raw:
+        return out
+    from urllib.parse import parse_qsl
+    for k, v in parse_qsl(raw, keep_blank_values=True):
+        out[k] = v  # last value wins; handlers that want lists split on ","
+    return out
+
+
+def _serve_static(rel_path: str) -> tuple[int, bytes, str]:
+    """Resolve ``/ui/<rel_path>`` under STATIC_DIR with traversal protection."""
+    rel = rel_path.strip("/")
+    if rel in ("", "ui", "ui/"):
+        rel = "index.html"
+    elif rel.startswith("ui/"):
+        rel = rel[3:]
+    target = (STATIC_DIR / rel).resolve()
+    try:
+        target.relative_to(STATIC_DIR.resolve())
+    except ValueError:
+        return 403, b"forbidden", "text/plain"
+    if target.is_dir():
+        target = target / "index.html"
+    if not target.is_file():
+        # SPA fallback: unknown sub-route -> index.html (hash router handles it).
+        index = STATIC_DIR / "index.html"
+        if index.is_file():
+            return 200, index.read_bytes(), "text/html; charset=utf-8"
+        return 404, b"not found", "text/plain"
+    ctype = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
+    if ctype.startswith("text/") or ctype in (
+            "application/javascript", "image/svg+xml", "application/json"):
+        ctype += "; charset=utf-8" if "charset" not in ctype else ""
+    return 200, target.read_bytes(), ctype
+
+
+def build_console_app(
+    mcp_app: Callable,
+    token: str | None,
+    health_payload: Callable[[], dict],
+    service: Any,
+) -> Callable:
+    """Return the composed ASGI app. ``mcp_app`` is forwarded for non-console
+    paths; ``health_payload`` powers ``/health``; ``service`` backs ``/api``."""
+    token = token or None
+    routes = ConsoleRoutes(service)
+
+    def _authorized(scope) -> bool:
+        if token is None:
+            return True
+        headers = {k.decode().lower(): v.decode()
+                   for k, v in scope.get("headers", [])}
+        return headers.get("authorization") == f"Bearer {token}"
+
+    async def app(scope, receive, send):
+        if scope["type"] != "http":
+            await mcp_app(scope, receive, send)
+            return
+
+        path = scope.get("path", "") or "/"
+        method = scope.get("method", "GET").upper()
+
+        # 1) open liveness probe
+        if path == "/health":
+            try:
+                await _send_json(send, 200, health_payload())
+            except Exception as exc:  # noqa: BLE001
+                await _send_json(send, 500, {"status": "error", "error": str(exc)})
+            return
+
+        # 2) root -> console
+        if path == "/":
+            await send({"type": "http.response.start", "status": 307,
+                        "headers": [(b"location", b"/ui/")]})
+            await send({"type": "http.response.body", "body": b""})
+            return
+
+        # 3) static SPA shell (open)
+        if path == "/ui" or path.startswith("/ui/"):
+            try:
+                status, body, ctype = await asyncio.get_running_loop().run_in_executor(
+                    None, _serve_static, path)
+                # Fonts/images are immutable; markup, styles and scripts must
+                # never be cached so updates are picked up without a hard reload.
+                cache = ("max-age=86400" if ctype.startswith(("font/", "image/"))
+                         else "no-store")
+                await _send_bytes(send, status, body, ctype, cache)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("static serve error for %s: %s", path, exc)
+                await _send_bytes(send, 500, b"static error", "text/plain")
+            return
+
+        # 4) console REST API (token-gated like /mcp)
+        if path.startswith("/api/") or path == "/api":
+            if not _authorized(scope):
+                await _send_json(send, 401, {
+                    "error": "unauthorized",
+                    "hint": "Authorization: Bearer <PSEUDOLIFE_MCP_TOKEN>"})
+                return
+            if method not in ("GET", "POST"):
+                await _send_json(send, 405, {"error": "method_not_allowed"})
+                return
+            params = _parse_query(scope)
+            body: dict = {}
+            if method == "POST":
+                raw = await _read_body(receive)
+                if raw:
+                    try:
+                        body = json.loads(raw.decode("utf-8"))
+                    except json.JSONDecodeError:
+                        await _send_json(send, 400, {"error": "invalid_json"})
+                        return
+                    if not isinstance(body, dict):
+                        await _send_json(send, 400, {"error": "body_must_be_object"})
+                        return
+            try:
+                result = await asyncio.get_running_loop().run_in_executor(
+                    None, routes.dispatch, method, path, params, body)
+                await _send_json(send, 200, result)
+            except KeyError:
+                # unknown path, or a wrong-verb hit on a known path
+                status = 405 if routes.has(path) else 404
+                await _send_json(send, status, {
+                    "error": "not_found" if status == 404 else "method_not_allowed",
+                    "path": path})
+            except ValueError as exc:
+                await _send_json(send, 400, {"error": str(exc)})
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("api handler error: %s %s", method, path)
+                await _send_json(send, 500, {"error": str(exc)})
+            return
+
+        # 5) everything else -> the MCP app (token gate preserved)
+        if not _authorized(scope):
+            await _send_json(send, 401, {
+                "error": "unauthorized",
+                "hint": "Authorization: Bearer <PSEUDOLIFE_MCP_TOKEN>"})
+            return
+        await mcp_app(scope, receive, send)
+
+    return app

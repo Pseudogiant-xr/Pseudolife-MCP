@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Cortex Console — PseudoLife</title>
+  <meta name="color-scheme" content="dark light" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%233fd0c9' stroke-width='2'/%3E%3Cpath d='M16 3a13 13 0 0 1 0 26z' fill='%23e8b341'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/ui/css/styles.css" />
+</head>
+<body>
+  <div id="app" class="app" hidden>
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-text">
+          <strong>Cortex Console</strong>
+          <em>PseudoLife&nbsp;memory</em>
+        </span>
+      </div>
+      <nav id="nav" class="nav" aria-label="Primary"></nav>
+      <div class="sidebar-foot">
+        <button id="theme-toggle" class="ghost-btn" title="Toggle theme" type="button">
+          <span class="ico-theme"></span><span class="lbl">Theme</span>
+        </button>
+        <button id="token-btn" class="ghost-btn" title="Access token" type="button">
+          <span class="ico-key"></span><span class="lbl">Token</span>
+        </button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <button id="nav-toggle" class="icon-btn only-mobile" title="Menu" type="button">≡</button>
+        <h1 id="view-title" class="view-title">Observatory</h1>
+        <div class="topbar-status" id="topbar-status"></div>
+        <button id="refresh-btn" class="icon-btn" title="Refresh (r)" type="button">
+          <span class="ico-refresh"></span>
+        </button>
+      </header>
+      <section id="view" class="content" aria-live="polite"></section>
+    </main>
+  </div>
+
+  <div id="splash" class="splash">
+    <div class="splash-mark"></div>
+    <div class="splash-text">Cortex&nbsp;Console</div>
+  </div>
+
+  <noscript>
+    <p style="padding:2rem;font-family:sans-serif">The Cortex Console requires JavaScript.</p>
+  </noscript>
+
+  <script type="module" src="/ui/js/app.js"></script>
+</body>
+</html>

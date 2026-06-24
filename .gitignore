@@ -20,6 +20,15 @@ memory_state/
 # ChromaDB
 chromadb/
 
+# Cortex Console dev-server scratch (fixture config writes)
+pseudolife_memory/web/.devdata/
+*.bak
+
+# UI QA scratch (screenshots, browser-driver output)
+.qa/
+.playwright-mcp/
+pseudolife_memory/web/.devserver.log
+
 # IDE
 .vscode/
 .idea/

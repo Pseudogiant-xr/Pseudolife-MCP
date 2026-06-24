@@ -139,10 +139,15 @@ def run_daemon(host: str | None = None, port: int | None = None) -> None:
     mcp_server.start_background_durability()
     mcp_server.start_dream_sweep()
 
-    app = AuthHealthASGI(
-        mcp_server.mcp.streamable_http_app(), token, _health,
+    # Compose the Cortex Console (static SPA at /ui + REST at /api) in front of
+    # the MCP app. /health and the static shell stay open; /api joins /mcp
+    # behind the bearer-token gate. See pseudolife_memory/web/.
+    from pseudolife_memory.web import build_console_app
+
+    app = build_console_app(
+        mcp_server.mcp.streamable_http_app(), token, _health, mcp_server.service,
     )
-    logger.info("daemon: listening on %s:%s (auth=%s, storage=%s)",
+    logger.info("daemon: listening on %s:%s (auth=%s, storage=%s) — console at /ui/",
                 host, port, token is not None, _health()["storage"])
     uvicorn.run(app, host=host, port=port, log_level="warning")
 
