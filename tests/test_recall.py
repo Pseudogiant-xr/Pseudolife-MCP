@@ -415,3 +415,18 @@ def test_memory_communities_tool(tmp_path, monkeypatch):
     assert listing["communities"]
     members = srv.memory_communities(community_id=listing["communities"][0]["id"])
     assert "members" in members
+
+
+@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
+def test_dream_run_refreshes_digest_with_no_backlog(tmp_path):
+    # A dream with no memory backlog must still recompute the graph digest, so
+    # manual graph edits (cleanup / direct graph_relate) are reflected promptly.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
+    from ladder_sweep import build_service
+    from pseudolife_memory.memory.dream import NoOpExtractor
+    svc = build_service(tmp_path)
+    _seed_two_communities(svc)            # graph edges only — no stored memories
+    out = svc.dream_run(NoOpExtractor())
+    assert out["pulled"] == 0             # exercised the no-backlog path
+    assert out["graph_insight"]["refreshed"] is True
+    assert svc._storage.load_communities()["assignment"]  # communities persisted

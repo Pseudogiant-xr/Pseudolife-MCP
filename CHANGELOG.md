@@ -45,6 +45,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   hub-adjacent queries with no recall loss (bench: mean −118 tokens/q, −6.7
   entities/q, zero recall regression). Adaptive threshold
   (`recall.hub_percentile` / `recall.hub_floor`); disable via `recall.hub_gate=false`.
+- The graph-insight digest now also refreshes on a `dream_run` with **no memory
+  backlog**, so manual graph edits (cleanup, direct `graph_relate`) are reflected
+  in `memory_digest` / `memory_communities` without waiting for a memory-bearing
+  dream.
 - Graph layer: single source of truth (Postgres `entities` hub + NetworkX
   read-model) behind a swappable `GraphStore` port. Apache AGE removed.
 - **Dream extractor default → Gemma 4 E2B QAT (UD-Q4_K_XL).** Switched the baked

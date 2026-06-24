@@ -1686,11 +1686,15 @@ class MemoryService:
         entries = pulled["entries"]
         if not entries:
             # No new memories to consolidate, but outcome signals may still be
-            # pending — synthesise lessons regardless.
+            # pending — synthesise lessons regardless. Still refresh the graph
+            # digest so manual graph edits (cleanup, direct graph_relate) are
+            # reflected even when there is no memory backlog.
             lessons = self.synthesize_lessons(extractor)
+            graph_insight = self._safe_refresh_graph_insight()
             return {"pulled": 0, "claims": 0, "inserted": 0, "confirmed": 0,
                     "contested": 0, "superseded": 0, "relations": 0,
-                    "cursor": pulled["cursor"], "lessons": lessons}
+                    "cursor": pulled["cursor"], "lessons": lessons,
+                    "graph_insight": graph_insight}
         texts = [e["text"] for e in entries]
         vocab = self.cortex_vocab().get("slots", [])
         try:
@@ -1718,11 +1722,7 @@ class MemoryService:
         self.dream_commit(newest)
         relations_n = self._dream_extract_relations(extractor, texts)
         lessons = self.synthesize_lessons(extractor)
-        try:
-            graph_insight = self._refresh_graph_insight()
-        except Exception as exc:  # noqa: BLE001 — insight must never break a dream
-            logger.warning("graph-insight refresh failed (%s); dream unaffected", exc)
-            graph_insight = {"refreshed": False, "error": str(exc)}
+        graph_insight = self._safe_refresh_graph_insight()
         return {"pulled": len(entries), "claims": len(claims),
                 "cursor": newest, "relations": relations_n, **tally,
                 "lessons": lessons, "graph_insight": graph_insight}
@@ -2447,6 +2447,15 @@ class MemoryService:
             self._storage.replace_communities(assignment, summaries, computed_at)
             self._storage.set_meta("graph_digest", digest)
         return {"refreshed": True, "communities": len(summaries)}
+
+    def _safe_refresh_graph_insight(self) -> dict[str, Any]:
+        """Run _refresh_graph_insight, swallowing any failure so a refresh can
+        never break a dream. Shared by both dream_run paths."""
+        try:
+            return self._refresh_graph_insight()
+        except Exception as exc:  # noqa: BLE001 — insight must never break a dream
+            logger.warning("graph-insight refresh failed (%s); dream unaffected", exc)
+            return {"refreshed": False, "error": str(exc)}
 
     def graph_digest(self) -> dict[str, Any]:
         """The persisted digest snapshot, or {available: False} if dream hasn't run."""
