@@ -106,6 +106,53 @@ def derive_edges(
     ]
 
 
+def degree_counts(edges: list[dict]) -> dict[int, int]:
+    """Undirected degree per entity id over asserted edges.
+
+    Each edge adds 1 to both endpoints. Derived/transitive edges are NOT
+    counted (they are re-derived on read) — degree reflects asserted
+    connectivity, the stable signal hub-gating wants.
+    """
+    deg: dict[int, int] = {}
+    for e in edges:
+        s, d = e["src_id"], e["dst_id"]
+        deg[s] = deg.get(s, 0) + 1
+        deg[d] = deg.get(d, 0) + 1
+    return deg
+
+
+def degrees_by_name(edges: list[dict], entities: list[dict]) -> dict[str, int]:
+    """Asserted undirected degree keyed by entity display name."""
+    by_id = {e["id"]: e["display"] for e in entities}
+    out: dict[str, int] = {}
+    for eid, d in degree_counts(edges).items():
+        name = by_id.get(eid)
+        if name:
+            out[name] = d
+    return out
+
+
+def shortest_path(edges: list[dict], src_id: int, dst_id: int, *,
+                  max_hops: int = 8) -> list[int] | None:
+    """Targeted bidirectional shortest path (undirected) between two ids.
+
+    Returns the node-id path inclusive of both ends, or None when no path
+    exists or the shortest path exceeds ``max_hops`` edges. Searches toward
+    the target, so cost is bounded by path length, not branching factor.
+    """
+    if src_id == dst_id:
+        return [src_id]
+    g = nx.Graph()
+    for e in edges:
+        g.add_edge(e["src_id"], e["dst_id"])
+    if src_id not in g or dst_id not in g or not nx.has_path(g, src_id, dst_id):
+        return None
+    path = nx.bidirectional_shortest_path(g, src_id, dst_id)
+    if len(path) - 1 > max_hops:
+        return None
+    return path
+
+
 def build_subgraph(
     edges: list[dict[str, Any]],
     relations: dict[str, dict[str, Any]],

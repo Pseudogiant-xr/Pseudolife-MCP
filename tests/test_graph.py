@@ -287,3 +287,54 @@ def test_no_age_imports_remain():
         if "storage.age" in text or "AgeGraph" in text or ".cypher(" in text:
             offenders.append(p.name)
     assert offenders == [], f"AGE references remain in: {offenders}"
+
+
+# ── pure logic: degree + shortest path ──────────────────────────────────
+
+def test_degree_counts_undirected():
+    edges = [
+        {"src_id": 1, "dst_id": 2},
+        {"src_id": 1, "dst_id": 3},
+        {"src_id": 2, "dst_id": 3},
+    ]
+    assert G.degree_counts(edges) == {1: 2, 2: 2, 3: 2}
+
+
+def test_degree_counts_empty():
+    assert G.degree_counts([]) == {}
+
+
+def test_degrees_by_name_maps_display():
+    edges = [{"src_id": 1, "dst_id": 2}, {"src_id": 1, "dst_id": 3}]
+    entities = [
+        {"id": 1, "display": "hub"},
+        {"id": 2, "display": "a"},
+        {"id": 3, "display": "b"},
+    ]
+    assert G.degrees_by_name(edges, entities) == {"hub": 2, "a": 1, "b": 1}
+
+
+def test_shortest_path_direct():
+    edges = [{"src_id": 1, "dst_id": 2}]
+    assert G.shortest_path(edges, 1, 2) == [1, 2]
+
+
+def test_shortest_path_two_hop():
+    edges = [{"src_id": 1, "dst_id": 2}, {"src_id": 2, "dst_id": 3}]
+    assert G.shortest_path(edges, 1, 3) == [1, 2, 3]
+
+
+def test_shortest_path_same_node():
+    assert G.shortest_path([{"src_id": 1, "dst_id": 2}], 1, 1) == [1]
+
+
+def test_shortest_path_no_path():
+    edges = [{"src_id": 1, "dst_id": 2}, {"src_id": 3, "dst_id": 4}]
+    assert G.shortest_path(edges, 1, 4) is None
+
+
+def test_shortest_path_exceeds_max_hops():
+    edges = [{"src_id": 1, "dst_id": 2}, {"src_id": 2, "dst_id": 3},
+             {"src_id": 3, "dst_id": 4}]
+    assert G.shortest_path(edges, 1, 4, max_hops=2) is None
+    assert G.shortest_path(edges, 1, 4, max_hops=3) == [1, 2, 3, 4]
