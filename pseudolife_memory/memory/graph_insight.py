@@ -206,3 +206,97 @@ def _god_degree_cutoff(deg: dict[int, int]) -> int:
         return 5
     top = sorted(deg.values(), reverse=True)
     return max(5, top[min(len(top) - 1, 9)])
+
+
+_LOW_COHESION = 0.15
+_MIN_COHESION_SIZE = 5
+_AGENT_EDGE_MIN = 2
+
+
+def suggest_questions(edges: list[dict], entities: list[dict],
+                      communities: dict[int, list[int]], node_community: dict[int, int],
+                      contested_facts: list[dict], summaries: list[dict], *,
+                      top_n: int = 7, betweenness_sample: int = 200) -> list[dict]:
+    disp = {e["id"]: e["display"] for e in entities}
+    deg = degree_counts(edges)
+    label = {s["id"]: s["label"] for s in summaries}
+    questions: list[dict] = []
+
+    # 1. contested facts (our richest signal)
+    for c in contested_facts:
+        questions.append({
+            "type": "contested_fact",
+            "question": (f"Which value of `{c['attribute']}` for `{c['entity']}` is "
+                         f"correct — `{c['value']}` or `{c['contender_value']}`?"),
+            "why": f"Contested fact; rival from origin={c.get('contender_origin')}.",
+        })
+
+    g = _undirected(edges)
+    # 2. bridge entities (high betweenness spanning >=2 communities)
+    if g.number_of_edges():
+        k = betweenness_sample if (betweenness_sample and g.number_of_nodes() > betweenness_sample) else None
+        bc = nx.betweenness_centrality(g, k=k, seed=42)
+        bridges = sorted(((n, s) for n, s in bc.items() if s > 0),
+                         key=lambda kv: (-kv[1], kv[0]))
+        for n, _s in bridges[:3]:
+            cid = node_community.get(n)
+            other = {node_community.get(nb) for nb in g.neighbors(n)} - {cid, None}
+            if other:
+                names = ", ".join(label.get(c, f"community {c}") for c in sorted(other))
+                questions.append({
+                    "type": "bridge_entity",
+                    "question": f"Why does `{disp.get(n, n)}` connect `{label.get(cid, cid)}` to {names}?",
+                    "why": "High betweenness — a cross-community bridge.",
+                })
+
+    # 3. verify a god-node with many agent-origin edges
+    for gnode in god_nodes(edges, entities, top_n=5):
+        eid = gnode["entity_id"]
+        agent_n = sum(1 for e in edges
+                      if (e["src_id"] == eid or e["dst_id"] == eid) and e.get("origin") == "agent")
+        if agent_n >= _AGENT_EDGE_MIN:
+            questions.append({
+                "type": "verify_inferred",
+                "question": f"Are the {agent_n} inferred relationships involving `{gnode['display']}` correct?",
+                "why": f"{agent_n} agent-origin (dream-inferred) edges need verification.",
+            })
+            break
+
+    # 4. isolated entities (degree <= 1)
+    isolated = [e["display"] for e in entities if deg.get(e["id"], 0) <= 1]
+    if isolated:
+        shown = ", ".join(f"`{n}`" for n in isolated[:3])
+        questions.append({
+            "type": "isolated_entity",
+            "question": f"What connects {shown} to the rest of the graph?",
+            "why": f"{len(isolated)} weakly-connected entities — possible gaps.",
+        })
+
+    # 5. low-cohesion communities
+    for s in summaries:
+        if s["cohesion"] < _LOW_COHESION and s["size"] >= _MIN_COHESION_SIZE:
+            questions.append({
+                "type": "low_cohesion",
+                "question": f"Should community `{s['label']}` be split into tighter groups?",
+                "why": f"Cohesion {s['cohesion']} over {s['size']} entities.",
+            })
+
+    return questions[:top_n]
+
+
+def build_digest(communities: dict[int, list[int]], summaries: list[dict],
+                 edges: list[dict], entities: list[dict], contested_facts: list[dict],
+                 computed_at: float, *, god_top_n: int = 10, surprises_top_n: int = 10,
+                 questions_top_n: int = 7, betweenness_sample: int = 200) -> dict:
+    node_comm = _node_community(communities)
+    return {
+        "computed_at": computed_at,
+        "communities": summaries,
+        "god_nodes": god_nodes(edges, entities, top_n=god_top_n),
+        "surprises": surprising_connections(edges, entities, node_comm, top_n=surprises_top_n),
+        "questions": suggest_questions(edges, entities, communities, node_comm,
+                                       contested_facts, summaries, top_n=questions_top_n,
+                                       betweenness_sample=betweenness_sample),
+        "totals": {"entities": len(entities), "edges": len(edges),
+                   "communities": len(communities)},
+    }

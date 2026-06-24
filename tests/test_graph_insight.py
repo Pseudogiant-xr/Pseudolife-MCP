@@ -101,3 +101,39 @@ def test_surprising_connections_dedup_by_community_pair():
     node_comm = {1: 0, 2: 0, 3: 1, 4: 1}
     out = gi.surprising_connections(edges, entities, node_comm, top_n=5)
     assert len(out) == 1
+
+
+def test_suggest_questions_contested_fact():
+    contested = [{"entity": "postgres", "attribute": "port", "value": "5433",
+                  "contender_value": "5432", "contender_origin": "agent"}]
+    qs = gi.suggest_questions([], [], {}, {}, contested, [], top_n=5)
+    assert any(q["type"] == "contested_fact" and "5433" in q["question"]
+               and "5432" in q["question"] for q in qs)
+
+
+def test_suggest_questions_isolated_entity():
+    edges = [{"src_id": 1, "dst_id": 2, "relation": "r", "confidence": 0.9, "origin": "user"}]
+    entities = [{"id": 1, "display": "a", "etype": None},
+                {"id": 2, "display": "b", "etype": None},
+                {"id": 3, "display": "lonely", "etype": None}]  # degree 0
+    comms = {0: [1, 2], 1: [3]}
+    qs = gi.suggest_questions(edges, entities, comms, gi._node_community(comms), [], [], top_n=5)
+    assert any(q["type"] == "isolated_entity" and "lonely" in q["question"] for q in qs)
+
+
+def test_build_digest_assembles_all_sections():
+    edges = [
+        {"src_id": 1, "dst_id": 2, "relation": "uses", "confidence": 0.9, "origin": "user"},
+        {"src_id": 2, "dst_id": 3, "relation": "uses", "confidence": 0.9, "origin": "user"},
+        {"src_id": 1, "dst_id": 3, "relation": "uses", "confidence": 0.9, "origin": "user"},
+        {"src_id": 4, "dst_id": 5, "relation": "uses", "confidence": 0.9, "origin": "user"},
+        {"src_id": 3, "dst_id": 4, "relation": "x", "confidence": 0.5, "origin": "agent"},
+    ]
+    entities = [{"id": i, "display": f"e{i}", "etype": None} for i in range(1, 6)]
+    comms = gi.detect_communities(edges)
+    summ = gi.summarize_communities(comms, edges, entities)
+    digest = gi.build_digest(comms, summ, edges, entities, [], 123.0)
+    assert digest["computed_at"] == 123.0
+    assert digest["totals"] == {"entities": 5, "edges": 5, "communities": len(comms)}
+    assert {"communities", "god_nodes", "surprises", "questions"} <= set(digest)
+    assert digest["god_nodes"][0]["degree"] >= 1
