@@ -134,9 +134,13 @@ Output `[{entity_id, display, degree}]`.
 ### C — Surprising connections (provenance-adapted)
 graphify scores by EXTRACTED/INFERRED/AMBIGUOUS + cross-file-type + cross-repo +
 semantic-similarity. We have none of those edge dimensions; we score on the
-signals our edges *do* carry (`relation`, `confidence`, `origin`, `derived`):
-- **Uncertainty** — `derived` (closure/inferred) edges, `confidence < 0.6`, or
-  `origin == "agent"` each add weight (our analogue of AMBIGUOUS/INFERRED).
+signals our edges *do* carry. The analytics run over **asserted** edges
+(`storage.load_graph`, the same source as Track A's degree), which carry
+`relation`, `confidence`, `origin` but **no `derived` flag** (derived/closure/
+inverse edges are re-derived on read in `build_subgraph`, never stored):
+- **Uncertainty** — `confidence < 0.6` or `origin == "agent"` (the origin the
+  dream writes for auto-extracted edges) add weight (our analogue of
+  AMBIGUOUS/INFERRED).
 - **Cross-community** — the edge bridges two communities (the core signal).
 - **Peripheral→hub** — a low-degree entity (degree ≤ 2) reaching a god-node (a
   top-N-degree entity).
@@ -145,7 +149,7 @@ The weighting cutoffs (`confidence < 0.6`, peripheral degree ≤ 2) are module
 constants, not config knobs, to keep `GraphInsightConfig` lean; the plan pins
 their exact values. Dedup by community-pair so one hub cannot dominate. Output
 top-N
-`[{src, dst, relation, confidence, origin, derived, score, why}]`, where `why`
+`[{src, dst, relation, confidence, origin, score, why}]`, where `why`
 is a human reason (e.g. "agent-inferred bridge between community 2 and 5").
 
 ### D — Suggested questions (PseudoLife signals)
@@ -155,8 +159,8 @@ is a human reason (e.g. "agent-inferred bridge between community 2 and 5").
   system rather than graphify's ambiguous-edge guess.
 - **bridge_entity** — high-betweenness entity spanning ≥2 communities: *"Why
   does `{entity}` connect `{commA}` to `{commB}`?"*
-- **verify_inferred** — a god-node with many `derived`/`agent` edges: *"Are the
-  inferred relationships involving `{entity}` correct?"*
+- **verify_inferred** — a god-node with many `origin == "agent"` (dream-inferred)
+  edges: *"Are the inferred relationships involving `{entity}` correct?"*
 - **isolated_entity** — degree ≤ 1: *"What connects `{entity}` to the rest?"*
 - **low_cohesion** — community with cohesion below a module-constant threshold
   (≈ 0.15) and size ≥ a small minimum (≈ 5): *"Should `{community}` be split?"*
