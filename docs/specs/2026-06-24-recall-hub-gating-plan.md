@@ -357,7 +357,9 @@ git commit -m "feat(recall): hub-gated frontier with degree ordering + per-hop b
 **Files:**
 - Modify: `pseudolife_memory/utils/config.py` (`RecallConfig`)
 - Modify: `pseudolife_memory/service.py` (`recall()`, new `_graph_degrees`)
-- Test: `tests/test_recall.py` (config defaults), `tests/test_service.py` (integration)
+- Test: `tests/test_recall.py` (config defaults + PG integration)
+
+> **Integration-test convention (verified against the existing suite):** graph-touching tests need the bench Postgres. `tests/test_recall.py` already defines module-level `_ADMIN` + `_pg_up()` and uses `@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")` with `build_service(tmp_path)` imported from `evals/ladder_sweep` (see `test_recall_bridges_two_hop_on_real_service`). Reuse that exact pattern — do **not** use the `pristine_service` fixture (it does not back the graph store). Tests skip cleanly when the bench DB is down; the pure unit tests are the gate that always runs.
 
 **Interfaces:**
 - Consumes: `graph.degrees_by_name` (Task 1); `run_recall`, `_hub_threshold` (Task 2).
@@ -454,55 +456,64 @@ Replace the `run_recall(...)` call with the gating-injected version:
 
 - [ ] **Step 4: Write the failing integration test**
 
-Add to `tests/test_service.py`:
+Append to `tests/test_recall.py`, alongside the existing PG integration tests
+(reuse the module-level `_pg_up` already defined there). A shared seed helper
+avoids duplicating the graph setup across the two tests:
 
 ```python
-class TestRecallHubGating:
-    def _seed_hub(self, svc):
-        # checkout -> billing -> jdk-21 (gold), and a shared-config hub that
-        # many heads depend on, fanning out to unrelated services.
-        svc.graph_relate("checkout-service", "depends-on", "billing-engine",
-                         origin="test")
-        svc.graph_relate("billing-engine", "runs-on", "jdk-21", origin="test")
-        svc.graph_relate("checkout-service", "depends-on", "shared-config",
-                         origin="test")
-        for head in ("order-service", "web-portal", "mobile-app",
-                     "analytics-ui", "notify-service"):
-            svc.graph_relate(head, "depends-on", "shared-config", origin="test")
+def _seed_hub_graph(svc):
+    # checkout -> billing -> jdk-21 (gold), plus a shared-config hub that many
+    # heads depend on (degree 6), fanning out to unrelated services.
+    svc.graph_relate("checkout-service", "depends-on", "billing-engine")
+    svc.graph_relate("billing-engine", "runs-on", "jdk-21")
+    svc.graph_relate("checkout-service", "depends-on", "shared-config")
+    for head in ("order-service", "web-portal", "mobile-app",
+                 "analytics-ui", "notify-service"):
+        svc.graph_relate(head, "depends-on", "shared-config")
 
-    def test_gating_keeps_gold_drops_blast_radius(self, pristine_service):
-        svc = pristine_service
-        self._seed_hub(svc)
-        svc.config.memory.recall.hub_gate = True
-        svc.config.memory.recall.hub_floor = 3   # shared-config has degree 6
-        gated = svc.recall("What does checkout-service run on?", hops=3)
-        names = {e["entity"] for e in gated["entities"]}
-        assert "jdk-21" in names                 # gold still reached
-        assert "order-service" not in names      # hub not expanded through
 
-    def test_gating_off_pulls_in_hub_siblings(self, pristine_service):
-        svc = pristine_service
-        self._seed_hub(svc)
-        svc.config.memory.recall.hub_gate = False
-        ungated = svc.recall("What does checkout-service run on?", hops=3)
-        names = {e["entity"] for e in ungated["entities"]}
-        assert "order-service" in names          # un-gated fan-out through hub
+@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
+def test_recall_hub_gating_keeps_gold_drops_blast_radius(tmp_path):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
+    from ladder_sweep import build_service
+    svc = build_service(tmp_path)
+    _seed_hub_graph(svc)
+    svc.config.memory.recall.hub_gate = True
+    svc.config.memory.recall.hub_floor = 3       # shared-config has degree 6
+    out = svc.recall("What does checkout-service run on?", hops=3)
+    names = {e["entity"] for e in out["entities"]}
+    assert "jdk-21" in names                      # gold still reached
+    assert "order-service" not in names           # hub not expanded through
+
+
+@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
+def test_recall_no_gating_pulls_in_hub_siblings(tmp_path):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
+    from ladder_sweep import build_service
+    svc = build_service(tmp_path)
+    _seed_hub_graph(svc)
+    svc.config.memory.recall.hub_gate = False
+    out = svc.recall("What does checkout-service run on?", hops=3)
+    names = {e["entity"] for e in out["entities"]}
+    assert "order-service" in names               # un-gated fan-out through hub
 ```
 
-Run: `python -m pytest tests/test_service.py::TestRecallHubGating -v`
-Expected: PASS (gating on keeps `jdk-21`, drops `order-service`; gating off pulls it in).
+Run: `python -m pytest tests/test_recall.py -k "hub_gating or hub_siblings" -v`
+Expected: PASS when the bench Postgres is up (gating on keeps `jdk-21`, drops
+`order-service`; gating off pulls it in); SKIPPED when the bench DB is
+unreachable. The `build_service` tmp DB is per-test, so no cross-test
+pollution.
 
-> Note: restore the toggled config if later tests in the module depend on defaults — these two tests set `hub_gate` explicitly, so they are self-contained.
+- [ ] **Step 5: Run the recall suite (unit + PG integration)**
 
-- [ ] **Step 5: Run the focused + full recall/service suites**
-
-Run: `python -m pytest tests/test_recall.py tests/test_service.py -v`
-Expected: PASS.
+Run: `python -m pytest tests/test_recall.py -v`
+Expected: PASS — config-default test + the pre-existing unit/PG tests; the two
+new hub-gating tests PASS with the bench DB up or SKIP when it is down.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add pseudolife_memory/utils/config.py pseudolife_memory/service.py tests/test_recall.py tests/test_service.py
+git add pseudolife_memory/utils/config.py pseudolife_memory/service.py tests/test_recall.py
 git commit -m "feat(recall): wire hub-gating through RecallConfig + service.recall"
 ```
 
@@ -513,7 +524,14 @@ git commit -m "feat(recall): wire hub-gating through RecallConfig + service.reca
 **Files:**
 - Modify: `pseudolife_memory/service.py` (`graph_path`)
 - Modify: `pseudolife_memory/mcp_server.py` (`get_neighbors`, `memory_path`)
-- Test: `tests/test_service.py`
+- Test: `tests/test_graph.py` (`graph_path` via the existing module-scoped `svc`
+  fixture, which builds a `MemoryService(database_url=pg_url)`); `tests/test_recall.py`
+  (the two MCP tools, via `build_service` + `monkeypatch.setattr(srv, "service", svc)`,
+  mirroring the existing `test_memory_recall_tool_delegates`).
+
+> Both files' graph tests require the bench Postgres and skip without it.
+> `test_graph.py`'s `svc` fixture is module-scoped (shared), so use unique
+> entity names per test to avoid cross-test edges.
 
 **Interfaces:**
 - Consumes: `graph.shortest_path` (Task 1); existing `storage.find_entity`, `storage.load_graph`, `graph.norm_name`, `service.graph_neighborhood`, `service._GRAPH_UNAVAILABLE`.
@@ -521,38 +539,40 @@ git commit -m "feat(recall): wire hub-gating through RecallConfig + service.reca
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `tests/test_service.py`:
+Add to `tests/test_graph.py` (uses the existing module-scoped `svc` fixture;
+unique `gp-*` names avoid collisions with other tests sharing that service).
+The relations `depends-on` and `runs-on` are already registered in this suite:
 
 ```python
-class TestGraphPath:
-    def test_shortest_path_returns_chain(self, pristine_service):
-        svc = pristine_service
-        svc.graph_relate("a", "depends-on", "b", origin="test")
-        svc.graph_relate("b", "depends-on", "c", origin="test")
-        out = svc.graph_path("a", "c")
-        assert out["found"] is True
-        assert out["path"] == ["a", "b", "c"]
-        assert out["hops"] == 2
-        assert out["edges"][0]["src"] == "a" and out["edges"][0]["dst"] == "b"
+def test_graph_path_returns_chain(svc):
+    svc.graph_relate("gp-a", "depends-on", "gp-b")
+    svc.graph_relate("gp-b", "depends-on", "gp-c")
+    out = svc.graph_path("gp-a", "gp-c")
+    assert out["found"] is True
+    assert out["path"] == ["gp-a", "gp-b", "gp-c"]
+    assert out["hops"] == 2
+    assert out["edges"][0]["src"] == "gp-a" and out["edges"][0]["dst"] == "gp-b"
 
-    def test_missing_endpoint(self, pristine_service):
-        svc = pristine_service
-        svc.graph_relate("a", "depends-on", "b", origin="test")
-        out = svc.graph_path("a", "nope")
-        assert out["found"] is False
-        assert out["missing"] == "nope"
 
-    def test_no_path_within_hops(self, pristine_service):
-        svc = pristine_service
-        svc.graph_relate("a", "depends-on", "b", origin="test")
-        svc.graph_relate("b", "depends-on", "c", origin="test")
-        out = svc.graph_path("a", "c", max_hops=1)
-        assert out["found"] is True
-        assert out["path"] == [] and out["hops"] is None
+def test_graph_path_missing_endpoint(svc):
+    svc.graph_relate("gp-d", "depends-on", "gp-e")
+    out = svc.graph_path("gp-d", "gp-nope")
+    assert out["found"] is False
+    assert out["missing"] == "gp-nope"
+
+
+def test_graph_path_no_path_within_hops(svc):
+    svc.graph_relate("gp-f", "depends-on", "gp-g")
+    svc.graph_relate("gp-g", "depends-on", "gp-h")
+    out = svc.graph_path("gp-f", "gp-h", max_hops=1)
+    assert out["found"] is True
+    assert out["path"] == [] and out["hops"] is None
 ```
 
-Run: `python -m pytest tests/test_service.py::TestGraphPath -v`
-Expected: FAIL — `AttributeError: 'MemoryService' object has no attribute 'graph_path'`.
+Run: `python -m pytest tests/test_graph.py -k graph_path -v`
+Expected (bench PG up): FAIL — `AttributeError: 'MemoryService' object has no
+attribute 'graph_path'`. (SKIP if the bench DB is down — bring it up to drive
+this task.)
 
 - [ ] **Step 2: Implement `graph_path`**
 
@@ -604,10 +624,10 @@ In `pseudolife_memory/service.py`, add (place near `graph_neighborhood`):
                 "hops": len(node_path) - 1, "source": source, "target": target}
 ```
 
-- [ ] **Step 3: Run the service test to verify it passes**
+- [ ] **Step 3: Run the graph_path test to verify it passes**
 
-Run: `python -m pytest tests/test_service.py::TestGraphPath -v`
-Expected: PASS (3 tests).
+Run: `python -m pytest tests/test_graph.py -k graph_path -v`
+Expected: PASS (3 tests) with the bench PG up.
 
 - [ ] **Step 4: Add the MCP tools**
 
@@ -640,29 +660,49 @@ def memory_path(source: str, target: str, max_hops: int = 8) -> dict[str, Any]:
     return service.graph_path(source, target, max_hops=max_hops)
 ```
 
-- [ ] **Step 5: Write + run the tool wrapper tests**
+- [ ] **Step 5: Write + run the MCP tool tests**
 
-Add to `tests/test_service.py` (the MCP tools delegate to the service; test the delegation + filter behavior through the service method the tools call):
+Add to `tests/test_recall.py` (the tools live in `mcp_server`; test them via the
+real module with `monkeypatch.setattr(srv, "service", svc)`, mirroring the
+existing `test_memory_recall_tool_delegates`). These cover the only
+tool-specific logic: `get_neighbors`' relation filter and `memory_path`'s
+delegation:
 
 ```python
-class TestGetNeighborsFilter:
-    def test_relation_filter_narrows_edges(self, pristine_service):
-        svc = pristine_service
-        svc.graph_relate("x", "depends-on", "y", origin="test")
-        svc.graph_relate("x", "runs-on", "z", origin="test")
-        out = svc.graph_neighborhood("x", depth=1)
-        deps = [e for e in out["edges"]
-                if "depends-on" in str(e.get("relation", "")).lower()]
-        assert deps and all("depends-on" in e["relation"] for e in deps)
+@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
+def test_get_neighbors_relation_filter(tmp_path, monkeypatch):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
+    from ladder_sweep import build_service
+    import pseudolife_memory.mcp_server as srv
+    svc = build_service(tmp_path)
+    svc.graph_relate("gnx", "depends-on", "gny")
+    svc.graph_relate("gnx", "runs-on", "gnz")
+    monkeypatch.setattr(srv, "service", svc, raising=False)
+    out = srv.get_neighbors("gnx", relation_filter="depends-on")
+    rels = {e["relation"] for e in out["edges"]}
+    assert rels == {"depends-on"}                 # runs-on filtered out
+
+
+@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
+def test_memory_path_tool_delegates(tmp_path, monkeypatch):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
+    from ladder_sweep import build_service
+    import pseudolife_memory.mcp_server as srv
+    svc = build_service(tmp_path)
+    svc.graph_relate("mp-a", "depends-on", "mp-b")
+    svc.graph_relate("mp-b", "depends-on", "mp-c")
+    monkeypatch.setattr(srv, "service", svc, raising=False)
+    out = srv.memory_path("mp-a", "mp-c")
+    assert out["path"] == ["mp-a", "mp-b", "mp-c"] and out["hops"] == 2
 ```
 
-Run: `python -m pytest tests/test_service.py -k "GraphPath or GetNeighbors" -v`
-Expected: PASS.
+Run: `python -m pytest tests/test_recall.py -k "get_neighbors or memory_path" -v`
+Expected: PASS with the bench PG up (SKIP without it).
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add pseudolife_memory/service.py pseudolife_memory/mcp_server.py tests/test_service.py
+git add pseudolife_memory/service.py pseudolife_memory/mcp_server.py tests/test_graph.py tests/test_recall.py
 git commit -m "feat(graph): graph_path + memory_path/get_neighbors MCP tools"
 ```
 
