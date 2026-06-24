@@ -467,3 +467,9 @@ def test_dream_relations_reject_lesson_only_predicates(svc):
     g = svc.graph_neighborhood("deploy-task", depth=1)
     rels = {e["relation"] for e in g["edges"]}
     assert "related-to" in rels and "prefers" not in rels
+
+
+def test_traces_config_default():
+    from pseudolife_memory.utils.config import TracesConfig, MemoryConfig
+    assert TracesConfig().enabled is True
+    assert MemoryConfig().traces.enabled is True

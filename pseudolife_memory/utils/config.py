@@ -410,6 +410,14 @@ class GraphInsightConfig:
 
 
 @dataclass
+class TracesConfig:
+    """Engram cross-index (provenance-as-link). When enabled, the dream links
+    each consolidated fact-slot to the dense episodes it came from and bumps their
+    reinforcement counter. retention_boost (Phase 2) reads that counter."""
+    enabled: bool = True
+
+
+@dataclass
 class RecallConfig:
     """memory_recall — live MemCoT iterative retrieval (read-only).
 
@@ -469,6 +477,8 @@ class MemoryConfig:
     recall: RecallConfig = field(default_factory=RecallConfig)
     # Topology analytics computed during dream (Track B).
     graph_insight: GraphInsightConfig = field(default_factory=GraphInsightConfig)
+    # Engram cross-index (provenance-as-link, schema v13).
+    traces: TracesConfig = field(default_factory=TracesConfig)
     # Meta-statement filter on the store path (off in the MCP build).
     meta_filter: MetaFilterConfig = field(default_factory=MetaFilterConfig)
     # Base recency half-life at band depth 0; doubles per depth.

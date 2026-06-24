@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 12
+SCHEMA_META_VERSION = 13
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -247,6 +247,19 @@ CREATE TABLE IF NOT EXISTS entity_communities (
   computed_at  DOUBLE PRECISION NOT NULL
 );
 CREATE INDEX IF NOT EXISTS entity_communities_cid_idx ON entity_communities (community_id);
+
+-- v13 engram cross-index (provenance-as-link). Keyed on the STABLE canonical
+-- slot (entity_norm, attribute_norm) — NOT facts.id, which is regenerated on
+-- every cortex snapshot save. entry_id keeps a CASCADE FK (entries.id is stable),
+-- so an evicting episode auto-removes its traces.
+CREATE TABLE IF NOT EXISTS memory_traces (
+  entity_norm    TEXT   NOT NULL,
+  attribute_norm TEXT   NOT NULL,
+  entry_id       BIGINT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+  created_at     DOUBLE PRECISION NOT NULL,
+  PRIMARY KEY (entity_norm, attribute_norm, entry_id)
+);
+CREATE INDEX IF NOT EXISTS memory_traces_entry_idx ON memory_traces (entry_id);
 """
 
 
@@ -264,6 +277,12 @@ def ensure_schema(conn) -> dict:
         cur.execute("SET lock_timeout = '5s'; SET statement_timeout = '30s';")
         cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
         cur.execute(SCHEMA_SQL)
+        # v13 additive: reinforcement counter on entries (tracks how many times
+        # the dream has re-linked an episode via memory_traces).
+        cur.execute(
+            "ALTER TABLE entries ADD COLUMN IF NOT EXISTS reinforcements "
+            "INTEGER NOT NULL DEFAULT 0"
+        )
         # One-time upgrade: drop the old episode FK only when it's actually
         # present. Guarding avoids taking an ACCESS EXCLUSIVE lock on every
         # init (which could block behind any open transaction on entries).
