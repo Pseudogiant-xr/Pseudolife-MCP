@@ -83,6 +83,19 @@ CORPUS: list[dict] = [
      "edges": [("cache-svc", "uses", "redis-7")]},
     {"snippet": "search-svc stores-data-in the es-cluster index.",
      "edges": [("search-svc", "stores-data-in", "es-cluster")]},
+    # hub fixture: shared-config is depended on by many heads (high degree).
+    {"snippet": "The checkout-service reads its limits from shared-config.",
+     "edges": [("checkout-service", "depends-on", "shared-config")]},
+    {"snippet": "The order-service reads feature flags from shared-config.",
+     "edges": [("order-service", "depends-on", "shared-config")]},
+    {"snippet": "The web-portal loads its theme from shared-config.",
+     "edges": [("web-portal", "depends-on", "shared-config")]},
+    {"snippet": "The mobile-app fetches toggles from shared-config.",
+     "edges": [("mobile-app", "depends-on", "shared-config")]},
+    {"snippet": "The analytics-ui reads dashboards config from shared-config.",
+     "edges": [("analytics-ui", "depends-on", "shared-config")]},
+    {"snippet": "The notify-service reads templates from shared-config.",
+     "edges": [("notify-service", "depends-on", "shared-config")]},
 ]
 
 # Predicate-echoing noise about NON-graph entities — crowds the top-k so the
@@ -253,6 +266,29 @@ def run_loop(svc, question: str, controller: Controller, *, use_graph: bool,
     return state
 
 
+def assembled_from_recall(result: dict) -> list[str]:
+    """Flatten service.recall output into the scorer's context list:
+    texts + per-entity facts + entity names (mirrors assembled_context)."""
+    out = list(result.get("texts", []))
+    for ent in result.get("entities", []):
+        for f in ent.get("facts", []):
+            out.append(f"{f.get('attribute')}={f.get('value')}")
+        out.append(ent.get("entity", ""))
+    return [s for s in out if s]
+
+
+def recall_record(result: dict, gold: str, hops: int) -> dict:
+    ctx = assembled_from_recall(result)
+    return {
+        "hops": hops,
+        "recovered": any(value_present(s, gold) for s in ctx),
+        "iterations": result.get("iterations", 0),
+        "tokens": sum(approx_tokens(s) for s in ctx),
+        "entities": len(result.get("entities", [])),
+        "latency_ms": 0.0,
+    }
+
+
 def run_baseline(svc, question: str, *, top_k: int = 5) -> LoopState:
     """Single-shot search — the control arm."""
     state = LoopState(iterations=1, queries_issued=1)
@@ -286,12 +322,13 @@ def _means(recs: list[dict]) -> dict:
     n = len(recs)
     if n == 0:
         return {"n": 0, "recall": 0.0, "mean_iterations": 0.0,
-                "mean_tokens": 0.0, "mean_latency_ms": 0.0}
+                "mean_tokens": 0.0, "mean_entities": 0.0, "mean_latency_ms": 0.0}
     return {
         "n": n,
         "recall": round(sum(1 for r in recs if r["recovered"]) / n, 3),
         "mean_iterations": round(sum(r["iterations"] for r in recs) / n, 2),
         "mean_tokens": round(sum(r["tokens"] for r in recs) / n, 1),
+        "mean_entities": round(sum(r.get("entities", 0) for r in recs) / n, 2),
         "mean_latency_ms": round(sum(r["latency_ms"] for r in recs) / n, 1),
     }
 
@@ -325,53 +362,60 @@ def seed_bench(svc) -> None:
 
 
 def run_all(svc, *, top_k: int = 5, hop_cap: int = 3) -> dict:
-    base_recs, b_recs, a_recs = [], [], []
+    base_recs, nogate_recs, gate_recs = [], [], []
     gate_fire = 0
+    cfg = svc.config.memory.recall
+    cfg.hub_floor = 3          # shared-config (deg 6) is a hub; chain heads are not
     for q in QUESTIONS:
         question, gold, hops = q["question"], q["gold"], q["hops"]
         base = run_baseline(svc, question, top_k=top_k)
         if would_gate(base):
             gate_fire += 1
-        b = run_loop(svc, question, MechanicalController(), use_graph=False,
-                     known_entities=KNOWN_ENTITIES, hop_cap=hop_cap, top_k=top_k)
-        a = run_loop(svc, question, MechanicalController(), use_graph=True,
-                     known_entities=KNOWN_ENTITIES, hop_cap=hop_cap, top_k=top_k)
-        for st, sink in ((base, base_recs), (b, b_recs), (a, a_recs)):
-            sink.append({"hops": hops, "recovered": gold_recovered(st, gold),
-                         "iterations": st.iterations, "tokens": tokens_read(st),
-                         "latency_ms": st.latency_ms})
+        base_recs.append({"hops": hops, "recovered": gold_recovered(base, gold),
+                          "iterations": base.iterations, "tokens": tokens_read(base),
+                          "entities": 0, "latency_ms": base.latency_ms})
+        cfg.hub_gate = False
+        nogate_recs.append(recall_record(
+            svc.recall(question, hops=hop_cap, top_k=top_k), gold, hops))
+        cfg.hub_gate = True
+        gate_recs.append(recall_record(
+            svc.recall(question, hops=hop_cap, top_k=top_k), gold, hops))
     base_agg = aggregate(base_recs)
-    b_agg = aggregate(b_recs)
-    a_agg = aggregate(a_recs)
+    nogate_agg = aggregate(nogate_recs)
+    gate_agg = aggregate(gate_recs)
     return {
-        "baseline": base_agg, "loop_no_graph": b_agg, "loop_graph": a_agg,
+        "baseline": base_agg, "recall_nogate": nogate_agg, "recall_gate": gate_agg,
         "gate_would_fire": gate_fire, "questions": len(QUESTIONS),
-        "lift_from_looping": round(
-            b_agg["overall"]["recall"] - base_agg["overall"]["recall"], 3),
-        "lift_from_graph": round(
-            a_agg["overall"]["recall"] - b_agg["overall"]["recall"], 3),
+        "recall_delta": round(
+            gate_agg["overall"]["recall"] - nogate_agg["overall"]["recall"], 3),
+        "tokens_saved": round(
+            nogate_agg["overall"]["mean_tokens"] - gate_agg["overall"]["mean_tokens"], 1),
+        "entities_saved": round(
+            nogate_agg["overall"]["mean_entities"] - gate_agg["overall"]["mean_entities"], 2),
     }
 
 
 def report(results: dict) -> None:
     arms = [("baseline", "single-shot search"),
-            ("loop_no_graph", "loop, no graph (B)"),
-            ("loop_graph", "loop + graph (A)")]
-    hdr = f"{'arm':<24}{'recall':>8}{'iters':>7}{'tok/q':>8}{'lat ms':>8}"
+            ("recall_nogate", "recall, gate off"),
+            ("recall_gate", "recall, gate on")]
+    hdr = f"{'arm':<24}{'recall':>8}{'iters':>7}{'tok/q':>8}{'ents/q':>8}"
     print("\n" + hdr)
     print("-" * len(hdr))
     for key, label in arms:
         o = results[key]["overall"]
         print(f"{label:<24}{o['recall']:>8}{o['mean_iterations']:>7}"
-              f"{o['mean_tokens']:>8}{o['mean_latency_ms']:>8}")
+              f"{o['mean_tokens']:>8}{o['mean_entities']:>8}")
     print("\nby hop-class (recall):")
     print(f"{'arm':<24}{'1-hop':>8}{'2-hop':>8}{'3-hop':>8}")
     for key, label in arms:
         bh = results[key]["by_hops"]
         cells = "".join(f"{bh.get(h, {}).get('recall', '—'):>8}" for h in (1, 2, 3))
         print(f"{label:<24}{cells}")
-    print(f"\nlift_from_looping (B - baseline): {results['lift_from_looping']}")
-    print(f"lift_from_graph   (A - B):        {results['lift_from_graph']}")
+    print(f"\nrecall_delta (gate - nogate): {results['recall_delta']}  "
+          f"(must be 0.0 — no regression)")
+    print(f"tokens_saved:   {results['tokens_saved']}")
+    print(f"entities_saved: {results['entities_saved']}")
     print(f"gate would fire on {results['gate_would_fire']}/{results['questions']} "
           f"questions")
 
