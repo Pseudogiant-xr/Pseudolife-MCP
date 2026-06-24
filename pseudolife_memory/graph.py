@@ -127,7 +127,7 @@ def degrees_by_name(edges: list[dict], entities: list[dict]) -> dict[str, int]:
     out: dict[str, int] = {}
     for eid, d in degree_counts(edges).items():
         name = by_id.get(eid)
-        if name:
+        if name is not None:  # an edge endpoint absent from `entities` is dropped
             out[name] = d
     return out
 

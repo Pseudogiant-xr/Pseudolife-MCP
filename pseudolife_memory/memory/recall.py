@@ -90,8 +90,10 @@ def _select_frontier(frontier: list[str], seed_set: set[str],
     others = [n for n in frontier if n not in seed_set]
     if hub_threshold is not None:
         others = [n for n in others if (degree_fn(n) or 0) < hub_threshold]
+    # Ascending degree is load-bearing, not cosmetic: under the caller's
+    # max_entities cap it decides which non-seeds survive truncation.
     others.sort(key=lambda n: ((degree_fn(n) or 0), n))
-    if expand_budget:
+    if expand_budget:  # 0 / None == no per-hop cap (per spec)
         others = others[:expand_budget]
     return seeds + others
 

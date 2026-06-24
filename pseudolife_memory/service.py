@@ -2406,6 +2406,10 @@ class MemoryService:
                 return {"found": False, "missing": target}
             g = st.load_graph()
         by_id = {e["id"]: e for e in g["entities"]}
+
+        def _disp(nid: int) -> str:  # mirror graph_neighborhood's guarded lookup
+            return by_id[nid]["display"] if nid in by_id else str(nid)
+
         rel: dict[tuple[int, int], str] = {}
         for e in g["edges"]:
             rel[(e["src_id"], e["dst_id"])] = e["relation"]
@@ -2414,17 +2418,15 @@ class MemoryService:
         if node_path is None:
             return {"found": True, "path": [], "edges": [], "hops": None,
                     "source": source, "target": target}
-        labels = [by_id[nid]["display"] for nid in node_path]
+        labels = [_disp(nid) for nid in node_path]
         edges = []
         for a, b in zip(node_path, node_path[1:]):
             if (a, b) in rel:
-                edges.append({"src": by_id[a]["display"],
-                              "relation": rel[(a, b)],
-                              "dst": by_id[b]["display"]})
+                edges.append({"src": _disp(a), "relation": rel[(a, b)],
+                              "dst": _disp(b)})
             elif (b, a) in rel:
-                edges.append({"src": by_id[b]["display"],
-                              "relation": rel[(b, a)],
-                              "dst": by_id[a]["display"]})
+                edges.append({"src": _disp(b), "relation": rel[(b, a)],
+                              "dst": _disp(a)})
         return {"found": True, "path": labels, "edges": edges,
                 "hops": len(node_path) - 1, "source": source, "target": target}
 
@@ -2467,7 +2469,8 @@ class MemoryService:
         cfg = self.config.memory.recall
         hops = (max(1, min(int(cfg.default_hops), 5)) if hops is None
                 else max(1, min(int(hops), 5)))
-        top_k = (cfg.default_top_k if top_k is None else max(1, int(top_k)))
+        top_k = (max(1, int(cfg.default_top_k)) if top_k is None
+                 else max(1, int(top_k)))
         driver = driver or os.environ.get("PSEUDOLIFE_RECALL_DRIVER", cfg.driver)
         query = (query or "").strip()
         if not query:

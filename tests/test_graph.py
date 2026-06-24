@@ -365,3 +365,17 @@ def test_graph_path_no_path_within_hops(svc):
     out = svc.graph_path("gp-f", "gp-h", max_hops=1)
     assert out["found"] is True
     assert out["path"] == [] and out["hops"] is None
+
+
+def test_graph_path_reverse_edge(svc):
+    # Path is found undirected, but the stored edges point z->y->x. The
+    # returned edges must keep their canonical (stored) direction.
+    svc.graph_relate("gp-z", "depends-on", "gp-y")
+    svc.graph_relate("gp-y", "depends-on", "gp-x")
+    out = svc.graph_path("gp-x", "gp-z")
+    assert out["found"] is True and out["hops"] == 2
+    assert out["path"] == ["gp-x", "gp-y", "gp-z"]
+    # Traversal is x->y->z, but each edge keeps its stored direction: the x<->y
+    # hop is stored as gp-y --depends-on--> gp-x, reported canonically (not flipped).
+    assert out["edges"][0] == {"src": "gp-y", "relation": "depends-on", "dst": "gp-x"}
+    assert out["edges"][1] == {"src": "gp-z", "relation": "depends-on", "dst": "gp-y"}

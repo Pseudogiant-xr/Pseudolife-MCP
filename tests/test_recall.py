@@ -227,9 +227,9 @@ def test_select_frontier_seeds_exempt_from_gate_and_budget():
     deg = {"seed": 99, "x": 1, "y": 1}
     out = rc._select_frontier(frontier, {"seed"}, deg.get, hub_threshold=10,
                               expand_budget=1)
-    assert out[0] == "seed"                   # seed always present, never gated
-    assert set(out) == {"seed", "x"} or set(out) == {"seed", "y"}
-    assert len(out) == 2                       # seed + 1 budgeted non-seed
+    # Deterministic: seed first (exempt), then the lowest (degree, name) non-seed.
+    # x and y both have degree 1, so the (degree, name) tiebreak picks "x".
+    assert out == ["seed", "x"]
 
 
 def test_select_frontier_off_is_identity():

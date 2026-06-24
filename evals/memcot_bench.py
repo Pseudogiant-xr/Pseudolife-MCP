@@ -365,6 +365,7 @@ def run_all(svc, *, top_k: int = 5, hop_cap: int = 3) -> dict:
     base_recs, nogate_recs, gate_recs = [], [], []
     gate_fire = 0
     cfg = svc.config.memory.recall
+    _saved = (cfg.hub_floor, cfg.hub_gate)  # run_all mutates the live config; restore below
     cfg.hub_floor = 3          # shared-config (deg 6) is a hub; chain heads are not
     for q in QUESTIONS:
         question, gold, hops = q["question"], q["gold"], q["hops"]
@@ -383,6 +384,7 @@ def run_all(svc, *, top_k: int = 5, hop_cap: int = 3) -> dict:
     base_agg = aggregate(base_recs)
     nogate_agg = aggregate(nogate_recs)
     gate_agg = aggregate(gate_recs)
+    cfg.hub_floor, cfg.hub_gate = _saved  # restore the live config we mutated
     return {
         "baseline": base_agg, "recall_nogate": nogate_agg, "recall_gate": gate_agg,
         "gate_would_fire": gate_fire, "questions": len(QUESTIONS),
