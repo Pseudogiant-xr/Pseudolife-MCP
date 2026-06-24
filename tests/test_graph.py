@@ -379,3 +379,28 @@ def test_graph_path_reverse_edge(svc):
     # hop is stored as gp-y --depends-on--> gp-x, reported canonically (not flipped).
     assert out["edges"][0] == {"src": "gp-y", "relation": "depends-on", "dst": "gp-x"}
     assert out["edges"][1] == {"src": "gp-z", "relation": "depends-on", "dst": "gp-y"}
+
+
+def test_replace_and_load_communities(svc):
+    # Need real entity ids — create two entities via the public graph path.
+    svc.graph_relate("ci-a", "depends-on", "ci-b")
+    st = svc._storage  # noqa: SLF001
+    g = st.load_graph()
+    ids = {e["display"]: e["id"] for e in g["entities"]}
+    a, b = ids["ci-a"], ids["ci-b"]
+    summaries = [{"id": 0, "label": "ci-a", "size": 2, "cohesion": 1.0}]
+    st.replace_communities({a: 0, b: 0}, summaries, 100.0)
+    loaded = st.load_communities()
+    assert loaded["assignment"][a] == 0 and loaded["assignment"][b] == 0
+    assert loaded["communities"][0]["label"] == "ci-a"
+    # Replace is wholesale: a second call with fewer rows clears the old ones.
+    st.replace_communities({a: 3}, [{"id": 3, "label": "ci-a", "size": 1, "cohesion": 1.0}], 101.0)
+    loaded2 = st.load_communities()
+    assert loaded2["assignment"] == {a: 3}
+
+
+def test_get_set_meta_roundtrip(svc):
+    st = svc._storage  # noqa: SLF001
+    st.set_meta("graph_digest", {"computed_at": 5.0, "god_nodes": []})
+    assert st.get_meta("graph_digest")["computed_at"] == 5.0
+    assert st.get_meta("does-not-exist") is None

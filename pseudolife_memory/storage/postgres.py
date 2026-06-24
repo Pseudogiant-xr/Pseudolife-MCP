@@ -480,6 +480,19 @@ class PostgresStorage:
         ).fetchone()
         return default if row is None else row[0]
 
+    def get_meta(self, key: str):
+        row = self.conn.execute(
+            "SELECT value FROM meta WHERE key = %s", (key,)).fetchone()
+        return row[0] if row else None
+
+    def set_meta(self, key: str, value) -> None:
+        self.conn.execute(
+            "INSERT INTO meta (key, value) VALUES (%s, %s::jsonb) "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+            (key, json.dumps(value)),
+        )
+        self.conn.commit()
+
     # ── graph: entities / aliases ───────────────────────────────────────
 
     def ensure_entity(
@@ -651,3 +664,37 @@ class PostgresStorage:
             ).fetchall()
         ]
         return {"entities": entities, "aliases": aliases, "edges": edges}
+
+    def replace_communities(self, assignment: dict[int, int],
+                            summaries: list[dict], computed_at: float) -> None:
+        """Wholesale replace the community partition (truncate + bulk insert).
+        The shared entities hub is never touched."""
+        with self.conn.cursor() as cur:
+            cur.execute("DELETE FROM entity_communities")
+            cur.execute("DELETE FROM communities")
+            if summaries:
+                cur.executemany(
+                    "INSERT INTO communities (id, label, size, cohesion, computed_at) "
+                    "VALUES (%s, %s, %s, %s, %s)",
+                    [(s["id"], s["label"], s["size"], s["cohesion"], computed_at)
+                     for s in summaries],
+                )
+            if assignment:
+                cur.executemany(
+                    "INSERT INTO entity_communities (entity_id, community_id, computed_at) "
+                    "VALUES (%s, %s, %s)",
+                    [(eid, cid, computed_at) for eid, cid in assignment.items()],
+                )
+        self.conn.commit()
+
+    def load_communities(self) -> dict:
+        assignment = {
+            eid: cid for eid, cid in self.conn.execute(
+                "SELECT entity_id, community_id FROM entity_communities").fetchall()
+        }
+        cols = ("id", "label", "size", "cohesion", "computed_at")
+        communities = [
+            dict(zip(cols, r)) for r in self.conn.execute(
+                f"SELECT {', '.join(cols)} FROM communities ORDER BY id").fetchall()
+        ]
+        return {"assignment": assignment, "communities": communities}
