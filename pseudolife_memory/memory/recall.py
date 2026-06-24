@@ -72,10 +72,46 @@ def _add_edge(state: RecallState, ed: dict) -> None:
                         "dst": ed.get("dst"), "derived": ed.get("derived", False)})
 
 
+def _select_frontier(frontier: list[str], seed_set: set[str],
+                     degree_fn: Callable[[str], int] | None,
+                     hub_threshold: int | None,
+                     expand_budget: int | None) -> list[str]:
+    """Choose which frontier entities to expand THROUGH this hop.
+
+    Seeds always expand (exempt from gate, ordering, and budget). For
+    non-seeds: drop hubs (degree >= hub_threshold), order survivors by
+    ascending degree with a (degree, name) tiebreak, then cap at
+    expand_budget. When degree_fn is None the frontier is returned unchanged
+    (gating off — byte-identical legacy behavior).
+    """
+    if degree_fn is None:
+        return list(frontier)
+    seeds = [n for n in frontier if n in seed_set]
+    others = [n for n in frontier if n not in seed_set]
+    if hub_threshold is not None:
+        others = [n for n in others if (degree_fn(n) or 0) < hub_threshold]
+    others.sort(key=lambda n: ((degree_fn(n) or 0), n))
+    if expand_budget:
+        others = others[:expand_budget]
+    return seeds + others
+
+
+def _hub_threshold(degrees, percentile: float, floor: int) -> int:
+    """max(floor, p-th percentile of the degree distribution)."""
+    vals = sorted(degrees)
+    if not vals:
+        return floor
+    idx = min(len(vals) - 1, int(len(vals) * percentile / 100.0))
+    return max(floor, vals[idx])
+
+
 def run_recall(search_fn: Callable, graph_fn: Callable, vocab: list[str],
                query: str, controller: RecallController, *,
                hops: int = 3, top_k: int = 5,
-               max_entities: int = 50) -> RecallState:
+               max_entities: int = 50,
+               degree_fn: Callable[[str], int] | None = None,
+               hub_threshold: int | None = None,
+               expand_budget: int | None = None) -> RecallState:
     """Iterative search(+graph) loop. Depth-1 graph expansion per iteration."""
     state = RecallState()
     hits = [e.get("text", "") for e in search_fn(query, top_k).get("entries", [])]
@@ -93,11 +129,13 @@ def run_recall(search_fn: Callable, graph_fn: Callable, vocab: list[str],
         state.seeds = state.seeds[:max_entities]
         seen = set(state.seeds)
     state.entities.extend(state.seeds)
+    seed_set = set(state.seeds)
     frontier = list(state.seeds)
     while frontier and state.iterations < hops and len(seen) < max_entities:
         state.iterations += 1
         newly: list[str] = []
-        for name in frontier:
+        for name in _select_frontier(frontier, seed_set, degree_fn,
+                                      hub_threshold, expand_budget):
             nb = graph_fn(name, 1)
             if not nb.get("found"):
                 continue

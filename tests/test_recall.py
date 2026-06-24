@@ -165,6 +165,87 @@ def test_recall_low_confidence_when_query_names_no_entity(tmp_path):
     assert out["entities"] == []
 
 
+# ---------------------------------------------------------------------------
+# Hub-gating tests (pure orchestration, no DB)
+# ---------------------------------------------------------------------------
+
+def _hub_svc():
+    # S-B, S-H, B-T(gold); H is a degree-5 hub fanning to X1..X4.
+    edges = [("S", "r", "B"), ("S", "r", "H"), ("B", "r", "T"),
+             ("H", "r", "X1"), ("H", "r", "X2"), ("H", "r", "X3"), ("H", "r", "X4")]
+    snippets = ["S relates to B and H"]
+    return _FakeSvc(snippets, edges)
+
+
+_HUB_DEGREE = {"S": 2, "B": 2, "H": 5, "T": 1,
+               "X1": 1, "X2": 1, "X3": 1, "X4": 1}
+
+
+def test_hub_included_but_not_expanded():
+    svc = _hub_svc()
+    state = rc.run_recall(
+        svc.search, svc.graph, vocab=["S", "B", "H", "T", "X1", "X2", "X3", "X4"],
+        query="about S", controller=rc.MechanicalController(),
+        hops=3, degree_fn=_HUB_DEGREE.get, hub_threshold=4, expand_budget=None)
+    ents = set(state.entities)
+    assert "H" in ents          # hub still surfaced as a result
+    assert "T" in ents          # gold still reached via the non-hub branch
+    assert "X1" not in ents     # hub NOT expanded through — no blast radius
+
+
+def test_no_gating_pulls_in_hub_neighbors():
+    svc = _hub_svc()
+    state = rc.run_recall(
+        svc.search, svc.graph, vocab=["S", "B", "H", "T", "X1", "X2", "X3", "X4"],
+        query="about S", controller=rc.MechanicalController(), hops=3)  # degree_fn=None
+    assert "X1" in set(state.entities)  # un-gated expansion fans out through H
+
+
+def test_seed_that_is_a_hub_still_expands():
+    # Seed S is itself a degree-5 hub; seed exemption must let it expand to T.
+    edges = [("S", "r", "T"), ("S", "r", "A"), ("S", "r", "B"),
+             ("S", "r", "C"), ("S", "r", "D")]
+    svc = _FakeSvc(["S relates to things"], edges)
+    deg = {"S": 5, "T": 1, "A": 1, "B": 1, "C": 1, "D": 1}
+    state = rc.run_recall(
+        svc.search, svc.graph, vocab=["S", "T", "A", "B", "C", "D"],
+        query="about S", controller=rc.MechanicalController(),
+        hops=2, degree_fn=deg.get, hub_threshold=3)
+    assert "T" in set(state.entities)
+
+
+def test_select_frontier_orders_and_budgets():
+    frontier = ["c", "a", "b"]               # none are seeds
+    deg = {"a": 5, "b": 1, "c": 3}
+    out = rc._select_frontier(frontier, set(), deg.get, hub_threshold=100,
+                              expand_budget=2)
+    assert out == ["b", "c"]                  # ascending degree, capped at 2
+
+
+def test_select_frontier_seeds_exempt_from_gate_and_budget():
+    frontier = ["seed", "x", "y"]
+    deg = {"seed": 99, "x": 1, "y": 1}
+    out = rc._select_frontier(frontier, {"seed"}, deg.get, hub_threshold=10,
+                              expand_budget=1)
+    assert out[0] == "seed"                   # seed always present, never gated
+    assert set(out) == {"seed", "x"} or set(out) == {"seed", "y"}
+    assert len(out) == 2                       # seed + 1 budgeted non-seed
+
+
+def test_select_frontier_off_is_identity():
+    frontier = ["c", "a", "b"]
+    assert rc._select_frontier(frontier, set(), None, None, None) == ["c", "a", "b"]
+
+
+def test_hub_threshold_percentile_and_floor():
+    # All low-degree -> percentile lands at 1, floor wins.
+    assert rc._hub_threshold([1, 1, 1, 1, 1], percentile=95.0, floor=4) == 4
+    # A clear hub -> percentile (50) exceeds the floor and wins.
+    assert rc._hub_threshold([1, 2, 3, 50], percentile=95.0, floor=2) == 50
+    # Empty distribution -> floor.
+    assert rc._hub_threshold([], percentile=95.0, floor=7) == 7
+
+
 @pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
 def test_memory_recall_tool_delegates(monkeypatch, tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
