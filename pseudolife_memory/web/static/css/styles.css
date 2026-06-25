@@ -521,6 +521,14 @@ input:focus, select:focus, textarea:focus { outline:none; border-color:color-mix
   font-size:1.05rem; line-height:1; font-family:var(--font-mono); transition:.14s; }
 .graph-zoom button:hover { color:var(--ink); border-color:var(--line); background:var(--bg-3); }
 
+.graph-fs { position:absolute; left:12px; top:12px; width:34px; height:34px; display:grid; place-content:center; z-index:3;
+  background:color-mix(in srgb,var(--bg-1) 82%,transparent); backdrop-filter:blur(6px);
+  border:1px solid var(--line-2); border-radius:9px; color:var(--ink-2); cursor:pointer; font-size:1rem; transition:.14s; }
+.graph-fs:hover { color:var(--ink); border-color:var(--line); background:var(--bg-3); }
+.graph-wrap:fullscreen { height:100vh; border-radius:0; }
+.graph-wrap.maximized { position:fixed; inset:0; z-index:80; height:100vh; width:100vw; border-radius:0; }
+.galaxy-loading { color:var(--ink-3); }
+
 .node-panel { position:absolute; top:12px; right:12px; width:min(290px,46%);
   background:var(--bg-2); border:1px solid var(--line-2); border-radius:var(--radius-sm);
   box-shadow:var(--shadow-pop); overflow:hidden; animation:slidein .2s var(--ease); }

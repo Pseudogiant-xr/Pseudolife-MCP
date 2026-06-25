@@ -12,6 +12,7 @@ const ETYPE_COLOR = {
 };
 let state = { entity: "", depth: 1, view: "graph" };
 let fg = null;
+let fg3d = null;
 
 function parseHash() {
   const qi = location.hash.indexOf("?");
@@ -32,6 +33,7 @@ export async function renderGraph(root, ctx) {
     [1, 2, 3].map((d) => el("option", { value: d, selected: d === state.depth }, `depth ${d}`)));
   const goBtn = el("button", { class: "btn", onclick: () => { state.entity = entityInput.value.trim(); load(); } }, "Explore");
   const viewToggle = el("div", { class: "facets" },
+    el("button", { class: "facet" + (state.view === "galaxy" ? " on" : ""), onclick: () => setView("galaxy") }, "galaxy"),
     el("button", { class: "facet" + (state.view === "graph" ? " on" : ""), onclick: () => setView("graph") }, "graph"),
     el("button", { class: "facet" + (state.view === "table" ? " on" : ""), onclick: () => setView("table") }, "table"));
 
@@ -48,6 +50,7 @@ export async function renderGraph(root, ctx) {
 
   async function load() {
     if (fg) { fg.stop(); fg = null; }
+    cleanupGalaxy();
     mount(host, loadingBlock("Walking the graph…"));
     try {
       const data = await api.get("/api/graph", { entity: state.entity || undefined, depth: state.depth });
@@ -58,11 +61,13 @@ export async function renderGraph(root, ctx) {
 
   function paint(data) {
     if (fg) { fg.stop(); fg = null; }
+    cleanupGalaxy();
     if (!data || data.found === false || !(data.nodes || []).length) {
       mount(host, emptyBlock("No graph here", state.entity ? `No relations around “${state.entity}”.` : "Enter a seed entity to explore."));
       return;
     }
     if (state.view === "table") { mount(host, tableView(data)); return; }
+    if (state.view === "galaxy") { renderGalaxy(host, data); return; }
     const wrap = el("div", { class: "graph-wrap" });
     const canvas = el("canvas", {});
     wrap.appendChild(canvas);
@@ -72,6 +77,7 @@ export async function renderGraph(root, ctx) {
     const etypes = [...new Set((data.nodes || []).map((n) => n.etype).filter(Boolean))];
     wrap.appendChild(legend(etypes));
     wrap.appendChild(el("div", { class: "graph-hint" }, "scroll to zoom · drag background to pan · click a node"));
+    wrap.appendChild(fullscreenBtn(wrap));
   }
 
   function showNode(wrap, node) {
@@ -136,6 +142,104 @@ function tableView(data) {
             el("td", { class: "mono" }, e.src), el("td", { class: "mono dim" }, e.relation),
             el("td", { class: "mono" }, e.dst),
             el("td", {}, e.derived ? badge("derived", "agent") : badge("explicit", "action")))))))));
+}
+
+// ── 3D galaxy (vendored 3d-force-graph, lazy-loaded) ────────────────────────
+function communityColor(n) {
+  if (n.community != null && n.community !== "") {
+    const h = (Math.abs(Number(n.community)) * 47) % 360;
+    return `hsl(${h} 65% 60%)`;
+  }
+  return colorFor(n.etype);
+}
+
+function cleanupGalaxy() {
+  if (!fg3d) return;
+  try { clearInterval(fg3d.__guard); } catch {}
+  try { fg3d.__ro && fg3d.__ro.disconnect(); } catch {}
+  try { fg3d._destructor && fg3d._destructor(); } catch {}
+  fg3d = null;
+}
+
+async function renderGalaxy(host, data) {
+  const wrap = el("div", { class: "graph-wrap" });
+  const mountPt = el("div", { style: { width: "100%", height: "100%" } });
+  const loading = el("div", { class: "graph-hint galaxy-loading", style: { top: "50%", animation: "none" } }, "loading 3D engine…");
+  wrap.appendChild(mountPt);
+  wrap.appendChild(loading);
+  mount(host, wrap);
+
+  let FG;
+  try {
+    const mod = await import("/ui/vendor/3d-force-graph.bundle.js");
+    FG = mod.default || mod.ForceGraph3D;
+    if (typeof FG !== "function") throw new Error("ForceGraph3D constructor not found");
+  } catch (err) {
+    mount(host, errorBlock(new Error("Could not load the 3D engine — " + (err?.message || err))));
+    return;
+  }
+  if (!mountPt.isConnected) return;   // user switched view/route during the import
+  loading.remove();
+
+  const deg = {};
+  for (const e of data.edges || []) { deg[e.src] = (deg[e.src] || 0) + 1; deg[e.dst] = (deg[e.dst] || 0) + 1; }
+  const nodes = (data.nodes || []).map((n) => ({ id: n.entity, etype: n.etype, community: n.community }));
+  const links = (data.edges || []).map((e) => ({ source: e.src, target: e.dst, derived: !!e.derived }));
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const r0 = wrap.getBoundingClientRect();
+
+  fg3d = new FG(mountPt, {})
+    .graphData({ nodes, links })
+    .backgroundColor("rgba(0,0,0,0)")
+    .nodeId("id")
+    .nodeLabel((n) => n.id)
+    .nodeColor((n) => communityColor(n))
+    .nodeVal((n) => 1 + (deg[n.id] || 0))
+    .linkColor((l) => (l.derived ? "rgba(150,170,200,0.22)" : "rgba(150,170,200,0.45)"))
+    .linkDirectionalArrowLength(3)
+    .width(r0.width).height(r0.height)
+    .cooldownTime(reduce ? 0 : 12000)
+    .onNodeClick((n) => { location.hash = "#/graph?entity=" + encodeURIComponent(n.id) + "&depth=" + state.depth; });
+
+  const ro = new ResizeObserver(() => {
+    const b = wrap.getBoundingClientRect();
+    if (fg3d && b.width) { fg3d.width(b.width); fg3d.height(b.height); }
+  });
+  ro.observe(wrap);
+  fg3d.__ro = ro;
+  // The 3D render loop won't stop itself on DOM removal — self-destruct on leave.
+  fg3d.__guard = setInterval(() => { if (!mountPt.isConnected) cleanupGalaxy(); }, 1500);
+
+  wrap.appendChild(galaxyLegend());
+  wrap.appendChild(el("div", { class: "graph-hint" }, "drag to orbit · scroll to zoom · click a node"));
+  wrap.appendChild(fullscreenBtn(wrap));
+}
+
+function galaxyLegend() {
+  return el("div", { class: "graph-legend" },
+    el("span", { class: "lg" }, el("span", { class: "sw",
+      style: { background: "conic-gradient(from 0deg,#5b9dff,#3fd0c9,#b083f0,#e8b341,#5b9dff)" } }), "by community"),
+    el("span", { class: "lg" }, el("span", { class: "ln" }), "relation"),
+    el("span", { class: "lg" }, el("span", { class: "ln dash" }), "derived"));
+}
+
+// ── Fullscreen (Fullscreen API + CSS-maximize fallback) ─────────────────────
+function fullscreenBtn(wrap) {
+  return el("button", { class: "graph-fs", title: "Fullscreen", "aria-label": "Toggle fullscreen",
+    onclick: () => toggleFullscreen(wrap) }, "⛶");
+}
+
+function enterMaximized(wrap) {
+  wrap.classList.add("maximized");
+  const onKey = (e) => { if (e.key === "Escape") { wrap.classList.remove("maximized"); document.removeEventListener("keydown", onKey); } };
+  document.addEventListener("keydown", onKey);
+}
+
+function toggleFullscreen(wrap) {
+  if (document.fullscreenElement) { document.exitFullscreen && document.exitFullscreen(); return; }
+  if (wrap.classList.contains("maximized")) { wrap.classList.remove("maximized"); return; }
+  if (wrap.requestFullscreen) wrap.requestFullscreen().catch(() => enterMaximized(wrap));
+  else enterMaximized(wrap);
 }
 
 // ── Force-directed simulation ───────────────────────────────────────────────

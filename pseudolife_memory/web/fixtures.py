@@ -278,7 +278,8 @@ class FixtureService:
         # A deliberately dense neighbourhood (~20 nodes) so the visualizer's
         # spread / zoom / fit behaviour can be exercised like a real bank.
         def n(e, et, facts=None):
-            return {"entity": e, "canonical": e, "etype": et, "aliases": [], "facts": facts or []}
+            return {"entity": e, "canonical": e, "etype": et, "aliases": [], "facts": facts or [],
+                    "community": sum(ord(c) for c in e) % 4}  # stable 4-community split for QA colouring
         nodes = [
             n("pseudolife-mcp", "service",
               [{"attribute": "status", "value": "active", "origin": "agent", "confidence": 1.0},
