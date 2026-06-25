@@ -69,7 +69,8 @@ export async function renderGraph(root, ctx) {
     mount(host, wrap);
     fg = new ForceGraph(canvas, wrap, data, state.entity, (node) => showNode(wrap, node));
     wrap.appendChild(zoomControls(fg));
-    wrap.appendChild(legend());
+    const etypes = [...new Set((data.nodes || []).map((n) => n.etype).filter(Boolean))];
+    wrap.appendChild(legend(etypes));
     wrap.appendChild(el("div", { class: "graph-hint" }, "scroll to zoom · drag background to pan · click a node"));
   }
 
@@ -105,9 +106,11 @@ function zoomControls(graph) {
     mk("⤢", "fit to view", () => graph.fitView(true)));
 }
 
-function legend() {
+function legend(etypes) {
+  const list = etypes && etypes.length ? etypes : ["entity"];
   return el("div", { class: "graph-legend" },
-    el("span", { class: "lg" }, el("span", { class: "sw", style: { background: "#5b9dff" } }), "entity"),
+    ...list.map((et) => el("span", { class: "lg" },
+      el("span", { class: "sw", style: { background: colorFor(et) } }), et)),
     el("span", { class: "lg" }, el("span", { class: "ln" }), "explicit"),
     el("span", { class: "lg" }, el("span", { class: "ln dash" }), "derived"));
 }

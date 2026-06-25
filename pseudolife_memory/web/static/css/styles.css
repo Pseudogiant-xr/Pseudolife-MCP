@@ -507,9 +507,11 @@ input:focus, select:focus, textarea:focus { outline:none; border-color:color-mix
 .graph-legend .sw { width:9px; height:9px; border-radius:50%; }
 .graph-legend .ln { width:16px; height:0; border-top:2px solid var(--ink-3); }
 .graph-legend .ln.dash { border-top-style:dashed; }
-.graph-hint { position:absolute; left:50%; transform:translateX(-50%); bottom:12px; font-size:.72rem; color:var(--ink-3);
+.graph-hint { position:absolute; left:50%; transform:translateX(-50%); top:12px; bottom:auto; font-size:.72rem; color:var(--ink-3);
   font-family:var(--font-mono); background:color-mix(in srgb,var(--bg-1) 70%,transparent);
-  padding:4px 10px; border-radius:99px; border:1px solid var(--line); pointer-events:none; white-space:nowrap; }
+  padding:4px 10px; border-radius:99px; border:1px solid var(--line); pointer-events:none; white-space:nowrap;
+  animation:hintfade .4s var(--ease) 6s forwards; }
+@keyframes hintfade { to { opacity:0; visibility:hidden; } }
 .graph-zoom { position:absolute; right:12px; bottom:12px; display:flex; flex-direction:column; gap:6px; z-index:3; }
 .graph-zoom button { width:34px; height:34px; display:grid; place-content:center;
   background:color-mix(in srgb,var(--bg-1) 82%,transparent); backdrop-filter:blur(6px);
