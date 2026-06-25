@@ -580,6 +580,13 @@ code.ic { font-family:var(--font-mono); font-size:.84em; padding:1px 5px; border
 .surprise-card .sc-edge { display:flex; align-items:center; gap:6px; font-size:.86rem; }
 .surprise-card .sc-why { margin-top:6px; font-size:.8rem; }
 
+/* ── Recall (multi-hop chains) ──────────────────────────────────────────── */
+.recall-chain { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:10px 2px;
+  font-family:var(--font-mono); font-size:.82rem; }
+.rc-node { padding:5px 11px; border-radius:99px; background:var(--bg-2); border:1px solid var(--line-2);
+  color:var(--ink); white-space:nowrap; }
+.rc-arrow { color:var(--ink-3); white-space:nowrap; }
+
 /* ── Responsive ─────────────────────────────────────────────────────────── */
 .only-mobile { display:none; }
 @media (max-width:860px) {
