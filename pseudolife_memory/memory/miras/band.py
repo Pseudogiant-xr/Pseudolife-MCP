@@ -137,9 +137,6 @@ class MIRASBand:
             + (1.0 - self.surprise_ema_decay) * float(surprise)
         )
 
-    # Alias so callers can use the shorter name.
-    add = store
-
     def _evict_one(self) -> None:
         """Drop the entry with the lowest source-weighted retention score
         (recency / surprise / balanced × per-source multiplier)."""
