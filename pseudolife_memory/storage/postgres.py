@@ -662,13 +662,16 @@ class PostgresStorage:
             (entity_norm, attribute_norm)).fetchall()]
 
     def facts_for_entry(self, entry_id: int) -> list[dict]:
-        cols = ("id", "entity", "attribute", "value")
+        # The (entity, attribute) slot is the stable handle; facts.id is ephemeral
+        # (snapshot-rewrite reassigns it on every cortex write), so we neither
+        # return it nor order by it — order by the stable slot for determinism.
+        cols = ("entity", "attribute", "value")
         return [dict(zip(cols, r)) for r in self.conn.execute(
             f"SELECT f.{', f.'.join(cols)} FROM facts f "
             "JOIN memory_traces t ON f.entity_norm = t.entity_norm "
             "AND f.attribute_norm = t.attribute_norm "
             "WHERE t.entry_id = %s AND f.status = 'current' "
-            "ORDER BY f.id", (entry_id,)).fetchall()]
+            "ORDER BY f.entity_norm, f.attribute_norm", (entry_id,)).fetchall()]
 
     def get_entry(self, entry_id: int) -> dict | None:
         cols = ("id", "text", "source", "ts", "reinforcements", "access_count")

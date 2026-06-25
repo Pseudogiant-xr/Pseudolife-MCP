@@ -470,6 +470,10 @@ def test_memory_get_and_reinforce_roundtrip(tmp_path, monkeypatch):
     got = srv.memory_get(eid)
     assert got["found"] is True and "getme-svc" in got["text"]
     assert got["consolidated_into"]                      # entry -> facts
+    # consolidated_into exposes the stable slot handle, NOT the ephemeral facts.id.
+    for f in got["consolidated_into"]:
+        assert set(f) == {"entity", "attribute", "value"}
+        assert "id" not in f
     # source_entries surfaces on a fact read (the fact advertises its episodes).
     facts = srv.memory_facts()["entries"]
     assert any(eid in (f.get("source_entries") or []) for f in facts)
