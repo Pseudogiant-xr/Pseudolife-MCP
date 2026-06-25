@@ -74,6 +74,16 @@ def test_cms_bands_get_configured_retention_boost():
     assert all(b.retention.retention_boost == 3.0 for b in cms.bands)
 
 
+def test_mcp_defaults_enable_retention_boost():
+    from pseudolife_memory.utils.config import AppConfig, TracesConfig
+    from pseudolife_memory.service import MemoryService
+    assert TracesConfig().retention_boost == 0.0          # library default stays no-op
+    cfg = AppConfig()
+    assert cfg.memory.traces.retention_boost == 0.0       # before MCP override
+    MemoryService._apply_mcp_defaults(cfg)                # noqa: SLF001
+    assert cfg.memory.traces.retention_boost == 1.0       # daemon turns graded retention ON
+
+
 def test_evict_one_protects_reinforced_and_still_evicts():
     # Exercises the real _evict_one: with access_count=0 the balanced base score
     # is 0 for every entry (0/age + 0), so the ONLY differentiator is the

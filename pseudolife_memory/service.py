@@ -319,6 +319,7 @@ class MemoryService:
         * Recency base half-life 24h (vs 1h): Claude Code sessions are
           hours-to-days apart, so a 1h half-life made the recency boost
           effectively always zero.
+        * retention_boost 1.0: graded MTT retention on for the daemon (library default 0.0).
 
         Leaves the MIRAS preset alone — the ``continuum`` 8-tier default
         is fine for Claude's use too.
@@ -327,6 +328,11 @@ class MemoryService:
         config.embedding.batch_size = 16
         config.memory.meta_filter.enabled = False
         config.memory.recency_base_half_life_s = 86400.0
+        # Graded MTT retention ON for the daemon (provenance-as-link Phase 2): a
+        # reinforced episode resists eviction by retention_boost*log1p(reinforcements).
+        # 1.0 is the tuning bench's knee (protection at ~no recency cost). The library
+        # default stays 0.0 (no-op) — this is a deployment-build choice.
+        config.memory.traces.retention_boost = 1.0
 
     def _ensure_init(self) -> None:
         if self._cms is not None:
