@@ -582,6 +582,23 @@ code.ic { font-family:var(--font-mono); font-size:.84em; padding:1px 5px; border
 .surprise-card .sc-edge { display:flex; align-items:center; gap:6px; font-size:.86rem; }
 .surprise-card .sc-why { margin-top:6px; font-size:.8rem; }
 
+/* ── Charts (hand-rolled SVG/DOM) ───────────────────────────────────────── */
+.donut-wrap { display:flex; align-items:center; gap:20px; flex-wrap:wrap; }
+.donut { flex:none; }
+.donut .donut-total { fill:var(--ink); font-family:var(--font-display); font-weight:600; font-size:1.5rem; }
+.chart-legend { display:flex; flex-direction:column; gap:7px; min-width:140px; }
+.cl-row { display:flex; align-items:center; gap:9px; font-size:.82rem; }
+.cl-dot { width:9px; height:9px; border-radius:3px; flex:none; }
+.cl-lbl { color:var(--ink-2); }
+.cl-val { margin-left:auto; font-family:var(--font-mono); color:var(--ink-3); }
+.bar-rows { display:flex; flex-direction:column; gap:9px; }
+.bar-row { display:grid; grid-template-columns:minmax(72px,150px) 1fr auto; align-items:center; gap:11px; font-size:.84rem; }
+.br-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--ink-2); }
+.br-bar { height:8px; border-radius:99px; background:var(--bg-inset); border:1px solid var(--line); overflow:hidden; }
+.br-bar > i { display:block; height:100%; border-radius:99px; }
+.br-val { font-family:var(--font-mono); font-size:.76rem; color:var(--ink-3); }
+.sparkline { display:block; }
+
 /* ── Recall (multi-hop chains) ──────────────────────────────────────────── */
 .recall-chain { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:10px 2px;
   font-family:var(--font-mono); font-size:.82rem; }
