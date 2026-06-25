@@ -478,3 +478,18 @@ def test_memory_get_and_reinforce_roundtrip(tmp_path, monkeypatch):
     after = st.conn.execute("SELECT reinforcements FROM entries WHERE id=%s", (eid,)).fetchone()[0]
     assert after == before + 1
     assert srv.memory_get(9_000_001) == {"found": False, "faded": True}
+
+
+@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
+def test_reinforcements_loads_into_entry(tmp_path):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
+    from ladder_sweep import build_service
+    from pseudolife_memory.storage.sync import row_to_entry
+    svc = build_service(tmp_path)
+    svc.store("retain-me runtime: jdk-21", source="general")
+    st = svc._storage  # noqa: SLF001
+    eid = st.conn.execute("SELECT id FROM entries ORDER BY id DESC LIMIT 1").fetchone()[0]
+    st.bump_reinforcements(eid, 3)
+    row = next(r for r in st.load_entries() if r["id"] == eid)
+    assert row["reinforcements"] == 3
+    assert row_to_entry(row).reinforcements == 3

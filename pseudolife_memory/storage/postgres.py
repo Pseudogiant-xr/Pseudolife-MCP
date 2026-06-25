@@ -195,7 +195,7 @@ class PostgresStorage:
         return cur.rowcount
 
     def load_entries(self) -> list[dict]:
-        cols = ("id",) + _ENTRY_COLS
+        cols = ("id",) + _ENTRY_COLS + ("reinforcements",)
         rows = self.conn.execute(
             f"SELECT {', '.join(cols)} FROM entries ORDER BY id",
         ).fetchall()

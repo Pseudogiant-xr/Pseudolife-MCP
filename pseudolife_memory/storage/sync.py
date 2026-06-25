@@ -86,6 +86,7 @@ def row_to_entry(row: dict[str, Any], device: str = "cpu") -> MemoryEntry:
         episode_title=row["episode_title"],
         tags=list(row["tags"] or []),
         db_id=row["id"],
+        reinforcements=row.get("reinforcements", 0),
     )
 
 
