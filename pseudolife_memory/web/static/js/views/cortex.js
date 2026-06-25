@@ -2,7 +2,7 @@
 // contested-fact resolution, and a per-slot history timeline drawer.
 import { el, mount, clear, fmtAge, fmtTime, titleCase, loadingBlock, emptyBlock, errorBlock, debounce } from "../util.js";
 import { api } from "../api.js";
-import { openDrawer, setDrawerBody, toast, confirmDialog } from "../ui.js";
+import { openDrawer, setDrawerBody, toast, confirmDialog, openModal, closeModal } from "../ui.js";
 import { originBadge, confMeter, searchBox, facetBar, badge } from "../components.js";
 
 const TONE = "var(--c-cortex)";
@@ -67,6 +67,8 @@ function entityCard(g, ctx) {
       el("span", { class: "name" }, g.entity),
       contested ? badge(`${contested} contested`, "contested") : null,
       el("span", { class: "spacer" }),
+      el("button", { class: "btn sm", title: "Assert or correct a fact",
+        onclick: () => openAssert(g.entity, ctx) }, "+ fact"),
       el("button", { class: "btn sm", title: "Open in graph",
         onclick: () => { location.hash = "#/graph?entity=" + encodeURIComponent(g.entity); } }, "graph ↗"),
       el("span", { class: "n", style: { marginLeft: "10px" } }, `${g.facts.length} fact${g.facts.length === 1 ? "" : "s"}`)),
@@ -82,6 +84,8 @@ function factRow(f, ctx) {
       originBadge(f.origin),
       confMeter(f.confidence, TONE),
       el("span", { class: "fact-age", title: f.tx_time ? fmtTime(f.tx_time) : "" }, f.age || (f.tx_time ? fmtAge(f.tx_time) : "")),
+      el("button", { class: "btn sm danger fact-forget", title: "Forget this fact",
+        onclick: (e) => { e.stopPropagation(); forgetFact(f, ctx); } }, "forget"),
       el("span", { class: "hist-ico" }, "history ↗")));
   if (f.contested) {
     row.appendChild(el("div", { class: "contender", onclick: (e) => e.stopPropagation() },
@@ -126,4 +130,41 @@ async function openHistory(f) {
               v.age ? el("span", {}, v.age) : (v.tx_time ? el("span", {}, fmtAge(v.tx_time)) : null)))))
         : emptyBlock("No version history")));
   } catch (e) { setDrawerBody(errorBlock(e)); }
+}
+
+function openAssert(entity, ctx) {
+  const attr = el("input", { type: "text", placeholder: "attribute", "aria-label": "attribute" });
+  const val = el("input", { type: "text", placeholder: "value", "aria-label": "value" });
+  const origin = el("select", { "aria-label": "origin" },
+    ["user", "action", "agent"].map((o) => el("option", { value: o, selected: o === "user" }, o)));
+  const conf = el("input", { type: "number", min: 0, max: 1, step: 0.05, value: 0.9, "aria-label": "confidence" });
+  openModal({
+    title: `Assert a fact for “${entity}”`,
+    body: el("div", { style: { display: "grid", gap: "10px" } },
+      el("p", { class: "dim", style: { marginTop: 0 } },
+        "Writes a canonical fact. A weaker-tier value conflicting with a stronger one is parked as a contender, not overwritten."),
+      attr, val,
+      el("div", { style: { display: "flex", gap: "10px" } }, origin, conf)),
+    actions: [
+      { label: "Cancel", onClick: closeModal },
+      { label: "Assert", kind: "primary", onClick: async () => {
+        const a = attr.value.trim(), v = val.value.trim();
+        if (!a || !v) { toast("Attribute and value are required", "bad"); return; }
+        try {
+          await api.post("/api/facts/set",
+            { entity, attribute: a, value: v, origin: origin.value, confidence: Number(conf.value) });
+          closeModal(); toast("Fact asserted", "ok"); ctx.refresh();
+        } catch (e) { toast("Assert failed: " + e.message, "bad"); }
+      } },
+    ],
+  });
+}
+
+async function forgetFact(f, ctx) {
+  if (!(await confirmDialog({ title: "Forget this fact?", danger: true, confirmLabel: "Forget",
+    message: `Permanently remove ${f.entity}.${f.attribute} = “${f.value}”. This cannot be undone.` }))) return;
+  try {
+    await api.post("/api/facts/forget", { entity: f.entity, attribute: f.attribute });
+    toast("Fact forgotten", "ok"); ctx.refresh();
+  } catch (e) { toast("Forget failed: " + e.message, "bad"); }
 }

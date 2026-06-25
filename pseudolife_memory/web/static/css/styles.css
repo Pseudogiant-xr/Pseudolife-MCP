@@ -425,6 +425,8 @@ input:focus, select:focus, textarea:focus { outline:none; border-color:color-mix
 .fact-age { font-size:.74rem; color:var(--ink-3); font-family:var(--font-mono); white-space:nowrap; }
 .hist-ico { opacity:.5; transition:opacity .14s; font-family:var(--font-mono); font-size:.8rem; }
 .fact-row:hover .hist-ico { opacity:.9; }
+.fact-forget { opacity:0; transition:opacity .14s; padding:2px 8px; }
+.fact-row:hover .fact-forget, .fact-forget:focus-visible { opacity:.9; }
 
 /* contender resolve strip */
 .contender { grid-column:1/-1; display:flex; align-items:center; gap:12px; padding:10px 0 2px;

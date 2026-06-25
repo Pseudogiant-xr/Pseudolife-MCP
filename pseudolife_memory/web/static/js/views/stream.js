@@ -2,13 +2,15 @@
 // rerank/BM25 toggles and a ranking-trace debugger drawer.
 import { el, mount, clear, fmtAge, fmtTime, truncate, loadingBlock, emptyBlock, errorBlock, debounce } from "../util.js";
 import { api } from "../api.js";
-import { openDrawer, setDrawerBody, toast } from "../ui.js";
+import { openDrawer, setDrawerBody, toast, openModal, closeModal, confirmDialog } from "../ui.js";
 import { badge, searchBox, facetBar } from "../components.js";
 
 const TONE = "var(--c-assoc)";
 let state = { q: "", source: "all", rerank: false, bm25: false };
+let viewCtx = null;
 
 export async function renderStream(root, ctx) {
+  viewCtx = ctx;
   let sources = [];
   try { sources = (await api.get("/api/sources")).sources || []; } catch { /* non-fatal */ }
 
@@ -120,9 +122,46 @@ function entryCard(e, searching) {
       el("span", { class: "spacer" }),
       e.id != null ? el("button", { class: "btn sm", style: { padding: "3px 9px" },
         title: "engram trace", onclick: () => openEngram(e) }, "trace ↗") : null,
+      el("button", { class: "btn sm", style: { padding: "3px 9px" },
+        title: "edit / supersede / delete", onclick: () => openEntryActions(e) }, "⋯"),
       e.access_count != null ? el("span", { class: "dim", style: { fontSize: ".74rem" } }, `${e.access_count}×`) : null,
       e.timestamp ? el("span", { class: "dim", style: { fontSize: ".74rem" }, title: fmtTime(e.timestamp) }, e.age || fmtAge(e.timestamp)) : null,
       searching && e.score != null ? el("span", { class: "score-pill" }, Number(e.score).toFixed(3)) : null));
+}
+
+function openEntryActions(e) {
+  const ta = el("textarea", { rows: 3, placeholder: "replacement text (for supersede)",
+    "aria-label": "replacement text" });
+  openModal({
+    title: "Edit memory",
+    body: el("div", { style: { display: "grid", gap: "12px" } },
+      el("div", { class: "entry", style: { marginTop: 0, opacity: ".8" } }, el("div", { class: "entry-text" }, e.text)),
+      el("p", { class: "dim", style: { margin: 0 } },
+        "Supersede replaces this with new text (the original is kept as history); delete removes it."),
+      ta),
+    actions: [
+      { label: "Cancel", onClick: closeModal },
+      { label: "Delete", kind: "danger", onClick: () => doDelete(e) },
+      { label: "Supersede", kind: "primary", onClick: () => doSupersede(e, ta.value.trim()) },
+    ],
+  });
+}
+
+async function doSupersede(e, newText) {
+  if (!newText) { toast("Replacement text is required", "bad"); return; }
+  try {
+    await api.post("/api/supersede", { old_text: e.text, new_text: newText });
+    closeModal(); toast("Superseded", "ok"); viewCtx?.refresh?.();
+  } catch (err) { toast("Supersede failed: " + err.message, "bad"); }
+}
+
+async function doDelete(e) {
+  if (!(await confirmDialog({ title: "Delete this memory?", danger: true, confirmLabel: "Delete",
+    message: `Permanently remove: “${truncate(e.text, 120)}”.` }))) return;
+  try {
+    const r = await api.post("/api/delete", { text: e.text });
+    toast(`Deleted ${r.deleted_count ?? 1}`, "ok"); viewCtx?.refresh?.();
+  } catch (err) { toast("Delete failed: " + err.message, "bad"); }
 }
 
 async function openEngram(entry) {
