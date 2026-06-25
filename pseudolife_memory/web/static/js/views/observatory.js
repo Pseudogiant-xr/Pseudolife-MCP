@@ -66,7 +66,8 @@ function continuumPanel(stats) {
     ? el("div", { class: "bands" },
         bands.map((b, i) => {
           const cap = b.capacity || 1;
-          const pct = Math.min(100, (b.size / cap) * 100);
+          const raw = (b.size / cap) * 100;
+          const pct = b.size > 0 ? Math.max(2.5, Math.min(100, raw)) : 0;
           const hue = bandHue(i, bands.length);
           return el("div", { class: "band-row", style: { "--bh": `hsl(${hue} 72% 62%)` } },
             el("div", { class: "band-name" }, b.name),
