@@ -1586,6 +1586,8 @@ class MemoryService:
             if self._storage is None or self._storage.get_entry(int(entry_id)) is None:
                 return {"reinforced": False, "faded": True}
             self._storage.bump_reinforcements(int(entry_id), 1)
+            if self._cms is not None:
+                self._cms.bump_entry_reinforcements(int(entry_id), 1)
         return {"reinforced": True, "entry_id": int(entry_id)}
 
     def cortex_forget(self, entity: str, attribute: str | None = None) -> dict[str, Any]:
@@ -1760,6 +1762,8 @@ class MemoryService:
                             if self._storage.add_trace(
                                     _norm_key(ent), _norm_key(attr), src_id, _time.time()):
                                 self._storage.bump_reinforcements(src_id, 1)
+                                if self._cms is not None:
+                                    self._cms.bump_entry_reinforcements(src_id, 1)
                                 traces_n += 1
         except Exception as exc:  # noqa: BLE001 — an extractor must never break a dream
             logger.warning("dream extractor failed (%s); cursor NOT advanced, "

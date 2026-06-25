@@ -1077,6 +1077,22 @@ class ContinuumMemorySystem:
         return merge_slots_view(slot_lists)
 
     # ------------------------------------------------------------------
+    # In-memory sync helpers
+    # ------------------------------------------------------------------
+
+    def bump_entry_reinforcements(self, db_id: int, delta: int) -> bool:
+        """Bump the resident entry's in-memory reinforcement counter to match a
+        DB bump, so eviction scoring reflects it without a reload. Returns True
+        if the entry was resident (a no-op + False otherwise — e.g. already
+        evicted; the DB value stands and is reloaded on next hydrate)."""
+        for band in self.bands:
+            for e in band.entries:
+                if e.db_id == db_id:
+                    e.reinforcements += delta
+                    return True
+        return False
+
+    # ------------------------------------------------------------------
     # Consolidation
     # ------------------------------------------------------------------
 

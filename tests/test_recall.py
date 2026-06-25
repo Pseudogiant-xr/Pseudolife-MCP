@@ -493,3 +493,28 @@ def test_reinforcements_loads_into_entry(tmp_path):
     row = next(r for r in st.load_entries() if r["id"] == eid)
     assert row["reinforcements"] == 3
     assert row_to_entry(row).reinforcements == 3
+
+
+@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
+def test_reinforce_syncs_in_memory(tmp_path):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
+    from ladder_sweep import build_service
+    svc = build_service(tmp_path)
+    svc.store("sync-me runtime: jdk-21", source="general")
+    st = svc._storage  # noqa: SLF001
+    eid = st.conn.execute("SELECT id FROM entries ORDER BY id DESC LIMIT 1").fetchone()[0]
+
+    def resident():
+        for b in svc._cms.bands:                      # noqa: SLF001
+            for e in b.entries:
+                if e.db_id == eid:
+                    return e
+        return None
+
+    r = resident()
+    assert r is not None and r.reinforcements == 0
+    out = svc.reinforce(eid)
+    assert out["reinforced"] is True
+    assert resident().reinforcements == 1            # in-memory synced
+    assert st.conn.execute(
+        "SELECT reinforcements FROM entries WHERE id=%s", (eid,)).fetchone()[0] == 1
