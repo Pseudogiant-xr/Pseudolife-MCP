@@ -79,7 +79,7 @@
   --line-2:rgba(30,28,24,.18);
   --ink:#23201b;
   --ink-2:#5d574c;
-  --ink-3:#8c8475;
+  --ink-3:#756b5d;  /* darkened from #8c8475 → ~4.7:1 on --bg-1 (WCAG AA) */
   --c-assoc:#0f9b94;
   --c-cortex:#b07d12;
   --c-world:#2f9a52;
@@ -120,6 +120,11 @@ h1,h2,h3,h4 { font-family:var(--font-display); font-weight:600; margin:0; letter
 button { font-family:inherit; }
 a { color:var(--accent); text-decoration:none; }
 ::selection { background:color-mix(in srgb, var(--accent) 32%, transparent); }
+
+/* Global keyboard focus ring for interactive controls (inputs keep their own). */
+button:focus-visible, a:focus-visible, [tabindex]:focus-visible,
+.facet:focus-visible, .nav-item:focus-visible, .switch:focus-within {
+  outline:2px solid color-mix(in srgb, var(--accent) 70%, transparent); outline-offset:2px; border-radius:var(--radius-xs); }
 
 /* Scrollbars */
 *::-webkit-scrollbar { width:11px; height:11px; }

@@ -64,7 +64,8 @@ export function openDrawer({ title, accent = "var(--accent)", body }) {
     el("div", { class: "drawer-head" },
       el("span", { class: "nav-dot", style: { "--dot": accent } }),
       el("h3", {}, title),
-      el("button", { class: "icon-btn", style: { marginLeft: "auto" }, onclick: closeDrawer }, "✕")),
+      el("button", { class: "icon-btn", style: { marginLeft: "auto" }, onclick: closeDrawer,
+        "aria-label": "Close", title: "Close" }, "✕")),
     el("div", { class: "drawer-body" }, body));
   document.body.appendChild(bg);
   document.body.appendChild(d);
