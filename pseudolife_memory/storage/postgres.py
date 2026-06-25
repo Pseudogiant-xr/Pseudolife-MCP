@@ -671,9 +671,10 @@ class PostgresStorage:
             "ORDER BY f.id", (entry_id,)).fetchall()]
 
     def get_entry(self, entry_id: int) -> dict | None:
-        cols = ("id", "text", "source", "ts")
+        cols = ("id", "text", "source", "ts", "reinforcements", "access_count")
         row = self.conn.execute(
-            "SELECT id, text, source, ts FROM entries WHERE id = %s",
+            "SELECT id, text, source, ts, reinforcements, access_count "
+            "FROM entries WHERE id = %s",
             (entry_id,)).fetchone()
         return dict(zip(cols, row)) if row else None
 

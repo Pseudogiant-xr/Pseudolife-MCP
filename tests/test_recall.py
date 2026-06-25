@@ -496,6 +496,46 @@ def test_reinforcements_loads_into_entry(tmp_path):
 
 
 @pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
+def test_memory_get_surfaces_reinforcements(tmp_path):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
+    from ladder_sweep import build_service
+    svc = build_service(tmp_path)
+    svc.store("retainshow runtime: jdk-21", source="general")
+    st = svc._storage  # noqa: SLF001
+    eid = st.conn.execute("SELECT id FROM entries ORDER BY id DESC LIMIT 1").fetchone()[0]
+    st.bump_reinforcements(eid, 4)
+    got = svc.get_entry(eid)
+    assert got["reinforcements"] == 4
+    assert "access_count" in got
+
+
+@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
+def test_memory_get_syncs_access_count_no_clobber(tmp_path):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
+    from ladder_sweep import build_service
+    svc = build_service(tmp_path)
+    svc.store("accesssync runtime: jdk-21", source="general")
+    st = svc._storage  # noqa: SLF001
+    eid = st.conn.execute("SELECT id FROM entries ORDER BY id DESC LIMIT 1").fetchone()[0]
+
+    def resident():
+        for b in svc._cms.bands:                       # noqa: SLF001
+            for e in b.entries:
+                if e.db_id == eid:
+                    return e
+        return None
+
+    mem_before = resident().access_count
+    db_before = st.conn.execute("SELECT access_count FROM entries WHERE id=%s", (eid,)).fetchone()[0]
+    svc.get_entry(eid)
+    assert resident().access_count == mem_before + 1     # in-memory bumped (the clobber fix)
+    assert st.conn.execute("SELECT access_count FROM entries WHERE id=%s", (eid,)).fetchone()[0] == db_before + 1
+    # Regression: a save-cadence sync (in-memory -> DB) must NOT clobber the bump back to db_before.
+    st.update_access_counts([(eid, resident().access_count)])
+    assert st.conn.execute("SELECT access_count FROM entries WHERE id=%s", (eid,)).fetchone()[0] == db_before + 1
+
+
+@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
 def test_reinforce_syncs_in_memory(tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service

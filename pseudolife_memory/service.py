@@ -1580,9 +1580,14 @@ class MemoryService:
             if row is None:
                 return {"found": False, "faded": True}
             self._storage.bump_access_count(int(entry_id), 1)
+            if self._cms is not None:
+                self._cms.bump_entry_access_count(int(entry_id), 1)
             facts = self._storage.facts_for_entry(int(entry_id))
         return {"found": True, "entry_id": row["id"], "text": row["text"],
-                "source": row.get("source"), "consolidated_into": facts}
+                "source": row.get("source"),
+                "reinforcements": row.get("reinforcements", 0),
+                "access_count": row.get("access_count", 0) + 1,  # +1 for the bump just applied
+                "consolidated_into": facts}
 
     def reinforce(self, entry_id: int) -> dict[str, Any]:
         """The 'this episode was useful' signal — bump reinforcements (Phase-2

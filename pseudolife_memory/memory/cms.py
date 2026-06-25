@@ -1092,6 +1092,17 @@ class ContinuumMemorySystem:
                     return True
         return False
 
+    def bump_entry_access_count(self, db_id: int, delta: int) -> bool:
+        """Bump the resident entry's in-memory access_count to match a DB bump, so
+        the save-cadence sync (update_access_counts, in-memory -> DB) reconciles to
+        the bumped value instead of clobbering it. Returns True if resident."""
+        for band in self.bands:
+            for e in band.entries:
+                if e.db_id == db_id:
+                    e.access_count += delta
+                    return True
+        return False
+
     # ------------------------------------------------------------------
     # Consolidation
     # ------------------------------------------------------------------
