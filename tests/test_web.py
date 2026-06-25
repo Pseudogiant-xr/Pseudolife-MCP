@@ -1,7 +1,9 @@
 """Tests for the Cortex Console web layer — config_io, routes, ASGI.
 
-These use the lightweight ``FixtureService`` (no Postgres, no torch), so they run
-in the standard suite without the warm-service fixture or a database.
+These use the lightweight ``FixtureService`` (no Postgres, no warm-service
+fixture or database). Note: ``FixtureService`` constructs ``AppConfig``, which
+transitively imports torch (``preset_bands`` -> the memory package -> ``cms``),
+so these tests require torch installed and run under ``.venv``.
 """
 
 from __future__ import annotations
@@ -98,6 +100,26 @@ def test_routes_dispatch_reads(svc):
 def test_routes_search_params(svc):
     out = ConsoleRoutes(svc).dispatch("GET", "/api/search", {"q": "recall"}, {})
     assert "entries" in out and "count" in out
+
+
+def test_routes_graph_insight_dispatch(svc):
+    r = ConsoleRoutes(svc)
+    dig = r.dispatch("GET", "/api/graph/digest", {}, {})
+    assert "available" in dig
+    comms = r.dispatch("GET", "/api/graph/communities", {}, {})
+    assert "communities" in comms
+    members = r.dispatch("GET", "/api/graph/communities", {"id": "0"}, {})
+    assert "members" in members
+    path = r.dispatch("GET", "/api/graph/path", {"source": "a", "target": "b"}, {})
+    assert "found" in path and "path" in path
+
+
+def test_routes_entry_and_reinforce(svc):
+    r = ConsoleRoutes(svc)
+    entry = r.dispatch("GET", "/api/entry", {"id": "1"}, {})
+    assert "consolidated_into" in entry and "reinforcements" in entry
+    out = r.dispatch("POST", "/api/reinforce", {}, {"entry_id": 1})
+    assert isinstance(out, dict)
 
 
 def test_routes_unknown_raises_keyerror(svc):

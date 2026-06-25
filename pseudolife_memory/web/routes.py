@@ -33,6 +33,17 @@ def _i(params: dict, key: str, default: int) -> int:
         return default
 
 
+def _i_opt(params: dict, key: str) -> int | None:
+    """Optional int: None when the param is absent/blank/non-numeric."""
+    v = params.get(key)
+    if v in (None, ""):
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
 def _f(params: dict, key: str, default: float | None) -> float | None:
     v = params.get(key)
     try:
@@ -126,6 +137,10 @@ class ConsoleRoutes:
         g("/api/recall", lambda q, b: svc.recall(
             _s(q, "q", ""), hops=_i(q, "hops", 3), top_k=_i(q, "top_k", 5)))
 
+        # ---- engram traces / retention ----
+        g("/api/entry", lambda q, b: svc.get_entry(_i(q, "id", 0)))
+        p("/api/reinforce", lambda q, b: svc.reinforce(int(b["entry_id"])))
+
         # ---- facets ----
         g("/api/sources", lambda q, b: svc.list_sources())
         g("/api/tags", lambda q, b: svc.list_tags())
@@ -135,6 +150,11 @@ class ConsoleRoutes:
             entity=_s(q, "entity"), depth=_i(q, "depth", 1),
             include_facts=_tribool(q, "include_facts") is not False,
             to=_s(q, "to")))
+        g("/api/graph/digest", lambda q, b: svc.graph_digest())
+        g("/api/graph/communities",
+          lambda q, b: svc.communities(community_id=_i_opt(q, "id")))
+        g("/api/graph/path", lambda q, b: svc.graph_path(
+            _s(q, "source"), _s(q, "target"), max_hops=_i(q, "max_hops", 8)))
 
         # ---- dream / consolidation ----
         g("/api/dream/status", lambda q, b: svc.dream_status())

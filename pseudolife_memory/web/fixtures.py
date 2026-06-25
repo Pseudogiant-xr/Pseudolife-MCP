@@ -323,6 +323,62 @@ class FixtureService:
                 "nodes": nodes, "edges": edges,
                 "paths": [["pseudolife-mcp", "postgres", "docker-desktop"]] if to else []}
 
+    # graph insight
+    def graph_digest(self):
+        return {"available": True, "digest": {
+            "computed_at": _NOW - 40 * 60,
+            "communities": [
+                {"id": 0, "label": "pseudolife-mcp", "size": 12, "cohesion": 0.42},
+                {"id": 1, "label": "Cortex Console web frontend", "size": 9, "cohesion": 0.55},
+                {"id": 2, "label": "postgres", "size": 4, "cohesion": 0.31}],
+            "god_nodes": [
+                {"entity_id": 1, "display": "pseudolife-mcp", "degree": 12},
+                {"entity_id": 2, "display": "Cortex Console web frontend", "degree": 10},
+                {"entity_id": 3, "display": "postgres", "degree": 6},
+                {"entity_id": 4, "display": "docker-desktop", "degree": 4}],
+            "surprises": [
+                {"src": "claude-code", "dst": "pseudolife-mcp", "relation": "writes-to",
+                 "confidence": 0.85, "origin": "agent", "score": 5,
+                 "why": "agent-inferred; bridge between community 1 and 2"},
+                {"src": "Console", "dst": "Auth flow", "relation": "guards",
+                 "confidence": 0.5, "origin": "agent", "score": 3,
+                 "why": "agent-inferred or low-confidence; peripheral node reaches a hub"}],
+            "questions": [
+                {"type": "contested_fact",
+                 "question": "Which value of `model` for `dream extractor` is correct — `Gemma 4 E2B` or `Gemma 4 E4B`?",
+                 "why": "Contested fact; rival from origin=agent."},
+                {"type": "isolated_entity",
+                 "question": "What connects `Auth flow` to the rest of the graph?",
+                 "why": "1 weakly-connected entity — possible gap."}],
+            "totals": {"entities": 25, "edges": 26, "communities": 3}}}
+
+    def communities(self, community_id=None):
+        comms = [{"id": 0, "label": "pseudolife-mcp", "size": 12, "cohesion": 0.42},
+                 {"id": 1, "label": "Cortex Console web frontend", "size": 9, "cohesion": 0.55},
+                 {"id": 2, "label": "postgres", "size": 4, "cohesion": 0.31}]
+        if community_id is None:
+            return {"communities": comms}
+        return {"community_id": community_id,
+                "members": ["pseudolife-mcp", "postgres", "docker-desktop"]}
+
+    def graph_path(self, source, target, max_hops=8):
+        return {"found": True, "source": source, "target": target, "hops": 2,
+                "path": [source or "pseudolife-mcp", "postgres", target or "docker-desktop"],
+                "edges": [{"src": source or "pseudolife-mcp", "relation": "stores-data-in", "dst": "postgres"},
+                          {"src": "postgres", "relation": "runs-on", "dst": target or "docker-desktop"}]}
+
+    # engram traces / retention
+    def get_entry(self, entry_id):
+        return {"found": True, "entry_id": int(entry_id),
+                "text": _STREAM[2][0], "source": "pseudolife",
+                "reinforcements": 2, "access_count": 13,
+                "consolidated_into": [
+                    {"entity": "pseudolife-mcp", "attribute": "graph population",
+                     "value": "GAM #2 graph-population is live"}]}
+
+    def reinforce(self, entry_id):
+        return {"reinforced": True, "entry_id": int(entry_id), "reinforcements": 3}
+
     # dream / consolidation
     def dream_status(self):
         return {"backlog": 14, "idle_seconds": 2100.0, "dream_cursor": _NOW - 6 * _H,
