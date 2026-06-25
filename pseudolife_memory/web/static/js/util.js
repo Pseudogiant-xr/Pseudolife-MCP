@@ -6,7 +6,13 @@ export function el(tag, props = {}, ...children) {
   for (const [k, v] of Object.entries(props || {})) {
     if (v == null || v === false) continue;
     if (k === "class") node.className = v;
-    else if (k === "style" && typeof v === "object") Object.assign(node.style, v);
+    else if (k === "style" && typeof v === "object") {
+      for (const [sk, sv] of Object.entries(v)) {
+        if (sv == null) continue;
+        if (sk.startsWith("--")) node.style.setProperty(sk, String(sv));
+        else node.style[sk] = sv;
+      }
+    }
     else if (k === "html") node.innerHTML = v;
     else if (k === "dataset") Object.assign(node.dataset, v);
     else if (k.startsWith("on") && typeof v === "function")
