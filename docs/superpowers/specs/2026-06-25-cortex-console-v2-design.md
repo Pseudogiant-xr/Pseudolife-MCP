@@ -185,12 +185,14 @@ is hand-rolled SVG/CSS, consistent with the no-build ethos.
 
 ## Verification
 
-- **Backend (TDD, first):** extend `tests/test_web.py` — each new route
-  dispatches to the right `service.*` method, honours the auth gate, returns
-  405 on the wrong verb, and handles `available: False` (digest/communities
-  before any dream). Tests use a **mock service** (no PG/torch), preserving the
-  repo's fast pure-logic convention. (This is separate from the fixture
-  devserver, which now requires torch — run it with `.venv`.)
+- **Backend (TDD, first):** extend `tests/test_web.py`, following its existing
+  pattern — add the new methods to `FixtureService`, then assert each new route
+  dispatches to the right `service.*` method (`ConsoleRoutes` test), honours the
+  auth gate, returns 405 on the wrong verb, and handles `available: False`
+  (digest/communities before any dream). Note: `FixtureService` now transitively
+  imports torch (via `AppConfig` → `preset_bands` → `cms`), so `test_web.py`'s
+  "no torch" docstring is stale and the web tests run under `.venv` — fix that
+  docstring as part of Phase 1.
 - **Frontend QA:** chrome-devtools MCP (fresh cache) across every tab in
   dark / light / mobile, asserting zero console errors and exercising: spectral
   colours actually render, continuum fills visible, Insight digest, Recall
