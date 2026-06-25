@@ -150,10 +150,10 @@ def test_evict_one_protects_reinforced_and_still_evicts():
     spec = MIRASBandSpec(name="b", max_entries=3, retention_policy="balanced")
     band = build_band(spec, embedding_dim=4, device="cpu", retention_boost=5.0)
     for i, reinf in enumerate([0, 5, 0]):
-        band.add(text=f"e{i}", embedding=torch.zeros(4), source="agent_action")
+        band.store(text=f"e{i}", embedding=torch.zeros(4), source="agent_action")
         band.entries[-1].db_id = i
         band.entries[-1].reinforcements = reinf
-    band.add(text="e3", embedding=torch.zeros(4), source="agent_action")  # triggers eviction
+    band.store(text="e3", embedding=torch.zeros(4), source="agent_action")  # triggers eviction
     band.entries[-1].db_id = 3
     ids = {e.db_id for e in band.entries}
     assert 1 in ids                 # the reinforced entry survived eviction
@@ -570,7 +570,7 @@ def _run_one(retention_boost: float) -> dict:
                       retention_boost=retention_boost)
     reinforced, fresh_unreinforced = set(), set()
     for i in range(N_TOTAL):
-        band.add(text=f"e{i}", embedding=torch.zeros(DIM), source=SOURCE, surprise=0.0)
+        band.store(text=f"e{i}", embedding=torch.zeros(DIM), source=SOURCE, surprise=0.0)
         e = band.entries[-1]
         e.db_id = i
         e.timestamp = float(i)           # higher i = newer
