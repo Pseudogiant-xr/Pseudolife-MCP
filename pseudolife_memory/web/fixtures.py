@@ -111,7 +111,7 @@ def _lesson_dict(t):
 
 def _stream_dict(t, idx):
     text, source, band, tags, age_s = t
-    return {"text": text, "source": source, "bank": band, "tags": tags,
+    return {"id": 1000 + idx, "text": text, "source": source, "bank": band, "tags": tags,
             "timestamp": _NOW - age_s, "age": _age(age_s),
             "score": round(0.9 - idx * 0.06, 3), "superseded": idx == 5,
             "episode_id": "ep-build" if idx == 0 else None,

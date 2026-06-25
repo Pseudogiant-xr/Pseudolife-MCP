@@ -2,7 +2,7 @@
 // rerank/BM25 toggles and a ranking-trace debugger drawer.
 import { el, mount, clear, fmtAge, fmtTime, truncate, loadingBlock, emptyBlock, errorBlock, debounce } from "../util.js";
 import { api } from "../api.js";
-import { openDrawer, setDrawerBody } from "../ui.js";
+import { openDrawer, setDrawerBody, toast } from "../ui.js";
 import { badge, searchBox, facetBar } from "../components.js";
 
 const TONE = "var(--c-assoc)";
@@ -118,7 +118,39 @@ function entryCard(e, searching) {
       ...(e.tags || []).slice(0, 6).map((t) => el("span", { class: "band-chip" }, "#" + t)),
       e.superseded ? badge("superseded", "stale") : null,
       el("span", { class: "spacer" }),
+      e.id != null ? el("button", { class: "btn sm", style: { padding: "3px 9px" },
+        title: "engram trace", onclick: () => openEngram(e) }, "trace ↗") : null,
       e.access_count != null ? el("span", { class: "dim", style: { fontSize: ".74rem" } }, `${e.access_count}×`) : null,
       e.timestamp ? el("span", { class: "dim", style: { fontSize: ".74rem" }, title: fmtTime(e.timestamp) }, e.age || fmtAge(e.timestamp)) : null,
       searching && e.score != null ? el("span", { class: "score-pill" }, Number(e.score).toFixed(3)) : null));
+}
+
+async function openEngram(entry) {
+  openDrawer({ title: "Engram trace", accent: TONE, body: loadingBlock("Dereferencing the episode…") });
+  let d;
+  try { d = await api.get("/api/entry", { id: entry.id }); }
+  catch (err) { setDrawerBody(errorBlock(err)); return; }
+  if (!d.found) { setDrawerBody(emptyBlock("Faded", "This episode has been forgotten.")); return; }
+  const facts = d.consolidated_into || [];
+  const reCount = el("span", { class: "chip" }, el("span", { class: "k" }, "reinforcements"), " " + (d.reinforcements ?? 0));
+  const reBtn = el("button", { class: "btn sm primary", onclick: async () => {
+    reBtn.disabled = true;
+    try {
+      const r = await api.post("/api/reinforce", { entry_id: d.entry_id });
+      reCount.textContent = "";
+      reCount.append(el("span", { class: "k" }, "reinforcements"), " " + (r.reinforcements ?? (d.reinforcements || 0) + 1));
+      toast("Reinforced", "ok");
+    } catch (e2) { toast("Reinforce failed: " + e2.message, "bad"); reBtn.disabled = false; }
+  } }, "Reinforce");
+  setDrawerBody(el("div", {},
+    el("div", { class: "entry", style: { marginTop: 0 } }, el("div", { class: "entry-text" }, d.text)),
+    el("div", { class: "facets", style: { margin: "12px 0" } },
+      d.source ? badge(d.source) : null, reCount,
+      el("span", { class: "chip" }, el("span", { class: "k" }, "access"), " " + (d.access_count ?? 0))),
+    el("div", { class: "eyebrow", style: { margin: "16px 0 8px" } }, "consolidated into"),
+    facts.length
+      ? el("div", {}, facts.map((f) => el("div", { class: "np-fact" },
+          el("div", { class: "a" }, `${f.entity} · ${f.attribute}`), el("div", {}, f.value))))
+      : el("div", { class: "dim", style: { fontSize: ".84rem" } }, "no canonical facts formed from this episode"),
+    el("div", { style: { marginTop: "18px" } }, reBtn)));
 }
