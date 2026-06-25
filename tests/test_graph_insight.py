@@ -152,6 +152,32 @@ def test_suggest_questions_bridge_entity():
     assert any(q["type"] == "bridge_entity" for q in qs)
 
 
+def test_suggest_questions_bridge_no_self_reference():
+    # Bridge node 3 is the highest-degree member of its own community {1,2,3},
+    # so summarize_communities labels community 0 with the bridge's own display
+    # ("e3"). The question must not name the bridge entity as one of the targets
+    # it connects to (regression: "Why does `e3` connect `e3` to ...").
+    edges = [
+        {"src_id": 1, "dst_id": 2, "relation": "r", "confidence": 0.9, "origin": "user"},
+        {"src_id": 2, "dst_id": 3, "relation": "r", "confidence": 0.9, "origin": "user"},
+        {"src_id": 1, "dst_id": 3, "relation": "r", "confidence": 0.9, "origin": "user"},
+        {"src_id": 4, "dst_id": 5, "relation": "r", "confidence": 0.9, "origin": "user"},
+        {"src_id": 3, "dst_id": 4, "relation": "r", "confidence": 0.9, "origin": "user"},
+    ]
+    entities = [{"id": i, "display": f"e{i}", "etype": None} for i in range(1, 6)]
+    comms = {0: [1, 2, 3], 1: [4, 5]}
+    summ = gi.summarize_communities(comms, edges, entities)
+    # precondition: community 0 is labelled by the bridge node itself
+    assert {s["id"]: s["label"] for s in summ}[0] == "e3"
+    qs = gi.suggest_questions(edges, entities, comms, gi._node_community(comms), [], summ, top_n=10)
+    bridges = [q for q in qs if q["type"] == "bridge_entity"]
+    assert bridges, "expected a bridge_entity question"
+    for q in bridges:
+        # the bridge entity `e3` must appear exactly once — as the subject, never
+        # also as one of the communities it is said to connect.
+        assert q["question"].count("`e3`") == 1, q["question"]
+
+
 def test_suggest_questions_low_cohesion():
     # Injected 6-node community with only 2 edges -> cohesion 2/15 < 0.15, size >= 5.
     edges = [{"src_id": 1, "dst_id": 2, "relation": "r", "confidence": 0.9, "origin": "user"},

@@ -243,11 +243,21 @@ def suggest_questions(edges: list[dict], entities: list[dict],
         for n, _s in bridges[:3]:
             cid = node_community.get(n)
             other = {node_community.get(nb) for nb in g.neighbors(n)} - {cid, None}
-            if other:
-                names = ", ".join(label.get(c, f"community {c}") for c in sorted(other))
+            nd = disp.get(n, n)
+            # The communities this node bridges *to*, labelled. Never the node's
+            # own community, and never a label that collides with the node itself
+            # (community labels are the top-degree member, frequently the bridge
+            # node — which produced "Why does X connect X to ..."). Dedup labels.
+            names: list[str] = []
+            for c in sorted(other):
+                lab = label.get(c, f"community {c}")
+                if lab != nd and lab not in names:
+                    names.append(lab)
+            if names:
+                targets = ", ".join(f"`{x}`" for x in names)
                 questions.append({
                     "type": "bridge_entity",
-                    "question": f"Why does `{disp.get(n, n)}` connect `{label.get(cid, cid)}` to {names}?",
+                    "question": f"Why is `{nd}` a bridge to {targets}?",
                     "why": "High betweenness — a cross-community bridge.",
                 })
 
