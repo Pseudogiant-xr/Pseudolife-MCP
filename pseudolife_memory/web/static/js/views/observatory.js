@@ -3,6 +3,7 @@
 import { el, mount, fmtNum, fmtPct, fmtDuration, fmtAge, loadingBlock, errorBlock } from "../util.js";
 import { api } from "../api.js";
 import { toast, confirmDialog } from "../ui.js";
+import { openConsolidationDrawer } from "../consolidation.js";
 
 const CARDS = [
   { key: "entries", label: "Associative entries", tone: "var(--c-assoc)", route: "stream", sub: (c) => "across 8 bands" },
@@ -122,6 +123,7 @@ function dreamPanel(dream, cfg, ctx) {
         el("span", { class: "dim", style: { fontSize: ".82rem" } },
           dream.dream_cursor ? "cursor " + fmtAge(dream.dream_cursor) : "no cursor yet"),
         el("span", { class: "spacer", style: { marginLeft: "auto" } }),
+        el("button", { class: "btn sm", onclick: () => openConsolidationDrawer(ctx) }, "Review consolidation"),
         runBtn)));
 }
 
