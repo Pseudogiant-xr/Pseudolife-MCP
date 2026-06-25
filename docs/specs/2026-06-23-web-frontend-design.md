@@ -1,7 +1,7 @@
 # PseudoLife Cortex Console — web frontend design
 
-**Status:** in progress (2026-06-23)
-**Branch:** `feat/web-ui`
+**Status:** shipped v1 (merged to master). Superseded by `docs/superpowers/specs/2026-06-25-cortex-console-v2-design.md`.
+**Branch:** merged (was `feat/web-ui`)
 **Author:** agent (overnight `/loop` build)
 
 ## Problem
