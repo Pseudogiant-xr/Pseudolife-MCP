@@ -154,6 +154,17 @@ def test_asgi_health_open(svc):
     assert st == 200
 
 
+def test_devserver_health_reports_real_schema():
+    import json
+
+    from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
+    from pseudolife_memory.web.devserver import build_dev_app
+
+    st, body = _call(build_dev_app(), "GET", "/health")
+    assert st == 200
+    assert json.loads(body)["schema"] == SCHEMA_META_VERSION
+
+
 def test_asgi_api_overview(svc):
     st, body = _call(_app(svc), "GET", "/api/overview")
     assert st == 200 and b"counts" in body
