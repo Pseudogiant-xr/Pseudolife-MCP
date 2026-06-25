@@ -4,6 +4,7 @@
 import { el, mount, fmtNum, fmtAge, loadingBlock, emptyBlock, errorBlock } from "../util.js";
 import { api } from "../api.js";
 import { panel, badge } from "../components.js";
+import { barRows } from "../charts.js";
 
 export async function renderInsight(root, ctx) {
   mount(root, loadingBlock("Reading the graph digest…"));
@@ -66,16 +67,20 @@ function godNodesPanel(nodes, maxDeg) {
 }
 
 function communitiesPanel(comms) {
-  const body = comms.length
-    ? el("table", { class: "tbl" },
-        el("thead", {}, el("tr", {}, el("th", {}, "community"), el("th", {}, "size"), el("th", {}, "cohesion"))),
-        el("tbody", {}, comms.map((c) => el("tr", { style: { cursor: "pointer" },
-          title: `open ${c.label} in the graph`,
-          onclick: () => { location.hash = "#/graph?entity=" + encodeURIComponent(c.label); } },
-          el("td", {}, c.label),
-          el("td", { class: "mono" }, String(c.size)),
-          el("td", { class: "mono dim" }, Number(c.cohesion ?? 0).toFixed(2))))))
-    : emptyBlock("No communities");
+  if (!comms.length) return panel("Communities", emptyBlock("No communities"), { accent: "var(--c-graph)" });
+  const topBars = comms.slice().sort((a, b) => (b.size || 0) - (a.size || 0)).slice(0, 8)
+    .map((c) => ({ label: c.label, value: c.size || 0, color: "var(--c-graph)" }));
+  const body = el("div", {},
+    barRows(topBars, {}),
+    el("div", { style: { height: "16px" } }),
+    el("table", { class: "tbl" },
+      el("thead", {}, el("tr", {}, el("th", {}, "community"), el("th", {}, "size"), el("th", {}, "cohesion"))),
+      el("tbody", {}, comms.map((c) => el("tr", { style: { cursor: "pointer" },
+        title: `open ${c.label} in the graph`,
+        onclick: () => { location.hash = "#/graph?entity=" + encodeURIComponent(c.label); } },
+        el("td", {}, c.label),
+        el("td", { class: "mono" }, String(c.size)),
+        el("td", { class: "mono dim" }, Number(c.cohesion ?? 0).toFixed(2)))))));
   return panel("Communities", body, { accent: "var(--c-graph)", sub: `${comms.length}` });
 }
 
