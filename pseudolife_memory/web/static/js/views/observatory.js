@@ -1,9 +1,11 @@
 // views/observatory.js — the dashboard: health, spectral counts, MIRAS
 // continuum, dream state, system facts.
-import { el, mount, fmtNum, fmtPct, fmtDuration, fmtAge, loadingBlock, errorBlock } from "../util.js";
+import { el, mount, fmtNum, fmtPct, fmtDuration, fmtAge, loadingBlock, emptyBlock, errorBlock } from "../util.js";
 import { api } from "../api.js";
 import { toast, confirmDialog } from "../ui.js";
 import { openConsolidationDrawer } from "../consolidation.js";
+import { panel } from "../components.js";
+import { donutWithLegend, barRows, sparkline } from "../charts.js";
 
 const CARDS = [
   { key: "entries", label: "Associative entries", tone: "var(--c-assoc)", route: "stream", sub: (c) => "across 8 bands" },
@@ -23,11 +25,12 @@ function bandHue(i, n) {
 
 export async function renderObservatory(root, ctx) {
   mount(root, loadingBlock("Reading instruments…"));
-  let ov, cfg;
+  let ov, cfg, sources;
   try {
-    [ov, cfg] = await Promise.all([
+    [ov, cfg, sources] = await Promise.all([
       api.get("/api/overview"),
       api.get("/api/config").catch(() => null),
+      api.get("/api/sources").catch(() => null),
     ]);
   } catch (err) {
     mount(root, errorBlock(err));
@@ -41,13 +44,45 @@ export async function renderObservatory(root, ctx) {
   const health = ov.health || {};
 
   mount(root,
+    signalsStrip(health, dream, counts),
     statCards(counts),
-    el("div", { class: "reveal", style: { display: "grid", gap: "16px", gridTemplateColumns: "1fr", marginTop: "26px" } },
+    el("div", { class: "reveal", style: { display: "grid", gap: "16px", gridTemplateColumns: "1fr", marginTop: "22px" } },
       continuumPanel(stats),
+      distributionsPanel(counts, sources),
       el("div", { style: { display: "grid", gap: "16px", gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))" } },
         dreamPanel(dream, cfg, ctx),
         systemPanel(health, stats))),
   );
+}
+
+// Golden-signals strip (F-pattern, top-left): the most actionable health first.
+function signalsStrip(health, dream, counts) {
+  const pe = health.persist_errors ?? 0;
+  const chips = [
+    el("span", { class: "chip ok" }, el("span", { class: "pulse-dot" }), " " + (health.storage || "live")),
+    el("span", { class: "chip" }, el("span", { class: "k" }, "schema"), " v" + (health.schema ?? "?")),
+    pe > 0 ? el("span", { class: "chip bad" }, `persist errors: ${pe}`)
+           : el("span", { class: "chip ok" }, "persist 0"),
+    dream.would_fire ? el("span", { class: "chip warn" }, el("span", { class: "pulse-dot" }), " dream ready")
+                     : el("span", { class: "chip" }, "dream idle"),
+  ];
+  if (counts.facts_contested) chips.push(el("span", { class: "chip warn" }, `${counts.facts_contested} contested`));
+  if (counts.world_stale) chips.push(el("span", { class: "chip bad" }, `${counts.world_stale} stale`));
+  return el("div", { class: "signals-strip reveal" }, chips);
+}
+
+function distributionsPanel(counts, sources) {
+  const oColor = { user: "var(--c-world)", action: "var(--c-graph)", agent: "var(--c-episode)" };
+  const segs = Object.entries(counts.facts_by_origin || {})
+    .map(([k, v]) => ({ label: k, value: v, color: oColor[k] || "var(--c-episode)" }));
+  const srcRows = (sources?.sources || []).slice(0, 6)
+    .map((s) => ({ label: s.source, value: s.count, color: "var(--c-assoc)" }));
+  return el("div", { class: "reveal", style: { display: "grid", gap: "16px",
+    gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))" } },
+    panel("Facts by provenance", segs.length ? donutWithLegend(segs, { size: 120 }) : emptyBlock("No facts"),
+      { accent: "var(--c-cortex)" }),
+    panel("Top sources", srcRows.length ? barRows(srcRows, {}) : emptyBlock("No sources"),
+      { accent: "var(--c-assoc)" }));
 }
 
 function statCards(counts) {
@@ -85,6 +120,9 @@ function continuumPanel(stats) {
       el("h2", {}, "Memory continuum"),
       el("span", { class: "sub" }, stats.preset ? `${stats.preset} · ${fmtNum(stats.total_memories || 0)} entries` : ""),
       el("span", { class: "spacer" }),
+      bands.length ? el("span", { class: "spark-wrap", title: "retrieval hit rate across bands" },
+        el("span", { class: "eyebrow" }, "hit rate"),
+        sparkline(bands.map((b) => (b.hit_rate || 0) * 100), { w: 84, h: 20, color: "var(--accent)" })) : null,
       el("span", { class: "eyebrow" }, "working → forever")),
     el("div", { class: "panel-body" }, body));
 }

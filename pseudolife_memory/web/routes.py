@@ -260,6 +260,8 @@ class ConsoleRoutes:
         ep_list = episodes.get("episodes", episodes.get("entries", [])) if isinstance(episodes, dict) else []
         contested = sum(1 for f in facts if f.get("contested"))
         stale = sum(1 for w in world if w.get("stale"))
+        from collections import Counter
+        by_origin = dict(Counter((f.get("origin") or "agent") for f in facts))
 
         return {
             "health": self._health(),
@@ -267,6 +269,7 @@ class ConsoleRoutes:
                 "entries": total_entries,
                 "facts": len(facts),
                 "facts_contested": contested,
+                "facts_by_origin": by_origin,
                 "world": len(world),
                 "world_stale": stale,
                 "lessons": len(lessons),

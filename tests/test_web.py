@@ -97,6 +97,12 @@ def test_routes_dispatch_reads(svc):
     assert "would_fire" in r.dispatch("GET", "/api/dream/status", {}, {})
 
 
+def test_overview_has_facts_by_origin(svc):
+    ov = ConsoleRoutes(svc).dispatch("GET", "/api/overview", {}, {})
+    assert "facts_by_origin" in ov["counts"]
+    assert isinstance(ov["counts"]["facts_by_origin"], dict)
+
+
 def test_routes_search_params(svc):
     out = ConsoleRoutes(svc).dispatch("GET", "/api/search", {"q": "recall"}, {})
     assert "entries" in out and "count" in out

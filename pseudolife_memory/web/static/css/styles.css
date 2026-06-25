@@ -582,6 +582,10 @@ code.ic { font-family:var(--font-mono); font-size:.84em; padding:1px 5px; border
 .surprise-card .sc-edge { display:flex; align-items:center; gap:6px; font-size:.86rem; }
 .surprise-card .sc-why { margin-top:6px; font-size:.8rem; }
 
+/* ── Observatory golden-signals strip ───────────────────────────────────── */
+.signals-strip { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:18px; }
+.spark-wrap { display:inline-flex; align-items:center; gap:8px; }
+
 /* ── Charts (hand-rolled SVG/DOM) ───────────────────────────────────────── */
 .donut-wrap { display:flex; align-items:center; gap:20px; flex-wrap:wrap; }
 .donut { flex:none; }
