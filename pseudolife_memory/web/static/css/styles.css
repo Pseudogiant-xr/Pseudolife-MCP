@@ -558,6 +558,28 @@ input:focus, select:focus, textarea:focus { outline:none; border-color:color-mix
 .diff-row .old { font-family:var(--font-mono); color:var(--ink-3); text-decoration:line-through; }
 .diff-row .new { font-family:var(--font-mono); color:var(--accent); }
 
+/* ── Insight (graph digest) ─────────────────────────────────────────────── */
+.insight-q { padding:12px 0; border-bottom:1px solid var(--line); }
+.insight-q:last-child { border-bottom:none; }
+.insight-q .q-text { font-size:.95rem; line-height:1.5; }
+.insight-q .q-meta { display:flex; align-items:center; gap:10px; margin-top:7px; font-size:.8rem; }
+code.ic { font-family:var(--font-mono); font-size:.84em; padding:1px 5px; border-radius:5px;
+  background:var(--bg-inset); border:1px solid var(--line); color:var(--ink-2); }
+.gn-row { display:grid; grid-template-columns:1fr 120px auto; align-items:center; gap:12px; width:100%;
+  padding:9px 6px; background:none; border:none; border-bottom:1px solid var(--line); cursor:pointer;
+  text-align:left; color:var(--ink); font-size:.9rem; transition:background .14s; }
+.gn-row:last-child { border-bottom:none; }
+.gn-row:hover { background:color-mix(in srgb,var(--c-graph) 8%,transparent); }
+.gn-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.gn-bar { height:7px; border-radius:99px; background:var(--bg-inset); border:1px solid var(--line); overflow:hidden; }
+.gn-bar > i { display:block; height:100%; background:var(--c-graph);
+  box-shadow:0 0 10px color-mix(in srgb,var(--c-graph) 55%,transparent); border-radius:99px; }
+.gn-deg { font-family:var(--font-mono); font-size:.78rem; color:var(--ink-3); }
+.surprise-card { padding:12px 14px; border:1px solid var(--line); border-left:3px solid var(--c-lessons);
+  border-radius:var(--radius-sm); background:var(--bg-1); margin-bottom:10px; }
+.surprise-card .sc-edge { display:flex; align-items:center; gap:6px; font-size:.86rem; }
+.surprise-card .sc-why { margin-top:6px; font-size:.8rem; }
+
 /* ── Responsive ─────────────────────────────────────────────────────────── */
 .only-mobile { display:none; }
 @media (max-width:860px) {
