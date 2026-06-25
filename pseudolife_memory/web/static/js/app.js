@@ -12,14 +12,14 @@ import { renderEpisodes } from "./views/episodes.js";
 import { renderConsole } from "./views/console.js";
 
 const ROUTES = [
-  { id: "observatory", label: "Observatory", accent: "var(--c-assoc)", view: renderObservatory, countKey: null },
-  { id: "cortex", label: "Cortex", accent: "var(--c-cortex)", view: renderCortex, countKey: "facts" },
-  { id: "world", label: "World", accent: "var(--c-world)", view: renderWorld, countKey: "world" },
-  { id: "lessons", label: "Lessons", accent: "var(--c-lessons)", view: renderLessons, countKey: "lessons" },
-  { id: "stream", label: "Stream", accent: "var(--c-assoc)", view: renderStream, countKey: "entries" },
-  { id: "graph", label: "Graph", accent: "var(--c-graph)", view: renderGraph, countKey: null },
-  { id: "episodes", label: "Episodes", accent: "var(--c-episode)", view: renderEpisodes, countKey: "episodes" },
-  { id: "console", label: "Console", accent: "var(--c-assoc)", view: renderConsole, countKey: null },
+  { id: "observatory", label: "Observatory", group: "Overview", accent: "var(--c-assoc)", view: renderObservatory, countKey: null },
+  { id: "cortex", label: "Cortex", group: "Memory", accent: "var(--c-cortex)", view: renderCortex, countKey: "facts" },
+  { id: "world", label: "World", group: "Memory", accent: "var(--c-world)", view: renderWorld, countKey: "world" },
+  { id: "lessons", label: "Lessons", group: "Memory", accent: "var(--c-lessons)", view: renderLessons, countKey: "lessons" },
+  { id: "stream", label: "Stream", group: "Memory", accent: "var(--c-assoc)", view: renderStream, countKey: "entries" },
+  { id: "graph", label: "Graph", group: "Structure", accent: "var(--c-graph)", view: renderGraph, countKey: null },
+  { id: "episodes", label: "Episodes", group: "Operations", accent: "var(--c-episode)", view: renderEpisodes, countKey: "episodes" },
+  { id: "console", label: "Console", group: "Operations", accent: "var(--c-assoc)", view: renderConsole, countKey: null },
 ];
 const byId = Object.fromEntries(ROUTES.map((r) => [r.id, r]));
 
@@ -64,7 +64,12 @@ onUnauthorized(() => { toast("Unauthorized — set an access token", "bad"); ope
 // ── nav ──────────────────────────────────────────────────────────────────────
 function buildNav() {
   clear(navEl);
+  let lastGroup = null;
   for (const r of ROUTES) {
+    if (r.group && r.group !== lastGroup) {
+      navEl.appendChild(el("div", { class: "nav-group-label" }, r.group));
+      lastGroup = r.group;
+    }
     const item = el("button", {
       class: "nav-item", dataset: { route: r.id }, style: { "--dot": r.accent },
       onclick: () => { location.hash = "#/" + r.id; closeMobileNav(); },

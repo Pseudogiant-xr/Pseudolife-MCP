@@ -170,6 +170,9 @@ a { color:var(--accent); text-decoration:none; }
 .nav-dot { width:8px; height:8px; border-radius:50%; flex:none;
   background:var(--dot, var(--accent)); box-shadow:0 0 10px color-mix(in srgb, var(--dot, var(--accent)) 70%, transparent); }
 .nav-item .count { margin-left:auto; font-family:var(--font-mono); font-size:.72rem; color:var(--ink-3); }
+.nav-group-label { font-family:var(--font-mono); font-size:.62rem; letter-spacing:.16em;
+  text-transform:uppercase; color:var(--ink-3); padding:14px 11px 5px; }
+.nav-group-label:first-child { padding-top:4px; }
 
 .sidebar-foot { display:flex; gap:8px; padding-top:12px; border-top:1px solid var(--line); }
 .ghost-btn {
