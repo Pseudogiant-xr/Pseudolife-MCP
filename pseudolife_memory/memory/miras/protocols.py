@@ -9,6 +9,7 @@ archived on the ``archive/neural-memory-titans`` branch.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Callable
 
@@ -77,15 +78,19 @@ class RetentionPolicy:
     eviction_score: Callable[["MemoryEntry", float], float]
     name: str
     source_weights: dict[str, float] = field(default_factory=_default_source_weights)
+    # MTT retention (Phase 2). 0.0 = today's eviction exactly (log1p term vanishes).
+    retention_boost: float = 0.0
 
     def source_weighted_score(self, entry: "MemoryEntry", now: float) -> float:
-        """``(eviction_score + 1) × source_weights[entry.source]``.
+        """``(eviction_score + 1) × source_weights[source] + retention_boost ×
+        log1p(reinforcements)``.
 
-        The ``+ 1`` floor ensures source weighting still differentiates fresh
-        entries (where the base score is near zero — access_count is still 0
-        just after a store). Established entries with a meaningful base score
-        compose multiplicatively as expected.
+        The reinforcement term is added AFTER the source-weight multiply — an
+        absolute, source-independent boost so a reinforced episode resists
+        eviction regardless of its source tier. ``retention_boost = 0.0``
+        (default) makes the term vanish → eviction is byte-identical to before.
         """
         base = self.eviction_score(entry, now)
         weight = self.source_weights.get(entry.source, 1.0)
-        return (base + 1.0) * weight
+        return ((base + 1.0) * weight
+                + self.retention_boost * math.log1p(entry.reinforcements))

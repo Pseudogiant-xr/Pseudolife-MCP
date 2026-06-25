@@ -415,6 +415,10 @@ class TracesConfig:
     each consolidated fact-slot to the dense episodes it came from and bumps their
     reinforcement counter. retention_boost (Phase 2) reads that counter."""
     enabled: bool = True
+    # MTT retention (Phase 2). Weight on log1p(reinforcements) in band eviction
+    # scoring; 0.0 = today's eviction exactly. A positive value makes reinforced
+    # episodes resist forgetting in proportion to their strength.
+    retention_boost: float = 0.0
 
 
 @dataclass

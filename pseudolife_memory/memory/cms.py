@@ -122,8 +122,11 @@ class ContinuumMemorySystem:
         # The default ``titans`` preset produces 3 bands with the same shapes
         # as the v0.4.x ``TitansConfig`` defaults, so behaviour is unchanged
         # for users who don't opt into a different preset.
+        _retention_boost = getattr(getattr(config, "traces", None),
+                                   "retention_boost", 0.0)
         self.bands: list[MIRASBand] = [
-            build_band(spec, embedding_dim=config.embedding_dim, device=device)
+            build_band(spec, embedding_dim=config.embedding_dim, device=device,
+                       retention_boost=_retention_boost)
             for spec in config.miras.bands
         ]
         if not self.bands:

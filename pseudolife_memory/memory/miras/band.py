@@ -137,6 +137,9 @@ class MIRASBand:
             + (1.0 - self.surprise_ema_decay) * float(surprise)
         )
 
+    # Alias so callers can use the shorter name.
+    add = store
+
     def _evict_one(self) -> None:
         """Drop the entry with the lowest source-weighted retention score
         (recency / surprise / balanced × per-source multiplier)."""
@@ -248,10 +251,12 @@ class MIRASBand:
         self._dirty = True
 
 
-def build_band(spec: "MIRASBandSpec", embedding_dim: int, device: str) -> MIRASBand:
+def build_band(spec: "MIRASBandSpec", embedding_dim: int, device: str,
+               retention_boost: float = 0.0) -> MIRASBand:
     """Construct a :class:`MIRASBand` from a :class:`MIRASBandSpec` — a plain
-    cosine store with the spec's capacity / cadence / promotion / eviction."""
-    policy = build_policy(spec.retention_policy)
+    cosine store with the spec's capacity / cadence / promotion / eviction.
+    ``retention_boost`` sets the band policy's MTT reinforcement-retention term."""
+    policy = build_policy(spec.retention_policy, retention_boost=retention_boost)
     return MIRASBand(
         name=spec.name,
         embedding_dim=embedding_dim,

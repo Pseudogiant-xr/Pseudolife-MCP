@@ -77,6 +77,10 @@ class MemoryEntry:
     # Storage row id (schema v8, transient — NOT persisted in .pt saves).
     # None in file mode or before the write-through insert returns.
     db_id: int | None = None
+    # Reinforcement strength (schema v13). DB-authoritative read-cache: loaded at
+    # hydrate, bumped in-memory on each bump path, never written back via a save
+    # path. Read by RetentionPolicy.source_weighted_score (MTT retention).
+    reinforcements: int = 0
 
     def __post_init__(self):
         if self.timestamp == 0.0:

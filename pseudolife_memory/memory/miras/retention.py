@@ -73,7 +73,7 @@ def _surprise_heavy_score(entry: "MemoryEntry", now: float) -> float:
 # ---------------------------------------------------------------------------
 
 
-def balanced(weight_decay: float = 0.001) -> RetentionPolicy:
+def balanced(weight_decay: float = 0.001, retention_boost: float = 0.0) -> RetentionPolicy:
     """The v0.4.x default — modest decay, half-and-half eviction weighting.
 
     Reproduces the v0.4.x ``TitansMemoryBank`` behaviour exactly when
@@ -85,10 +85,11 @@ def balanced(weight_decay: float = 0.001) -> RetentionPolicy:
         decay_factor_on_contradiction=0.3,
         eviction_score=_balanced_score,
         name="balanced",
+        retention_boost=retention_boost,
     )
 
 
-def recency_heavy(weight_decay: float = 0.005) -> RetentionPolicy:
+def recency_heavy(weight_decay: float = 0.005, retention_boost: float = 0.0) -> RetentionPolicy:
     """Recency-biased eviction + faster contradiction decay.
 
     Higher ``weight_decay`` so the memory body itself drifts away from
@@ -101,10 +102,11 @@ def recency_heavy(weight_decay: float = 0.005) -> RetentionPolicy:
         decay_factor_on_contradiction=0.2,
         eviction_score=_recency_heavy_score,
         name="recency_heavy",
+        retention_boost=retention_boost,
     )
 
 
-def surprise_heavy(weight_decay: float = 0.0005) -> RetentionPolicy:
+def surprise_heavy(weight_decay: float = 0.0005, retention_boost: float = 0.0) -> RetentionPolicy:
     """Surprise-biased eviction + gentler contradiction decay.
 
     Lower ``weight_decay`` to preserve learned associations long-term;
@@ -118,6 +120,7 @@ def surprise_heavy(weight_decay: float = 0.0005) -> RetentionPolicy:
         decay_factor_on_contradiction=0.5,
         eviction_score=_surprise_heavy_score,
         name="surprise_heavy",
+        retention_boost=retention_boost,
     )
 
 
@@ -128,8 +131,10 @@ POLICY_REGISTRY = {
 }
 
 
-def build_policy(name: str, weight_decay: float | None = None) -> RetentionPolicy:
-    """Construct a named policy. ``weight_decay`` overrides the default."""
+def build_policy(name: str, weight_decay: float | None = None,
+                 retention_boost: float = 0.0) -> RetentionPolicy:
+    """Construct a named policy. ``weight_decay`` overrides the default;
+    ``retention_boost`` sets the MTT reinforcement-retention term."""
     try:
         factory = POLICY_REGISTRY[name]
     except KeyError as exc:
@@ -137,8 +142,8 @@ def build_policy(name: str, weight_decay: float | None = None) -> RetentionPolic
             f"Unknown retention_policy {name!r}. Available: {list(POLICY_REGISTRY)}"
         ) from exc
     if weight_decay is None:
-        return factory()
-    return factory(weight_decay=weight_decay)
+        return factory(retention_boost=retention_boost)
+    return factory(weight_decay=weight_decay, retention_boost=retention_boost)
 
 
 def now_seconds() -> float:
