@@ -5,4 +5,4 @@ Top-level re-exports for convenience. The MCP server itself lives in
 :mod:`pseudolife_memory.service`.
 """
 
-__version__ = "0.5.1"
+__version__ = "0.6.0"

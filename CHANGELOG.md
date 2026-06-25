@@ -4,7 +4,7 @@ All notable changes to PseudoLife-MCP are documented here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — graph foundation
+## [0.6.0] — 2026-06-25 — graph foundation
 
 ### Added
 - **Provenance-as-link (Phase 1)** — the dream now links each consolidated fact-slot

@@ -66,6 +66,8 @@ each session.
 | `memory_fact_forget(entity, attribute?)` | Hard-delete canonical fact(s) at a slot/entity (no audit trail) |
 | `memory_facts(limit?)` | List all current canonical facts (cortex introspection) |
 | `memory_history(entity, attribute)` | The version timeline at a slot — current + superseded, each with its temporal/provenance stamp (who changed it, when) |
+| `memory_get(entry_id)` | Dereference a fact's `source_entries` pointer → the full dense episode it was distilled from (+ `consolidated_into`); reading gently reinforces it |
+| `memory_reinforce(entry_id)` | After reading an episode via `memory_get` and finding it useful, strengthen it so it resists forgetting (a deliberate "this mattered" signal) |
 | `memory_world_set(entity, attribute, value, source_url?, source_quote?, freshness_class?, confidence?, ...)` | Assert a canonical WORLD fact — sourced *external* knowledge (current model/version/price/role), kept in its own table; age-decayed trust by freshness |
 | `memory_world_search(query, top_k?)` | Search world facts by similarity — each carries `effective_confidence`, a `stale` flag, and its citation |
 | `memory_world_facts(limit?)` | List all current world facts (world-cortex introspection) |
@@ -83,6 +85,10 @@ each session.
 | `memory_alias(entity, alias)` | Bind an alternative name — all fact/graph lookups resolve aliases first |
 | `memory_graph(entity, depth?, include_facts?, to?)` | Entity neighborhood (≤3 hops): nodes + facts + edges, with transitive/inverse edges derived on read |
 | `memory_recall(query, hops?, top_k?)` | Multi-hop retrieval: seed from graph, follow edges up to `hops` iterations; returns entities, edges, paths, texts; `low_confidence: true` → fall back to `memory_search` |
+| `memory_path(source, target, max_hops?)` | Shortest path between two entities — the entity chain + typed edges, or empty when none exists within `max_hops` (read-only) |
+| `get_neighbors(entity, relation_filter?)` | Direct 1-hop neighbours of an entity with typed edges (a focused `memory_graph(entity, depth=1)`; optional relation substring filter) |
+| `memory_digest()` | Knowledge-graph topology digest as of the last dream: god-nodes, surprising cross-community connections, suggested questions (read-only) |
+| `memory_communities(community_id?)` | List graph communities (size + cohesion), or the members of one given its id (read-only) |
 | `memory_relation_define(name, description, transitive?, inverse_of?, src_type?, dst_type?)` | Grow the closed relation vocabulary (deliberate, strong-model act) |
 | `memory_stats()` | Per-band sizes, hit rates, totals |
 | `memory_save()` | Flush CMS tensors to disk |
@@ -347,7 +353,7 @@ Connection / deployment env vars:
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v11). Unset → v0.1 file-only mode. |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v13). Unset → v0.1 file-only mode. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). |
 | `PSEUDOLIFE_MCP_HOST` / `_PORT` | `127.0.0.1` / `8765` | Daemon bind address. |
 | `PSEUDOLIFE_MCP_TOKEN` | _(unset)_ | Bearer token; **required** to bind a non-loopback host. |
@@ -846,7 +852,21 @@ on-machine.
 
 ## Data layout
 
-Everything lives under `PSEUDOLIFE_MCP_DATA_DIR`:
+**Containerized / daemon mode (recommended).** The durable source of truth is
+**Postgres**, which lives in an *external* Docker volume — `pseudolife-mcp-bank`
+by default (entries + facts + graph). A second external volume,
+`pseudolife-mcp-state`, holds the daemon's ChromaDB reference bank, the
+band-counter `weights.pt`, and the cortex snapshot. Both are declared `external`
+in `ops/docker-compose.yml` precisely so a container teardown can't take them
+with it. The host `data/` dir then holds only backups (`data/backups/` from
+`ops/backup.ps1`) and one-time legacy-import staging — *not* the live bank.
+
+To wipe the bank in this mode you must drop those volumes deliberately —
+**never `docker compose down -v` or `docker volume rm` without `ops/backup.ps1`
+first**; `stop` / `start` and `up -d --build` keep both volumes.
+
+**File mode (no daemon / no Postgres — the `embedded` CLI, or unset
+`PSEUDOLIFE_MCP_DATABASE_URL`).** Everything lives under `PSEUDOLIFE_MCP_DATA_DIR`:
 
 ```
 data/
@@ -857,9 +877,10 @@ data/
 └── config.yaml             # Optional overrides
 ```
 
-To wipe Claude's memory: delete the `data/` directory and restart the
-MCP server. To wipe just documents: delete `data/chromadb/`. To wipe just
-the episodic bands (file mode): delete `data/memory_state/`.
+In **file mode only**, wipe memory by deleting `data/` and restarting; wipe just
+documents via `data/chromadb/`; wipe just the episodic bands via
+`data/memory_state/`. (In containerized mode these files are not the source of
+truth — see the volume note above.)
 
 ## Testing
 
@@ -869,7 +890,7 @@ pip install -e .[dev]
 pytest tests/ -v
 ```
 
-384 tests cover the MemoryService methods (store / search / recent /
+514 tests cover the MemoryService methods (store / search / recent /
 supersede / stats / save / trace / list_sources / list_tags / delete),
 the `memory_search` scoring overrides, the cross-encoder reranker
 (15 unit + 4 integration), the BM25 hybrid lexical pool
@@ -908,14 +929,19 @@ not skipped — plus env-overridable timeout / max-tokens), procedural lessons
 (signals → dream-synthesised lessons + `prefers`/`avoids` graph edges),
 writer-aware temporal memory (HLC-ordered supersession, `memory_history`,
 writer/session keying), the single-writer cortex (auto-promote off + the
-`cortex_dedup` sibling-slot merge), and the v0.5 cosine spine.
+`cortex_dedup` sibling-slot merge), and the v0.5 cosine spine. The v0.6
+graph-foundation suites add the swappable `GraphStore` contract + graph-from-text
+dream extraction, the graph-insight layer (communities / digest / god-nodes),
+multi-hop `memory_recall` + hub-gating, the provenance-as-link engram
+(`memory_traces`, `memory_get` / `memory_reinforce`) + reinforcement-weighted
+retention, and the Cortex Console web API.
 
 The PG-backed suites target a throwaway `pseudolife_memory_test` database on
 the bundled dev container (`ops/docker-compose.yml`, port 5433) — created on
 first run and reset per-test, so the whole suite is green on repeat runs and
 never touches your real bank. Point them elsewhere with
 `PSEUDOLIFE_TEST_DATABASE_URL`. With the container up, `pytest tests/` runs all
-384; without any Postgres, the PG suites skip and the pure-logic suites still
+514; without any Postgres, the PG suites skip and the pure-logic suites still
 pass.
 
 ## Cortex Console (web UI)
@@ -971,7 +997,7 @@ python -m pseudolife_memory.web.devserver   # http://127.0.0.1:8770/ui/
 | BM25 hybrid pool | Optional (`bm25=True` per call, stdlib only) |
 | NLI contradiction scorer | Optional (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, graph visualiser, search/trace, config editor (read-mostly, token-gated like `/mcp`) |
-| Schema version | v11 (additive temporal/provenance stamp; legacy file-mode `.pt` banks auto-migrate into Postgres) |
+| Schema version | v13 (Postgres meta version) — v11 temporal/provenance stamp, v12 graph-insight communities, v13 provenance-trace engram + reinforcements; legacy file-mode `.pt` banks auto-migrate into Postgres |
 
 ## What's not built yet
 
