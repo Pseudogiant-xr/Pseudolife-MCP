@@ -27,7 +27,6 @@ def test_all_tools_registered() -> None:
     assert names == sorted([
         "memory_store",
         "memory_search",
-        "memory_trace",
         "memory_recent",
         "memory_list_sources",
         "memory_supersede",
@@ -120,6 +119,25 @@ def _invoke(tool_name: str, args: dict) -> dict:
         item.text for item in content if hasattr(item, "text")
     ]
     return json.loads("".join(text_parts))
+
+
+def test_search_explain_attaches_trace_and_default_does_not(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
+    import importlib
+    import pseudolife_memory.mcp_server as mod
+    importlib.reload(mod)
+
+    _invoke("memory_store", {"text": "the gadget port is 8080", "source": "notes"})
+    plain = _invoke("memory_search", {"query": "gadget port"})
+    explained = _invoke("memory_search", {"query": "gadget port", "explain": True})
+    assert "trace" not in plain
+    assert "trace" in explained and isinstance(explained["trace"], dict)
+
+
+def test_memory_trace_tool_is_gone() -> None:
+    from pseudolife_memory import mcp_server  # noqa: PLC0415
+    names = {t.name for t in asyncio.run(mcp_server.mcp.list_tools())}
+    assert "memory_trace" not in names
 
 
 def test_memory_dream_run_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:
@@ -221,14 +239,14 @@ def test_memory_stats_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:
     assert stats["total_memories"] >= 1
 
 
-def test_memory_trace_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:
+def test_memory_search_explain_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
     import importlib
     import pseudolife_memory.mcp_server as mod
     importlib.reload(mod)
 
     _invoke("memory_store", {"text": "Trace dispatch fact", "source": "t"})
-    out = _invoke("memory_trace", {"query": "Trace dispatch", "top_k": 3})
+    out = _invoke("memory_search", {"query": "Trace dispatch", "top_k": 3, "explain": True})
     assert "trace" in out
     assert "tiers" in out["trace"]
 

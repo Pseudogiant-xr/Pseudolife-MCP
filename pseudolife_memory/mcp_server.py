@@ -177,6 +177,7 @@ def memory_search(
     disable_recency_boost: bool = False,
     rerank: bool | None = None,
     bm25: bool | None = None,
+    explain: bool = False,
 ) -> dict[str, Any]:
     """Retrieve memories relevant to a query by associative similarity.
 
@@ -218,6 +219,9 @@ def memory_search(
         tags: When provided, only return entries whose ``tags`` share at
             least one element with this list (OR within the list,
             AND with the other filters). None = no filter.
+        explain: When True, also run the ranking tracer and attach a
+            ``trace`` dict (per-tier candidates, multipliers, drop reasons) —
+            the debug view formerly exposed as ``memory_trace``.
 
     Returns:
         ``{"query": str, "count": int, "entries": [<entry>...], "cortex":
@@ -273,53 +277,13 @@ def memory_search(
     # A confident cortex answer must never be flagged low-confidence: the
     # cortex block IS the answer even when associative recall is weak/empty.
     result["low_confidence"] = result.get("low_confidence", False) and not result.get("cortex")
+    if explain:
+        trace_out = service.trace(
+            query=query, top_k=top_k, sources=sources, bands=bands,
+            episodes=episodes, tags=tags, rerank=rerank, bm25=bm25,
+        )
+        result["trace"] = trace_out.get("trace")
     return result
-
-
-@mcp.tool()
-def memory_trace(
-    query: str,
-    top_k: int = 8,
-    sources: list[str] | None = None,
-    bands: list[str] | None = None,
-    episodes: list[str] | None = None,
-    tags: list[str] | None = None,
-    rerank: bool | None = None,
-    bm25: bool | None = None,
-) -> dict[str, Any]:
-    """Search + structured ranking trace — debug why an entry didn't surface.
-
-    Same envelope as ``memory_search`` but also returns a ``trace`` dict
-    showing exactly what the ranking pipeline did: per-tier candidates
-    with raw_score, recency, source/supersession multipliers, and the
-    ``drop_reason`` (or ``kept=True``) for each. Use when retrieval
-    feels wrong and you want to see why — "Was the entry filtered by
-    source? Below the relevance threshold? Outranked by a popular entry
-    in a deeper band?".
-
-    Args:
-        query, top_k, sources, bands: Same semantics as ``memory_search``.
-        rerank: Override the reranker flag — same semantics as
-            ``memory_search.rerank``. When True, the trace's ``reranker``
-            block includes per-candidate ``original_score``, ``ce_score``,
-            and ``fused_score`` so you can see exactly how the
-            cross-encoder reshuffled the bi-encoder ordering.
-        bm25: Override the BM25 flag — same semantics as
-            ``memory_search.bm25``. When True, the trace's ``bm25``
-            block records raw + normalised scores per hit, any
-            BM25-only injections, and the candidate-pool size.
-
-    Returns:
-        ``{"query", "count", "entries", "trace"}``. The trace contains
-        ``config``, ``filters``, ``tiers`` (per-band candidate breakdown),
-        ``chain_residual``, ``bm25``, ``reference_pool``, ``reranker``,
-        and ``final_topk``.
-    """
-    return service.trace(
-        query=query, top_k=top_k, sources=sources, bands=bands,
-        episodes=episodes, tags=tags,
-        rerank=rerank, bm25=bm25,
-    )
 
 
 @mcp.tool()
