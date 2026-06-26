@@ -3,6 +3,7 @@
 * ``pseudolife-mcp``           — stdio shim: find/start the daemon, proxy.
 * ``pseudolife-mcp serve``     — the HTTP memory daemon (deployment mode).
 * ``pseudolife-mcp embedded``  — v0.1 in-process stdio server (escape hatch).
+* ``pseudolife-mcp briefing``  — print the session-start briefing (for a hook).
 
 The heavy imports (torch, sentence-transformers) happen only inside the
 ``serve`` / ``embedded`` branches; the shim path imports nothing heavier
@@ -25,6 +26,9 @@ def main() -> None:
     elif mode == "shim":
         from pseudolife_memory.shim import run_shim
         run_shim()
+    elif mode == "briefing":
+        from pseudolife_memory.briefing_cli import run_briefing
+        run_briefing()
     else:
         print(
             f"unknown mode {mode!r}; use: serve | embedded | (no arg = shim)",

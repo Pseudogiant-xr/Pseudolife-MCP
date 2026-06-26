@@ -41,3 +41,22 @@ def test_session_briefing_cold_bank_is_unavailable(tmp_path):
     assert out["markdown"] == ""
     assert out["unsure"] == {"surprises": [], "questions": []}
     assert out["lessons"] == []
+
+
+def test_extract_markdown_prefers_structured():
+    import types
+    from pseudolife_memory import briefing_cli as bc
+    r = types.SimpleNamespace(structuredContent={"markdown": "## hi\n- x"}, content=[])
+    assert bc._extract_markdown(r) == "## hi\n- x"
+    r2 = types.SimpleNamespace(structuredContent={"available": False, "markdown": ""}, content=[])
+    assert bc._extract_markdown(r2) == ""
+
+
+def test_briefing_no_daemon_prints_nothing(monkeypatch, capsys):
+    import sys
+    from pseudolife_memory import briefing_cli as bc
+    monkeypatch.setattr("pseudolife_memory.shim.probe_health",
+                        lambda url, timeout=0.25: None)
+    monkeypatch.setattr(sys, "argv", ["pseudolife-mcp", "briefing"])
+    bc.run_briefing()                       # must not raise, must not print
+    assert capsys.readouterr().out == ""
