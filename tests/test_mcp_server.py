@@ -73,6 +73,13 @@ def test_all_tools_registered() -> None:
         "memory_graph",
         "memory_recall",
         "memory_relation_define",
+        # Graph foundation (v0.6) — recall/graph extras, graph-insight, provenance traces.
+        "memory_path",
+        "get_neighbors",
+        "memory_digest",
+        "memory_communities",
+        "memory_get",
+        "memory_reinforce",
     ])
 
 
