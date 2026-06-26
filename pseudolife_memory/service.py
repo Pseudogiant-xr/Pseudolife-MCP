@@ -2538,6 +2538,28 @@ class MemoryService:
             return {"available": False, "reason": "no_digest"}
         return {"available": True, "digest": digest}
 
+    def session_briefing(self, max_unsure: int = 3, max_lessons: int = 3) -> dict[str, Any]:
+        """Assemble the session-start briefing: graph 'unsure-about' (surprising
+        links + open questions) + avoid-first lessons. Read-only; no LLM. Each
+        sub-call takes the lock itself, so this orchestrator must not hold it."""
+        from pseudolife_memory.memory.briefing import format_briefing, select_lessons
+        dg = self.graph_digest()
+        surprises: list[dict] = []
+        questions: list[dict] = []
+        if dg.get("available"):
+            d = dg.get("digest") or {}
+            surprises = (d.get("surprises") or [])[:max_unsure]
+            questions = (d.get("questions") or [])[:max_unsure]
+        lessons_all = (self.lessons_dump(limit=120) or {}).get("entries", [])
+        lessons = select_lessons(lessons_all, max_lessons)
+        markdown = format_briefing(surprises, questions, lessons)
+        return {
+            "available": bool(markdown),
+            "markdown": markdown,
+            "unsure": {"surprises": surprises, "questions": questions},
+            "lessons": lessons,
+        }
+
     def communities(self, community_id: int | None = None) -> dict[str, Any]:
         """List communities, or the members of one when community_id is given."""
         with self._lock:

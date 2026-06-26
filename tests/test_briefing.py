@@ -31,3 +31,13 @@ def test_format_briefing_renders_both_sections_ascii():
 
 def test_format_briefing_empty_when_nothing():
     assert format_briefing([], [], []) == ""
+
+
+def test_session_briefing_cold_bank_is_unavailable(tmp_path):
+    from pseudolife_memory.service import MemoryService
+    svc = MemoryService(data_dir=str(tmp_path))   # file mode, no graph/lessons
+    out = svc.session_briefing()
+    assert out["available"] is False
+    assert out["markdown"] == ""
+    assert out["unsure"] == {"surprises": [], "questions": []}
+    assert out["lessons"] == []

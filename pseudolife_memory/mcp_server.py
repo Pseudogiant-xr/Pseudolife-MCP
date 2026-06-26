@@ -1095,6 +1095,15 @@ def memory_communities(community_id: int | None = None) -> dict[str, Any]:
     return service.communities(community_id=community_id)
 
 
+@_tool()
+def memory_briefing(max_unsure: int = 3, max_lessons: int = 3) -> dict[str, Any]:
+    """Session-start briefing: what your memory is unsure about (surprising graph
+    links + open questions) plus lessons from past work (avoid / prefer). Pull this
+    at the start of a task. Read-only; `available: false` + empty `markdown` on a
+    cold bank (no dream digest, no lessons yet)."""
+    return service.session_briefing(max_unsure=max_unsure, max_lessons=max_lessons)
+
+
 @_tool(core=True)
 def memory_graph(
     entity: str,

@@ -76,6 +76,7 @@ def test_all_tools_registered() -> None:
         "memory_path",
         "memory_digest",
         "memory_communities",
+        "memory_briefing",
         "memory_get",
         "memory_reinforce",
     ])
