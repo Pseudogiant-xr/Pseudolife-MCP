@@ -47,8 +47,7 @@ each session.
 | Tool | Purpose |
 |------|---------|
 | `memory_store(text, source?, tags?, origin?)` | Remember a fact, decision, observation (canonical facts reach the cortex via the dream pass / `memory_fact_set`) |
-| `memory_search(query, top_k?, sources?, bands?, episodes?, tags?, min_score?, disable_recency_boost?, rerank?, bm25?)` | Retrieve by associative similarity; returns `low_confidence` when the top score is below `search_confidence_floor` (off by default) |
-| `memory_trace(query, top_k?, sources?, bands?, episodes?, tags?, rerank?, bm25?)` | Search + full ranking trace — debug why an entry didn't surface |
+| `memory_search(query, top_k?, sources?, bands?, episodes?, tags?, min_score?, disable_recency_boost?, rerank?, bm25?, explain?)` | Retrieve by associative similarity; returns `low_confidence` when the top score is below `search_confidence_floor` (off by default). `explain=True` also attaches a ranking `trace` (debug why an entry didn't surface) |
 | `memory_recent(n?, sources?, episodes?, tags?)` | List newest stores (debug + session start) |
 | `memory_list_sources()` | Enumerate every source tag in the bank with entry counts |
 | `memory_list_tags()` | Enumerate every multi-valued tag in the bank with occurrence counts |
@@ -83,10 +82,9 @@ each session.
 | `memory_graph_relate(src, relation, dst, origin?, confidence?, src_type?, dst_type?)` | Assert a typed edge between entities (closed relation vocabulary; re-assertion bumps confidence) |
 | `memory_graph_unrelate(src, relation, dst)` | Retract an edge (superseded, kept for audit) |
 | `memory_alias(entity, alias)` | Bind an alternative name — all fact/graph lookups resolve aliases first |
-| `memory_graph(entity, depth?, include_facts?, to?)` | Entity neighborhood (≤3 hops): nodes + facts + edges, with transitive/inverse edges derived on read |
+| `memory_graph(entity, depth?, include_facts?, to?, relation_filter?)` | Entity neighborhood (≤3 hops): nodes + facts + edges (transitive/inverse derived on read); `relation_filter` keeps only edges whose relation matches a substring |
 | `memory_recall(query, hops?, top_k?)` | Multi-hop retrieval: seed from graph, follow edges up to `hops` iterations; returns entities, edges, paths, texts; `low_confidence: true` → fall back to `memory_search` |
 | `memory_path(source, target, max_hops?)` | Shortest path between two entities — the entity chain + typed edges, or empty when none exists within `max_hops` (read-only) |
-| `get_neighbors(entity, relation_filter?)` | Direct 1-hop neighbours of an entity with typed edges (a focused `memory_graph(entity, depth=1)`; optional relation substring filter) |
 | `memory_digest()` | Knowledge-graph topology digest as of the last dream: god-nodes, surprising cross-community connections, suggested questions (read-only) |
 | `memory_communities(community_id?)` | List graph communities (size + cohesion), or the members of one given its id (read-only) |
 | `memory_relation_define(name, description, transitive?, inverse_of?, src_type?, dst_type?)` | Grow the closed relation vocabulary (deliberate, strong-model act) |
@@ -97,6 +95,14 @@ each session.
 
 Each tool returns plain JSON. See `pseudolife_memory/mcp_server.py` for
 docstrings — those are what Claude reads to decide when to call which tool.
+
+**Toolset tiers.** Set `PSEUDOLIFE_MCP_TOOLSET=core` to expose only the lean
+**core** set (the rest stay available with the default `full`): `memory_store`,
+`memory_search`, `memory_fact_get`, `memory_fact_set`, `memory_fact_resolve`,
+`memory_graph`, `memory_recall`, `memory_graph_relate`, `memory_world_search`,
+`memory_world_set`, `memory_lesson_search`, `memory_outcome`, `document_search`,
+`document_ingest`, `memory_stats`. Recommended for weak-model / public /
+token-conscious deployments. The Cortex Console is unaffected (it talks REST).
 
 ## Architecture
 
@@ -141,10 +147,9 @@ NetworkX derived read-model built on demand — behind a swappable `GraphStore`
 interface. There is no AGE/Cypher dependency; `memory_graph` serves
 multi-hop queries (neighborhood + derived/inverse edges + shortest path).
 
-**Weak-model deployments:** expose only `memory_search`,
-`memory_store`, `memory_fact_get`/`memory_fact_set`, `memory_graph`,
-and `memory_graph_relate`. Do NOT expose `memory_relation_define`,
-`memory_delete`, or `memory_fact_forget`.
+**Weak-model deployments:** set `PSEUDOLIFE_MCP_TOOLSET=core` — it exposes the
+curated core set and hides the power/hygiene tools (`*_forget`, `memory_delete`,
+`memory_relation_define`, the dream internals, …) that a small model can misuse.
 
 ### memory_recall (multi-hop retrieval)
 
@@ -464,9 +469,9 @@ searches so you know what tags actually exist instead of guessing.
 
 **Debugging a retrieval miss:**
 ```
-memory_trace("why didn't X come back?", sources=["pseudolife"])
+memory_search("why didn't X come back?", sources=["pseudolife"], explain=True)
 ```
-Returns the same envelope as `memory_search` plus a `trace` dict: every
+Returns the normal search result plus a `trace` dict: every
 tier's candidates with raw_score, recency boost, source/supersession
 multipliers, and the `drop_reason` (or `kept=True`) for each. The
 `final_topk` block shows exactly which entries reached the result set
@@ -515,7 +520,7 @@ added to a top-20 search). If the model fails to load, the reranker
 disables itself silently and retrieval falls back to bi-encoder ranking
 — search never breaks because of an optional component.
 
-`memory_trace(..., rerank=True)` surfaces the per-candidate
+`memory_search(..., rerank=True, explain=True)` surfaces the per-candidate
 `original_score`, `ce_score`, and `fused_score` under `trace.reranker`
 so you can see exactly how the cross-encoder reshuffled the
 bi-encoder ordering.
@@ -554,7 +559,7 @@ memory:
 No new dependencies — pure stdlib. Cost is one O(N tokens) index
 rebuild per query, ≈ 20-50ms on a 40K-entry bank.
 
-`memory_trace(..., bm25=True)` records per-hit `raw_bm25`,
+`memory_search(..., bm25=True, explain=True)` records per-hit `raw_bm25`,
 `normalized`, and any BM25-only injections under `trace.bm25`.
 
 **Episodes + tags (Tier C, schema v6):**

@@ -4,6 +4,20 @@ All notable changes to PseudoLife-MCP are documented here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Dream cadence: faster post-activity consolidation.** `memory.dream.idle_seconds`
+  default 1800 → 600, so the cortex consolidates ~10 min after you go quiet (still
+  never mid-session — any store resets idle). The quiescence gate logic is
+  unchanged. The README "Dreaming" section now documents the concrete cadence
+  (8 / 600s / 600s, daemon-only) and the on-demand `memory_fact_set` /
+  `memory_dream_run` paths.
+- **Tool-surface gate + redundancy trim.** `PSEUDOLIFE_MCP_TOOLSET=core` exposes a
+  lean 15-tool core set (default `full` = unchanged). Folded `memory_trace` into
+  `memory_search(explain=True)` and dropped `get_neighbors` (its `relation_filter`
+  moved onto `memory_graph`); `memory_path` retained. 48 → 46 tools.
+
 ## [0.6.0] — 2026-06-25 — graph foundation
 
 ### Added

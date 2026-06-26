@@ -81,6 +81,9 @@ services:
       PSEUDOLIFE_MCP_TRUST_BIND: "1"
       # Writer identity stamped on every canonical write (schema v11).
       PSEUDOLIFE_WRITER_ID: claude-code
+      # Tool-surface tier: "full" (default, all tools) or "core" (lean ~15-tool
+      # set for weak-model / token-conscious clients). Uncomment to opt in.
+      # PSEUDOLIFE_MCP_TOOLSET: core
       CUDA_VISIBLE_DEVICES: "-1"
       HF_HUB_OFFLINE: "1"
       TRANSFORMERS_OFFLINE: "1"
