@@ -43,13 +43,19 @@ def test_session_briefing_cold_bank_is_unavailable(tmp_path):
     assert out["lessons"] == []
 
 
-def test_extract_markdown_prefers_structured():
-    import types
+def test_fetch_markdown_parses_api_response(monkeypatch):
     from pseudolife_memory import briefing_cli as bc
-    r = types.SimpleNamespace(structuredContent={"markdown": "## hi\n- x"}, content=[])
-    assert bc._extract_markdown(r) == "## hi\n- x"
-    r2 = types.SimpleNamespace(structuredContent={"available": False, "markdown": ""}, content=[])
-    assert bc._extract_markdown(r2) == ""
+
+    class _Resp:
+        def __init__(self, body): self._b = body.encode("utf-8")
+        def read(self): return self._b
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda req, timeout=5: _Resp('{"markdown": "## hi\\n- x", "available": true}'))
+    assert bc._fetch_markdown("http://x", None, 3, 3) == "## hi\n- x"
 
 
 def test_briefing_no_daemon_prints_nothing(monkeypatch, capsys):

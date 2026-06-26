@@ -2540,7 +2540,8 @@ class MemoryService:
 
     def session_briefing(self, max_unsure: int = 3, max_lessons: int = 3) -> dict[str, Any]:
         """Assemble the session-start briefing: graph 'unsure-about' (surprising
-        links + open questions) + avoid-first lessons. Read-only; no LLM. Each
+        links + open questions) + avoid-first lessons. Read-only; no LLM.
+        ``max_unsure`` caps surprises AND questions at that many each. Each
         sub-call takes the lock itself, so this orchestrator must not hold it."""
         from pseudolife_memory.memory.briefing import format_briefing, select_lessons
         dg = self.graph_digest()
