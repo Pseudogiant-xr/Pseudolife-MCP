@@ -1078,6 +1078,7 @@ def memory_graph(
     depth: int = 1,
     include_facts: bool = True,
     to: str | None = None,
+    relation_filter: str | None = None,
 ) -> dict[str, Any]:
     """Read an entity's neighborhood: nodes, typed edges, canonical facts.
 
@@ -1095,26 +1096,18 @@ def memory_graph(
         to: Optional second entity — the shortest path between the two is
             returned under ``paths`` (and its nodes are included even when
             beyond ``depth``).
+        relation_filter: Optional case-insensitive substring; keep only edges
+            whose relation contains it (e.g. "runs-on"). Replaces the former
+            get_neighbors convenience tool.
 
     Returns:
         ``{"found": bool, "entity", "depth", "nodes": [{entity, canonical,
         etype, aliases, facts}], "edges": [{src, relation, dst, derived,
         confidence|via}], "paths": [[entity, ...]]}``.
     """
-    return service.graph_neighborhood(
+    out = service.graph_neighborhood(
         entity=entity, depth=depth, include_facts=include_facts, to=to,
     )
-
-
-@mcp.tool()
-def get_neighbors(entity: str, relation_filter: str | None = None) -> dict[str, Any]:
-    """Direct (1-hop) neighbors of an entity, with typed edges.
-
-    A focused shortcut for ``memory_graph(entity, depth=1)`` — use it for
-    "what is X directly connected to?". Optional ``relation_filter`` keeps
-    only edges whose relation contains that substring (case-insensitive).
-    """
-    out = service.graph_neighborhood(entity, depth=1)
     if relation_filter and out.get("edges"):
         rf = relation_filter.lower()
         out = dict(out)

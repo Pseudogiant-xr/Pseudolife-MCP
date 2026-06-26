@@ -74,7 +74,6 @@ def test_all_tools_registered() -> None:
         "memory_relation_define",
         # Graph foundation (v0.6) — recall/graph extras, graph-insight, provenance traces.
         "memory_path",
-        "get_neighbors",
         "memory_digest",
         "memory_communities",
         "memory_get",
@@ -138,6 +137,24 @@ def test_memory_trace_tool_is_gone() -> None:
     from pseudolife_memory import mcp_server  # noqa: PLC0415
     names = {t.name for t in asyncio.run(mcp_server.mcp.list_tools())}
     assert "memory_trace" not in names
+
+
+def test_graph_relation_filter_keeps_only_matching_edges(monkeypatch) -> None:
+    from pseudolife_memory import mcp_server  # noqa: PLC0415
+    fake = {"found": True, "entity": "svc-a", "nodes": [], "paths": [],
+            "edges": [{"src": "svc-a", "relation": "runs-on", "dst": "jvm-21"},
+                      {"src": "svc-a", "relation": "uses", "dst": "redis"}]}
+    monkeypatch.setattr(mcp_server.service, "graph_neighborhood",
+                        lambda **kw: dict(fake))
+    out = _invoke("memory_graph", {"entity": "svc-a", "relation_filter": "runs-on"})
+    rels = {e["relation"] for e in out["edges"]}
+    assert rels == {"runs-on"}
+
+
+def test_get_neighbors_tool_is_gone() -> None:
+    from pseudolife_memory import mcp_server  # noqa: PLC0415
+    names = {t.name for t in asyncio.run(mcp_server.mcp.list_tools())}
+    assert "get_neighbors" not in names
 
 
 def test_memory_dream_run_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:

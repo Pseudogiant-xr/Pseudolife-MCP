@@ -158,7 +158,7 @@ class BM25Config:
 
     Off by default. Enable globally via
     ``memory.bm25.enabled = true`` in config, or pass ``bm25=True``
-    per call to ``memory_search`` / ``memory_trace``.
+    per call to ``memory_search``.
 
     Score fusion
     ------------
@@ -201,7 +201,7 @@ class RerankerConfig:
     Off by default — install with ``pip install .[rerank]`` (which just
     pulls a slightly newer sentence-transformers anyway), set
     ``enabled = True`` in config, or pass ``rerank=True`` per-call to
-    ``memory_search`` / ``memory_trace``.
+    ``memory_search``.
 
     Score fusion
     ------------
