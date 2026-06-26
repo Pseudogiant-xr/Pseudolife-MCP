@@ -24,7 +24,7 @@ def test_schema_v12_creates_community_tables(tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
     from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
-    assert SCHEMA_META_VERSION == 12
+    assert SCHEMA_META_VERSION >= 12  # community tables introduced at v12; persist into later schemas
     svc = build_service(tmp_path)
     svc._ensure_init()  # noqa: SLF001
     st = svc._storage  # noqa: SLF001

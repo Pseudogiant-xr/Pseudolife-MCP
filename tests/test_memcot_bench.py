@@ -200,8 +200,9 @@ def test_run_all_arm_graph_beats_baseline_on_a_two_hop_case():
         svc = mb.build_service(Path(td)) if hasattr(mb, "build_service") else build_service(Path(td))
         mb.seed_bench(svc)
         results = mb.run_all(svc)
-    # structural
-    for arm in ("baseline", "loop_no_graph", "loop_graph"):
+    # structural (arms: baseline / recall_nogate / recall_gate — the hub-gating
+    # rename of the old loop_no_graph / loop_graph arms)
+    for arm in ("baseline", "recall_nogate", "recall_gate"):
         assert "overall" in results[arm]
-    # core hypothesis smoke: graph loop recall >= baseline overall
-    assert results["loop_graph"]["overall"]["recall"] >= results["baseline"]["overall"]["recall"]
+    # core hypothesis smoke: graph (hub-gated) recall >= baseline overall
+    assert results["recall_gate"]["overall"]["recall"] >= results["baseline"]["overall"]["recall"]
