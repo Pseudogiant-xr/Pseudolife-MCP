@@ -845,6 +845,25 @@ What gets consolidated and when is configurable under `memory.dream`
 (`eligible_sources` / `exclude_sources`, and the `min_batch` / `idle_seconds`
 backlog+quiescence thresholds that `memory_dream_status` reports).
 
+**Cadence — quiescence-gated, daemon-only.** The auto-sweep (Tier 2) fires when:
+
+```
+backlog ≥ min_batch (8)   OR   (backlog ≥ 1 AND idle ≥ idle_seconds (600s))
+```
+
+polled every `sweep_interval_seconds` (600s). It runs **only in the daemon** — the
+embedded stdio mode never sweeps. There is **no turn-based trigger** (the cortex
+does not "dream every N turns"), by design: consolidating mid-session would distil
+half-formed, still-changing state into canonical facts and burn the CPU extractor
+during your foreground work. So during an active session, prose-stored facts stay
+in the searchable bands and reach the cortex once you go quiet (~10 min idle) or a
+backlog of 8 accumulates.
+
+**Want a fact canonical *now*, mid-session?** Two on-demand paths bypass the wait:
+`memory_fact_set` writes a canonical fact instantly, and `memory_dream_run` forces
+a full consolidation sweep on the spot (the `/dream` command wraps it).
+`memory_search` finds the original prose the entire time regardless.
+
 **Privacy & cost.** Tier 0 is on-box and free. Tier 1 spends the agent tokens
 you already pay for (a scheduled daily dream is small but non-zero). Tier 2 with a
 *cloud* endpoint sends memory text off-box — a local model (e.g. Ollama) keeps it
