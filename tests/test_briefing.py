@@ -60,3 +60,17 @@ def test_briefing_no_daemon_prints_nothing(monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["pseudolife-mcp", "briefing"])
     bc.run_briefing()                       # must not raise, must not print
     assert capsys.readouterr().out == ""
+
+
+def test_hook_json_wraps_markdown_as_sessionstart_context():
+    import json
+    from pseudolife_memory import briefing_cli as bc
+    d = json.loads(bc._as_hook_json("## hi\n- x"))
+    assert d["hookSpecificOutput"]["hookEventName"] == "SessionStart"
+    assert d["hookSpecificOutput"]["additionalContext"] == "## hi\n- x"
+
+
+def test_hook_json_empty_is_empty_string():
+    from pseudolife_memory import briefing_cli as bc
+    assert bc._as_hook_json("") == ""
+    assert bc._as_hook_json("   \n  ") == ""
