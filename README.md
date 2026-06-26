@@ -352,6 +352,28 @@ The `dream` pass periodically distils stored memories into canonical facts and a
 knowledge graph; `memory_digest` / `memory_communities` then surface the graph's
 shape (hubs, communities, surprising links, questions worth answering).
 
+### Session-start briefing (optional hook)
+
+`pseudolife-mcp briefing` prints a compact markdown block — **what your memory is
+unsure about** (surprising graph links + open questions) and **lessons from past
+work** (avoid / prefer). Wire it to a SessionStart hook so every session opens
+with it. In your Claude Code `settings.json`:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "pseudolife-mcp briefing" } ] }
+    ]
+  }
+}
+```
+
+It connects to the *already-running* daemon (never starts one), and prints
+nothing if the daemon is down or the bank is still cold — it can't slow or break
+session start. Tune the budget with `--max-unsure N` / `--max-lessons N` (default
+3 / 3). The same content is available on demand via the `memory_briefing` tool.
+
 ## Configuration
 
 Connection / deployment env vars:

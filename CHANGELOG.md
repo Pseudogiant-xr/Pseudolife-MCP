@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Session-start briefing (P1.7).** New `memory_briefing` tool + `pseudolife-mcp
+  briefing` CLI assemble a "what your memory is unsure about" (graph surprises +
+  questions) + "lessons from past work" (avoid/prefer) block. Wire the CLI to a
+  SessionStart hook (README) to auto-inject it; it never auto-starts the daemon
+  and prints nothing on a cold bank.
+
 ### Changed
 - **Dream cadence: faster post-activity consolidation.** `memory.dream.idle_seconds`
   default 1800 → 600, so the cortex consolidates ~10 min after you go quiet (still
