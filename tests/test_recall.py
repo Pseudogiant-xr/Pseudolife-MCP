@@ -303,7 +303,7 @@ def test_recall_config_hub_defaults():
 
 
 @pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_get_neighbors_relation_filter(tmp_path, monkeypatch):
+def test_memory_graph_relation_filter(tmp_path, monkeypatch):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
     import pseudolife_memory.mcp_server as srv
@@ -311,7 +311,7 @@ def test_get_neighbors_relation_filter(tmp_path, monkeypatch):
     svc.graph_relate("gnx", "depends-on", "gny")
     svc.graph_relate("gnx", "runs-on", "gnz")
     monkeypatch.setattr(srv, "service", svc, raising=False)
-    out = srv.get_neighbors("gnx", relation_filter="depends-on")
+    out = srv.memory_graph("gnx", relation_filter="depends-on")
     rels = {e["relation"] for e in out["edges"]}
     assert rels == {"depends-on"}                 # runs-on filtered out
 
