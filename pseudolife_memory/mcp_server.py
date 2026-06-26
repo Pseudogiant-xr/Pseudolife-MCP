@@ -1,7 +1,7 @@
 """MCP tool surface — exposes the PseudoLife memory tools to Claude Code.
 
 Built on the FastMCP decorator API from the official ``mcp`` Python SDK.
-Each ``@mcp.tool()`` becomes a JSON-RPC tool. The set spans memory
+Each ``@_tool()`` becomes a JSON-RPC tool. The set spans memory
 (``memory_store`` / ``memory_search`` / ``memory_recent`` / ``memory_stats``),
 the canonical-fact cortex (``memory_fact_get`` / ``memory_fact_set`` /
 ``memory_history`` / ``memory_facts`` / ``memory_fact_resolve``), the world
@@ -79,11 +79,34 @@ service = MemoryService(data_dir=_data_dir, config_path=_config_path)
 
 mcp = FastMCP("PseudoLife Memory")
 
+# Tool-surface tier gate (P1.5). Default "full" = every tool registers (no
+# behaviour change). "core" registers only the core-tier set — a lean opt-in
+# for weak-model / public / token-conscious deployments. The Cortex Console is
+# unaffected (it calls service.* over REST, not MCP tools).
+_TOOLSET = os.environ.get("PSEUDOLIFE_MCP_TOOLSET", "full").strip().lower()
+_TOOL_TIERS: dict[str, bool] = {}
+
+
+def _should_register(toolset: str, core: bool) -> bool:
+    """Register a tool unless we're in core mode and it's not core-tier."""
+    return toolset != "core" or core
+
+
+def _tool(*, core: bool = False):
+    """Replacement for @_tool() that records the tool's tier and gates
+    registration on PSEUDOLIFE_MCP_TOOLSET."""
+    def deco(fn):
+        _TOOL_TIERS[fn.__name__] = core
+        if _should_register(_TOOLSET, core):
+            return mcp.tool()(fn)
+        return fn  # left callable (tests / Console-via-service); not exposed
+    return deco
+
 
 # ── Tools ─────────────────────────────────────────────────────────────────
 
 
-@mcp.tool()
+@_tool(core=True)
 def memory_store(
     text: str,
     source: str = "claude",
@@ -165,7 +188,7 @@ def _restates_fact(entry_text: str, value: str) -> bool:
     return len(v) >= 0.5 * len(t)
 
 
-@mcp.tool()
+@_tool(core=True)
 def memory_search(
     query: str,
     top_k: int = 8,
@@ -286,7 +309,7 @@ def memory_search(
     return result
 
 
-@mcp.tool()
+@_tool(core=True)
 def memory_fact_get(entity: str, attribute: str) -> dict[str, Any]:
     """Look up the one CURRENT canonical value at a slot, or null.
 
@@ -322,7 +345,7 @@ def memory_fact_get(entity: str, attribute: str) -> dict[str, Any]:
     return out
 
 
-@mcp.tool()
+@_tool(core=True)
 def memory_fact_set(
     entity: str,
     attribute: str,
@@ -361,7 +384,7 @@ def memory_fact_set(
     )
 
 
-@mcp.tool()
+@_tool()
 def memory_fact_forget(entity: str, attribute: str | None = None) -> dict[str, Any]:
     """Hard-delete canonical fact(s) — a whole entity or one slot.
 
@@ -380,7 +403,7 @@ def memory_fact_forget(entity: str, attribute: str | None = None) -> dict[str, A
     return service.cortex_forget(entity, attribute)
 
 
-@mcp.tool()
+@_tool(core=True)
 def memory_fact_resolve(entity: str, attribute: str, accept: bool) -> dict[str, Any]:
     """Resolve a CONTESTED canonical fact after checking in with the human.
 
@@ -407,7 +430,7 @@ def memory_fact_resolve(entity: str, attribute: str, accept: bool) -> dict[str, 
     return service.cortex_resolve(entity, attribute, accept)
 
 
-@mcp.tool()
+@_tool()
 def memory_history(entity: str, attribute: str) -> dict[str, Any]:
     """The change history of a canonical fact — how it evolved and who changed it.
 
@@ -428,7 +451,7 @@ def memory_history(entity: str, attribute: str) -> dict[str, Any]:
     return service.history(entity, attribute)
 
 
-@mcp.tool()
+@_tool()
 def memory_facts(limit: int = 120) -> dict[str, Any]:
     """List all CURRENT canonical facts (introspection / audit of the cortex).
 
@@ -444,7 +467,7 @@ def memory_facts(limit: int = 120) -> dict[str, Any]:
     return {"count": len(entries), "entries": entries}
 
 
-@mcp.tool()
+@_tool()
 def memory_get(entry_id: int) -> dict[str, Any]:
     """Dereference a source-entry pointer from a fact's `source_entries`: returns
     the full dense memory episode and `consolidated_into` (the facts it formed).
@@ -454,7 +477,7 @@ def memory_get(entry_id: int) -> dict[str, Any]:
     return service.get_entry(entry_id)
 
 
-@mcp.tool()
+@_tool()
 def memory_reinforce(entry_id: int) -> dict[str, Any]:
     """After reading an episode via `memory_get` and finding it genuinely useful,
     call this to strengthen it — a deliberate 'this mattered' signal that helps the
@@ -463,7 +486,7 @@ def memory_reinforce(entry_id: int) -> dict[str, Any]:
     return service.reinforce(entry_id)
 
 
-@mcp.tool()
+@_tool(core=True)
 def memory_world_set(
     entity: str,
     attribute: str,
@@ -505,7 +528,7 @@ def memory_world_set(
     )
 
 
-@mcp.tool()
+@_tool(core=True)
 def memory_world_search(query: str, top_k: int = 5) -> dict[str, Any]:
     """Search current WORLD facts (sourced external knowledge) by similarity.
 
@@ -520,7 +543,7 @@ def memory_world_search(query: str, top_k: int = 5) -> dict[str, Any]:
     return service.world_search(query, top_k=top_k, min_score=0.0)
 
 
-@mcp.tool()
+@_tool()
 def memory_world_facts(limit: int = 120) -> dict[str, Any]:
     """List all current WORLD facts (introspection / audit of the world cortex).
 
@@ -532,7 +555,7 @@ def memory_world_facts(limit: int = 120) -> dict[str, Any]:
     return {"count": len(entries), "entries": entries}
 
 
-@mcp.tool()
+@_tool()
 def memory_world_forget(entity: str, attribute: str | None = None) -> dict[str, Any]:
     """Hard-delete WORLD fact(s) — a whole entity or one slot (cleanup; no audit
     trail). Only touches the world cortex, never the user/project facts.
@@ -542,7 +565,7 @@ def memory_world_forget(entity: str, attribute: str | None = None) -> dict[str, 
     return service.world_forget(entity, attribute)
 
 
-@mcp.tool()
+@_tool(core=True)
 def memory_outcome(
     task: str,
     outcome: str,
@@ -575,7 +598,7 @@ def memory_outcome(
         task, outcome, about=about, detail=detail, polarity=polarity)
 
 
-@mcp.tool()
+@_tool(core=True)
 def memory_lesson_search(query: str, top_k: int = 5) -> dict[str, Any]:
     """Search learned LESSONS (procedural memory) by similarity to the task at hand.
 
@@ -589,7 +612,7 @@ def memory_lesson_search(query: str, top_k: int = 5) -> dict[str, Any]:
     return service.lesson_search(query, top_k=top_k)
 
 
-@mcp.tool()
+@_tool()
 def memory_lessons(limit: int = 120) -> dict[str, Any]:
     """List all current LESSONS (introspection / audit of procedural memory).
 
@@ -599,7 +622,7 @@ def memory_lessons(limit: int = 120) -> dict[str, Any]:
     return service.lessons_dump(limit=limit)
 
 
-@mcp.tool()
+@_tool()
 def memory_lesson_forget(task: str, aspect: str | None = None) -> dict[str, Any]:
     """Delete LESSON(s) — a whole task-type or one aspect (cleanup / manual
     correction). Only touches the lessons store.
@@ -609,7 +632,7 @@ def memory_lesson_forget(task: str, aspect: str | None = None) -> dict[str, Any]
     return service.lesson_forget(task, aspect)
 
 
-@mcp.tool()
+@_tool()
 def memory_dream_status() -> dict[str, Any]:
     """Read-only: how much unconsolidated memory is waiting for a dream.
 
@@ -619,7 +642,7 @@ def memory_dream_status() -> dict[str, Any]:
     return service.dream_status()
 
 
-@mcp.tool()
+@_tool()
 def memory_dream_pull(limit: int = 40) -> dict[str, Any]:
     """Eligible memories not yet consolidated (timestamp > dream_cursor),
     oldest-first. The agent reads these, extracts canonical facts, writes them
@@ -630,7 +653,7 @@ def memory_dream_pull(limit: int = 40) -> dict[str, Any]:
     return service.dream_pull(limit=limit)
 
 
-@mcp.tool()
+@_tool()
 def memory_dream_commit(cursor: float) -> dict[str, Any]:
     """Advance the dream cursor (monotonic) after consolidating up to ``cursor``
     (the newest timestamp from the pull). Returns ``{dream_cursor}``.
@@ -638,7 +661,7 @@ def memory_dream_commit(cursor: float) -> dict[str, Any]:
     return service.dream_commit(cursor)
 
 
-@mcp.tool()
+@_tool()
 def memory_dream_run(limit: int | None = None) -> dict[str, Any]:
     """Run one server-side dream with the configured extractor: pull -> extract
     -> fact_set -> commit. Uses the regex floor (Tier 0, no LLM) unless a
@@ -660,7 +683,7 @@ def memory_dream_run(limit: int | None = None) -> dict[str, Any]:
     )
 
 
-@mcp.tool()
+@_tool()
 def memory_list_sources() -> dict[str, Any]:
     """Enumerate every source tag in the bank, with entry counts.
 
@@ -674,7 +697,7 @@ def memory_list_sources() -> dict[str, Any]:
     return service.list_sources()
 
 
-@mcp.tool()
+@_tool()
 def memory_delete(
     text: str | None = None,
     substring: str | None = None,
@@ -711,7 +734,7 @@ def memory_delete(
     )
 
 
-@mcp.tool()
+@_tool()
 def memory_recent(
     n: int = 10,
     sources: list[str] | None = None,
@@ -737,7 +760,7 @@ def memory_recent(
     )
 
 
-@mcp.tool()
+@_tool()
 def memory_supersede(old_text: str, new_text: str) -> dict[str, Any]:
     """Mark an outdated fact obsolete and record its replacement.
 
@@ -764,7 +787,7 @@ def memory_supersede(old_text: str, new_text: str) -> dict[str, Any]:
     return service.supersede(old_text=old_text, new_text=new_text)
 
 
-@mcp.tool()
+@_tool(core=True)
 def memory_stats() -> dict[str, Any]:
     """Per-band sizes, capacities, hit rates, totals.
 
@@ -775,7 +798,7 @@ def memory_stats() -> dict[str, Any]:
     return service.stats()
 
 
-@mcp.tool()
+@_tool()
 def memory_save() -> dict[str, Any]:
     """Flush CMS tensors to disk now.
 
@@ -787,7 +810,7 @@ def memory_save() -> dict[str, Any]:
     return service.save()
 
 
-@mcp.tool()
+@_tool()
 def memory_episode_start(
     title: str, hint: str | None = None,
 ) -> dict[str, Any]:
@@ -816,7 +839,7 @@ def memory_episode_start(
     return service.episode_start(title=title, hint=hint)
 
 
-@mcp.tool()
+@_tool()
 def memory_episode_end() -> dict[str, Any]:
     """Close the currently-open episode.
 
@@ -828,7 +851,7 @@ def memory_episode_end() -> dict[str, Any]:
     return service.episode_end()
 
 
-@mcp.tool()
+@_tool()
 def memory_episode_list(
     limit: int = 20, include_open: bool = True,
 ) -> dict[str, Any]:
@@ -846,7 +869,7 @@ def memory_episode_list(
     return service.episode_list(limit=limit, include_open=include_open)
 
 
-@mcp.tool()
+@_tool()
 def memory_episode_summary(id: str) -> dict[str, Any]:
     """Stats + tag distribution + recent entries for an episode.
 
@@ -866,7 +889,7 @@ def memory_episode_summary(id: str) -> dict[str, Any]:
     return service.episode_summary(id=id)
 
 
-@mcp.tool()
+@_tool()
 def memory_list_tags() -> dict[str, Any]:
     """Enumerate every tag in the bank, with occurrence counts.
 
@@ -878,7 +901,7 @@ def memory_list_tags() -> dict[str, Any]:
     return service.list_tags()
 
 
-@mcp.tool()
+@_tool()
 def memory_consolidation_candidates(
     query: str | None = None,
     episode: str | None = None,
@@ -938,7 +961,7 @@ def memory_consolidation_candidates(
     )
 
 
-@mcp.tool()
+@_tool()
 def memory_consolidate(
     replaces: list[str],
     new_text: str,
@@ -976,7 +999,7 @@ def memory_consolidate(
     )
 
 
-@mcp.tool()
+@_tool(core=True)
 def memory_graph_relate(
     src: str,
     relation: str,
@@ -1023,7 +1046,7 @@ def memory_graph_relate(
     )
 
 
-@mcp.tool()
+@_tool()
 def memory_graph_unrelate(src: str, relation: str, dst: str) -> dict[str, Any]:
     """Retract a relation — mark the edge superseded (kept for audit).
 
@@ -1039,7 +1062,7 @@ def memory_graph_unrelate(src: str, relation: str, dst: str) -> dict[str, Any]:
     return service.graph_unrelate(src=src, relation=relation, dst=dst)
 
 
-@mcp.tool()
+@_tool()
 def memory_alias(entity: str, alias: str) -> dict[str, Any]:
     """Bind an alternative name to an entity (e.g. ``pg`` → ``postgres``).
 
@@ -1054,7 +1077,7 @@ def memory_alias(entity: str, alias: str) -> dict[str, Any]:
     return service.graph_alias(entity=entity, alias=alias)
 
 
-@mcp.tool()
+@_tool()
 def memory_digest() -> dict[str, Any]:
     """Topology digest of the knowledge graph as of the last dream: most-connected
     entities (god-nodes), surprising cross-community connections, and questions
@@ -1064,7 +1087,7 @@ def memory_digest() -> dict[str, Any]:
     return service.graph_digest()
 
 
-@mcp.tool()
+@_tool()
 def memory_communities(community_id: int | None = None) -> dict[str, Any]:
     """List the graph's communities (clusters of related entities) with size and
     cohesion, or — given a community_id — the members of that community. Read-only.
@@ -1072,7 +1095,7 @@ def memory_communities(community_id: int | None = None) -> dict[str, Any]:
     return service.communities(community_id=community_id)
 
 
-@mcp.tool()
+@_tool(core=True)
 def memory_graph(
     entity: str,
     depth: int = 1,
@@ -1116,7 +1139,7 @@ def memory_graph(
     return out
 
 
-@mcp.tool()
+@_tool()
 def memory_path(source: str, target: str, max_hops: int = 8) -> dict[str, Any]:
     """Shortest path between two entities — how ``source`` connects to
     ``target``. Returns the entity chain and the typed edges along it, or an
@@ -1125,7 +1148,7 @@ def memory_path(source: str, target: str, max_hops: int = 8) -> dict[str, Any]:
     return service.graph_path(source, target, max_hops=max_hops)
 
 
-@mcp.tool()
+@_tool(core=True)
 def memory_recall(query: str, hops: int = 3, top_k: int = 5) -> dict[str, Any]:
     """Multi-hop retrieval: follow the knowledge graph to answer RELATIONAL
     questions that single-shot ``memory_search`` can't (it returns flat
@@ -1153,7 +1176,7 @@ def memory_recall(query: str, hops: int = 3, top_k: int = 5) -> dict[str, Any]:
     return service.recall(query, hops=hops, top_k=top_k)
 
 
-@mcp.tool()
+@_tool()
 def memory_relation_define(
     name: str,
     description: str,
@@ -1189,7 +1212,7 @@ def memory_relation_define(
     )
 
 
-@mcp.tool()
+@_tool(core=True)
 def document_ingest(path: str, source: str | None = None) -> dict[str, Any]:
     """Read a file (.txt / .md / .pdf) and index it in the reference bank.
 
@@ -1209,7 +1232,7 @@ def document_ingest(path: str, source: str | None = None) -> dict[str, Any]:
     return service.ingest_document(path=path, source=source)
 
 
-@mcp.tool()
+@_tool(core=True)
 def document_search(query: str, top_k: int = 5) -> dict[str, Any]:
     """RAG search over the reference bank only — no neural memories.
 

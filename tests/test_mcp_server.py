@@ -157,6 +157,28 @@ def test_get_neighbors_tool_is_gone() -> None:
     assert "get_neighbors" not in names
 
 
+_EXPECTED_CORE = sorted([
+    "memory_store", "memory_search", "memory_fact_get", "memory_fact_set",
+    "memory_fact_resolve", "memory_graph", "memory_recall", "memory_graph_relate",
+    "memory_world_search", "memory_world_set", "memory_lesson_search",
+    "memory_outcome", "document_search", "document_ingest", "memory_stats",
+])
+
+
+def test_should_register_gate_logic() -> None:
+    from pseudolife_memory.mcp_server import _should_register  # noqa: PLC0415
+    assert _should_register("full", core=False) is True
+    assert _should_register("full", core=True) is True
+    assert _should_register("core", core=True) is True
+    assert _should_register("core", core=False) is False
+
+
+def test_core_tier_membership_is_exactly_the_core_set() -> None:
+    from pseudolife_memory import mcp_server  # noqa: PLC0415
+    core_names = sorted(n for n, is_core in mcp_server._TOOL_TIERS.items() if is_core)
+    assert core_names == _EXPECTED_CORE
+
+
 def test_memory_dream_run_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
     import importlib
