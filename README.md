@@ -243,10 +243,26 @@ ops\install-autostart.ps1
 Start-ScheduledTask -TaskName "PseudoLife-MCP Daemon"
 ```
 
-The `pseudolife-mcp` console-script is now on your PATH with three modes:
+The `pseudolife-mcp` console-script is now on your PATH with four modes:
 `pseudolife-mcp serve` (the daemon), `pseudolife-mcp` (the stdio shim —
-auto-starts the daemon if absent), and `pseudolife-mcp embedded` (the
-v0.1 in-process stdio server; no daemon, no Postgres — an escape hatch).
+auto-starts the daemon if absent), `pseudolife-mcp embedded` (the
+v0.1 in-process stdio server; no daemon, no Postgres — an escape hatch), and
+`pseudolife-mcp briefing` (print the session-start briefing; used by the hook).
+
+## Updating
+
+After a `git pull` (or local code change), redeploy the **daemon only** — safely,
+without touching Postgres or the extractor:
+
+```powershell
+.\ops\update.ps1
+```
+
+It backs up the bank (`pg_dump`), tags a rollback image, rebuilds + recreates
+**only** the daemon (`docker compose up -d --no-deps --build pseudolife-daemon`),
+and waits for `/health`. It never runs `down -v`. (Host-process install: just
+restart the daemon — `pip install -e .` is editable, so a restart picks up the
+new code.)
 
 ## Wire into Claude Code
 
@@ -354,25 +370,38 @@ shape (hubs, communities, surprising links, questions worth answering).
 
 ### Session-start briefing (optional hook)
 
-`pseudolife-mcp briefing` prints a compact markdown block — **what your memory is
-unsure about** (surprising graph links + open questions) and **lessons from past
-work** (avoid / prefer). Wire it to a SessionStart hook so every session opens
-with it. In your Claude Code `settings.json`:
+`pseudolife-mcp briefing` prints a compact block — **what your memory is unsure
+about** (surprising graph links + open questions) and **lessons from past work**
+(avoid / prefer). Wire it to a Claude Code **SessionStart hook** so every session
+opens with it. One command (PowerShell 7):
+
+```powershell
+.\ops\install-hook.ps1
+```
+
+It backs up your `settings.json`, then adds the briefing **alongside** any
+existing SessionStart hooks (idempotent — safe to re-run). Requires
+`pseudolife-mcp` on PATH — `pip install -e .` in the repo puts it there.
+
+Prefer to wire it by hand? Add this to `settings.json` — the `--hook-json` flag
+emits the `hookSpecificOutput.additionalContext` payload Claude Code injects:
 
 ```json
 {
   "hooks": {
     "SessionStart": [
-      { "hooks": [ { "type": "command", "command": "pseudolife-mcp briefing" } ] }
+      { "hooks": [
+        { "type": "command", "command": "pseudolife-mcp briefing --hook-json", "shell": "bash" }
+      ] }
     ]
   }
 }
 ```
 
-It connects to the *already-running* daemon (never starts one), and prints
-nothing if the daemon is down or the bank is still cold — it can't slow or break
-session start. Tune the budget with `--max-unsure N` / `--max-lessons N` (default
-3 / 3). The same content is available on demand via the `memory_briefing` tool.
+It connects to the *already-running* daemon (never starts one) and prints nothing
+if the daemon is down or the bank is still cold — it can't slow or break session
+start. Tune the budget with `--max-unsure N` / `--max-lessons N` (default 3 / 3).
+The same content is available on demand via the `memory_briefing` tool.
 
 ## Configuration
 

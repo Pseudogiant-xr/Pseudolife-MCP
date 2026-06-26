@@ -12,6 +12,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   questions) + "lessons from past work" (avoid/prefer) block. Wire the CLI to a
   SessionStart hook (README) to auto-inject it; it never auto-starts the daemon
   and prints nothing on a cold bank.
+- **Easy hook install + safe updates.** `pseudolife-mcp briefing --hook-json`
+  emits the SessionStart `additionalContext` payload; `ops/install-hook.ps1` wires
+  it idempotently alongside existing hooks (backs up `settings.json` first);
+  `ops/update.ps1` does a backup-first, daemon-only (`--no-deps`) rebuild that
+  never touches Postgres/the extractor or runs `down -v`.
 
 ### Changed
 - **Dream cadence: faster post-activity consolidation.** `memory.dream.idle_seconds`
