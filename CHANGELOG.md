@@ -17,6 +17,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   lean 15-tool core set (default `full` = unchanged). Folded `memory_trace` into
   `memory_search(explain=True)` and dropped `get_neighbors` (its `relation_filter`
   moved onto `memory_graph`); `memory_path` retained. 48 → 46 tools.
+- **Retention bench made honest (P1.6).** `evals/retention_bench.py` now models a
+  heavy-tailed reinforcement workload with `access_count` coupled to reinforcement
+  (reinforcing *is* accessing). The honest re-derivation keeps `retention_boost=1.0`
+  (the largest boost with ~no recency displacement) but shows it's a modest nudge on
+  top of the automatic access-coupling — not the dramatic knee the prior synthetic
+  bench implied. Default unchanged.
 
 ## [0.6.0] — 2026-06-25 — graph foundation
 

@@ -2,32 +2,32 @@
   {
     "retention_boost": 0.0,
     "reinforced_total": 50,
-    "reinforced_survived": 12,
-    "reinforced_survival_rate": 0.24,
+    "reinforced_survived": 15,
+    "reinforced_survival_rate": 0.3,
     "unreinforced_total": 150,
-    "unreinforced_survived": 38,
-    "unreinforced_survival_rate": 0.25333333333333335,
-    "mean_survivor_timestamp": 174.5
+    "unreinforced_survived": 35,
+    "unreinforced_survival_rate": 0.23333333333333334,
+    "mean_survivor_timestamp": 174.44
   },
   {
     "retention_boost": 0.25,
-    "reinforced_total": 50,
-    "reinforced_survived": 13,
-    "reinforced_survival_rate": 0.26,
-    "unreinforced_total": 150,
-    "unreinforced_survived": 37,
-    "unreinforced_survival_rate": 0.24666666666666667,
-    "mean_survivor_timestamp": 174.46
-  },
-  {
-    "retention_boost": 0.5,
     "reinforced_total": 50,
     "reinforced_survived": 15,
     "reinforced_survival_rate": 0.3,
     "unreinforced_total": 150,
     "unreinforced_survived": 35,
     "unreinforced_survival_rate": 0.23333333333333334,
-    "mean_survivor_timestamp": 174.06
+    "mean_survivor_timestamp": 174.44
+  },
+  {
+    "retention_boost": 0.5,
+    "reinforced_total": 50,
+    "reinforced_survived": 16,
+    "reinforced_survival_rate": 0.32,
+    "unreinforced_total": 150,
+    "unreinforced_survived": 34,
+    "unreinforced_survival_rate": 0.22666666666666666,
+    "mean_survivor_timestamp": 174.4
   },
   {
     "retention_boost": 1.0,
@@ -37,26 +37,26 @@
     "unreinforced_total": 150,
     "unreinforced_survived": 33,
     "unreinforced_survival_rate": 0.22,
-    "mean_survivor_timestamp": 173.24
+    "mean_survivor_timestamp": 174.22
   },
   {
     "retention_boost": 2.0,
     "reinforced_total": 50,
-    "reinforced_survived": 24,
-    "reinforced_survival_rate": 0.48,
+    "reinforced_survived": 22,
+    "reinforced_survival_rate": 0.44,
     "unreinforced_total": 150,
-    "unreinforced_survived": 26,
-    "unreinforced_survival_rate": 0.17333333333333334,
-    "mean_survivor_timestamp": 166.98
+    "unreinforced_survived": 28,
+    "unreinforced_survival_rate": 0.18666666666666668,
+    "mean_survivor_timestamp": 167.48
   },
   {
     "retention_boost": 4.0,
     "reinforced_total": 50,
-    "reinforced_survived": 33,
-    "reinforced_survival_rate": 0.66,
+    "reinforced_survived": 29,
+    "reinforced_survival_rate": 0.58,
     "unreinforced_total": 150,
-    "unreinforced_survived": 17,
-    "unreinforced_survival_rate": 0.11333333333333333,
-    "mean_survivor_timestamp": 151.26
+    "unreinforced_survived": 21,
+    "unreinforced_survival_rate": 0.14,
+    "mean_survivor_timestamp": 157.94
   }
 ]

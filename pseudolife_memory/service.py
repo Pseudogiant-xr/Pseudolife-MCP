@@ -330,8 +330,11 @@ class MemoryService:
         config.memory.recency_base_half_life_s = 86400.0
         # Graded MTT retention ON for the daemon (provenance-as-link Phase 2): a
         # reinforced episode resists eviction by retention_boost*log1p(reinforcements).
-        # 1.0 is the tuning bench's knee (protection at ~no recency cost). The library
-        # default stays 0.0 (no-op) — this is a deployment-build choice.
+        # 1.0 is the largest boost with ~no recency displacement — the honest
+        # retention_bench knee (P1.6, evals/retention_bench.py). Most reinforced-entry
+        # protection already comes from access-coupling (reinforcing bumps access_count);
+        # 1.0 is a modest free nudge on top, higher values trade recency for more. The
+        # library default stays 0.0 (no-op) — this is a deployment-build choice.
         config.memory.traces.retention_boost = 1.0
 
     def _ensure_init(self) -> None:
