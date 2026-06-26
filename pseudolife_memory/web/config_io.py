@@ -121,7 +121,7 @@ KNOBS: list[dict[str, Any]] = [
      "max": 1000, "step": 1, "restart": False,
      "help": "Unconsolidated entries required before a dream fires."},
     {"path": "memory.dream.idle_seconds", "group": "Dream",
-     "label": "Quiescence (s)", "type": "float", "default": 1800.0,
+     "label": "Quiescence (s)", "type": "float", "default": 600.0,
      "min": 0.0, "max": 86400.0, "step": 60.0, "restart": False,
      "help": "Idle time required before a dream fires."},
     {"path": "memory.dream.max_batch", "group": "Dream",

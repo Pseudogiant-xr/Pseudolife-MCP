@@ -129,7 +129,7 @@ function continuumPanel(stats) {
 
 function dreamPanel(dream, cfg, ctx) {
   const minBatch = knob(cfg, "memory.dream.min_batch") ?? 8;
-  const idleThresh = knob(cfg, "memory.dream.idle_seconds") ?? 1800;
+  const idleThresh = knob(cfg, "memory.dream.idle_seconds") ?? 600;
   const backlog = dream.backlog ?? 0;
   const idle = dream.idle_seconds ?? 0;
   const fire = !!dream.would_fire;

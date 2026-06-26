@@ -281,9 +281,12 @@ class DreamConfig:
     exclude_sources: list[str] = field(
         default_factory=lambda: ["consolidation", "reflection", "status", "log"]
     )
-    # Backlog + quiescence trigger (consumed by dream_status / future sweep).
+    # Backlog + quiescence trigger (consumed by dream_status + the daemon sweep).
+    # idle_seconds is deliberately short-ish: consolidate ~10 min after the user
+    # goes quiet, but NEVER mid-session (any store resets idle) — see
+    # docs/specs/2026-06-26-dream-cadence-design.md.
     min_batch: int = 8
-    idle_seconds: float = 1800.0
+    idle_seconds: float = 600.0
     max_batch: int = 40
     sweep_interval_seconds: float = 600.0   # used by the Phase 3 daemon sweep
     # Tier 2 (Phase 3) — BYO OpenAI-compatible extractor. Unused in Phases 1–2.
