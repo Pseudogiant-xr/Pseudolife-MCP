@@ -2428,6 +2428,24 @@ class MemoryService:
             ok = self._storage.delete_entity(e["id"])
         return {"deleted": ok, "entity": e["display"]}
 
+    def graph_merge(self, from_entity: str, into_entity: str) -> dict[str, Any]:
+        """Fold ``from_entity`` into ``into_entity``: re-point edges/facts/lessons,
+        carry aliases + sources, then delete ``from`` (CASCADE clears leftovers)."""
+        from pseudolife_memory import graph as G
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return dict(self._GRAPH_UNAVAILABLE)
+            a = self._storage.find_entity(G.norm_name(from_entity))
+            b = self._storage.find_entity(G.norm_name(into_entity))
+            if a is None or b is None:
+                return {"merged": False, "reason": "unknown_entity",
+                        "from": from_entity, "into": into_entity}
+            if a["id"] == b["id"]:
+                return {"merged": False, "reason": "same_entity", "into": b["display"]}
+            ok = self._storage.merge_entity(a["id"], b["id"])
+        return {"merged": ok, "from": a["display"], "into": b["display"]}
+
     def graph_review(self, scope: str | None = None) -> dict[str, Any]:
         from pseudolife_memory.memory import graph_review as gr
         with self._lock:

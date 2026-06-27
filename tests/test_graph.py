@@ -557,6 +557,26 @@ def test_graph_delete_entity_removes_node_and_edges(svc):
     assert all(e["src_id"] != eid and e["dst_id"] != eid for e in st.load_graph()["edges"])
 
 
+def test_graph_merge_folds_from_into(svc):
+    from pseudolife_memory import graph as G
+    st = svc._storage
+    # `mg-from` and `mg-into` are the same thing stored twice; each has a distinct edge.
+    svc.graph_relate("mg-from", "uses", "mg-dep")
+    svc.graph_relate("mg-into", "stores-data-in", "mg-store")
+    into_id = st.find_entity(G.norm_name("mg-into"))["id"]
+
+    res = svc.graph_merge("mg-from", "mg-into")
+    assert res["merged"] is True
+    assert st.find_entity(G.norm_name("mg-from"))["id"] == into_id   # alias now resolves to into
+    # into absorbed from's edge: an edge from `mg-into` to `mg-dep` now exists
+    edges = st.load_graph()["edges"]
+    assert any(e["src_id"] == into_id for e in edges)
+    disp = {e["id"]: e["display"] for e in st.load_graph()["entities"]}
+    pairs = {(disp.get(e["src_id"]), e["relation"], disp.get(e["dst_id"])) for e in edges}
+    assert ("mg-into", "uses", "mg-dep") in pairs
+    assert ("mg-into", "stores-data-in", "mg-store") in pairs
+
+
 def test_seedless_scoped_whole_graph(svc):
     import time as _t
     svc._ensure_init()  # noqa: SLF001

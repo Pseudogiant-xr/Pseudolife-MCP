@@ -570,6 +570,49 @@ class PostgresStorage:
         self.conn.commit()
         return row is not None
 
+    def merge_entity(self, from_id: int, into_id: int) -> bool:
+        """Fold `from` into `into`: drop edges that would duplicate or self-loop,
+        re-point the rest, re-point fact/lesson refs, carry aliases + sources,
+        then delete `from` (CASCADE clears its leftovers). edges UNIQUE
+        (src,rel,dst) forces the dedup-before-repoint order."""
+        if from_id == into_id:
+            return False
+        c = self.conn
+        # 1a. drop from-edges that already exist on `into` (src side / dst side)
+        c.execute("DELETE FROM edges f WHERE f.src_id = %s AND EXISTS ("
+                  "SELECT 1 FROM edges t WHERE t.src_id = %s AND t.relation = f.relation "
+                  "AND t.dst_id = f.dst_id)", (from_id, into_id))
+        c.execute("DELETE FROM edges f WHERE f.dst_id = %s AND EXISTS ("
+                  "SELECT 1 FROM edges t WHERE t.dst_id = %s AND t.relation = f.relation "
+                  "AND t.src_id = f.src_id)", (from_id, into_id))
+        # 1b. drop edges that would become self-loops (from<->into)
+        c.execute("DELETE FROM edges WHERE (src_id = %s AND dst_id = %s) "
+                  "OR (src_id = %s AND dst_id = %s)",
+                  (from_id, into_id, into_id, from_id))
+        # 1c. re-point
+        c.execute("UPDATE edges SET src_id = %s WHERE src_id = %s", (into_id, from_id))
+        c.execute("UPDATE edges SET dst_id = %s WHERE dst_id = %s", (into_id, from_id))
+        # 2. fact/lesson refs
+        for tbl in ("facts", "lessons"):
+            c.execute(f"UPDATE {tbl} SET entity_id = %s WHERE entity_id = %s", (into_id, from_id))
+            c.execute(f"UPDATE {tbl} SET object_entity_id = %s WHERE object_entity_id = %s", (into_id, from_id))
+        # 3. aliases: from's canonical + its aliases become into's aliases
+        frm = c.execute("SELECT canonical FROM entities WHERE id = %s", (from_id,)).fetchone()
+        if frm:
+            c.execute("INSERT INTO entity_aliases (alias, entity_id) VALUES (%s, %s) "
+                      "ON CONFLICT (alias) DO NOTHING", (frm[0], into_id))
+        c.execute("UPDATE entity_aliases SET entity_id = %s WHERE entity_id = %s "
+                  "AND alias NOT IN (SELECT alias FROM entity_aliases WHERE entity_id = %s)",
+                  (into_id, from_id, into_id))
+        # 4. sources: carry from's sources onto into (keep existing)
+        c.execute("INSERT INTO entity_sources (entity_id, source, count, origin, updated_at) "
+                  "SELECT %s, source, count, origin, updated_at FROM entity_sources WHERE entity_id = %s "
+                  "ON CONFLICT (entity_id, source) DO NOTHING", (into_id, from_id))
+        # 5. delete `from` (CASCADE removes its leftover aliases/sources/community/edges)
+        c.execute("DELETE FROM entities WHERE id = %s", (from_id,))
+        c.commit()
+        return True
+
     def entity_id_map(self) -> dict[str, int]:
         """Every normalized name (canonical + alias) → entity id. Used to
         link fact rows on cortex snapshot; canonical wins on collision."""

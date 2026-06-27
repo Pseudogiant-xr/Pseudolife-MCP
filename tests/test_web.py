@@ -167,6 +167,12 @@ def test_delete_entity_route(svc):
     assert out["deleted"] is True
 
 
+def test_merge_route(svc):
+    r = ConsoleRoutes(svc)
+    out = r.dispatch("POST", "/api/graph/merge", {}, {"from": "dup", "into": "canonical"})
+    assert out["merged"] is True and out["into"] == "canonical"
+
+
 def test_routes_has(svc):
     r = ConsoleRoutes(svc)
     assert r.has("/api/facts")
