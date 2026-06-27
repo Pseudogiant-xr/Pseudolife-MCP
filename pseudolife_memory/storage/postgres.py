@@ -212,13 +212,16 @@ class PostgresStorage:
         self.conn.execute(
             """
             INSERT INTO episodes (id, title, hint, started_at, ended_at,
-                                  closed_by_new_start)
+                                  closed_by_new_start, session_key)
             VALUES (%(id)s, %(title)s, %(hint)s, %(started_at)s,
-                    %(ended_at)s, %(closed_by_new_start)s)
+                    %(ended_at)s, %(closed_by_new_start)s, %(session_key)s)
             ON CONFLICT (id) DO UPDATE SET
-              title = EXCLUDED.title, hint = EXCLUDED.hint,
-              started_at = EXCLUDED.started_at, ended_at = EXCLUDED.ended_at,
-              closed_by_new_start = EXCLUDED.closed_by_new_start
+              title = EXCLUDED.title,
+              hint = EXCLUDED.hint,
+              started_at = EXCLUDED.started_at,
+              ended_at = EXCLUDED.ended_at,
+              closed_by_new_start = EXCLUDED.closed_by_new_start,
+              session_key = EXCLUDED.session_key
             """,
             ep,
         )
@@ -226,7 +229,7 @@ class PostgresStorage:
 
     def load_episodes(self) -> list[dict]:
         cols = ("id", "title", "hint", "started_at", "ended_at",
-                "closed_by_new_start")
+                "closed_by_new_start", "session_key")
         rows = self.conn.execute(
             f"SELECT {', '.join(cols)} FROM episodes ORDER BY started_at",
         ).fetchall()
