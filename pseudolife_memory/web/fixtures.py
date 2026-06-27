@@ -399,6 +399,12 @@ class FixtureService:
              "label": "3 entities with no project", "entities": ["a", "b", "c"]},
         ], "counts": {"total": 4}}
 
+    def graph_assign_scope(self, entity, source):
+        return {"assigned": True, "entity": entity, "source": source}
+
+    def graph_unrelate(self, src, relation, dst):
+        return {"removed": True, "src": src, "relation": relation, "dst": dst}
+
     # engram traces / retention
     def get_entry(self, entry_id):
         return {"found": True, "entry_id": int(entry_id),

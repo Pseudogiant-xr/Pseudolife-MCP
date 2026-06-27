@@ -462,6 +462,16 @@ def test_memory_traces_storage_roundtrip(svc):
     assert any(f["entity"] == "tr-a" for f in st.facts_for_entry(entry_id))
 
 
+def test_graph_assign_scope_writes_manual_source(svc):
+    svc.graph_relate("as-target", "uses", "as-other")   # creates the entity
+    res = svc.graph_assign_scope("as-target", "as-proj")
+    assert res["assigned"] is True
+    st = svc._storage  # noqa: SLF001
+    eid = st.find_entity(G.norm_name("as-target"))["id"]
+    rows = {r["source"]: r["origin"] for r in st.sources_for_entity(eid)}
+    assert rows["as-proj"] == "manual"
+
+
 def test_backfill_entity_sources_from_traces(svc):
     import time as _t
     from pseudolife_memory.memory.cortex import _norm_key

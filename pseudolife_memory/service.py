@@ -2377,6 +2377,20 @@ class MemoryService:
                 "warnings": warnings,
             }
 
+    def graph_assign_scope(self, entity: str, source: str) -> dict[str, Any]:
+        """Assign a project/source scope to an entity via manual entity_sources entry."""
+        from pseudolife_memory import graph as G
+        import time as _time
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return dict(self._GRAPH_UNAVAILABLE)
+            e = self._storage.find_entity(G.norm_name(entity))
+            if e is None:
+                return {"assigned": False, "reason": "unknown_entity", "entity": entity}
+            self._storage.upsert_entity_source(e["id"], source, "manual", _time.time())
+        return {"assigned": True, "entity": e["display"], "source": source}
+
     def graph_unrelate(self, src: str, relation: str, dst: str) -> dict[str, Any]:
         """Mark an edge superseded (kept for audit, hidden from queries)."""
         from pseudolife_memory import graph as G

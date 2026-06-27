@@ -153,6 +153,14 @@ def test_graph_review_route(svc):
     assert any(f["action"] == "merge" for f in out["findings"])
 
 
+def test_assign_scope_and_unrelate_routes(svc):
+    r = ConsoleRoutes(svc)
+    a = r.dispatch("POST", "/api/graph/assign-scope", {}, {"entity": "x", "source": "p"})
+    assert a["assigned"] is True
+    u = r.dispatch("POST", "/api/graph/unrelate", {}, {"src": "a", "relation": "uses", "dst": "b"})
+    assert u["removed"] is True
+
+
 def test_routes_has(svc):
     r = ConsoleRoutes(svc)
     assert r.has("/api/facts")

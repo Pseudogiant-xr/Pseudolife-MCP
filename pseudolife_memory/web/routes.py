@@ -167,6 +167,8 @@ class ConsoleRoutes:
         g("/api/graph/path", lambda q, b: svc.graph_path(
             _s(q, "source"), _s(q, "target"), max_hops=_i(q, "max_hops", 8)))
         g("/api/graph/review", lambda q, b: svc.graph_review(scope=_s(q, "scope")))
+        p("/api/graph/assign-scope", lambda q, b: svc.graph_assign_scope(b["entity"], b["source"]))
+        p("/api/graph/unrelate", lambda q, b: svc.graph_unrelate(b["src"], b["relation"], b["dst"]))
 
         # ---- dream / consolidation ----
         g("/api/dream/status", lambda q, b: svc.dream_status())
