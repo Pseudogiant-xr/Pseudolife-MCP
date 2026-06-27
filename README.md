@@ -53,8 +53,8 @@ each session.
 | `memory_list_tags()` | Enumerate every multi-valued tag in the bank with occurrence counts |
 | `memory_supersede(old_text, new_text)` | Explicit correction — mark old fact obsolete |
 | `memory_delete(text?, substring?, source?, episode?, tag?)` | Remove memories matching any filter (hygiene) |
-| `memory_episode_start(title, hint?)` | Open a bracketed working session — entries stored while open carry the episode id |
-| `memory_episode_end()` | Close the currently-open episode |
+| `memory_episode_start(title, hint?)` | Open a NESTED sub-episode under the open session episode (session episodes are opened/closed for you by the SessionStart/SessionEnd hooks) — entries stored while open carry the episode id; a session-scoped search expands to the whole subtree |
+| `memory_episode_end()` | Close the current (leaf) episode and pop back to its parent |
 | `memory_episode_list(limit?, include_open?)` | List episodes newest-first with per-episode entry counts |
 | `memory_episode_summary(id)` | Stats + tag/source distribution + recent entries within an episode |
 | `memory_consolidation_candidates(query?, episode?, top_k?, min_cohesion?, ...)` | Cluster mutually-similar memories ripe for consolidation |
@@ -339,69 +339,89 @@ Postgres itself stays loopback-only — the LAN only ever sees the daemon.
 
 ## Recommended agent setup (CLAUDE.md)
 
-The server's value depends entirely on the agent *using* it well — pulling
-context at task start and writing durable facts as they arise. Encode that as a
-standing instruction so it fires every session: add a block like the following to
-your `CLAUDE.md` (Claude Code), `AGENTS.md`, or the equivalent for your agent.
+The server's value depends entirely on the agent *using* it well. Encode the loop
+as a standing instruction so it fires every session — add a block like the
+following to your `CLAUDE.md` (Claude Code), `AGENTS.md`, or the equivalent. Treat
+memory as **RECALL at the start, CAPTURE as you go, REFLECT at the end** (session
+episodes open/close for you via the lifecycle hooks above):
 
 ```markdown
-## Memory — use it every session
-A persistent memory server is enabled (tools: `mcp__pseudolife-memory__*`).
-
-- **At task start**, call `memory_search` with a natural-language description of
-  the work to pull prior context, decisions, and gotchas. For "what is X now?",
-  `memory_fact_get(entity, attribute)` returns the one current canonical value.
-- **As durable things arise**, `memory_store` them (user preferences, decisions,
-  outcomes, corrections). One claim per call; set `origin` honestly
-  (`user`/`action`/`agent`); use a stable `source`/`tags` per project.
-- **For canonical single-value facts**, use `memory_fact_set`; correct a fact by
-  setting a new value at the same slot (the old one is kept for audit).
-- **Store dense detail freely, but route it.** Full memory text stays searchable,
-  but the dream also mines it into facts + graph edges — so verbose status under a
-  *normal* source pollutes the graph. Put dense status/logs under `source="status"`
-  (excluded from extraction by default: searchable, no pollution); reserve
-  `memory_fact_set` / `memory_graph_relate` for terse canonical facts and real
-  relations.
+## Memory — use it every session (tools: `mcp__pseudolife-memory__*`)
+RECALL at task start:
+- `memory_search(<task>)` for prior context/decisions/gotchas;
+  `memory_lesson_search(<task>)` for what worked / what to avoid (heed `polarity:-`);
+  `memory_fact_get(entity, attribute)` for one canonical value;
+  `memory_world_search(<topic>)` when an external fact may be stale.
+CAPTURE as durable things arise (one claim per call):
+- `memory_store` for durable context (set `origin`: user/action/agent);
+  `memory_fact_set` for a canonical single-value fact (correct by re-setting the slot);
+  `memory_world_set(..., source_url=, source_quote=)` for a verified EXTERNAL fact (cite it);
+  open a named sub-episode with `memory_episode_start` for a big multi-step task.
+  Route verbose status/logs under `source="status"` (searchable, but excluded from
+  the dream so they don't pollute the graph).
+REFLECT at task end / when an outcome lands:
+- `memory_outcome(task, outcome, about=, detail=)` for a success / dead-end / correction —
+  the dream distils these into the lessons surfaced at your next session start.
 ```
 
 The `dream` pass periodically distils stored memories into canonical facts and a
 knowledge graph; `memory_digest` / `memory_communities` then surface the graph's
 shape (hubs, communities, surprising links, questions worth answering).
 
-### Session-start briefing (optional hook)
+### Session lifecycle hooks (recommended)
 
-`pseudolife-mcp briefing` prints a compact block — **what your memory is unsure
-about** (surprising graph links + open questions) and **lessons from past work**
-(avoid / prefer). Wire it to a Claude Code **SessionStart hook** so every session
-opens with it. One command (PowerShell 7):
+Two things wire to Claude Code's session lifecycle so the memory loop runs
+reliably — without the agent having to remember:
+
+1. **SessionStart briefing.** `pseudolife-mcp briefing` prints a compact block:
+   **what your memory is unsure about** (surprising graph links + open
+   questions), **lessons from past work** (avoid / prefer), **verified world
+   facts** (fresh, cited, age-ranked), and **where we left off** (a one-line
+   recap of your last closed session). Empty sections are omitted, so a cold
+   bank injects nothing.
+2. **Episode lifecycle.** `pseudolife-mcp episode-start` (SessionStart) opens a
+   session episode and `pseudolife-mcp episode-end` (SessionEnd) closes it — so
+   every memory you store is auto-stamped to the session, and closing fires a
+   background dream that distils the session's outcome signals into lessons for
+   next time. Both are keyed by the client session id, so resume / compact
+   re-fires don't double-open.
+
+One command installs all of it (PowerShell 7):
 
 ```powershell
 .\ops\install-hook.ps1
 ```
 
-It backs up your `settings.json`, then adds the briefing **alongside** any
-existing SessionStart hooks (idempotent — safe to re-run). Requires
-`pseudolife-mcp` on PATH — `pip install -e .` in the repo puts it there.
+It backs up your `settings.json`, then adds each hook **alongside** any existing
+ones (idempotent per-hook — safe to re-run; it installs only what's missing).
+Requires `pseudolife-mcp` on PATH — `pip install -e .` in the repo puts it there.
 
-Prefer to wire it by hand? Add this to `settings.json` — the `--hook-json` flag
-emits the `hookSpecificOutput.additionalContext` payload Claude Code injects:
+Prefer to wire it by hand? The briefing's `--hook-json` flag emits the
+`hookSpecificOutput.additionalContext` payload Claude Code injects:
 
 ```json
 {
   "hooks": {
     "SessionStart": [
       { "hooks": [
-        { "type": "command", "command": "pseudolife-mcp briefing --hook-json", "shell": "bash" }
+        { "type": "command", "command": "pseudolife-mcp briefing --hook-json", "shell": "bash" },
+        { "type": "command", "command": "pseudolife-mcp episode-start", "shell": "bash" }
+      ] }
+    ],
+    "SessionEnd": [
+      { "hooks": [
+        { "type": "command", "command": "pseudolife-mcp episode-end", "shell": "bash" }
       ] }
     ]
   }
 }
 ```
 
-It connects to the *already-running* daemon (never starts one) and prints nothing
-if the daemon is down or the bank is still cold — it can't slow or break session
-start. Tune the budget with `--max-unsure N` / `--max-lessons N` (default 3 / 3).
-The same content is available on demand via the `memory_briefing` tool.
+All three connect to the *already-running* daemon (never start one) and do
+nothing if the daemon is down — they can't slow or break session start/stop.
+Tune the briefing budget with `--max-unsure N` / `--max-lessons N` /
+`--max-world N` (default 3 each). The briefing content is also available on
+demand via the `memory_briefing` tool.
 
 ## Configuration
 
@@ -409,7 +429,7 @@ Connection / deployment env vars:
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v13). Unset → v0.1 file-only mode. |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v15). Unset → v0.1 file-only mode. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). |
 | `PSEUDOLIFE_MCP_HOST` / `_PORT` | `127.0.0.1` / `8765` | Daemon bind address. |
 | `PSEUDOLIFE_MCP_TOKEN` | _(unset)_ | Bearer token; **required** to bind a non-loopback host. |
@@ -613,25 +633,31 @@ rebuild per query, ≈ 20-50ms on a 40K-entry bank.
 `memory_search(..., bm25=True, explain=True)` records per-hit `raw_bm25`,
 `normalized`, and any BM25-only injections under `trace.bm25`.
 
-**Episodes + tags (Tier C, schema v6):**
+**Episodes + tags (Tier C):**
 
-An *episode* is a bracketed working session. While an episode is open,
-every memory stored carries the episode's id + title automatically, so
-later queries can scope by session:
+An *episode* is a bracketed working session. While an episode is open, every
+memory stored carries the episode's id + title automatically, so later queries
+can scope by session. **Session episodes open and close for you** via the
+SessionStart / SessionEnd hooks (see *Session lifecycle hooks* above), keyed by
+the client session id so resume / compact don't double-open. For a substantial
+multi-step task you open a **nested sub-episode** under the session:
 
 ```
-memory_episode_start("Tier C implementation work")
+memory_episode_start("auth refactor")            # nests under the open session
 memory_store("Decided to keep tags orthogonal to source instead of merging them")
-memory_search("design choices", episodes=[episode_id])
-memory_episode_summary(episode_id)   # stats + tag distribution + recent entries
-memory_episode_end()
+memory_episode_end()                             # pops back to the session
+memory_search("design choices", episodes=[session_id])  # expands to the subtree
+memory_episode_summary(session_id)               # stats + tag distribution + recent entries
 ```
 
-Starting a new episode while one is already open auto-closes the prior
-one (with a `closed_by_new_start=True` flag for telemetry) — Claude
-isn't required to reliably call `memory_episode_end`. Episodes
-persist alongside CMS state in `cms_state.pt` under the `episodes`
-key. Pre-v6 saves load cleanly with an empty episode log.
+Episodes **nest** (schema v15): `memory_episode_start` opens a child under the
+current open episode — the parent stays open — `memory_episode_end` pops back to
+it, and closing the session cascade-closes any still-open children. A
+session-scoped `memory_search(episodes=[root_id])` expands to the whole subtree,
+so a sub-episode's entries surface under their parent session too. (Calling
+`memory_episode_start` with nothing open simply opens a root.) In Postgres mode
+episodes live in the `episodes` table (`session_key` + `parent_id` columns); in
+file mode they ride `cms_state.pt` under the `episodes` key.
 
 Tags are a parallel multi-valued axis to `source`: pass
 `tags=["decision", "blocker"]` on store, filter with
@@ -792,9 +818,9 @@ graph edges power structured traversal.
 > Single-writer: `memory_outcome` only ever logs a signal — the dream's LLM
 > extractor is the sole writer of lessons. With no extractor configured, signals
 > accumulate (pruned by retention) and no lessons are synthesised, exactly as the
-> cortex behaves without an extractor. An auto-injected "lessons from past work"
-> prompt block is a provider/client concern, like the world-knowledge block — not
-> part of the standalone server.
+> cortex behaves without an extractor. The synthesised lessons are **auto-injected
+> at session start** by the `pseudolife-mcp briefing` SessionStart hook (the
+> "lessons from past work" block) — see *Session lifecycle hooks*.
 
 ### Sense of time + multi-writer attribution (schema v11)
 
@@ -965,7 +991,7 @@ pip install -e .[dev]
 pytest tests/ -v
 ```
 
-514 tests cover the MemoryService methods (store / search / recent /
+547 tests cover the MemoryService methods (store / search / recent /
 supersede / stats / save / trace / list_sources / list_tags / delete),
 the `memory_search` scoring overrides, the cross-encoder reranker
 (15 unit + 4 integration), the BM25 hybrid lexical pool
@@ -1009,14 +1035,17 @@ graph-foundation suites add the swappable `GraphStore` contract + graph-from-tex
 dream extraction, the graph-insight layer (communities / digest / god-nodes),
 multi-hop `memory_recall` + hub-gating, the provenance-as-link engram
 (`memory_traces`, `memory_get` / `memory_reinforce`) + reinforcement-weighted
-retention, and the Cortex Console web API.
+retention, and the Cortex Console web API. The memory-lifecycle-utilization
+suites add session-keyed episode open/close idempotency, episode nesting
+(`start_nested` / `end` pop / `end_session` cascade), subtree-expanded recall, the
+world-facts + last-session-recap briefing surfaces, and the torch-free episode CLI.
 
 The PG-backed suites target a throwaway `pseudolife_memory_test` database on
 the bundled dev container (`ops/docker-compose.yml`, port 5433) — created on
 first run and reset per-test, so the whole suite is green on repeat runs and
 never touches your real bank. Point them elsewhere with
 `PSEUDOLIFE_TEST_DATABASE_URL`. With the container up, `pytest tests/` runs all
-514; without any Postgres, the PG suites skip and the pure-logic suites still
+547; without any Postgres, the PG suites skip and the pure-logic suites still
 pass.
 
 ## Cortex Console (web UI)
@@ -1066,13 +1095,14 @@ python -m pseudolife_memory.web.devserver   # http://127.0.0.1:8770/ui/
 | World cortex | `memory_world_*` — cited external facts + age-decayed freshness (manual ingest) |
 | Procedural memory | `memory_outcome` (signals) → dream-synthesised `memory_lessons`/`memory_lesson_search`; `prefers`/`avoids` graph edges; single-writer |
 | Sense of time + multi-writer | Per-write stamp (tx/valid time, HLC ordering, writer/session); `memory_history`; relative `age` on reads; `write_mode` seam (snapshot live, occ Phase-2) |
-| Episodes + tags | `memory_episode_*`; multi-valued `tags=[...]` on store/search/delete |
+| Episodes + tags | Session episodes auto-managed by SessionStart/SessionEnd hooks; nested sub-episodes (`memory_episode_*`, schema v15) with subtree-expanded recall; multi-valued `tags=[...]` |
+| Session briefing | SessionStart hook injects unsure-graph + lessons + verified world facts + last-session recap (`pseudolife-mcp briefing`) |
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
 | Cross-encoder reranker | Optional (`rerank=True` per call, ~80 MB) |
 | BM25 hybrid pool | Optional (`bm25=True` per call, stdlib only) |
 | NLI contradiction scorer | Optional (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, graph visualiser, search/trace, config editor (read-mostly, token-gated like `/mcp`) |
-| Schema version | v13 (Postgres meta version) — v11 temporal/provenance stamp, v12 graph-insight communities, v13 provenance-trace engram + reinforcements; legacy file-mode `.pt` banks auto-migrate into Postgres |
+| Schema version | v15 (Postgres meta version) — v11 temporal/provenance stamp, v12 graph-insight communities, v13 provenance-trace engram + reinforcements, v14 episode `session_key`, v15 episode `parent_id` (nesting); additive `ADD COLUMN IF NOT EXISTS` on daemon start; legacy file-mode `.pt` banks auto-migrate into Postgres |
 
 ## What's not built yet
 
@@ -1088,16 +1118,12 @@ python -m pseudolife_memory.web.devserver   # http://127.0.0.1:8770/ui/
 - **Hierarchical summarisation** — periodic auto-summaries at multiple
   time scales (daily, weekly). Mostly subsumed by Tier C's episode +
   consolidation flow; what's left is the *cadence* automation.
-- **Automated world-knowledge ingestion** — the world cortex stores and serves
-  cited external facts, but populating it from the live web (`research_ingest`)
-  needs a web-fetch tool the standalone server doesn't ship. Today, assert world
-  facts manually with `memory_world_set`; an agent with web access can
-  automate it.
-- **Lessons auto-injection** — the lessons store, tools, and `prefers`/`avoids`
-  edges ship here; the auto-injected "lessons from past work" prompt block is a
-  provider/client concern (like the world-knowledge block), still a deferred
-  follow-on. (A human-facing graph visualiser now ships in the
-  [Cortex Console](#cortex-console-web-ui).)
+- **Automated world-knowledge *ingestion*** — the world cortex stores and serves
+  cited external facts, and the SessionStart briefing now surfaces them (the
+  *verified world facts* block), but *populating* it from the live web
+  (`research_ingest`) still needs a web-fetch tool the standalone server doesn't
+  ship. Today, assert world facts with `memory_world_set` (an agent with web
+  access can automate the fetch+cite step); the read surface is already in place.
 
 ## License
 
