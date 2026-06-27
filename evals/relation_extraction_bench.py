@@ -104,3 +104,64 @@ def alias_index(entities: dict[str, dict]) -> dict[str, str]:
 
 def resolve(name: str, idx: dict[str, str]) -> str | None:
     return idx.get(norm_name(name))
+
+
+def _f1(p: float, r: float) -> float:
+    return round(2 * p * r / (p + r), 3) if (p + r) else 0.0
+
+
+def score(predicted: list[list[tuple]], corpus: list[dict] = CORPUS,
+          entities: dict[str, dict] = ENTITIES) -> dict:
+    idx = alias_index(entities)
+    tp = fp = fn = 0
+    total_pred = related_to = 0
+    struct_pred = struct_violation = 0
+    null_edges = halluc = 0
+    naming: dict[str, set] = {}          # canonical -> distinct normalized surfaces
+
+    for note, preds in zip(corpus, predicted):
+        gold = {(s, r, d) for (s, r, d) in note["edges"]}
+        matched: set = set()
+        is_null = not note["edges"]
+        note_norm = norm_name(note["text"])
+        for (s, r, d) in preds:
+            total_pred += 1
+            if is_null:
+                null_edges += 1
+            if r == "related-to":
+                related_to += 1
+            cs, cd = resolve(s, idx), resolve(d, idx)
+            for raw, canon in ((s, cs), (d, cd)):
+                if canon is not None:
+                    naming.setdefault(canon, set()).add(norm_name(raw))
+                elif norm_name(raw) not in note_norm:
+                    halluc += 1
+            if r in RELATION_CONSTRAINTS and cs and cd:
+                struct_pred += 1
+                src_ok, dst_ok = RELATION_CONSTRAINTS[r]
+                if entities[cs]["type"] not in src_ok or entities[cd]["type"] not in dst_ok:
+                    struct_violation += 1
+            triple = (cs, r, cd)
+            if cs and cd and triple in gold and triple not in matched:
+                tp += 1
+                matched.add(triple)
+            else:
+                fp += 1
+        fn += len(gold) - len(matched)
+
+    precision = round(tp / (tp + fp), 3) if (tp + fp) else 0.0
+    recall = round(tp / (tp + fn), 3) if (tp + fn) else 0.0
+    naming_consistency = (round(sum(len(v) for v in naming.values()) / len(naming), 3)
+                          if naming else 1.0)
+    n_notes = len(corpus) or 1
+    return {
+        "edge_precision": precision,
+        "edge_recall": recall,
+        "edge_f1": _f1(precision, recall),
+        "naming_consistency": naming_consistency,
+        "type_violation_rate": round(struct_violation / struct_pred, 3) if struct_pred else 0.0,
+        "related_to_share": round(related_to / total_pred, 3) if total_pred else 0.0,
+        "over_extraction_null_edges": null_edges,
+        "over_extraction_halluc": halluc,
+        "edges_per_note": round(total_pred / n_notes, 2),
+    }

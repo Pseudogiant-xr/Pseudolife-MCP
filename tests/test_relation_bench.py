@@ -49,3 +49,43 @@ def test_resolve_is_alias_aware():
     assert rb.resolve("the daemon", idx) == "pseudolife-daemon"
     assert rb.resolve("PG", idx) == "postgres"
     assert rb.resolve("nonexistent thing", idx) is None
+
+
+def test_perfect_extraction_scores_one():
+    corpus = [{"text": "the daemon runs in docker",
+               "edges": [("pseudolife-daemon", "runs-on", "docker-desktop")]}]
+    pred = [[("pseudolife-daemon", "runs-on", "docker-desktop")]]
+    m = rb.score(pred, corpus, rb.ENTITIES)
+    assert m["edge_f1"] == 1.0
+    assert m["type_violation_rate"] == 0.0
+    assert m["over_extraction_null_edges"] == 0
+    assert m["naming_consistency"] == 1.0
+
+
+def test_type_violation_and_null_spurious_counted():
+    corpus = [{"text": "the user is on windows 11", "edges": []}]
+    pred = [[("the user", "runs-on", "windows 11")]]
+    m = rb.score(pred, corpus, rb.ENTITIES)
+    assert m["type_violation_rate"] == 1.0           # person can't be runs-on src
+    assert m["over_extraction_null_edges"] == 1       # edge on a gold-[] note
+    assert m["edge_precision"] == 0.0                 # it's a false positive
+
+
+def test_naming_fragmentation_measured():
+    corpus = [{"text": "the daemon writes to postgres",
+               "edges": [("pseudolife-daemon", "stores-data-in", "postgres")]},
+              {"text": "the daemon writes to pg",
+               "edges": [("pseudolife-daemon", "stores-data-in", "postgres")]}]
+    pred = [[("pseudolife-daemon", "stores-data-in", "postgres")],
+            [("pseudolife-daemon", "stores-data-in", "pg")]]
+    m = rb.score(pred, corpus, rb.ENTITIES)
+    # postgres seen as 2 surface forms, daemon as 1 -> mean 1.5
+    assert m["naming_consistency"] == 1.5
+    assert m["edge_f1"] == 1.0  # both still resolve to canonical postgres
+
+
+def test_related_to_share():
+    corpus = [{"text": "a and b are connected", "edges": []}]
+    pred = [[("pseudolife-daemon", "related-to", "postgres")]]
+    m = rb.score(pred, corpus, rb.ENTITIES)
+    assert m["related_to_share"] == 1.0
