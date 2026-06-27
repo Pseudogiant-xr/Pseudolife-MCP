@@ -1849,6 +1849,7 @@ class MemoryService:
             "ended_at": ep.ended_at,
             "hint": ep.hint,
             "closed_by_new_start": ep.closed_by_new_start,
+            "session_key": getattr(ep, "session_key", None),
         }
 
     def episode_start(
@@ -1875,6 +1876,65 @@ class MemoryService:
             closed = self._cms.episodes.end()
             self._persist_episodes()
             return self._episode_to_dict(closed) if closed is not None else {}
+
+    def episode_start_session(
+        self, session_key: str | None, title: str, hint: str | None = None,
+    ) -> dict[str, Any]:
+        """Idempotent open for a hook-driven session episode.
+
+        If an episode is already open with the same ``session_key`` (a
+        resume/compact re-fire of SessionStart), return it unchanged.
+        Otherwise open a new one stamped with the key (auto-closing any
+        stale prior open episode, as ``start`` always has).
+        """
+        with self._lock:
+            self._ensure_init()
+            assert self._cms is not None
+            em = self._cms.episodes
+            cur = em.open_episode()
+            if (session_key is not None and cur is not None
+                    and cur.session_key == session_key):
+                return self._episode_to_dict(cur)
+            ep = em.start(title=title, hint=hint, session_key=session_key)
+            self._persist_episodes()
+            return self._episode_to_dict(ep)
+
+    def episode_end_session(
+        self, session_key: str | None, run_dream: bool = True,
+    ) -> dict[str, Any]:
+        """Close the open episode only if its ``session_key`` matches; then
+        (optionally) fire a background dream so the session's outcome signals
+        become lessons by the next session start. Returns the closed episode
+        dict, or ``{}`` when nothing matching was open."""
+        with self._lock:
+            self._ensure_init()
+            assert self._cms is not None
+            em = self._cms.episodes
+            cur = em.open_episode()
+            if cur is None or (session_key is not None
+                               and cur.session_key != session_key):
+                return {}
+            closed = em.end()
+            self._persist_episodes()
+            result = self._episode_to_dict(closed) if closed is not None else {}
+        if run_dream and result:
+            self._fire_and_forget_dream()
+        return result
+
+    def _fire_and_forget_dream(self) -> None:
+        """Run one dream cycle in a daemon thread so SessionEnd never blocks on
+        the extractor. Errors are logged, never raised."""
+        import threading
+
+        def _run() -> None:
+            try:
+                from pseudolife_memory.memory.dream import build_extractor
+                self.dream_run(build_extractor(self.config.memory.dream))
+            except Exception:  # noqa: BLE001 — background best-effort
+                logger.warning("session-end dream failed", exc_info=True)
+
+        threading.Thread(target=_run, name="session-end-dream",
+                         daemon=True).start()
 
     def _persist_episodes(self) -> None:
         """Write-through the episode log (small; start auto-closes priors,

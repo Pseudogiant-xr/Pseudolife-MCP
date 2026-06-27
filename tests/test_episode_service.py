@@ -12,3 +12,19 @@ def test_episode_session_key_round_trips(pg_conn, pg_url):
     storage.upsert_episode(asdict(ep))           # episode_row(ep) == asdict(ep)
     rows = {r["id"]: r for r in storage.load_episodes()}
     assert rows["e1"]["session_key"] == "sess-xyz"
+
+
+def test_session_start_is_idempotent_per_key(pristine_service):
+    service = pristine_service
+    a = service.episode_start_session("sess-1", "Session A")
+    b = service.episode_start_session("sess-1", "Session A")   # re-fire
+    assert a["id"] == b["id"]                                   # no second episode
+
+
+def test_session_end_matches_key_only(pristine_service):
+    service = pristine_service
+    service.episode_start_session("sess-1", "Session A")
+    assert service.episode_end_session("other", run_dream=False) == {}   # no-op
+    closed = service.episode_end_session("sess-1", run_dream=False)
+    assert closed and closed["ended_at"] is not None
+    assert service.episode_end_session("sess-1", run_dream=False) == {}   # nothing open
