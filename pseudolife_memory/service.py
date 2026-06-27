@@ -610,6 +610,7 @@ class MemoryService:
         with self._lock:
             self._ensure_init()
             assert self._embedder is not None and self._cms is not None
+            episodes = self._episode_subtree(episodes)
             query = (query or "").strip()
             if not query:
                 return {"entries": [], "query": "", "count": 0, "low_confidence": True}
@@ -1838,6 +1839,27 @@ class MemoryService:
     # ------------------------------------------------------------------
     # Tier C — episode lifecycle + tag hygiene
     # ------------------------------------------------------------------
+
+    def _episode_subtree(self, ids: list[str] | None) -> list[str] | None:
+        """Expand each episode id to itself + all descendant episode ids, so a
+        session-scoped query also returns entries from its sub-episodes."""
+        if not ids:
+            return ids
+        assert self._cms is not None
+        all_eps = self._cms.episodes.episodes
+        want = set(ids)
+        # walk parent chains; an episode is in-scope if any ancestor is requested
+        out = set(ids)
+        for ep in all_eps.values():
+            cur = ep
+            seen: set[str] = set()
+            while cur is not None and cur.id not in seen:
+                if cur.id in want:
+                    out.add(ep.id)
+                    break
+                seen.add(cur.id)
+                cur = all_eps.get(cur.parent_id) if cur.parent_id else None
+        return list(out)
 
     @staticmethod
     def _episode_to_dict(ep) -> dict[str, Any]:

@@ -51,3 +51,13 @@ def test_agent_episode_nests_under_session(pristine_service):
     service.store("did a thing")  # returns entry/ack; episode stamped internally
     closed = service.episode_end_session("s1", run_dream=False)
     assert closed and closed["parent_id"] is None      # the root was closed
+
+
+def test_search_episode_filter_includes_child_episodes(pristine_service):
+    service = pristine_service
+    root = service.episode_start_session("s1", "Session")
+    sub = service.episode_start("Sub")                       # nests under root
+    service.store("alpha beta gamma", source="pseudolife")   # stamped to sub
+    hits = service.search("alpha beta gamma", episodes=[root["id"]])
+    texts = [e["text"] for e in hits.get("entries", [])]
+    assert any("alpha beta gamma" in t for t in texts)
