@@ -504,3 +504,21 @@ def test_backfill_preserves_manual(svc):
     by_src = {r["source"]: r["origin"] for r in st.sources_for_entity(eid)}
     assert by_src["es-hand"] == "manual"
     assert by_src.get("es-auto") == "derived"
+
+
+def test_graph_backfill_sources_service(svc):
+    import time as _t
+    from pseudolife_memory.memory.cortex import _norm_key
+    st = svc._storage
+    svc.cortex_write("es-svc-target", "role", "thing", support="user")
+    svc.store("es-svc-target note", source="es-svc-proj")
+    e1 = st.conn.execute("SELECT id FROM entries ORDER BY id DESC LIMIT 1").fetchone()[0]
+    en = _norm_key("es-svc-target")
+    st.add_trace(en, _norm_key("role"), e1, _t.time())
+
+    res = svc.graph_backfill_sources()
+    assert res["attributed"] >= 1
+    eid = st.conn.execute(
+        "SELECT entity_id FROM facts WHERE entity_norm=%s AND status='current' "
+        "AND entity_id IS NOT NULL LIMIT 1", (en,)).fetchone()[0]
+    assert "es-svc-proj" in st.entity_sources_map()[eid]

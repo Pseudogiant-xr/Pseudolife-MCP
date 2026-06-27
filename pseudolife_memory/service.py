@@ -1793,10 +1793,11 @@ class MemoryService:
         relations_n = self._dream_extract_relations(extractor, texts)
         lessons = self.synthesize_lessons(extractor)
         graph_insight = self._safe_refresh_graph_insight()
+        sources_attributed = self.graph_backfill_sources().get("attributed", 0)
         return {"pulled": len(entries), "claims": sum(tally.values()),
                 "cursor": newest, "relations": relations_n, **tally,
                 "lessons": lessons, "graph_insight": graph_insight,
-                "traces": traces_n}
+                "traces": traces_n, "sources_attributed": sources_attributed}
 
     def dream_status(self) -> dict[str, Any]:
         """Backlog (eligible unconsolidated memories), idle seconds since the most
@@ -2606,6 +2607,19 @@ class MemoryService:
         except Exception as exc:  # noqa: BLE001 — insight must never break a dream
             logger.warning("graph-insight refresh failed (%s); dream unaffected", exc)
             return {"refreshed": False, "error": str(exc)}
+
+    def graph_backfill_sources(self) -> dict[str, Any]:
+        """Refresh entity->project attribution from fact provenance. Cheap,
+        idempotent, manual overrides preserved. Takes the lock itself, so callers
+        must NOT hold it (mirrors graph_backfill in dream_run, which runs after
+        the lock is released)."""
+        import time as _time
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return {"attributed": 0}
+            n = self._storage.backfill_entity_sources(_time.time())
+        return {"attributed": n}
 
     def graph_digest(self) -> dict[str, Any]:
         """The persisted digest snapshot, or {available: False} if dream hasn't run."""
