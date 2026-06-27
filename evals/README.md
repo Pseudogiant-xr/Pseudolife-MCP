@@ -406,3 +406,53 @@ loop+graph (A)        1.000        1.0     1.0     1.0     3.0    137.4    69.1
   1 iter / 59 tok / 6 ms — roughly 2× tokens and 11× latency for a 3× recall
   gain on multi-hop corpora.
 - **1-hop cost reflects the unenforced gate.** Arm A runs the full hop-cap on every question, so even 1-hop lookups cost ~3 iterations — recall is not regressed, but the wasted cost on easy questions is exactly what a real (currently unenforced) gate would suppress.
+
+---
+
+# Relation-extraction benchmark (`relation_extraction_bench.py`)
+
+Dev-only. Answers the Phase-2 question the fact-ladder never did: **how good is
+the dream graph-from-text path, per extractor model?** Scores each rung's
+`extract_relations` over a hand-labeled corpus (`CORPUS`) — edge precision/
+recall/F1 plus four defect-aligned diagnostics:
+
+- `naming_consistency` (↓ to 1.0) — surface-form fragmentation (duplicate nodes)
+- `type_violation_rate` (↓) — structural edges that violate `(src_type→dst_type)`
+- `related_to_share` (↓) — laziness into the `related-to` catch-all
+- `over_extraction_null_edges` / `over_extraction_halluc` (↓) — orphan minting
+
+No DB and no embedder — `extract_relations` is a pure model call.
+
+## Rungs
+
+`floor` (n/a — regex has no relation extraction), `gemma-e2b`, `gemma-e4b`
+(swap the `:8081` GGUF, as in the fact ladder), `qwen-27b` (LAN 4090, the
+sovereign-local ceiling), and `opus-4.8` (the absolute ceiling, produced
+in-session — below).
+
+```bash
+PYTHONPATH=. python evals/relation_extraction_bench.py --rung gemma-e2b
+PYTHONPATH=. python evals/relation_extraction_bench.py --rung qwen-27b
+PYTHONPATH=. python evals/relation_extraction_bench.py --report
+```
+
+Each rung writes `results/relations-<rung>.json` (including its raw predicted
+triples — the silver labels for any future bespoke-model work).
+
+## The opus-4.8 ceiling rung (in-session, no API key)
+
+Produced by Claude Code subagents on your included usage — a **frozen
+reference** (regenerate by repeating these steps; not headlessly re-runnable):
+
+1. `PYTHONPATH=. python evals/relation_extraction_bench.py --emit-prompts`
+   → `results/relations_corpus_prompts.json` (each note + the exact `system`
+   prompt + registry the headless rungs use).
+2. In a Claude Code session, dispatch subagents (Opus 4.8) to run the
+   extraction over those prompts and return predicted triples as JSON.
+3. Collect into `results/relations-opus-4.8.json`, matching the `--rung` output
+   shape: `{"rung":"opus-4.8","status":"ok","predicted":[[["src","rel","dst"],…],…], …score keys…}`.
+   Re-score by importing `relation_extraction_bench.score(predicted)` and
+   merging its keys, so the file carries the same metrics as the headless rungs.
+4. `--report` ranks every rung against the `qwen-27b` and `opus-4.8` ceilings
+   (`gap_to_27b`). That gap drives the keep-repair vs retrench(C) vs
+   bespoke-model decision (see the design doc).
