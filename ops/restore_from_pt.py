@@ -64,6 +64,7 @@ def main() -> None:
                 "id": ep["id"], "title": ep["title"], "hint": ep.get("hint"),
                 "started_at": ep["started_at"], "ended_at": ep.get("ended_at"),
                 "closed_by_new_start": bool(ep.get("closed_by_new_start")),
+                "session_key": ep.get("session_key"),
             })
             episodes += 1
         for band_name, band_state in (state.get("bands") or {}).items():
