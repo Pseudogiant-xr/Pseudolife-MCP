@@ -10,8 +10,8 @@ from pseudolife_memory.graph import degree_counts
 
 _DUBIOUS_CONF = 0.6
 _TEST_PATTERNS = re.compile(
-    r"(payments?[-/]|pl-healthcheck|deploy-smoke|smoke[-_]?test|noise[ _-]?agent"
-    r"|\btest-|-test\b|\bfixture\b)", re.I)
+    r"(payments?[-/]|pl-healthcheck|deploy-smoke|smoke[-_]?test|noise[ _-]?agent)",
+    re.I)
 
 
 def _disp(entities):

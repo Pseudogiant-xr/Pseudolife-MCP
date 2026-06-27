@@ -63,3 +63,17 @@ def test_version_and_phase_numbers_not_collapsed():
 def test_genuine_phrasing_duplicate_still_flagged():
     ents = _ents("memcot_bench.py", "memcot bench")
     assert frozenset({"memcot_bench.py", "memcot bench"}) in _pairs(gr.duplicate_candidates(ents))
+
+
+def test_legit_fixtures_and_lessons_not_flagged():
+    ents = _ents("fixture devserver",
+                 "TDD pattern: PG service test + fixture stubs + web routes")
+    assert gr.test_artifacts(ents) == []
+
+
+def test_real_test_artifacts_still_flagged():
+    ents = _ents("deploy-smoke-foo", "pl-healthcheck-probe", "payments/payments-db",
+                 "Cortex Console")  # a normal entity, must NOT be flagged
+    out = gr.test_artifacts(ents)
+    assert out and set(out[0]["entities"]) == {
+        "deploy-smoke-foo", "pl-healthcheck-probe", "payments/payments-db"}
