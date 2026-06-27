@@ -35,6 +35,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (the largest boost with ~no recency displacement) but shows it's a modest nudge on
   top of the automatic access-coupling — not the dramatic knee the prior synthetic
   bench implied. Default unchanged.
+- **Right-sized the continuum bands.** The default `continuum` preset's total
+  capacity drops 44,000 → ~5,250 (e.g. `slow` 8000→1500), all still well above a
+  personal bank's fill — so eviction/curation engages in ~1 year (the `slow`
+  band) instead of ~decades, with no data loss on existing personal banks. Raise
+  the caps (or use `preset: custom`) for high-volume / multi-agent deployments.
 
 ## [0.6.0] — 2026-06-25 — graph foundation
 

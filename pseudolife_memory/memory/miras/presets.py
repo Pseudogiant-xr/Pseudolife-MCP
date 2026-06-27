@@ -40,35 +40,40 @@ def continuum_bands() -> list["MIRASBandSpec"]:
     forever — a recency-tiered cosine store for agentic deployments.
 
     Geometric ~3× spacing of ``update_interval`` (1 → 1000) drives consolidation
-    cadence; ``max_entries`` widens with depth; ``promotion_*`` raise the bar to
-    enter slower tiers. Fast tiers evict ``balanced``; slow tiers ``surprise_heavy``
-    to pin rare-but-important facts. Pairs with
+    cadence; ``max_entries`` widens through the consolidation tiers (``slow`` is
+    the main long-term store; ``archival`` / ``forever`` are deep but rarely
+    reached); ``promotion_*`` raise the bar to enter slower tiers. Fast tiers
+    evict ``balanced``; slow tiers ``surprise_heavy`` to pin rare-but-important
+    facts. ~5K total capacity — right-sized 2026-06-27 from a 44K over-provisioned
+    layout: a personal bank accrues ~10/day, so this engages eviction/curation in
+    ~1yr (the ``slow`` band) instead of ~decades. Raise it for high-volume /
+    multi-agent deployments (or set ``preset: custom``). Pairs with
     :meth:`ContinuumMemorySystem.begin_logical_turn` so consolidation fires per
     agent step, not per raw store.
     """
     return [
-        _spec(name="working", max_entries=1500, update_interval=1,
+        _spec(name="working", max_entries=200, update_interval=1,
               promotion_access_count=2, promotion_surprise=0.4,
               retention_policy="balanced"),
-        _spec(name="micro", max_entries=2000, update_interval=1,
+        _spec(name="micro", max_entries=250, update_interval=1,
               promotion_access_count=2, promotion_surprise=0.45,
               retention_policy="balanced"),
-        _spec(name="instant", max_entries=2500, update_interval=2,
+        _spec(name="instant", max_entries=300, update_interval=2,
               promotion_access_count=2, promotion_surprise=0.5,
               retention_policy="balanced"),
-        _spec(name="fast", max_entries=4000, update_interval=5,
+        _spec(name="fast", max_entries=400, update_interval=5,
               promotion_access_count=3, promotion_surprise=0.55,
               retention_policy="balanced"),
-        _spec(name="medium", max_entries=6000, update_interval=15,
+        _spec(name="medium", max_entries=600, update_interval=15,
               promotion_access_count=3, promotion_surprise=0.65,
               retention_policy="balanced"),
-        _spec(name="slow", max_entries=8000, update_interval=50,
+        _spec(name="slow", max_entries=1500, update_interval=50,
               promotion_access_count=4, promotion_surprise=0.7,
               retention_policy="surprise_heavy"),
-        _spec(name="archival", max_entries=10000, update_interval=200,
+        _spec(name="archival", max_entries=1000, update_interval=200,
               promotion_access_count=5, promotion_surprise=0.8,
               retention_policy="surprise_heavy"),
-        _spec(name="forever", max_entries=10000, update_interval=1000,
+        _spec(name="forever", max_entries=1000, update_interval=1000,
               promotion_access_count=999_999, promotion_surprise=1.0,
               retention_policy="surprise_heavy"),
     ]
