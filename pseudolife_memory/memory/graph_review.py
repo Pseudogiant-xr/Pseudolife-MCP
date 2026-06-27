@@ -19,7 +19,8 @@ def _disp(entities):
 
 
 def _token_set(name):
-    return {t for t in re.split(r"[^a-z0-9]+", str(name).lower()) if len(t) > 2}
+    return {t for t in re.split(r"[^a-z0-9]+", str(name).lower())
+            if len(t) > 2 or any(c.isdigit() for c in t)}
 
 
 def duplicate_candidates(entities, *, min_jaccard=0.6):

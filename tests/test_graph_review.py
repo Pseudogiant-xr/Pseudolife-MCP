@@ -47,3 +47,19 @@ def test_review_aggregates_all_groups():
     types = {f["type"] for f in out["findings"]}
     assert {"test_artifact", "orphan", "unattributed"} <= types
     assert out["counts"]["total"] == len(out["findings"])
+
+
+def _pairs(findings):
+    return {frozenset(f["entities"]) for f in findings}
+
+
+def test_version_and_phase_numbers_not_collapsed():
+    ents = _ents("schema v8", "schema 11", "schema 15->16",
+                 "Phase 1 plan", "Phase 2 plan",
+                 "Atlas Stage 1", "Atlas Stage 2")
+    assert gr.duplicate_candidates(ents) == []
+
+
+def test_genuine_phrasing_duplicate_still_flagged():
+    ents = _ents("memcot_bench.py", "memcot bench")
+    assert frozenset({"memcot_bench.py", "memcot bench"}) in _pairs(gr.duplicate_candidates(ents))
