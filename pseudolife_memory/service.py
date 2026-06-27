@@ -2456,16 +2456,77 @@ class MemoryService:
                     "inverse_of": inv, "src_type": src_type,
                     "dst_type": dst_type}
 
+    def graph_projects(self) -> dict[str, Any]:
+        """Return all project sources with their entity counts.
+
+        Returns ``{"projects": [{"source": str, "entities": int}, ...]}``.
+        """
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return {"projects": []}
+            return {"projects": self._storage.project_source_counts()}
+
+    def _whole_graph(self, scope: str | None, include_facts: bool) -> dict[str, Any]:
+        """Return every entity/edge in the graph, optionally filtered to a
+        source ``scope``. Each node carries a ``sources`` list. Used by the
+        seedless ``graph_neighborhood(entity=None)`` path."""
+        from pseudolife_memory import graph as G
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return dict(self._GRAPH_UNAVAILABLE)
+            g = self._storage.load_graph()
+            comm = self._storage.load_communities()["assignment"]
+            src_map = self._storage.entity_sources_map()
+            facts_by_norm: dict[str, list[dict]] = {}
+            if include_facts and self._cortex is not None:
+                for rec in self._cortex.current_records():
+                    facts_by_norm.setdefault(G.norm_name(rec.entity), []).append({
+                        "attribute": rec.attribute, "value": rec.value,
+                        "origin": rec.origin,
+                        "confidence": round(float(rec.confidence), 4)})
+        keep = None
+        if scope and scope != "all":
+            keep = {eid for eid, ss in src_map.items() if scope in ss}
+        by_id, nodes = {}, []
+        for e in g["entities"]:
+            if keep is not None and e["id"] not in keep:
+                continue
+            by_id[e["id"]] = e["display"]
+            node = {"entity": e["display"], "canonical": e["canonical"],
+                    "etype": e["etype"], "aliases": g["aliases"].get(e["id"], []),
+                    "community": comm.get(e["id"]), "sources": src_map.get(e["id"], [])}
+            if include_facts:
+                node["facts"] = facts_by_norm.get(e["canonical"], [])
+            nodes.append(node)
+        edges = [
+            {"src": by_id[e["src_id"]], "relation": e["relation"],
+             "dst": by_id[e["dst_id"]], "derived": False,
+             "confidence": round(float(e["confidence"]), 4),
+             "origin": e.get("origin")}
+            for e in g["edges"]
+            if e["src_id"] in by_id and e["dst_id"] in by_id]
+        return {"found": True, "entity": None, "scope": scope or "all",
+                "nodes": nodes, "edges": edges, "paths": [], "truncated": False}
+
     def graph_neighborhood(
         self,
-        entity: str,
+        entity=None,
         depth: int = 1,
         include_facts: bool = True,
         to: str | None = None,
+        scope: str | None = None,
     ) -> dict[str, Any]:
         """Subgraph within ``depth`` hops (cap 3): nodes with their current
         facts, edges (derived ones marked with rule provenance), plus the
-        shortest path when ``to`` names a second entity."""
+        shortest path when ``to`` names a second entity.
+
+        When ``entity`` is ``None`` (or falsy), returns the whole graph
+        filtered to ``scope`` (a source name; ``None`` / ``"all"`` = no
+        filter) via :meth:`_whole_graph`."""
+        if not entity:
+            return self._whole_graph(scope=scope, include_facts=include_facts)
         from pseudolife_memory import graph as G
         with self._lock:
             self._ensure_init()

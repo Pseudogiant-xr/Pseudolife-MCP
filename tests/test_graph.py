@@ -522,3 +522,31 @@ def test_graph_backfill_sources_service(svc):
         "SELECT entity_id FROM facts WHERE entity_norm=%s AND status='current' "
         "AND entity_id IS NOT NULL LIMIT 1", (en,)).fetchone()[0]
     assert "es-svc-proj" in st.entity_sources_map()[eid]
+
+
+def test_graph_projects_lists_sources(svc):
+    import time as _t
+    svc._ensure_init()  # noqa: SLF001
+    st = svc._storage
+    a = st.ensure_entity("es-proj-ent", display="es-proj-ent")
+    st.upsert_entity_source(a, "es-proj-z", "derived", _t.time())
+    assert any(p["source"] == "es-proj-z" for p in svc.graph_projects()["projects"])
+
+
+def test_seedless_scoped_whole_graph(svc):
+    import time as _t
+    svc._ensure_init()  # noqa: SLF001
+    st = svc._storage
+    keep = st.ensure_entity("es-keep-node", display="es-keep-node")
+    drop = st.ensure_entity("es-drop-node", display="es-drop-node")
+    st.upsert_entity_source(keep, "es-scope-a", "derived", _t.time())
+    st.upsert_entity_source(drop, "es-scope-b", "derived", _t.time())
+
+    full = svc.graph_neighborhood(entity=None, scope="all")
+    names = {n["entity"] for n in full["nodes"]}
+    assert {"es-keep-node", "es-drop-node"} <= names
+    assert all("sources" in n for n in full["nodes"])
+
+    scoped = svc.graph_neighborhood(entity=None, scope="es-scope-a")
+    scoped_names = {n["entity"] for n in scoped["nodes"]}
+    assert "es-keep-node" in scoped_names and "es-drop-node" not in scoped_names
