@@ -29,6 +29,9 @@ def main() -> None:
     elif mode == "briefing":
         from pseudolife_memory.briefing_cli import run_briefing
         run_briefing()
+    elif mode in ("episode-start", "episode-end"):
+        from pseudolife_memory.episode_cli import run_episode
+        run_episode(mode)
     else:
         print(
             f"unknown mode {mode!r}; use: serve | embedded | (no arg = shim)",
