@@ -1925,7 +1925,11 @@ class MemoryService:
         any still-open descendants; then (optionally) fire a background dream
         so the session's outcome signals become lessons by the next session
         start. Returns the closed root episode dict, or ``{}`` when nothing
-        matching was open."""
+        matching was open.
+
+        ``session_key=None`` closes ANY open root (a force-close escape hatch).
+        The hook CLI always supplies a real key, so this only applies to a
+        direct ``POST /api/episode/end`` with no ``session_key``."""
         with self._lock:
             self._ensure_init()
             assert self._cms is not None
