@@ -95,10 +95,13 @@ is therefore a set, not a single value.
    facts) derive **no** project and surface as **"unattributed"** in the review
    queue.
 
-2. **Forward (stamp at write time).** Thread the originating entry's `source`
-   through `_dream_extract_relations → _link_dream_relations` and record it, so
-   new entities/edges are born scoped. This requires the source to travel with
-   each batch text (today `texts` is a bare `list[str]`).
+2. **Forward (keep fresh).** Relation extraction is batched (N texts → M
+   triples with no triple→text mapping), so an edge cannot be stamped with a
+   single source at write time. Instead `entity_sources` is re-derived
+   incrementally at the **tail of each dream** (after the per-entry fact traces
+   are written), riding the same precise `memory_traces` link the retroactive
+   path uses. New entities thus become attributed on the next dream, manual rows
+   preserved.
 
 3. **Manual override.** "Assign to project" / "mark shared" actions in Atlas
    write explicit attribution that wins over derivation.
@@ -109,8 +112,8 @@ is therefore a set, not a single value.
 CREATE TABLE IF NOT EXISTS entity_sources (
   entity_id BIGINT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
   source    TEXT   NOT NULL,
-  count     INTEGER NOT NULL DEFAULT 1,   -- support strength (traces/edges seen)
-  origin    TEXT   NOT NULL DEFAULT 'derived',  -- 'derived' | 'manual' | 'stamped'
+  count     INTEGER NOT NULL DEFAULT 1,   -- support strength (distinct traced entries)
+  origin    TEXT   NOT NULL DEFAULT 'derived',  -- 'derived' | 'manual'
   updated_at DOUBLE PRECISION NOT NULL,
   PRIMARY KEY (entity_id, source)
 );
@@ -191,8 +194,8 @@ find → graph is one click — closing the original UX gap.
 
 ### E. Staged delivery
 
-1. **Scoping foundation** — `entity_sources` (v16) + backfill; source threaded
-   into relation extraction + stamped; `GET /api/graph` seedless+scoped;
+1. **Scoping foundation** — `entity_sources` (v16) + backfill + incremental
+   re-derive at the dream tail; `GET /api/graph` seedless+scoped;
    `GET /api/graph/projects`. Data becomes project-aware.
 2. **Atlas view** — seedless scoped map + project switcher + "Show in Atlas"
    links. *Ships the visualisation win on its own — kills "type a seed to see
@@ -203,9 +206,9 @@ find → graph is one click — closing the original UX gap.
 ## Data flow
 
 ```
-dream extract → relations + originating source
-   → _link_dream_relations(relations, source)
-       → upsert_edge(...) + entity_sources upsert (origin='stamped')
+dream tail (after per-entry fact traces written)
+   → graph_backfill_sources()
+       → re-derive entity_sources from memory_traces ⋈ entries (manual rows kept)
 
 console open Atlas (scope=project)
    → GET /api/graph?scope=project        (seedless, filtered by entity_sources)
