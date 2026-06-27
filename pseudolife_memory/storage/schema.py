@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 15
+SCHEMA_META_VERSION = 16
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -262,6 +262,20 @@ CREATE TABLE IF NOT EXISTS memory_traces (
   PRIMARY KEY (entity_norm, attribute_norm, entry_id)
 );
 CREATE INDEX IF NOT EXISTS memory_traces_entry_idx ON memory_traces (entry_id);
+
+-- v16 additive: per-entity project/topic attribution. Denormalized cache of
+-- entity_id -> source(s). 'derived' rows are recomputed from
+-- facts.entity_id ⋈ memory_traces ⋈ entries; 'manual' rows are user overrides
+-- and are never auto-overwritten.
+CREATE TABLE IF NOT EXISTS entity_sources (
+  entity_id  BIGINT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+  source     TEXT   NOT NULL,
+  count      INTEGER NOT NULL DEFAULT 1,
+  origin     TEXT   NOT NULL DEFAULT 'derived',
+  updated_at DOUBLE PRECISION NOT NULL,
+  PRIMARY KEY (entity_id, source)
+);
+CREATE INDEX IF NOT EXISTS entity_sources_source_idx ON entity_sources (source);
 """
 
 
