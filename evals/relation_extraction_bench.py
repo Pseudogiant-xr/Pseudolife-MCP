@@ -221,3 +221,85 @@ def emit_prompts(path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(build_prompts(), indent=2))
     return path
+
+
+import argparse
+
+LADDER_ORDER = ["floor", "gemma-e2b", "gemma-e4b", "qwen-27b", "opus-4.8"]
+
+
+def _load_results() -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    if RESULTS_DIR.exists():
+        for fp in RESULTS_DIR.glob("relations-*.json"):
+            try:
+                out[fp.stem.replace("relations-", "")] = json.loads(fp.read_text())
+            except Exception:
+                pass
+    return out
+
+
+def build_report(results: dict[str, dict]) -> list[dict]:
+    ceiling = results.get("qwen-27b", {}).get("edge_f1")
+    rows = []
+    for name in LADDER_ORDER:
+        r = results.get(name)
+        if not r or r.get("status") != "ok":
+            continue
+        row = {k: r.get(k) for k in (
+            "rung", "edge_f1", "type_violation_rate", "naming_consistency",
+            "related_to_share", "over_extraction_null_edges", "over_extraction_halluc")}
+        row["gap_to_27b"] = (round(r["edge_f1"] - ceiling, 3)
+                             if ceiling is not None else None)
+        rows.append(row)
+    return rows
+
+
+def report() -> None:
+    rows = build_report(_load_results())
+    hdr = (f"{'rung':<12}{'F1↑':>7}{'type_viol↓':>12}{'naming↓':>9}"
+           f"{'rel-to↓':>9}{'null':>6}{'halluc':>8}{'gap_to_27b':>12}")
+    print("\n" + hdr + "\n" + "-" * len(hdr))
+    for r in rows:
+        print(f"{r['rung']:<12}{r['edge_f1']:>7}{r['type_violation_rate']:>12}"
+              f"{r['naming_consistency']:>9}{r['related_to_share']:>9}"
+              f"{r['over_extraction_null_edges']:>6}{r['over_extraction_halluc']:>8}"
+              f"{str(r['gap_to_27b']):>12}")
+    if not rows:
+        print("(no results — run a rung, or add results/relations-opus-4.8.json)")
+
+
+def main() -> int:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--rung", choices=list(RUNGS), help="run one rung")
+    ap.add_argument("--emit-prompts", action="store_true",
+                    help="write results/relations_corpus_prompts.json for the opus rung")
+    ap.add_argument("--report", action="store_true", help="aggregate results into the table")
+    ap.add_argument("--list", action="store_true", help="list rungs + endpoints")
+    args = ap.parse_args()
+
+    if args.list:
+        for n in LADDER_ORDER:
+            r = RUNGS.get(n, {"label": "in-session subagents (see README)"})
+            print(f"  {n:<12} {r.get('label', n):<34} {r.get('base_url', '—')}")
+        return 0
+    if args.report:
+        report(); return 0
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    if args.emit_prompts:
+        p = emit_prompts(RESULTS_DIR / "relations_corpus_prompts.json")
+        print(f"wrote {p}"); return 0
+    if args.rung:
+        out = run_rung(args.rung)
+        (RESULTS_DIR / f"relations-{args.rung}.json").write_text(json.dumps(out, indent=2))
+        print(json.dumps({k: v for k, v in out.items() if k != "predicted"}, indent=2))
+        return 0
+    ap.print_help(); return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

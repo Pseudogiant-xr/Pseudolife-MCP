@@ -115,3 +115,21 @@ def test_build_prompts_uses_the_live_relations_prompt():
     assert prompts[0]["user"] == rb.CORPUS[0]["text"]
     assert prompts[0]["system"] == _relations_prompt(rb.RELATION_REGISTRY)
     assert prompts[0]["note_index"] == 0
+
+
+def test_build_report_orders_rungs_and_computes_gap_to_ceiling():
+    results = {
+        "gemma-e2b": {"rung": "gemma-e2b", "status": "ok", "edge_f1": 0.62,
+                      "type_violation_rate": 0.28, "naming_consistency": 1.9,
+                      "related_to_share": 0.41, "over_extraction_null_edges": 5,
+                      "over_extraction_halluc": 3},
+        "qwen-27b": {"rung": "qwen-27b", "status": "ok", "edge_f1": 0.84,
+                     "type_violation_rate": 0.04, "naming_consistency": 1.1,
+                     "related_to_share": 0.12, "over_extraction_null_edges": 1,
+                     "over_extraction_halluc": 0},
+    }
+    rows = rb.build_report(results)
+    names = [r["rung"] for r in rows]
+    assert names.index("gemma-e2b") < names.index("qwen-27b")  # ladder order
+    e2b = next(r for r in rows if r["rung"] == "gemma-e2b")
+    assert e2b["gap_to_27b"] == round(0.62 - 0.84, 3)          # -0.22
