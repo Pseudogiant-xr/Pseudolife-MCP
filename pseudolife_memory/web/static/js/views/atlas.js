@@ -8,6 +8,7 @@ import { facetBar } from "../components.js";
 import { ForceGraph, renderGalaxy, cleanupGalaxy, tableView, legend,
          zoomControls, fullscreenBtn } from "../graphview.js";
 import { reviewPanel } from "../atlas_review.js";
+import { confirmDialog, openModal, closeModal, toast } from "../ui.js";
 
 let state = { scope: "all", view: "map", review: false };
 let reviewData = null;
@@ -56,8 +57,70 @@ export async function renderAtlas(root, ctx) {
     } catch (err) { mount(reviewHost, errorBlock(err)); }
   }
 
-  // Stub for Task 1; the confirm-gated dispatcher is added in Task 2.
-  function actOnFinding(_f) {}
+  async function refreshAfterMutation() {
+    if (state.review) await loadReview();
+    await load();
+  }
+
+  async function postAll(calls, okMsg) {
+    let ok = 0;
+    for (const c of calls) {
+      try { await api.post(c.path, c.body); ok += 1; }
+      catch (err) { toast(`${c.path.split("/").pop()} failed — ${err.message}`, "bad"); }
+    }
+    if (ok) { toast(`${okMsg} (${ok})`, "ok"); await refreshAfterMutation(); }
+  }
+
+  async function actOnFinding(f) {
+    if (f.action === "merge") {
+      const [a, b] = f.entities || [];
+      if (!a || !b) return;
+      openModal({
+        title: "Merge duplicate entities",
+        body: el("div", {}, el("p", { class: "dim", style: { marginTop: 0 } },
+          "One entity absorbs the other's edges, aliases and project tags. Which name should survive?")),
+        actions: [
+          { label: "Cancel", onClick: closeModal },
+          { label: `Keep “${a}”`, kind: "primary", onClick: async () => { closeModal();
+            await postAll([{ path: "/api/graph/merge", body: { from: b, into: a } }], "Merged"); } },
+          { label: `Keep “${b}”`, onClick: async () => { closeModal();
+            await postAll([{ path: "/api/graph/merge", body: { from: a, into: b } }], "Merged"); } },
+        ],
+      });
+      return;
+    }
+    if (f.action === "delete") {
+      const ents = f.entities || [];
+      if (!(await confirmDialog({ title: "Delete entities", danger: true,
+        message: `Permanently delete ${ents.length} entit${ents.length === 1 ? "y" : "ies"} and their edges? This cannot be undone.` }))) return;
+      await postAll(ents.map((e) => ({ path: "/api/graph/delete-entity", body: { entity: e } })), "Deleted");
+      return;
+    }
+    if (f.action === "prune") {
+      const edges = f.edges || [];
+      if (!(await confirmDialog({ title: "Prune edges", danger: true,
+        message: `Remove ${edges.length} low-confidence inferred edge${edges.length === 1 ? "" : "s"}?` }))) return;
+      await postAll(edges.map((e) => ({ path: "/api/graph/unrelate",
+        body: { src: e.src, relation: e.relation, dst: e.dst } })), "Pruned");
+      return;
+    }
+    if (f.action === "assign") {
+      const ents = f.entities || [];
+      const input = el("input", { type: "text", placeholder: "project / source name", name: "project" });
+      openModal({
+        title: "Assign a project",
+        body: el("div", {}, el("p", { class: "dim", style: { marginTop: 0 } },
+          `Tag ${ents.length} unattributed entit${ents.length === 1 ? "y" : "ies"} with a project. They'll appear under that scope.`), input),
+        actions: [
+          { label: "Cancel", onClick: closeModal },
+          { label: "Assign", kind: "primary", onClick: async () => {
+            const src = input.value.trim(); if (!src) return; closeModal();
+            await postAll(ents.map((e) => ({ path: "/api/graph/assign-scope", body: { entity: e, source: src } })), "Assigned"); } },
+        ],
+      });
+      return;
+    }
+  }
 
   async function load() {
     if (fg) { fg.stop(); fg = null; }
