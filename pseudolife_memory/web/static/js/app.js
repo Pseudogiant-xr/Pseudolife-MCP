@@ -9,6 +9,7 @@ import { renderLessons } from "./views/lessons.js";
 import { renderStream } from "./views/stream.js";
 import { renderRecall } from "./views/recall.js";
 import { renderGraph } from "./views/graph.js";
+import { renderAtlas } from "./views/atlas.js";
 import { renderInsight } from "./views/insight.js";
 import { renderEpisodes } from "./views/episodes.js";
 import { renderConsole } from "./views/console.js";
@@ -21,6 +22,7 @@ const ROUTES = [
   { id: "stream", label: "Stream", group: "Memory", accent: "var(--c-assoc)", view: renderStream, countKey: "entries" },
   { id: "recall", label: "Recall", group: "Memory", accent: "var(--c-assoc)", view: renderRecall, countKey: null },
   { id: "graph", label: "Graph", group: "Structure", accent: "var(--c-graph)", view: renderGraph, countKey: null },
+  { id: "atlas", label: "Atlas", group: "Structure", accent: "var(--c-graph)", view: renderAtlas, countKey: null },
   { id: "insight", label: "Insight", group: "Structure", accent: "var(--c-graph)", view: renderInsight, countKey: null },
   { id: "episodes", label: "Episodes", group: "Operations", accent: "var(--c-episode)", view: renderEpisodes, countKey: "episodes" },
   { id: "console", label: "Console", group: "Operations", accent: "var(--c-assoc)", view: renderConsole, countKey: null },

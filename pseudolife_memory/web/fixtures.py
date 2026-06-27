@@ -320,9 +320,11 @@ class FixtureService:
             {"src": "docker-desktop", "relation": "runs", "dst": "docker compose", "derived": False, "confidence": 0.7},
             {"src": "Console", "relation": "guards", "dst": "Auth flow", "derived": True, "via": ["inferred"]},
         ] + [{"src": hub, "relation": "tab", "dst": t, "derived": False, "confidence": 0.9} for t in tabs]
+        # Deterministically spread demo nodes across the advertised projects so
+        # every scope in graph_projects() has matching members (coherent demo).
+        _FX_PROJECTS = ("pseudolife-mcp", "gw2-reshade", "hermes-infra")
         for nd in nodes:
-            nd["sources"] = ["gw2-reshade"] if nd["entity"].startswith("GW2") \
-                else ["pseudolife-mcp"]
+            nd["sources"] = [_FX_PROJECTS[sum(ord(ch) for ch in nd["entity"]) % 3]]
         if scope and scope != "all":
             keep = {nd["entity"] for nd in nodes if scope in nd["sources"]}
             nodes = [nd for nd in nodes if nd["entity"] in keep]
@@ -376,9 +378,12 @@ class FixtureService:
                           {"src": "postgres", "relation": "runs-on", "dst": target or "docker-desktop"}]}
 
     def graph_projects(self):
-        return {"projects": [{"source": "pseudolife-mcp", "entities": 23},
-                             {"source": "gw2-reshade", "entities": 16},
-                             {"source": "hermes-infra", "entities": 9}]}
+        # Counts derived from the same node assignment graph_neighborhood uses,
+        # so the switcher labels match the scoped subgraph sizes.
+        from collections import Counter
+        nodes = self.graph_neighborhood(None, scope="all")["nodes"]
+        c = Counter(s for nd in nodes for s in nd.get("sources", []))
+        return {"projects": [{"source": s, "entities": n} for s, n in c.most_common()]}
 
     # engram traces / retention
     def get_entry(self, entry_id):
