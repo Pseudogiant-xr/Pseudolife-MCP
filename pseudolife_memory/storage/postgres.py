@@ -666,6 +666,43 @@ class PostgresStorage:
             "WHERE entity_norm = %s AND attribute_norm = %s ORDER BY entry_id",
             (entity_norm, attribute_norm)).fetchall()]
 
+    def upsert_entity_source(self, entity_id: int, source: str,
+                             origin: str, now: float) -> None:
+        """Attribute an entity to a project/source. A 'derived' upsert never
+        downgrades an existing 'manual' row; it bumps count + updated_at. A
+        'manual' upsert always wins."""
+        self.conn.execute(
+            "INSERT INTO entity_sources (entity_id, source, count, origin, updated_at) "
+            "VALUES (%s, %s, 1, %s, %s) "
+            "ON CONFLICT (entity_id, source) DO UPDATE SET "
+            "  count = entity_sources.count + 1, "
+            "  updated_at = EXCLUDED.updated_at, "
+            "  origin = CASE WHEN entity_sources.origin = 'manual' "
+            "                THEN 'manual' ELSE EXCLUDED.origin END",
+            (entity_id, source, origin, now))
+        self.conn.commit()
+
+    def sources_for_entity(self, entity_id: int) -> list[dict]:
+        cols = ("source", "count", "origin")
+        return [dict(zip(cols, r)) for r in self.conn.execute(
+            "SELECT source, count, origin FROM entity_sources "
+            "WHERE entity_id = %s ORDER BY count DESC, source", (entity_id,)).fetchall()]
+
+    def entity_sources_map(self) -> dict[int, list[str]]:
+        out: dict[int, list[str]] = {}
+        for eid, source in self.conn.execute(
+            "SELECT entity_id, source FROM entity_sources ORDER BY entity_id, source"
+        ).fetchall():
+            out.setdefault(eid, []).append(source)
+        return out
+
+    def project_source_counts(self) -> list[dict]:
+        cols = ("source", "entities")
+        return [dict(zip(cols, r)) for r in self.conn.execute(
+            "SELECT source, COUNT(DISTINCT entity_id) AS entities "
+            "FROM entity_sources GROUP BY source ORDER BY entities DESC, source"
+        ).fetchall()]
+
     def facts_for_entry(self, entry_id: int) -> list[dict]:
         # The (entity, attribute) slot is the stable handle; facts.id is ephemeral
         # (snapshot-rewrite reassigns it on every cortex write), so we neither

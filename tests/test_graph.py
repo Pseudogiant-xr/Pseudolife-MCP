@@ -150,6 +150,34 @@ def test_edge_upsert_bumps_confidence_and_revives(storage):
     assert revived["confidence"] == pytest.approx(0.9)  # 0.85 + 0.05
 
 
+def test_entity_sources_upsert_and_read(storage):
+    import time as _t
+    eid = storage.ensure_entity("es-postgres", display="es-postgres")
+    storage.upsert_entity_source(eid, "es-proj-a", "derived", _t.time())
+    storage.upsert_entity_source(eid, "es-proj-b", "derived", _t.time())
+    assert {r["source"] for r in storage.sources_for_entity(eid)} == {"es-proj-a", "es-proj-b"}
+    assert storage.entity_sources_map()[eid] == ["es-proj-a", "es-proj-b"]
+
+
+def test_entity_sources_manual_not_clobbered(storage):
+    import time as _t
+    eid = storage.ensure_entity("es-immerse", display="es-immerse")
+    storage.upsert_entity_source(eid, "es-gw2", "manual", _t.time())
+    storage.upsert_entity_source(eid, "es-gw2", "derived", _t.time())
+    assert storage.sources_for_entity(eid)[0]["origin"] == "manual"
+
+
+def test_entity_sources_project_counts(storage):
+    import time as _t
+    a = storage.ensure_entity("es-c-a", display="es-c-a")
+    b = storage.ensure_entity("es-c-b", display="es-c-b")
+    storage.upsert_entity_source(a, "es-px", "derived", _t.time())
+    storage.upsert_entity_source(b, "es-px", "derived", _t.time())
+    storage.upsert_entity_source(b, "es-py", "derived", _t.time())
+    counts = {r["source"]: r["entities"] for r in storage.project_source_counts()}
+    assert counts["es-px"] == 2 and counts["es-py"] == 1
+
+
 # ── service-level (real embedder; one shared instance) ──────────────────
 
 @pytest.fixture(scope="module")
