@@ -509,8 +509,8 @@ def test_backfill_preserves_manual(svc):
 def test_graph_backfill_sources_service(svc):
     import time as _t
     from pseudolife_memory.memory.cortex import _norm_key
-    st = svc._storage
     svc.cortex_write("es-svc-target", "role", "thing", support="user")
+    st = svc._storage
     svc.store("es-svc-target note", source="es-svc-proj")
     e1 = st.conn.execute("SELECT id FROM entries ORDER BY id DESC LIMIT 1").fetchone()[0]
     en = _norm_key("es-svc-target")
