@@ -559,10 +559,10 @@ def test_graph_delete_entity_removes_node_and_edges(svc):
 
 def test_graph_merge_folds_from_into(svc):
     from pseudolife_memory import graph as G
-    st = svc._storage
     # `mg-from` and `mg-into` are the same thing stored twice; each has a distinct edge.
     svc.graph_relate("mg-from", "uses", "mg-dep")
     svc.graph_relate("mg-into", "stores-data-in", "mg-store")
+    st = svc._storage
     into_id = st.find_entity(G.norm_name("mg-into"))["id"]
 
     res = svc.graph_merge("mg-from", "mg-into")
