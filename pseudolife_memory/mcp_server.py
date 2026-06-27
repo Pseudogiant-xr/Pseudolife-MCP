@@ -814,18 +814,21 @@ def memory_save() -> dict[str, Any]:
 def memory_episode_start(
     title: str, hint: str | None = None,
 ) -> dict[str, Any]:
-    """Open a new episode — a bracketed working session.
+    """Open a NESTED sub-episode under the current open (session) episode.
 
     Every memory stored while the episode is open carries the episode
     id + title automatically, enabling later queries like
     ``memory_search(..., episodes=[id])`` ("what did we work on in this
     session?") and ``memory_episode_summary(id)`` for a structured
-    rundown.
+    rundown. A session-scoped search expands to the whole subtree, so a
+    sub-episode's entries surface under its parent session too.
 
-    If another episode is already open, this auto-closes it (with a
-    ``closed_by_new_start=True`` flag on the closed one) before opening
-    the new episode — graceful degradation when ``memory_episode_end``
-    was forgotten.
+    Session episodes are opened/closed for you by the session-lifecycle
+    hooks. Use this for a substantial multi-step TASK: it nests under the
+    open session (the parent STAYS open) and ``memory_episode_end`` pops
+    back to it. With nothing open, it opens a root episode. (It no longer
+    auto-closes a prior open episode — sub-episodes nest rather than
+    replace.)
 
     Args:
         title: Human label for the episode. Surfaces in retrieval
@@ -834,19 +837,22 @@ def memory_episode_start(
 
     Returns:
         ``{"id": str, "title": str, "started_at": float, "ended_at":
-        None, "hint": str|None, "closed_by_new_start": bool}``.
+        None, "hint": str|None, "closed_by_new_start": bool,
+        "parent_id": str|None, "session_key": str|None}``.
     """
     return service.episode_start(title=title, hint=hint)
 
 
 @_tool()
 def memory_episode_end() -> dict[str, Any]:
-    """Close the currently-open episode.
+    """Close the current open (leaf) episode and pop back to its parent.
 
-    Returns the closed episode dict (with ``ended_at`` set), or an
-    empty dict when no episode is open. Stores made after this call
-    will have ``episode_id=None`` until you call
-    ``memory_episode_start`` again.
+    With a nested sub-episode open, this closes it and resumes stamping
+    new memories with the PARENT (session) episode. With only a root
+    episode open, it closes that and stores afterward carry
+    ``episode_id=None`` until the next ``memory_episode_start``. Returns
+    the closed episode dict (with ``ended_at`` set), or an empty dict
+    when nothing is open.
     """
     return service.episode_end()
 
