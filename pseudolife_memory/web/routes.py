@@ -122,7 +122,8 @@ class ConsoleRoutes:
 
         # ---- session-start briefing (REST fast-path for `pseudolife-mcp briefing`) ----
         g("/api/briefing", lambda q, b: svc.session_briefing(
-            max_unsure=_i(q, "max_unsure", 3), max_lessons=_i(q, "max_lessons", 3)))
+            max_unsure=_i(q, "max_unsure", 3), max_lessons=_i(q, "max_lessons", 3),
+            max_world=_i(q, "max_world", 3)))
 
         # ---- episodes ----
         g("/api/episodes", lambda q, b: svc.episode_list(

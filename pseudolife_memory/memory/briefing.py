@@ -41,8 +41,32 @@ def _fmt_lesson(e: dict) -> str:
     return f"- {marker}: {text}" if text else ""
 
 
+def _fmt_world(w: dict) -> str:
+    ent = (w.get("entity") or "").strip()
+    attr = (w.get("attribute") or "").strip()
+    val = (w.get("value") or "").strip()
+    if not (ent and val):
+        return ""
+    url = (w.get("source_url") or "").strip()
+    src = ""
+    if url:
+        host = url.split("://", 1)[-1].split("/", 1)[0]
+        src = f" ({host})" if host else ""
+    head = f"{ent} {attr}".strip()
+    return f"- `{head}`: {val}{src}"
+
+
+def _fmt_recap(r: dict) -> str:
+    title = (r.get("title") or "").strip()
+    if not title:
+        return ""
+    n = r.get("entry_count") or 0
+    return f"- {title} ({n} memories)"
+
+
 def format_briefing(surprises: list[dict], questions: list[dict],
-                    lessons: list[dict]) -> str:
+                    lessons: list[dict], world: list[dict] | None = None,
+                    recap: dict | None = None) -> str:
     """Render the markdown block; empty string when there is nothing to say."""
     parts: list[str] = []
     unsure = [_fmt_surprise(s) for s in surprises]
@@ -53,4 +77,10 @@ def format_briefing(surprises: list[dict], questions: list[dict],
     lesson_lines = [ln for ln in (_fmt_lesson(e) for e in lessons) if ln]
     if lesson_lines:
         parts.append("## Lessons from past work\n" + "\n".join(lesson_lines))
+    world_lines = [ln for ln in (_fmt_world(w) for w in (world or [])) if ln]
+    if world_lines:
+        parts.append("## Verified world facts\n" + "\n".join(world_lines))
+    recap_line = _fmt_recap(recap) if recap else ""
+    if recap_line:
+        parts.append("## Where we left off\n" + recap_line)
     return "\n\n".join(parts)

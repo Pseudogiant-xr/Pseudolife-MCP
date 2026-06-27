@@ -27,10 +27,12 @@ def _as_hook_json(md: str) -> str:
         "hookEventName": "SessionStart", "additionalContext": md}})
 
 
-def _fetch_markdown(url: str, token: str | None, max_unsure: int, max_lessons: int) -> str:
+def _fetch_markdown(url: str, token: str | None, max_unsure: int, max_lessons: int,
+                    max_world: int = 3) -> str:
     """GET ``/api/briefing`` and return its ``markdown`` field. Plain HTTP — no MCP
     ``initialize`` handshake — so it's fast enough for a per-session hook."""
-    qs = urllib.parse.urlencode({"max_unsure": max_unsure, "max_lessons": max_lessons})
+    qs = urllib.parse.urlencode({"max_unsure": max_unsure, "max_lessons": max_lessons,
+                                 "max_world": max_world})
     req = urllib.request.Request(f"{url}/api/briefing?{qs}")
     if token:
         req.add_header("Authorization", f"Bearer {token}")
@@ -46,6 +48,7 @@ def run_briefing() -> None:
     ap.add_argument("--max-unsure", type=int, default=3,
                     help="cap surprises AND questions at this many EACH (default 3 of each)")
     ap.add_argument("--max-lessons", type=int, default=3)
+    ap.add_argument("--max-world", type=int, default=3)
     ap.add_argument("--hook-json", action="store_true",
                     help="emit a Claude Code SessionStart hook payload "
                          "(hookSpecificOutput.additionalContext) instead of raw markdown")
@@ -56,7 +59,7 @@ def run_briefing() -> None:
         return  # daemon down -> inject nothing
     token = os.environ.get("PSEUDOLIFE_MCP_TOKEN") or None
     try:
-        md = _fetch_markdown(url, token, args.max_unsure, args.max_lessons)
+        md = _fetch_markdown(url, token, args.max_unsure, args.max_lessons, args.max_world)
     except Exception:
         return  # never break session start
     md = (md or "").strip()

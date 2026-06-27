@@ -2598,11 +2598,12 @@ class MemoryService:
             return {"available": False, "reason": "no_digest"}
         return {"available": True, "digest": digest}
 
-    def session_briefing(self, max_unsure: int = 3, max_lessons: int = 3) -> dict[str, Any]:
-        """Assemble the session-start briefing: graph 'unsure-about' (surprising
-        links + open questions) + avoid-first lessons. Read-only; no LLM.
-        ``max_unsure`` caps surprises AND questions at that many each. Each
-        sub-call takes the lock itself, so this orchestrator must not hold it."""
+    def session_briefing(self, max_unsure: int = 3, max_lessons: int = 3,
+                         max_world: int = 3) -> dict[str, Any]:
+        """Assemble the session-start briefing: graph 'unsure-about' + avoid-first
+        lessons + fresh world facts + a one-line recap of the last closed session.
+        Read-only; no LLM. Each sub-call takes the lock itself, so this
+        orchestrator must not hold it."""
         from pseudolife_memory.memory.briefing import format_briefing, select_lessons
         dg = self.graph_digest()
         surprises: list[dict] = []
@@ -2613,12 +2614,32 @@ class MemoryService:
             questions = (d.get("questions") or [])[:max_unsure]
         lessons_all = (self.lessons_dump(limit=120) or {}).get("entries", [])
         lessons = select_lessons(lessons_all, max_lessons)
-        markdown = format_briefing(surprises, questions, lessons)
+
+        # Fresh, high-confidence world facts (drop stale; best-confidence first).
+        world_all = (self.world_dump() or {}).get("entries", [])
+        world = sorted(
+            (w for w in world_all if not w.get("stale")),
+            key=lambda w: w.get("effective_confidence", 0.0), reverse=True,
+        )[:max_world]
+
+        # Recap: newest CLOSED episode that actually captured memories.
+        recap = None
+        eps = (self.episode_list(limit=20, include_open=False)
+               or {}).get("episodes", [])
+        for e in eps:  # episode_list is newest-first
+            if (e.get("entry_count") or 0) > 0:
+                recap = {"title": e.get("title"), "entry_count": e.get("entry_count")}
+                break
+
+        markdown = format_briefing(surprises, questions, lessons,
+                                   world=world, recap=recap)
         return {
             "available": bool(markdown),
             "markdown": markdown,
             "unsure": {"surprises": surprises, "questions": questions},
             "lessons": lessons,
+            "world": world,
+            "recap": recap,
         }
 
     def communities(self, community_id: int | None = None) -> dict[str, Any]:

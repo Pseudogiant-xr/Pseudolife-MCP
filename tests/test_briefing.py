@@ -55,7 +55,26 @@ def test_fetch_markdown_parses_api_response(monkeypatch):
     monkeypatch.setattr(
         "urllib.request.urlopen",
         lambda req, timeout=5: _Resp('{"markdown": "## hi\\n- x", "available": true}'))
-    assert bc._fetch_markdown("http://x", None, 3, 3) == "## hi\n- x"
+    assert bc._fetch_markdown("http://x", None, 3, 3, 3) == "## hi\n- x"
+
+
+def test_world_block_renders_fresh_facts():
+    world = [{"entity": "anthropic", "attribute": "latest-model",
+              "value": "opus-4.8", "source_url": "https://docs.anthropic.com/x"}]
+    md = format_briefing([], [], [], world=world, recap=None)
+    assert "## Verified world facts" in md
+    assert "anthropic" in md and "opus-4.8" in md
+
+
+def test_recap_block_renders_last_session():
+    recap = {"title": "Auth refactor", "entry_count": 7}
+    md = format_briefing([], [], [], world=None, recap=recap)
+    assert "## Where we left off" in md
+    assert "Auth refactor" in md
+
+
+def test_empty_inputs_render_nothing():
+    assert format_briefing([], [], [], world=[], recap=None) == ""
 
 
 def test_briefing_no_daemon_prints_nothing(monkeypatch, capsys):
