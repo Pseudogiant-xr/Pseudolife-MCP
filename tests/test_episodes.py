@@ -167,3 +167,16 @@ def test_from_dict_handles_empty_payload() -> None:
     em = EpisodeManager.from_dict({})
     assert em.episodes == {}
     assert em.current_id is None
+
+
+# ── Session key + open_episode helper ────────────────────────────────────────
+
+
+def test_start_records_session_key_and_open_episode_helper():
+    em = EpisodeManager()
+    assert em.open_episode() is None
+    ep = em.start(title="S", session_key="sess-abc")
+    assert ep.session_key == "sess-abc"
+    assert em.open_episode() is ep
+    em.end()
+    assert em.open_episode() is None

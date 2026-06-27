@@ -79,6 +79,7 @@ class Episode:
     ended_at: float | None = None
     hint: str | None = None
     closed_by_new_start: bool = False
+    session_key: str | None = None
 
 
 class EpisodeManager:
@@ -94,7 +95,8 @@ class EpisodeManager:
 
     # ── Lifecycle ────────────────────────────────────────────────────
 
-    def start(self, title: str, hint: str | None = None) -> Episode:
+    def start(self, title: str, hint: str | None = None,
+              session_key: str | None = None) -> Episode:
         """Open a new episode. Auto-closes any prior open one.
 
         Returns the freshly-opened episode. The prior open episode (if
@@ -112,6 +114,7 @@ class EpisodeManager:
             title=title,
             started_at=time.time(),
             hint=hint,
+            session_key=session_key,
         )
         self.episodes[ep.id] = ep
         self.current_id = ep.id
@@ -127,6 +130,13 @@ class EpisodeManager:
             return None
         ep.ended_at = time.time()
         return ep
+
+    def open_episode(self) -> Episode | None:
+        """The current open leaf episode, or None when nothing is open."""
+        if self.current_id is None:
+            return None
+        ep = self.episodes.get(self.current_id)
+        return ep if (ep is not None and ep.ended_at is None) else None
 
     # ── Lookup / listing ─────────────────────────────────────────────
 
