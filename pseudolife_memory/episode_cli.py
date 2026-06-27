@@ -31,9 +31,40 @@ def _read_stdin() -> dict:
         return {}
 
 
+def _git_project_name(cwd: str | None) -> str | None:
+    """Walk up from ``cwd`` to the nearest git repo root and return its
+    directory name — the *project* the session is in (robust to running from
+    a subdirectory). ``None`` when ``cwd`` is not inside a repo."""
+    if not cwd:
+        return None
+    try:
+        path = os.path.abspath(cwd)
+    except Exception:
+        return None
+    prev = ""
+    while path and path != prev:
+        if os.path.isdir(os.path.join(path, ".git")):
+            return os.path.basename(path) or None
+        prev, path = path, os.path.dirname(path)
+    return None
+
+
 def _title_from_cwd(cwd: str | None) -> str:
-    base = os.path.basename(os.path.normpath(cwd)) if cwd else "session"
-    return f"{base or 'session'} - {time.strftime('%Y-%m-%d')}"
+    """A stable, human title for a session episode: the project (git repo
+    root) name when discoverable, else the working-dir basename, else
+    ``session``. Never titles a session after the home directory — some
+    SessionStart fires arrive with ``cwd`` set to home, which produced noisy
+    ``<user> - <date>`` titles."""
+    name = _git_project_name(cwd)
+    if not name and cwd:
+        norm = os.path.normpath(cwd)
+        try:
+            is_home = os.path.abspath(norm) == os.path.abspath(os.path.expanduser("~"))
+        except Exception:
+            is_home = False
+        if not is_home:
+            name = os.path.basename(norm) or None
+    return f"{name or 'session'} - {time.strftime('%Y-%m-%d')}"
 
 
 def _post(url: str, token: str | None, path: str, payload: dict) -> None:

@@ -24,3 +24,24 @@ def test_parses_session_key_from_stdin(monkeypatch):
     assert captured["path"] == "/api/episode/start"
     assert captured["payload"]["session_key"] == "abc"
     assert "Proj" in captured["payload"]["title"]
+
+
+def test_title_uses_git_repo_root_from_subdir(tmp_path):
+    # cwd is a nested subdir of a git repo -> title is the REPO ROOT name.
+    repo = tmp_path / "MyProject"
+    (repo / ".git").mkdir(parents=True)
+    sub = repo / "src" / "pkg"
+    sub.mkdir(parents=True)
+    assert ec._title_from_cwd(str(sub)).startswith("MyProject - ")
+
+
+def test_title_ignores_home_dir(tmp_path, monkeypatch):
+    # SessionStart sometimes fires with cwd=home; don't title after the
+    # home-dir basename (the noisy "<user> - <date>" case).
+    home = tmp_path / "home" / "someuser"
+    home.mkdir(parents=True)
+    monkeypatch.setattr(ec.os.path, "expanduser",
+                        lambda p: str(home) if p == "~" else p)
+    title = ec._title_from_cwd(str(home))
+    assert title.startswith("session - ")
+    assert "someuser" not in title
