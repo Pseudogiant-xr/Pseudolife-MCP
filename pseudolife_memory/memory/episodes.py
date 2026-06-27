@@ -80,6 +80,7 @@ class Episode:
     hint: str | None = None
     closed_by_new_start: bool = False
     session_key: str | None = None
+    parent_id: str | None = None
 
 
 class EpisodeManager:
@@ -120,16 +121,62 @@ class EpisodeManager:
         self.current_id = ep.id
         return ep
 
+    def start_nested(self, title: str, hint: str | None = None) -> Episode:
+        """Open a sub-episode under the current open leaf (which stays open).
+        Falls back to a root episode when nothing is open."""
+        parent = self.open_episode()
+        ep = Episode(
+            id=uuid.uuid4().hex,
+            title=title,
+            started_at=time.time(),
+            hint=hint,
+            parent_id=parent.id if parent is not None else None,
+        )
+        self.episodes[ep.id] = ep
+        self.current_id = ep.id
+        return ep
+
     def end(self) -> Episode | None:
-        """Close the currently-open episode, if any. Returns it or ``None``."""
+        """Close the current open leaf and pop to its parent (if still open)."""
         if self.current_id is None:
             return None
         ep = self.episodes.get(self.current_id)
-        self.current_id = None
         if ep is None:
+            self.current_id = None
             return None
         ep.ended_at = time.time()
+        parent = self.episodes.get(ep.parent_id) if ep.parent_id else None
+        self.current_id = parent.id if (parent and parent.ended_at is None) else None
         return ep
+
+    def end_session(self, session_key: str | None) -> Episode | None:
+        """Close the open ROOT episode matching ``session_key`` and cascade-close
+        any still-open descendants. Returns the closed root, or None."""
+        root = None
+        for e in self.episodes.values():
+            if (e.ended_at is None and e.parent_id is None
+                    and (session_key is None or e.session_key == session_key)):
+                root = e
+                break
+        if root is None:
+            return None
+        now = time.time()
+        # close root + every still-open episode reachable from it
+        for e in self.episodes.values():
+            if e.ended_at is None and self._descends_from(e, root.id):
+                e.ended_at = now
+        self.current_id = None
+        return root
+
+    def _descends_from(self, ep: Episode, root_id: str) -> bool:
+        seen: set[str] = set()
+        cur: Episode | None = ep
+        while cur is not None and cur.id not in seen:
+            if cur.id == root_id:
+                return True
+            seen.add(cur.id)
+            cur = self.episodes.get(cur.parent_id) if cur.parent_id else None
+        return False
 
     def open_episode(self) -> Episode | None:
         """The current open leaf episode, or None when nothing is open."""

@@ -180,3 +180,25 @@ def test_start_records_session_key_and_open_episode_helper():
     assert em.open_episode() is ep
     em.end()
     assert em.open_episode() is None
+
+
+# ── Nesting ───────────────────────────────────────────────────────────────
+
+
+def test_nested_episode_keeps_parent_open_and_pops():
+    em = EpisodeManager()
+    root = em.start(title="Session", session_key="s1")
+    child = em.start_nested(title="Task")
+    assert child.parent_id == root.id
+    assert em.episodes[root.id].ended_at is None      # parent stays open
+    assert em.open_episode() is child                  # leaf is the child
+    em.end()                                            # pop child
+    assert em.open_episode() is em.episodes[root.id]    # back to parent
+
+
+def test_end_session_cascade_closes_orphan_children():
+    em = EpisodeManager()
+    root = em.start(title="Session", session_key="s1")
+    em.start_nested(title="Task")                       # forgot to end()
+    em.end_session("s1")
+    assert all(e.ended_at is not None for e in em.episodes.values())
