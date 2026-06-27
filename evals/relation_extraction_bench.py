@@ -15,6 +15,7 @@ The opus-4.8 ceiling rung is produced in-session by subagents (see README):
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 import time
@@ -205,3 +206,18 @@ def run_rung(name: str) -> dict:
     result["predicted"] = predicted          # raw triples = silver labels (§10)
     result["status"] = "ok"
     return result
+
+
+def build_prompts() -> list[dict]:
+    """Each corpus note paired with the EXACT system prompt + registry the
+    headless LLM rungs receive — the single source for the in-session Opus rung."""
+    from pseudolife_memory.memory.dream import _relations_prompt
+    system = _relations_prompt(RELATION_REGISTRY)
+    return [{"note_index": i, "system": system, "user": note["text"]}
+            for i, note in enumerate(CORPUS)]
+
+
+def emit_prompts(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(build_prompts(), indent=2))
+    return path

@@ -106,3 +106,12 @@ def test_predict_with_maps_triples_and_resolves_aliases():
     assert pred == [[("the daemon", "runs-on", "docker")]]
     m = rb.score(pred, corpus, rb.ENTITIES)
     assert m["edge_f1"] == 1.0   # aliases resolve: "the daemon"->daemon, "docker"->docker-desktop
+
+
+def test_build_prompts_uses_the_live_relations_prompt():
+    from pseudolife_memory.memory.dream import _relations_prompt
+    prompts = rb.build_prompts()
+    assert len(prompts) == len(rb.CORPUS)
+    assert prompts[0]["user"] == rb.CORPUS[0]["text"]
+    assert prompts[0]["system"] == _relations_prompt(rb.RELATION_REGISTRY)
+    assert prompts[0]["note_index"] == 0
