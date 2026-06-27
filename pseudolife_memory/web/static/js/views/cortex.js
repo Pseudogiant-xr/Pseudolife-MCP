@@ -71,6 +71,8 @@ function entityCard(g, ctx) {
         onclick: () => openAssert(g.entity, ctx) }, "+ fact"),
       el("button", { class: "btn sm", title: "Open in graph",
         onclick: () => { location.hash = "#/graph?entity=" + encodeURIComponent(g.entity); } }, "graph ↗"),
+      el("button", { class: "btn sm", title: "Show in Atlas",
+        onclick: () => { location.hash = "#/atlas?entity=" + encodeURIComponent(g.entity); } }, "atlas ↗"),
       el("span", { class: "n", style: { marginLeft: "10px" } }, `${g.facts.length} fact${g.facts.length === 1 ? "" : "s"}`)),
     g.facts.map((f) => factRow(f, ctx)));
 }
