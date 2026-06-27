@@ -385,6 +385,20 @@ class FixtureService:
         c = Counter(s for nd in nodes for s in nd.get("sources", []))
         return {"projects": [{"source": s, "entities": n} for s, n in c.most_common()]}
 
+    def graph_review(self, scope=None):
+        return {"findings": [
+            {"type": "duplicate", "severity": "warn", "action": "merge",
+             "label": "Cortex Console web frontend ↔ web frontend (Cortex Console)",
+             "entities": ["Cortex Console web frontend", "web frontend (Cortex Console)"]},
+            {"type": "test_artifact", "severity": "warn", "action": "delete",
+             "label": "2 test/smoke artifacts", "entities": ["payments-db", "pl-healthcheck-target"]},
+            {"type": "dubious_edge", "severity": "warn", "action": "prune",
+             "label": "1 low-confidence inferred edge",
+             "edges": [{"src": "memory_recall", "relation": "runs-on", "dst": "docker-desktop", "confidence": 0.6}]},
+            {"type": "unattributed", "severity": "info", "action": "assign",
+             "label": "3 entities with no project", "entities": ["a", "b", "c"]},
+        ], "counts": {"total": 4}}
+
     # engram traces / retention
     def get_entry(self, entry_id):
         return {"found": True, "entry_id": int(entry_id),

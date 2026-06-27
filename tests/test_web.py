@@ -146,6 +146,13 @@ def test_routes_unknown_raises_keyerror(svc):
         ConsoleRoutes(svc).dispatch("GET", "/api/bogus", {}, {})
 
 
+def test_graph_review_route(svc):
+    r = ConsoleRoutes(svc)
+    out = r.dispatch("GET", "/api/graph/review", {"scope": "all"}, {})
+    assert "findings" in out and out["counts"]["total"] == len(out["findings"])
+    assert any(f["action"] == "merge" for f in out["findings"])
+
+
 def test_routes_has(svc):
     r = ConsoleRoutes(svc)
     assert r.has("/api/facts")

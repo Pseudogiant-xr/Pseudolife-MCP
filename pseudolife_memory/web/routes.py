@@ -166,6 +166,7 @@ class ConsoleRoutes:
           lambda q, b: svc.communities(community_id=_i_opt(q, "id")))
         g("/api/graph/path", lambda q, b: svc.graph_path(
             _s(q, "source"), _s(q, "target"), max_hops=_i(q, "max_hops", 8)))
+        g("/api/graph/review", lambda q, b: svc.graph_review(scope=_s(q, "scope")))
 
         # ---- dream / consolidation ----
         g("/api/dream/status", lambda q, b: svc.dream_status())
