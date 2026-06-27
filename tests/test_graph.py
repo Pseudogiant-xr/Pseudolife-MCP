@@ -545,9 +545,9 @@ def test_graph_projects_lists_sources(svc):
 
 def test_graph_delete_entity_removes_node_and_edges(svc):
     from pseudolife_memory import graph as G
-    st = svc._storage
     svc.graph_relate("del-victim", "uses", "del-bystander")
     svc.cortex_write("del-victim", "role", "junk", support="user")  # a fact references it (no-cascade FK)
+    st = svc._storage
     eid = st.find_entity(G.norm_name("del-victim"))["id"]
 
     res = svc.graph_delete_entity("del-victim")
@@ -575,6 +575,20 @@ def test_graph_merge_folds_from_into(svc):
     pairs = {(disp.get(e["src_id"]), e["relation"], disp.get(e["dst_id"])) for e in edges}
     assert ("mg-into", "uses", "mg-dep") in pairs
     assert ("mg-into", "stores-data-in", "mg-store") in pairs
+
+
+def test_graph_merge_dedup_collision(svc):
+    from pseudolife_memory import graph as G
+    svc.graph_relate("mg2-from", "uses", "mg2-shared")
+    svc.graph_relate("mg2-into", "uses", "mg2-shared")   # identical relation+target
+    st = svc._storage
+    into_id = st.find_entity(G.norm_name("mg2-into"))["id"]
+    assert svc.graph_merge("mg2-from", "mg2-into")["merged"] is True
+    edges = st.load_graph()["edges"]
+    disp = {e["id"]: e["display"] for e in st.load_graph()["entities"]}
+    shared = [e for e in edges if disp.get(e["src_id"]) == "mg2-into"
+              and e["relation"] == "uses" and disp.get(e["dst_id"]) == "mg2-shared"]
+    assert len(shared) == 1   # deduped, not duplicated
 
 
 def test_seedless_scoped_whole_graph(svc):
