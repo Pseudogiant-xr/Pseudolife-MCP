@@ -28,3 +28,15 @@ def test_session_end_matches_key_only(pristine_service):
     closed = service.episode_end_session("sess-1", run_dream=False)
     assert closed and closed["ended_at"] is not None
     assert service.episode_end_session("sess-1", run_dream=False) == {}   # nothing open
+
+
+def test_episode_rest_start_and_end(pristine_service):
+    from pseudolife_memory.web.routes import ConsoleRoutes
+    service = pristine_service
+    routes = ConsoleRoutes(service)
+    started = routes.dispatch("POST", "/api/episode/start", {},
+                              {"session_key": "s1", "title": "Sess"})
+    assert started["session_key"] == "s1"
+    ended = routes.dispatch("POST", "/api/episode/end", {},
+                            {"session_key": "s1", "run_dream": False})
+    assert ended["ended_at"] is not None

@@ -128,6 +128,11 @@ class ConsoleRoutes:
         g("/api/episodes", lambda q, b: svc.episode_list(
             limit=_i(q, "limit", 100), include_open=True))
         g("/api/episodes/summary", lambda q, b: svc.episode_summary(id=_s(q, "id")))
+        p("/api/episode/start", lambda q, b: svc.episode_start_session(
+            b.get("session_key"), b.get("title") or "session",
+            b.get("hint")))
+        p("/api/episode/end", lambda q, b: svc.episode_end_session(
+            b.get("session_key"), run_dream=bool(b.get("run_dream", True))))
 
         # ---- associative stream ----
         g("/api/recent", lambda q, b: svc.recent(
