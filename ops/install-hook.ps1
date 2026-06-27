@@ -29,29 +29,69 @@ if (-not ($obj.hooks.PSObject.Properties.Name -contains 'SessionStart')) {
     $obj.hooks | Add-Member -NotePropertyName SessionStart -NotePropertyValue @()
 }
 
-# Idempotency: bail if a briefing hook is already present.
-foreach ($group in @($obj.hooks.SessionStart)) {
-    foreach ($h in @($group.hooks)) {
-        if ($h.command -like "*pseudolife-mcp briefing*") {
-            Write-Host "Briefing hook already present in $SettingsPath - nothing to do."
-            return
-        }
-    }
-}
-
-# Backup before writing.
+# Backup before writing (once, before any mutations).
 if (Test-Path $SettingsPath) {
     $bak = "$SettingsPath.bak-$(Get-Date -Format yyyyMMdd-HHmmss)"
     Copy-Item $SettingsPath $bak
     Write-Host "Backed up -> $bak"
 }
 
-# Append a NEW SessionStart group (leaves existing groups + hooks intact).
-$group = [pscustomobject]@{
-    hooks = @([pscustomobject]@{ type = 'command'; command = $Command; shell = 'bash' })
+# Idempotency: check briefing hook independently.
+$hasBriefing = $false
+foreach ($group in @($obj.hooks.SessionStart)) {
+    foreach ($h in @($group.hooks)) {
+        if ($h.command -like "*pseudolife-mcp briefing*") { $hasBriefing = $true }
+    }
 }
-$obj.hooks.SessionStart = @($obj.hooks.SessionStart) + $group
+if (-not $hasBriefing) {
+    # Append a NEW SessionStart group (leaves existing groups + hooks intact).
+    $briefingGroup = [pscustomobject]@{
+        hooks = @([pscustomobject]@{ type = 'command'; command = $Command; shell = 'bash' })
+    }
+    $obj.hooks.SessionStart = @($obj.hooks.SessionStart) + $briefingGroup
+    Write-Host "Installed SessionStart briefing hook -> $SettingsPath"
+    Write-Host "  command: $Command"
+} else {
+    Write-Host "Briefing hook already present in $SettingsPath - skipping."
+}
+
+# ---- episode lifecycle hooks (idempotent, alongside the briefing hook) ----
+if (-not ($obj.hooks.PSObject.Properties.Name -contains 'SessionEnd')) {
+    $obj.hooks | Add-Member -NotePropertyName SessionEnd -NotePropertyValue @()
+}
+
+$hasStart = $false
+foreach ($group in @($obj.hooks.SessionStart)) {
+    foreach ($h in @($group.hooks)) {
+        if ($h.command -like "*pseudolife-mcp episode-start*") { $hasStart = $true }
+    }
+}
+if (-not $hasStart) {
+    $startGroup = [pscustomobject]@{
+        hooks = @([pscustomobject]@{ type = 'command';
+            command = 'pseudolife-mcp episode-start'; shell = 'bash' })
+    }
+    $obj.hooks.SessionStart = @($obj.hooks.SessionStart) + $startGroup
+    Write-Host "Installed SessionStart episode-start hook."
+} else {
+    Write-Host "episode-start hook already present - skipping."
+}
+
+$hasEnd = $false
+foreach ($group in @($obj.hooks.SessionEnd)) {
+    foreach ($h in @($group.hooks)) {
+        if ($h.command -like "*pseudolife-mcp episode-end*") { $hasEnd = $true }
+    }
+}
+if (-not $hasEnd) {
+    $endGroup = [pscustomobject]@{
+        hooks = @([pscustomobject]@{ type = 'command';
+            command = 'pseudolife-mcp episode-end'; shell = 'bash' })
+    }
+    $obj.hooks.SessionEnd = @($obj.hooks.SessionEnd) + $endGroup
+    Write-Host "Installed SessionEnd episode-end hook."
+} else {
+    Write-Host "episode-end hook already present - skipping."
+}
 
 $obj | ConvertTo-Json -Depth 30 | Set-Content -Path $SettingsPath -Encoding utf8
-Write-Host "Installed SessionStart briefing hook -> $SettingsPath"
-Write-Host "  command: $Command"
