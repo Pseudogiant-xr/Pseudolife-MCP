@@ -558,6 +558,18 @@ class PostgresStorage:
         )
         self.conn.commit()
 
+    def delete_entity(self, entity_id: int) -> bool:
+        """Remove a graph entity. edges/aliases/sources/community are ON DELETE
+        CASCADE; facts/lessons FK have NO cascade, so null those refs first
+        (the fact/lesson rows survive, just unlinked from the deleted node)."""
+        for tbl in ("facts", "lessons"):
+            self.conn.execute(f"UPDATE {tbl} SET entity_id = NULL WHERE entity_id = %s", (entity_id,))
+            self.conn.execute(f"UPDATE {tbl} SET object_entity_id = NULL WHERE object_entity_id = %s", (entity_id,))
+        row = self.conn.execute(
+            "DELETE FROM entities WHERE id = %s RETURNING id", (entity_id,)).fetchone()
+        self.conn.commit()
+        return row is not None
+
     def entity_id_map(self) -> dict[str, int]:
         """Every normalized name (canonical + alias) → entity id. Used to
         link fact rows on cortex snapshot; canonical wins on collision."""

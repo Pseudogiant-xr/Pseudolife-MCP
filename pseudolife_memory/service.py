@@ -2414,6 +2414,20 @@ class MemoryService:
             return {"removed": removed, "src": src_e["display"],
                     "relation": resolved, "dst": dst_e["display"]}
 
+    def graph_delete_entity(self, entity: str) -> dict[str, Any]:
+        """Hard-delete a graph entity (and cascade its edges/aliases). Facts/lessons
+        that reference it are unlinked (entity_id set to NULL) but not deleted."""
+        from pseudolife_memory import graph as G
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return dict(self._GRAPH_UNAVAILABLE)
+            e = self._storage.find_entity(G.norm_name(entity))
+            if e is None:
+                return {"deleted": False, "reason": "unknown_entity", "entity": entity}
+            ok = self._storage.delete_entity(e["id"])
+        return {"deleted": ok, "entity": e["display"]}
+
     def graph_review(self, scope: str | None = None) -> dict[str, Any]:
         from pseudolife_memory.memory import graph_review as gr
         with self._lock:

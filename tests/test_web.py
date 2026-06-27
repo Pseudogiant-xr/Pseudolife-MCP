@@ -161,6 +161,12 @@ def test_assign_scope_and_unrelate_routes(svc):
     assert u["removed"] is True
 
 
+def test_delete_entity_route(svc):
+    r = ConsoleRoutes(svc)
+    out = r.dispatch("POST", "/api/graph/delete-entity", {}, {"entity": "junk"})
+    assert out["deleted"] is True
+
+
 def test_routes_has(svc):
     r = ConsoleRoutes(svc)
     assert r.has("/api/facts")

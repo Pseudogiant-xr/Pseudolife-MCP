@@ -543,6 +543,20 @@ def test_graph_projects_lists_sources(svc):
     assert any(p["source"] == "es-proj-z" for p in svc.graph_projects()["projects"])
 
 
+def test_graph_delete_entity_removes_node_and_edges(svc):
+    from pseudolife_memory import graph as G
+    st = svc._storage
+    svc.graph_relate("del-victim", "uses", "del-bystander")
+    svc.cortex_write("del-victim", "role", "junk", support="user")  # a fact references it (no-cascade FK)
+    eid = st.find_entity(G.norm_name("del-victim"))["id"]
+
+    res = svc.graph_delete_entity("del-victim")
+    assert res["deleted"] is True
+    assert st.find_entity(G.norm_name("del-victim")) is None
+    # its edge is gone; the fact's entity_id was nulled (fact row may remain, unlinked)
+    assert all(e["src_id"] != eid and e["dst_id"] != eid for e in st.load_graph()["edges"])
+
+
 def test_seedless_scoped_whole_graph(svc):
     import time as _t
     svc._ensure_init()  # noqa: SLF001

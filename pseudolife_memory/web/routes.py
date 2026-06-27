@@ -169,6 +169,7 @@ class ConsoleRoutes:
         g("/api/graph/review", lambda q, b: svc.graph_review(scope=_s(q, "scope")))
         p("/api/graph/assign-scope", lambda q, b: svc.graph_assign_scope(b["entity"], b["source"]))
         p("/api/graph/unrelate", lambda q, b: svc.graph_unrelate(b["src"], b["relation"], b["dst"]))
+        p("/api/graph/delete-entity", lambda q, b: svc.graph_delete_entity(b["entity"]))
 
         # ---- dream / consolidation ----
         g("/api/dream/status", lambda q, b: svc.dream_status())

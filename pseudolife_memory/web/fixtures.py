@@ -405,6 +405,9 @@ class FixtureService:
     def graph_unrelate(self, src, relation, dst):
         return {"removed": True, "src": src, "relation": relation, "dst": dst}
 
+    def graph_delete_entity(self, entity):
+        return {"deleted": True, "entity": entity}
+
     # engram traces / retention
     def get_entry(self, entry_id):
         return {"found": True, "entry_id": int(entry_id),
