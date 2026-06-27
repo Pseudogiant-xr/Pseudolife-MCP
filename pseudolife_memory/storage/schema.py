@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 14
+SCHEMA_META_VERSION = 15
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS episodes (
   started_at DOUBLE PRECISION NOT NULL,
   ended_at DOUBLE PRECISION,
   closed_by_new_start BOOLEAN NOT NULL DEFAULT FALSE,
-  session_key TEXT
+  session_key TEXT,
+  parent_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS entries (
@@ -287,6 +288,10 @@ def ensure_schema(conn) -> dict:
         # v14 additive: per-session idempotency key for hook-driven episodes.
         cur.execute(
             "ALTER TABLE episodes ADD COLUMN IF NOT EXISTS session_key TEXT"
+        )
+        # v15 additive: parent episode id for nested sub-episodes.
+        cur.execute(
+            "ALTER TABLE episodes ADD COLUMN IF NOT EXISTS parent_id TEXT"
         )
         # One-time upgrade: drop the old episode FK only when it's actually
         # present. Guarding avoids taking an ACCESS EXCLUSIVE lock on every

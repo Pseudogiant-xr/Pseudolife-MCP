@@ -98,7 +98,7 @@ def test_entry_crud_roundtrip(storage):
 def test_episode_roundtrip(storage):
     ep = {"id": "ep1", "title": "Session", "hint": None,
           "started_at": 1.0, "ended_at": None, "closed_by_new_start": False,
-          "session_key": None}
+          "session_key": None, "parent_id": None}
     storage.upsert_episode(ep)
     ep["ended_at"] = 2.0
     storage.upsert_episode(ep)

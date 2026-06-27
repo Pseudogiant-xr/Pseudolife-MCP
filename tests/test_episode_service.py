@@ -40,3 +40,14 @@ def test_episode_rest_start_and_end(pristine_service):
     ended = routes.dispatch("POST", "/api/episode/end", {},
                             {"session_key": "s1", "run_dream": False})
     assert ended["ended_at"] is not None
+
+
+def test_agent_episode_nests_under_session(pristine_service):
+    service = pristine_service
+    service.episode_start_session("s1", "Session")
+    sub = service.episode_start("Big task")           # agent sub-episode
+    assert sub["parent_id"] is not None
+    # storing now stamps the sub-episode (the leaf)
+    service.store("did a thing")  # returns entry/ack; episode stamped internally
+    closed = service.episode_end_session("s1", run_dream=False)
+    assert closed and closed["parent_id"] is None      # the root was closed

@@ -1850,21 +1850,18 @@ class MemoryService:
             "hint": ep.hint,
             "closed_by_new_start": ep.closed_by_new_start,
             "session_key": getattr(ep, "session_key", None),
+            "parent_id": getattr(ep, "parent_id", None),
         }
 
     def episode_start(
         self, title: str, hint: str | None = None,
     ) -> dict[str, Any]:
-        """Open a new episode. Auto-closes any currently-open episode.
-
-        Every memory stored while the episode is open carries
-        ``episode_id`` / ``episode_title`` for later episode-scoped
-        retrieval. Returns the freshly-opened episode dict.
-        """
+        """Open a NESTED sub-episode under the current open (session) episode;
+        the parent stays open. Falls back to a root when nothing is open."""
         with self._lock:
             self._ensure_init()
             assert self._cms is not None
-            ep = self._cms.episodes.start(title=title, hint=hint)
+            ep = self._cms.episodes.start_nested(title=title, hint=hint)
             self._persist_episodes()
             return self._episode_to_dict(ep)
 
@@ -1902,19 +1899,16 @@ class MemoryService:
     def episode_end_session(
         self, session_key: str | None, run_dream: bool = True,
     ) -> dict[str, Any]:
-        """Close the open episode only if its ``session_key`` matches; then
-        (optionally) fire a background dream so the session's outcome signals
-        become lessons by the next session start. Returns the closed episode
-        dict, or ``{}`` when nothing matching was open."""
+        """Cascade-close the root session episode matching ``session_key`` and
+        any still-open descendants; then (optionally) fire a background dream
+        so the session's outcome signals become lessons by the next session
+        start. Returns the closed root episode dict, or ``{}`` when nothing
+        matching was open."""
         with self._lock:
             self._ensure_init()
             assert self._cms is not None
             em = self._cms.episodes
-            cur = em.open_episode()
-            if cur is None or (session_key is not None
-                               and cur.session_key != session_key):
-                return {}
-            closed = em.end()
+            closed = em.end_session(session_key)
             self._persist_episodes()
             result = self._episode_to_dict(closed) if closed is not None else {}
         if run_dream and result:
