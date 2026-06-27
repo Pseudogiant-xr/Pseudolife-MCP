@@ -191,6 +191,7 @@ def run_rung(name: str) -> dict:
     if rung["kind"] == "floor":
         result["status"] = "n/a"   # RegexExtractor has no extract_relations
         return result
+    # only llm rungs carry base_url; floor returned above, naive/other -> unreachable
     if rung["kind"] != "llm" or not probe(rung["base_url"]):
         result["status"] = "unreachable"
         result["base_url"] = rung.get("base_url")
