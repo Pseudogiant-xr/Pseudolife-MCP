@@ -1,10 +1,11 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
 import relation_extraction_bench as rb  # noqa: E402
 
-_STRUCTURAL = {"runs-on", "hosts", "stores-data-in", "part-of"}
 _VOCAB = {n for n, _d in rb.RELATION_REGISTRY}
 
 
@@ -133,3 +134,9 @@ def test_build_report_orders_rungs_and_computes_gap_to_ceiling():
     assert names.index("gemma-e2b") < names.index("qwen-27b")  # ladder order
     e2b = next(r for r in rows if r["rung"] == "gemma-e2b")
     assert e2b["gap_to_27b"] == round(0.62 - 0.84, 3)          # -0.22
+
+
+def test_score_rejects_length_mismatch():
+    corpus = [{"text": "x", "edges": []}, {"text": "y", "edges": []}]
+    with pytest.raises(ValueError):
+        rb.score([[]], corpus, rb.ENTITIES)  # 1 prediction, 2 notes

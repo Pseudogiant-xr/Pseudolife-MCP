@@ -59,6 +59,7 @@ RELATION_CONSTRAINTS: dict[str, tuple[set, set]] = {
     "runs-on":        ({"service", "process", "component", "tool", "file"}, {"runtime", "host"}),
     "hosts":          ({"runtime", "host"}, {"service", "process", "component"}),
     "stores-data-in": ({"service", "process", "tool"}, {"datastore", "file"}),
+    # part-of dst is component/service only — a datastore is never a parent
     "part-of":        ({"component", "service", "file", "datastore"}, {"component", "service"}),
 }
 
@@ -119,6 +120,9 @@ def _f1(p: float, r: float) -> float:
 
 def score(predicted: list[list[tuple]], corpus: list[dict] = CORPUS,
           entities: dict[str, dict] = ENTITIES) -> dict:
+    if len(predicted) != len(corpus):
+        raise ValueError(
+            f"predicted has {len(predicted)} note-lists but corpus has {len(corpus)} notes")
     idx = alias_index(entities)
     tp = fp = fn = 0
     total_pred = related_to = 0
@@ -141,6 +145,7 @@ def score(predicted: list[list[tuple]], corpus: list[dict] = CORPUS,
             for raw, canon in ((s, cs), (d, cd)):
                 if canon is not None:
                     naming.setdefault(canon, set()).add(norm_name(raw))
+                # counts per unresolved endpoint (a fully-hallucinated edge contributes 2)
                 elif norm_name(raw) not in note_norm:
                     halluc += 1
             if r in RELATION_CONSTRAINTS and cs and cd:
@@ -219,7 +224,7 @@ def build_prompts() -> list[dict]:
 
 def emit_prompts(path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(build_prompts(), indent=2))
+    path.write_text(json.dumps(build_prompts(), indent=2), encoding="utf-8")
     return path
 
 
@@ -295,7 +300,7 @@ def main() -> int:
         print(f"wrote {p}"); return 0
     if args.rung:
         out = run_rung(args.rung)
-        (RESULTS_DIR / f"relations-{args.rung}.json").write_text(json.dumps(out, indent=2))
+        (RESULTS_DIR / f"relations-{args.rung}.json").write_text(json.dumps(out, indent=2), encoding="utf-8")
         print(json.dumps({k: v for k, v in out.items() if k != "predicted"}, indent=2))
         return 0
     ap.print_help(); return 1
