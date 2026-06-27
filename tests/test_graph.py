@@ -460,3 +460,47 @@ def test_memory_traces_storage_roundtrip(svc):
     svc.cortex_write("tr-a", "language", "python", support="user")
     assert st.traces_for_slot(en, an) == [entry_id]
     assert any(f["entity"] == "tr-a" for f in st.facts_for_entry(entry_id))
+
+
+def test_backfill_entity_sources_from_traces(svc):
+    import time as _t
+    from pseudolife_memory.memory.cortex import _norm_key
+    # cortex_write links facts.entity_id; two entries under two sources; trace both.
+    svc.cortex_write("es-shared", "role", "thing", support="user")
+    st = svc._storage  # noqa: SLF001  (lazy-inits on first svc call)
+    svc.store("es-shared mention x", source="es-src-x")
+    ex = st.conn.execute("SELECT id FROM entries ORDER BY id DESC LIMIT 1").fetchone()[0]
+    svc.store("es-shared mention y", source="es-src-y")
+    ey = st.conn.execute("SELECT id FROM entries ORDER BY id DESC LIMIT 1").fetchone()[0]
+    en, an = _norm_key("es-shared"), _norm_key("role")
+    st.add_trace(en, an, ex, _t.time())
+    st.add_trace(en, an, ey, _t.time())
+
+    n = st.backfill_entity_sources(_t.time())
+    assert n >= 2
+    eid = st.conn.execute(
+        "SELECT entity_id FROM facts WHERE entity_norm=%s AND status='current' "
+        "AND entity_id IS NOT NULL LIMIT 1", (en,)).fetchone()[0]
+    assert {"es-src-x", "es-src-y"} <= {r["source"] for r in st.sources_for_entity(eid)}
+    # idempotent: second run keeps the same derived set
+    st.backfill_entity_sources(_t.time())
+    assert {"es-src-x", "es-src-y"} <= {r["source"] for r in st.sources_for_entity(eid)}
+
+
+def test_backfill_preserves_manual(svc):
+    import time as _t
+    from pseudolife_memory.memory.cortex import _norm_key
+    svc.cortex_write("es-curated", "role", "thing", support="user")
+    st = svc._storage  # noqa: SLF001  (lazy-inits on first svc call)
+    svc.store("es-curated mention", source="es-auto")
+    e1 = st.conn.execute("SELECT id FROM entries ORDER BY id DESC LIMIT 1").fetchone()[0]
+    en = _norm_key("es-curated")
+    st.add_trace(en, _norm_key("role"), e1, _t.time())
+    eid = st.conn.execute(
+        "SELECT entity_id FROM facts WHERE entity_norm=%s AND status='current' "
+        "AND entity_id IS NOT NULL LIMIT 1", (en,)).fetchone()[0]
+    st.upsert_entity_source(eid, "es-hand", "manual", _t.time())
+    st.backfill_entity_sources(_t.time())
+    by_src = {r["source"]: r["origin"] for r in st.sources_for_entity(eid)}
+    assert by_src["es-hand"] == "manual"
+    assert by_src.get("es-auto") == "derived"

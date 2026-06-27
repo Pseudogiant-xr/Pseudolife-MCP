@@ -696,6 +696,36 @@ class PostgresStorage:
             out.setdefault(eid, []).append(source)
         return out
 
+    def backfill_entity_sources(self, now: float) -> int:
+        """Derive entity->source attribution from the fact-provenance link:
+        facts.entity_id is the authoritative FK to entities; facts.entity_norm
+        shares the cortex normalization with memory_traces.entity_norm; entries
+        carry the source. Keying by entity_id avoids the graph/cortex norm
+        mismatch. Writes/refreshes origin='derived'; never overwrites 'manual'.
+        Idempotent: count is recomputed from DISTINCT entries."""
+        rows = self.conn.execute(
+            "SELECT m.entity_id, en.source, COUNT(DISTINCT t.entry_id) AS cnt "
+            "FROM (SELECT DISTINCT entity_id, entity_norm FROM facts "
+            "      WHERE entity_id IS NOT NULL AND status = 'current') m "
+            "JOIN memory_traces t ON t.entity_norm = m.entity_norm "
+            "JOIN entries en ON en.id = t.entry_id "
+            "WHERE en.source <> '' "
+            "GROUP BY m.entity_id, en.source"
+        ).fetchall()
+        n = 0
+        for entity_id, source, cnt in rows:
+            self.conn.execute(
+                "INSERT INTO entity_sources (entity_id, source, count, origin, updated_at) "
+                "VALUES (%s, %s, %s, 'derived', %s) "
+                "ON CONFLICT (entity_id, source) DO UPDATE SET "
+                "  count = EXCLUDED.count, updated_at = EXCLUDED.updated_at, "
+                "  origin = CASE WHEN entity_sources.origin = 'manual' "
+                "                THEN 'manual' ELSE 'derived' END",
+                (entity_id, source, int(cnt), now))
+            n += 1
+        self.conn.commit()
+        return n
+
     def project_source_counts(self) -> list[dict]:
         cols = ("source", "entities")
         return [dict(zip(cols, r)) for r in self.conn.execute(
