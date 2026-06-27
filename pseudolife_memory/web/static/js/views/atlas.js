@@ -1,14 +1,16 @@
 // views/atlas.js — the Atlas overview: the WHOLE graph, no seed needed, with a
-// project/topic switcher. scope=all colours nodes by project; a single project
-// colours by community. Reuses the shared renderer in graphview.js. (The review
-// queue + cleanup actions are Stage 3 — not here.)
+// project/topic switcher (scope=all colours by project; one project colours by
+// community) and a Review queue of graph-hygiene findings with confirm-gated
+// cleanup actions. Reuses the shared renderer in graphview.js.
 import { el, mount, clear, loadingBlock, emptyBlock, errorBlock } from "../util.js";
 import { api } from "../api.js";
 import { facetBar } from "../components.js";
 import { ForceGraph, renderGalaxy, cleanupGalaxy, tableView, legend,
          zoomControls, fullscreenBtn } from "../graphview.js";
+import { reviewPanel } from "../atlas_review.js";
 
-let state = { scope: "all", view: "map" };
+let state = { scope: "all", view: "map", review: false };
+let reviewData = null;
 let fg = null;
 
 function parseHash() {
@@ -30,16 +32,32 @@ export async function renderAtlas(root, ctx) {
   const host = el("div", {});
   const scopeOpts = [{ value: "all", label: "all projects" }]
     .concat(projects.map((p) => ({ value: p.source, label: `${p.source} (${p.entities})` })));
-  const switcher = facetBar(scopeOpts, state.scope, (v) => { state.scope = v; load(); });
+  const switcher = facetBar(scopeOpts, state.scope, (v) => { state.scope = v; load(); if (state.review) loadReview(); });
   const viewToggle = facetBar(
     [{ value: "map", label: "map" }, { value: "galaxy", label: "galaxy" }, { value: "table", label: "table" }],
     state.view, (v) => { state.view = v; paint(host._data); });
+  const reviewBtn = el("button", { class: "facet" + (state.review ? " on" : ""),
+    onclick: () => { state.review = !state.review; reviewBtn.classList.toggle("on", state.review);
+      reviewHost.style.display = state.review ? "" : "none"; if (state.review) loadReview(); } },
+    "Review");
+  const reviewHost = el("div", { style: { display: state.review ? "" : "none", marginBottom: "12px" } });
 
   mount(root,
     el("div", { class: "toolbar" },
       el("span", { class: "eyebrow" }, "scope"), switcher,
-      el("span", { class: "grow" }), viewToggle),
-    host);
+      el("span", { class: "grow" }), reviewBtn, viewToggle),
+    reviewHost, host);
+
+  async function loadReview() {
+    mount(reviewHost, loadingBlock("Scanning the graph…"));
+    try {
+      reviewData = await api.get("/api/graph/review", { scope: state.scope });
+      mount(reviewHost, reviewPanel(reviewData, (f) => actOnFinding(f)));
+    } catch (err) { mount(reviewHost, errorBlock(err)); }
+  }
+
+  // Stub for Task 1; the confirm-gated dispatcher is added in Task 2.
+  function actOnFinding(_f) {}
 
   async function load() {
     if (fg) { fg.stop(); fg = null; }
