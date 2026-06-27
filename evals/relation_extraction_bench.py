@@ -16,6 +16,9 @@ The opus-4.8 ceiling rung is produced in-session by subagents (see README):
 from __future__ import annotations
 
 import os
+import sys
+import time
+from pathlib import Path
 
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
@@ -23,6 +26,9 @@ os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 from pseudolife_memory.graph import norm_name
 from pseudolife_memory.storage.postgres import _BUILTIN_RELATIONS
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from ladder_sweep import RUNGS, make_extractor, probe  # noqa: E402
 
 # Relation vocab handed to the model — same as service._dream_extract_relations
 # (builtins minus the lesson-only prefers/avoids).
@@ -165,3 +171,36 @@ def score(predicted: list[list[tuple]], corpus: list[dict] = CORPUS,
         "over_extraction_halluc": halluc,
         "edges_per_note": round(total_pred / n_notes, 2),
     }
+
+
+RESULTS_DIR = Path(__file__).resolve().parent / "results"
+
+
+def predict_with(extractor, corpus: list[dict] = CORPUS) -> list[list[tuple]]:
+    """Per-note: call extract_relations, return [(src, relation, dst), ...] strings."""
+    out: list[list[tuple]] = []
+    for note in corpus:
+        triples = extractor.extract_relations([note["text"]], RELATION_REGISTRY)
+        out.append([(t["src"], t["relation"], t["dst"]) for t in triples])
+    return out
+
+
+def run_rung(name: str) -> dict:
+    rung = RUNGS[name]
+    result = {"rung": name, "label": rung["label"]}
+    if rung["kind"] == "floor":
+        result["status"] = "n/a"   # RegexExtractor has no extract_relations
+        return result
+    if rung["kind"] != "llm" or not probe(rung["base_url"]):
+        result["status"] = "unreachable"
+        result["base_url"] = rung.get("base_url")
+        return result
+    extractor = make_extractor(rung)        # OpenAICompatExtractor (max_tokens=4096, 600s)
+    t0 = time.perf_counter()
+    predicted = predict_with(extractor)
+    secs = round(time.perf_counter() - t0, 1)
+    result.update(score(predicted))
+    result["extract_seconds"] = secs
+    result["predicted"] = predicted          # raw triples = silver labels (§10)
+    result["status"] = "ok"
+    return result

@@ -89,3 +89,20 @@ def test_related_to_share():
     pred = [[("pseudolife-daemon", "related-to", "postgres")]]
     m = rb.score(pred, corpus, rb.ENTITIES)
     assert m["related_to_share"] == 1.0
+
+
+class _StubExtractor:
+    """Mimics OpenAICompatExtractor.extract_relations for one fixed note."""
+    def extract_relations(self, texts, relations):
+        if "runs in docker" in texts[0].lower():
+            return [{"src": "the daemon", "relation": "runs-on", "dst": "docker", "confidence": 0.6}]
+        return []
+
+
+def test_predict_with_maps_triples_and_resolves_aliases():
+    corpus = [{"text": "the daemon runs in docker",
+               "edges": [("pseudolife-daemon", "runs-on", "docker-desktop")]}]
+    pred = rb.predict_with(_StubExtractor(), corpus)
+    assert pred == [[("the daemon", "runs-on", "docker")]]
+    m = rb.score(pred, corpus, rb.ENTITIES)
+    assert m["edge_f1"] == 1.0   # aliases resolve: "the daemon"->daemon, "docker"->docker-desktop
