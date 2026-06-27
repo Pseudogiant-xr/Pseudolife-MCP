@@ -273,7 +273,7 @@ class FixtureService:
         return {"tags": tags, "total": sum(t["count"] for t in tags)}
 
     # graph
-    def graph_neighborhood(self, entity, depth=1, include_facts=True, to=None):
+    def graph_neighborhood(self, entity, depth=1, include_facts=True, to=None, scope=None):
         entity = entity or "pseudolife-mcp"
         # A deliberately dense neighbourhood (~20 nodes) so the visualizer's
         # spread / zoom / fit behaviour can be exercised like a real bank.
@@ -320,6 +320,13 @@ class FixtureService:
             {"src": "docker-desktop", "relation": "runs", "dst": "docker compose", "derived": False, "confidence": 0.7},
             {"src": "Console", "relation": "guards", "dst": "Auth flow", "derived": True, "via": ["inferred"]},
         ] + [{"src": hub, "relation": "tab", "dst": t, "derived": False, "confidence": 0.9} for t in tabs]
+        for nd in nodes:
+            nd["sources"] = ["gw2-reshade"] if nd["entity"].startswith("GW2") \
+                else ["pseudolife-mcp"]
+        if scope and scope != "all":
+            keep = {nd["entity"] for nd in nodes if scope in nd["sources"]}
+            nodes = [nd for nd in nodes if nd["entity"] in keep]
+            edges = [e for e in edges if e["src"] in keep and e["dst"] in keep]
         return {"found": True, "entity": entity, "depth": depth,
                 "nodes": nodes, "edges": edges,
                 "paths": [["pseudolife-mcp", "postgres", "docker-desktop"]] if to else []}
@@ -367,6 +374,11 @@ class FixtureService:
                 "path": [source or "pseudolife-mcp", "postgres", target or "docker-desktop"],
                 "edges": [{"src": source or "pseudolife-mcp", "relation": "stores-data-in", "dst": "postgres"},
                           {"src": "postgres", "relation": "runs-on", "dst": target or "docker-desktop"}]}
+
+    def graph_projects(self):
+        return {"projects": [{"source": "pseudolife-mcp", "entities": 23},
+                             {"source": "gw2-reshade", "entities": 16},
+                             {"source": "hermes-infra", "entities": 9}]}
 
     # engram traces / retention
     def get_entry(self, entry_id):

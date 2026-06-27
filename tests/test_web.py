@@ -120,6 +120,19 @@ def test_routes_graph_insight_dispatch(svc):
     assert "found" in path and "path" in path
 
 
+def test_graph_scope_param_dispatches(svc):
+    r = ConsoleRoutes(svc)
+    out = r.dispatch("GET", "/api/graph", {"scope": "all"}, {})
+    assert out["found"] is True
+    assert all("sources" in n for n in out["nodes"])
+
+
+def test_graph_projects_route(svc):
+    r = ConsoleRoutes(svc)
+    out = r.dispatch("GET", "/api/graph/projects", {}, {})
+    assert "projects" in out and isinstance(out["projects"], list)
+
+
 def test_routes_entry_and_reinforce(svc):
     r = ConsoleRoutes(svc)
     entry = r.dispatch("GET", "/api/entry", {"id": "1"}, {})
