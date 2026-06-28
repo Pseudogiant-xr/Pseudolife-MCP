@@ -317,6 +317,16 @@ class DreamConfig:
 
 
 @dataclass
+class DeepDreamConfig:
+    """Manual full-corpus graph consolidation (Phase-2 'C'). See
+    docs/superpowers/specs/2026-06-28-deep-dream-graph-consolidation-design.md."""
+    min_similarity: float = 0.55       # cosine floor for a link candidate
+    top_k_candidates: int = 50         # max candidate pairs emitted per pass
+    max_context_snippets: int = 3      # context snippets per entity in a candidate
+    auto_apply_safe: bool = True       # auto-supersede violations + merge exact dups (apply only)
+
+
+@dataclass
 class HydeConfig:
     """HyDE-lite query expansion (Slice E, v0.7.6).
 
@@ -477,6 +487,8 @@ class MemoryConfig:
     reflection: ReflectionConfig = field(default_factory=ReflectionConfig)
     # Dream pass — MIRAS→cortex consolidation (pluggable extractor).
     dream: DreamConfig = field(default_factory=DreamConfig)
+    # Manual full-corpus graph consolidation (deep dream, Phase-2 'C').
+    deep_dream: DeepDreamConfig = field(default_factory=DeepDreamConfig)
     # Contrastive retrieval objective (Slice F, v0.7.6).
     contrastive: ContrastiveConfig = field(default_factory=ContrastiveConfig)
     # Cortex — sibling slot-keyed canonical-fact store (schema v7).

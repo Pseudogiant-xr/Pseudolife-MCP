@@ -2864,6 +2864,78 @@ class MemoryService:
         return {"found": True, "path": labels, "edges": edges,
                 "hops": len(node_path) - 1, "source": source, "target": target}
 
+    def deep_dream(self, *, apply: bool = False) -> dict[str, Any]:
+        """Manual full-corpus graph consolidation. Step A (self-clean) + Step B
+        (candidate generation), both deterministic. dry-run (default) computes and
+        returns a preview + candidates without writing; apply commits the re-score and
+        (when auto_apply_safe) the provably-safe supersede/merge class. Discovered
+        links are NOT written here — Step C (subagents) proposes them via
+        graph_propose_links. Backup-first on apply is a runbook step, not in-method."""
+        from pseudolife_memory.memory import graph_consolidation as gc
+        cfg = self.config.memory.deep_dream
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return dict(self._GRAPH_UNAVAILABLE)
+            g = self._storage.load_graph()
+            scope_map = self._storage.entity_sources_map()
+            traces = self._storage.traces_by_entity_norm()
+            entries = self._storage.load_entries()
+        entities, edges = g["entities"], g["edges"]
+
+        rescore = gc.rescore_edges(edges, entities)
+        violations = gc.hard_violation_edges(edges, entities)
+        dups = gc.exact_duplicate_pairs(entities, edges)
+        vectors = gc.entity_context_vectors(entities, entries, traces)
+        candidates = gc.candidate_pairs(
+            vectors, edges, entities, scope_map,
+            min_similarity=cfg.min_similarity, top_k=cfg.top_k_candidates)
+        candidates = self._attach_candidate_snippets(candidates, entities, entries,
+                                                     traces, cfg.max_context_snippets)
+
+        totals = {"entities": len(entities), "edges": len(edges),
+                  "candidates": len(candidates)}
+        if not apply:
+            return {"dry_run": True, "rescored": len(rescore),
+                    "would_supersede": [self._edge_label(e, entities) for e in violations],
+                    "would_merge": self._merge_labels(dups, entities),
+                    "candidates": candidates, "totals": totals}
+
+        superseded = merged = 0
+        with self._lock:
+            for eid, conf in rescore:
+                self._storage.set_edge_confidence(eid, conf)
+            if cfg.auto_apply_safe:
+                for e in violations:
+                    if self._storage.supersede_edge(e["src_id"], e["relation"], e["dst_id"]):
+                        superseded += 1
+                for frm, into in dups:
+                    if self._storage.merge_entity(frm, into):
+                        merged += 1
+        return {"applied": True, "rescored": len(rescore), "superseded": superseded,
+                "merged": merged, "candidates": candidates, "totals": totals}
+
+    def _edge_label(self, e: dict, entities: list[dict]) -> dict:
+        disp = {x["id"]: x["display"] for x in entities}
+        return {"src": disp.get(e["src_id"], str(e["src_id"])), "relation": e["relation"],
+                "dst": disp.get(e["dst_id"], str(e["dst_id"])), "confidence": e.get("confidence")}
+
+    def _merge_labels(self, dups: list[tuple[int, int]], entities: list[dict]) -> list[dict]:
+        disp = {x["id"]: x["display"] for x in entities}
+        return [{"from": disp.get(f, str(f)), "into": disp.get(t, str(t))} for f, t in dups]
+
+    def _attach_candidate_snippets(self, candidates, entities, entries, traces, k):
+        """Attach up to k context snippets per side, for the Step-C subagent prompt."""
+        by_id = {e["id"]: e for e in entries}
+        canon = {e["id"]: e["canonical"] for e in entities}
+        def snippets(eid):
+            ids = traces.get(canon.get(eid, ""), [])[:k]
+            return [by_id[i]["text"] for i in ids if i in by_id][:k]
+        for c in candidates:
+            c["src_snippets"] = snippets(c["src_id"])
+            c["dst_snippets"] = snippets(c["dst_id"])
+        return candidates
+
     def _recall_vocab(self) -> list[str]:
         """Live entity vocabulary (display names + aliases) for seed matching.
         Short locked read; released before the lock-free recall loop."""
