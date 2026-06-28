@@ -1408,9 +1408,10 @@ class MemoryService:
         if self._storage is None or not relations:
             return 0
         from pseudolife_memory import graph as G
+        from pseudolife_memory.memory.relation_quality import edge_confidence
         known = [r["name"] for r in self._graph.load_relations()
                  if r["name"] not in ("prefers", "avoids")]
-        conf = float(self.config.memory.dream.relation_confidence)
+        floor = float(self.config.memory.dream.min_relation_confidence)
         n = 0
         for r in relations:
             raw_src, raw_dst = str(r.get("src", "")), str(r.get("dst", ""))
@@ -1419,6 +1420,9 @@ class MemoryService:
                 continue
             resolved, _ = G.resolve_relation(known, str(r.get("relation", "")))
             relation = resolved or "related-to"
+            conf = edge_confidence(raw_src, relation, raw_dst)
+            if conf < floor:
+                continue
             src_e = self._resolve_or_create_entity(raw_src)
             dst_e = self._resolve_or_create_entity(raw_dst)
             self._graph.upsert_edge(src_e["id"], relation, dst_e["id"],

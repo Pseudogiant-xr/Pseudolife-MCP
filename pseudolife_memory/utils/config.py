@@ -310,7 +310,10 @@ class DreamConfig:
     # are dream-inferred, so a modest confidence below explicit graph_relate (0.8)
     # and lessons (0.7).
     extract_relations: bool = True
-    relation_confidence: float = 0.6
+    relation_confidence: float = 0.6  # legacy default; superseded by edge_confidence()
+    # Edges scoring below this at link time are dropped. 0.0 = write everything
+    # (non-destructive default); raise (e.g. 0.2) to auto-drop type-violations.
+    min_relation_confidence: float = 0.0
 
 
 @dataclass
