@@ -484,14 +484,21 @@ For each hit asserting `16`, change to `17`. (Known: `tests/test_*` carries a `t
 
 - [ ] **Step 3: Write the failing storage tests**
 
-`tests/test_edge_proposals.py` (mirror the PG-skip guard used by `tests/test_graph.py`):
+`tests/test_edge_proposals.py` — the `storage` fixture is copied verbatim from `tests/test_graph.py:110-116` (the canonical PG storage fixture; PG tests skip cleanly without a server because `tests/pg_fixtures.py` does `pytest.importorskip("psycopg")` and `pg_url` skips when no server is reachable):
 
 ```python
 import time
 import pytest
 
-pg = pytest.importorskip("psycopg")
-from tests.pg_fixtures import pg_storage  # reuse the existing fixture module
+from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401 (fixtures)
+from pseudolife_memory.storage.postgres import PostgresStorage
+
+
+@pytest.fixture()
+def storage(pg_conn, pg_url):
+    s = PostgresStorage(pg_url)
+    yield s
+    s.close()
 
 
 def _two_entities(st):
@@ -500,33 +507,28 @@ def _two_entities(st):
     return a, b
 
 
-def test_insert_then_pending_then_accept(pg_storage):
-    st = pg_storage
-    a, b = _two_entities(st)
-    pid = st.insert_proposal(a, "related-to", b, 0.45, 0.91, "why", "deep-dream", time.time())
+def test_insert_then_pending_then_accept(storage):
+    a, b = _two_entities(storage)
+    pid = storage.insert_proposal(a, "related-to", b, 0.45, 0.91, "why", "deep-dream", time.time())
     assert pid is not None
-    pend = st.pending_proposals()
+    pend = storage.pending_proposals()
     assert len(pend) == 1 and pend[0]["src"] == "alpha" and pend[0]["dst"] == "beta"
-    assert st.set_proposal_status(pid, "accepted") is True
-    assert st.pending_proposals() == []
+    assert storage.set_proposal_status(pid, "accepted") is True
+    assert storage.pending_proposals() == []
 
 
-def test_insert_is_idempotent_on_triple(pg_storage):
-    st = pg_storage
-    a, b = _two_entities(st)
-    first = st.insert_proposal(a, "related-to", b, 0.45, 0.9, "x", "deep-dream", time.time())
-    dup = st.insert_proposal(a, "related-to", b, 0.45, 0.9, "x", "deep-dream", time.time())
+def test_insert_is_idempotent_on_triple(storage):
+    a, b = _two_entities(storage)
+    first = storage.insert_proposal(a, "related-to", b, 0.45, 0.9, "x", "deep-dream", time.time())
+    dup = storage.insert_proposal(a, "related-to", b, 0.45, 0.9, "x", "deep-dream", time.time())
     assert first is not None and dup is None
 
 
-def test_traces_by_entity_norm_groups_entry_ids(pg_storage):
-    st = pg_storage
-    eid = st.add_entry_minimal("alpha note") if hasattr(st, "add_entry_minimal") else None
-    # If no helper exists, this asserts the method shape on an empty bank:
-    assert isinstance(st.traces_by_entity_norm(), dict)
+def test_traces_by_entity_norm_returns_dict(storage):
+    assert isinstance(storage.traces_by_entity_norm(), dict)
 ```
 
-> Note for the implementer: if `tests/pg_fixtures.py` / `pg_storage` does not exist under that name, use the same fixture the existing PG-backed suite uses (grep `tests/test_graph.py` for its storage fixture and import that). Keep the skip-without-Postgres behavior identical to the existing suite.
+> `edge_proposals` does not need adding to `tests/pg_fixtures.py`'s `_ALL_TABLES` truncate list — it has an FK to `entities`, so `TRUNCATE entities ... CASCADE` clears it automatically.
 
 - [ ] **Step 4: Run to verify failure**
 
@@ -750,39 +752,49 @@ Wire it into the memory config aggregate (find `class MemoryConfig` and add a fi
 
 - [ ] **Step 2: Write the failing tests**
 
-`tests/test_deep_dream.py`:
+`tests/test_deep_dream.py` — the `svc` fixture mirrors `tests/test_graph.py:183-206` but is function-scoped (per-test truncate) for count isolation, and adds `edge_proposals` to the truncate list:
 
 ```python
 import pytest
 
-pg = pytest.importorskip("psycopg")
-from tests.pg_fixtures import service_with_pg  # reuse existing PG service fixture
+from tests.pg_fixtures import pg_url  # noqa: F401 (fixture; skips without a server)
 
 
-def test_dry_run_writes_nothing(service_with_pg):
-    svc = service_with_pg
+@pytest.fixture()
+def svc(pg_url, tmp_path_factory):
+    """Function-scoped PG-backed service with a wiped graph."""
+    import psycopg as _psy
+    from pseudolife_memory.storage.schema import ensure_schema
+    with _psy.connect(pg_url) as conn:
+        conn.execute("SET search_path TO public")
+        conn.commit()
+        ensure_schema(conn)
+        with conn.cursor() as cur:
+            cur.execute(
+                "TRUNCATE edges, edge_proposals, entity_aliases, relations, facts, "
+                "world_facts, entries, episodes, entities, meta RESTART IDENTITY CASCADE")
+        conn.commit()
+        ensure_schema(conn)
+    from pseudolife_memory.service import MemoryService
+    return MemoryService(data_dir=tmp_path_factory.mktemp("dd-svc"), database_url=pg_url)
+
+
+def test_dry_run_writes_nothing(svc):
     svc.graph_relate("user", "runs-on", "windows 11", origin="agent")  # a violation
     before = svc._storage.load_graph()["edges"]
     out = svc.deep_dream(apply=False)
     after = svc._storage.load_graph()["edges"]
     assert out["dry_run"] is True
     assert [e["id"] for e in before] == [e["id"] for e in after]   # nothing superseded
-    assert any(e["confidence"] for e in before)                    # unchanged
 
 
-def test_apply_supersedes_violation_and_rescores(service_with_pg):
-    svc = service_with_pg
+def test_apply_supersedes_violation_and_rescores(svc):
     svc.graph_relate("user", "runs-on", "windows 11", origin="agent")     # violation
     svc.graph_relate("daemon", "runs-on", "docker", origin="agent")       # clean
     out = svc.deep_dream(apply=True)
     assert out["applied"] is True
-    live = {(e["src_id"], e["relation"], e["dst_id"]): e
-            for e in svc._storage.load_graph()["edges"]}
-    # the clean edge survives at 0.70; the violation is gone (superseded)
     assert out["superseded"] >= 1
 ```
-
-> Implementer: if `service_with_pg` is named differently, reuse the fixture the existing PG-backed service tests use (grep `tests/test_graph.py`).
 
 - [ ] **Step 3: Run to verify failure**
 
@@ -903,11 +915,10 @@ git commit -m "feat(service): deep_dream orchestration (self-clean + candidate g
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `tests/test_deep_dream.py`:
+Append to `tests/test_deep_dream.py` (reuses the `svc` PG fixture defined there in Task 6):
 
 ```python
-def test_propose_then_accept_promotes_to_edge(service_with_pg):
-    svc = service_with_pg
+def test_propose_then_accept_promotes_to_edge(svc):
     svc._resolve_or_create_entity("alpha"); svc._resolve_or_create_entity("beta")
     out = svc.graph_propose_links([
         {"src": "alpha", "relation": "related-to", "dst": "beta",
@@ -924,16 +935,14 @@ def test_propose_then_accept_promotes_to_edge(service_with_pg):
     assert svc._storage.pending_proposals() == []
 
 
-def test_propose_drops_type_violation(service_with_pg):
-    svc = service_with_pg
+def test_propose_drops_type_violation(svc):
     svc._resolve_or_create_entity("user"); svc._resolve_or_create_entity("windows 11")
     out = svc.graph_propose_links([
         {"src": "user", "relation": "runs-on", "dst": "windows 11"}])
     assert out["proposed"] == 0 and out["skipped"] == 1
 
 
-def test_reject_marks_rejected(service_with_pg):
-    svc = service_with_pg
+def test_reject_marks_rejected(svc):
     svc._resolve_or_create_entity("alpha"); svc._resolve_or_create_entity("beta")
     svc.graph_propose_links([{"src": "alpha", "relation": "related-to", "dst": "beta"}])
     pid = svc._storage.pending_proposals()[0]["id"]
@@ -941,12 +950,13 @@ def test_reject_marks_rejected(service_with_pg):
     assert svc._storage.pending_proposals() == []
 ```
 
-Append to `tests/test_web.py` (mirror an existing POST dispatch test):
+Append to `tests/test_web.py` (mirrors `test_assign_scope_and_unrelate_routes` at line ~156; the module's `svc` fixture is `FixtureService()`):
 
 ```python
-def test_accept_reject_proposal_routes(fixture_app):  # use the existing web fixture
-    assert fixture_app.dispatch("POST", "/api/graph/accept-proposal", {}, {"id": 1})["accepted"]
-    assert fixture_app.dispatch("POST", "/api/graph/reject-proposal", {}, {"id": 1})["rejected"]
+def test_accept_reject_proposal_routes(svc):
+    r = ConsoleRoutes(svc)
+    assert r.dispatch("POST", "/api/graph/accept-proposal", {}, {"id": 1})["accepted"]
+    assert r.dispatch("POST", "/api/graph/reject-proposal", {}, {"id": 1})["rejected"]
 ```
 
 - [ ] **Step 2: Run to verify failure**
