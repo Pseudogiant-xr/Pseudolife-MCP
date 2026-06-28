@@ -3,7 +3,7 @@ from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
 
 
 def test_schema_version_is_16():
-    assert SCHEMA_META_VERSION == 16
+    assert SCHEMA_META_VERSION == 17
 
 
 def test_entity_sources_table_present(pg_conn):

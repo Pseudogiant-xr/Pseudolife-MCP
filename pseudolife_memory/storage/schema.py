@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 16
+SCHEMA_META_VERSION = 17
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -93,6 +93,20 @@ CREATE TABLE IF NOT EXISTS edges (
   origin TEXT,
   asserted_at DOUBLE PRECISION NOT NULL,
   superseded_at DOUBLE PRECISION,
+  UNIQUE (src_id, relation, dst_id)
+);
+
+CREATE TABLE IF NOT EXISTS edge_proposals (
+  id BIGSERIAL PRIMARY KEY,
+  src_id BIGINT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+  relation TEXT NOT NULL REFERENCES relations(name),
+  dst_id BIGINT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+  confidence REAL NOT NULL,
+  similarity REAL,
+  rationale TEXT,
+  source TEXT NOT NULL DEFAULT 'deep-dream',
+  created_at DOUBLE PRECISION NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
   UNIQUE (src_id, relation, dst_id)
 );
 

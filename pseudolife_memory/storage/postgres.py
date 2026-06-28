@@ -727,6 +727,64 @@ class PostgresStorage:
         self.conn.commit()
         return row is not None
 
+    def set_edge_confidence(self, edge_id: int, confidence: float) -> None:
+        self.conn.execute("UPDATE edges SET confidence = %s WHERE id = %s",
+                          (float(confidence), edge_id))
+        self.conn.commit()
+
+    def traces_by_entity_norm(self) -> dict[str, list[int]]:
+        out: dict[str, list[int]] = {}
+        for ent_norm, entry_id in self.conn.execute(
+            "SELECT entity_norm, entry_id FROM memory_traces ORDER BY entity_norm, entry_id"
+        ).fetchall():
+            out.setdefault(ent_norm, []).append(entry_id)
+        return out
+
+    def insert_proposal(self, src_id: int, relation: str, dst_id: int,
+                        confidence: float, similarity: float | None,
+                        rationale: str | None, source: str, now: float) -> int | None:
+        row = self.conn.execute(
+            "INSERT INTO edge_proposals "
+            "(src_id, relation, dst_id, confidence, similarity, rationale, source, created_at, status) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'pending') "
+            "ON CONFLICT (src_id, relation, dst_id) DO NOTHING RETURNING id",
+            (src_id, relation, dst_id, float(confidence),
+             similarity, rationale, source, now),
+        ).fetchone()
+        self.conn.commit()
+        return int(row[0]) if row else None
+
+    def pending_proposals(self) -> list[dict]:
+        cols = ("id", "src_id", "relation", "dst_id", "confidence", "similarity",
+                "rationale", "source", "created_at", "status")
+        rows = self.conn.execute(
+            "SELECT p.id, p.src_id, p.relation, p.dst_id, p.confidence, p.similarity, "
+            "       p.rationale, p.source, p.created_at, p.status, s.display, d.display "
+            "FROM edge_proposals p "
+            "JOIN entities s ON s.id = p.src_id JOIN entities d ON d.id = p.dst_id "
+            "WHERE p.status = 'pending' ORDER BY p.confidence DESC, p.id"
+        ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(zip(cols, r[:10]))
+            d["src"], d["dst"] = r[10], r[11]
+            out.append(d)
+        return out
+
+    def get_proposal(self, proposal_id: int) -> dict | None:
+        cols = ("id", "src_id", "relation", "dst_id", "confidence", "similarity",
+                "rationale", "source", "created_at", "status")
+        r = self.conn.execute(
+            f"SELECT {', '.join(cols)} FROM edge_proposals WHERE id = %s", (proposal_id,)
+        ).fetchone()
+        return dict(zip(cols, r)) if r else None
+
+    def set_proposal_status(self, proposal_id: int, status: str) -> bool:
+        cur = self.conn.execute(
+            "UPDATE edge_proposals SET status = %s WHERE id = %s", (status, proposal_id))
+        self.conn.commit()
+        return cur.rowcount > 0
+
     def traces_for_slot(self, entity_norm: str, attribute_norm: str) -> list[int]:
         return [r[0] for r in self.conn.execute(
             "SELECT entry_id FROM memory_traces "

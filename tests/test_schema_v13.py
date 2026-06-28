@@ -23,7 +23,7 @@ def test_schema_v13_traces_and_reinforcements(tmp_path):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
     from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
-    assert SCHEMA_META_VERSION == 16
+    assert SCHEMA_META_VERSION == 17
     svc = build_service(tmp_path)
     svc._ensure_init()  # noqa: SLF001
     st = svc._storage  # noqa: SLF001
