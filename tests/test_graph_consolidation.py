@@ -1,3 +1,5 @@
+import numpy as np
+
 from pseudolife_memory.memory import graph_consolidation as gc
 
 ENTS = [
@@ -51,9 +53,6 @@ def test_exact_duplicate_pairs_ignores_non_identical_token_sets():
         {"id": 2, "canonical": "schema 11", "display": "schema 11", "etype": None},
     ]
     assert gc.exact_duplicate_pairs(ents, []) == []
-
-
-import numpy as np
 
 
 def _vec(*xs):
