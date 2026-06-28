@@ -14,8 +14,8 @@ import re
 # truth — evals/relation_extraction_bench.py imports this. depends-on / uses /
 # configures / related-to are intentionally absent (any->any, no type penalty).
 TYPE_CONSTRAINTS: dict[str, tuple[set[str], set[str]]] = {
-    "runs-on":        ({"service", "process", "component", "tool", "file"}, {"runtime", "host"}),
-    "hosts":          ({"runtime", "host"}, {"service", "process", "component"}),
+    "runs-on":        ({"service", "process", "component", "tool", "file", "datastore"}, {"runtime", "host"}),
+    "hosts":          ({"runtime", "host"}, {"service", "process", "component", "datastore"}),
     "stores-data-in": ({"service", "process", "tool"}, {"datastore", "file"}),
     "part-of":        ({"component", "service", "file", "datastore"}, {"component", "service"}),
 }

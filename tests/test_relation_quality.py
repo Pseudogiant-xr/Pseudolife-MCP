@@ -54,3 +54,11 @@ def test_unknown_type_is_neutral():
 def test_non_structural_relation_never_penalized():
     # 'uses' has no constraint even if types look odd
     assert edge_confidence("user", "uses", "schema 11") == 0.70
+
+
+def test_datastore_can_be_hosted_and_run_on():
+    # a runtime hosting a datastore is legitimate (docker hosts postgres) — and
+    # the inverse (a datastore running on a runtime). Regression for the backfill
+    # dry-run finding: these must NOT be flagged as type-violations.
+    assert edge_confidence("docker-desktop", "hosts", "postgres") == 0.70
+    assert edge_confidence("postgres", "runs-on", "docker-desktop") == 0.70
