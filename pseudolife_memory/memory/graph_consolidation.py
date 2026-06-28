@@ -5,6 +5,8 @@ CANDIDATE generation for cross-session link discovery. The service supplies
 edges / entities / entries / embeddings / scope-map and persists the decisions."""
 from __future__ import annotations
 
+import re
+
 import numpy as np
 
 from pseudolife_memory.graph import degree_counts
@@ -16,6 +18,18 @@ from pseudolife_memory.memory.relation_quality import (
 
 def _disp(entities: list[dict]) -> dict[int, str]:
     return {e["id"]: e["display"] for e in entities}
+
+
+_WORD_SPLIT = re.compile(r"[^a-z0-9]+")
+
+
+def _full_token_set(name: str) -> frozenset[str]:
+    """Every alphanumeric token, lowercased, with NO length filter — short
+    discriminators (a/b, pg, id, py, version letters) are retained. This is the
+    identity test for the AUTO-MERGE class; graph_review._token_set (which drops
+    short tokens for recall) is kept for the fuzzy duplicate detector and the
+    mention scan."""
+    return frozenset(t for t in _WORD_SPLIT.split(str(name).lower()) if t)
 
 
 # --- Step A: self-clean classifiers -------------------------------------------
@@ -51,7 +65,7 @@ def exact_duplicate_pairs(entities: list[dict], edges: list[dict]) -> list[tuple
     (preserve the more-connected node); tie-break folds the higher id into the
     lower id (deterministic)."""
     deg = degree_counts(edges)
-    toks = [(e["id"], _token_set(e["display"])) for e in entities]
+    toks = [(e["id"], _full_token_set(e["display"])) for e in entities]
     pairs: list[tuple[int, int]] = []
     for i in range(len(toks)):
         for j in range(i + 1, len(toks)):

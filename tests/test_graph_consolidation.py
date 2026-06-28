@@ -103,3 +103,29 @@ def test_candidate_pairs_filters_edges_scope_and_threshold():
     # 2-3 dropped (disjoint scope). 1-4 / 2-4 dropped (sim 0 < 0.55).
     assert pairs == {(1, 2)}
     assert out[0]["similarity"] == 1.0
+
+
+def test_exact_duplicate_pairs_keeps_short_discriminators():
+    # Distinct entities whose ONLY difference is a token graph_review._token_set
+    # would drop (<=2 chars, no digit) must NOT be auto-merged.
+    cases = [
+        ("Extractor", "pg+extractor"),               # 'pg' dropped by the old filter
+        ("heuristic bug (a)", "heuristic bug (b)"),   # 'a'/'b'
+        ("Phase-2 Option B", "Phase-2 Option C"),     # 'B'/'C'
+    ]
+    for da, db in cases:
+        ents = [
+            {"id": 1, "canonical": da.lower(), "display": da, "etype": None},
+            {"id": 2, "canonical": db.lower(), "display": db, "etype": None},
+        ]
+        assert gc.exact_duplicate_pairs(ents, []) == [], f"should not merge {da!r}/{db!r}"
+
+
+def test_exact_duplicate_pairs_still_merges_quote_artifacts():
+    # Pairs differing only by non-alphanumeric noise (quotes, extra spaces) ARE
+    # the same entity and must still auto-merge.
+    ents = [
+        {"id": 1, "canonical": "fixture devserver", "display": "fixture devserver", "etype": None},
+        {"id": 2, "canonical": "'fixture devserver'", "display": "'fixture devserver'", "etype": None},
+    ]
+    assert gc.exact_duplicate_pairs(ents, []) == [(2, 1)]  # equal degree -> higher id folds into lower
