@@ -79,6 +79,8 @@ def test_all_tools_registered() -> None:
         "memory_briefing",
         "memory_get",
         "memory_reinforce",
+        # Deep dream — full-corpus graph consolidation.
+        "memory_deep_dream",
         # Deep dream — link proposals.
         "memory_graph_propose_links",
         "memory_graph_accept_proposal",

@@ -456,3 +456,9 @@ reference** (regenerate by repeating these steps; not headlessly re-runnable):
 4. `--report` ranks every rung against the `qwen-27b` and `opus-4.8` ceilings
    (`gap_to_27b`). That gap drives the keep-repair vs retrench(C) vs
    bespoke-model decision (see the design doc).
+
+**Step-C prompt reuse.** The `--emit-prompts` output (system prompt + registry)
+is also the shape the deep-dream Step-C workflow reuses when dispatching Opus
+subagents over `memory_deep_dream` candidates. Each candidate's
+`src_snippets`/`dst_snippets` slot into the same prompt template, so a subagent
+trained on the bench corpus transfers directly to the live consolidation run.

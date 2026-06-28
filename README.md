@@ -951,6 +951,19 @@ you already pay for (a scheduled daily dream is small but non-zero). Tier 2 with
 *cloud* endpoint sends memory text off-box — a local model (e.g. Ollama) keeps it
 on-machine.
 
+**Deep dream — full-corpus graph consolidation.** The incremental dream (tiers
+above) is window-local: it distils only the recent MIRAS tail into cortex facts.
+`memory_deep_dream` is a separate, manually-triggered full-corpus GRAPH pass
+(Phase-2 'C'). A dry-run (default) returns a preview of what it would change:
+re-scored edges, hard type-violation edges queued for supersession, exact-duplicate
+entity pairs queued for merging, and semantic link *candidates* across sessions
+(each with context snippets). Calling `memory_deep_dream(apply=True)` commits the
+safe self-clean (re-score + supersede violations + merge exact dups), then the
+candidates are dispatched to Opus subagents via the Step-C workflow and the
+survivors posted with `memory_graph_propose_links` — landing in the Atlas Review
+queue (`proposed_link` findings) for per-item accept/reject before anything
+reaches live edges. See `docs/runbooks/deep-dream.md` for the operator procedure.
+
 ## Data layout
 
 **Containerized / daemon mode (recommended).** The durable source of truth is

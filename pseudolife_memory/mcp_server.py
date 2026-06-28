@@ -1228,6 +1228,22 @@ def memory_relation_define(
     )
 
 
+# Deep dream — full-corpus graph consolidation.
+@_tool()
+def memory_deep_dream(apply: bool = False) -> dict[str, Any]:
+    """Manual full-corpus GRAPH consolidation (Phase-2 'C'). dry-run (default,
+    apply=False) returns a preview — would-supersede / would-merge sets, re-score
+    count, and semantic link CANDIDATES (with context snippets) — and writes
+    nothing. apply=True commits the re-score and the provably-safe self-clean
+    (supersede hard type-violations + merge exact duplicates).
+
+    BACKUP FIRST before apply=True (ops/backup.ps1 on the host). After apply,
+    drive Step C from this session: dispatch subagents over `candidates` to
+    propose typed relations, then post survivors with memory_graph_propose_links;
+    confirm them per-item in the Atlas Review queue (proposed_link findings)."""
+    return service.deep_dream(apply=apply)
+
+
 # Deep dream — link proposals.
 @_tool()
 def memory_graph_propose_links(proposals: list[dict]) -> dict[str, Any]:
