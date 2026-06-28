@@ -1,5 +1,7 @@
 import pytest
-from pseudolife_memory.memory.relation_quality import infer_type, TYPE_CONSTRAINTS
+from pseudolife_memory.memory.relation_quality import (
+    infer_type, TYPE_CONSTRAINTS, edge_confidence, is_hard_type_violation
+)
 
 
 @pytest.mark.parametrize("name,expected", [
@@ -22,9 +24,6 @@ def test_infer_type(name, expected):
 def test_constraints_cover_structural_relations():
     assert set(TYPE_CONSTRAINTS) == {"runs-on", "hosts", "stores-data-in", "part-of"}
     assert TYPE_CONSTRAINTS["runs-on"][1] == {"runtime", "host"}
-
-
-from pseudolife_memory.memory.relation_quality import edge_confidence
 
 
 def test_clean_specific_edge():
@@ -62,9 +61,6 @@ def test_datastore_can_be_hosted_and_run_on():
     # dry-run finding: these must NOT be flagged as type-violations.
     assert edge_confidence("docker-desktop", "hosts", "postgres") == 0.70
     assert edge_confidence("postgres", "runs-on", "docker-desktop") == 0.70
-
-
-from pseudolife_memory.memory.relation_quality import is_hard_type_violation
 
 
 def test_hard_violation_when_both_typed_and_incompatible():

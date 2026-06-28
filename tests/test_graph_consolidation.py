@@ -55,6 +55,16 @@ def test_exact_duplicate_pairs_ignores_non_identical_token_sets():
     assert gc.exact_duplicate_pairs(ents, []) == []
 
 
+def test_exact_duplicate_pairs_equal_degree_folds_higher_id_into_lower():
+    # token-set-identical displays, both degree 0 (no edges) -> equal degree:
+    # fold the HIGHER id into the LOWER id, i.e. (from_id=9, into_id=5).
+    ents = [
+        {"id": 5, "canonical": "dup", "display": "dup thing", "etype": None},
+        {"id": 9, "canonical": "dup", "display": "dup  thing", "etype": None},
+    ]
+    assert gc.exact_duplicate_pairs(ents, []) == [(9, 5)]
+
+
 def _vec(*xs):
     return np.asarray(xs, dtype=np.float32)
 

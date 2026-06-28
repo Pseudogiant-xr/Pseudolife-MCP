@@ -233,6 +233,12 @@ deliberate per-item human act.
 A+B are deterministic and daemon-side with dry-run/apply safety; C is session-orchestrated (no
 scheduler, frontier quality on included usage); acceptance is the existing Atlas confirm flow.
 
+> **Implementation note:** the `ops/deep_dream.py` CLI and `evals/results/deep-dream-candidates.json`
+> payload file mentioned in earlier drafts were intentionally dropped (YAGNI — a standalone CLI
+> would require a separate DB connection, which the no-separate-connection constraint forbids); the
+> entry point is the `memory_deep_dream` MCP tool, the operator runbook is `docs/runbooks/deep-dream.md`,
+> and Step C is driven in-session.
+
 **Config** — new `memory.deep_dream` namespace: `min_similarity` (0.55), `top_k_candidates` (50),
 `max_context_snippets` (3), `auto_apply_safe` (True; acts only under apply). Reuses
 `min_relation_confidence` + `TYPE_CONSTRAINTS`. All knobs, no magic numbers.
