@@ -84,8 +84,21 @@ def unattributed(entities, entity_sources_map):
              "entities": names, "action": "assign"}]
 
 
-def review(edges, entities, entity_sources_map):
+def proposed_links(proposals):
+    if not proposals:
+        return []
+    links = [{"src": p["src"], "relation": p["relation"], "dst": p["dst"],
+              "confidence": p.get("confidence"), "similarity": p.get("similarity"),
+              "rationale": p.get("rationale")}
+             for p in proposals]
+    return [{"type": "proposed_link", "severity": "info", "action": "review",
+             "label": f"{len(links)} proposed cross-session links",
+             "links": links}]
+
+
+def review(edges, entities, entity_sources_map, proposals=None):
     findings = (duplicate_candidates(entities) + test_artifacts(entities)
                 + dubious_edges(edges, entities) + orphans(edges, entities)
-                + unattributed(entities, entity_sources_map))
+                + unattributed(entities, entity_sources_map)
+                + proposed_links(proposals or []))
     return {"findings": findings, "counts": {"total": len(findings)}}

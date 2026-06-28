@@ -95,3 +95,23 @@ def test_dubious_edges_discriminate_by_confidence():
     assert out, "low-confidence edge should produce a finding"
     flagged = out[0]["edges"]
     assert len(flagged) == 1 and flagged[0]["confidence"] == 0.175
+
+
+def test_proposed_links_finding_shape():
+    props = [{"src": "alpha", "relation": "related-to", "dst": "beta",
+              "confidence": 0.45, "similarity": 0.91, "rationale": "co-discussed"}]
+    out = gr.proposed_links(props)
+    assert len(out) == 1
+    f = out[0]
+    assert f["type"] == "proposed_link" and f["action"] == "review"
+    assert f["links"][0]["src"] == "alpha" and f["links"][0]["dst"] == "beta"
+
+
+def test_proposed_links_empty_when_none():
+    assert gr.proposed_links([]) == []
+
+
+def test_review_includes_proposals_when_passed():
+    out = gr.review([], [], {}, proposals=[
+        {"src": "a", "relation": "related-to", "dst": "b", "confidence": 0.45}])
+    assert any(f["type"] == "proposed_link" for f in out["findings"])

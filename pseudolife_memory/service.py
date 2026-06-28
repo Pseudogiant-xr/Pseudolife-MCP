@@ -2458,12 +2458,13 @@ class MemoryService:
                 return {"findings": [], "counts": {"total": 0}}
             g = self._storage.load_graph()
             src_map = self._storage.entity_sources_map()
+            proposals = self._storage.pending_proposals()
         entities, edges = g["entities"], g["edges"]
         if scope and scope != "all":
             keep = {eid for eid, ss in src_map.items() if scope in ss}
             entities = [e for e in entities if e["id"] in keep]
             edges = [e for e in edges if e["src_id"] in keep and e["dst_id"] in keep]
-        return gr.review(edges, entities, src_map)
+        return gr.review(edges, entities, src_map, proposals=proposals)
 
     def graph_alias(self, entity: str, alias: str) -> dict[str, Any]:
         """Bind ``alias`` → ``entity`` (auto-created). All fact and graph
