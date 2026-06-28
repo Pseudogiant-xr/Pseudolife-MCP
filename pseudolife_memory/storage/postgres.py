@@ -745,8 +745,8 @@ class PostgresStorage:
                         rationale: str | None, source: str, now: float) -> int | None:
         row = self.conn.execute(
             "INSERT INTO edge_proposals "
-            "(src_id, relation, dst_id, confidence, similarity, rationale, source, created_at, status) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'pending') "
+            "(src_id, relation, dst_id, confidence, similarity, rationale, source, created_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
             "ON CONFLICT (src_id, relation, dst_id) DO NOTHING RETURNING id",
             (src_id, relation, dst_id, float(confidence),
              similarity, rationale, source, now),

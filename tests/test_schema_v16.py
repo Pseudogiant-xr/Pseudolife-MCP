@@ -2,7 +2,7 @@ from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
 from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
 
 
-def test_schema_version_is_16():
+def test_schema_version_is_17():
     assert SCHEMA_META_VERSION == 17
 
 
