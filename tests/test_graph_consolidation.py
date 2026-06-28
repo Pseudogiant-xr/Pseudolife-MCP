@@ -51,3 +51,46 @@ def test_exact_duplicate_pairs_ignores_non_identical_token_sets():
         {"id": 2, "canonical": "schema 11", "display": "schema 11", "etype": None},
     ]
     assert gc.exact_duplicate_pairs(ents, []) == []
+
+
+import numpy as np
+
+
+def _vec(*xs):
+    return np.asarray(xs, dtype=np.float32)
+
+
+def test_entity_context_vectors_trace_primary_then_mention_fallback():
+    ents = [
+        {"id": 1, "canonical": "alpha", "display": "alpha", "etype": None},
+        {"id": 2, "canonical": "beta", "display": "beta", "etype": None},
+        {"id": 3, "canonical": "ghost", "display": "ghost", "etype": None},
+    ]
+    entries = [
+        {"id": 100, "text": "alpha runs nightly", "embedding": _vec(1, 0)},
+        {"id": 101, "text": "beta and alpha discussed", "embedding": _vec(0, 1)},
+    ]
+    # alpha has a trace to entry 100; beta has none -> mention-scan finds entry 101
+    vecs = gc.entity_context_vectors(ents, entries, {"alpha": [100]})
+    assert set(vecs) == {1, 2}                 # ghost omitted (no trace, no mention)
+    assert np.allclose(vecs[1], _vec(1, 0))    # alpha from its trace entry
+    assert np.allclose(vecs[2], _vec(0, 1))    # beta from the mention scan
+
+
+def test_candidate_pairs_filters_edges_scope_and_threshold():
+    ents = [
+        {"id": 1, "canonical": "a", "display": "a", "etype": None},
+        {"id": 2, "canonical": "b", "display": "b", "etype": None},
+        {"id": 3, "canonical": "c", "display": "c", "etype": None},
+        {"id": 4, "canonical": "d", "display": "d", "etype": None},
+    ]
+    vectors = {1: _vec(1, 0), 2: _vec(1, 0), 3: _vec(1, 0), 4: _vec(0, 1)}
+    edges = [{"id": 9, "src_id": 1, "relation": "related-to", "dst_id": 3,
+              "confidence": 0.45, "origin": "agent"}]
+    scope = {1: ["pseudolife"], 2: ["pseudolife"], 3: ["gw2-reshade"], 4: ["pseudolife"]}
+    out = gc.candidate_pairs(vectors, edges, ents, scope, min_similarity=0.55, top_k=50)
+    pairs = {(c["src_id"], c["dst_id"]) for c in out}
+    # 1-2 kept (sim 1.0, same scope, no edge). 1-3 dropped (edge exists).
+    # 2-3 dropped (disjoint scope). 1-4 / 2-4 dropped (sim 0 < 0.55).
+    assert pairs == {(1, 2)}
+    assert out[0]["similarity"] == 1.0
