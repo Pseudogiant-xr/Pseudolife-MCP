@@ -77,3 +77,21 @@ def test_real_test_artifacts_still_flagged():
     out = gr.test_artifacts(ents)
     assert out and set(out[0]["entities"]) == {
         "deploy-smoke-foo", "pl-healthcheck-probe", "payments/payments-db"}
+
+
+from pseudolife_memory.memory.graph_review import dubious_edges
+
+
+def test_dubious_edges_discriminate_by_confidence():
+    entities = _ents("a", "b", "c")
+    ids = {e["display"]: e["id"] for e in entities}
+    edges = [
+        {"src_id": ids["a"], "relation": "runs-on", "dst_id": ids["b"],
+         "origin": "agent", "confidence": 0.175},   # violation -> flagged
+        {"src_id": ids["a"], "relation": "uses", "dst_id": ids["c"],
+         "origin": "agent", "confidence": 0.70},      # good -> NOT flagged
+    ]
+    out = dubious_edges(edges, entities)
+    assert out, "low-confidence edge should produce a finding"
+    flagged = out[0]["edges"]
+    assert len(flagged) == 1 and flagged[0]["confidence"] == 0.175

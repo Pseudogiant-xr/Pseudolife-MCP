@@ -62,7 +62,7 @@ def dubious_edges(edges, entities, *, conf=_DUBIOUS_CONF):
     if not rows:
         return []
     return [{"type": "dubious_edge", "severity": "warn",
-             "label": f"{len(rows)} low-confidence inferred edges",
+             "label": f"{len(rows)} low-confidence / type-suspect edges",
              "edges": rows, "action": "prune"}]
 
 
