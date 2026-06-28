@@ -43,6 +43,7 @@ def infer_type(name: str) -> str | None:
         return "concept"
     if re.fullmatch(r"v?\d+(?:\.\d+)*", n):                 # "11", "v8", "0.2.0"
         return "concept"
+    # NOTE: 'schema' / command-strings deliberately shadow later rules — e.g. 'schema.sql' types as concept (not file), 'docker-db' as runtime (not datastore). Intentional per the partial-lexicon design.
     if n.startswith("schema") or n in ("branch", "master", "main"):
         return "concept"
     # file (by extension) before tool (identifier)

@@ -48,7 +48,8 @@ def main() -> int:
         conn.execute("SET statement_timeout = '30s'")
         rows = conn.execute(_SELECT).fetchall()
         updates = recompute_rows(rows)
-        changed = [(rid, new) for (rid, _s, _r, _d, old), (rid2, new)
+        # (old or 0): a NULL confidence coerces to 0 so NULL edges are always recomputed (intended).
+        changed = [(rid, new) for (rid, _s, _r, _d, old), (_rid2, new)
                    in zip(rows, updates) if abs((old or 0) - new) > 1e-6]
         dist = Counter(round(new, 3) for _id, new in updates)
         print(f"agent edges: {len(rows)}; would change: {len(changed)}")
