@@ -1228,6 +1228,28 @@ def memory_relation_define(
     )
 
 
+# Deep dream — link proposals.
+@_tool()
+def memory_graph_propose_links(proposals: list[dict]) -> dict[str, Any]:
+    """Ingest deep-dream Step-C link proposals (each {src, relation, dst,
+    similarity?, rationale?}). Gated by edge_confidence; stored in edge_proposals
+    (NOT edges) for review in Atlas. Returns {proposed, skipped}."""
+    return service.graph_propose_links(proposals)
+
+
+@_tool()
+def memory_graph_accept_proposal(proposal_id: int) -> dict[str, Any]:
+    """Promote a pending edge proposal to a real edge (origin=agent). Returns
+    {accepted, src, relation, dst}."""
+    return service.graph_accept_proposal(proposal_id)
+
+
+@_tool()
+def memory_graph_reject_proposal(proposal_id: int) -> dict[str, Any]:
+    """Reject a pending edge proposal (kept for audit). Returns {rejected}."""
+    return service.graph_reject_proposal(proposal_id)
+
+
 @_tool(core=True)
 def document_ingest(path: str, source: str | None = None) -> dict[str, Any]:
     """Read a file (.txt / .md / .pdf) and index it in the reference bank.

@@ -173,6 +173,12 @@ def test_merge_route(svc):
     assert out["merged"] is True and out["into"] == "canonical"
 
 
+def test_accept_reject_proposal_routes(svc):
+    r = ConsoleRoutes(svc)
+    assert r.dispatch("POST", "/api/graph/accept-proposal", {}, {"id": 1})["accepted"]
+    assert r.dispatch("POST", "/api/graph/reject-proposal", {}, {"id": 1})["rejected"]
+
+
 def test_routes_has(svc):
     r = ConsoleRoutes(svc)
     assert r.has("/api/facts")

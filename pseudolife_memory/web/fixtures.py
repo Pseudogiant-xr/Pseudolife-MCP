@@ -397,7 +397,11 @@ class FixtureService:
              "edges": [{"src": "memory_recall", "relation": "runs-on", "dst": "docker-desktop", "confidence": 0.6}]},
             {"type": "unattributed", "severity": "info", "action": "assign",
              "label": "3 entities with no project", "entities": ["a", "b", "c"]},
-        ], "counts": {"total": 4}}
+            {"type": "proposed_link", "severity": "info", "action": "review",
+             "label": "1 proposed cross-session link",
+             "links": [{"src": "Track A", "relation": "related-to", "dst": "Track B",
+                        "confidence": 0.45, "similarity": 0.9, "rationale": "co-discussed"}]},
+        ], "counts": {"total": 5}}
 
     def graph_assign_scope(self, entity, source):
         return {"assigned": True, "entity": entity, "source": source}
@@ -410,6 +414,15 @@ class FixtureService:
 
     def graph_merge(self, from_entity, into_entity):
         return {"merged": True, "from": from_entity, "into": into_entity}
+
+    def graph_propose_links(self, proposals):
+        return {"proposed": len(proposals), "skipped": 0}
+
+    def graph_accept_proposal(self, proposal_id):
+        return {"accepted": True, "src": "Track A", "relation": "related-to", "dst": "Track B"}
+
+    def graph_reject_proposal(self, proposal_id):
+        return {"rejected": True, "id": int(proposal_id)}
 
     # engram traces / retention
     def get_entry(self, entry_id):

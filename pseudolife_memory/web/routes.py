@@ -171,6 +171,8 @@ class ConsoleRoutes:
         p("/api/graph/unrelate", lambda q, b: svc.graph_unrelate(b["src"], b["relation"], b["dst"]))
         p("/api/graph/delete-entity", lambda q, b: svc.graph_delete_entity(b["entity"]))
         p("/api/graph/merge", lambda q, b: svc.graph_merge(b["from"], b["into"]))
+        p("/api/graph/accept-proposal", lambda q, b: svc.graph_accept_proposal(b["id"]))
+        p("/api/graph/reject-proposal", lambda q, b: svc.graph_reject_proposal(b["id"]))
 
         # ---- dream / consolidation ----
         g("/api/dream/status", lambda q, b: svc.dream_status())

@@ -2311,7 +2311,13 @@ class MemoryService:
             return self._storage.find_entity(norm_name(entity))
 
     def _resolve_or_create_entity(self, name: str, etype: str | None = None) -> dict:
-        """Alias-aware find; auto-create on miss. Caller holds the lock."""
+        """Alias-aware find; auto-create on miss. Caller holds the lock.
+
+        When called outside a locked context (e.g. direct test setup), lazily
+        triggers initialisation so the storage handle is available."""
+        if self._storage is None:
+            with self._lock:
+                self._ensure_init()
         from pseudolife_memory.graph import norm_name
         st = self._storage
         n = norm_name(name)
@@ -2939,6 +2945,64 @@ class MemoryService:
             c["src_snippets"] = snippets(c["src_id"])
             c["dst_snippets"] = snippets(c["dst_id"])
         return candidates
+
+    def graph_propose_links(self, proposals: list[dict]) -> dict[str, Any]:
+        """Ingest Step-C subagent link proposals. Each is gated by the SAME mechanism
+        production uses (resolve_relation -> closed vocab; edge_confidence; drop hard
+        type-violations) and inserted into edge_proposals — never into edges."""
+        from pseudolife_memory import graph as G
+        from pseudolife_memory.memory.relation_quality import (
+            edge_confidence, is_hard_type_violation)
+        import time as _t
+        proposed = skipped = 0
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return dict(self._GRAPH_UNAVAILABLE)
+            known = [r["name"] for r in self._graph.load_relations()
+                     if r["name"] not in ("prefers", "avoids")]
+            for p in proposals:
+                src, dst = str(p.get("src", "")), str(p.get("dst", ""))
+                resolved, _ = G.resolve_relation(known, str(p.get("relation", "")))
+                relation = resolved or "related-to"
+                if not src or not dst or G.norm_name(src) == G.norm_name(dst) \
+                        or is_hard_type_violation(src, relation, dst):
+                    skipped += 1
+                    continue
+                se = self._resolve_or_create_entity(src)
+                de = self._resolve_or_create_entity(dst)
+                conf = edge_confidence(src, relation, dst)
+                pid = self._storage.insert_proposal(
+                    se["id"], relation, de["id"], conf,
+                    p.get("similarity"), p.get("rationale"), "deep-dream", _t.time())
+                if pid is not None:
+                    proposed += 1
+                else:
+                    skipped += 1
+        return {"proposed": proposed, "skipped": skipped}
+
+    def graph_accept_proposal(self, proposal_id: int) -> dict[str, Any]:
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return dict(self._GRAPH_UNAVAILABLE)
+            prop = self._storage.get_proposal(proposal_id)
+            if prop is None or prop["status"] != "pending":
+                return {"accepted": False, "reason": "not_pending", "id": proposal_id}
+            self._graph.upsert_edge(prop["src_id"], prop["relation"], prop["dst_id"],
+                                    confidence=prop["confidence"], origin="agent")
+            self._storage.set_proposal_status(proposal_id, "accepted")
+            disp = {e["id"]: e["display"] for e in self._storage.load_graph()["entities"]}
+        return {"accepted": True, "src": disp.get(prop["src_id"]),
+                "relation": prop["relation"], "dst": disp.get(prop["dst_id"])}
+
+    def graph_reject_proposal(self, proposal_id: int) -> dict[str, Any]:
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return dict(self._GRAPH_UNAVAILABLE)
+            ok = self._storage.set_proposal_status(proposal_id, "rejected")
+        return {"rejected": ok, "id": proposal_id}
 
     def _recall_vocab(self) -> list[str]:
         """Live entity vocabulary (display names + aliases) for seed matching.
