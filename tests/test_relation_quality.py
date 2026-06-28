@@ -62,3 +62,26 @@ def test_datastore_can_be_hosted_and_run_on():
     # dry-run finding: these must NOT be flagged as type-violations.
     assert edge_confidence("docker-desktop", "hosts", "postgres") == 0.70
     assert edge_confidence("postgres", "runs-on", "docker-desktop") == 0.70
+
+
+from pseudolife_memory.memory.relation_quality import is_hard_type_violation
+
+
+def test_hard_violation_when_both_typed_and_incompatible():
+    # user=person, windows 11=runtime; runs-on src must be service/process/... not person
+    assert is_hard_type_violation("user", "runs-on", "windows 11") is True
+
+
+def test_no_violation_when_compatible():
+    # daemon=service, docker=runtime: runs-on service->runtime is allowed
+    assert is_hard_type_violation("daemon", "runs-on", "docker") is False
+
+
+def test_no_violation_when_an_endpoint_is_untyped():
+    # an arbitrary junk endpoint is None-typed -> neutral, never a hard violation
+    assert is_hard_type_violation("zxqw blob", "runs-on", "docker") is False
+
+
+def test_no_violation_for_unconstrained_relation():
+    # related-to has no TYPE_CONSTRAINTS entry -> never a hard violation
+    assert is_hard_type_violation("user", "related-to", "windows 11") is False

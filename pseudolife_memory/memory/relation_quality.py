@@ -63,15 +63,26 @@ def infer_type(name: str) -> str | None:
     return None
 
 
+def is_hard_type_violation(src: str, relation: str, dst: str) -> bool:
+    """True iff BOTH endpoints are confidently typed AND the pair violates this
+    relation's TYPE_CONSTRAINTS — the exact structural condition under which
+    edge_confidence() applies its 0.25 penalty. Unknown types are never a
+    violation (neutral). The single source of truth for 'this edge is junk we
+    can auto-supersede', shared by edge_confidence and the deep-dream self-clean."""
+    constraint = TYPE_CONSTRAINTS.get(relation)
+    if not constraint:
+        return False
+    st, dt = infer_type(src), infer_type(dst)
+    if not (st and dt):
+        return False
+    src_ok, dst_ok = constraint
+    return st not in src_ok or dt not in dst_ok
+
+
 def edge_confidence(src: str, relation: str, dst: str) -> float:
     """Deterministic per-edge confidence. 0.70 clean / 0.45 related-to /
     0.175 known type-violation. Unknown types never penalize."""
     base = 0.45 if relation == "related-to" else 0.70
-    constraint = TYPE_CONSTRAINTS.get(relation)
-    if constraint:
-        st, dt = infer_type(src), infer_type(dst)
-        if st and dt:                      # only when BOTH endpoints are typed
-            src_ok, dst_ok = constraint
-            if st not in src_ok or dt not in dst_ok:
-                base *= 0.25
+    if is_hard_type_violation(src, relation, dst):
+        base *= 0.25
     return round(base, 3)
