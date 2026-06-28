@@ -24,3 +24,4 @@ def test_apply_supersedes_violation_and_rescores(svc):
     out = svc.deep_dream(apply=True)
     assert out["applied"] is True
     assert out["superseded"] >= 1
+    assert out["rescored"] >= 1
