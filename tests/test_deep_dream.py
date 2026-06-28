@@ -28,7 +28,6 @@ def test_apply_supersedes_violation_and_rescores(svc):
 
 
 def test_propose_then_accept_promotes_to_edge(svc):
-    svc._resolve_or_create_entity("alpha"); svc._resolve_or_create_entity("beta")
     out = svc.graph_propose_links([
         {"src": "alpha", "relation": "related-to", "dst": "beta",
          "similarity": 0.9, "rationale": "co-discussed"}])
@@ -45,14 +44,12 @@ def test_propose_then_accept_promotes_to_edge(svc):
 
 
 def test_propose_drops_type_violation(svc):
-    svc._resolve_or_create_entity("user"); svc._resolve_or_create_entity("windows 11")
     out = svc.graph_propose_links([
         {"src": "user", "relation": "runs-on", "dst": "windows 11"}])
     assert out["proposed"] == 0 and out["skipped"] == 1
 
 
 def test_reject_marks_rejected(svc):
-    svc._resolve_or_create_entity("alpha"); svc._resolve_or_create_entity("beta")
     svc.graph_propose_links([{"src": "alpha", "relation": "related-to", "dst": "beta"}])
     pid = svc._storage.pending_proposals()[0]["id"]
     assert svc.graph_reject_proposal(pid)["rejected"] is True

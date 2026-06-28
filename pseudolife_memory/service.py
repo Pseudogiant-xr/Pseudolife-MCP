@@ -2311,13 +2311,7 @@ class MemoryService:
             return self._storage.find_entity(norm_name(entity))
 
     def _resolve_or_create_entity(self, name: str, etype: str | None = None) -> dict:
-        """Alias-aware find; auto-create on miss. Caller holds the lock.
-
-        When called outside a locked context (e.g. direct test setup), lazily
-        triggers initialisation so the storage handle is available."""
-        if self._storage is None:
-            with self._lock:
-                self._ensure_init()
+        """Alias-aware find; auto-create on miss. Caller holds the lock."""
         from pseudolife_memory.graph import norm_name
         st = self._storage
         n = norm_name(name)
