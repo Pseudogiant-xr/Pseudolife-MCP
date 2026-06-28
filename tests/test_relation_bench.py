@@ -140,3 +140,8 @@ def test_score_rejects_length_mismatch():
     corpus = [{"text": "x", "edges": []}, {"text": "y", "edges": []}]
     with pytest.raises(ValueError):
         rb.score([[]], corpus, rb.ENTITIES)  # 1 prediction, 2 notes
+
+
+def test_bench_constraints_are_the_shared_source():
+    from pseudolife_memory.memory.relation_quality import TYPE_CONSTRAINTS
+    assert rb.RELATION_CONSTRAINTS is TYPE_CONSTRAINTS

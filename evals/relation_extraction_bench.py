@@ -26,6 +26,7 @@ os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 from pseudolife_memory.graph import norm_name
+from pseudolife_memory.memory.relation_quality import TYPE_CONSTRAINTS as RELATION_CONSTRAINTS
 from pseudolife_memory.storage.postgres import _BUILTIN_RELATIONS
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -51,16 +52,6 @@ ENTITIES: dict[str, dict] = {
     "config.yaml":         {"type": "file",      "aliases": ["the config file"]},
     "schema":              {"type": "concept",   "aliases": []},
     "the user":            {"type": "person",    "aliases": ["i", "me"]},
-}
-
-# Type constraints for STRUCTURAL relations only. depends-on/uses/configures/
-# related-to are intentionally absent (any->any; never a type violation).
-RELATION_CONSTRAINTS: dict[str, tuple[set, set]] = {
-    "runs-on":        ({"service", "process", "component", "tool", "file"}, {"runtime", "host"}),
-    "hosts":          ({"runtime", "host"}, {"service", "process", "component"}),
-    "stores-data-in": ({"service", "process", "tool"}, {"datastore", "file"}),
-    # part-of dst is component/service only — a datastore is never a parent
-    "part-of":        ({"component", "service", "file", "datastore"}, {"component", "service"}),
 }
 
 # Each note: source text + gold closed-vocab edges (possibly empty).
