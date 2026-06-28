@@ -60,3 +60,17 @@ def infer_type(name: str) -> str | None:
     if (re.fullmatch(r"[a-z][a-z0-9_]*", n) and "_" in n) or n.endswith("()"):
         return "tool"
     return None
+
+
+def edge_confidence(src: str, relation: str, dst: str) -> float:
+    """Deterministic per-edge confidence. 0.70 clean / 0.45 related-to /
+    0.175 known type-violation. Unknown types never penalize."""
+    base = 0.45 if relation == "related-to" else 0.70
+    constraint = TYPE_CONSTRAINTS.get(relation)
+    if constraint:
+        st, dt = infer_type(src), infer_type(dst)
+        if st and dt:                      # only when BOTH endpoints are typed
+            src_ok, dst_ok = constraint
+            if st not in src_ok or dt not in dst_ok:
+                base *= 0.25
+    return round(base, 3)
