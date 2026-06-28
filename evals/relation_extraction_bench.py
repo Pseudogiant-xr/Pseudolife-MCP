@@ -75,7 +75,7 @@ CORPUS: list[dict] = [
     {"text": "The extractor sidecar runs on Docker, and the daemon depends on it for consolidation.",
      "edges": [("gemma 4 e2b sidecar", "runs-on", "docker-desktop"),
                ("pseudolife-daemon", "depends-on", "gemma 4 e2b sidecar")]},
-    {"text": "ChromaDB is part of the daemon's reference bank.",
+    {"text": "ChromaDB is part of the daemon.",
      "edges": [("chromadb", "part-of", "pseudolife-daemon")]},
     {"text": "memory_recall uses NetworkX to walk the graph.",
      "edges": [("memory_recall", "uses", "networkx")]},
@@ -102,11 +102,17 @@ CORPUS: list[dict] = [
 
 
 def alias_index(entities: dict[str, dict]) -> dict[str, str]:
-    """norm_name(surface) -> canonical, over canonical names + their aliases."""
+    """norm_name(surface) -> canonical, over canonical names + their aliases.
+    Also registers an article-stripped variant (leading "the ") so model outputs
+    that drop the article ("daemon" for "the daemon") still resolve — the lenient
+    entity match is meant to credit correct relationships regardless of surface."""
     idx: dict[str, str] = {}
     for canon, meta in entities.items():
         for surface in [canon, *meta.get("aliases", [])]:
-            idx[norm_name(surface)] = canon
+            s = surface.strip()
+            idx[norm_name(s)] = canon
+            if s.lower().startswith("the "):
+                idx.setdefault(norm_name(s[4:]), canon)
     return idx
 
 

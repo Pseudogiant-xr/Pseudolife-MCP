@@ -1,0 +1,115 @@
+{
+  "rung": "gemma-e2b",
+  "label": "Gemma 4 E2B (CPU sidecar)",
+  "edge_precision": 0.786,
+  "edge_recall": 0.846,
+  "edge_f1": 0.815,
+  "naming_consistency": 1.273,
+  "type_violation_rate": 0.111,
+  "related_to_share": 0.0,
+  "over_extraction_null_edges": 2,
+  "over_extraction_halluc": 0,
+  "edges_per_note": 0.88,
+  "extract_seconds": 20.4,
+  "predicted": [
+    [
+      [
+        "daemon",
+        "runs-on",
+        "Docker"
+      ],
+      [
+        "daemon",
+        "stores-data-in",
+        "Postgres"
+      ]
+    ],
+    [
+      [
+        "Cortex Console",
+        "part-of",
+        "daemon"
+      ],
+      [
+        "Cortex Console",
+        "uses",
+        "NetworkX"
+      ]
+    ],
+    [
+      [
+        "extractor sidecar",
+        "depends-on",
+        "daemon"
+      ]
+    ],
+    [
+      [
+        "ChromaDB",
+        "part-of",
+        "daemon"
+      ]
+    ],
+    [
+      [
+        "memory_recall",
+        "uses",
+        "NetworkX"
+      ]
+    ],
+    [
+      [
+        "config.yaml",
+        "configures",
+        "daemon"
+      ]
+    ],
+    [
+      [
+        "daemon",
+        "runs-on",
+        "Windows 11"
+      ]
+    ],
+    [
+      [
+        "gemma sidecar",
+        "runs-on",
+        "Docker"
+      ]
+    ],
+    [
+      [
+        "daemon",
+        "stores-data-in",
+        "pg"
+      ]
+    ],
+    [
+      [
+        "console ui",
+        "part-of",
+        "daemon"
+      ]
+    ],
+    [],
+    [],
+    [],
+    [],
+    [
+      [
+        "user",
+        "runs-on",
+        "Windows 11"
+      ]
+    ],
+    [
+      [
+        "daemon",
+        "stores-data-in",
+        "nightly backup folder"
+      ]
+    ]
+  ],
+  "status": "ok"
+}
