@@ -1240,7 +1240,11 @@ def memory_deep_dream(apply: bool = False) -> dict[str, Any]:
     BACKUP FIRST before apply=True (ops/backup.ps1 on the host). After apply,
     drive Step C from this session: dispatch subagents over `candidates` to
     propose typed relations, then post survivors with memory_graph_propose_links;
-    confirm them per-item in the Atlas Review queue (proposed_link findings)."""
+    confirm them per-item in the Atlas Review queue (proposed_link findings).
+
+    Returns: dry-run -> {dry_run, rescored, would_supersede, would_merge,
+    candidates, totals}; apply -> {applied, rescored, superseded, merged,
+    candidates, totals}."""
     return service.deep_dream(apply=apply)
 
 

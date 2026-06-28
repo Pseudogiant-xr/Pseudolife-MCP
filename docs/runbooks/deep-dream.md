@@ -11,8 +11,8 @@ Call `memory_deep_dream(apply=false)`. Review:
 
 ## 2. Apply self-clean (backup first)
 On the Windows host: `pwsh ops/backup.ps1`. Then `memory_deep_dream(apply=true)`.
-This re-scores + (when `memory.deep_dream.auto_apply_safe`) supersedes violations
-and merges exact dups. Supersede-not-delete — reversible.
+This re-scores + (when `memory.deep_dream.auto_apply_safe`, default `True`)
+supersedes violations and merges exact dups. Supersede-not-delete — reversible.
 
 ## 3. Step C — propose links (this session, subagents)
 For each `candidate`, dispatch an Opus subagent with the two entity displays + their

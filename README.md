@@ -958,11 +958,12 @@ above) is window-local: it distils only the recent MIRAS tail into cortex facts.
 re-scored edges, hard type-violation edges queued for supersession, exact-duplicate
 entity pairs queued for merging, and semantic link *candidates* across sessions
 (each with context snippets). Calling `memory_deep_dream(apply=True)` commits the
-safe self-clean (re-score + supersede violations + merge exact dups), then the
-candidates are dispatched to Opus subagents via the Step-C workflow and the
-survivors posted with `memory_graph_propose_links` — landing in the Atlas Review
-queue (`proposed_link` findings) for per-item accept/reject before anything
-reaches live edges. See `docs/runbooks/deep-dream.md` for the operator procedure.
+safe self-clean (re-score + supersede violations + merge exact dups) and returns
+`candidates` for review. The operator then drives Step C manually in the same
+session: dispatch Opus subagents over those candidates, collect survivors, and
+post them with `memory_graph_propose_links` — they land in the Atlas Review queue
+(`proposed_link` findings) for per-item accept/reject before anything reaches live
+edges. See `docs/runbooks/deep-dream.md` for the operator procedure.
 
 ## Data layout
 
