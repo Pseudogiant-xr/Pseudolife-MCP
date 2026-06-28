@@ -79,11 +79,12 @@ def test_entity_context_vectors_trace_primary_then_mention_fallback():
         {"id": 100, "text": "alpha runs nightly", "embedding": _vec(1, 0)},
         {"id": 101, "text": "beta and alpha discussed", "embedding": _vec(0, 1)},
     ]
-    # alpha has a trace to entry 100; beta has none -> mention-scan finds entry 101
-    vecs = gc.entity_context_vectors(ents, entries, {"alpha": [100]})
+    # min_mentions=1: this test checks SOURCE selection (trace vs scan), not the threshold.
+    vecs, mentions = gc.entity_context_vectors(ents, entries, {"alpha": [100]}, min_mentions=1)
     assert set(vecs) == {1, 2}                 # ghost omitted (no trace, no mention)
     assert np.allclose(vecs[1], _vec(1, 0))    # alpha from its trace entry
     assert np.allclose(vecs[2], _vec(0, 1))    # beta from the mention scan
+    assert mentions[1] == frozenset({100}) and mentions[2] == frozenset({101})
 
 
 def test_candidate_pairs_filters_edges_scope_and_threshold():
@@ -94,10 +95,13 @@ def test_candidate_pairs_filters_edges_scope_and_threshold():
         {"id": 4, "canonical": "d", "display": "d", "etype": None},
     ]
     vectors = {1: _vec(1, 0), 2: _vec(1, 0), 3: _vec(1, 0), 4: _vec(0, 1)}
+    mentions = {1: frozenset({10}), 2: frozenset({20}),
+                3: frozenset({30}), 4: frozenset({40})}   # all distinct
     edges = [{"id": 9, "src_id": 1, "relation": "related-to", "dst_id": 3,
               "confidence": 0.45, "origin": "agent"}]
     scope = {1: ["pseudolife"], 2: ["pseudolife"], 3: ["gw2-reshade"], 4: ["pseudolife"]}
-    out = gc.candidate_pairs(vectors, edges, ents, scope, min_similarity=0.55, top_k=50)
+    out = gc.candidate_pairs(vectors, edges, ents, scope, mentions,
+                             min_similarity=0.55, top_k=50)
     pairs = {(c["src_id"], c["dst_id"]) for c in out}
     # 1-2 kept (sim 1.0, same scope, no edge). 1-3 dropped (edge exists).
     # 2-3 dropped (disjoint scope). 1-4 / 2-4 dropped (sim 0 < 0.55).
@@ -129,3 +133,35 @@ def test_exact_duplicate_pairs_still_merges_quote_artifacts():
         {"id": 2, "canonical": "'fixture devserver'", "display": "'fixture devserver'", "etype": None},
     ]
     assert gc.exact_duplicate_pairs(ents, []) == [(2, 1)]  # equal degree -> higher id folds into lower
+
+
+def test_entity_context_vectors_min_mentions_gate():
+    ents = [
+        {"id": 1, "canonical": "one", "display": "one", "etype": None},   # 1 entry
+        {"id": 2, "canonical": "two", "display": "two", "etype": None},   # 2 entries
+    ]
+    entries = [
+        {"id": 10, "text": "one only", "embedding": _vec(1, 0)},
+        {"id": 20, "text": "two here", "embedding": _vec(1, 0)},
+        {"id": 21, "text": "two again", "embedding": _vec(0, 1)},
+    ]
+    traces = {"one": [10], "two": [20, 21]}
+    vecs, mentions = gc.entity_context_vectors(ents, entries, traces)  # default min_mentions=2
+    assert set(vecs) == {2}                          # 'one' omitted (only 1 mention)
+    assert mentions[2] == frozenset({20, 21})
+
+
+def test_candidate_pairs_drops_identical_mention_sets():
+    ents = [
+        {"id": 1, "canonical": "a", "display": "a", "etype": None},
+        {"id": 2, "canonical": "b", "display": "b", "etype": None},
+        {"id": 3, "canonical": "c", "display": "c", "etype": None},
+    ]
+    vectors = {1: _vec(1, 0), 2: _vec(1, 0), 3: _vec(1, 0)}
+    # 1 and 2 share the SAME supporting entries (pure co-occurrence) -> dropped.
+    # 3 has a distinct set -> 1-3 and 2-3 survive.
+    mentions = {1: frozenset({10, 11}), 2: frozenset({10, 11}), 3: frozenset({12, 13})}
+    out = gc.candidate_pairs(vectors, [], ents, {}, mentions,
+                             min_similarity=0.55, top_k=50)
+    pairs = {(c["src_id"], c["dst_id"]) for c in out}
+    assert pairs == {(1, 3), (2, 3)}

@@ -324,6 +324,7 @@ class DeepDreamConfig:
     top_k_candidates: int = 50         # max candidate pairs emitted per pass
     max_context_snippets: int = 3      # context snippets per entity in a candidate
     auto_apply_safe: bool = True       # auto-supersede violations + merge exact dups (apply only)
+    min_entity_mentions: int = 2       # an entity needs >= this many distinct mentioning entries to be candidate-eligible
 
 
 @dataclass

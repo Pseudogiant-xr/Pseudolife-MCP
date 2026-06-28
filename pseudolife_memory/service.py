@@ -2886,9 +2886,10 @@ class MemoryService:
         rescore = gc.rescore_edges(edges, entities)
         violations = gc.hard_violation_edges(edges, entities)
         dups = gc.exact_duplicate_pairs(entities, edges)
-        vectors = gc.entity_context_vectors(entities, entries, traces)
+        vectors, mentions = gc.entity_context_vectors(
+            entities, entries, traces, min_mentions=cfg.min_entity_mentions)
         candidates = gc.candidate_pairs(
-            vectors, edges, entities, scope_map,
+            vectors, edges, entities, scope_map, mentions,
             min_similarity=cfg.min_similarity, top_k=cfg.top_k_candidates)
         candidates = self._attach_candidate_snippets(candidates, entities, entries,
                                                      traces, cfg.max_context_snippets)

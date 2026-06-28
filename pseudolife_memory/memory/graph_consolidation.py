@@ -91,32 +91,42 @@ def _l2(v: np.ndarray) -> np.ndarray:
 
 
 def entity_context_vectors(entities: list[dict], entries: list[dict],
-                           traces_by_entity: dict[str, list[int]]) -> dict[int, np.ndarray]:
+                           traces_by_entity: dict[str, list[int]], *,
+                           min_mentions: int = 2,
+                           ) -> tuple[dict[int, np.ndarray], dict[int, frozenset[int]]]:
     """Per-entity context vector = L2-normalized mean of its mentioning entries'
-    embeddings. Trace entries are the primary source; entities without traces fall
-    back to a token-mention scan; entities with neither are omitted (we don't guess)."""
+    embeddings, plus the set of those entry ids. Trace entries are the primary
+    source; entities without traces fall back to a token-mention scan. An entity is
+    included only if it has >= min_mentions DISTINCT mentioning entries (with
+    embeddings) — a centroid-of-one isn't a context. Returns (vectors, mentions)."""
     by_id = {e["id"]: e for e in entries}
     entry_tokens = [(e["id"], _token_set(e.get("text", ""))) for e in entries]
-    out: dict[int, np.ndarray] = {}
+    vectors: dict[int, np.ndarray] = {}
+    mentions: dict[int, frozenset[int]] = {}
     for ent in entities:
         ids = list(traces_by_entity.get(ent["canonical"], []))
         if not ids:
             want = _token_set(ent["display"])
             if want:
                 ids = [eid for eid, toks in entry_tokens if want <= toks]
-        embs = [by_id[i]["embedding"] for i in ids if i in by_id]
-        if not embs:
+        valid = {i for i in ids if i in by_id}      # distinct entries with embeddings
+        if len(valid) < min_mentions:
             continue
-        out[ent["id"]] = _l2(np.mean(np.stack(embs), axis=0))
-    return out
+        embs = [by_id[i]["embedding"] for i in valid]
+        vectors[ent["id"]] = _l2(np.mean(np.stack(embs), axis=0))
+        mentions[ent["id"]] = frozenset(valid)
+    return vectors, mentions
 
 
 def candidate_pairs(vectors: dict[int, np.ndarray], edges: list[dict],
-                    entities: list[dict], scope_map: dict[int, list[str]], *,
+                    entities: list[dict], scope_map: dict[int, list[str]],
+                    mentions: dict[int, frozenset[int]], *,
                     min_similarity: float = 0.55, top_k: int = 50) -> list[dict]:
     """Unlinked, scope-coherent, semantically-near entity pairs — the link
     candidates. Drops pairs that already have an edge (either direction), exact
-    duplicates (a Step-A merge), or that sit in disjoint non-empty project scopes."""
+    duplicates (a Step-A merge), have IDENTICAL supporting-entry sets (pure
+    co-occurrence, not independent similarity), or sit in disjoint non-empty
+    project scopes."""
     disp = _disp(entities)
     linked = {frozenset((e["src_id"], e["dst_id"])) for e in edges}
     dup = {frozenset(p) for p in exact_duplicate_pairs(entities, edges)}
@@ -127,6 +137,9 @@ def candidate_pairs(vectors: dict[int, np.ndarray], edges: list[dict],
             u, v = ids[i], ids[j]
             key = frozenset((u, v))
             if key in linked or key in dup:
+                continue
+            mu, mv = mentions.get(u), mentions.get(v)
+            if mu is not None and mu == mv:        # identical support -> co-occurrence
                 continue
             su, sv = set(scope_map.get(u, [])), set(scope_map.get(v, []))
             if su and sv and not (su & sv):       # disjoint, both attributed
