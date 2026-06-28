@@ -1,0 +1,86 @@
+{
+  "rung": "gemma-e4b",
+  "label": "Gemma 4 E4B (CPU sidecar)",
+  "edge_precision": 0.889,
+  "edge_recall": 0.615,
+  "edge_f1": 0.727,
+  "naming_consistency": 1.125,
+  "type_violation_rate": 0.0,
+  "related_to_share": 0.0,
+  "over_extraction_null_edges": 1,
+  "over_extraction_halluc": 0,
+  "edges_per_note": 0.56,
+  "extract_seconds": 31.0,
+  "predicted": [
+    [],
+    [
+      [
+        "Cortex Console",
+        "part-of",
+        "daemon"
+      ],
+      [
+        "Cortex Console",
+        "uses",
+        "NetworkX"
+      ]
+    ],
+    [],
+    [
+      [
+        "ChromaDB",
+        "part-of",
+        "daemon"
+      ]
+    ],
+    [
+      [
+        "memory_recall",
+        "uses",
+        "NetworkX"
+      ]
+    ],
+    [
+      [
+        "config.yaml",
+        "configures",
+        "daemon"
+      ]
+    ],
+    [
+      [
+        "daemon",
+        "runs-on",
+        "Windows 11"
+      ]
+    ],
+    [],
+    [
+      [
+        "daemon",
+        "stores-data-in",
+        "pg"
+      ]
+    ],
+    [
+      [
+        "console ui",
+        "part-of",
+        "daemon"
+      ]
+    ],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [
+      [
+        "daemon",
+        "stores-data-in",
+        "nightly backup folder"
+      ]
+    ]
+  ],
+  "status": "ok"
+}

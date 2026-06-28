@@ -1,0 +1,126 @@
+{
+  "rung": "opus-4.8",
+  "label": "Claude Opus 4.8 (in-session subagent)",
+  "status": "ok",
+  "extract_seconds": null,
+  "predicted": [
+    [
+      [
+        "The daemon",
+        "runs-on",
+        "Docker"
+      ],
+      [
+        "The daemon",
+        "stores-data-in",
+        "Postgres"
+      ]
+    ],
+    [
+      [
+        "Cortex Console",
+        "part-of",
+        "the daemon"
+      ],
+      [
+        "Cortex Console",
+        "uses",
+        "NetworkX"
+      ]
+    ],
+    [
+      [
+        "The extractor sidecar",
+        "runs-on",
+        "Docker"
+      ],
+      [
+        "the daemon",
+        "depends-on",
+        "The extractor sidecar"
+      ]
+    ],
+    [
+      [
+        "ChromaDB",
+        "part-of",
+        "the daemon"
+      ]
+    ],
+    [
+      [
+        "memory_recall",
+        "uses",
+        "NetworkX"
+      ]
+    ],
+    [
+      [
+        "config.yaml",
+        "configures",
+        "the daemon"
+      ]
+    ],
+    [
+      [
+        "The daemon",
+        "runs-on",
+        "the Windows 11 host"
+      ]
+    ],
+    [
+      [
+        "The gemma sidecar",
+        "runs-on",
+        "Docker"
+      ]
+    ],
+    [
+      [
+        "The daemon",
+        "stores-data-in",
+        "pg"
+      ]
+    ],
+    [
+      [
+        "The console ui",
+        "part-of",
+        "the daemon"
+      ]
+    ],
+    [],
+    [],
+    [],
+    [
+      [
+        "The migration",
+        "related-to",
+        "schema v11"
+      ]
+    ],
+    [
+      [
+        "The user",
+        "related-to",
+        "Windows 11"
+      ]
+    ],
+    [
+      [
+        "The daemon",
+        "stores-data-in",
+        "the nightly backup folder"
+      ]
+    ]
+  ],
+  "edge_precision": 0.688,
+  "edge_recall": 0.846,
+  "edge_f1": 0.759,
+  "naming_consistency": 1.182,
+  "type_violation_rate": 0.0,
+  "related_to_share": 0.125,
+  "over_extraction_null_edges": 3,
+  "over_extraction_halluc": 0,
+  "edges_per_note": 1.0
+}
