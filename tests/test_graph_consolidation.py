@@ -169,19 +169,19 @@ def test_candidate_pairs_drops_identical_mention_sets():
 
 def test_partition_candidates_merge_vs_link():
     ents = [
-        {"id": 1, "canonical": "daemon", "display": "daemon", "etype": None},
-        {"id": 2, "canonical": "live daemon", "display": "live daemon", "etype": None},
+        {"id": 1, "canonical": "atlas review", "display": "Atlas Review", "etype": None},
+        {"id": 2, "canonical": "atlas review queue", "display": "Atlas Review queue", "etype": None},
         {"id": 3, "canonical": "track a (recall)", "display": "Track A (recall)", "etype": None},
         {"id": 4, "canonical": "track b (insight)", "display": "Track B (insight)", "etype": None},
     ]
-    # entity 1 has an edge (degree 1) so 'live daemon' folds into 'daemon'.
+    # entity 1 has an edge (degree 1) so 'Atlas Review queue' folds into 'Atlas Review'.
     edges = [_edge(99, 1, "related-to", 3, 0.45)]
     pairs = [
-        {"src_id": 1, "dst_id": 2, "src": "daemon", "dst": "live daemon", "similarity": 0.99},
+        {"src_id": 1, "dst_id": 2, "src": "Atlas Review", "dst": "Atlas Review queue", "similarity": 0.99},
         {"src_id": 3, "dst_id": 4, "src": "Track A (recall)", "dst": "Track B (insight)", "similarity": 0.98},
     ]
     merges, links = gc.partition_candidates(pairs, ents, edges, merge_min_similarity=0.90)
-    assert [(m["from_id"], m["into_id"]) for m in merges] == [(2, 1)]   # name-contained -> merge
+    assert [(m["from_id"], m["into_id"]) for m in merges] == [(2, 1)]   # >=2-token subset -> merge
     assert merges[0]["reason"] == "token-subset"
     assert [(p["src_id"], p["dst_id"]) for p in links] == [(3, 4)]      # distinct names -> link
 
@@ -225,3 +225,37 @@ def test_is_concat_artifact_ignores_plain_names():
 def test_is_concat_artifact_requires_nonempty_both_sides():
     assert gc._is_concat_artifact("<-> y") is False   # empty left
     assert gc._is_concat_artifact("x <->") is False   # empty right
+
+
+def test_name_contains_requires_two_contained_tokens():
+    assert gc._name_contains("Atlas Review", "Atlas Review queue") == "token-subset"
+    assert gc._name_contains("memory_graph", "Graph") is None       # {graph} = 1 token
+    assert gc._name_contains("bank", "live bank") is None           # {bank} = 1 token
+
+
+def test_name_contains_excludes_concat_artifacts():
+    assert gc._name_contains("Phase 2 plan", "Phase 1 plan<->Phase 2 plan") is None
+
+
+def test_partition_candidates_single_token_subset_is_link_not_merge():
+    ents = [
+        {"id": 1, "canonical": "bank", "display": "bank", "etype": None},
+        {"id": 2, "canonical": "live bank", "display": "live bank", "etype": None},
+    ]
+    pairs = [{"src_id": 1, "dst_id": 2, "src": "bank", "dst": "live bank", "similarity": 0.99}]
+    merges, links = gc.partition_candidates(pairs, ents, [], merge_min_similarity=0.90)
+    assert merges == []
+    assert [(p["src_id"], p["dst_id"]) for p in links] == [(1, 2)]
+
+
+def test_partition_candidates_concat_artifact_target_is_not_merged():
+    ents = [
+        {"id": 1, "canonical": "phase 2 plan", "display": "Phase 2 plan", "etype": None},
+        {"id": 2, "canonical": "phase 1 plan<->phase 2 plan",
+         "display": "Phase 1 plan<->Phase 2 plan", "etype": None},
+    ]
+    pairs = [{"src_id": 1, "dst_id": 2, "src": "Phase 2 plan",
+              "dst": "Phase 1 plan<->Phase 2 plan", "similarity": 0.99}]
+    merges, links = gc.partition_candidates(pairs, ents, [], merge_min_similarity=0.90)
+    assert merges == []                         # artifact endpoint excluded from merge
+    assert len(links) == 1

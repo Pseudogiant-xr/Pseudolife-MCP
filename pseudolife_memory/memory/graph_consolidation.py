@@ -176,8 +176,14 @@ def _is_concat_artifact(name: str) -> bool:
 
 def _name_contains(a: str, b: str) -> str | None:
     """A reason if one display asserts identity with the other, else None.
-    token-subset (every token of one is in the other) OR norm-name substring."""
+    Guards: an A<->B concat artifact is never a merge endpoint (it's junk), and
+    the smaller token set must have >=2 tokens — single-token containment (a
+    generic word that is a subset of countless names) is too weak to auto-merge."""
+    if _is_concat_artifact(a) or _is_concat_artifact(b):
+        return None
     ta, tb = _full_token_set(a), _full_token_set(b)
+    if min(len(ta), len(tb)) < 2:
+        return None
     if ta and tb and (ta <= tb or tb <= ta):
         return "token-subset"
     na, nb = norm_name(a), norm_name(b)
