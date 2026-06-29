@@ -7,6 +7,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Atlas review queue: granular per-item bulk actions.** The `dubious_edge` (Prune),
+  `unattributed` (Assign) and `test_artifact` (Delete) findings — previously
+  all-or-nothing over the whole list — now render a filterable, capped-scroll checkbox
+  list with "select all (filtered)" / "clear" and a live count on the action button
+  (opt-in: nothing selected by default), so you act on exactly the chosen subset. The
+  `orphan` finding is now actionable too (Delete + Assign on the selection). Pure
+  frontend (`atlas_review.js` `selectableList`) — the findings already carried their
+  full lists and the handlers already post per item.
 - **Atlas review queue: entity provenance.** New `GET /api/graph/entity-provenance`
   (`service.entity_provenance` + `storage.entries_for_entity`) returns an entity's
   project attribution (`entity_sources`: source · count · origin) and the MIRAS
