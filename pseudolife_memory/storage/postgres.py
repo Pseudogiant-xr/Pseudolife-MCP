@@ -787,13 +787,17 @@ class PostgresStorage:
 
     def insert_entity_proposal(self, kind: str, entity_id: int, into_id: int | None,
                                score: float | None, reason: str | None, now: float) -> int | None:
-        row = self.conn.execute(
-            "INSERT INTO entity_proposals (kind, entity_id, into_id, score, reason, created_at) "
-            "VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING RETURNING id",
-            (kind, entity_id, into_id, score, reason, now),
-        ).fetchone()
-        self.conn.commit()
-        return int(row[0]) if row else None
+        try:
+            row = self.conn.execute(
+                "INSERT INTO entity_proposals (kind, entity_id, into_id, score, reason, created_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING RETURNING id",
+                (kind, entity_id, into_id, score, reason, now),
+            ).fetchone()
+            self.conn.commit()
+            return int(row[0]) if row else None
+        except psycopg.errors.ForeignKeyViolation:
+            self.conn.rollback()  # endpoint was deleted (e.g. auto-merged) this pass — skip the proposal
+            return None
 
     def pending_entity_proposals(self) -> list[dict]:
         cols = ("id", "kind", "entity_id", "into_id", "score", "reason", "status", "created_at")

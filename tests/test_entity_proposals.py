@@ -46,3 +46,12 @@ def test_partial_unique_dedupe(storage):
     j1 = storage.insert_entity_proposal("junk", n, None, None, "x", time.time())
     j2 = storage.insert_entity_proposal("junk", n, None, None, "x", time.time())
     assert j1 is not None and j2 is None
+
+
+def test_insert_entity_proposal_skips_dangling_fk(storage):
+    # entity_id referencing a non-existent entity -> FK violation -> None, no raise,
+    # and the connection stays usable (rollback recovered the transaction).
+    a = storage.ensure_entity("real", display="real")
+    assert storage.insert_entity_proposal("merge", 999999, a, 0.9, "x", time.time()) is None
+    pid = storage.insert_entity_proposal("junk", a, None, None, "x", time.time())
+    assert pid is not None
