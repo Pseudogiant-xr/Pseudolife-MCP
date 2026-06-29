@@ -1,5 +1,6 @@
 import pytest
 
+from pseudolife_memory.graph import norm_name
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401 (fixtures)
 
 
@@ -82,26 +83,35 @@ def test_apply_persists_entity_proposals(svc):
 
 
 def test_accept_entity_merge_folds(svc):
-    a = svc._resolve_or_create_entity("daemon")["id"]
-    b = svc._resolve_or_create_entity("live daemon")["id"]
+    with svc._lock:
+        svc._ensure_init()
+        a = svc._resolve_or_create_entity("daemon")["id"]
+        b = svc._resolve_or_create_entity("live daemon")["id"]
     pid = svc._storage.insert_entity_proposal("merge", b, a, 0.99, "token-subset", __import__("time").time())
     out = svc.graph_accept_entity_merge(pid)
     assert out["accepted"] is True and out["into"] == "daemon"
-    assert svc._storage.find_entity("live daemon") is None          # folded away
+    # folded away: no distinct 'live-daemon' node survives; the name now resolves
+    # (via alias) to the merge target 'daemon'.
+    folded = svc._storage.find_entity(norm_name("live daemon"))
+    assert folded is not None and folded["id"] == a and folded["canonical"] == "daemon"
     assert svc._storage.pending_entity_proposals() == []
 
 
 def test_accept_entity_junk_deletes(svc):
-    n = svc._resolve_or_create_entity("2")["id"]
+    with svc._lock:
+        svc._ensure_init()
+        n = svc._resolve_or_create_entity("2")["id"]
     pid = svc._storage.insert_entity_proposal("junk", n, None, None, "bare-number", __import__("time").time())
     out = svc.graph_accept_entity_junk(pid)
     assert out["accepted"] is True and out["entity"] == "2"
-    assert svc._storage.find_entity("2") is None
+    assert svc._storage.find_entity(norm_name("2")) is None
 
 
 def test_reject_entity_proposal(svc):
-    n = svc._resolve_or_create_entity("merged")["id"]
+    with svc._lock:
+        svc._ensure_init()
+        n = svc._resolve_or_create_entity("merged")["id"]
     pid = svc._storage.insert_entity_proposal("junk", n, None, None, "status-word", __import__("time").time())
     assert svc.graph_reject_entity_proposal(pid)["rejected"] is True
-    assert svc._storage.find_entity("merged") is not None           # NOT deleted on reject
+    assert svc._storage.find_entity(norm_name("merged")) is not None    # NOT deleted on reject
     assert svc._storage.pending_entity_proposals() == []
