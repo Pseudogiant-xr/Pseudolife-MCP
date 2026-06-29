@@ -103,28 +103,85 @@ function itemRow(inline, refs) {
 
 // ── per-type renderers ───────────────────────────────────────────────────────
 
+const SELECTABLE = new Set(["dubious_edge", "unattributed", "test_artifact", "orphan"]);
+
+// A filterable, capped-scroll checkbox list. Opt-in: nothing selected initially.
+// row(item) -> {cell, extra?}; filterText(item) -> string; onChange(count).
+function selectableList(items, { row, filterText, onChange }) {
+  const selected = new Set();
+  const emit = () => onChange && onChange(selected.size);
+  const rows = [];
+  const listEl = el("div", { style: { maxHeight: "280px", overflowY: "auto", marginTop: "6px",
+    border: "1px solid var(--surface-2, rgba(127,127,127,.2))", borderRadius: "8px", padding: "4px 6px" } });
+  for (const item of items) {
+    const ftext = String(filterText(item) || "");
+    const cb = el("input", { type: "checkbox", name: "review-select",
+      "aria-label": `select ${ftext || "row"}`, style: { marginRight: "8px", flex: "0 0 auto" },
+      onchange: () => { cb.checked ? selected.add(item) : selected.delete(item); emit(); } });
+    const { cell, extra } = row(item);
+    const line = el("div", { style: { display: "flex", alignItems: "center", gap: "4px", padding: "2px 0" } }, cb, cell);
+    const rowEl = el("div", {}, line, extra || null);
+    rows.push({ row: rowEl, cb, item, text: ftext.toLowerCase() });
+    listEl.appendChild(rowEl);
+  }
+  const filter = el("input", { type: "text", placeholder: "filter…", name: "review-filter",
+    "aria-label": "filter selection", style: { fontSize: "12px", padding: "3px 7px" },
+    oninput: () => { const q = filter.value.toLowerCase();
+      for (const r of rows) r.row.style.display = (!q || r.text.includes(q)) ? "" : "none"; } });
+  const selAll = el("button", { class: "btn sm", onclick: () => {
+    for (const r of rows) if (r.row.style.display !== "none") { r.cb.checked = true; selected.add(r.item); } emit(); } },
+    "select all");
+  const clear = el("button", { class: "btn sm", style: { opacity: ".75" }, onclick: () => {
+    for (const r of rows) r.cb.checked = false; selected.clear(); emit(); } }, "clear");
+  const controls = el("div", { style: { display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" } },
+    filter, selAll, clear);
+  return { node: el("div", {}, controls, listEl), getSelected: () => [...selected] };
+}
+
+// Build the selectable list for a finding (edge rows vs entity-name rows).
+function selectableBody(f, onChange) {
+  if (f.type === "dubious_edge") {
+    return selectableList(f.edges || [], {
+      row: (e) => ({ cell: el("span", { class: "mono", style: CHIP },
+        `${e.src} —${e.relation}→ ${e.dst}`, e.confidence != null ? ` (${(+e.confidence).toFixed(2)})` : "") }),
+      filterText: (e) => `${e.src} ${e.relation} ${e.dst}`, onChange });
+  }
+  const names = (f.entities || []).map((e) => (typeof e === "string" ? e : e.entity));
+  return selectableList(names, {
+    row: (n) => { const r = entityRef(n); return { cell: r.chip, extra: r.drawer }; },
+    filterText: (n) => n, onChange });
+}
+
 function findingRow(f, onAct) {
   const acc = SEV[f.severity] || SEV.info;
-  return el("div", { style: { borderLeft: `3px solid ${acc}`, padding: "8px 10px",
-      marginBottom: "8px", background: "var(--surface-1, rgba(127,127,127,.06))",
+  const frame = (buttons, inner) => el("div", { style: { borderLeft: `3px solid ${acc}`,
+      padding: "8px 10px", marginBottom: "8px", background: "var(--surface-1, rgba(127,127,127,.06))",
       borderRadius: "0 8px 8px 0" } },
     el("div", { style: { display: "flex", alignItems: "center", gap: "8px" } },
       badge(String(f.type || "").replace(/_/g, " ")),
       el("span", { style: { fontWeight: "500" } }, f.label),
-      el("span", { style: { marginLeft: "auto" } }, bulkAction(f, onAct))),
-    el("div", { style: { marginTop: "6px" } }, body(f, onAct)));
-}
+      el("span", { style: { marginLeft: "auto", display: "flex", gap: "6px" } }, buttons || null)),
+    el("div", { style: { marginTop: "6px" } }, inner));
 
-// A bulk button only for the group-level analyzer findings that act on the
-// whole set; the deep-dream findings act per-item (buttons live in the body).
-function bulkAction(f, onAct) {
-  if (f.type === "dubious_edge")
-    return btn("Prune", { kind: "danger", onClick: () => onAct({ kind: "prune", edges: f.edges || [] }) });
-  if (f.type === "unattributed")
-    return btn("Assign project", { onClick: () => onAct({ kind: "assign", entities: f.entities || [] }) });
-  if (f.type === "test_artifact")
-    return btn("Delete all", { kind: "danger", onClick: () => onAct({ kind: "delete-names", entities: f.entities || [] }) });
-  return null;
+  if (SELECTABLE.has(f.type)) {
+    let getSel = () => [];
+    const specs = {
+      dubious_edge:  [["Prune", "danger", (s) => ({ kind: "prune", edges: s })]],
+      unattributed:  [["Assign", null, (s) => ({ kind: "assign", entities: s })]],
+      test_artifact: [["Delete", "danger", (s) => ({ kind: "delete-names", entities: s })]],
+      orphan:        [["Delete", "danger", (s) => ({ kind: "delete-names", entities: s })],
+                      ["Assign", null, (s) => ({ kind: "assign", entities: s })]],
+    }[f.type];
+    const made = specs.map(([label, kind, make]) =>
+      ({ label, b: btn(`${label} (0)`, { kind, onClick: () => onAct(make(getSel())) }) }));
+    const setCount = (n) => { for (const { label, b } of made) { b.textContent = `${label} (${n})`; b.disabled = n === 0; } };
+    const list = selectableBody(f, setCount);
+    getSel = list.getSelected;
+    setCount(0);
+    return frame(made.map((m) => m.b), list.node);
+  }
+
+  return frame(null, body(f, onAct));
 }
 
 function body(f, onAct) {
@@ -133,8 +190,7 @@ function body(f, onAct) {
     case "junk_candidate":  return (f.entities || []).map((j) => junkItem(j, onAct));
     case "proposed_link":   return (f.links || []).map((l) => linkItem(l, onAct));
     case "duplicate":       return dupItem(f, onAct);
-    case "dubious_edge":    return edgeList(f.edges || []);
-    default:                return nameChips(f.entities || []);   // orphan / unattributed / test_artifact
+    default:                return null;   // selectable findings render via findingRow
   }
 }
 
@@ -173,22 +229,4 @@ function dupItem(f, onAct) {
     ra.chip, dim("↔"), rb.chip, f.score != null ? dim(`jaccard ${(+f.score).toFixed(2)}`) : null,
     btn("Merge", { onClick: () => onAct({ kind: "merge-named", from: a, into: b }) }),
   ], [ra, rb]);
-}
-
-function edgeList(edges) {
-  return el("div", { style: { display: "flex", flexWrap: "wrap", gap: "4px" } },
-    edges.slice(0, 8).map((e) => el("span", { class: "mono", style: CHIP },
-      `${e.src} —${e.relation}→ ${e.dst}`,
-      e.confidence != null ? ` (${(+e.confidence).toFixed(2)})` : "")),
-    edges.length > 8 ? dim(`+${edges.length - 8}`) : null);
-}
-
-function nameChips(entities) {
-  const names = entities.map((e) => (typeof e === "string" ? e : e.entity));
-  const refs = names.slice(0, 6).map((n) => entityRef(n));
-  return el("div", {},
-    el("div", { style: { display: "flex", flexWrap: "wrap", gap: "4px", alignItems: "center" } },
-      ...refs.map((r) => r.chip),
-      names.length > 6 ? dim(`+${names.length - 6}`) : null),
-    ...refs.map((r) => r.drawer));
 }
