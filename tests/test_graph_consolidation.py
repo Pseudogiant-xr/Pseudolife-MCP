@@ -165,3 +165,47 @@ def test_candidate_pairs_drops_identical_mention_sets():
                              min_similarity=0.55, top_k=50)
     pairs = {(c["src_id"], c["dst_id"]) for c in out}
     assert pairs == {(1, 3), (2, 3)}
+
+
+def test_partition_candidates_merge_vs_link():
+    ents = [
+        {"id": 1, "canonical": "daemon", "display": "daemon", "etype": None},
+        {"id": 2, "canonical": "live daemon", "display": "live daemon", "etype": None},
+        {"id": 3, "canonical": "track a (recall)", "display": "Track A (recall)", "etype": None},
+        {"id": 4, "canonical": "track b (insight)", "display": "Track B (insight)", "etype": None},
+    ]
+    # entity 1 has an edge (degree 1) so 'live daemon' folds into 'daemon'.
+    edges = [_edge(99, 1, "related-to", 3, 0.45)]
+    pairs = [
+        {"src_id": 1, "dst_id": 2, "src": "daemon", "dst": "live daemon", "similarity": 0.99},
+        {"src_id": 3, "dst_id": 4, "src": "Track A (recall)", "dst": "Track B (insight)", "similarity": 0.98},
+    ]
+    merges, links = gc.partition_candidates(pairs, ents, edges, merge_min_similarity=0.90)
+    assert [(m["from_id"], m["into_id"]) for m in merges] == [(2, 1)]   # name-contained -> merge
+    assert merges[0]["reason"] == "token-subset"
+    assert [(p["src_id"], p["dst_id"]) for p in links] == [(3, 4)]      # distinct names -> link
+
+
+def test_partition_candidates_below_threshold_is_link():
+    ents = [
+        {"id": 1, "canonical": "test", "display": "test", "etype": None},
+        {"id": 2, "canonical": "test harness", "display": "test harness", "etype": None},
+    ]
+    # name-contained, but low similarity -> NOT a merge (guard against coincidental containment).
+    pairs = [{"src_id": 1, "dst_id": 2, "src": "test", "dst": "test harness", "similarity": 0.70}]
+    merges, links = gc.partition_candidates(pairs, ents, [], merge_min_similarity=0.90)
+    assert merges == []
+    assert len(links) == 1
+
+
+def test_junk_entities_flags_artifacts_not_real():
+    ents = [
+        {"id": 1, "canonical": "2", "display": "2", "etype": None},          # bare number
+        {"id": 2, "canonical": "live", "display": "LIVE", "etype": None},     # status word
+        {"id": 3, "canonical": "ok", "display": "ok", "etype": None},        # too short AND status
+        {"id": 4, "canonical": "daemon", "display": "daemon", "etype": None}, # real entity
+        {"id": 5, "canonical": "merged", "display": "merged", "etype": None}, # status word, BUT high degree
+    ]
+    edges = [_edge(10, 5, "related-to", 4, 0.45), _edge(11, 5, "related-to", 1, 0.45)]  # entity 5 degree 2
+    out = {j["entity_id"]: j["reason"] for j in gc.junk_entities(ents, edges, max_degree=1)}
+    assert out == {1: "bare-number", 2: "status-word", 3: "too-short"}  # 4 real, 5 well-connected

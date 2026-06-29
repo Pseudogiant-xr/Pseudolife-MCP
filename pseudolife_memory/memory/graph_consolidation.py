@@ -9,7 +9,7 @@ import re
 
 import numpy as np
 
-from pseudolife_memory.graph import degree_counts
+from pseudolife_memory.graph import degree_counts, norm_name
 from pseudolife_memory.memory.graph_review import _token_set
 from pseudolife_memory.memory.relation_quality import (
     edge_confidence, is_hard_type_violation,
@@ -151,3 +151,74 @@ def candidate_pairs(vectors: dict[int, np.ndarray], edges: list[dict],
                            "dst": disp.get(v, str(v)), "similarity": round(sim, 4)})
     scored.sort(key=lambda c: (-c["similarity"], c["src_id"], c["dst_id"]))
     return scored[:top_k]
+
+
+# --- SP-1: entity consolidation (merge + junk surfacing) ----------------------
+
+_JUNK_STOPWORDS = frozenset({
+    "live", "merged", "done", "fixed", "current", "ok", "pending", "wip",
+    "todo", "n/a", "none", "null",
+})
+_BARE_NUMBER = re.compile(r"^\d+$")
+
+
+def _name_contains(a: str, b: str) -> str | None:
+    """A reason if one display asserts identity with the other, else None.
+    token-subset (every token of one is in the other) OR norm-name substring."""
+    ta, tb = _full_token_set(a), _full_token_set(b)
+    if ta and tb and (ta <= tb or tb <= ta):
+        return "token-subset"
+    na, nb = norm_name(a), norm_name(b)
+    if na and nb and (na in nb or nb in na):
+        return "substring"
+    return None
+
+
+def partition_candidates(pairs: list[dict], entities: list[dict], edges: list[dict], *,
+                         merge_min_similarity: float = 0.90,
+                         ) -> tuple[list[dict], list[dict]]:
+    """Split near-pairs into MERGE candidates (high sim + name-containment) and the
+    remaining LINK candidates. Merge fold direction: lower-degree into higher-degree
+    (tie folds higher id into lower id), matching exact_duplicate_pairs."""
+    deg = degree_counts(edges)
+    disp = _disp(entities)
+    merges: list[dict] = []
+    links: list[dict] = []
+    for p in pairs:
+        reason = (_name_contains(p["src"], p["dst"])
+                  if float(p.get("similarity", 0.0)) >= merge_min_similarity else None)
+        if reason is None:
+            links.append(p)
+            continue
+        u, v = p["src_id"], p["dst_id"]
+        du, dv = deg.get(u, 0), deg.get(v, 0)
+        if du > dv or (du == dv and u < v):
+            into, frm = u, v
+        else:
+            into, frm = v, u
+        merges.append({"from_id": frm, "into_id": into,
+                       "from": disp.get(frm, str(frm)), "into": disp.get(into, str(into)),
+                       "similarity": p["similarity"], "reason": reason})
+    return merges, links
+
+
+def junk_entities(entities: list[dict], edges: list[dict], *,
+                  max_degree: int = 1) -> list[dict]:
+    """Over-extraction artifacts: bare numbers, <=2-char displays, or status-words —
+    only when weakly connected (degree <= max_degree). Proposal-only; never deletes."""
+    deg = degree_counts(edges)
+    out: list[dict] = []
+    for e in entities:
+        if deg.get(e["id"], 0) > max_degree:
+            continue
+        d = str(e["display"]).strip()
+        if _BARE_NUMBER.match(d):
+            reason = "bare-number"
+        elif len(d) <= 2:
+            reason = "too-short"
+        elif d.lower() in _JUNK_STOPWORDS:
+            reason = "status-word"
+        else:
+            continue
+        out.append({"entity_id": e["id"], "display": e["display"], "reason": reason})
+    return out
