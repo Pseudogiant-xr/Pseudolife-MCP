@@ -399,7 +399,7 @@ class FixtureService:
              "label": "3 entities with no project", "entities": ["a", "b", "c"]},
             {"type": "proposed_link", "severity": "info", "action": "review",
              "label": "1 proposed cross-session link",
-             "links": [{"src": "Track A", "relation": "related-to", "dst": "Track B",
+             "links": [{"id": 1, "src": "Track A", "relation": "related-to", "dst": "Track B",
                         "confidence": 0.45, "similarity": 0.9, "rationale": "co-discussed"}]},
             {"type": "merge_candidate", "severity": "warn", "action": "merge",
              "label": "1 near-duplicate entity merges",
@@ -409,6 +409,16 @@ class FixtureService:
              "label": "1 junk entities to prune",
              "entities": [{"entity": "2", "reason": "bare-number", "id": 2}]},
         ], "counts": {"total": 7}}
+
+    def entity_provenance(self, entity, limit=20):
+        return {"found": True, "entity": entity,
+                "sources": [{"source": "pseudolife", "count": 12, "origin": "derived"},
+                            {"source": "homelab-local-models", "count": 3, "origin": "derived"}],
+                "entries": [
+                    {"id": 5, "band": "forever", "source": "pseudolife", "ts": 1782200000.0,
+                     "text": "the live daemon serves MCP from docker on port 8765"},
+                    {"id": 9, "band": "slow", "source": "homelab-local-models", "ts": 1782100000.0,
+                     "text": "daemon image pseudolife-daemon:0.2.0 rebuilt and deployed"}]}
 
     def graph_assign_scope(self, entity, source):
         return {"assigned": True, "entity": entity, "source": source}

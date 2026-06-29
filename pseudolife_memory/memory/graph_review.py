@@ -87,9 +87,9 @@ def unattributed(entities, entity_sources_map):
 def proposed_links(proposals):
     if not proposals:
         return []
-    links = [{"src": p["src"], "relation": p["relation"], "dst": p["dst"],
-              "confidence": p.get("confidence"), "similarity": p.get("similarity"),
-              "rationale": p.get("rationale")}
+    links = [{"id": p.get("id"), "src": p["src"], "relation": p["relation"],
+              "dst": p["dst"], "confidence": p.get("confidence"),
+              "similarity": p.get("similarity"), "rationale": p.get("rationale")}
              for p in proposals]
     return [{"type": "proposed_link", "severity": "info", "action": "review",
              "label": f"{len(links)} proposed cross-session links",

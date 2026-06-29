@@ -2468,6 +2468,24 @@ class MemoryService:
         return gr.review(edges, entities, src_map, proposals=proposals,
                          entity_proposals=entity_proposals)
 
+    def entity_provenance(self, entity: str, *, limit: int = 20) -> dict[str, Any]:
+        """Why does this entity exist? Its project attribution (entity_sources)
+        plus the MIRAS source entries behind its facts — band/source/ts/text — so
+        a human reviewing a merge/junk/link finding can judge from real evidence
+        instead of names alone."""
+        from pseudolife_memory import graph as G
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return dict(self._GRAPH_UNAVAILABLE)
+            e = self._storage.find_entity(G.norm_name(entity))
+            if e is None:
+                return {"found": False, "entity": entity, "sources": [], "entries": []}
+            sources = self._storage.sources_for_entity(e["id"])
+            entries = self._storage.entries_for_entity(e["id"], limit=limit)
+        return {"found": True, "entity": e["display"],
+                "sources": sources, "entries": entries}
+
     def graph_alias(self, entity: str, alias: str) -> dict[str, Any]:
         """Bind ``alias`` → ``entity`` (auto-created). All fact and graph
         lookups resolve aliases first."""

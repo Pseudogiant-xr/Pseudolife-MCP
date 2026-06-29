@@ -857,6 +857,22 @@ class PostgresStorage:
             "SELECT source, count, origin FROM entity_sources "
             "WHERE entity_id = %s ORDER BY count DESC, source", (entity_id,)).fetchall()]
 
+    def entries_for_entity(self, entity_id: int, *, limit: int = 20) -> list[dict]:
+        """The MIRAS source entries behind an entity, newest-first. Bridges
+        facts.entity_id (graph FK) -> facts.entity_norm (cortex norm) -> the
+        memory_traces engram cross-index -> entries. Keying through facts avoids
+        the graph/cortex norm mismatch (mirrors backfill_entity_sources). A
+        graph-only node with no current fact returns []."""
+        cols = ("id", "band", "source", "ts", "text")
+        return [dict(zip(cols, r)) for r in self.conn.execute(
+            "SELECT DISTINCT en.id, en.band, en.source, en.ts, en.text "
+            "FROM facts f "
+            "JOIN memory_traces t ON t.entity_norm = f.entity_norm "
+            "JOIN entries en ON en.id = t.entry_id "
+            "WHERE f.entity_id = %s AND f.status = 'current' "
+            "ORDER BY en.ts DESC LIMIT %s",
+            (entity_id, int(limit))).fetchall()]
+
     def entity_sources_map(self) -> dict[int, list[str]]:
         out: dict[int, list[str]] = {}
         for eid, source in self.conn.execute(

@@ -285,3 +285,12 @@ def test_entity_proposal_routes(svc):
     assert r.dispatch("POST", "/api/graph/accept-entity-merge", {}, {"id": 1})["accepted"]
     assert r.dispatch("POST", "/api/graph/accept-entity-junk", {}, {"id": 2})["accepted"]
     assert r.dispatch("POST", "/api/graph/reject-entity-proposal", {}, {"id": 3})["rejected"]
+
+
+def test_entity_provenance_route(svc):
+    r = ConsoleRoutes(svc)
+    out = r.dispatch("GET", "/api/graph/entity-provenance", {"entity": "daemon"}, {})
+    assert out["found"] is True
+    assert isinstance(out["sources"], list) and isinstance(out["entries"], list)
+    # the MIRAS band + source travel so the human can judge in the drawer
+    assert out["entries"][0]["band"] and out["entries"][0]["source"]

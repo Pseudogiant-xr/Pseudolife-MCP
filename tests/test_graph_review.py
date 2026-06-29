@@ -98,13 +98,15 @@ def test_dubious_edges_discriminate_by_confidence():
 
 
 def test_proposed_links_finding_shape():
-    props = [{"src": "alpha", "relation": "related-to", "dst": "beta",
+    props = [{"id": 7, "src": "alpha", "relation": "related-to", "dst": "beta",
               "confidence": 0.45, "similarity": 0.91, "rationale": "co-discussed"}]
     out = gr.proposed_links(props)
     assert len(out) == 1
     f = out[0]
     assert f["type"] == "proposed_link" and f["action"] == "review"
     assert f["links"][0]["src"] == "alpha" and f["links"][0]["dst"] == "beta"
+    # the edge_proposals id must travel so the link is accept/reject-able
+    assert f["links"][0]["id"] == 7
 
 
 def test_proposed_links_empty_when_none():

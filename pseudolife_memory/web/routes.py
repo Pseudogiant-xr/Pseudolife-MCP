@@ -167,6 +167,8 @@ class ConsoleRoutes:
         g("/api/graph/path", lambda q, b: svc.graph_path(
             _s(q, "source"), _s(q, "target"), max_hops=_i(q, "max_hops", 8)))
         g("/api/graph/review", lambda q, b: svc.graph_review(scope=_s(q, "scope")))
+        g("/api/graph/entity-provenance", lambda q, b: svc.entity_provenance(
+            _s(q, "entity"), limit=_i(q, "limit", 20)))
         p("/api/graph/assign-scope", lambda q, b: svc.graph_assign_scope(b["entity"], b["source"]))
         p("/api/graph/unrelate", lambda q, b: svc.graph_unrelate(b["src"], b["relation"], b["dst"]))
         p("/api/graph/delete-entity", lambda q, b: svc.graph_delete_entity(b["entity"]))

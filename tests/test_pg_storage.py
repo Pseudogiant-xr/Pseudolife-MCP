@@ -144,3 +144,37 @@ def test_vector_column_roundtrip(pg_conn):
     )
     out = pg_conn.execute("SELECT embedding FROM entries").fetchone()[0]
     assert np.allclose(out, vec, atol=1e-6)
+
+
+def test_entries_for_entity_joins_facts_traces_entries(storage):
+    """The provenance join: facts.entity_id ⋈ memory_traces.entity_norm ⋈ entries.
+    Returns the MIRAS source entries (band/source/ts/text) behind an entity."""
+    c = storage.conn
+    eid = c.execute(
+        "INSERT INTO entities (canonical, display, created_at) "
+        "VALUES ('daemon', 'daemon', 1000.0) RETURNING id").fetchone()[0]
+    entry_id = storage.insert_entry(
+        _entry(text="the daemon runs in docker", band="slow", source="pseudolife", ts=1234.0))
+    c.execute(
+        "INSERT INTO facts (entity, attribute, entity_norm, attribute_norm, value, "
+        "status, confidence, asserted_at, last_confirmed, entity_id) "
+        "VALUES ('daemon','role','daemon','role','serves MCP','current',0.9,1.0,1.0,%s)",
+        (eid,))
+    storage.add_trace("daemon", "role", entry_id, 1234.0)
+    c.commit()
+
+    rows = storage.entries_for_entity(eid)
+    assert [r["id"] for r in rows] == [entry_id]
+    r = rows[0]
+    assert r["band"] == "slow" and r["source"] == "pseudolife"
+    assert "docker" in r["text"]
+
+
+def test_entries_for_entity_empty_without_traces(storage):
+    """A graph-only node with no cortex-fact trace has no provenance entries —
+    the slot-keyed engram caveat. Must return [] cleanly, not error."""
+    eid = storage.conn.execute(
+        "INSERT INTO entities (canonical, display, created_at) "
+        "VALUES ('lonely', 'lonely', 1.0) RETURNING id").fetchone()[0]
+    storage.conn.commit()
+    assert storage.entries_for_entity(eid) == []

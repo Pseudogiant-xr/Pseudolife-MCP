@@ -71,41 +71,66 @@ export async function renderAtlas(root, ctx) {
     if (ok) { toast(`${okMsg} (${ok})`, "ok"); await refreshAfterMutation(); }
   }
 
-  async function actOnFinding(f) {
-    if (f.action === "merge") {
-      const [a, b] = f.entities || [];
-      if (!a || !b) return;
+  // The review panel calls this with a normalized action descriptor {kind, …}.
+  // Per-item proposal actions hit the id-keyed accept/reject endpoints; the
+  // group analyzer findings keep their bulk modals.
+  async function actOnFinding(d) {
+    if (d.kind === "merge-named") {                       // duplicate (recomputed, by name)
       openModal({
         title: "Merge duplicate entities",
         body: el("div", {}, el("p", { class: "dim", style: { marginTop: 0 } },
           "One entity absorbs the other's edges, aliases and project tags. Which name should survive?")),
         actions: [
           { label: "Cancel", onClick: closeModal },
-          { label: `Keep “${a}”`, kind: "primary", onClick: async () => { closeModal();
-            await postAll([{ path: "/api/graph/merge", body: { from: b, into: a } }], "Merged"); } },
-          { label: `Keep “${b}”`, onClick: async () => { closeModal();
-            await postAll([{ path: "/api/graph/merge", body: { from: a, into: b } }], "Merged"); } },
+          { label: `Keep “${d.from}”`, kind: "primary", onClick: async () => { closeModal();
+            await postAll([{ path: "/api/graph/merge", body: { from: d.into, into: d.from } }], "Merged"); } },
+          { label: `Keep “${d.into}”`, onClick: async () => { closeModal();
+            await postAll([{ path: "/api/graph/merge", body: { from: d.from, into: d.into } }], "Merged"); } },
         ],
       });
       return;
     }
-    if (f.action === "delete") {
-      const ents = f.entities || [];
-      if (!(await confirmDialog({ title: "Delete entities", danger: true,
-        message: `Permanently delete ${ents.length} entit${ents.length === 1 ? "y" : "ies"} and their edges? This cannot be undone.` }))) return;
-      await postAll(ents.map((e) => ({ path: "/api/graph/delete-entity", body: { entity: e } })), "Deleted");
+    if (d.kind === "merge-entity") {                      // merge_candidate proposal
+      if (!(await confirmDialog({ title: "Merge entities",
+        message: `Fold “${d.from}” into “${d.into}”? Its edges, aliases and project tags move to “${d.into}”.` }))) return;
+      await postAll([{ path: "/api/graph/accept-entity-merge", body: { id: d.id } }], "Merged");
       return;
     }
-    if (f.action === "prune") {
-      const edges = f.edges || [];
+    if (d.kind === "junk-entity") {                       // junk_candidate proposal
+      if (!(await confirmDialog({ title: "Delete entity", danger: true,
+        message: `Permanently delete “${d.entity}” and its edges? This cannot be undone.` }))) return;
+      await postAll([{ path: "/api/graph/accept-entity-junk", body: { id: d.id } }], "Deleted");
+      return;
+    }
+    if (d.kind === "reject-entity") {                     // dismiss a merge/junk proposal
+      await postAll([{ path: "/api/graph/reject-entity-proposal", body: { id: d.id } }], "Dismissed");
+      return;
+    }
+    if (d.kind === "accept-link") {                       // proposed_link → real edge
+      await postAll([{ path: "/api/graph/accept-proposal", body: { id: d.id } }], "Linked");
+      return;
+    }
+    if (d.kind === "reject-link") {
+      await postAll([{ path: "/api/graph/reject-proposal", body: { id: d.id } }], "Dismissed");
+      return;
+    }
+    if (d.kind === "prune") {                             // dubious_edge (bulk)
+      const edges = d.edges || [];
       if (!(await confirmDialog({ title: "Prune edges", danger: true,
         message: `Remove ${edges.length} low-confidence inferred edge${edges.length === 1 ? "" : "s"}?` }))) return;
       await postAll(edges.map((e) => ({ path: "/api/graph/unrelate",
         body: { src: e.src, relation: e.relation, dst: e.dst } })), "Pruned");
       return;
     }
-    if (f.action === "assign") {
-      const ents = f.entities || [];
+    if (d.kind === "delete-names") {                      // test_artifact (bulk, by name)
+      const ents = d.entities || [];
+      if (!(await confirmDialog({ title: "Delete entities", danger: true,
+        message: `Permanently delete ${ents.length} entit${ents.length === 1 ? "y" : "ies"} and their edges? This cannot be undone.` }))) return;
+      await postAll(ents.map((e) => ({ path: "/api/graph/delete-entity", body: { entity: e } })), "Deleted");
+      return;
+    }
+    if (d.kind === "assign") {                            // unattributed (bulk)
+      const ents = d.entities || [];
       const input = el("input", { type: "text", placeholder: "project / source name", name: "project" });
       openModal({
         title: "Assign a project",

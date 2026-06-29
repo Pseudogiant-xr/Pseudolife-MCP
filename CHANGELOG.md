@@ -7,6 +7,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Atlas review queue: entity provenance.** New `GET /api/graph/entity-provenance`
+  (`service.entity_provenance` + `storage.entries_for_entity`) returns an entity's
+  project attribution (`entity_sources`: source · count · origin) and the MIRAS
+  source entries behind its facts (band · source · ts · text), bridging
+  `facts.entity_id → entity_norm → memory_traces → entries`. In the Atlas Review
+  panel every entity name is now clickable to lazy-load a provenance drawer, so a
+  human can judge a merge/junk/link finding from real evidence, not names alone.
+  (Source entries carry no user/action/agent tier — that lives on facts/edges — so
+  the drawer shows band + `entity_sources` origin, not a per-entry tier.)
 - **Session-start briefing (P1.7).** New `memory_briefing` tool + `pseudolife-mcp
   briefing` CLI assemble a "what your memory is unsure about" (graph surprises +
   questions) + "lessons from past work" (avoid/prefer) block. Wire the CLI to a
@@ -40,6 +49,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   personal bank's fill — so eviction/curation engages in ~1 year (the `slow`
   band) instead of ~decades, with no data loss on existing personal banks. Raise
   the caps (or use `preset: custom`) for high-volume / multi-agent deployments.
+
+### Fixed
+- **Atlas review queue rendered deep-dream findings unusably.** The panel predated
+  the deep-dream proposal shapes: `merge_candidate` (data in `f.merges`),
+  `proposed_link` (`f.links`), and `junk_candidate` (`f.entities` as objects) showed
+  no detail or literal `[object Object]`, and their action buttons were dead (read
+  `f.entities` → `[undefined, undefined]`) or posted malformed bodies. The renderer
+  (`atlas_review.js`) now understands all finding shapes and surfaces the
+  already-computed signals (jaccard / similarity / confidence / reason / rationale);
+  the handler (`views/atlas.js`) dispatches per item to the id-keyed
+  `accept-entity-merge` / `accept-entity-junk` / `reject-entity-proposal` /
+  `accept-proposal` / `reject-proposal` endpoints. `graph_review.proposed_links` now
+  carries the `edge_proposals` id so links are accept/reject-able.
 
 ## [0.6.0] — 2026-06-25 — graph foundation
 
