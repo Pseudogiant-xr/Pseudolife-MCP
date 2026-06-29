@@ -54,3 +54,26 @@ def test_reject_marks_rejected(svc):
     pid = svc._storage.pending_proposals()[0]["id"]
     assert svc.graph_reject_proposal(pid)["rejected"] is True
     assert svc._storage.pending_proposals() == []
+
+
+def test_dry_run_previews_merge_and_junk(svc):
+    # Two synonym entities sharing two entries -> a high-sim near-pair name-contained -> merge preview.
+    svc.cortex_write("daemon", "role", "serves MCP", support="user")
+    svc.cortex_write("daemon", "note", "the daemon runs in docker", support="user")
+    svc.cortex_write("live daemon", "role", "serves MCP", support="user")
+    svc.cortex_write("live daemon", "note", "the daemon runs in docker", support="user")
+    svc.graph_relate("2", "related-to", "daemon", origin="agent")   # 'live daemon' co-mentions
+    out = svc.deep_dream(apply=False)
+    assert out["dry_run"] is True
+    assert "would_merge_propose" in out and "would_junk" in out
+    assert svc._storage.pending_entity_proposals() == []            # dry-run writes nothing
+
+
+def test_apply_persists_entity_proposals(svc):
+    svc.cortex_write("daemon", "role", "serves MCP", support="user")
+    svc.cortex_write("daemon", "note", "runs in docker", support="user")
+    svc.cortex_write("live daemon", "role", "serves MCP", support="user")
+    svc.cortex_write("live daemon", "note", "runs in docker", support="user")
+    out = svc.deep_dream(apply=True)
+    assert out["applied"] is True
+    assert "merge_proposed" in out and "junk_proposed" in out

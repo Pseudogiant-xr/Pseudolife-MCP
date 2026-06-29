@@ -2890,10 +2890,13 @@ class MemoryService:
         dups = gc.exact_duplicate_pairs(entities, edges)
         vectors, mentions = gc.entity_context_vectors(
             entities, entries, traces, min_mentions=cfg.min_entity_mentions)
-        candidates = gc.candidate_pairs(
+        near = gc.candidate_pairs(
             vectors, edges, entities, scope_map, mentions,
             min_similarity=cfg.min_similarity, top_k=cfg.top_k_candidates)
-        candidates = self._attach_candidate_snippets(candidates, entities, entries,
+        merge_cands, link_cands = gc.partition_candidates(
+            near, entities, edges, merge_min_similarity=cfg.merge_min_similarity)
+        junk = gc.junk_entities(entities, edges, max_degree=cfg.junk_max_degree)
+        candidates = self._attach_candidate_snippets(link_cands, entities, entries,
                                                      traces, cfg.max_context_snippets)
 
         totals = {"entities": len(entities), "edges": len(edges),
@@ -2902,14 +2905,15 @@ class MemoryService:
             return {"dry_run": True, "rescored": len(rescore),
                     "would_supersede": [self._edge_label(e, entities) for e in violations],
                     "would_merge": self._merge_labels(dups, entities),
+                    "would_merge_propose": [{"from": m["from"], "into": m["into"],
+                                             "similarity": m["similarity"], "reason": m["reason"]}
+                                            for m in merge_cands],
+                    "would_junk": [{"entity": j["display"], "reason": j["reason"]} for j in junk],
                     "candidates": candidates, "totals": totals}
 
-        superseded = merged = 0
+        import time as _t
+        superseded = merged = merge_proposed = junk_proposed = 0
         with self._lock:
-            # Writes apply against the snapshot read above; like the dream's
-            # graph-relation extraction, a concurrent edit between the two lock
-            # windows is tolerated — supersede/merge/rescore are no-ops on a row
-            # that has since changed.
             for eid, conf in rescore:
                 self._storage.set_edge_confidence(eid, conf)
             if cfg.auto_apply_safe:
@@ -2919,8 +2923,18 @@ class MemoryService:
                 for frm, into in dups:
                     if self._storage.merge_entity(frm, into):
                         merged += 1
+            # Non-destructive: populate the review queue regardless of auto_apply_safe.
+            for m in merge_cands:
+                if self._storage.insert_entity_proposal(
+                        "merge", m["from_id"], m["into_id"], m["similarity"], m["reason"], _t.time()) is not None:
+                    merge_proposed += 1
+            for j in junk:
+                if self._storage.insert_entity_proposal(
+                        "junk", j["entity_id"], None, None, j["reason"], _t.time()) is not None:
+                    junk_proposed += 1
         return {"applied": True, "rescored": len(rescore), "superseded": superseded,
-                "merged": merged, "candidates": candidates, "totals": totals}
+                "merged": merged, "merge_proposed": merge_proposed,
+                "junk_proposed": junk_proposed, "candidates": candidates, "totals": totals}
 
     def _edge_label(self, e: dict, entities: list[dict]) -> dict:
         disp = {x["id"]: x["display"] for x in entities}

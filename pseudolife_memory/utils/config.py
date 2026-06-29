@@ -325,6 +325,8 @@ class DeepDreamConfig:
     max_context_snippets: int = 3      # context snippets per entity in a candidate
     auto_apply_safe: bool = True       # auto-supersede violations + merge exact dups (apply only)
     min_entity_mentions: int = 2       # an entity needs >= this many distinct mentioning entries to be candidate-eligible
+    merge_min_similarity: float = 0.90   # cosine floor for a near-dup MERGE candidate (vs a link)
+    junk_max_degree: int = 1             # junk entities must be this weakly connected to be flagged
 
 
 @dataclass
