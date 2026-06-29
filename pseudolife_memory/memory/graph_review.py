@@ -96,9 +96,30 @@ def proposed_links(proposals):
              "links": links}]
 
 
-def review(edges, entities, entity_sources_map, proposals=None):
+def merge_candidates(entity_proposals):
+    rows = [p for p in (entity_proposals or []) if p.get("kind") == "merge"]
+    if not rows:
+        return []
+    merges = [{"from": p["entity"], "into": p["into"], "similarity": p.get("score"),
+               "reason": p.get("reason"), "id": p["id"]} for p in rows]
+    return [{"type": "merge_candidate", "severity": "warn", "action": "merge",
+             "label": f"{len(merges)} near-duplicate entity merges", "merges": merges}]
+
+
+def junk_candidates(entity_proposals):
+    rows = [p for p in (entity_proposals or []) if p.get("kind") == "junk"]
+    if not rows:
+        return []
+    items = [{"entity": p["entity"], "reason": p.get("reason"), "id": p["id"]} for p in rows]
+    return [{"type": "junk_candidate", "severity": "warn", "action": "delete",
+             "label": f"{len(items)} junk entities to prune", "entities": items}]
+
+
+def review(edges, entities, entity_sources_map, proposals=None, entity_proposals=None):
     findings = (duplicate_candidates(entities) + test_artifacts(entities)
                 + dubious_edges(edges, entities) + orphans(edges, entities)
                 + unattributed(entities, entity_sources_map)
-                + proposed_links(proposals or []))
+                + proposed_links(proposals or [])
+                + merge_candidates(entity_proposals or [])
+                + junk_candidates(entity_proposals or []))
     return {"findings": findings, "counts": {"total": len(findings)}}

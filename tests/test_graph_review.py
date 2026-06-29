@@ -115,3 +115,23 @@ def test_review_includes_proposals_when_passed():
     out = gr.review([], [], {}, proposals=[
         {"src": "a", "relation": "related-to", "dst": "b", "confidence": 0.45}])
     assert any(f["type"] == "proposed_link" for f in out["findings"])
+
+
+def test_merge_and_junk_candidate_findings():
+    eprops = [
+        {"id": 1, "kind": "merge", "entity": "live daemon", "into": "daemon",
+         "score": 0.99, "reason": "token-subset"},
+        {"id": 2, "kind": "junk", "entity": "2", "into": None, "reason": "bare-number"},
+    ]
+    out = gr.review([], [], {}, entity_proposals=eprops)
+    types = {f["type"] for f in out["findings"]}
+    assert "merge_candidate" in types and "junk_candidate" in types
+    mc = next(f for f in out["findings"] if f["type"] == "merge_candidate")
+    assert mc["merges"][0]["from"] == "live daemon" and mc["merges"][0]["into"] == "daemon"
+    jc = next(f for f in out["findings"] if f["type"] == "junk_candidate")
+    assert jc["entities"][0]["entity"] == "2" and jc["entities"][0]["reason"] == "bare-number"
+
+
+def test_entity_proposals_default_none_no_findings():
+    out = gr.review([], [], {})
+    assert all(f["type"] not in ("merge_candidate", "junk_candidate") for f in out["findings"])
