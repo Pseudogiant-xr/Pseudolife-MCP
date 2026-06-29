@@ -85,6 +85,9 @@ def test_all_tools_registered() -> None:
         "memory_graph_propose_links",
         "memory_graph_accept_proposal",
         "memory_graph_reject_proposal",
+        "memory_graph_accept_entity_merge",
+        "memory_graph_accept_entity_junk",
+        "memory_graph_reject_entity_proposal",
     ])
 
 

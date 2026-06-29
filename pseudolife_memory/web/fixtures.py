@@ -401,7 +401,14 @@ class FixtureService:
              "label": "1 proposed cross-session link",
              "links": [{"src": "Track A", "relation": "related-to", "dst": "Track B",
                         "confidence": 0.45, "similarity": 0.9, "rationale": "co-discussed"}]},
-        ], "counts": {"total": 5}}
+            {"type": "merge_candidate", "severity": "warn", "action": "merge",
+             "label": "1 near-duplicate entity merges",
+             "merges": [{"from": "live daemon", "into": "daemon", "similarity": 0.99,
+                         "reason": "token-subset", "id": 1}]},
+            {"type": "junk_candidate", "severity": "warn", "action": "delete",
+             "label": "1 junk entities to prune",
+             "entities": [{"entity": "2", "reason": "bare-number", "id": 2}]},
+        ], "counts": {"total": 7}}
 
     def graph_assign_scope(self, entity, source):
         return {"assigned": True, "entity": entity, "source": source}
@@ -422,6 +429,15 @@ class FixtureService:
         return {"accepted": True, "src": "Track A", "relation": "related-to", "dst": "Track B"}
 
     def graph_reject_proposal(self, proposal_id):
+        return {"rejected": True, "id": int(proposal_id)}
+
+    def graph_accept_entity_merge(self, proposal_id):
+        return {"accepted": True, "from": "live daemon", "into": "daemon"}
+
+    def graph_accept_entity_junk(self, proposal_id):
+        return {"accepted": True, "entity": "2"}
+
+    def graph_reject_entity_proposal(self, proposal_id):
         return {"rejected": True, "id": int(proposal_id)}
 
     # engram traces / retention

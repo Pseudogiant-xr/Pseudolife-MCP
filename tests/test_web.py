@@ -278,3 +278,10 @@ def test_asgi_static_traversal_blocked(svc):
 def test_asgi_root_redirects(svc):
     st, _ = _call(_app(svc), "GET", "/")
     assert st == 307
+
+
+def test_entity_proposal_routes(svc):
+    r = ConsoleRoutes(svc)
+    assert r.dispatch("POST", "/api/graph/accept-entity-merge", {}, {"id": 1})["accepted"]
+    assert r.dispatch("POST", "/api/graph/accept-entity-junk", {}, {"id": 2})["accepted"]
+    assert r.dispatch("POST", "/api/graph/reject-entity-proposal", {}, {"id": 3})["rejected"]

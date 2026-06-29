@@ -1270,6 +1270,26 @@ def memory_graph_reject_proposal(proposal_id: int) -> dict[str, Any]:
     return service.graph_reject_proposal(proposal_id)
 
 
+@_tool()
+def memory_graph_accept_entity_merge(proposal_id: int) -> dict[str, Any]:
+    """Accept a near-duplicate entity-merge proposal: fold the 'from' entity into the
+    'into' entity. Returns {accepted, from, into}."""
+    return service.graph_accept_entity_merge(proposal_id)
+
+
+@_tool()
+def memory_graph_accept_entity_junk(proposal_id: int) -> dict[str, Any]:
+    """Accept a junk-entity prune proposal: delete the over-extraction artifact entity.
+    Returns {accepted, entity}."""
+    return service.graph_accept_entity_junk(proposal_id)
+
+
+@_tool()
+def memory_graph_reject_entity_proposal(proposal_id: int) -> dict[str, Any]:
+    """Reject a pending entity merge/junk proposal (kept for audit). Returns {rejected}."""
+    return service.graph_reject_entity_proposal(proposal_id)
+
+
 @_tool(core=True)
 def document_ingest(path: str, source: str | None = None) -> dict[str, Any]:
     """Read a file (.txt / .md / .pdf) and index it in the reference bank.

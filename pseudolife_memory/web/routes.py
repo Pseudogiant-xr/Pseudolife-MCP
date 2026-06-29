@@ -173,6 +173,9 @@ class ConsoleRoutes:
         p("/api/graph/merge", lambda q, b: svc.graph_merge(b["from"], b["into"]))
         p("/api/graph/accept-proposal", lambda q, b: svc.graph_accept_proposal(b["id"]))
         p("/api/graph/reject-proposal", lambda q, b: svc.graph_reject_proposal(b["id"]))
+        p("/api/graph/accept-entity-merge", lambda q, b: svc.graph_accept_entity_merge(b["id"]))
+        p("/api/graph/accept-entity-junk", lambda q, b: svc.graph_accept_entity_junk(b["id"]))
+        p("/api/graph/reject-entity-proposal", lambda q, b: svc.graph_reject_entity_proposal(b["id"]))
 
         # ---- dream / consolidation ----
         g("/api/dream/status", lambda q, b: svc.dream_status())
