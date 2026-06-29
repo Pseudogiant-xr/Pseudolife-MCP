@@ -2914,6 +2914,10 @@ class MemoryService:
         import time as _t
         superseded = merged = merge_proposed = junk_proposed = 0
         with self._lock:
+            # Writes apply against the snapshot read above; like the dream's
+            # graph-relation extraction, a concurrent edit between the two lock
+            # windows is tolerated — supersede/merge/rescore are no-ops on a row
+            # that has since changed.
             for eid, conf in rescore:
                 self._storage.set_edge_confidence(eid, conf)
             if cfg.auto_apply_safe:

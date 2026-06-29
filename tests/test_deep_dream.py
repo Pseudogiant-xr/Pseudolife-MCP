@@ -74,6 +74,8 @@ def test_apply_persists_entity_proposals(svc):
     svc.cortex_write("daemon", "note", "runs in docker", support="user")
     svc.cortex_write("live daemon", "role", "serves MCP", support="user")
     svc.cortex_write("live daemon", "note", "runs in docker", support="user")
+    svc.cortex_write("42", "note", "a bare number entity", support="user")
     out = svc.deep_dream(apply=True)
     assert out["applied"] is True
     assert "merge_proposed" in out and "junk_proposed" in out
+    assert out["junk_proposed"] >= 1
