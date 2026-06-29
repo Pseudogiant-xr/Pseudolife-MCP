@@ -359,7 +359,8 @@ input:focus, select:focus, textarea:focus { outline:none; border-color:color-mix
   border-radius:var(--radius); box-shadow:var(--shadow-pop); overflow:hidden; }
 .modal-head { padding:18px 20px; border-bottom:1px solid var(--line); font-family:var(--font-display); font-size:1.1rem; }
 .modal-body { padding:20px; display:flex; flex-direction:column; gap:14px; }
-.modal-foot { padding:14px 20px; border-top:1px solid var(--line); display:flex; gap:10px; justify-content:flex-end; }
+.modal-foot { padding:14px 20px; border-top:1px solid var(--line); display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap; }
+.modal-foot .btn { max-width:100%; }
 @keyframes fade { from { opacity:0; } }
 
 /* Drawer (right) */

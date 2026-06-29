@@ -62,6 +62,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `accept-entity-merge` / `accept-entity-junk` / `reject-entity-proposal` /
   `accept-proposal` / `reject-proposal` endpoints. `graph_review.proposed_links` now
   carries the `edge_proposals` id so links are accept/reject-able.
+- **"Merge duplicate entities" modal clipped long names.** The footer put the full
+  entity name in each button (`Keep "<name>"`); long path-like names overflowed the
+  fixed-width modal (`overflow:hidden`) and were cut off. The modal now shows both
+  full names (labelled A/B, wrapping) in the body and uses short, middle-ellipsised
+  button labels; `.modal-foot` also wraps (`flex-wrap`) as a safety net.
 
 ## [0.6.0] — 2026-06-25 — graph foundation
 

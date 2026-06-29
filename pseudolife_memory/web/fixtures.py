@@ -386,10 +386,15 @@ class FixtureService:
         return {"projects": [{"source": s, "entities": n} for s, n in c.most_common()]}
 
     def graph_review(self, scope=None):
-        return {"findings": [
+        findings = [
             {"type": "duplicate", "severity": "warn", "action": "merge",
              "label": "Cortex Console web frontend ↔ web frontend (Cortex Console)",
              "entities": ["Cortex Console web frontend", "web frontend (Cortex Console)"]},
+            # long, path-like names exercise the merge modal's button truncation
+            {"type": "duplicate", "severity": "warn", "action": "merge",
+             "label": "deep-dream-graph-consolidation-design.md ↔ deep-dream-graph-consolidation.md",
+             "entities": ["docs/superpowers/specs/2026-06-28-deep-dream-graph-consolidation-design.md",
+                          "docs/superpowers/plans/2026-06-28-deep-dream-graph-consolidation.md"]},
             {"type": "test_artifact", "severity": "warn", "action": "delete",
              "label": "2 test/smoke artifacts", "entities": ["payments-db", "pl-healthcheck-target"]},
             {"type": "dubious_edge", "severity": "warn", "action": "prune",
@@ -408,7 +413,8 @@ class FixtureService:
             {"type": "junk_candidate", "severity": "warn", "action": "delete",
              "label": "1 junk entities to prune",
              "entities": [{"entity": "2", "reason": "bare-number", "id": 2}]},
-        ], "counts": {"total": 7}}
+        ]
+        return {"findings": findings, "counts": {"total": len(findings)}}
 
     def entity_provenance(self, entity, limit=20):
         return {"found": True, "entity": entity,

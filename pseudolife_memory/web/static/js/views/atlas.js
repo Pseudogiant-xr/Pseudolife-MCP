@@ -10,6 +10,10 @@ import { ForceGraph, renderGalaxy, cleanupGalaxy, tableView, legend,
 import { reviewPanel } from "../atlas_review.js";
 import { confirmDialog, openModal, closeModal, toast } from "../ui.js";
 
+// Middle-ellipsis a long name so a modal button label can't overflow/clip.
+const ellipsisMid = (s, max = 22) =>
+  s.length <= max ? s : `${s.slice(0, max - 9)}…${s.slice(-8)}`;
+
 let state = { scope: "all", view: "map", review: false };
 let reviewData = null;
 let fg = null;
@@ -76,15 +80,22 @@ export async function renderAtlas(root, ctx) {
   // group analyzer findings keep their bulk modals.
   async function actOnFinding(d) {
     if (d.kind === "merge-named") {                       // duplicate (recomputed, by name)
+      // Show the full names in the body (they wrap); keep the button labels
+      // short + truncated so a long entity name can never clip the modal.
+      const nameRow = (lead, name) => el("div", { style: { display: "flex", gap: "8px", margin: "3px 0" } },
+        el("span", { class: "dim", style: { flex: "0 0 auto" } }, lead),
+        el("span", { class: "mono", style: { wordBreak: "break-all" } }, name));
       openModal({
         title: "Merge duplicate entities",
-        body: el("div", {}, el("p", { class: "dim", style: { marginTop: 0 } },
-          "One entity absorbs the other's edges, aliases and project tags. Which name should survive?")),
+        body: el("div", {},
+          el("p", { class: "dim", style: { marginTop: 0 } },
+            "One entity absorbs the other's edges, aliases and project tags. Which name should survive?"),
+          nameRow("A", d.from), nameRow("B", d.into)),
         actions: [
           { label: "Cancel", onClick: closeModal },
-          { label: `Keep “${d.from}”`, kind: "primary", onClick: async () => { closeModal();
+          { label: `Keep A — “${ellipsisMid(d.from)}”`, kind: "primary", onClick: async () => { closeModal();
             await postAll([{ path: "/api/graph/merge", body: { from: d.into, into: d.from } }], "Merged"); } },
-          { label: `Keep “${d.into}”`, onClick: async () => { closeModal();
+          { label: `Keep B — “${ellipsisMid(d.into)}”`, onClick: async () => { closeModal();
             await postAll([{ path: "/api/graph/merge", body: { from: d.from, into: d.into } }], "Merged"); } },
         ],
       });
