@@ -67,6 +67,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   fixed-width modal (`overflow:hidden`) and were cut off. The modal now shows both
   full names (labelled A/B, wrapping) in the body and uses short, middle-ellipsised
   button labels; `.modal-foot` also wraps (`flex-wrap`) as a safety net.
+- **Deep-dream merge proposals were noisy; `A<->B` artifacts were unhandled.** The
+  entity-merge classifier proposed a merge whenever one name's token set was a subset
+  of the other's, so single generic tokens drove false merges (`memory_graph→Graph`,
+  `bank→live bank`, `LIVE→live daemon`) and real entities were merged *into*
+  concatenated extraction artifacts (`Phase 2 plan → Phase 1 plan<->Phase 2 plan`).
+  `_name_contains` now requires the contained token set to have ≥2 tokens and excludes
+  any concat-artifact endpoint; a new degree-agnostic `concat-artifact` junk rule
+  (`_is_concat_artifact`) surfaces the `A<->B` nodes for deletion instead.
 
 ## [0.6.0] — 2026-06-25 — graph foundation
 
