@@ -227,9 +227,13 @@ def junk_entities(entities: list[dict], edges: list[dict], *,
     deg = degree_counts(edges)
     out: list[dict] = []
     for e in entities:
+        d = str(e["display"]).strip()
+        if _is_concat_artifact(d):
+            out.append({"entity_id": e["id"], "display": e["display"],
+                        "reason": "concat-artifact"})   # degree-agnostic
+            continue
         if deg.get(e["id"], 0) > max_degree:
             continue
-        d = str(e["display"]).strip()
         if _BARE_NUMBER.match(d):
             reason = "bare-number"
         elif len(d) <= 2:

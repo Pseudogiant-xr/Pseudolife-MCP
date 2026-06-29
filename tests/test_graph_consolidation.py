@@ -259,3 +259,16 @@ def test_partition_candidates_concat_artifact_target_is_not_merged():
     merges, links = gc.partition_candidates(pairs, ents, [], merge_min_similarity=0.90)
     assert merges == []                         # artifact endpoint excluded from merge
     assert len(links) == 1
+
+
+def test_junk_entities_flags_concat_artifacts_regardless_of_degree():
+    ents = [
+        {"id": 1, "canonical": "memory_recall<->recall.py",
+         "display": "memory_recall<->recall.py", "etype": None},
+        {"id": 2, "canonical": "recall.py", "display": "recall.py", "etype": None},
+        {"id": 3, "canonical": "memory_recall", "display": "memory_recall", "etype": None},
+    ]
+    # entity 1 is well-connected (degree 2) yet must still be flagged as an artifact
+    edges = [_edge(10, 1, "related-to", 2, 0.45), _edge(11, 1, "related-to", 3, 0.45)]
+    out = {j["entity_id"]: j["reason"] for j in gc.junk_entities(ents, edges, max_degree=1)}
+    assert out == {1: "concat-artifact"}   # 2 and 3 are real; flagged despite degree 2
