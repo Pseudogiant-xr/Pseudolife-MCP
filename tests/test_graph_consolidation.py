@@ -209,3 +209,19 @@ def test_junk_entities_flags_artifacts_not_real():
     edges = [_edge(10, 5, "related-to", 4, 0.45), _edge(11, 5, "related-to", 1, 0.45)]  # entity 5 degree 2
     out = {j["entity_id"]: j["reason"] for j in gc.junk_entities(ents, edges, max_degree=1)}
     assert out == {1: "bare-number", 2: "status-word", 3: "too-short"}  # 4 real, 5 well-connected
+
+
+def test_is_concat_artifact_detects_relation_separators():
+    for name in ["memory_recall<->recall.py", "schema v8 <-> schema 11",
+                 "a ↔ b", "x -> y", "Phase 1 plan<->Phase 2 plan"]:
+        assert gc._is_concat_artifact(name) is True, name
+
+
+def test_is_concat_artifact_ignores_plain_names():
+    for name in ["memory_graph", "Atlas Review queue", "claude-code", "4090/Qwen3.6-27B"]:
+        assert gc._is_concat_artifact(name) is False, name
+
+
+def test_is_concat_artifact_requires_nonempty_both_sides():
+    assert gc._is_concat_artifact("<-> y") is False   # empty left
+    assert gc._is_concat_artifact("x <->") is False   # empty right

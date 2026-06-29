@@ -161,6 +161,18 @@ _JUNK_STOPWORDS = frozenset({
 })
 _BARE_NUMBER = re.compile(r"^\d+$")
 
+# A relation separator captured into an entity name (extraction artifact), e.g.
+# "memory_recall<->recall.py". Longest arrow first so "<->" isn't split as "->".
+_ARROW = re.compile(r"<-+>|↔|->|→")
+
+
+def _is_concat_artifact(name: str) -> bool:
+    """True if ``name`` is two names joined by a relation arrow (<->, ->, ↔, →) —
+    a captured-relation extraction artifact. Requires non-empty text on both
+    sides, so a name merely starting/ending with an arrow char is not caught."""
+    parts = [p.strip() for p in _ARROW.split(str(name))]
+    return len(parts) >= 2 and sum(1 for p in parts if p) >= 2
+
 
 def _name_contains(a: str, b: str) -> str | None:
     """A reason if one display asserts identity with the other, else None.
