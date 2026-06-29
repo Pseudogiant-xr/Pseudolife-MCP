@@ -785,6 +785,46 @@ class PostgresStorage:
         self.conn.commit()
         return cur.rowcount > 0
 
+    def insert_entity_proposal(self, kind: str, entity_id: int, into_id: int | None,
+                               score: float | None, reason: str | None, now: float) -> int | None:
+        row = self.conn.execute(
+            "INSERT INTO entity_proposals (kind, entity_id, into_id, score, reason, created_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING RETURNING id",
+            (kind, entity_id, into_id, score, reason, now),
+        ).fetchone()
+        self.conn.commit()
+        return int(row[0]) if row else None
+
+    def pending_entity_proposals(self) -> list[dict]:
+        cols = ("id", "kind", "entity_id", "into_id", "score", "reason", "status", "created_at")
+        rows = self.conn.execute(
+            "SELECT p.id, p.kind, p.entity_id, p.into_id, p.score, p.reason, p.status, "
+            "       p.created_at, e.display, i.display "
+            "FROM entity_proposals p "
+            "JOIN entities e ON e.id = p.entity_id "
+            "LEFT JOIN entities i ON i.id = p.into_id "
+            "WHERE p.status = 'pending' ORDER BY p.kind, p.score DESC NULLS LAST, p.id"
+        ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(zip(cols, r[:8]))
+            d["entity"], d["into"] = r[8], r[9]
+            out.append(d)
+        return out
+
+    def get_entity_proposal(self, proposal_id: int) -> dict | None:
+        cols = ("id", "kind", "entity_id", "into_id", "score", "reason", "status", "created_at")
+        r = self.conn.execute(
+            f"SELECT {', '.join(cols)} FROM entity_proposals WHERE id = %s", (proposal_id,)
+        ).fetchone()
+        return dict(zip(cols, r)) if r else None
+
+    def set_entity_proposal_status(self, proposal_id: int, status: str) -> bool:
+        cur = self.conn.execute(
+            "UPDATE entity_proposals SET status = %s WHERE id = %s", (status, proposal_id))
+        self.conn.commit()
+        return cur.rowcount > 0
+
     def traces_for_slot(self, entity_norm: str, attribute_norm: str) -> list[int]:
         return [r[0] for r in self.conn.execute(
             "SELECT entry_id FROM memory_traces "

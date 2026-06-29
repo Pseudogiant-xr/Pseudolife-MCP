@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 17
+SCHEMA_META_VERSION = 18
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -109,6 +109,21 @@ CREATE TABLE IF NOT EXISTS edge_proposals (
   status TEXT NOT NULL DEFAULT 'pending',
   UNIQUE (src_id, relation, dst_id)
 );
+
+CREATE TABLE IF NOT EXISTS entity_proposals (
+  id BIGSERIAL PRIMARY KEY,
+  kind TEXT NOT NULL,
+  entity_id BIGINT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+  into_id BIGINT REFERENCES entities(id) ON DELETE CASCADE,
+  score REAL,
+  reason TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at DOUBLE PRECISION NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS entity_proposals_merge_uq ON entity_proposals
+  (LEAST(entity_id, into_id), GREATEST(entity_id, into_id)) WHERE kind = 'merge';
+CREATE UNIQUE INDEX IF NOT EXISTS entity_proposals_junk_uq ON entity_proposals
+  (entity_id) WHERE kind = 'junk';
 
 CREATE TABLE IF NOT EXISTS facts (
   id BIGSERIAL PRIMARY KEY,
