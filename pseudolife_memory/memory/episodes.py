@@ -96,20 +96,18 @@ class EpisodeManager:
 
     # ── Lifecycle ────────────────────────────────────────────────────
 
-    def start(self, title: str, hint: str | None = None,
-              session_key: str | None = None) -> Episode:
-        """Open a new episode. Auto-closes any prior open one.
-
-        Returns the freshly-opened episode. The prior open episode (if
-        any) has ``ended_at`` set to ``now`` and ``closed_by_new_start=True``
-        before the new one is opened.
+    def start_session(self, title: str, session_key: str | None = None,
+                      hint: str | None = None) -> Episode:
+        """Open a root session episode. Idempotent per open ``session_key`` (a
+        resume/compact re-fire returns the existing open one) and — unlike the
+        old ``start`` — NEVER closes another session's open episode. This is
+        what lets concurrent sessions (different projects) coexist without
+        clobbering each other's episode + stamping context.
         """
-        if self.current_id is not None:
-            prior = self.episodes.get(self.current_id)
-            if prior is not None and prior.ended_at is None:
-                prior.ended_at = time.time()
-                prior.closed_by_new_start = True
-
+        if session_key is not None:
+            existing = self.open_leaf_for(session_key)
+            if existing is not None:
+                return existing
         ep = Episode(
             id=uuid.uuid4().hex,
             title=title,
@@ -121,33 +119,82 @@ class EpisodeManager:
         self.current_id = ep.id
         return ep
 
-    def start_nested(self, title: str, hint: str | None = None) -> Episode:
-        """Open a sub-episode under the current open leaf (which stays open).
-        Falls back to a root episode when nothing is open."""
-        parent = self.open_episode()
+    def start(self, title: str, hint: str | None = None,
+              session_key: str | None = None) -> Episode:
+        """Legacy single-session opener. With ``session_key=None`` it keeps the
+        old "one open episode, auto-close the prior with ``closed_by_new_start``"
+        semantics that pre-session callers (tests, embedded mode) rely on. With
+        a key it defers to :meth:`start_session` (no clobber)."""
+        if session_key is None and self.current_id is not None:
+            prior = self.episodes.get(self.current_id)
+            if prior is not None and prior.ended_at is None:
+                prior.ended_at = time.time()
+                prior.closed_by_new_start = True
+        return self.start_session(title, session_key=session_key, hint=hint)
+
+    def start_nested(self, title: str, hint: str | None = None,
+                     session_key: str | None = None) -> Episode:
+        """Open a sub-episode under the caller's open leaf (which stays open).
+        With a ``session_key`` it nests under THAT session's leaf and inherits
+        the key; without one it uses the global ``current_id`` leaf. Falls back
+        to a root episode when nothing is open."""
+        parent = (self.open_leaf_for(session_key) if session_key is not None
+                  else self.open_episode())
         ep = Episode(
             id=uuid.uuid4().hex,
             title=title,
             started_at=time.time(),
             hint=hint,
             parent_id=parent.id if parent is not None else None,
+            session_key=(session_key if session_key is not None
+                         else (parent.session_key if parent else None)),
         )
         self.episodes[ep.id] = ep
         self.current_id = ep.id
         return ep
 
-    def end(self) -> Episode | None:
-        """Close the current open leaf and pop to its parent (if still open)."""
-        if self.current_id is None:
-            return None
-        ep = self.episodes.get(self.current_id)
+    def end_leaf(self, session_key: str | None = None) -> Episode | None:
+        """Close the open leaf (for ``session_key`` when given, else the global
+        ``current_id`` leaf) and pop to its parent if still open."""
+        ep = (self.open_leaf_for(session_key) if session_key is not None
+              else self.open_episode())
         if ep is None:
-            self.current_id = None
+            if session_key is None:
+                self.current_id = None
             return None
         ep.ended_at = time.time()
         parent = self.episodes.get(ep.parent_id) if ep.parent_id else None
-        self.current_id = parent.id if (parent and parent.ended_at is None) else None
+        new_leaf = parent if (parent and parent.ended_at is None) else None
+        if self.current_id == ep.id:
+            self.current_id = new_leaf.id if new_leaf else None
         return ep
+
+    def end(self) -> Episode | None:
+        """Legacy: close the global current leaf. Equivalent to ``end_leaf()``."""
+        return self.end_leaf(None)
+
+    def open_leaf_for(self, session_key: str | None) -> Episode | None:
+        """The deepest currently-open episode for ``session_key`` (root or a
+        nested child), or None. The leaf is the open episode that no other
+        open episode in the session points to as its parent — robust to
+        equal ``started_at`` timestamps (sub-second nesting). A latest-start
+        tiebreak covers the unexpected branched case."""
+        if session_key is None:
+            return None
+        open_eps = [e for e in self.episodes.values()
+                    if e.ended_at is None and e.session_key == session_key]
+        if not open_eps:
+            return None
+        parent_ids = {e.parent_id for e in open_eps if e.parent_id}
+        leaves = [e for e in open_eps if e.id not in parent_ids]
+        candidates = leaves or open_eps
+        return max(candidates, key=lambda e: e.started_at)
+
+    def remove(self, id: str) -> None:
+        """Drop an episode from the log (used by prune-on-empty / cleanup)."""
+        self.episodes.pop(id, None)
+        if self.current_id == id:
+            self.current_id = None
 
     def end_session(self, session_key: str | None) -> Episode | None:
         """Close the open ROOT episode matching ``session_key`` and cascade-close
@@ -206,13 +253,21 @@ class EpisodeManager:
 
     # ── Stamping ─────────────────────────────────────────────────────
 
-    def stamp(self, entry: MemoryEntry) -> None:
-        """Fill ``entry.episode_id`` / ``entry.episode_title`` from the
-        current open episode. No-op when no episode is open.
+    def stamp(self, entry: MemoryEntry, session_key: str | None = None) -> None:
+        """Fill ``entry.episode_id`` / ``entry.episode_title`` from the open
+        episode. With a ``session_key`` it stamps THAT session's open leaf and
+        never another session's (no crosstalk under concurrency). Without one it
+        uses the global ``current_id`` leaf (legacy single-session path). No-op
+        when nothing applies.
         """
-        if self.current_id is None:
-            return
-        ep = self.episodes.get(self.current_id)
+        if session_key is not None:
+            ep = self.open_leaf_for(session_key)
+        elif self.current_id is not None:
+            ep = self.episodes.get(self.current_id)
+            if ep is not None and ep.ended_at is not None:
+                ep = None
+        else:
+            ep = None
         if ep is None:
             return
         entry.episode_id = ep.id

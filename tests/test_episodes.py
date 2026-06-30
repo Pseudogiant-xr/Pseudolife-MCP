@@ -202,3 +202,71 @@ def test_end_session_cascade_closes_orphan_children():
     em.start_nested(title="Task")                       # forgot to end()
     em.end_session("s1")
     assert all(e.ended_at is not None for e in em.episodes.values())
+
+
+# ── Session-scoped lifecycle (v2: per-session open tracking, no clobber) ──────
+
+
+def test_start_session_does_not_close_other_sessions():
+    em = EpisodeManager()
+    a = em.start_session("proj-a", session_key="A")
+    b = em.start_session("proj-b", session_key="B")
+    # B opening must NOT close A (the old single-pointer clobber bug).
+    assert a.ended_at is None
+    assert b.ended_at is None
+    assert em.open_leaf_for("A").id == a.id
+    assert em.open_leaf_for("B").id == b.id
+
+
+def test_start_session_is_idempotent_per_key():
+    em = EpisodeManager()
+    a1 = em.start_session("proj-a", session_key="A")
+    a2 = em.start_session("proj-a again", session_key="A")
+    assert a1.id == a2.id          # re-fire returns the same open episode
+    assert a2.title == "proj-a"    # unchanged
+
+
+def test_stamp_routes_to_the_callers_session():
+    em = EpisodeManager()
+    em.start_session("proj-a", session_key="A")
+    b = em.start_session("proj-b", session_key="B")
+    ent = _new_entry()
+    em.stamp(ent, session_key="B")
+    assert ent.episode_id == b.id
+    assert ent.episode_title == "proj-b"
+
+
+def test_stamp_with_no_session_falls_back_to_current_id():
+    em = EpisodeManager()
+    ep = em.start_session("solo", session_key=None)
+    ent = _new_entry()
+    em.stamp(ent)                  # session_key omitted -> legacy current_id path
+    assert ent.episode_id == ep.id
+
+
+def test_stamp_with_unknown_session_is_noop_not_crosstalk():
+    em = EpisodeManager()
+    em.start_session("proj-a", session_key="A")   # sets current_id
+    ent = _new_entry()
+    em.stamp(ent, session_key="GHOST")            # no open episode for GHOST
+    assert ent.episode_id is None                 # must NOT fall through to A
+
+
+def test_nested_belongs_to_caller_session_and_end_leaf_pops():
+    em = EpisodeManager()
+    root = em.start_session("proj-a", session_key="A")
+    child = em.start_nested("subtask", session_key="A")
+    assert child.parent_id == root.id
+    assert child.session_key == "A"
+    assert em.open_leaf_for("A").id == child.id
+    em.end_leaf(session_key="A")                  # close the child
+    assert child.ended_at is not None
+    assert em.open_leaf_for("A").id == root.id    # popped back to root
+
+
+def test_remove_drops_episode_and_clears_pointer():
+    em = EpisodeManager()
+    ep = em.start_session("gone", session_key="A")
+    em.remove(ep.id)
+    assert ep.id not in em.episodes
+    assert em.current_id is None
