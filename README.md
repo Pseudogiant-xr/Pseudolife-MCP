@@ -53,7 +53,7 @@ each session.
 | `memory_list_tags()` | Enumerate every multi-valued tag in the bank with occurrence counts |
 | `memory_supersede(old_text, new_text)` | Explicit correction — mark old fact obsolete |
 | `memory_delete(text?, substring?, source?, episode?, tag?)` | Remove memories matching any filter (hygiene) |
-| `memory_episode_start(title, hint?)` | Open a NESTED sub-episode under the open session episode (session episodes are opened/closed for you by the SessionStart/SessionEnd hooks) — entries stored while open carry the episode id; a session-scoped search expands to the whole subtree |
+| `memory_episode_start(title, hint?)` | Open a NESTED sub-episode under the open session episode (session episodes are opened/closed for you by the per-session shim) — entries stored while open carry the episode id; a session-scoped search expands to the whole subtree |
 | `memory_episode_end()` | Close the current (leaf) episode and pop back to its parent |
 | `memory_episode_list(limit?, include_open?)` | List episodes newest-first with per-episode entry counts |
 | `memory_episode_summary(id)` | Stats + tag/source distribution + recent entries within an episode |
@@ -379,22 +379,27 @@ reliably — without the agent having to remember:
    facts** (fresh, cited, age-ranked), and **where we left off** (a one-line
    recap of your last closed session). Empty sections are omitted, so a cold
    bank injects nothing.
-2. **Episode lifecycle.** `pseudolife-mcp episode-start` (SessionStart) opens a
-   session episode and `pseudolife-mcp episode-end` (SessionEnd) closes it — so
-   every memory you store is auto-stamped to the session, and closing fires a
-   background dream that distils the session's outcome signals into lessons for
-   next time. Both are keyed by the client session id, so resume / compact
-   re-fires don't double-open.
+2. **Episode lifecycle is owned by the shim — no hooks required.** The stdio
+   shim runs once per session; it mints a stable session id, opens a session
+   episode when it starts and closes it when the session ends (firing the
+   background dream that distils outcome signals into lessons). That same id
+   rides every MCP call as `X-PL-Session`, so each `memory_store` is stamped to
+   *its own* session's episode even when several projects run concurrently — and
+   a session that captures nothing is pruned on close instead of leaving an
+   empty husk. (Earlier versions drove this from `SessionStart`/`SessionEnd`
+   episode hooks keyed by Claude's session id; those are obsolete — the shim
+   owns it now. The legacy `pseudolife-mcp episode-start/-end` CLI still exists
+   for manual use.)
 
-One command installs all of it (PowerShell 7):
+One command installs the briefing hook (PowerShell 7):
 
 ```powershell
 .\ops\install-hook.ps1
 ```
 
-It backs up your `settings.json`, then adds each hook **alongside** any existing
-ones (idempotent per-hook — safe to re-run; it installs only what's missing).
-Requires `pseudolife-mcp` on PATH — `pip install -e .` in the repo puts it there.
+It backs up your `settings.json`, then adds the hook **alongside** any existing
+ones (idempotent — safe to re-run; it installs only what's missing). Requires
+`pseudolife-mcp` on PATH — `pip install -e .` in the repo puts it there.
 
 Prefer to wire it by hand? The briefing's `--hook-json` flag emits the
 `hookSpecificOutput.additionalContext` payload Claude Code injects:
@@ -404,21 +409,15 @@ Prefer to wire it by hand? The briefing's `--hook-json` flag emits the
   "hooks": {
     "SessionStart": [
       { "hooks": [
-        { "type": "command", "command": "pseudolife-mcp briefing --hook-json", "shell": "bash" },
-        { "type": "command", "command": "pseudolife-mcp episode-start", "shell": "bash" }
-      ] }
-    ],
-    "SessionEnd": [
-      { "hooks": [
-        { "type": "command", "command": "pseudolife-mcp episode-end", "shell": "bash" }
+        { "type": "command", "command": "pseudolife-mcp briefing --hook-json", "shell": "bash" }
       ] }
     ]
   }
 }
 ```
 
-All three connect to the *already-running* daemon (never start one) and do
-nothing if the daemon is down — they can't slow or break session start/stop.
+The briefing connects to the *already-running* daemon (never starts one) and
+does nothing if the daemon is down — it can't slow or break session start.
 Tune the briefing budget with `--max-unsure N` / `--max-lessons N` /
 `--max-world N` (default 3 each). The briefing content is also available on
 demand via the `memory_briefing` tool.
@@ -638,9 +637,9 @@ rebuild per query, ≈ 20-50ms on a 40K-entry bank.
 An *episode* is a bracketed working session. While an episode is open, every
 memory stored carries the episode's id + title automatically, so later queries
 can scope by session. **Session episodes open and close for you** via the
-SessionStart / SessionEnd hooks (see *Session lifecycle hooks* above), keyed by
-the client session id so resume / compact don't double-open. For a substantial
-multi-step task you open a **nested sub-episode** under the session:
+per-session shim, keyed by a stable per-session id (minted by the shim) so
+resume / compact don't double-open and concurrent projects don't collide. For a
+substantial multi-step task you open a **nested sub-episode** under the session:
 
 ```
 memory_episode_start("auth refactor")            # nests under the open session
@@ -1109,7 +1108,7 @@ python -m pseudolife_memory.web.devserver   # http://127.0.0.1:8770/ui/
 | World cortex | `memory_world_*` — cited external facts + age-decayed freshness (manual ingest) |
 | Procedural memory | `memory_outcome` (signals) → dream-synthesised `memory_lessons`/`memory_lesson_search`; `prefers`/`avoids` graph edges; single-writer |
 | Sense of time + multi-writer | Per-write stamp (tx/valid time, HLC ordering, writer/session); `memory_history`; relative `age` on reads; `write_mode` seam (snapshot live, occ Phase-2) |
-| Episodes + tags | Session episodes auto-managed by SessionStart/SessionEnd hooks; nested sub-episodes (`memory_episode_*`, schema v15) with subtree-expanded recall; multi-valued `tags=[...]` |
+| Episodes + tags | Session episodes auto-managed by the per-session shim (X-PL-Session keying, prune-on-empty); nested sub-episodes (`memory_episode_*`, schema v15) with subtree-expanded recall; multi-valued `tags=[...]` |
 | Session briefing | SessionStart hook injects unsure-graph + lessons + verified world facts + last-session recap (`pseudolife-mcp briefing`) |
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
 | Cross-encoder reranker | Optional (`rerank=True` per call, ~80 MB) |
