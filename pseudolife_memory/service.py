@@ -2036,6 +2036,27 @@ class MemoryService:
                 rows.append(row)
             return {"count": len(rows), "episodes": rows}
 
+    def episode_prune_empty(self, include_open: bool = False) -> dict[str, Any]:
+        """Delete episodes that have zero attached entries. By default only
+        CLOSED ones — the currently-open session episodes are live and kept.
+        Returns ``{"deleted": int, "ids": [...]}``. This is the one-shot
+        cleanup for the empty/spurious husks accumulated under the old
+        single-pointer model."""
+        with self._lock:
+            self._ensure_init()
+            assert self._cms is not None
+            counts = self._episode_entry_counts()
+            em = self._cms.episodes
+            victims = [
+                e.id for e in list(em.episodes.values())
+                if counts.get(e.id, 0) == 0
+                and (include_open or e.ended_at is not None)
+            ]
+            for i in victims:
+                em.remove(i)
+                self._delete_episode_row(i)
+            return {"deleted": len(victims), "ids": victims}
+
     def episode_summary(self, id: str) -> dict[str, Any]:
         """Return stats + tag distribution + recent entries for an episode.
 

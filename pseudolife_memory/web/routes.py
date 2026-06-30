@@ -134,6 +134,8 @@ class ConsoleRoutes:
             b.get("hint")))
         p("/api/episode/end", lambda q, b: svc.episode_end_session(
             b.get("session_key"), run_dream=bool(b.get("run_dream", True))))
+        p("/api/episodes/prune", lambda q, b: svc.episode_prune_empty(
+            include_open=bool(b.get("include_open", False))))
 
         # ---- associative stream ----
         g("/api/recent", lambda q, b: svc.recent(

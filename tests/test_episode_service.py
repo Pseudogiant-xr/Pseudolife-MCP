@@ -60,6 +60,29 @@ def test_two_sessions_start_without_clobber(pristine_service):
     assert a["ended_at"] is None and b["ended_at"] is None
 
 
+def test_prune_empty_deletes_only_entryless_closed(pristine_service):
+    service = pristine_service
+    service.episode_start_session("KEEP", "has-entry")
+    service.store("durable")                       # stamps the open leaf (KEEP)
+    service.episode_end_session("KEEP", run_dream=False)   # survives (has entry)
+    # A closed, entry-less husk (closed directly so prune-on-close doesn't run):
+    service.episode_start_session("DROP", "empty")
+    service._cms.episodes.end_session("DROP")
+    out = service.episode_prune_empty(include_open=False)
+    titles = [e["title"] for e in service.episode_list(include_open=True)["episodes"]]
+    assert "has-entry" in titles
+    assert "empty" not in titles
+    assert out["deleted"] >= 1
+
+
+def test_prune_empty_keeps_open_session_by_default(pristine_service):
+    service = pristine_service
+    service.episode_start_session("OPEN", "live-open")    # open, 0 entries
+    service.episode_prune_empty(include_open=False)
+    titles = [e["title"] for e in service.episode_list(include_open=True)["episodes"]]
+    assert "live-open" in titles                          # not deleted while open
+
+
 def test_episode_rest_start_and_end(pristine_service):
     from pseudolife_memory.web.routes import ConsoleRoutes
     service = pristine_service
@@ -67,6 +90,7 @@ def test_episode_rest_start_and_end(pristine_service):
     started = routes.dispatch("POST", "/api/episode/start", {},
                               {"session_key": "s1", "title": "Sess"})
     assert started["session_key"] == "s1"
+    service.store("a durable fact so the session is not pruned on close")
     ended = routes.dispatch("POST", "/api/episode/end", {},
                             {"session_key": "s1", "run_dream": False})
     assert ended["ended_at"] is not None

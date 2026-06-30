@@ -106,6 +106,16 @@ def test_episode_roundtrip(storage):
     assert len(rows) == 1 and rows[0]["ended_at"] == 2.0
 
 
+def test_delete_episode_removes_row(storage):
+    storage.upsert_episode({
+        "id": "ep-del", "title": "t", "hint": None, "started_at": 1.0,
+        "ended_at": 2.0, "closed_by_new_start": False,
+        "session_key": "k", "parent_id": None})
+    assert any(e["id"] == "ep-del" for e in storage.load_episodes())
+    storage.delete_episode("ep-del")
+    assert not any(e["id"] == "ep-del" for e in storage.load_episodes())
+
+
 def test_fact_roundtrip(storage):
     f = {
         "entity": "Zanthar", "attribute": "Default Timeout",

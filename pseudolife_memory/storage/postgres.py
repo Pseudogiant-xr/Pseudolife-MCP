@@ -237,6 +237,10 @@ class PostgresStorage:
         ).fetchall()
         return [dict(zip(cols, r)) for r in rows]
 
+    def delete_episode(self, episode_id: str) -> None:
+        self.conn.execute("DELETE FROM episodes WHERE id = %s", (episode_id,))
+        self.conn.commit()
+
     # ── cortex facts ────────────────────────────────────────────────────
 
     def upsert_fact(self, f: dict) -> int:
