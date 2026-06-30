@@ -11,6 +11,10 @@ from __future__ import annotations
 import os
 import time
 
+# Directories that are never a "project" — a GUI client (e.g. Claude Desktop)
+# launches the shim with cwd set to one of these, which must not become a title.
+_NON_PROJECT_DIRS = {"system32", "syswow64", "windows", "system", "system64"}
+
 
 def git_project_name(cwd: str | None) -> str | None:
     """Nearest git-repo-root basename walking up from ``cwd``; ``None`` when
@@ -44,5 +48,7 @@ def title_from_cwd(cwd: str | None, now: float | None = None) -> str:
             is_home = False
         if not is_home:
             name = os.path.basename(norm) or None
+            if name and name.lower() in _NON_PROJECT_DIRS:
+                name = None  # a system dir is not a project
     stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime(now))
     return f"{name or 'session'} - {stamp}"

@@ -2095,6 +2095,37 @@ class MemoryService:
         logger.info("opened session episode %s (session_key=%s)", ep.id, session_key)
         return ep.id
 
+    def set_session_title(self, title: str) -> dict[str, Any]:
+        """Rename THIS request's session episode (the root keyed by the caller's
+        session id). The daemon can't see the client's project directory, so
+        session titles default to a generic ``session - <date> <time>``; an
+        agent that knows its project calls this to name the session. Opens a
+        session episode if none is open yet (so it can be called up front).
+        Returns ``{"ok": bool, "id": str, "title": str}`` or
+        ``{"ok": False, "reason": ...}``."""
+        title = (title or "").strip()
+        if not title:
+            return {"ok": False, "reason": "empty title"}
+        with self._lock:
+            self._ensure_init()
+            assert self._cms is not None
+            _, session_id = self._resolve_writer()
+            if not session_id:
+                return {"ok": False, "reason": "no session id on this request"}
+            em = self._cms.episodes
+            root = next(
+                (e for e in em.episodes.values()
+                 if e.session_key == session_id and e.parent_id is None
+                 and e.ended_at is None),
+                None,
+            )
+            if root is None:
+                root = em.start_session(title=title, session_key=session_id)
+            else:
+                root.title = title
+            self._persist_episodes()
+            return {"ok": True, "id": root.id, "title": title}
+
     def episode_list(
         self, limit: int = 20, include_open: bool = True,
     ) -> dict[str, Any]:

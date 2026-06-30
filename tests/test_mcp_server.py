@@ -36,6 +36,7 @@ def test_all_tools_registered() -> None:
         "document_ingest",
         "document_search",
         # Tier C — episode lifecycle + tag listing + consolidation.
+        "memory_session_title",
         "memory_episode_start",
         "memory_episode_end",
         "memory_episode_list",

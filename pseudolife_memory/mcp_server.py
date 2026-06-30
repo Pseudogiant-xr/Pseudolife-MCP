@@ -858,6 +858,29 @@ def memory_episode_end() -> dict[str, Any]:
 
 
 @_tool()
+def memory_session_title(title: str) -> dict[str, Any]:
+    """Name THIS session's episode.
+
+    Session episodes are opened and keyed for you automatically (by the MCP
+    session id), but the daemon can't see your project directory, so the
+    default title is generic (``session - <date> <time>``). Call this once at
+    the start of a task to name the session after the project or task you're
+    working on — e.g. ``"PseudoLife-MCP"`` or ``"auth-refactor"`` — so
+    ``memory_episode_list`` and the "where we left off" recap read meaningfully.
+    Renames the current session episode in place (opening one if needed);
+    idempotent, so call again to update.
+
+    Args:
+        title: Human label for this working session.
+
+    Returns:
+        ``{"ok": bool, "id": str, "title": str}`` on success, else
+        ``{"ok": False, "reason": str}``.
+    """
+    return service.set_session_title(title=title)
+
+
+@_tool()
 def memory_episode_list(
     limit: int = 20, include_open: bool = True,
 ) -> dict[str, Any]:

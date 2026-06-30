@@ -1140,3 +1140,46 @@ def test_store_without_session_does_not_open_episode(
     pristine_service.store("a memory with no session context")
     eps = pristine_service.episode_list()["episodes"]
     assert eps == [] or all(e["entry_count"] == 0 for e in eps)
+
+
+def test_set_session_title_creates_then_renames(
+    pristine_service: MemoryService,
+) -> None:
+    """Agent-set title: names the session episode (keyed by session id),
+    creating one if needed, and renames it in place on a second call."""
+    from pseudolife_memory.writer_context import (
+        reset_writer_context, set_writer_context)
+
+    tok = set_writer_context("w", "SESS-T")
+    try:
+        out = pristine_service.set_session_title("My Project")
+        assert out["ok"] is True and out["title"] == "My Project"
+        pristine_service.store("did work")            # stamps the titled session
+        out2 = pristine_service.set_session_title("Renamed Project")
+        assert out2["ok"] is True and out2["id"] == out["id"]   # same episode
+    finally:
+        reset_writer_context(tok)
+    mine = [e for e in pristine_service.episode_list()["episodes"]
+            if e["session_key"] == "SESS-T"]
+    assert len(mine) == 1
+    assert mine[0]["title"] == "Renamed Project"
+    assert mine[0]["entry_count"] == 1
+
+
+def test_set_session_title_requires_session(
+    pristine_service: MemoryService,
+) -> None:
+    assert pristine_service.set_session_title("X")["ok"] is False  # no session id
+
+
+def test_set_session_title_rejects_empty(
+    pristine_service: MemoryService,
+) -> None:
+    from pseudolife_memory.writer_context import (
+        reset_writer_context, set_writer_context)
+
+    tok = set_writer_context("w", "S")
+    try:
+        assert pristine_service.set_session_title("   ")["ok"] is False
+    finally:
+        reset_writer_context(tok)

@@ -26,7 +26,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   local-time titles). New `storage.delete_episode` +
   `service.episode_prune_empty(include_open=False)` + `POST /api/episodes/prune` provide
   a one-shot cleanup for the empty/spurious husks the old single-pointer model
-  accumulated.
+  accumulated. New `memory_session_title(title)` tool lets an agent name its
+  session episode (since the daemon can't see the client's project dir); the
+  shim no longer titles GUI-client sessions after a system dir (`system32` →
+  generic `session`).
 - **Atlas review queue: granular per-item bulk actions.** The `dubious_edge` (Prune),
   `unattributed` (Assign) and `test_artifact` (Delete) findings — previously
   all-or-nothing over the whole list — now render a filterable, capped-scroll checkbox

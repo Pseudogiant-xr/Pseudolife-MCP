@@ -53,6 +53,7 @@ each session.
 | `memory_list_tags()` | Enumerate every multi-valued tag in the bank with occurrence counts |
 | `memory_supersede(old_text, new_text)` | Explicit correction — mark old fact obsolete |
 | `memory_delete(text?, substring?, source?, episode?, tag?)` | Remove memories matching any filter (hygiene) |
+| `memory_session_title(title)` | Name THIS session's episode (the daemon can't see your project dir, so titles default to generic `session - <date> <time>`) — call once at task start to label the session after the project/task; renames in place, opens one if needed |
 | `memory_episode_start(title, hint?)` | Open a NESTED sub-episode under the open session episode (session episodes are opened/closed for you by the daemon, keyed per session) — entries stored while open carry the episode id; a session-scoped search expands to the whole subtree |
 | `memory_episode_end()` | Close the current (leaf) episode and pop back to its parent |
 | `memory_episode_list(limit?, include_open?)` | List episodes newest-first with per-episode entry counts |

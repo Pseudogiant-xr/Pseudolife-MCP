@@ -23,3 +23,12 @@ def test_git_project_name_finds_repo_root(tmp_path):
 
 def test_git_project_name_none_outside_repo(tmp_path):
     assert git_project_name(str(tmp_path)) is None
+
+
+def test_system_dir_is_not_a_project_title():
+    # GUI clients (e.g. Claude Desktop) launch the shim with cwd = System32;
+    # that's not a project, so the title must fall back to "session", not
+    # "system32".
+    for d in (r"C:\Windows\System32", r"C:\Windows", r"C:\Windows\SysWOW64"):
+        t = title_from_cwd(d, now=1782780930.0)
+        assert t.startswith("session - "), t
