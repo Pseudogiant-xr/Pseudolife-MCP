@@ -129,6 +129,31 @@ def test_shim_survives_idle_gap(tmp_path):
         _reap_daemon(port)
 
 
+# ── Session identity + lifecycle (unit; no daemon) ────────────────────────────
+
+
+def test_session_headers_include_writer_and_session(monkeypatch):
+    from pseudolife_memory import shim
+
+    monkeypatch.setenv("PSEUDOLIFE_WRITER_ID", "writer-7")
+    headers = shim._session_headers(token="tok", session_uid="uid-123")
+    assert headers["Authorization"] == "Bearer tok"
+    assert headers["X-PL-Writer"] == "writer-7"
+    assert headers["X-PL-Session"] == "uid-123"
+
+
+def test_post_episode_is_best_effort(monkeypatch):
+    from pseudolife_memory import shim
+
+    def boom(*a, **k):
+        raise OSError("daemon down")
+
+    monkeypatch.setattr(shim.urllib.request, "urlopen", boom)
+    # Must NOT raise — episode bookkeeping can never break a session.
+    shim._post_episode("http://127.0.0.1:8765", None, "/api/episode/start",
+                       {"session_key": "x", "title": "t"})
+
+
 def _reap_daemon(port: int) -> None:
     """Best-effort cleanup of the detached daemon the shim auto-spawned."""
     import urllib.request

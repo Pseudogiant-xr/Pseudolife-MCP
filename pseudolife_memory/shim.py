@@ -18,6 +18,9 @@ import subprocess
 import sys
 import time
 import urllib.request
+import uuid
+
+from pseudolife_memory.session_title import title_from_cwd
 
 DEFAULT_URL = "http://127.0.0.1:8765"
 _SPAWN_WAIT_S = 25.0  # daemon import (torch) can take a while on cold cache
@@ -77,7 +80,37 @@ def ensure_daemon(url: str) -> dict:
     sys.exit(1)
 
 
-async def _proxy(url: str, token: str | None) -> None:
+def _session_headers(token: str | None, session_uid: str) -> dict[str, str]:
+    """Headers that ride every upstream call. ``X-PL-Writer`` attributes the
+    writer (v0.4 keying); ``X-PL-Session`` is this shim's stable per-session id
+    — the daemon keys episode stamping by it so concurrent sessions don't
+    cross-contaminate."""
+    headers: dict[str, str] = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    writer_id = os.environ.get("PSEUDOLIFE_WRITER_ID")
+    if writer_id:
+        headers["X-PL-Writer"] = writer_id
+    headers["X-PL-Session"] = session_uid
+    return headers
+
+
+def _post_episode(url: str, token: str | None, path: str, payload: dict) -> None:
+    """Best-effort REST call to open/close the session episode. Swallows every
+    error so episode bookkeeping can never break or slow a Claude session."""
+    try:
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(url + path, data=data, method="POST")
+        req.add_header("content-type", "application/json")
+        if token:
+            req.add_header("Authorization", f"Bearer {token}")
+        with urllib.request.urlopen(req, timeout=5) as r:
+            r.read()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+async def _proxy(url: str, token: str | None, session_uid: str) -> None:
     import contextlib
 
     import mcp.types as types
@@ -86,14 +119,7 @@ async def _proxy(url: str, token: str | None) -> None:
     from mcp.server.lowlevel import Server
     from mcp.server.stdio import stdio_server
 
-    headers: dict[str, str] = {}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    # Identify this session to the daemon so writes are attributed to the right
-    # writer (v0.4 keying). The daemon falls back to its own default if unset.
-    writer_id = os.environ.get("PSEUDOLIFE_WRITER_ID")
-    if writer_id:
-        headers["X-PL-Writer"] = writer_id
+    headers = _session_headers(token, session_uid)
     @contextlib.asynccontextmanager
     async def _upstream():
         # A FRESH upstream connection per call. The shim owns no state and the
@@ -144,7 +170,20 @@ def run_shim() -> None:
     url = _daemon_url()
     ensure_daemon(url)
     token = os.environ.get("PSEUDOLIFE_MCP_TOKEN") or None
+    # One shim == one Claude session. This uid keys BOTH the session episode
+    # (opened/closed here) and per-store stamping (rides every call as
+    # X-PL-Session), so lifecycle and attribution always agree — no dependency
+    # on Claude's session_id (which MCP servers don't receive).
+    session_uid = uuid.uuid4().hex
+    _post_episode(url, token, "/api/episode/start", {
+        "session_key": session_uid,
+        "title": title_from_cwd(os.getcwd()),
+    })
     try:
-        asyncio.run(_proxy(url, token))
+        asyncio.run(_proxy(url, token, session_uid))
     except KeyboardInterrupt:  # session closed
         pass
+    finally:
+        # Close the session episode (prune-on-empty if it captured nothing).
+        _post_episode(url, token, "/api/episode/end",
+                      {"session_key": session_uid})
