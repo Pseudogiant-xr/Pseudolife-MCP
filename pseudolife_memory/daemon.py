@@ -138,6 +138,7 @@ def run_daemon(host: str | None = None, port: int | None = None) -> None:
 
     mcp_server.start_background_durability()
     mcp_server.start_dream_sweep()
+    mcp_server.start_session_reaper()
 
     # Compose the Cortex Console (static SPA at /ui + REST at /api) in front of
     # the MCP app. /health and the static shell stay open; /api joins /mcp

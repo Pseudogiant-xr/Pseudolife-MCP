@@ -1416,6 +1416,34 @@ def start_dream_sweep() -> None:
     ).start()
 
 
+def _session_reaper_loop(interval: float, idle_seconds: float) -> None:
+    while True:
+        time.sleep(interval)
+        try:
+            service.reap_idle_sessions(idle_seconds)
+        except Exception as exc:  # noqa: BLE001 — reaper must never kill the daemon
+            logger.warning("session reaper error: %s", exc)
+
+
+_session_reaper_started = False
+
+
+def start_session_reaper() -> None:
+    """Idempotent: close session episodes idle past a threshold. The direct-HTTP
+    transport gives no session-end signal, so this is how a session episode
+    closes (fires the end-of-session dream / prunes if empty). Daemon-only."""
+    global _session_reaper_started
+    if _session_reaper_started:
+        return
+    _session_reaper_started = True
+    idle = float(os.environ.get("PSEUDOLIFE_SESSION_IDLE_SECONDS", "1800"))  # 30 min
+    interval = float(os.environ.get("PSEUDOLIFE_SESSION_REAP_SECONDS", "300"))  # 5 min
+    threading.Thread(
+        target=_session_reaper_loop, args=(interval, idle), daemon=True,
+        name="pl-session-reaper",
+    ).start()
+
+
 def _run_embedded_stdio() -> None:
     """v0.1-style in-process stdio server (also the shim's escape hatch)."""
     logger.info(

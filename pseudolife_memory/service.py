@@ -1946,26 +1946,85 @@ class MemoryService:
         with self._lock:
             self._ensure_init()
             assert self._cms is not None
-            em = self._cms.episodes
-            closed = em.end_session(session_key)
-            result = self._episode_to_dict(closed) if closed is not None else {}
-            pruned = False
-            if closed is not None:
-                subtree = {closed.id} | {
-                    e.id for e in em.episodes.values()
-                    if em._descends_from(e, closed.id)
-                }
-                counts = self._episode_entry_counts()
-                if sum(counts.get(i, 0) for i in subtree) == 0:
-                    for i in subtree:
-                        em.remove(i)
-                        self._delete_episode_row(i)
-                    pruned = True
-            if not pruned:
-                self._persist_episodes()
-        if run_dream and result and not pruned:
+            result, fire = self._close_session_locked(session_key, run_dream)
+        if fire:
             self._fire_and_forget_dream()
-        return {} if pruned else result
+        return result
+
+    def _close_session_locked(
+        self, session_key: str | None, run_dream: bool,
+    ) -> tuple[dict[str, Any], bool]:
+        """Cascade-close the session root for ``session_key`` and prune the
+        subtree if it captured zero entries. Caller MUST hold the lock and have
+        ensured init (so both ``episode_end_session`` and the idle reaper can
+        reuse it without re-entering the non-reentrant lock). Returns
+        ``(result_dict, should_fire_dream)``; ``result_dict`` is ``{}`` when
+        nothing matched or the subtree was pruned empty."""
+        assert self._cms is not None
+        em = self._cms.episodes
+        closed = em.end_session(session_key)
+        result = self._episode_to_dict(closed) if closed is not None else {}
+        pruned = False
+        if closed is not None:
+            subtree = {closed.id} | {
+                e.id for e in em.episodes.values()
+                if em._descends_from(e, closed.id)
+            }
+            counts = self._episode_entry_counts()
+            if sum(counts.get(i, 0) for i in subtree) == 0:
+                for i in subtree:
+                    em.remove(i)
+                    self._delete_episode_row(i)
+                pruned = True
+        if not pruned:
+            self._persist_episodes()
+        fire = bool(run_dream and result and not pruned)
+        return ({} if pruned else result), fire
+
+    def reap_idle_sessions(
+        self, idle_seconds: float, now: float | None = None,
+    ) -> dict[str, Any]:
+        """Close session episodes with no activity for ``idle_seconds``.
+
+        In the direct-HTTP transport there is no session-end signal, so a
+        session episode is closed here once idle: empty ones are pruned, and
+        non-empty ones are closed (firing one end-of-session dream so outcome
+        signals become lessons). A later store from the same client lazily
+        opens a fresh episode. ``now`` is injectable for tests. Returns
+        ``{"reaped": int, "session_keys": [...]}``."""
+        now = time.time() if now is None else now
+        reaped: list[str] = []
+        fired_any = False
+        with self._lock:
+            self._ensure_init()
+            assert self._cms is not None
+            em = self._cms.episodes
+            # newest entry timestamp per episode (session activity proxy)
+            last_ts: dict[str, float] = {}
+            for band in self._cms.bands:
+                for e in band.entries:
+                    if e.episode_id and e.timestamp > last_ts.get(e.episode_id, 0.0):
+                        last_ts[e.episode_id] = e.timestamp
+            # candidate roots: open, session-keyed; activity = newest across subtree
+            targets: list[str] = []
+            for root in list(em.episodes.values()):
+                if (root.ended_at is not None or root.parent_id is not None
+                        or not root.session_key):
+                    continue
+                activity = last_ts.get(root.id, root.started_at)
+                for e in em.episodes.values():
+                    if (e.id != root.id and e.id in last_ts
+                            and em._descends_from(e, root.id)):
+                        activity = max(activity, last_ts[e.id])
+                if now - activity >= idle_seconds:
+                    targets.append(root.session_key)
+            for sk in targets:
+                _result, fire = self._close_session_locked(sk, run_dream=True)
+                reaped.append(sk)
+                fired_any = fired_any or fire
+        if fired_any:
+            self._fire_and_forget_dream()
+        return {"reaped": len(reaped), "session_keys": reaped}
 
     def _fire_and_forget_dream(self) -> None:
         """Run one dream cycle in a daemon thread so SessionEnd never blocks on

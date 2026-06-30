@@ -115,3 +115,41 @@ def test_search_episode_filter_includes_child_episodes(pristine_service):
     hits = service.search("alpha beta gamma", episodes=[root["id"]])
     texts = [e["text"] for e in hits.get("entries", [])]
     assert any("alpha beta gamma" in t for t in texts)
+
+
+# ── Idle reaper (direct-http has no session-end signal) ───────────────────────
+
+
+def test_reap_idle_closes_nonempty_session_keeps_it(pristine_service):
+    from pseudolife_memory.writer_context import (
+        reset_writer_context, set_writer_context)
+    service = pristine_service
+    tok = set_writer_context("w", "SESS-IDLE")
+    try:
+        service.store("did real work in this session")  # lazy-opens + stamps
+    finally:
+        reset_writer_context(tok)
+    # Not idle yet -> nothing reaped.
+    assert service.reap_idle_sessions(idle_seconds=3600)["reaped"] == 0
+    # Force idle (now far in the future) -> closed but NOT pruned (has an entry).
+    out = service.reap_idle_sessions(idle_seconds=0, now=9e12)
+    assert out["reaped"] == 1
+    mine = [e for e in service.episode_list(include_open=True)["episodes"]
+            if e["session_key"] == "SESS-IDLE"]
+    assert len(mine) == 1 and mine[0]["ended_at"] is not None
+
+
+def test_reap_idle_prunes_empty_session(pristine_service):
+    service = pristine_service
+    service.episode_start_session("SESS-EMPTY", "manual-empty")  # open, 0 entries
+    out = service.reap_idle_sessions(idle_seconds=0, now=9e12)
+    assert out["reaped"] == 1
+    titles = [e["title"] for e in service.episode_list(include_open=True)["episodes"]]
+    assert "manual-empty" not in titles  # empty -> pruned on reap
+
+
+def test_reap_ignores_already_closed(pristine_service):
+    service = pristine_service
+    service.episode_start_session("SESS-DONE", "done")
+    service._cms.episodes.end_session("SESS-DONE")  # already closed
+    assert service.reap_idle_sessions(idle_seconds=0, now=9e12)["reaped"] == 0
