@@ -491,8 +491,10 @@ class MemoryService:
                 return {"stored": False, "surprise": 0.0, "reason": "empty",
                         "cortex_promoted": 0}
             embedding = self._embedder.encode_single(text)
+            _, session_id = self._resolve_writer()
             stored, surprise = self._cms.store(
                 text, embedding, source=source, tags=tags,
+                session_key=session_id,
             )
             reason: str | None = None
             if not stored:
@@ -837,6 +839,7 @@ class MemoryService:
             store_emb = self._embedder.encode_single(new_text)
             stored, surprise = self._cms.store(
                 new_text, store_emb, source="correction",
+                session_key=self._resolve_writer()[1],
             )
             return {
                 "superseded_count": len(superseded),
@@ -2258,6 +2261,7 @@ class MemoryService:
                 store_emb,
                 source=source or "consolidation",
                 tags=tags,
+                session_key=self._resolve_writer()[1],
             )
             return {
                 "superseded_count": len(superseded),

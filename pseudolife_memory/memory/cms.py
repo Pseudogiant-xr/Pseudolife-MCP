@@ -216,6 +216,7 @@ class ContinuumMemorySystem:
         embedding: torch.Tensor,
         source: str = "",
         tags: list[str] | None = None,
+        session_key: str | None = None,
     ) -> tuple[bool, float]:
         """Store a new memory through the CMS pipeline.
 
@@ -301,10 +302,11 @@ class ContinuumMemorySystem:
             # Stamp logical turn (schema v3 — None when no turn open).
             if self._in_logical_turn:
                 entry.last_logical_turn = self._logical_turn_count + 1
-            # Stamp episode (schema v6, Tier C). No-op when no episode is
-            # open; otherwise fills entry.episode_id / entry.episode_title
-            # so the entry carries its context through promotion.
-            self.episodes.stamp(entry)
+            # Stamp episode (schema v6, Tier C). Routes to the CALLER's session
+            # episode (session_key) under concurrency; falls back to the global
+            # current leaf when no key is supplied (embedded / legacy). No-op
+            # when nothing is open. Carries context through promotion.
+            self.episodes.stamp(entry, session_key)
             # Tag stamp (schema v6, Tier C). Normalised once here so
             # downstream filters can do plain set-intersection.
             entry.tags = normalize_tags(tags)

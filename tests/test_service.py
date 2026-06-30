@@ -1082,3 +1082,27 @@ class TestConsolidation:
         # No new memory stored either — the caller should use
         # ``memory_store`` for that.
         assert out["new_memory_stored"] is False
+
+
+def test_store_stamps_callers_session_episode(
+    pristine_service: MemoryService,
+) -> None:
+    """A store resolved to session A must carry A's episode, not whichever
+    session opened most recently (the cross-session stamping bug)."""
+    from pseudolife_memory.writer_context import (
+        reset_writer_context,
+        set_writer_context,
+    )
+
+    pristine_service.episode_start_session("A", "proj-a")
+    pristine_service.episode_start_session("B", "proj-b")  # B is now current_id
+    # Resolve the store to A — the EARLIER session — so a naive global-pointer
+    # stamp (current_id == B) would mis-attribute it. Correct behavior stamps A.
+    tok = set_writer_context("writer-x", "A")
+    try:
+        pristine_service.store("a durable fact about session A work", source="claude")
+    finally:
+        reset_writer_context(tok)
+    eps = {e["title"]: e for e in pristine_service.episode_list()["episodes"]}
+    assert eps["proj-a"]["entry_count"] == 1
+    assert eps["proj-b"]["entry_count"] == 0
