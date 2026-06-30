@@ -492,7 +492,6 @@ class MemoryService:
                         "cortex_promoted": 0}
             embedding = self._embedder.encode_single(text)
             _, session_id = self._resolve_writer()
-            logger.info("PL-DIAG store session_id=%r source=%r", session_id, source)
             self._ensure_session_episode(session_id)
             stored, surprise = self._cms.store(
                 text, embedding, source=source, tags=tags,
@@ -2093,8 +2092,7 @@ class MemoryService:
         title = time.strftime("session - %Y-%m-%d %H:%M")
         ep = em.start_session(title=title, session_key=session_key)
         self._persist_episodes()
-        logger.info("PL-DIAG lazy-opened session episode %s session_key=%r",
-                    ep.id, session_key)
+        logger.info("opened session episode %s (session_key=%s)", ep.id, session_key)
         return ep.id
 
     def episode_list(

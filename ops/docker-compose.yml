@@ -75,6 +75,10 @@ services:
       PSEUDOLIFE_MCP_HOST: 0.0.0.0
       PSEUDOLIFE_MCP_PORT: "8765"
       PSEUDOLIFE_MCP_DATA_DIR: /data
+      # Local timezone for daemon-generated episode titles (the container is
+      # UTC by default). Set TZ in ops/.env to your zone (e.g. Australia/Sydney)
+      # so "session - YYYY-MM-DD HH:MM" titles read in local time.
+      TZ: ${TZ:-UTC}
       # The 0.0.0.0 bind is safe here: the port below publishes only to
       # 127.0.0.1, so the network boundary is the Docker mapping, not the
       # bind host. This flag tells the daemon's guard exactly that.

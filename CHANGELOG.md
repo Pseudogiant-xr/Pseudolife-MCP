@@ -8,21 +8,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 - **Session-scoped episodes (correct attribution + clean names).** Episodes are now
-  keyed to a stable per-session id minted by the **shim** (one shim == one Claude
-  session), carried on every MCP call as `X-PL-Session`. The daemon's
-  `EpisodeManager` tracks one open episode **per session** instead of a single global
-  `current_id`, so a new session (e.g. a different project) no longer auto-closes
-  another's open episode, and each `memory_store` is stamped to *its own* session's
-  episode even under concurrency (`writer_context` now prefers `X-PL-Session` over the
-  per-call `mcp-session-id`). The shim **owns the lifecycle** — it opens the session
-  episode on start and closes it on exit — so the `SessionStart`/`SessionEnd`
-  `episode-start`/`episode-end` hooks are obsolete (removed from the README's wiring;
-  the legacy CLI remains for manual use). A session that captures **zero** entries is
-  **pruned on close** (no empty husk persisted), and titles gained a `HH:MM`
-  disambiguator (`{project} - {YYYY-MM-DD HH:MM}`, shared `session_title.py`). New
-  `storage.delete_episode` + `service.episode_prune_empty(include_open=False)` +
-  `POST /api/episodes/prune` provide a one-shot cleanup for the empty/spurious husks
-  the old single-pointer model accumulated.
+  keyed to a **stable per-session id** instead of a single global `current_id`, so a
+  new session (e.g. a different project) no longer auto-closes another's open episode
+  and each `memory_store` is stamped to *its own* session's episode even under
+  concurrency (`EpisodeManager` tracks one open episode per `session_key`). The session
+  id is the transport's `mcp-session-id` — **stable per session for a direct-HTTP
+  client** (the daemon's shipped transport), or a stdio shim's `X-PL-Session`
+  (`writer_context` prefers it). **Lifecycle is daemon-owned:** because a direct-HTTP
+  client has no shim/hook in the path, the daemon **lazily opens** a session episode on
+  the first store of a new session id (so empty sessions never create a husk) and an
+  **idle reaper** closes it once inactive — firing the end-of-session dream, or pruning
+  it if empty (`PSEUDOLIFE_SESSION_IDLE_SECONDS`, default 30 min). The
+  `SessionStart`/`SessionEnd` `episode-start`/`episode-end` hooks are therefore obsolete
+  (removed; the legacy CLI + shim path remain for stdio clients). Titles are
+  `{project} - {YYYY-MM-DD HH:MM}` (shim, from cwd) or `session - {YYYY-MM-DD HH:MM}`
+  (daemon, generic — direct-HTTP carries no project signal; set `TZ` in `ops/.env` for
+  local-time titles). New `storage.delete_episode` +
+  `service.episode_prune_empty(include_open=False)` + `POST /api/episodes/prune` provide
+  a one-shot cleanup for the empty/spurious husks the old single-pointer model
+  accumulated.
 - **Atlas review queue: granular per-item bulk actions.** The `dubious_edge` (Prune),
   `unattributed` (Assign) and `test_artifact` (Delete) findings — previously
   all-or-nothing over the whole list — now render a filterable, capped-scroll checkbox

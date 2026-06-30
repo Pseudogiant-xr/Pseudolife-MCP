@@ -53,7 +53,7 @@ each session.
 | `memory_list_tags()` | Enumerate every multi-valued tag in the bank with occurrence counts |
 | `memory_supersede(old_text, new_text)` | Explicit correction — mark old fact obsolete |
 | `memory_delete(text?, substring?, source?, episode?, tag?)` | Remove memories matching any filter (hygiene) |
-| `memory_episode_start(title, hint?)` | Open a NESTED sub-episode under the open session episode (session episodes are opened/closed for you by the per-session shim) — entries stored while open carry the episode id; a session-scoped search expands to the whole subtree |
+| `memory_episode_start(title, hint?)` | Open a NESTED sub-episode under the open session episode (session episodes are opened/closed for you by the daemon, keyed per session) — entries stored while open carry the episode id; a session-scoped search expands to the whole subtree |
 | `memory_episode_end()` | Close the current (leaf) episode and pop back to its parent |
 | `memory_episode_list(limit?, include_open?)` | List episodes newest-first with per-episode entry counts |
 | `memory_episode_summary(id)` | Stats + tag/source distribution + recent entries within an episode |
@@ -379,17 +379,21 @@ reliably — without the agent having to remember:
    facts** (fresh, cited, age-ranked), and **where we left off** (a one-line
    recap of your last closed session). Empty sections are omitted, so a cold
    bank injects nothing.
-2. **Episode lifecycle is owned by the shim — no hooks required.** The stdio
-   shim runs once per session; it mints a stable session id, opens a session
-   episode when it starts and closes it when the session ends (firing the
-   background dream that distils outcome signals into lessons). That same id
-   rides every MCP call as `X-PL-Session`, so each `memory_store` is stamped to
-   *its own* session's episode even when several projects run concurrently — and
-   a session that captures nothing is pruned on close instead of leaving an
-   empty husk. (Earlier versions drove this from `SessionStart`/`SessionEnd`
-   episode hooks keyed by Claude's session id; those are obsolete — the shim
-   owns it now. The legacy `pseudolife-mcp episode-start/-end` CLI still exists
-   for manual use.)
+2. **Episode lifecycle is owned by the daemon — no hooks required.** Each
+   `memory_store` is stamped to its session's episode, keyed by a stable
+   per-session id: the transport's `mcp-session-id` for a direct-HTTP client
+   (the shipped path — stable for the whole session), or a stdio shim's
+   `X-PL-Session`. Because a direct-HTTP client has no shim/hook in the path,
+   the daemon **lazily opens** a session episode on the first store of a new
+   session (so empty sessions never leave a husk) and an **idle reaper** closes
+   it once inactive — firing the end-of-session dream, or pruning it if empty
+   (`PSEUDOLIFE_SESSION_IDLE_SECONDS`, default 30 min). One open episode is
+   tracked *per session*, so concurrent sessions (e.g. different projects) never
+   clobber each other. (Earlier versions drove this from `SessionStart`/
+   `SessionEnd` episode hooks keyed by Claude's session id; those are obsolete.
+   The legacy `pseudolife-mcp episode-start/-end` CLI + shim path remain for
+   stdio clients.) Direct-HTTP titles are generic (`session - YYYY-MM-DD HH:MM`,
+   since the daemon has no project `cwd`); set `TZ` in `ops/.env` for local time.
 
 One command installs the briefing hook (PowerShell 7):
 
@@ -636,10 +640,11 @@ rebuild per query, ≈ 20-50ms on a 40K-entry bank.
 
 An *episode* is a bracketed working session. While an episode is open, every
 memory stored carries the episode's id + title automatically, so later queries
-can scope by session. **Session episodes open and close for you** via the
-per-session shim, keyed by a stable per-session id (minted by the shim) so
-resume / compact don't double-open and concurrent projects don't collide. For a
-substantial multi-step task you open a **nested sub-episode** under the session:
+can scope by session. **Session episodes open and close for you**, daemon-owned
+and keyed by a stable per-session id (the transport `mcp-session-id`, or a shim's
+`X-PL-Session`) so concurrent sessions don't collide; the daemon lazily opens one
+on first store and an idle reaper closes it. For a substantial multi-step task you
+open a **nested sub-episode** under the session:
 
 ```
 memory_episode_start("auth refactor")            # nests under the open session
@@ -1108,7 +1113,7 @@ python -m pseudolife_memory.web.devserver   # http://127.0.0.1:8770/ui/
 | World cortex | `memory_world_*` — cited external facts + age-decayed freshness (manual ingest) |
 | Procedural memory | `memory_outcome` (signals) → dream-synthesised `memory_lessons`/`memory_lesson_search`; `prefers`/`avoids` graph edges; single-writer |
 | Sense of time + multi-writer | Per-write stamp (tx/valid time, HLC ordering, writer/session); `memory_history`; relative `age` on reads; `write_mode` seam (snapshot live, occ Phase-2) |
-| Episodes + tags | Session episodes auto-managed by the per-session shim (X-PL-Session keying, prune-on-empty); nested sub-episodes (`memory_episode_*`, schema v15) with subtree-expanded recall; multi-valued `tags=[...]` |
+| Episodes + tags | Session episodes daemon-owned, keyed by stable per-session id (`mcp-session-id` / `X-PL-Session`); lazy-open + idle reaper + prune-empty; nested sub-episodes (`memory_episode_*`, schema v15) with subtree-expanded recall; multi-valued `tags=[...]` |
 | Session briefing | SessionStart hook injects unsure-graph + lessons + verified world facts + last-session recap (`pseudolife-mcp briefing`) |
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
 | Cross-encoder reranker | Optional (`rerank=True` per call, ~80 MB) |

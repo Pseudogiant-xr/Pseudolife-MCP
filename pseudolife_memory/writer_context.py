@@ -21,14 +21,6 @@ and direct API use never import or touch the SDK.
 from __future__ import annotations
 
 import contextvars
-import logging
-
-logger = logging.getLogger("pseudolife-mcp.writer")
-
-# PL-DIAG (temporary): dump the first live request's headers once, to discover
-# whether the direct-HTTP client sends a project/session signal usable for
-# episode titles. Removed after the title follow-up.
-_DIAG_HEADERS_LOGGED = False
 
 # (writer_id, session_id) override; (None, None) means "not set".
 _WRITER_CTX: contextvars.ContextVar[tuple[str | None, str | None]] = (
@@ -60,15 +52,6 @@ def _http_writer_session() -> tuple[str | None, str | None]:
         if req is None:
             return (None, None)
         headers = req.headers
-        global _DIAG_HEADERS_LOGGED
-        if not _DIAG_HEADERS_LOGGED:
-            _DIAG_HEADERS_LOGGED = True
-            try:
-                safe = {k: v for k, v in headers.items()
-                        if "auth" not in k.lower() and "cookie" not in k.lower()}
-                logger.info("PL-DIAG first-request headers: %s", safe)
-            except Exception:  # noqa: BLE001
-                pass
         # Prefer the shim's stable per-session id; the transport's
         # ``mcp-session-id`` is stable per session for a direct-HTTP client
         # (persistent connection) and per-call only for the reconnecting shim.
