@@ -52,7 +52,13 @@ def _http_writer_session() -> tuple[str | None, str | None]:
         if req is None:
             return (None, None)
         headers = req.headers
-        return (headers.get("x-pl-writer"), headers.get("mcp-session-id"))
+        # Prefer the shim's stable per-session id; the transport's
+        # ``mcp-session-id`` is per-call (fresh connection per call) and only a
+        # fallback for clients that don't set ``X-PL-Session``.
+        return (
+            headers.get("x-pl-writer"),
+            headers.get("x-pl-session") or headers.get("mcp-session-id"),
+        )
     except Exception:  # noqa: BLE001  (LookupError when unset; ImportError; ...)
         return (None, None)
 
