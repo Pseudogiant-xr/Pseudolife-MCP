@@ -24,10 +24,40 @@ def test_session_start_is_idempotent_per_key(pristine_service):
 def test_session_end_matches_key_only(pristine_service):
     service = pristine_service
     service.episode_start_session("sess-1", "Session A")
+    # Give the session an entry so prune-on-empty-close doesn't delete it; this
+    # test is about key matching, not the empty-prune path.
+    service.store("a durable fact so sess-1 survives close")
     assert service.episode_end_session("other", run_dream=False) == {}   # no-op
     closed = service.episode_end_session("sess-1", run_dream=False)
     assert closed and closed["ended_at"] is not None
     assert service.episode_end_session("sess-1", run_dream=False) == {}   # nothing open
+
+
+# ── Prune-on-empty-close + no-clobber (v2) ────────────────────────────────────
+
+
+def test_empty_session_is_pruned_on_close(pristine_service):
+    service = pristine_service
+    service.episode_start_session("S1", "empty-proj")
+    service.episode_end_session("S1", run_dream=False)   # nothing stored
+    titles = [e["title"] for e in service.episode_list(include_open=True)["episodes"]]
+    assert "empty-proj" not in titles                    # empty husk deleted
+
+
+def test_nonempty_session_survives_close(pristine_service):
+    service = pristine_service
+    service.episode_start_session("S2", "real-proj")
+    service.store("durable work in S2")                  # stamps the open leaf
+    service.episode_end_session("S2", run_dream=False)
+    titles = [e["title"] for e in service.episode_list(include_open=True)["episodes"]]
+    assert "real-proj" in titles
+
+
+def test_two_sessions_start_without_clobber(pristine_service):
+    service = pristine_service
+    a = service.episode_start_session("A", "proj-a")
+    b = service.episode_start_session("B", "proj-b")
+    assert a["ended_at"] is None and b["ended_at"] is None
 
 
 def test_episode_rest_start_and_end(pristine_service):

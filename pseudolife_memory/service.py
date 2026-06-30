@@ -1886,43 +1886,45 @@ class MemoryService:
     def episode_start(
         self, title: str, hint: str | None = None,
     ) -> dict[str, Any]:
-        """Open a NESTED sub-episode under the current open (session) episode;
-        the parent stays open. Falls back to a root when nothing is open."""
+        """Open a NESTED sub-episode under the CALLER's open session episode;
+        the parent stays open. The caller's session is the request's
+        ``X-PL-Session`` (resolved via the writer seam); without one it nests
+        under the global current leaf. Falls back to a root when nothing open."""
         with self._lock:
             self._ensure_init()
             assert self._cms is not None
-            ep = self._cms.episodes.start_nested(title=title, hint=hint)
+            _, session_id = self._resolve_writer()
+            ep = self._cms.episodes.start_nested(
+                title=title, hint=hint, session_key=session_id)
             self._persist_episodes()
             return self._episode_to_dict(ep)
 
     def episode_end(self) -> dict[str, Any]:
-        """Close the currently-open episode. Empty dict if none open."""
+        """Close the caller's currently-open leaf episode and pop to its parent.
+        Empty dict if none open for the caller's session."""
         with self._lock:
             self._ensure_init()
             assert self._cms is not None
-            closed = self._cms.episodes.end()
+            _, session_id = self._resolve_writer()
+            closed = self._cms.episodes.end_leaf(session_key=session_id)
             self._persist_episodes()
             return self._episode_to_dict(closed) if closed is not None else {}
 
     def episode_start_session(
         self, session_key: str | None, title: str, hint: str | None = None,
     ) -> dict[str, Any]:
-        """Idempotent open for a hook-driven session episode.
+        """Idempotent open for a shim-driven session episode.
 
         If an episode is already open with the same ``session_key`` (a
-        resume/compact re-fire of SessionStart), return it unchanged.
-        Otherwise open a new one stamped with the key (auto-closing any
-        stale prior open episode, as ``start`` always has).
+        resume/compact re-fire), return it unchanged. Otherwise open a new
+        root — WITHOUT closing any other session's open episode, so concurrent
+        sessions (different projects) coexist cleanly.
         """
         with self._lock:
             self._ensure_init()
             assert self._cms is not None
-            em = self._cms.episodes
-            cur = em.open_episode()
-            if (session_key is not None and cur is not None
-                    and cur.session_key == session_key):
-                return self._episode_to_dict(cur)
-            ep = em.start(title=title, hint=hint, session_key=session_key)
+            ep = self._cms.episodes.start_session(
+                title=title, session_key=session_key, hint=hint)
             self._persist_episodes()
             return self._episode_to_dict(ep)
 
@@ -1930,24 +1932,38 @@ class MemoryService:
         self, session_key: str | None, run_dream: bool = True,
     ) -> dict[str, Any]:
         """Cascade-close the root session episode matching ``session_key`` and
-        any still-open descendants; then (optionally) fire a background dream
-        so the session's outcome signals become lessons by the next session
-        start. Returns the closed root episode dict, or ``{}`` when nothing
-        matching was open.
+        any still-open descendants. If the closed subtree captured ZERO entries
+        it is deleted (prune-on-empty-close) — no empty husk is persisted, no
+        dream fires, and ``{}`` is returned. Otherwise (optionally) fire a
+        background dream so the session's outcome signals become lessons by the
+        next session start, and return the closed root episode dict.
 
         ``session_key=None`` closes ANY open root (a force-close escape hatch).
-        The hook CLI always supplies a real key, so this only applies to a
-        direct ``POST /api/episode/end`` with no ``session_key``."""
+        The shim always supplies a real key, so that only applies to a direct
+        ``POST /api/episode/end`` with no ``session_key``."""
         with self._lock:
             self._ensure_init()
             assert self._cms is not None
             em = self._cms.episodes
             closed = em.end_session(session_key)
-            self._persist_episodes()
             result = self._episode_to_dict(closed) if closed is not None else {}
-        if run_dream and result:
+            pruned = False
+            if closed is not None:
+                subtree = {closed.id} | {
+                    e.id for e in em.episodes.values()
+                    if em._descends_from(e, closed.id)
+                }
+                counts = self._episode_entry_counts()
+                if sum(counts.get(i, 0) for i in subtree) == 0:
+                    for i in subtree:
+                        em.remove(i)
+                        self._delete_episode_row(i)
+                    pruned = True
+            if not pruned:
+                self._persist_episodes()
+        if run_dream and result and not pruned:
             self._fire_and_forget_dream()
-        return result
+        return {} if pruned else result
 
     def _fire_and_forget_dream(self) -> None:
         """Run one dream cycle in a daemon thread so SessionEnd never blocks on
@@ -1965,9 +1981,8 @@ class MemoryService:
                          daemon=True).start()
 
     def _persist_episodes(self) -> None:
-        """Write-through the episode log (small; start auto-closes priors,
-        so a full upsert sweep is the simplest correct sync). Caller holds
-        the lock. No-op in file mode."""
+        """Write-through the episode log (small; a full upsert sweep is the
+        simplest correct sync). Caller holds the lock. No-op in file mode."""
         if self._storage is None or self._cms is None:
             return
         from pseudolife_memory.storage.sync import episode_row
@@ -1976,6 +1991,27 @@ class MemoryService:
                 self._storage.upsert_episode(episode_row(ep))
         except Exception as exc:  # noqa: BLE001
             logger.warning("episode write-through failed: %s", exc)
+
+    def _episode_entry_counts(self) -> dict[str, int]:
+        """entry_id-count per episode, walking all bands once. Promoted entries
+        still count under their original episode (they keep ``episode_id``)."""
+        counts: dict[str, int] = {}
+        if self._cms is None:
+            return counts
+        for band in self._cms.bands:
+            for entry in band.entries:
+                if entry.episode_id:
+                    counts[entry.episode_id] = counts.get(entry.episode_id, 0) + 1
+        return counts
+
+    def _delete_episode_row(self, episode_id: str) -> None:
+        """Best-effort persistent delete of one episode row. No-op in file mode."""
+        if self._storage is None:
+            return
+        try:
+            self._storage.delete_episode(episode_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("episode delete failed: %s", exc)
 
     def episode_list(
         self, limit: int = 20, include_open: bool = True,
@@ -1992,11 +2028,7 @@ class MemoryService:
             eps = self._cms.episodes.list(
                 limit=limit, include_open=include_open,
             )
-            counts: dict[str, int] = {}
-            for band in self._cms.bands:
-                for entry in band.entries:
-                    if entry.episode_id:
-                        counts[entry.episode_id] = counts.get(entry.episode_id, 0) + 1
+            counts = self._episode_entry_counts()
             rows = []
             for ep in eps:
                 row = self._episode_to_dict(ep)
