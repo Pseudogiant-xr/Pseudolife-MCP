@@ -492,6 +492,8 @@ class MemoryService:
                         "cortex_promoted": 0}
             embedding = self._embedder.encode_single(text)
             _, session_id = self._resolve_writer()
+            logger.info("PL-DIAG store session_id=%r source=%r", session_id, source)
+            self._ensure_session_episode(session_id)
             stored, surprise = self._cms.store(
                 text, embedding, source=source, tags=tags,
                 session_key=session_id,
@@ -2012,6 +2014,29 @@ class MemoryService:
             self._storage.delete_episode(episode_id)
         except Exception as exc:  # noqa: BLE001
             logger.warning("episode delete failed: %s", exc)
+
+    def _ensure_session_episode(self, session_key: str | None) -> str | None:
+        """Daemon-owned lazy episode open. In the direct-HTTP transport there is
+        no stdio shim (and no SessionStart hook) to open a session episode, so
+        the first store carrying a stable session id — the transport's
+        ``mcp-session-id``, or a shim's ``X-PL-Session`` — opens one here. No-op
+        when an episode is already open for the key, or when there's no key
+        (e.g. a background/internal writer). Returns the open episode id or None.
+
+        Caller holds the lock and has ensured init. Title is generic (the daemon
+        has no project ``cwd``); see the session-title follow-up."""
+        if not session_key or self._cms is None:
+            return None
+        em = self._cms.episodes
+        existing = em.open_leaf_for(session_key)
+        if existing is not None:
+            return existing.id
+        title = time.strftime("session - %Y-%m-%d %H:%M")
+        ep = em.start_session(title=title, session_key=session_key)
+        self._persist_episodes()
+        logger.info("PL-DIAG lazy-opened session episode %s session_key=%r",
+                    ep.id, session_key)
+        return ep.id
 
     def episode_list(
         self, limit: int = 20, include_open: bool = True,

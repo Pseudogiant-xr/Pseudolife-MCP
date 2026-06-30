@@ -1106,3 +1106,37 @@ def test_store_stamps_callers_session_episode(
     eps = {e["title"]: e for e in pristine_service.episode_list()["episodes"]}
     assert eps["proj-a"]["entry_count"] == 1
     assert eps["proj-b"]["entry_count"] == 0
+
+
+def test_store_lazy_opens_session_episode_when_none(
+    pristine_service: MemoryService,
+) -> None:
+    """Direct-http (no shim/hook in the path): the first store from a session
+    id with no open episode lazily opens one (daemon-owned lifecycle) and
+    stamps it; a second store from the same session reuses that one episode."""
+    from pseudolife_memory.writer_context import (
+        reset_writer_context,
+        set_writer_context,
+    )
+
+    tok = set_writer_context("writer-x", "MCP-SESS-1")
+    try:
+        pristine_service.store("first durable thing in this session")
+        pristine_service.store("second durable thing in this session")
+    finally:
+        reset_writer_context(tok)
+    eps = pristine_service.episode_list()["episodes"]
+    mine = [e for e in eps if e["session_key"] == "MCP-SESS-1"]
+    assert len(mine) == 1                  # exactly ONE episode for the session
+    assert mine[0]["entry_count"] == 2     # both stores stamped to it
+    assert mine[0]["title"].startswith("session - ")
+
+
+def test_store_without_session_does_not_open_episode(
+    pristine_service: MemoryService,
+) -> None:
+    """No session id (e.g. background/internal writer) must NOT lazily create
+    an episode."""
+    pristine_service.store("a memory with no session context")
+    eps = pristine_service.episode_list()["episodes"]
+    assert eps == [] or all(e["entry_count"] == 0 for e in eps)
