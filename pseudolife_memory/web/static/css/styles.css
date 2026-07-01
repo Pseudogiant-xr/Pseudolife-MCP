@@ -413,8 +413,10 @@ input:focus, select:focus, textarea:focus { outline:none; border-color:color-mix
 
 /* ── Entity / fact cards (Cortex) ───────────────────────────────────────── */
 .entity-card { margin-bottom:14px; }
-.entity-head { display:flex; align-items:center; gap:10px; padding:14px 18px; border-bottom:1px solid var(--line); }
-.entity-head .name { font-family:var(--font-display); font-size:1.05rem; font-weight:600; }
+/* wrap so the action buttons + count fall to a second line on narrow screens
+   instead of clipping off the card's right edge */
+.entity-head { display:flex; align-items:center; gap:10px 8px; flex-wrap:wrap; padding:14px 18px; border-bottom:1px solid var(--line); }
+.entity-head .name { font-family:var(--font-display); font-size:1.05rem; font-weight:600; min-width:0; overflow-wrap:anywhere; }
 .entity-head .etype { font-family:var(--font-mono); font-size:.68rem; color:var(--ink-3);
   padding:2px 7px; border:1px solid var(--line); border-radius:99px; }
 .entity-head .spacer { margin-left:auto; }
