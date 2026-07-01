@@ -48,6 +48,20 @@ def test_newer_source_supersedes():
     assert any(r.status == "superseded" and r.value == "opus-4.7" for r in s.records)
 
 
+def test_stale_hlc_write_does_not_clobber_newer_value():
+    """HLC is supposed to be the ordering authority (immune to wall-clock
+    jumps/replays), mirroring the personal cortex's _should_supersede. A
+    write carrying an OLDER hlc than the current record must not overwrite
+    it, even though it arrives later in wall-clock time (a delayed/replayed
+    write)."""
+    s = WorldCortexStore()
+    s.write_fact("anthropic", "latest-model", "opus-4.8", now=1000.0, hlc=(5, 0))
+    action, rec = s.write_fact("anthropic", "latest-model", "opus-4.7",
+                               now=2000.0, hlc=(3, 0))
+    assert action == "stale"
+    assert s.lookup("anthropic", "latest-model").value == "opus-4.8"
+
+
 def test_effective_confidence_decays_with_age():
     s = WorldCortexStore()
     now = time.time()

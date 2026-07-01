@@ -97,6 +97,28 @@ def test_accept_entity_merge_folds(svc):
     assert svc._storage.pending_entity_proposals() == []
 
 
+def test_accept_entity_merge_target_deleted_cascades_proposal_away(svc):
+    """A queued merge proposal is protected against a stale endpoint by the
+    entity_proposals ON DELETE CASCADE FK on BOTH entity_id and into_id: if the
+    `into` entity is junk-deleted after the proposal is queued, the proposal row
+    cascades away with it, so graph_accept_entity_merge never sees a proposal
+    pointing at a ghost — it returns a graceful `not_pending`, never an FK crash,
+    and `from` is untouched. (This is why no accept-time endpoint re-check is
+    needed at the caller; the schema enforces it.)"""
+    with svc._lock:
+        svc._ensure_init()
+        frm = svc._resolve_or_create_entity("stale-merge-from")["id"]
+        into = svc._resolve_or_create_entity("stale-merge-into")["id"]
+    pid = svc._storage.insert_entity_proposal(
+        "merge", frm, into, 0.99, "token-subset", __import__("time").time())
+    assert svc._storage.delete_entity(into) is True     # target vanishes → CASCADE
+    assert svc._storage.get_entity_proposal(pid) is None  # proposal cascaded away
+
+    out = svc.graph_accept_entity_merge(pid)
+    assert out["accepted"] is False and out["reason"] == "not_pending"
+    assert svc._storage.find_entity(norm_name("stale-merge-from")) is not None
+
+
 def test_accept_entity_junk_deletes(svc):
     with svc._lock:
         svc._ensure_init()

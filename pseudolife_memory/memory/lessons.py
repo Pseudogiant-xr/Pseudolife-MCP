@@ -152,7 +152,26 @@ class LessonStore:
                 cur.session_id = session_id
             return ("confirmed", cur)
 
-        # Different value → the newer lesson wins (single author, no tier guard).
+        # Different value → the newer lesson wins (single author, no tier guard,
+        # but HLC is the ordering authority — an out-of-order write with an older
+        # hlc than the current record must not clobber it, mirroring the personal
+        # cortex's _should_supersede.
+        #
+        # Reachability: under the shipped single-daemon writer this is DORMANT
+        # defensive code — every write is stamped with a fresh, monotonic
+        # `self._hlc.tick()`, so a later write always has a >= hlc and the gate
+        # never fires. (Note valid_time is bitemporal DISPLAY metadata and does
+        # NOT enter this comparison; only hlc, then wall-clock `t` on an hlc tie.)
+        # It becomes live under the future multi-writer occ path, where two
+        # writers can present out-of-order stamps — same status as the cortex's
+        # own gate.
+        cur_hlc = (cur.hlc_phys or 0, cur.hlc_logical or 0)
+        cand_hlc = hlc or (0, 0)
+        if cand_hlc < cur_hlc:
+            return ("stale", cur)
+        if cand_hlc == cur_hlc and t < cur.asserted_at:
+            return ("stale", cur)
+
         cur.status = "superseded"
         cur.superseded_at = t
         cur.superseded_by_value = value

@@ -63,15 +63,22 @@ def exact_duplicate_pairs(entities: list[dict], edges: list[dict]) -> list[tuple
     """(from_id, into_id) for entity pairs with token-set-IDENTICAL displays
     (Jaccard == 1.0). Fold the lower-degree entity into the higher-degree one
     (preserve the more-connected node); tie-break folds the higher id into the
-    lower id (deterministic)."""
+    lower id (deterministic). This path auto-merges with NO human review, so
+    an "A<->B" concat-artifact (a captured-relation extraction artifact, not a
+    real entity) is never eligible here — two independently-extracted concat
+    artifacts with the same token multiset are junk, not duplicates of each
+    other; see junk_entities / _is_concat_artifact."""
     deg = degree_counts(edges)
     toks = [(e["id"], _full_token_set(e["display"])) for e in entities]
+    disp = _disp(entities)
     pairs: list[tuple[int, int]] = []
     for i in range(len(toks)):
         for j in range(i + 1, len(toks)):
             a_id, a = toks[i]
             b_id, b = toks[j]
             if not a or not b or a != b:
+                continue
+            if _is_concat_artifact(disp.get(a_id, "")) or _is_concat_artifact(disp.get(b_id, "")):
                 continue
             da, db = deg.get(a_id, 0), deg.get(b_id, 0)
             if da > db or (da == db and a_id < b_id):
