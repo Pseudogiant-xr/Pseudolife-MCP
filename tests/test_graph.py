@@ -610,6 +610,39 @@ def test_seedless_scoped_whole_graph(svc):
     assert "es-keep-node" in scoped_names and "es-drop-node" not in scoped_names
 
 
+def test_whole_graph_caps_nodes_by_degree(svc):
+    """Seedless whole-graph is capped to ``max_nodes`` (highest-degree hubs
+    kept) so a huge bank can't cram 800+ nodes onto the canvas. The reported
+    'cramped / fails to render' root cause."""
+    import time as _t
+    svc._ensure_init()  # noqa: SLF001
+    st = svc._storage
+    hub = st.ensure_entity("cap-hub", display="cap-hub")
+    st.upsert_entity_source(hub, "cap-scope", "derived", _t.time())
+    for i in range(6):  # hub with 6 spokes → degree 6
+        st.upsert_entity_source(
+            st.ensure_entity(f"cap-spoke-{i}", display=f"cap-spoke-{i}"),
+            "cap-scope", "derived", _t.time())
+        svc.graph_relate("cap-hub", "related-to", f"cap-spoke-{i}")
+    for i in range(3):  # zero-degree isolates → dropped first under a tight cap
+        st.upsert_entity_source(
+            st.ensure_entity(f"cap-iso-{i}", display=f"cap-iso-{i}"),
+            "cap-scope", "derived", _t.time())
+
+    out = svc.graph_neighborhood(entity=None, scope="cap-scope", max_nodes=4)
+    assert out["truncated"] is True
+    assert out["total_nodes"] == 10          # 1 hub + 6 spokes + 3 isolates
+    assert len(out["nodes"]) == 4
+    names = {n["entity"] for n in out["nodes"]}
+    assert "cap-hub" in names                # highest-degree hub always kept
+    assert all(e["src"] in names and e["dst"] in names for e in out["edges"])
+
+    # Under a cap larger than the graph, nothing is dropped.
+    full = svc.graph_neighborhood(entity=None, scope="cap-scope", max_nodes=500)
+    assert full["truncated"] is False
+    assert len(full["nodes"]) == 10
+
+
 def test_dream_edge_confidence_varies_by_type(svc):
     """dream-written edges carry per-edge confidence: clean ~0.70, violation ~0.175.
 

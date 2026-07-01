@@ -2754,10 +2754,16 @@ class MemoryService:
                 return {"projects": []}
             return {"projects": self._storage.project_source_counts()}
 
-    def _whole_graph(self, scope: str | None, include_facts: bool) -> dict[str, Any]:
+    def _whole_graph(self, scope: str | None, include_facts: bool,
+                     max_nodes: int | None = None) -> dict[str, Any]:
         """Return every entity/edge in the graph, optionally filtered to a
         source ``scope``. Each node carries a ``sources`` list. Used by the
-        seedless ``graph_neighborhood(entity=None)`` path."""
+        seedless ``graph_neighborhood(entity=None)`` path.
+
+        When more than ``max_nodes`` nodes match, keep only the highest-degree
+        hubs (edges are filtered to the kept set) and flag ``truncated`` with
+        the pre-cap ``total_nodes``/``total_edges`` — an unbounded whole graph
+        pours 800+ nodes onto the canvas and pegs the O(n²) force sim."""
         from pseudolife_memory import graph as G
         with self._lock:
             self._ensure_init()
@@ -2794,8 +2800,22 @@ class MemoryService:
              "origin": e.get("origin")}
             for e in g["edges"]
             if e["src_id"] in by_id and e["dst_id"] in by_id]
+        total_nodes, total_edges, truncated = len(nodes), len(edges), False
+        if max_nodes and total_nodes > max_nodes:
+            deg: dict[str, int] = {}
+            for e in edges:
+                deg[e["src"]] = deg.get(e["src"], 0) + 1
+                deg[e["dst"]] = deg.get(e["dst"], 0) + 1
+            # Keep the most-connected hubs; name tie-break keeps it deterministic.
+            ranked = sorted(nodes, key=lambda n: (deg.get(n["entity"], 0), n["entity"]),
+                            reverse=True)
+            kept = {n["entity"] for n in ranked[:max_nodes]}
+            nodes = [n for n in nodes if n["entity"] in kept]
+            edges = [e for e in edges if e["src"] in kept and e["dst"] in kept]
+            truncated = True
         return {"found": True, "entity": None, "scope": scope or "all",
-                "nodes": nodes, "edges": edges, "paths": [], "truncated": False}
+                "nodes": nodes, "edges": edges, "paths": [], "truncated": truncated,
+                "total_nodes": total_nodes, "total_edges": total_edges}
 
     def graph_neighborhood(
         self,
@@ -2804,6 +2824,7 @@ class MemoryService:
         include_facts: bool = True,
         to: str | None = None,
         scope: str | None = None,
+        max_nodes: int | None = None,
     ) -> dict[str, Any]:
         """Subgraph within ``depth`` hops (cap 3): nodes with their current
         facts, edges (derived ones marked with rule provenance), plus the
@@ -2811,9 +2832,10 @@ class MemoryService:
 
         When ``entity`` is ``None`` (or falsy), returns the whole graph
         filtered to ``scope`` (a source name; ``None`` / ``"all"`` = no
-        filter) via :meth:`_whole_graph`."""
+        filter) via :meth:`_whole_graph`, capped to ``max_nodes`` hubs."""
         if not entity:
-            return self._whole_graph(scope=scope, include_facts=include_facts)
+            return self._whole_graph(scope=scope, include_facts=include_facts,
+                                     max_nodes=max_nodes)
         from pseudolife_memory import graph as G
         with self._lock:
             self._ensure_init()

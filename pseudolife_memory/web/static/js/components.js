@@ -37,13 +37,20 @@ export function searchBox(placeholder, oninput, value = "") {
 }
 
 export function facetBar(options, active, onPick) {
-  return el("div", { class: "facets" },
-    options.map((o) => {
-      const val = typeof o === "string" ? o : o.value;
-      const label = typeof o === "string" ? o : o.label;
-      return el("button", { class: "facet" + (val === active ? " on" : ""),
-        onclick: () => onPick(val) }, label);
-    }));
+  const bar = el("div", { class: "facets" });
+  for (const o of options) {
+    const val = typeof o === "string" ? o : o.value;
+    const label = typeof o === "string" ? o : o.label;
+    const b = el("button", { class: "facet" + (val === active ? " on" : ""),
+      onclick: () => {
+        // Move the active highlight to the clicked facet — the bar owns its own
+        // selected state so callers don't have to re-toggle `.on` by hand.
+        for (const f of bar.children) f.classList.toggle("on", f === b);
+        onPick(val);
+      } }, label);
+    bar.appendChild(b);
+  }
+  return bar;
 }
 
 export function groupHead(title, count) {
