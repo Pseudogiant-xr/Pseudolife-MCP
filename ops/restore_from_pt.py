@@ -57,7 +57,10 @@ def main() -> None:
 
     if cms_path.exists():
         print(f"loading entries from {cms_path}")
-        state = torch.load(str(cms_path), map_location="cpu", weights_only=False)
+        # weights_only=True: same guard as storage.migrate's legacy loader —
+        # this reads the same .pt format, so importing a stale/tampered .bak
+        # must not be able to unpickle arbitrary objects (CWE-502).
+        state = torch.load(str(cms_path), map_location="cpu", weights_only=True)
         ep_payload = (state.get("episodes") or {}).get("episodes") or {}
         for _eid, ep in ep_payload.items():
             storage.upsert_episode({

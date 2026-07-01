@@ -36,7 +36,16 @@ function freshnessBadge(fc) {
   return badge(fc || "volatile", m[fc] || "");
 }
 
+// source_url is agent/LLM-authored (memory_world_set has no scheme check at
+// write time), so a javascript:/data: URL rendered as a raw <a href> would
+// execute on click. Only render http(s) as a clickable link; anything else
+// shows as inert text.
+function safeHttpUrl(url) {
+  return /^https?:\/\//i.test(url || "") ? url : null;
+}
+
 function worldCard(w) {
+  const href = safeHttpUrl(w.source_url);
   return el("div", { class: "world-card reveal" },
     el("div", { class: "world-head" },
       el("span", { class: "nav-dot", style: { "--dot": TONE } }),
@@ -50,7 +59,9 @@ function worldCard(w) {
     w.source_quote ? el("blockquote", { class: "world-quote" }, "“" + w.source_quote + "”") : null,
     el("div", { class: "world-src" },
       w.source_url
-        ? el("a", { href: w.source_url, target: "_blank", rel: "noopener noreferrer" }, w.source_url)
+        ? (href
+            ? el("a", { href, target: "_blank", rel: "noopener noreferrer" }, w.source_url)
+            : el("span", { class: "dim" }, w.source_url))
         : el("span", { class: "dim" }, "no source url"),
       w.age ? el("span", { class: "dim", style: { marginLeft: "10px" } }, w.age) : null));
 }

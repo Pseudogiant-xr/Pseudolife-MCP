@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from contextlib import contextmanager
 from typing import Any
 
 import numpy as np
@@ -132,7 +133,7 @@ class PostgresStorage:
         self._seed_relations()
 
     def _seed_relations(self) -> None:
-        with self.conn.cursor() as cur:
+        with self._txn(), self.conn.cursor() as cur:
             for name, desc, transitive, inverse in _BUILTIN_RELATIONS:
                 cur.execute(
                     """
@@ -144,13 +145,26 @@ class PostgresStorage:
                     """,
                     (name, desc, transitive, inverse, time.time()),
                 )
-        self.conn.commit()
 
     def close(self) -> None:
         try:
             self.conn.close()
         except Exception:  # noqa: BLE001
             pass
+
+    @contextmanager
+    def _txn(self):
+        """Every mutating method funnels through here: commit on success,
+        rollback on any exception. Without this, a single failed statement
+        (lock timeout, FK violation, ...) leaves the shared long-lived
+        connection in InFailedSqlTransaction — breaking every subsequent
+        call until the daemon restarts."""
+        try:
+            yield
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
 
     # ── entries ─────────────────────────────────────────────────────────
 
@@ -163,12 +177,12 @@ class PostgresStorage:
             elif c in _ENTRY_JSONB:
                 v = Jsonb(v if v is not None else [])
             values.append(v)
-        row = self.conn.execute(
-            f"INSERT INTO entries ({', '.join(_ENTRY_COLS)}) "
-            f"VALUES ({', '.join(['%s'] * len(_ENTRY_COLS))}) RETURNING id",
-            values,
-        ).fetchone()
-        self.conn.commit()
+        with self._txn():
+            row = self.conn.execute(
+                f"INSERT INTO entries ({', '.join(_ENTRY_COLS)}) "
+                f"VALUES ({', '.join(['%s'] * len(_ENTRY_COLS))}) RETURNING id",
+                values,
+            ).fetchone()
         return int(row[0])
 
     def update_entry(self, entry_id: int, **fields) -> None:
@@ -182,16 +196,16 @@ class PostgresStorage:
             sets.append(f"{k} = %s")
             values.append(Jsonb(v) if k in _ENTRY_JSONB else v)
         values.append(entry_id)
-        self.conn.execute(
-            f"UPDATE entries SET {', '.join(sets)} WHERE id = %s", values,
-        )
-        self.conn.commit()
+        with self._txn():
+            self.conn.execute(
+                f"UPDATE entries SET {', '.join(sets)} WHERE id = %s", values,
+            )
 
     def delete_entry_ids(self, ids: list[int]) -> int:
         if not ids:
             return 0
-        cur = self.conn.execute("DELETE FROM entries WHERE id = ANY(%s)", (ids,))
-        self.conn.commit()
+        with self._txn():
+            cur = self.conn.execute("DELETE FROM entries WHERE id = ANY(%s)", (ids,))
         return cur.rowcount
 
     def load_entries(self) -> list[dict]:
@@ -209,25 +223,25 @@ class PostgresStorage:
     # ── episodes ────────────────────────────────────────────────────────
 
     def upsert_episode(self, ep: dict) -> None:
-        self.conn.execute(
-            """
-            INSERT INTO episodes (id, title, hint, started_at, ended_at,
-                                  closed_by_new_start, session_key, parent_id)
-            VALUES (%(id)s, %(title)s, %(hint)s, %(started_at)s,
-                    %(ended_at)s, %(closed_by_new_start)s, %(session_key)s,
-                    %(parent_id)s)
-            ON CONFLICT (id) DO UPDATE SET
-              title = EXCLUDED.title,
-              hint = EXCLUDED.hint,
-              started_at = EXCLUDED.started_at,
-              ended_at = EXCLUDED.ended_at,
-              closed_by_new_start = EXCLUDED.closed_by_new_start,
-              session_key = EXCLUDED.session_key,
-              parent_id = EXCLUDED.parent_id
-            """,
-            ep,
-        )
-        self.conn.commit()
+        with self._txn():
+            self.conn.execute(
+                """
+                INSERT INTO episodes (id, title, hint, started_at, ended_at,
+                                      closed_by_new_start, session_key, parent_id)
+                VALUES (%(id)s, %(title)s, %(hint)s, %(started_at)s,
+                        %(ended_at)s, %(closed_by_new_start)s, %(session_key)s,
+                        %(parent_id)s)
+                ON CONFLICT (id) DO UPDATE SET
+                  title = EXCLUDED.title,
+                  hint = EXCLUDED.hint,
+                  started_at = EXCLUDED.started_at,
+                  ended_at = EXCLUDED.ended_at,
+                  closed_by_new_start = EXCLUDED.closed_by_new_start,
+                  session_key = EXCLUDED.session_key,
+                  parent_id = EXCLUDED.parent_id
+                """,
+                ep,
+            )
 
     def load_episodes(self) -> list[dict]:
         cols = ("id", "title", "hint", "started_at", "ended_at",
@@ -238,8 +252,8 @@ class PostgresStorage:
         return [dict(zip(cols, r)) for r in rows]
 
     def delete_episode(self, episode_id: str) -> None:
-        self.conn.execute("DELETE FROM episodes WHERE id = %s", (episode_id,))
-        self.conn.commit()
+        with self._txn():
+            self.conn.execute("DELETE FROM episodes WHERE id = %s", (episode_id,))
 
     # ── cortex facts ────────────────────────────────────────────────────
 
@@ -256,17 +270,17 @@ class PostgresStorage:
             values.append(v)
         if f.get("id") is not None:
             sets = ", ".join(f"{c} = %s" for c in _FACT_COLS)
-            self.conn.execute(
-                f"UPDATE facts SET {sets} WHERE id = %s", values + [f["id"]],
-            )
-            self.conn.commit()
+            with self._txn():
+                self.conn.execute(
+                    f"UPDATE facts SET {sets} WHERE id = %s", values + [f["id"]],
+                )
             return int(f["id"])
-        row = self.conn.execute(
-            f"INSERT INTO facts ({', '.join(_FACT_COLS)}) "
-            f"VALUES ({', '.join(['%s'] * len(_FACT_COLS))}) RETURNING id",
-            values,
-        ).fetchone()
-        self.conn.commit()
+        with self._txn():
+            row = self.conn.execute(
+                f"INSERT INTO facts ({', '.join(_FACT_COLS)}) "
+                f"VALUES ({', '.join(['%s'] * len(_FACT_COLS))}) RETURNING id",
+                values,
+            ).fetchone()
         return int(row[0])
 
     def replace_facts(self, rows: list[dict]) -> None:
@@ -276,7 +290,7 @@ class PostgresStorage:
         audit history), so a transactional truncate+insert is simpler and
         safer than row diffing.
         """
-        with self.conn.cursor() as cur:
+        with self._txn(), self.conn.cursor() as cur:
             cur.execute("DELETE FROM facts")
             for f in rows:
                 values = []
@@ -294,7 +308,6 @@ class PostgresStorage:
                     f"VALUES ({', '.join(['%s'] * len(_FACT_COLS))})",
                     values,
                 )
-        self.conn.commit()
 
     def replace_facts_occ(self, rows: list[dict]) -> None:
         """Optimistic-concurrency cortex persistence (Phase-2 seam, dormant).
@@ -317,19 +330,18 @@ class PostgresStorage:
         not per retrieval, to keep reads cheap."""
         if not pairs:
             return
-        with self.conn.cursor() as cur:
+        with self._txn(), self.conn.cursor() as cur:
             cur.executemany(
                 "UPDATE entries SET access_count = %s "
                 "WHERE id = %s AND access_count <> %s",
                 [(c, i, c) for (i, c) in pairs],
             )
-        self.conn.commit()
 
     def delete_fact_ids(self, ids: list[int]) -> int:
         if not ids:
             return 0
-        cur = self.conn.execute("DELETE FROM facts WHERE id = ANY(%s)", (ids,))
-        self.conn.commit()
+        with self._txn():
+            cur = self.conn.execute("DELETE FROM facts WHERE id = ANY(%s)", (ids,))
         return cur.rowcount
 
     def load_facts(self) -> list[dict]:
@@ -350,7 +362,7 @@ class PostgresStorage:
     def replace_world_facts(self, rows: list[dict]) -> None:
         """Snapshot-style world cortex persistence: one transaction, full rewrite
         (the world cortex is small/deduped, like the personal one)."""
-        with self.conn.cursor() as cur:
+        with self._txn(), self.conn.cursor() as cur:
             cur.execute("DELETE FROM world_facts")
             for f in rows:
                 values = []
@@ -368,7 +380,6 @@ class PostgresStorage:
                     f"VALUES ({', '.join(['%s'] * len(_WORLD_FACT_COLS))})",
                     values,
                 )
-        self.conn.commit()
 
     def load_world_facts(self) -> list[dict]:
         cols = ("id",) + _WORLD_FACT_COLS
@@ -388,7 +399,7 @@ class PostgresStorage:
     def replace_lessons(self, rows: list[dict]) -> None:
         """Snapshot-style lesson persistence: one transaction, full rewrite (the
         lesson store is small/deduped, like the personal and world cortex)."""
-        with self.conn.cursor() as cur:
+        with self._txn(), self.conn.cursor() as cur:
             cur.execute("DELETE FROM lessons")
             for f in rows:
                 values = []
@@ -406,7 +417,6 @@ class PostgresStorage:
                     f"VALUES ({', '.join(['%s'] * len(_LESSON_COLS))})",
                     values,
                 )
-        self.conn.commit()
 
     def load_lessons(self) -> list[dict]:
         cols = ("id",) + _LESSON_COLS
@@ -428,12 +438,12 @@ class PostgresStorage:
                    origin: str | None = None, episode_id: str | None = None,
                    now: float | None = None) -> int:
         t = time.time() if now is None else float(now)
-        row = self.conn.execute(
-            f"INSERT INTO outcome_signals ({', '.join(_SIGNAL_COLS)}) "
-            f"VALUES ({', '.join(['%s'] * len(_SIGNAL_COLS))}) RETURNING id",
-            (task, outcome, about, detail, polarity, origin, episode_id, t),
-        ).fetchone()
-        self.conn.commit()
+        with self._txn():
+            row = self.conn.execute(
+                f"INSERT INTO outcome_signals ({', '.join(_SIGNAL_COLS)}) "
+                f"VALUES ({', '.join(['%s'] * len(_SIGNAL_COLS))}) RETURNING id",
+                (task, outcome, about, detail, polarity, origin, episode_id, t),
+            ).fetchone()
         return int(row[0])
 
     def pending_signals(self, limit: int | None = None) -> list[dict]:
@@ -453,35 +463,35 @@ class PostgresStorage:
         if not ids:
             return 0
         t = time.time() if now is None else float(now)
-        cur = self.conn.execute(
-            "UPDATE outcome_signals SET consumed_at = %s "
-            "WHERE id = ANY(%s) AND consumed_at IS NULL",
-            (t, list(ids)),
-        )
-        self.conn.commit()
+        with self._txn():
+            cur = self.conn.execute(
+                "UPDATE outcome_signals SET consumed_at = %s "
+                "WHERE id = ANY(%s) AND consumed_at IS NULL",
+                (t, list(ids)),
+            )
         return cur.rowcount
 
     def prune_signals(self, older_than_ts: float) -> int:
         """Delete signals (consumed or not) older than the cutoff, so the log
         can't grow unbounded when no extractor is configured to drain it."""
-        cur = self.conn.execute(
-            "DELETE FROM outcome_signals WHERE created_at < %s",
-            (float(older_than_ts),),
-        )
-        self.conn.commit()
+        with self._txn():
+            cur = self.conn.execute(
+                "DELETE FROM outcome_signals WHERE created_at < %s",
+                (float(older_than_ts),),
+            )
         return cur.rowcount
 
     # ── meta ────────────────────────────────────────────────────────────
 
     def meta_set(self, key: str, value: Any) -> None:
-        self.conn.execute(
-            """
-            INSERT INTO meta (key, value) VALUES (%s, %s)
-            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
-            """,
-            (key, Jsonb(value)),
-        )
-        self.conn.commit()
+        with self._txn():
+            self.conn.execute(
+                """
+                INSERT INTO meta (key, value) VALUES (%s, %s)
+                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+                """,
+                (key, Jsonb(value)),
+            )
 
     def meta_get(self, key: str, default: Any = None) -> Any:
         row = self.conn.execute(
@@ -495,12 +505,12 @@ class PostgresStorage:
         return row[0] if row else None
 
     def set_meta(self, key: str, value) -> None:
-        self.conn.execute(
-            "INSERT INTO meta (key, value) VALUES (%s, %s::jsonb) "
-            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
-            (key, json.dumps(value)),
-        )
-        self.conn.commit()
+        with self._txn():
+            self.conn.execute(
+                "INSERT INTO meta (key, value) VALUES (%s, %s::jsonb) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+                (key, json.dumps(value)),
+            )
 
     # ── graph: entities / aliases ───────────────────────────────────────
 
@@ -510,17 +520,17 @@ class PostgresStorage:
     ) -> int:
         """Upsert by canonical name; first non-null etype wins (soft typing
         is advisory, so a later conflicting hint must not silently retype)."""
-        row = self.conn.execute(
-            """
-            INSERT INTO entities (canonical, display, etype, created_at)
-            VALUES (%s, %s, %s, %s)
-            ON CONFLICT (canonical) DO UPDATE
-              SET etype = COALESCE(entities.etype, EXCLUDED.etype)
-            RETURNING id
-            """,
-            (canonical, display or canonical, etype, time.time()),
-        ).fetchone()
-        self.conn.commit()
+        with self._txn():
+            row = self.conn.execute(
+                """
+                INSERT INTO entities (canonical, display, etype, created_at)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (canonical) DO UPDATE
+                  SET etype = COALESCE(entities.etype, EXCLUDED.etype)
+                RETURNING id
+                """,
+                (canonical, display or canonical, etype, time.time()),
+            ).fetchone()
         return int(row[0])
 
     def find_entity(self, name_norm: str) -> dict | None:
@@ -553,30 +563,26 @@ class PostgresStorage:
         return d
 
     def add_alias(self, alias_norm: str, entity_id: int) -> None:
-        self.conn.execute(
-            """
-            INSERT INTO entity_aliases (alias, entity_id) VALUES (%s, %s)
-            ON CONFLICT (alias) DO UPDATE SET entity_id = EXCLUDED.entity_id
-            """,
-            (alias_norm, entity_id),
-        )
-        self.conn.commit()
+        with self._txn():
+            self.conn.execute(
+                """
+                INSERT INTO entity_aliases (alias, entity_id) VALUES (%s, %s)
+                ON CONFLICT (alias) DO UPDATE SET entity_id = EXCLUDED.entity_id
+                """,
+                (alias_norm, entity_id),
+            )
 
     def delete_entity(self, entity_id: int) -> bool:
         """Remove a graph entity. edges/aliases/sources/community are ON DELETE
         CASCADE; facts/lessons FK have NO cascade, so null those refs first
         (the fact/lesson rows survive, just unlinked from the deleted node)."""
-        try:
+        with self._txn():
             for tbl in ("facts", "lessons"):
                 self.conn.execute(f"UPDATE {tbl} SET entity_id = NULL WHERE entity_id = %s", (entity_id,))
                 self.conn.execute(f"UPDATE {tbl} SET object_entity_id = NULL WHERE object_entity_id = %s", (entity_id,))
             row = self.conn.execute(
                 "DELETE FROM entities WHERE id = %s RETURNING id", (entity_id,)).fetchone()
-            self.conn.commit()
-            return row is not None
-        except Exception:
-            self.conn.rollback()
-            raise
+        return row is not None
 
     def merge_entity(self, from_id: int, into_id: int) -> bool:
         """Fold `from` into `into`: drop edges that would duplicate or self-loop,
@@ -585,8 +591,23 @@ class PostgresStorage:
         (src,rel,dst) forces the dedup-before-repoint order."""
         if from_id == into_id:
             return False
-        try:
+        with self._txn():
             c = self.conn
+            # 0. Both endpoints must still exist. A chained multi-way merge
+            #    (A->B, C->B, C->A applied in order) can present a `from_id`
+            #    already deleted by an earlier merge in the same batch; a queued
+            #    merge proposal whose `into` entity was junk-deleted before the
+            #    merge is accepted presents a stale `into_id`. Either way, treat
+            #    it as a no-op (return False) rather than proceeding — a stale
+            #    `into_id` would otherwise re-point edges to a nonexistent row
+            #    and raise an FK violation (→ rollback + 500). Returning False
+            #    lets callers report "target no longer exists" gracefully and
+            #    keeps merge counts honest.
+            rows = c.execute(
+                "SELECT id FROM entities WHERE id IN (%s, %s)",
+                (from_id, into_id)).fetchall()
+            if {r[0] for r in rows} != {from_id, into_id}:
+                return False
             # 1a. drop from-edges that already exist on `into` (src side / dst side)
             c.execute("DELETE FROM edges f WHERE f.src_id = %s AND EXISTS ("
                       "SELECT 1 FROM edges t WHERE t.src_id = %s AND t.relation = f.relation "
@@ -623,11 +644,7 @@ class PostgresStorage:
                       "ON CONFLICT (entity_id, source) DO NOTHING", (into_id, from_id))
             # 5. delete `from` (CASCADE removes its leftover aliases/sources/community/edges)
             c.execute("DELETE FROM entities WHERE id = %s", (from_id,))
-            c.commit()
-            return True
-        except Exception:
-            self.conn.rollback()
-            raise
+        return True
 
     def entity_id_map(self) -> dict[str, int]:
         """Every normalized name (canonical + alias) → entity id. Used to
@@ -659,23 +676,23 @@ class PostgresStorage:
         src_type: str | None = None, dst_type: str | None = None,
         transitive: bool = False, inverse_of: str | None = None,
     ) -> None:
-        self.conn.execute(
-            """
-            INSERT INTO relations
-              (name, description, src_type, dst_type, transitive,
-               inverse_of, builtin, created_at)
-            VALUES (%s, %s, %s, %s, %s, %s, FALSE, %s)
-            ON CONFLICT (name) DO UPDATE SET
-              description = EXCLUDED.description,
-              src_type = EXCLUDED.src_type,
-              dst_type = EXCLUDED.dst_type,
-              transitive = EXCLUDED.transitive,
-              inverse_of = EXCLUDED.inverse_of
-            """,
-            (name, description, src_type, dst_type, transitive,
-             inverse_of, time.time()),
-        )
-        self.conn.commit()
+        with self._txn():
+            self.conn.execute(
+                """
+                INSERT INTO relations
+                  (name, description, src_type, dst_type, transitive,
+                   inverse_of, builtin, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, FALSE, %s)
+                ON CONFLICT (name) DO UPDATE SET
+                  description = EXCLUDED.description,
+                  src_type = EXCLUDED.src_type,
+                  dst_type = EXCLUDED.dst_type,
+                  transitive = EXCLUDED.transitive,
+                  inverse_of = EXCLUDED.inverse_of
+                """,
+                (name, description, src_type, dst_type, transitive,
+                 inverse_of, time.time()),
+            )
 
     # ── graph: edges ────────────────────────────────────────────────────
 
@@ -686,34 +703,34 @@ class PostgresStorage:
         """Insert or re-assert. Re-assertion bumps confidence (+0.05,
         capped 0.99), revives a superseded edge, and keeps the stronger
         origin claim if the new call omitted one."""
-        row = self.conn.execute(
-            """
-            INSERT INTO edges
-              (src_id, relation, dst_id, confidence, origin, asserted_at)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            ON CONFLICT (src_id, relation, dst_id) DO UPDATE SET
-              confidence = LEAST(
-                0.99, GREATEST(EXCLUDED.confidence, edges.confidence + 0.05)),
-              origin = COALESCE(EXCLUDED.origin, edges.origin),
-              superseded_at = NULL,
-              asserted_at = EXCLUDED.asserted_at
-            RETURNING id, confidence
-            """,
-            (src_id, relation, dst_id, confidence, origin, time.time()),
-        ).fetchone()
-        self.conn.commit()
+        with self._txn():
+            row = self.conn.execute(
+                """
+                INSERT INTO edges
+                  (src_id, relation, dst_id, confidence, origin, asserted_at)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (src_id, relation, dst_id) DO UPDATE SET
+                  confidence = LEAST(
+                    0.99, GREATEST(EXCLUDED.confidence, edges.confidence + 0.05)),
+                  origin = COALESCE(EXCLUDED.origin, edges.origin),
+                  superseded_at = NULL,
+                  asserted_at = EXCLUDED.asserted_at
+                RETURNING id, confidence
+                """,
+                (src_id, relation, dst_id, confidence, origin, time.time()),
+            ).fetchone()
         return {"id": int(row[0]), "confidence": float(row[1])}
 
     def supersede_edge(self, src_id: int, relation: str, dst_id: int) -> bool:
-        cur = self.conn.execute(
-            """
-            UPDATE edges SET superseded_at = %s
-            WHERE src_id = %s AND relation = %s AND dst_id = %s
-              AND superseded_at IS NULL
-            """,
-            (time.time(), src_id, relation, dst_id),
-        )
-        self.conn.commit()
+        with self._txn():
+            cur = self.conn.execute(
+                """
+                UPDATE edges SET superseded_at = %s
+                WHERE src_id = %s AND relation = %s AND dst_id = %s
+                  AND superseded_at IS NULL
+                """,
+                (time.time(), src_id, relation, dst_id),
+            )
         return cur.rowcount > 0
 
     def add_trace(self, entity_norm: str, attribute_norm: str,
@@ -721,20 +738,20 @@ class PostgresStorage:
         """Link a cortex slot to a source episode. Idempotent on the PK; returns
         True iff a NEW row was inserted (so the caller bumps reinforcements only on
         genuine new formation, never on a re-assert)."""
-        row = self.conn.execute(
-            "INSERT INTO memory_traces (entity_norm, attribute_norm, entry_id, created_at) "
-            "VALUES (%s, %s, %s, %s) "
-            "ON CONFLICT (entity_norm, attribute_norm, entry_id) DO NOTHING "
-            "RETURNING entry_id",
-            (entity_norm, attribute_norm, entry_id, now),
-        ).fetchone()
-        self.conn.commit()
+        with self._txn():
+            row = self.conn.execute(
+                "INSERT INTO memory_traces (entity_norm, attribute_norm, entry_id, created_at) "
+                "VALUES (%s, %s, %s, %s) "
+                "ON CONFLICT (entity_norm, attribute_norm, entry_id) DO NOTHING "
+                "RETURNING entry_id",
+                (entity_norm, attribute_norm, entry_id, now),
+            ).fetchone()
         return row is not None
 
     def set_edge_confidence(self, edge_id: int, confidence: float) -> None:
-        self.conn.execute("UPDATE edges SET confidence = %s WHERE id = %s",
-                          (float(confidence), edge_id))
-        self.conn.commit()
+        with self._txn():
+            self.conn.execute("UPDATE edges SET confidence = %s WHERE id = %s",
+                              (float(confidence), edge_id))
 
     def traces_by_entity_norm(self) -> dict[str, list[int]]:
         out: dict[str, list[int]] = {}
@@ -747,15 +764,15 @@ class PostgresStorage:
     def insert_proposal(self, src_id: int, relation: str, dst_id: int,
                         confidence: float, similarity: float | None,
                         rationale: str | None, source: str, now: float) -> int | None:
-        row = self.conn.execute(
-            "INSERT INTO edge_proposals "
-            "(src_id, relation, dst_id, confidence, similarity, rationale, source, created_at) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
-            "ON CONFLICT (src_id, relation, dst_id) DO NOTHING RETURNING id",
-            (src_id, relation, dst_id, float(confidence),
-             similarity, rationale, source, now),
-        ).fetchone()
-        self.conn.commit()
+        with self._txn():
+            row = self.conn.execute(
+                "INSERT INTO edge_proposals "
+                "(src_id, relation, dst_id, confidence, similarity, rationale, source, created_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (src_id, relation, dst_id) DO NOTHING RETURNING id",
+                (src_id, relation, dst_id, float(confidence),
+                 similarity, rationale, source, now),
+            ).fetchone()
         return int(row[0]) if row else None
 
     def pending_proposals(self) -> list[dict]:
@@ -784,23 +801,24 @@ class PostgresStorage:
         return dict(zip(cols, r)) if r else None
 
     def set_proposal_status(self, proposal_id: int, status: str) -> bool:
-        cur = self.conn.execute(
-            "UPDATE edge_proposals SET status = %s WHERE id = %s", (status, proposal_id))
-        self.conn.commit()
+        with self._txn():
+            cur = self.conn.execute(
+                "UPDATE edge_proposals SET status = %s WHERE id = %s", (status, proposal_id))
         return cur.rowcount > 0
 
     def insert_entity_proposal(self, kind: str, entity_id: int, into_id: int | None,
                                score: float | None, reason: str | None, now: float) -> int | None:
         try:
-            row = self.conn.execute(
-                "INSERT INTO entity_proposals (kind, entity_id, into_id, score, reason, created_at) "
-                "VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING RETURNING id",
-                (kind, entity_id, into_id, score, reason, now),
-            ).fetchone()
-            self.conn.commit()
+            with self._txn():
+                row = self.conn.execute(
+                    "INSERT INTO entity_proposals (kind, entity_id, into_id, score, reason, created_at) "
+                    "VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING RETURNING id",
+                    (kind, entity_id, into_id, score, reason, now),
+                ).fetchone()
             return int(row[0]) if row else None
         except psycopg.errors.ForeignKeyViolation:
-            self.conn.rollback()  # endpoint was deleted (e.g. auto-merged) this pass — skip the proposal
+            # endpoint was deleted (e.g. auto-merged) this pass — skip the
+            # proposal; _txn already rolled back.
             return None
 
     def pending_entity_proposals(self) -> list[dict]:
@@ -828,9 +846,9 @@ class PostgresStorage:
         return dict(zip(cols, r)) if r else None
 
     def set_entity_proposal_status(self, proposal_id: int, status: str) -> bool:
-        cur = self.conn.execute(
-            "UPDATE entity_proposals SET status = %s WHERE id = %s", (status, proposal_id))
-        self.conn.commit()
+        with self._txn():
+            cur = self.conn.execute(
+                "UPDATE entity_proposals SET status = %s WHERE id = %s", (status, proposal_id))
         return cur.rowcount > 0
 
     def traces_for_slot(self, entity_norm: str, attribute_norm: str) -> list[int]:
@@ -844,16 +862,16 @@ class PostgresStorage:
         """Attribute an entity to a project/source. A 'derived' upsert never
         downgrades an existing 'manual' row; it bumps count + updated_at. A
         'manual' upsert always wins."""
-        self.conn.execute(
-            "INSERT INTO entity_sources (entity_id, source, count, origin, updated_at) "
-            "VALUES (%s, %s, 1, %s, %s) "
-            "ON CONFLICT (entity_id, source) DO UPDATE SET "
-            "  count = entity_sources.count + 1, "
-            "  updated_at = EXCLUDED.updated_at, "
-            "  origin = CASE WHEN entity_sources.origin = 'manual' "
-            "                THEN 'manual' ELSE EXCLUDED.origin END",
-            (entity_id, source, origin, now))
-        self.conn.commit()
+        with self._txn():
+            self.conn.execute(
+                "INSERT INTO entity_sources (entity_id, source, count, origin, updated_at) "
+                "VALUES (%s, %s, 1, %s, %s) "
+                "ON CONFLICT (entity_id, source) DO UPDATE SET "
+                "  count = entity_sources.count + 1, "
+                "  updated_at = EXCLUDED.updated_at, "
+                "  origin = CASE WHEN entity_sources.origin = 'manual' "
+                "                THEN 'manual' ELSE EXCLUDED.origin END",
+                (entity_id, source, origin, now))
 
     def sources_for_entity(self, entity_id: int) -> list[dict]:
         cols = ("source", "count", "origin")
@@ -902,17 +920,17 @@ class PostgresStorage:
             "GROUP BY m.entity_id, en.source"
         ).fetchall()
         n = 0
-        for entity_id, source, cnt in rows:
-            self.conn.execute(
-                "INSERT INTO entity_sources (entity_id, source, count, origin, updated_at) "
-                "VALUES (%s, %s, %s, 'derived', %s) "
-                "ON CONFLICT (entity_id, source) DO UPDATE SET "
-                "  count = EXCLUDED.count, updated_at = EXCLUDED.updated_at, "
-                "  origin = CASE WHEN entity_sources.origin = 'manual' "
-                "                THEN 'manual' ELSE 'derived' END",
-                (entity_id, source, int(cnt), now))
-            n += 1
-        self.conn.commit()
+        with self._txn():
+            for entity_id, source, cnt in rows:
+                self.conn.execute(
+                    "INSERT INTO entity_sources (entity_id, source, count, origin, updated_at) "
+                    "VALUES (%s, %s, %s, 'derived', %s) "
+                    "ON CONFLICT (entity_id, source) DO UPDATE SET "
+                    "  count = EXCLUDED.count, updated_at = EXCLUDED.updated_at, "
+                    "  origin = CASE WHEN entity_sources.origin = 'manual' "
+                    "                THEN 'manual' ELSE 'derived' END",
+                    (entity_id, source, int(cnt), now))
+                n += 1
         return n
 
     def project_source_counts(self) -> list[dict]:
@@ -943,16 +961,16 @@ class PostgresStorage:
         return dict(zip(cols, row)) if row else None
 
     def bump_reinforcements(self, entry_id: int, delta: int) -> None:
-        self.conn.execute(
-            "UPDATE entries SET reinforcements = reinforcements + %s WHERE id = %s",
-            (delta, entry_id))
-        self.conn.commit()
+        with self._txn():
+            self.conn.execute(
+                "UPDATE entries SET reinforcements = reinforcements + %s WHERE id = %s",
+                (delta, entry_id))
 
     def bump_access_count(self, entry_id: int, delta: int) -> None:
-        self.conn.execute(
-            "UPDATE entries SET access_count = access_count + %s WHERE id = %s",
-            (delta, entry_id))
-        self.conn.commit()
+        with self._txn():
+            self.conn.execute(
+                "UPDATE entries SET access_count = access_count + %s WHERE id = %s",
+                (delta, entry_id))
 
     def load_graph(self) -> dict:
         """Whole live graph (entities + aliases + non-superseded edges) —
@@ -983,7 +1001,7 @@ class PostgresStorage:
                             summaries: list[dict], computed_at: float) -> None:
         """Wholesale replace the community partition (truncate + bulk insert).
         The shared entities hub is never touched."""
-        with self.conn.cursor() as cur:
+        with self._txn(), self.conn.cursor() as cur:
             cur.execute("DELETE FROM entity_communities")
             cur.execute("DELETE FROM communities")
             if summaries:
@@ -999,7 +1017,6 @@ class PostgresStorage:
                     "VALUES (%s, %s, %s)",
                     [(eid, cid, computed_at) for eid, cid in assignment.items()],
                 )
-        self.conn.commit()
 
     def load_communities(self) -> dict:
         assignment = {

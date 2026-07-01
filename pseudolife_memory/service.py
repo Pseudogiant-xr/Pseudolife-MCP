@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from pathlib import Path
 from threading import Lock
@@ -143,6 +144,30 @@ def _cortex_record_to_dict(rec, relative_age: bool = True) -> dict[str, Any]:
     if relative_age:
         d["age"] = _relative_time(rec.tx_time or rec.asserted_at)
     return d
+
+
+# A URL scheme per RFC 3986: ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ) ":".
+_URL_SCHEME = re.compile(r"[a-z][a-z0-9+.\-]*:")
+
+
+def _is_safe_source_url(url: str) -> bool:
+    """True iff a world-fact citation URL is safe to PERSIST. A world citation is
+    agent/LLM-authored (often distilled from fetched web content), so a
+    prompt-injected ``javascript:`` / ``data:`` / ``vbscript:`` scheme must never
+    land in the bank — not merely be neutralised at one render site.
+
+    Safe = empty (no citation), an ``http(s)`` URL, or a scheme-LESS string (a
+    bare path/host is inert; the console renders it as plain text). Rejected = a
+    non-empty string carrying any scheme other than http(s). Leading
+    whitespace/control chars are stripped first, the way a browser would, so
+    ``"\\tjavascript:..."`` can't slip past the scheme check.
+    """
+    if not url:
+        return True
+    cleaned = re.sub(r"[\x00-\x20]", "", url).lower()  # strip ctrl/space like a browser
+    if cleaned.startswith(("http://", "https://")):
+        return True
+    return _URL_SCHEME.match(cleaned) is None  # no scheme at all → inert, allow
 
 
 def _world_record_to_dict(rec, now=None) -> dict[str, Any]:
@@ -1264,6 +1289,12 @@ class MemoryService:
                     retrieved_at: float | None = None, content_hash: str | None = None,
                     source_doc_id: int | None = None, now: float | None = None) -> dict[str, Any]:
         """Assert a canonical WORLD fact (origin=source). Newer source supersedes."""
+        if not _is_safe_source_url(source_url):
+            # Refuse a citation carrying a non-http(s) scheme (javascript:, data:,
+            # …) at the write boundary so a prompt-injected payload never lands —
+            # data-at-rest safety, complementing the console's render-time allowlist.
+            return {"action": "rejected", "reason": "unsafe_source_url",
+                    "source_url": source_url}
         with self._lock:
             self._ensure_init()
             assert self._embedder is not None and self._world is not None

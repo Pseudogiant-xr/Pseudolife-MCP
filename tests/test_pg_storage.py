@@ -188,3 +188,80 @@ def test_entries_for_entity_empty_without_traces(storage):
         "VALUES ('lonely', 'lonely', 1.0) RETURNING id").fetchone()[0]
     storage.conn.commit()
     assert storage.entries_for_entity(eid) == []
+
+
+def test_failed_mutation_does_not_poison_connection(storage):
+    """A statement-level error (here: an FK violation from a nonexistent
+    entity id) must roll back so the shared long-lived connection is still
+    usable afterward — every other mutating method must guard the same way
+    delete_entity/merge_entity already do, not just those two."""
+    with pytest.raises(Exception):
+        storage.upsert_edge(999999, "uses", 999999)
+
+    # The connection must not be left in "current transaction is aborted" —
+    # a completely unrelated mutation must still succeed.
+    eid = storage.ensure_entity("probe-after-failed-edge")
+    assert eid > 0
+
+
+def test_merge_entity_stale_from_id_is_a_noop_not_a_merge(storage):
+    """Three mutual duplicates a<b<c generate pairwise folds (b,a), (c,a),
+    (c,b) under the "higher id into lower" tie-break exact_duplicate_pairs
+    uses. Applying them in order: merge(b,a) deletes b; merge(c,a) deletes c;
+    the third call merge(c,b) then has BOTH ids already gone. That call must
+    return False (no-op), not True — otherwise a caller counting
+    `if merge_entity(...): merged += 1` reports a merge that never happened."""
+    a = storage.ensure_entity("dup-a")
+    b = storage.ensure_entity("dup-b")
+    c = storage.ensure_entity("dup-c")
+
+    assert storage.merge_entity(b, a) is True   # b folds into a
+    assert storage.merge_entity(c, a) is True   # c folds into a
+    assert storage.merge_entity(c, b) is False  # both already gone — no-op
+
+    # a is the sole survivor.
+    assert storage.conn.execute(
+        "SELECT 1 FROM entities WHERE id = %s", (a,)).fetchone() is not None
+
+
+def test_merge_entity_stale_into_id_is_a_noop_not_a_crash(storage):
+    """A merge whose TARGET (into_id) was already deleted — e.g. a queued merge
+    proposal whose `into` entity got junk-deleted before the merge is accepted —
+    must return False (graceful no-op), not raise an FK violation. Without the
+    guard, re-pointing edges to a nonexistent into_id violates the edges FK,
+    which _txn rolls back and re-raises → a 500 in the Atlas UI instead of a
+    clean 'target no longer exists'."""
+    frm = storage.ensure_entity("merge-from")
+    into = storage.ensure_entity("merge-into")
+    storage.ensure_entity("merge-dep")
+    storage.upsert_edge(frm, "uses", storage.ensure_entity("merge-dep2"))
+    assert storage.delete_entity(into) is True    # target vanishes
+
+    assert storage.merge_entity(frm, into) is False   # no-op, no raise
+    # from survived untouched (not folded into a ghost).
+    assert storage.conn.execute(
+        "SELECT 1 FROM entities WHERE id = %s", (frm,)).fetchone() is not None
+
+
+def test_txn_rolls_back_compound_cursor_shape(storage):
+    """The `with self._txn(), self.conn.cursor() as cur:` shape (replace_facts /
+    replace_lessons / replace_communities / etc.) must roll back cleanly when a
+    statement inside the cursor block fails — pinning the nested-context-manager
+    exit ordering (cursor closes, then _txn rolls back). A bad embedding value
+    (wrong pgvector dimension) makes the INSERT inside replace_facts raise."""
+    good = {
+        "entity": "E", "attribute": "A", "entity_norm": "e", "attribute_norm": "a",
+        "value": "v", "polarity": "+", "status": "current", "confidence": 0.8,
+        "origin": "action", "support": ["action"], "provenance": ["t"],
+        "asserted_at": 1.0, "last_confirmed": 1.0, "supersedes_value": None,
+        "superseded_by_value": None, "superseded_at": None,
+        "embedding": [0.0] * 5,   # wrong dim (schema expects 384) → INSERT raises
+        "entity_id": None, "object_entity_id": None,
+    }
+    with pytest.raises(Exception):
+        storage.replace_facts([good])
+
+    # Connection must be usable afterward (not InFailedSqlTransaction), and the
+    # failed rewrite left no partial rows.
+    assert storage.ensure_entity("probe-after-compound-fail") > 0
+    assert storage.load_facts() == []

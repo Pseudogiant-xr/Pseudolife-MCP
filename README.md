@@ -80,6 +80,7 @@ each session.
 | `memory_dream_pull(limit?)` | Recent memories not yet consolidated — the agent extracts canonical facts from these (Tier 1) |
 | `memory_dream_commit(cursor)` | Advance the dream cursor after consolidating up to `cursor` |
 | `memory_dream_run(limit?)` | One server-side dream with the configured extractor (regex floor if none) — headless; `limit` sweeps the whole backlog in one pass (Tier 0/2) |
+| `memory_briefing(max_unsure?, max_lessons?)` | Session-start briefing on demand: surprising graph links + open questions, plus avoid/prefer lessons (read-only; also injected automatically by the `SessionStart` hook) |
 | `memory_graph_relate(src, relation, dst, origin?, confidence?, src_type?, dst_type?)` | Assert a typed edge between entities (closed relation vocabulary; re-assertion bumps confidence) |
 | `memory_graph_unrelate(src, relation, dst)` | Retract an edge (superseded, kept for audit) |
 | `memory_alias(entity, alias)` | Bind an alternative name — all fact/graph lookups resolve aliases first |
@@ -91,6 +92,13 @@ each session.
 | `memory_relation_define(name, description, transitive?, inverse_of?, src_type?, dst_type?)` | Grow the closed relation vocabulary (deliberate, strong-model act) |
 | `memory_stats()` | Per-band sizes, hit rates, totals |
 | `memory_save()` | Flush CMS tensors to disk |
+| `memory_deep_dream(apply?)` | Manual full-corpus GRAPH consolidation: dry-run (default) previews re-scores/merges/duplicate-candidates + semantic link candidates; `apply=True` commits the safe self-clean (supersede hard type-violations, merge exact duplicates) — back up first |
+| `memory_graph_propose_links(proposals)` | Ingest deep-dream Step-C link proposals into `edge_proposals` for review (never writes `edges` directly) |
+| `memory_graph_accept_proposal(proposal_id)` | Promote a pending edge proposal to a real edge (`origin=agent`) |
+| `memory_graph_reject_proposal(proposal_id)` | Reject a pending edge proposal (kept for audit) |
+| `memory_graph_accept_entity_merge(proposal_id)` | Accept a near-duplicate entity-merge proposal: fold `from` into `into` |
+| `memory_graph_accept_entity_junk(proposal_id)` | Accept a junk-entity prune proposal: delete the over-extraction artifact |
+| `memory_graph_reject_entity_proposal(proposal_id)` | Reject a pending entity merge/junk proposal (kept for audit) |
 | `document_ingest(path, source?)` | Index a file (txt/md/pdf) in the reference bank |
 | `document_search(query, top_k?)` | RAG search over reference bank only |
 
@@ -433,7 +441,7 @@ Connection / deployment env vars:
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v15). Unset → v0.1 file-only mode. |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v18). Unset → v0.1 file-only mode. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). |
 | `PSEUDOLIFE_MCP_HOST` / `_PORT` | `127.0.0.1` / `8765` | Daemon bind address. |
 | `PSEUDOLIFE_MCP_TOKEN` | _(unset)_ | Bearer token; **required** to bind a non-loopback host. |
@@ -1121,7 +1129,7 @@ python -m pseudolife_memory.web.devserver   # http://127.0.0.1:8770/ui/
 | BM25 hybrid pool | Optional (`bm25=True` per call, stdlib only) |
 | NLI contradiction scorer | Optional (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, graph visualiser, search/trace, config editor (read-mostly, token-gated like `/mcp`) |
-| Schema version | v15 (Postgres meta version) — v11 temporal/provenance stamp, v12 graph-insight communities, v13 provenance-trace engram + reinforcements, v14 episode `session_key`, v15 episode `parent_id` (nesting); additive `ADD COLUMN IF NOT EXISTS` on daemon start; legacy file-mode `.pt` banks auto-migrate into Postgres |
+| Schema version | v18 (Postgres meta version) — v11 temporal/provenance stamp, v12 graph-insight communities, v13 provenance-trace engram + reinforcements, v14 episode `session_key`, v15 episode `parent_id` (nesting), v16 `entity_sources` (per-entity project attribution), v17 `edge_proposals` (deep-dream link candidates), v18 `entity_proposals` (deep-dream merge/junk candidates); additive `ADD COLUMN IF NOT EXISTS` on daemon start; legacy file-mode `.pt` banks auto-migrate into Postgres |
 
 ## What's not built yet
 

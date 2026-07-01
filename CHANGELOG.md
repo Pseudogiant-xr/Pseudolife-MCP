@@ -68,7 +68,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Tool-surface gate + redundancy trim.** `PSEUDOLIFE_MCP_TOOLSET=core` exposes a
   lean 15-tool core set (default `full` = unchanged). Folded `memory_trace` into
   `memory_search(explain=True)` and dropped `get_neighbors` (its `relation_filter`
-  moved onto `memory_graph`); `memory_path` retained. 48 → 46 tools.
+  moved onto `memory_graph`); `memory_path` retained. 48 → 46 tools at the time
+  of this change (the surface has since grown again with the deep-dream /
+  entity-consolidation additions below — see README for the current count).
 - **Retention bench made honest (P1.6).** `evals/retention_bench.py` now models a
   heavy-tailed reinforcement workload with `access_count` coupled to reinforcement
   (reinforcing *is* accessing). The honest re-derivation keeps `retention_boost=1.0`
@@ -106,6 +108,33 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `_name_contains` now requires the contained token set to have ≥2 tokens and excludes
   any concat-artifact endpoint; a new degree-agnostic `concat-artifact` junk rule
   (`_is_concat_artifact`) surfaces the `A<->B` nodes for deletion instead.
+- **A failed statement could wedge the whole daemon (connection poisoning).** The
+  daemon holds one long-lived psycopg connection, but only 3 of ~30 mutating methods
+  in `storage/postgres.py` rolled back on error — so any raised statement (lock
+  timeout, FK violation) left the connection `InFailedSqlTransaction`, breaking every
+  subsequent tool call until a restart. Every mutator now funnels through one shared
+  `_txn()` context manager (commit on success, rollback on any exception). The
+  deep-dream apply loop is unaffected by design (each op is idempotent + re-runnable).
+- **`world_cortex` / `lessons` supersession ignored HLC ordering.** Both stores
+  superseded on value-difference alone, unlike the personal cortex; they now gate on
+  the HLC (an out-of-order write with an older stamp can't clobber a newer value).
+  Dormant under the shipped single-writer (every write gets a fresh monotonic tick),
+  live under the future multi-writer path — parity with `cortex._should_supersede`.
+- **`exact_duplicate_pairs` could auto-merge (no review) two `A<->B` concat
+  artifacts**, and `merge_entity` over-counted / FK-crashed on a stale endpoint. The
+  auto-merge path now excludes concat artifacts, and `merge_entity` returns a graceful
+  no-op when either endpoint no longer exists instead of raising.
+
+### Security
+- **Stored-XSS via world-fact `source_url`.** A citation URL is agent/LLM-authored
+  (often distilled from fetched web content), so a prompt-injected `javascript:` /
+  `data:` scheme could execute when an operator clicked the "source" link in the
+  Cortex Console. Now blocked at both ends: `service.world_write` rejects any non-
+  `http(s)` scheme at write time (`{"action":"rejected"}`) so the payload never lands,
+  and `views/world.js` allowlists `http(s)` at render time (bad URLs show as inert text).
+- **`ops/restore_from_pt.py` unpickled snapshots with `weights_only=False`** (CWE-502),
+  inconsistent with `storage/migrate.py`'s own guard on the same file format. Now
+  `weights_only=True`, so restoring a stale/tampered `.pt` bank can't execute code.
 
 ## [0.6.0] — 2026-06-25 — graph foundation
 

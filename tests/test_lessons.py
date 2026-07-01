@@ -63,6 +63,20 @@ def test_newer_lesson_supersedes():
     assert any(r.status == "superseded" and r.value == "approach-A" for r in s.records)
 
 
+def test_stale_hlc_write_does_not_clobber_newer_lesson():
+    """HLC is the ordering authority (immune to wall-clock jumps/replays),
+    mirroring the personal cortex's _should_supersede: a write carrying an
+    OLDER hlc than the current record must not overwrite it, even though it
+    arrives later in wall-clock time. Dormant under the shipped single-writer
+    (every write gets a fresh monotonic tick); this exercises the multi-writer
+    out-of-order case directly by passing an explicit older hlc."""
+    s = LessonStore()
+    s.write_fact("t", "approach", "approach-A", now=1000.0, hlc=(5, 0))
+    action, rec = s.write_fact("t", "approach", "approach-B", now=2000.0, hlc=(3, 0))
+    assert action == "stale"
+    assert s.lookup("t", "approach").value == "approach-A"
+
+
 def test_search_ranks_by_cosine():
     s = LessonStore()
     s.write_fact("t1", "a", "v1", embedding=_emb(1.0, 0.0), now=1.0)

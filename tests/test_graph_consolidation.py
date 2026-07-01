@@ -69,6 +69,21 @@ def _vec(*xs):
     return np.asarray(xs, dtype=np.float32)
 
 
+def test_exact_duplicate_pairs_excludes_concat_artifacts():
+    # Two independently-extracted "A<->B" junk concat-artifacts with the same
+    # token multiset (e.g. from different extraction passes) must NOT be
+    # proposed for auto-merge on this path -- there is no human review here,
+    # unlike partition_candidates' merge_cands queue, and _name_contains
+    # already refuses to treat a concat artifact as a merge endpoint there.
+    ents = [
+        {"id": 1, "canonical": "memory_recall<->recall.py",
+         "display": "memory_recall<->recall.py", "etype": None},
+        {"id": 2, "canonical": "recall.py<->memory_recall",
+         "display": "recall.py<->memory_recall", "etype": None},
+    ]
+    assert gc.exact_duplicate_pairs(ents, []) == []
+
+
 def test_entity_context_vectors_trace_primary_then_mention_fallback():
     ents = [
         {"id": 1, "canonical": "alpha", "display": "alpha", "etype": None},

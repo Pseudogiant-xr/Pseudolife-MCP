@@ -1183,3 +1183,44 @@ def test_set_session_title_rejects_empty(
         assert pristine_service.set_session_title("   ")["ok"] is False
     finally:
         reset_writer_context(tok)
+
+
+class TestWorldWriteUrlValidation:
+    """A world-fact citation URL is agent/LLM-authored (often distilled from
+    fetched web content), so a prompt-injected `javascript:`/`data:` scheme
+    must be refused at the write boundary — the payload should never land in
+    the bank, not merely be neutralised at one render site."""
+
+    def test_rejects_javascript_scheme_source_url(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        res = pristine_service.world_write(
+            "xss", "probe", "payload", source_url="javascript:alert(1)")
+        assert res["action"] == "rejected"
+        assert res["reason"] == "unsafe_source_url"
+        # nothing was written
+        assert pristine_service.world_lookup("xss", "probe") is None
+
+    def test_rejects_data_scheme_even_with_leading_whitespace(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        res = pristine_service.world_write(
+            "xss2", "probe", "payload", source_url="  data:text/html,<script>1</script>")
+        assert res["action"] == "rejected"
+        assert pristine_service.world_lookup("xss2", "probe") is None
+
+    def test_allows_https_source_url(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        res = pristine_service.world_write(
+            "anthropic", "latest-model", "opus-4.8",
+            source_url="https://anthropic.com/news")
+        assert res["action"] == "inserted"
+
+    def test_allows_empty_and_schemeless_source_url(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        # empty (no citation) and a bare scheme-less string are both inert.
+        r1 = pristine_service.world_write("e1", "a", "v", source_url="")
+        r2 = pristine_service.world_write("e2", "a", "v", source_url="example.com/x")
+        assert r1["action"] == "inserted" and r2["action"] == "inserted"

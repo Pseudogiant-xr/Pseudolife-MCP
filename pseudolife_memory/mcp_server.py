@@ -26,7 +26,7 @@ This module is the shared tool layer for **two** entry points:
 Configuration
 -------------
 * ``PSEUDOLIFE_MCP_DATABASE_URL`` — Postgres DSN; when set, PG is the source of
-  truth (schema v11) and the in-memory bands are a write-through cache. Unset →
+  truth (schema v18) and the in-memory bands are a write-through cache. Unset →
   v0.1 file-only mode.
 * ``PSEUDOLIFE_MCP_DATA_DIR`` — where weights + ChromaDB live. **Set this
   explicitly** so the data path is stable regardless of cwd.
@@ -509,7 +509,10 @@ def memory_world_set(
     Args:
         entity / attribute / value: the (slot, value), e.g. ``anthropic`` /
             ``latest-model`` / ``opus-4.8``.
-        source_url: where the claim came from (the citation).
+        source_url: where the claim came from (the citation). Must be an
+            ``http(s)`` URL or empty — a citation carrying any other scheme
+            (``javascript:``, ``data:``, …) is refused (``action="rejected"``)
+            so a prompt-injected payload never lands in the bank.
         source_quote: the 1–2 sentences it was extracted from (shown as evidence).
         freshness_class: ``evergreen`` (definitions/how-things-work; never decays) |
             ``slow`` (months: leading X, a CEO) | ``volatile`` (weeks: latest
@@ -519,7 +522,9 @@ def memory_world_set(
         content_hash: optional hash of the source, to detect drift on revisit.
 
     Returns:
-        ``{"action": "inserted"|"confirmed"|"superseded", ...record, effective_confidence, stale}``.
+        ``{"action": "inserted"|"confirmed"|"superseded", ...record, effective_confidence, stale}``,
+        or ``{"action": "rejected", "reason": "unsafe_source_url", ...}`` if the
+        citation URL carries a non-http(s) scheme.
     """
     return service.world_write(
         entity, attribute, value, confidence=confidence, source_url=source_url,

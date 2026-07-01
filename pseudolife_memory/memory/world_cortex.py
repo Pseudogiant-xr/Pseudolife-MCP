@@ -160,7 +160,23 @@ class WorldCortexStore:
                 cur.session_id = session_id
             return ("confirmed", cur)
 
-        # Different value → the newer source wins (no tier guard for world facts).
+        # Different value → the newer source wins (no tier guard for world facts,
+        # but HLC is the ordering authority — an out-of-order write with an older
+        # hlc than the current record must not clobber it, mirroring the personal
+        # cortex's _should_supersede.
+        #
+        # Reachability: under the shipped single-daemon writer this is DORMANT
+        # defensive code — every write is stamped with a fresh, monotonic
+        # `self._hlc.tick()`, so a later write always has a >= hlc and the gate
+        # never fires. It becomes live under the future multi-writer occ path —
+        # same status as the cortex's own gate.
+        cur_hlc = (cur.hlc_phys or 0, cur.hlc_logical or 0)
+        cand_hlc = hlc or (0, 0)
+        if cand_hlc < cur_hlc:
+            return ("stale", cur)
+        if cand_hlc == cur_hlc and t < cur.asserted_at:
+            return ("stale", cur)
+
         cur.status = "superseded"
         cur.superseded_at = t
         cur.superseded_by_value = value
