@@ -2,7 +2,7 @@
 // table), reused by the Graph explorer and the Atlas overview. Honours a
 // `colorBy` option: "etype" (default) | "community" | "project".
 import { el, mount, errorBlock } from "./util.js";
-import { badge } from "./components.js";
+import { badge, tagBadge } from "./components.js";
 
 const ETYPE_COLOR = {
   service: "#5b9dff", database: "#3fd0c9", host: "#b083f0", model: "#e8b341",
@@ -182,7 +182,8 @@ export function tableView(data) {
           el("tbody", {}, edges.map((e) => el("tr", {},
             el("td", { class: "mono" }, e.src), el("td", { class: "mono dim" }, e.relation),
             el("td", { class: "mono" }, e.dst),
-            el("td", {}, e.derived ? badge("derived", "agent") : badge("explicit", "action")))))))));
+            el("td", {}, e.derived ? badge("derived", "agent")
+              : (e.tag ? tagBadge(e.tag) : badge("explicit", "action"))))))))));
 }
 
 // ── Force-directed simulation ───────────────────────────────────────────────

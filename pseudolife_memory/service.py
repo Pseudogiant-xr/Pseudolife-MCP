@@ -1353,6 +1353,39 @@ class MemoryService:
                 "contenders": [_cortex_record_to_dict(r) for r in recs],
             }
 
+    def cortex_candidates(self, entity: str, attribute: str,
+                          top_k: int = 5) -> list[dict]:
+        """Ranked nearby slots for an empty-slot lookup (see
+        ``CortexStore.candidates_for``). Alias-aware: same-entity candidates
+        are collected for both the queried name and its canonical graph
+        alias. Degrades to same-entity-only when the embedder is absent."""
+        with self._lock:
+            self._ensure_init()
+            assert self._cortex is not None
+            names = [entity]
+            if self._storage is not None:
+                from pseudolife_memory.graph import norm_name
+                node = self._storage.find_entity(norm_name(entity))
+                if node is not None:
+                    canon = node.get("canonical")
+                    if canon and norm_name(canon) != norm_name(entity):
+                        names.append(canon)
+            emb = None
+            if self._embedder is not None:
+                emb = self._embedder.encode_single(f"{entity} {attribute}")
+            out: list[dict] = []
+            seen: set[tuple[str, str]] = set()
+            for name in names:
+                for c in self._cortex.candidates_for(
+                        name, attribute, emb, top_k=top_k):
+                    k = (c["entity"].lower(), c["attribute"].lower())
+                    if k not in seen:
+                        seen.add(k)
+                        out.append(c)
+            out.sort(key=lambda c: (c["why"] != "same_entity",
+                                    -(c["score"] or 1.0)))
+            return out[:top_k]
+
     def cortex_resolve(self, entity: str, attribute: str, accept: bool) -> dict[str, Any]:
         """Promote (accept) or retire (reject) the active contender at a slot.
         Persists. Returns ``{"resolved": False, "reason": "no_contender"}`` when
@@ -3249,11 +3282,13 @@ class MemoryService:
             if include_facts:
                 node["facts"] = facts_by_norm.get(e["canonical"], [])
             nodes.append(node)
+        from pseudolife_memory.memory.graph_review import classify_edge as _classify_edge
         edges = [
             {"src": by_id[e["src_id"]], "relation": e["relation"],
              "dst": by_id[e["dst_id"]], "derived": False,
              "confidence": round(float(e["confidence"]), 4),
-             "origin": e.get("origin")}
+             "origin": e.get("origin"),
+             "tag": _classify_edge(e)}
             for e in g["edges"]
             if e["src_id"] in by_id and e["dst_id"] in by_id]
         total_nodes, total_edges, truncated = len(nodes), len(edges), False
@@ -3286,6 +3321,7 @@ class MemoryService:
             return self._whole_graph(scope=scope, include_facts=include_facts,
                                      max_nodes=max_nodes)
         from pseudolife_memory import graph as G
+        from pseudolife_memory.memory.graph_review import classify_edge as _classify_edge
         with self._lock:
             self._ensure_init()
             if self._storage is None:
@@ -3352,6 +3388,7 @@ class MemoryService:
                     row["confidence"] = round(float(e["confidence"]), 4)
                     if e.get("origin"):
                         row["origin"] = e["origin"]
+                    row["tag"] = _classify_edge(e)
                 out_edges.append(row)
 
             result: dict[str, Any] = {

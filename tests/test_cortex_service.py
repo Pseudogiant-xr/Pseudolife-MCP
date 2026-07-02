@@ -117,3 +117,16 @@ if __name__ == "__main__":
             print(f"ok   {name}")
     print(f"\n{len(tests) - failures}/{len(tests)} passed")
     sys.exit(1 if failures else 0)
+
+
+def test_fact_get_miss_returns_candidates():
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
+        svc = MemoryService(data_dir=d)
+        svc.cortex_write("server", "port", "8080", support="user")
+        got = svc.cortex_candidates("server", "nonexistent-attr")
+        assert got and got[0]["why"] == "same_entity"
+        assert got[0]["attribute"] == "port"
+        # A genuinely similar slot surfaces via embeddings too.
+        sim = svc.cortex_candidates("srv", "port number")
+        assert any(c["why"] == "similar_slot" and c["entity"] == "server"
+                   for c in sim) or sim == []  # embedder-dependent, tolerate empty

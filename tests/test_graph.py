@@ -714,3 +714,18 @@ def test_dream_edge_confidence_varies_by_type(svc):
     )
     assert len(confs) == 1, f"expected only the clean runs-on edge, got {confs}"
     assert abs(confs[0] - 0.70) < 0.01, f"expected clean ~0.70, got {confs[0]}"
+
+
+def test_graph_neighborhood_edges_carry_tag(svc):
+    svc.graph_relate("tagged-app", "depends-on", "tagged-db", origin="user")
+    out = svc.graph_neighborhood("tagged-app", depth=1)
+    stored = [e for e in out["edges"] if not e["derived"]]
+    assert stored
+    assert all(e.get("tag") in {"EXTRACTED", "INFERRED", "AMBIGUOUS"}
+               for e in stored)
+    user_edge = next(e for e in stored
+                     if e["src"] == "tagged-app" and e["dst"] == "tagged-db")
+    assert user_edge["tag"] == "EXTRACTED"
+    whole = svc.graph_neighborhood()
+    assert all(e.get("tag") in {"EXTRACTED", "INFERRED", "AMBIGUOUS"}
+               for e in whole["edges"])

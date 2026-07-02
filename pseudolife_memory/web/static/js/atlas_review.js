@@ -7,7 +7,7 @@
 // evidence, not names alone. Mutations are owned by atlas.js via onAct(desc);
 // provenance is a read this panel hydrates itself.
 import { el } from "./util.js";
-import { panel, badge } from "./components.js";
+import { panel, badge, tagBadge } from "./components.js";
 import { api } from "./api.js";
 
 const SEV = { warn: "var(--c-lessons)", info: "var(--c-assoc)", danger: "var(--c-world)" };
@@ -143,7 +143,8 @@ function selectableBody(f, onChange) {
   if (f.type === "dubious_edge") {
     return selectableList(f.edges || [], {
       row: (e) => ({ cell: el("span", { class: "mono", style: CHIP },
-        `${e.src} —${e.relation}→ ${e.dst}`, e.confidence != null ? ` (${(+e.confidence).toFixed(2)})` : "") }),
+        `${e.src} —${e.relation}→ ${e.dst}`, e.confidence != null ? ` (${(+e.confidence).toFixed(2)})` : "",
+        e.tag ? ` · ${e.tag.toLowerCase()}` : "") }),
       filterText: (e) => `${e.src} ${e.relation} ${e.dst}`, onChange });
   }
   const names = (f.entities || []).map((e) => (typeof e === "string" ? e : e.entity));
@@ -216,7 +217,8 @@ function junkItem(j, onAct) {
 function linkItem(l, onAct) {
   const s = entityRef(l.src), d = entityRef(l.dst);
   return itemRow([
-    s.chip, dim(`—${l.relation}→`), d.chip, sim(l.similarity), conf(l.confidence), dim(l.rationale),
+    s.chip, dim(`—${l.relation}→`), d.chip, sim(l.similarity), conf(l.confidence),
+    tagBadge(l.tag), dim(l.rationale),
     btn("Accept", { onClick: () => onAct({ kind: "accept-link", id: l.id }) }),
     btn("Reject", { kind: "ghost", onClick: () => onAct({ kind: "reject-link", id: l.id }) }),
   ], [s, d]);

@@ -214,3 +214,33 @@ def test_graph_insight_config_defaults():
     assert c.resolution == 1.0 and c.max_community_fraction == 0.25
     assert c.god_nodes_top_n == 10 and c.surprises_top_n == 10
     assert c.questions_top_n == 7 and c.betweenness_sample == 200
+
+
+def test_god_nodes_ranks_by_betweenness_over_degree():
+    # Two triangles (1-2-3, 5-6-7) joined through bridge node 4.
+    # Node 4 has degree 2 (lower than 3 and 5, which have degree 3) but the
+    # highest betweenness: all 9 cross-triangle shortest paths pass through it.
+    edges = [
+        {"src_id": 1, "dst_id": 2}, {"src_id": 2, "dst_id": 3},
+        {"src_id": 1, "dst_id": 3},
+        {"src_id": 5, "dst_id": 6}, {"src_id": 6, "dst_id": 7},
+        {"src_id": 5, "dst_id": 7},
+        {"src_id": 3, "dst_id": 4}, {"src_id": 4, "dst_id": 5},
+    ]
+    entities = [{"id": i, "display": f"e{i}", "etype": None} for i in range(1, 8)]
+    gods = gi.god_nodes(edges, entities, top_n=3)
+    assert gods[0]["entity_id"] == 4
+    assert gods[0]["degree"] == 2
+    assert all("betweenness" in g for g in gods)
+    bcs = [g["betweenness"] for g in gods]
+    assert bcs == sorted(bcs, reverse=True)
+
+
+def test_god_nodes_degree_tiebreak_when_betweenness_zero():
+    # Two disjoint edges: every node has betweenness 0 -> fall back to
+    # degree desc then id asc, so order is deterministic.
+    edges = [{"src_id": 1, "dst_id": 2}, {"src_id": 3, "dst_id": 4}]
+    entities = [{"id": i, "display": f"e{i}", "etype": None} for i in range(1, 5)]
+    gods = gi.god_nodes(edges, entities, top_n=4)
+    assert [g["entity_id"] for g in gods] == [1, 2, 3, 4]
+    assert all(g["betweenness"] == 0.0 for g in gods)
