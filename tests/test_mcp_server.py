@@ -50,70 +50,46 @@ def test_all_tools_registered() -> None:
     tools = asyncio.run(mcp_server.mcp.list_tools())
     names = sorted(t.name for t in tools)
     assert names == sorted([
+        # Associative stream.
         "memory_store",
         "memory_search",
         "memory_recent",
-        "memory_list_sources",
         "memory_supersede",
-        "memory_delete",
         "memory_stats",
-        "memory_save",
         "document_ingest",
         "document_search",
-        # Tier C — episode lifecycle + tag listing + consolidation.
+        # Episodes + consolidation.
         "memory_session_title",
         "memory_episode_start",
         "memory_episode_end",
-        "memory_episode_list",
         "memory_episode_summary",
-        "memory_list_tags",
         "memory_consolidation_candidates",
         "memory_consolidate",
         # Cortex — canonical-fact layer.
         "memory_fact_get",
         "memory_fact_set",
-        "memory_fact_forget",
-        "memory_facts",
         "memory_fact_resolve",
         "memory_history",
-        # World cortex — sourced external-knowledge layer.
+        # World cortex + lessons.
         "memory_world_set",
         "memory_world_search",
-        "memory_world_facts",
-        "memory_world_forget",
-        # Procedural / outcome memory — lessons (schema v10).
         "memory_outcome",
         "memory_lesson_search",
-        "memory_lessons",
-        "memory_lesson_forget",
-        # Dream — MIRAS->cortex consolidation.
-        "memory_dream_pull",
-        "memory_dream_status",
-        "memory_dream_commit",
-        "memory_dream_run",
-        # Phase 2 — knowledge graph + ontology-lite.
+        # Consolidated verbs (2026-07-02): forget across all stores, the
+        # dream lifecycle, and the graph review queue.
+        "memory_forget",
+        "memory_dream",
+        "memory_graph_review",
+        # Knowledge graph.
         "memory_graph_relate",
         "memory_graph_unrelate",
         "memory_alias",
         "memory_graph",
         "memory_recall",
         "memory_relation_define",
-        # Graph foundation (v0.6) — recall/graph extras, graph-insight, provenance traces.
-        "memory_path",
-        "memory_digest",
-        "memory_communities",
-        "memory_briefing",
+        # Engram traces / retention.
         "memory_get",
         "memory_reinforce",
-        # Deep dream — full-corpus graph consolidation.
-        "memory_deep_dream",
-        # Deep dream — link proposals.
-        "memory_graph_propose_links",
-        "memory_graph_accept_proposal",
-        "memory_graph_reject_proposal",
-        "memory_graph_accept_entity_merge",
-        "memory_graph_accept_entity_junk",
-        "memory_graph_reject_entity_proposal",
     ])
 
 
@@ -222,7 +198,7 @@ def test_memory_dream_run_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:
     importlib.reload(mod)
 
     _invoke("memory_store", {"text": "the beacon port is 7777", "source": "notes"})
-    out = _invoke("memory_dream_run", {})
+    out = _invoke("memory_dream", {"action": "run"})
     assert "pulled" in out and "cursor" in out
     # Single-writer cortex: no extractor LLM is configured in tests, so the dream
     # writes nothing (no regex floor fallback). The promote-with-extractor path is
@@ -279,7 +255,7 @@ def test_memory_fact_set_get_forget_via_mcp_dispatch(tmp_path: Path, monkeypatch
     assert got["record"]["value"] == "rust"
     assert got["record"]["origin"] == "user"
     # forget purges the slot
-    forget = _invoke("memory_fact_forget", {"entity": "project"})
+    forget = _invoke("memory_forget", {"scope": "fact", "entity": "project"})
     assert forget["removed"] == 1
     assert _invoke("memory_fact_get", {"entity": "project", "attribute": "language"})["record"] is None
 
@@ -295,7 +271,7 @@ def test_store_auto_promotes_and_search_surfaces_cortex(tmp_path: Path, monkeypa
         "text": "I have a Ragdoll cat named Jacque", "source": "conversation",
     })
     assert out["cortex_promoted"] >= 1                      # slot auto-promoted
-    facts = _invoke("memory_facts", {})
+    facts = mod.service.cortex_dump()   # dump left the MCP surface (Console-only)
     assert any(e["entity"] == "Jacque" and e["origin"] == "user" for e in facts["entries"])
     # cortex-first: the canonical fact is surfaced in search
     res = _invoke("memory_search", {"query": "Ragdoll cat named Jacque", "top_k": 5})
@@ -326,39 +302,6 @@ def test_memory_search_explain_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> 
     assert "tiers" in out["trace"]
 
 
-def test_memory_list_sources_via_mcp_dispatch(
-    tmp_path: Path, monkeypatch,
-) -> None:
-    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
-    import importlib
-    import pseudolife_memory.mcp_server as mod
-    importlib.reload(mod)
-
-    _invoke("memory_store", {"text": "A1", "source": "alpha"})
-    _invoke("memory_store", {"text": "A2", "source": "alpha"})
-    _invoke("memory_store", {"text": "B1", "source": "beta"})
-    out = _invoke("memory_list_sources", {})
-    by_source = {row["source"]: row["count"] for row in out["sources"]}
-    assert by_source["alpha"] == 2
-    assert by_source["beta"] == 1
-
-
-def test_memory_delete_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
-    import importlib
-    import pseudolife_memory.mcp_server as mod
-    importlib.reload(mod)
-
-    _invoke("memory_store", {"text": "Junk", "source": "test"})
-    _invoke("memory_store", {"text": "Keep", "source": "test"})
-    out = _invoke("memory_delete", {"text": "Junk"})
-    assert out["deleted_count"] == 1
-    recent = _invoke("memory_recent", {"n": 10})
-    texts = [e["text"] for e in recent["entries"]]
-    assert "Junk" not in texts
-    assert "Keep" in texts
-
-
 # ---------------------------------------------------------------------------
 # Tier C — episode lifecycle + consolidation tool dispatch
 # ---------------------------------------------------------------------------
@@ -386,7 +329,8 @@ def test_memory_episode_lifecycle_via_mcp_dispatch(
     assert closed["id"] == ep_id
     assert closed["ended_at"] is not None
 
-    listing = _invoke("memory_episode_list", {"limit": 5})
+    # episode_list left the MCP surface (Console-only) — verify via service.
+    listing = mod.service.episode_list(limit=5)
     assert any(e["id"] == ep_id for e in listing["episodes"])
 
 
@@ -413,20 +357,6 @@ def test_memory_episode_summary_via_mcp_dispatch(
     tags = {row["tag"]: row["count"] for row in out["tag_distribution"]}
     assert tags["alpha"] == 2
     assert tags["beta"] == 1
-
-
-def test_memory_list_tags_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
-    import importlib
-    import pseudolife_memory.mcp_server as mod
-    importlib.reload(mod)
-
-    _invoke("memory_store", {"text": "a", "source": "x", "tags": ["red"]})
-    _invoke("memory_store", {"text": "b", "source": "x", "tags": ["red", "blue"]})
-    out = _invoke("memory_list_tags", {})
-    counts = {row["tag"]: row["count"] for row in out["tags"]}
-    assert counts["red"] == 2
-    assert counts["blue"] == 1
 
 
 def test_memory_consolidation_candidates_via_mcp_dispatch(

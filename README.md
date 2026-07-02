@@ -44,66 +44,51 @@ each session.
 
 ## Tools exposed
 
+The surface was consolidated 2026-07-02 (55 → 32 tools): lifecycle families
+became verb-dispatched tools (`memory_dream`, `memory_forget`,
+`memory_graph_review`), and dump/introspection views moved to the Cortex
+Console (REST) — the manifest is agent context every session, so it stays lean.
+
 | Tool | Purpose |
 |------|---------|
-| `memory_store(text, source?, tags?, origin?)` | Remember a fact, decision, observation (canonical facts reach the cortex via the dream pass / `memory_fact_set`) |
-| `memory_search(query, top_k?, sources?, bands?, episodes?, tags?, min_score?, disable_recency_boost?, rerank?, bm25?, explain?)` | Retrieve by associative similarity; returns `low_confidence` when the top score is below `search_confidence_floor` (off by default). `explain=True` also attaches a ranking `trace` (debug why an entry didn't surface) |
-| `memory_recent(n?, sources?, episodes?, tags?)` | List newest stores (debug + session start) |
-| `memory_list_sources()` | Enumerate every source tag in the bank with entry counts |
-| `memory_list_tags()` | Enumerate every multi-valued tag in the bank with occurrence counts |
-| `memory_supersede(old_text, new_text)` | Explicit correction — mark old fact obsolete |
-| `memory_delete(text?, substring?, source?, episode?, tag?)` | Remove memories matching any filter (hygiene) |
-| `memory_session_title(title)` | Name THIS session's episode (the daemon can't see your project dir, so titles default to generic `session - <date> <time>`) — call once at task start to label the session after the project/task; renames in place, opens one if needed |
-| `memory_episode_start(title, hint?)` | Open a NESTED sub-episode under the open session episode (session episodes are opened/closed for you by the daemon, keyed per session) — entries stored while open carry the episode id; a session-scoped search expands to the whole subtree |
-| `memory_episode_end()` | Close the current (leaf) episode and pop back to its parent |
-| `memory_episode_list(limit?, include_open?)` | List episodes newest-first with per-episode entry counts |
-| `memory_episode_summary(id)` | Stats + tag/source distribution + recent entries within an episode |
-| `memory_consolidation_candidates(query?, episode?, top_k?, min_cohesion?, ...)` | Cluster mutually-similar memories ripe for consolidation |
-| `memory_consolidate(replaces, new_text, source?, tags?)` | Atomic supersede + store — replace a cluster with one canonical note |
-| `memory_fact_get(entity, attribute)` | The one CURRENT canonical value at a slot (+ any parked contenders) |
-| `memory_fact_set(entity, attribute, value, origin?, confidence?)` | Assert a canonical fact deliberately (insert / confirm / supersede / contest) |
-| `memory_fact_resolve(entity, attribute, accept)` | Settle a contested fact after checking in — adopt (`true`) or discard (`false`) the contender |
-| `memory_fact_forget(entity, attribute?)` | Hard-delete canonical fact(s) at a slot/entity (no audit trail) |
-| `memory_facts(limit?)` | List all current canonical facts (cortex introspection) |
-| `memory_history(entity, attribute)` | The version timeline at a slot — current + superseded, each with its temporal/provenance stamp (who changed it, when) |
-| `memory_get(entry_id)` | Dereference a fact's `source_entries` pointer → the full dense episode it was distilled from (+ `consolidated_into`); reading gently reinforces it |
-| `memory_reinforce(entry_id)` | After reading an episode via `memory_get` and finding it useful, strengthen it so it resists forgetting (a deliberate "this mattered" signal) |
-| `memory_world_set(entity, attribute, value, source_url?, source_quote?, freshness_class?, confidence?, ...)` | Assert a canonical WORLD fact — sourced *external* knowledge (current model/version/price/role), kept in its own table; age-decayed trust by freshness |
-| `memory_world_search(query, top_k?)` | Search world facts by similarity — each carries `effective_confidence`, a `stale` flag, and its citation |
-| `memory_world_facts(limit?)` | List all current world facts (world-cortex introspection) |
-| `memory_world_forget(entity, attribute?)` | Hard-delete world fact(s) at a slot/entity (cleanup; never touches user/project facts) |
-| `memory_outcome(task, outcome, about?, detail?, polarity?)` | Record a PROCEDURAL outcome signal (`success`/`failure`/`correction`) — what worked / dead-ended / got corrected while doing a task; the dream later distils signals into lessons |
-| `memory_lesson_search(query, top_k?)` | Recall learned LESSONS for the task at hand — dead-ends come back with `polarity` `-` / `outcome` `failure` |
-| `memory_lessons(limit?)` | List all current lessons (procedural-memory introspection) |
-| `memory_lesson_forget(task, aspect?)` | Delete lesson(s) at a task-type/aspect (cleanup / manual correction) |
-| `memory_dream_status()` | Read-only: backlog of unconsolidated memories + whether a dream would fire (safe for a SessionStart nudge) |
-| `memory_dream_pull(limit?)` | Recent memories not yet consolidated — the agent extracts canonical facts from these (Tier 1) |
-| `memory_dream_commit(cursor)` | Advance the dream cursor after consolidating up to `cursor` |
-| `memory_dream_run(limit?)` | One server-side dream with the configured extractor (regex floor if none) — headless; `limit` sweeps the whole backlog in one pass (Tier 0/2) |
-| `memory_briefing(max_unsure?, max_lessons?)` | Session-start briefing on demand: surprising graph links + open questions, plus avoid/prefer lessons (read-only; also injected automatically by the `SessionStart` hook) |
-| `memory_graph_relate(src, relation, dst, origin?, confidence?, src_type?, dst_type?)` | Assert a typed edge between entities (closed relation vocabulary; re-assertion bumps confidence) |
-| `memory_graph_unrelate(src, relation, dst)` | Retract an edge (superseded, kept for audit) |
-| `memory_alias(entity, alias)` | Bind an alternative name — all fact/graph lookups resolve aliases first |
-| `memory_graph(entity, depth?, include_facts?, to?, relation_filter?)` | Entity neighborhood (≤3 hops): nodes + facts + edges (transitive/inverse derived on read); `relation_filter` keeps only edges whose relation matches a substring |
-| `memory_recall(query, hops?, top_k?)` | Multi-hop retrieval: seed from graph, follow edges up to `hops` iterations; returns entities, edges, paths, texts; `low_confidence: true` → fall back to `memory_search` |
-| `memory_path(source, target, max_hops?)` | Shortest path between two entities — the entity chain + typed edges, or empty when none exists within `max_hops` (read-only) |
-| `memory_digest()` | Knowledge-graph topology digest as of the last dream: god-nodes, surprising cross-community connections, suggested questions (read-only) |
-| `memory_communities(community_id?)` | List graph communities (size + cohesion), or the members of one given its id (read-only) |
-| `memory_relation_define(name, description, transitive?, inverse_of?, src_type?, dst_type?)` | Grow the closed relation vocabulary (deliberate, strong-model act) |
+| `memory_store(text, source?, tags?, origin?)` | Remember one durable fact / decision / observation (canonical facts reach the cortex via the dream pass or `memory_fact_set`) |
+| `memory_search(query, top_k?, filters..., rerank?, bm25?, explain?)` | Associative retrieval; canonical `cortex` facts surface ahead of recall hits; `explain=True` attaches a ranking trace |
+| `memory_recent(n?, sources?, episodes?, tags?)` | Newest stores, timestamp-ordered (debug + session catch-up) |
+| `memory_supersede(old_text, new_text)` | Explicit correction — mark a memory obsolete, keep it as history |
+| `memory_forget(scope, ...)` | Hard-delete from one store: `memory` (by text/substring/source/episode/tag), `fact`, `world`, or `lesson` (by entity/attribute) |
 | `memory_stats()` | Per-band sizes, hit rates, totals |
-| `memory_save()` | Flush CMS tensors to disk |
-| `memory_deep_dream(apply?)` | Manual full-corpus GRAPH consolidation: dry-run (default) previews re-scores/merges/duplicate-candidates + semantic link candidates; `apply=True` commits the safe self-clean (supersede hard type-violations, merge exact duplicates) — back up first |
-| `memory_graph_propose_links(proposals)` | Ingest deep-dream Step-C link proposals into `edge_proposals` for review (never writes `edges` directly) |
-| `memory_graph_accept_proposal(proposal_id)` | Promote a pending edge proposal to a real edge (`origin=agent`) |
-| `memory_graph_reject_proposal(proposal_id)` | Reject a pending edge proposal (kept for audit) |
-| `memory_graph_accept_entity_merge(proposal_id)` | Accept a near-duplicate entity-merge proposal: fold `from` into `into` |
-| `memory_graph_accept_entity_junk(proposal_id)` | Accept a junk-entity prune proposal: delete the over-extraction artifact |
-| `memory_graph_reject_entity_proposal(proposal_id)` | Reject a pending entity merge/junk proposal (kept for audit) |
+| `memory_get(entry_id)` / `memory_reinforce(entry_id)` | Dereference a memory id to its full episode (+ `consolidated_into`); reinforce it after finding it useful |
+| `memory_fact_get(entity, attribute)` | The one CURRENT canonical value at a slot (+ parked contenders) |
+| `memory_fact_set(entity, attribute, value, origin?, confidence?)` | Assert a canonical fact deliberately (insert / confirm / supersede / contest) |
+| `memory_fact_resolve(entity, attribute, accept)` | Settle a contested slot — adopt (`true`) or discard (`false`) the contender |
+| `memory_history(entity, attribute)` | Version timeline at a slot, with writer/temporal stamps |
+| `memory_world_set(entity, attribute, value, source_url?, ...)` | Assert a cited WORLD fact (external knowledge; age-decayed trust by freshness class) |
+| `memory_world_search(query, top_k?)` | Search world facts — each carries `effective_confidence`, a `stale` flag, and its citation |
+| `memory_outcome(task, outcome, about?, detail?, polarity?)` | Record a procedural outcome signal (`success`/`failure`/`correction`); the dream distils signals into lessons |
+| `memory_lesson_search(query, top_k?)` | Recall learned lessons for the task at hand — heed `polarity` `-` dead-ends |
+| `memory_dream(action, limit?, cursor?, apply?)` | Drive the dream: `status` / `pull` / `commit` / `run` (server-side extractor) / `deep` (full-corpus graph consolidation; dry-run unless `apply`) |
+| `memory_graph_review(action, proposal_id?, proposals?, scope?)` | Work the review queue: `list` / `propose` / `accept_link` / `reject_link` / `accept_merge` / `accept_junk` / `reject_entity` |
+| `memory_session_title(title)` | Name THIS session's auto-opened episode (default titles are generic) |
+| `memory_episode_start(title, hint?)` / `memory_episode_end()` | Open/close a nested sub-episode for a substantial task; entries stored while open carry its id |
+| `memory_episode_summary(id)` | Stats + tag/source distribution + recent entries within an episode |
+| `memory_consolidation_candidates(query?, episode?, ...)` | Cluster near-duplicate memories ripe for consolidation |
+| `memory_consolidate(replaces, new_text, source?, tags?)` | Atomic supersede + store — replace a cluster with one canonical note |
+| `memory_graph_relate(src, relation, dst, ...)` | Assert a typed edge (closed relation vocabulary; re-assertion bumps confidence) |
+| `memory_graph_unrelate(src, relation, dst)` | Retract an edge (superseded, kept for audit) |
+| `memory_alias(entity, alias)` | Bind an alternative name — lookups resolve aliases first |
+| `memory_graph(entity, depth?, include_facts?, to?, relation_filter?)` | Entity neighborhood (≤3 hops) with derived transitive/inverse edges; `to` returns the shortest path between two entities |
+| `memory_recall(query, hops?, top_k?)` | Multi-hop retrieval for relational questions; `low_confidence: true` → fall back to `memory_search` |
+| `memory_relation_define(name, description, ...)` | Grow the closed relation vocabulary (deliberate, rare act) |
 | `document_ingest(path, source?)` | Index a file (txt/md/pdf) in the reference bank |
-| `document_search(query, top_k?)` | RAG search over reference bank only |
+| `document_search(query, top_k?)` | RAG search over the reference bank only |
 
 Each tool returns plain JSON. See `pseudolife_memory/mcp_server.py` for
 docstrings — those are what Claude reads to decide when to call which tool.
+Full-table dumps and topology views (`facts`, `world`, `lessons`, sources,
+tags, episodes list, graph digest/communities, shortest path, session
+briefing) live in the **Cortex Console** (`/api/*`) and the
+`pseudolife-mcp briefing` CLI — they left the MCP surface in the 2026-07-02
+consolidation.
 
 **Toolset tiers.** Set `PSEUDOLIFE_MCP_TOOLSET=core` to expose only the lean
 **core** set (the rest stay available with the default `full`): `memory_store`,
@@ -157,8 +142,9 @@ interface. There is no AGE/Cypher dependency; `memory_graph` serves
 multi-hop queries (neighborhood + derived/inverse edges + shortest path).
 
 **Weak-model deployments:** set `PSEUDOLIFE_MCP_TOOLSET=core` — it exposes the
-curated core set and hides the power/hygiene tools (`*_forget`, `memory_delete`,
-`memory_relation_define`, the dream internals, …) that a small model can misuse.
+curated core set and hides the power/hygiene tools (`memory_forget`,
+`memory_relation_define`, `memory_dream`, `memory_graph_review`, …) that a
+small model can misuse.
 
 ### memory_recall (multi-hop retrieval)
 
@@ -374,8 +360,9 @@ REFLECT at task end / when an outcome lands:
 ```
 
 The `dream` pass periodically distils stored memories into canonical facts and a
-knowledge graph; `memory_digest` / `memory_communities` then surface the graph's
-shape (hubs, communities, surprising links, questions worth answering).
+knowledge graph; the Console's Atlas view (`/api/graph/digest`,
+`/api/graph/communities`) then surfaces the graph's shape (hubs, communities,
+surprising links, questions worth answering).
 
 ### Session lifecycle hooks (recommended)
 
@@ -433,7 +420,7 @@ The briefing connects to the *already-running* daemon (never starts one) and
 does nothing if the daemon is down — it can't slow or break session start.
 Tune the briefing budget with `--max-unsure N` / `--max-lessons N` /
 `--max-world N` (default 3 each). The briefing content is also available on
-demand via the `memory_briefing` tool.
+demand via the CLI or the Console's `/api/briefing` route.
 
 ## Configuration
 
@@ -536,19 +523,10 @@ memory_supersede(
 Marks the old fact superseded *and* stores the correction. Both will
 surface in future retrieval, with the new one ranked higher.
 
-**End of session:**
-```
-memory_save()
-```
-Optional — tensors persist eventually anyway, but `save()` snapshots
-immediately so a crash doesn't lose recent stores.
-
-**Discovering what's in the bank:**
-```
-memory_list_sources()
-```
-Returns every source tag and its entry count. Run this before scoped
-searches so you know what tags actually exist instead of guessing.
+**Discovering what's in the bank:** open the Cortex Console — sources, tags,
+episodes, and full-table views all live there (`/api/sources`, `/api/tags`,
+`/api/episodes`, …). Band tensors autosave on a cadence and flush on clean
+exit; there is no manual save step.
 
 **Debugging a retrieval miss:**
 ```
@@ -567,12 +545,12 @@ memory_search("current Python version", disable_recency_boost=True)
 
 **Hygiene:**
 ```
-memory_delete(source="test-noise")
-memory_delete(substring="Junk entry")
-memory_delete(text="Exact fact to remove")
+memory_forget(scope="memory", source="test-noise")
+memory_forget(scope="memory", substring="Junk entry")
+memory_forget(scope="fact", entity="test-entity")
 ```
-At least one filter is required — bare `memory_delete()` returns an
-error to prevent accidental wholesale deletion. For "keep the history
+At least one filter is required for scope `memory` — a bare call returns
+an error to prevent accidental wholesale deletion. For "keep the history
 but mark it wrong" use `memory_supersede` instead.
 
 **Cross-encoder reranking (Tier B):**
@@ -791,7 +769,7 @@ The trust contract: prefer a fresh, *cited* world fact over frozen training
 intuition when they conflict — but cite it ("as of <date>, per <source>") rather
 than presenting it as your own knowledge; your own cortex/episodic facts stay the
 highest-trust ground truth. `memory_search` surfaces matching world facts in a
-separate block, and `memory_world_facts` lists them all for audit.
+separate block, and the Console's world view (`/api/world`) lists them all for audit.
 
 > The world cortex here is populated **manually** via `memory_world_set`. The
 > live-web `research_ingest` action (fetch + distil cited world facts
@@ -889,19 +867,19 @@ required**:
 
 | Tier | How it runs | Needs | Quality |
 |------|-------------|-------|---------|
-| **0 — baseline** | `memory_dream_run` (regex floor) — headless, on-box, free | nothing | weak (`X is Y`, `key: value`, port/version) |
+| **0 — baseline** | `memory_dream(action="run")` (regex floor) — headless, on-box, free | nothing | weak (`X is Y`, `key: value`, port/version) |
 | **1 — default** | the **agent itself** is the gateway: the `/dream` command | the agent you already run | highest |
 | **2 — opt-in** | daemon auto-sweep calls a configured OpenAI-compatible endpoint | one base-URL + key + model | high; free if local |
 
 **Tier 1 — `/dream` (recommended).** Copy `examples/commands/dream.md` to
 `.claude/commands/dream.md` in any project, then run `/dream`. The agent reads
-`memory_dream_pull`, extracts durable current-state facts, writes them with
-`memory_fact_set`, and commits the cursor. To run it on a cadence instead of by
-hand, point a scheduled agent/cron job at the same prompt.
+`memory_dream(action="pull")`, extracts durable current-state facts, writes them
+with `memory_fact_set`, and commits the cursor. To run it on a cadence instead
+of by hand, point a scheduled agent/cron job at the same prompt.
 
-**Tier 0 — zero-config.** Call `memory_dream_run` (or schedule it) for a fully
-headless pass with the deterministic regex floor — no LLM, nothing leaves the
-machine.
+**Tier 0 — zero-config.** Call `memory_dream(action="run")` (or schedule it)
+for a fully headless pass with the deterministic regex floor — no LLM, nothing
+leaves the machine.
 
 **Tier 2 — headless auto-sweep.** Point the daemon at any OpenAI-compatible
 endpoint and it dreams on its own — no agent, no manual trigger:
@@ -922,8 +900,8 @@ pass that finds no canonical facts writes nothing and advances the cursor; a
 so those memories are retried next sweep rather than skipped — there is no regex
 fallback either way. The extractor timeout defaults to **240s** (a CPU model emits
 ~30 tok/s, so a full `PSEUDOLIFE_DREAM_MAX_TOKENS` generation is ~70s) — raise it
-for slower hardware. The same env vars also upgrade `memory_dream_run`. A local
-model keeps all text on-box; a hosted endpoint does not.
+for slower hardware. The same env vars also upgrade `memory_dream(action="run")`.
+A local model keeps all text on-box; a hosted endpoint does not.
 
 **Tier 2, batteries-included — the CPU extractor sidecar (default-on).** The stack
 ships a llama.cpp sidecar with a small model baked in (Gemma 4 E2B — the
@@ -938,7 +916,7 @@ naive-RAG at ~25× fewer tokens/query); see `evals/README.md`.
 
 What gets consolidated and when is configurable under `memory.dream`
 (`eligible_sources` / `exclude_sources`, and the `min_batch` / `idle_seconds`
-backlog+quiescence thresholds that `memory_dream_status` reports).
+backlog+quiescence thresholds that `memory_dream(action="status")` reports).
 
 **Cadence — quiescence-gated, daemon-only.** The auto-sweep (Tier 2) fires when:
 
@@ -955,8 +933,8 @@ in the searchable bands and reach the cortex once you go quiet (~10 min idle) or
 backlog of 8 accumulates.
 
 **Want a fact canonical *now*, mid-session?** Two on-demand paths bypass the wait:
-`memory_fact_set` writes a canonical fact instantly, and `memory_dream_run` forces
-a full consolidation sweep on the spot (the `/dream` command wraps it).
+`memory_fact_set` writes a canonical fact instantly, and `memory_dream(action="run")`
+forces a full consolidation sweep on the spot (the `/dream` command wraps it).
 `memory_search` finds the original prose the entire time regardless.
 
 **Privacy & cost.** Tier 0 is on-box and free. Tier 1 spends the agent tokens
@@ -966,15 +944,15 @@ on-machine.
 
 **Deep dream — full-corpus graph consolidation.** The incremental dream (tiers
 above) is window-local: it distils only the recent MIRAS tail into cortex facts.
-`memory_deep_dream` is a separate, manually-triggered full-corpus GRAPH pass
-(Phase-2 'C'). A dry-run (default) returns a preview of what it would change:
+`memory_dream(action="deep")` is a separate, manually-triggered full-corpus GRAPH
+pass (Phase-2 'C'). A dry-run (default) returns a preview of what it would change:
 re-scored edges, hard type-violation edges queued for supersession, exact-duplicate
 entity pairs queued for merging, and semantic link *candidates* across sessions
-(each with context snippets). Calling `memory_deep_dream(apply=True)` commits the
-safe self-clean (re-score + supersede violations + merge exact dups) and returns
-`candidates` for review. The operator then drives Step C manually in the same
-session: dispatch Opus subagents over those candidates, collect survivors, and
-post them with `memory_graph_propose_links` — they land in the Atlas Review queue
+(each with context snippets). Adding `apply=True` commits the safe self-clean
+(re-score + supersede violations + merge exact dups) and returns `candidates` for
+review. The operator then drives Step C manually in the same session: dispatch
+Opus subagents over those candidates, collect survivors, and post them with
+`memory_graph_review(action="propose")` — they land in the Atlas Review queue
 (`proposed_link` findings) for per-item accept/reject before anything reaches live
 edges. See `docs/runbooks/deep-dream.md` for the operator procedure.
 
@@ -1120,7 +1098,7 @@ python -m pseudolife_memory.web.devserver   # http://127.0.0.1:8770/ui/
 | Provenance contenders | Tier-rank guard `user > action > agent`; `memory_fact_resolve` |
 | Knowledge graph | Typed entities/edges, closed relation vocab, on-read closure (Postgres + NetworkX, no AGE/Cypher) |
 | World cortex | `memory_world_*` — cited external facts + age-decayed freshness (manual ingest) |
-| Procedural memory | `memory_outcome` (signals) → dream-synthesised `memory_lessons`/`memory_lesson_search`; `prefers`/`avoids` graph edges; single-writer |
+| Procedural memory | `memory_outcome` (signals) → dream-synthesised lessons via `memory_lesson_search`; `prefers`/`avoids` graph edges; single-writer |
 | Sense of time + multi-writer | Per-write stamp (tx/valid time, HLC ordering, writer/session); `memory_history`; relative `age` on reads; `write_mode` seam (snapshot live, occ Phase-2) |
 | Episodes + tags | Session episodes daemon-owned, keyed by stable per-session id (`mcp-session-id` / `X-PL-Session`); lazy-open + idle reaper + prune-empty; nested sub-episodes (`memory_episode_*`, schema v15) with subtree-expanded recall; multi-valued `tags=[...]` |
 | Session briefing | SessionStart hook injects unsure-graph + lessons + verified world facts + last-session recap (`pseudolife-mcp briefing`) |

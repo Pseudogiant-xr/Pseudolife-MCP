@@ -15,7 +15,7 @@ def test_dream_run_passes_limit(monkeypatch):
                 "contested": 0, "superseded": 0, "cursor": 0.0}
 
     monkeypatch.setattr(srv.service, "dream_run", fake_dream_run)
-    srv.memory_dream_run(limit=500)
+    srv.memory_dream(action="run", limit=500)
     assert seen["limit"] == 500
 
 

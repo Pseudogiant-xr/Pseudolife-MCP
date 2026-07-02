@@ -6,6 +6,38 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-02 review, final item — MCP tool-surface consolidation)
+- **BREAKING: the MCP surface shrank from 55 tools to 32** (the manifest is
+  agent context every session: description payload dropped ~37.0k → ~15.0k
+  chars, ~60%). Three verb-dispatched tools replace fifteen:
+  - `memory_dream(action=...)` — `status` / `pull` / `commit` / `run` /
+    `deep` (replaces `memory_dream_status/pull/commit/run` +
+    `memory_deep_dream`).
+  - `memory_forget(scope=...)` — `memory` / `fact` / `world` / `lesson`
+    (replaces `memory_delete`, `memory_fact_forget`, `memory_world_forget`,
+    `memory_lesson_forget`). Scope `memory` now returns a structured
+    `{error: "filter_required"}` on a filterless call instead of a raw
+    ToolError.
+  - `memory_graph_review(action=...)` — `list` / `propose` / `accept_link` /
+    `reject_link` / `accept_merge` / `accept_junk` / `reject_entity`
+    (replaces `memory_graph_propose_links` + the five accept/reject tools;
+    `list` newly exposes `service.graph_review` over MCP).
+- **Removed from MCP** (Console REST + CLI cover them; service methods and
+  `/api` routes unchanged): `memory_facts`, `memory_world_facts`,
+  `memory_lessons`, `memory_list_sources`, `memory_list_tags`,
+  `memory_episode_list`, `memory_communities`, `memory_digest`,
+  `memory_briefing` (the SessionStart hook uses `pseudolife-mcp briefing`),
+  `memory_path` (use `memory_graph(to=...)`), `memory_save` (autosave loop +
+  exit flush already cover durability).
+- **Every remaining docstring rewritten terse** — first line says what the
+  tool does, when-to-use guidance kept only where it changes behaviour.
+  `tests/test_tool_consolidation.py` pins the budget (≤1600 chars/tool,
+  ≤18k total) plus dispatch/validation contracts for the three merged tools.
+- Core-tier membership (`PSEUDOLIFE_MCP_TOOLSET=core`) is unchanged — all 15
+  core tools kept their names, as did every tool referenced by the global
+  CLAUDE.md workflow. `/dream` command and deep-dream runbook updated to the
+  new verbs.
+
 ### Fixed/Changed (2026-07-02 review P3 — surface polish + zombie sweep)
 - **Tokenless `/api` is now browser-hardened** (review H2, live exposure —
   the daemon runs without a token): foreign `Origin` → 403 (CSRF, covers
