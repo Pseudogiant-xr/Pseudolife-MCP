@@ -87,6 +87,13 @@ export async function renderGalaxy(host, data, opts = {}) {
     .cooldownTime(reduce ? 0 : 12000)
     .onNodeClick((n) => onNodeClick(n.id));
 
+  // The 3D camera starts aimed at the origin; the layout's centroid drifts, so
+  // fit it to the graph once nodes have spread (and again when the engine
+  // settles) instead of leaving it parked off to one side.
+  const fitCam = () => { try { fg3d && fg3d.zoomToFit(400, 40); } catch {} };
+  setTimeout(() => { if (mountPt.isConnected) fitCam(); }, 700);
+  fg3d.onEngineStop(fitCam);
+
   const ro = new ResizeObserver(() => {
     const b = wrap.getBoundingClientRect();
     if (fg3d && b.width) { fg3d.width(b.width); fg3d.height(b.height); }

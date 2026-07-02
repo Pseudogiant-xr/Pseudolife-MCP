@@ -161,7 +161,7 @@ class ConsoleRoutes:
         g("/api/graph", lambda q, b: svc.graph_neighborhood(
             entity=_s(q, "entity"), depth=_i(q, "depth", 1),
             include_facts=_tribool(q, "include_facts") is not False,
-            to=_s(q, "to"), scope=_s(q, "scope")))
+            to=_s(q, "to"), scope=_s(q, "scope"), max_nodes=_i(q, "limit", 300)))
         g("/api/graph/projects", lambda q, b: svc.graph_projects())
         g("/api/graph/digest", lambda q, b: svc.graph_digest())
         g("/api/graph/communities",

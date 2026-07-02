@@ -273,7 +273,8 @@ class FixtureService:
         return {"tags": tags, "total": sum(t["count"] for t in tags)}
 
     # graph
-    def graph_neighborhood(self, entity, depth=1, include_facts=True, to=None, scope=None):
+    def graph_neighborhood(self, entity, depth=1, include_facts=True, to=None,
+                           scope=None, max_nodes=None):
         entity = entity or "pseudolife-mcp"
         # A deliberately dense neighbourhood (~20 nodes) so the visualizer's
         # spread / zoom / fit behaviour can be exercised like a real bank.
@@ -329,8 +330,21 @@ class FixtureService:
             keep = {nd["entity"] for nd in nodes if scope in nd["sources"]}
             nodes = [nd for nd in nodes if nd["entity"] in keep]
             edges = [e for e in edges if e["src"] in keep and e["dst"] in keep]
+        total_nodes, total_edges, truncated = len(nodes), len(edges), False
+        if max_nodes and total_nodes > max_nodes:
+            deg = {}
+            for e in edges:
+                deg[e["src"]] = deg.get(e["src"], 0) + 1
+                deg[e["dst"]] = deg.get(e["dst"], 0) + 1
+            ranked = sorted(nodes, key=lambda nd: (deg.get(nd["entity"], 0), nd["entity"]),
+                            reverse=True)
+            kept = {nd["entity"] for nd in ranked[:max_nodes]}
+            nodes = [nd for nd in nodes if nd["entity"] in kept]
+            edges = [e for e in edges if e["src"] in kept and e["dst"] in kept]
+            truncated = True
         return {"found": True, "entity": entity, "depth": depth,
-                "nodes": nodes, "edges": edges,
+                "nodes": nodes, "edges": edges, "truncated": truncated,
+                "total_nodes": total_nodes, "total_edges": total_edges,
                 "paths": [["pseudolife-mcp", "postgres", "docker-desktop"]] if to else []}
 
     # graph insight

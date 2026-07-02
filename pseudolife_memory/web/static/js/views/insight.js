@@ -62,7 +62,7 @@ function godNodesPanel(nodes, maxDeg) {
         el("span", { class: "gn-name" }, n.display),
         el("span", { class: "gn-bar" }, el("i", { style: { width: Math.round((n.degree / maxDeg) * 100) + "%" } })),
         el("span", { class: "gn-deg" }, String(n.degree)),
-        el("span", { class: "gn-atlas", title: "Show in Atlas", role: "link",
+        el("span", { class: "gn-atlas", title: "Show in the graph overview", role: "link",
           style: { marginLeft: "8px", cursor: "pointer" },
           onclick: (e) => { e.stopPropagation();
             location.hash = "#/atlas?entity=" + encodeURIComponent(n.display); } }, "↗"))))

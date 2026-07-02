@@ -9,7 +9,6 @@ import { renderLessons } from "./views/lessons.js";
 import { renderStream } from "./views/stream.js";
 import { renderRecall } from "./views/recall.js";
 import { renderGraph } from "./views/graph.js";
-import { renderAtlas } from "./views/atlas.js";
 import { renderInsight } from "./views/insight.js";
 import { renderEpisodes } from "./views/episodes.js";
 import { renderConsole } from "./views/console.js";
@@ -22,12 +21,15 @@ const ROUTES = [
   { id: "stream", label: "Stream", group: "Memory", accent: "var(--c-assoc)", view: renderStream, countKey: "entries" },
   { id: "recall", label: "Recall", group: "Memory", accent: "var(--c-assoc)", view: renderRecall, countKey: null },
   { id: "graph", label: "Graph", group: "Structure", accent: "var(--c-graph)", view: renderGraph, countKey: null },
-  { id: "atlas", label: "Atlas", group: "Structure", accent: "var(--c-graph)", view: renderAtlas, countKey: null },
+  // `atlas` is the legacy hash for the graph's Overview mode — kept routable so
+  // old #/atlas deep links still resolve, but hidden from the nav (one Graph tab).
+  { id: "atlas", label: "Graph", group: "Structure", accent: "var(--c-graph)", view: renderGraph, countKey: null, hidden: true, navAs: "graph" },
   { id: "insight", label: "Insight", group: "Structure", accent: "var(--c-graph)", view: renderInsight, countKey: null },
   { id: "episodes", label: "Episodes", group: "Operations", accent: "var(--c-episode)", view: renderEpisodes, countKey: "episodes" },
   { id: "console", label: "Console", group: "Operations", accent: "var(--c-assoc)", view: renderConsole, countKey: null },
 ];
 const byId = Object.fromEntries(ROUTES.map((r) => [r.id, r]));
+const NAV = ROUTES.filter((r) => !r.hidden);   // routes shown in the sidebar / number shortcuts
 
 const appEl = document.getElementById("app");
 const navEl = document.getElementById("nav");
@@ -71,7 +73,7 @@ onUnauthorized(() => { toast("Unauthorized — set an access token", "bad"); ope
 function buildNav() {
   clear(navEl);
   let lastGroup = null;
-  for (const r of ROUTES) {
+  for (const r of NAV) {
     if (r.group && r.group !== lastGroup) {
       navEl.appendChild(el("div", { class: "nav-group-label" }, r.group));
       lastGroup = r.group;
@@ -87,8 +89,10 @@ function buildNav() {
   }
 }
 function paintNav() {
+  // A hidden route (e.g. #/atlas) lights up the nav item it aliases (navAs).
+  const activeId = current && (current.navAs || current.id);
   navEl.querySelectorAll(".nav-item").forEach((n) => {
-    n.classList.toggle("active", n.dataset.route === (current && current.id));
+    n.classList.toggle("active", n.dataset.route === activeId);
     const ck = n.querySelector(".count[data-count]");
     if (ck) ck.textContent = counts[ck.dataset.count] != null ? fmtNum(counts[ck.dataset.count]) : "";
   });
@@ -151,7 +155,7 @@ document.addEventListener("keydown", (e) => {
   if (e.target.matches("input,textarea,select")) return;
   if (e.key === "r") { refreshCounts(); renderRoute(); }
   const n = parseInt(e.key, 10);
-  if (n >= 1 && n <= ROUTES.length) location.hash = "#/" + ROUTES[n - 1].id;
+  if (n >= 1 && n <= NAV.length) location.hash = "#/" + NAV[n - 1].id;
 });
 
 // ── mobile nav ──────────────────────────────────────────────────────────────
@@ -175,8 +179,12 @@ async function refreshCounts() {
 async function boot() {
   buildNav();
   await refreshCounts();
-  await renderRoute();
+  // Unhide BEFORE the first render: a graph/atlas landing route constructs its
+  // canvas from getBoundingClientRect(), which is 0×0 while #app is display:none
+  // — leaving the camera off-screen until a later resize. The splash still
+  // covers the screen during this frame, so there's no visible flash.
   appEl.hidden = false;
+  await renderRoute();
   const splash = document.getElementById("splash");
   splash.classList.add("hide");
   setTimeout(() => splash.remove(), 600);
