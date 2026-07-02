@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-03 — external findings wave 2)
+- **Lesson staleness ("re-verify")**: lessons whose `about` entity saw cortex
+  fact churn after the lesson was asserted/confirmed carry `re_verify` +
+  `re_verify_reason` in `memory_lesson_search` / `/api/lessons`, and the
+  session briefing renders a `⚠ re-verify` suffix. Read-time only — no stored
+  state; re-confirming the lesson clears the flag.
+- **Causal chain ("what led to X")**: `memory_history(entity)` without an
+  `attribute` now returns the entity's dated event chain — canonical fact
+  assertions/supersessions, source entries (with episode titles), graph
+  edges, and lessons, merged oldest→newest. Also `GET /api/chain` and a
+  timeline block in the Console's entity-provenance drawer.
+
 ### Added (2026-07-03 — external findings wave 1)
 - **Betweenness god-nodes**: `god_nodes()` now ranks by betweenness centrality
   (bridges whose loss disconnects communities) with degree as tiebreak; each

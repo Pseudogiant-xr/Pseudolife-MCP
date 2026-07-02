@@ -1708,6 +1708,7 @@ class MemoryService:
             hits = self._lessons.search(emb, top_k=k, min_score=floor)
             entries = [{**_lesson_record_to_dict(r), "score": round(float(s), 4)}
                        for r, s in hits]
+            self._annotate_lesson_staleness(entries)
             return {"count": len(entries), "entries": entries}
 
     def lessons_dump(self, limit: int = 120) -> dict[str, Any]:
@@ -1716,7 +1717,55 @@ class MemoryService:
             assert self._lessons is not None
             rows = [_lesson_record_to_dict(r) for r in self._lessons.current_records()]
             rows.sort(key=lambda d: (d["task"].lower(), d["aspect"].lower()))
-            return {"count": len(rows), "entries": rows[: max(0, int(limit))]}
+            rows = rows[: max(0, int(limit))]
+            self._annotate_lesson_staleness(rows)
+            return {"count": len(rows), "entries": rows}
+
+    def _cortex_change_index(self) -> dict[str, float]:
+        """norm-entity → latest cortex change ts (assertions + supersessions,
+        over ALL records incl. superseded) — the churn signal behind lesson
+        ``re_verify``. Caller holds the lock."""
+        from pseudolife_memory.memory.cortex import _norm_key
+        idx: dict[str, float] = {}
+        if self._cortex is None:
+            return idx
+        for r in self._cortex.records:
+            ts = max(r.asserted_at, r.superseded_at or 0.0)
+            k = _norm_key(r.entity)
+            if ts > idx.get(k, 0.0):
+                idx[k] = ts
+        return idx
+
+    def _annotate_lesson_staleness(self, rows: list[dict]) -> list[dict]:
+        """Read-time staleness: a lesson whose ``about`` (fallback: task)
+        resolves to a cortex entity whose facts changed AFTER the lesson was
+        asserted/confirmed gets ``re_verify: True`` + ``re_verify_reason``.
+        No stored state — re-confirming the lesson clears the flag. Any
+        resolution failure leaves the row unflagged. Caller holds the lock."""
+        if not rows:
+            return rows
+        from pseudolife_memory.memory.cortex import _norm_key
+        idx = self._cortex_change_index()
+        if not idx:
+            return rows
+        for row in rows:
+            name = (row.get("about") or row.get("task") or "").strip()
+            if not name:
+                continue
+            k = _norm_key(name)
+            if k not in idx and self._storage is not None:
+                from pseudolife_memory.graph import norm_name
+                node = self._storage.find_entity(norm_name(name))
+                if node is not None:
+                    k = _norm_key(node.get("canonical") or "")
+            changed = idx.get(k)
+            seen = max(row.get("asserted_at") or 0.0,
+                       row.get("last_confirmed") or 0.0)
+            if changed and seen and changed > seen:
+                row["re_verify"] = True
+                row["re_verify_reason"] = (
+                    f"facts about {name} changed since this lesson")
+        return rows
 
     def lesson_forget(self, task: str, aspect: str | None = None) -> dict[str, Any]:
         with self._lock:
@@ -1823,6 +1872,86 @@ class MemoryService:
                 "versions": [_cortex_record_to_dict(r, relative_age=ra)
                              for r in recs],
             }
+
+    def chain(self, entity: str, limit: int = 20) -> dict[str, Any]:
+        """Causal chain — "what led to X": dated events about an entity,
+        merged from four streams (canonical fact assertions + supersessions,
+        source entries, graph edges, lessons) and sorted oldest→newest.
+        Alias-aware; streams degrade independently (no graph node → facts +
+        lessons only). Returns ``{found, entity, count, events}`` with events
+        ``{t, kind: fact_set|superseded|entry|edge|lesson, summary, refs}``."""
+        from pseudolife_memory.memory.cortex import _norm_key
+        with self._lock:
+            self._ensure_init()
+            assert self._cortex is not None
+            name = (entity or "").strip()
+            if not name:
+                return {"found": False, "entity": entity, "count": 0, "events": []}
+            keys = {_norm_key(name)}
+            display = name
+            node = None
+            if self._storage is not None:
+                from pseudolife_memory.graph import norm_name
+                node = self._storage.find_entity(norm_name(name))
+                if node is not None:
+                    display = node["display"]
+                    keys.add(_norm_key(node.get("canonical") or ""))
+            events: list[dict] = []
+            # 1. canonical fact history — assertions and supersessions.
+            for r in self._cortex.records:
+                if _norm_key(r.entity) not in keys:
+                    continue
+                events.append({
+                    "t": r.asserted_at, "kind": "fact_set",
+                    "summary": f"{r.attribute} = {r.value}",
+                    "refs": {"attribute": r.attribute}})
+                if r.superseded_at:
+                    by = (f" by {r.superseded_by_value}"
+                          if r.superseded_by_value else "")
+                    events.append({
+                        "t": r.superseded_at, "kind": "superseded",
+                        "summary": f"{r.attribute}: {r.value} superseded{by}",
+                        "refs": {"attribute": r.attribute}})
+            # 2 + 3. source entries and edges need the graph node.
+            if node is not None and self._storage is not None:
+                for en in self._storage.entries_for_entity(
+                        node["id"], limit=limit):
+                    refs = {"entry_id": en.get("id")}
+                    if en.get("episode_title"):
+                        refs["episode_title"] = en["episode_title"]
+                    events.append({
+                        "t": en["ts"], "kind": "entry",
+                        "summary": (en.get("text") or "")[:160],
+                        "refs": refs})
+                g = self._storage.load_graph()
+                disp = {e["id"]: e["display"] for e in g["entities"]}
+                for e in g["edges"]:
+                    if node["id"] not in (e["src_id"], e["dst_id"]):
+                        continue
+                    if not e.get("asserted_at"):
+                        continue
+                    events.append({
+                        "t": e["asserted_at"], "kind": "edge",
+                        "summary": (f"{disp.get(e['src_id'])} —{e['relation']}→ "
+                                    f"{disp.get(e['dst_id'])}"),
+                        "refs": {"relation": e["relation"]}})
+            # 4. lessons whose about/task names the entity.
+            if self._lessons is not None:
+                for r in self._lessons.current_records():
+                    named = {_norm_key(r.entity)}
+                    if r.about:
+                        named.add(_norm_key(r.about))
+                    if named & keys:
+                        events.append({
+                            "t": r.asserted_at, "kind": "lesson",
+                            "summary": r.value,
+                            "refs": {"task": r.entity, "aspect": r.attribute}})
+            if not events:
+                return {"found": False, "entity": entity, "count": 0, "events": []}
+            events.sort(key=lambda ev: ev["t"])
+            events = events[-max(1, int(limit)):]
+            return {"found": True, "entity": display,
+                    "count": len(events), "events": events}
 
     def get_entry(self, entry_id: int) -> dict[str, Any]:
         """Dereference a trace pointer: the dense episode + the facts it formed.

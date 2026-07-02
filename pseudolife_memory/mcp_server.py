@@ -412,13 +412,19 @@ def memory_fact_resolve(entity: str, attribute: str, accept: bool) -> dict[str, 
 
 
 @_tool()
-def memory_history(entity: str, attribute: str) -> dict[str, Any]:
-    """Change history of a canonical fact slot — every version,
-    oldest→newest, each with its writer/session, transaction time, valid
-    time, and age. Answers "what did this used to be?" and "who set this?".
+def memory_history(entity: str, attribute: str | None = None) -> dict[str, Any]:
+    """With ``attribute``: change history of that canonical fact slot — every
+    version, oldest→newest, each with its writer/session, transaction time,
+    valid time, and age ("what did this used to be? who set it?").
 
-    Returns: ``{entity, attribute, count, versions}``.
+    Without ``attribute``: the entity's causal CHAIN — dated
+    fact/entry/edge/lesson events merged oldest→newest ("what led to X?").
+
+    Returns: ``{entity, attribute, count, versions}`` (slot mode) or
+    ``{found, entity, count, events}`` (chain mode).
     """
+    if attribute is None:
+        return service.chain(entity)
     return service.history(entity, attribute)
 
 

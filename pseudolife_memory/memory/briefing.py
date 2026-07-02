@@ -38,7 +38,12 @@ def _fmt_question(q: dict) -> str:
 def _fmt_lesson(e: dict) -> str:
     marker = "avoid" if _is_avoid(e) else "prefer"
     text = (e.get("lesson") or "").strip()
-    return f"- {marker}: {text}" if text else ""
+    if not text:
+        return ""
+    line = f"- {marker}: {text}"
+    if e.get("re_verify"):
+        line += " ⚠ re-verify (facts changed since)"
+    return line
 
 
 def _fmt_world(w: dict) -> str:

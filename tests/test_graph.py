@@ -729,3 +729,24 @@ def test_graph_neighborhood_edges_carry_tag(svc):
     whole = svc.graph_neighborhood()
     assert all(e.get("tag") in {"EXTRACTED", "INFERRED", "AMBIGUOUS"}
                for e in whole["edges"])
+
+
+def test_chain_merges_fact_edge_lesson_events_in_time_order(svc):
+    svc.cortex_write("chain-box", "ip", "10.0.0.5", support="user")
+    svc.cortex_write("chain-box", "ip", "10.0.0.9", support="user")  # supersedes
+    svc.graph_relate("chain-box", "depends-on", "chain-net", origin="user")
+    svc.lesson_write("manage chain-box", "approach", "use static ip",
+                     about="chain-box", now=50.0)
+    out = svc.chain("chain-box")
+    assert out["found"] is True
+    kinds = {e["kind"] for e in out["events"]}
+    assert {"fact_set", "superseded", "edge", "lesson"} <= kinds
+    ts = [e["t"] for e in out["events"]]
+    assert ts == sorted(ts)
+    sup = next(e for e in out["events"] if e["kind"] == "superseded")
+    assert "10.0.0.9" in sup["summary"]
+
+
+def test_chain_unknown_entity_not_found(svc):
+    out = svc.chain("never-existed-entity")
+    assert out["found"] is False and out["events"] == []

@@ -6,7 +6,7 @@
 // its MIRAS provenance (sources + source entries) so a human can judge from
 // evidence, not names alone. Mutations are owned by atlas.js via onAct(desc);
 // provenance is a read this panel hydrates itself.
-import { el } from "./util.js";
+import { el, fmtAge } from "./util.js";
 import { panel, badge, tagBadge } from "./components.js";
 import { api } from "./api.js";
 
@@ -65,6 +65,13 @@ function entityRef(name) {
       drawer.textContent = "";
       drawer.appendChild(dim("provenance unavailable"));
     }
+    try {
+      const c = await api.get("/api/chain", { entity: name });
+      const body = chainBody(c);
+      if (body) drawer.appendChild(body);
+    } catch (err) {
+      drawer.appendChild(dim("chain unavailable"));
+    }
   }
   const chip = el("span", { class: "mono", title: `Show provenance for ${name}`,
     style: { ...CHIP, cursor: "pointer", borderBottom: "1px dotted currentColor" },
@@ -90,6 +97,27 @@ function provBody(p) {
 function snippet(t) {
   t = String(t || "");
   return t.length > 160 ? t.slice(0, 157) + "…" : t;
+}
+
+// "What led to X" timeline (GET /api/chain) — appended under the provenance
+// body when the entity has any dated events.
+const CHAIN_KIND_CLS = { fact_set: "action", superseded: "contested",
+                         entry: "agent", edge: "action", lesson: "user" };
+
+function chainBody(c) {
+  if (!c || c.found === false || !(c.events || []).length) return null;
+  const rows = c.events.map((ev) =>
+    el("div", { style: { margin: "3px 0", fontSize: "12px" } },
+      el("span", { class: "dim mono", style: { marginRight: "6px" } }, fmtAge(ev.t)),
+      el("span", { class: `badge ${CHAIN_KIND_CLS[ev.kind] || "agent"}`,
+        style: { marginRight: "6px" } }, ev.kind),
+      el("span", { class: "dim" }, snippet(ev.summary)),
+      ev.refs && ev.refs.episode_title
+        ? el("span", { class: "dim mono", style: { marginLeft: "6px" } },
+            `[${ev.refs.episode_title}]`)
+        : null));
+  return el("div", { style: { marginTop: "6px" } },
+    dim("chain — what led here: "), ...rows);
 }
 
 // One actionable item line: [chips/score] … [buttons], with the provenance
