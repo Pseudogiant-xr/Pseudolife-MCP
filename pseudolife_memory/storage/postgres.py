@@ -1031,9 +1031,10 @@ class PostgresStorage:
         memory_traces engram cross-index -> entries. Keying through facts avoids
         the graph/cortex norm mismatch (mirrors backfill_entity_sources). A
         graph-only node with no current fact returns []."""
-        cols = ("id", "band", "source", "ts", "text")
+        cols = ("id", "band", "source", "ts", "text", "episode_title")
         return [dict(zip(cols, r)) for r in self.conn.execute(
-            "SELECT DISTINCT en.id, en.band, en.source, en.ts, en.text "
+            "SELECT DISTINCT en.id, en.band, en.source, en.ts, en.text, "
+            "en.episode_title "
             "FROM facts f "
             "JOIN memory_traces t ON t.entity_norm = f.entity_norm "
             "JOIN entries en ON en.id = t.entry_id "
