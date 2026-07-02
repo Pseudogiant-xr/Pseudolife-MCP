@@ -21,6 +21,14 @@ def _undirected(edges: list[dict]) -> nx.Graph:
     return g
 
 
+def _betweenness(g: nx.Graph, sample: int) -> dict[int, float]:
+    """Betweenness centrality; k-sampled above ``sample`` nodes (0 = exact)."""
+    if not g.number_of_edges():
+        return {}
+    k = sample if (sample and g.number_of_nodes() > sample) else None
+    return nx.betweenness_centrality(g, k=k, seed=42)
+
+
 def _partition(g: nx.Graph, *, resolution: float, algorithm: str) -> list[set]:
     """Return a list of node-sets. Leiden if asked-for AND importable, else Louvain."""
     if algorithm == "leiden":
@@ -141,15 +149,21 @@ _PERIPHERAL_DEGREE = 2
 
 
 def god_nodes(edges: list[dict], entities: list[dict], *, top_n: int = 10,
-              exclude_etypes: tuple[str, ...] = ()) -> list[dict]:
+              exclude_etypes: tuple[str, ...] = (),
+              betweenness_sample: int = 200) -> list[dict]:
+    """Top connector entities. Ranked by betweenness centrality (bridges that
+    hold communities together — their loss has the widest blast radius),
+    with degree as tiebreak; ``degree`` is still reported per node."""
     deg = degree_counts(edges)
+    bc = _betweenness(_undirected(edges), betweenness_sample)
     excluded = {e["id"] for e in entities if e.get("etype") in exclude_etypes}
     disp = {e["id"]: e["display"] for e in entities}
     ranked = sorted(
         ((eid, d) for eid, d in deg.items() if eid not in excluded),
-        key=lambda kv: (-kv[1], kv[0]),
+        key=lambda kv: (-bc.get(kv[0], 0.0), -kv[1], kv[0]),
     )
-    return [{"entity_id": eid, "display": disp.get(eid, str(eid)), "degree": d}
+    return [{"entity_id": eid, "display": disp.get(eid, str(eid)),
+             "degree": d, "betweenness": round(bc.get(eid, 0.0), 4)}
             for eid, d in ranked[:top_n]]
 
 
@@ -236,8 +250,7 @@ def suggest_questions(edges: list[dict], entities: list[dict],
     g = _undirected(edges)
     # 2. bridge entities (high betweenness spanning >=2 communities)
     if g.number_of_edges():
-        k = betweenness_sample if (betweenness_sample and g.number_of_nodes() > betweenness_sample) else None
-        bc = nx.betweenness_centrality(g, k=k, seed=42)
+        bc = _betweenness(g, betweenness_sample)
         bridges = sorted(((n, s) for n, s in bc.items() if s > 0),
                          key=lambda kv: (-kv[1], kv[0]))
         for n, _s in bridges[:3]:
@@ -304,7 +317,8 @@ def build_digest(communities: dict[int, list[int]], summaries: list[dict],
     return {
         "computed_at": computed_at,
         "communities": summaries,
-        "god_nodes": god_nodes(edges, entities, top_n=god_top_n),
+        "god_nodes": god_nodes(edges, entities, top_n=god_top_n,
+                               betweenness_sample=betweenness_sample),
         "surprises": surprising_connections(edges, entities, node_comm, top_n=surprises_top_n),
         "questions": suggest_questions(edges, entities, communities, node_comm,
                                        contested_facts, summaries, top_n=questions_top_n,

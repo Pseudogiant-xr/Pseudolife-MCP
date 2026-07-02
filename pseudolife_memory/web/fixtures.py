@@ -366,10 +366,14 @@ class FixtureService:
                 {"id": 1, "label": "Cortex Console web frontend", "size": 9, "cohesion": 0.55},
                 {"id": 2, "label": "postgres", "size": 4, "cohesion": 0.31}],
             "god_nodes": [
-                {"entity_id": 1, "display": "pseudolife-mcp", "degree": 12},
-                {"entity_id": 2, "display": "Cortex Console web frontend", "degree": 10},
-                {"entity_id": 3, "display": "postgres", "degree": 6},
-                {"entity_id": 4, "display": "docker-desktop", "degree": 4}],
+                {"entity_id": 1, "display": "pseudolife-mcp", "degree": 12,
+                 "betweenness": 0.42},
+                {"entity_id": 2, "display": "Cortex Console web frontend",
+                 "degree": 10, "betweenness": 0.31},
+                {"entity_id": 3, "display": "postgres", "degree": 6,
+                 "betweenness": 0.12},
+                {"entity_id": 4, "display": "docker-desktop", "degree": 4,
+                 "betweenness": 0.05}],
             "surprises": [
                 {"src": "claude-code", "dst": "pseudolife-mcp", "relation": "writes-to",
                  "confidence": 0.85, "origin": "agent", "score": 5,
