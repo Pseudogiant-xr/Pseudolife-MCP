@@ -348,12 +348,16 @@ def memory_fact_get(entity: str, attribute: str) -> dict[str, Any]:
 
     Returns: ``{record | null, contenders}`` (+ ``entity_ref`` when the
     entity has a graph node). A non-empty ``contenders`` list is an
-    unsettled conflict — see ``memory_fact_resolve``.
+    unsettled conflict — see ``memory_fact_resolve``. On an empty slot,
+    ``candidates`` lists nearby current slots (same entity first, then
+    similar slots) — ranked leads, not the answer.
     """
     out = {
         "record": service.cortex_lookup(entity, attribute),
         "contenders": service.cortex_contenders(entity, attribute)["contenders"],
     }
+    if out["record"] is None and not out["contenders"]:
+        out["candidates"] = service.cortex_candidates(entity, attribute)
     # Graph join: when the subject has a graph node, surface its id +
     # aliases so callers can pivot into memory_graph.
     ref = service.entity_ref(entity)

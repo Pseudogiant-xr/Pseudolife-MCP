@@ -1353,6 +1353,39 @@ class MemoryService:
                 "contenders": [_cortex_record_to_dict(r) for r in recs],
             }
 
+    def cortex_candidates(self, entity: str, attribute: str,
+                          top_k: int = 5) -> list[dict]:
+        """Ranked nearby slots for an empty-slot lookup (see
+        ``CortexStore.candidates_for``). Alias-aware: same-entity candidates
+        are collected for both the queried name and its canonical graph
+        alias. Degrades to same-entity-only when the embedder is absent."""
+        with self._lock:
+            self._ensure_init()
+            assert self._cortex is not None
+            names = [entity]
+            if self._storage is not None:
+                from pseudolife_memory.graph import norm_name
+                node = self._storage.find_entity(norm_name(entity))
+                if node is not None:
+                    canon = node.get("canonical")
+                    if canon and norm_name(canon) != norm_name(entity):
+                        names.append(canon)
+            emb = None
+            if self._embedder is not None:
+                emb = self._embedder.encode_single(f"{entity} {attribute}")
+            out: list[dict] = []
+            seen: set[tuple[str, str]] = set()
+            for name in names:
+                for c in self._cortex.candidates_for(
+                        name, attribute, emb, top_k=top_k):
+                    k = (c["entity"].lower(), c["attribute"].lower())
+                    if k not in seen:
+                        seen.add(k)
+                        out.append(c)
+            out.sort(key=lambda c: (c["why"] != "same_entity",
+                                    -(c["score"] or 1.0)))
+            return out[:top_k]
+
     def cortex_resolve(self, entity: str, attribute: str, accept: bool) -> dict[str, Any]:
         """Promote (accept) or retire (reject) the active contender at a slot.
         Persists. Returns ``{"resolved": False, "reason": "no_contender"}`` when

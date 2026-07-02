@@ -522,6 +522,44 @@ class CortexStore:
         scored.sort(key=lambda rs: rs[1], reverse=True)
         return scored[: max(0, int(top_k))]
 
+    def candidates_for(
+        self,
+        entity: str,
+        attribute: str,
+        query_embedding: torch.Tensor | None = None,
+        *,
+        top_k: int = 5,
+        min_score: float = 0.35,
+    ) -> list[dict]:
+        """Ranked nearby slots for an EMPTY slot lookup — leads, not answers.
+
+        Same-entity current facts first (other attributes, most recently
+        asserted/confirmed first, ``score=None``), then embedding-similar
+        slots above ``min_score`` (``score`` = cosine). Never includes the
+        queried slot itself.
+        """
+        key_ent, key_attr = _norm_key(entity), _norm_key(attribute)
+        same = [r for r in self.current_records()
+                if _norm_key(r.entity) == key_ent
+                and _norm_key(r.attribute) != key_attr]
+        same.sort(key=lambda r: -max(r.asserted_at, r.last_confirmed))
+        out = [{"entity": r.entity, "attribute": r.attribute, "value": r.value,
+                "score": None, "why": "same_entity"} for r in same[:top_k]]
+        if query_embedding is not None and len(out) < top_k:
+            seen = {r.key for r in same}
+            seen.add((key_ent, key_attr))
+            for rec, s in self.search(query_embedding, top_k=top_k * 2,
+                                      min_score=min_score):
+                if rec.key in seen:
+                    continue
+                seen.add(rec.key)
+                out.append({"entity": rec.entity, "attribute": rec.attribute,
+                            "value": rec.value, "score": round(float(s), 4),
+                            "why": "similar_slot"})
+                if len(out) >= top_k:
+                    break
+        return out
+
     def resolve_slot(
         self, slot_embedding: torch.Tensor, threshold: float,
     ) -> tuple[str, str] | None:

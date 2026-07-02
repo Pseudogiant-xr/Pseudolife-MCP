@@ -491,3 +491,36 @@ if __name__ == "__main__":
             print(f"ok   {name}")
     print(f"\n{len(tests) - failures}/{len(tests)} passed")
     sys.exit(1 if failures else 0)
+
+
+def test_candidates_for_same_entity_first_recency_ranked():
+    s = CortexStore()
+    s.write_fact(Slot("server", "port", "8080"), _unit(1), support="user", now=100.0)
+    s.write_fact(Slot("server", "host", "hal9000"), _unit(2), support="user", now=200.0)
+    s.write_fact(Slot("other", "port", "9090"), _unit(3), support="user", now=300.0)
+    got = s.candidates_for("server", "os")  # empty slot, no embedding
+    assert [(c["attribute"], c["why"]) for c in got[:2]] == [
+        ("host", "same_entity"), ("port", "same_entity")]
+    assert all(c["score"] is None for c in got if c["why"] == "same_entity")
+    assert all(c["entity"] == "server" for c in got)
+
+
+def test_candidates_for_similar_slot_via_embedding():
+    s = CortexStore()
+    e = _unit(7)
+    s.write_fact(Slot("daemon", "version", "0.2.0"), e, support="user", now=100.0)
+    s.write_fact(Slot("unrelated", "color", "blue"), -e, support="user", now=100.0)
+    got = s.candidates_for("no such entity", "ver", query_embedding=e)
+    assert got and got[0]["why"] == "similar_slot"
+    assert got[0]["entity"] == "daemon" and got[0]["score"] > 0.9
+    assert all(c["entity"] != "unrelated" for c in got)  # below 0.35 floor
+
+
+def test_candidates_for_excludes_queried_slot_and_caps():
+    s = CortexStore()
+    for i in range(8):
+        s.write_fact(Slot("srv", f"attr{i}", f"v{i}"), _unit(i), support="user",
+                     now=float(i))
+    got = s.candidates_for("srv", "attr0")
+    assert len(got) == 5  # top_k cap
+    assert all(c["attribute"] != "attr0" for c in got)
