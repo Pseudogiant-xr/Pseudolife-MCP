@@ -1569,17 +1569,27 @@ class MemoryService:
         Caller holds the lock; no-op in file mode. Returns edges written."""
         if self._storage is None or not relations:
             return 0
+        import time as _t
         from pseudolife_memory import graph as G
-        from pseudolife_memory.memory.relation_quality import edge_confidence
+        from pseudolife_memory.memory.relation_quality import (
+            GENERIC_HUB_NORMS, edge_confidence)
         known = [r["name"] for r in self._graph.load_relations()
                  if r["name"] not in ("prefers", "avoids")]
         floor = float(self.config.memory.dream.min_relation_confidence)
         n = 0
         from pseudolife_memory.memory.graph_consolidation import junk_name_reason
+        scope_map = self._storage.entity_sources_map()
         for r in relations:
             raw_src, raw_dst = str(r.get("src", "")), str(r.get("dst", ""))
             src_n, dst_n = G.norm_name(raw_src), G.norm_name(raw_dst)
             if not src_n or not dst_n or src_n == dst_n:
+                continue
+            # Generic-hub gate: everything "relates to" MCP / master /
+            # CLAUDE.md, so a dream edge touching one carries no information.
+            # Explicit graph_relate is unaffected.
+            if src_n in GENERIC_HUB_NORMS or dst_n in GENERIC_HUB_NORMS:
+                logger.debug("dream relation dropped (generic-hub): %r -> %r",
+                             raw_src, raw_dst)
                 continue
             # Write-time junk gate: the 2B extractor's known artifact classes
             # (concat names, bare numbers, status words) never become entities.
@@ -1595,6 +1605,19 @@ class MemoryService:
                 continue
             src_e = self._resolve_or_create_entity(raw_src)
             dst_e = self._resolve_or_create_entity(raw_dst)
+            # Cross-project gate: entities attributed to disjoint projects
+            # merely coexist in the shared bank — route the claim to
+            # edge_proposals for human review instead of the live graph.
+            ss = set(scope_map.get(src_e["id"], []))
+            ds = set(scope_map.get(dst_e["id"], []))
+            if ss and ds and not (ss & ds):
+                self._storage.insert_proposal(
+                    src_e["id"], relation, dst_e["id"], conf, None,
+                    f"cross-project: {sorted(ss)} x {sorted(ds)}",
+                    "dream-cross-project", _t.time())
+                logger.debug("dream relation proposed (cross-project): %r -> %r",
+                             raw_src, raw_dst)
+                continue
             # revive=False: a dream re-assertion must not resurrect an edge
             # a human (or deep-dream) superseded — removals stay sticky.
             self._graph.upsert_edge(src_e["id"], relation, dst_e["id"],
@@ -2873,13 +2896,30 @@ class MemoryService:
             src_map = self._storage.entity_sources_map()
             proposals = self._storage.pending_proposals()
             entity_proposals = self._storage.pending_entity_proposals()
+            dismissed = self._storage.dismissed_pairs()
         entities, edges = g["entities"], g["edges"]
         if scope and scope != "all":
             keep = {eid for eid, ss in src_map.items() if scope in ss}
             entities = [e for e in entities if e["id"] in keep]
             edges = [e for e in edges if e["src_id"] in keep and e["dst_id"] in keep]
         return gr.review(edges, entities, src_map, proposals=proposals,
-                         entity_proposals=entity_proposals)
+                         entity_proposals=entity_proposals,
+                         dismissed_pairs=dismissed)
+
+    def graph_dismiss_duplicate(self, a: str, b: str) -> dict[str, Any]:
+        """Human verdict on a duplicate finding: these two names are genuinely
+        distinct. Persisted by normalized name so the stateless analyzer never
+        re-flags the pair."""
+        from pseudolife_memory import graph as G
+        an, bn = G.norm_name(a), G.norm_name(b)
+        if not an or not bn or an == bn:
+            return {"dismissed": False, "reason": "bad_pair", "a": a, "b": b}
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return dict(self._GRAPH_UNAVAILABLE)
+            new = self._storage.dismiss_pair(an, bn)
+        return {"dismissed": True, "new": new, "a": a, "b": b}
 
     def entity_provenance(self, entity: str, *, limit: int = 20) -> dict[str, Any]:
         """Why does this entity exist? Its project attribution (entity_sources)

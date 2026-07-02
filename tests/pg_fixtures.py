@@ -23,6 +23,9 @@ _TEST_DB = "pseudolife_memory_test"
 _ALL_TABLES = (
     "edges", "entity_aliases", "relations", "facts", "world_facts", "lessons",
     "outcome_signals", "entries", "episodes", "entities", "meta",
+    # No FK to entities, so the CASCADE above never reaches it — truncate
+    # explicitly or dismissals leak across test runs.
+    "dismissed_pairs",
 )
 
 

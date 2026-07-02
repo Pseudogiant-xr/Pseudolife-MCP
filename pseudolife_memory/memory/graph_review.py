@@ -23,13 +23,18 @@ def _token_set(name):
             if len(t) > 2 or any(c.isdigit() for c in t)}
 
 
-def duplicate_candidates(entities, *, min_jaccard=0.6):
-    toks = [(e["id"], e["display"], _token_set(e["display"])) for e in entities]
+def duplicate_candidates(entities, *, min_jaccard=0.6, dismissed=frozenset()):
+    """``dismissed`` holds human-settled false positives as ordered
+    (canonical_a, canonical_b) tuples — those pairs never re-flag."""
+    toks = [(e["id"], e["display"], _token_set(e["display"]), e.get("canonical"))
+            for e in entities]
     out = []
     for i in range(len(toks)):
         for j in range(i + 1, len(toks)):
             a, b = toks[i][2], toks[j][2]
             if not a or not b:
+                continue
+            if tuple(sorted((toks[i][3] or "", toks[j][3] or ""))) in dismissed:
                 continue
             jac = len(a & b) / len(a | b)
             if jac >= min_jaccard:
@@ -115,8 +120,10 @@ def junk_candidates(entity_proposals):
              "label": f"{len(items)} junk entities to prune", "entities": items}]
 
 
-def review(edges, entities, entity_sources_map, proposals=None, entity_proposals=None):
-    findings = (duplicate_candidates(entities) + test_artifacts(entities)
+def review(edges, entities, entity_sources_map, proposals=None, entity_proposals=None,
+           dismissed_pairs=None):
+    findings = (duplicate_candidates(entities, dismissed=dismissed_pairs or frozenset())
+                + test_artifacts(entities)
                 + dubious_edges(edges, entities) + orphans(edges, entities)
                 + unattributed(entities, entity_sources_map)
                 + proposed_links(proposals or [])

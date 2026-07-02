@@ -168,6 +168,13 @@ def test_bless_edge_route(svc):
     assert out["blessed"] is True
 
 
+def test_dismiss_duplicate_route(svc):
+    r = ConsoleRoutes(svc)
+    out = r.dispatch("POST", "/api/graph/dismiss-duplicate", {},
+                     {"a": "postgres", "b": "postgres.py"})
+    assert out["dismissed"] is True
+
+
 def test_delete_entity_route(svc):
     r = ConsoleRoutes(svc)
     out = r.dispatch("POST", "/api/graph/delete-entity", {}, {"entity": "junk"})

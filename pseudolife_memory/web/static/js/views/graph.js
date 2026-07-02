@@ -225,6 +225,10 @@ export async function renderGraph(root, ctx) {
       await postAll([{ path: "/api/graph/reject-proposal", body: { id: d.id } }], "Dismissed");
       return;
     }
+    if (d.kind === "dismiss-duplicate") {                 // duplicate: genuinely-distinct verdict
+      await postAll([{ path: "/api/graph/dismiss-duplicate", body: { a: d.a, b: d.b } }], "Dismissed");
+      return;
+    }
     if (d.kind === "bless") {                             // dubious_edge (bulk): human "Keep"
       const edges = d.edges || [];
       await postAll(edges.map((e) => ({ path: "/api/graph/bless-edge",
