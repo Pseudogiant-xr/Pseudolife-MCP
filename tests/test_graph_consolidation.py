@@ -199,6 +199,26 @@ def test_candidate_pairs_drops_identical_mention_sets():
     assert pairs == {(1, 3), (2, 3)}
 
 
+def test_candidate_pairs_drops_high_support_overlap():
+    # Near-identical supporting-entry sets are still co-occurrence, not
+    # independent similarity: Jaccard overlap >= max_support_overlap drops the
+    # pair (strict equality is the overlap-1.0 special case).
+    ents = [
+        {"id": 1, "canonical": "a", "display": "a", "etype": None},
+        {"id": 2, "canonical": "b", "display": "b", "etype": None},
+        {"id": 3, "canonical": "c", "display": "c", "etype": None},
+    ]
+    vectors = {1: _vec(1, 0), 2: _vec(1, 0), 3: _vec(1, 0)}
+    # 1-2 overlap 4/5 = 0.8 -> dropped at threshold 0.8; 1-3 / 2-3 overlap 0 -> kept.
+    mentions = {1: frozenset({10, 11, 12, 13, 14}), 2: frozenset({10, 11, 12, 13}),
+                3: frozenset({20, 21})}
+    out = gc.candidate_pairs(vectors, [], ents, {}, mentions,
+                             min_similarity=0.55, top_k=50,
+                             max_support_overlap=0.8)
+    pairs = {(c["src_id"], c["dst_id"]) for c in out}
+    assert pairs == {(1, 3), (2, 3)}
+
+
 def test_partition_candidates_merge_vs_link():
     ents = [
         {"id": 1, "canonical": "atlas review", "display": "Atlas Review", "etype": None},

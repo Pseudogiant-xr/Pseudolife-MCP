@@ -6,6 +6,33 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-03 — deep-dream review follow-ups)
+- **Pre-apply graph snapshot**: `memory_dream(action="deep", apply=true)` first
+  dumps the five graph tables to
+  `data_dir/graph_snapshots/graph-<stamp>.json` (newest
+  `memory.deep_dream.snapshot_keep` kept, default 10) and refuses with
+  `snapshot_failed` — writing nothing — if the dump fails. Response carries the
+  `snapshot` filename.
+- **`memory_graph_review(action="dismiss_pair", src, dst)`**: record a
+  "genuinely distinct" verdict over MCP (wires `graph_dismiss_duplicate`), so
+  the Step-C agent can stop noise pairs resurfacing as deep-dream candidates.
+- **Step-C driver flow**: `/dream deep` in `examples/commands/dream.md` +
+  updated `docs/runbooks/deep-dream.md` — judge candidates from snippets, then
+  propose / dismiss_pair / leave for Atlas.
+
+### Changed (2026-07-03 — deep-dream review follow-ups)
+- **Candidate snippets truncated** to `memory.deep_dream.snippet_max_chars`
+  (default 240) — the full-length deep response had outgrown MCP output limits
+  (~483KB) — and `memory_dream(..., snippets=false)` omits them entirely.
+- **Support-overlap filter**: `candidate_pairs` drops pairs whose
+  supporting-entry sets overlap at Jaccard >=
+  `memory.deep_dream.max_support_overlap` (default 0.8), generalizing the old
+  identical-set (co-occurrence) drop and killing the same-doc verb-cluster
+  noise.
+- **Dry-run/apply parity**: `would_merge_propose` / `would_junk` items are
+  annotated `already_proposed` when an entity_proposals row (any status)
+  already covers them — the preview now predicts the apply counters.
+
 ### Added (2026-07-02 — episode naming + fragmentation rework)
 - **Episode consolidation primitives**: `service.episode_rename(id, title)`
   and `service.episode_merge(sources, into?/title?, hint?)` re-stamp the

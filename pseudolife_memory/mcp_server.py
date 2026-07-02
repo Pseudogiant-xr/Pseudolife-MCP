@@ -564,6 +564,7 @@ def memory_dream(
     limit: int | None = None,
     cursor: float | None = None,
     apply: bool = False,
+    snippets: bool = True,
 ) -> dict[str, Any]:
     """Drive the dream — consolidation of recent memories into canonical
     facts and graph structure.
@@ -578,9 +579,11 @@ def memory_dream(
         ``run``: one server-side dream with the configured extractor (up to
             ``limit``; loop until ``pulled=0`` to drain the backlog).
         ``deep``: full-corpus graph consolidation. Dry-run preview by
-            default; ``apply=true`` commits the provably-safe self-clean —
-            BACK UP FIRST, then settle the returned link candidates via
-            ``memory_graph_review`` or the Console's Atlas queue.
+            default; ``apply=true`` snapshots the graph tables (undo file;
+            refuses if it can't) then commits the provably-safe self-clean.
+            Settle the returned link candidates via ``memory_graph_review``
+            (propose / dismiss_pair) or the Console's Atlas queue;
+            ``snippets=false`` omits candidate evidence.
 
     Returns: per-action dict; ``{error}`` on a bad action or missing cursor.
     """
@@ -598,7 +601,7 @@ def memory_dream(
             build_extractor(service.config.memory.dream), limit=limit,
         )
     if action == "deep":
-        return service.deep_dream(apply=apply)
+        return service.deep_dream(apply=apply, include_snippets=snippets)
     return {"error": "unknown_action",
             "actions": ["status", "pull", "commit", "run", "deep"]}
 
@@ -609,6 +612,8 @@ def memory_graph_review(
     proposal_id: int | None = None,
     proposals: list[dict] | None = None,
     scope: str | None = None,
+    src: str | None = None,
+    dst: str | None = None,
 ) -> dict[str, Any]:
     """Work the graph review queue — deep-dream proposals that need a
     verdict before they touch the real graph.
@@ -619,6 +624,9 @@ def memory_graph_review(
         ``propose``: submit link proposals ``[{src, relation, dst,
             similarity?, rationale?}]`` — stored for review, never written
             to the graph directly.
+        ``dismiss_pair``: record that ``src`` and ``dst`` (entity names) are
+            genuinely distinct — the pair stops resurfacing as a duplicate
+            finding or deep-dream candidate.
         ``accept_link`` / ``reject_link``: settle an edge proposal by
             ``proposal_id``.
         ``accept_merge``: fold a near-duplicate entity into its canonical
@@ -634,6 +642,10 @@ def memory_graph_review(
         if not proposals:
             return {"error": "proposals_required"}
         return service.graph_propose_links(proposals)
+    if action == "dismiss_pair":
+        if not src or not dst:
+            return {"error": "src_dst_required"}
+        return service.graph_dismiss_duplicate(src, dst)
     handlers = {
         "accept_link": service.graph_accept_proposal,
         "reject_link": service.graph_reject_proposal,
@@ -644,7 +656,7 @@ def memory_graph_review(
     handler = handlers.get(action)
     if handler is None:
         return {"error": "unknown_action",
-                "actions": ["list", "propose", *handlers]}
+                "actions": ["list", "propose", "dismiss_pair", *handlers]}
     if proposal_id is None:
         return {"error": "proposal_id_required", "action": action}
     return handler(proposal_id)

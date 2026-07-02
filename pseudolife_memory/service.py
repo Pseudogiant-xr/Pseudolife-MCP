@@ -3556,13 +3556,17 @@ class MemoryService:
         return {"found": True, "path": labels, "edges": edges,
                 "hops": len(node_path) - 1, "source": source, "target": target}
 
-    def deep_dream(self, *, apply: bool = False) -> dict[str, Any]:
+    def deep_dream(self, *, apply: bool = False,
+                   include_snippets: bool = True) -> dict[str, Any]:
         """Manual full-corpus graph consolidation. Step A (self-clean) + Step B
         (candidate generation), both deterministic. dry-run (default) computes and
-        returns a preview + candidates without writing; apply commits the re-score and
-        (when auto_apply_safe) the provably-safe supersede/merge class. Discovered
-        links are NOT written here — Step C (subagents) proposes them via
-        graph_propose_links. Backup-first on apply is a runbook step, not in-method."""
+        returns a preview + candidates without writing; apply first writes a graph
+        snapshot (undo artifact — refuses with ``snapshot_failed`` if it can't),
+        then commits the re-score and (when auto_apply_safe) the provably-safe
+        supersede/merge class. Discovered links are NOT written here — Step C (the
+        /dream agent) proposes them via graph_propose_links.
+        ``include_snippets=False`` omits candidate evidence for callers who only
+        want the scores."""
         from pseudolife_memory.memory import graph_consolidation as gc
         cfg = self.config.memory.deep_dream
         with self._lock:
@@ -3574,6 +3578,7 @@ class MemoryService:
             traces = self._storage.traces_by_entity_norm()
             entries = self._storage.load_entries()
             dismissed = self._storage.dismissed_pairs()
+            prop_keys = self._storage.entity_proposal_keys()
         entities, edges = g["entities"], g["edges"]
 
         rescore = gc.rescore_edges(edges, entities)
@@ -3584,13 +3589,16 @@ class MemoryService:
         near = gc.candidate_pairs(
             vectors, edges, entities, scope_map, mentions,
             min_similarity=cfg.min_similarity, top_k=cfg.top_k_candidates,
-            dismissed=dismissed)
+            dismissed=dismissed, max_support_overlap=cfg.max_support_overlap)
         merge_cands, link_cands = gc.partition_candidates(
             near, entities, edges, merge_min_similarity=cfg.merge_min_similarity)
         junk = gc.junk_entities(entities, edges, max_degree=cfg.junk_max_degree)
-        candidates = self._attach_candidate_snippets(link_cands, entities, entries,
-                                                     traces, cfg.max_context_snippets,
-                                                     mentions=mentions)
+        if include_snippets:
+            candidates = self._attach_candidate_snippets(
+                link_cands, entities, entries, traces, cfg.max_context_snippets,
+                mentions=mentions, max_chars=cfg.snippet_max_chars)
+        else:
+            candidates = link_cands
 
         totals = {"entities": len(entities), "edges": len(edges),
                   "candidates": len(candidates)}
@@ -3598,12 +3606,22 @@ class MemoryService:
             return {"dry_run": True, "rescored": len(rescore),
                     "would_supersede": [self._edge_label(e, entities) for e in violations],
                     "would_merge": self._merge_labels(dups, entities),
-                    "would_merge_propose": [{"from": m["from"], "into": m["into"],
-                                             "similarity": m["similarity"], "reason": m["reason"]}
-                                            for m in merge_cands],
-                    "would_junk": [{"entity": j["display"], "reason": j["reason"]} for j in junk],
+                    "would_merge_propose": [
+                        {"from": m["from"], "into": m["into"],
+                         "similarity": m["similarity"], "reason": m["reason"],
+                         "already_proposed": ("merge",
+                                              min(m["from_id"], m["into_id"]),
+                                              max(m["from_id"], m["into_id"])) in prop_keys}
+                        for m in merge_cands],
+                    "would_junk": [{"entity": j["display"], "reason": j["reason"],
+                                    "already_proposed": ("junk", j["entity_id"]) in prop_keys}
+                                   for j in junk],
                     "candidates": candidates, "totals": totals}
 
+        snapshot = self._write_graph_snapshot()
+        if snapshot is None:
+            return {"error": "snapshot_failed", "applied": False,
+                    "detail": "pre-apply graph snapshot could not be written; nothing changed"}
         import time as _t
         superseded = merged = merge_proposed = junk_proposed = 0
         with self._lock:
@@ -3631,7 +3649,30 @@ class MemoryService:
                     junk_proposed += 1
         return {"applied": True, "rescored": len(rescore), "superseded": superseded,
                 "merged": merged, "merge_proposed": merge_proposed,
-                "junk_proposed": junk_proposed, "candidates": candidates, "totals": totals}
+                "junk_proposed": junk_proposed, "snapshot": snapshot,
+                "candidates": candidates, "totals": totals}
+
+    def _write_graph_snapshot(self) -> str | None:
+        """Timestamped JSON dump of the five graph tables the apply path is
+        about to mutate — a targeted undo artifact (pg_dump backups remain the
+        real recovery path). Keeps the newest ``snapshot_keep`` files under
+        ``data_dir/graph_snapshots``. Returns the filename, or None when the
+        snapshot could not be written — the caller must refuse to apply."""
+        import json
+        import time as _t
+        keep = max(1, int(self.config.memory.deep_dream.snapshot_keep))
+        try:
+            with self._lock:
+                tables = self._storage.dump_graph_tables()
+            d = self.data_dir / "graph_snapshots"
+            d.mkdir(parents=True, exist_ok=True)
+            name = _t.strftime("graph-%Y%m%d-%H%M%S", _t.gmtime()) + ".json"
+            (d / name).write_text(json.dumps(tables, default=str), encoding="utf-8")
+            for old in sorted(d.glob("graph-*.json"))[:-keep]:
+                old.unlink()
+            return name
+        except OSError:
+            return None
 
     def _edge_label(self, e: dict, entities: list[dict]) -> dict:
         disp = {x["id"]: x["display"] for x in entities}
@@ -3643,19 +3684,21 @@ class MemoryService:
         return [{"from": disp.get(f, str(f)), "into": disp.get(t, str(t))} for f, t in dups]
 
     def _attach_candidate_snippets(self, candidates, entities, entries, traces, k,
-                                   mentions=None):
-        """Attach up to k context snippets per side, for the Step-C subagent prompt.
-        Traces are the primary evidence; entities without traces (most graph
-        entities) fall back to their token-mention entries — the same source
-        entity_context_vectors built their vectors from — so a candidate never
-        ships as a bare similarity score."""
+                                   mentions=None, max_chars=None):
+        """Attach up to k context snippets per side (each truncated to
+        max_chars), for the Step-C agent prompt. Traces are the primary
+        evidence; entities without traces (most graph entities) fall back to
+        their token-mention entries — the same source entity_context_vectors
+        built their vectors from — so a candidate never ships as a bare
+        similarity score."""
         by_id = {e["id"]: e for e in entries}
         canon = {e["id"]: e["canonical"] for e in entities}
         def snippets(eid):
             ids = traces.get(canon.get(eid, ""), [])[:k]
             if not ids and mentions:
                 ids = sorted(mentions.get(eid, ()))[:k]
-            return [by_id[i]["text"] for i in ids if i in by_id][:k]
+            texts = [by_id[i]["text"] for i in ids if i in by_id][:k]
+            return [t[:max_chars] for t in texts] if max_chars else texts
         for c in candidates:
             c["src_snippets"] = snippets(c["src_id"])
             c["dst_snippets"] = snippets(c["dst_id"])

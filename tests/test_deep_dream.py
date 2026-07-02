@@ -125,6 +125,75 @@ def test_candidates_respect_dismissed_pairs(svc):
     assert _find_candidate(svc.deep_dream(apply=False)) is None
 
 
+def test_dry_run_marks_already_proposed(svc):
+    # The apply path dedupes against existing entity_proposals rows (any
+    # status); the dry-run preview must say so instead of over-counting.
+    import time
+    with svc._lock:
+        svc._ensure_init()
+        a = svc._resolve_or_create_entity("42")["id"]
+        svc._resolve_or_create_entity("7")
+    svc._storage.insert_entity_proposal("junk", a, None, None, "bare-number", time.time())
+    out = svc.deep_dream(apply=False)
+    flags = {j["entity"]: j["already_proposed"] for j in out["would_junk"]}
+    assert flags["42"] is True
+    assert flags["7"] is False
+
+
+def test_apply_writes_graph_snapshot(svc):
+    import json
+    out = svc.deep_dream(apply=True)
+    assert out["applied"] is True and out["snapshot"]
+    snap_dir = svc.data_dir / "graph_snapshots"
+    path = snap_dir / out["snapshot"]
+    assert path.is_file()
+    tables = json.loads(path.read_text(encoding="utf-8"))
+    assert set(tables) == {"entities", "edges", "entity_aliases",
+                           "edge_proposals", "entity_proposals"}
+
+
+def test_apply_refuses_when_snapshot_unwritable(svc):
+    # A file squatting on the snapshot dir path makes mkdir fail -> apply
+    # must refuse and write NOTHING.
+    (svc.data_dir / "graph_snapshots").write_text("not a dir", encoding="utf-8")
+    with svc._lock:
+        svc._ensure_init()
+        svc._resolve_or_create_entity("42")        # junk-shaped: would be proposed
+    out = svc.deep_dream(apply=True)
+    assert out.get("error") == "snapshot_failed"
+    assert svc._storage.pending_entity_proposals() == []
+
+
+def test_apply_prunes_old_snapshots(svc):
+    snap_dir = svc.data_dir / "graph_snapshots"
+    snap_dir.mkdir()
+    for stamp in ("20200101-000001", "20200101-000002", "20200101-000003"):
+        (snap_dir / f"graph-{stamp}.json").write_text("{}", encoding="utf-8")
+    svc.config.memory.deep_dream.snapshot_keep = 2
+    out = svc.deep_dream(apply=True)
+    names = sorted(p.name for p in snap_dir.glob("graph-*.json"))
+    assert len(names) == 2
+    assert out["snapshot"] in names                # the fresh one survives
+
+
+def test_candidate_snippets_are_truncated(svc):
+    _stage_link_pair(svc)
+    svc.config.memory.deep_dream.snippet_max_chars = 40
+    out = svc.deep_dream(apply=False)
+    c = _find_candidate(out)
+    assert c is not None
+    snips = c["src_snippets"] + c["dst_snippets"]
+    assert snips and all(len(s) <= 40 for s in snips)
+
+
+def test_deep_dream_can_omit_snippets(svc):
+    _stage_link_pair(svc)
+    out = svc.deep_dream(apply=False, include_snippets=False)
+    c = _find_candidate(out)
+    assert c is not None
+    assert "src_snippets" not in c and "dst_snippets" not in c
+
+
 def test_accept_entity_merge_folds(svc):
     with svc._lock:
         svc._ensure_init()

@@ -77,7 +77,8 @@ def test_dream_deep_delegates_with_apply_flag(tmp_path: Path, monkeypatch) -> No
     seen: list[bool] = []
     monkeypatch.setattr(
         mod.service, "deep_dream",
-        lambda apply=False: (seen.append(apply), {"dry_run": not apply})[1])
+        lambda apply=False, include_snippets=True:
+            (seen.append(apply), {"dry_run": not apply})[1])
     assert _invoke("memory_dream", {"action": "deep"})["dry_run"] is True
     assert _invoke("memory_dream", {"action": "deep", "apply": True})["dry_run"] is False
     assert seen == [False, True]
@@ -175,6 +176,36 @@ def test_graph_review_validates_inputs(tmp_path: Path, monkeypatch) -> None:
     assert _invoke("memory_graph_review", {"action": "bless"}).get("error") == "unknown_action"
     assert _invoke("memory_graph_review", {"action": "accept_link"}).get("error") == "proposal_id_required"
     assert _invoke("memory_graph_review", {"action": "propose"}).get("error") == "proposals_required"
+    assert _invoke("memory_graph_review", {"action": "dismiss_pair"}).get("error") == "src_dst_required"
+    assert _invoke("memory_graph_review",
+                   {"action": "dismiss_pair", "src": "a"}).get("error") == "src_dst_required"
+
+
+def test_graph_review_dismiss_pair_routes_to_service(tmp_path: Path, monkeypatch) -> None:
+    # Step-C driver verb: an agent working deep-dream candidates must be able
+    # to record "these are distinct" so the pair stops resurfacing.
+    mod = _reload(tmp_path, monkeypatch)
+    calls: list[tuple] = []
+    monkeypatch.setattr(mod.service, "graph_dismiss_duplicate",
+                        lambda a, b: calls.append(("dismiss", a, b)) or {"dismissed": True})
+    out = _invoke("memory_graph_review",
+                  {"action": "dismiss_pair", "src": "accept-link", "dst": "reject-merge"})
+    assert out == {"dismissed": True}
+    assert calls == [("dismiss", "accept-link", "reject-merge")]
+
+
+def test_dream_deep_routes_snippets_param(tmp_path: Path, monkeypatch) -> None:
+    mod = _reload(tmp_path, monkeypatch)
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        mod.service, "deep_dream",
+        lambda apply=False, include_snippets=True:
+            calls.append({"apply": apply, "include_snippets": include_snippets})
+            or {"dry_run": True})
+    _invoke("memory_dream", {"action": "deep", "snippets": False})
+    _invoke("memory_dream", {"action": "deep"})
+    assert calls == [{"apply": False, "include_snippets": False},
+                     {"apply": False, "include_snippets": True}]
 
 
 # ── surface shape: removals + description budget ──────────────────────────

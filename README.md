@@ -66,8 +66,8 @@ Console (REST) — the manifest is agent context every session, so it stays lean
 | `memory_world_search(query, top_k?)` | Search world facts — each carries `effective_confidence`, a `stale` flag, and its citation |
 | `memory_outcome(task, outcome, about?, detail?, polarity?)` | Record a procedural outcome signal (`success`/`failure`/`correction`); the dream distils signals into lessons |
 | `memory_lesson_search(query, top_k?)` | Recall learned lessons for the task at hand — heed `polarity` `-` dead-ends |
-| `memory_dream(action, limit?, cursor?, apply?)` | Drive the dream: `status` / `pull` / `commit` / `run` (server-side extractor) / `deep` (full-corpus graph consolidation; dry-run unless `apply`) |
-| `memory_graph_review(action, proposal_id?, proposals?, scope?)` | Work the review queue: `list` / `propose` / `accept_link` / `reject_link` / `accept_merge` / `accept_junk` / `reject_entity` |
+| `memory_dream(action, limit?, cursor?, apply?, snippets?)` | Drive the dream: `status` / `pull` / `commit` / `run` (server-side extractor) / `deep` (full-corpus graph consolidation; dry-run unless `apply`, which snapshots the graph tables first; `snippets=false` omits candidate evidence) |
+| `memory_graph_review(action, proposal_id?, proposals?, scope?, src?, dst?)` | Work the review queue: `list` / `propose` / `dismiss_pair` / `accept_link` / `reject_link` / `accept_merge` / `accept_junk` / `reject_entity` |
 | `memory_session_title(title)` | Name THIS session's auto-opened episode (default titles are generic) |
 | `memory_episode_start(title, hint?)` / `memory_episode_end()` | Open/close a nested sub-episode for a substantial task; entries stored while open carry its id |
 | `memory_episode_summary(id)` | Stats + tag/source distribution + recent entries within an episode |
@@ -956,13 +956,18 @@ above) is window-local: it distils only the recent MIRAS tail into cortex facts.
 pass (Phase-2 'C'). A dry-run (default) returns a preview of what it would change:
 re-scored edges, hard type-violation edges queued for supersession, exact-duplicate
 entity pairs queued for merging, and semantic link *candidates* across sessions
-(each with context snippets). Adding `apply=True` commits the safe self-clean
-(re-score + supersede violations + merge exact dups) and returns `candidates` for
-review. The operator then drives Step C manually in the same session: dispatch
-Opus subagents over those candidates, collect survivors, and post them with
-`memory_graph_review(action="propose")` — they land in the Atlas Review queue
-(`proposed_link` findings) for per-item accept/reject before anything reaches live
-edges. See `docs/runbooks/deep-dream.md` for the operator procedure.
+(each with truncated context snippets; items the apply path would dedupe are
+flagged `already_proposed`). Adding `apply=True` first dumps the five graph
+tables to a JSON undo file under `data_dir/graph_snapshots/` (refusing with
+`snapshot_failed` if it can't), then commits the safe self-clean (re-score +
+supersede violations + merge exact dups) and returns `candidates` for review.
+The agent then drives Step C in the same session (see the `/dream deep` flow in
+`examples/commands/dream.md`): judge each candidate from its snippets, post the
+real relations with `memory_graph_review(action="propose")` — they land in the
+Atlas Review queue (`proposed_link` findings) for per-item accept/reject before
+anything reaches live edges — and record clearly-distinct pairs with
+`memory_graph_review(action="dismiss_pair")` so they stop resurfacing. See
+`docs/runbooks/deep-dream.md` for the operator procedure.
 
 ## Data layout
 
