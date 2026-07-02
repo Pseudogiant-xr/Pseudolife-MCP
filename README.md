@@ -61,11 +61,11 @@ Console (REST) — the manifest is agent context every session, so it stays lean
 | `memory_fact_get(entity, attribute)` | The one CURRENT canonical value at a slot (+ parked contenders); on an empty slot returns ranked `candidates` (same-entity, then similar slots) |
 | `memory_fact_set(entity, attribute, value, origin?, confidence?)` | Assert a canonical fact deliberately (insert / confirm / supersede / contest) |
 | `memory_fact_resolve(entity, attribute, accept)` | Settle a contested slot — adopt (`true`) or discard (`false`) the contender |
-| `memory_history(entity, attribute)` | Version timeline at a slot, with writer/temporal stamps |
+| `memory_history(entity, attribute?)` | With `attribute`: version timeline at a slot, with writer/temporal stamps. Without: the entity's causal chain — dated fact/entry/edge/lesson events ("what led to X") |
 | `memory_world_set(entity, attribute, value, source_url?, ...)` | Assert a cited WORLD fact (external knowledge; age-decayed trust by freshness class) |
 | `memory_world_search(query, top_k?)` | Search world facts — each carries `effective_confidence`, a `stale` flag, and its citation |
 | `memory_outcome(task, outcome, about?, detail?, polarity?)` | Record a procedural outcome signal (`success`/`failure`/`correction`); the dream distils signals into lessons |
-| `memory_lesson_search(query, top_k?)` | Recall learned lessons for the task at hand — heed `polarity` `-` dead-ends |
+| `memory_lesson_search(query, top_k?)` | Recall learned lessons for the task at hand — heed `polarity` `-` dead-ends; `re_verify` flags lessons whose subject facts changed since |
 | `memory_dream(action, limit?, cursor?, apply?, snippets?)` | Drive the dream: `status` / `pull` / `commit` / `run` (server-side extractor) / `deep` (full-corpus graph consolidation; dry-run unless `apply`, which snapshots the graph tables first; `snippets=false` omits candidate evidence) |
 | `memory_graph_review(action, proposal_id?, proposals?, scope?, src?, dst?)` | Work the review queue: `list` / `propose` / `dismiss_pair` / `accept_link` / `reject_link` / `accept_merge` / `accept_junk` / `reject_entity` |
 | `memory_session_title(title)` | Name THIS session's auto-opened episode (default titles are generic) |
