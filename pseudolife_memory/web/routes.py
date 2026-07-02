@@ -173,6 +173,7 @@ class ConsoleRoutes:
             _s(q, "entity"), limit=_i(q, "limit", 20)))
         p("/api/graph/assign-scope", lambda q, b: svc.graph_assign_scope(b["entity"], b["source"]))
         p("/api/graph/unrelate", lambda q, b: svc.graph_unrelate(b["src"], b["relation"], b["dst"]))
+        p("/api/graph/bless-edge", lambda q, b: svc.graph_bless_edge(b["src"], b["relation"], b["dst"]))
         p("/api/graph/delete-entity", lambda q, b: svc.graph_delete_entity(b["entity"]))
         p("/api/graph/merge", lambda q, b: svc.graph_merge(b["from"], b["into"]))
         p("/api/graph/accept-proposal", lambda q, b: svc.graph_accept_proposal(b["id"]))

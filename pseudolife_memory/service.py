@@ -2803,6 +2803,34 @@ class MemoryService:
             return {"removed": removed, "src": src_e["display"],
                     "relation": resolved, "dst": dst_e["display"]}
 
+    def graph_bless_edge(self, src: str, relation: str, dst: str) -> dict[str, Any]:
+        """Human 'Keep' on a dubious-edge finding: raise the live edge to
+        >=0.8 / origin='user' so it leaves the review queue. Confirms only —
+        a missing or superseded edge is not created or revived."""
+        from pseudolife_memory import graph as G
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return dict(self._GRAPH_UNAVAILABLE)
+            registry = [r["name"] for r in self._graph.load_relations()]
+            resolved, suggestions = G.resolve_relation(registry, relation)
+            if resolved is None:
+                return {"error": "unknown_relation", "relation": relation,
+                        "suggestions": suggestions}
+            src_e = self._storage.find_entity(G.norm_name(src))
+            dst_e = self._storage.find_entity(G.norm_name(dst))
+            if src_e is None or dst_e is None:
+                missing = src if src_e is None else dst
+                return {"blessed": False, "reason": "unknown_entity",
+                        "entity": missing}
+            ok = self._graph.bless_edge(src_e["id"], resolved, dst_e["id"])
+            if not ok:
+                return {"blessed": False, "reason": "edge_not_found",
+                        "src": src_e["display"], "relation": resolved,
+                        "dst": dst_e["display"]}
+            return {"blessed": True, "src": src_e["display"],
+                    "relation": resolved, "dst": dst_e["display"]}
+
     def graph_delete_entity(self, entity: str) -> dict[str, Any]:
         """Hard-delete a graph entity (and cascade its edges/aliases). Facts/lessons
         that reference it are unlinked (entity_id set to NULL) but not deleted."""
