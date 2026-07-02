@@ -125,17 +125,23 @@ class PostgresStorage:
 
     def _connect(self) -> psycopg.Connection:
         """Open + session-configure a connection (shared by init and the
-        reconnect path)."""
-        conn = psycopg.connect(self.dsn, connect_timeout=10)
+        reconnect path).
+
+        Autocommit (H4, 2026-07-02 review): a bare read must never leave an
+        implicit transaction open — that pinned the xmin horizon (blocking
+        autovacuum on the churny canonical tables) and held ACCESS SHARE
+        locks that blocked any concurrent DDL. Mutations get explicit
+        transaction blocks via :meth:`_txn`."""
+        conn = psycopg.connect(self.dsn, connect_timeout=10, autocommit=True)
         # Never block forever on a lock — a stuck/orphaned writer should
-        # raise here, not hang the whole daemon.
+        # raise here, not hang the whole daemon. (Session-level GUCs; they
+        # apply immediately under autocommit.)
         conn.execute("SET lock_timeout = '5s'")
         # Pin the namespace to public BEFORE ensure_schema runs. The DB role is
         # `pseudolife`, which can clash with schema names, so the cluster default
         # ("$user", public) search_path could shadow the real bank. Pinning to
         # public makes SCHEMA_SQL creation + every read/write target the real tables.
         conn.execute("SET search_path TO public")
-        conn.commit()
         return conn
 
     @property
@@ -186,23 +192,15 @@ class PostgresStorage:
 
     @contextmanager
     def _txn(self):
-        """Every mutating method funnels through here: commit on success,
+        """Every mutating method funnels through here. The connection runs
+        autocommit (reads never leave an idle transaction — H4), so mutations
+        open an explicit psycopg transaction block: commit on success,
         rollback on any exception. Without this, a single failed statement
-        (lock timeout, FK violation, ...) leaves the shared long-lived
-        connection in InFailedSqlTransaction — breaking every subsequent
-        call until the daemon restarts."""
-        try:
+        (lock timeout, FK violation, ...) would poison subsequent calls.
+        Nested use degrades safely to savepoints (the old manual
+        commit/rollback would have committed the outer work mid-way)."""
+        with self.conn.transaction():
             yield
-            self.conn.commit()
-        except Exception:
-            # Roll back on the RAW connection: going through the property
-            # here could trigger a reconnect attempt whose own failure would
-            # mask the original exception (e.g. when the server is down).
-            try:
-                self._conn.rollback()
-            except Exception:  # noqa: BLE001 — dead connection; the original error matters more
-                logger.debug("rollback on dead connection skipped", exc_info=True)
-            raise
 
     # ── entries ─────────────────────────────────────────────────────────
 

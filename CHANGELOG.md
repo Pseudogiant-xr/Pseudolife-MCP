@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-02 review H4 — autocommit connection)
+- **Reads no longer leave the shared connection idle-in-transaction.** The
+  storage connection runs autocommit; every mutation opens an explicit
+  psycopg transaction block (`_txn` → `conn.transaction()`, nesting degrades
+  to savepoints). Pre-fix, a bare read opened an implicit transaction that
+  stayed open until the next mutator committed — pinning the xmin horizon
+  overnight (blocking autovacuum) and holding ACCESS SHARE locks that
+  blocked any concurrent DDL (the root cause of the test-suite
+  lock-timeout ordering flake). `ensure_schema` now wraps its DDL in one
+  `conn.transaction()` block so it stays atomic under both connection modes.
+
 ### Changed (2026-07-02 review P1 — per-slot persistence, schema v19)
 - **The full-table snapshot rewrite is gone from the write path.** Every
   cortex/world/lesson write used to `DELETE FROM <table>` and reinsert every

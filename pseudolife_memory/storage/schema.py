@@ -315,7 +315,11 @@ def ensure_schema(conn) -> dict:
     ``schema_version`` in ``meta`` (upsert to the current value, so an
     upgraded bank reports its real version, not the first-init one).
     """
-    with conn.cursor() as cur:
+    # conn.transaction(): one atomic DDL transaction whether the caller's
+    # connection is autocommit (the daemon's storage conn, H4) or classic
+    # (test fixtures) — psycopg begins/commits for real on an idle
+    # connection in either mode.
+    with conn.transaction(), conn.cursor() as cur:
         # Bound every DDL statement so a stray lock holder surfaces as an
         # error instead of an indefinite hang (the v0.1 lesson, applied to
         # the new storage layer). SET LOCAL: these guards are for THIS
@@ -399,5 +403,4 @@ def ensure_schema(conn) -> dict:
             """,
             (str(SCHEMA_META_VERSION),),
         )
-    conn.commit()
     return {}
