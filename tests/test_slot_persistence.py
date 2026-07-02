@@ -72,9 +72,8 @@ def test_supersede_round_trips_slot_history(svc):
     by_value = {v: s for v, s in rows}
     assert by_value == {"1111": "superseded", "2222": "current"}
 
-    # And a fresh service hydrates the same picture. Release svc's implicit
-    # read transaction first so s2's ensure_schema DDL isn't lock-blocked.
-    svc._storage.conn.rollback()
+    # And a fresh service hydrates the same picture (svc's autocommit
+    # connection holds no locks, so s2's ensure_schema DDL proceeds — H4).
     from pseudolife_memory.service import MemoryService
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
         s2 = MemoryService(data_dir=d, database_url=svc._db_url)
@@ -151,7 +150,6 @@ def test_hlc_reseeds_from_stored_stamps_on_hydrate(svc):
             "UPDATE facts SET hlc_phys = %s, hlc_logical = 0 "
             "WHERE entity_norm = %s", (future_ms, "clock-probe"))
 
-    svc._storage.conn.rollback()   # release read locks for s2's DDL
     from pseudolife_memory.service import MemoryService
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
         s2 = MemoryService(data_dir=d, database_url=svc._db_url)

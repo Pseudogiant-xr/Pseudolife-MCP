@@ -293,3 +293,20 @@ def test_ddl_timeouts_do_not_leak_into_session(storage):
     rewrite) silently ran under a 30s abort. It must be SET LOCAL."""
     val = storage.conn.execute("SHOW statement_timeout").fetchone()[0]
     assert val in ("0", "0ms"), f"DDL statement_timeout leaked: {val}"
+
+
+def test_reads_leave_connection_idle_not_in_transaction(storage, pg_url):
+    """H4 (2026-07-02 review): a bare read on the shared connection left an
+    implicit transaction open until the next mutator committed — pinning the
+    xmin horizon overnight (blocking autovacuum) and holding ACCESS SHARE
+    locks that block any concurrent DDL (the daemon-vs-daemon lock-timeout
+    flake). The connection runs autocommit; mutations use explicit
+    transaction blocks."""
+    import psycopg
+
+    storage.load_facts()   # a bare read, no commit afterwards
+    with psycopg.connect(pg_url, autocommit=True) as probe:
+        st = probe.execute(
+            "SELECT state FROM pg_stat_activity WHERE pid = %s",
+            (storage.conn.info.backend_pid,)).fetchone()[0]
+    assert st == "idle", f"read left the backend in state '{st}'"
