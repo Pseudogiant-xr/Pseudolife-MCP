@@ -3282,11 +3282,13 @@ class MemoryService:
             if include_facts:
                 node["facts"] = facts_by_norm.get(e["canonical"], [])
             nodes.append(node)
+        from pseudolife_memory.memory.graph_review import classify_edge as _classify_edge
         edges = [
             {"src": by_id[e["src_id"]], "relation": e["relation"],
              "dst": by_id[e["dst_id"]], "derived": False,
              "confidence": round(float(e["confidence"]), 4),
-             "origin": e.get("origin")}
+             "origin": e.get("origin"),
+             "tag": _classify_edge(e)}
             for e in g["edges"]
             if e["src_id"] in by_id and e["dst_id"] in by_id]
         total_nodes, total_edges, truncated = len(nodes), len(edges), False
@@ -3319,6 +3321,7 @@ class MemoryService:
             return self._whole_graph(scope=scope, include_facts=include_facts,
                                      max_nodes=max_nodes)
         from pseudolife_memory import graph as G
+        from pseudolife_memory.memory.graph_review import classify_edge as _classify_edge
         with self._lock:
             self._ensure_init()
             if self._storage is None:
@@ -3385,6 +3388,7 @@ class MemoryService:
                     row["confidence"] = round(float(e["confidence"]), 4)
                     if e.get("origin"):
                         row["origin"] = e["origin"]
+                    row["tag"] = _classify_edge(e)
                 out_edges.append(row)
 
             result: dict[str, Any] = {

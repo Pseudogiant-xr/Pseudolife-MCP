@@ -22,6 +22,15 @@ export function originBadge(origin) {
   return el("span", { class: `badge ${cls}`, title: `provenance tier: ${o}` }, o);
 }
 
+export function tagBadge(tag) {
+  // Edge provenance tag (EXTRACTED / INFERRED / AMBIGUOUS) — reuses the
+  // existing badge palette: explicit=graph, inferred=muted, ambiguous=warn.
+  if (!tag) return null;
+  const t = String(tag).toLowerCase();
+  const cls = { extracted: "action", inferred: "agent", ambiguous: "contested" }[t] || "agent";
+  return el("span", { class: `badge ${cls}`, title: `edge provenance: ${t}` }, t);
+}
+
 export function confMeter(c, tone = "var(--accent)") {
   const pct = Math.round((Number(c) || 0) * 100);
   return el("span", { class: "conf", title: `confidence ${pct}%` },

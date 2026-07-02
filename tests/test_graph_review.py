@@ -148,3 +148,32 @@ def test_merge_and_junk_candidate_findings():
 def test_entity_proposals_default_none_no_findings():
     out = gr.review([], [], {})
     assert all(f["type"] not in ("merge_candidate", "junk_candidate") for f in out["findings"])
+
+
+def test_classify_edge_extracted_wins_over_low_confidence():
+    from pseudolife_memory.memory.graph_review import classify_edge
+    assert classify_edge({"origin": "user", "confidence": 0.2}) == "EXTRACTED"
+    assert classify_edge({"origin": "action", "confidence": 0.9}) == "EXTRACTED"
+
+
+def test_classify_edge_ambiguous_on_low_confidence_or_proposed():
+    from pseudolife_memory.memory.graph_review import classify_edge
+    assert classify_edge({"origin": "agent", "confidence": 0.4}) == "AMBIGUOUS"
+    assert classify_edge({"origin": "agent", "confidence": 0.9},
+                         proposed=True) == "AMBIGUOUS"
+
+
+def test_classify_edge_inferred_default():
+    from pseudolife_memory.memory.graph_review import classify_edge
+    assert classify_edge({"origin": "agent", "confidence": 0.8}) == "INFERRED"
+    assert classify_edge({"origin": None, "confidence": None}) == "INFERRED"
+
+
+def test_dubious_edge_rows_carry_ambiguous_tag():
+    from pseudolife_memory.memory import graph_review as gr
+    edges = [{"src_id": 1, "dst_id": 2, "relation": "x",
+              "confidence": 0.3, "origin": "agent"}]
+    entities = [{"id": 1, "display": "a", "etype": None},
+                {"id": 2, "display": "b", "etype": None}]
+    findings = gr.dubious_edges(edges, entities)
+    assert findings and all(r["tag"] == "AMBIGUOUS" for r in findings[0]["edges"])

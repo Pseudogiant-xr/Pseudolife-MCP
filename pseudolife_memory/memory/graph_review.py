@@ -9,9 +9,26 @@ import re
 from pseudolife_memory.graph import degree_counts
 
 _DUBIOUS_CONF = 0.6
+_TAG_AMBIGUOUS_CONF = 0.5
 _TEST_PATTERNS = re.compile(
     r"(payments?[-/]|pl-healthcheck|deploy-smoke|smoke[-_]?test|noise[ _-]?agent)",
     re.I)
+
+
+def classify_edge(edge: dict, *, proposed: bool = False) -> str:
+    """Three-way provenance tag for an edge (graphify-style).
+
+    EXTRACTED — asserted by a human or a confirming action (origin
+    user/action); never demoted by low confidence. AMBIGUOUS — a proposal
+    awaiting review, or confidence below 0.5. INFERRED — everything else
+    (agent/dream extraction at working confidence)."""
+    origin = (edge.get("origin") or "").lower()
+    if origin in ("user", "action"):
+        return "EXTRACTED"
+    conf = edge.get("confidence")
+    if proposed or (conf is not None and float(conf) < _TAG_AMBIGUOUS_CONF):
+        return "AMBIGUOUS"
+    return "INFERRED"
 
 
 def _disp(entities):
@@ -61,7 +78,8 @@ def dubious_edges(edges, entities, *, conf=_DUBIOUS_CONF):
     rows = [{"src": disp.get(e["src_id"], str(e["src_id"])),
              "relation": e.get("relation", ""),
              "dst": disp.get(e["dst_id"], str(e["dst_id"])),
-             "confidence": e.get("confidence")}
+             "confidence": e.get("confidence"),
+             "tag": "AMBIGUOUS"}
             for e in edges
             if e.get("origin") == "agent" and (e.get("confidence") or 1.0) <= conf]
     if not rows:
@@ -94,7 +112,8 @@ def proposed_links(proposals):
         return []
     links = [{"id": p.get("id"), "src": p["src"], "relation": p["relation"],
               "dst": p["dst"], "confidence": p.get("confidence"),
-              "similarity": p.get("similarity"), "rationale": p.get("rationale")}
+              "similarity": p.get("similarity"), "rationale": p.get("rationale"),
+              "tag": classify_edge(p, proposed=True)}
              for p in proposals]
     return [{"type": "proposed_link", "severity": "info", "action": "review",
              "label": f"{len(links)} proposed cross-session links",
