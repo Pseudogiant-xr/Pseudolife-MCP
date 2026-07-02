@@ -56,8 +56,11 @@ _STOP = frozenset({"a", "an", "the", "is", "are"})
 
 # Identifier-friendly tokeniser. Captures `process_chunk_v2`,
 # `v0.7.6`, `--rerank`, `MIRAS`, while dropping standalone punctuation.
-# Underscores stay; periods inside version-like tokens stay.
-_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)*|\d+(?:\.\d+)+")
+# Underscores stay; periods inside version-like tokens stay. The numeric
+# alternative is ``*`` not ``+``: standalone integers (ports, HTTP codes,
+# model numbers) must survive — they're the whole point of the lexical
+# channel (2026-07-02 review M2 fixed the dot-required variant).
+_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)*|\d+(?:\.\d+)*")
 
 
 def tokenize(text: str) -> list[str]:

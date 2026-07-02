@@ -10,27 +10,6 @@ import yaml
 
 
 @dataclass
-class ClaudeConfig:
-    model: str = "claude-sonnet-4-20250514"
-    max_tokens: int = 4096
-
-
-@dataclass
-class LMStudioConfig:
-    base_url: str = "http://localhost:1234/v1"
-    model: str = "local-model"
-    max_tokens: int = -1  # -1 = let LM Studio use model's max; respects loaded context
-    api_key: str = "lm-studio"
-
-
-@dataclass
-class GeminiConfig:
-    model: str = "gemini-2.0-flash"
-    api_key: str = ""
-    max_tokens: int = 4096
-
-
-@dataclass
 class EmbeddingConfig:
     model_name: str = "all-MiniLM-L6-v2"
     device: str = "cuda"
@@ -138,8 +117,13 @@ class ReferenceConfig:
 
 @dataclass
 class NLIConfig:
-    """Configuration for the optional NLI contradiction-detection path."""
-    enabled: bool = True
+    """Configuration for the optional NLI contradiction-detection path.
+
+    EXPERIMENTAL / not wired: no production path constructs the scorer, so
+    this block only takes effect for library callers that inject one
+    (2026-07-02 zombie sweep set the default to False to stop the knob
+    lying about a live capability)."""
+    enabled: bool = False
     model_name: str = "cross-encoder/nli-deberta-v3-xsmall"
     threshold: float = 0.70
     max_candidates: int = 8
@@ -332,24 +316,6 @@ class DeepDreamConfig:
 
 
 @dataclass
-class HydeConfig:
-    """HyDE-lite query expansion (Slice E, v0.7.6).
-
-    Short queries carry weak embedding signal. When fired, the active LLM
-    generates a one-sentence hypothetical answer, we embed it, and blend
-    it with the query embedding before retrieval. Cost-guarded by a length
-    heuristic and a hard timeout — falls back silently to query-only on
-    any failure.
-    """
-    enabled: bool = True
-    min_query_words: int = 5
-    min_query_chars: int = 30
-    max_tokens: int = 60
-    query_weight: float = 0.5
-    timeout_seconds: float = 5.0
-
-
-@dataclass
 class CortexConfig:
     """Sibling slot-keyed canonical-fact store (schema v8).
 
@@ -487,7 +453,6 @@ class MemoryConfig:
     # Cross-encoder reranker over the merged retrieval pool (Tier B).
     reranker: RerankerConfig = field(default_factory=RerankerConfig)
     # HyDE-lite query expansion (Slice E, v0.7.6).
-    hyde: HydeConfig = field(default_factory=HydeConfig)
     # Periodic reflection / dreaming (Slice D, v0.7.6).
     reflection: ReflectionConfig = field(default_factory=ReflectionConfig)
     # Dream pass — MIRAS→cortex consolidation (pluggable extractor).
@@ -569,10 +534,6 @@ class StorageConfig:
 
 @dataclass
 class AppConfig:
-    backend: str = "lmstudio"
-    claude: ClaudeConfig = field(default_factory=ClaudeConfig)
-    gemini: GeminiConfig = field(default_factory=GeminiConfig)
-    lmstudio: LMStudioConfig = field(default_factory=LMStudioConfig)
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     context: ContextConfig = field(default_factory=ContextConfig)
@@ -607,15 +568,11 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
     with open(path) as f:
         raw = yaml.safe_load(f) or {}
 
-    # Build config from raw dict
-    config = AppConfig(backend=raw.get("backend", "lmstudio"))
+    # Build config from raw dict. (The chat-product backend blocks —
+    # backend/claude/gemini/lmstudio — were removed in the 2026-07-02
+    # zombie sweep; unknown YAML sections are simply ignored.)
+    config = AppConfig()
 
-    if "claude" in raw:
-        config.claude = _dict_to_dataclass(ClaudeConfig, raw["claude"])
-    if "gemini" in raw:
-        config.gemini = _dict_to_dataclass(GeminiConfig, raw["gemini"])
-    if "lmstudio" in raw:
-        config.lmstudio = _dict_to_dataclass(LMStudioConfig, raw["lmstudio"])
     if "embedding" in raw:
         config.embedding = _dict_to_dataclass(EmbeddingConfig, raw["embedding"])
     if "memory" in raw:
@@ -660,8 +617,6 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             config.memory.reranker = _dict_to_dataclass(
                 RerankerConfig, mem_raw["reranker"],
             )
-        if "hyde" in mem_raw:
-            config.memory.hyde = _dict_to_dataclass(HydeConfig, mem_raw["hyde"])
         if "reflection" in mem_raw:
             config.memory.reflection = _dict_to_dataclass(
                 ReflectionConfig, mem_raw["reflection"],

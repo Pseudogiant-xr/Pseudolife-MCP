@@ -241,11 +241,21 @@ class FixtureService:
     def trace(self, query, top_k=8, sources=None, bands=None, rerank=None, bm25=None,
               episodes=None, tags=None):
         res = self.search(query, top_k=top_k)
+        # Shapes mirror cms.retrieve_with_trace — pinned by
+        # tests/test_fixture_contract.py (the old invented keys shipped a
+        # broken drawer that QA'd green against these fixtures).
         res["trace"] = {
             "config": {"min_score": 0.25, "rerank": bool(rerank), "bm25": bool(bm25)},
-            "tiers": [{"band": b["name"], "candidates": b["size"] // 50,
-                       "kept": min(2, b["size"] // 100)} for b in self.stats()["bands"]],
-            "final_topk": [{"text": e["text"][:60], "score": e["score"]} for e in res["entries"]],
+            "tiers": [{"name": b["name"], "depth": i, "filtered_out": False,
+                       "candidates": [
+                           {"text_preview": e["text"][:80], "source": e["source"],
+                            "raw_score": e["score"], "superseded": False,
+                            "kept": j == 0, "drop_reason": None}
+                           for j, e in enumerate(res["entries"][:2])]}
+                      for i, b in enumerate(self.stats()["bands"])],
+            "final_topk": [{"text_preview": e["text"][:120], "score": e["score"],
+                            "source": e["source"], "bank": e["bank"]}
+                           for e in res["entries"]],
         }
         return res
 

@@ -17,7 +17,6 @@ Security model:
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import sys
@@ -30,57 +29,10 @@ DEFAULT_PORT = 8765
 _LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 
 
-def _json_response(send, status: int, payload: dict):
-    body = json.dumps(payload).encode()
-
-    async def _send():
-        await send({
-            "type": "http.response.start",
-            "status": status,
-            "headers": [(b"content-type", b"application/json"),
-                        (b"content-length", str(len(body)).encode())],
-        })
-        await send({"type": "http.response.body", "body": body})
-
-    return _send()
-
-
-class AuthHealthASGI:
-    """Pure-ASGI wrapper: /health endpoint + bearer-token gate.
-
-    Implemented against the raw ASGI protocol (not Starlette middleware
-    classes) so it has no dependency on Starlette's middleware API
-    surface staying stable across mcp-SDK versions.
-    """
-
-    def __init__(self, app, token: str | None, health_payload) -> None:
-        self.app = app
-        self.token = token or None
-        self.health_payload = health_payload  # callable -> dict
-
-    async def __call__(self, scope, receive, send):
-        if scope["type"] == "http":
-            path = scope.get("path", "")
-            if path == "/health":
-                try:
-                    payload = self.health_payload()
-                except Exception as exc:  # noqa: BLE001
-                    await _json_response(
-                        send, 500, {"status": "error", "error": str(exc)})
-                    return
-                await _json_response(send, 200, payload)
-                return
-            if self.token is not None:
-                headers = {k.decode().lower(): v.decode()
-                           for k, v in scope.get("headers", [])}
-                expect = f"Bearer {self.token}"
-                if headers.get("authorization") != expect:
-                    await _json_response(
-                        send, 401,
-                        {"error": "unauthorized",
-                         "hint": "Authorization: Bearer <PSEUDOLIFE_MCP_TOKEN>"})
-                    return
-        await self.app(scope, receive, send)
+# (AuthHealthASGI and its _json_response helper were removed in the
+# 2026-07-02 zombie sweep: run_daemon has served the composed Console app
+# from web/api.py — which owns /health and the token gate — since the
+# Cortex Console landed, leaving this wrapper dead code.)
 
 
 def run_daemon(host: str | None = None, port: int | None = None) -> None:

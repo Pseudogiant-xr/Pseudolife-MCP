@@ -309,3 +309,56 @@ def test_entity_provenance_route(svc):
     assert isinstance(out["sources"], list) and isinstance(out["entries"], list)
     # the MIRAS band + source travel so the human can judge in the drawer
     assert out["entries"][0]["band"] and out["entries"][0]["source"]
+
+
+# ── 2026-07-02 review H2: tokenless /api CSRF + DNS-rebinding guards ───────
+
+def test_tokenless_api_rejects_cross_site_origin(svc):
+    """A web page the operator visits can fire fetch() at 127.0.0.1 —
+    browsers stamp the attacker's Origin on it. Foreign Origin = CSRF."""
+    st, _ = _call(_app(svc), "POST", "/api/episodes/prune",
+                  headers=[(b"host", b"127.0.0.1:8765"),
+                           (b"origin", b"https://evil.example")])
+    assert st == 403
+
+
+def test_tokenless_api_rejects_foreign_host(svc):
+    """DNS rebinding re-resolves an attacker domain to 127.0.0.1 — the Host
+    header keeps the attacker's name and must be rejected."""
+    st, _ = _call(_app(svc), "GET", "/api/stats",
+                  headers=[(b"host", b"rebind.evil.example:8765")])
+    assert st == 403
+
+
+def test_tokenless_api_allows_loopback_browser(svc):
+    st, _ = _call(_app(svc), "GET", "/api/stats",
+                  headers=[(b"host", b"127.0.0.1:8765"),
+                           (b"origin", b"http://127.0.0.1:8765")])
+    assert st == 200
+
+
+def test_tokenless_api_allows_headerless_clients(svc):
+    # curl / scripts / the MCP transport send no Origin (and the test rig
+    # no Host) — they are not browsers and must keep working.
+    st, _ = _call(_app(svc), "GET", "/api/stats")
+    assert st == 200
+
+
+def test_api_post_with_body_requires_json_content_type(svc):
+    """A cross-site form/fetch can send text/plain or urlencoded without a
+    CORS preflight — application/json cannot. 415 forces the preflight."""
+    st, _ = _call(_app(svc), "POST", "/api/facts/set",
+                  headers=[(b"host", b"127.0.0.1"),
+                           (b"content-type", b"text/plain")],
+                  body=b'{"entity":"e","attribute":"a","value":"v"}')
+    assert st == 415
+
+
+def test_tokened_api_skips_host_gate(svc):
+    """With a token set, Authorization already proves intent (it cannot be
+    attached cross-origin without a failing preflight) — remote/LAN hosts
+    are legitimate."""
+    st, _ = _call(_app(svc, token="s3cret"), "GET", "/api/stats",
+                  headers=[(b"host", b"192.168.1.20:8765"),
+                           (b"authorization", b"Bearer s3cret")])
+    assert st == 200

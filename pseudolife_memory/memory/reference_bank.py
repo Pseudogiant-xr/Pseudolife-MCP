@@ -19,6 +19,15 @@ from pseudolife_memory.memory.titans_memory import MemoryEntry, RetrievalResult
 from pseudolife_memory.utils.config import ReferenceConfig
 
 
+def cosine_similarity_from_distance(dist: float) -> float:
+    """ChromaDB cosine *distance* is ``1 − cos`` (range [0, 2]), so the
+    similarity is ``1 − dist``, clamped at 0. The old ``1 − dist/2`` mapped
+    an orthogonal chunk to 0.5 — above the 0.25 retrieval floor — so
+    unrelated documents were appended to essentially every search result
+    (2026-07-02 review M1)."""
+    return max(0.0, 1.0 - float(dist))
+
+
 def _chunk_text(text: str, chunk_size: int = 512, chunk_overlap: int = 64) -> list[str]:
     """Split text into overlapping chunks by token-approximate character count."""
     # Rough heuristic: 1 token ~ 4 chars
@@ -190,9 +199,7 @@ class ReferenceBank:
             dists = results["distances"][0] if results["distances"] else [0.0] * len(docs)
 
             for doc, meta, dist in zip(docs, metas, dists):
-                # ChromaDB cosine distance: 0 = identical, 2 = opposite
-                # Convert to similarity: 1 - (dist / 2)
-                similarity = max(0.0, 1.0 - dist / 2.0)
+                similarity = cosine_similarity_from_distance(dist)
                 entry = MemoryEntry(
                     text=doc,
                     embedding=torch.zeros(self.embedding_dim),  # Placeholder

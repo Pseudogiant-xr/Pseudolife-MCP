@@ -83,12 +83,13 @@ export async function renderStream(root, ctx) {
         el("table", { class: "tbl", style: { marginBottom: "18px" } },
           el("thead", {}, el("tr", {}, el("th", {}, "band"), el("th", {}, "candidates"), el("th", {}, "kept"))),
           el("tbody", {}, (tr.tiers || []).map((ti) => el("tr", {},
-            el("td", { class: "mono" }, ti.band), el("td", { class: "mono" }, String(ti.candidates)),
-            el("td", { class: "mono" }, String(ti.kept)))))),
+            el("td", { class: "mono" }, ti.name),
+            el("td", { class: "mono" }, String((ti.candidates || []).length)),
+            el("td", { class: "mono" }, String((ti.candidates || []).filter((c) => c.kept).length)))))),
         el("div", { class: "eyebrow", style: { marginBottom: "8px" } }, "final top-k"),
         el("ol", { style: { paddingLeft: "20px", margin: 0 } },
           (tr.final_topk || []).map((r) => el("li", { style: { marginBottom: "6px" } },
-            el("span", {}, truncate(r.text, 80)), " ",
+            el("span", {}, truncate(r.text_preview, 80)), " ",
             el("span", { class: "score-pill" }, (r.score ?? 0).toFixed(3)))))));
     } catch (err) { setDrawerBody(errorBlock(err)); }
   }
