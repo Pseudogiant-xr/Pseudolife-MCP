@@ -6,6 +6,36 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-02 — episode naming + fragmentation rework)
+- **Episode consolidation primitives**: `service.episode_rename(id, title)`
+  and `service.episode_merge(sources, into?/title?, hint?)` re-stamp the
+  denormalised `episode_id`/`episode_title` on band entries (in-memory + DB),
+  bulk-retarget evicted entries and `outcome_signals`
+  (`PostgresStorage.retarget_episode_refs`), re-parent child episodes, widen
+  the target span, and delete the merged husks. REST:
+  `POST /api/episodes/rename`, `POST /api/episodes/merge`. Open sources are
+  skipped (`skipped_open`) — a live session is never merged away.
+- **Resume-on-return**: a store arriving after the idle reaper closed the
+  session's episode now *reopens* that episode (same `mcp-session-id` = same
+  client session) instead of opening a fresh generic husk.
+  `PSEUDOLIFE_SESSION_RESUME_SECONDS` (default 21600 = 6 h) bounds the window;
+  `0` disables.
+- **Auto-title at close**: a session episode still carrying the generic
+  `session - YYYY-MM-DD HH:MM` lazy-open title gets a derived
+  `"{dominant_source} - {stamp}: {first-entry snippet}"` title when it closes
+  (explicit end or reaper). Agent-set titles never match the generic pattern
+  and are untouched (`session_title.derive_session_title`).
+- **Untitled-session nudge**: `memory_store` responses include a one-line
+  `episode_hint` while the session episode is still generic-titled, pointing
+  at `memory_session_title`.
+
+### Fixed (2026-07-02 — episode naming + fragmentation rework)
+- `memory_episode_start` called before the session's first store now lazily
+  opens the session root first and nests under it, instead of creating a
+  session-keyed root that `memory_session_title` would then rename.
+- `memory_session_title` now also rewrites the denormalised `episode_title`
+  stamp on entries already stored in the session.
+
 ### Changed (2026-07-02 review, final item — MCP tool-surface consolidation)
 - **BREAKING: the MCP surface shrank from 55 tools to 32** (the manifest is
   agent context every session: description payload dropped ~37.0k → ~15.0k

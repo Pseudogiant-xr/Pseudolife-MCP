@@ -388,8 +388,16 @@ reliably — without the agent having to remember:
    clobber each other. (Earlier versions drove this from `SessionStart`/
    `SessionEnd` episode hooks keyed by Claude's session id; those are obsolete.
    The legacy `pseudolife-mcp episode-start/-end` CLI + shim path remain for
-   stdio clients.) Direct-HTTP titles are generic (`session - YYYY-MM-DD HH:MM`,
-   since the daemon has no project `cwd`); set `TZ` in `ops/.env` for local time.
+   stdio clients.) A store arriving after the reaper closed the episode
+   **resumes** it — same session id, same episode — rather than opening a new
+   husk (`PSEUDOLIFE_SESSION_RESUME_SECONDS`, default 6 h; `0` disables).
+   Direct-HTTP titles start generic (`session - YYYY-MM-DD HH:MM`, since the
+   daemon has no project `cwd`) — name the session with
+   `memory_session_title` (store responses carry an `episode_hint` until you
+   do); a session closing still-generic gets an auto-derived
+   `"{dominant source} - {stamp}: {first-entry snippet}"` title. Fragmented
+   history is repairable over REST: `POST /api/episodes/rename` and
+   `POST /api/episodes/merge`. Set `TZ` in `ops/.env` for local time.
 
 One command installs the briefing hook (PowerShell 7):
 

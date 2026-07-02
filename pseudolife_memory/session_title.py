@@ -17,6 +17,47 @@ import time
 # launches the shim with cwd set to one of these, which must not become a title.
 _NON_PROJECT_DIRS = {"system32", "syswow64", "windows", "system", "system64"}
 
+# The daemon's lazy-open fallback title. Anything still matching this at
+# session close was never named by an agent/shim and is fair game for the
+# derived-title pass.
+GENERIC_TITLE_RE = re.compile(r"^session - \d{4}-\d{2}-\d{2} \d{2}:\d{2}$")
+
+# Routing sources that carry progress noise rather than project identity —
+# they only win the dominant-source vote when nothing else is present.
+_NOISE_SOURCES = {"status", "log", "claude", "conversation"}
+
+_SNIPPET_CHARS = 60
+
+
+def derive_session_title(
+    started_at: float, entries: list[tuple[float, str, str]],
+) -> str | None:
+    """A content title for a generic-named session episode at close time:
+    ``"{dominant_source} - {start stamp}: {first-entry snippet}"``.
+
+    ``entries`` is ``[(timestamp, source, text), ...]`` for the episode's
+    subtree. The dominant source is an honest project signal because sources
+    are stable per project by convention; noise sources (``status``/``log``/
+    default client tags) only win when they're all there is. Returns ``None``
+    when there are no entries (the caller prunes empty episodes anyway).
+    """
+    if not entries:
+        return None
+    counts: dict[str, int] = {}
+    for _ts, source, _text in entries:
+        s = (source or "").strip() or "session"
+        counts[s] = counts.get(s, 0) + 1
+    signal = {s: n for s, n in counts.items() if s not in _NOISE_SOURCES}
+    pool = signal or counts
+    src = max(pool, key=lambda s: pool[s])
+    first_text = min(entries, key=lambda e: e[0])[2] or ""
+    snippet = " ".join(first_text.split())
+    if len(snippet) > _SNIPPET_CHARS:
+        cut = snippet.rfind(" ", 0, _SNIPPET_CHARS)
+        snippet = snippet[:cut if cut > 20 else _SNIPPET_CHARS].rstrip() + "…"
+    stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime(started_at))
+    return f"{src} - {stamp}: {snippet}" if snippet else f"{src} - {stamp}"
+
 _WINDOWSY = re.compile(r"^[A-Za-z]:[\\/]|\\")
 
 

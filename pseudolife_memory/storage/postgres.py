@@ -291,6 +291,27 @@ class PostgresStorage:
         with self._txn():
             self.conn.execute("DELETE FROM episodes WHERE id = %s", (episode_id,))
 
+    def retarget_episode_refs(
+        self, old_ids: list[str], new_id: str, new_title: str,
+    ) -> int:
+        """Re-point every row stamped with one of ``old_ids`` (entries +
+        outcome signals) at ``new_id`` — the episode-merge bulk pass. Returns
+        the number of entry rows moved."""
+        if not old_ids:
+            return 0
+        with self._txn():
+            cur = self.conn.execute(
+                "UPDATE entries SET episode_id = %s, episode_title = %s "
+                "WHERE episode_id = ANY(%s)",
+                (new_id, new_title, list(old_ids)),
+            )
+            self.conn.execute(
+                "UPDATE outcome_signals SET episode_id = %s "
+                "WHERE episode_id = ANY(%s)",
+                (new_id, list(old_ids)),
+            )
+        return cur.rowcount or 0
+
     # ── cortex facts ────────────────────────────────────────────────────
 
     def upsert_fact(self, f: dict) -> int:

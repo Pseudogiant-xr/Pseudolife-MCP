@@ -136,6 +136,11 @@ class ConsoleRoutes:
             b.get("session_key"), run_dream=bool(b.get("run_dream", True))))
         p("/api/episodes/prune", lambda q, b: svc.episode_prune_empty(
             include_open=bool(b.get("include_open", False))))
+        p("/api/episodes/rename", lambda q, b: svc.episode_rename(
+            b["id"], b.get("title") or ""))
+        p("/api/episodes/merge", lambda q, b: svc.episode_merge(
+            b.get("sources") or [], into=b.get("into"),
+            title=b.get("title"), hint=b.get("hint")))
 
         # ---- associative stream ----
         g("/api/recent", lambda q, b: svc.recent(

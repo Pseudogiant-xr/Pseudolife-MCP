@@ -54,6 +54,8 @@ from pseudolife_memory.memory.reranker import CrossEncoderReranker
 from pseudolife_memory.memory.titans_memory import MemoryEntry, RetrievalResult
 from pseudolife_memory.memory.cortex import CortexStore
 from pseudolife_memory.memory.slots import Slot
+from pseudolife_memory.session_title import (
+    GENERIC_TITLE_RE, derive_session_title)
 from pseudolife_memory.writer_context import resolve_writer
 from pseudolife_memory.utils.config import (
     AppConfig,
@@ -644,12 +646,21 @@ class MemoryService:
                 promoted = self._promote_slots(text, source=source, origin=origin)
                 if promoted and self._storage is not None:
                     self._save_cortex()
-            return {
+            out = {
                 "stored": stored,
                 "surprise": round(float(surprise), 4),
                 "reason": reason,
                 "cortex_promoted": promoted,
             }
+            # Nudge the agent while the lazily-opened session episode still
+            # carries the generic fallback title (the daemon has no project
+            # signal of its own; the agent does).
+            root = self._session_root_locked(session_id)
+            if root is not None and GENERIC_TITLE_RE.match(root.title or ""):
+                out["episode_hint"] = (
+                    "session episode is untitled — call "
+                    "memory_session_title('<project> - <topic>')")
+            return out
 
     def _promote_slots(self, text: str, *, source: str, origin: str | None) -> int:
         """Lift any slot-shaped facts in ``text`` into the cortex deterministically
@@ -2133,6 +2144,9 @@ class MemoryService:
             self._ensure_init()
             assert self._cms is not None
             _, session_id = self._resolve_writer()
+            # A sub-episode opened before the first store must still nest
+            # under a session root — lazily open one exactly like store does.
+            self._ensure_session_episode(session_id)
             ep = self._cms.episodes.start_nested(
                 title=title, hint=hint, session_key=session_id)
             self._persist_episodes()
@@ -2213,6 +2227,9 @@ class MemoryService:
                     em.remove(i)
                     self._delete_episode_row(i)
                 pruned = True
+            else:
+                self._auto_title_locked(closed, subtree)
+                result = self._episode_to_dict(closed)
         if not pruned:
             self._persist_episodes()
         fire = bool(run_dream and result and not pruned)
@@ -2327,6 +2344,26 @@ class MemoryService:
         existing = em.open_leaf_for(session_key)
         if existing is not None:
             return existing.id
+        # Resume-on-return: the idle reaper closes a session episode during a
+        # long pause, but the same mcp-session-id is by construction the same
+        # client session — reopen its episode instead of leaving a husk chain.
+        # The window only exists so a days-idle session starts a fresh episode.
+        resume = float(os.environ.get(
+            "PSEUDOLIFE_SESSION_RESUME_SECONDS", "21600"))
+        if resume > 0:
+            closed = [e for e in em.episodes.values()
+                      if e.session_key == session_key
+                      and e.parent_id is None and e.ended_at is not None]
+            if closed:
+                last = max(closed, key=lambda e: e.ended_at)
+                if time.time() - last.ended_at <= resume:
+                    last.ended_at = None
+                    last.closed_by_new_start = False
+                    em.current_id = last.id
+                    self._persist_episodes()
+                    logger.info("resumed session episode %s (session_key=%s)",
+                                last.id, session_key)
+                    return last.id
         title = time.strftime("session - %Y-%m-%d %H:%M")
         ep = em.start_session(title=title, session_key=session_key)
         self._persist_episodes()
@@ -2360,9 +2397,176 @@ class MemoryService:
             if root is None:
                 root = em.start_session(title=title, session_key=session_id)
             else:
-                root.title = title
+                self._retitle_locked(root, title)
             self._persist_episodes()
             return {"ok": True, "id": root.id, "title": title}
+
+    def _session_root_locked(self, session_key: str | None):
+        """The OPEN root episode for ``session_key``, or None. Caller holds
+        the lock and has ensured init."""
+        if not session_key or self._cms is None:
+            return None
+        for e in self._cms.episodes.episodes.values():
+            if (e.session_key == session_key and e.parent_id is None
+                    and e.ended_at is None):
+                return e
+        return None
+
+    def _retitle_locked(self, ep, title: str) -> None:
+        """Set an episode's title and rewrite the denormalised
+        ``episode_title`` stamp on its band entries (in-memory + DB rows).
+        Caller holds the lock and persists the episode log afterwards."""
+        assert self._cms is not None
+        ep.title = title
+        for band in self._cms.bands:
+            changed = False
+            for e in band.entries:
+                if e.episode_id == ep.id and e.episode_title != title:
+                    e.episode_title = title
+                    changed = True
+                    if self._storage is not None and e.db_id is not None:
+                        try:
+                            self._storage.update_entry(
+                                e.db_id, episode_title=title)
+                        except Exception as exc:  # noqa: BLE001
+                            logger.warning("entry retitle failed: %s", exc)
+            if changed:
+                band._dirty = True
+
+    def _auto_title_locked(self, root, subtree_ids: set[str]) -> None:
+        """Derive a content title for a session root that still carries the
+        generic lazy-open title at close time (dominant source + first-entry
+        snippet — see :func:`derive_session_title`). Agent/shim-named episodes
+        never match the generic pattern and are untouched. Caller holds the
+        lock."""
+        assert self._cms is not None
+        if not GENERIC_TITLE_RE.match(root.title or ""):
+            return
+        entries: list[tuple[float, str, str]] = []
+        for band in self._cms.bands:
+            for e in band.entries:
+                if e.episode_id in subtree_ids:
+                    entries.append((e.timestamp, e.source, e.text))
+        title = derive_session_title(root.started_at, entries)
+        if title:
+            self._retitle_locked(root, title)
+
+    def episode_rename(self, id: str, title: str) -> dict[str, Any]:
+        """Rename any episode by id (admin surface for the console / REST —
+        an agent naming its OWN session uses ``set_session_title``). Rewrites
+        the denormalised title stamp on the episode's entries too."""
+        title = (title or "").strip()
+        if not title:
+            return {"ok": False, "reason": "empty title"}
+        with self._lock:
+            self._ensure_init()
+            assert self._cms is not None
+            ep = self._cms.episodes.get(id)
+            if ep is None:
+                return {"ok": False, "reason": f"unknown episode {id}"}
+            self._retitle_locked(ep, title)
+            self._persist_episodes()
+            return {"ok": True, "id": ep.id, "title": ep.title}
+
+    def episode_merge(
+        self,
+        source_ids: list[str],
+        into: str | None = None,
+        title: str | None = None,
+        hint: str | None = None,
+    ) -> dict[str, Any]:
+        """Merge closed episodes into one (the fragmentation repair tool).
+
+        Target is ``into`` (an existing episode) or a fresh closed rollup
+        titled ``title``. Every source's entries and outcome signals are
+        re-stamped to the target, child episodes are re-parented, the target's
+        span widens to cover the sources, and the source episodes are deleted.
+        Open sources are skipped (they are someone's live session) and
+        reported in ``skipped_open``."""
+        from pseudolife_memory.memory.episodes import Episode
+        import uuid as _uuid
+        with self._lock:
+            self._ensure_init()
+            assert self._cms is not None
+            em = self._cms.episodes
+            sources, skipped_open, missing = [], [], []
+            for sid in dict.fromkeys(source_ids or []):
+                if into is not None and sid == into:
+                    continue
+                ep = em.get(sid)
+                if ep is None:
+                    missing.append(sid)
+                elif ep.ended_at is None:
+                    skipped_open.append(sid)
+                else:
+                    sources.append(ep)
+            base = {"skipped_open": skipped_open, "missing": missing}
+            if into is not None:
+                target = em.get(into)
+                if target is None:
+                    return {"ok": False, **base,
+                            "reason": f"unknown target episode {into}"}
+            elif not (title or "").strip():
+                return {"ok": False, **base,
+                        "reason": "a new target needs a title"}
+            else:
+                target = None
+            if not sources:
+                return {"ok": False, **base,
+                        "reason": "no closed source episodes to merge"}
+            if target is None:
+                target = Episode(
+                    id=_uuid.uuid4().hex,
+                    title=title.strip(),
+                    started_at=min(s.started_at for s in sources),
+                    ended_at=max(s.ended_at for s in sources),
+                    hint=hint,
+                )
+                em.episodes[target.id] = target
+            src_ids = {s.id for s in sources}
+            moved = 0
+            for band in self._cms.bands:
+                changed = False
+                for e in band.entries:
+                    if e.episode_id in src_ids:
+                        e.episode_id = target.id
+                        e.episode_title = target.title
+                        moved += 1
+                        changed = True
+                        if self._storage is not None and e.db_id is not None:
+                            try:
+                                self._storage.update_entry(
+                                    e.db_id, episode_id=target.id,
+                                    episode_title=target.title)
+                            except Exception as exc:  # noqa: BLE001
+                                logger.warning(
+                                    "entry retarget failed: %s", exc)
+                if changed:
+                    band._dirty = True
+            if self._storage is not None:
+                # Belt-and-braces for rows the bands no longer hold (evicted
+                # entries) + the outcome-signals log.
+                try:
+                    self._storage.retarget_episode_refs(
+                        sorted(src_ids), target.id, target.title)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("episode retarget failed: %s", exc)
+            for e in em.episodes.values():
+                if e.parent_id in src_ids:
+                    e.parent_id = target.id
+            target.started_at = min(
+                [target.started_at] + [s.started_at for s in sources])
+            if target.ended_at is not None:
+                target.ended_at = max(
+                    [target.ended_at]
+                    + [s.ended_at for s in sources if s.ended_at])
+            for s in sources:
+                em.remove(s.id)
+                self._delete_episode_row(s.id)
+            self._persist_episodes()
+            return {"ok": True, "id": target.id, "title": target.title,
+                    "merged": sorted(src_ids), "entries_moved": moved,
+                    **base}
 
     def episode_list(
         self, limit: int = 20, include_open: bool = True,
