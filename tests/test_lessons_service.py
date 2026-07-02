@@ -95,6 +95,18 @@ def test_synthesize_writes_lessons_edges_and_consumes_signals(svc):
     assert ("avoids", "tar --same-owner") in rels
 
 
+def test_empty_synthesis_leaves_signals_pending(svc):
+    """2026-07-02 review fix: a valid-but-empty extraction (or a batch where
+    every lesson_write failed) must not drain the signal queue — outcome
+    signals are the only feeder for procedural memory, so consuming them
+    with nothing written silently loses them. Leave them for the next sweep;
+    signal retention pruning bounds the retry window."""
+    svc.record_outcome("some task", "failure", about="thing", polarity="-")
+    rep = svc.synthesize_lessons(StubExtractor([]))
+    assert rep["lessons"] == 0
+    assert len(svc._storage.pending_signals()) == 1  # retried next sweep
+
+
 def test_no_extractor_leaves_signals_pending(svc):
     svc.record_outcome("some task", "success", about="thing")
     rep = svc.synthesize_lessons(NoLessonExtractor())

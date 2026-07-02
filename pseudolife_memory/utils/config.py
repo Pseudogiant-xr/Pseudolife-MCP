@@ -311,9 +311,11 @@ class DreamConfig:
     # and lessons (0.7).
     extract_relations: bool = True
     relation_confidence: float = 0.6  # legacy default; superseded by edge_confidence()
-    # Edges scoring below this at link time are dropped. 0.0 = write everything
-    # (non-destructive default); raise (e.g. 0.2) to auto-drop type-violations.
-    min_relation_confidence: float = 0.0
+    # Edges scoring below this at link time are dropped. Hard type-violations
+    # score 0.1125-0.175 (relation_quality.edge_confidence), so 0.2 auto-drops
+    # them at the source instead of leaving them for deep-dream cleanup.
+    # Set 0.0 to restore the old write-everything behavior.
+    min_relation_confidence: float = 0.2
 
 
 @dataclass
@@ -685,6 +687,14 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
         if "meta_filter" in mem_raw:
             config.memory.meta_filter = _dict_to_dataclass(
                 MetaFilterConfig, mem_raw["meta_filter"],
+            )
+        if "traces" in mem_raw:
+            config.memory.traces = _dict_to_dataclass(
+                TracesConfig, mem_raw["traces"],
+            )
+        if "deep_dream" in mem_raw:
+            config.memory.deep_dream = _dict_to_dataclass(
+                DeepDreamConfig, mem_raw["deep_dream"],
             )
     if "context" in raw:
         config.context = _dict_to_dataclass(ContextConfig, raw["context"])

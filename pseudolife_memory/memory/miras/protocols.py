@@ -92,5 +92,12 @@ class RetentionPolicy:
         """
         base = self.eviction_score(entry, now)
         weight = self.source_weights.get(entry.source, 1.0)
-        return ((base + 1.0) * weight
-                + self.retention_boost * math.log1p(entry.reinforcements))
+        score = ((base + 1.0) * weight
+                 + self.retention_boost * math.log1p(entry.reinforcements))
+        # Superseded history is always cheaper to lose than current state.
+        # Without this, a correction (near-zero surprise by construction)
+        # scored below the stale fact it replaced and was evicted first,
+        # permanently — while the stale fact survived.
+        if getattr(entry, "superseded_at", None) is not None:
+            score *= 0.05
+        return score

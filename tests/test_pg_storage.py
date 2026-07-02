@@ -265,3 +265,31 @@ def test_txn_rolls_back_compound_cursor_shape(storage):
     # failed rewrite left no partial rows.
     assert storage.ensure_entity("probe-after-compound-fail") > 0
     assert storage.load_facts() == []
+
+
+# ── 2026-07-02 review fixes: reconnect, ping, DDL-timeout leak ────────────
+
+def test_conn_property_reconnects_after_close(storage):
+    """A PG restart severs the single shared connection; the next use must
+    transparently re-establish it (heal-on-next-use) instead of poisoning
+    every storage call until a daemon restart."""
+    old = storage.conn
+    old.close()
+    eid = storage.ensure_entity("reconnect-probe-entity")
+    assert isinstance(eid, int)
+    assert storage.conn is not old
+
+
+def test_ping_reports_liveness(storage):
+    """/health uses this: a dedicated short-lived connection so the probe
+    can't interleave with (or leave an idle transaction on) the shared
+    connection another thread is using."""
+    assert storage.ping() is True
+
+
+def test_ddl_timeouts_do_not_leak_into_session(storage):
+    """ensure_schema's 30s statement_timeout was SET session-wide on the
+    shared connection — every runtime query (including the growing facts
+    rewrite) silently ran under a 30s abort. It must be SET LOCAL."""
+    val = storage.conn.execute("SHOW statement_timeout").fetchone()[0]
+    assert val in ("0", "0ms"), f"DDL statement_timeout leaked: {val}"

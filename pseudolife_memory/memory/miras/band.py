@@ -176,7 +176,10 @@ class MIRASBand:
         result_surprises: list[float] = []
         for idx in top_indices.tolist():
             entry = self.entries[idx]
-            entry.access_count += 1
+            # No access_count bump here — these are *candidates*. The CMS
+            # bumps only entries that survive the merged final top-k
+            # (promotion/retention/eviction all key off the count, so a
+            # candidate-level bump corrupts all three).
             result_entries.append(entry)
             result_surprises.append(entry.surprise_score)
 

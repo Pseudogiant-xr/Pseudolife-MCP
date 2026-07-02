@@ -938,6 +938,10 @@ class ContinuumMemorySystem:
             return RetrievalResult(entries=[], scores=[], surprises=[])
 
         entries, scores, surprises = zip(*combined)
+        # Access accrual happens HERE, on the final merged result set —
+        # not in band.retrieve, whose top-k is only a candidate pool.
+        for e in entries:
+            e.access_count += 1
         return RetrievalResult(
             entries=list(entries),
             scores=list(scores),

@@ -16,7 +16,8 @@ from pseudolife_memory.graph import build_subgraph
 
 class GraphStore(Protocol):
     def upsert_edge(self, src_id: int, relation: str, dst_id: int, *,
-                    confidence: float = 0.8, origin: str | None = None) -> dict: ...
+                    confidence: float = 0.8, origin: str | None = None,
+                    revive: bool = True) -> dict: ...
 
     def supersede_edge(self, src_id: int, relation: str, dst_id: int) -> bool: ...
 
@@ -39,9 +40,11 @@ class PostgresNetworkxGraphStore:
 
     # ── writes (delegate to the hub's edge/relation tables) ─────────────
     def upsert_edge(self, src_id: int, relation: str, dst_id: int, *,
-                    confidence: float = 0.8, origin: str | None = None) -> dict:
+                    confidence: float = 0.8, origin: str | None = None,
+                    revive: bool = True) -> dict:
         return self._st.upsert_edge(src_id, relation, dst_id,
-                                    confidence=confidence, origin=origin)
+                                    confidence=confidence, origin=origin,
+                                    revive=revive)
 
     def supersede_edge(self, src_id: int, relation: str, dst_id: int) -> bool:
         return self._st.supersede_edge(src_id, relation, dst_id)

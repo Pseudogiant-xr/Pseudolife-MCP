@@ -126,7 +126,7 @@ def run_daemon(host: str | None = None, port: int | None = None) -> None:
         from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
 
         svc = mcp_server.service
-        return {
+        payload = {
             "status": "ok",
             "schema": SCHEMA_META_VERSION,
             "storage": "postgres" if getattr(svc, "_db_url", None) else "files",
@@ -135,6 +135,21 @@ def run_daemon(host: str | None = None, port: int | None = None) -> None:
             # >0 means writes succeeded in memory but a snapshot did not persist.
             "persist_errors": getattr(svc, "_persist_errors", 0),
         }
+        # Honest DB liveness (2026-07-02 review fix): /health used to say
+        # "ok" while a restarted Postgres had every memory tool failing.
+        # ping() uses a dedicated short-lived connection so the probe can't
+        # interleave with the shared connection another thread is using.
+        # Before the first tool call storage is lazily unbuilt — that is
+        # still "ok" (nothing to probe yet).
+        storage = getattr(svc, "_storage", None)
+        if storage is not None and hasattr(storage, "ping"):
+            try:
+                storage.ping()
+                payload["db"] = "ok"
+            except Exception as exc:  # noqa: BLE001 — surface, don't raise
+                payload["status"] = "degraded"
+                payload["db"] = f"error: {exc}"
+        return payload
 
     mcp_server.start_background_durability()
     mcp_server.start_dream_sweep()

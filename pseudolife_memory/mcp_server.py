@@ -37,6 +37,7 @@ Configuration
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 import sys
@@ -53,6 +54,7 @@ from typing import Any
 # also touch TORCH_LOGS (an empty value crashes torch's log initialiser).
 os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
 
+from anyio import to_thread  # noqa: E402
 from mcp.server.fastmcp import FastMCP  # noqa: E402
 
 from pseudolife_memory.service import MemoryService  # noqa: E402
@@ -92,14 +94,31 @@ def _should_register(toolset: str, core: bool) -> bool:
     return toolset != "core" or core
 
 
+def _async_offload(fn):
+    """Register-time wrapper: run a sync tool body on a worker thread.
+
+    The MCP SDK invokes sync tools inline on the uvicorn event loop, so one
+    long tool call (dream_run, document_ingest, first-call model init) froze
+    every other session, /health, and the console (2026-07-02 review, H1).
+    ``functools.wraps`` preserves name/docstring/signature (via
+    ``__wrapped__``) so FastMCP still derives the tool schema from the real
+    parameter list, and AnyIO copies the calling context into the worker
+    thread so the per-request writer/session contextvars still resolve.
+    """
+    @functools.wraps(fn)
+    async def _run(*args: Any, **kwargs: Any) -> Any:
+        return await to_thread.run_sync(functools.partial(fn, *args, **kwargs))
+    return _run
+
+
 def _tool(*, core: bool = False):
     """Replacement for @_tool() that records the tool's tier and gates
     registration on PSEUDOLIFE_MCP_TOOLSET."""
     def deco(fn):
         _TOOL_TIERS[fn.__name__] = core
         if _should_register(_TOOLSET, core):
-            return mcp.tool()(fn)
-        return fn  # left callable (tests / Console-via-service); not exposed
+            mcp.tool()(_async_offload(fn))
+        return fn  # module attr stays the plain sync fn (tests / Console)
     return deco
 
 
