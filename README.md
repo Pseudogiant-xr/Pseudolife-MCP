@@ -58,7 +58,7 @@ Console (REST) — the manifest is agent context every session, so it stays lean
 | `memory_forget(scope, ...)` | Hard-delete from one store: `memory` (by text/substring/source/episode/tag), `fact`, `world`, or `lesson` (by entity/attribute) |
 | `memory_stats()` | Per-band sizes, hit rates, totals |
 | `memory_get(entry_id)` / `memory_reinforce(entry_id)` | Dereference a memory id to its full episode (+ `consolidated_into`); reinforce it after finding it useful |
-| `memory_fact_get(entity, attribute)` | The one CURRENT canonical value at a slot (+ parked contenders) |
+| `memory_fact_get(entity, attribute)` | The one CURRENT canonical value at a slot (+ parked contenders); on an empty slot returns ranked `candidates` (same-entity, then similar slots) |
 | `memory_fact_set(entity, attribute, value, origin?, confidence?)` | Assert a canonical fact deliberately (insert / confirm / supersede / contest) |
 | `memory_fact_resolve(entity, attribute, accept)` | Settle a contested slot — adopt (`true`) or discard (`false`) the contender |
 | `memory_history(entity, attribute)` | Version timeline at a slot, with writer/temporal stamps |
@@ -76,7 +76,7 @@ Console (REST) — the manifest is agent context every session, so it stays lean
 | `memory_graph_relate(src, relation, dst, ...)` | Assert a typed edge (closed relation vocabulary; re-assertion bumps confidence) |
 | `memory_graph_unrelate(src, relation, dst)` | Retract an edge (superseded, kept for audit) |
 | `memory_alias(entity, alias)` | Bind an alternative name — lookups resolve aliases first |
-| `memory_graph(entity, depth?, include_facts?, to?, relation_filter?)` | Entity neighborhood (≤3 hops) with derived transitive/inverse edges; `to` returns the shortest path between two entities |
+| `memory_graph(entity, depth?, include_facts?, to?, relation_filter?)` | Entity neighborhood (≤3 hops) with derived transitive/inverse edges and per-edge `EXTRACTED/INFERRED/AMBIGUOUS` provenance tags; `to` returns the shortest path between two entities |
 | `memory_recall(query, hops?, top_k?)` | Multi-hop retrieval for relational questions; `low_confidence: true` → fall back to `memory_search` |
 | `memory_relation_define(name, description, ...)` | Grow the closed relation vocabulary (deliberate, rare act) |
 | `document_ingest(path, source?)` | Index a file (txt/md/pdf) in the reference bank |

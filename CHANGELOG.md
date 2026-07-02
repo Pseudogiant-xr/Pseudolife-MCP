@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-03 — external findings wave 1)
+- **Betweenness god-nodes**: `god_nodes()` now ranks by betweenness centrality
+  (bridges whose loss disconnects communities) with degree as tiebreak; each
+  item carries a new `betweenness` field alongside `degree`. K-sampled above
+  `memory.graph_insight.betweenness_sample` nodes.
+- **`memory_fact_get` candidates on miss**: an empty slot (no record, no
+  contenders) now returns `candidates` — same-entity slots first
+  (recency-ranked), then embedding-similar slots above a 0.35 floor — ranked
+  leads instead of a bare null.
+- **Edge provenance tags**: graph edges surface a derived
+  `EXTRACTED | INFERRED | AMBIGUOUS` tag (origin user/action; agent at working
+  confidence; proposals + sub-0.5 confidence) in `memory_graph`, `/api/graph`,
+  review findings, and as Atlas/Console badges. No schema change.
+
 ### Added (2026-07-03 — deep-dream review follow-ups)
 - **Pre-apply graph snapshot**: `memory_dream(action="deep", apply=true)` first
   dumps the five graph tables to
