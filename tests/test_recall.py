@@ -317,15 +317,15 @@ def test_memory_graph_relation_filter(tmp_path, monkeypatch):
 
 
 @pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_memory_path_tool_delegates(tmp_path, monkeypatch):
+def test_graph_path_service_shortest_path(tmp_path):
+    # The memory_path MCP tool was folded into memory_graph(to=...); the
+    # Console still reaches this via /api/graph/path -> service.graph_path.
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
-    import pseudolife_memory.mcp_server as srv
     svc = build_service(tmp_path)
     svc.graph_relate("mp-a", "depends-on", "mp-b")
     svc.graph_relate("mp-b", "depends-on", "mp-c")
-    monkeypatch.setattr(srv, "service", svc, raising=False)
-    out = srv.memory_path("mp-a", "mp-c")
+    out = svc.graph_path("mp-a", "mp-c")
     assert out["path"] == ["mp-a", "mp-b", "mp-c"] and out["hops"] == 2
 
 
@@ -390,30 +390,28 @@ def test_recall_no_gating_pulls_in_hub_siblings(tmp_path):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_memory_digest_tool(tmp_path, monkeypatch):
+def test_graph_digest_service(tmp_path):
+    # digest left the MCP surface (Console-only via /api/graph/digest).
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
-    import pseudolife_memory.mcp_server as srv
     svc = build_service(tmp_path)
     _seed_two_communities(svc)
     svc._refresh_graph_insight()  # noqa: SLF001
-    monkeypatch.setattr(srv, "service", svc, raising=False)
-    out = srv.memory_digest()
+    out = svc.graph_digest()
     assert out["available"] is True and "god_nodes" in out["digest"]
 
 
 @pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_memory_communities_tool(tmp_path, monkeypatch):
+def test_communities_service(tmp_path):
+    # communities left the MCP surface (Console-only via /api/graph/communities).
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
-    import pseudolife_memory.mcp_server as srv
     svc = build_service(tmp_path)
     _seed_two_communities(svc)
     svc._refresh_graph_insight()  # noqa: SLF001
-    monkeypatch.setattr(srv, "service", svc, raising=False)
-    listing = srv.memory_communities()
+    listing = svc.communities()
     assert listing["communities"]
-    members = srv.memory_communities(community_id=listing["communities"][0]["id"])
+    members = svc.communities(community_id=listing["communities"][0]["id"])
     assert "members" in members
 
 
@@ -475,7 +473,7 @@ def test_memory_get_and_reinforce_roundtrip(tmp_path, monkeypatch):
         assert set(f) == {"entity", "attribute", "value"}
         assert "id" not in f
     # source_entries surfaces on a fact read (the fact advertises its episodes).
-    facts = srv.memory_facts()["entries"]
+    facts = svc.cortex_dump()["entries"]
     assert any(eid in (f.get("source_entries") or []) for f in facts)
     before = st.conn.execute("SELECT reinforcements FROM entries WHERE id=%s", (eid,)).fetchone()[0]
     assert srv.memory_reinforce(eid)["reinforced"] is True
