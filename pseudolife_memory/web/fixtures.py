@@ -459,6 +459,23 @@ class FixtureService:
                     {"id": 9, "band": "slow", "source": "homelab-local-models", "ts": 1782100000.0,
                      "text": "daemon image pseudolife-daemon:0.2.0 rebuilt and deployed"}]}
 
+    def chain(self, entity, limit=20):
+        return {"found": True, "entity": entity, "count": 4, "events": [
+            {"t": 1782100000.0, "kind": "fact_set",
+             "summary": "image = pseudolife-daemon:0.1.9",
+             "refs": {"attribute": "image"}},
+            {"t": 1782150000.0, "kind": "entry",
+             "summary": "rebuilt the daemon image after the graph rename",
+             "refs": {"entry_id": 9, "episode_title": "containerization"}},
+            {"t": 1782190000.0, "kind": "superseded",
+             "summary": "image: pseudolife-daemon:0.1.9 superseded by "
+                        "pseudolife-daemon:0.2.0",
+             "refs": {"attribute": "image"}},
+            {"t": 1782200000.0, "kind": "edge",
+             "summary": "pseudolife-daemon —runs-on→ docker-desktop",
+             "refs": {"relation": "runs-on"}},
+        ]}
+
     def graph_assign_scope(self, entity, source):
         return {"assigned": True, "entity": entity, "source": source}
 

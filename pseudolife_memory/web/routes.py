@@ -153,6 +153,8 @@ class ConsoleRoutes:
             rerank=_tribool(q, "rerank"), bm25=_tribool(q, "bm25")))
         g("/api/recall", lambda q, b: svc.recall(
             _s(q, "q", ""), hops=_i(q, "hops", 3), top_k=_i(q, "top_k", 5)))
+        g("/api/chain", lambda q, b: svc.chain(
+            _s(q, "entity", ""), limit=_i(q, "limit", 20)))
 
         # ---- engram traces / retention ----
         g("/api/entry", lambda q, b: svc.get_entry(_i(q, "id", 0)))
