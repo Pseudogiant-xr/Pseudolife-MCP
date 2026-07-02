@@ -228,6 +228,21 @@ def test_asgi_health_open(svc):
     assert st == 200
 
 
+def test_asgi_health_degraded_returns_503(svc):
+    """2026-07-02 review fix: /health said 200 'ok' while the DB was
+    unreachable and every memory tool failed. A degraded payload must
+    surface as 503 so orchestration can see it."""
+    import json
+
+    app = build_console_app(
+        _stub_mcp, None,
+        lambda: {"status": "degraded", "db": "error: connection refused"},
+        svc)
+    st, body = _call(app, "GET", "/health")
+    assert st == 503
+    assert json.loads(body)["db"].startswith("error")
+
+
 def test_devserver_health_reports_real_schema():
     import json
 

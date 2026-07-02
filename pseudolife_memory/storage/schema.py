@@ -318,8 +318,13 @@ def ensure_schema(conn) -> dict:
     with conn.cursor() as cur:
         # Bound every DDL statement so a stray lock holder surfaces as an
         # error instead of an indefinite hang (the v0.1 lesson, applied to
-        # the new storage layer).
-        cur.execute("SET lock_timeout = '5s'; SET statement_timeout = '30s';")
+        # the new storage layer). SET LOCAL: these guards are for THIS
+        # transaction only — a plain SET leaked the 30s statement_timeout
+        # into the whole session, so every later runtime query silently ran
+        # under a 30s abort (2026-07-02 review fix).
+        cur.execute(
+            "SET LOCAL lock_timeout = '5s'; "
+            "SET LOCAL statement_timeout = '30s';")
         cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
         cur.execute(SCHEMA_SQL)
         # v13 additive: reinforcement counter on entries (tracks how many times

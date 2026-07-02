@@ -18,6 +18,31 @@ import pytest
 # ---------------------------------------------------------------------------
 
 
+def test_all_registered_tools_run_off_the_event_loop() -> None:
+    """2026-07-02 review fix: the MCP SDK invokes sync tools inline on the
+    uvicorn event loop, so one long tool call (dream_run, document_ingest,
+    first-call model init) froze every other session, /health, and the
+    console. Every registered tool must be an async wrapper that
+    thread-dispatches its sync body (the REST layer already does the
+    equivalent via run_in_executor)."""
+    from pseudolife_memory import mcp_server  # noqa: PLC0415 — lazy import.
+
+    tools = mcp_server.mcp._tool_manager.list_tools()
+    assert tools, "no tools registered?"
+    blocking = [t.name for t in tools if not t.is_async]
+    assert blocking == [], f"tools that would block the event loop: {blocking}"
+
+
+def test_module_level_tool_fns_stay_sync_callable() -> None:
+    """The Console/tests call tool bodies directly — the module attribute
+    must remain the plain sync function; only the registered copy is async."""
+    import inspect
+
+    from pseudolife_memory import mcp_server  # noqa: PLC0415 — lazy import.
+
+    assert not inspect.iscoroutinefunction(mcp_server.memory_stats)
+
+
 def test_all_tools_registered() -> None:
     """The MCP server exposes exactly the documented tool set."""
     from pseudolife_memory import mcp_server  # noqa: PLC0415 — lazy import.

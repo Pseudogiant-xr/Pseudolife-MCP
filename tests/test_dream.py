@@ -363,6 +363,58 @@ def test_dream_run_does_not_advance_cursor_on_failure(svc):
     assert svc.cortex_lookup("relay", "port") is not None
 
 
+class _PoisonExtractor:
+    """Fails deterministically on entries containing 'poison'; extracts a
+    canned relay/port claim from everything else."""
+
+    def extract(self, texts, vocab):
+        from pseudolife_memory.memory.dream import ExtractorError
+        if "poison" in texts[0]:
+            raise ExtractorError("deterministic parse failure")
+        return [{"entity": "relay", "attribute": "port", "value": "4001",
+                 "confidence": 0.55, "origin": "agent"}]
+
+
+def test_poison_entry_quarantined_after_repeated_failures(svc):
+    """2026-07-02 review fix: an entry that fails extraction deterministically
+    must not stall consolidation forever. After repeated failures it is
+    quarantined (skipped) and the cursor advances past it."""
+    svc.config.memory.cortex.auto_promote = False
+    svc.store("good one relay speaks on some port", source="notes")
+    svc.store("poison entry that always breaks extraction", source="notes")
+    svc.store("good two also mentions the relay", source="notes")
+
+    ext = _PoisonExtractor()
+    r1 = svc.dream_run(ext)
+    r2 = svc.dream_run(ext)
+    assert r1.get("extractor_failed") is True     # transient-style holds...
+    assert r2.get("extractor_failed") is True     # ...and holds again
+    r3 = svc.dream_run(ext)                       # third strike: quarantine
+    assert not r3.get("extractor_failed"), (
+        "a deterministically-failing entry must be quarantined, not retried "
+        "forever")
+    assert svc.dream_status()["backlog"] == 0     # cursor moved past poison
+
+
+def test_batch_retry_does_not_ratchet_confidence(svc):
+    """A re-extraction of the SAME source entry (batch retry after a
+    mid-batch failure) must be a no-op on the slot, not a confirmation —
+    the pre-fix behavior ratcheted agent guesses toward 1.0 on every
+    600s sweep while consolidation was stalled."""
+    svc.config.memory.cortex.auto_promote = False
+    svc.store("relay speaks on some port", source="notes")
+    svc.store("poison entry that always breaks extraction", source="notes")
+
+    ext = _PoisonExtractor()
+    svc.dream_run(ext)   # writes relay.port@0.55, then poison aborts batch
+    first = svc.cortex_lookup("relay", "port")["confidence"]
+    svc.dream_run(ext)   # retry re-extracts the same source entry
+    second = svc.cortex_lookup("relay", "port")["confidence"]
+    assert second == pytest.approx(first), (
+        "re-dreaming an already-traced (slot, source) pair must not "
+        "reinforce confidence")
+
+
 # ── GAM #2 graph-from-text: _dream_extract_relations (PG-backed) ─────────
 
 class _RelStubExtractor:

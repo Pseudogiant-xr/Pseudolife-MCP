@@ -139,10 +139,13 @@ def build_console_app(
         path = scope.get("path", "") or "/"
         method = scope.get("method", "GET").upper()
 
-        # 1) open liveness probe
+        # 1) open liveness probe. A degraded payload (e.g. DB unreachable)
+        # surfaces as 503 so orchestration/healthchecks can actually see it.
         if path == "/health":
             try:
-                await _send_json(send, 200, health_payload())
+                payload = health_payload()
+                ok = payload.get("status", "ok") == "ok"
+                await _send_json(send, 200 if ok else 503, payload)
             except Exception as exc:  # noqa: BLE001
                 await _send_json(send, 500, {"status": "error", "error": str(exc)})
             return

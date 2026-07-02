@@ -6,6 +6,56 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-07-02 review P0 — six correctness fires)
+- **MCP tools no longer block the daemon's event loop.** The SDK invokes sync
+  tools inline on the uvicorn loop, so one long call (`memory_dream_run`,
+  `document_ingest`, first-call model init) froze every other session,
+  `/health`, and the Console — a Docker healthcheck could kill the daemon
+  mid-dream. Every registered tool is now an async wrapper that dispatches
+  its sync body via `anyio.to_thread.run_sync` (one change in `_tool()`;
+  module-level fns stay sync for the Console/tests). Contextvars (writer /
+  session attribution) propagate into the worker thread.
+- **Postgres reconnect + honest `/health`.** A PG restart used to poison the
+  daemon permanently (single connection, no reconnect anywhere) while
+  `/health` — which never touched the DB — kept saying "ok". `storage.conn`
+  is now a heal-on-next-use property; `/health` pings the DB on a dedicated
+  short-lived connection and reports 503 `status:degraded` when it's
+  unreachable. `_txn` rollback on a dead connection no longer masks the
+  original exception. `ensure_schema`'s DDL timeouts are now `SET LOCAL` —
+  the old session-wide `SET` silently capped every runtime query at 30s.
+- **`access_count` now counts returned results, not candidates.** Bands
+  bumped every band-local top-k candidate (up to 8 per band per query,
+  pre-filter), corrupting promotion, MTT retention, and eviction scoring at
+  the source. The bump moved to the final merged top-k in `cms.retrieve`.
+- **Eviction prefers superseded entries.** A correction arrives with
+  near-zero surprise while the stale fact it replaced keeps a decayed-but-
+  larger one, so surprise-driven eviction destroyed corrections and kept the
+  stale facts. Superseded entries now score 0.05× — always the cheaper loss.
+- **Graph ingestion gated at the source** (the junk root cause, previously
+  patched detection-side only): dream relations drop endpoints matching the
+  known junk classes (`junk_name_reason`: concat-artifacts, bare numbers,
+  status words) before entity creation; fact-write subject nodes get the same
+  gate; `dream.min_relation_confidence` default 0.0 → **0.2** (hard
+  type-violations score ≤0.175 and are now dropped, not written-then-cleaned);
+  and `upsert_edge(revive=False)` on the dream path makes human removals
+  sticky — an agent re-assertion no longer resurrects a superseded edge.
+- **Dream poison-pill quarantine + idempotent re-dreams.** A deterministically
+  failing entry used to stall consolidation forever (same batch retried every
+  sweep) while each retry re-confirmed the batch prefix, ratcheting agent-
+  guess confidence toward ~0.98. Now: three strikes per entry → quarantine
+  (cursor advances past it), and an already-traced (slot, source-entry) pair
+  is skipped on re-extraction instead of re-confirmed.
+- **User config.yaml keys are respected.** `_apply_mcp_defaults` clobbered
+  five knobs unconditionally after load (`surprise_threshold`,
+  `meta_filter.enabled`, `recency_base_half_life_s`, `traces.retention_boost`,
+  `embedding.batch_size`) — the YAML knobs were dead. Defaults now overlay
+  only keys the user left unset; `load_config` also gained the missing
+  `memory.traces` / `memory.deep_dream` sections.
+- **Lesson signals survive empty synthesis.** `synthesize_lessons` consumed
+  the outcome-signal queue even when the extraction wrote nothing — silently
+  losing the only feeder for procedural memory. Signals are now consumed only
+  when at least one lesson landed.
+
 ### Added
 - **Session-scoped episodes (correct attribution + clean names).** Episodes are now
   keyed to a **stable per-session id** instead of a single global `current_id`, so a

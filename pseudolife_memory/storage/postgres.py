@@ -118,19 +118,51 @@ class PostgresStorage:
 
     def __init__(self, dsn: str) -> None:
         self.dsn = dsn
-        self.conn = psycopg.connect(dsn, connect_timeout=10)
+        self._conn = self._connect()
+        self.capabilities = ensure_schema(self._conn)
+        register_vector(self._conn)
+        self._seed_relations()
+
+    def _connect(self) -> psycopg.Connection:
+        """Open + session-configure a connection (shared by init and the
+        reconnect path)."""
+        conn = psycopg.connect(self.dsn, connect_timeout=10)
         # Never block forever on a lock — a stuck/orphaned writer should
         # raise here, not hang the whole daemon.
-        self.conn.execute("SET lock_timeout = '5s'")
+        conn.execute("SET lock_timeout = '5s'")
         # Pin the namespace to public BEFORE ensure_schema runs. The DB role is
         # `pseudolife`, which can clash with schema names, so the cluster default
         # ("$user", public) search_path could shadow the real bank. Pinning to
         # public makes SCHEMA_SQL creation + every read/write target the real tables.
-        self.conn.execute("SET search_path TO public")
-        self.conn.commit()
-        self.capabilities = ensure_schema(self.conn)
-        register_vector(self.conn)
-        self._seed_relations()
+        conn.execute("SET search_path TO public")
+        conn.commit()
+        return conn
+
+    @property
+    def conn(self) -> psycopg.Connection:
+        """The live shared connection — transparently re-established when a
+        Postgres restart closed/broke the previous one (2026-07-02 review
+        fix: there was no reconnect anywhere, so a PG restart poisoned the
+        daemon until manual restart). Heal-on-next-use: the call that hits
+        the dead connection still raises; the *next* one reconnects.
+        Schema is NOT re-ensured (it exists); the vector adapter is
+        per-connection and must be re-registered."""
+        c = self._conn
+        if c.closed or c.broken:
+            logger.warning("postgres connection lost (closed=%s broken=%s); "
+                           "reconnecting", c.closed, c.broken)
+            self._conn = self._connect()
+            register_vector(self._conn)
+        return self._conn
+
+    def ping(self) -> bool:
+        """Cheap liveness probe for /health on a DEDICATED short-lived
+        connection, so it can't interleave with — or leave an idle
+        transaction on — the shared connection another thread is using.
+        Raises on an unreachable server."""
+        with psycopg.connect(self.dsn, connect_timeout=2) as c:
+            c.execute("SELECT 1")
+        return True
 
     def _seed_relations(self) -> None:
         with self._txn(), self.conn.cursor() as cur:
@@ -148,7 +180,7 @@ class PostgresStorage:
 
     def close(self) -> None:
         try:
-            self.conn.close()
+            self._conn.close()  # raw: never reconnect just to close
         except Exception:  # noqa: BLE001
             pass
 
@@ -163,7 +195,13 @@ class PostgresStorage:
             yield
             self.conn.commit()
         except Exception:
-            self.conn.rollback()
+            # Roll back on the RAW connection: going through the property
+            # here could trigger a reconnect attempt whose own failure would
+            # mask the original exception (e.g. when the server is down).
+            try:
+                self._conn.rollback()
+            except Exception:  # noqa: BLE001 — dead connection; the original error matters more
+                logger.debug("rollback on dead connection skipped", exc_info=True)
             raise
 
     # ── entries ─────────────────────────────────────────────────────────
@@ -699,10 +737,14 @@ class PostgresStorage:
     def upsert_edge(
         self, src_id: int, relation: str, dst_id: int, *,
         confidence: float = 0.8, origin: str | None = None,
+        revive: bool = True,
     ) -> dict:
         """Insert or re-assert. Re-assertion bumps confidence (+0.05,
-        capped 0.99), revives a superseded edge, and keeps the stronger
-        origin claim if the new call omitted one."""
+        capped 0.99) and keeps the stronger origin claim if the new call
+        omitted one. ``revive=True`` (explicit/human assertion) clears a
+        prior supersession; ``revive=False`` (agent re-extraction, e.g.
+        the dream) leaves a superseded edge superseded — a human removal
+        must be sticky against the extractor re-planting the same triple."""
         with self._txn():
             row = self.conn.execute(
                 """
@@ -713,11 +755,13 @@ class PostgresStorage:
                   confidence = LEAST(
                     0.99, GREATEST(EXCLUDED.confidence, edges.confidence + 0.05)),
                   origin = COALESCE(EXCLUDED.origin, edges.origin),
-                  superseded_at = NULL,
+                  superseded_at = CASE WHEN %s THEN NULL
+                                       ELSE edges.superseded_at END,
                   asserted_at = EXCLUDED.asserted_at
                 RETURNING id, confidence
                 """,
-                (src_id, relation, dst_id, confidence, origin, time.time()),
+                (src_id, relation, dst_id, confidence, origin, time.time(),
+                 bool(revive)),
             ).fetchone()
         return {"id": int(row[0]), "confidence": float(row[1])}
 
@@ -732,6 +776,18 @@ class PostgresStorage:
                 (time.time(), src_id, relation, dst_id),
             )
         return cur.rowcount > 0
+
+    def has_trace(self, entity_norm: str, attribute_norm: str,
+                  entry_id: int) -> bool:
+        """True iff this source entry already formed this slot once — lets a
+        dream batch retry skip re-confirming (and re-ratcheting) the prefix
+        it already consolidated."""
+        row = self.conn.execute(
+            "SELECT 1 FROM memory_traces WHERE entity_norm=%s "
+            "AND attribute_norm=%s AND entry_id=%s",
+            (entity_norm, attribute_norm, entry_id),
+        ).fetchone()
+        return row is not None
 
     def add_trace(self, entity_norm: str, attribute_norm: str,
                   entry_id: int, now: float) -> bool:

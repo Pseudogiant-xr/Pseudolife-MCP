@@ -266,6 +266,31 @@ def _k_core_peel(entities: list[str], edges: list[dict], max_nodes: int) -> set[
     return alive
 
 
+def _user_yaml_leaves(path: str | Path) -> frozenset[str]:
+    """Dotted leaf keys explicitly set in the user's config.yaml.
+
+    Empty set when the file is missing or unreadable. Feeds
+    :meth:`MemoryService._apply_mcp_defaults` so the MCP-tuned defaults
+    only fill keys the user left unset.
+    """
+    try:
+        import yaml
+        raw = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    except Exception:  # noqa: BLE001 — missing/corrupt file = no user keys
+        return frozenset()
+    leaves: set[str] = set()
+
+    def _walk(node: object, prefix: str) -> None:
+        if isinstance(node, dict) and node:
+            for k, v in node.items():
+                _walk(v, f"{prefix}{k}.")
+        elif prefix:
+            leaves.add(prefix[:-1])
+
+    _walk(raw, "")
+    return frozenset(leaves)
+
+
 def _origin_from_source(source: str | None) -> str | None:
     return _SOURCE_ORIGIN.get((source or "").strip().lower())
 
@@ -302,9 +327,9 @@ class MemoryService:
             # Sentinel for "use defaults" — load_config returns an
             # AppConfig() when the file doesn't exist.
             cfg_candidate = self.data_dir / "config.yaml"
-            self.config = load_config(cfg_candidate)
         else:
-            self.config = load_config(config_path)
+            cfg_candidate = Path(config_path)
+        self.config = load_config(cfg_candidate)
 
         # Override save_dir so memory tensors land inside data_dir even
         # when the config wasn't tailored for this install.
@@ -313,7 +338,8 @@ class MemoryService:
 
         # Defaults that make sense for the *Claude* use-case differ from
         # the human-chat defaults shipped with PseudoLife — see README.
-        self._apply_mcp_defaults(self.config)
+        # Overlay only: keys the user explicitly set in config.yaml win.
+        self._apply_mcp_defaults(self.config, user_keys=_user_yaml_leaves(cfg_candidate))
 
         # Lazy components — built on first use.
         self._embedder: EmbeddingPipeline | None = None
@@ -331,6 +357,11 @@ class MemoryService:
         self._writer_id = os.environ.get("PSEUDOLIFE_WRITER_ID") or "unknown"
         self._last_user_query: str | None = None
         self._last_saved_fingerprint = None
+        # Poison-pill guard for the dream: consecutive extraction-failure
+        # counts per entry (db_id). In-memory only — a daemon restart resets
+        # the strikes, which just means a poison entry needs its three
+        # failures again before quarantine.
+        self._dream_entry_failures: dict[Any, int] = {}
         # Count of durable-save failures (cortex/world/lessons). Exposed via the
         # daemon /health probe so swallowed-then-surfaced saves are observable.
         self._persist_errors = 0
@@ -366,8 +397,15 @@ class MemoryService:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _apply_mcp_defaults(config: AppConfig) -> None:
+    def _apply_mcp_defaults(
+        config: AppConfig, user_keys: frozenset[str] = frozenset(),
+    ) -> None:
         """Tweak PseudoLife defaults for the MCP / Claude use case.
+
+        ``user_keys`` is the set of dotted leaf keys the user explicitly
+        set in config.yaml — those are respected, never clobbered (the
+        pre-2026-07-02 behavior overwrote them unconditionally, which made
+        the corresponding YAML knobs dead in the daemon).
 
         Differences from the user-facing chat defaults:
 
@@ -388,10 +426,17 @@ class MemoryService:
         Leaves the MIRAS preset alone — the ``continuum`` 8-tier default
         is fine for Claude's use too.
         """
-        config.memory.surprise_threshold = 0.0
-        config.embedding.batch_size = 16
-        config.memory.meta_filter.enabled = False
-        config.memory.recency_base_half_life_s = 86400.0
+        def absent(key: str) -> bool:
+            return key not in user_keys
+
+        if absent("memory.surprise_threshold"):
+            config.memory.surprise_threshold = 0.0
+        if absent("embedding.batch_size"):
+            config.embedding.batch_size = 16
+        if absent("memory.meta_filter.enabled"):
+            config.memory.meta_filter.enabled = False
+        if absent("memory.recency_base_half_life_s"):
+            config.memory.recency_base_half_life_s = 86400.0
         # Graded MTT retention ON for the daemon (provenance-as-link Phase 2): a
         # reinforced episode resists eviction by retention_boost*log1p(reinforcements).
         # 1.0 is the largest boost with ~no recency displacement — the honest
@@ -399,7 +444,8 @@ class MemoryService:
         # protection already comes from access-coupling (reinforcing bumps access_count);
         # 1.0 is a modest free nudge on top, higher values trade recency for more. The
         # library default stays 0.0 (no-op) — this is a deployment-build choice.
-        config.memory.traces.retention_boost = 1.0
+        if absent("memory.traces.retention_boost"):
+            config.memory.traces.retention_boost = 1.0
 
     def _ensure_init(self) -> None:
         if self._cms is not None:
@@ -623,6 +669,9 @@ class MemoryService:
         if self._storage is None:
             return
         from pseudolife_memory.graph import norm_name
+        from pseudolife_memory.memory.graph_consolidation import junk_name_reason
+        if junk_name_reason(entity):
+            return  # junk-shaped subject: keep the fact, skip the graph node
         n = norm_name(entity)
         if n and self._storage.find_entity(n) is None:
             self._storage.ensure_entity(n, display=entity.strip())
@@ -1487,10 +1536,18 @@ class MemoryService:
                  if r["name"] not in ("prefers", "avoids")]
         floor = float(self.config.memory.dream.min_relation_confidence)
         n = 0
+        from pseudolife_memory.memory.graph_consolidation import junk_name_reason
         for r in relations:
             raw_src, raw_dst = str(r.get("src", "")), str(r.get("dst", ""))
             src_n, dst_n = G.norm_name(raw_src), G.norm_name(raw_dst)
             if not src_n or not dst_n or src_n == dst_n:
+                continue
+            # Write-time junk gate: the 2B extractor's known artifact classes
+            # (concat names, bare numbers, status words) never become entities.
+            junk = junk_name_reason(raw_src) or junk_name_reason(raw_dst)
+            if junk:
+                logger.debug("dream relation dropped (%s): %r -> %r",
+                             junk, raw_src, raw_dst)
                 continue
             resolved, _ = G.resolve_relation(known, str(r.get("relation", "")))
             relation = resolved or "related-to"
@@ -1499,8 +1556,11 @@ class MemoryService:
                 continue
             src_e = self._resolve_or_create_entity(raw_src)
             dst_e = self._resolve_or_create_entity(raw_dst)
+            # revive=False: a dream re-assertion must not resurrect an edge
+            # a human (or deep-dream) superseded — removals stay sticky.
             self._graph.upsert_edge(src_e["id"], relation, dst_e["id"],
-                                    confidence=conf, origin="agent")
+                                    confidence=conf, origin="agent",
+                                    revive=False)
             n += 1
         return n
 
@@ -1609,8 +1669,16 @@ class MemoryService:
                 written += 1
             except Exception as exc:  # noqa: BLE001
                 logger.warning("lesson write skipped (%s): %s", exc, c)
-        with self._lock:
-            self._storage.consume_signals([s["id"] for s in signals])
+        if written:
+            with self._lock:
+                self._storage.consume_signals([s["id"] for s in signals])
+        else:
+            # Nothing landed (empty extraction or every write failed): leave
+            # the signals pending so the next sweep retries — they are the
+            # only feeder for procedural memory. Retention pruning bounds
+            # the retry window.
+            logger.info("lesson synthesis wrote nothing; leaving %d signals "
+                        "pending", len(signals))
         return {"signals": len(signals), "lessons": written}
 
     def cortex_dump(self) -> dict[str, Any]:
@@ -1834,11 +1902,52 @@ class MemoryService:
         vocab = self.cortex_vocab().get("slots", [])
         tally = {"inserted": 0, "confirmed": 0, "contested": 0, "superseded": 0}
         traces_n = 0
-        try:
-            for e in entries:
-                src_id = e.get("db_id")
-                for c in extractor.extract([e["text"]], vocab):
+        max_entry_failures = 3
+        quarantined = 0
+
+        def _held(reason: str, exc: Exception) -> dict[str, Any]:
+            logger.warning("dream %s (%s); cursor NOT advanced, will retry "
+                           "next sweep", reason, exc)
+            return {"pulled": len(entries), "claims": 0, "inserted": 0,
+                    "confirmed": 0, "contested": 0, "superseded": 0, "relations": 0,
+                    "cursor": self._cortex.dream_cursor, "extractor_failed": True,
+                    "lessons": {"signals": 0, "lessons": 0}}
+
+        for e in entries:
+            src_id = e.get("db_id")
+            fail_key = src_id if src_id is not None else e["text"][:200]
+            try:
+                claims = list(extractor.extract([e["text"]], vocab))
+            except Exception as exc:  # noqa: BLE001 — an extractor must never break a dream
+                fails = self._dream_entry_failures.get(fail_key, 0) + 1
+                self._dream_entry_failures[fail_key] = fails
+                if fails < max_entry_failures:
+                    return _held(
+                        f"extractor failed ({fails}/{max_entry_failures} "
+                        f"for entry {fail_key})", exc)
+                # Poison pill: a deterministically-failing entry would stall
+                # consolidation forever (and every retry used to re-confirm
+                # the batch prefix, ratcheting its confidence). Skip it; the
+                # batch commit advances the cursor past it.
+                logger.warning("dream: quarantining entry %s after %d failed "
+                               "extractions (%s)", fail_key, fails, exc)
+                quarantined += 1
+                continue
+            self._dream_entry_failures.pop(fail_key, None)
+            try:
+                for c in claims:
                     ent, attr = self._resolve_dream_slot(c["entity"], c["attribute"])
+                    if (traces_cfg.enabled and src_id is not None
+                            and self._storage is not None):
+                        with self._lock:
+                            already = self._storage.has_trace(
+                                _norm_key(ent), _norm_key(attr), src_id)
+                        if already:
+                            # This source entry already formed this slot once
+                            # (batch retry after a mid-batch failure). A
+                            # re-dream must be a no-op, not a confirmation —
+                            # the confirm path ratchets confidence.
+                            continue
                     res = self.cortex_write(
                         ent, attr, c["value"],
                         confidence=float(c.get("confidence", 0.55)),
@@ -1858,13 +1967,8 @@ class MemoryService:
                                 if self._cms is not None:
                                     self._cms.bump_entry_reinforcements(src_id, 1)
                                 traces_n += 1
-        except Exception as exc:  # noqa: BLE001 — an extractor must never break a dream
-            logger.warning("dream extractor failed (%s); cursor NOT advanced, "
-                           "will retry next sweep", exc)
-            return {"pulled": len(entries), "claims": 0, "inserted": 0,
-                    "confirmed": 0, "contested": 0, "superseded": 0, "relations": 0,
-                    "cursor": self._cortex.dream_cursor, "extractor_failed": True,
-                    "lessons": {"signals": 0, "lessons": 0}}
+            except Exception as exc:  # noqa: BLE001 — a write failure must hold the cursor too
+                return _held("claim write failed", exc)
         newest = max(e["timestamp"] for e in entries)
         self.dream_commit(newest)
         texts = [e["text"] for e in entries]
@@ -1875,7 +1979,8 @@ class MemoryService:
         return {"pulled": len(entries), "claims": sum(tally.values()),
                 "cursor": newest, "relations": relations_n, **tally,
                 "lessons": lessons, "graph_insight": graph_insight,
-                "traces": traces_n, "sources_attributed": sources_attributed}
+                "traces": traces_n, "sources_attributed": sources_attributed,
+                "quarantined": quarantined}
 
     def dream_status(self) -> dict[str, Any]:
         """Backlog (eligible unconsolidated memories), idle seconds since the most

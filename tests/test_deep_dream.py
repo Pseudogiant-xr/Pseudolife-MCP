@@ -75,7 +75,10 @@ def test_apply_persists_entity_proposals(svc):
     svc.cortex_write("daemon", "note", "runs in docker", support="user")
     svc.cortex_write("live daemon", "role", "serves MCP", support="user")
     svc.cortex_write("live daemon", "note", "runs in docker", support="user")
-    svc.cortex_write("42", "note", "a bare number entity", support="user")
+    # Junk-shaped names no longer enter via fact writes (write-time gate,
+    # 2026-07-02); seed a legacy junk node directly so the deep-dream
+    # detection path stays covered.
+    svc._storage.ensure_entity("42", display="42")
     out = svc.deep_dream(apply=True)
     assert out["applied"] is True
     assert "merge_proposed" in out and "junk_proposed" in out

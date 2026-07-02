@@ -181,6 +181,29 @@ def _is_concat_artifact(name: str) -> bool:
     return len(parts) >= 2 and sum(1 for p in parts if p) >= 2
 
 
+def junk_name_reason(name: str) -> str | None:
+    """Write-time entity-name gate: the reason ``name`` must never become a
+    graph entity (``concat-artifact`` / ``bare-number`` / ``status-word`` /
+    ``empty``), else None.
+
+    Deliberately narrower than :func:`junk_entities` — short names are
+    legitimate at write time ("Go", "uv") and stay review-queue material
+    judged by degree. This gate exists so the dream's ungated 2B extractor
+    can't plant the junk classes the review queue keeps having to clean
+    (2026-07-02 review, H3: ingestion was detection-side patched only).
+    """
+    d = str(name).strip()
+    if not d:
+        return "empty"
+    if _is_concat_artifact(d):
+        return "concat-artifact"
+    if _BARE_NUMBER.match(d):
+        return "bare-number"
+    if d.lower() in _JUNK_STOPWORDS:
+        return "status-word"
+    return None
+
+
 def _name_contains(a: str, b: str) -> str | None:
     """A reason if one display asserts identity with the other, else None.
     Guards: an A<->B concat artifact is never a merge endpoint (it's junk), and

@@ -48,3 +48,23 @@ def test_store_does_no_training():
     assert not hasattr(b, "objective")
     b.store("x", _unit(1), surprise=1.0)         # must not train / raise
     assert b.size == 1
+
+
+def test_superseded_entries_evict_before_their_corrections():
+    """2026-07-02 review fix: a correction arrives with near-zero surprise
+    (it is semantically near-identical to what it replaces) while the
+    superseded predecessor keeps a decayed-but-larger surprise, so
+    surprise-driven eviction destroyed the correction and kept the stale
+    fact. Superseded entries must always be the cheaper eviction."""
+    import time
+
+    b = _band(max_entries=2)
+    b.store("old fact", _unit(1), surprise=0.9)
+    b.store("correction", _unit(2), surprise=0.05)
+    b.entries[0].superseded_at = time.time()      # "old fact" now stale
+
+    b.store("newcomer", _unit(3), surprise=0.5)   # capacity → evict one
+
+    texts = [e.text for e in b.entries]
+    assert "old fact" not in texts
+    assert "correction" in texts

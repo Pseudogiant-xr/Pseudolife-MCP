@@ -682,13 +682,16 @@ def test_whole_graph_cap_prefers_connected_core_over_orphaned_hub(svc):
 
 
 def test_dream_edge_confidence_varies_by_type(svc):
-    """dream-written edges carry per-edge confidence: clean ~0.70, violation ~0.175.
+    """dream-written edges carry per-edge confidence: clean ~0.70 is written;
+    a hard type-violation (~0.175) falls below the write floor (0.2, the
+    2026-07-02 review fix) and is dropped at the source instead of landing
+    live for deep-dream cleanup.
 
     Entity names are unique to this test so the module-scoped shared DB cannot
     have bumped them before. 'ec-svc-daemon' → service type ('daemon' in name);
     'docker-desktop' → runtime type (starts 'docker-'); 'user' → person type
     (in _PERSON).  runs-on requires src in {service/process/...} — person
-    violates it → 0.175.
+    violates it → 0.175 → dropped.
     """
     svc._ensure_init()  # noqa: SLF001 — storage must be ready before _link_dream_relations
     rels = [
@@ -709,6 +712,5 @@ def test_dream_edge_confidence_varies_by_type(svc):
         and id_to_display.get(e["src_id"]) in our_srcs
         and e["dst_id"] in docker_desktop_ids
     )
-    assert len(confs) == 2, f"expected 2 runs-on edges to docker-desktop, got {confs}"
-    assert abs(confs[0] - 0.175) < 0.01, f"expected violation ~0.175, got {confs[0]}"
-    assert abs(confs[-1] - 0.70) < 0.01, f"expected clean ~0.70, got {confs[-1]}"
+    assert len(confs) == 1, f"expected only the clean runs-on edge, got {confs}"
+    assert abs(confs[0] - 0.70) < 0.01, f"expected clean ~0.70, got {confs[0]}"
