@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 19
+SCHEMA_META_VERSION = 20
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -122,6 +122,18 @@ CREATE UNIQUE INDEX IF NOT EXISTS entity_proposals_merge_uq ON entity_proposals
   (LEAST(entity_id, into_id), GREATEST(entity_id, into_id)) WHERE kind = 'merge';
 CREATE UNIQUE INDEX IF NOT EXISTS entity_proposals_junk_uq ON entity_proposals
   (entity_id) WHERE kind = 'junk';
+
+-- v20 (2026-07-02 review fix 3): human-dismissed duplicate findings. The
+-- duplicate analyzer is stateless token-Jaccard, so its false positives
+-- (postgres vs postgres.py) re-flagged forever; a dismissed pair is stored
+-- normalized with a_norm < b_norm and skipped on every later analysis. Kept
+-- by name (no entity FK) so a dismissal survives entity churn.
+CREATE TABLE IF NOT EXISTS dismissed_pairs (
+  a_norm TEXT NOT NULL,
+  b_norm TEXT NOT NULL,
+  dismissed_at DOUBLE PRECISION NOT NULL,
+  PRIMARY KEY (a_norm, b_norm)
+);
 
 CREATE TABLE IF NOT EXISTS facts (
   id BIGSERIAL PRIMARY KEY,

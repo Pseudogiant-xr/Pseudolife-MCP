@@ -65,6 +65,17 @@ def test_genuine_phrasing_duplicate_still_flagged():
     assert frozenset({"memcot_bench.py", "memcot bench"}) in _pairs(gr.duplicate_candidates(ents))
 
 
+def test_duplicate_candidates_skips_dismissed_pairs():
+    # 2026-07-02 review fix 3: a human-dismissed false positive (postgres vs
+    # postgres.py class) must stay dismissed across analyzer runs.
+    ents = _ents("memcot_bench.py", "memcot bench")
+    key = tuple(sorted((ents[0]["canonical"], ents[1]["canonical"])))
+    assert gr.duplicate_candidates(ents, dismissed={key}) == []
+    # and review() threads the set through
+    out = gr.review([], ents, {1: ["p"], 2: ["p"]}, dismissed_pairs={key})
+    assert not [f for f in out["findings"] if f["type"] == "duplicate"]
+
+
 def test_legit_fixtures_and_lessons_not_flagged():
     ents = _ents("fixture devserver",
                  "TDD pattern: PG service test + fixture stubs + web routes")

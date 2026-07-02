@@ -857,6 +857,23 @@ class PostgresStorage:
             ).fetchone()
         return int(row[0]) if row else None
 
+    def dismiss_pair(self, a_norm: str, b_norm: str) -> bool:
+        """Persist a human 'these are NOT duplicates' verdict. Stored ordered
+        (a < b) so either argument order lands on the same row. Returns True
+        iff a new dismissal was recorded."""
+        a, b = sorted((a_norm, b_norm))
+        with self._txn():
+            row = self.conn.execute(
+                "INSERT INTO dismissed_pairs (a_norm, b_norm, dismissed_at) "
+                "VALUES (%s, %s, %s) ON CONFLICT DO NOTHING RETURNING a_norm",
+                (a, b, time.time()),
+            ).fetchone()
+        return row is not None
+
+    def dismissed_pairs(self) -> set[tuple[str, str]]:
+        return {(r[0], r[1]) for r in self.conn.execute(
+            "SELECT a_norm, b_norm FROM dismissed_pairs").fetchall()}
+
     def pending_proposals(self) -> list[dict]:
         cols = ("id", "src_id", "relation", "dst_id", "confidence", "similarity",
                 "rationale", "source", "created_at", "status")

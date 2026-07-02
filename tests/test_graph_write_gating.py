@@ -195,6 +195,50 @@ def test_service_bless_edge_unknown_edge_or_entity(svc):
     assert unknown["blessed"] is False and unknown["reason"] == "unknown_entity"
 
 
+def test_dream_edges_skip_generic_hubs(svc):
+    # 2026-07-02 review fix 4: "memory_* related-to MCP"-style hub spokes carry
+    # zero information; the dream must not mint edges touching generic hubs.
+    svc.stats()
+    n = svc._link_dream_relations([
+        {"src": "hubgate-lib", "relation": "related-to", "dst": "MCP"},
+        {"src": "master", "relation": "related-to", "dst": "hubgate-lib2"},
+    ])
+    assert n == 0
+    assert svc._storage.find_entity("mcp") is None
+    assert svc._storage.find_entity("master") is None
+
+
+def test_dream_cross_project_edge_becomes_proposal(svc):
+    # 2026-07-02 review fix 5: entities attributed to disjoint projects only
+    # coexist in the shared bank — a dream edge between them goes to
+    # edge_proposals for review, never straight into the live graph.
+    svc.graph_relate("xproj-a-thing", "uses", "xproj-a-helper")
+    svc.graph_relate("xproj-b-thing", "uses", "xproj-b-helper")
+    svc.graph_assign_scope("xproj-a-thing", "proj-a")
+    svc.graph_assign_scope("xproj-b-thing", "proj-b")
+
+    n = svc._link_dream_relations([
+        {"src": "xproj-a-thing", "relation": "related-to", "dst": "xproj-b-thing"},
+    ])
+
+    assert n == 0
+    nb = svc.graph_neighborhood("xproj-a-thing", depth=1)
+    assert not any("xproj-b-thing" in (e["src"], e["dst"]) for e in nb["edges"])
+    assert any(p["src"] == "xproj-a-thing" and p["dst"] == "xproj-b-thing"
+               for p in svc._storage.pending_proposals())
+
+
+def test_dream_same_project_edge_still_written(svc):
+    svc.graph_relate("xproj-c-thing", "uses", "xproj-c-helper")
+    svc.graph_assign_scope("xproj-c-thing", "proj-c")
+    svc.graph_assign_scope("xproj-c-helper", "proj-c")
+
+    n = svc._link_dream_relations([
+        {"src": "xproj-c-thing", "relation": "related-to", "dst": "xproj-c-helper"},
+    ])
+    assert n == 1
+
+
 def test_dream_reassertion_does_not_revive_human_removal(svc):
     svc.graph_relate("alpha-svc", "uses", "beta-db")
     svc.graph_unrelate("alpha-svc", "uses", "beta-db")  # human: "wrong"

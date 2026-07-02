@@ -464,6 +464,9 @@ class FixtureService:
     def graph_bless_edge(self, src, relation, dst):
         return {"blessed": True, "src": src, "relation": relation, "dst": dst}
 
+    def graph_dismiss_duplicate(self, a, b):
+        return {"dismissed": True, "new": True, "a": a, "b": b}
+
     def graph_delete_entity(self, entity):
         return {"deleted": True, "entity": entity}
 

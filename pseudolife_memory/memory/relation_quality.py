@@ -20,6 +20,12 @@ TYPE_CONSTRAINTS: dict[str, tuple[set[str], set[str]]] = {
     "part-of":        ({"component", "service", "file", "datastore"}, {"component", "service"}),
 }
 
+# Generic hub entities (normalized): every tool/file "relates to" these, so a
+# dream-minted edge touching one carries no information (2026-07-02 cleanup
+# pruned nine "memory_* related-to MCP" spokes). Dream ingestion drops them;
+# explicit graph_relate is unaffected.
+GENERIC_HUB_NORMS = frozenset({"mcp", "master", "origin-master", "claude-md"})
+
 _CMD_PREFIXES = ("docker compose", "docker ", "git ", "pip ", "npm ", "curl ",
                  "kubectl ", "psql ", "pg_dump", "wsl ")
 _FILE_EXT = (".py", ".yaml", ".yml", ".json", ".md", ".txt", ".sql", ".ps1",

@@ -229,5 +229,6 @@ function dupItem(f, onAct) {
   return itemRow([
     ra.chip, dim("↔"), rb.chip, f.score != null ? dim(`jaccard ${(+f.score).toFixed(2)}`) : null,
     btn("Merge", { onClick: () => onAct({ kind: "merge-named", from: a, into: b }) }),
+    btn("Dismiss", { kind: "ghost", onClick: () => onAct({ kind: "dismiss-duplicate", a, b }) }),
   ], [ra, rb]);
 }
