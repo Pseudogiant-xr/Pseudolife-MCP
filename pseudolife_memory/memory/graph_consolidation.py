@@ -129,13 +129,15 @@ def candidate_pairs(vectors: dict[int, np.ndarray], edges: list[dict],
                     entities: list[dict], scope_map: dict[int, list[str]],
                     mentions: dict[int, frozenset[int]], *,
                     min_similarity: float = 0.55, top_k: int = 50,
-                    dismissed: set[tuple[str, str]] | None = None) -> list[dict]:
+                    dismissed: set[tuple[str, str]] | None = None,
+                    max_support_overlap: float = 1.0) -> list[dict]:
     """Unlinked, scope-coherent, semantically-near entity pairs — the link
     candidates. Drops pairs that already have an edge (either direction), exact
-    duplicates (a Step-A merge), have IDENTICAL supporting-entry sets (pure
-    co-occurrence, not independent similarity), sit in disjoint non-empty
-    project scopes, or were human-dismissed (``dismissed`` holds sorted
-    canonical-name pairs from dismissed_pairs)."""
+    duplicates (a Step-A merge), have near-identical supporting-entry sets
+    (Jaccard >= ``max_support_overlap`` — co-occurrence, not independent
+    similarity; 1.0 keeps only the strict-equality drop), sit in disjoint
+    non-empty project scopes, or were human-dismissed (``dismissed`` holds
+    sorted canonical-name pairs from dismissed_pairs)."""
     disp = _disp(entities)
     canon = {e["id"]: e["canonical"] for e in entities}
     linked = {frozenset((e["src_id"], e["dst_id"])) for e in edges}
@@ -151,8 +153,8 @@ def candidate_pairs(vectors: dict[int, np.ndarray], edges: list[dict],
             if dismissed and tuple(sorted((canon.get(u, ""), canon.get(v, "")))) in dismissed:
                 continue
             mu, mv = mentions.get(u), mentions.get(v)
-            if mu is not None and mu == mv:        # identical support -> co-occurrence
-                continue
+            if mu and mv and len(mu & mv) / len(mu | mv) >= max_support_overlap:
+                continue                           # shared support -> co-occurrence
             su, sv = set(scope_map.get(u, [])), set(scope_map.get(v, []))
             if su and sv and not (su & sv):       # disjoint, both attributed
                 continue

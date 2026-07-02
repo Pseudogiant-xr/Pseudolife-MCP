@@ -313,6 +313,9 @@ class DeepDreamConfig:
     min_entity_mentions: int = 2       # an entity needs >= this many distinct mentioning entries to be candidate-eligible
     merge_min_similarity: float = 0.90   # cosine floor for a near-dup MERGE candidate (vs a link)
     junk_max_degree: int = 1             # junk entities must be this weakly connected to be flagged
+    max_support_overlap: float = 0.8     # Jaccard on supporting-entry sets at/above which a pair is co-occurrence
+    snippet_max_chars: int = 240         # per-snippet truncation in the deep response
+    snapshot_keep: int = 10              # graph-snapshot undo files kept under data_dir/graph_snapshots
 
 
 @dataclass

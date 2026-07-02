@@ -941,6 +941,32 @@ class PostgresStorage:
             # proposal; _txn already rolled back.
             return None
 
+    def entity_proposal_keys(self) -> set[tuple]:
+        """Keys of ALL entity_proposals rows (any status), shaped like the
+        dedupe unique indexes: ``("junk", entity_id)`` and ``("merge",
+        least_id, greatest_id)`` — so a dry-run can tell which previews the
+        apply path will silently skip."""
+        rows = self.conn.execute(
+            "SELECT kind, entity_id, into_id FROM entity_proposals").fetchall()
+        out: set[tuple] = set()
+        for kind, eid, into in rows:
+            if kind == "merge" and into is not None:
+                out.add(("merge", min(eid, into), max(eid, into)))
+            else:
+                out.add((kind, eid))
+        return out
+
+    def dump_graph_tables(self) -> dict[str, list[dict]]:
+        """Plain-dict dump of the five graph tables the deep dream mutates —
+        the pre-apply snapshot payload."""
+        out: dict[str, list[dict]] = {}
+        for t in ("entities", "edges", "entity_aliases",
+                  "edge_proposals", "entity_proposals"):
+            cur = self.conn.execute(f"SELECT * FROM {t} ORDER BY 1")  # noqa: S608 — fixed table list
+            cols = [c.name for c in cur.description]
+            out[t] = [dict(zip(cols, r)) for r in cur.fetchall()]
+        return out
+
     def pending_entity_proposals(self) -> list[dict]:
         cols = ("id", "kind", "entity_id", "into_id", "score", "reason", "status", "created_at")
         rows = self.conn.execute(
