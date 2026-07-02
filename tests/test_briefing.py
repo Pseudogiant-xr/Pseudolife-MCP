@@ -99,3 +99,11 @@ def test_hook_json_empty_is_empty_string():
     from pseudolife_memory import briefing_cli as bc
     assert bc._as_hook_json("") == ""
     assert bc._as_hook_json("   \n  ") == ""
+
+
+def test_fmt_lesson_re_verify_suffix():
+    from pseudolife_memory.memory.briefing import _fmt_lesson
+    base = {"lesson": "use tar", "polarity": "+"}
+    assert "re-verify" not in _fmt_lesson(base)
+    out = _fmt_lesson({**base, "re_verify": True})
+    assert out.endswith("re-verify (facts changed since)")

@@ -188,3 +188,29 @@ def test_lesson_forget(svc):
     rem = svc.lesson_forget("t")
     assert rem["removed"] == 1
     assert svc.lessons_dump()["count"] == 0
+
+
+def test_lessons_flag_re_verify_when_about_facts_changed(svc):
+    svc.lesson_write("deploy engine", "approach", "use tar --no-same-owner",
+                     about="engine-host", now=100.0)
+    svc.cortex_write("engine-host", "os", "ubuntu-24")  # later churn
+    got = svc.lesson_search("deploy engine")
+    row = got["entries"][0]
+    assert row["re_verify"] is True
+    assert "engine-host" in row["re_verify_reason"]
+
+
+def test_lessons_unflagged_when_about_unresolvable_or_quiet(svc):
+    svc.lesson_write("random task", "approach", "do the thing",
+                     about="totally-unknown-thing", now=100.0)
+    got = svc.lessons_dump()
+    row = next(r for r in got["entries"] if r["task"] == "random task")
+    assert "re_verify" not in row
+
+
+def test_lessons_unflagged_when_lesson_newer_than_facts(svc):
+    svc.cortex_write("box", "ip", "10.0.0.5")
+    svc.lesson_write("manage box", "approach", "ssh via ip", about="box")
+    got = svc.lessons_dump()
+    row = next(r for r in got["entries"] if r["task"] == "manage box")
+    assert "re_verify" not in row

@@ -1708,6 +1708,7 @@ class MemoryService:
             hits = self._lessons.search(emb, top_k=k, min_score=floor)
             entries = [{**_lesson_record_to_dict(r), "score": round(float(s), 4)}
                        for r, s in hits]
+            self._annotate_lesson_staleness(entries)
             return {"count": len(entries), "entries": entries}
 
     def lessons_dump(self, limit: int = 120) -> dict[str, Any]:
@@ -1716,7 +1717,55 @@ class MemoryService:
             assert self._lessons is not None
             rows = [_lesson_record_to_dict(r) for r in self._lessons.current_records()]
             rows.sort(key=lambda d: (d["task"].lower(), d["aspect"].lower()))
-            return {"count": len(rows), "entries": rows[: max(0, int(limit))]}
+            rows = rows[: max(0, int(limit))]
+            self._annotate_lesson_staleness(rows)
+            return {"count": len(rows), "entries": rows}
+
+    def _cortex_change_index(self) -> dict[str, float]:
+        """norm-entity → latest cortex change ts (assertions + supersessions,
+        over ALL records incl. superseded) — the churn signal behind lesson
+        ``re_verify``. Caller holds the lock."""
+        from pseudolife_memory.memory.cortex import _norm_key
+        idx: dict[str, float] = {}
+        if self._cortex is None:
+            return idx
+        for r in self._cortex.records:
+            ts = max(r.asserted_at, r.superseded_at or 0.0)
+            k = _norm_key(r.entity)
+            if ts > idx.get(k, 0.0):
+                idx[k] = ts
+        return idx
+
+    def _annotate_lesson_staleness(self, rows: list[dict]) -> list[dict]:
+        """Read-time staleness: a lesson whose ``about`` (fallback: task)
+        resolves to a cortex entity whose facts changed AFTER the lesson was
+        asserted/confirmed gets ``re_verify: True`` + ``re_verify_reason``.
+        No stored state — re-confirming the lesson clears the flag. Any
+        resolution failure leaves the row unflagged. Caller holds the lock."""
+        if not rows:
+            return rows
+        from pseudolife_memory.memory.cortex import _norm_key
+        idx = self._cortex_change_index()
+        if not idx:
+            return rows
+        for row in rows:
+            name = (row.get("about") or row.get("task") or "").strip()
+            if not name:
+                continue
+            k = _norm_key(name)
+            if k not in idx and self._storage is not None:
+                from pseudolife_memory.graph import norm_name
+                node = self._storage.find_entity(norm_name(name))
+                if node is not None:
+                    k = _norm_key(node.get("canonical") or "")
+            changed = idx.get(k)
+            seen = max(row.get("asserted_at") or 0.0,
+                       row.get("last_confirmed") or 0.0)
+            if changed and seen and changed > seen:
+                row["re_verify"] = True
+                row["re_verify_reason"] = (
+                    f"facts about {name} changed since this lesson")
+        return rows
 
     def lesson_forget(self, task: str, aspect: str | None = None) -> dict[str, Any]:
         with self._lock:
