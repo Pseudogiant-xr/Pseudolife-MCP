@@ -1,0 +1,72 @@
+# CI (P2, 2026-07-02 review): the 760+ test suite finally runs on every
+# merge instead of only when someone remembers. Budget-conscious for a
+# free-plan private repo (~2,000 Actions min/month):
+#   * triggers only on master pushes + PRs (not every branch push);
+#   * concurrency cancel-in-progress kills stale runs on rapid pushes;
+#   * pip + HuggingFace caches make the warm path ~4-6 min;
+#   * no artifacts uploaded (pass/fail is the product).
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        # pgvector included — the schema requires CREATE EXTENSION vector.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: pseudolife
+          POSTGRES_PASSWORD: pseudolife
+          POSTGRES_DB: postgres
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U pseudolife"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      # tests/pg_fixtures.py resolves the test server from this; the
+      # fixture creates/truncates the test database itself.
+      PSEUDOLIFE_TEST_DATABASE_URL: postgresql://pseudolife:pseudolife@127.0.0.1:5433/pseudolife_memory_test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install (CPU torch first, mirroring the daemon image)
+        run: |
+          python -m pip install -U pip
+          pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.12.0"
+          pip install -e .[dev]
+
+      - name: Cache HuggingFace models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-minilm-l6-v2
+
+      - name: Warm the embedder (downloads only on cache miss)
+        run: python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+
+      - name: Tests (offline + deterministic — the documented invocation)
+        env:
+          HF_HUB_OFFLINE: "1"
+          TRANSFORMERS_OFFLINE: "1"
+        run: python -m pytest -q

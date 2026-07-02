@@ -6,6 +6,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-02 review P2 — quality infrastructure)
+- **CI (GitHub Actions).** `.github/workflows/ci.yml` runs the full suite on
+  every master push and PR: pgvector/pg16 service container, CPU-torch
+  install mirroring the daemon image, cached pip + HuggingFace models, then
+  the documented offline invocation. Budget-guarded for a free-plan private
+  repo: master+PR triggers only, cancel-in-progress concurrency, no
+  artifacts (warm run ≈ 4-6 min of the 2,000 free minutes/month).
+- **Retrieval golden set** (`tests/test_retrieval_golden.py`): 50 realistic
+  memory/paraphrase-query pairs asserting recall@5 ≥ 0.92 and MRR ≥ 0.85 on
+  the dense path plus top-3 ≥ 0.85 on BM25-fused identifier queries
+  (measured baseline: 1.000 / 0.990 / 1.000) — the first thing on master
+  that can catch a *ranking* regression, in under a second.
+- **`ops/restore.ps1`** — the restore path is now a rehearsed procedure, not
+  a code comment. Default mode restores the newest backup into a scratch
+  database, reports per-table row counts against the live bank, and drops
+  the scratch (live bank untouched); `-Apply` does the real restore with a
+  pre-restore safety dump, daemon stop/start, and a health gate. Rehearsed
+  2026-07-02 against the latest backup: PASSED.
+- **Off-disk backup mirror**: `ops/backup.ps1` copies each artifact to
+  `PSEUDOLIFE_BACKUP_MIRROR` (or `-MirrorDir`) with the same retention when
+  set — point it at a folder on another physical disk. Mirror failure warns
+  but never aborts (the primary backup already succeeded).
+
 ### Changed (2026-07-02 review H4 — autocommit connection)
 - **Reads no longer leave the shared connection idle-in-transaction.** The
   storage connection runs autocommit; every mutation opens an explicit

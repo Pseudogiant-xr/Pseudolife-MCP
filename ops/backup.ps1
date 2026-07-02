@@ -9,7 +9,13 @@ param(
     [string]$Db = "pseudolife_memory",
     [string]$User = "pseudolife",
     [string]$OutDir = "",
-    [int]$KeepDays = 7
+    [int]$KeepDays = 7,
+    # Off-disk mirror (2026-07-02 review P2): backups on the same physical
+    # disk as the bank die with it. Point this (or the env var) at a folder
+    # on ANOTHER disk / synced share. Mirror failure warns, never throws —
+    # the primary backup already succeeded and deploys must not abort
+    # because a mirror drive is unplugged.
+    [string]$MirrorDir = $env:PSEUDOLIFE_BACKUP_MIRROR
 )
 
 $ErrorActionPreference = "Stop"
@@ -38,5 +44,24 @@ if (-not (Test-Path $out) -or (Get-Item $out).Length -eq 0) {
 Get-ChildItem $OutDir -Filter "pseudolife_memory-*.sql.gz" |
     Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-$KeepDays) } |
     Remove-Item -Force
+
+# Off-disk mirror (opt-in; same retention).
+if ($MirrorDir) {
+    try {
+        New-Item -ItemType Directory -Force -Path $MirrorDir | Out-Null
+        Copy-Item $out $MirrorDir -Force
+        $m = Join-Path $MirrorDir (Split-Path $out -Leaf)
+        if ((Test-Path $m) -and (Get-Item $m).Length -eq (Get-Item $out).Length) {
+            Get-ChildItem $MirrorDir -Filter "pseudolife_memory-*.sql.gz" |
+                Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-$KeepDays) } |
+                Remove-Item -Force
+            Write-Host "Mirrored to $m"
+        } else {
+            Write-Warning "mirror copy missing or size mismatch: $m"
+        }
+    } catch {
+        Write-Warning "backup mirror failed (primary backup is safe): $_"
+    }
+}
 
 Write-Host "Backup complete. Retained last $KeepDays days in $OutDir"
