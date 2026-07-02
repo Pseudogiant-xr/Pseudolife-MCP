@@ -8,18 +8,30 @@ collided for every session in a day).
 """
 from __future__ import annotations
 
+import ntpath
 import os
+import re
 import time
 
 # Directories that are never a "project" — a GUI client (e.g. Claude Desktop)
 # launches the shim with cwd set to one of these, which must not become a title.
 _NON_PROJECT_DIRS = {"system32", "syswow64", "windows", "system", "system64"}
 
+_WINDOWSY = re.compile(r"^[A-Za-z]:[\\/]|\\")
+
+
+def _foreign_windows_path(cwd: str) -> bool:
+    """A Windows-style path seen on a POSIX host (the Linux daemon handed a
+    Windows client's cwd): os.path parses it as ONE relative segment, so
+    abspath anchors it under the daemon's own cwd and a git walk can "find"
+    the daemon's repo — titling the session after the wrong project."""
+    return os.name != "nt" and bool(_WINDOWSY.search(cwd))
+
 
 def git_project_name(cwd: str | None) -> str | None:
     """Nearest git-repo-root basename walking up from ``cwd``; ``None`` when
     ``cwd`` is not inside a repo. Robust to being run from a subdirectory."""
-    if not cwd:
+    if not cwd or _foreign_windows_path(cwd):
         return None
     try:
         path = os.path.abspath(cwd)
@@ -47,7 +59,9 @@ def title_from_cwd(cwd: str | None, now: float | None = None) -> str:
         except Exception:  # noqa: BLE001
             is_home = False
         if not is_home:
-            name = os.path.basename(norm) or None
+            # ntpath.basename splits on BOTH separators, so a Windows-style
+            # cwd still yields "System32" (not the whole path) on POSIX.
+            name = ntpath.basename(norm) or None
             if name and name.lower() in _NON_PROJECT_DIRS:
                 name = None  # a system dir is not a project
     stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime(now))
