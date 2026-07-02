@@ -166,6 +166,23 @@ def test_entity_context_vectors_min_mentions_gate():
     assert mentions[2] == frozenset({20, 21})
 
 
+def test_candidate_pairs_skips_dismissed_pairs():
+    # A human 'these are NOT duplicates' verdict (dismissed_pairs, stored as
+    # sorted canonical names) must stop the pair resurfacing as a candidate.
+    ents = [
+        {"id": 1, "canonical": "a", "display": "a", "etype": None},
+        {"id": 2, "canonical": "b", "display": "b", "etype": None},
+        {"id": 3, "canonical": "c", "display": "c", "etype": None},
+    ]
+    vectors = {1: _vec(1, 0), 2: _vec(1, 0), 3: _vec(1, 0)}
+    mentions = {1: frozenset({10}), 2: frozenset({20}), 3: frozenset({30})}
+    out = gc.candidate_pairs(vectors, [], ents, {}, mentions,
+                             min_similarity=0.55, top_k=50,
+                             dismissed={("a", "b")})
+    pairs = {(c["src_id"], c["dst_id"]) for c in out}
+    assert pairs == {(1, 3), (2, 3)}
+
+
 def test_candidate_pairs_drops_identical_mention_sets():
     ents = [
         {"id": 1, "canonical": "a", "display": "a", "etype": None},

@@ -85,6 +85,46 @@ def test_apply_persists_entity_proposals(svc):
     assert out["junk_proposed"] >= 1
 
 
+def _stage_link_pair(svc):
+    """Two similar-context entities with NO memory_traces rows, no shared edge
+    and no name containment -> a deep-dream LINK candidate whose evidence can
+    only come from the token-mention scan (the live-bank shape: graph entities
+    rarely have traces)."""
+    with svc._lock:
+        svc._ensure_init()
+        svc._resolve_or_create_entity("atlas queue")
+        svc._resolve_or_create_entity("review workbench")
+    for text in (
+        "the atlas queue lists pending graph findings for human review",
+        "accepting an atlas queue proposal folds the entities together",
+        "the review workbench shows unsettled graph findings to the operator",
+        "accepting a review workbench proposal merges the two entities",
+    ):
+        assert svc.store(text, source="dd-test")["stored"] is True
+
+
+def _find_candidate(out, a="atlas queue", b="review workbench"):
+    for c in out["candidates"]:
+        if {c["src"], c["dst"]} == {a, b}:
+            return c
+    return None
+
+
+def test_candidate_snippets_fall_back_to_mention_scan(svc):
+    _stage_link_pair(svc)
+    out = svc.deep_dream(apply=False)
+    c = _find_candidate(out)
+    assert c is not None, out["candidates"]
+    assert c["src_snippets"] and c["dst_snippets"]     # evidence, not just a score
+
+
+def test_candidates_respect_dismissed_pairs(svc):
+    _stage_link_pair(svc)
+    assert _find_candidate(svc.deep_dream(apply=False)) is not None
+    svc.graph_dismiss_duplicate("atlas queue", "review workbench")
+    assert _find_candidate(svc.deep_dream(apply=False)) is None
+
+
 def test_accept_entity_merge_folds(svc):
     with svc._lock:
         svc._ensure_init()

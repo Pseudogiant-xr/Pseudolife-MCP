@@ -128,13 +128,16 @@ def entity_context_vectors(entities: list[dict], entries: list[dict],
 def candidate_pairs(vectors: dict[int, np.ndarray], edges: list[dict],
                     entities: list[dict], scope_map: dict[int, list[str]],
                     mentions: dict[int, frozenset[int]], *,
-                    min_similarity: float = 0.55, top_k: int = 50) -> list[dict]:
+                    min_similarity: float = 0.55, top_k: int = 50,
+                    dismissed: set[tuple[str, str]] | None = None) -> list[dict]:
     """Unlinked, scope-coherent, semantically-near entity pairs — the link
     candidates. Drops pairs that already have an edge (either direction), exact
     duplicates (a Step-A merge), have IDENTICAL supporting-entry sets (pure
-    co-occurrence, not independent similarity), or sit in disjoint non-empty
-    project scopes."""
+    co-occurrence, not independent similarity), sit in disjoint non-empty
+    project scopes, or were human-dismissed (``dismissed`` holds sorted
+    canonical-name pairs from dismissed_pairs)."""
     disp = _disp(entities)
+    canon = {e["id"]: e["canonical"] for e in entities}
     linked = {frozenset((e["src_id"], e["dst_id"])) for e in edges}
     dup = {frozenset(p) for p in exact_duplicate_pairs(entities, edges)}
     ids = sorted(vectors)
@@ -144,6 +147,8 @@ def candidate_pairs(vectors: dict[int, np.ndarray], edges: list[dict],
             u, v = ids[i], ids[j]
             key = frozenset((u, v))
             if key in linked or key in dup:
+                continue
+            if dismissed and tuple(sorted((canon.get(u, ""), canon.get(v, "")))) in dismissed:
                 continue
             mu, mv = mentions.get(u), mentions.get(v)
             if mu is not None and mu == mv:        # identical support -> co-occurrence

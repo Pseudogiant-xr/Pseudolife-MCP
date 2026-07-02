@@ -3573,6 +3573,7 @@ class MemoryService:
             scope_map = self._storage.entity_sources_map()
             traces = self._storage.traces_by_entity_norm()
             entries = self._storage.load_entries()
+            dismissed = self._storage.dismissed_pairs()
         entities, edges = g["entities"], g["edges"]
 
         rescore = gc.rescore_edges(edges, entities)
@@ -3582,12 +3583,14 @@ class MemoryService:
             entities, entries, traces, min_mentions=cfg.min_entity_mentions)
         near = gc.candidate_pairs(
             vectors, edges, entities, scope_map, mentions,
-            min_similarity=cfg.min_similarity, top_k=cfg.top_k_candidates)
+            min_similarity=cfg.min_similarity, top_k=cfg.top_k_candidates,
+            dismissed=dismissed)
         merge_cands, link_cands = gc.partition_candidates(
             near, entities, edges, merge_min_similarity=cfg.merge_min_similarity)
         junk = gc.junk_entities(entities, edges, max_degree=cfg.junk_max_degree)
         candidates = self._attach_candidate_snippets(link_cands, entities, entries,
-                                                     traces, cfg.max_context_snippets)
+                                                     traces, cfg.max_context_snippets,
+                                                     mentions=mentions)
 
         totals = {"entities": len(entities), "edges": len(edges),
                   "candidates": len(candidates)}
@@ -3639,12 +3642,19 @@ class MemoryService:
         disp = {x["id"]: x["display"] for x in entities}
         return [{"from": disp.get(f, str(f)), "into": disp.get(t, str(t))} for f, t in dups]
 
-    def _attach_candidate_snippets(self, candidates, entities, entries, traces, k):
-        """Attach up to k context snippets per side, for the Step-C subagent prompt."""
+    def _attach_candidate_snippets(self, candidates, entities, entries, traces, k,
+                                   mentions=None):
+        """Attach up to k context snippets per side, for the Step-C subagent prompt.
+        Traces are the primary evidence; entities without traces (most graph
+        entities) fall back to their token-mention entries — the same source
+        entity_context_vectors built their vectors from — so a candidate never
+        ships as a bare similarity score."""
         by_id = {e["id"]: e for e in entries}
         canon = {e["id"]: e["canonical"] for e in entities}
         def snippets(eid):
             ids = traces.get(canon.get(eid, ""), [])[:k]
+            if not ids and mentions:
+                ids = sorted(mentions.get(eid, ()))[:k]
             return [by_id[i]["text"] for i in ids if i in by_id][:k]
         for c in candidates:
             c["src_snippets"] = snippets(c["src_id"])
