@@ -57,8 +57,6 @@ CREATE TABLE IF NOT EXISTS entries (
 CREATE INDEX IF NOT EXISTS entries_band_idx ON entries (band);
 CREATE INDEX IF NOT EXISTS entries_ts_idx ON entries (ts);
 CREATE INDEX IF NOT EXISTS entries_source_idx ON entries (source);
-CREATE INDEX IF NOT EXISTS entries_embedding_idx
-  ON entries USING hnsw (embedding vector_cosine_ops);
 
 CREATE TABLE IF NOT EXISTS entities (
   id BIGSERIAL PRIMARY KEY,
@@ -355,6 +353,11 @@ def ensure_schema(conn) -> dict:
             cur.execute(
                 "ALTER TABLE entries DROP CONSTRAINT entries_episode_id_fkey"
             )
+        # 2026-07-02 zombie sweep: the HNSW index was maintained on every
+        # entries insert but nothing ever ran a vector query in SQL — all
+        # similarity happens in Python over the hydrated bands. Drop it;
+        # recreate consciously if retrieval ever moves into PG.
+        cur.execute("DROP INDEX IF EXISTS entries_embedding_idx")
         # v19 (2026-07-02 P1): DB-enforced one-live-row-per-slot for the three
         # canonical stores — the invariant previously lived only in Python
         # (CortexStore._current), so an additive restore could silently create

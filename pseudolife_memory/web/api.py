@@ -24,6 +24,7 @@ import logging
 import mimetypes
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlsplit
 
 from pseudolife_memory.web.routes import ConsoleRoutes
 
@@ -131,6 +132,42 @@ def build_console_app(
                    for k, v in scope.get("headers", [])}
         return headers.get("authorization") == f"Bearer {token}"
 
+    def _hdr(scope, name: bytes) -> str | None:
+        for k, v in scope.get("headers", []):
+            if k.lower() == name:
+                return v.decode("latin-1")
+        return None
+
+    def _host_part(value: str) -> str:
+        """Lower-cased host from a Host header or an Origin URL —
+        strips scheme, port, and IPv6 brackets."""
+        if "://" in value:
+            value = urlsplit(value).netloc or value
+        value = value.strip().lower()
+        if value.startswith("["):
+            return value.partition("]")[0].lstrip("[")
+        if value.count(":") == 1:
+            return value.rsplit(":", 1)[0]
+        return value
+
+    def _browser_gate(scope) -> str | None:
+        """Tokenless /api is loopback-only (2026-07-02 review H2). Browsers
+        always send Host — and Origin on cross-site requests — so a foreign
+        Origin is CSRF and a foreign Host is DNS rebinding; both are
+        rejected. Non-browser clients (curl, scripts, tests) send neither
+        and pass. With a token set, Authorization already proves intent (it
+        cannot be attached cross-origin without a failing preflight), so
+        remote/LAN hosts stay legitimate."""
+        if token is not None:
+            return None
+        origin = _hdr(scope, b"origin")
+        if origin is not None and _host_part(origin) not in _LOOPBACK:
+            return "forbidden_origin"
+        host = _hdr(scope, b"host")
+        if host is not None and _host_part(host) not in _LOOPBACK:
+            return "forbidden_host"
+        return None
+
     async def app(scope, receive, send):
         if scope["type"] != "http":
             await mcp_app(scope, receive, send)
@@ -174,6 +211,13 @@ def build_console_app(
 
         # 4) console REST API (token-gated like /mcp)
         if path.startswith("/api/") or path == "/api":
+            denied = _browser_gate(scope)
+            if denied:
+                await _send_json(send, 403, {
+                    "error": denied,
+                    "hint": "tokenless /api serves loopback browsers only; "
+                            "set PSEUDOLIFE_MCP_TOKEN for remote access"})
+                return
             if not _authorized(scope):
                 await _send_json(send, 401, {
                     "error": "unauthorized",
@@ -187,6 +231,16 @@ def build_console_app(
             if method == "POST":
                 raw = await _read_body(receive)
                 if raw:
+                    # A cross-site form/fetch can send text/plain or
+                    # urlencoded WITHOUT a CORS preflight; application/json
+                    # cannot. 415 here forces the preflight (which fails —
+                    # no CORS headers are served). Bodyless POSTs are
+                    # covered by the Origin gate above.
+                    ctype = (_hdr(scope, b"content-type") or "")
+                    if ctype.split(";")[0].strip().lower() != "application/json":
+                        await _send_json(send, 415, {
+                            "error": "content_type_must_be_application_json"})
+                        return
                     try:
                         body = json.loads(raw.decode("utf-8"))
                     except json.JSONDecodeError:

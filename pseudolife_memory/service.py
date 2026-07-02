@@ -47,8 +47,7 @@ from pseudolife_memory.memory.consolidation import (
     Cluster,
     cluster_candidates,
 )
-from pseudolife_memory.memory.context_builder import ContextBuilder, _relative_time
-from pseudolife_memory.memory.contrastive import ContrastiveUpdater
+from pseudolife_memory.memory.context_builder import _relative_time
 from pseudolife_memory.memory.embedding import EmbeddingPipeline
 from pseudolife_memory.memory.reference_bank import ReferenceBank
 from pseudolife_memory.memory.reranker import CrossEncoderReranker
@@ -88,6 +87,10 @@ def _entry_to_dict(
     Pass ``include_embedding=True`` only for debug tooling.
     """
     out: dict[str, Any] = {
+        # Storage row id (None in file mode / pre-persist): pairs a search
+        # hit with memory_get/memory_reinforce and lets the Console render
+        # its engram-trace drawer (2026-07-02 review M3).
+        "id": entry.db_id,
         "text": entry.text,
         "source": entry.source,
         "bank": entry.bank,
@@ -345,8 +348,6 @@ class MemoryService:
         self._embedder: EmbeddingPipeline | None = None
         self._cms: ContinuumMemorySystem | None = None
         self._reference: ReferenceBank | None = None
-        self._contrastive: ContrastiveUpdater | None = None
-        self._context_builder: ContextBuilder | None = None
         self._reranker: CrossEncoderReranker | None = None
         self._cortex: CortexStore | None = None
         self._world = None  # WorldCortexStore | None (world-knowledge cortex, v9)
@@ -516,10 +517,9 @@ class MemoryService:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("CMS load skipped: %s", exc)
 
-        self._contrastive = ContrastiveUpdater(
-            self.config.memory.contrastive, self._embedder,
-        )
-        self._context_builder = ContextBuilder(self.config.context)
+        # (ContrastiveUpdater / ContextBuilder were constructed here for the
+        # legacy chat product but never called on any daemon path — removed
+        # in the 2026-07-02 zombie sweep; the modules remain for library use.)
 
         # Cortex — sibling slot-keyed canonical-fact store (schema v7).
         # Co-persisted next to memory_state; deliberately outside the

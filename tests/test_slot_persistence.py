@@ -201,3 +201,13 @@ def test_ensure_schema_demotes_preexisting_duplicate_current(pg_conn):
     assert by_value["older"] == "superseded"
     pg_conn.execute("DELETE FROM facts WHERE entity_norm='dup'")
     pg_conn.commit()
+
+
+def test_search_entries_carry_storage_id(svc):
+    """2026-07-02 review M3: _entry_to_dict omitted the storage row id, so
+    the Console's engram-trace button never rendered and the agent couldn't
+    pair search hits with memory_get/memory_reinforce."""
+    svc.store("the id-carrying probe memory", source="notes")
+    res = svc.search("id-carrying probe memory")
+    assert res["entries"], "probe must be retrievable"
+    assert isinstance(res["entries"][0].get("id"), int)

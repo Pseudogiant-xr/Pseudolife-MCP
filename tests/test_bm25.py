@@ -212,3 +212,19 @@ class TestNormalize:
         a, b = _make_entry("a"), _make_entry("b")
         out = normalize_scores([(a, 4.0), (b, 4.0)])
         assert all(s == 1.0 for _, s in out)
+
+
+class TestTokenizerIntegers:
+    """2026-07-02 review M2: the numeric alternative required a dot, so
+    standalone integers vanished — defeating the module's own stated purpose
+    (error codes, ports, model numbers)."""
+
+    def test_standalone_integers_survive(self) -> None:
+        from pseudolife_memory.memory.bm25 import tokenize
+        assert tokenize("port 8080") == ["port", "8080"]
+        assert tokenize("error 404 from nginx") == ["error", "404", "from", "nginx"]
+        assert "4090" in tokenize("the RTX 4090 workstation")
+
+    def test_dotted_versions_still_whole(self) -> None:
+        from pseudolife_memory.memory.bm25 import tokenize
+        assert "v0.7.6" in tokenize("shipped in v0.7.6")

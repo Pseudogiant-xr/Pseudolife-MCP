@@ -6,6 +6,41 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed/Changed (2026-07-02 review P3 — surface polish + zombie sweep)
+- **Tokenless `/api` is now browser-hardened** (review H2, live exposure —
+  the daemon runs without a token): foreign `Origin` → 403 (CSRF, covers
+  bodyless POSTs), foreign `Host` → 403 (DNS rebinding), and any POST with
+  a body must be `application/json` → 415 (a cross-site form can't send
+  that without a failing CORS preflight). Non-browser clients send neither
+  header and pass; with a token set the host gates are skipped (the
+  Authorization header already proves intent, so LAN use stays legitimate).
+- **Console Stream view repaired**: search/recent entries now carry the
+  storage row `id` (the engram-trace button finally renders live, and
+  agents can pair hits with `memory_get`/`memory_reinforce`); the "Explain
+  ranking" drawer reads the real trace keys (`name`/candidate lists/
+  `text_preview`) instead of fixture-invented ones that rendered
+  "undefined" and "[object Object]" in production.
+- **Fixture-vs-serializer contract test** (`tests/test_fixture_contract.py`)
+  pins the exact keys the Stream view consumes against both the real trace
+  and the devserver fixtures — fixture drift now fails CI instead of QA.
+- **ReferenceBank similarity math**: ChromaDB cosine distance is `1 − cos`,
+  so similarity is `1 − dist` — the old `1 − dist/2` scored orthogonal
+  chunks 0.5, above the retrieval floor, appending unrelated documents to
+  essentially every search once any document existed.
+- **BM25 tokenizer keeps standalone integers** (`port 8080`, `error 404`,
+  `RTX 4090`) — the numeric pattern required a dot, silently gutting the
+  exact-token channel for the very tokens it exists to catch.
+- **Zombie sweep**: removed the never-called `ContrastiveUpdater` /
+  `ContextBuilder` daemon wiring, the dead `AuthHealthASGI` wrapper, the
+  chat-product config blocks (`backend`/`claude`/`gemini`/`lmstudio`) and
+  `HydeConfig`; `NLIConfig.enabled` now defaults False with an honest
+  "not wired" docstring; the HNSW index on `entries.embedding` is dropped
+  (maintained on every insert, queried by nothing — similarity runs in
+  Python over the hydrated bands).
+- **Session titles no longer mis-attribute on POSIX** (found by CI run #1):
+  a Windows-style client cwd parsed as one relative segment on Linux, so
+  the git walk could title a session after the daemon's own repo.
+
 ### Added (2026-07-02 review P2 — quality infrastructure)
 - **CI (GitHub Actions).** `.github/workflows/ci.yml` runs the full suite on
   every master push and PR: pgvector/pg16 service container, CPU-torch
