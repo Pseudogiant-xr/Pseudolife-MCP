@@ -321,31 +321,68 @@ class PostgresStorage:
             ).fetchone()
         return int(row[0])
 
+    def _insert_canonical_rows(
+        self, cur, table: str, cols: tuple[str, ...], rows: list[dict],
+    ) -> None:
+        """Shared row-insert loop for the three canonical stores
+        (facts / world_facts / lessons)."""
+        for f in rows:
+            values = []
+            for c in cols:
+                v = f.get(c)
+                if c == "embedding":
+                    v = _embedding_in(v)
+                elif c in _FACT_JSONB:
+                    v = Jsonb(v if v is not None else [])
+                elif c == "version" and v is None:
+                    v = 1            # NOT NULL DEFAULT 1; never insert explicit NULL
+                values.append(v)
+            cur.execute(
+                f"INSERT INTO {table} ({', '.join(cols)}) "
+                f"VALUES ({', '.join(['%s'] * len(cols))})",
+                values,
+            )
+
+    def _replace_slot_rows(
+        self, table: str, cols: tuple[str, ...],
+        slots: set[tuple[str, str]] | list[tuple[str, str]], rows: list[dict],
+    ) -> None:
+        """Per-slot rewrite (2026-07-02 P1): delete + reinsert ONLY the given
+        ``(entity_norm, attribute_norm)`` slots, one transaction. The
+        full-table snapshot rewrite was O(total rows) per write — quadratic
+        over a dream sweep — and reassigned every row id, which also blocked
+        the dormant OCC seam."""
+        slot_list = sorted(set(slots))
+        if not slot_list:
+            return
+        placeholders = ", ".join(["(%s, %s)"] * len(slot_list))
+        params = [x for s in slot_list for x in s]
+        with self._txn(), self.conn.cursor() as cur:
+            cur.execute(
+                f"DELETE FROM {table} "
+                f"WHERE (entity_norm, attribute_norm) IN ({placeholders})",
+                params,
+            )
+            self._insert_canonical_rows(cur, table, cols, rows)
+
+    def replace_slot_facts(self, slots, rows: list[dict]) -> None:
+        self._replace_slot_rows("facts", _FACT_COLS, slots, rows)
+
+    def replace_slot_world_facts(self, slots, rows: list[dict]) -> None:
+        self._replace_slot_rows("world_facts", _WORLD_FACT_COLS, slots, rows)
+
+    def replace_slot_lessons(self, slots, rows: list[dict]) -> None:
+        self._replace_slot_rows("lessons", _LESSON_COLS, slots, rows)
+
     def replace_facts(self, rows: list[dict]) -> None:
         """Snapshot-style cortex persistence: one transaction, full rewrite.
 
-        The cortex is small by design (one current record per slot plus
-        audit history), so a transactional truncate+insert is simpler and
-        safer than row diffing.
+        Retained for restore/migration and the explicit-save resync path;
+        the per-write path is :meth:`replace_slot_facts` (2026-07-02 P1).
         """
         with self._txn(), self.conn.cursor() as cur:
             cur.execute("DELETE FROM facts")
-            for f in rows:
-                values = []
-                for c in _FACT_COLS:
-                    v = f.get(c)
-                    if c == "embedding":
-                        v = _embedding_in(v)
-                    elif c in _FACT_JSONB:
-                        v = Jsonb(v if v is not None else [])
-                    elif c == "version" and v is None:
-                        v = 1            # NOT NULL DEFAULT 1; never insert explicit NULL
-                    values.append(v)
-                cur.execute(
-                    f"INSERT INTO facts ({', '.join(_FACT_COLS)}) "
-                    f"VALUES ({', '.join(['%s'] * len(_FACT_COLS))})",
-                    values,
-                )
+            self._insert_canonical_rows(cur, "facts", _FACT_COLS, rows)
 
     def replace_facts_occ(self, rows: list[dict]) -> None:
         """Optimistic-concurrency cortex persistence (Phase-2 seam, dormant).
@@ -398,26 +435,12 @@ class PostgresStorage:
     # ── world-knowledge cortex (schema v9; same snapshot pattern as facts) ──
 
     def replace_world_facts(self, rows: list[dict]) -> None:
-        """Snapshot-style world cortex persistence: one transaction, full rewrite
-        (the world cortex is small/deduped, like the personal one)."""
+        """Snapshot-style world cortex persistence: full rewrite. Retained for
+        the explicit-save resync; the per-write path is
+        replace_slot_world_facts."""
         with self._txn(), self.conn.cursor() as cur:
             cur.execute("DELETE FROM world_facts")
-            for f in rows:
-                values = []
-                for c in _WORLD_FACT_COLS:
-                    v = f.get(c)
-                    if c == "embedding":
-                        v = _embedding_in(v)
-                    elif c in _FACT_JSONB:
-                        v = Jsonb(v if v is not None else [])
-                    elif c == "version" and v is None:
-                        v = 1            # NOT NULL DEFAULT 1; never insert explicit NULL
-                    values.append(v)
-                cur.execute(
-                    f"INSERT INTO world_facts ({', '.join(_WORLD_FACT_COLS)}) "
-                    f"VALUES ({', '.join(['%s'] * len(_WORLD_FACT_COLS))})",
-                    values,
-                )
+            self._insert_canonical_rows(cur, "world_facts", _WORLD_FACT_COLS, rows)
 
     def load_world_facts(self) -> list[dict]:
         cols = ("id",) + _WORLD_FACT_COLS
@@ -435,26 +458,11 @@ class PostgresStorage:
     # ── procedural / outcome memory (schema v10; same snapshot pattern) ─────
 
     def replace_lessons(self, rows: list[dict]) -> None:
-        """Snapshot-style lesson persistence: one transaction, full rewrite (the
-        lesson store is small/deduped, like the personal and world cortex)."""
+        """Snapshot-style lesson persistence: full rewrite. Retained for the
+        explicit-save resync; the per-write path is replace_slot_lessons."""
         with self._txn(), self.conn.cursor() as cur:
             cur.execute("DELETE FROM lessons")
-            for f in rows:
-                values = []
-                for c in _LESSON_COLS:
-                    v = f.get(c)
-                    if c == "embedding":
-                        v = _embedding_in(v)
-                    elif c in _FACT_JSONB:
-                        v = Jsonb(v if v is not None else [])
-                    elif c == "version" and v is None:
-                        v = 1            # NOT NULL DEFAULT 1; never insert explicit NULL
-                    values.append(v)
-                cur.execute(
-                    f"INSERT INTO lessons ({', '.join(_LESSON_COLS)}) "
-                    f"VALUES ({', '.join(['%s'] * len(_LESSON_COLS))})",
-                    values,
-                )
+            self._insert_canonical_rows(cur, "lessons", _LESSON_COLS, rows)
 
     def load_lessons(self) -> list[dict]:
         cols = ("id",) + _LESSON_COLS

@@ -147,6 +147,43 @@ def _record_to_row(r: CortexRecord) -> dict[str, Any]:
     }
 
 
+def _link_entity_ids(storage, row: dict[str, Any], object_key: str = "value") -> None:
+    """Point lookups replacing the full entity_id_map() scan: resolve the
+    row's subject (and object, when it names a known entity/alias) against
+    the entities table."""
+    from pseudolife_memory.graph import norm_name
+
+    ent = storage.find_entity(norm_name(row["entity"]))
+    row["entity_id"] = ent["id"] if ent else None
+    obj_name = row.get(object_key)
+    if obj_name:
+        obj = storage.find_entity(norm_name(obj_name))
+        row["object_entity_id"] = obj["id"] if obj else None
+
+
+def sync_cortex_slots(cortex: CortexStore, storage) -> int:
+    """Per-slot write-through (2026-07-02 P1): persist ONLY the slots mutated
+    since the last sync, plus the supersession log / dream cursor when they
+    changed. Exactness relies on CortexStore marking every mutation in
+    ``dirty_slots``; :func:`snapshot_cortex` remains the full-resync path
+    (explicit save / flush / restore). Dirty marks are cleared only after
+    the storage write succeeds, so a failed sync retries on the next save."""
+    slots = set(cortex.dirty_slots)
+    meta_dirty = bool(cortex.meta_dirty)
+    rows: list[dict[str, Any]] = []
+    if slots:
+        rows = [_record_to_row(r) for r in cortex.records if r.key in slots]
+        for row in rows:
+            _link_entity_ids(storage, row)
+        storage.replace_slot_facts(slots, rows)
+        cortex.dirty_slots -= slots
+    if meta_dirty:
+        storage.meta_set(_CORTEX_LOG_KEY, cortex.supersession_log[-200:])
+        storage.meta_set(_CORTEX_CURSOR_KEY, cortex.dream_cursor)
+        cortex.meta_dirty = False
+    return len(rows)
+
+
 def snapshot_cortex(cortex: CortexStore, storage) -> int:
     """Transactionally rewrite the facts table from the in-memory cortex.
 
@@ -164,6 +201,9 @@ def snapshot_cortex(cortex: CortexStore, storage) -> int:
     storage.replace_facts(rows)
     storage.meta_set(_CORTEX_LOG_KEY, cortex.supersession_log[-200:])
     storage.meta_set(_CORTEX_CURSOR_KEY, cortex.dream_cursor)
+    # A full snapshot persists everything — outstanding dirty marks are moot.
+    cortex.dirty_slots.clear()
+    cortex.meta_dirty = False
     return len(rows)
 
 
@@ -229,11 +269,24 @@ def _world_record_to_row(r) -> dict[str, Any]:
     }
 
 
+def sync_world_slots(world, storage) -> int:
+    """Per-slot write-through for the world cortex (2026-07-02 P1)."""
+    slots = set(world.dirty_slots)
+    if not slots:
+        return 0
+    rows = [_world_record_to_row(r) for r in world.records if r.key in slots]
+    storage.replace_slot_world_facts(slots, rows)
+    world.dirty_slots -= slots
+    return len(rows)
+
+
 def snapshot_world_cortex(world, storage) -> int:
     """Transactionally rewrite the world_facts table from the in-memory world cortex.
-    No entity-graph auto-linking in v1 (world facts are external)."""
+    No entity-graph auto-linking in v1 (world facts are external). Full-resync
+    path; the per-write path is :func:`sync_world_slots`."""
     rows = [_world_record_to_row(r) for r in world.records]
     storage.replace_world_facts(rows)
+    world.dirty_slots.clear()
     return len(rows)
 
 
@@ -303,8 +356,24 @@ def _lesson_record_to_row(r) -> dict[str, Any]:
     }
 
 
+def sync_lesson_slots(lessons, storage) -> int:
+    """Per-slot write-through for the lesson store (2026-07-02 P1). Graph
+    linking matches :func:`snapshot_lessons`: subject = task-type entity,
+    object = the ``about`` tool/source."""
+    slots = set(lessons.dirty_slots)
+    if not slots:
+        return 0
+    rows = [_lesson_record_to_row(r) for r in lessons.records if r.key in slots]
+    for row in rows:
+        _link_entity_ids(storage, row, object_key="about")
+    storage.replace_slot_lessons(slots, rows)
+    lessons.dirty_slots -= slots
+    return len(rows)
+
+
 def snapshot_lessons(lessons, storage) -> int:
     """Transactionally rewrite the lessons table from the in-memory store.
+    Full-resync path; the per-write path is :func:`sync_lesson_slots`.
 
     Graph linking: the task-type (``entity``) resolves to its entity id, and the
     ``about`` tool/source — when it names a known entity/alias — to the object id,
@@ -319,6 +388,7 @@ def snapshot_lessons(lessons, storage) -> int:
         if row.get("about"):
             row["object_entity_id"] = emap.get(norm_name(row["about"]))
     storage.replace_lessons(rows)
+    lessons.dirty_slots.clear()
     return len(rows)
 
 
