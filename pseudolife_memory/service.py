@@ -31,6 +31,7 @@ Design notes
 
 from __future__ import annotations
 
+import heapq
 import logging
 import os
 import re
@@ -225,6 +226,44 @@ _SOURCE_ORIGIN = {
     "claude": "agent", "assistant": "agent", "agent": "agent",
     "tool": "action", "action": "action",
 }
+
+
+def _k_core_peel(entities: list[str], edges: list[dict], max_nodes: int) -> set[str]:
+    """Shrink ``entities`` to ``max_nodes`` by repeatedly removing the
+    globally lowest-degree node (decrementing its neighbours as it goes) —
+    i.e. a k-core peel, not a single top-degree sort.
+
+    A single sort-by-raw-degree cap can keep a node whose entire neighbourhood
+    consists of low-degree leaves that themselves don't survive the cap: the
+    node individually ranks high, but ends up with zero edges once the kept
+    set is filtered. On a real bank (1091 entities, capped to 300) this
+    stranded ~1/6 of the kept nodes with no edges at all, and those
+    force-sim-scattered orphans dragged the canvas's auto-fit camera off the
+    dense cluster — reproducing the very 'off to the side' bug the cap was
+    meant to help fix. Peeling by current (not original) degree means a node
+    is only kept if it's still meaningfully connected to the *rest of the
+    kept set* at the moment it would otherwise be cut."""
+    if len(entities) <= max_nodes:
+        return set(entities)
+    adj: dict[str, set[str]] = {e: set() for e in entities}
+    for e in edges:
+        if e["src"] in adj and e["dst"] in adj and e["src"] != e["dst"]:
+            adj[e["src"]].add(e["dst"])
+            adj[e["dst"]].add(e["src"])
+    deg = {e: len(adj[e]) for e in entities}
+    alive = set(entities)
+    heap = [(d, e) for e, d in deg.items()]
+    heapq.heapify(heap)
+    while len(alive) > max_nodes:
+        d, name = heapq.heappop(heap)
+        if name not in alive or d != deg[name]:
+            continue   # stale heap entry — degree changed since this was pushed
+        alive.discard(name)
+        for nb in adj[name]:
+            if nb in alive:
+                deg[nb] -= 1
+                heapq.heappush(heap, (deg[nb], nb))
+    return alive
 
 
 def _origin_from_source(source: str | None) -> str | None:
@@ -2802,14 +2841,7 @@ class MemoryService:
             if e["src_id"] in by_id and e["dst_id"] in by_id]
         total_nodes, total_edges, truncated = len(nodes), len(edges), False
         if max_nodes and total_nodes > max_nodes:
-            deg: dict[str, int] = {}
-            for e in edges:
-                deg[e["src"]] = deg.get(e["src"], 0) + 1
-                deg[e["dst"]] = deg.get(e["dst"], 0) + 1
-            # Keep the most-connected hubs; name tie-break keeps it deterministic.
-            ranked = sorted(nodes, key=lambda n: (deg.get(n["entity"], 0), n["entity"]),
-                            reverse=True)
-            kept = {n["entity"] for n in ranked[:max_nodes]}
+            kept = _k_core_peel([n["entity"] for n in nodes], edges, max_nodes)
             nodes = [n for n in nodes if n["entity"] in kept]
             edges = [e for e in edges if e["src"] in kept and e["dst"] in kept]
             truncated = True

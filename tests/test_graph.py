@@ -643,6 +643,44 @@ def test_whole_graph_caps_nodes_by_degree(svc):
     assert len(full["nodes"]) == 10
 
 
+def test_whole_graph_cap_prefers_connected_core_over_orphaned_hub(svc):
+    """The seedless cap must peel by iteratively-recomputed (k-core) degree,
+    not a single top-RAW-degree sort — a node whose huge raw degree comes
+    entirely from one-off leaves that can't all survive the cap should lose
+    out to a smaller, mutually-connected clique that keeps its edges intact.
+    Reproduces a bug seen on the live bank (1091 entities): naive top-degree
+    capping kept 50/300 nodes with zero edges in the rendered subgraph (every
+    neighbour of each got cut), and those orphans — scattered by the force
+    sim — dragged fitView's bounding-box centre off the dense cluster,
+    reproducing the original 'off to the side' complaint on the very feature
+    meant to fix it.
+
+    The magnitudes here (hub degree 20 vs clique degree 2, leaves degree 1)
+    are deliberately non-adjacent so the outcome can't hinge on name
+    tie-breaking: naive top-3-by-raw-degree keeps the hub (which ends up with
+    zero surviving edges) plus 2 of the 3 clique members (breaking the
+    clique); k-core peeling strips the hub's leaves down to nothing, drops the
+    now-degree-0 hub, and keeps the whole clique.
+    """
+    import time as _t
+    svc._ensure_init()  # noqa: SLF001
+    st = svc._storage
+    st.upsert_entity_source(st.ensure_entity("core-hub", display="core-hub"), "core-scope", "derived", _t.time())
+    for i in range(20):   # hub degree 20 (raw) — but every leaf is a private one-off, degree 1
+        leaf = f"core-leaf-{i}"
+        st.upsert_entity_source(st.ensure_entity(leaf, display=leaf), "core-scope", "derived", _t.time())
+        svc.graph_relate("core-hub", "related-to", leaf)
+    for name in ["core-a", "core-b", "core-c"]:
+        st.upsert_entity_source(st.ensure_entity(name, display=name), "core-scope", "derived", _t.time())
+    for a, b in [("core-a", "core-b"), ("core-a", "core-c"), ("core-b", "core-c")]:
+        svc.graph_relate(a, "related-to", b)   # fully-connected 3-clique, degree 2 each
+
+    out = svc.graph_neighborhood(entity=None, scope="core-scope", max_nodes=3)
+    names = {n["entity"] for n in out["nodes"]}
+    assert names == {"core-a", "core-b", "core-c"}   # the clique survives intact; the hub is dropped
+    assert len(out["edges"]) == 3                    # all 3 clique edges present — nobody got stranded
+
+
 def test_dream_edge_confidence_varies_by_type(svc):
     """dream-written edges carry per-edge confidence: clean ~0.70, violation ~0.175.
 

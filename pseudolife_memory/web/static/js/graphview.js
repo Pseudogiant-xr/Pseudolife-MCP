@@ -296,19 +296,35 @@ export class ForceGraph {
   fitView(userTriggered) {
     if (!this.nodes.length) return;
     if (userTriggered) this.userInteracted = true;
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const n of this.nodes) {
-      const r = this.radius(n) + 46;   // pad for the label drawn under the node
-      minX = Math.min(minX, n.x - r); maxX = Math.max(maxX, n.x + r);
-      minY = Math.min(minY, n.y - r); maxY = Math.max(maxY, n.y + r);
-    }
-    const bw = Math.max(1, maxX - minX), bh = Math.max(1, maxY - minY);
-    const fit = Math.min(this.W / bw, this.H / bh);
+    // Camera CENTRE is the median position on each axis, not the midpoint of
+    // the extremes: at real scale (hundreds of nodes) the layout isn't "one
+    // tight cluster plus a couple of outliers" — repulsion gives it a broad,
+    // often-skewed continuous spread, so a long thin tail on one side (a
+    // handful of stray/weakly-connected nodes — real orphans, or a capped
+    // hub whose neighbours got cut) drags a min/max-midpoint far from where
+    // most nodes actually sit, which is what "off to the side" turned out to
+    // be even after excluding literal extremes. The median tracks the sim's
+    // own centering force regardless of any such tail. SCALE still comes
+    // from a trimmed half-extent so a few strays don't force the view out
+    // to fit them, while everyone still renders (nothing is cropped, they
+    // just may sit outside the initial framing).
+    const xs = this.nodes.map((nd) => nd.x).sort((a, b) => a - b);
+    const ys = this.nodes.map((nd) => nd.y).sort((a, b) => a - b);
+    const n = xs.length;
+    const median = (arr) => (arr.length % 2
+      ? arr[(arr.length - 1) / 2]
+      : (arr[arr.length / 2 - 1] + arr[arr.length / 2]) / 2);
+    const cx = median(xs), cy = median(ys);
+    const trim = n > 12 ? Math.floor(n * 0.04) : 0;
+    const pad = Math.max(...this.nodes.map((nd) => this.radius(nd))) + 46;
+    const halfW = Math.max(cx - xs[trim], xs[n - 1 - trim] - cx, 1) + pad;
+    const halfH = Math.max(cy - ys[trim], ys[n - 1 - trim] - cy, 1) + pad;
+    const fit = Math.min(this.W / (halfW * 2), this.H / (halfH * 2));
     // auto-fit only shrinks (never blows a tiny graph up past 1:1); the manual
     // fit button is allowed to enlarge up to 1.6×.
     this.scale = clamp(fit, 0.15, userTriggered ? 1.6 : 1);
-    this.panX = this.W / 2 - ((minX + maxX) / 2) * this.scale;
-    this.panY = this.H / 2 - ((minY + maxY) / 2) * this.scale;
+    this.panX = this.W / 2 - cx * this.scale;
+    this.panY = this.H / 2 - cy * this.scale;
   }
 
   themeColors() {
