@@ -161,6 +161,13 @@ def test_assign_scope_and_unrelate_routes(svc):
     assert u["removed"] is True
 
 
+def test_bless_edge_route(svc):
+    r = ConsoleRoutes(svc)
+    out = r.dispatch("POST", "/api/graph/bless-edge", {},
+                     {"src": "a", "relation": "uses", "dst": "b"})
+    assert out["blessed"] is True
+
+
 def test_delete_entity_route(svc):
     r = ConsoleRoutes(svc)
     out = r.dispatch("POST", "/api/graph/delete-entity", {}, {"entity": "junk"})

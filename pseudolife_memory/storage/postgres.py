@@ -771,6 +771,26 @@ class PostgresStorage:
             ).fetchone()
         return {"id": int(row[0]), "confidence": float(row[1])}
 
+    def bless_edge(self, src_id: int, relation: str, dst_id: int, *,
+                   confidence: float = 0.8) -> bool:
+        """Human 'Keep' on a review-queue edge: raise a LIVE edge to at least
+        ``confidence`` and mark it origin='user' so the dubious detector stops
+        flagging it. Never creates a missing edge and never revives a
+        superseded one — Keep confirms, it doesn't assert."""
+        with self._txn():
+            cur = self.conn.execute(
+                """
+                UPDATE edges SET
+                  confidence = GREATEST(confidence, %s),
+                  origin = 'user',
+                  asserted_at = %s
+                WHERE src_id = %s AND relation = %s AND dst_id = %s
+                  AND superseded_at IS NULL
+                """,
+                (confidence, time.time(), src_id, relation, dst_id),
+            )
+        return cur.rowcount > 0
+
     def supersede_edge(self, src_id: int, relation: str, dst_id: int) -> bool:
         with self._txn():
             cur = self.conn.execute(

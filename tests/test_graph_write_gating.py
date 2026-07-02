@@ -37,6 +37,40 @@ def test_junk_name_reason_allows_legitimate_names():
     assert junk_name_reason("RTX 4090") is None
 
 
+def test_junk_name_reason_blocks_2026_07_02_cleanup_classes():
+    # Every class below dominated the 612 hand-deleted entities of the
+    # 2026-07-02 live-cortex cleanup; the gate must stop the re-supply.
+    assert junk_name_reason("236 memories") == "count-prefix"
+    assert junk_name_reason("5 type-violation junk edges") == "count-prefix"
+    assert junk_name_reason("2026-07-02") == "bare-date"
+    assert junk_name_reason("pseudolife_memory-20260702-194002.sql.gz") == "dump-file"
+    assert junk_name_reason("data/backups/pseudolife_memory-20260624-200948.sql") == "dump-file"
+    assert junk_name_reason("pseudolife-daemon:0.2.0-pre-gi") == "image-tag"
+    assert junk_name_reason("docker compose -f ops/docker-compose.yml build x") == "command-string"
+    assert junk_name_reason("python -m pseudolife_memory.web.devserver") == "command-string"
+    assert junk_name_reason("LOCAL master = 8e2b992") == "hash-status"
+    assert junk_name_reason("Action: accept-link") == "action-prefix"
+    assert junk_name_reason(
+        "deploy a schema change to the live pseudolife-mcp daemon") == "sentence"
+    assert junk_name_reason("P3 SURFACE POLISH") == "status-shard"
+    assert junk_name_reason("P1_roadmap_item") == "status-shard"
+
+
+def test_junk_name_reason_new_rules_spare_legitimate_names():
+    # Near-misses for each new rule that must stay storable.
+    assert junk_name_reason("2026-07-02 review roadmap") is None    # dated title, not bare date
+    assert junk_name_reason("arXiv:2606.22844") is None             # 2-part id, not an image tag
+    assert junk_name_reason("3d-force-graph@1.73.6") is None        # versioned lib (@, not :)
+    assert junk_name_reason("8-band continuum") is None             # hyphenated, not count-prefix
+    assert junk_name_reason("docker compose") is None               # tool name, not a command line
+    assert junk_name_reason("backup.ps1 off-disk mirror") is None   # short noun phrase
+    assert junk_name_reason("Language Models Need Sleep") is None   # short paper name
+    assert junk_name_reason(
+        "Track A (graphify-derived recall hub-gating)") is None     # 5 tokens < sentence floor
+    assert junk_name_reason("AllowTelemetry=0 at both HKLM Policies") is None  # '=' but no hash
+    assert junk_name_reason("P2P protocol") is None                 # P<digit><letter>: no shard boundary
+
+
 def test_dream_edge_floor_drops_type_violations_by_default():
     # Hard type-violations score 0.1125-0.175; the shipped floor must
     # exceed that (pre-fix it was 0.0 = write everything).
@@ -67,6 +101,33 @@ def test_upsert_edge_revive_false_keeps_superseded(storage):
         "SELECT superseded_at FROM edges WHERE src_id=%s AND relation=%s "
         "AND dst_id=%s", (a, "uses", b)).fetchone()
     assert row[0] is not None, "agent re-assertion must not revive the edge"
+
+
+def test_bless_edge_raises_confidence_and_marks_user(storage):
+    # 2026-07-02 review fix 2: the missing "Keep" half of Prune. A blessed
+    # edge climbs above the 0.6 dubious threshold and records the human call.
+    a = storage.ensure_entity("bless-src")
+    b = storage.ensure_entity("bless-dst")
+    storage.upsert_edge(a, "uses", b, confidence=0.45, origin="agent")
+
+    assert storage.bless_edge(a, "uses", b) is True
+
+    row = storage.conn.execute(
+        "SELECT confidence, origin FROM edges WHERE src_id=%s AND relation=%s "
+        "AND dst_id=%s", (a, "uses", b)).fetchone()
+    assert row[0] >= 0.8
+    assert row[1] == "user"
+
+
+def test_bless_edge_never_creates_or_revives(storage):
+    a = storage.ensure_entity("bless-src2")
+    b = storage.ensure_entity("bless-dst2")
+    assert storage.bless_edge(a, "uses", b) is False, "no edge: nothing to bless"
+
+    storage.upsert_edge(a, "uses", b, confidence=0.45, origin="agent")
+    storage.supersede_edge(a, "uses", b)
+    assert storage.bless_edge(a, "uses", b) is False, (
+        "a superseded (human-removed) edge must not be blessable back to life")
 
 
 def test_upsert_edge_default_still_revives(storage):
@@ -109,6 +170,29 @@ def test_dream_relations_skip_junk_endpoints(svc):
     assert n == 0
     assert svc._storage.find_entity(G.norm_name("a<->b")) is None
     assert svc._storage.find_entity(G.norm_name("42")) is None
+
+
+def test_service_bless_edge_clears_dubious_flag(svc):
+    svc.graph_relate("gamma-tool", "uses", "delta-lib",
+                     origin="agent", confidence=0.45)
+
+    out = svc.graph_bless_edge("gamma-tool", "uses", "delta-lib")
+
+    assert out["blessed"] is True
+    nb = svc.graph_neighborhood("gamma-tool", depth=1)
+    edge = next(e for e in nb["edges"]
+                if e["relation"] == "uses" and e["dst"] == "delta-lib")
+    assert edge["confidence"] >= 0.8
+    assert edge["origin"] == "user"
+
+
+def test_service_bless_edge_unknown_edge_or_entity(svc):
+    svc.graph_relate("gamma-tool2", "uses", "delta-lib2")
+    missing = svc.graph_bless_edge("gamma-tool2", "hosts", "delta-lib2")
+    assert missing["blessed"] is False and missing["reason"] == "edge_not_found"
+
+    unknown = svc.graph_bless_edge("no-such-entity-xyz", "uses", "delta-lib2")
+    assert unknown["blessed"] is False and unknown["reason"] == "unknown_entity"
 
 
 def test_dream_reassertion_does_not_revive_human_removal(svc):

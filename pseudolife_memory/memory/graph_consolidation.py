@@ -168,6 +168,21 @@ _JUNK_STOPWORDS = frozenset({
 })
 _BARE_NUMBER = re.compile(r"^\d+$")
 
+# 2026-07-02 live-cortex cleanup: the classes below covered nearly all of the
+# ~612 hand-deleted junk entities. Each is a write-time name shape, tuned to
+# spare the near-miss legit shapes ("2026-07-02 review roadmap",
+# "arXiv:2606.22844", "docker compose", "8-band continuum").
+_COUNT_PREFIX = re.compile(r"^\d+\s")                      # "236 memories"
+_BARE_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_DUMP_FILE = re.compile(r"\.sql(\.gz)?$", re.IGNORECASE)   # pg_dump artifacts
+_IMAGE_TAG = re.compile(r":\d+\.\d+\.\d+")                 # 3-part ver; arXiv ids are 2-part
+_COMMAND_STRING = re.compile(                              # cmd word + >=2 more tokens
+    r"^(docker|git|python|pip|curl|pwsh|npm|pytest)\s+\S+\s+\S", re.IGNORECASE)
+_HASH_STATUS = re.compile(r"=\s*[0-9a-f]{7,}\b")           # "LOCAL master = 8e2b992"
+_ACTION_PREFIX = re.compile(r"^action:\s", re.IGNORECASE)
+_STATUS_SHARD = re.compile(r"^P\d+[ _]")                   # "P3 SURFACE POLISH"
+_SENTENCE_TOKENS = 7                                       # task/status phrases
+
 # A relation separator captured into an entity name (extraction artifact), e.g.
 # "memory_recall<->recall.py". Longest arrow first so "<->" isn't split as "->".
 _ARROW = re.compile(r"<-+>|↔|->|→")
@@ -201,6 +216,24 @@ def junk_name_reason(name: str) -> str | None:
         return "bare-number"
     if d.lower() in _JUNK_STOPWORDS:
         return "status-word"
+    if _BARE_DATE.match(d):
+        return "bare-date"
+    if _COUNT_PREFIX.match(d):
+        return "count-prefix"
+    if _DUMP_FILE.search(d):
+        return "dump-file"
+    if _IMAGE_TAG.search(d):
+        return "image-tag"
+    if _COMMAND_STRING.match(d):
+        return "command-string"
+    if _HASH_STATUS.search(d):
+        return "hash-status"
+    if _ACTION_PREFIX.match(d):
+        return "action-prefix"
+    if _STATUS_SHARD.match(d):
+        return "status-shard"
+    if len(d.split()) >= _SENTENCE_TOKENS:
+        return "sentence"
     return None
 
 

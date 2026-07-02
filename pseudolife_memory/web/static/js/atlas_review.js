@@ -166,7 +166,8 @@ function findingRow(f, onAct) {
   if (SELECTABLE.has(f.type)) {
     let getSel = () => [];
     const specs = {
-      dubious_edge:  [["Prune", "danger", (s) => ({ kind: "prune", edges: s })]],
+      dubious_edge:  [["Keep", null, (s) => ({ kind: "bless", edges: s })],
+                      ["Prune", "danger", (s) => ({ kind: "prune", edges: s })]],
       unattributed:  [["Assign", null, (s) => ({ kind: "assign", entities: s })]],
       test_artifact: [["Delete", "danger", (s) => ({ kind: "delete-names", entities: s })]],
       orphan:        [["Delete", "danger", (s) => ({ kind: "delete-names", entities: s })],

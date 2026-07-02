@@ -225,6 +225,12 @@ export async function renderGraph(root, ctx) {
       await postAll([{ path: "/api/graph/reject-proposal", body: { id: d.id } }], "Dismissed");
       return;
     }
+    if (d.kind === "bless") {                             // dubious_edge (bulk): human "Keep"
+      const edges = d.edges || [];
+      await postAll(edges.map((e) => ({ path: "/api/graph/bless-edge",
+        body: { src: e.src, relation: e.relation, dst: e.dst } })), "Kept");
+      return;
+    }
     if (d.kind === "prune") {                             // dubious_edge (bulk)
       const edges = d.edges || [];
       if (!(await confirmDialog({ title: "Prune edges", danger: true,

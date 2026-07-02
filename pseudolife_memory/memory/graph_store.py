@@ -21,6 +21,9 @@ class GraphStore(Protocol):
 
     def supersede_edge(self, src_id: int, relation: str, dst_id: int) -> bool: ...
 
+    def bless_edge(self, src_id: int, relation: str, dst_id: int, *,
+                   confidence: float = 0.8) -> bool: ...
+
     def load_relations(self) -> list[dict]: ...
 
     def upsert_relation(self, name: str, description: str, *,
@@ -48,6 +51,11 @@ class PostgresNetworkxGraphStore:
 
     def supersede_edge(self, src_id: int, relation: str, dst_id: int) -> bool:
         return self._st.supersede_edge(src_id, relation, dst_id)
+
+    def bless_edge(self, src_id: int, relation: str, dst_id: int, *,
+                   confidence: float = 0.8) -> bool:
+        return self._st.bless_edge(src_id, relation, dst_id,
+                                   confidence=confidence)
 
     def load_relations(self) -> list[dict]:
         return self._st.load_relations()
