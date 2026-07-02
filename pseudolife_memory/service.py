@@ -566,6 +566,23 @@ class MemoryService:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Lesson store hydration skipped: %s", exc)
 
+        # Re-seed the HLC from the stored high-water stamp (2026-07-02 P1): a
+        # wall-clock step-back across restarts (NTP, laptop resume) must not
+        # let stored stamps outrank every new write — pre-fix, a user
+        # correction landing "before" history got parked as a contender until
+        # real time caught up.
+        best = (0, 0)
+        for recs in ((self._cortex.records if self._cortex else ()),
+                     (self._world.records if self._world else ()),
+                     (self._lessons.records if self._lessons else ())):
+            for r in recs:
+                if r.hlc_phys:
+                    cand = (int(r.hlc_phys), int(r.hlc_logical or 0))
+                    if cand > best:
+                        best = cand
+        if best > (0, 0):
+            self._hlc.observe(*best)
+
     # ------------------------------------------------------------------
     # Tool: store
     # ------------------------------------------------------------------
@@ -644,6 +661,10 @@ class MemoryService:
         sup = origin if origin is not None else _origin_from_source(source)
         conf = self.config.memory.cortex.promote_confidence
         prov = [source] if source else []
+        # Stamp like cortex_write does (2026-07-02 P1): unstamped auto-promotes
+        # carried (0,0) HLC — they could never supersede a stamped row, and the
+        # v11 backfill retro-labeled them writer_id='legacy' on every boot.
+        writer_id, session_id = self._resolve_writer()
         written = 0
         for s in extract_slots(text):
             value = s.value if getattr(s, "polarity", "+") != "-" else ("NOT " + s.value)
@@ -655,6 +676,9 @@ class MemoryService:
                     confidence=conf,
                     provenance=prov,
                     support=sup,
+                    hlc=self._hlc.tick(),
+                    writer_id=writer_id,
+                    session_id=session_id,
                 )
                 self._ensure_subject_entity(s.entity)
                 written += 1
@@ -1145,7 +1169,10 @@ class MemoryService:
         try:
             if self._storage is not None:
                 from pseudolife_memory.storage import sync as _sync
-                _sync.snapshot_cortex(self._cortex, self._storage)
+                # Per-slot write-through (2026-07-02 P1): persists only the
+                # slots mutated since the last sync. The full snapshot runs
+                # on explicit save / flush (see _persist_all).
+                _sync.sync_cortex_slots(self._cortex, self._storage)
             else:
                 self._cortex.save(self._cortex_path())
         except Exception as exc:
@@ -1158,7 +1185,7 @@ class MemoryService:
             return
         try:
             from pseudolife_memory.storage import sync as _sync
-            _sync.snapshot_world_cortex(self._world, self._storage)
+            _sync.sync_world_slots(self._world, self._storage)
         except Exception as exc:
             self._persist_errors += 1
             logger.error("World cortex save failed (NOT durably persisted): %s", exc)
@@ -1169,7 +1196,7 @@ class MemoryService:
             return
         try:
             from pseudolife_memory.storage import sync as _sync
-            _sync.snapshot_lessons(self._lessons, self._storage)
+            _sync.sync_lesson_slots(self._lessons, self._storage)
         except Exception as exc:
             self._persist_errors += 1
             logger.error("Lesson store save failed (NOT durably persisted): %s", exc)
@@ -1196,7 +1223,19 @@ class MemoryService:
                 self._storage.update_access_counts(pairs)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("access-count sync failed: %s", exc)
-            self._save_cortex()
+            if kind in ("explicit", "flush"):
+                # Full resync on the rare explicit/exit saves — belt and
+                # braces against any dirty-mark gap in the per-slot path.
+                from pseudolife_memory.storage import sync as _sync
+                _sync.snapshot_cortex(self._cortex, self._storage)
+                if self._world is not None:
+                    _sync.snapshot_world_cortex(self._world, self._storage)
+                if self._lessons is not None:
+                    _sync.snapshot_lessons(self._lessons, self._storage)
+            else:
+                self._save_cortex()
+                self._save_world()
+                self._save_lessons()
             return {"saved_to": self.config.memory.save_dir,
                     "mode": "postgres+weights", "kind": kind}
         self._cms.save(self.config.memory.save_dir)
@@ -1823,6 +1862,7 @@ class MemoryService:
             c = float(cursor or 0.0)
             if c > self._cortex.dream_cursor:
                 self._cortex.dream_cursor = c
+                self._cortex.meta_dirty = True   # cursor rides the meta sync
                 self._save_cortex()
             return {"dream_cursor": self._cortex.dream_cursor}
 

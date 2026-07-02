@@ -83,6 +83,8 @@ class LessonStore:
     def __init__(self) -> None:
         self.records: list[LessonRecord] = []
         self._current: dict[tuple[str, str], int] = {}
+        # Slots mutated since the last storage sync (2026-07-02 P1).
+        self.dirty_slots: set[tuple[str, str]] = set()
 
     # ── write ───────────────────────────────────────────────────────────
     def write_fact(
@@ -119,6 +121,7 @@ class LessonStore:
         supp = set(support or [])
         outcome = outcome if outcome in OUTCOMES else "success"
         key = (_norm_key(entity), _norm_key(attribute))
+        self.dirty_slots.add(key)
         idx = self._current.get(key)
 
         if idx is None:
@@ -241,6 +244,7 @@ class LessonStore:
             ke, ka = r.key
             if ke == ne and (na is None or ka == na):
                 removed += 1
+                self.dirty_slots.add(r.key)   # sync deletes the slot's rows
                 continue
             keep.append(r)
         if removed:

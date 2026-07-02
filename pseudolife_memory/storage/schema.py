@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 18
+SCHEMA_META_VERSION = 19
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -351,6 +351,47 @@ def ensure_schema(conn) -> dict:
             cur.execute(
                 "ALTER TABLE entries DROP CONSTRAINT entries_episode_id_fkey"
             )
+        # v19 (2026-07-02 P1): DB-enforced one-live-row-per-slot for the three
+        # canonical stores — the invariant previously lived only in Python
+        # (CortexStore._current), so an additive restore could silently create
+        # duplicate current rows. Heal pre-existing duplicates first (keep the
+        # most recently confirmed, demote the rest — mirroring
+        # CortexStore._reindex_current), then add the partial unique indexes.
+        # Both steps are cheap no-ops on a clean bank.
+        for table, status in (("facts", "current"), ("facts", "contested"),
+                              ("world_facts", "current"), ("lessons", "current")):
+            cur.execute(
+                f"""
+                UPDATE {table} SET status = 'superseded',
+                       superseded_at = COALESCE(superseded_at,
+                                                EXTRACT(EPOCH FROM now()))
+                WHERE id IN (
+                  SELECT id FROM (
+                    SELECT id, ROW_NUMBER() OVER (
+                      PARTITION BY entity_norm, attribute_norm
+                      ORDER BY last_confirmed DESC, id DESC) AS rn
+                    FROM {table} WHERE status = %s) d
+                  WHERE d.rn > 1)
+                """,
+                (status,),
+            )
+        cur.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS facts_slot_current_uq "
+            "ON facts (entity_norm, attribute_norm) WHERE status = 'current'"
+        )
+        cur.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS facts_slot_contested_uq "
+            "ON facts (entity_norm, attribute_norm) WHERE status = 'contested'"
+        )
+        cur.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS world_facts_slot_current_uq "
+            "ON world_facts (entity_norm, attribute_norm) "
+            "WHERE status = 'current'"
+        )
+        cur.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS lessons_slot_current_uq "
+            "ON lessons (entity_norm, attribute_norm) WHERE status = 'current'"
+        )
         cur.execute(
             """
             INSERT INTO meta (key, value) VALUES ('schema_version', %s::jsonb)

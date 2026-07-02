@@ -164,6 +164,12 @@ class CortexStore:
         self.records: list[CortexRecord] = []
         # slot key -> index into ``records`` of the *current* record.
         self._current: dict[tuple[str, str], int] = {}
+        # Slots mutated since the last storage sync (2026-07-02 P1 per-slot
+        # persistence). Every mutation path MUST mark the slot(s) it touches;
+        # sync_cortex_slots persists exactly these and clears the set on
+        # success. meta_dirty covers the supersession log + dream cursor.
+        self.dirty_slots: set[tuple[str, str]] = set()
+        self.meta_dirty: bool = False
         # (old_value, new_value, entity, attribute, decision, reason,
         #  confidence_delta, timestamp) — instrumentation for §10.
         self.supersession_log: list[dict] = []
@@ -203,6 +209,7 @@ class CortexStore:
         semb = (slot_embedding.detach().to("cpu", torch.float32).clone()
                 if slot_embedding is not None else None)
         key = (_norm_key(slot.entity), _norm_key(slot.attribute))
+        self.dirty_slots.add(key)
 
         idx = self._current.get(key)
         if idx is None:
@@ -322,6 +329,7 @@ class CortexStore:
 
     def _log(self, cur, new_value, new_conf, t, decision, reason,
              writer_id=None, session_id=None):
+        self.meta_dirty = True
         self.supersession_log.append({
             "entity": cur.entity,
             "attribute": cur.attribute,
@@ -408,6 +416,7 @@ class CortexStore:
         ``accept=False`` retires it (current untouched). Returns a ``WriteResult``
         or ``None`` when there is no active contender."""
         key = (_norm_key(entity), _norm_key(attribute))
+        self.dirty_slots.add(key)
         t = time.time() if now is None else float(now)
         c_idx = next(
             (i for i, r in enumerate(self.records)
@@ -479,6 +488,7 @@ class CortexStore:
             ke, ka = r.key
             if ke == ne and (na is None or ka == na):
                 removed += 1
+                self.dirty_slots.add(r.key)   # sync deletes the slot's rows
                 continue
             keep.append(r)
         if removed:
@@ -591,6 +601,8 @@ class CortexStore:
                     r.status = "superseded"
                     r.superseded_by_value = canonical.value
                     r.superseded_at = now
+                    self.dirty_slots.add(r.key)
+                self.dirty_slots.add(canonical.key)
                 changed = True
 
         if apply and changed:
@@ -690,6 +702,7 @@ class CortexStore:
             if loser.superseded_at is None:
                 loser.superseded_at = self.records[keep].last_confirmed
             loser.superseded_by_value = self.records[keep].value
+            self.dirty_slots.add(loser.key)   # persist load-time healing
 
         for i, rec in enumerate(self.records):
             if rec.status == "current":

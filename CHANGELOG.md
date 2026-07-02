@@ -6,6 +6,33 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-02 review P1 — per-slot persistence, schema v19)
+- **The full-table snapshot rewrite is gone from the write path.** Every
+  cortex/world/lesson write used to `DELETE FROM <table>` and reinsert every
+  row (embeddings included) — O(claims × total rows) per dream sweep,
+  permanent id churn and autovacuum pressure, and a structural blocker for
+  the dormant OCC seam. The stores now track `dirty_slots`; saves persist
+  only the mutated `(entity_norm, attribute_norm)` slots in one transaction
+  (`replace_slot_facts` / `_world_facts` / `_lessons`,
+  `sync_cortex_slots` / `sync_world_slots` / `sync_lesson_slots`). The
+  supersession log + dream cursor ride a `meta_dirty` flag instead of being
+  rewritten every save. Full snapshots remain for explicit `memory_save`,
+  exit flush, and restore/migration — a belt-and-braces resync.
+- **Schema v19:** partial unique indexes enforce one `current` row per slot
+  on facts/world_facts/lessons (+ at-most-one `contested` on facts) — the
+  invariant previously lived only in Python, so an additive `restore_from_pt`
+  could silently create duplicate current rows. `ensure_schema` heals
+  pre-existing duplicates first (keeps the most recently confirmed, demotes
+  the rest — mirroring `CortexStore._reindex_current`).
+- **HLC re-seeds from stored stamps at hydrate** (`hlc.observe` of the
+  bank's high-water mark): a wall-clock step-back across restarts (NTP,
+  resume) no longer lets history outrank new writes and park user
+  corrections as contenders.
+- **Auto-promoted facts are stamped** (`_promote_slots` now passes HLC +
+  writer/session like `cortex_write`): unstamped rows could never supersede
+  stamped ones and were retro-labeled `writer_id='legacy'` by the v11
+  backfill on every boot.
+
 ### Fixed (2026-07-02 review P0 — six correctness fires)
 - **MCP tools no longer block the daemon's event loop.** The SDK invokes sync
   tools inline on the uvicorn loop, so one long call (`memory_dream_run`,
