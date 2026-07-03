@@ -58,9 +58,11 @@ the normal Atlas queue for everything uncertain.
   `reject_entity` on the proposal when clearly distinct, or (c) leave pending
   for Atlas. Judgment criteria live in the driver prompt; the code adds no
   auto-apply heuristics.
-- Merge direction: fold the LOWER-degree entity into the higher-degree one
-  (proposal rows already carry `entity_id` → `into_id`; the enrichment
-  orients them so `into` is the higher-degree side).
+- Merge direction: write-dedup rows are stored lower-degree → higher-degree
+  at insert time; the enrichment presents the STORED direction unchanged —
+  `accept_merge` folds `from` into `into` exactly as shown (re-orienting the
+  presentation would let the model approve the mirror image of what the
+  accept applies).
 
 ## Audit trail
 

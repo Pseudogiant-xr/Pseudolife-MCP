@@ -14,7 +14,8 @@ Call `memory_dream(action="deep")` (dry-run by default). Review:
   context snippets; `snippets=false` omits them).
 - `merge_proposals` — pending near-duplicate merges (write-time dedup +
   analyzer), each side enriched with display/etype/degree/scopes/snippets;
-  `into` is the higher-degree side.
+  accept folds `from` into `into` exactly as shown (write-dedup rows are
+  stored lower-degree → higher-degree at insert time).
 
 ## 2. Apply self-clean
 `memory_dream(action="deep", apply=true)`. The daemon first dumps the five

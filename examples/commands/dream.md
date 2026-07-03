@@ -41,7 +41,8 @@ reviewed proposals:
      queue. Do not guess.
 4. Triage the returned `merge_proposals` (near-duplicate entities, mostly from
    the write-time dedup detector). Each carries per-side `display`, `etype`,
-   `degree`, `scopes`, and `snippets`; `into` is the higher-degree side. Judge
+   `degree`, `scopes`, and `snippets`; accepting folds `from` into `into`
+   exactly as shown. Judge
    from the snippets, never names alone — the bank's confirmed-distinct history
    (postgres vs postgres.py) is exactly why:
    - **Same referent** (naming-layer variants of one thing — file suffixes,

@@ -3937,8 +3937,11 @@ class MemoryService:
                                 include_snippets):
         """Evidence payload for Step-C merge triage (write-dedup spec): each
         pending merge proposal with per-side display/etype/degree/scopes and
-        snippets, oriented so ``into`` is the higher-degree side. Presentation
-        only — proposal ids and stored direction are untouched."""
+        snippets. Presentation follows the STORED direction — ``accept_merge``
+        folds ``from`` into ``into`` exactly as shown (a degree-based
+        re-orientation here would make the model approve the mirror image of
+        what the accept applies). Write-dedup rows are already stored
+        lower-degree → higher-degree at insert time."""
         from pseudolife_memory.graph import degree_counts
         deg = degree_counts(edges)
         by_id = {e["id"]: e for e in entities}
@@ -3958,12 +3961,10 @@ class MemoryService:
                         "degree": deg.get(eid, 0),
                         "scopes": sorted(scope_map.get(eid, [])),
                         "snippets": snips if include_snippets else []}
-            frm = side(p["entity_id"], s.get("src_snippets", []))
-            into = side(p["into_id"], s.get("dst_snippets", []))
-            if frm["degree"] > into["degree"]:
-                frm, into = into, frm
             out.append({"id": p["id"], "score": p.get("score"),
-                        "reason": p.get("reason"), "from": frm, "into": into})
+                        "reason": p.get("reason"),
+                        "from": side(p["entity_id"], s.get("src_snippets", [])),
+                        "into": side(p["into_id"], s.get("dst_snippets", []))})
         return out
 
     def graph_propose_links(self, proposals: list[dict]) -> dict[str, Any]:
