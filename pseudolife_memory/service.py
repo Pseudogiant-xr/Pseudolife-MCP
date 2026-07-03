@@ -691,16 +691,18 @@ class MemoryService:
                     writer_id=writer_id,
                     session_id=session_id,
                 )
-                self._ensure_subject_entity(s.entity)
+                self._ensure_subject_entity(s.entity, propose_dupes=True)
                 written += 1
             except Exception as exc:  # noqa: BLE001
                 logger.debug("cortex auto-promote skipped (%s): %s", claim, exc)
         return written
 
-    def _ensure_subject_entity(self, entity: str) -> None:
+    def _ensure_subject_entity(self, entity: str, *,
+                               propose_dupes: bool = False) -> None:
         """Fact writes create the subject's graph node (spec §5.1) so the
         cortex and graph stay joined. No-op in file mode. Caller holds the
-        lock."""
+        lock. ``propose_dupes`` (dream auto-promote only) files write-dedup
+        merge proposals for near-duplicate creates."""
         if self._storage is None:
             return
         from pseudolife_memory.graph import norm_name
@@ -709,7 +711,9 @@ class MemoryService:
             return  # junk-shaped subject: keep the fact, skip the graph node
         n = norm_name(entity)
         if n and self._storage.find_entity(n) is None:
-            self._storage.ensure_entity(n, display=entity.strip())
+            eid = self._storage.ensure_entity(n, display=entity.strip())
+            if propose_dupes:
+                self._propose_write_dedup(eid, entity)
 
     # ------------------------------------------------------------------
     # Tool: search
@@ -1647,8 +1651,8 @@ class MemoryService:
             conf = edge_confidence(raw_src, relation, raw_dst)
             if conf < floor:
                 continue
-            src_e = self._resolve_or_create_entity(raw_src)
-            dst_e = self._resolve_or_create_entity(raw_dst)
+            src_e = self._resolve_or_create_entity(raw_src, propose_dupes=True)
+            dst_e = self._resolve_or_create_entity(raw_dst, propose_dupes=True)
             # Cross-project gate: entities attributed to disjoint projects
             # merely coexist in the shared bank — route the claim to
             # edge_proposals for human review instead of the live graph.
@@ -3084,8 +3088,11 @@ class MemoryService:
             from pseudolife_memory.graph import norm_name
             return self._storage.find_entity(norm_name(entity))
 
-    def _resolve_or_create_entity(self, name: str, etype: str | None = None) -> dict:
-        """Alias-aware find; auto-create on miss. Caller holds the lock."""
+    def _resolve_or_create_entity(self, name: str, etype: str | None = None,
+                                  *, propose_dupes: bool = False) -> dict:
+        """Alias-aware find; auto-create on miss. Caller holds the lock.
+        ``propose_dupes`` (dream paths only) files write-dedup merge
+        proposals when the created name near-duplicates an existing one."""
         from pseudolife_memory.graph import norm_name
         st = self._storage
         n = norm_name(name)
@@ -3094,10 +3101,47 @@ class MemoryService:
             if etype and not found.get("etype"):
                 st.ensure_entity(found["canonical"], etype=etype)
                 found["etype"] = etype
+            found["created"] = False
             return found
         eid = st.ensure_entity(n, display=name.strip(), etype=etype)
+        if propose_dupes:
+            self._propose_write_dedup(eid, name)
         return {"id": eid, "canonical": n, "display": name.strip(),
-                "etype": etype, "aliases": []}
+                "etype": etype, "aliases": [], "created": True}
+
+    def _propose_write_dedup(self, entity_id: int, name: str) -> None:
+        """Advisory write-time dedup: when the dream mints a new entity whose
+        name near-duplicates an existing canonical/display/alias, file an
+        entity_proposals merge row for review (dismissed pairs suppressed;
+        the merge unique index dedupes re-files). Never blocks the write —
+        any failure logs and continues. Caller holds the lock."""
+        import time as _t
+        try:
+            thr = float(self.config.memory.dream.write_dedup_min_jaccard)
+            if thr <= 0:
+                return
+            from pseudolife_memory.graph import degree_counts
+            from pseudolife_memory.memory.graph_review import near_duplicate_names
+            g = self._storage.load_graph()
+            existing = [{**e, "aliases": g["aliases"].get(e["id"], [])}
+                        for e in g["entities"] if e["id"] != entity_id]
+            matches = near_duplicate_names(
+                name, existing, min_jaccard=thr,
+                dismissed=frozenset(self._storage.dismissed_pairs()))
+            if not matches:
+                return
+            deg = degree_counts(g["edges"])
+            now = _t.time()
+            for m in matches[:3]:
+                # Present the fold lower-degree -> higher-degree.
+                a, b = entity_id, m["entity_id"]
+                if deg.get(a, 0) > deg.get(b, 0):
+                    a, b = b, a
+                self._storage.insert_entity_proposal(
+                    "merge", a, b, m["score"],
+                    f"write-dedup: {name!r} ~ {m['display']!r}", now)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("write-dedup scan skipped (%s): %r", exc, name)
 
     def graph_relate(
         self,
