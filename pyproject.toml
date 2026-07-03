@@ -8,7 +8,7 @@ version = "0.6.0"
 description = "PseudoLife persistent long-term memory exposed as an MCP server for Claude Code"
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "MIT"}
+license = {text = "Apache-2.0"}
 
 # Core deps — same memory stack as PseudoLife (torch + MIRAS + ChromaDB),
 # minus the LLM backends, FastAPI, and Electron-side machinery. MCP SDK on
@@ -45,8 +45,10 @@ nli = [
 rerank = [
     "sentence-transformers>=2.5",
 ]
+# Optional higher-quality PDF text extraction (Chromium PDFium bindings,
+# Apache-2.0/BSD-3). The core pypdf path works without it.
 pdf = [
-    "PyMuPDF>=1.24",
+    "pypdfium2>=4",
 ]
 
 [project.scripts]

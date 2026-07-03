@@ -1145,4 +1145,4 @@ python -m pseudolife_memory.web.devserver   # http://127.0.0.1:8770/ui/
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+Apache-2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).

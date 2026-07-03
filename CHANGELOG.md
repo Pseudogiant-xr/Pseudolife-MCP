@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-03 — public-release licensing prep)
+- **License: MIT → Apache-2.0** (LICENSE replaced with the canonical text,
+  NOTICE added, pyproject + README updated). Apache-2.0 keeps the same
+  permissive terms and adds an explicit patent grant.
+- **Optional PDF extra: PyMuPDF → pypdfium2** (`pip install .[pdf]`).
+  PyMuPDF is AGPL-3.0, which conflicts with permissive distribution and any
+  future commercial/hosted offering; pypdfium2 (Chromium PDFium bindings,
+  Apache-2.0/BSD-3) fills the same higher-quality-extraction slot. The core
+  pypdf fallback is unchanged.
+
 ### Added (2026-07-03 — dream near-duplicate correction, schema v21)
 - **Write-time dedup (Tier 1)**: a dream-minted entity whose name-token
   Jaccard against an existing canonical/display/alias reaches
