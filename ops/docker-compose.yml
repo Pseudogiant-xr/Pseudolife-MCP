@@ -31,6 +31,13 @@
 # compose network + loopback; the daemon (8765) is the only thing Claude
 # Code talks to — point it at  http://127.0.0.1:8765/mcp  (HTTP transport,
 # no stdio shim). Host port 5433 avoids collisions with a native Postgres.
+#
+# Postgres password: defaults to `pseudolife` (loopback-only, so the network
+# boundary — not the password — is the real guard). To use your own, set
+# POSTGRES_PASSWORD in ops/.env BEFORE the first `up` (the postgres image only
+# applies it when initializing a fresh volume; changing it later means
+# `docker exec pseudolife-mcp-postgres psql -U pseudolife -d postgres -c
+# "ALTER USER pseudolife PASSWORD '<new>'"` plus updating ops/.env to match).
 name: pseudolife-mcp
 services:
   pseudolife-pg:
@@ -42,7 +49,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: pseudolife
-      POSTGRES_PASSWORD: pseudolife
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pseudolife}
       POSTGRES_DB: pseudolife_memory
     ports:
       - "127.0.0.1:5433:5432"
@@ -60,7 +67,9 @@ services:
       # Dockerfile can copy the pseudolife_memory package + pyproject.
       context: ..
       dockerfile: ops/Dockerfile.daemon
-    image: pseudolife-daemon:0.2.0
+    # Keep this tag in step with the package version in pyproject.toml; the
+    # update scripts read it from here (single source of truth for deploys).
+    image: pseudolife-daemon:0.6.0
     container_name: pseudolife-mcp-daemon
     restart: unless-stopped
     depends_on:
@@ -70,8 +79,9 @@ services:
         condition: service_started
     environment:
       # Reaches Postgres over the compose network by service name (internal
-      # port 5432, not the host-published 5433).
-      PSEUDOLIFE_MCP_DATABASE_URL: postgresql://pseudolife:pseudolife@pseudolife-pg:5432/pseudolife_memory
+      # port 5432, not the host-published 5433). Password mirrors the pg
+      # service above — override both via POSTGRES_PASSWORD in ops/.env.
+      PSEUDOLIFE_MCP_DATABASE_URL: postgresql://pseudolife:${POSTGRES_PASSWORD:-pseudolife}@pseudolife-pg:5432/pseudolife_memory
       PSEUDOLIFE_MCP_HOST: 0.0.0.0
       PSEUDOLIFE_MCP_PORT: "8765"
       PSEUDOLIFE_MCP_DATA_DIR: /data

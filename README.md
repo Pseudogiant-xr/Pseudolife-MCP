@@ -250,7 +250,10 @@ After a `git pull` (or local code change), redeploy the **daemon only** — safe
 without touching Postgres or the extractor:
 
 ```powershell
-.\ops\update.ps1
+.\ops\update.ps1        # Windows
+```
+```bash
+./ops/update.sh         # Linux / macOS
 ```
 
 It backs up the bank (`pg_dump`), tags a rollback image, rebuilds + recreates
@@ -315,7 +318,10 @@ the daemon and proxies. It does *not* work with the containerized daemon
 Replace `C:\path\to\PseudoLife-MCP` with wherever you cloned the repo. The
 `PSEUDOLIFE_MCP_DATABASE_URL` matches the bundled `ops/docker-compose.yml`
 defaults (user/password `pseudolife`, host port `5433`) — change it only if you
-edit the compose file.
+edit the compose file or override the password. The default password is safe
+for the stock loopback-only stack (nothing off-box can reach Postgres); to use
+your own anyway, set `POSTGRES_PASSWORD` in `ops/.env` **before the first
+launch** (see the note in `ops/docker-compose.yml` for changing it later).
 
 The shim is torch-free, so sessions attach near-instantly; the daemon
 pays the one-time embedder warmup once for everyone. On first run with a
@@ -329,8 +335,12 @@ clients set the same `PSEUDOLIFE_MCP_DAEMON_URL` + `PSEUDOLIFE_MCP_TOKEN`.
 The daemon **refuses to bind a non-loopback host without a token**, and
 Postgres itself stays loopback-only — the LAN only ever sees the daemon.
 
-**Backups:** `ops\backup.ps1` runs `pg_dump` inside the container into
-`data\backups\` with 7-day rotation.
+**Backups:** `ops\backup.ps1` (Windows) / `ops/backup.sh` (Linux/macOS) runs
+`pg_dump` inside the container into `data\backups\` with 7-day rotation, plus
+an optional off-disk mirror via `PSEUDOLIFE_BACKUP_MIRROR`. The matching
+`restore` script rehearses the newest backup into a scratch database by
+default (never touching the live bank) and only replaces the live bank with
+an explicit `-Apply` / `--apply`.
 
 ## Recommended agent setup (CLAUDE.md)
 

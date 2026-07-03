@@ -27,16 +27,19 @@ if (-not $NoBackup) {
     Write-Warning "Skipping backup (-NoBackup)."
 }
 
-# 2. Tag the current daemon image so a bad build can be rolled back.
+# 2. Tag the current daemon image so a bad build can be rolled back. The tag
+#    is read from the compose file so this script never drifts from it.
+$imageTag = (Select-String -Path $composeFile -Pattern 'image:\s*(pseudolife-daemon:\S+)').Matches[0].Groups[1].Value
+if (-not $imageTag) { throw "could not find the pseudolife-daemon image tag in $composeFile" }
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 if (-not $Tag) { $Tag = "pre-update-$stamp" }
-$rollback = "pseudolife-daemon:0.2.0-$Tag"
-docker image inspect pseudolife-daemon:0.2.0 *> $null
+$rollback = "$imageTag-$Tag"
+docker image inspect $imageTag *> $null
 if ($LASTEXITCODE -eq 0) {
-    docker tag pseudolife-daemon:0.2.0 $rollback
+    docker tag $imageTag $rollback
     Write-Host "==> Tagged rollback image: $rollback"
 } else {
-    Write-Warning "No current pseudolife-daemon:0.2.0 image to tag (first build?)."
+    Write-Warning "No current $imageTag image to tag (first build?)."
 }
 
 # 3. Rebuild + recreate ONLY the daemon. `--no-deps` is what keeps Postgres and
@@ -58,10 +61,10 @@ for ($i = 0; $i -lt 30; $i++) {
 if ($h) {
     Write-Host "==> Healthy. schema=$($h.schema) persist_errors=$($h.persist_errors)"
     Write-Host "    Rolled-back deploy if ever needed:"
-    Write-Host "      docker tag $rollback pseudolife-daemon:0.2.0"
+    Write-Host "      docker tag $rollback $imageTag"
     Write-Host "      docker compose -f `"$composeFile`" up -d --no-deps pseudolife-daemon"
 } else {
     Write-Warning "Daemon did not report healthy. Logs: docker logs pseudolife-mcp-daemon"
-    Write-Warning "Rollback: docker tag $rollback pseudolife-daemon:0.2.0; then re-run the up line above."
+    Write-Warning "Rollback: docker tag $rollback $imageTag; then re-run the up line above."
     exit 1
 }
