@@ -6,6 +6,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-03 — community files)
+- **CONTRIBUTING.md** (dev setup, offline test invocation, live-bank safety
+  rules, DCO sign-off, permissive-only dependency policy) and **SECURITY.md**
+  (private vulnerability reporting, threat model, in/out of scope).
+
 ### Added (2026-07-03 — cross-platform ops)
 - **Bash ops scripts**: `ops/backup.sh`, `ops/restore.sh`, `ops/update.sh` —
   feature-parity ports of the PowerShell originals for Linux/macOS hosts
