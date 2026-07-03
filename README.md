@@ -932,6 +932,42 @@ so they return structured output instead of an empty budget. The `evals/`
 extractor-ladder benchmark is how that default model was chosen (Gemma 4 E2B beats
 naive-RAG at ~25× fewer tokens/query); see `evals/README.md`.
 
+**Upgrading the extractor — bigger local models.** If you have a GPU (or a
+beefier box on your LAN), any OpenAI-compatible server can replace the sidecar —
+the ladder measured a Qwen3.6-27B on a single RTX 4090 at the quality ceiling
+(gold 1.0 / stale-leak 0.0) while extracting ~5× faster than the CPU sidecar.
+For the Docker stack, set the override in `ops/.env` (the compose file
+interpolates it into the daemon) and restart the daemon
+(`docker compose -f ops/docker-compose.yml up -d --no-deps pseudolife-daemon`):
+
+```dotenv
+# ops/.env — point dream consolidation at a local model server.
+# From inside the container the host machine is host.docker.internal, NOT
+# localhost. (Linux: also uncomment extra_hosts in ops/docker-compose.yml.)
+PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:1234/v1
+PSEUDOLIFE_DREAM_MODEL=qwen3.6-27b
+```
+
+Per-runtime defaults (all serve the same `/v1/chat/completions` shape):
+
+| Runtime | Typical base URL (from the container) | `PSEUDOLIFE_DREAM_MODEL` |
+|---------|----------------------------------------|--------------------------|
+| **LM Studio** | `http://host.docker.internal:1234/v1` | the model's API identifier shown in LM Studio's server tab |
+| **Ollama** | `http://host.docker.internal:11434/v1` | the tag, e.g. `qwen2.5:14b` |
+| **llama.cpp** (`llama-server`) | `http://host.docker.internal:8080/v1` | anything (single-model server ignores it) |
+| **vLLM** | `http://host.docker.internal:8000/v1` | the `--served-model-name` |
+| LAN box | `http://192.168.x.x:PORT/v1` | per the runtime above |
+
+The unused sidecar can be stopped (`docker compose -f ops/docker-compose.yml
+stop pseudolife-extractor`) or left running as a fallback to switch back to.
+Middle option, no GPU required: bake the **Gemma 4 E4B** sidecar instead of the
+E2B (also ladder-verified; slower but stronger) — see the `MODEL_URL` build-arg
+in `ops/Dockerfile.extractor`, or mount any GGUF over `/models/extractor.gguf`
+(comment in the compose file). If you run the daemon *outside* Docker (embedded
+stdio mode), the `$env:` variables above apply directly and `localhost` URLs
+work as-is. A local or LAN model keeps all memory text on your network; the
+same env triple pointed at a hosted endpoint does not.
+
 What gets consolidated and when is configurable under `memory.dream`
 (`eligible_sources` / `exclude_sources`, and the `min_batch` / `idle_seconds`
 backlog+quiescence thresholds that `memory_dream(action="status")` reports).

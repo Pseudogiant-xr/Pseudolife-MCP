@@ -103,14 +103,24 @@ services:
       TRANSFORMERS_OFFLINE: "1"
       # Single-writer cortex: the LLM dream pass is the sole automatic cortex
       # writer, so the extractor sidecar (below) is a default stack member and
-      # dream consolidation routes to it.
-      PSEUDOLIFE_DREAM_BASE_URL: http://pseudolife-extractor:8081/v1
-      PSEUDOLIFE_DREAM_MODEL: extractor
+      # dream consolidation routes to it. To use a BIGGER local model instead
+      # (LM Studio / Ollama / llama.cpp / vLLM), override these in ops/.env —
+      # from inside the container the host machine is `host.docker.internal`,
+      # not `localhost` (Linux: uncomment extra_hosts below). See the README's
+      # "Upgrading the extractor" section for per-runtime examples.
+      PSEUDOLIFE_DREAM_BASE_URL: ${PSEUDOLIFE_DREAM_BASE_URL:-http://pseudolife-extractor:8081/v1}
+      PSEUDOLIFE_DREAM_MODEL: ${PSEUDOLIFE_DREAM_MODEL:-extractor}
+      PSEUDOLIFE_DREAM_API_KEY: ${PSEUDOLIFE_DREAM_API_KEY:-}
       # The CPU Gemma sidecar generates at ~30 tok/s, so dream extraction needs
       # well over the old 20s default (a full 2048-tok generation is ~70s). 240s
       # gives headroom incl. slower end-user laptops; bump for a larger model.
-      PSEUDOLIFE_DREAM_TIMEOUT_SECONDS: "240"
-      PSEUDOLIFE_DREAM_MAX_TOKENS: "2048"
+      PSEUDOLIFE_DREAM_TIMEOUT_SECONDS: ${PSEUDOLIFE_DREAM_TIMEOUT_SECONDS:-240}
+      PSEUDOLIFE_DREAM_MAX_TOKENS: ${PSEUDOLIFE_DREAM_MAX_TOKENS:-2048}
+    # Linux only: make host.docker.internal resolve to the host (Docker Desktop
+    # on Windows/macOS provides it automatically). Needed when the extractor
+    # override above points at a model server on the host machine.
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"
     ports:
       - "127.0.0.1:8765:8765"
     volumes:

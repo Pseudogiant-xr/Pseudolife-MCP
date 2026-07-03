@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-03 — bigger-local-model extractor docs + compose overrides)
+- **`PSEUDOLIFE_DREAM_*` are now overridable via `ops/.env`** (compose
+  interpolation with the sidecar as the default), so the Dockerized daemon can
+  point dream consolidation at LM Studio / Ollama / llama.cpp / vLLM without
+  editing the compose file; commented `extra_hosts` snippet for Linux
+  `host.docker.internal`. README gains an "Upgrading the extractor" section
+  with per-runtime base URLs and the ladder-measured upgrade guidance.
+
 ### Fixed (2026-07-03 — dream extraction supersession regression)
 - **Dream extraction is batched again**: the 2026-06-25 per-entry restructure
   (added for per-claim source traces) meant the extractor never saw a fact's
