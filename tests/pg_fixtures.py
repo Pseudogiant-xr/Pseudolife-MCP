@@ -26,6 +26,8 @@ _ALL_TABLES = (
     # No FK to entities, so the CASCADE above never reaches it — truncate
     # explicitly or dismissals leak across test runs.
     "dismissed_pairs",
+    # Deliberately FK-free (durable merge audit) — same leak class as above.
+    "merge_decisions",
 )
 
 
