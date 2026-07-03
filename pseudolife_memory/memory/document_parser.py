@@ -1,6 +1,6 @@
 """Document parsing and text extraction for RAG ingestion.
 
-Supports PDF (PyMuPDF/fitz), Markdown, HTML (BeautifulSoup), and plain text.
+Supports PDF (pypdfium2/pypdf), Markdown, HTML (BeautifulSoup), and plain text.
 Provides a unified interface for extracting clean text from various file formats.
 """
 
@@ -40,16 +40,23 @@ def extract_text(path: Path) -> str:
 
 
 def _extract_pdf(path: Path) -> str:
-    """Extract text from PDF using PyMuPDF (fitz) or pypdf as fallback."""
-    # Try PyMuPDF first (better extraction quality)
+    """Extract text from PDF using pypdfium2 or pypdf as fallback."""
+    # Try pypdfium2 first (Chromium's PDFium; better extraction quality).
+    # Permissively licensed (Apache-2.0/BSD-3), unlike the AGPL PyMuPDF it
+    # replaced — keep this path copyleft-free.
     try:
-        import fitz  # PyMuPDF
-        doc = fitz.open(str(path))
-        pages = []
-        for page in doc:
-            pages.append(page.get_text())
-        doc.close()
-        return "\n\n".join(pages)
+        import pypdfium2 as pdfium
+        pdf = pdfium.PdfDocument(str(path))
+        try:
+            pages = []
+            for page in pdf:
+                textpage = page.get_textpage()
+                pages.append(textpage.get_text_range())
+                textpage.close()
+                page.close()
+            return "\n\n".join(pages)
+        finally:
+            pdf.close()
     except ImportError:
         pass
 
@@ -60,7 +67,7 @@ def _extract_pdf(path: Path) -> str:
         pages = [page.extract_text() or "" for page in reader.pages]
         return "\n\n".join(pages)
     except ImportError:
-        raise ValueError("No PDF library available. Install PyMuPDF or pypdf.")
+        raise ValueError("No PDF library available. Install pypdfium2 or pypdf.")
     except Exception as e:
         raise ValueError(f"Failed to read PDF: {e}")
 
