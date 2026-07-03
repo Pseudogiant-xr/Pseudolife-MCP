@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-03 — cross-platform ops)
+- **Bash ops scripts**: `ops/backup.sh`, `ops/restore.sh`, `ops/update.sh` —
+  feature-parity ports of the PowerShell originals for Linux/macOS hosts
+  (same rehearse-by-default restore, rollback-tagged daemon-only update, and
+  off-disk backup mirror). `.gitattributes` pins `*.sh` to LF.
+
+### Changed (2026-07-03 — cross-platform ops)
+- **Postgres password is overridable**: set `POSTGRES_PASSWORD` in `ops/.env`
+  before first launch (compose default remains `pseudolife`, guarded by the
+  loopback-only port binding; the daemon's `DATABASE_URL` follows the same
+  variable).
+- **Daemon image tag aligned to the package version** (`pseudolife-daemon:0.6.0`,
+  was `0.2.0`), and both update scripts now read the tag from the compose file
+  instead of hardcoding it — one source of truth for future bumps. Existing
+  installs: the next `update.ps1`/`update.sh` run simply builds the new tag;
+  old `0.2.0`-tagged images can be `docker image rm`'d at leisure.
+
 ### Changed (2026-07-03 — public-release licensing prep)
 - **License: MIT → Apache-2.0** (LICENSE replaced with the canonical text,
   NOTICE added, pyproject + README updated). Apache-2.0 keeps the same

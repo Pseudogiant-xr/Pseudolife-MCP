@@ -1,2 +1,5 @@
 # Keep the vendored offline bundle byte-stable (no EOL normalization).
 pseudolife_memory/web/static/vendor/*.js -text
+
+# Shell scripts must check out LF everywhere — bash rejects CRLF.
+*.sh text eol=lf
