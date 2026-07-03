@@ -20,6 +20,9 @@ memory_state/
 # ChromaDB
 chromadb/
 
+# Benchmark datasets (LongMemEval etc.) — downloaded, never committed
+evals/data/
+
 # Cortex Console dev-server scratch (fixture config writes)
 pseudolife_memory/web/.devdata/
 *.bak
