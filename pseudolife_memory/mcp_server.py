@@ -659,14 +659,18 @@ def memory_graph_review(
     handlers = {
         "accept_link": service.graph_accept_proposal,
         "reject_link": service.graph_reject_proposal,
-        "accept_merge": service.graph_accept_entity_merge,
+        "accept_merge": lambda pid: service.graph_accept_entity_merge(
+            pid, decided_by="agent"),
         "accept_junk": service.graph_accept_entity_junk,
-        "reject_entity": service.graph_reject_entity_proposal,
+        "reject_entity": lambda pid: service.graph_reject_entity_proposal(
+            pid, decided_by="agent"),
     }
     handler = handlers.get(action)
     if handler is None:
         return {"error": "unknown_action",
-                "actions": ["list", "propose", "dismiss_pair", *handlers]}
+                "actions": ["list", "propose", "dismiss_pair",
+                            "accept_link", "reject_link", "accept_merge",
+                            "accept_junk", "reject_entity"]}
     if proposal_id is None:
         return {"error": "proposal_id_required", "action": action}
     return handler(proposal_id)

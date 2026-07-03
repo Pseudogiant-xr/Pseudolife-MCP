@@ -151,12 +151,16 @@ def test_graph_review_actions_route_to_the_right_service_calls(
                         lambda pid: calls.append(("accept_link", pid)) or {"accepted": True})
     monkeypatch.setattr(mod.service, "graph_reject_proposal",
                         lambda pid: calls.append(("reject_link", pid)) or {"rejected": True})
+    # accept_merge / reject_entity are decision actions: the MCP layer stamps
+    # decided_by="agent" so the audit trail attributes model-driven folds.
     monkeypatch.setattr(mod.service, "graph_accept_entity_merge",
-                        lambda pid: calls.append(("accept_merge", pid)) or {"accepted": True})
+                        lambda pid, decided_by=None: calls.append(
+                            ("accept_merge", pid, decided_by)) or {"accepted": True})
     monkeypatch.setattr(mod.service, "graph_accept_entity_junk",
                         lambda pid: calls.append(("accept_junk", pid)) or {"accepted": True})
     monkeypatch.setattr(mod.service, "graph_reject_entity_proposal",
-                        lambda pid: calls.append(("reject_entity", pid)) or {"rejected": True})
+                        lambda pid, decided_by=None: calls.append(
+                            ("reject_entity", pid, decided_by)) or {"rejected": True})
 
     _invoke("memory_graph_review", {"action": "list"})
     _invoke("memory_graph_review", {
@@ -167,8 +171,8 @@ def test_graph_review_actions_route_to_the_right_service_calls(
         _invoke("memory_graph_review", {"action": action, "proposal_id": 7})
 
     assert calls == [("list", None), ("propose", 1), ("accept_link", 7),
-                     ("reject_link", 7), ("accept_merge", 7),
-                     ("accept_junk", 7), ("reject_entity", 7)]
+                     ("reject_link", 7), ("accept_merge", 7, "agent"),
+                     ("accept_junk", 7), ("reject_entity", 7, "agent")]
 
 
 def test_graph_review_validates_inputs(tmp_path: Path, monkeypatch) -> None:

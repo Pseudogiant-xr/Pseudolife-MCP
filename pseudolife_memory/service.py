@@ -3312,9 +3312,12 @@ class MemoryService:
             keep = {eid for eid, ss in src_map.items() if scope in ss}
             entities = [e for e in entities if e["id"] in keep]
             edges = [e for e in edges if e["src_id"] in keep and e["dst_id"] in keep]
-        return gr.review(edges, entities, src_map, proposals=proposals,
-                         entity_proposals=entity_proposals,
-                         dismissed_pairs=dismissed)
+        out = gr.review(edges, entities, src_map, proposals=proposals,
+                        entity_proposals=entity_proposals,
+                        dismissed_pairs=dismissed)
+        with self._lock:
+            out["recent_merges"] = self._storage.recent_entity_decisions()
+        return out
 
     def graph_dismiss_duplicate(self, a: str, b: str) -> dict[str, Any]:
         """Human verdict on a duplicate finding: these two names are genuinely
@@ -3972,7 +3975,9 @@ class MemoryService:
             ok = self._storage.set_proposal_status(proposal_id, "rejected")
         return {"rejected": ok, "id": proposal_id}
 
-    def graph_accept_entity_merge(self, proposal_id: int) -> dict[str, Any]:
+    def graph_accept_entity_merge(self, proposal_id: int, *,
+                                  decided_by: str = "human") -> dict[str, Any]:
+        import time as _t
         with self._lock:
             self._ensure_init()
             if self._storage is None:
@@ -3981,8 +3986,16 @@ class MemoryService:
             if prop is None or prop["status"] != "pending" or prop["kind"] != "merge":
                 return {"accepted": False, "reason": "not_pending", "id": proposal_id}
             disp = {e["id"]: e["display"] for e in self._storage.load_graph()["entities"]}
+            now = _t.time()
+            # Audit BEFORE the merge: the accepted proposal row CASCADEs away
+            # with the folded entity, so merge_decisions is the durable record.
+            self._storage.record_merge_decision(
+                proposal_id, disp.get(prop["entity_id"], "?"),
+                disp.get(prop["into_id"], "?"), "accepted", prop.get("score"),
+                prop.get("reason"), decided_by, now)
             ok = self._storage.merge_entity(prop["entity_id"], prop["into_id"])
-            self._storage.set_entity_proposal_status(proposal_id, "accepted")
+            self._storage.set_entity_proposal_status(
+                proposal_id, "accepted", decided_by=decided_by, decided_at=now)
         return {"accepted": ok, "from": disp.get(prop["entity_id"]),
                 "into": disp.get(prop["into_id"])}
 
@@ -3999,12 +4012,24 @@ class MemoryService:
             self._storage.set_entity_proposal_status(proposal_id, "accepted")
         return {"accepted": ok, "entity": disp.get(prop["entity_id"])}
 
-    def graph_reject_entity_proposal(self, proposal_id: int) -> dict[str, Any]:
+    def graph_reject_entity_proposal(self, proposal_id: int, *,
+                                     decided_by: str = "human") -> dict[str, Any]:
+        import time as _t
         with self._lock:
             self._ensure_init()
             if self._storage is None:
                 return dict(self._GRAPH_UNAVAILABLE)
-            ok = self._storage.set_entity_proposal_status(proposal_id, "rejected")
+            now = _t.time()
+            prop = self._storage.get_entity_proposal(proposal_id)
+            ok = self._storage.set_entity_proposal_status(
+                proposal_id, "rejected", decided_by=decided_by, decided_at=now)
+            if ok and prop is not None and prop.get("kind") == "merge":
+                disp = {e["id"]: e["display"]
+                        for e in self._storage.load_graph()["entities"]}
+                self._storage.record_merge_decision(
+                    proposal_id, disp.get(prop["entity_id"], "?"),
+                    disp.get(prop["into_id"], "?"), "rejected",
+                    prop.get("score"), prop.get("reason"), decided_by, now)
         return {"rejected": ok, "id": proposal_id}
 
     def _recall_vocab(self) -> list[str]:

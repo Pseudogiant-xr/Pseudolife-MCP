@@ -16,17 +16,33 @@ const CHIP = { background: "var(--surface-1, rgba(127,127,127,.12))", padding: "
 
 export function reviewPanel(data, onAct) {
   const findings = (data && data.findings) || [];
+  const recent = recentMerges((data && data.recent_merges) || []);
   if (!findings.length) {
     return panel("Review queue",
-      el("div", { class: "empty" },
-        el("div", { class: "big" }, "Graph looks clean"),
-        el("div", {}, "No duplicate, orphan, dubious-edge, test-artifact, unattributed, "
-          + "merge, junk, or proposed-link findings in scope.")),
+      el("div", {},
+        el("div", { class: "empty" },
+          el("div", { class: "big" }, "Graph looks clean"),
+          el("div", {}, "No duplicate, orphan, dubious-edge, test-artifact, unattributed, "
+            + "merge, junk, or proposed-link findings in scope.")),
+        recent),
       { accent: "var(--c-graph)" });
   }
   return panel("Review queue",
-    el("div", {}, findings.map((f) => findingRow(f, onAct))),
+    el("div", {}, findings.map((f) => findingRow(f, onAct)), recent),
     { accent: "var(--c-graph)", sub: String(findings.length) });
+}
+
+// Read-only audit list: who folded / rejected which near-duplicate, and when.
+function recentMerges(rows) {
+  if (!rows.length) return null;
+  return el("div", { style: { marginTop: "10px" } },
+    el("div", { class: "eyebrow", style: { marginBottom: "4px" } },
+      "recent merge decisions"),
+    rows.map((m) => el("div", { style: { margin: "2px 0", fontSize: "12px" } },
+      el("span", { class: "mono" }, `${m.entity ?? "?"} → ${m.into ?? "?"}`),
+      el("span", { class: `badge ${m.status === "accepted" ? "action" : "agent"}`,
+        style: { margin: "0 6px" } }, m.status),
+      dim(`${m.decided_by || "—"} · ${m.decided_at ? fmtAge(m.decided_at) : ""}`))));
 }
 
 // ── small bits ──────────────────────────────────────────────────────────────
