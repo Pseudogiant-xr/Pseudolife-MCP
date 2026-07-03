@@ -39,6 +39,22 @@ reviewed proposals:
      never resurfaces and stops occupying a top-k slot.
    - **Unsure**: leave it — the pair stays visible for the Console's Atlas
      queue. Do not guess.
-4. Report: superseded / merged / proposed / dismissed counts and the snapshot
-   filename. Proposals still need a human verdict (`accept_link` /
-   `reject_link` or Atlas).
+4. Triage the returned `merge_proposals` (near-duplicate entities, mostly from
+   the write-time dedup detector). Each carries per-side `display`, `etype`,
+   `degree`, `scopes`, and `snippets`; `into` is the higher-degree side. Judge
+   from the snippets, never names alone — the bank's confirmed-distinct history
+   (postgres vs postgres.py) is exactly why:
+   - **Same referent** (naming-layer variants of one thing — file suffixes,
+     abbreviations, display drift): `memory_graph_review(action="accept_merge",
+     proposal_id=...)`. The merge applies immediately (the graph snapshot from
+     step 2 is the undo artifact) and is logged to the recent-merges audit as
+     decided_by=agent.
+   - **Distinct things**: `memory_graph_review(action="reject_entity",
+     proposal_id=...)` AND `memory_graph_review(action="dismiss_pair",
+     src=..., dst=...)` so the pair never re-proposes.
+   - **Unsure**: leave pending for the Atlas queue. Do not guess; scopes that
+     don't overlap are a strong distinct signal.
+5. Report: superseded / merged / proposed / dismissed counts, merges you
+   applied or rejected (they appear under "recent merge decisions" in Atlas),
+   and the snapshot filename. Link proposals still need a human verdict
+   (`accept_link` / `reject_link` or Atlas).

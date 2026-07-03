@@ -12,6 +12,9 @@ Call `memory_dream(action="deep")` (dry-run by default). Review:
   any status, so rejected proposals are sticky).
 - `candidates` — semantic cross-session link candidates (src/dst + truncated
   context snippets; `snippets=false` omits them).
+- `merge_proposals` — pending near-duplicate merges (write-time dedup +
+  analyzer), each side enriched with display/etype/degree/scopes/snippets;
+  `into` is the higher-degree side.
 
 ## 2. Apply self-clean
 `memory_dream(action="deep", apply=true)`. The daemon first dumps the five
@@ -35,6 +38,17 @@ subagents for large batches — reuse the
   stops resurfacing and frees its top-k slot.
 - **Unsure** → leave for Atlas; don't guess.
 
+## 3b. Step C — triage near-duplicate merges (this session)
+Judge each `merge_proposals` item from its per-side snippets/scopes:
+- **Same referent** → `memory_graph_review(action="accept_merge",
+  proposal_id=...)` — applies immediately (snapshot from step 2 is the undo),
+  logged to the recent-merges audit as `decided_by=agent`.
+- **Distinct** → `memory_graph_review(action="reject_entity", proposal_id=...)`
+  plus `dismiss_pair` so the pair never re-proposes.
+- **Unsure** → leave pending; disjoint `scopes` is a strong distinct signal.
+
 ## 4. Confirm in Atlas
 Open Atlas Review → `proposed_link` findings → accept (promotes to a real edge)
-or reject, per item. Nothing reaches `edges`/recall until you accept.
+or reject, per item. Nothing reaches `edges`/recall until you accept. The
+"recent merge decisions" list under the queue shows what the model applied or
+rejected in step 3b (decided_by=agent), newest first.

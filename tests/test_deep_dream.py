@@ -249,3 +249,31 @@ def test_reject_entity_proposal(svc):
     assert svc.graph_reject_entity_proposal(pid)["rejected"] is True
     assert svc._storage.find_entity(norm_name("merged")) is not None    # NOT deleted on reject
     assert svc._storage.pending_entity_proposals() == []
+
+
+def test_deep_response_carries_enriched_merge_proposals(svc):
+    import time as _t
+    svc.graph_relate("enrich-a.py", "part-of", "enrich-core", origin="user")
+    a = svc._storage.find_entity(norm_name("enrich-a.py"))["id"]
+    b = svc._storage.ensure_entity("enrich-a", display="enrich a")
+    pid = svc._storage.insert_entity_proposal(
+        "merge", b, a, 1.0, "write-dedup: test", _t.time())
+    out = svc.deep_dream(apply=False)
+    mine = next(m for m in out["merge_proposals"] if m["id"] == pid)
+    assert {"from", "into", "score", "reason"} <= set(mine)
+    assert isinstance(mine["from"]["snippets"], list)
+    assert isinstance(mine["into"]["scopes"], list)
+    # oriented: 'into' is the higher-degree side (a has 1 edge, b has 0)
+    assert mine["into"]["degree"] >= mine["from"]["degree"]
+    assert mine["into"]["display"] == "enrich-a.py"
+
+
+def test_apply_response_also_lists_merge_proposals(svc):
+    import time as _t
+    svc.graph_relate("enrich-c.py", "uses", "enrich-lib", origin="user")
+    c = svc._storage.find_entity(norm_name("enrich-c.py"))["id"]
+    d = svc._storage.ensure_entity("enrich-c", display="enrich c")
+    pid = svc._storage.insert_entity_proposal(
+        "merge", d, c, 0.9, "write-dedup: test2", _t.time())
+    out = svc.deep_dream(apply=True)
+    assert any(m["id"] == pid for m in out["merge_proposals"])

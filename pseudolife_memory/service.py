@@ -3792,6 +3792,7 @@ class MemoryService:
             entries = self._storage.load_entries()
             dismissed = self._storage.dismissed_pairs()
             prop_keys = self._storage.entity_proposal_keys()
+            pending_props = self._storage.pending_entity_proposals()
         entities, edges = g["entities"], g["edges"]
 
         rescore = gc.rescore_edges(edges, entities)
@@ -3812,6 +3813,10 @@ class MemoryService:
                 mentions=mentions, max_chars=cfg.snippet_max_chars)
         else:
             candidates = link_cands
+        merge_proposals = self._enrich_merge_proposals(
+            pending_props, entities, edges, entries, traces, mentions,
+            scope_map, cfg.max_context_snippets, cfg.snippet_max_chars,
+            include_snippets)
 
         totals = {"entities": len(entities), "edges": len(edges),
                   "candidates": len(candidates)}
@@ -3829,6 +3834,7 @@ class MemoryService:
                     "would_junk": [{"entity": j["display"], "reason": j["reason"],
                                     "already_proposed": ("junk", j["entity_id"]) in prop_keys}
                                    for j in junk],
+                    "merge_proposals": merge_proposals,
                     "candidates": candidates, "totals": totals}
 
         snapshot = self._write_graph_snapshot()
@@ -3860,9 +3866,18 @@ class MemoryService:
                 if self._storage.insert_entity_proposal(
                         "junk", j["entity_id"], None, None, j["reason"], _t.time()) is not None:
                     junk_proposed += 1
+        # Re-read pending merges: the apply loop above may have just inserted
+        # fresh proposals the Step-C triage should see in the same response.
+        with self._lock:
+            pending_props = self._storage.pending_entity_proposals()
+        merge_proposals = self._enrich_merge_proposals(
+            pending_props, entities, edges, entries, traces, mentions,
+            scope_map, cfg.max_context_snippets, cfg.snippet_max_chars,
+            include_snippets)
         return {"applied": True, "rescored": len(rescore), "superseded": superseded,
                 "merged": merged, "merge_proposed": merge_proposed,
                 "junk_proposed": junk_proposed, "snapshot": snapshot,
+                "merge_proposals": merge_proposals,
                 "candidates": candidates, "totals": totals}
 
     def _write_graph_snapshot(self) -> str | None:
@@ -3916,6 +3931,40 @@ class MemoryService:
             c["src_snippets"] = snippets(c["src_id"])
             c["dst_snippets"] = snippets(c["dst_id"])
         return candidates
+
+    def _enrich_merge_proposals(self, pending, entities, edges, entries,
+                                traces, mentions, scope_map, k, max_chars,
+                                include_snippets):
+        """Evidence payload for Step-C merge triage (write-dedup spec): each
+        pending merge proposal with per-side display/etype/degree/scopes and
+        snippets, oriented so ``into`` is the higher-degree side. Presentation
+        only — proposal ids and stored direction are untouched."""
+        from pseudolife_memory.graph import degree_counts
+        deg = degree_counts(edges)
+        by_id = {e["id"]: e for e in entities}
+
+        rows = [p for p in pending if p.get("kind") == "merge"]
+        shaped = [{"src_id": p["entity_id"], "dst_id": p["into_id"]}
+                  for p in rows]
+        if include_snippets:
+            self._attach_candidate_snippets(
+                shaped, entities, entries, traces, k,
+                mentions=mentions, max_chars=max_chars)
+        out = []
+        for p, s in zip(rows, shaped):
+            def side(eid, snips):
+                e = by_id.get(eid) or {}
+                return {"display": e.get("display"), "etype": e.get("etype"),
+                        "degree": deg.get(eid, 0),
+                        "scopes": sorted(scope_map.get(eid, [])),
+                        "snippets": snips if include_snippets else []}
+            frm = side(p["entity_id"], s.get("src_snippets", []))
+            into = side(p["into_id"], s.get("dst_snippets", []))
+            if frm["degree"] > into["degree"]:
+                frm, into = into, frm
+            out.append({"id": p["id"], "score": p.get("score"),
+                        "reason": p.get("reason"), "from": frm, "into": into})
+        return out
 
     def graph_propose_links(self, proposals: list[dict]) -> dict[str, Any]:
         """Ingest Step-C subagent link proposals. Each is gated by the SAME mechanism
