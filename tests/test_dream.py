@@ -136,6 +136,53 @@ def test_openai_extractor_parses_claims():
                        "confidence": 0.9, "origin": "agent"}]
 
 
+def test_openai_extractor_numbers_notes_and_parses_source():
+    # Batched extraction: the notes are numbered in the prompt so the model can
+    # cite which note each claim came from ("source", 1-based); the extractor
+    # maps it back to a 0-based index. Out-of-range/missing sources are dropped.
+    from pseudolife_memory.memory.dream import OpenAICompatExtractor
+
+    seen_bodies = []
+
+    class _CapturingHandler(_StubHandler):
+        @staticmethod
+        def responder():
+            return (200, _chat_payload([
+                {"entity": "svc", "attribute": "port", "value": "8080",
+                 "confidence": 0.9, "source": 2},
+                {"entity": "svc", "attribute": "host", "value": "h1",
+                 "confidence": 0.9, "source": "1"},      # string form accepted
+                {"entity": "svc", "attribute": "os", "value": "linux",
+                 "confidence": 0.9, "source": 99},        # out of range -> dropped
+            ]))
+
+        def do_POST(self):  # noqa: N802
+            length = int(self.headers.get("content-length", 0))
+            seen_bodies.append(json.loads(self.rfile.read(length).decode()))
+            status, body = self.responder()
+            data = body.encode()
+            self.send_response(status)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), _CapturingHandler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        base_url = f"http://127.0.0.1:{srv.server_address[1]}"
+        claims = OpenAICompatExtractor(base_url, "m").extract(
+            ["first note", "second note"], vocab=[])
+    finally:
+        srv.shutdown()
+    user_msg = seen_bodies[0]["messages"][1]["content"]
+    assert "[1] first note" in user_msg and "[2] second note" in user_msg
+    by_attr = {c["attribute"]: c for c in claims}
+    assert by_attr["port"]["source"] == 1        # 1-based 2 -> index 1
+    assert by_attr["host"]["source"] == 0        # "1" -> index 0
+    assert "source" not in by_attr["os"]         # 99 out of range
+
+
 def test_openai_extractor_raises_on_timeout():
     # Failure must RAISE (not return []) so the dream can tell it apart from a
     # genuine empty result and avoid advancing the cursor past these memories.
@@ -363,13 +410,67 @@ def test_dream_run_does_not_advance_cursor_on_failure(svc):
     assert svc.cortex_lookup("relay", "port") is not None
 
 
+class _BatchRecordingExtractor:
+    """Records each extract() call's texts; returns fixed claims."""
+
+    def __init__(self, claims):
+        self._claims = claims
+        self.calls: list[list[str]] = []
+
+    def extract(self, texts, vocab):
+        self.calls.append(list(texts))
+        return [dict(c) for c in self._claims]
+
+
+def test_dream_extracts_batch_in_one_call(svc):
+    """Regression for the 2026-06-25 per-entry restructure: extraction must see
+    the whole pulled batch in ONE call, so the model names a fact's initial and
+    update turns consistently and supersession can fire (per-entry extraction
+    fragmented updates onto sibling slots — stale_leak 0.0 -> 0.8 on the
+    ladder). Per-claim attribution now travels via the claim's 'source' index."""
+    svc.config.memory.cortex.auto_promote = False
+    svc.store("alpha-svc listens on port 1111", source="notes")
+    svc.store("beta-svc listens on port 2222", source="notes")
+    svc.store("gamma-svc listens on port 3333", source="notes")
+    ext = _BatchRecordingExtractor([])
+    out = svc.dream_run(ext)
+    assert out["pulled"] == 3
+    assert len(ext.calls) == 1, "all pulled entries must go in one extract call"
+    assert len(ext.calls[0]) == 3
+
+
+def test_dream_attributes_claims_by_source(svc):
+    """Claims carry a 0-based 'source' index into the batch; traces must link
+    each fact to the entry it actually came from (the point of eec67b1)."""
+    svc.config.memory.cortex.auto_promote = False
+    svc.store("first: alpha-svc port fact", source="notes")
+    svc.store("second: beta-svc host fact", source="notes")
+    out = svc.dream_run(_StubExtractor([
+        {"entity": "alpha-svc", "attribute": "port", "value": "1111",
+         "confidence": 0.6, "origin": "agent", "source": 0},
+        {"entity": "beta-svc", "attribute": "host", "value": "h-2",
+         "confidence": 0.6, "origin": "agent", "source": 1},
+    ]))
+    assert out["traces"] == 2
+    st = svc._storage  # noqa: SLF001
+    rows = st.conn.execute(
+        "SELECT id, text FROM entries ORDER BY id").fetchall()
+    by_text = {text: eid for eid, text in rows}
+    first_facts = st.facts_for_entry(by_text["first: alpha-svc port fact"])
+    second_facts = st.facts_for_entry(by_text["second: beta-svc host fact"])
+    assert any(f["entity"] == "alpha-svc" for f in first_facts)
+    assert any(f["entity"] == "beta-svc" for f in second_facts)
+    assert not any(f["entity"] == "beta-svc" for f in first_facts)
+
+
 class _PoisonExtractor:
-    """Fails deterministically on entries containing 'poison'; extracts a
-    canned relay/port claim from everything else."""
+    """Fails deterministically when any entry contains 'poison' (a poison entry
+    corrupts the whole batched response); extracts a canned relay/port claim
+    otherwise. Per-entry isolation calls therefore fail only on the poison."""
 
     def extract(self, texts, vocab):
         from pseudolife_memory.memory.dream import ExtractorError
-        if "poison" in texts[0]:
+        if any("poison" in t for t in texts):
             raise ExtractorError("deterministic parse failure")
         return [{"entity": "relay", "attribute": "port", "value": "4001",
                  "confidence": 0.55, "origin": "agent"}]
@@ -398,21 +499,40 @@ def test_poison_entry_quarantined_after_repeated_failures(svc):
 
 def test_batch_retry_does_not_ratchet_confidence(svc):
     """A re-extraction of the SAME source entry (batch retry after a
-    mid-batch failure) must be a no-op on the slot, not a confirmation —
-    the pre-fix behavior ratcheted agent guesses toward 1.0 on every
-    600s sweep while consolidation was stalled."""
+    mid-batch failure, or a rewound cursor) must be a no-op on the slot,
+    not a confirmation — the pre-fix behavior ratcheted agent guesses
+    toward 1.0 on every 600s sweep while consolidation was stalled."""
     svc.config.memory.cortex.auto_promote = False
     svc.store("relay speaks on some port", source="notes")
-    svc.store("poison entry that always breaks extraction", source="notes")
 
-    ext = _PoisonExtractor()
-    svc.dream_run(ext)   # writes relay.port@0.55, then poison aborts batch
+    stub = _StubExtractor([{"entity": "relay", "attribute": "port",
+                            "value": "4001", "confidence": 0.55,
+                            "origin": "agent"}])
+    svc.dream_run(stub)                     # writes relay.port@0.55 + trace
     first = svc.cortex_lookup("relay", "port")["confidence"]
-    svc.dream_run(ext)   # retry re-extracts the same source entry
+    svc._cortex.dream_cursor = 0.0          # noqa: SLF001 — force a re-dream
+    again = svc.dream_run(stub)             # re-extracts the same source entry
+    assert again["pulled"] >= 1             # the re-dream really happened
     second = svc.cortex_lookup("relay", "port")["confidence"]
     assert second == pytest.approx(first), (
         "re-dreaming an already-traced (slot, source) pair must not "
         "reinforce confidence")
+
+
+def test_dream_outage_holds_cursor_without_quarantine(svc):
+    """When EVERY entry fails the per-entry isolation pass (endpoint outage,
+    not a poison entry), nothing may be quarantined — the cursor holds and
+    the whole batch stays pending for the next sweep."""
+    svc.config.memory.cortex.auto_promote = False
+    svc.store("outage one relay fact", source="notes")
+    svc.store("outage two relay fact", source="notes")
+
+    ext = _FailingExtractor()
+    for _ in range(4):                      # past the batch-failure threshold
+        out = svc.dream_run(ext)
+        assert out.get("extractor_failed") is True
+    assert svc.dream_status()["backlog"] == 2, (
+        "an outage must not quarantine entries")
 
 
 # ── GAM #2 graph-from-text: _dream_extract_relations (PG-backed) ─────────

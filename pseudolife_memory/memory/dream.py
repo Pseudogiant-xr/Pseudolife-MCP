@@ -18,12 +18,19 @@ from typing import Protocol, TypedDict
 logger = logging.getLogger(__name__)
 
 
-class Claim(TypedDict):
+class _ClaimRequired(TypedDict):
     entity: str
     attribute: str
     value: str
     confidence: float
     origin: str          # "user" | "action" | "agent"
+
+
+class Claim(_ClaimRequired, total=False):
+    # 0-based index into the extract() texts batch this claim came from, for
+    # per-claim source attribution (slot->episode traces). Absent when the
+    # model didn't cite a note (or cited one out of range).
+    source: int
 
 
 class LessonClaim(TypedDict):
@@ -58,12 +65,12 @@ class RegexExtractor:
     def extract(self, texts: list[str], vocab: list[str]) -> list[Claim]:
         from pseudolife_memory.memory.slots import extract_slots
         claims: list[Claim] = []
-        for t in texts or []:
+        for i, t in enumerate(texts or []):
             for s in extract_slots(t or ""):
                 value = s.value if s.polarity != "-" else ("NOT " + s.value)
                 claims.append(Claim(
                     entity=s.entity, attribute=s.attribute, value=value,
-                    confidence=0.55, origin="agent",
+                    confidence=0.55, origin="agent", source=i,
                 ))
         return claims
 
@@ -80,11 +87,14 @@ class NoOpExtractor:
 
 
 _SYSTEM_PROMPT = (
-    "You consolidate notes into canonical facts. Extract durable, current-state "
-    'facts as JSON: {"claims":[{"entity":..,"attribute":..,"value":..,'
-    '"confidence":0..1}]}. One slot per real fact; skip narrative, opinions, and '
-    'obsolete states. Reuse existing slot keys when they fit. Return {"claims":[]} '
-    "if nothing qualifies."
+    "You consolidate numbered notes into canonical facts. Extract durable, "
+    'current-state facts as JSON: {"claims":[{"entity":..,"attribute":..,'
+    '"value":..,"confidence":0..1,"source":<number of the note the fact came '
+    "from>}]}. One slot per real fact; skip narrative, opinions, and obsolete "
+    "states. When several notes state or update the SAME fact, use one "
+    "consistent entity and attribute for it and emit only the CURRENT value "
+    "(source = the note stating it). Reuse existing slot keys when they fit. "
+    'Return {"claims":[]} if nothing qualifies.'
 )
 
 
@@ -190,7 +200,11 @@ class OpenAICompatExtractor:
                 "messages": [
                     {"role": "system",
                      "content": _SYSTEM_PROMPT + _vocab_hint(vocab)},
-                    {"role": "user", "content": "\n\n".join(texts)},
+                    # Numbered so the model can cite which note each claim came
+                    # from ("source") — per-claim attribution without giving up
+                    # the one-batch call that keeps cross-note naming consistent.
+                    {"role": "user", "content": "\n\n".join(
+                        f"[{i + 1}] {t}" for i, t in enumerate(texts))},
                 ],
                 "response_format": {"type": "json_object"},
                 "max_tokens": self.max_tokens,
@@ -233,8 +247,15 @@ class OpenAICompatExtractor:
                 conf = max(0.0, min(1.0, float(c.get("confidence", 0.7))))
             except (TypeError, ValueError):
                 conf = 0.7
-            claims.append(Claim(entity=entity, attribute=attribute, value=value,
-                                confidence=conf, origin="agent"))
+            claim = Claim(entity=entity, attribute=attribute, value=value,
+                          confidence=conf, origin="agent")
+            try:
+                idx = int(c.get("source")) - 1     # 1-based in the prompt
+            except (TypeError, ValueError):
+                idx = -1
+            if 0 <= idx < len(texts):
+                claim["source"] = idx
+            claims.append(claim)
         return claims
 
     def extract_lessons(self, signals: list[dict]) -> list[LessonClaim]:

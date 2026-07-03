@@ -2,7 +2,7 @@
   "rung": "floor",
   "label": "deterministic floor",
   "kind": "floor",
-  "extract_seconds": 0.2,
+  "extract_seconds": 0.1,
   "consolidation": {
     "pulled": 26,
     "claims": 2,
@@ -12,6 +12,6 @@
   "gold_recoverable": 0.1,
   "stale_leak": 0.1,
   "tokens_per_query": 0.9,
-  "search_latency_ms": 2.9,
+  "search_latency_ms": 7.8,
   "status": "ok"
 }

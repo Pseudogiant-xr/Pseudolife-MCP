@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-07-03 — dream extraction supersession regression)
+- **Dream extraction is batched again**: the 2026-06-25 per-entry restructure
+  (added for per-claim source traces) meant the extractor never saw a fact's
+  initial and update turns together, so it named them inconsistently and
+  updates landed on sibling slots instead of superseding — ladder stale-leak
+  went 0.0 → 0.7–0.9 (all quants equally; the 06-24 QAT model swap was
+  unrelated). `dream_run` now sends the whole pull in ONE numbered-notes call
+  and the model cites each claim's source note (`"source"`), keeping trace
+  attribution. Poison-entry quarantine survives via a per-entry isolation
+  fallback after repeated batch failures, with an all-fail outage guard that
+  holds the cursor instead of quarantining.
+
 ### Added (2026-07-03 — community files)
 - **CONTRIBUTING.md** (dev setup, offline test invocation, live-bank safety
   rules, DCO sign-off, permissive-only dependency policy) and **SECURITY.md**

@@ -364,7 +364,7 @@ class MemoryService:
         # counts per entry (db_id). In-memory only — a daemon restart resets
         # the strikes, which just means a poison entry needs its three
         # failures again before quarantine.
-        self._dream_entry_failures: dict[Any, int] = {}
+        self._dream_batch_failures: dict[Any, int] = {}
         # Count of durable-save failures (cortex/world/lessons). Exposed via the
         # daemon /health probe so swallowed-then-surfaced saves are observable.
         self._persist_errors = 0
@@ -2142,7 +2142,7 @@ class MemoryService:
         vocab = self.cortex_vocab().get("slots", [])
         tally = {"inserted": 0, "confirmed": 0, "contested": 0, "superseded": 0}
         traces_n = 0
-        max_entry_failures = 3
+        max_batch_failures = 3
         quarantined = 0
 
         def _held(reason: str, exc: Exception) -> dict[str, Any]:
@@ -2153,65 +2153,99 @@ class MemoryService:
                     "cursor": self._cortex.dream_cursor, "extractor_failed": True,
                     "lessons": {"signals": 0, "lessons": 0}}
 
-        for e in entries:
-            src_id = e.get("db_id")
-            fail_key = src_id if src_id is not None else e["text"][:200]
-            try:
-                claims = list(extractor.extract([e["text"]], vocab))
-            except Exception as exc:  # noqa: BLE001 — an extractor must never break a dream
-                fails = self._dream_entry_failures.get(fail_key, 0) + 1
-                self._dream_entry_failures[fail_key] = fails
-                if fails < max_entry_failures:
-                    return _held(
-                        f"extractor failed ({fails}/{max_entry_failures} "
-                        f"for entry {fail_key})", exc)
-                # Poison pill: a deterministically-failing entry would stall
-                # consolidation forever (and every retry used to re-confirm
-                # the batch prefix, ratcheting its confidence). Skip it; the
-                # batch commit advances the cursor past it.
-                logger.warning("dream: quarantining entry %s after %d failed "
-                               "extractions (%s)", fail_key, fails, exc)
-                quarantined += 1
-                continue
-            self._dream_entry_failures.pop(fail_key, None)
-            try:
-                for c in claims:
-                    ent, attr = self._resolve_dream_slot(c["entity"], c["attribute"])
-                    if (traces_cfg.enabled and src_id is not None
-                            and self._storage is not None):
-                        with self._lock:
-                            already = self._storage.has_trace(
-                                _norm_key(ent), _norm_key(attr), src_id)
-                        if already:
-                            # This source entry already formed this slot once
-                            # (batch retry after a mid-batch failure). A
-                            # re-dream must be a no-op, not a confirmation —
-                            # the confirm path ratchets confidence.
-                            continue
-                    res = self.cortex_write(
-                        ent, attr, c["value"],
-                        confidence=float(c.get("confidence", 0.55)),
-                        support=c.get("origin", "agent"))
-                    tally[res["action"]] = tally.get(res["action"], 0) + 1
-                    if (traces_cfg.enabled and src_id is not None
-                            and self._storage is not None):
-                        # Serialize trace writes on the shared psycopg connection:
-                        # dream_run holds no outer lock (cortex_write locks internally
-                        # and has already released), so the trace writes must take
-                        # self._lock themselves. Scope it to JUST these calls — the
-                        # lock is non-reentrant, so including cortex_write would deadlock.
-                        with self._lock:
-                            if self._storage.add_trace(
-                                    _norm_key(ent), _norm_key(attr), src_id, _time.time()):
-                                self._storage.bump_reinforcements(src_id, 1)
-                                if self._cms is not None:
-                                    self._cms.bump_entry_reinforcements(src_id, 1)
-                                traces_n += 1
-            except Exception as exc:  # noqa: BLE001 — a write failure must hold the cursor too
-                return _held("claim write failed", exc)
+        # ONE batched call for the whole pull: the model must see a fact's
+        # initial and update turns together to name them consistently, or
+        # updates land on sibling slots instead of superseding (the 2026-06-25
+        # per-entry restructure cost stale_leak 0.0 -> 0.8 on the ladder).
+        # Per-claim attribution travels back via the claim's "source" index.
+        texts = [e["text"] for e in entries]
+        batch_key = tuple(e.get("db_id") if e.get("db_id") is not None
+                          else e["text"][:200] for e in entries)
+        pairs: list[tuple[dict, Any]] = []      # (claim, source entry db_id)
+        try:
+            for c in extractor.extract(texts, vocab):
+                idx = c.get("source")
+                if isinstance(idx, int) and 0 <= idx < len(entries):
+                    src_id = entries[idx].get("db_id")
+                elif len(entries) == 1:
+                    # Unambiguous: extractors that don't cite sources (stubs,
+                    # older models) still attribute a single-entry batch.
+                    src_id = entries[0].get("db_id")
+                else:
+                    src_id = None
+                pairs.append((c, src_id))
+        except Exception as exc:  # noqa: BLE001 — an extractor must never break a dream
+            fails = self._dream_batch_failures.get(batch_key, 0) + 1
+            self._dream_batch_failures[batch_key] = fails
+            if fails < max_batch_failures:
+                return _held(
+                    f"extractor failed ({fails}/{max_batch_failures} "
+                    "for this batch)", exc)
+            # The batch fails deterministically — isolate the poison entry with
+            # per-entry calls so it can't stall consolidation forever. Entries
+            # that fail alone are quarantined (skipped; the commit advances the
+            # cursor past them) — UNLESS everything fails, which is an endpoint
+            # outage, not a poison pill: hold the cursor and retry next sweep.
+            succeeded = 0
+            failed_keys: list[Any] = []
+            for e, key in zip(entries, batch_key):
+                try:
+                    e_claims = list(extractor.extract([e["text"]], vocab))
+                except Exception as exc2:  # noqa: BLE001
+                    logger.warning("dream: entry %s failed isolated "
+                                   "extraction (%s)", key, exc2)
+                    failed_keys.append(key)
+                    continue
+                succeeded += 1
+                pairs.extend((c, e.get("db_id")) for c in e_claims)
+            if succeeded == 0 and len(entries) > 1:
+                return _held("all entries failed the isolation pass "
+                             "(outage, not poison)", exc)
+            quarantined = len(failed_keys)
+            for key in failed_keys:
+                logger.warning("dream: quarantining entry %s (fails alone "
+                               "while siblings extract)", key)
+            self._dream_batch_failures.pop(batch_key, None)
+        else:
+            self._dream_batch_failures.pop(batch_key, None)
+
+        try:
+            for c, src_id in pairs:
+                ent, attr = self._resolve_dream_slot(c["entity"], c["attribute"])
+                if (traces_cfg.enabled and src_id is not None
+                        and self._storage is not None):
+                    with self._lock:
+                        already = self._storage.has_trace(
+                            _norm_key(ent), _norm_key(attr), src_id)
+                    if already:
+                        # This source entry already formed this slot once
+                        # (batch retry after a mid-batch failure). A
+                        # re-dream must be a no-op, not a confirmation —
+                        # the confirm path ratchets confidence.
+                        continue
+                res = self.cortex_write(
+                    ent, attr, c["value"],
+                    confidence=float(c.get("confidence", 0.55)),
+                    support=c.get("origin", "agent"))
+                tally[res["action"]] = tally.get(res["action"], 0) + 1
+                if (traces_cfg.enabled and src_id is not None
+                        and self._storage is not None):
+                    # Serialize trace writes on the shared psycopg connection:
+                    # dream_run holds no outer lock (cortex_write locks internally
+                    # and has already released), so the trace writes must take
+                    # self._lock themselves. Scope it to JUST these calls — the
+                    # lock is non-reentrant, so including cortex_write would deadlock.
+                    with self._lock:
+                        if self._storage.add_trace(
+                                _norm_key(ent), _norm_key(attr), src_id, _time.time()):
+                            self._storage.bump_reinforcements(src_id, 1)
+                            if self._cms is not None:
+                                self._cms.bump_entry_reinforcements(src_id, 1)
+                            traces_n += 1
+        except Exception as exc:  # noqa: BLE001 — a write failure must hold the cursor too
+            return _held("claim write failed", exc)
         newest = max(e["timestamp"] for e in entries)
         self.dream_commit(newest)
-        texts = [e["text"] for e in entries]
         relations_n = self._dream_extract_relations(extractor, texts)
         lessons = self.synthesize_lessons(extractor)
         graph_insight = self._safe_refresh_graph_insight()

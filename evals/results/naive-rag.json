@@ -5,7 +5,7 @@
   "gold_recoverable": 0.7,
   "stale_leak": 0.3,
   "tokens_per_query": 58.3,
-  "search_latency_ms": 3.6,
+  "search_latency_ms": 9.0,
   "extract_seconds": 0.0,
   "status": "ok"
 }
