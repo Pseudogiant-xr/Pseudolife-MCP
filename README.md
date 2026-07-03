@@ -66,8 +66,8 @@ Console (REST) — the manifest is agent context every session, so it stays lean
 | `memory_world_search(query, top_k?)` | Search world facts — each carries `effective_confidence`, a `stale` flag, and its citation |
 | `memory_outcome(task, outcome, about?, detail?, polarity?)` | Record a procedural outcome signal (`success`/`failure`/`correction`); the dream distils signals into lessons |
 | `memory_lesson_search(query, top_k?)` | Recall learned lessons for the task at hand — heed `polarity` `-` dead-ends; `re_verify` flags lessons whose subject facts changed since |
-| `memory_dream(action, limit?, cursor?, apply?, snippets?)` | Drive the dream: `status` / `pull` / `commit` / `run` (server-side extractor) / `deep` (full-corpus graph consolidation; dry-run unless `apply`, which snapshots the graph tables first; `snippets=false` omits candidate evidence) |
-| `memory_graph_review(action, proposal_id?, proposals?, scope?, src?, dst?)` | Work the review queue: `list` / `propose` / `dismiss_pair` / `accept_link` / `reject_link` / `accept_merge` / `accept_junk` / `reject_entity` |
+| `memory_dream(action, limit?, cursor?, apply?, snippets?)` | Drive the dream: `status` / `pull` / `commit` / `run` (server-side extractor) / `deep` (full-corpus graph consolidation; dry-run unless `apply`, which snapshots the graph tables first; `snippets=false` omits candidate evidence; responses carry evidence-enriched `merge_proposals` for near-duplicate triage) |
+| `memory_graph_review(action, proposal_id?, proposals?, scope?, src?, dst?)` | Work the review queue: `list` / `propose` / `dismiss_pair` / `accept_link` / `reject_link` / `accept_merge` / `accept_junk` / `reject_entity` (merge/entity decisions are audit-stamped `decided_by=agent` over MCP, `human` via Console) |
 | `memory_session_title(title)` | Name THIS session's auto-opened episode (default titles are generic) |
 | `memory_episode_start(title, hint?)` / `memory_episode_end()` | Open/close a nested sub-episode for a substantial task; entries stored while open carry its id |
 | `memory_episode_summary(id)` | Stats + tag/source distribution + recent entries within an episode |
