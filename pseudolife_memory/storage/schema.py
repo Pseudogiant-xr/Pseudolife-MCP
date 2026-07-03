@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 20
+SCHEMA_META_VERSION = 21
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -354,6 +354,36 @@ def ensure_schema(conn) -> dict:
         # v15 additive: parent episode id for nested sub-episodes.
         cur.execute(
             "ALTER TABLE episodes ADD COLUMN IF NOT EXISTS parent_id TEXT"
+        )
+        # v21 additive: decision audit on entity proposals (who folded /
+        # rejected a near-duplicate, and when) — the human's post-hoc window
+        # onto deep-dream merge triage. Stamps live on the proposal row while
+        # it exists; the durable audit is merge_decisions below, because an
+        # ACCEPTED merge deletes the folded entity and the proposal row
+        # CASCADEs away with it.
+        cur.execute(
+            "ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS decided_by TEXT"
+        )
+        cur.execute(
+            "ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS "
+            "decided_at DOUBLE PRECISION"
+        )
+        # v21 additive: durable, denormalized merge-decision audit (no FKs —
+        # must outlive the entities and proposal rows it describes).
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS merge_decisions (
+              id BIGSERIAL PRIMARY KEY,
+              proposal_id BIGINT,
+              entity_display TEXT,
+              into_display TEXT,
+              status TEXT NOT NULL,
+              score REAL,
+              reason TEXT,
+              decided_by TEXT,
+              decided_at DOUBLE PRECISION NOT NULL
+            )
+            """
         )
         # One-time upgrade: drop the old episode FK only when it's actually
         # present. Guarding avoids taking an ACCESS EXCLUSIVE lock on every

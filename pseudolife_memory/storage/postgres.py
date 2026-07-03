@@ -991,11 +991,47 @@ class PostgresStorage:
         ).fetchone()
         return dict(zip(cols, r)) if r else None
 
-    def set_entity_proposal_status(self, proposal_id: int, status: str) -> bool:
+    def set_entity_proposal_status(self, proposal_id: int, status: str, *,
+                                   decided_by: str | None = None,
+                                   decided_at: float | None = None) -> bool:
         with self._txn():
             cur = self.conn.execute(
-                "UPDATE entity_proposals SET status = %s WHERE id = %s", (status, proposal_id))
+                "UPDATE entity_proposals SET status = %s, "
+                "decided_by = COALESCE(%s, decided_by), "
+                "decided_at = COALESCE(%s, decided_at) WHERE id = %s",
+                (status, decided_by, decided_at, proposal_id))
         return cur.rowcount > 0
+
+    def record_merge_decision(self, proposal_id: int | None, entity_display: str,
+                              into_display: str | None, status: str,
+                              score: float | None, reason: str | None,
+                              decided_by: str, decided_at: float) -> int:
+        """Durable audit row for a merge decision. Denormalized on purpose:
+        an accepted merge deletes the folded entity (and its proposal row via
+        CASCADE), so the audit must not reference either."""
+        with self._txn():
+            row = self.conn.execute(
+                "INSERT INTO merge_decisions "
+                "(proposal_id, entity_display, into_display, status, score, "
+                " reason, decided_by, decided_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                (proposal_id, entity_display, into_display, status, score,
+                 reason, decided_by, decided_at)).fetchone()
+        return int(row[0])
+
+    def recent_entity_decisions(self, limit: int = 20) -> list[dict]:
+        """Merge decisions newest-first — the audit trail behind Atlas
+        'recent merge decisions'. Reads merge_decisions (durable), not
+        entity_proposals (accepted rows CASCADE away with the merge)."""
+        cols = ("id", "proposal_id", "entity", "into", "status", "score",
+                "reason", "decided_by", "decided_at")
+        rows = self.conn.execute(
+            "SELECT id, proposal_id, entity_display, into_display, status, "
+            "       score, reason, decided_by, decided_at "
+            "FROM merge_decisions "
+            "ORDER BY decided_at DESC, id DESC LIMIT %s",
+            (int(limit),)).fetchall()
+        return [dict(zip(cols, r)) for r in rows]
 
     def traces_for_slot(self, entity_norm: str, attribute_norm: str) -> list[int]:
         return [r[0] for r in self.conn.execute(

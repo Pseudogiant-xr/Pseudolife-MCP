@@ -251,3 +251,54 @@ def test_dream_reassertion_does_not_revive_human_removal(svc):
     rels = {(e["relation"], e["dst"]) for e in nb.get("edges", [])}
     assert ("uses", "beta-db") not in rels, (
         "dream re-assertion revived an edge a human superseded")
+
+
+def test_dream_write_dedup_files_merge_proposal(svc):
+    svc.stats()  # force init
+    svc.graph_relate("epsilon-review.py", "part-of", "epsilon-core",
+                     origin="user")
+    n = svc._link_dream_relations([
+        {"src": "epsilon review", "relation": "uses", "dst": "zeta-lib"},
+    ])
+    assert n == 1
+    props = [p for p in svc._storage.pending_entity_proposals()
+             if (p["reason"] or "").startswith("write-dedup:")
+             and "epsilon" in p["reason"]]
+    assert len(props) == 1
+    assert {props[0]["entity"], props[0]["into"]} == {
+        "epsilon review", "epsilon-review.py"}
+    # re-run: entity now exists (created=False) -> nothing new filed
+    svc._link_dream_relations([
+        {"src": "epsilon review", "relation": "uses", "dst": "zeta-lib"},
+    ])
+    props2 = [p for p in svc._storage.pending_entity_proposals()
+              if (p["reason"] or "").startswith("write-dedup:")
+              and "epsilon" in p["reason"]]
+    assert len(props2) == 1
+
+
+def test_dream_write_dedup_respects_dismissed_and_disable(svc):
+    svc.stats()
+    svc.graph_relate("theta-store.py", "part-of", "theta-core", origin="user")
+    svc._storage.dismiss_pair("theta-store", "theta-store-py")
+    svc._link_dream_relations(
+        [{"src": "theta store", "relation": "uses", "dst": "iota-lib"}])
+    assert [p for p in svc._storage.pending_entity_proposals()
+            if "theta" in (p["reason"] or "")] == []
+    # disabled at 0: a fresh variant files nothing
+    old = svc.config.memory.dream.write_dedup_min_jaccard
+    svc.config.memory.dream.write_dedup_min_jaccard = 0.0
+    try:
+        svc._link_dream_relations(
+            [{"src": "iota lib", "relation": "uses", "dst": "mu-lib"}])
+        assert [p for p in svc._storage.pending_entity_proposals()
+                if "iota" in (p["reason"] or "")] == []
+    finally:
+        svc.config.memory.dream.write_dedup_min_jaccard = old
+
+
+def test_explicit_relate_never_files_write_dedup(svc):
+    svc.stats()
+    svc.graph_relate("kappa runner", "uses", "kappa-runner.py", origin="user")
+    assert [p for p in svc._storage.pending_entity_proposals()
+            if "kappa" in (p["reason"] or "")] == []

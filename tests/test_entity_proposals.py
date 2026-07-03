@@ -55,3 +55,27 @@ def test_insert_entity_proposal_skips_dangling_fk(storage):
     assert storage.insert_entity_proposal("merge", 999999, a, 0.9, "x", time.time()) is None
     pid = storage.insert_entity_proposal("junk", a, None, None, "x", time.time())
     assert pid is not None
+
+
+def test_decision_stamps_survive_on_pending_rows(storage):
+    a = storage.ensure_entity("stamp-a", display="stamp-a")
+    b = storage.ensure_entity("stamp-b", display="stamp-b")
+    pid = storage.insert_entity_proposal(
+        "merge", a, b, 0.9, "write-dedup: test", time.time())
+    assert storage.set_entity_proposal_status(
+        pid, "rejected", decided_by="human", decided_at=123.0) is True
+    row = storage.get_entity_proposal(pid)
+    assert row["status"] == "rejected"
+
+
+def test_merge_decision_audit_newest_first_and_durable(storage):
+    storage.record_merge_decision(77, "stamp-c", "stamp-d", "accepted", 0.9,
+                                  "write-dedup: t1", "agent", 200.0)
+    storage.record_merge_decision(78, "stamp-e", "stamp-f", "rejected", 0.8,
+                                  "write-dedup: t2", "human", 100.0)
+    recents = storage.recent_entity_decisions()
+    ids = [r["proposal_id"] for r in recents if r["proposal_id"] in (77, 78)]
+    assert ids == [77, 78]  # newest decision first
+    top = next(r for r in recents if r["proposal_id"] == 77)
+    assert top["decided_by"] == "agent" and top["status"] == "accepted"
+    assert top["entity"] == "stamp-c" and top["into"] == "stamp-d"

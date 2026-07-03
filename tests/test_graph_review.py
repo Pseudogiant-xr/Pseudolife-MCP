@@ -177,3 +177,31 @@ def test_dubious_edge_rows_carry_ambiguous_tag():
                 {"id": 2, "display": "b", "etype": None}]
     findings = gr.dubious_edges(edges, entities)
     assert findings and all(r["tag"] == "AMBIGUOUS" for r in findings[0]["edges"])
+
+
+def test_near_duplicate_names_matches_token_identical_variant():
+    from pseudolife_memory.memory.graph_review import near_duplicate_names
+    existing = [{"id": 7, "canonical": "graph-review-py",
+                 "display": "graph_review.py", "aliases": []}]
+    got = near_duplicate_names("graph review", existing)
+    assert got and got[0]["entity_id"] == 7 and got[0]["score"] == 1.0
+
+
+def test_near_duplicate_names_matches_via_alias():
+    from pseudolife_memory.memory.graph_review import near_duplicate_names
+    existing = [{"id": 3, "canonical": "dev-box", "display": "dev-box",
+                 "aliases": ["gaming rig 4090"]}]
+    got = near_duplicate_names("4090 gaming rig", existing)
+    assert got and got[0]["entity_id"] == 3
+
+
+def test_near_duplicate_names_respects_dismissed_and_threshold():
+    from pseudolife_memory.memory.graph_review import near_duplicate_names
+    existing = [{"id": 1, "canonical": "postgres-py",
+                 "display": "postgres.py", "aliases": []}]
+    dismissed = frozenset({("postgres", "postgres-py")})
+    assert near_duplicate_names("postgres", existing, dismissed=dismissed) == []
+    # unrelated name: below threshold
+    assert near_duplicate_names("cortex console", existing) == []
+    # disabled
+    assert near_duplicate_names("postgres", existing, min_jaccard=0) == []

@@ -447,7 +447,18 @@ class FixtureService:
              "label": "1 junk entities to prune",
              "entities": [{"entity": "2", "reason": "bare-number", "id": 2}]},
         ]
-        return {"findings": findings, "counts": {"total": len(findings)}}
+        return {"findings": findings, "counts": {"total": len(findings)},
+                "recent_merges": [
+                    {"id": 2, "proposal_id": 41, "entity": "graph review",
+                     "into": "graph_review.py", "score": 1.0,
+                     "reason": "write-dedup: 'graph review' ~ 'graph_review.py'",
+                     "status": "accepted", "decided_by": "agent",
+                     "decided_at": 1782990000.0},
+                    {"id": 1, "proposal_id": 40, "entity": "postgres",
+                     "into": "postgres.py", "score": 0.7,
+                     "reason": "write-dedup",
+                     "status": "rejected", "decided_by": "human",
+                     "decided_at": 1782980000.0}]}
 
     def entity_provenance(self, entity, limit=20):
         return {"found": True, "entity": entity,

@@ -300,6 +300,11 @@ class DreamConfig:
     # them at the source instead of leaving them for deep-dream cleanup.
     # Set 0.0 to restore the old write-everything behavior.
     min_relation_confidence: float = 0.2
+    # Write-time dedup: when the dream mints a NEW entity whose name-token
+    # Jaccard against an existing canonical/display/alias reaches this
+    # threshold, a merge proposal is filed for review (never auto-folded).
+    # 0 disables the detector.
+    write_dedup_min_jaccard: float = 0.6
 
 
 @dataclass

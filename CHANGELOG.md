@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-03 — dream near-duplicate correction, schema v21)
+- **Write-time dedup (Tier 1)**: a dream-minted entity whose name-token
+  Jaccard against an existing canonical/display/alias reaches
+  `memory.dream.write_dedup_min_jaccard` (default 0.6; 0 disables) files an
+  `entity_proposals` merge row at birth — dismissed pairs suppressed, advisory
+  only, never blocks the write. Explicit relate/fact writes untouched.
+- **Deep-dream merge triage (Tier 2)**: `memory_dream(action="deep")`
+  responses carry `merge_proposals` — pending near-duplicate merges enriched
+  per side with display/etype/degree/scopes/snippets (`into` = higher-degree
+  side); the `/dream deep` driver instructs the capable model to
+  `accept_merge` same-referent variants, reject + `dismiss_pair` distinct
+  ones, and leave unsure items for Atlas.
+- **Merge-decision audit**: new FK-free `merge_decisions` table (an accepted
+  merge CASCADE-deletes its proposal row, so the audit is denormalized) +
+  `decided_by`/`decided_at` stamps on entity proposals; MCP decisions stamp
+  `agent`, Console `human`; `/api/graph/review` and Atlas show
+  "recent merge decisions" newest-first.
+
 ### Added (2026-07-03 — external findings wave 2)
 - **Lesson staleness ("re-verify")**: lessons whose `about` entity saw cortex
   fact churn after the lesson was asserted/confirmed carry `re_verify` +

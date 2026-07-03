@@ -750,3 +750,17 @@ def test_chain_merges_fact_edge_lesson_events_in_time_order(svc):
 def test_chain_unknown_entity_not_found(svc):
     out = svc.chain("never-existed-entity")
     assert out["found"] is False and out["events"] == []
+
+
+def test_accept_merge_stamps_decider_and_review_lists_recent(svc):
+    import time as _t
+    svc.stats()  # force init
+    a = svc._storage.ensure_entity("audit-a", display="audit-a")
+    b = svc._storage.ensure_entity("audit-b", display="audit-b")
+    pid = svc._storage.insert_entity_proposal(
+        "merge", a, b, 0.9, "write-dedup: audit", _t.time())
+    out = svc.graph_accept_entity_merge(pid, decided_by="agent")
+    assert out["accepted"] is True
+    review = svc.graph_review()
+    mine = next(m for m in review["recent_merges"] if m["proposal_id"] == pid)
+    assert mine["decided_by"] == "agent" and mine["status"] == "accepted"

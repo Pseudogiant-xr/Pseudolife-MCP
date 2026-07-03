@@ -691,16 +691,18 @@ class MemoryService:
                     writer_id=writer_id,
                     session_id=session_id,
                 )
-                self._ensure_subject_entity(s.entity)
+                self._ensure_subject_entity(s.entity, propose_dupes=True)
                 written += 1
             except Exception as exc:  # noqa: BLE001
                 logger.debug("cortex auto-promote skipped (%s): %s", claim, exc)
         return written
 
-    def _ensure_subject_entity(self, entity: str) -> None:
+    def _ensure_subject_entity(self, entity: str, *,
+                               propose_dupes: bool = False) -> None:
         """Fact writes create the subject's graph node (spec §5.1) so the
         cortex and graph stay joined. No-op in file mode. Caller holds the
-        lock."""
+        lock. ``propose_dupes`` (dream auto-promote only) files write-dedup
+        merge proposals for near-duplicate creates."""
         if self._storage is None:
             return
         from pseudolife_memory.graph import norm_name
@@ -709,7 +711,9 @@ class MemoryService:
             return  # junk-shaped subject: keep the fact, skip the graph node
         n = norm_name(entity)
         if n and self._storage.find_entity(n) is None:
-            self._storage.ensure_entity(n, display=entity.strip())
+            eid = self._storage.ensure_entity(n, display=entity.strip())
+            if propose_dupes:
+                self._propose_write_dedup(eid, entity)
 
     # ------------------------------------------------------------------
     # Tool: search
@@ -1647,8 +1651,8 @@ class MemoryService:
             conf = edge_confidence(raw_src, relation, raw_dst)
             if conf < floor:
                 continue
-            src_e = self._resolve_or_create_entity(raw_src)
-            dst_e = self._resolve_or_create_entity(raw_dst)
+            src_e = self._resolve_or_create_entity(raw_src, propose_dupes=True)
+            dst_e = self._resolve_or_create_entity(raw_dst, propose_dupes=True)
             # Cross-project gate: entities attributed to disjoint projects
             # merely coexist in the shared bank — route the claim to
             # edge_proposals for human review instead of the live graph.
@@ -3084,8 +3088,11 @@ class MemoryService:
             from pseudolife_memory.graph import norm_name
             return self._storage.find_entity(norm_name(entity))
 
-    def _resolve_or_create_entity(self, name: str, etype: str | None = None) -> dict:
-        """Alias-aware find; auto-create on miss. Caller holds the lock."""
+    def _resolve_or_create_entity(self, name: str, etype: str | None = None,
+                                  *, propose_dupes: bool = False) -> dict:
+        """Alias-aware find; auto-create on miss. Caller holds the lock.
+        ``propose_dupes`` (dream paths only) files write-dedup merge
+        proposals when the created name near-duplicates an existing one."""
         from pseudolife_memory.graph import norm_name
         st = self._storage
         n = norm_name(name)
@@ -3094,10 +3101,47 @@ class MemoryService:
             if etype and not found.get("etype"):
                 st.ensure_entity(found["canonical"], etype=etype)
                 found["etype"] = etype
+            found["created"] = False
             return found
         eid = st.ensure_entity(n, display=name.strip(), etype=etype)
+        if propose_dupes:
+            self._propose_write_dedup(eid, name)
         return {"id": eid, "canonical": n, "display": name.strip(),
-                "etype": etype, "aliases": []}
+                "etype": etype, "aliases": [], "created": True}
+
+    def _propose_write_dedup(self, entity_id: int, name: str) -> None:
+        """Advisory write-time dedup: when the dream mints a new entity whose
+        name near-duplicates an existing canonical/display/alias, file an
+        entity_proposals merge row for review (dismissed pairs suppressed;
+        the merge unique index dedupes re-files). Never blocks the write —
+        any failure logs and continues. Caller holds the lock."""
+        import time as _t
+        try:
+            thr = float(self.config.memory.dream.write_dedup_min_jaccard)
+            if thr <= 0:
+                return
+            from pseudolife_memory.graph import degree_counts
+            from pseudolife_memory.memory.graph_review import near_duplicate_names
+            g = self._storage.load_graph()
+            existing = [{**e, "aliases": g["aliases"].get(e["id"], [])}
+                        for e in g["entities"] if e["id"] != entity_id]
+            matches = near_duplicate_names(
+                name, existing, min_jaccard=thr,
+                dismissed=frozenset(self._storage.dismissed_pairs()))
+            if not matches:
+                return
+            deg = degree_counts(g["edges"])
+            now = _t.time()
+            for m in matches[:3]:
+                # Present the fold lower-degree -> higher-degree.
+                a, b = entity_id, m["entity_id"]
+                if deg.get(a, 0) > deg.get(b, 0):
+                    a, b = b, a
+                self._storage.insert_entity_proposal(
+                    "merge", a, b, m["score"],
+                    f"write-dedup: {name!r} ~ {m['display']!r}", now)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("write-dedup scan skipped (%s): %r", exc, name)
 
     def graph_relate(
         self,
@@ -3268,9 +3312,12 @@ class MemoryService:
             keep = {eid for eid, ss in src_map.items() if scope in ss}
             entities = [e for e in entities if e["id"] in keep]
             edges = [e for e in edges if e["src_id"] in keep and e["dst_id"] in keep]
-        return gr.review(edges, entities, src_map, proposals=proposals,
-                         entity_proposals=entity_proposals,
-                         dismissed_pairs=dismissed)
+        out = gr.review(edges, entities, src_map, proposals=proposals,
+                        entity_proposals=entity_proposals,
+                        dismissed_pairs=dismissed)
+        with self._lock:
+            out["recent_merges"] = self._storage.recent_entity_decisions()
+        return out
 
     def graph_dismiss_duplicate(self, a: str, b: str) -> dict[str, Any]:
         """Human verdict on a duplicate finding: these two names are genuinely
@@ -3745,6 +3792,7 @@ class MemoryService:
             entries = self._storage.load_entries()
             dismissed = self._storage.dismissed_pairs()
             prop_keys = self._storage.entity_proposal_keys()
+            pending_props = self._storage.pending_entity_proposals()
         entities, edges = g["entities"], g["edges"]
 
         rescore = gc.rescore_edges(edges, entities)
@@ -3765,6 +3813,10 @@ class MemoryService:
                 mentions=mentions, max_chars=cfg.snippet_max_chars)
         else:
             candidates = link_cands
+        merge_proposals = self._enrich_merge_proposals(
+            pending_props, entities, edges, entries, traces, mentions,
+            scope_map, cfg.max_context_snippets, cfg.snippet_max_chars,
+            include_snippets)
 
         totals = {"entities": len(entities), "edges": len(edges),
                   "candidates": len(candidates)}
@@ -3782,6 +3834,7 @@ class MemoryService:
                     "would_junk": [{"entity": j["display"], "reason": j["reason"],
                                     "already_proposed": ("junk", j["entity_id"]) in prop_keys}
                                    for j in junk],
+                    "merge_proposals": merge_proposals,
                     "candidates": candidates, "totals": totals}
 
         snapshot = self._write_graph_snapshot()
@@ -3813,9 +3866,18 @@ class MemoryService:
                 if self._storage.insert_entity_proposal(
                         "junk", j["entity_id"], None, None, j["reason"], _t.time()) is not None:
                     junk_proposed += 1
+        # Re-read pending merges: the apply loop above may have just inserted
+        # fresh proposals the Step-C triage should see in the same response.
+        with self._lock:
+            pending_props = self._storage.pending_entity_proposals()
+        merge_proposals = self._enrich_merge_proposals(
+            pending_props, entities, edges, entries, traces, mentions,
+            scope_map, cfg.max_context_snippets, cfg.snippet_max_chars,
+            include_snippets)
         return {"applied": True, "rescored": len(rescore), "superseded": superseded,
                 "merged": merged, "merge_proposed": merge_proposed,
                 "junk_proposed": junk_proposed, "snapshot": snapshot,
+                "merge_proposals": merge_proposals,
                 "candidates": candidates, "totals": totals}
 
     def _write_graph_snapshot(self) -> str | None:
@@ -3869,6 +3931,41 @@ class MemoryService:
             c["src_snippets"] = snippets(c["src_id"])
             c["dst_snippets"] = snippets(c["dst_id"])
         return candidates
+
+    def _enrich_merge_proposals(self, pending, entities, edges, entries,
+                                traces, mentions, scope_map, k, max_chars,
+                                include_snippets):
+        """Evidence payload for Step-C merge triage (write-dedup spec): each
+        pending merge proposal with per-side display/etype/degree/scopes and
+        snippets. Presentation follows the STORED direction — ``accept_merge``
+        folds ``from`` into ``into`` exactly as shown (a degree-based
+        re-orientation here would make the model approve the mirror image of
+        what the accept applies). Write-dedup rows are already stored
+        lower-degree → higher-degree at insert time."""
+        from pseudolife_memory.graph import degree_counts
+        deg = degree_counts(edges)
+        by_id = {e["id"]: e for e in entities}
+
+        rows = [p for p in pending if p.get("kind") == "merge"]
+        shaped = [{"src_id": p["entity_id"], "dst_id": p["into_id"]}
+                  for p in rows]
+        if include_snippets:
+            self._attach_candidate_snippets(
+                shaped, entities, entries, traces, k,
+                mentions=mentions, max_chars=max_chars)
+        out = []
+        for p, s in zip(rows, shaped):
+            def side(eid, snips):
+                e = by_id.get(eid) or {}
+                return {"display": e.get("display"), "etype": e.get("etype"),
+                        "degree": deg.get(eid, 0),
+                        "scopes": sorted(scope_map.get(eid, [])),
+                        "snippets": snips if include_snippets else []}
+            out.append({"id": p["id"], "score": p.get("score"),
+                        "reason": p.get("reason"),
+                        "from": side(p["entity_id"], s.get("src_snippets", [])),
+                        "into": side(p["into_id"], s.get("dst_snippets", []))})
+        return out
 
     def graph_propose_links(self, proposals: list[dict]) -> dict[str, Any]:
         """Ingest Step-C subagent link proposals. Each is gated by the SAME mechanism
@@ -3928,7 +4025,9 @@ class MemoryService:
             ok = self._storage.set_proposal_status(proposal_id, "rejected")
         return {"rejected": ok, "id": proposal_id}
 
-    def graph_accept_entity_merge(self, proposal_id: int) -> dict[str, Any]:
+    def graph_accept_entity_merge(self, proposal_id: int, *,
+                                  decided_by: str = "human") -> dict[str, Any]:
+        import time as _t
         with self._lock:
             self._ensure_init()
             if self._storage is None:
@@ -3937,8 +4036,16 @@ class MemoryService:
             if prop is None or prop["status"] != "pending" or prop["kind"] != "merge":
                 return {"accepted": False, "reason": "not_pending", "id": proposal_id}
             disp = {e["id"]: e["display"] for e in self._storage.load_graph()["entities"]}
+            now = _t.time()
+            # Audit BEFORE the merge: the accepted proposal row CASCADEs away
+            # with the folded entity, so merge_decisions is the durable record.
+            self._storage.record_merge_decision(
+                proposal_id, disp.get(prop["entity_id"], "?"),
+                disp.get(prop["into_id"], "?"), "accepted", prop.get("score"),
+                prop.get("reason"), decided_by, now)
             ok = self._storage.merge_entity(prop["entity_id"], prop["into_id"])
-            self._storage.set_entity_proposal_status(proposal_id, "accepted")
+            self._storage.set_entity_proposal_status(
+                proposal_id, "accepted", decided_by=decided_by, decided_at=now)
         return {"accepted": ok, "from": disp.get(prop["entity_id"]),
                 "into": disp.get(prop["into_id"])}
 
@@ -3955,12 +4062,24 @@ class MemoryService:
             self._storage.set_entity_proposal_status(proposal_id, "accepted")
         return {"accepted": ok, "entity": disp.get(prop["entity_id"])}
 
-    def graph_reject_entity_proposal(self, proposal_id: int) -> dict[str, Any]:
+    def graph_reject_entity_proposal(self, proposal_id: int, *,
+                                     decided_by: str = "human") -> dict[str, Any]:
+        import time as _t
         with self._lock:
             self._ensure_init()
             if self._storage is None:
                 return dict(self._GRAPH_UNAVAILABLE)
-            ok = self._storage.set_entity_proposal_status(proposal_id, "rejected")
+            now = _t.time()
+            prop = self._storage.get_entity_proposal(proposal_id)
+            ok = self._storage.set_entity_proposal_status(
+                proposal_id, "rejected", decided_by=decided_by, decided_at=now)
+            if ok and prop is not None and prop.get("kind") == "merge":
+                disp = {e["id"]: e["display"]
+                        for e in self._storage.load_graph()["entities"]}
+                self._storage.record_merge_decision(
+                    proposal_id, disp.get(prop["entity_id"], "?"),
+                    disp.get(prop["into_id"], "?"), "rejected",
+                    prop.get("score"), prop.get("reason"), decided_by, now)
         return {"rejected": ok, "id": proposal_id}
 
     def _recall_vocab(self) -> list[str]:
