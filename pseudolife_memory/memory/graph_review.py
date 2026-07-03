@@ -31,6 +31,42 @@ def classify_edge(edge: dict, *, proposed: bool = False) -> str:
     return "INFERRED"
 
 
+def near_duplicate_names(name, existing, *, min_jaccard=0.6,
+                         dismissed=frozenset()):
+    """Score a candidate name against existing entities (write-time dedup).
+
+    ``existing`` rows are ``{"id", "canonical", "display", "aliases"}``;
+    the best token-Jaccard across canonical/display/aliases wins per entity.
+    ``dismissed`` holds sorted (canonical_a, canonical_b) pairs — human-
+    settled distinct pairs never match. ``min_jaccard <= 0`` disables.
+    Returns ``[{"entity_id", "display", "score"}]`` sorted by score desc."""
+    if min_jaccard is None or min_jaccard <= 0:
+        return []
+    from pseudolife_memory.graph import norm_name
+    cand_tokens = _token_set(name)
+    if not cand_tokens:
+        return []
+    cand_canon = norm_name(name)
+    out = []
+    for e in existing:
+        if tuple(sorted((cand_canon, e.get("canonical") or ""))) in dismissed:
+            continue
+        best = 0.0
+        for variant in [e.get("canonical"), e.get("display"),
+                        *(e.get("aliases") or [])]:
+            toks = _token_set(variant or "")
+            if not toks:
+                continue
+            jac = len(cand_tokens & toks) / len(cand_tokens | toks)
+            if jac > best:
+                best = jac
+        if best >= min_jaccard:
+            out.append({"entity_id": e["id"], "display": e.get("display"),
+                        "score": round(best, 3)})
+    out.sort(key=lambda m: -m["score"])
+    return out
+
+
 def _disp(entities):
     return {e["id"]: e["display"] for e in entities}
 
