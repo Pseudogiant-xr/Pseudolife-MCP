@@ -8,7 +8,8 @@ import { panel } from "../components.js";
 import { donutWithLegend, barRows, sparkline } from "../charts.js";
 
 const CARDS = [
-  { key: "entries", label: "Associative entries", tone: "var(--c-assoc)", route: "stream", sub: (c) => "across 8 bands" },
+  { key: "entries", label: "Associative entries", tone: "var(--c-assoc)", route: "stream",
+    sub: (c) => c.band_count ? `across ${c.band_count} bands` : "continuum" },
   { key: "facts", label: "Canonical facts", tone: "var(--c-cortex)", route: "cortex",
     sub: (c) => c.facts_contested ? `${c.facts_contested} contested` : "cortex" },
   { key: "world", label: "World facts", tone: "var(--c-world)", route: "world",
@@ -45,7 +46,7 @@ export async function renderObservatory(root, ctx) {
 
   mount(root,
     signalsStrip(health, dream, counts),
-    statCards(counts),
+    statCards({ ...counts, band_count: (stats.bands || []).length }),
     el("div", { class: "reveal", style: { display: "grid", gap: "16px", gridTemplateColumns: "1fr", marginTop: "22px" } },
       continuumPanel(stats),
       distributionsPanel(counts, sources),

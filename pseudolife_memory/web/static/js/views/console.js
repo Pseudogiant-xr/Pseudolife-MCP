@@ -66,7 +66,9 @@ function control(k, row) {
   const step = k.type === "int" ? (k.step || 1) : (k.step || 0.01);
   return el("input", { type: "number", value: k.value, name: k.path, "aria-label": k.label,
     min: k.min, max: k.max, step,
-    oninput: (e) => onChange(e.target.value === "" ? "" : Number(e.target.value)) });
+    // An emptied field is "no edit", not a value — sending "" to the server
+    // produced a raw float('') conversion error in the save toast.
+    oninput: (e) => onChange(e.target.value === "" ? originals.get(k.path) : Number(e.target.value)) });
 }
 
 function defaultHint(k, row) {

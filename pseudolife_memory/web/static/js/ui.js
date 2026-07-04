@@ -8,7 +8,8 @@ function toastHost() {
   return h;
 }
 export function toast(message, kind = "info", ms = 3800) {
-  const node = el("div", { class: `toast ${kind}` }, message);
+  // role=status so screen readers announce mutation results.
+  const node = el("div", { class: `toast ${kind}`, role: "status" }, message);
   toastHost().appendChild(node);
   setTimeout(() => {
     node.style.transition = "opacity .3s, transform .3s";
@@ -19,19 +20,39 @@ export function toast(message, kind = "info", ms = 3800) {
 
 // ── Modal ────────────────────────────────────────────────────────────────
 export function closeModal() {
-  document.querySelector(".modal-bg")?.remove();
+  const bg = document.querySelector(".modal-bg");
+  if (!bg) return;
+  bg.remove();
+  bg._onClose?.();       // fires on EVERY close path (button, backdrop, ESC)
+  bg._restoreFocus?.();
 }
-export function openModal({ title, body, actions = [] }) {
+export function openModal({ title, body, actions = [], onClose = null }) {
   closeModal();
+  const opener = document.activeElement;
   const bg = el("div", { class: "modal-bg",
     onclick: (e) => { if (e.target === bg) closeModal(); } });
+  bg._onClose = onClose;
+  bg._restoreFocus = () => { if (opener && document.contains(opener)) opener.focus?.(); };
   const foot = el("div", { class: "modal-foot" },
     actions.map((a) =>
       el("button", { class: `btn ${a.kind || ""}`, onclick: () => a.onClick?.() }, a.label)));
-  bg.appendChild(el("div", { class: "modal" },
+  const box = el("div", { class: "modal", role: "dialog", "aria-modal": "true",
+    "aria-label": typeof title === "string" ? title : "Dialog" },
     el("div", { class: "modal-head" }, title),
     el("div", { class: "modal-body" }, body),
-    actions.length ? foot : null));
+    actions.length ? foot : null);
+  // Minimal focus trap: Tab cycles within the dialog.
+  bg.addEventListener("keydown", (e) => {
+    if (e.key !== "Tab") return;
+    const f = [...box.querySelectorAll(
+      "button, input, select, textarea, a[href], [tabindex]:not([tabindex='-1'])",
+    )].filter((n) => !n.disabled);
+    if (!f.length) return;
+    const first = f[0], last = f[f.length - 1];
+    if (e.shiftKey && document.activeElement === first) { last.focus(); e.preventDefault(); }
+    else if (!e.shiftKey && document.activeElement === last) { first.focus(); e.preventDefault(); }
+  });
+  bg.appendChild(box);
   document.body.appendChild(bg);
   bg.querySelector("input,select,textarea,button")?.focus();
   return bg;
@@ -40,13 +61,17 @@ export function openModal({ title, body, actions = [] }) {
 export function confirmDialog({ title = "Are you sure?", message = "", danger = false,
   confirmLabel = "Confirm" } = {}) {
   return new Promise((resolve) => {
+    // Resolve BEFORE closeModal so the onClose(false) fallback is a no-op for
+    // button paths; backdrop/ESC closes reach onClose and settle as false
+    // (previously those paths left the caller's await suspended forever).
     openModal({
       title,
       body: el("div", { class: "dim" }, message),
+      onClose: () => resolve(false),
       actions: [
-        { label: "Cancel", onClick: () => { closeModal(); resolve(false); } },
+        { label: "Cancel", onClick: () => { resolve(false); closeModal(); } },
         { label: confirmLabel, kind: danger ? "danger" : "primary",
-          onClick: () => { closeModal(); resolve(true); } },
+          onClick: () => { resolve(true); closeModal(); } },
       ],
     });
   });
@@ -60,7 +85,8 @@ export function closeDrawer() {
 export function openDrawer({ title, accent = "var(--accent)", body }) {
   closeDrawer();
   const bg = el("div", { class: "drawer-bg", onclick: closeDrawer });
-  const d = el("div", { class: "drawer" },
+  const d = el("div", { class: "drawer", role: "dialog",
+    "aria-label": typeof title === "string" ? title : "Details" },
     el("div", { class: "drawer-head" },
       el("span", { class: "nav-dot", style: { "--dot": accent } }),
       el("h3", {}, title),

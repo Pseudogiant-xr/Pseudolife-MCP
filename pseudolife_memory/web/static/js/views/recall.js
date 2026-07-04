@@ -20,6 +20,27 @@ function draw(root) {
   mount(root,
     el("div", { class: "toolbar" }, modeBar, el("span", { class: "grow" })),
     controls, resultsEl);
+  if (!state.q && !state.source) intro(root);
+}
+
+// First-visit explainer: what the two modes do, with runnable examples.
+function intro(root) {
+  const example = (q) => el("button", { class: "facet",
+    onclick: () => { state.mode = "hops"; state.q = q; draw(root); runHops(q); } }, q);
+  mount(resultsEl, el("div", { class: "panel", style: { padding: "18px" } },
+    el("p", { class: "dim", style: { marginTop: 0 } },
+      "Recall walks the knowledge graph instead of running a single search: ",
+      el("strong", {}, "multi-hop"),
+      " resolves the entities named in your query (the seeds), expands outward ",
+      "along their relations, and re-queries — surfacing bridging chains a ",
+      "one-shot search can't reach. ",
+      el("strong", {}, "path between two"),
+      " traces the shortest relation path linking two entities you name."),
+    el("p", { class: "dim" }, "Try one:"),
+    el("div", { class: "facets" },
+      example("what depends on the daemon"),
+      example("how memories become canonical facts"),
+      example("what changed recently and why"))));
 }
 
 function modeBtn(v, label, root) {
@@ -55,19 +76,45 @@ async function runHops(q) {
     resultsEl.appendChild(el("div", { class: "chip warn", style: { marginBottom: "12px" } },
       "low confidence — no seed entity resolved; the agent would fall back to plain search"));
 
+  const seeds = r.seeds || [];
   resultsEl.appendChild(el("div", { class: "section-h" },
     el("h2", {}, "Seeds"),
-    el("span", { class: "sub" }, `${(r.seeds || []).length} · ${r.iterations || 0} iteration${r.iterations === 1 ? "" : "s"}`)));
-  resultsEl.appendChild(el("div", { class: "facets" },
-    (r.seeds || []).length ? r.seeds.map((s) => el("span", { class: "chip" }, s)) : el("span", { class: "dim" }, "none")));
+    el("span", { class: "sub" },
+      `${seeds.length} · ${r.iterations || 0} iteration${r.iterations === 1 ? "" : "s"} — entities resolved from the query; the walk starts here`)));
+  const SEED_CAP = 15;
+  const seedRow = el("div", { class: "facets" },
+    seeds.length ? seeds.slice(0, SEED_CAP).map((s) => el("span", { class: "chip" }, s))
+                 : el("span", { class: "dim" }, "none"));
+  if (seeds.length > SEED_CAP) {
+    const more = el("button", { class: "facet" }, `+${seeds.length - SEED_CAP} more`);
+    more.onclick = () => {
+      for (const s of seeds.slice(SEED_CAP)) seedRow.insertBefore(el("span", { class: "chip" }, s), more);
+      more.remove();
+    };
+    seedRow.appendChild(more);
+  }
+  resultsEl.appendChild(seedRow);
 
   if ((r.paths || []).length) {
     resultsEl.appendChild(el("div", { class: "section-h" }, el("h2", {}, "Bridging paths")));
     for (const p of r.paths) resultsEl.appendChild(chainFromNodes(p));
   }
   if ((r.entities || []).length) {
+    // Entities that carry canonical facts are the substance — full cards.
+    // Fact-less ones are still real graph hits but read as noise when each
+    // gets a whole panel; collapse them into one compact chip block.
+    const withFacts = r.entities.filter((e) => (e.facts || []).length);
+    const bare = r.entities.filter((e) => !(e.facts || []).length);
     resultsEl.appendChild(el("div", { class: "section-h" }, el("h2", {}, "Entities"), el("span", { class: "sub" }, `${r.entities.length}`)));
-    for (const ent of r.entities) resultsEl.appendChild(entityCard(ent));
+    for (const ent of withFacts) resultsEl.appendChild(entityCard(ent));
+    if (bare.length) {
+      resultsEl.appendChild(el("div", { class: "panel", style: { marginBottom: "12px", padding: "12px 18px" } },
+        el("div", { class: "dim", style: { marginBottom: "8px", fontSize: ".84rem" } },
+          `${bare.length} related ${bare.length === 1 ? "entity" : "entities"} without canonical facts`),
+        el("div", { class: "facets" }, bare.map((ent) =>
+          el("button", { class: "facet", title: "open in graph",
+            onclick: () => { location.hash = "#/graph?entity=" + encodeURIComponent(ent.entity); } }, ent.entity)))));
+    }
   }
   if ((r.texts || []).length) {
     resultsEl.appendChild(el("div", { class: "section-h" }, el("h2", {}, "Surfaced text")));

@@ -155,9 +155,11 @@ function placeholder(r) {
 // ── refresh / shortcuts ─────────────────────────────────────────────────────
 document.getElementById("refresh-btn").onclick = () => { refreshCounts(); renderRoute(); };
 document.addEventListener("keydown", (e) => {
-  if (e.target.matches("input,textarea,select")) return;
+  if (e.target instanceof Element && e.target.matches("input,textarea,select")) return;
+  // Don't shadow browser shortcuts (Ctrl/Cmd+R reload, Ctrl+1..9 tab switch).
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.key === "r") { refreshCounts(); renderRoute(); }
-  const n = parseInt(e.key, 10);
+  const n = e.key === "0" ? 10 : parseInt(e.key, 10);
   if (n >= 1 && n <= NAV.length) location.hash = "#/" + NAV[n - 1].id;
 });
 
