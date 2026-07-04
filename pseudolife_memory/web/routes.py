@@ -118,7 +118,9 @@ class ConsoleRoutes:
         g("/api/world", lambda q, b: self._limited(svc.world_dump, _i(q, "limit", 500)))
 
         # ---- lessons ----
-        g("/api/lessons", lambda q, b: svc.lessons_dump(limit=_i(q, "limit", 500)))
+        g("/api/lessons",
+          lambda q, b: self._limited(
+              lambda: svc.lessons_dump(limit=100000), _i(q, "limit", 500)))
 
         # ---- session-start briefing (REST fast-path for `pseudolife-mcp briefing`) ----
         g("/api/briefing", lambda q, b: svc.session_briefing(
@@ -225,14 +227,16 @@ class ConsoleRoutes:
         }
 
     def _facts(self, limit: int) -> dict:
-        dump = self.svc.cortex_dump()
-        entries = dump.get("entries", [])[: max(0, int(limit))]
-        return {"count": len(entries), "entries": entries}
+        return self._limited(self.svc.cortex_dump, limit)
 
     def _limited(self, fn: Callable[[], dict], limit: int) -> dict:
+        """Cap a dump at ``limit`` rows, telling the client how many exist so
+        it can say "showing first N of M" instead of silently truncating."""
         dump = fn()
-        entries = dump.get("entries", [])[: max(0, int(limit))]
-        return {"count": len(entries), "entries": entries}
+        rows = dump.get("entries", [])
+        entries = rows[: max(0, int(limit))]
+        return {"count": len(entries), "total": len(rows),
+                "truncated": len(entries) < len(rows), "entries": entries}
 
     def _search(self, q: dict) -> dict:
         """memory_search, with the cortex-first block the agent sees."""

@@ -32,8 +32,10 @@ export async function renderCortex(root, ctx) {
   }
   function paint() {
     const entries = (state.data.entries || []).filter(matches);
+    const fetched = (state.data.entries || []).length;
     note.textContent = `${entries.length} fact${entries.length === 1 ? "" : "s"}` +
-      (entries.length !== (state.data.entries || []).length ? ` of ${state.data.entries.length}` : "");
+      (entries.length !== fetched ? ` of ${fetched}` : "") +
+      (state.data.truncated ? ` · first ${fetched} of ${state.data.total} loaded` : "");
     const groups = groupByEntity(entries);
     clear(list);
     if (!groups.length) { list.appendChild(emptyBlock("No matching facts", "Try a different filter.")); return; }

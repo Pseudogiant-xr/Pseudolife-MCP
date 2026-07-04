@@ -11,7 +11,7 @@ import { panel, badge, tagBadge } from "./components.js";
 import { api } from "./api.js";
 
 const SEV = { warn: "var(--c-lessons)", info: "var(--c-assoc)", danger: "var(--c-world)" };
-const CHIP = { background: "var(--surface-1, rgba(127,127,127,.12))", padding: "2px 7px",
+const CHIP = { background: "var(--bg-2)", padding: "2px 7px",
   borderRadius: "6px", fontSize: "12px" };
 
 export function reviewPanel(data, onAct) {
@@ -65,7 +65,7 @@ function btn(label, { kind, onClick }) {
 // Returns { chip, drawer } so the caller can place the drawer under the row.
 function entityRef(name) {
   const drawer = el("div", { style: { display: "none", margin: "2px 0 6px 14px",
-    paddingLeft: "8px", borderLeft: "2px solid var(--surface-2, rgba(127,127,127,.25))" } });
+    paddingLeft: "8px", borderLeft: "2px solid var(--line-2)" } });
   let loaded = false;
   async function toggle() {
     const opening = drawer.style.display === "none";
@@ -156,7 +156,7 @@ function selectableList(items, { row, filterText, onChange }) {
   const emit = () => onChange && onChange(selected.size);
   const rows = [];
   const listEl = el("div", { style: { maxHeight: "280px", overflowY: "auto", marginTop: "6px",
-    border: "1px solid var(--surface-2, rgba(127,127,127,.2))", borderRadius: "8px", padding: "4px 6px" } });
+    border: "1px solid var(--line-2)", borderRadius: "8px", padding: "4px 6px" } });
   for (const item of items) {
     const ftext = String(filterText(item) || "");
     const cb = el("input", { type: "checkbox", name: "review-select",
@@ -200,7 +200,7 @@ function selectableBody(f, onChange) {
 function findingRow(f, onAct) {
   const acc = SEV[f.severity] || SEV.info;
   const frame = (buttons, inner) => el("div", { style: { borderLeft: `3px solid ${acc}`,
-      padding: "8px 10px", marginBottom: "8px", background: "var(--surface-1, rgba(127,127,127,.06))",
+      padding: "8px 10px", marginBottom: "8px", background: "var(--bg-2)",
       borderRadius: "0 8px 8px 0" } },
     el("div", { style: { display: "flex", alignItems: "center", gap: "8px" } },
       badge(String(f.type || "").replace(/_/g, " ")),

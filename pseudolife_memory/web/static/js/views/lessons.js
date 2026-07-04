@@ -27,7 +27,8 @@ export async function renderLessons(root) {
   }
   function paint() {
     const entries = (state.data.entries || []).filter(matches);
-    note.textContent = `${entries.length} lesson${entries.length === 1 ? "" : "s"}`;
+    note.textContent = `${entries.length} lesson${entries.length === 1 ? "" : "s"}` +
+      (state.data.truncated ? ` · first ${(state.data.entries || []).length} of ${state.data.total} loaded` : "");
     clear(list);
     if (!entries.length) { list.appendChild(emptyBlock("No lessons yet", "Outcome signals are distilled into lessons by the dream pass.")); return; }
     const groups = new Map();

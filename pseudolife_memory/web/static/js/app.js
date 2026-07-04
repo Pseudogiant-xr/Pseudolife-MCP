@@ -53,7 +53,7 @@ document.getElementById("theme-toggle").onclick = () => {
 
 // ── token ───────────────────────────────────────────────────────────────────
 function openTokenModal() {
-  const input = el("input", { type: "text", value: getToken(), placeholder: "PSEUDOLIFE_MCP_TOKEN (blank if none)" });
+  const input = el("input", { type: "password", value: getToken(), placeholder: "PSEUDOLIFE_MCP_TOKEN (blank if none)" });
   openModal({
     title: "Access token",
     body: el("div", {},
@@ -108,8 +108,11 @@ function paintStatus(overview) {
   if (h.storage) chips.push(el("span", { class: "chip" }, el("span", { class: "k" }, "store"), " " + h.storage));
   if (h.persist_errors) chips.push(el("span", { class: "chip bad" }, "persist errors: " + h.persist_errors));
   if (dream.would_fire) chips.push(el("span", { class: "chip warn" }, el("span", { class: "pulse-dot" }), " dream ready"));
-  const ok = el("span", { class: "chip ok" }, el("span", { class: "pulse-dot" }), " live");
-  chips.unshift(ok);
+  // No overview means the fetch failed — say so instead of claiming "live".
+  const state = overview
+    ? el("span", { class: "chip ok" }, el("span", { class: "pulse-dot" }), " live")
+    : el("span", { class: "chip bad" }, "offline");
+  chips.unshift(state);
   mount(statusEl, chips);
 }
 

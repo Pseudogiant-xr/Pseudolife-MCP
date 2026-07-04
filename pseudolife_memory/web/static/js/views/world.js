@@ -22,7 +22,8 @@ export async function renderWorld(root) {
   function paint() {
     const entries = (state.data.entries || []).filter((w) =>
       !state.q || `${w.entity} ${w.attribute} ${w.value}`.toLowerCase().includes(state.q.toLowerCase()));
-    note.textContent = `${entries.length} world fact${entries.length === 1 ? "" : "s"}`;
+    note.textContent = `${entries.length} world fact${entries.length === 1 ? "" : "s"}` +
+      (state.data.truncated ? ` · first ${(state.data.entries || []).length} of ${state.data.total} loaded` : "");
     clear(list);
     if (!entries.length) { list.appendChild(emptyBlock("No world facts", "Add cited external facts via memory_world_set.")); return; }
     entries.sort((a, b) => `${a.entity}.${a.attribute}`.localeCompare(`${b.entity}.${b.attribute}`));
