@@ -167,6 +167,115 @@ off.
 
 ---
 
+# LongMemEval knowledge-update benchmark (`longmemeval_bench.py`)
+
+The first **external** benchmark: the knowledge-update subset (78 questions)
+of [LongMemEval](https://arxiv.org/abs/2410.10813) — the ability the HLC
+supersession spine is built for. Everything runs **locally** (extractor,
+answerer, judge); nothing leaves the machine.
+
+## Dataset
+
+Download from HuggingFace (`xiaowu0162/longmemeval-cleaned`) into
+`evals/data/` (gitignored):
+
+- `longmemeval_oracle.json` — evidence-only sessions (~15MB). Isolates
+  extraction + supersession quality with no retrieval noise.
+- `longmemeval_s_cleaned.json` — full haystacks (~265MB), median ~48
+  sessions / ~122k tokens per question. The realistic setting.
+
+## Design
+
+Three arms answer every question from the same ingested memory:
+
+| arm | context | measures |
+|-----|---------|----------|
+| `rag` | top-6 raw turns (vector search) | naive-RAG baseline — **never touches the extractor**, so it doubles as a cross-run control |
+| `cortex` | top-8 canonical facts, each with its supersession chain (`svc.history`) appended | the fact spine alone |
+| `hybrid` | facts + top-3 raw turns | the product posture |
+
+Model roles are split so extraction quality is the **only** variable:
+
+- **Extractor** (varies): `gemma-e2b` (the shipped CPU sidecar's model,
+  GPU-served for bench speed — ladder-verified identical output at
+  temperature 0) = the **floor**; `qwen-27b` = the local **ceiling**.
+- **Answerer + judge** (constant): Qwen3.6-27B for every run, LongMemEval's
+  LLM-as-judge protocol. All calls request `temperature: 0`.
+
+Serving config for reproducibility: Qwen3.6-27B **Unsloth UD-Q4_K_XL**
+(~4.5bpw) on a llama.cpp MTP fork with 4.25-bit (`tbq4_0`) KV cache.
+Both quantizations trade some fidelity for fitting 24GB — treat the
+ceiling as "27B-class local", not "27B at BF16".
+
+Ingestion mirrors the product cadence: turns are stored session-by-session
+in chronological order and the dream consolidates after each session.
+Results are per-question JSONL (append-only, atomic rewrite) so any run can
+be killed and resumed. `--phase extract` / `--phase answer` split the work
+so only one model needs the GPU at a time; `--tag` namespaces experiment
+runs. Every extract run also dumps the question's full fact bank (values +
+history chains) to `results/banks/` and stamps rows with
+`answer_in_current_fact` / `answer_in_history_only`, so a failure is
+attributable to never-extracted vs overwritten vs not-retrieved.
+
+```bash
+# full run, one extractor
+PYTHONPATH=. python evals/longmemeval_bench.py --dataset oracle --extractor qwen-27b
+# split phases (exclusive GPU tenancy), tagged experiment
+PYTHONPATH=. python evals/longmemeval_bench.py --dataset s --extractor gemma-e2b --phase extract --tag exp1
+PYTHONPATH=. python evals/longmemeval_bench.py --dataset s --extractor gemma-e2b --phase answer --tag exp1
+# report from existing results
+PYTHONPATH=. python evals/longmemeval_bench.py --dataset s --extractor qwen-27b --report
+# the whole floor+ceiling night, unattended (watchdog restarts crashed servers)
+evals\overnight_longmemeval.ps1
+```
+
+`retrieval_sweep.py` replays cortex retrieval over the dumped banks under
+different `top_k` × `min_score` knobs **offline** — fact embeddings are a
+pure function of fact text and cortex search is plain cosine, so the replay
+is exact and needs no re-extraction (and no GPU).
+
+## Findings — 2026-07-04
+
+Accuracy / context-tokens-per-question, 78 questions, judge = local
+Qwen3.6-27B:
+
+| dataset | extractor | rag (control) | cortex | hybrid |
+|---|---|---|---|---|
+| oracle | qwen-27b (ceiling) | 0.615 / 1638 | 0.564 / **59** | **0.705** / 979 |
+| oracle | gemma-e2b (floor) | 0.564 / 1638 | 0.192 / 112 | 0.474 / 1031 |
+| s | qwen-27b | 0.321 / 2056 | 0.205 / 27 | **0.372** / 1114 |
+| s | gemma-e2b | 0.346 / 2076 | 0.141 / 142 | 0.308 / 1229 |
+
+- **Hybrid beats naive RAG on both datasets with the ceiling extractor** —
+  +9pp on oracle at ~40% less context. Cortex alone reaches 92% of RAG's
+  oracle accuracy on **3.6%** of its token budget (59 vs 1638 tok/q).
+- **Extraction quality is the bottleneck, isolated causally**: the RAG
+  control stays flat across extractors (0.56–0.62; it never touches the
+  extractor) while cortex collapses 0.564 → 0.192 when the extractor
+  shrinks. The retrieval spine is fine; what goes *into* it decides
+  everything. (This is the measured case for pointing the dream at a
+  bigger local model — see the README's "Upgrading the extractor".)
+- **Supersession chains matter**: surfacing each fact's earlier values
+  lifted the whole board vs current-value-only contexts (hybrid 0.590 →
+  0.705 on oracle) — knowledge-update questions ask about the original
+  value as often as the current one. The pre-history baseline is kept at
+  `results/longmemeval-ku-oracle.v1-nohistory.jsonl`.
+- **Abstention holds**: 6/6 abstention variants correct in the hybrid arm
+  on both datasets.
+- **Known `_s` gap under diagnosis**: at `min_score 0.3`, 45/78 haystack
+  questions retrieve zero cortex facts (terse canonical fact strings score
+  low cosine against verbose questions) and supersession churn is ~10×
+  oracle's (970–1245 events). Both are being worked with the bank-dump
+  diagnostics + offline sweep.
+
+**Comparability caveat:** published LongMemEval numbers (TiMem 76.9%,
+EverMemOS 83% overall) use GPT-4o-class answerers/judges and all 500
+questions; these runs are all-local (27B answerer, 4-bit quant) on the
+78-question knowledge-update slice. Compare arms and extractors *within*
+this table, not against leaderboards.
+
+---
+
 # Lesson-synthesis benchmark (`lesson_synthesis_bench.py`)
 
 A separate eval for the **procedural** path (schema v10): how well does each model

@@ -1112,6 +1112,33 @@ never touches your real bank. Point them elsewhere with
 547; without any Postgres, the PG suites skip and the pure-logic suites still
 pass.
 
+## Benchmarks
+
+Measured on the **knowledge-update subset of
+[LongMemEval](https://arxiv.org/abs/2410.10813)** (78 questions) — the
+"user's facts change over time" ability the HLC supersession spine exists
+for. Everything local: extraction, answering, and LLM-as-judge grading all
+run on the author's own hardware (judge = Qwen3.6-27B at temperature 0),
+so compare *within* the table, not against GPT-4o-judged leaderboards.
+
+On the oracle variant (evidence sessions only), with the local-ceiling
+extractor:
+
+| arm | accuracy | context tokens/question |
+|-----|----------|------------------------|
+| naive RAG (top-6 turns) | 0.615 | 1638 |
+| cortex facts only | 0.564 | **59** |
+| **hybrid (facts + top-3 turns)** | **0.705** | 979 |
+
+The consolidated-facts posture beats naive RAG by 9 points while reading
+~40% of the context — and the fact spine alone delivers 92% of RAG's
+accuracy on **3.6% of its token budget**. Running floor (Gemma 4 E2B, the
+default CPU sidecar) vs ceiling (Qwen3.6-27B) extractors with the RAG arm
+as a fixed control isolates **extraction quality as the dominant factor**
+in fact-spine accuracy — the measured case for the "Upgrading the
+extractor" section above. Full methodology, the harder full-haystack
+(`_s`) results, and every finding: [`evals/README.md`](evals/README.md).
+
 ## Cortex Console (web UI)
 
 An operator dashboard served by the daemon itself — point a browser at
