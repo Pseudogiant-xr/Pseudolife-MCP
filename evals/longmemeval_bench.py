@@ -40,6 +40,7 @@ Usage (repo root):
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 import os
 import re
@@ -137,8 +138,54 @@ def load_questions(dataset: str) -> list[dict]:
     return [q for q in data if q["question_type"] == "knowledge-update"]
 
 
-def out_file(dataset: str, extractor: str) -> Path:
-    return RESULTS_DIR / f"longmemeval-ku-{dataset}-{extractor}.jsonl"
+def out_file(dataset: str, extractor: str, tag: str = "") -> Path:
+    suffix = f"-{tag}" if tag else ""
+    return RESULTS_DIR / f"longmemeval-ku-{dataset}-{extractor}{suffix}.jsonl"
+
+
+def bank_dir(dataset: str, extractor: str, tag: str = "") -> Path:
+    suffix = f"-{tag}" if tag else ""
+    return RESULTS_DIR / "banks" / f"{dataset}-{extractor}{suffix}"
+
+
+def _norm_text(s) -> str:
+    return re.sub(r"\s+", " ", str(s).lower().strip())
+
+
+def dump_bank(svc, q: dict, path: Path) -> list[dict]:
+    """Persist the question's full fact bank (with per-slot history chains).
+
+    Fact embeddings are encode_single(f"{entity} {attribute} {value}") and
+    cortex search is plain cosine over them, so this dump is sufficient to
+    replay retrieval offline EXACTLY under different top_k / min_score."""
+    facts = svc.cortex_dump().get("entries", [])
+    for f in facts:
+        f.pop("source_entries", None)             # bulky, not needed offline
+        try:
+            versions = svc.history(f["entity"], f["attribute"]).get("versions", [])
+            f["history"] = [v.get("value") for v in versions]  # oldest→newest
+        except Exception:  # noqa: BLE001 — history is garnish, never fatal
+            f["history"] = [f.get("value")]
+    payload = {"question_id": q["question_id"], "question": q["question"],
+               "answer": q["answer"], "question_date": q["question_date"],
+               "facts": facts}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with gzip.open(path, "wt", encoding="utf-8") as fh:
+        json.dump(payload, fh, ensure_ascii=False)
+    return facts
+
+
+def diagnose_bank(facts: list[dict], answer) -> dict:
+    """Where does the gold answer live? Splits a failure into never-extracted
+    (nowhere in the bank), overwritten (history only), or not-retrieved
+    (in a current fact but absent from the served context)."""
+    ans = _norm_text(answer)
+    in_current = any(ans in _norm_text(f.get("value", "")) for f in facts)
+    in_history = any(ans in _norm_text(v)
+                     for f in facts for v in (f.get("history") or [])[:-1])
+    return {"bank_facts": len(facts),
+            "answer_in_current_fact": in_current,
+            "answer_in_history_only": (in_history and not in_current)}
 
 
 def load_rows(path: Path) -> list[dict]:
@@ -254,7 +301,7 @@ def answer_and_judge(row: dict) -> dict:
 
 
 def run_extract(dataset: str, limit: int | None, extractor_name: str,
-                do_answer: bool) -> None:
+                do_answer: bool, tag: str = "") -> None:
     ex_url = EXTRACTORS[extractor_name]
     if not probe(ex_url):
         sys.exit(f"no extractor server at {ex_url} — start it first")
@@ -265,7 +312,7 @@ def run_extract(dataset: str, limit: int | None, extractor_name: str,
     questions = load_questions(dataset)
     if limit:
         questions = questions[:limit]
-    out_path = out_file(dataset, extractor_name)
+    out_path = out_file(dataset, extractor_name, tag)
     done = {r["question_id"] for r in load_rows(out_path)}
     print(f"{len(questions)} knowledge-update questions, extractor="
           f"{extractor_name} ({len(done)} already done, resuming)", flush=True)
@@ -281,6 +328,8 @@ def run_extract(dataset: str, limit: int | None, extractor_name: str,
                                           timeout_seconds=600.0)
         tally = ingest_and_dream(svc, extractor, q, ex_url)
         contexts = build_contexts(svc, q["question"])
+        facts = dump_bank(svc, q, bank_dir(dataset, extractor_name, tag)
+                          / f"{q['question_id']}.json.gz")
         svc.flush()
         row = {
             "question_id": q["question_id"],
@@ -293,6 +342,7 @@ def run_extract(dataset: str, limit: int | None, extractor_name: str,
             "contexts": contexts,
             "consolidation": tally,
             "wall_seconds": round(time.perf_counter() - t_start, 1),
+            **diagnose_bank(facts, q["answer"]),
         }
         marks = "extracted"
         if do_answer:
@@ -306,10 +356,10 @@ def run_extract(dataset: str, limit: int | None, extractor_name: str,
               f"{tally['superseded']} superseded)", flush=True)
 
 
-def run_answer(dataset: str, extractor_name: str) -> None:
+def run_answer(dataset: str, extractor_name: str, tag: str = "") -> None:
     if not probe(QWEN_URL):
         sys.exit(f"no answer/judge server at {QWEN_URL} — start it first")
-    out_path = out_file(dataset, extractor_name)
+    out_path = out_file(dataset, extractor_name, tag)
     rows = load_rows(out_path)
     pending = [r for r in rows if "rag_correct" not in r]
     print(f"answer phase: {len(pending)} of {len(rows)} rows pending", flush=True)
@@ -321,14 +371,15 @@ def run_answer(dataset: str, extractor_name: str) -> None:
         print(f"[{i + 1}/{len(pending)}] {row['question_id']}  {marks}", flush=True)
 
 
-def report(dataset: str, extractor_name: str) -> None:
-    out_path = out_file(dataset, extractor_name)
+def report(dataset: str, extractor_name: str, tag: str = "") -> None:
+    out_path = out_file(dataset, extractor_name, tag)
     rows = [r for r in load_rows(out_path) if "rag_correct" in r]
     if not rows:
         sys.exit(f"no judged results in {out_path}")
     n = len(rows)
+    label = f"{extractor_name}{f' [{tag}]' if tag else ''}"
     print(f"\nLongMemEval knowledge-update — {dataset}, extractor="
-          f"{extractor_name} ({n} questions)")
+          f"{label} ({n} questions)")
     print(f"{'arm':<10}{'accuracy':>10}{'ctx tok/q':>12}")
     summary = {"dataset": dataset, "extractor": extractor_name, "n": n,
                "arms": {}}
@@ -341,9 +392,8 @@ def report(dataset: str, extractor_name: str) -> None:
     sup = sum(r["consolidation"]["superseded"] for r in rows)
     print(f"supersessions across runs: {sup}")
     summary["superseded_total"] = sup
-    (RESULTS_DIR / f"longmemeval-ku-{dataset}-{extractor_name}"
-     ".summary.json").write_text(json.dumps(summary, indent=2),
-                                 encoding="utf-8")
+    out_path.with_suffix("").with_suffix(".summary.json").write_text(
+        json.dumps(summary, indent=2), encoding="utf-8")
 
 
 def main() -> int:
@@ -356,17 +406,20 @@ def main() -> int:
                     help="run only the first N questions (smoke test)")
     ap.add_argument("--report", action="store_true",
                     help="summarise existing results instead of running")
+    ap.add_argument("--tag", default="",
+                    help="namespace suffix for output files/banks "
+                         "(e.g. 'diag' — keeps experiment runs apart)")
     args = ap.parse_args()
     if args.report:
-        report(args.dataset, args.extractor)
+        report(args.dataset, args.extractor, args.tag)
         return 0
     if args.phase == "answer":
-        run_answer(args.dataset, args.extractor)
+        run_answer(args.dataset, args.extractor, args.tag)
     else:
         run_extract(args.dataset, args.limit, args.extractor,
-                    do_answer=(args.phase == "full"))
+                    do_answer=(args.phase == "full"), tag=args.tag)
     if args.phase != "extract":
-        report(args.dataset, args.extractor)
+        report(args.dataset, args.extractor, args.tag)
     return 0
 
 

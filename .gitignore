@@ -26,6 +26,9 @@ evals/data/
 # Overnight-runner console logs (results JSONLs are committed, raw logs not)
 evals/results/*.log
 
+# Per-question fact-bank dumps (diagnostic, regenerable, ~MBs)
+evals/results/banks/
+
 # Cortex Console dev-server scratch (fixture config writes)
 pseudolife_memory/web/.devdata/
 *.bak
