@@ -247,6 +247,9 @@ def memory_search(
     )
     # Cortex-first: surface canonical facts above associative recall, and drop
     # any recall hit that merely restates a surfaced fact (currency, not noise).
+    # ``cortex`` is part of the documented return shape, so it is always
+    # present — an empty list on a miss, never a missing key.
+    result.setdefault("cortex", [])
     cc = service.config.memory.cortex
     if cc.enabled and cc.search_first and (query or "").strip():
         facts = service.cortex_search(query, top_k=5, min_score=cc.guard_min_score).get("entries", [])
@@ -322,7 +325,8 @@ def memory_stats() -> dict[str, Any]:
     return service.stats()
 
 
-@_tool()
+@_tool(core=True)  # core memory_fact_get returns source_entries ids —
+# core mode must be able to dereference them.
 def memory_get(entry_id: int) -> dict[str, Any]:
     """Dereference a memory id (from search results or a fact's
     ``source_entries``) to the full stored episode plus
@@ -507,7 +511,8 @@ def memory_outcome(
         detail: What worked / what the dead-end was.
         polarity: ``+`` do-this | ``-`` avoid; usually omit (inferred).
 
-    Returns: ``{recorded, signal_id, task, outcome}``.
+    Returns: ``{recorded, signal_id, task, outcome}``. Requires Postgres
+    storage — file mode returns ``{recorded: false, reason}``.
     """
     return service.record_outcome(
         task, outcome, about=about, detail=detail, polarity=polarity)
@@ -712,7 +717,7 @@ def memory_episode_end() -> dict[str, Any]:
     return service.episode_end()
 
 
-@_tool()
+@_tool(core=True)  # the recommended workflow names the session early.
 def memory_session_title(title: str) -> dict[str, Any]:
     """Name THIS session's auto-opened episode (default titles are
     generic). Call once at the start of work — e.g. ``"PseudoLife-MCP"`` or

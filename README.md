@@ -445,10 +445,13 @@ reliably — without the agent having to remember:
    history is repairable over REST: `POST /api/episodes/rename` and
    `POST /api/episodes/merge`. Set `TZ` in `ops/.env` for local time.
 
-One command installs the briefing hook (PowerShell 7):
+One command installs the briefing hook:
 
 ```powershell
-.\ops\install-hook.ps1
+.\ops\install-hook.ps1     # Windows (PowerShell 7)
+```
+```bash
+./ops/install-hook.sh      # Linux / macOS
 ```
 
 It backs up your `settings.json`, then adds the hook **alongside** any existing
@@ -463,7 +466,7 @@ Prefer to wire it by hand? The briefing's `--hook-json` flag emits the
   "hooks": {
     "SessionStart": [
       { "hooks": [
-        { "type": "command", "command": "pseudolife-mcp briefing --hook-json", "shell": "bash" }
+        { "type": "command", "command": "pseudolife-mcp briefing --hook-json" }
       ] }
     ]
   }
@@ -1082,6 +1085,58 @@ In **file mode only**, wipe memory by deleting `data/` and restarting; wipe just
 documents via `data/chromadb/`; wipe just the episodic bands via
 `data/memory_state/`. (In containerized mode these files are not the source of
 truth — see the volume note above.)
+
+## Troubleshooting
+
+Start with `curl http://127.0.0.1:8765/health` — it reports the schema
+version, storage backend, auth state, and `persist_errors` (non-zero means
+writes are failing to reach Postgres; check `docker logs
+pseudolife-mcp-daemon`).
+
+- **First build is slow / big.** The daemon image bakes in CPU torch and the
+  embedding model (~2.5 GB, several minutes). Every start after that is
+  offline and fast — if a *rebuild* is re-downloading models, the Docker
+  layer cache was pruned.
+- **Daemon unreachable after `wsl --shutdown`** (Windows): the host port
+  forward is gone — `docker restart pseudolife-mcp-daemon` re-establishes it.
+- **Docker eating RAM** (Windows): the WSL2 VM (`Vmmem`) claims up to ~50% of
+  host memory by default. Copy `ops/wslconfig.example` to
+  `%USERPROFILE%\.wslconfig`, tune `memory=`, then `wsl --shutdown`.
+- **Port already in use**: the stack binds `127.0.0.1:8765` (daemon) and
+  `127.0.0.1:5433` (Postgres). Change the host side in
+  `ops/docker-compose.yml` if either collides.
+- **Console shows "offline" / Unauthorized**: "offline" means the daemon
+  isn't reachable (see above). A 401 prompt means the daemon runs with
+  `PSEUDOLIFE_MCP_TOKEN` — paste the same token into the Console's Token
+  dialog.
+- **Claude Code doesn't see the tools**: `claude mcp list` should show
+  `pseudolife-memory` ✓ connected. If not, re-check the URL
+  (`http://127.0.0.1:8765/mcp` — the `/mcp` path matters) and the bearer
+  header when a token is set.
+- **A tool call hangs on first use**: the first call after a cold start
+  loads the embedder (a few seconds, once per daemon start). The
+  session-start briefing hook never blocks — it skips silently when the
+  daemon is down.
+
+## Uninstall
+
+Deletion is deliberate at every step — nothing here is reversible past the
+backups you keep:
+
+```bash
+# 1. Optional: take a final backup first (ops/backup.ps1 or ops/backup.sh).
+# 2. Stop and remove the containers (volumes survive this).
+docker compose -f ops/docker-compose.yml down
+# 3. Remove the MCP registration.
+claude mcp remove pseudolife-memory
+# 4. Only when you're sure: delete the data volumes (THIS is the memory).
+docker volume rm pseudolife-mcp-bank pseudolife-mcp-state
+```
+
+Host-process installs: also unregister the logon task (`Unregister-ScheduledTask
+-TaskName "PseudoLife-MCP Daemon"`) and remove the SessionStart/SessionEnd
+hooks that `install-hook.ps1` / `install-hook.sh` added to
+`~/.claude/settings.json` (a timestamped `.bak-*` sits next to it).
 
 ## Testing
 

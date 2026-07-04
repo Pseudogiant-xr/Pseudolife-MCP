@@ -174,6 +174,9 @@ _EXPECTED_CORE = sorted([
     "memory_fact_resolve", "memory_graph", "memory_recall", "memory_graph_relate",
     "memory_world_search", "memory_world_set", "memory_lesson_search",
     "memory_outcome", "document_search", "document_ingest", "memory_stats",
+    # 2026-07-04 promotions: fact_get surfaces source_entries ids that core
+    # mode must be able to dereference; the workflow names the session early.
+    "memory_get", "memory_session_title",
 ])
 
 

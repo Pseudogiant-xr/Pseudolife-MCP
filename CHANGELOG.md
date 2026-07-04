@@ -6,7 +6,36 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.7.0] - 2026-07-04
+### Added (2026-07-04 — UX fast-follow, P2 batch)
+- **Recall tab explains itself**: a first-visit intro describes multi-hop vs
+  path-between-two with runnable example queries; seed chips cap at 15 behind
+  a "+N more" expander (with a one-line "what is a seed" hint); entities
+  without canonical facts collapse into one compact chip block instead of a
+  panel each.
+- **`ops/install-hook.sh`** — Linux/macOS port of the briefing/episode hook
+  installer (python3-based JSON edit, backup-first, idempotent, preserves
+  existing hooks). Both installers stop writing the unrecognized
+  `"shell": "bash"` field.
+- **README Troubleshooting + Uninstall sections** — the scattered fixes
+  (WSL `Vmmem` cap, port-forward loss after `wsl --shutdown`, first-build
+  expectations, 401/offline meanings, `claude mcp list` check) collected
+  under one heading; uninstall documents the deliberate volume-removal path.
+- **Core tier grows by two**: `memory_get` (core `memory_fact_get` returns
+  `source_entries` ids that core mode couldn't dereference) and
+  `memory_session_title` (the recommended workflow names the session early).
+
+### Fixed (2026-07-04 — UX fast-follow, P2 batch)
+- **`memory_search` always returns the `cortex` key** (empty list on a miss —
+  previously the documented key was absent, so `result["cortex"]` could
+  KeyError).
+- **Console a11y + interaction**: modals are `role="dialog"` with a focus
+  trap and focus-restore-to-opener; toasts announce via `role="status"`;
+  `confirmDialog` resolves `false` on backdrop/ESC close (previously the
+  awaiting caller hung forever); keyboard shortcuts ignore Ctrl/Cmd/Alt
+  chords and `0` reaches the tenth tab; the config editor treats an emptied
+  number field as "no edit" instead of sending `""` (raw `float('')` error);
+  the Observatory band-count subtitle reads from the live preset instead of
+  a hardcoded "8".
 
 ### Fixed (2026-07-04 — pre-release UI/UX pass)
 - **`memory_outcome` no longer coerces an unknown outcome to `"success"`**

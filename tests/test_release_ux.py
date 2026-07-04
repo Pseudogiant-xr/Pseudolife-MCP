@@ -89,6 +89,24 @@ def test_tool_exceptions_become_structured_errors(tmp_path: Path, monkeypatch) -
     assert "Z:/missing.pdf" in out["message"]
 
 
+def test_search_always_returns_cortex_key(tmp_path: Path, monkeypatch) -> None:
+    """``cortex`` is documented in the return shape — it must be an empty
+    list on a miss, not a missing key (``result["cortex"]`` KeyError'd)."""
+    _reload(tmp_path, monkeypatch)
+    out = _invoke("memory_search", {"query": "nothing stored about this"})
+    assert out["cortex"] == []
+
+
+def test_core_tier_can_close_its_own_loops(tmp_path: Path, monkeypatch) -> None:
+    """Core-mode gaps: memory_fact_get (core) surfaces source_entries ids, so
+    memory_get must be core to dereference them; the recommended workflow
+    names the session early, so memory_session_title must be core."""
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOOLSET", "core")
+    mod = _reload(tmp_path, monkeypatch)
+    names = {t.name for t in asyncio.run(mod.mcp.list_tools())}
+    assert {"memory_get", "memory_session_title"} <= names
+
+
 # ── Console list endpoints: no silent truncation ──────────────────────────
 
 
