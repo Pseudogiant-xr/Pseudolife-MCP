@@ -6,6 +6,55 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-04
+
+### Fixed (2026-07-04 — pre-release UI/UX pass)
+- **`memory_outcome` no longer coerces an unknown outcome to `"success"`**
+  (which could invert a typo'd failure signal into a do-this lesson). An
+  invalid value is refused up front — `{recorded: false, reason:
+  "unknown_outcome", outcomes: [...]}` — and the tool schema now rejects it
+  client-side too.
+- **Console: one 401 notice instead of a storm.** With a token-gated daemon,
+  the parallel boot fetches produced a stacked "Unauthorized" toast + token
+  modal rebuild per call; the notifier is now latched until the token changes
+  or a call succeeds. The token input is a `password` field.
+- **Console: honest topbar.** An unreachable daemon shows an `offline` chip
+  instead of the green pulsing `live`.
+- **Console: no silent truncation.** `/api/facts`, `/api/world`, and
+  `/api/lessons` return `total` + `truncated` alongside the capped `entries`,
+  and the Cortex/World/Lessons views render "first N of M loaded" when the
+  bank exceeds the fetch limit (the live bank's 1,358 facts were silently
+  capped at 1,000 with no indication).
+- **Console: Atlas review panel now follows both themes** — it referenced
+  undefined `--surface-*` design tokens, so its chips/borders always fell
+  back to hard-coded greys.
+
+### Changed (2026-07-04 — MCP tool-surface ergonomics)
+- **Verb-dispatch and enum params are typed `Literal`** so the JSON schema
+  itself enumerates the legal values (`memory_dream.action`,
+  `memory_forget.scope`, `memory_graph_review.action`,
+  `memory_outcome.outcome`, `memory_world_set.freshness_class`,
+  `memory_store.origin`, `memory_fact_set.origin`) — dispatch is discoverable
+  from the manifest alone; the in-body structured-error fallbacks remain for
+  direct callers.
+- **Uniform failure contract**: a tool body that raises now returns the same
+  `{"error", "message"}` shape the dispatch tools use, instead of leaking a
+  raw exception string (e.g. `document_ingest` on a missing file).
+- **`document_ingest` documents server-side path resolution** — with the
+  Docker daemon the path must be visible inside the container.
+
+### Added (2026-07-04 — docs & release hygiene)
+- **README Quickstart** (clone → volumes → compose up → `claude mcp add` →
+  verify) with the wiring step that was missing entirely: where the
+  `mcpServers` JSON lives (`~/.claude.json` / project `.mcp.json`) and the
+  `claude mcp add --transport http` one-liner.
+- **Mechanical doc-drift guards** (`tests/test_release_ux.py`): README schema
+  version must match `SCHEMA_META_VERSION` (it had drifted three separate
+  times), no hardcoded test-count claims, and the Claude-Code wiring
+  instructions must exist. Schema/capabilities rows corrected to v21; the
+  stale 60-line Testing narrative replaced with a count-free summary; the
+  broken `%USERPROFILE%` shim example fixed to `${USERPROFILE}`.
+
 ### Added (2026-07-04 — LongMemEval knowledge-update results)
 - **First external-benchmark results** (`evals/results/longmemeval-ku-*`):
   LongMemEval knowledge-update subset (78 questions), floor (Gemma-4-E2B) +
@@ -808,4 +857,5 @@ graph on top of the associative continuum.
   `memory_supersede` / `memory_delete` / `memory_stats` / `memory_save` plus the
   document RAG tools.
 
+[0.7.0]: https://github.com/Pseudogiant-xr/PseudoLife-MCP/releases/tag/v0.7.0
 [0.2.0]: https://github.com/Pseudogiant-xr/PseudoLife-MCP/releases/tag/v0.2.0
