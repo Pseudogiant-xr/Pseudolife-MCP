@@ -2,16 +2,16 @@
   "rung": "gemma-e2b",
   "label": "Gemma 4 E2B (CPU sidecar)",
   "kind": "llm",
-  "extract_seconds": 48.5,
+  "extract_seconds": 6.8,
   "consolidation": {
     "pulled": 26,
     "claims": 10,
     "inserted": 10,
     "superseded": 0
   },
-  "gold_recoverable": 0.9,
+  "gold_recoverable": 1.0,
   "stale_leak": 0.0,
   "tokens_per_query": 1.4,
-  "search_latency_ms": 4.6,
+  "search_latency_ms": 4.4,
   "status": "ok"
 }

@@ -1,0 +1,20 @@
+{
+  "dataset": "oracle",
+  "extractor": "gemma-e2b",
+  "n": 78,
+  "arms": {
+    "rag": {
+      "accuracy": 0.564,
+      "context_tokens": 1637.8
+    },
+    "cortex": {
+      "accuracy": 0.192,
+      "context_tokens": 111.5
+    },
+    "hybrid": {
+      "accuracy": 0.474,
+      "context_tokens": 1030.6
+    }
+  },
+  "superseded_total": 112
+}

@@ -23,6 +23,9 @@ chromadb/
 # Benchmark datasets (LongMemEval etc.) — downloaded, never committed
 evals/data/
 
+# Overnight-runner console logs (results JSONLs are committed, raw logs not)
+evals/results/*.log
+
 # Cortex Console dev-server scratch (fixture config writes)
 pseudolife_memory/web/.devdata/
 *.bak

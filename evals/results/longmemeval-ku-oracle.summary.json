@@ -1,0 +1,19 @@
+{
+  "dataset": "oracle",
+  "n": 78,
+  "arms": {
+    "rag": {
+      "accuracy": 0.551,
+      "context_tokens": 1637.8
+    },
+    "cortex": {
+      "accuracy": 0.397,
+      "context_tokens": 50.9
+    },
+    "hybrid": {
+      "accuracy": 0.59,
+      "context_tokens": 970.1
+    }
+  },
+  "superseded_total": 124
+}

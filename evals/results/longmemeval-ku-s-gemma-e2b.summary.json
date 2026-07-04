@@ -1,0 +1,20 @@
+{
+  "dataset": "s",
+  "extractor": "gemma-e2b",
+  "n": 78,
+  "arms": {
+    "rag": {
+      "accuracy": 0.346,
+      "context_tokens": 2075.8
+    },
+    "cortex": {
+      "accuracy": 0.141,
+      "context_tokens": 141.7
+    },
+    "hybrid": {
+      "accuracy": 0.308,
+      "context_tokens": 1228.5
+    }
+  },
+  "superseded_total": 1245
+}

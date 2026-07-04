@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-04 — LongMemEval knowledge-update results)
+- **First external-benchmark results** (`evals/results/longmemeval-ku-*`):
+  LongMemEval knowledge-update subset (78 questions), floor (Gemma-4-E2B) +
+  ceiling (Qwen3.6-27B) extractors, answerer/judge pinned to local Qwen3.6-27B.
+  Oracle: hybrid 0.705 vs naive-RAG 0.615 at ~40% less context; cortex alone
+  0.564 at 59 ctx tok/q (3.6% of RAG's budget). Full `_s` haystacks
+  (~48 sessions/q): hybrid 0.372 vs RAG 0.321. The RAG control stays flat
+  across extractors while cortex drops 0.564 → 0.192, isolating extraction
+  quality as the fact-spine bottleneck. Overnight runner hardening: full
+  `.bat` path (`NoDefaultCurrentDirectoryInExePath`), `Write-Host` logging
+  (return-value pollution), and the bench now aborts only on a dead extractor
+  endpoint (probe-gated, 8-hold cap) instead of on any transient extraction
+  failure.
+
 ### Added (2026-07-03 — bigger-local-model extractor docs + compose overrides)
 - **`PSEUDOLIFE_DREAM_*` are now overridable via `ops/.env`** (compose
   interpolation with the sidecar as the default), so the Dockerized daemon can

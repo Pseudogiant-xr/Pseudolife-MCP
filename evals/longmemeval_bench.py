@@ -162,12 +162,13 @@ def rewrite_rows(path: Path, rows: list[dict]) -> None:
     tmp.replace(path)
 
 
-def ingest_and_dream(svc, extractor, q: dict) -> dict:
+def ingest_and_dream(svc, extractor, q: dict, ex_url: str) -> dict:
     """Store every turn session-by-session in chronological order, dreaming
     after each session — the product cadence (consolidation fires between
     sessions, when the user goes quiet)."""
     tally = {"turns": 0, "claims": 0, "inserted": 0, "superseded": 0,
              "extract_seconds": 0.0}
+    held = 0
     sessions = sorted(
         zip(q["haystack_dates"], q["haystack_sessions"]),
         key=lambda pair: _parse_date(pair[0]))
@@ -184,11 +185,18 @@ def ingest_and_dream(svc, extractor, q: dict) -> dict:
             for k in ("claims", "inserted", "superseded"):
                 tally[k] += int(res.get(k, 0))
             if res.get("extractor_failed"):
-                # A held cursor still reports pulled>0 — on a dead endpoint
-                # this would spin forever. Abort the run; the JSONL resume
-                # picks this question up again once the server is back.
-                raise RuntimeError("extractor endpoint failing — aborting "
-                                   "(restart the model server and rerun)")
+                # A held cursor still reports pulled>0. Transient model
+                # hiccups (malformed JSON on one batch) are the service's
+                # job — it holds, retries, then isolates + quarantines the
+                # poison entry. Abort only when the endpoint is actually
+                # dead, or the hold never resolves.
+                held += 1
+                if held >= 8 or not probe(ex_url):
+                    raise RuntimeError(
+                        "extractor endpoint failing — aborting "
+                        "(restart the model server and rerun)")
+                continue
+            held = 0
             if not res.get("pulled"):
                 break
         tally["extract_seconds"] += time.perf_counter() - t0
@@ -271,7 +279,7 @@ def run_extract(dataset: str, limit: int | None, extractor_name: str,
         svc.config.memory.dream.extract_relations = False   # facts only
         extractor = OpenAICompatExtractor(ex_url, "bench", max_tokens=4096,
                                           timeout_seconds=600.0)
-        tally = ingest_and_dream(svc, extractor, q)
+        tally = ingest_and_dream(svc, extractor, q, ex_url)
         contexts = build_contexts(svc, q["question"])
         svc.flush()
         row = {

@@ -25,7 +25,10 @@ $env:PYTHONPATH = $repo
 $env:TORCHDYNAMO_DISABLE = "1"
 $maxRetries = 12
 
-function Log($msg) { Write-Output "$(Get-Date -Format 'HH:mm:ss') $msg" }
+# Write-Host, not Write-Output: Log runs inside functions whose return value
+# the watchdog checks — Write-Output would pollute it (a [log, $false] array
+# is truthy, silently swallowing server-start failures).
+function Log($msg) { Write-Host "$(Get-Date -Format 'HH:mm:ss') $msg" }
 
 function Wait-Endpoint($url, $seconds) {
     for ($i = 0; $i -lt ($seconds / 5); $i++) {
@@ -46,8 +49,10 @@ function Stop-Qwen {
 function Start-Qwen {
     if (Wait-Endpoint "http://127.0.0.1:1234/v1/models" 5) { return $true }
     Log "starting Qwen 27B server (log: $qwenDir\qwen-server.log)"
+    # Full path: NoDefaultCurrentDirectoryInExePath is set on this box, so cmd
+    # will not resolve a bare .bat name from the working directory.
     Start-Process -FilePath cmd.exe -WorkingDirectory $qwenDir -WindowStyle Minimized `
-        -ArgumentList '/c', 'run-server-turboq.bat > qwen-server.log 2>&1'
+        -ArgumentList '/c', "`"$qwenDir\run-server-turboq.bat`" > qwen-server.log 2>&1"
     return (Wait-Endpoint "http://127.0.0.1:1234/v1/models" 300)
 }
 
