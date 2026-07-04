@@ -1144,6 +1144,8 @@ An operator dashboard served by the daemon itself — point a browser at
 unchanged; the console is additive). It's a read-mostly instrument panel for
 seeing and steering the memory a human otherwise can't observe.
 
+![Cortex Console — Observatory view](docs/images/cortex-console-observatory.png)
+
 - **Observatory** — health, per-layer counts, the 8-band MIRAS continuum
   (capacity fill + hit rate), and dream backlog/quiescence gauges.
 - **Cortex** — canonical facts grouped by entity with provenance tiers and
