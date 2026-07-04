@@ -46,7 +46,7 @@ foreach ($group in @($obj.hooks.SessionStart)) {
 if (-not $hasBriefing) {
     # Append a NEW SessionStart group (leaves existing groups + hooks intact).
     $briefingGroup = [pscustomobject]@{
-        hooks = @([pscustomobject]@{ type = 'command'; command = $Command; shell = 'bash' })
+        hooks = @([pscustomobject]@{ type = 'command'; command = $Command })
     }
     $obj.hooks.SessionStart = @($obj.hooks.SessionStart) + $briefingGroup
     Write-Host "Installed SessionStart briefing hook -> $SettingsPath"
@@ -69,7 +69,7 @@ foreach ($group in @($obj.hooks.SessionStart)) {
 if (-not $hasStart) {
     $startGroup = [pscustomobject]@{
         hooks = @([pscustomobject]@{ type = 'command';
-            command = 'pseudolife-mcp episode-start'; shell = 'bash' })
+            command = 'pseudolife-mcp episode-start' })
     }
     $obj.hooks.SessionStart = @($obj.hooks.SessionStart) + $startGroup
     Write-Host "Installed SessionStart episode-start hook."
@@ -86,7 +86,7 @@ foreach ($group in @($obj.hooks.SessionEnd)) {
 if (-not $hasEnd) {
     $endGroup = [pscustomobject]@{
         hooks = @([pscustomobject]@{ type = 'command';
-            command = 'pseudolife-mcp episode-end'; shell = 'bash' })
+            command = 'pseudolife-mcp episode-end' })
     }
     $obj.hooks.SessionEnd = @($obj.hooks.SessionEnd) + $endGroup
     Write-Host "Installed SessionEnd episode-end hook."
