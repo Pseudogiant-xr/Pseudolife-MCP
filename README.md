@@ -6,6 +6,29 @@ An MCP server that gives Claude (or any MCP-capable client) a long-term
 memory that persists across sessions — surviving context compactions and
 `/clear` resets. Claude is the LLM; this server is its memory on disk.
 
+## Quickstart
+
+Requires Docker and Claude Code. From clone to first memory:
+
+```bash
+git clone https://github.com/Pseudogiant-xr/PseudoLife-MCP.git
+cd PseudoLife-MCP
+docker volume create pseudolife-mcp-bank
+docker volume create pseudolife-mcp-state
+docker compose -f ops/docker-compose.yml up -d --build   # first build ~2.5 GB, once
+
+# Verify, then wire into Claude Code:
+curl http://127.0.0.1:8765/health
+claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
+```
+
+Then in any Claude Code session: *"remember that my staging box is
+haze-02"* → Claude calls `memory_store`; next session, *"which box is
+staging?"* → `memory_search` finds it. Browse everything at the Cortex
+Console: <http://127.0.0.1:8765/ui/>. Details: [Install](#install--containerized-recommended-any-os)
+· [Wire into Claude Code](#wire-into-claude-code) · [Configuration](#configuration)
+· [Data layout & backups](#data-layout) · [Cortex Console](#cortex-console-web-ui).
+
 ## What this is
 
 A memory engine exposed over MCP. There's no chat UI and no bundled
@@ -266,7 +289,16 @@ new code.)
 
 **HTTP transport (recommended — required for the containerized stack).**
 The daemon already serves MCP over HTTP, so point Claude Code straight at
-it — no shim, no host command, nothing OS-specific:
+it — no shim, no host command, nothing OS-specific. One command:
+
+```bash
+claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
+```
+
+(`--scope user` registers it for every project; drop it to register for the
+current project only.) Or write the equivalent JSON yourself — into
+`~/.claude.json` under the top-level `mcpServers` key for user scope, or into
+a `.mcp.json` at a project root for project scope:
 
 ```json
 {
@@ -295,6 +327,10 @@ If you ran the daemon with a `PSEUDOLIFE_MCP_TOKEN`, add the bearer header:
 
 This is the cleanest cross-OS setup: the only host-side state is this URL.
 
+**Verify:** run `claude mcp list` (the server should report ✓ connected),
+then ask Claude to *"store a memory that this install works"* and check it
+appears in the Stream tab of the Console at <http://127.0.0.1:8765/ui/>.
+
 **stdio shim (host-process installs only).** If you run the daemon on host
 Python and prefer stdio, point at the **shim** instead — it find-or-starts
 the daemon and proxies. It does *not* work with the containerized daemon
@@ -308,7 +344,7 @@ the daemon and proxies. It does *not* work with the containerized daemon
       "env": {
         "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:8765",
         "PSEUDOLIFE_MCP_DATABASE_URL": "postgresql://pseudolife:pseudolife@127.0.0.1:5433/pseudolife_memory",
-        "PSEUDOLIFE_MCP_DATA_DIR": "%USERPROFILE%\\.pseudolife-mcp"
+        "PSEUDOLIFE_MCP_DATA_DIR": "${USERPROFILE}\\.pseudolife-mcp"
       }
     }
   }
@@ -446,7 +482,7 @@ Connection / deployment env vars:
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v20). Unset → v0.1 file-only mode. |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v21). Unset → v0.1 file-only mode. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). |
 | `PSEUDOLIFE_MCP_HOST` / `_PORT` | `127.0.0.1` / `8765` | Daemon bind address. |
 | `PSEUDOLIFE_MCP_TOKEN` | _(unset)_ | Bearer token; **required** to bind a non-loopback host. |
@@ -1055,62 +1091,24 @@ pip install -e .[dev]
 pytest tests/ -v
 ```
 
-547 tests cover the MemoryService methods (store / search / recent /
-supersede / stats / save / trace / list_sources / list_tags / delete),
-the `memory_search` scoring overrides, the cross-encoder reranker
-(15 unit + 4 integration), the BM25 hybrid lexical pool
-(23 unit + 5 integration), schema v6 + episode lifecycle (12 + 14),
-tag plumbing through store/retrieval (10), greedy clustering for
-consolidation (10), the episode + tag service surface (16), the
-atomic consolidation operation (6), the cortex canonical-fact store
-(slot dedup / supersession / no-decay / key-normalisation + the
-provenance tier-rank guard, contenders, and `resolve`), auto-promotion
-on `store`, the cortex service + MCP surface, the world cortex (sourced
-facts with citations + age-decayed freshness + `stale` flagging), the
-alias-resolved cortex lookup regression (a fact under a canonical name is
-reachable via any bound alias), and MCP-level dispatch
-(tool registration + docstring sanity + end-to-end invocation for every
-exposed tool through the FastMCP machinery). The v0.2 Phase 0 suites
-add the config knobs, the meta-filter gate + pruned patterns, the
-recency base half-life, and the dev-fact extractor (positives + precision
-guards). The v0.2 Phase 1 suites add the Postgres storage layer
-(schema idempotency, vector round-trips, write-through consistency,
-legacy `.pt` migration, atomic weights + corrupt-file recovery), the
-HTTP daemon (health, token auth, two-concurrent-clients no-lost-writes)
-and the stdio shim spawn path — these skip cleanly when no test
-Postgres is reachable. The Phase 2 graph suite covers normalization,
-unknown-relation suggestions, soft type warnings, transitive/inverse
-on-read inference (marked `derived`), depth caps, paths, fact↔entity
-auto-linking. The
-delete suite includes a persistence round-trip test (store → delete →
-save → reload → verify gone). Reranker tests monkeypatch
-`sentence_transformers.CrossEncoder` with a deterministic stub so the
-suite stays fast and offline. Test suite uses a fresh embedder per
-module via the `warm_service` fixture so the ~1.5s
-sentence-transformers load doesn't dominate runtime. Later suites (v0.3–v0.5)
-add the pluggable dream extractor (including the regression that a *failed*
-extraction raises `ExtractorError` and holds the cursor — memories are retried,
-not skipped — plus env-overridable timeout / max-tokens), procedural lessons
-(signals → dream-synthesised lessons + `prefers`/`avoids` graph edges),
-writer-aware temporal memory (HLC-ordered supersession, `memory_history`,
-writer/session keying), the single-writer cortex (auto-promote off + the
-`cortex_dedup` sibling-slot merge), and the v0.5 cosine spine. The v0.6
-graph-foundation suites add the swappable `GraphStore` contract + graph-from-text
-dream extraction, the graph-insight layer (communities / digest / god-nodes),
-multi-hop `memory_recall` + hub-gating, the provenance-as-link engram
-(`memory_traces`, `memory_get` / `memory_reinforce`) + reinforcement-weighted
-retention, and the Cortex Console web API. The memory-lifecycle-utilization
-suites add session-keyed episode open/close idempotency, episode nesting
-(`start_nested` / `end` pop / `end_session` cascade), subtree-expanded recall, the
-world-facts + last-session-recap briefing surfaces, and the torch-free episode CLI.
+The suite covers every layer: the MemoryService surface, retrieval scoring
+(cross-encoder reranker / BM25 hybrid), the cortex + world cortex + lessons
+stores, episodes + tags, the dream extractors (including the regression that
+a *failed* extraction holds the cursor so memories are retried, not
+skipped), the knowledge graph (+ insight layer and multi-hop recall),
+Postgres storage (schema idempotency, write-through consistency, legacy
+`.pt` migration, concurrent-writer safety), the HTTP daemon + stdio shim,
+the MCP tool surface (schema + end-to-end invocation for every exposed
+tool, plus a description-budget guard that keeps the manifest lean), and
+the Cortex Console REST API. Model-heavy pieces are stubbed where possible
+so the suite stays fast and offline.
 
 The PG-backed suites target a throwaway `pseudolife_memory_test` database on
 the bundled dev container (`ops/docker-compose.yml`, port 5433) — created on
-first run and reset per-test, so the whole suite is green on repeat runs and
-never touches your real bank. Point them elsewhere with
-`PSEUDOLIFE_TEST_DATABASE_URL`. With the container up, `pytest tests/` runs all
-547; without any Postgres, the PG suites skip and the pure-logic suites still
-pass.
+first run and reset per-test, so repeat runs stay green and never touch your
+real bank. Point them elsewhere with `PSEUDOLIFE_TEST_DATABASE_URL`. With the
+container up, `pytest tests/` runs everything; without any Postgres, the PG
+suites skip and the pure-logic suites still pass.
 
 ## Benchmarks
 
@@ -1193,7 +1191,7 @@ python -m pseudolife_memory.web.devserver   # http://127.0.0.1:8770/ui/
 | BM25 hybrid pool | Optional (`bm25=True` per call, stdlib only) |
 | NLI contradiction scorer | Optional (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, graph visualiser, search/trace, config editor (read-mostly, token-gated like `/mcp`) |
-| Schema version | v19 (Postgres meta version) — v11 temporal/provenance stamp, v12 graph-insight communities, v13 provenance-trace engram + reinforcements, v14 episode `session_key`, v15 episode `parent_id` (nesting), v16 `entity_sources` (per-entity project attribution), v17 `edge_proposals` (deep-dream link candidates), v18 `entity_proposals` (deep-dream merge/junk candidates), v19 partial unique indexes enforcing one current row per slot on facts/world_facts/lessons (+ startup heal of pre-existing duplicates; per-slot write-through persistence replaces the full-table snapshot rewrite); additive `ADD COLUMN IF NOT EXISTS` on daemon start; legacy file-mode `.pt` banks auto-migrate into Postgres |
+| Schema version | v21 (Postgres meta version) — v11 temporal/provenance stamp, v12 graph-insight communities, v13 provenance-trace engram + reinforcements, v14 episode `session_key`, v15 episode `parent_id` (nesting), v16 `entity_sources` (per-entity project attribution), v17 `edge_proposals` (deep-dream link candidates), v18 `entity_proposals` (deep-dream merge/junk candidates), v19 partial unique indexes enforcing one current row per slot on facts/world_facts/lessons (+ startup heal of pre-existing duplicates; per-slot write-through persistence replaces the full-table snapshot rewrite), v20 `dismissed_pairs` (reviewed-distinct pairs stop resurfacing as duplicate findings), v21 `merge_decisions` audit + write-time near-duplicate merge proposals; additive `ADD COLUMN IF NOT EXISTS` on daemon start; legacy file-mode `.pt` banks auto-migrate into Postgres |
 
 ## What's not built yet
 
