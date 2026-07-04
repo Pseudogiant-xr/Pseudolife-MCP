@@ -1549,18 +1549,22 @@ class MemoryService:
         """Record a cheap in-session outcome signal (success | failure |
         correction). Single-writer: this never writes a lesson — the dream
         synthesises lessons from the accumulated signals."""
+        # Refuse — never coerce — an unknown outcome: silently mapping e.g.
+        # "failed" to "success" would invert a dead-end into a do-this lesson.
+        if outcome not in ("success", "failure", "correction"):
+            return {"recorded": False, "reason": "unknown_outcome",
+                    "outcomes": ["success", "failure", "correction"]}
         with self._lock:
             self._ensure_init()
             if self._storage is None:
                 return {"recorded": False, "reason": "signals require Postgres storage"}
             if not self.config.memory.lessons.enabled:
                 return {"recorded": False, "reason": "lessons disabled"}
-            oc = outcome if outcome in ("success", "failure", "correction") else "success"
             sid = self._storage.add_signal(
-                task=task, outcome=oc, about=about, detail=detail,
+                task=task, outcome=outcome, about=about, detail=detail,
                 polarity=polarity, origin=origin,
                 episode_id=self._current_episode_id())
-            return {"recorded": True, "signal_id": sid, "task": task, "outcome": oc}
+            return {"recorded": True, "signal_id": sid, "task": task, "outcome": outcome}
 
     def lesson_write(self, task: str, aspect: str, lesson: str, *,
                      about: str | None = None, outcome: str = "success",

@@ -84,9 +84,16 @@ def test_dream_deep_delegates_with_apply_flag(tmp_path: Path, monkeypatch) -> No
     assert seen == [False, True]
 
 
-def test_dream_unknown_action_is_a_structured_error(tmp_path: Path, monkeypatch) -> None:
-    _reload(tmp_path, monkeypatch)
-    out = _invoke("memory_dream", {"action": "snooze"})
+def test_dream_unknown_action_is_rejected(tmp_path: Path, monkeypatch) -> None:
+    """Over MCP the ``Literal`` schema rejects a bad action with a message
+    that lists the legal values; direct (in-process) callers still get the
+    structured ``unknown_action`` fallback."""
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    mod = _reload(tmp_path, monkeypatch)
+    with pytest.raises(ToolError, match="'status'"):
+        _invoke("memory_dream", {"action": "snooze"})
+    out = mod.memory_dream("snooze")
     assert out.get("error") == "unknown_action"
     assert "status" in out.get("actions", [])
 
@@ -127,8 +134,12 @@ def test_forget_scope_world_and_lesson(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_forget_validates_scope_and_required_args(tmp_path: Path, monkeypatch) -> None:
-    _reload(tmp_path, monkeypatch)
-    assert _invoke("memory_forget", {"scope": "everything"}).get("error") == "unknown_scope"
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    mod = _reload(tmp_path, monkeypatch)
+    with pytest.raises(ToolError, match="'memory'"):  # Literal schema gate
+        _invoke("memory_forget", {"scope": "everything"})
+    assert mod.memory_forget("everything").get("error") == "unknown_scope"
     assert _invoke("memory_forget", {"scope": "fact"}).get("error") == "entity_required"
     # scope=memory with no filter: service refuses wholesale deletion.
     out = _invoke("memory_forget", {"scope": "memory"})
@@ -176,8 +187,12 @@ def test_graph_review_actions_route_to_the_right_service_calls(
 
 
 def test_graph_review_validates_inputs(tmp_path: Path, monkeypatch) -> None:
-    _reload(tmp_path, monkeypatch)
-    assert _invoke("memory_graph_review", {"action": "bless"}).get("error") == "unknown_action"
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    mod = _reload(tmp_path, monkeypatch)
+    with pytest.raises(ToolError, match="'list'"):  # Literal schema gate
+        _invoke("memory_graph_review", {"action": "bless"})
+    assert mod.memory_graph_review("bless").get("error") == "unknown_action"
     assert _invoke("memory_graph_review", {"action": "accept_link"}).get("error") == "proposal_id_required"
     assert _invoke("memory_graph_review", {"action": "propose"}).get("error") == "proposals_required"
     assert _invoke("memory_graph_review", {"action": "dismiss_pair"}).get("error") == "src_dst_required"
@@ -233,21 +248,25 @@ _REMOVED = [
 ]
 
 
-def test_removed_tools_are_gone() -> None:
-    from pseudolife_memory import mcp_server  # noqa: PLC0415
+def test_removed_tools_are_gone(tmp_path: Path, monkeypatch) -> None:
+    # Pin the FULL surface: in an env with PSEUDOLIFE_MCP_TOOLSET=core this
+    # test would otherwise pass vacuously against the 15-tool manifest.
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOOLSET", "full")
+    mod = _reload(tmp_path, monkeypatch)
 
-    names = {t.name for t in asyncio.run(mcp_server.mcp.list_tools())}
+    names = {t.name for t in asyncio.run(mod.mcp.list_tools())}
     still_there = sorted(names & set(_REMOVED))
     assert still_there == [], f"tools that should have left the surface: {still_there}"
 
 
-def test_descriptions_are_terse() -> None:
+def test_descriptions_are_terse(tmp_path: Path, monkeypatch) -> None:
     """The manifest is loaded into agent context every session. Pre-
     consolidation it cost ~37k chars; the consolidated surface must stay
     at half that or less, with no single tool ballooning."""
-    from pseudolife_memory import mcp_server  # noqa: PLC0415
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOOLSET", "full")
+    mod = _reload(tmp_path, monkeypatch)
 
-    tools = asyncio.run(mcp_server.mcp.list_tools())
+    tools = asyncio.run(mod.mcp.list_tools())
     fat = [(t.name, len(t.description or "")) for t in tools
            if len(t.description or "") > 1600]
     assert fat == [], f"over-long tool descriptions: {fat}"

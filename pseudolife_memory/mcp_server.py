@@ -48,7 +48,7 @@ import atexit
 import signal
 import threading
 import time
-from typing import Any
+from typing import Any, Literal
 
 # Silence torch._dynamo's noisy fall-back warnings on systems without
 # Triton (i.e. every Windows install). The embedder forward pass works
@@ -107,10 +107,18 @@ def _async_offload(fn):
     ``__wrapped__``) so FastMCP still derives the tool schema from the real
     parameter list, and AnyIO copies the calling context into the worker
     thread so the per-request writer/session contextvars still resolve.
+
+    Also the surface's uniform failure contract: a service-level raise is
+    mapped to the same ``{"error", "message"}`` shape the dispatch tools
+    return, instead of leaking a raw exception string to the agent.
     """
     @functools.wraps(fn)
     async def _run(*args: Any, **kwargs: Any) -> Any:
-        return await to_thread.run_sync(functools.partial(fn, *args, **kwargs))
+        try:
+            return await to_thread.run_sync(functools.partial(fn, *args, **kwargs))
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("tool %s failed", fn.__name__)
+            return {"error": type(exc).__name__, "message": str(exc)}
     return _run
 
 
@@ -133,7 +141,7 @@ def memory_store(
     text: str,
     source: str = "claude",
     tags: list[str] | None = None,
-    origin: str | None = None,
+    origin: Literal["user", "action", "agent"] | None = None,
 ) -> dict[str, Any]:
     """Store one durable fact, decision, or observation in associative memory.
 
@@ -374,7 +382,7 @@ def memory_fact_set(
     entity: str,
     attribute: str,
     value: str,
-    origin: str | None = None,
+    origin: Literal["user", "action", "agent"] | None = None,
     confidence: float = 0.8,
 ) -> dict[str, Any]:
     """Assert a canonical fact NOW — insert, confirm, or correct a slot.
@@ -438,7 +446,7 @@ def memory_world_set(
     value: str,
     source_url: str = "",
     source_quote: str = "",
-    freshness_class: str = "volatile",
+    freshness_class: Literal["evergreen", "slow", "volatile"] = "volatile",
     confidence: float = 0.85,
     retrieved_at: float | None = None,
     content_hash: str | None = None,
@@ -481,7 +489,7 @@ def memory_world_search(query: str, top_k: int = 5) -> dict[str, Any]:
 @_tool(core=True)
 def memory_outcome(
     task: str,
-    outcome: str,
+    outcome: Literal["success", "failure", "correction"],
     about: str | None = None,
     detail: str | None = None,
     polarity: str | None = None,
@@ -522,7 +530,7 @@ def memory_lesson_search(query: str, top_k: int = 5) -> dict[str, Any]:
 
 @_tool()
 def memory_forget(
-    scope: str,
+    scope: Literal["memory", "fact", "world", "lesson"],
     entity: str | None = None,
     attribute: str | None = None,
     text: str | None = None,
@@ -570,7 +578,7 @@ def memory_forget(
 
 @_tool()
 def memory_dream(
-    action: str,
+    action: Literal["status", "pull", "commit", "run", "deep"],
     limit: int | None = None,
     cursor: float | None = None,
     apply: bool = False,
@@ -618,7 +626,9 @@ def memory_dream(
 
 @_tool()
 def memory_graph_review(
-    action: str = "list",
+    action: Literal["list", "propose", "dismiss_pair", "accept_link",
+                    "reject_link", "accept_merge", "accept_junk",
+                    "reject_entity"] = "list",
     proposal_id: int | None = None,
     proposals: list[dict] | None = None,
     scope: str | None = None,
@@ -900,7 +910,9 @@ def document_ingest(path: str, source: str | None = None) -> dict[str, Any]:
     """Index a file (.txt / .md / .pdf) into the reference bank — a
     separate store for background documents (papers, manuals, codebases)
     retrieved by pure cosine similarity, kept apart from conversational
-    memory. ``source`` defaults to the filename.
+    memory. ``source`` defaults to the filename. ``path`` resolves on the
+    SERVER's filesystem — with the Docker daemon, use a path visible inside
+    the container (e.g. a mounted volume), not a host path.
 
     Returns: ``{source, chunks_stored, chunks_total}``.
     """
