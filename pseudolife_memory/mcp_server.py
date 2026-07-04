@@ -222,7 +222,8 @@ def memory_search(
         query: Natural-language description; specific queries retrieve better.
         top_k: Max results (default 8).
         sources / bands / episodes / tags: Optional filters (AND across
-            kinds, OR within a list).
+            kinds, OR within a list). Band names, most→least recent:
+            working, micro, instant, fast, medium, slow, archival, forever.
         min_score: Override the 0.25 relevance floor.
         disable_recency_boost: True for state-probe queries where recency
             bias is unwelcome.
@@ -551,7 +552,8 @@ def memory_forget(
     Scopes:
         ``memory``: associative entries matching ``text`` / ``substring`` /
             ``source`` / ``episode`` / ``tag`` (at least one filter
-            required; filters OR-combine).
+            required; filters OR-combine — ANY match deletes, unlike
+            memory_search's AND).
         ``fact``: canonical fact slots — ``entity`` required; omit
             ``attribute`` to purge every slot under the entity.
         ``world``: world facts — ``entity`` (+ optional ``attribute``).

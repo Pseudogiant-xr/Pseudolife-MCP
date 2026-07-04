@@ -1,5 +1,5 @@
 // views/episodes.js — session timeline; click an episode for its summary.
-import { el, mount, clear, fmtAge, fmtTime, fmtDuration, loadingBlock, emptyBlock, errorBlock } from "../util.js";
+import { el, mount, clear, fmtAge, fmtTime, fmtDuration, loadingBlock, emptyBlock, errorBlock, pressable } from "../util.js";
 import { api } from "../api.js";
 import { openDrawer, setDrawerBody } from "../ui.js";
 import { badge, groupHead } from "../components.js";
@@ -30,7 +30,8 @@ function episodeItem(e) {
   const open = !e.ended_at;
   const span = open ? "open" : (e.started_at && e.ended_at ? fmtDuration(e.ended_at - e.started_at) : "");
   return el("div", { class: "tl-item" + (open ? " current" : ""), style: { cursor: "pointer" },
-    onclick: () => openSummary(e) },
+    "aria-label": `${e.title || e.id} — open summary`,
+    ...pressable(() => openSummary(e)) },
     el("div", { class: "tl-val", style: { fontFamily: "var(--font-display)", fontSize: "1rem" } }, e.title || e.id),
     el("div", { class: "tl-meta" },
       open ? badge("open", "pos") : null,

@@ -1,7 +1,7 @@
 // views/insight.js — the graph-insight digest: suggested questions, god-nodes,
 // communities, and surprises (cross-community / low-confidence bridges). Renders
 // graph_digest(); empty until a dream sweep has built the digest.
-import { el, mount, fmtNum, fmtAge, loadingBlock, emptyBlock, errorBlock } from "../util.js";
+import { el, mount, fmtNum, fmtAge, loadingBlock, emptyBlock, errorBlock, pressable } from "../util.js";
 import { api } from "../api.js";
 import { panel, badge } from "../components.js";
 import { barRows } from "../charts.js";
@@ -56,16 +56,20 @@ function questionsPanel(qs) {
 
 function godNodesPanel(nodes, maxDeg) {
   const body = nodes.length
-    ? el("div", {}, nodes.map((n) => el("button", { class: "gn-row", type: "button",
+    // A div+pressable outer (not <button>) so the inner atlas jump can be a
+    // real button — interactive content inside a button is invalid HTML.
+    ? el("div", {}, nodes.map((n) => el("div", { class: "gn-row",
         title: `open ${n.display} in the graph`,
-        onclick: () => { location.hash = "#/graph?entity=" + encodeURIComponent(n.display); } },
-        el("span", { class: "gn-name" }, n.display),
+        "aria-label": `open ${n.display} in the graph`,
+        ...pressable(() => { location.hash = "#/graph?entity=" + encodeURIComponent(n.display); }) },
+        el("span", { class: "gn-name" }, n.display,
+          el("button", { class: "gn-atlas", type: "button", title: "Show in the graph overview",
+            style: { marginLeft: "8px", cursor: "pointer", background: "none", border: "none",
+              color: "inherit", font: "inherit", padding: "0 4px" },
+            onclick: (e) => { e.stopPropagation();
+              location.hash = "#/atlas?entity=" + encodeURIComponent(n.display); } }, "↗")),
         el("span", { class: "gn-bar" }, el("i", { style: { width: Math.round((n.degree / maxDeg) * 100) + "%" } })),
-        el("span", { class: "gn-deg" }, String(n.degree)),
-        el("span", { class: "gn-atlas", title: "Show in the graph overview", role: "link",
-          style: { marginLeft: "8px", cursor: "pointer" },
-          onclick: (e) => { e.stopPropagation();
-            location.hash = "#/atlas?entity=" + encodeURIComponent(n.display); } }, "↗"))))
+        el("span", { class: "gn-deg" }, String(n.degree)))))
     : emptyBlock("No hubs");
   return panel("God-nodes", body, { accent: "var(--c-graph)", sub: "by degree" });
 }
@@ -81,7 +85,8 @@ function communitiesPanel(comms) {
       el("thead", {}, el("tr", {}, el("th", {}, "community"), el("th", {}, "size"), el("th", {}, "cohesion"))),
       el("tbody", {}, comms.map((c) => el("tr", { style: { cursor: "pointer" },
         title: `open ${c.label} in the graph`,
-        onclick: () => { location.hash = "#/graph?entity=" + encodeURIComponent(c.label); } },
+        "aria-label": `open ${c.label} in the graph`,
+        ...pressable(() => { location.hash = "#/graph?entity=" + encodeURIComponent(c.label); }) },
         el("td", {}, c.label),
         el("td", { class: "mono" }, String(c.size)),
         el("td", { class: "mono dim" }, Number(c.cohesion ?? 0).toFixed(2)))))));

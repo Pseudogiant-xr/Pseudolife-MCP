@@ -6,7 +6,7 @@
 // its MIRAS provenance (sources + source entries) so a human can judge from
 // evidence, not names alone. Mutations are owned by atlas.js via onAct(desc);
 // provenance is a read this panel hydrates itself.
-import { el, fmtAge } from "./util.js";
+import { el, fmtAge, pressable } from "./util.js";
 import { panel, badge, tagBadge } from "./components.js";
 import { api } from "./api.js";
 
@@ -91,7 +91,7 @@ function entityRef(name) {
   }
   const chip = el("span", { class: "mono", title: `Show provenance for ${name}`,
     style: { ...CHIP, cursor: "pointer", borderBottom: "1px dotted currentColor" },
-    onclick: toggle }, name);
+    ...pressable(toggle) }, name);
   return { chip, drawer };
 }
 

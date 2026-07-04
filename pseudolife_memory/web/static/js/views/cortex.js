@@ -1,6 +1,6 @@
 // views/cortex.js — canonical fact review, grouped by entity, with provenance,
 // contested-fact resolution, and a per-slot history timeline drawer.
-import { el, mount, clear, fmtAge, fmtTime, titleCase, loadingBlock, emptyBlock, errorBlock, debounce } from "../util.js";
+import { el, mount, clear, fmtAge, fmtTime, titleCase, loadingBlock, emptyBlock, errorBlock, debounce, pressable } from "../util.js";
 import { api } from "../api.js";
 import { openDrawer, setDrawerBody, toast, confirmDialog, openModal, closeModal } from "../ui.js";
 import { originBadge, confMeter, searchBox, facetBar, badge } from "../components.js";
@@ -9,6 +9,11 @@ const TONE = "var(--c-cortex)";
 let state = { q: "", origin: "all", data: null };
 
 export async function renderCortex(root, ctx) {
+  // Deep-link filter: #/cortex?q=<entity> (e.g. the graph panel's "Facts ↗").
+  const qi = (location.hash || "").indexOf("?");
+  const linked = qi >= 0 ? new URLSearchParams(location.hash.slice(qi + 1)).get("q") : null;
+  if (linked != null) state.q = linked;
+
   mount(root, loadingBlock("Reading the cortex…"));
   try {
     state.data = await api.get("/api/facts", { limit: 1000 });
@@ -79,7 +84,8 @@ function entityCard(g, ctx) {
 
 function factRow(f, ctx) {
   const row = el("div", { class: "fact-row" + (f.contested ? " is-contested" : ""),
-    onclick: () => openHistory(f) },
+    "aria-label": `${f.entity}.${f.attribute} — open history`,
+    ...pressable(() => openHistory(f)) },
     el("div", { class: "fact-attr" }, f.attribute),
     el("div", { class: "fact-val" }, f.value),
     el("div", { class: "fact-side" },

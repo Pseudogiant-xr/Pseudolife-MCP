@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-04 — final polish batch)
+- **Keyboard operability for click-only rows**: cortex fact rows, episode
+  timeline items, Insight god-node rows and community rows, and Atlas
+  provenance chips are now focusable and Enter/Space-activatable (new
+  `pressable()` helper in `util.js`), each with an `aria-label`. The Insight
+  god-node row is no longer a `<button>` wrapping another interactive element
+  (invalid HTML) — the atlas jump is a real button inline with the name.
+- **Confirm gate on "Dismiss" for duplicate findings** — marking a pair as
+  genuinely distinct permanently stops it resurfacing, so it now confirms
+  like the other irreversible actions (ordinary proposal rejects stay
+  one-click for fast triage).
+- **Graph → Cortex deep link**: the node panel's "Facts ↗" opens the Cortex
+  view pre-filtered to that entity (`#/cortex?q=…`) instead of unfiltered.
+- **`examples/CLAUDE.memory.md`** — the recommended CLAUDE.md memory block as
+  a copyable file; **`docs/README.md`** — marks docs/ as internal design
+  history and maps its subdirectories.
+- **Manifest doc gaps**: `memory_search` enumerates the eight band names;
+  `memory_forget` contrasts its OR-combined filters against search's AND.
+
 ### Added (2026-07-04 — UX fast-follow, P2 batch)
 - **Recall tab explains itself**: a first-visit intro describes multi-hop vs
   path-between-two with runnable example queries; seed chips cap at 15 behind

@@ -405,6 +405,9 @@ REFLECT at task end / when an outcome lands:
   the dream distils these into the lessons surfaced at your next session start.
 ```
 
+The same block ships as a copyable file:
+[`examples/CLAUDE.memory.md`](examples/CLAUDE.memory.md).
+
 The `dream` pass periodically distils stored memories into canonical facts and a
 knowledge graph; the Console's Atlas view (`/api/graph/digest`,
 `/api/graph/communities`) then surfaces the graph's shape (hubs, communities,

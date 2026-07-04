@@ -141,7 +141,8 @@ export async function renderGraph(root, ctx) {
           : el("div", { class: "dim", style: { fontSize: ".84rem" } }, "no canonical facts"),
         el("div", { style: { display: "flex", gap: "8px", marginTop: "12px" } },
           el("button", { class: "btn sm primary", onclick: () => goExplore(node.entity) }, "Explore from here"),
-          el("button", { class: "btn sm", onclick: () => { location.hash = "#/cortex"; } }, "Facts ↗"))));
+          el("button", { class: "btn sm", title: `Cortex facts filtered to ${node.entity}`,
+            onclick: () => { location.hash = "#/cortex?q=" + encodeURIComponent(node.entity); } }, "Facts ↗"))));
     wrap.appendChild(panel);
   }
 
@@ -226,6 +227,11 @@ export async function renderGraph(root, ctx) {
       return;
     }
     if (d.kind === "dismiss-duplicate") {                 // duplicate: genuinely-distinct verdict
+      // Permanent: the pair never resurfaces as a duplicate finding or
+      // deep-dream candidate — worth one confirm, unlike ordinary rejects.
+      if (!(await confirmDialog({ title: "Mark as distinct",
+        message: `Record that “${d.a}” and “${d.b}” are genuinely different things? The pair stops resurfacing as a duplicate finding — permanently.`,
+        confirmLabel: "Mark distinct" }))) return;
       await postAll([{ path: "/api/graph/dismiss-duplicate", body: { a: d.a, b: d.b } }], "Dismissed");
       return;
     }

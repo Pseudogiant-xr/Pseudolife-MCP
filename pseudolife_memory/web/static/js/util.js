@@ -33,6 +33,17 @@ function appendKids(node, kids) {
   }
 }
 
+/** Props that make a clickable non-button keyboard-operable
+ *  (Enter/Space activate). Spread into el(): el("div", {..., ...pressable(fn)}). */
+export function pressable(onActivate) {
+  return {
+    role: "button", tabindex: "0", onclick: onActivate,
+    onkeydown: (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onActivate(e); }
+    },
+  };
+}
+
 export function clear(node) {
   while (node.firstChild) node.removeChild(node.firstChild);
   return node;

@@ -128,6 +128,9 @@ class ConsoleRoutes:
             max_world=_i(q, "max_world", 3)))
 
         # ---- episodes ----
+        # The write endpoints (start/end/prune/rename/merge) are deliberately
+        # agent/CLI-only — the Episodes view stays a read-only timeline;
+        # curation happens through an agent that can reason about the history.
         g("/api/episodes", lambda q, b: svc.episode_list(
             limit=_i(q, "limit", 100), include_open=True))
         g("/api/episodes/summary", lambda q, b: svc.episode_summary(id=_s(q, "id")))
