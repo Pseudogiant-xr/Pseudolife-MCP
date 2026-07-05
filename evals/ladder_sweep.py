@@ -75,10 +75,27 @@ RUNGS: dict[str, dict] = {
                  "base_url": os.environ.get("PSEUDOLIFE_BENCH_QWEN_URL",
                                             "http://127.0.0.1:1234/v1"),
                  "model": "Qwen3.6-27B-UD-Q4_K_XL.gguf"},
+    # Sidecar-upgrade bake-off candidates (2026-07-04) — all served on :8081
+    # like the gemma rungs (operator swaps the GGUF between runs).
+    "qwen3.5-4b": {"kind": "llm", "label": "Qwen3.5-4B (candidate)",
+                   "base_url": "http://127.0.0.1:8081/v1", "model": "extractor"},
+    "granite-h-tiny": {"kind": "llm",
+                       "label": "Granite 4.0-H-Tiny 7B-A1B (candidate)",
+                       "base_url": "http://127.0.0.1:8081/v1", "model": "extractor"},
+    "lfm2-8b-a1b": {"kind": "llm", "label": "LFM2-8B-A1B (candidate)",
+                    "base_url": "http://127.0.0.1:8081/v1", "model": "extractor"},
+    "ornith-9b": {"kind": "llm", "label": "Ornith-1.0-9B (candidate)",
+                  "base_url": "http://127.0.0.1:8081/v1", "model": "extractor"},
+    # served by evals/dg_shim.py (no llama-server support for diffusion archs)
+    "diffusiongemma": {"kind": "llm",
+                       "label": "DiffusionGemma 26B-A4B (candidate)",
+                       "base_url": "http://127.0.0.1:8082/v1",
+                       "model": "extractor"},
     # cloud rung intentionally omitted — sovereign-only sweep (user decision).
 }
 LADDER_ORDER = ["naive-rag", "floor", "gemma-e2b", "gemma-e4b",
-                "qwen-a3b", "qwen-27b"]
+                "qwen3.5-4b", "granite-h-tiny", "lfm2-8b-a1b", "ornith-9b",
+                "diffusiongemma", "qwen-a3b", "qwen-27b"]
 
 # ---------------------------------------------------------------------------
 # Corpus — realistically-phrased "ingested conversation". Each update-pair

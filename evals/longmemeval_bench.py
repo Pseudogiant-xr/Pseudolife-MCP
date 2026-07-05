@@ -70,6 +70,15 @@ DATASETS = {
 EXTRACTORS = {
     "qwen-27b": "http://127.0.0.1:1234/v1",
     "gemma-e2b": "http://127.0.0.1:8081/v1",
+    # Sidecar-upgrade bake-off candidates (2026-07-04) — all on :8081; the
+    # operator swaps the served GGUF between runs, as with the gemma rungs.
+    "qwen3.5-4b": "http://127.0.0.1:8081/v1",
+    "granite-h-tiny": "http://127.0.0.1:8081/v1",
+    "lfm2-8b-a1b": "http://127.0.0.1:8081/v1",
+    "ornith-9b": "http://127.0.0.1:8081/v1",
+    # DiffusionGemma has no llama-server support (PR #24423); serve it with
+    # evals/dg_shim.py, which wraps the patched llama-diffusion-cli.
+    "diffusiongemma": "http://127.0.0.1:8082/v1",
 }
 # Answerer + judge — constant across runs, so extractor is the only variable.
 QWEN_URL = os.environ.get("PSEUDOLIFE_BENCH_QWEN_URL", "http://127.0.0.1:1234/v1")
@@ -392,7 +401,10 @@ def report(dataset: str, extractor_name: str, tag: str = "") -> None:
     sup = sum(r["consolidation"]["superseded"] for r in rows)
     print(f"supersessions across runs: {sup}")
     summary["superseded_total"] = sup
-    out_path.with_suffix("").with_suffix(".summary.json").write_text(
+    # NOT with_suffix: extractor names contain dots (qwen3.5-4b), which
+    # pathlib would treat as a suffix and truncate.
+    out_path.with_name(
+        out_path.name.removesuffix(".jsonl") + ".summary.json").write_text(
         json.dumps(summary, indent=2), encoding="utf-8")
 
 
