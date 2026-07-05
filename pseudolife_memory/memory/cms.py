@@ -1098,6 +1098,23 @@ class ContinuumMemorySystem:
                     return True
         return False
 
+    def reflush_entries(self, db_ids: set[int]) -> int:
+        """Re-insert resident entries whose storage rows are gone — a
+        connection lost mid-store can roll back an insert whose RETURNING id
+        was already handed out (see PostgresStorage._txn), leaving the entry
+        holding a phantom db_id. Each hit gets a fresh row + id. Returns the
+        number re-flushed."""
+        if self.storage is None or not db_ids:
+            return 0
+        from pseudolife_memory.storage.sync import entry_to_row
+        n = 0
+        for band in self.bands:
+            for e in band.entries:
+                if e.db_id in db_ids:
+                    e.db_id = self.storage.insert_entry(entry_to_row(e))
+                    n += 1
+        return n
+
     def bump_entry_access_count(self, db_id: int, delta: int) -> bool:
         """Bump the resident entry's in-memory access_count to match a DB bump, so
         the save-cadence sync (update_access_counts, in-memory -> DB) reconciles to

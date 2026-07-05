@@ -198,9 +198,20 @@ class PostgresStorage:
         rollback on any exception. Without this, a single failed statement
         (lock timeout, FK violation, ...) would poison subsequent calls.
         Nested use degrades safely to savepoints (the old manual
-        commit/rollback would have committed the outer work mid-way)."""
-        with self.conn.transaction():
+        commit/rollback would have committed the outer work mid-way).
+
+        Commit check (2026-07-04): psycopg's Transaction.__exit__ silently
+        SKIPS the COMMIT when the connection broke during the block
+        (pgconn.status != OK) — the block exits cleanly while the server
+        rolls the work back. Left undetected, insert_entry hands out a
+        RETURNING id for a row that never committed, and the stale db_id
+        later stalls the dream on memory_traces FK violations."""
+        with self.conn.transaction() as tx:
             yield
+        if tx.status is not tx.Status.COMMITTED:
+            raise psycopg.OperationalError(
+                f"transaction did not commit (status={tx.status.name}); "
+                "connection lost during the block")
 
     # ── entries ─────────────────────────────────────────────────────────
 
@@ -1142,6 +1153,17 @@ class PostgresStorage:
             "FROM entries WHERE id = %s",
             (entry_id,)).fetchone()
         return dict(zip(cols, row)) if row else None
+
+    def existing_entry_ids(self, ids) -> set[int]:
+        """The subset of ``ids`` that still have entries rows — lets the dream
+        verify its in-memory db_id mapping after a connection loss rolled back
+        inserts whose ids were already handed out."""
+        ids = [int(i) for i in ids]
+        if not ids:
+            return set()
+        rows = self.conn.execute(
+            "SELECT id FROM entries WHERE id = ANY(%s)", (ids,)).fetchall()
+        return {int(r[0]) for r in rows}
 
     def bump_reinforcements(self, entry_id: int, delta: int) -> None:
         with self._txn():

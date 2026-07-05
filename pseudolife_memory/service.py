@@ -2247,6 +2247,10 @@ class MemoryService:
                                 self._cms.bump_entry_reinforcements(src_id, 1)
                             traces_n += 1
         except Exception as exc:  # noqa: BLE001 — a write failure must hold the cursor too
+            healed = self._dream_reflush_stale(entries)
+            if healed:
+                return _held(f"claim write failed ({healed} stale entry id(s) "
+                             "re-flushed; mapping repaired)", exc)
             return _held("claim write failed", exc)
         newest = max(e["timestamp"] for e in entries)
         self.dream_commit(newest)
@@ -2259,6 +2263,30 @@ class MemoryService:
                 "lessons": lessons, "graph_insight": graph_insight,
                 "traces": traces_n, "sources_attributed": sources_attributed,
                 "quarantined": quarantined}
+
+    def _dream_reflush_stale(self, entries: list[dict]) -> int:
+        """After a claim/trace write failure, verify the pulled batch's
+        in-memory→PG entry mapping and re-insert entries whose rows are gone
+        (a connection lost mid-store could hand out a RETURNING id for an
+        insert that never committed — see PostgresStorage._txn). Without
+        this, a memory_traces FK violation recurs verbatim every sweep: a
+        permanent dream stall. Healing turns it into a single held sweep —
+        the next pull sees the fresh ids. Never raises."""
+        if self._storage is None:
+            return 0
+        ids = [e["db_id"] for e in entries if e.get("db_id") is not None]
+        if not ids:
+            return 0
+        try:
+            with self._lock:
+                assert self._cms is not None
+                missing = set(ids) - self._storage.existing_entry_ids(ids)
+                if not missing:
+                    return 0
+                return self._cms.reflush_entries(missing)
+        except Exception as exc:  # noqa: BLE001 — healing must never mask the hold
+            logger.warning("dream stale-id heal failed (%s)", exc)
+            return 0
 
     def dream_status(self) -> dict[str, Any]:
         """Backlog (eligible unconsolidated memories), idle seconds since the most

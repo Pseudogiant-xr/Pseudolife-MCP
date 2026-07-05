@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-07-04 — dream stall after mid-store connection loss)
+- **Phantom entry ids from a connection lost mid-store**: psycopg's
+  transaction block exits *silently without committing* when the connection
+  broke during the block (`pgconn.status != OK`), so `insert_entry` could
+  return a RETURNING id for a row the server rolled back. `_txn` now verifies
+  the transaction actually committed and raises `OperationalError` otherwise,
+  so every mutator reports the loss instead of pretending success.
+- **Permanent dream stall on `memory_traces_entry_id_fkey`**: when in-memory
+  entries held db_ids absent from the entries table (the rolled-back-insert
+  case above), every `dream_run` trace write hit the FK violation and the
+  claim-write hold retried the SAME write each sweep — a stall only a process
+  restart cleared (seen 2026-07-04 in evals bench runs). On a claim-write
+  failure the dream now verifies the pulled batch's in-memory→PG entry
+  mapping and re-flushes entries whose rows are gone (fresh row + id), so the
+  hold resolves on the next sweep. New: `PostgresStorage.existing_entry_ids`,
+  `CMS.reflush_entries`, regression tests in
+  `tests/test_connection_loss_recovery.py`.
+
 ### Added (2026-07-04 — final polish batch)
 - **Keyboard operability for click-only rows**: cortex fact rows, episode
   timeline items, Insight god-node rows and community rows, and Atlas
@@ -24,7 +42,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   history and maps its subdirectories.
 - **Manifest doc gaps**: `memory_search` enumerates the eight band names;
   `memory_forget` contrasts its OR-combined filters against search's AND.
-
 ### Added (2026-07-04 — UX fast-follow, P2 batch)
 - **Recall tab explains itself**: a first-visit intro describes multi-hop vs
   path-between-two with runnable example queries; seed chips cap at 15 behind
