@@ -1,0 +1,17 @@
+{
+  "rung": "granite-h-tiny",
+  "label": "Granite 4.0-H-Tiny 7B-A1B (candidate)",
+  "kind": "llm",
+  "extract_seconds": 5.6,
+  "consolidation": {
+    "pulled": 26,
+    "claims": 10,
+    "inserted": 10,
+    "superseded": 0
+  },
+  "gold_recoverable": 0.9,
+  "stale_leak": 0.0,
+  "tokens_per_query": 1.4,
+  "search_latency_ms": 6.1,
+  "status": "ok"
+}

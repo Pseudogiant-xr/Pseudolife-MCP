@@ -1,0 +1,17 @@
+{
+  "rung": "lfm2-8b-a1b",
+  "label": "LFM2-8B-A1B (candidate)",
+  "kind": "llm",
+  "extract_seconds": 6.7,
+  "consolidation": {
+    "pulled": 26,
+    "claims": 18,
+    "inserted": 18,
+    "superseded": 0
+  },
+  "gold_recoverable": 1.0,
+  "stale_leak": 0.0,
+  "tokens_per_query": 2.5,
+  "search_latency_ms": 5.1,
+  "status": "ok"
+}
