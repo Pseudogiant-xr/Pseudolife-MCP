@@ -99,11 +99,15 @@ RUNGS: dict[str, dict] = {
                       "label": "Gemma 4 E4B QAT UD-Q4_K_XL (sidecar-swap candidate)",
                       "base_url": "http://127.0.0.1:8081/v1",
                       "model": "extractor"},
+    "e4b-ft": {"kind": "llm",
+               "label": "E4B QLoRA extractor fine-tune Q4_K_M (distill SFT 2026-07-06)",
+               "base_url": "http://127.0.0.1:8081/v1",
+               "model": "extractor"},
     # cloud rung intentionally omitted — sovereign-only sweep (user decision).
 }
 LADDER_ORDER = ["naive-rag", "floor", "gemma-e2b", "gemma-e4b",
                 "qwen3.5-4b", "granite-h-tiny", "lfm2-8b-a1b", "ornith-9b",
-                "diffusiongemma", "gemma4-26b-qat", "gemma-e4b-qat",
+                "diffusiongemma", "gemma4-26b-qat", "gemma-e4b-qat", "e4b-ft",
                 "qwen-a3b", "qwen-27b"]
 
 # ---------------------------------------------------------------------------

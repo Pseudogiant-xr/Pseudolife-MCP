@@ -46,3 +46,4 @@ pseudolife_memory/web/.devserver.log
 # OS
 .DS_Store
 Thumbs.db
+unsloth_compiled_cache/
