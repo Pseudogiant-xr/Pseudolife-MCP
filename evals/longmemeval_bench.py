@@ -79,6 +79,7 @@ EXTRACTORS = {
     # DiffusionGemma has no llama-server support (PR #24423); serve it with
     # evals/dg_shim.py, which wraps the patched llama-diffusion-cli.
     "diffusiongemma": "http://127.0.0.1:8082/v1",
+    "gemma4-26b-qat": "http://127.0.0.1:8081/v1",
 }
 # Answerer + judge — constant across runs, so extractor is the only variable.
 QWEN_URL = os.environ.get("PSEUDOLIFE_BENCH_QWEN_URL", "http://127.0.0.1:1234/v1")
