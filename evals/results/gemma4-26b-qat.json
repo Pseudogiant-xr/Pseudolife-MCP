@@ -1,0 +1,17 @@
+{
+  "rung": "gemma4-26b-qat",
+  "label": "Gemma 4 26B-A4B QAT-Q4_0 (candidate)",
+  "kind": "llm",
+  "extract_seconds": 3.8,
+  "consolidation": {
+    "pulled": 26,
+    "claims": 13,
+    "inserted": 13,
+    "superseded": 0
+  },
+  "gold_recoverable": 1.0,
+  "stale_leak": 0.0,
+  "tokens_per_query": 1.4,
+  "search_latency_ms": 6.1,
+  "status": "ok"
+}

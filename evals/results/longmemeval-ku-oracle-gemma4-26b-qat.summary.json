@@ -1,0 +1,20 @@
+{
+  "dataset": "oracle",
+  "extractor": "gemma4-26b-qat",
+  "n": 78,
+  "arms": {
+    "rag": {
+      "accuracy": 0.603,
+      "context_tokens": 1637.8
+    },
+    "cortex": {
+      "accuracy": 0.462,
+      "context_tokens": 54.3
+    },
+    "hybrid": {
+      "accuracy": 0.59,
+      "context_tokens": 973.5
+    }
+  },
+  "superseded_total": 39
+}
