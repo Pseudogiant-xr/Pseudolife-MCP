@@ -2139,6 +2139,74 @@ class MemoryService:
                            "alphabetical vocab", exc)
             return self.cortex_vocab(limit).get("slots", [])
 
+    # Post-pass caps: screen at most this many freshly-minted entities per
+    # cycle, one best-match proposal each — the queue stays reviewable.
+    _ALIAS_SCAN_MAX = 20
+
+    def _propose_dream_alias_candidates(self, new_entities: dict[str, str],
+                                        known_entities: set[str]) -> int:
+        """Embedding-based coreference screen over entities a dream cycle just
+        minted: each new entity name is cosine-compared against existing
+        entity names; the best match at/above ``alias_candidate_min_cosine``
+        files a merge proposal into the SAME review queue as the token-Jaccard
+        write-dedup (dismissed pairs suppressed, unique index dedupes,
+        Atlas/graph_review surfaces it, a human settles it — never
+        auto-folded). Complements ``_propose_write_dedup``: paraphrase
+        coreference ("production extractor sidecar" ~ "PseudoLife-MCP default
+        extractor sidecar") shares almost no tokens but embeds close.
+        Returns the number of proposals filed; never raises."""
+        import time as _t
+        try:
+            thr = float(self.config.memory.dream.alias_candidate_min_cosine)
+            if thr <= 0 or not new_entities:
+                return 0
+            from pseudolife_memory.graph import norm_name
+            filed = 0
+            with self._lock:
+                self._ensure_init()
+                if (self._storage is None or self._embedder is None
+                        or self._cortex is None):
+                    return 0
+                # Existing display names, one per norm key (cortex entities
+                # predating this cycle).
+                existing: dict[str, str] = {}
+                for r in self._cortex.records:
+                    if r.status == "current":
+                        k = r.key[0]
+                        if k in known_entities and k not in existing:
+                            existing[k] = r.entity
+                if not existing:
+                    return 0
+                dismissed = frozenset(self._storage.dismissed_pairs())
+                new_items = list(new_entities.items())[:self._ALIAS_SCAN_MAX]
+                ex_items = list(existing.items())
+                new_emb = self._embedder.encode([d for _, d in new_items])
+                ex_emb = self._embedder.encode([d for _, d in ex_items])
+                sims = new_emb @ ex_emb.T          # encode() normalizes
+                now = _t.time()
+                for i, (_, disp) in enumerate(new_items):
+                    j = int(sims[i].argmax())
+                    score = float(sims[i][j])
+                    if score < thr:
+                        continue
+                    target = ex_items[j][1]
+                    pair = tuple(sorted((norm_name(disp), norm_name(target))))
+                    if pair[0] == pair[1] or pair in dismissed:
+                        continue
+                    a = self._resolve_or_create_entity(disp)
+                    b = self._resolve_or_create_entity(target)
+                    if a["id"] == b["id"]:
+                        continue                    # already aliased/merged
+                    if self._storage.insert_entity_proposal(
+                            "merge", a["id"], b["id"], round(score, 3),
+                            f"dream-alias: {disp!r} ~ {target!r} "
+                            f"(cosine {score:.2f})", now) is not None:
+                        filed += 1
+            return filed
+        except Exception as exc:  # noqa: BLE001 — screening must never break a dream
+            logger.debug("dream alias-candidate scan skipped (%s)", exc)
+            return 0
+
     def dream_run(self, extractor, *, limit: int | None = None) -> dict[str, Any]:
         """One dream cycle: pull eligible unconsolidated memories, extract claims
         via ``extractor`` (an extractor that yields nothing writes nothing —
@@ -2233,9 +2301,19 @@ class MemoryService:
         else:
             self._dream_batch_failures.pop(batch_key, None)
 
+        # Entities that exist BEFORE this cycle's writes — claims landing on a
+        # norm-key outside this set minted a new entity, which the alias-
+        # candidate post-pass below screens against existing names.
+        with self._lock:
+            known_entities = {r.key[0] for r in self._cortex.records
+                              if r.status == "current"}
+        new_entities: dict[str, str] = {}    # norm -> display, first seen
         try:
             for c, src_id in pairs:
                 ent, attr = self._resolve_dream_slot(c["entity"], c["attribute"])
+                ent_norm = _norm_key(ent)
+                if ent_norm not in known_entities and ent_norm not in new_entities:
+                    new_entities[ent_norm] = ent
                 if (traces_cfg.enabled and src_id is not None
                         and self._storage is not None):
                     with self._lock:
@@ -2275,11 +2353,16 @@ class MemoryService:
         newest = max(e["timestamp"] for e in entries)
         self.dream_commit(newest)
         relations_n = self._dream_extract_relations(extractor, texts)
+        # After relations linking, so paraphrase entities the relations pass
+        # just created resolve to their graph nodes instead of re-creating.
+        alias_candidates = self._propose_dream_alias_candidates(
+            new_entities, known_entities)
         lessons = self.synthesize_lessons(extractor)
         graph_insight = self._safe_refresh_graph_insight()
         sources_attributed = self.graph_backfill_sources().get("attributed", 0)
         return {"pulled": len(entries), "claims": sum(tally.values()),
                 "cursor": newest, "relations": relations_n, **tally,
+                "alias_candidates": alias_candidates,
                 "lessons": lessons, "graph_insight": graph_insight,
                 "traces": traces_n, "sources_attributed": sources_attributed,
                 "quarantined": quarantined}

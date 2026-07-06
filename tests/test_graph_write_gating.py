@@ -302,3 +302,77 @@ def test_explicit_relate_never_files_write_dedup(svc):
     svc.graph_relate("kappa runner", "uses", "kappa-runner.py", origin="user")
     assert [p for p in svc._storage.pending_entity_proposals()
             if "kappa" in (p["reason"] or "")] == []
+
+
+# ── dream alias-candidate post-pass (embedding coreference screen) ─────────
+
+class _ClaimStub:
+    """Extractor stub: emits one fixed claim per dream cycle."""
+
+    def __init__(self, entity, attribute="deployment-status", value="production"):
+        self._claim = dict(entity=entity, attribute=attribute, value=value,
+                           confidence=0.8, origin="agent")
+
+    def extract(self, texts, vocab):
+        return [dict(self._claim)]
+
+
+def _drain(svc, extractor):
+    while svc.dream_run(extractor, limit=100)["pulled"]:
+        pass
+
+
+def _alias_props(svc):
+    return [p for p in svc._storage.pending_entity_proposals()
+            if (p["reason"] or "").startswith("dream-alias:")]
+
+
+def test_dream_alias_candidate_files_semantic_merge_proposal(svc):
+    """A dreamed paraphrase of an existing cortex entity (near-zero token
+    overlap, so the Jaccard write-dedup can't see it) files a merge proposal
+    for review."""
+    svc.cortex_write("PseudoLife-MCP default extractor sidecar", "version",
+                     "e4b", support="user")
+    svc.store("sidecar deploy note", source="t")
+    _drain(svc, _ClaimStub("production extractor sidecar"))
+    props = _alias_props(svc)
+    assert len(props) == 1
+    assert {props[0]["entity"], props[0]["into"]} == {
+        "production extractor sidecar",
+        "PseudoLife-MCP default extractor sidecar"}
+    # Same claim re-dreamed: entity is no longer new -> nothing re-filed.
+    svc.store("sidecar deploy note again", source="t")
+    _drain(svc, _ClaimStub("production extractor sidecar"))
+    assert len(_alias_props(svc)) == 1
+
+
+def test_dream_alias_candidate_ignores_unrelated_entities(svc):
+    svc.cortex_write("PseudoLife-MCP default extractor sidecar", "version",
+                     "e4b", support="user")
+    svc.store("budget note", source="t")
+    _drain(svc, _ClaimStub("quarterly budget report"))
+    assert _alias_props(svc) == []
+
+
+def test_dream_alias_candidate_respects_dismissed_and_disable(svc):
+    from pseudolife_memory.graph import norm_name
+    svc.cortex_write("PseudoLife-MCP default extractor sidecar", "version",
+                     "e4b", support="user")
+    svc.stats()
+    svc._storage.dismiss_pair(*sorted((
+        norm_name("production extractor sidecar"),
+        norm_name("PseudoLife-MCP default extractor sidecar"))))
+    svc.store("sidecar deploy note", source="t")
+    _drain(svc, _ClaimStub("production extractor sidecar"))
+    assert _alias_props(svc) == []
+    # disabled at 0: a fresh paraphrase files nothing
+    old = svc.config.memory.dream.alias_candidate_min_cosine
+    svc.config.memory.dream.alias_candidate_min_cosine = 0.0
+    try:
+        svc.store("dream service note", source="t")
+        svc.cortex_write("dream consolidation service", "status", "live",
+                         support="user")
+        _drain(svc, _ClaimStub("dream service"))
+        assert _alias_props(svc) == []
+    finally:
+        svc.config.memory.dream.alias_candidate_min_cosine = old

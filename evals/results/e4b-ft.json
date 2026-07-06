@@ -2,7 +2,7 @@
   "rung": "e4b-ft",
   "label": "E4B QLoRA extractor fine-tune Q4_K_M (distill SFT 2026-07-06)",
   "kind": "llm",
-  "extract_seconds": 16.0,
+  "extract_seconds": 14.7,
   "consolidation": {
     "pulled": 26,
     "claims": 16,

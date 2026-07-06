@@ -277,6 +277,14 @@ class DreamConfig:
     extractor_base_url: str | None = None
     extractor_api_key: str | None = None
     extractor_model: str | None = None
+    # Who owns the extractor endpoint settings above: "env" (default) keeps
+    # the ops contract — PSEUDOLIFE_DREAM_* env vars override the dataclass,
+    # as the compose file and README document. "config" hands control to
+    # this config (the Console's Extractor panel writes here), ignoring the
+    # env vars — the honest way to let a UI change win over a compose-baked
+    # env default without silently breaking existing env-driven deploys.
+    # api_key stays env-only either way (never persisted to config.yaml).
+    extractor_source: str = "env"
     # Output budget for the extractor call. Sized generously so a dense dream
     # batch can emit all its claim JSON without truncation (a truncated response
     # parses to fewer/zero claims). 2048 ≈ 40-80 claims. Override per-deploy with
@@ -305,6 +313,15 @@ class DreamConfig:
     # threshold, a merge proposal is filed for review (never auto-folded).
     # 0 disables the detector.
     write_dedup_min_jaccard: float = 0.6
+    # Alias-candidate post-pass: when a dream claim mints a NEW cortex entity
+    # whose name-embedding cosine against an existing entity name reaches
+    # this threshold, a merge proposal is filed for review (same queue and
+    # review flow as the Jaccard detector above; never auto-folded). Semantic
+    # complement to token Jaccard: "production extractor sidecar" ~
+    # "PseudoLife-MCP default extractor sidecar" is Jaccard 0.33 but cosine
+    # 0.65 (all-MiniLM-L6-v2 calibration 2026-07-07: paraphrase pairs scored
+    # 0.53-0.77, unrelated pairs <= 0.17). 0 disables.
+    alias_candidate_min_cosine: float = 0.5
 
 
 @dataclass
