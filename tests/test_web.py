@@ -86,6 +86,28 @@ def test_write_config_bool_coercion(svc):
     assert svc.config.memory.show_superseded is True
 
 
+def test_write_config_extractor_panel_roundtrip(svc):
+    res = config_io.write_config(svc, {
+        "memory.dream.extractor_source": "config",
+        "memory.dream.extractor_base_url": "http://host.docker.internal:1234/v1",
+        "memory.dream.extractor_model": "qwen",
+    })
+    assert len(res["applied"]) == 3 and not res["restart_required"]
+    d = svc.config.memory.dream
+    assert d.extractor_source == "config"
+    assert d.extractor_base_url == "http://host.docker.internal:1234/v1"
+    assert d.extractor_model == "qwen"
+    # An emptied string field clears the value (back to unset/None).
+    config_io.write_config(svc, {"memory.dream.extractor_base_url": ""})
+    assert svc.config.memory.dream.extractor_base_url is None
+
+
+@pytest.mark.parametrize("bad", ["ftp://x", "javascript:alert(1)", "not a url"])
+def test_write_config_rejects_non_http_endpoint(svc, bad):
+    with pytest.raises(ValueError):
+        config_io.write_config(svc, {"memory.dream.extractor_base_url": bad})
+
+
 # ── routes ──────────────────────────────────────────────────────────────────
 
 def test_routes_dispatch_reads(svc):

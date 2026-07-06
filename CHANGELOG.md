@@ -6,7 +6,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Changed (2026-07-07 — dream vocab hint is relevance-ranked)
+### Added (2026-07-07 — Console: Extractor panel + dedup knobs)
+- **Console Extractor panel** — the dream extractor endpoint is now
+  switchable from the Cortex Console: base URL (with suggestions for the
+  bundled sidecar, LM Studio, and Ollama), model name, call timeout, and max
+  output tokens. A new `extractor_source` switch decides who owns these
+  settings: `env` (default — the documented `PSEUDOLIFE_DREAM_*` ops
+  contract, unchanged) or `config` (the panel's values win and the env vars
+  are ignored; otherwise a UI change would silently lose to the env defaults
+  the compose file always sets). All live — `build_extractor` constructs the
+  client fresh on every dream invocation. The API key stays env-only in both
+  modes (secrets never land in config.yaml); string knobs validate http(s)
+  URLs at the write boundary.
+- **New Console knobs** — `write_dedup_min_jaccard`,
+  `alias_candidate_min_cosine` (Dream group) and
+  `dream_slot_match_threshold` (Cortex group) are now editable live.
+
+### Added (2026-07-07 — dream alias-candidate post-pass)
+- **`MemoryService._propose_dream_alias_candidates`** — after a dream cycle
+  writes its claims, every freshly-minted cortex entity name is cosine-
+  compared (name embeddings) against existing entity names; the best match
+  at/above `alias_candidate_min_cosine` (new `DreamConfig` knob, default 0.5,
+  0 disables) files a merge proposal into the existing `entity_proposals`
+  review queue — dismissed-pair suppression, unique-index dedupe, Atlas
+  merge queue, and the accept/dismiss flows are all reused, and nothing is
+  ever auto-folded. Semantic complement to the token-Jaccard write-dedup:
+  paraphrase coreference ("production extractor sidecar" ~ "PseudoLife-MCP
+  default extractor sidecar", Jaccard 0.33) embeds at cosine 0.65 while
+  unrelated pairs calibrate ≤ 0.17 on all-MiniLM-L6-v2. Dream summaries gain
+  an `alias_candidates` count.
 - **`CortexStore.vocab_ranked` + `MemoryService._dream_vocab`**: the slot-key
   hint handed to the dream extractor is now ranked by cosine of each current
   slot's value-free embedding against the batch text, instead of taking the

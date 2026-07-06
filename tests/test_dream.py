@@ -236,6 +236,34 @@ def test_build_extractor_selects_by_config(monkeypatch):
     assert build_extractor(DreamConfig()).timeout == DreamConfig().extractor_timeout_seconds
 
 
+def test_build_extractor_config_source_ignores_env(monkeypatch):
+    """extractor_source="config" (the Console's Extractor panel) must win over
+    the PSEUDOLIFE_DREAM_* env vars the compose file always sets — except the
+    api key, which stays env-honoured in both modes (secrets never live in
+    config.yaml)."""
+    from pseudolife_memory.memory.dream import (
+        NoOpExtractor, OpenAICompatExtractor, build_extractor,
+    )
+    from pseudolife_memory.utils.config import DreamConfig
+
+    monkeypatch.setenv("PSEUDOLIFE_DREAM_BASE_URL", "http://env")
+    monkeypatch.setenv("PSEUDOLIFE_DREAM_MODEL", "envm")
+    monkeypatch.setenv("PSEUDOLIFE_DREAM_TIMEOUT_SECONDS", "200")
+    monkeypatch.setenv("PSEUDOLIFE_DREAM_MAX_TOKENS", "256")
+    monkeypatch.setenv("PSEUDOLIFE_DREAM_API_KEY", "sekret")
+    cfg = DreamConfig(extractor_source="config",
+                      extractor_base_url="http://cfg", extractor_model="cfgm",
+                      extractor_timeout_seconds=99.0, extractor_max_tokens=512)
+    ext = build_extractor(cfg)
+    assert isinstance(ext, OpenAICompatExtractor)
+    assert ext.base_url == "http://cfg" and ext.model == "cfgm"
+    assert ext.timeout == 99.0 and ext.max_tokens == 512
+    assert ext.api_key == "sekret"
+    # config mode with no endpoint set => NoOp, even though env points somewhere.
+    assert isinstance(build_extractor(DreamConfig(extractor_source="config")),
+                      NoOpExtractor)
+
+
 # ── sweep gate (pure; fake service) ──────────────────────────────────────
 
 class _FakeService:

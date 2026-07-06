@@ -111,6 +111,12 @@ KNOBS: list[dict[str, Any]] = [
      "restart": False,
      "help": "Deterministic regex promotion on every store. Off by default — "
              "it mis-splits compound entity names. Prefer the dream pass."},
+    {"path": "memory.cortex.dream_slot_match_threshold", "group": "Cortex",
+     "label": "Dream slot-match floor", "type": "float", "default": 0.0,
+     "min": 0.0, "max": 1.0, "step": 0.01, "restart": False,
+     "help": "Dream-path slot resolver: a paraphrased claim adopts an existing "
+             "slot when its value-free embedding cosine ≥ this. 0 = exact-key "
+             "only."},
     # ── Dream ──────────────────────────────────────────────────────────────
     {"path": "memory.dream.enabled", "group": "Dream", "label": "Dream sweep",
      "type": "bool", "default": True, "restart": True,
@@ -135,6 +141,55 @@ KNOBS: list[dict[str, Any]] = [
      "label": "Extract graph relations", "type": "bool", "default": True,
      "restart": False,
      "help": "Dream also extracts (src,relation,dst) triples into the graph."},
+    {"path": "memory.dream.write_dedup_min_jaccard", "group": "Dream",
+     "label": "Write-dedup Jaccard floor", "type": "float", "default": 0.6,
+     "min": 0.0, "max": 1.0, "step": 0.05, "restart": False,
+     "help": "New dream entity whose name-token Jaccard vs an existing name "
+             "reaches this files a merge proposal for review. 0 = off."},
+    {"path": "memory.dream.alias_candidate_min_cosine", "group": "Dream",
+     "label": "Alias-candidate cosine floor", "type": "float", "default": 0.5,
+     "min": 0.0, "max": 1.0, "step": 0.05, "restart": False,
+     "help": "New dream entity whose name-embedding cosine vs an existing "
+             "entity reaches this files a merge proposal for review (semantic "
+             "complement to the Jaccard detector). 0 = off."},
+    # ── Extractor ──────────────────────────────────────────────────────────
+    # All live: build_extractor() constructs the client fresh on every dream
+    # invocation from service.config.
+    {"path": "memory.dream.extractor_source", "group": "Extractor",
+     "label": "Settings source", "type": "enum", "default": "env",
+     "options": ["env", "config"], "restart": False,
+     "help": "Who owns the endpoint settings: env = PSEUDOLIFE_DREAM_* vars "
+             "(compose/ops contract) override; config = the values below win "
+             "and env vars are ignored. Switch to config to edit here."},
+    {"path": "memory.dream.extractor_base_url", "group": "Extractor",
+     "label": "Endpoint base URL", "type": "string", "format": "url",
+     "default": None, "restart": False,
+     "suggestions": ["http://pseudolife-extractor:8081/v1",
+                     "http://host.docker.internal:1234/v1",
+                     "http://host.docker.internal:11434/v1",
+                     "http://127.0.0.1:8081/v1"],
+     "help": "OpenAI-compatible /v1 endpoint. From inside the container the "
+             "host machine is host.docker.internal (sidecar = "
+             "pseudolife-extractor:8081; LM Studio = :1234; Ollama = :11434). "
+             "Effective only when settings source = config."},
+    {"path": "memory.dream.extractor_model", "group": "Extractor",
+     "label": "Model name", "type": "string", "default": None, "restart": False,
+     "suggestions": ["extractor"],
+     "help": "Model id the endpoint expects (the bundled sidecar serves "
+             "\"extractor\"; LM Studio/Ollama use their loaded-model names). "
+             "Effective only when settings source = config."},
+    {"path": "memory.dream.extractor_timeout_seconds", "group": "Extractor",
+     "label": "Call timeout (s)", "type": "float", "default": 240.0,
+     "min": 10.0, "max": 3600.0, "step": 10.0, "restart": False,
+     "help": "Hard timeout per extractor call. CPU sidecars need generous "
+             "headroom (E4B ≈ 480s); GPU endpoints can go much lower. "
+             "Effective only when settings source = config."},
+    {"path": "memory.dream.extractor_max_tokens", "group": "Extractor",
+     "label": "Max output tokens", "type": "int", "default": 2048,
+     "min": 128, "max": 32768, "step": 128, "restart": False,
+     "help": "Output budget per extractor call (truncated JSON parses to "
+             "fewer/zero claims). Effective only when settings source = "
+             "config."},
     # ── Lessons ────────────────────────────────────────────────────────────
     {"path": "memory.lessons.enabled", "group": "Lessons",
      "label": "Procedural lessons", "type": "bool", "default": True,
@@ -218,7 +273,15 @@ def _coerce(knob: dict, value: Any) -> Any:
                 f"{knob['path']}: {v!r} not in {knob.get('options')}")
         return v
     else:  # string
-        return str(value)
+        if value is None:
+            return None                      # explicit clear
+        v = str(value).strip()
+        if not v:
+            return None                      # empty field clears the value
+        if (knob.get("format") == "url"
+                and not v.lower().startswith(("http://", "https://"))):
+            raise ValueError(f"{knob['path']}: must be an http(s) URL")
+        return v
     lo, hi = knob.get("min"), knob.get("max")
     if lo is not None and v < lo:
         raise ValueError(f"{knob['path']}: {v} < min {lo}")
@@ -249,7 +312,8 @@ def read_config(service: Any) -> dict[str, Any]:
             continue  # knob not present in this config version — skip gracefully
         item = {k: knob.get(k) for k in (
             "path", "label", "type", "default", "min", "max", "step",
-            "options", "restart", "help") if knob.get(k) is not None}
+            "options", "restart", "help", "format", "suggestions")
+            if knob.get(k) is not None}
         item["value"] = current
         groups.setdefault(knob["group"], []).append(item)
     return {

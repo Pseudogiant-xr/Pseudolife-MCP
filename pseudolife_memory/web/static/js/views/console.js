@@ -62,6 +62,17 @@ function control(k, row) {
       onchange: (e) => onChange(e.target.value) },
       (k.options || []).map((o) => el("option", { value: o, selected: o === k.value }, o)));
   }
+  if (k.type === "string") {
+    // Empty field = unset (null), so operators can clear a value. Suggestions
+    // render as a datalist (freeform + common endpoints).
+    const listId = k.suggestions?.length ? "dl-" + k.path.replace(/\./g, "-") : null;
+    const input = el("input", { type: "text", value: k.value ?? "", name: k.path,
+      "aria-label": k.label, ...(listId ? { list: listId } : {}),
+      oninput: (e) => onChange(e.target.value.trim() === "" ? null : e.target.value.trim()) });
+    if (!listId) return input;
+    return el("span", { class: "with-datalist" }, input,
+      el("datalist", { id: listId }, k.suggestions.map((s) => el("option", { value: s }))));
+  }
   // int / float
   const step = k.type === "int" ? (k.step || 1) : (k.step || 0.01);
   return el("input", { type: "number", value: k.value, name: k.path, "aria-label": k.label,
@@ -90,7 +101,7 @@ function resetTo(k, row) {
   const ctrl = row.querySelector(".ctrl");
   if (k.type === "bool") { ctrl.querySelector("input").checked = !!k.default; }
   else if (k.type === "enum") { ctrl.querySelector("select").value = k.default; }
-  else { ctrl.querySelector("input").value = k.default; }
+  else { ctrl.querySelector("input").value = k.default ?? ""; }
   setEdit(k, k.default, row);
 }
 
@@ -115,7 +126,7 @@ function discardAll() {
     const ctrl = r.querySelector(".ctrl");
     if (k.type === "bool") ctrl.querySelector("input").checked = !!k.value;
     else if (k.type === "enum") ctrl.querySelector("select").value = k.value;
-    else ctrl.querySelector("input").value = k.value;
+    else ctrl.querySelector("input").value = k.value ?? "";
     r.classList.remove("dirty");
   });
   refreshSaveBar(document.querySelector(".savebar"));

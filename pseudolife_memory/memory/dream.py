@@ -380,10 +380,17 @@ class OpenAICompatExtractor:
 
 def build_extractor(cfg) -> DreamExtractor:
     """Pick the extractor from config: an OpenAI-compatible endpoint when a
-    base-URL + model are set (env vars ``PSEUDOLIFE_DREAM_BASE_URL`` /
-    ``_MODEL`` / ``_API_KEY`` / ``_TIMEOUT_SECONDS`` / ``_MAX_TOKENS`` override
-    the dataclass), else a no-op (no automatic regex writes — single-writer
-    cortex; see the 2026-06-19 design)."""
+    base-URL + model are set, else a no-op (no automatic regex writes —
+    single-writer cortex; see the 2026-06-19 design).
+
+    ``cfg.extractor_source`` decides who owns the endpoint settings:
+    ``"env"`` (default, the documented ops contract) lets the
+    ``PSEUDOLIFE_DREAM_BASE_URL`` / ``_MODEL`` / ``_TIMEOUT_SECONDS`` /
+    ``_MAX_TOKENS`` env vars override the dataclass; ``"config"`` (set by
+    the Console's Extractor panel) uses the config values and ignores those
+    env vars — otherwise a UI change would silently lose to the env defaults
+    the compose file always sets. ``PSEUDOLIFE_DREAM_API_KEY`` is honoured
+    in both modes (secrets stay out of config.yaml)."""
     import os
 
     def _env_num(name, fallback, cast):
@@ -395,16 +402,22 @@ def build_extractor(cfg) -> DreamExtractor:
         except (TypeError, ValueError):
             return fallback
 
-    base_url = os.environ.get("PSEUDOLIFE_DREAM_BASE_URL") or cfg.extractor_base_url
-    model = os.environ.get("PSEUDOLIFE_DREAM_MODEL") or cfg.extractor_model
+    from_config = getattr(cfg, "extractor_source", "env") == "config"
+    if from_config:
+        base_url, model = cfg.extractor_base_url, cfg.extractor_model
+        max_tokens, timeout = cfg.extractor_max_tokens, cfg.extractor_timeout_seconds
+    else:
+        base_url = os.environ.get("PSEUDOLIFE_DREAM_BASE_URL") or cfg.extractor_base_url
+        model = os.environ.get("PSEUDOLIFE_DREAM_MODEL") or cfg.extractor_model
+        max_tokens = _env_num("PSEUDOLIFE_DREAM_MAX_TOKENS",
+                              cfg.extractor_max_tokens, int)
+        timeout = _env_num("PSEUDOLIFE_DREAM_TIMEOUT_SECONDS",
+                           cfg.extractor_timeout_seconds, float)
     api_key = os.environ.get("PSEUDOLIFE_DREAM_API_KEY") or cfg.extractor_api_key
     if base_url and model:
         return OpenAICompatExtractor(
             base_url, model, api_key=api_key,
-            max_tokens=_env_num("PSEUDOLIFE_DREAM_MAX_TOKENS",
-                                 cfg.extractor_max_tokens, int),
-            timeout_seconds=_env_num("PSEUDOLIFE_DREAM_TIMEOUT_SECONDS",
-                                     cfg.extractor_timeout_seconds, float),
+            max_tokens=max_tokens, timeout_seconds=timeout,
         )
     return NoOpExtractor()
 

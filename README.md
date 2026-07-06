@@ -982,8 +982,17 @@ naive-RAG at ~25× fewer tokens/query); see `evals/README.md`.
 beefier box on your LAN), any OpenAI-compatible server can replace the sidecar —
 the ladder measured a Qwen3.6-27B on a single RTX 4090 at the quality ceiling
 (gold 1.0 / stale-leak 0.0) while extracting ~5× faster than the CPU sidecar.
-For the Docker stack, set the override in `ops/.env` (the compose file
-interpolates it into the daemon) and restart the daemon
+Two ways to switch:
+
+*From the Console (no restart):* the **Extractor** panel in the Cortex
+Console's config view edits the endpoint, model, timeout, and token budget
+live — flip its "Settings source" switch to `config` first (while it is
+`env`, the default, the `PSEUDOLIFE_DREAM_*` variables below own the
+settings and the panel's values are ignored). The API key stays env-only
+either way.
+
+*Via env:* for the Docker stack, set the override in `ops/.env` (the compose
+file interpolates it into the daemon) and restart the daemon
 (`docker compose -f ops/docker-compose.yml up -d --no-deps pseudolife-daemon`):
 
 ```dotenv
