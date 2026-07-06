@@ -352,8 +352,15 @@ class CortexConfig:
     supersede_confidence_margin: float = 0.15
     reinforce_rate: float = 0.34
     # Cortex guard for memory_search abstention: a current fact must score >= this
-    # to be surfaced (and to suppress low_confidence). Default 0.3 = today.
-    guard_min_score: float = 0.3
+    # to be surfaced (and to suppress low_confidence). Default 0.2: fact embeddings
+    # are terse "entity attribute value" strings whose cosine vs a natural-language
+    # question rarely clears 0.3 even when the fact IS the answer — the 2026-07-06
+    # LongMemEval replay sweep showed 0.3 serves ZERO facts for 60% of questions
+    # vs 28% at 0.2, with identical end-to-end accuracy. 0.1 was tried and served
+    # more gold facts but measurably hurt: the extra weak facts dilute the context
+    # and the consumer abstains ("distractor-induced under-confidence").
+    # Abstention-on deployments still override upward (see README: 0.65 pairing).
+    guard_min_score: float = 0.2
     # Dream-path slot resolver: a paraphrased dreamed claim adopts an existing
     # current slot when its value-free slot embedding cosine >= this. <=0 disables
     # (exact-key only = today's behaviour). Positive = the cosine floor.

@@ -538,9 +538,13 @@ The built-in defaults are tuned for Claude's use case:
   the top match scores below the floor, so the agent can abstain instead
   of answering from a weak hit. A cortex fact in the result always
   overrides it — but *which* cortex facts count is now tunable via
-  `memory.cortex.guard_min_score` (default `0.3` = prior hard-coded
-  behaviour): only facts scoring at/above it are treated as a confident
-  answer, so weak topically-adjacent facts stop suppressing abstention.
+  `memory.cortex.guard_min_score` (default `0.2`; a LongMemEval retrieval
+  replay showed the old `0.3` floor served *zero* facts for 60% of
+  questions, because terse fact embeddings rarely score 0.3 against a
+  natural-language query even when they are the answer — while going
+  below 0.2 measurably hurt by diluting the context with weak facts):
+  only facts scoring at/above it are treated as a confident answer, so
+  weak topically-adjacent facts stop suppressing abstention.
   The two are calibrated as a **pair**; the `evals/` sweep recommends
   `guard_min_score = 0.65` + `search_confidence_floor = 0.70` for an
   abstention-on deployment (doubles abstention recall at zero false-abstain).

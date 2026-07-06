@@ -93,7 +93,7 @@ KNOBS: list[dict[str, Any]] = [
      "restart": False,
      "help": "Surface canonical facts ahead of associative recall in search."},
     {"path": "memory.cortex.guard_min_score", "group": "Cortex",
-     "label": "Cortex guard min score", "type": "float", "default": 0.3,
+     "label": "Cortex guard min score", "type": "float", "default": 0.2,
      "min": 0.0, "max": 1.0, "step": 0.01, "restart": False,
      "help": "A current fact must score ≥ this to count as a confident answer "
              "(and to suppress abstention)."},

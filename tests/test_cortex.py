@@ -420,7 +420,7 @@ def test_protect_provenance_false_restores_pure_newer_wins():
 def test_cortex_config_new_knobs_default_and_parse():
     from pseudolife_memory.utils.config import CortexConfig, _dict_to_dataclass
     c = CortexConfig()
-    assert c.guard_min_score == 0.3            # default = today's hardcoded guard
+    assert c.guard_min_score == 0.2            # default = sweep-tuned floor (2026-07-06)
     assert c.dream_slot_match_threshold == 0.0  # default = off (exact-key only)
     parsed = _dict_to_dataclass(
         CortexConfig,

@@ -2,7 +2,7 @@
   "rung": "gemma-e2b",
   "label": "Gemma 4 E2B (CPU sidecar)",
   "kind": "llm",
-  "extract_seconds": 6.8,
+  "extract_seconds": 6.7,
   "consolidation": {
     "pulled": 26,
     "claims": 10,

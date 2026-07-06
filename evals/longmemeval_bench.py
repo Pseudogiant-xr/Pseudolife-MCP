@@ -85,7 +85,13 @@ EXTRACTORS = {
 QWEN_URL = os.environ.get("PSEUDOLIFE_BENCH_QWEN_URL", "http://127.0.0.1:1234/v1")
 RAG_TOP_K = 6        # raw-turn context width for the rag + hybrid arms
 HYBRID_TOP_K = 3     # raw turns added to cortex facts in the hybrid arm
-CORTEX_TOP_K = 8
+# 24 @ min_score 0.2 (was 8 @ 0.3): the 2026-07-06 retrieval_sweep.py replay on
+# the s-qwen-27b-diag banks showed 0.3 starves 60% of questions outright vs 28%
+# at 0.2, with identical judged accuracy (rebuild_contexts.py before/after).
+# 0.1 was tried and rejected: more gold facts served, but the extra weak facts
+# dilute the context and the answerer abstains on previously-correct questions.
+CORTEX_TOP_K = 24
+CORTEX_MIN_SCORE = 0.2
 ARMS = ("rag", "cortex", "hybrid")
 
 _ANSWER_SYSTEM = (
@@ -265,7 +271,7 @@ def build_contexts(svc, question: str) -> dict[str, str]:
     raw = svc.search(question, top_k=RAG_TOP_K).get("entries", [])
     raw_texts = [e.get("text", "") for e in raw]
     cortex = svc.cortex_search(question, top_k=CORTEX_TOP_K,
-                               min_score=0.3).get("entries", [])
+                               min_score=CORTEX_MIN_SCORE).get("entries", [])
     # Facts carry their supersession chain: knowledge-update asks about BOTH
     # the current value and the original one ("where did I initially ...") —
     # the version timeline (HLC supersession) is the memory system's actual

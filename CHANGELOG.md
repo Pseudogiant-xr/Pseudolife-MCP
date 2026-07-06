@@ -6,7 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Fixed (2026-07-04 — dream stall after mid-store connection loss)
+### Changed (2026-07-06 — cortex retrieval floor lowered)
+- **`memory.cortex.guard_min_score` default 0.3 → 0.2.** A LongMemEval
+  retrieval replay (`evals/retrieval_sweep.py` over dumped fact banks) showed
+  the 0.3 floor served *zero* cortex facts for 60% of questions: fact
+  embeddings are terse `entity attribute value` strings whose cosine against
+  a natural-language query rarely clears 0.3 even when the fact is the
+  answer. 0.2 halves starvation (60% → 28%) at identical end-to-end accuracy
+  in the before/after judge run (`evals/rebuild_contexts.py`). 0.1 was tried
+  and rejected: it un-starves further but the extra weak facts dilute the
+  context and the answerer abstains on questions it previously got right.
+  Abstention-on deployments should keep overriding upward (`0.65` pairing,
+  see README). The bench's cortex arm moved to `top_k=24, min_score=0.2`.
 - **Phantom entry ids from a connection lost mid-store**: psycopg's
   transaction block exits *silently without committing* when the connection
   broke during the block (`pgconn.status != OK`), so `insert_entry` could
