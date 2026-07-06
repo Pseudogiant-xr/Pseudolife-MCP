@@ -111,10 +111,10 @@ services:
       PSEUDOLIFE_DREAM_BASE_URL: ${PSEUDOLIFE_DREAM_BASE_URL:-http://pseudolife-extractor:8081/v1}
       PSEUDOLIFE_DREAM_MODEL: ${PSEUDOLIFE_DREAM_MODEL:-extractor}
       PSEUDOLIFE_DREAM_API_KEY: ${PSEUDOLIFE_DREAM_API_KEY:-}
-      # The CPU Gemma sidecar generates at ~30 tok/s, so dream extraction needs
-      # well over the old 20s default (a full 2048-tok generation is ~70s). 240s
-      # gives headroom incl. slower end-user laptops; bump for a larger model.
-      PSEUDOLIFE_DREAM_TIMEOUT_SECONDS: ${PSEUDOLIFE_DREAM_TIMEOUT_SECONDS:-240}
+      # The CPU E4B sidecar generates at ~12-15 tok/s, so dream extraction needs
+      # generous headroom (a full 2048-tok generation is ~150-170s). 480s covers
+      # that incl. slower end-user laptops; lower to 240 for the lighter E2B.
+      PSEUDOLIFE_DREAM_TIMEOUT_SECONDS: ${PSEUDOLIFE_DREAM_TIMEOUT_SECONDS:-480}
       PSEUDOLIFE_DREAM_MAX_TOKENS: ${PSEUDOLIFE_DREAM_MAX_TOKENS:-2048}
     # Linux only: make host.docker.internal resolve to the host (Docker Desktop
     # on Windows/macOS provides it automatically). Needed when the extractor
@@ -134,7 +134,7 @@ services:
     build:
       context: ..
       dockerfile: ops/Dockerfile.extractor
-    image: pseudolife-extractor:gemma4-e2b
+    image: pseudolife-extractor:gemma4-e4b
     container_name: pseudolife-mcp-extractor
     restart: unless-stopped
     expose:
@@ -151,7 +151,7 @@ services:
     # Benchmark/swap: mount a different GGUF over the baked default without a
     # rebuild, e.g.:
     #   volumes:
-    #     - ../evals/models/gemma-4-E4B-it-Q4_K_M.gguf:/models/extractor.gguf:ro
+    #     - ../evals/models/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf:/models/extractor.gguf:ro
 
 volumes:
   # External so `docker compose down -v` cannot remove them — the bank survives

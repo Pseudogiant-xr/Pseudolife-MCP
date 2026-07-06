@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-06 — default extractor sidecar E2B → E4B QAT)
+- **`ops/Dockerfile.extractor` now bakes Gemma-4-E4B QAT (UD-Q4_K_XL, ~4.2GB)**
+  instead of E2B QAT. The LongMemEval knowledge-update bench showed E4B builds
+  a far stronger fact spine (cortex 0.333-0.359 vs E2B's 0.192; hybrid
+  0.551-0.564 vs 0.474) at only ~1.4x E2B's CPU wall time per dream cycle.
+  Qwen3.5-4B (higher still on GPU) was disqualified as a CPU sidecar: its
+  verbose extractions deterministically overrun the generation cap on large
+  batches (5.7x wall time with multi-minute retry tails). Constrained machines
+  can bake E2B back via the documented `MODEL_URL` build-arg.
+- **`--parallel 1` pinned in the extractor CMD**: newer llama.cpp server images
+  default to 4 slots sharing one unified KV buffer, so two concurrent ~4k-token
+  dream calls exceed the context and every request fails with "Context size has
+  been exceeded". One slot restores the serialized behaviour older images had.
+- **`PSEUDOLIFE_DREAM_TIMEOUT_SECONDS` default 240 → 480** — E4B generates at
+  roughly half E2B's CPU token rate, so a full 2048-token extraction needs the
+  extra headroom.
+
 ### Changed (2026-07-06 — cortex retrieval floor lowered)
 - **`memory.cortex.guard_min_score` default 0.3 → 0.2.** A LongMemEval
   retrieval replay (`evals/retrieval_sweep.py` over dumped fact banks) showed

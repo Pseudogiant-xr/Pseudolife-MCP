@@ -3,18 +3,16 @@
 # the stack is batteries-included: `docker compose --profile extractor up`
 # needs no manual model step and works offline after the build.
 #
-# Default rung = Gemma 4 E2B QAT (UD-Q4_K_XL, ~2.44GB) — quantization-aware-trained
-# int4: smaller (2.44 vs 2.9GB) AND faster on CPU than the old PTQ Q4_K_M at
-# identical extraction quality (quant-ladder 2026-06-24: gold 1.0 / stale 0.0 for
-# both; QAT ~17% faster to consolidate). Bake E4B (rung 2) instead with:
-#   --build-arg MODEL_URL=https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/resolve/main/gemma-4-E4B-it-Q4_K_M.gguf
+# Default rung = Gemma 4 E4B QAT (UD-Q4_K_XL, ~4.2GB). The 2026-07-06 LongMemEval
+# knowledge-update bench showed E4B builds a far stronger fact spine than E2B
+# (cortex 0.333 vs 0.192, hybrid 0.564 vs 0.474) at only ~1.4x E2B's CPU wall
+# time per dream cycle (production-identical serving). Bake the lighter E2B QAT
+# (~2.44GB) instead on constrained machines with:
+#   --build-arg MODEL_URL=https://huggingface.co/unsloth/gemma-4-E2B-it-qat-GGUF/resolve/main/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf
 # Or, for the benchmark, leave the baked default and mount a different GGUF over
 # /models/extractor.gguf at run time (see ops/docker-compose.yml).
-#
-# NOTE: making this sidecar default-on (and which rung) is a post-benchmark
-# decision (see docs/specs/2026-06-18-pluggable-llm-extraction-design.md §4).
 
-ARG MODEL_URL=https://huggingface.co/unsloth/gemma-4-E2B-it-qat-GGUF/resolve/main/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf
+ARG MODEL_URL=https://huggingface.co/unsloth/gemma-4-E4B-it-qat-GGUF/resolve/main/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf
 
 # Stage 1 — fetch the GGUF with a curl-equipped image (the llama.cpp server
 # image is minimal and may lack curl/wget).
@@ -29,7 +27,10 @@ EXPOSE 8081
 # llama-server is the image ENTRYPOINT; these are its args. --jinja enables the
 # chat template so response_format / JSON-object output works; the bind is
 # 0.0.0.0 because the compose network (not the host) is the boundary — this
-# service is never published to the host.
+# service is never published to the host. --parallel 1 is explicit because newer
+# llama.cpp images default to 4 slots sharing ONE unified KV buffer — concurrent
+# ~4k-token dream calls then exceed the context and every request 500s
+# ("Context size has been exceeded"); one slot serializes = old behaviour.
 CMD ["--model", "/models/extractor.gguf", \
      "--host", "0.0.0.0", "--port", "8081", \
-     "--ctx-size", "8192", "--jinja"]
+     "--ctx-size", "8192", "--jinja", "--parallel", "1"]

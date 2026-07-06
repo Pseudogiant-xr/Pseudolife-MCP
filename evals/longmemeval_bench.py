@@ -70,6 +70,8 @@ DATASETS = {
 EXTRACTORS = {
     "qwen-27b": "http://127.0.0.1:1234/v1",
     "gemma-e2b": "http://127.0.0.1:8081/v1",
+    "gemma-e4b": "http://127.0.0.1:8081/v1",
+    "gemma-e4b-qat": "http://127.0.0.1:8081/v1",
     # Sidecar-upgrade bake-off candidates (2026-07-04) — all on :8081; the
     # operator swaps the served GGUF between runs, as with the gemma rungs.
     "qwen3.5-4b": "http://127.0.0.1:8081/v1",
