@@ -255,6 +255,34 @@ def test_vocab_lists_normalised_current_slots():
     assert "box.ip" in v
 
 
+def test_vocab_ranked_orders_by_slot_embedding_relevance():
+    """The dream vocab hint shows only the head of the list, so the keys the
+    batch is about must sort FIRST — not alphabetically (the 2026-07-06
+    coreference miss)."""
+    store = CortexStore()
+    # "aardvark.diet" wins alphabetically; "sidecar.version" wins by cosine.
+    store.write_fact(Slot("aardvark", "diet", "ants"), _unit(1),
+                     slot_embedding=_unit(10), now=1.0)
+    store.write_fact(Slot("sidecar", "version", "e4b"), _unit(2),
+                     slot_embedding=_unit(20), now=2.0)
+    ranked = store.vocab_ranked(_unit(20))
+    assert ranked[0] == "sidecar.version"
+    assert set(ranked) == {"sidecar.version", "aardvark.diet"}
+    # No query embedding -> alphabetical fallback.
+    assert store.vocab_ranked(None) == store.vocab()
+
+
+def test_vocab_ranked_appends_embeddingless_slots_after_ranked():
+    store = CortexStore()
+    store.write_fact(Slot("sidecar", "version", "e4b"), _unit(2),
+                     slot_embedding=_unit(20), now=1.0)
+    store.write_fact(Slot("legacy", "slot", "x"), _unit(3), now=2.0)  # no semb
+    ranked = store.vocab_ranked(_unit(20))
+    assert ranked == ["sidecar.version", "legacy.slot"]
+    # The limit still caps the combined list.
+    assert store.vocab_ranked(_unit(20), limit=1) == ["sidecar.version"]
+
+
 def test_load_missing_file_is_empty_not_error():
     with tempfile.TemporaryDirectory() as d:
         store = CortexStore()

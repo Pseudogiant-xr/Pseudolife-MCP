@@ -2120,6 +2120,25 @@ class MemoryService:
             logger.warning("dream slot resolve failed (%s); using literal slot", exc)
             return entity, attribute
 
+    def _dream_vocab(self, texts: list[str], limit: int = 120) -> list[str]:
+        """Relevance-ranked slot keys for the dream vocab hint: embed the
+        batch text and rank current slots by value-free slot-embedding cosine
+        (see ``CortexStore.vocab_ranked``). The prompt hint shows ~60 keys;
+        on a large bank the alphabetical head rarely contains the keys the
+        batch actually updates, so the extractor mints paraphrase variants
+        instead of superseding. Never raises — falls back to the alphabetical
+        list on any failure."""
+        try:
+            with self._lock:
+                self._ensure_init()
+                assert self._embedder is not None and self._cortex is not None
+                emb = self._embedder.encode_single(" ".join(texts)[:4000])
+                return self._cortex.vocab_ranked(emb, limit)
+        except Exception as exc:  # noqa: BLE001 — hint quality must never break a dream
+            logger.warning("dream vocab ranking failed (%s); using "
+                           "alphabetical vocab", exc)
+            return self.cortex_vocab(limit).get("slots", [])
+
     def dream_run(self, extractor, *, limit: int | None = None) -> dict[str, Any]:
         """One dream cycle: pull eligible unconsolidated memories, extract claims
         via ``extractor`` (an extractor that yields nothing writes nothing —
@@ -2143,7 +2162,7 @@ class MemoryService:
         from pseudolife_memory.memory.cortex import _norm_key
         import time as _time
         traces_cfg = self.config.memory.traces
-        vocab = self.cortex_vocab().get("slots", [])
+        vocab = self._dream_vocab([e["text"] for e in entries])
         tally = {"inserted": 0, "confirmed": 0, "contested": 0, "superseded": 0}
         traces_n = 0
         max_batch_failures = 3
@@ -2194,7 +2213,8 @@ class MemoryService:
             failed_keys: list[Any] = []
             for e, key in zip(entries, batch_key):
                 try:
-                    e_claims = list(extractor.extract([e["text"]], vocab))
+                    e_claims = list(extractor.extract(
+                        [e["text"]], self._dream_vocab([e["text"]])))
                 except Exception as exc2:  # noqa: BLE001
                     logger.warning("dream: entry %s failed isolated "
                                    "extraction (%s)", key, exc2)

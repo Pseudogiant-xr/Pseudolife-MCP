@@ -6,6 +6,37 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-07 — dream vocab hint is relevance-ranked)
+- **`CortexStore.vocab_ranked` + `MemoryService._dream_vocab`**: the slot-key
+  hint handed to the dream extractor is now ranked by cosine of each current
+  slot's value-free embedding against the batch text, instead of taking the
+  alphabetical head of the bank. On a bank larger than the ~60-key prompt
+  window the alphabetical list rarely contained the keys a batch actually
+  updates, so extractors minted paraphrase-variant entities instead of
+  superseding (observed live 2026-07-06: a sidecar-version update never saw
+  the existing `…sidecar.version` slot). Hint format is unchanged (the
+  fine-tuned extractor was trained on it); alphabetical fallback on any
+  ranking failure. KU-oracle re-run (e4b-ft, tag `vocabrank`): cortex 0.615
+  vs 0.564, hybrid/rag within judge noise, ladder stale_leak 0.0 — the bench's
+  per-question banks fit the window, so this mainly protects large live banks.
+- **`evals/distill_clean.py`** — cleaning pass over the 2,000-row Qwen3.6-27B
+  teacher-labeled extraction set (echo-key / spam-value / mega-row filters;
+  1,756 rows / 7,823 claims kept).
+- **`evals/distill_train_e4b.py`** — QLoRA SFT of Gemma-4 E4B on the cleaned
+  set (WSL/4090, unsloth; pre-tokenized fixed 5120 shape so the graph compiles
+  once, completion-only loss via manual −100 labels, eval batch 1, step-100
+  checkpoints). `evals/distill_merge_e4b.py` re-merges from a checkpoint when
+  the in-process merge is OOM-killed.
+- **`evals/gate_e4b_ft.ps1`** + `e4b-ft` rung/extractor entries — acceptance
+  gate for the fine-tune. Result: KU-oracle **cortex 0.564 / hybrid 0.769**
+  vs base E4B QAT 0.359/0.551 — the 8B student beats its 27B teacher
+  (0.397/0.590) on the task it was distilled for. Ladder: gold_recoverable
+  1.0, stale_leak 0.0; CPU ~160s/question (same band as base E4B).
+- **Deployed**: `ops/docker-compose.yml` mounts
+  `evals/models/e4b-extractor-Q4_K_M.gguf` over the baked base model
+  (drop the `volumes:` block to fall back). Verified live via a daemon dream
+  cycle through the sidecar.
+
 ### Changed (2026-07-06 — default extractor sidecar E2B → E4B QAT)
 - **`ops/Dockerfile.extractor` now bakes Gemma-4-E4B QAT (UD-Q4_K_XL, ~4.2GB)**
   instead of E2B QAT. The LongMemEval knowledge-update bench showed E4B builds

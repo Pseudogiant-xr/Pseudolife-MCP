@@ -476,6 +476,37 @@ class CortexStore:
         }
         return sorted(keys)[: max(0, int(limit))]
 
+    def vocab_ranked(self, query_embedding: torch.Tensor | None,
+                     limit: int = 120) -> list[str]:
+        """Slot keys ranked by cosine of their value-free ``slot_embedding``
+        against ``query_embedding`` (the dream batch), most-relevant first —
+        so the keys shown in the extractor's vocab hint are the ones this
+        batch plausibly updates. The plain :meth:`vocab` is alphabetical, and
+        on a bank bigger than the hint window that starved the prompt of the
+        very keys the batch was about (the 2026-07-06 coreference miss: the
+        sidecar's ``version`` slot never appeared, so the extractor couldn't
+        reuse it). Records without a slot embedding follow alphabetically;
+        no embedding at all falls back to :meth:`vocab`."""
+        cur = [r for r in self.records if r.status == "current"]
+        with_emb = [r for r in cur if r.slot_embedding is not None]
+        if query_embedding is None or not with_emb:
+            return self.vocab(limit)
+        q = query_embedding.detach().to("cpu", torch.float32).reshape(-1)
+        q = q / (q.norm() + 1e-12)
+        mat = torch.stack([r.slot_embedding.reshape(-1) for r in with_emb])
+        mat = mat / (mat.norm(dim=1, keepdim=True) + 1e-12)
+        sims = (mat @ q).tolist()
+        keys: list[str] = []
+        seen: set[str] = set()
+        for i in sorted(range(len(with_emb)), key=lambda i: -sims[i]):
+            k = "%s.%s" % with_emb[i].key
+            if k not in seen:
+                seen.add(k)
+                keys.append(k)
+        tail = {"%s.%s" % r.key for r in cur if r.slot_embedding is None}
+        keys.extend(k for k in sorted(tail) if k not in seen)
+        return keys[: max(0, int(limit))]
+
     def forget(self, entity: str, attribute: str | None = None) -> int:
         """Hard-delete every record (current AND superseded) at an entity, or at
         one exact ``(entity, attribute)`` slot. Unlike supersession this leaves no
