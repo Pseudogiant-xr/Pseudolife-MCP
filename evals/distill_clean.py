@@ -25,6 +25,7 @@ them would mislabel fact-rich sessions as empty).
 """
 from __future__ import annotations
 
+import argparse
 import json
 from collections import Counter
 from pathlib import Path
@@ -59,7 +60,11 @@ def clean_row(row: dict) -> dict | None:
 
 
 def main() -> int:
-    rows = [json.loads(l) for l in SRC.open(encoding="utf-8")]
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--src", type=Path, default=SRC)
+    ap.add_argument("--dst", type=Path, default=DST)
+    args = ap.parse_args()
+    rows = [json.loads(l) for l in args.src.open(encoding="utf-8")]
     out, dropped_rows, dropped_claims = [], 0, 0
     for r in rows:
         before = len(json.loads(r["messages"][-1]["content"])["claims"])
@@ -71,7 +76,7 @@ def main() -> int:
         after = len(json.loads(cleaned["messages"][-1]["content"])["claims"])
         dropped_claims += before - after
         out.append(cleaned)
-    with DST.open("w", encoding="utf-8") as f:
+    with args.dst.open("w", encoding="utf-8") as f:
         for r in out:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
     total = sum(len(json.loads(r["messages"][-1]["content"])["claims"])
