@@ -25,6 +25,12 @@ stale_leak 0.0).
 
     source ~/e4b-train/bin/activate
     python .../evals/distill_train_e4b.py [--smoke]
+
+Stage-1.5 (docs/superpowers/specs/2026-07-07): --jepa-lambda adds the
+LLM-JEPA auxiliary loss (arXiv 2509.14252) — last-token view embeddings,
+<unusedN> predictor tokens, cosine loss, fixed view shapes 4096/1024.
+--jepa-lambda 0 (default) is the exact Stage-1 path; parity-gate it against
+an unmodified checkout before any ablation run.
 """
 from __future__ import annotations
 
@@ -32,6 +38,8 @@ import argparse
 import json
 from pathlib import Path
 
+import torch
+import torch.nn.functional as F
 from unsloth import FastModel                     # import first (patches)
 from datasets import Dataset
 from transformers import default_data_collator
@@ -44,11 +52,25 @@ OUT = Path.home() / "e4b-extractor"               # WSL-local: fast disk io
 # overflowed 24GB into WSL sysmem spill. ~96% of rows fit in 5120; the rest
 # are DROPPED (truncating would cut off the completion we train on).
 MAX_SEQ = 5120
+# JEPA view shapes (aux loss only — CE rows keep MAX_SEQ + drop-don't-truncate).
+# Fixed so the run compiles exactly three graphs: 5120 SFT + 4096 + 1024.
+NOTES_VIEW_SEQ = 4096
+CLAIMS_VIEW_SEQ = 1024
 HOLDOUT = 64                                      # eval rows (seeded split)
 
 
-def tokenize_fixed(tok, rows: list[dict]) -> Dataset:
+def tokenize_fixed(tok, rows: list[dict], jepa_k: int = 0) -> Dataset:
     feats = {"input_ids": [], "labels": [], "attention_mask": []}
+    if jepa_k:
+        # Predictor tokens = Gemma's reserved <unusedN> vocab. Their embedding
+        # rows stay frozen under QLoRA; the LoRA-adapted layers learn to emit
+        # the prediction at those positions (deviation from the paper's newly
+        # learned tokens — embedding surgery on a 4-bit base is not worth it).
+        pred_ids = [tok.convert_tokens_to_ids(f"<unused{i}>")
+                    for i in range(jepa_k)]
+        assert all(isinstance(i, int) and i >= 0 for i in pred_ids), pred_ids
+        feats |= {"notes_ids": [], "notes_mask": [], "notes_pred_pos": [],
+                  "claims_ids": [], "claims_mask": [], "claims_last_pos": []}
     pad = tok.pad_token_id
     for r in rows:
         msgs = r["messages"]
@@ -71,14 +93,86 @@ def tokenize_fixed(tok, rows: list[dict]) -> Dataset:
         feats["input_ids"].append(ids + [pad] * n_pad)
         feats["labels"].append(labels + [-100] * n_pad)
         feats["attention_mask"].append(mask + [0] * n_pad)
+        if jepa_k:
+            # view1 = raw numbered-notes user text, view2 = claims JSON.
+            n_ids = tok(text=msgs[1]["content"],
+                        add_special_tokens=False).input_ids
+            v_ids = tok(text=msgs[2]["content"],
+                        add_special_tokens=False).input_ids
+            if n_ids and isinstance(n_ids[0], list):
+                n_ids, v_ids = n_ids[0], v_ids[0]
+            n_ids = n_ids[:NOTES_VIEW_SEQ - jepa_k] + pred_ids
+            v_ids = v_ids[:CLAIMS_VIEW_SEQ]
+            feats["notes_ids"].append(
+                n_ids + [pad] * (NOTES_VIEW_SEQ - len(n_ids)))
+            feats["notes_mask"].append(
+                [1] * len(n_ids) + [0] * (NOTES_VIEW_SEQ - len(n_ids)))
+            feats["notes_pred_pos"].append(len(n_ids) - 1)
+            feats["claims_ids"].append(
+                v_ids + [pad] * (CLAIMS_VIEW_SEQ - len(v_ids)))
+            feats["claims_mask"].append(
+                [1] * len(v_ids) + [0] * (CLAIMS_VIEW_SEQ - len(v_ids)))
+            feats["claims_last_pos"].append(len(v_ids) - 1)
     return Dataset.from_dict(feats)
+
+
+_VIEW_KEYS = ("notes_ids", "notes_mask", "notes_pred_pos",
+              "claims_ids", "claims_mask", "claims_last_pos")
+
+
+class JEPATrainer(SFTTrainer):
+    """SFTTrainer + LLM-JEPA auxiliary loss (arXiv 2509.14252).
+
+    L = L_SFT + lambda * (1 - cos(pred(E(notes)), E(claims))), last-token
+    hidden states as view embeddings, predictor = k reserved tokens appended
+    to the notes view. The SFT term goes through unsloth's fused CE
+    untouched; view forwards return hidden states only (no logits tensor).
+    JEPA is TRAIN-only: eval_loss stays CE-only, comparable to baseline.
+    """
+
+    def __init__(self, *args, jepa_lambda: float = 0.0,
+                 jepa_stopgrad: bool = False, **kw):
+        super().__init__(*args, **kw)
+        self.jepa_lambda = jepa_lambda
+        self.jepa_stopgrad = jepa_stopgrad
+
+    def compute_loss(self, model, inputs, return_outputs=False,
+                     num_items_in_batch=None):
+        view = {k: inputs.pop(k) for k in _VIEW_KEYS if k in inputs}
+        out = super().compute_loss(model, inputs, return_outputs=return_outputs,
+                                   num_items_in_batch=num_items_in_batch)
+        if not (self.jepa_lambda and view and model.training):
+            return out
+        loss = out[0] if return_outputs else out
+        h_n = model(input_ids=view["notes_ids"],
+                    attention_mask=view["notes_mask"],
+                    output_hidden_states=True).hidden_states[-1]
+        pred = h_n[torch.arange(h_n.size(0)), view["notes_pred_pos"]]
+        h_c = model(input_ids=view["claims_ids"],
+                    attention_mask=view["claims_mask"],
+                    output_hidden_states=True).hidden_states[-1]
+        tgt = h_c[torch.arange(h_c.size(0)), view["claims_last_pos"]]
+        if self.jepa_stopgrad:
+            tgt = tgt.detach()
+        jepa = 1.0 - F.cosine_similarity(pred.float(), tgt.float(),
+                                         dim=-1).mean()
+        loss = loss + self.jepa_lambda * jepa
+        return (loss, out[1]) if return_outputs else loss
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--smoke", action="store_true",
                     help="5 steps on 40 rows — shape/memory/throughput check")
+    ap.add_argument("--jepa-lambda", type=float, default=0.0,
+                    help="JEPA aux-loss weight; 0 = exact baseline path")
+    ap.add_argument("--jepa-pred-tokens", type=int, default=2)
+    ap.add_argument("--jepa-stopgrad", action="store_true",
+                    help="detach the claims-view target embedding")
+    ap.add_argument("--out-dir", type=Path, default=OUT,
+                    help="run dir (checkpoints + merged); default unchanged")
     args = ap.parse_args()
+    jepa_k = args.jepa_pred_tokens if args.jepa_lambda > 0 else 0
 
     model, tokenizer = FastModel.from_pretrained(
         "unsloth/gemma-4-E4B-it",
@@ -99,20 +193,23 @@ def main() -> int:
     rows = [json.loads(l) for l in DATA.open(encoding="utf-8")]
     if args.smoke:
         rows = rows[-40:]                         # tail rows include long ones
-    ds = tokenize_fixed(tokenizer, rows)
+    ds = tokenize_fixed(tokenizer, rows, jepa_k=jepa_k)
     split = ds.train_test_split(test_size=(4 if args.smoke else HOLDOUT),
                                 seed=42)
 
-    trainer = SFTTrainer(
+    trainer = JEPATrainer(
         model=model,
         processing_class=tokenizer,
         train_dataset=split["train"],
         eval_dataset=split["test"],
         data_collator=default_data_collator,
+        jepa_lambda=args.jepa_lambda,
+        jepa_stopgrad=args.jepa_stopgrad,
         args=SFTConfig(
-            output_dir=str(OUT / "checkpoints"),
+            output_dir=str(args.out_dir / "checkpoints"),
             dataset_kwargs={"skip_prepare_dataset": True},
             max_length=MAX_SEQ,
+            remove_unused_columns=(False if jepa_k else True),
             per_device_train_batch_size=1,
             # eval batch must match: the default (8) pushed 8 fixed-5120 rows
             # through the fused CE at once at step 200 and wedged the driver
@@ -145,8 +242,8 @@ def main() -> int:
         return 0
     print("final eval:", trainer.evaluate())
     model.save_pretrained_merged(
-        str(OUT / "merged"), tokenizer, save_method="merged_16bit")
-    print(f"merged model -> {OUT / 'merged'}")
+        str(args.out_dir / "merged"), tokenizer, save_method="merged_16bit")
+    print(f"merged model -> {args.out_dir / 'merged'}")
     return 0
 
 
