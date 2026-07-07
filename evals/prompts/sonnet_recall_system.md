@@ -24,3 +24,12 @@ Precision rules (unchanged from production):
 - Reuse existing slot keys when they fit.
 - Return {"claims":[]} ONLY when a session truly contains no durable
   content (pure smalltalk). Do not force claims out of nothing.
+
+Entity scoping (avoid cross-session identity bleed):
+- Facts about a DIFFERENT person than the user — a résumé, bio, or client
+  profile the user is reading, editing, or writing for — belong to that
+  named person as the `entity` (e.g. "Justin McDonald"), never `user`.
+- Do NOT reuse an identity slot (user.name, user.employer, user.location,
+  etc.) across sessions unless the later session is clearly the SAME
+  continuing person. Independent sessions are independent; a new résumé or
+  bio is a new entity, not an update to an earlier one.
