@@ -140,17 +140,29 @@ class JEPATrainer(SFTTrainer):
     the pinned unsloth). So the SFT term takes its own forward+backward
     (unsloth-native, fused CE), then the JEPA term takes a separate
     forward+backward; gradients accumulate on the LoRA params before the
-    shared optimizer step. Gradient checkpointing is toggled OFF around the
-    view forwards (the guard only fires while it is on; the views are shorter
-    than the 5120 SFT row so activations fit). The claims (target) view is
-    stop-gradient under no_grad — canonical for JEPA/BYOL targets and it keeps
-    only ONE grad graph alive at a time. JEPA is TRAIN-only; eval_loss stays
-    CE-only, comparable to baseline.
+    shared optimizer step. Gradient checkpointing stays ON throughout
+    (disabling it around the 4096-token notes forward overflows the 24GB
+    card). What keeps the module-scoped shared-KV carrier from being
+    corrupted is the split into two backwards plus a no_grad (stop-gradient)
+    claims target — canonical for JEPA/BYOL — so only ONE grad graph is ever
+    alive. JEPA is TRAIN-only; eval_loss stays CE-only, comparable to
+    baseline.
     """
 
     def __init__(self, *args, jepa_lambda: float = 0.0, **kw):
         super().__init__(*args, **kw)
         self.jepa_lambda = jepa_lambda
+
+    def compute_loss(self, model, inputs, return_outputs=False,
+                     num_items_in_batch=None):
+        # Eval path strips the view columns (training_step pops them before the
+        # train forward, but evaluate() bypasses training_step). With
+        # remove_unused_columns=False they would otherwise ride into model(**
+        # inputs); keep eval CE-only and identical to baseline.
+        for k in _VIEW_KEYS:
+            inputs.pop(k, None)
+        return super().compute_loss(model, inputs, return_outputs=return_outputs,
+                                    num_items_in_batch=num_items_in_batch)
 
     def _jepa_term(self, model, view):
         """One JEPA forward pair; returns the (already lambda-weighted) loss."""
@@ -185,9 +197,13 @@ class JEPATrainer(SFTTrainer):
         if not (self.jepa_lambda and view):
             return sft_loss
         jepa = self._jepa_term(model, view)
-        # match the SFT term's 1/grad_accum scaling before backward
-        self.accelerator.backward(jepa / self.args.gradient_accumulation_steps)
-        return sft_loss + (jepa.detach() / self.args.gradient_accumulation_steps)
+        # match how the base Trainer scales the SFT loss before backward — the
+        # dynamic denominator is smaller on the last, partial accumulation
+        # window of an epoch (falls back to the static arg pre-loop).
+        gas = getattr(self, "current_gradient_accumulation_steps",
+                      self.args.gradient_accumulation_steps)
+        self.accelerator.backward(jepa / gas)
+        return sft_loss + (jepa.detach() / gas)
 
 
 def main() -> int:
