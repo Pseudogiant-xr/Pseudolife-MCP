@@ -66,10 +66,13 @@ def tokenize_fixed(tok, rows: list[dict], jepa_k: int = 0) -> Dataset:
         # rows stay frozen under QLoRA; the LoRA-adapted layers learn to emit
         # the prediction at those positions (deviation from the paper's newly
         # learned tokens — embedding surgery on a 4-bit base is not worth it).
-        pred_ids = [tok.convert_tokens_to_ids(f"<unused{i}>")
+        # E4B ships a Gemma4Processor, not a tokenizer: convert_tokens_to_ids /
+        # unk_token_id live on its inner .tokenizer, not the processor itself.
+        _tk = getattr(tok, "tokenizer", tok)
+        pred_ids = [_tk.convert_tokens_to_ids(f"<unused{i}>")
                     for i in range(jepa_k)]
         assert all(isinstance(i, int) and i >= 0
-                   and i != tok.unk_token_id for i in pred_ids), pred_ids
+                   and i != _tk.unk_token_id for i in pred_ids), pred_ids
         feats |= {"notes_ids": [], "notes_mask": [], "notes_pred_pos": [],
                   "claims_ids": [], "claims_mask": [], "claims_last_pos": []}
     pad = tok.pad_token_id
@@ -124,50 +127,67 @@ _VIEW_KEYS = ("notes_ids", "notes_mask", "notes_pred_pos",
 class JEPATrainer(SFTTrainer):
     """SFTTrainer + LLM-JEPA auxiliary loss (arXiv 2509.14252).
 
-    L = L_SFT + lambda * (1 - cos(pred(E(notes)), E(claims))), last-token
+    L = L_SFT + lambda * (1 - cos(pred(E(notes)), sg[E(claims)])), last-token
     hidden states as view embeddings, predictor = k reserved tokens appended
-    to the notes view. The SFT term goes through unsloth's fused CE
-    untouched; view forwards read hidden states only (logits_to_keep=1 keeps
-    the unused logit side-channel to one position). JEPA is TRAIN-only:
-    eval_loss stays CE-only, comparable to baseline.
+    to the notes view.
+
+    Why two separate backwards (not one summed loss): Gemma-4 E-series shares
+    K/V across layers via a MODULE-scoped carrier on transformers <= 5.5.0
+    (the ceiling unsloth 2026.6.9 pins). Running the SFT forward AND the view
+    forwards before a single backward makes the second forward corrupt the
+    first graph's gradients, and unsloth raises rather than train silently
+    wrong (fix is transformers >= 5.5.2 function-scoped K/V, unreachable under
+    the pinned unsloth). So the SFT term takes its own forward+backward
+    (unsloth-native, fused CE), then the JEPA term takes a separate
+    forward+backward; gradients accumulate on the LoRA params before the
+    shared optimizer step. Gradient checkpointing is toggled OFF around the
+    view forwards (the guard only fires while it is on; the views are shorter
+    than the 5120 SFT row so activations fit). The claims (target) view is
+    stop-gradient under no_grad — canonical for JEPA/BYOL targets and it keeps
+    only ONE grad graph alive at a time. JEPA is TRAIN-only; eval_loss stays
+    CE-only, comparable to baseline.
     """
 
-    def __init__(self, *args, jepa_lambda: float = 0.0,
-                 jepa_stopgrad: bool = False, **kw):
+    def __init__(self, *args, jepa_lambda: float = 0.0, **kw):
         super().__init__(*args, **kw)
         self.jepa_lambda = jepa_lambda
-        self.jepa_stopgrad = jepa_stopgrad
 
-    def compute_loss(self, model, inputs, return_outputs=False,
-                     num_items_in_batch=None):
-        view = {k: inputs.pop(k) for k in _VIEW_KEYS if k in inputs}
-        out = super().compute_loss(model, inputs, return_outputs=return_outputs,
-                                   num_items_in_batch=num_items_in_batch)
-        if not (self.jepa_lambda and view and model.training):
-            return out
-        loss = out[0] if return_outputs else out
-        # logits_to_keep=1: only hidden states are read here, but a plain
-        # forward materialises the full (seq, ~262k-vocab) logits tensor as a
-        # side effect — the exact blowup the header warns about. Keeping one
-        # position bounds that; hidden_states are unaffected.
+    def _jepa_term(self, model, view):
+        """One JEPA forward pair; returns the (already lambda-weighted) loss."""
+        # logits_to_keep=1: only hidden states are read, but a plain forward
+        # materialises the full (seq, ~262k-vocab) logits tensor as a side
+        # effect — the blowup the header warns about. One position bounds it.
+        with torch.no_grad():                          # stop-gradient target
+            h_c = model(input_ids=view["claims_ids"],
+                        attention_mask=view["claims_mask"],
+                        output_hidden_states=True,
+                        logits_to_keep=1).hidden_states[-1]
+            tgt = h_c[torch.arange(h_c.size(0), device=h_c.device),
+                      view["claims_last_pos"]].float()
         h_n = model(input_ids=view["notes_ids"],
                     attention_mask=view["notes_mask"],
                     output_hidden_states=True,
                     logits_to_keep=1).hidden_states[-1]
         pred = h_n[torch.arange(h_n.size(0), device=h_n.device),
-                   view["notes_pred_pos"]]
-        h_c = model(input_ids=view["claims_ids"],
-                    attention_mask=view["claims_mask"],
-                    output_hidden_states=True,
-                    logits_to_keep=1).hidden_states[-1]
-        tgt = h_c[torch.arange(h_c.size(0), device=h_c.device),
-                  view["claims_last_pos"]]
-        if self.jepa_stopgrad:
-            tgt = tgt.detach()
-        jepa = 1.0 - F.cosine_similarity(pred.float(), tgt.float(),
-                                         dim=-1).mean()
-        loss = loss + self.jepa_lambda * jepa
-        return (loss, out[1]) if return_outputs else loss
+                   view["notes_pred_pos"]].float()
+        return self.jepa_lambda * (
+            1.0 - F.cosine_similarity(pred, tgt, dim=-1).mean())
+
+    def training_step(self, model, inputs, num_items_in_batch=None):
+        view = {k: inputs.pop(k) for k in _VIEW_KEYS if k in inputs}
+        # SFT forward+backward first (unsloth-native), freeing its graph before
+        # the JEPA term's own forward+backward. Gradient checkpointing stays ON
+        # throughout — disabling it around the 4096-token notes forward
+        # overflows the 24GB card (WSL sysmem spill). Two separate backwards
+        # with a no_grad (stop-gradient) target keep only ONE grad graph alive
+        # at a time, so the module-scoped shared-KV carrier is never corrupted.
+        sft_loss = super().training_step(model, inputs, num_items_in_batch)
+        if not (self.jepa_lambda and view):
+            return sft_loss
+        jepa = self._jepa_term(model, view)
+        # match the SFT term's 1/grad_accum scaling before backward
+        self.accelerator.backward(jepa / self.args.gradient_accumulation_steps)
+        return sft_loss + (jepa.detach() / self.args.gradient_accumulation_steps)
 
 
 def main() -> int:
@@ -177,8 +197,6 @@ def main() -> int:
     ap.add_argument("--jepa-lambda", type=float, default=0.0,
                     help="JEPA aux-loss weight; 0 = exact baseline path")
     ap.add_argument("--jepa-pred-tokens", type=int, default=2)
-    ap.add_argument("--jepa-stopgrad", action="store_true",
-                    help="detach the claims-view target embedding")
     ap.add_argument("--out-dir", type=Path, default=OUT,
                     help="run dir (checkpoints + merged); default unchanged")
     args = ap.parse_args()
@@ -214,7 +232,6 @@ def main() -> int:
         eval_dataset=split["test"],
         data_collator=default_data_collator,
         jepa_lambda=args.jepa_lambda,
-        jepa_stopgrad=args.jepa_stopgrad,
         args=SFTConfig(
             output_dir=str(args.out_dir / "checkpoints"),
             dataset_kwargs={"skip_prepare_dataset": True},
