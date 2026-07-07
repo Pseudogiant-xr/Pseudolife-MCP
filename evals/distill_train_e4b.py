@@ -68,7 +68,8 @@ def tokenize_fixed(tok, rows: list[dict], jepa_k: int = 0) -> Dataset:
         # learned tokens — embedding surgery on a 4-bit base is not worth it).
         pred_ids = [tok.convert_tokens_to_ids(f"<unused{i}>")
                     for i in range(jepa_k)]
-        assert all(isinstance(i, int) and i >= 0 for i in pred_ids), pred_ids
+        assert all(isinstance(i, int) and i >= 0
+                   and i != tok.unk_token_id for i in pred_ids), pred_ids
         feats |= {"notes_ids": [], "notes_mask": [], "notes_pred_pos": [],
                   "claims_ids": [], "claims_mask": [], "claims_last_pos": []}
     pad = tok.pad_token_id
@@ -126,8 +127,9 @@ class JEPATrainer(SFTTrainer):
     L = L_SFT + lambda * (1 - cos(pred(E(notes)), E(claims))), last-token
     hidden states as view embeddings, predictor = k reserved tokens appended
     to the notes view. The SFT term goes through unsloth's fused CE
-    untouched; view forwards return hidden states only (no logits tensor).
-    JEPA is TRAIN-only: eval_loss stays CE-only, comparable to baseline.
+    untouched; view forwards read hidden states only (logits_to_keep=1 keeps
+    the unused logit side-channel to one position). JEPA is TRAIN-only:
+    eval_loss stays CE-only, comparable to baseline.
     """
 
     def __init__(self, *args, jepa_lambda: float = 0.0,
@@ -144,14 +146,22 @@ class JEPATrainer(SFTTrainer):
         if not (self.jepa_lambda and view and model.training):
             return out
         loss = out[0] if return_outputs else out
+        # logits_to_keep=1: only hidden states are read here, but a plain
+        # forward materialises the full (seq, ~262k-vocab) logits tensor as a
+        # side effect — the exact blowup the header warns about. Keeping one
+        # position bounds that; hidden_states are unaffected.
         h_n = model(input_ids=view["notes_ids"],
                     attention_mask=view["notes_mask"],
-                    output_hidden_states=True).hidden_states[-1]
-        pred = h_n[torch.arange(h_n.size(0)), view["notes_pred_pos"]]
+                    output_hidden_states=True,
+                    logits_to_keep=1).hidden_states[-1]
+        pred = h_n[torch.arange(h_n.size(0), device=h_n.device),
+                   view["notes_pred_pos"]]
         h_c = model(input_ids=view["claims_ids"],
                     attention_mask=view["claims_mask"],
-                    output_hidden_states=True).hidden_states[-1]
-        tgt = h_c[torch.arange(h_c.size(0)), view["claims_last_pos"]]
+                    output_hidden_states=True,
+                    logits_to_keep=1).hidden_states[-1]
+        tgt = h_c[torch.arange(h_c.size(0), device=h_c.device),
+                  view["claims_last_pos"]]
         if self.jepa_stopgrad:
             tgt = tgt.detach()
         jepa = 1.0 - F.cosine_similarity(pred.float(), tgt.float(),
