@@ -215,6 +215,9 @@ def main() -> int:
     ap.add_argument("--jepa-pred-tokens", type=int, default=2)
     ap.add_argument("--out-dir", type=Path, default=OUT,
                     help="run dir (checkpoints + merged); default unchanged")
+    ap.add_argument("--data", type=Path, default=DATA,
+                    help="training jsonl (cleaned); a relative path resolves "
+                         "against the repo root. Default = Qwen baseline set")
     args = ap.parse_args()
     jepa_k = args.jepa_pred_tokens if args.jepa_lambda > 0 else 0
 
@@ -234,7 +237,8 @@ def main() -> int:
         random_state=42,
     )
 
-    rows = [json.loads(l) for l in DATA.open(encoding="utf-8")]
+    data_path = args.data if args.data.is_absolute() else REPO / args.data
+    rows = [json.loads(l) for l in data_path.open(encoding="utf-8")]
     if args.smoke:
         rows = rows[-40:]                         # tail rows include long ones
     ds = tokenize_fixed(tokenizer, rows, jepa_k=jepa_k)
