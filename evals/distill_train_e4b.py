@@ -218,6 +218,14 @@ def main() -> int:
     ap.add_argument("--data", type=Path, default=DATA,
                     help="training jsonl (cleaned); a relative path resolves "
                          "against the repo root. Default = Qwen baseline set")
+    ap.add_argument("--save-steps", type=int, default=100)
+    ap.add_argument("--eval-steps", type=int, default=200)
+    ap.add_argument("--logging-steps", type=int, default=10)
+    ap.add_argument("--no-eval", action="store_true",
+                    help="skip all eval (mid-run + final); the eval pass spills "
+                         "to WSL sysmem at the VRAM cap and is the documented "
+                         "run killer. save-steps still gives recovery points; "
+                         "eval_loss is not comparable across arms anyway")
     args = ap.parse_args()
     jepa_k = args.jepa_pred_tokens if args.jepa_lambda > 0 else 0
 
@@ -268,14 +276,14 @@ def main() -> int:
             learning_rate=2e-4,
             lr_scheduler_type="cosine",
             warmup_ratio=0.03,
-            logging_steps=(1 if args.smoke else 10),
-            eval_strategy=("no" if args.smoke else "steps"),
-            eval_steps=200,
+            logging_steps=(1 if args.smoke else args.logging_steps),
+            eval_strategy=("no" if (args.smoke or args.no_eval) else "steps"),
+            eval_steps=args.eval_steps,
             # steps, not epoch: run 1 died at step 200 with the first epoch
             # checkpoint still 5 steps away — 75 minutes lost. Adapters are
             # ~150MB; checkpoint often.
             save_strategy=("no" if args.smoke else "steps"),
-            save_steps=100,
+            save_steps=args.save_steps,
             save_total_limit=2,
             bf16=True,
             optim="adamw_8bit",
@@ -287,7 +295,8 @@ def main() -> int:
     if args.smoke:
         print("SMOKETEST OK")
         return 0
-    print("final eval:", trainer.evaluate())
+    if not args.no_eval:
+        print("final eval:", trainer.evaluate())
     model.save_pretrained_merged(
         str(args.out_dir / "merged"), tokenizer, save_method="merged_16bit")
     print(f"merged model -> {args.out_dir / 'merged'}")
