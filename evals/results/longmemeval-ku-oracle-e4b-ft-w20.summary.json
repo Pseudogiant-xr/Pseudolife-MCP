@@ -1,0 +1,20 @@
+{
+  "dataset": "oracle",
+  "extractor": "e4b-ft",
+  "n": 78,
+  "arms": {
+    "rag": {
+      "accuracy": 0.59,
+      "context_tokens": 1637.8
+    },
+    "cortex": {
+      "accuracy": 0.513,
+      "context_tokens": 91.7
+    },
+    "hybrid": {
+      "accuracy": 0.731,
+      "context_tokens": 1010.9
+    }
+  },
+  "superseded_total": 118
+}
