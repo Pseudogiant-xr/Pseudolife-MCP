@@ -673,3 +673,66 @@ def test_traces_config_default():
     from pseudolife_memory.utils.config import TracesConfig, MemoryConfig
     assert TracesConfig().enabled is True
     assert MemoryConfig().traces.enabled is True
+
+
+# ── known-facts window prompt block (spec 2026-07-10) ────────────────────
+
+def test_facts_hint_formats_block_and_empty_is_empty():
+    from pseudolife_memory.memory.dream import _facts_hint
+
+    assert _facts_hint(None) == ""
+    assert _facts_hint([]) == ""
+    block = _facts_hint([("svc", "port", "8080"), ("db", "host", "h1")])
+    assert "Current known facts" in block
+    assert "never emit a claim the notes do not state" in block
+    assert "- svc — port: 8080" in block
+    assert "- db — host: h1" in block
+
+
+def _capture_extract_body(known_facts):
+    """Run one extract() against a capturing stub server; return the request
+    body the extractor sent (messages etc.)."""
+    from pseudolife_memory.memory.dream import OpenAICompatExtractor
+
+    seen_bodies = []
+
+    class _CapturingHandler(_StubHandler):
+        @staticmethod
+        def responder():
+            return (200, _chat_payload([]))
+
+        def do_POST(self):  # noqa: N802
+            length = int(self.headers.get("content-length", 0))
+            seen_bodies.append(json.loads(self.rfile.read(length).decode()))
+            status, body = self.responder()
+            data = body.encode()
+            self.send_response(status)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), _CapturingHandler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        base_url = f"http://127.0.0.1:{srv.server_address[1]}"
+        ext = OpenAICompatExtractor(base_url, "m")
+        if known_facts is None:
+            ext.extract(["a note"], vocab=["svc.port"])
+        else:
+            ext.extract(["a note"], vocab=["svc.port"], known_facts=known_facts)
+    finally:
+        srv.shutdown()
+    return seen_bodies[0]
+
+
+def test_openai_extractor_renders_known_facts_block():
+    body = _capture_extract_body([("svc", "port", "8080")])
+    system = body["messages"][0]["content"]
+    assert "Current known facts" in system
+    assert "- svc — port: 8080" in system
+
+
+def test_openai_extractor_omits_block_without_known_facts():
+    system = _capture_extract_body(None)["messages"][0]["content"]
+    assert "Current known facts" not in system
