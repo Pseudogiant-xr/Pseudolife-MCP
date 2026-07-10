@@ -6,7 +6,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
 
 from distill_datagen_sonnet import (  # noqa: E402
-    ingest_question, plan_questions, render_brief,
+    canonicalize_claims, ingest_question, plan_questions, render_brief,
+    _key_sig,
 )
 
 DATASET = [
@@ -97,3 +98,60 @@ def test_ingest_rejects_question_on_missing_session():
     plans = plan_questions(DATASET)
     qa = next(p for p in plans if p["question_id"] == "q_a")
     assert ingest_question(qa, {"s_1": []}) is None   # s_2 unanswered
+
+
+def _claim(entity, attribute, value, source=1):
+    return {"entity": entity, "attribute": attribute, "value": value,
+            "confidence": 0.9, "source": source}
+
+
+def test_key_sig_merges_wording_variants():
+    # reordering + suffix variants collapse to one signature
+    assert _key_sig("pre-approved-loan-amount") == _key_sig("loan pre-approval amount")
+    # generic filler tokens are ignored
+    assert _key_sig("wake-time") == _key_sig("wake-up-time")
+
+
+def test_key_sig_keeps_distinct_properties_apart():
+    assert _key_sig("bedroom-color") != _key_sig("bedroom-size")
+
+
+def test_canonicalize_rewrites_to_first_seen_key():
+    canon = {}
+    first = canonicalize_claims(
+        [_claim("user", "pre-approved-loan-amount", "$400,000")], canon)
+    later = canonicalize_claims(
+        [_claim("user", "loan-pre-approval-amount", "$350,000")], canon)
+    assert first[0]["attribute"] == "pre-approved-loan-amount"
+    assert later[0]["attribute"] == "pre-approved-loan-amount"  # rewritten
+
+
+def test_canonicalize_scopes_by_entity():
+    canon = {}
+    canonicalize_claims([_claim("alice", "team-size", "5")], canon)
+    other = canonicalize_claims([_claim("bob", "team-size", "8")], canon)
+    assert other[0]["attribute"] == "team-size"      # no cross-entity rewrite
+
+
+def test_ingest_question_canonical_flag():
+    qplan = {"question_id": "q_c", "sessions": [
+        {"session_id": "sA", "date": "2023/03/02",
+         "notes": ["[2023/03/02] user: pre-approved for $400k"]},
+        {"session_id": "sB", "date": "2023/03/03",
+         "notes": ["[2023/03/03] user: actually the pre-approval is $350k"]},
+    ]}
+    answers = {
+        "sA": [_claim("user", "pre-approved-loan-amount", "$400,000")],
+        "sB": [_claim("user", "loan-pre-approval-amount", "$350,000")],
+    }
+    rows = ingest_question(qplan, answers, canonical=True)
+    target_b = json.loads(rows[1]["messages"][-1]["content"])["claims"][0]
+    assert target_b["attribute"] == "pre-approved-loan-amount"
+    # session B's vocab hint carries only the canonical key
+    sys_b = rows[1]["messages"][0]["content"]
+    assert "pre-approved-loan-amount" in sys_b
+    assert "loan-pre-approval-amount" not in sys_b
+    # flag OFF: variant key survives untouched (arm-B parity)
+    rows_off = ingest_question(qplan, answers)
+    target_off = json.loads(rows_off[1]["messages"][-1]["content"])["claims"][0]
+    assert target_off["attribute"] == "loan-pre-approval-amount"

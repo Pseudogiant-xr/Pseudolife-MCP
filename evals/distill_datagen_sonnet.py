@@ -54,6 +54,40 @@ def _notes(session: list[dict], date: str) -> list[str]:
             for t in session if (t.get("content") or "").strip()]
 
 
+# Slot-key canonicalization (arm B'): the Sonnet labels re-word the same
+# property's key instead of reusing it (6.8% exact reuse vs qwen 24.1%),
+# which suppresses supersession downstream. Merging is per (entity,
+# signature) within one question chain; the first-seen attribute wins so
+# the recomputed vocab hint and the labels stay coherent.
+_GENERIC_TOKENS = {"a", "an", "and", "at", "for", "in", "of", "on", "or",
+                   "the", "to", "up"}
+_STEM_SUFFIXES = ("ation", "ment", "ness", "ing", "ed", "es", "al", "s")
+
+
+def _stem(tok: str) -> str:
+    for suf in _STEM_SUFFIXES:
+        if tok.endswith(suf) and len(tok) - len(suf) >= 3:
+            return tok[: -len(suf)]
+    return tok
+
+
+def _key_sig(attribute: str) -> frozenset[str]:
+    toks = {_stem(t) for t in _norm_key(attribute).split("-") if t}
+    return frozenset(toks - _GENERIC_TOKENS) or frozenset(toks)
+
+
+def canonicalize_claims(claims: list[dict], canon: dict) -> list[dict]:
+    out = []
+    for c in claims:
+        key = (_norm_key(str(c.get("entity", ""))),
+               _key_sig(str(c.get("attribute", ""))))
+        first = canon.setdefault(key, c["attribute"])
+        if first != c["attribute"]:
+            c = {**c, "attribute": first}
+        out.append(c)
+    return out
+
+
 def plan_questions(data: list[dict]) -> list[dict]:
     """Chrono-ordered per-question session plans; KU-forbidden sessions and
     cross-question duplicates removed (first question in sorted order wins,
@@ -116,7 +150,8 @@ def render_brief(qplan: dict, recall_prompt: str) -> str:
     return "\n".join(parts) + "\n"
 
 
-def ingest_question(qplan: dict, answers: dict[str, list]) -> list[dict] | None:
+def ingest_question(qplan: dict, answers: dict[str, list],
+                    canonical: bool = False) -> list[dict] | None:
     """Rebuild production-shaped training rows from a subagent's answers.
 
     all-or-nothing: every session must be answered and every claim must pass
@@ -125,6 +160,7 @@ def ingest_question(qplan: dict, answers: dict[str, list]) -> list[dict] | None:
     """
     rows = []
     vocab: set[str] = set()
+    canon: dict = {}
     for s in qplan["sessions"]:
         claims_in = answers.get(s["session_id"])
         if claims_in is None:
@@ -133,6 +169,8 @@ def ingest_question(qplan: dict, answers: dict[str, list]) -> list[dict] | None:
         claims = validate_claims(content, len(s["notes"]))
         if claims is None:
             return None                                # schema violation
+        if canonical:
+            claims = canonicalize_claims(claims, canon)
         vocab_list = sorted(vocab)[:VOCAB_MAX]
         target = json.dumps({"claims": claims}, ensure_ascii=False)
         rows.append({
@@ -173,17 +211,18 @@ def _cmd_emit(args) -> int:
 def _cmd_ingest(args) -> int:
     data = json.loads(DATASET.read_text(encoding="utf-8"))
     plans = {p["question_id"]: p for p in plan_questions(data)}
+    out_path = args.out or MERGED
     done_ids = set()
     kept = empty_kept = 0
-    if MERGED.exists():
-        for line in MERGED.read_text(encoding="utf-8").splitlines():
+    if out_path.exists():
+        for line in out_path.read_text(encoding="utf-8").splitlines():
             row = json.loads(line)
             done_ids.add(row["id"].split(":")[0])
             kept += 1
             if not json.loads(row["messages"][-1]["content"])["claims"]:
                 empty_kept += 1
     rejected = []
-    with MERGED.open("a", encoding="utf-8") as out:
+    with out_path.open("a", encoding="utf-8") as out:
         for f in sorted(OUT_DIR.glob("*.jsonl")):
             qid = f.stem
             if qid in done_ids or qid not in plans:
@@ -197,7 +236,8 @@ def _cmd_ingest(args) -> int:
             except (ValueError, KeyError):
                 rejected.append(qid)
                 continue
-            rows = ingest_question(plans[qid], answers)
+            rows = ingest_question(plans[qid], answers,
+                                   canonical=args.canonical_keys)
             if rows is None:
                 rejected.append(qid)
                 continue
@@ -257,6 +297,11 @@ def main() -> int:
     ap.add_argument("--questions", type=int, default=0,
                     help="emit only the first N question briefs (pilot)")
     ap.add_argument("--max-empty-share", type=float, default=0.2)
+    ap.add_argument("--canonical-keys", action="store_true",
+                    help="merge near-miss slot keys to the first-seen key "
+                         "per question chain (arm B')")
+    ap.add_argument("--out", type=Path, default=None,
+                    help="ingest output file (default: distill-extract-sonnet.jsonl)")
     args = ap.parse_args()
     if args.emit_briefs:
         return _cmd_emit(args)
