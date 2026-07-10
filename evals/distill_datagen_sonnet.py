@@ -88,6 +88,19 @@ def canonicalize_claims(claims: list[dict], canon: dict) -> list[dict]:
     return out
 
 
+def apply_key_map(claims: list[dict], qmap: dict) -> list[dict]:
+    """Rewrite claim attributes per a controller-supplied per-question map
+    (LLM-judged granularity merges, e.g. office-location -> location)."""
+    out = []
+    for c in claims:
+        canon = qmap.get(_norm_key(str(c.get("entity", ""))), {}).get(
+            _norm_key(str(c.get("attribute", ""))))
+        if canon and canon != c["attribute"]:
+            c = {**c, "attribute": canon}
+        out.append(c)
+    return out
+
+
 def plan_questions(data: list[dict]) -> list[dict]:
     """Chrono-ordered per-question session plans; KU-forbidden sessions and
     cross-question duplicates removed (first question in sorted order wins,
@@ -151,7 +164,8 @@ def render_brief(qplan: dict, recall_prompt: str) -> str:
 
 
 def ingest_question(qplan: dict, answers: dict[str, list],
-                    canonical: bool = False) -> list[dict] | None:
+                    canonical: bool = False,
+                    keymap: dict | None = None) -> list[dict] | None:
     """Rebuild production-shaped training rows from a subagent's answers.
 
     all-or-nothing: every session must be answered and every claim must pass
@@ -169,6 +183,10 @@ def ingest_question(qplan: dict, answers: dict[str, list],
         claims = validate_claims(content, len(s["notes"]))
         if claims is None:
             return None                                # schema violation
+        if keymap:
+            qmap = keymap.get(qplan["question_id"])
+            if qmap:
+                claims = apply_key_map(claims, qmap)
         if canonical:
             claims = canonicalize_claims(claims, canon)
         vocab_list = sorted(vocab)[:VOCAB_MAX]
@@ -212,6 +230,8 @@ def _cmd_ingest(args) -> int:
     data = json.loads(DATASET.read_text(encoding="utf-8"))
     plans = {p["question_id"]: p for p in plan_questions(data)}
     out_path = args.out or MERGED
+    keymap = (json.loads(args.key_map.read_text(encoding="utf-8"))
+              if args.key_map else None)
     done_ids = set()
     kept = empty_kept = 0
     if out_path.exists():
@@ -237,7 +257,8 @@ def _cmd_ingest(args) -> int:
                 rejected.append(qid)
                 continue
             rows = ingest_question(plans[qid], answers,
-                                   canonical=args.canonical_keys)
+                                   canonical=args.canonical_keys,
+                                   keymap=keymap)
             if rows is None:
                 rejected.append(qid)
                 continue
@@ -302,6 +323,9 @@ def main() -> int:
                          "per question chain (arm B')")
     ap.add_argument("--out", type=Path, default=None,
                     help="ingest output file (default: distill-extract-sonnet.jsonl)")
+    ap.add_argument("--key-map", type=Path, default=None,
+                    help="JSON file of controller-supplied per-question "
+                         "attribute rewrites (LLM-judged granularity merges)")
     args = ap.parse_args()
     if args.emit_briefs:
         return _cmd_emit(args)

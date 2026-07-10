@@ -6,8 +6,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
 
 from distill_datagen_sonnet import (  # noqa: E402
-    canonicalize_claims, ingest_question, plan_questions, render_brief,
-    _key_sig,
+    apply_key_map, canonicalize_claims, ingest_question, plan_questions,
+    render_brief, _key_sig,
 )
 
 DATASET = [
@@ -155,3 +155,74 @@ def test_ingest_question_canonical_flag():
     rows_off = ingest_question(qplan, answers)
     target_off = json.loads(rows_off[1]["messages"][-1]["content"])["claims"][0]
     assert target_off["attribute"] == "loan-pre-approval-amount"
+
+
+# --- Task 2R: --key-map controller-supplied rewrite map ---------------------
+
+def test_apply_key_map_rewrites_attribute():
+    claims = [_claim("user", "office-location", "Seattle")]
+    qmap = {"user": {"office-location": "location"}}
+    out = apply_key_map(claims, qmap)
+    assert out[0]["attribute"] == "location"
+    assert out[0]["value"] == "Seattle"
+    assert out[0]["confidence"] == 0.9
+    assert out[0]["source"] == 1
+    assert claims[0]["attribute"] == "office-location"          # input untouched
+
+
+def test_apply_key_map_scopes_by_entity():
+    claims = [_claim("bob", "office-location", "Seattle")]
+    qmap = {"user": {"office-location": "location"}}
+    out = apply_key_map(claims, qmap)
+    assert out[0]["attribute"] == "office-location"              # no cross-entity rewrite
+
+
+def test_apply_key_map_normalized_lookup():
+    claims = [_claim("User", "Office Location", "Seattle")]
+    qmap = {"user": {"office-location": "location"}}
+    out = apply_key_map(claims, qmap)
+    assert out[0]["attribute"] == "location"
+
+
+def test_ingest_question_keymap():
+    plans = plan_questions(DATASET)
+    qb = next(p for p in plans if p["question_id"] == "q_b")
+    # q_b's plan is just s_3 (s_1 already claimed by q_a in sorted order)
+    answers = {"s_3": [_claim("user", "office-location", "Seattle")]}
+    keymap = {"q_b": {"user": {"office-location": "location"}}}
+    rows = ingest_question(qb, answers, keymap=keymap)
+    target = json.loads(rows[0]["messages"][-1]["content"])["claims"][0]
+    assert target["attribute"] == "location"
+
+    # a question_id NOT in the map is untouched
+    qa = next(p for p in plans if p["question_id"] == "q_a")
+    answers_a = {
+        "s_1": [_claim("Miso", "species", "cat")],
+        "s_2": [_claim("Miso", "species", "dog")],
+    }
+    rows_a = ingest_question(qa, answers_a, keymap=keymap)
+    target_a = json.loads(rows_a[0]["messages"][-1]["content"])["claims"][0]
+    assert target_a["attribute"] == "species"
+
+
+def test_ingest_question_no_keymap_identity():
+    plans = plan_questions(DATASET)
+    qb = next(p for p in plans if p["question_id"] == "q_b")
+    answers = {"s_3": [_claim("user", "office-location", "Seattle")]}
+    rows_none = ingest_question(qb, answers, keymap=None)
+    rows_default = ingest_question(qb, answers)
+    assert rows_none == rows_default
+
+
+def test_cli_accepts_key_map_flag(monkeypatch, tmp_path):
+    import distill_datagen_sonnet as mod
+    captured = {}
+    def fake_cmd_ingest(args):
+        captured["args"] = args
+        return 0
+    monkeypatch.setattr(mod, "_cmd_ingest", fake_cmd_ingest)
+    km_path = tmp_path / "km.json"
+    monkeypatch.setattr(
+        sys, "argv", ["prog", "--ingest", "--key-map", str(km_path)])
+    assert mod.main() == 0
+    assert captured["args"].key_map == km_path
