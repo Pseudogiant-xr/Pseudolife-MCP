@@ -696,7 +696,7 @@ def memory_graph_review(
 # ── Episodes + consolidation ──────────────────────────────────────────────
 
 
-@_tool()
+@_tool(core=True)  # the CLAUDE.md workflow opens sub-episodes for big tasks.
 def memory_episode_start(
     title: str, hint: str | None = None,
 ) -> dict[str, Any]:
@@ -710,7 +710,7 @@ def memory_episode_start(
     return service.episode_start(title=title, hint=hint)
 
 
-@_tool()
+@_tool(core=True)  # pairs with memory_episode_start.
 def memory_episode_end() -> dict[str, Any]:
     """Close the current open episode and pop back to its parent (the
     session). Returns the closed episode dict, or ``{}`` when nothing is

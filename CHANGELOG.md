@@ -6,6 +6,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-10 — core toolset promoted to the deployed default)
+- **`memory_episode_start` / `memory_episode_end` are core-tier now** — the
+  recommended CLAUDE.md workflow opens named sub-episodes for multi-step
+  tasks, so core mode (19 tools) keeps every tool name that workflow
+  references.
+- **`ops/docker-compose.yml` ships with `PSEUDOLIFE_MCP_TOOLSET: core`
+  enabled** (was a commented-out opt-in). The full manifest is agent context
+  re-read every turn (~15k chars of descriptions across 32 tools); core trims
+  ~40% of that with no workflow loss — the trimmed tail (dream, graph review,
+  forget/supersede, episode summaries, consolidation) runs on daemon cadence
+  or via the Cortex Console. Set `full` (or comment the line out) for admin
+  sessions.
+
 ### Added (2026-07-07 — Console: Extractor panel + dedup knobs)
 - **Console Extractor panel** — the dream extractor endpoint is now
   switchable from the Cortex Console: base URL (with suggestions for the

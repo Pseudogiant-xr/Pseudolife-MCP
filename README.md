@@ -115,11 +115,15 @@ consolidation.
 
 **Toolset tiers.** Set `PSEUDOLIFE_MCP_TOOLSET=core` to expose only the lean
 **core** set (the rest stay available with the default `full`): `memory_store`,
-`memory_search`, `memory_fact_get`, `memory_fact_set`, `memory_fact_resolve`,
-`memory_graph`, `memory_recall`, `memory_graph_relate`, `memory_world_search`,
-`memory_world_set`, `memory_lesson_search`, `memory_outcome`, `document_search`,
-`document_ingest`, `memory_stats`. Recommended for weak-model / public /
-token-conscious deployments. The Cortex Console is unaffected (it talks REST).
+`memory_search`, `memory_get`, `memory_fact_get`, `memory_fact_set`,
+`memory_fact_resolve`, `memory_graph`, `memory_recall`, `memory_graph_relate`,
+`memory_world_search`, `memory_world_set`, `memory_lesson_search`,
+`memory_outcome`, `memory_session_title`, `memory_episode_start`,
+`memory_episode_end`, `document_search`, `document_ingest`, `memory_stats`.
+Recommended for weak-model / public / token-conscious deployments — the
+19-tool manifest is ~40% leaner than `full`, and it covers the entire
+recall/capture/reflect workflow. The Cortex Console is unaffected (it talks
+REST).
 
 ## Architecture
 

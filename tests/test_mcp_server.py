@@ -177,6 +177,10 @@ _EXPECTED_CORE = sorted([
     # 2026-07-04 promotions: fact_get surfaces source_entries ids that core
     # mode must be able to dereference; the workflow names the session early.
     "memory_get", "memory_session_title",
+    # 2026-07-10 promotions: the global CLAUDE.md workflow tells the agent to
+    # open/close named sub-episodes for multi-step tasks; core mode (now the
+    # deployed default) must keep every tool name that workflow references.
+    "memory_episode_start", "memory_episode_end",
 ])
 
 
