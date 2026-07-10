@@ -49,6 +49,8 @@ from pathlib import Path
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 
+WINDOW = 0   # --window: known-facts window size applied to every bench service
+
 # ---------------------------------------------------------------------------
 # Rung registry — every rung is the same OpenAI-compatible interface; only the
 # base-URL + model change (endpoints resolved from the memory cortex).
@@ -307,6 +309,7 @@ def build_service(tmp_dir: Path):
     # floor (which fragments compound slots). Explicit so the bench is independent
     # of the shipped default (which is now also False).
     svc.config.memory.cortex.auto_promote = False
+    svc.config.memory.dream.known_facts_window = WINDOW
     return svc
 
 
@@ -629,7 +632,12 @@ def main() -> int:
     ap.add_argument("--report", action="store_true",
                     help="aggregate results/*.json into the table + verdict")
     ap.add_argument("--list", action="store_true", help="list rungs + endpoints")
+    ap.add_argument("--window", type=int, default=0,
+                    help="known-facts window size for every service built "
+                         "by this run (0 = off; spec 2026-07-10)")
     args = ap.parse_args()
+    global WINDOW
+    WINDOW = args.window
 
     if args.list:
         for n in LADDER_ORDER:
