@@ -737,3 +737,56 @@ def test_openai_extractor_renders_known_facts_block():
 def test_openai_extractor_omits_block_without_known_facts():
     system = _capture_extract_body(None)["messages"][0]["content"]
     assert "Current known facts" not in system
+
+
+# ── service wiring: _dream_hints + dream_run known-facts window ──────────
+
+class _RecordingExtractor:
+    """Records what dream_run passes; returns one fixed claim per call."""
+
+    def __init__(self):
+        self.calls = []
+
+    def extract(self, texts, vocab, known_facts=None):
+        self.calls.append({"texts": list(texts), "vocab": list(vocab),
+                           "known_facts": known_facts})
+        return [{"entity": "gadget", "attribute": "version", "value": "3.3",
+                 "confidence": 0.8, "origin": "agent"}]
+
+
+def test_dream_run_window_off_by_default_passes_no_known_facts(svc):
+    svc.store("the widget port is 9090", source="notes")
+    ext = _RecordingExtractor()
+    svc.dream_run(ext)
+    assert ext.calls and ext.calls[0]["known_facts"] is None
+
+
+def test_dream_run_passes_known_facts_window_when_enabled(svc):
+    svc.config.memory.dream.known_facts_window = 20
+    # Seed a current fact through the normal dream path (no LLM needed).
+    svc.store("gadget version is 3.2", source="notes")
+    svc.dream_run(_StubExtractor([{
+        "entity": "gadget", "attribute": "version", "value": "3.2",
+        "confidence": 0.8, "origin": "agent"}]))
+    # Second cycle: the extractor must now SEE the seeded fact's value.
+    svc.store("the gadget version is now 3.3", source="notes")
+    ext = _RecordingExtractor()
+    out = svc.dream_run(ext)
+    kf = ext.calls[0]["known_facts"]
+    assert kf, "window enabled + non-empty cortex must pass known_facts"
+    assert ("gadget", "version", "3.2") in kf
+    # And the claim written under the same slot supersedes as usual.
+    assert out["superseded"] >= 1
+    fact = svc.cortex_lookup("gadget", "version")
+    assert fact is not None and "3.3" in fact["value"]
+
+
+def test_dream_run_window_on_empty_cortex_omits_kwarg(svc):
+    # First-ever dream on an empty bank: facts_ranked returns [] and the
+    # kwarg must NOT be passed (extractors without it must keep working).
+    svc.config.memory.dream.known_facts_window = 20
+    svc.store("brand new note about a fresh topic", source="notes")
+    out = svc.dream_run(_StubExtractor([{
+        "entity": "fresh", "attribute": "topic", "value": "noted",
+        "confidence": 0.8, "origin": "agent"}]))     # has no known_facts param
+    assert out["inserted"] + out["confirmed"] >= 1   # did not blow up
