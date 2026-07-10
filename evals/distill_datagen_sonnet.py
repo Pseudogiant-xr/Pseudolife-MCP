@@ -281,7 +281,8 @@ def _cmd_compare(args) -> int:
         row = json.loads(line)
         qwen[row["id"]] = json.loads(row["messages"][-1]["content"])["claims"]
     per_id, keys = {}, defaultdict(lambda: [set(), set()])
-    for line in MERGED.read_text(encoding="utf-8").splitlines():
+    merged_path = args.out or MERGED
+    for line in merged_path.read_text(encoding="utf-8").splitlines():
         row = json.loads(line)
         rid = row["id"]
         if rid not in qwen:

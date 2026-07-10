@@ -40,7 +40,7 @@ from pathlib import Path
 
 import torch
 import torch.nn.functional as F
-from unsloth import FastModel                     # import first (patches)
+from unsloth import FastModel        # before transformers/trl (patches them)
 from datasets import Dataset
 from transformers import default_data_collator
 from trl import SFTConfig, SFTTrainer
