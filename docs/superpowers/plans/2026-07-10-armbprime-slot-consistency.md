@@ -464,3 +464,37 @@ git commit -m "feat(ops): deploy arm-B' extractor (e4b-sonnet2) as sidecar GGUF"
 ```
 
 Plus `memory_store` (tags `["deploy", "milestone"]`) with the rollback tag and gate numbers.
+
+### Task 2R: LLM-assisted key-merge maps (revision, 2026-07-10)
+
+**Why:** Task 2's reuse gate failed at 0.069 (gate ≥ 0.20; arm B 0.068). The
+T1 sig-equality matcher made only 3 true rewrites in 3,494 claims — the
+dominant Sonnet key drift is granularity/hierarchy drift (`office-location`
+vs `location`, `business` vs `business-products`), which no token-set rule
+separates safely from genuinely distinct properties (`bedroom-color` vs
+`bedroom-size`). User chose LLM-assisted merge maps over subset matcher
+(0.111, under gate), loose matcher (0.381, unsafe), or full re-label.
+
+**Approach:**
+1. Controller builds per-chain inventories (entity → keys in first-seen
+   order + 2 example values) from `evals/data/sonnet_out/*.jsonl` — 5 batch
+   files of 10 questions (scratchpad `keymap_batches/batch-N.md`).
+2. 5 parallel Sonnet subagents each return GROUPS of same-underlying-property
+   keys per (question, entity). Criterion: merge iff the keys track the same
+   evolving fact — a "what is the current X?" query should return only the
+   newest value. Unsure = don't merge. Direction is NOT delegated.
+3. Controller resolves groups deterministically: canonical = first-seen key
+   of each group; builds `evals/data/sonnet2_keymap.json`:
+   `{question_id: {norm_entity: {norm_variant_attr: canonical_attr_verbatim}}}`.
+4. New `--key-map PATH` flag in `distill_datagen_sonnet.py --ingest`
+   (implementer subagent, TDD): applied per claim after `validate_claims`,
+   BEFORE `canonicalize_claims`/vocab recompute (same placement as T1).
+   Lookup by `_norm_key(entity)` / `_norm_key(attribute)`. Without the flag,
+   behavior stays byte-identical (arm-B reproducibility).
+5. Gate check runs OFFLINE from map + sonnet_out before regenerating:
+   exact reuse ≥ 0.20 unchanged. ~30-merge hand audit unchanged. Then
+   regenerate `distill-extract-sonnet2.jsonl` with
+   `--ingest --canonical-keys --key-map ... --out ...` and proceed to Task 3.
+
+Gates, tags, and Tasks 3–6 are unchanged. Task 4 remains HELD for explicit
+user go.
