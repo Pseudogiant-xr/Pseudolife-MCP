@@ -193,6 +193,30 @@ def _restates_fact(entry_text: str, value: str) -> bool:
     return len(v) >= 0.5 * len(t)
 
 
+# ── Compact transport shapes (2026-07-10) ────────────────────────────────
+# Recall-path tools ship only the fields an agent acts on; bookkeeping
+# metadata (timestamps, counters, band/episode attribution, provenance) is
+# gated behind ``verbose=True``. Result payloads are per-session agent
+# context on every retrieval, so the default stays lean — same rationale as
+# the toolset gate. The Cortex Console is unaffected (REST calls service.*).
+
+
+def _compact_entry(e: dict[str, Any]) -> dict[str, Any]:
+    """{id, text, source, tags, score} plus the supersession signal when
+    set — ``superseded_by_text`` changes answers, so it always survives."""
+    out = {k: e[k] for k in ("id", "text", "source", "tags", "score") if k in e}
+    if e.get("superseded"):
+        out["superseded"] = True
+    if e.get("superseded_by_text"):
+        out["superseded_by_text"] = e["superseded_by_text"]
+    return out
+
+
+def _compact_entries(result: dict[str, Any]) -> dict[str, Any]:
+    result["entries"] = [_compact_entry(e) for e in result.get("entries", [])]
+    return result
+
+
 @_tool(core=True)
 def memory_search(
     query: str,
@@ -206,6 +230,7 @@ def memory_search(
     rerank: bool | None = None,
     bm25: bool | None = None,
     explain: bool = False,
+    verbose: bool = False,
 ) -> dict[str, Any]:
     """Retrieve memories relevant to a query — associative recall plus
     canonical facts.
@@ -230,7 +255,9 @@ def memory_search(
         rerank / bm25: Tri-state config overrides. ``bm25=True`` helps
             exact-keyword queries (function names, versions, error codes);
             ``rerank=True`` cross-encodes the top candidates (~200ms).
-        explain: Attach a ranking ``trace`` for debugging retrieval.
+        explain: Attach a ranking ``trace`` for debugging (implies verbose).
+        verbose: Full per-entry metadata; default entries are compact
+            ``{id, text, source, tags, score}`` + supersession when set.
 
     Returns: ``{query, count, entries, cortex, low_confidence}``.
     """
@@ -285,6 +312,10 @@ def memory_search(
             episodes=episodes, tags=tags, rerank=rerank, bm25=bm25,
         )
         result["trace"] = trace_out.get("trace")
+    # explain implies verbose: a ranking trace without the entry metadata it
+    # scores against would be unreadable.
+    if not (verbose or explain):
+        result = _compact_entries(result)
     return result
 
 
@@ -294,15 +325,18 @@ def memory_recent(
     sources: list[str] | None = None,
     episodes: list[str] | None = None,
     tags: list[str] | None = None,
+    verbose: bool = False,
 ) -> dict[str, Any]:
     """List the N most recently stored memories, newest first — timestamp
     order, not relevance. Useful for "what did I just store?" and for
     catching up at the start of a session. Optional ``sources`` /
-    ``episodes`` / ``tags`` filters (AND-combined).
+    ``episodes`` / ``tags`` filters (AND-combined). ``verbose=True`` for
+    full per-entry metadata (default entries are compact).
     """
-    return service.recent(
+    result = service.recent(
         n=n, sources=sources, episodes=episodes, tags=tags,
     )
+    return result if verbose else _compact_entries(result)
 
 
 @_tool()
@@ -479,16 +513,32 @@ def memory_world_set(
 
 
 @_tool(core=True)
-def memory_world_search(query: str, top_k: int = 5) -> dict[str, Any]:
+def memory_world_search(query: str, top_k: int = 5,
+                        verbose: bool = False) -> dict[str, Any]:
     """Search current WORLD facts (sourced external knowledge) by
     similarity. Use when a task turns on an external fact your training
     data may have stale. Entries carry ``effective_confidence``
     (age-decayed), a ``stale`` flag (re-verify before relying on it), and
-    their ``source_url`` / ``source_quote`` for citation.
+    their ``source_url`` / ``source_quote`` for citation. ``verbose=True``
+    for full provenance metadata (default entries are compact).
 
     Returns: ``{count, entries}``.
     """
-    return service.world_search(query, top_k=top_k, min_score=0.0)
+    result = service.world_search(query, top_k=top_k, min_score=0.0)
+    if not verbose:
+        result["entries"] = [_compact_world(e) for e in result.get("entries", [])]
+    return result
+
+
+def _compact_world(e: dict[str, Any]) -> dict[str, Any]:
+    out = {k: e[k] for k in ("entity", "attribute", "value",
+                             "effective_confidence", "stale", "score")
+           if k in e}
+    if e.get("source_url"):
+        out["source_url"] = e["source_url"]
+    if e.get("source_quote"):
+        out["source_quote"] = e["source_quote"]
+    return out
 
 
 @_tool(core=True)
@@ -520,15 +570,26 @@ def memory_outcome(
 
 
 @_tool(core=True)
-def memory_lesson_search(query: str, top_k: int = 5) -> dict[str, Any]:
+def memory_lesson_search(query: str, top_k: int = 5,
+                         verbose: bool = False) -> dict[str, Any]:
     """Search learned lessons (procedural memory) by similarity to the task
     at hand. Call at the START of a task: what worked, what to avoid, what
     the user corrected before. Heed polarity ``-`` entries — known dead-ends.
+    ``verbose=True`` for full provenance metadata (default entries are
+    compact).
 
     Returns: ``{count, entries: [{task, aspect, lesson, about, polarity,
     outcome, confidence, score}]}``.
     """
-    return service.lesson_search(query, top_k=top_k)
+    result = service.lesson_search(query, top_k=top_k)
+    if not verbose:
+        keep = ("task", "aspect", "lesson", "about", "polarity", "outcome",
+                "confidence", "score", "re_verify", "re_verify_reason")
+        result["entries"] = [
+            {k: e[k] for k in keep if k in e}
+            for e in result.get("entries", [])
+        ]
+    return result
 
 
 # ── Consolidated lifecycle verbs ──────────────────────────────────────────
@@ -872,7 +933,8 @@ def memory_graph(
 
 
 @_tool(core=True)
-def memory_recall(query: str, hops: int = 3, top_k: int = 5) -> dict[str, Any]:
+def memory_recall(query: str, hops: int = 3, top_k: int = 5,
+                  verbose: bool = False) -> dict[str, Any]:
     """Multi-hop retrieval over the knowledge graph, for RELATIONAL
     questions whose answer is reached by following links — "what does X
     ultimately run on?", "how does A reach C?" — which single-shot
@@ -881,10 +943,26 @@ def memory_recall(query: str, hops: int = 3, top_k: int = 5) -> dict[str, Any]:
 
     Args:
         hops: Max graph hops (default 3, max 5).
+        verbose: Full fact/edge provenance (origin, confidence, derivation).
+            Default facts are ``{attribute, value}``, edges
+            ``{src, relation, dst}``.
 
     Returns: ``{seeds, entities, edges, paths, texts, iterations}``.
     """
-    return service.recall(query, hops=hops, top_k=top_k)
+    out = service.recall(query, hops=hops, top_k=top_k)
+    if not verbose:
+        out["entities"] = [
+            {"entity": n.get("entity"),
+             "facts": [{"attribute": f.get("attribute"), "value": f.get("value")}
+                       for f in n.get("facts", [])]}
+            for n in out.get("entities", [])
+        ]
+        out["edges"] = [
+            {"src": e.get("src"), "relation": e.get("relation"),
+             "dst": e.get("dst")}
+            for e in out.get("edges", [])
+        ]
+    return out
 
 
 @_tool()

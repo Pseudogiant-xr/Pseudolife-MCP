@@ -75,8 +75,8 @@ Console (REST) — the manifest is agent context every session, so it stays lean
 | Tool | Purpose |
 |------|---------|
 | `memory_store(text, source?, tags?, origin?)` | Remember one durable fact / decision / observation (canonical facts reach the cortex via the dream pass or `memory_fact_set`) |
-| `memory_search(query, top_k?, filters..., rerank?, bm25?, explain?)` | Associative retrieval; canonical `cortex` facts surface ahead of recall hits; `explain=True` attaches a ranking trace |
-| `memory_recent(n?, sources?, episodes?, tags?)` | Newest stores, timestamp-ordered (debug + session catch-up) |
+| `memory_search(query, top_k?, filters..., rerank?, bm25?, explain?, verbose?)` | Associative retrieval; canonical `cortex` facts surface ahead of recall hits; `explain=True` attaches a ranking trace |
+| `memory_recent(n?, sources?, episodes?, tags?, verbose?)` | Newest stores, timestamp-ordered (debug + session catch-up) |
 | `memory_supersede(old_text, new_text)` | Explicit correction — mark a memory obsolete, keep it as history |
 | `memory_forget(scope, ...)` | Hard-delete from one store: `memory` (by text/substring/source/episode/tag), `fact`, `world`, or `lesson` (by entity/attribute) |
 | `memory_stats()` | Per-band sizes, hit rates, totals |
@@ -86,9 +86,9 @@ Console (REST) — the manifest is agent context every session, so it stays lean
 | `memory_fact_resolve(entity, attribute, accept)` | Settle a contested slot — adopt (`true`) or discard (`false`) the contender |
 | `memory_history(entity, attribute?)` | With `attribute`: version timeline at a slot, with writer/temporal stamps. Without: the entity's causal chain — dated fact/entry/edge/lesson events ("what led to X") |
 | `memory_world_set(entity, attribute, value, source_url?, ...)` | Assert a cited WORLD fact (external knowledge; age-decayed trust by freshness class) |
-| `memory_world_search(query, top_k?)` | Search world facts — each carries `effective_confidence`, a `stale` flag, and its citation |
+| `memory_world_search(query, top_k?, verbose?)` | Search world facts — each carries `effective_confidence`, a `stale` flag, and its citation |
 | `memory_outcome(task, outcome, about?, detail?, polarity?)` | Record a procedural outcome signal (`success`/`failure`/`correction`); the dream distils signals into lessons |
-| `memory_lesson_search(query, top_k?)` | Recall learned lessons for the task at hand — heed `polarity` `-` dead-ends; `re_verify` flags lessons whose subject facts changed since |
+| `memory_lesson_search(query, top_k?, verbose?)` | Recall learned lessons for the task at hand — heed `polarity` `-` dead-ends; `re_verify` flags lessons whose subject facts changed since |
 | `memory_dream(action, limit?, cursor?, apply?, snippets?)` | Drive the dream: `status` / `pull` / `commit` / `run` (server-side extractor) / `deep` (full-corpus graph consolidation; dry-run unless `apply`, which snapshots the graph tables first; `snippets=false` omits candidate evidence; responses carry evidence-enriched `merge_proposals` for near-duplicate triage) |
 | `memory_graph_review(action, proposal_id?, proposals?, scope?, src?, dst?)` | Work the review queue: `list` / `propose` / `dismiss_pair` / `accept_link` / `reject_link` / `accept_merge` / `accept_junk` / `reject_entity` (merge/entity decisions are audit-stamped `decided_by=agent` over MCP, `human` via Console) |
 | `memory_session_title(title)` | Name THIS session's auto-opened episode (default titles are generic) |
@@ -100,13 +100,22 @@ Console (REST) — the manifest is agent context every session, so it stays lean
 | `memory_graph_unrelate(src, relation, dst)` | Retract an edge (superseded, kept for audit) |
 | `memory_alias(entity, alias)` | Bind an alternative name — lookups resolve aliases first |
 | `memory_graph(entity, depth?, include_facts?, to?, relation_filter?)` | Entity neighborhood (≤3 hops) with derived transitive/inverse edges and per-edge `EXTRACTED/INFERRED/AMBIGUOUS` provenance tags; `to` returns the shortest path between two entities |
-| `memory_recall(query, hops?, top_k?)` | Multi-hop retrieval for relational questions; `low_confidence: true` → fall back to `memory_search` |
+| `memory_recall(query, hops?, top_k?, verbose?)` | Multi-hop retrieval for relational questions; `low_confidence: true` → fall back to `memory_search` |
 | `memory_relation_define(name, description, ...)` | Grow the closed relation vocabulary (deliberate, rare act) |
 | `document_ingest(path, source?)` | Index a file (txt/md/pdf) in the reference bank |
 | `document_search(query, top_k?)` | RAG search over the reference bank only |
 
 Each tool returns plain JSON. See `pseudolife_memory/mcp_server.py` for
 docstrings — those are what Claude reads to decide when to call which tool.
+
+**Compact results.** The five recall-path tools (`memory_search`,
+`memory_recall`, `memory_recent`, `memory_world_search`,
+`memory_lesson_search`) return compact entries by default — for the
+associative stream that's `{id, text, source, tags, score}` plus the
+supersession signal when set — because result payloads are agent context on
+every retrieval. Pass `verbose=true` (or `explain=true` on `memory_search`)
+for the full metadata: timestamps, counters, band/episode attribution, and
+fact/edge provenance. Cortex Console REST responses are unaffected.
 Full-table dumps and topology views (`facts`, `world`, `lessons`, sources,
 tags, episodes list, graph digest/communities, shortest path, session
 briefing) live in the **Cortex Console** (`/api/*`) and the

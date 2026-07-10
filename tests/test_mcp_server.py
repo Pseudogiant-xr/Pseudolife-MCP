@@ -415,7 +415,8 @@ def test_memory_consolidate_via_mcp_dispatch(
     recent = _invoke("memory_recent", {"n": 10})
     by_text = {e["text"]: e for e in recent["entries"]}
     assert by_text["old phrasing one"]["superseded"] is True
-    assert by_text["Consolidated: current phrasing"]["superseded"] is False
+    # Compact shape: ``superseded`` only appears when true.
+    assert "superseded" not in by_text["Consolidated: current phrasing"]
     assert "consolidated" in by_text["Consolidated: current phrasing"]["tags"]
 
 
@@ -499,3 +500,161 @@ def test_restates_fact_requires_word_boundary_and_min_length() -> None:
     assert _restates_fact("rust", "rust") is False
     # Empty / missing.
     assert _restates_fact("anything", "") is False
+
+
+# ---------------------------------------------------------------------------
+# Compact-by-default recall payloads (2026-07-10 token-cost lever) — the five
+# recall-path tools return only the fields an agent acts on; ``verbose=True``
+# (and ``explain=True`` on memory_search) restores the full metadata. The
+# Console REST paths call service.* directly and are unaffected.
+# ---------------------------------------------------------------------------
+
+
+_ENTRY_NOISE = ("timestamp", "access_count", "surprise_score", "bank",
+                "episode_id", "episode_title")
+
+
+def _reload_mod(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
+    import importlib
+    import pseudolife_memory.mcp_server as mod
+    importlib.reload(mod)
+    return mod
+
+
+def test_memory_search_entries_are_compact_by_default(tmp_path: Path, monkeypatch) -> None:
+    _reload_mod(tmp_path, monkeypatch)
+    _invoke("memory_store", {"text": "the widget port is 9191",
+                             "source": "notes", "tags": ["net"]})
+    out = _invoke("memory_search", {"query": "widget port"})
+    assert out["count"] >= 1
+    e = out["entries"][0]
+    assert set(e) == {"id", "text", "source", "tags", "score"}
+    for noise in _ENTRY_NOISE + ("superseded", "superseded_by_text"):
+        assert noise not in e
+
+
+def test_memory_search_verbose_restores_full_metadata(tmp_path: Path, monkeypatch) -> None:
+    _reload_mod(tmp_path, monkeypatch)
+    _invoke("memory_store", {"text": "the widget port is 9191", "source": "notes"})
+    out = _invoke("memory_search", {"query": "widget port", "verbose": True})
+    e = out["entries"][0]
+    for k in _ENTRY_NOISE + ("superseded",):
+        assert k in e, f"verbose entry missing {k!r}"
+
+
+def test_memory_search_explain_implies_verbose_entries(tmp_path: Path, monkeypatch) -> None:
+    _reload_mod(tmp_path, monkeypatch)
+    _invoke("memory_store", {"text": "the widget port is 9191", "source": "notes"})
+    out = _invoke("memory_search", {"query": "widget port", "explain": True})
+    assert "trace" in out
+    e = out["entries"][0]
+    for k in _ENTRY_NOISE:
+        assert k in e, f"explain entry missing {k!r}"
+
+
+def test_compact_search_keeps_supersession_signal(tmp_path: Path, monkeypatch) -> None:
+    """superseded_by_text changes answers — it must survive compaction."""
+    _reload_mod(tmp_path, monkeypatch)
+    _invoke("memory_store", {"text": "the api key lives in .env", "source": "notes"})
+    _invoke("memory_supersede", {"old_text": "the api key lives in .env",
+                                 "new_text": "the api key lives in the vault now"})
+    out = _invoke("memory_search", {"query": "where does the api key live"})
+    old = next(e for e in out["entries"] if e["text"] == "the api key lives in .env")
+    assert old["superseded"] is True
+    assert old["superseded_by_text"] == "the api key lives in the vault now"
+
+
+def test_memory_recent_compact_by_default_verbose_restores(tmp_path: Path, monkeypatch) -> None:
+    _reload_mod(tmp_path, monkeypatch)
+    _invoke("memory_store", {"text": "recent shape probe", "source": "notes",
+                             "tags": ["probe"]})
+    compact = _invoke("memory_recent", {"n": 5})["entries"][0]
+    assert set(compact) == {"id", "text", "source", "tags"}
+    full = _invoke("memory_recent", {"n": 5, "verbose": True})["entries"][0]
+    for k in _ENTRY_NOISE + ("superseded",):
+        assert k in full, f"verbose entry missing {k!r}"
+
+
+_FULL_LESSON = {
+    "task": "deploy daemon", "aspect": "procedure", "lesson": "backup first",
+    "about": "ops/update.ps1", "polarity": "+", "outcome": "success",
+    "status": "current", "confidence": 0.9, "origin": "action",
+    "provenance": ["action"], "asserted_at": 1.0, "last_confirmed": 2.0,
+    "supersedes_value": None, "superseded_by_value": None,
+    "superseded_at": None, "score": 0.8,
+}
+
+
+def test_memory_lesson_search_compact_by_default(monkeypatch) -> None:
+    from pseudolife_memory import mcp_server  # noqa: PLC0415
+    monkeypatch.setattr(
+        mcp_server.service, "lesson_search",
+        lambda *a, **k: {"count": 1, "entries": [dict(_FULL_LESSON)]})
+    e = _invoke("memory_lesson_search", {"query": "deploy"})["entries"][0]
+    assert set(e) == {"task", "aspect", "lesson", "about", "polarity",
+                      "outcome", "confidence", "score"}
+    full = _invoke("memory_lesson_search", {"query": "deploy", "verbose": True})
+    assert set(full["entries"][0]) == set(_FULL_LESSON)
+
+
+def test_memory_lesson_search_compact_keeps_re_verify(monkeypatch) -> None:
+    from pseudolife_memory import mcp_server  # noqa: PLC0415
+    row = {**_FULL_LESSON, "re_verify": True, "re_verify_reason": "facts changed"}
+    monkeypatch.setattr(
+        mcp_server.service, "lesson_search",
+        lambda *a, **k: {"count": 1, "entries": [row]})
+    e = _invoke("memory_lesson_search", {"query": "deploy"})["entries"][0]
+    assert e["re_verify"] is True
+    assert e["re_verify_reason"] == "facts changed"
+
+
+_FULL_WORLD = {
+    "entity": "fastmcp", "attribute": "latest version", "value": "2.3",
+    "polarity": "+", "status": "current", "confidence": 0.85,
+    "effective_confidence": 0.81, "stale": False, "origin": "web",
+    "freshness_class": "volatile", "source_url": "https://example.com/x",
+    "source_quote": "fastmcp 2.3 released", "retrieved_at": 1.0,
+    "asserted_at": 1.0, "last_confirmed": 2.0, "supersedes_value": None,
+    "superseded_by_value": None, "superseded_at": None, "score": 0.7,
+}
+
+
+def test_memory_world_search_compact_by_default(monkeypatch) -> None:
+    from pseudolife_memory import mcp_server  # noqa: PLC0415
+    monkeypatch.setattr(
+        mcp_server.service, "world_search",
+        lambda *a, **k: {"count": 1, "entries": [dict(_FULL_WORLD)]})
+    e = _invoke("memory_world_search", {"query": "fastmcp version"})["entries"][0]
+    assert set(e) == {"entity", "attribute", "value", "effective_confidence",
+                      "stale", "source_url", "source_quote", "score"}
+    full = _invoke("memory_world_search", {"query": "fastmcp version",
+                                           "verbose": True})
+    assert set(full["entries"][0]) == set(_FULL_WORLD)
+
+
+def test_memory_recall_compact_by_default(monkeypatch) -> None:
+    from pseudolife_memory import mcp_server  # noqa: PLC0415
+    fake = {
+        "query": "q", "seeds": ["svc-a"],
+        "entities": [{"entity": "svc-a",
+                      "facts": [{"attribute": "port", "value": "9090",
+                                 "origin": "agent", "confidence": 0.8}]}],
+        "edges": [{"src": "svc-a", "relation": "runs-on", "dst": "jvm-21",
+                   "derived": False, "confidence": 0.9, "origin": "agent",
+                   "tag": "confirmed"}],
+        "paths": [["svc-a", "jvm-21"]], "texts": ["svc-a runs on jvm-21"],
+        "iterations": 1, "hops": 3, "low_confidence": False,
+    }
+    monkeypatch.setattr(mcp_server.service, "recall",
+                        lambda *a, **k: dict(fake))
+    out = _invoke("memory_recall", {"query": "what does svc-a run on"})
+    assert out["entities"] == [{"entity": "svc-a",
+                                "facts": [{"attribute": "port", "value": "9090"}]}]
+    assert out["edges"] == [{"src": "svc-a", "relation": "runs-on", "dst": "jvm-21"}]
+    assert out["paths"] == [["svc-a", "jvm-21"]]      # untouched
+    assert out["texts"] == ["svc-a runs on jvm-21"]   # untouched
+    full = _invoke("memory_recall", {"query": "what does svc-a run on",
+                                     "verbose": True})
+    assert full["entities"][0]["facts"][0]["confidence"] == 0.8
+    assert full["edges"][0]["tag"] == "confirmed"

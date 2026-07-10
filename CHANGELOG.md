@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-10 — compact-by-default recall payloads)
+- **The five recall-path tools return compact entries by default** —
+  `memory_search`, `memory_recall`, `memory_recent`, `memory_world_search`,
+  and `memory_lesson_search` now ship only the fields an agent acts on
+  (associative entries: `{id, text, source, tags, score}` plus `superseded` /
+  `superseded_by_text` when set; recall facts: `{attribute, value}`, edges:
+  `{src, relation, dst}`; world/lesson entries similarly trimmed to their
+  documented cores, keeping `effective_confidence`/`stale`/citation and
+  `re_verify`). Trims ~40% of a typical associative entry (measured on a
+  representative long-text entry; short entries save proportionally more).
+  New `verbose=true` flag on all five restores the full
+  metadata (timestamps, counters, band/episode attribution, provenance);
+  `explain=true` on `memory_search` implies `verbose`. Result payloads are
+  the second half of the 2026-07-10 token-cost lever (the toolset gate below
+  was the first). Cortex Console REST responses are unaffected — the
+  compaction lives at the MCP transport layer only.
+
 ### Changed (2026-07-10 — core toolset promoted to the deployed default)
 - **`memory_episode_start` / `memory_episode_end` are core-tier now** — the
   recommended CLAUDE.md workflow opens named sub-episodes for multi-step
