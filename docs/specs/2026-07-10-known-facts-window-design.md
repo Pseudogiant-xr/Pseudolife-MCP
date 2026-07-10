@@ -1,7 +1,15 @@
 # Known-facts window for the dream pass (TiMem-inspired)
 
 **Date:** 2026-07-10
-**Status:** approved design, pre-plan
+**Status:** CLOSED 2026-07-11 — gate FAILED, mechanism closed. Same-sitting
+2x2 (n=78): e4b-ft cortex 0.603→0.513, qwen-27b cortex 0.577→0.500 with the
+window on; both extractors regress ~0.08, so the mechanism (not e4b-ft
+format shift) is at fault. Echo check PASS, ladder clean. Diagnostics:
+e4b-ft losses were extraction losses (10/11 flips lost the gold answer from
+current facts; supersessions 156→118); qwen-27b captured MORE answers
+(answer_in_current_fact 28→33) yet scored lower — key gravity toward shown
+slots degrades retrieval ranking. `known_facts_window` stays 0 (code inert,
+default-off). Results archived in `evals/results/*-w0/-w20*`.
 **Origin:** TiMem (arXiv 2601.02845) historical-window consolidation, adapted to
 PseudoLife's flat slot cortex. Successor experiment to Stage 1.5 (closed
 2026-07-10: training-side arms neutral or negative; forward hypothesis was
