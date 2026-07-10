@@ -320,7 +320,7 @@ def answer_and_judge(row: dict) -> dict:
 
 
 def run_extract(dataset: str, limit: int | None, extractor_name: str,
-                do_answer: bool, tag: str = "") -> None:
+                do_answer: bool, tag: str = "", window: int = 0) -> None:
     ex_url = EXTRACTORS[extractor_name]
     if not probe(ex_url):
         sys.exit(f"no extractor server at {ex_url} — start it first")
@@ -343,6 +343,7 @@ def run_extract(dataset: str, limit: int | None, extractor_name: str,
         tmp = Path(tempfile.mkdtemp(prefix="lme_"))
         svc = build_service(tmp)                      # fresh, truncated bench DB
         svc.config.memory.dream.extract_relations = False   # facts only
+        svc.config.memory.dream.known_facts_window = window
         extractor = OpenAICompatExtractor(ex_url, "bench", max_tokens=4096,
                                           timeout_seconds=600.0)
         tally = ingest_and_dream(svc, extractor, q, ex_url)
@@ -358,6 +359,7 @@ def run_extract(dataset: str, limit: int | None, extractor_name: str,
             "abstention": q["question_id"].endswith("_abs"),
             "sessions": len(q["haystack_sessions"]),
             "extractor": extractor_name,
+            "window": window,
             "contexts": contexts,
             "consolidation": tally,
             "wall_seconds": round(time.perf_counter() - t_start, 1),
@@ -431,6 +433,9 @@ def main() -> int:
     ap.add_argument("--tag", default="",
                     help="namespace suffix for output files/banks "
                          "(e.g. 'diag' — keeps experiment runs apart)")
+    ap.add_argument("--window", type=int, default=0,
+                    help="known-facts window size for the dream pass "
+                         "(0 = off; use 20 for the window arm — spec 2026-07-10)")
     args = ap.parse_args()
     if args.report:
         report(args.dataset, args.extractor, args.tag)
@@ -439,7 +444,8 @@ def main() -> int:
         run_answer(args.dataset, args.extractor, args.tag)
     else:
         run_extract(args.dataset, args.limit, args.extractor,
-                    do_answer=(args.phase == "full"), tag=args.tag)
+                    do_answer=(args.phase == "full"), tag=args.tag,
+                    window=args.window)
     if args.phase != "extract":
         report(args.dataset, args.extractor, args.tag)
     return 0

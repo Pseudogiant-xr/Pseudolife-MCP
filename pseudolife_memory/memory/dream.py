@@ -51,10 +51,17 @@ class RelationClaim(TypedDict):
 
 
 class DreamExtractor(Protocol):
-    def extract(self, texts: list[str], vocab: list[str]) -> list[Claim]:
+    def extract(self, texts: list[str], vocab: list[str],
+                known_facts: list[tuple[str, str, str]] | None = None,
+                ) -> list[Claim]:
         """Return canonical claims for ``texts``. ``vocab`` is the existing
         ``entity.attribute`` slot keys, so an extractor can REUSE them instead of
-        reinventing variants. Must never raise — return ``[]`` on any failure."""
+        reinventing variants. ``known_facts`` (when the known-facts window is
+        enabled) is ``(entity, attribute, current value)`` triples the batch
+        plausibly updates — shown so updates land on the SAME slot. The caller
+        only passes it when non-empty, so extractors without the parameter
+        keep working on window-off deployments. Must never raise — return
+        ``[]`` on any failure."""
         ...
 
 
@@ -62,7 +69,9 @@ class RegexExtractor:
     """Deterministic no-LLM floor. Wraps ``slots.extract_slots`` (the one regex
     implementation) and shapes its output into ``Claim`` dicts."""
 
-    def extract(self, texts: list[str], vocab: list[str]) -> list[Claim]:
+    def extract(self, texts: list[str], vocab: list[str],
+                known_facts: list[tuple[str, str, str]] | None = None,
+                ) -> list[Claim]:
         from pseudolife_memory.memory.slots import extract_slots
         claims: list[Claim] = []
         for i, t in enumerate(texts or []):
@@ -82,7 +91,9 @@ class NoOpExtractor:
     is for the recall-time slot-view only, and ``RegexExtractor`` is an explicit
     opt-in, never reached automatically."""
 
-    def extract(self, texts: list[str], vocab: list[str]) -> list[Claim]:
+    def extract(self, texts: list[str], vocab: list[str],
+                known_facts: list[tuple[str, str, str]] | None = None,
+                ) -> list[Claim]:
         return []
 
 
@@ -102,6 +113,20 @@ def _vocab_hint(vocab: list[str]) -> str:
     if not vocab:
         return ""
     return "\n\nExisting slot keys (reuse if applicable): " + ", ".join(vocab[:60])
+
+
+_FACTS_HINT_HEAD = (
+    "\n\nCurrent known facts (for key reuse — if a note updates one of "
+    "these, emit the claim under the SAME entity and attribute with the new "
+    "current value; never emit a claim the notes do not state):\n"
+)
+
+
+def _facts_hint(known_facts: list[tuple[str, str, str]] | None) -> str:
+    if not known_facts:
+        return ""
+    return _FACTS_HINT_HEAD + "\n".join(
+        f"- {e} — {a}: {v}" for e, a, v in known_facts)
 
 
 _LESSON_SYSTEM_PROMPT = (
@@ -184,7 +209,9 @@ class OpenAICompatExtractor:
         self.max_tokens = int(max_tokens)
         self.timeout = float(timeout_seconds)
 
-    def extract(self, texts: list[str], vocab: list[str]) -> list[Claim]:
+    def extract(self, texts: list[str], vocab: list[str],
+                known_facts: list[tuple[str, str, str]] | None = None,
+                ) -> list[Claim]:
         import json
         import urllib.request
 
@@ -199,7 +226,8 @@ class OpenAICompatExtractor:
                 "model": self.model,
                 "messages": [
                     {"role": "system",
-                     "content": _SYSTEM_PROMPT + _vocab_hint(vocab)},
+                     "content": _SYSTEM_PROMPT + _vocab_hint(vocab)
+                                + _facts_hint(known_facts)},
                     # Numbered so the model can cite which note each claim came
                     # from ("source") — per-claim attribution without giving up
                     # the one-batch call that keeps cross-note naming consistent.

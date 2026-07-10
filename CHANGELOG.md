@@ -36,6 +36,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   or via the Cortex Console. Set `full` (or comment the line out) for admin
   sessions.
 
+### Added (2026-07-10 — known-facts window for dream pass)
+- Known-facts window for the dream pass (`memory.dream.known_facts_window`,
+  default 0 = off): the extractor prompt shows current values of the top-N
+  relevance-ranked slots so updates supersede in place instead of minting
+  paraphrase keys. `--window` flags on `evals/longmemeval_bench.py` and
+  `evals/ladder_sweep.py`; echo guard in `evals/window_echo_check.py`.
+  (docs/specs/2026-07-10-known-facts-window-design.md)
+
 ### Added (2026-07-07 — Console: Extractor panel + dedup knobs)
 - **Console Extractor panel** — the dream extractor endpoint is now
   switchable from the Cortex Console: base URL (with suggestions for the

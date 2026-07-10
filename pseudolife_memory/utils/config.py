@@ -322,6 +322,13 @@ class DreamConfig:
     # 0.65 (all-MiniLM-L6-v2 calibration 2026-07-07: paraphrase pairs scored
     # 0.53-0.77, unrelated pairs <= 0.17). 0 disables.
     alias_candidate_min_cosine: float = 0.5
+    # TiMem-inspired known-facts window
+    # (docs/specs/2026-07-10-known-facts-window-design.md): when > 0, the dream
+    # prompt also shows the CURRENT VALUES of the top-N relevance-ranked slots
+    # so updates supersede in place instead of minting paraphrase-variant keys.
+    # 0 (default) = off — the extractor request is byte-identical to before.
+    # Working value when enabled: 20.
+    known_facts_window: int = 0
 
 
 @dataclass

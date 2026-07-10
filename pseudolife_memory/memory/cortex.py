@@ -507,6 +507,41 @@ class CortexStore:
         keys.extend(k for k in sorted(tail) if k not in seen)
         return keys[: max(0, int(limit))]
 
+    def facts_ranked(self, query_embedding: torch.Tensor | None,
+                     limit: int = 20,
+                     value_chars: int = 120) -> list[tuple[str, str, str]]:
+        """Current ``(entity, attribute, value)`` triples for the top-``limit``
+        slots, ranked like :meth:`vocab_ranked` — the dream extractor's
+        known-facts window (docs/specs/2026-07-10-known-facts-window-design.md).
+        Values are truncated to ``value_chars`` to bound prompt size. Display
+        forms (not normalised keys) so the prompt reads naturally. Records
+        without a slot embedding follow alphabetically; no embedding at all
+        falls back to alphabetical-by-key."""
+        if limit <= 0:
+            return []
+
+        def _triple(r: CortexRecord) -> tuple[str, str, str]:
+            v = r.value if len(r.value) <= value_chars else \
+                r.value[:value_chars - 1] + "…"
+            return (r.entity, r.attribute, v)
+
+        cur = [r for r in self.records if r.status == "current"]
+        with_emb = [r for r in cur if r.slot_embedding is not None]
+        if query_embedding is None or not with_emb:
+            ranked = sorted(cur, key=lambda r: "%s.%s" % r.key)
+            return [_triple(r) for r in ranked[: int(limit)]]
+        q = query_embedding.detach().to("cpu", torch.float32).reshape(-1)
+        q = q / (q.norm() + 1e-12)
+        mat = torch.stack([r.slot_embedding.reshape(-1) for r in with_emb])
+        mat = mat / (mat.norm(dim=1, keepdim=True) + 1e-12)
+        sims = (mat @ q).tolist()
+        out = [_triple(with_emb[i])
+               for i in sorted(range(len(with_emb)), key=lambda i: -sims[i])]
+        tail = sorted((r for r in cur if r.slot_embedding is None),
+                      key=lambda r: "%s.%s" % r.key)
+        out.extend(_triple(r) for r in tail)
+        return out[: int(limit)]
+
     def forget(self, entity: str, attribute: str | None = None) -> int:
         """Hard-delete every record (current AND superseded) at an entity, or at
         one exact ``(entity, attribute)`` slot. Unlike supersession this leaves no

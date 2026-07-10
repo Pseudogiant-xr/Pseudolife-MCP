@@ -498,6 +498,71 @@ def test_resolve_slot_matches_above_threshold_only():
     assert store.resolve_slot(_unit(3), 0.9) is None
 
 
+# ── facts_ranked (known-facts window, spec 2026-07-10) ───────────────────
+
+def _kf_rec(entity, attribute, value, emb=None, status="current"):
+    from pseudolife_memory.memory.cortex import CortexRecord
+    return CortexRecord(entity=entity, attribute=attribute, value=value,
+                        status=status, slot_embedding=emb)
+
+
+def test_facts_ranked_orders_by_slot_embedding_cosine():
+    from pseudolife_memory.memory.cortex import CortexStore
+    store = CortexStore()
+    store.records = [
+        _kf_rec("db", "host", "h1", torch.tensor([0.0, 1.0])),
+        _kf_rec("svc", "port", "8080", torch.tensor([1.0, 0.0])),
+    ]
+    out = store.facts_ranked(torch.tensor([0.9, 0.1]), limit=2)
+    assert out == [("svc", "port", "8080"), ("db", "host", "h1")]
+
+
+def test_facts_ranked_excludes_non_current_and_caps_limit():
+    from pseudolife_memory.memory.cortex import CortexStore
+    store = CortexStore()
+    store.records = [
+        _kf_rec("svc", "port", "8080", torch.tensor([1.0, 0.0])),
+        _kf_rec("svc", "port", "9090", torch.tensor([1.0, 0.0]),
+                status="superseded"),
+        _kf_rec("db", "host", "h1", torch.tensor([0.0, 1.0])),
+    ]
+    out = store.facts_ranked(torch.tensor([1.0, 0.0]), limit=1)
+    assert out == [("svc", "port", "8080")]
+    assert store.facts_ranked(torch.tensor([1.0, 0.0]), limit=0) == []
+
+
+def test_facts_ranked_falls_back_alphabetical_without_embedding():
+    from pseudolife_memory.memory.cortex import CortexStore
+    store = CortexStore()
+    store.records = [
+        _kf_rec("zeta", "attr", "z"),
+        _kf_rec("alpha", "attr", "a"),
+    ]
+    # No query embedding AND no slot embeddings -> alphabetical by slot key.
+    assert store.facts_ranked(None, limit=2) == [
+        ("alpha", "attr", "a"), ("zeta", "attr", "z")]
+
+
+def test_facts_ranked_appends_embeddingless_records_after_ranked():
+    from pseudolife_memory.memory.cortex import CortexStore
+    store = CortexStore()
+    store.records = [
+        _kf_rec("plain", "attr", "no-emb"),                       # no slot_embedding
+        _kf_rec("svc", "port", "8080", torch.tensor([1.0, 0.0])),
+    ]
+    out = store.facts_ranked(torch.tensor([1.0, 0.0]), limit=5)
+    assert out == [("svc", "port", "8080"), ("plain", "attr", "no-emb")]
+
+
+def test_facts_ranked_truncates_long_values():
+    from pseudolife_memory.memory.cortex import CortexStore
+    store = CortexStore()
+    store.records = [_kf_rec("svc", "notes", "x" * 300,
+                             torch.tensor([1.0, 0.0]))]
+    (_, _, v), = store.facts_ranked(torch.tensor([1.0, 0.0]), limit=1)
+    assert len(v) == 120 and v.endswith("…")
+
+
 if __name__ == "__main__":
     import sys
     import traceback
