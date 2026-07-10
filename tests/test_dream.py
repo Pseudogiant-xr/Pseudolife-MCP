@@ -94,6 +94,7 @@ def test_dream_config_defaults():
     assert c.eligible_sources is None          # None => all-but-excluded
     assert c.min_batch == 8 and c.idle_seconds == 600.0
     assert MemoryConfig().dream.max_batch == 40
+    assert c.known_facts_window == 0            # known-facts window off by default
 
 
 # ── RegexExtractor (no LLM, no embedder) ─────────────────────────────────
