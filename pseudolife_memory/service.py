@@ -1667,7 +1667,7 @@ class MemoryService:
             ss = set(scope_map.get(src_e["id"], []))
             ds = set(scope_map.get(dst_e["id"], []))
             if ss and ds and not (ss & ds):
-                if resolved is None:
+                if relation == "related-to":
                     # Untyped fallback across disjoint projects carries no
                     # information (2026-07-11: 4/4 such proposals rejected).
                     logger.debug("dream relation dropped (cross-project-"

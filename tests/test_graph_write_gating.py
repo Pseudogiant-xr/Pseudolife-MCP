@@ -306,7 +306,7 @@ def test_dream_cross_project_edge_becomes_proposal(svc):
     svc.graph_assign_scope("xproj-b-thing", "proj-b")
 
     n = svc._link_dream_relations([
-        {"src": "xproj-a-thing", "relation": "related-to", "dst": "xproj-b-thing"},
+        {"src": "xproj-a-thing", "relation": "uses", "dst": "xproj-b-thing"},
     ])
 
     assert n == 0
@@ -340,6 +340,11 @@ def test_cross_project_untyped_relation_dropped(svc):
     n2 = svc._link_dream_relations([
         {"src": "alpha-tool", "relation": "uses", "dst": "beta-tool"}])
     assert n2 == 0 and _cross_count() == 1
+    # the LITERAL "related-to" label resolves in the registry but is equally
+    # information-free across disjoint scopes: dropped, no new proposal
+    n3 = svc._link_dream_relations([
+        {"src": "alpha-tool", "relation": "related-to", "dst": "beta-tool"}])
+    assert n3 == 0 and _cross_count() == 1
 
 
 def test_dream_same_project_edge_still_written(svc):
