@@ -1,4 +1,7 @@
+#Requires -Version 7
 # Register the Sonnet extractor shim to start at logon (Windows Task Scheduler).
+# (Install under pwsh 7 — the ternary below needs it; the scheduled task itself
+# runs fine under powershell.exe 5.1.)
 #
 #   ops\install-shim-autostart.ps1              # default port 8082, v1 prompt
 #   ops\install-shim-autostart.ps1 -Port 8082 -PromptFile evals\prompts\sonnet_extractor_v1.md
