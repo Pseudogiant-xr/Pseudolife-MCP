@@ -371,7 +371,8 @@ async def _notify_list_changed(ctx: Context) -> bool:
     try:
         await ctx.session.send_tool_list_changed()
         return True
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("tools/list_changed not sent: %s", exc)
         return False
 
 
@@ -1096,11 +1097,12 @@ def _wire_transport_tiering() -> None:
     _orig = server.create_initialization_options
 
     def _init_opts(notification_options=None, experimental_capabilities=None):
-        return _orig(
-            notification_options=notification_options
-            or NotificationOptions(tools_changed=True),
-            experimental_capabilities=experimental_capabilities,
-        )
+        # memory_toolset depends on the listChanged capability: force it on
+        # whatever options arrive rather than only defaulting the None case.
+        opts = notification_options or NotificationOptions()
+        opts.tools_changed = True
+        return _orig(notification_options=opts,
+                     experimental_capabilities=experimental_capabilities)
 
     server.create_initialization_options = _init_opts
 

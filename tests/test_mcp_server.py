@@ -753,6 +753,16 @@ def test_initialization_advertises_list_changed(tmp_path: Path, monkeypatch) -> 
     assert opts.capabilities.tools.listChanged is True
 
 
+def test_list_changed_forced_even_with_explicit_options(tmp_path: Path, monkeypatch) -> None:
+    """The gate tool depends on the capability: an explicit NotificationOptions
+    with tools_changed=False must not silently disable it."""
+    from mcp.server.lowlevel.server import NotificationOptions
+    mod = _reload_tiered(tmp_path, monkeypatch)
+    opts = mod.mcp._mcp_server.create_initialization_options(
+        notification_options=NotificationOptions())
+    assert opts.capabilities.tools.listChanged is True
+
+
 def test_tool_cache_prefilled_with_full_set(tmp_path: Path, monkeypatch) -> None:
     """Hidden tools keep call-time input validation: the SDK tool cache is
     fed the FULL registry, not the filtered view."""

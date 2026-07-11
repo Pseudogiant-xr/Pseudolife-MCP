@@ -1,8 +1,6 @@
 """Tier logic unit tests — pure module, no MCP/embedder."""
 from __future__ import annotations
 
-import pytest
-
 from pseudolife_memory.toolset_tiers import (
     TIERS, SessionTierState, normalize_tier, parse_tier_map, rank,
     resolve_tier, step,

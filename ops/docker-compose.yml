@@ -95,14 +95,12 @@ services:
       PSEUDOLIFE_MCP_TRUST_BIND: "1"
       # Writer identity stamped on every canonical write (schema v11).
       PSEUDOLIFE_WRITER_ID: claude-code
-      # Tool-surface tier: "full" (all tools) or "core" (lean 19-tool set —
-      # everything the CLAUDE.md recall/capture/reflect workflow references).
-      # Core is the shipped default since 2026-07-10: the manifest is agent
-      # context every turn, and the trimmed tail (dream/graph-review/admin)
-      # runs on daemon cadence or via the Cortex Console anyway. Override per
-      # deployment in ops/.env (PSEUDOLIFE_MCP_TOOLSET=full) — worthwhile for
-      # clients that defer MCP schemas client-side (e.g. Claude Code), where
-      # the extra tools cost only their names until a schema is requested.
+      # Default toolset tier: "minimal" (7 tools: recall/capture loop + the
+      # memory_toolset gate), "core" (20: + graph/recall/world/lessons/docs/
+      # episodes), or "full" (all 33). Since 2026-07-11 this sets per-session
+      # VISIBILITY, not registration — hidden tools stay callable, and any
+      # session can step its own tier up/down via memory_toolset. Shipped
+      # default: core.
       PSEUDOLIFE_MCP_TOOLSET: ${PSEUDOLIFE_MCP_TOOLSET:-core}
       # Per-writer default tiers, "writer:tier" CSV (e.g.
       # "claude-desktop:minimal,claude-code:core"). Empty = everyone gets

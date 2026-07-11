@@ -68,6 +68,7 @@ class SessionTierState:
     """TTL'd session-tier overrides. Thread-safe: read on the event loop
     (tools/list) and written from tool handlers. Lazy expiry — no reaper."""
 
+    # Fallback bucket for key-less callers (embedded stdio/tests). HTTP transports always carry a session id, so concurrent sessions never share it.
     _GLOBAL = "__global__"
 
     def __init__(self, ttl_s: float = SESSION_TTL_S) -> None:
