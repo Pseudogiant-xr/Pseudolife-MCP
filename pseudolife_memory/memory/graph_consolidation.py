@@ -190,6 +190,42 @@ _ACTION_PREFIX = re.compile(r"^action:\s", re.IGNORECASE)
 _STATUS_SHARD = re.compile(r"^P\d+[ _]")                   # "P3 SURFACE POLISH"
 _SENTENCE_TOKENS = 7                                       # task/status phrases
 
+# Variant tokens: size / quant / dotted-version markers whose DIFFERENCE means
+# two names denote different artifacts (E4B vs E2B, Q4_K_M vs Q4_K_XL) even when
+# every other token matches (2026-07-11 curation: 9 such merge proposals
+# hand-rejected). "_"/"-" are interchangeable inside tokens (norm_name folds
+# both), so custom boundaries treat any non-alphanumeric as a separator.
+_VB = r"(?<![A-Za-z0-9])"
+_VE = r"(?![A-Za-z0-9])"
+_VARIANT_PATTERNS = (
+    re.compile(_VB + r"E\d+B" + _VE, re.IGNORECASE),                  # E2B / E4B
+    re.compile(_VB + r"\d+(?:\.\d+)?[MK]?B" + _VE, re.IGNORECASE),    # 26B / 4B
+    re.compile(_VB + r"Q\d[_-]K(?:[_-](?:XS|S|M|L|XL))?" + _VE,       # Q4_K_XL (K required)
+               re.IGNORECASE),
+    re.compile(_VB + r"q\d[_-]\d" + _VE),                             # q4_0
+    re.compile(_VB + r"UD[_-]Q[A-Za-z0-9_-]*" + _VE, re.IGNORECASE),  # UD-Q4_K_XL
+    re.compile(r"\d+\.\d+(?:\.\d+)*"),                                # 0.2.0 / 3.6
+)
+
+
+def variant_tokens(name: str) -> frozenset[str]:
+    """Size / quant / dotted-version markers in ``name``, casefolded with
+    ``_`` folded to ``-`` so display and canonical forms compare equal."""
+    out: set[str] = set()
+    for pat in _VARIANT_PATTERNS:
+        for m in pat.finditer(str(name)):
+            out.add(m.group(0).casefold().replace("_", "-"))
+    return frozenset(out)
+
+
+def variant_conflict(a: str, b: str) -> bool:
+    """True when BOTH names carry variant tokens and the sets differ — such a
+    pair is never a merge candidate (it may still be link-related, e.g. a
+    quant of a model). Absent-on-either-side never conflicts."""
+    ta, tb = variant_tokens(a), variant_tokens(b)
+    return bool(ta) and bool(tb) and ta != tb
+
+
 # A relation separator captured into an entity name (extraction artifact), e.g.
 # "memory_recall<->recall.py". Longest arrow first so "<->" isn't split as "->".
 _ARROW = re.compile(r"<-+>|↔|->|→")

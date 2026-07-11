@@ -14,7 +14,8 @@ import tempfile
 
 import pytest
 
-from pseudolife_memory.memory.graph_consolidation import junk_name_reason
+from pseudolife_memory.memory.graph_consolidation import (
+    junk_name_reason, variant_tokens, variant_conflict)
 from pseudolife_memory.utils.config import DreamConfig
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
 
@@ -75,6 +76,43 @@ def test_dream_edge_floor_drops_type_violations_by_default():
     # Hard type-violations score 0.1125-0.175; the shipped floor must
     # exceed that (pre-fix it was 0.0 = write everything).
     assert DreamConfig().min_relation_confidence >= 0.2
+
+
+# ── variant tokens & conflicts ────────────────────────────────────────────
+
+def test_variant_tokens_extract_size_quant_version():
+    assert variant_tokens("Gemma 4 E4B") == frozenset({"e4b"})
+    toks = variant_tokens("gemma-4-26B_q4_0-it.gguf")
+    assert "26b" in toks and "q4-0" in toks
+    assert variant_tokens("pseudolife-daemon:0.2.0") == frozenset({"0.2.0"})
+    assert variant_tokens("plain name") == frozenset()
+
+
+def test_variant_conflict_blocks_cross_model_pairs():
+    # the 9 merge proposals hand-rejected on 2026-07-11
+    assert variant_conflict("Gemma-4-E4B-QAT (UD-Q4_K_XL)",
+                            "gemma-4-E2B-it-qat-UD-Q4_K_XL")
+    assert variant_conflict("gemma-E4B Q4_K_M", "Gemma-4-E4B-QAT (UD-Q4_K_XL)")
+    assert variant_conflict("gemma-4-26B", "Gemma 4 E4B")
+    assert variant_conflict("Qwen3.5-4B", "Qwen3.6-27B")
+
+
+def test_variant_conflict_allows_same_or_absent_variants():
+    assert not variant_conflict("Gemma 4 E4B", "gemma-4-E4B-it base")
+    assert not variant_conflict("update.ps1", "ops/update.ps1")
+    assert not variant_conflict("Sonnet shim", "evals/sonnet_shim.py")
+    # underscore vs hyphen quant forms are the SAME token (norm_name folds _ to -)
+    assert not variant_conflict("UD-Q4_K_XL quant", "ud-q4-k-xl quant")
+    # Q4 alone (quarter label) is NOT a variant token — it needs _K suffix
+    assert not variant_conflict("Q4 2026 roadmap", "Q1 2027 roadmap")
+
+
+def test_variant_tokens_quarter_labels_not_variants():
+    # Quarter labels (Q1, Q4 standalone) are NOT variant tokens; only Q<digit>_K*
+    assert variant_tokens("Q4 2026 roadmap") == frozenset()
+    assert variant_tokens("Q1 2027 roadmap") == frozenset()
+    # Q4_K forms ARE variants
+    assert "q4-k" in variant_tokens("Q4_K 2026 quant")
 
 
 # ── storage: revive semantics ─────────────────────────────────────────────
