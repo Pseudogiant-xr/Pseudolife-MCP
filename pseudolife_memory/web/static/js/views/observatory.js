@@ -83,9 +83,13 @@ function extractorChip(dream) {
     return el("span", { class: "chip warn", title: "forced via extractor mode" },
       "extractor: fallback (forced)");
   if (dream.primary_healthy === false)
-    return el("span", { class: "chip bad",
-      title: `primary ${dream.primary_url || ""} unreachable — dreams use the fallback` },
-      "extractor: FALLBACK (primary down)");
+    return mode === "primary"
+      ? el("span", { class: "chip bad",
+          title: `primary ${dream.primary_url || ""} unreachable — mode is primary, so dreams HOLD until it returns` },
+          "extractor: primary DOWN (holding)")
+      : el("span", { class: "chip bad",
+          title: `primary ${dream.primary_url || ""} unreachable — dreams use the fallback` },
+          "extractor: FALLBACK (primary down)");
   const lastNote = last ? ` · last dream: ${last.which}` : "";
   return el("span", { class: "chip ok", title: (dream.primary_url || "") + lastNote },
     "extractor: primary ✓");
