@@ -62,6 +62,9 @@ class ClaudeCli:
         self.system_override = system_override
         self.lock = threading.Lock()
         self.calls = 0
+        self._health_ok: bool | None = None
+        self._health_detail = ""
+        self._health_at = 0.0
 
     def chat(self, system: str, user: str) -> str:
         if self.system_override and system.startswith(_SYSTEM_PROMPT):
@@ -104,6 +107,23 @@ class ClaudeCli:
               flush=True)
         return reply
 
+    _HEALTH_TTL = 300.0  # one trivial CLI call per 5 min keeps /health honest
+
+    def health(self) -> tuple[bool, str]:
+        """Real usability check: run a trivial completion so a logged-out or
+        broken CLI turns /health into 503 (the daemon's fallback probe treats
+        that as primary-down). Cached for _HEALTH_TTL seconds."""
+        now = time.monotonic()
+        if self._health_ok is not None and now - self._health_at < self._HEALTH_TTL:
+            return self._health_ok, self._health_detail
+        try:
+            self.chat("", "Reply with exactly: OK")
+            self._health_ok, self._health_detail = True, ""
+        except Exception as e:  # noqa: BLE001 — any failure means unusable
+            self._health_ok, self._health_detail = False, str(e)[:300]
+        self._health_at = now
+        return self._health_ok, self._health_detail
+
 
 def make_handler(cli: ClaudeCli):
     class Handler(BaseHTTPRequestHandler):
@@ -120,7 +140,11 @@ def make_handler(cli: ClaudeCli):
 
         def do_GET(self):
             if self.path == "/health":
-                self._json(200, {"status": "ok"})
+                ok, detail = cli.health()
+                if ok:
+                    self._json(200, {"status": "ok"})
+                else:
+                    self._json(503, {"status": "cli_error", "detail": detail})
             elif self.path in ("/v1/models", "/models"):
                 self._json(200, {"object": "list", "data": [
                     {"id": cli.model, "object": "model"},

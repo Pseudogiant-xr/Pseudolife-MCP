@@ -259,10 +259,8 @@ class ConsoleRoutes:
         return result
 
     def _dream_run(self, b: dict) -> dict:
-        from pseudolife_memory.memory.dream import build_extractor
         limit = b.get("limit")
-        return self.svc.dream_run(
-            build_extractor(self.svc.config.memory.dream),
+        return self.svc.dream_run_auto(
             limit=int(limit) if limit not in (None, "") else None)
 
     def _delete(self, b: dict) -> dict:

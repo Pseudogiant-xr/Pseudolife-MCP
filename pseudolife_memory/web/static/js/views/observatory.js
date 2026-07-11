@@ -66,10 +66,33 @@ function signalsStrip(health, dream, counts) {
            : el("span", { class: "chip ok" }, "persist 0"),
     dream.would_fire ? el("span", { class: "chip warn" }, el("span", { class: "pulse-dot" }), " dream ready")
                      : el("span", { class: "chip" }, "dream idle"),
+    extractorChip(dream),
   ];
   if (counts.facts_contested) chips.push(el("span", { class: "chip warn" }, `${counts.facts_contested} contested`));
   if (counts.world_stale) chips.push(el("span", { class: "chip bad" }, `${counts.world_stale} stale`));
   return el("div", { class: "signals-strip reveal" }, chips);
+}
+
+// Which extractor serves the dream (2026-07-11 sonnet-sidecar-cutover).
+// Renders nothing for single-extractor deploys (fallback_url unset).
+function extractorChip(dream) {
+  if (!dream.fallback_url) return null;
+  const last = dream.last_dream_extractor;
+  const mode = dream.extractor_mode || "auto";
+  if (mode === "fallback")
+    return el("span", { class: "chip warn", title: "forced via extractor mode" },
+      "extractor: fallback (forced)");
+  if (dream.primary_healthy === false)
+    return mode === "primary"
+      ? el("span", { class: "chip bad",
+          title: `primary ${dream.primary_url || ""} unreachable — mode is primary, so dreams HOLD until it returns` },
+          "extractor: primary DOWN (holding)")
+      : el("span", { class: "chip bad",
+          title: `primary ${dream.primary_url || ""} unreachable — dreams use the fallback` },
+          "extractor: FALLBACK (primary down)");
+  const lastNote = last ? ` · last dream: ${last.which}` : "";
+  return el("span", { class: "chip ok", title: (dream.primary_url || "") + lastNote },
+    "extractor: primary ✓");
 }
 
 function distributionsPanel(counts, sources) {
@@ -152,6 +175,7 @@ function dreamPanel(dream, cfg, ctx) {
       el("span", { class: "nav-dot", style: { "--dot": "var(--c-lessons)" } }),
       el("h2", {}, "Dream consolidation"),
       el("span", { class: "spacer" }),
+      extractorChip(dream),
       fire ? el("span", { class: "chip warn" }, el("span", { class: "pulse-dot" }), " would fire")
            : el("span", { class: "chip" }, "idle")),
     el("div", { class: "panel-body" },

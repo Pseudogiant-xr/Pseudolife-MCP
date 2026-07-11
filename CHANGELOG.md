@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-11 — Sonnet extractor sidecar cutover)
+- Dream extractor primary/fallback selection: `PSEUDOLIFE_DREAM_FALLBACK_BASE_URL`
+  / `_FALLBACK_MODEL` / `_EXTRACTOR_MODE` (auto|primary|fallback), automatic
+  fallback when the primary probe fails, extractor badge + override in the
+  Console, `dream_status` extractor fields, shim `/health` CLI check,
+  `ops/install-shim-autostart.ps1`. Inert until the fallback URL is set.
+
 ### Changed (2026-07-10 — toolset tier overridable per deployment)
 - **`PSEUDOLIFE_MCP_TOOLSET` in `ops/docker-compose.yml` now reads from the
   environment** (`${PSEUDOLIFE_MCP_TOOLSET:-core}`): the shipped default stays

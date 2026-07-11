@@ -682,10 +682,7 @@ def memory_dream(
             return {"error": "cursor_required"}
         return service.dream_commit(cursor)
     if action == "run":
-        from pseudolife_memory.memory.dream import build_extractor
-        return service.dream_run(
-            build_extractor(service.config.memory.dream), limit=limit,
-        )
+        return service.dream_run_auto(limit=limit)
     if action == "deep":
         return service.deep_dream(apply=apply, include_snippets=snippets)
     return {"error": "unknown_action",

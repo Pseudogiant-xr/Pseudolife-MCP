@@ -190,6 +190,28 @@ KNOBS: list[dict[str, Any]] = [
      "help": "Output budget per extractor call (truncated JSON parses to "
              "fewer/zero claims). Effective only when settings source = "
              "config."},
+    {"path": "memory.dream.extractor_mode", "group": "Extractor",
+     "label": "Extractor mode", "type": "enum", "default": "auto",
+     "options": ["auto", "primary", "fallback"], "restart": False,
+     "help": "auto = use the primary endpoint, fall back to the fallback "
+             "endpoint when the primary probe fails; primary = never fall "
+             "back (outages hold consolidation); fallback = skip the "
+             "primary entirely (sovereign-only override). Effective only "
+             "when settings source = config."},
+    {"path": "memory.dream.fallback_base_url", "group": "Extractor",
+     "label": "Fallback base URL", "type": "string", "format": "url",
+     "default": None, "restart": False,
+     "suggestions": ["http://pseudolife-extractor:8081/v1"],
+     "help": "OpenAI-compatible /v1 endpoint used when the primary is "
+             "unreachable (or mode = fallback). Empty disables selection "
+             "entirely — single-extractor behavior. Effective only when "
+             "settings source = config."},
+    {"path": "memory.dream.fallback_model", "group": "Extractor",
+     "label": "Fallback model", "type": "string", "default": None,
+     "restart": False, "suggestions": ["extractor"],
+     "help": "Model id the fallback endpoint expects (the bundled sidecar "
+             "serves \"extractor\"). Effective only when settings source = "
+             "config."},
     # ── Lessons ────────────────────────────────────────────────────────────
     {"path": "memory.lessons.enabled", "group": "Lessons",
      "label": "Procedural lessons", "type": "bool", "default": True,
