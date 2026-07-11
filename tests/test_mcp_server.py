@@ -169,33 +169,46 @@ def test_get_neighbors_tool_is_gone() -> None:
     assert "get_neighbors" not in names
 
 
-_EXPECTED_CORE = sorted([
+_EXPECTED_MINIMAL = sorted([
+    # The 7-tool eager surface for minimal-tier clients (Claude Desktop).
+    # memory_toolset joins in the gate-tool task; until then 6.
     "memory_store", "memory_search", "memory_fact_get", "memory_fact_set",
-    "memory_fact_resolve", "memory_graph", "memory_recall", "memory_graph_relate",
-    "memory_world_search", "memory_world_set", "memory_lesson_search",
-    "memory_outcome", "document_search", "document_ingest", "memory_stats",
-    # 2026-07-04 promotions: fact_get surfaces source_entries ids that core
-    # mode must be able to dereference; the workflow names the session early.
-    "memory_get", "memory_session_title",
-    # 2026-07-10 promotions: the global CLAUDE.md workflow tells the agent to
-    # open/close named sub-episodes for multi-step tasks; core mode (now the
-    # deployed default) must keep every tool name that workflow references.
-    "memory_episode_start", "memory_episode_end",
+    "memory_outcome", "memory_session_title",
+])
+
+_EXPECTED_CORE = sorted(_EXPECTED_MINIMAL + [
+    "memory_fact_resolve", "memory_graph", "memory_recall",
+    "memory_graph_relate", "memory_world_search", "memory_world_set",
+    "memory_lesson_search", "document_search", "document_ingest",
+    "memory_stats", "memory_get", "memory_episode_start", "memory_episode_end",
 ])
 
 
-def test_should_register_gate_logic() -> None:
-    from pseudolife_memory.mcp_server import _should_register  # noqa: PLC0415
-    assert _should_register("full", core=False) is True
-    assert _should_register("full", core=True) is True
-    assert _should_register("core", core=True) is True
-    assert _should_register("core", core=False) is False
+def test_all_tools_register_regardless_of_toolset_env(tmp_path: Path, monkeypatch) -> None:
+    """Visibility model: PSEUDOLIFE_MCP_TOOLSET no longer gates registration."""
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TOOLSET", "core")
+    import importlib
+    import pseudolife_memory.mcp_server as mod
+    importlib.reload(mod)
+    assert len(asyncio.run(mod.mcp.list_tools())) == len(mod._TOOL_TIERS)
+    assert mod._DEFAULT_TIER == "core"
 
 
-def test_core_tier_membership_is_exactly_the_core_set() -> None:
-    from pseudolife_memory import mcp_server  # noqa: PLC0415
-    core_names = sorted(n for n, is_core in mcp_server._TOOL_TIERS.items() if is_core)
-    assert core_names == _EXPECTED_CORE
+def test_visible_tool_names_per_tier() -> None:
+    from pseudolife_memory import mcp_server as mod
+    assert sorted(mod._visible_tool_names("minimal")) == _EXPECTED_MINIMAL
+    assert sorted(mod._visible_tool_names("core")) == _EXPECTED_CORE
+    assert mod._visible_tool_names("full") == set(mod._TOOL_TIERS)
+
+
+def test_tier_map_env_parsed(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("PSEUDOLIFE_MCP_TIER_MAP", "claude-desktop:minimal,claude-code:core")
+    import importlib
+    import pseudolife_memory.mcp_server as mod
+    importlib.reload(mod)
+    assert mod._TIER_MAP == {"claude-desktop": "minimal", "claude-code": "core"}
 
 
 def test_memory_dream_run_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:

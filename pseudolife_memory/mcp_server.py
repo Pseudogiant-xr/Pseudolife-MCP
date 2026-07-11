@@ -84,17 +84,25 @@ service = MemoryService(data_dir=_data_dir, config_path=_config_path)
 
 mcp = FastMCP("PseudoLife Memory")
 
-# Tool-surface tier gate (P1.5). Default "full" = every tool registers (no
-# behaviour change). "core" registers only the core-tier set — a lean opt-in
-# for weak-model / public / token-conscious deployments. The Cortex Console is
-# unaffected (it calls service.* over REST, not MCP tools).
-_TOOLSET = os.environ.get("PSEUDOLIFE_MCP_TOOLSET", "full").strip().lower()
-_TOOL_TIERS: dict[str, bool] = {}
+from pseudolife_memory.toolset_tiers import (
+    SessionTierState, normalize_tier, parse_tier_map, rank as _tier_rank,
+)
+
+# Session-scoped toolset tiers (spec 2026-07-11). All tools register; the
+# transport tools/list handler filters per session. PSEUDOLIFE_MCP_TOOLSET
+# is the DEFAULT tier (was: a registration gate); PSEUDOLIFE_MCP_TIER_MAP
+# maps writer ids (X-PL-Writer / daemon default) to default tiers. The
+# Cortex Console is unaffected (REST calls service.*, not MCP tools).
+_DEFAULT_TIER = normalize_tier(os.environ.get("PSEUDOLIFE_MCP_TOOLSET"),
+                               warn_context="PSEUDOLIFE_MCP_TOOLSET")
+_TIER_MAP = parse_tier_map(os.environ.get("PSEUDOLIFE_MCP_TIER_MAP"))
+_SESSION_TIERS = SessionTierState()
+_TOOL_TIERS: dict[str, str] = {}
 
 
-def _should_register(toolset: str, core: bool) -> bool:
-    """Register a tool unless we're in core mode and it's not core-tier."""
-    return toolset != "core" or core
+def _visible_tool_names(tier: str) -> set[str]:
+    r = _tier_rank(tier)
+    return {n for n, t in _TOOL_TIERS.items() if _tier_rank(t) <= r}
 
 
 def _async_offload(fn):
@@ -122,13 +130,12 @@ def _async_offload(fn):
     return _run
 
 
-def _tool(*, core: bool = False):
-    """Replacement for @_tool() that records the tool's tier and gates
-    registration on PSEUDOLIFE_MCP_TOOLSET."""
+def _tool(*, tier: str = "full"):
+    """Record the tool's tier and register it (always — tiers gate
+    visibility in tools/list, not existence)."""
     def deco(fn):
-        _TOOL_TIERS[fn.__name__] = core
-        if _should_register(_TOOLSET, core):
-            mcp.tool()(_async_offload(fn))
+        _TOOL_TIERS[fn.__name__] = tier
+        mcp.tool()(_async_offload(fn))
         return fn  # module attr stays the plain sync fn (tests / Console)
     return deco
 
@@ -136,7 +143,7 @@ def _tool(*, core: bool = False):
 # ── Associative stream ────────────────────────────────────────────────────
 
 
-@_tool(core=True)
+@_tool(tier="minimal")
 def memory_store(
     text: str,
     source: str = "claude",
@@ -217,7 +224,7 @@ def _compact_entries(result: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-@_tool(core=True)
+@_tool(tier="minimal")
 def memory_search(
     query: str,
     top_k: int = 8,
@@ -351,7 +358,7 @@ def memory_supersede(old_text: str, new_text: str) -> dict[str, Any]:
     return service.supersede(old_text=old_text, new_text=new_text)
 
 
-@_tool(core=True)
+@_tool(tier="core")
 def memory_stats() -> dict[str, Any]:
     """Memory-bank vital signs: per-band sizes, capacities, hit rates, and
     totals. Use to gauge how much has been remembered or to diagnose why
@@ -360,8 +367,9 @@ def memory_stats() -> dict[str, Any]:
     return service.stats()
 
 
-@_tool(core=True)  # core memory_fact_get returns source_entries ids —
+# core memory_fact_get returns source_entries ids —
 # core mode must be able to dereference them.
+@_tool(tier="core")
 def memory_get(entry_id: int) -> dict[str, Any]:
     """Dereference a memory id (from search results or a fact's
     ``source_entries``) to the full stored episode plus
@@ -384,7 +392,7 @@ def memory_reinforce(entry_id: int) -> dict[str, Any]:
 # ── Cortex — canonical facts ──────────────────────────────────────────────
 
 
-@_tool(core=True)
+@_tool(tier="minimal")
 def memory_fact_get(entity: str, attribute: str) -> dict[str, Any]:
     """Look up the one CURRENT canonical value at an ``(entity, attribute)``
     slot — the unambiguous "what is X now?" read. One current value per
@@ -416,7 +424,7 @@ def memory_fact_get(entity: str, attribute: str) -> dict[str, Any]:
     return out
 
 
-@_tool(core=True)
+@_tool(tier="minimal")
 def memory_fact_set(
     entity: str,
     attribute: str,
@@ -445,7 +453,7 @@ def memory_fact_set(
     )
 
 
-@_tool(core=True)
+@_tool(tier="core")
 def memory_fact_resolve(entity: str, attribute: str, accept: bool) -> dict[str, Any]:
     """Settle a CONTESTED fact slot after checking with the human.
     ``accept=true`` adopts the parked contender as the new current value
@@ -478,7 +486,7 @@ def memory_history(entity: str, attribute: str | None = None) -> dict[str, Any]:
 # ── World cortex + lessons ────────────────────────────────────────────────
 
 
-@_tool(core=True)
+@_tool(tier="core")
 def memory_world_set(
     entity: str,
     attribute: str,
@@ -512,7 +520,7 @@ def memory_world_set(
     )
 
 
-@_tool(core=True)
+@_tool(tier="core")
 def memory_world_search(query: str, top_k: int = 5,
                         verbose: bool = False) -> dict[str, Any]:
     """Search current WORLD facts (sourced external knowledge) by
@@ -541,7 +549,7 @@ def _compact_world(e: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-@_tool(core=True)
+@_tool(tier="minimal")
 def memory_outcome(
     task: str,
     outcome: Literal["success", "failure", "correction"],
@@ -569,7 +577,7 @@ def memory_outcome(
         task, outcome, about=about, detail=detail, polarity=polarity)
 
 
-@_tool(core=True)
+@_tool(tier="core")
 def memory_lesson_search(query: str, top_k: int = 5,
                          verbose: bool = False) -> dict[str, Any]:
     """Search learned lessons (procedural memory) by similarity to the task
@@ -754,7 +762,7 @@ def memory_graph_review(
 # ── Episodes + consolidation ──────────────────────────────────────────────
 
 
-@_tool(core=True)  # the CLAUDE.md workflow opens sub-episodes for big tasks.
+@_tool(tier="core")  # the CLAUDE.md workflow opens sub-episodes for big tasks.
 def memory_episode_start(
     title: str, hint: str | None = None,
 ) -> dict[str, Any]:
@@ -768,7 +776,7 @@ def memory_episode_start(
     return service.episode_start(title=title, hint=hint)
 
 
-@_tool(core=True)  # pairs with memory_episode_start.
+@_tool(tier="core")  # pairs with memory_episode_start.
 def memory_episode_end() -> dict[str, Any]:
     """Close the current open episode and pop back to its parent (the
     session). Returns the closed episode dict, or ``{}`` when nothing is
@@ -777,7 +785,7 @@ def memory_episode_end() -> dict[str, Any]:
     return service.episode_end()
 
 
-@_tool(core=True)  # the recommended workflow names the session early.
+@_tool(tier="minimal")  # the recommended workflow names the session early.
 def memory_session_title(title: str) -> dict[str, Any]:
     """Name THIS session's auto-opened episode (default titles are
     generic). Call once at the start of work — e.g. ``"PseudoLife-MCP"`` or
@@ -853,7 +861,7 @@ def memory_consolidate(
 # ── Knowledge graph ───────────────────────────────────────────────────────
 
 
-@_tool(core=True)
+@_tool(tier="core")
 def memory_graph_relate(
     src: str,
     relation: str,
@@ -899,7 +907,7 @@ def memory_alias(entity: str, alias: str) -> dict[str, Any]:
     return service.graph_alias(entity=entity, alias=alias)
 
 
-@_tool(core=True)
+@_tool(tier="core")
 def memory_graph(
     entity: str,
     depth: int = 1,
@@ -929,7 +937,7 @@ def memory_graph(
     return out
 
 
-@_tool(core=True)
+@_tool(tier="core")
 def memory_recall(query: str, hops: int = 3, top_k: int = 5,
                   verbose: bool = False) -> dict[str, Any]:
     """Multi-hop retrieval over the knowledge graph, for RELATIONAL
@@ -987,7 +995,7 @@ def memory_relation_define(
 # ── Reference bank ────────────────────────────────────────────────────────
 
 
-@_tool(core=True)
+@_tool(tier="core")
 def document_ingest(path: str, source: str | None = None) -> dict[str, Any]:
     """Index a file (.txt / .md / .pdf) into the reference bank — a
     separate store for background documents (papers, manuals, codebases)
@@ -1001,7 +1009,7 @@ def document_ingest(path: str, source: str | None = None) -> dict[str, Any]:
     return service.ingest_document(path=path, source=source)
 
 
-@_tool(core=True)
+@_tool(tier="core")
 def document_search(query: str, top_k: int = 5) -> dict[str, Any]:
     """Search the reference bank only — ingested documents, no
     conversational memories mixed in. For docs AND memories together, use
