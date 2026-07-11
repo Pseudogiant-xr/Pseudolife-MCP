@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-11 — Sonnet extractor sidecar cutover)
+- Dream extractor primary/fallback selection: `PSEUDOLIFE_DREAM_FALLBACK_BASE_URL`
+  / `_FALLBACK_MODEL` / `_EXTRACTOR_MODE` (auto|primary|fallback), automatic
+  fallback when the primary probe fails, extractor badge + override in the
+  Console, `dream_status` extractor fields, shim `/health` CLI check,
+  `ops/install-shim-autostart.ps1`. Inert until the fallback URL is set.
+
 ### Changed (2026-07-10 — compact-by-default recall payloads)
 - **The five recall-path tools return compact entries by default** —
   `memory_search`, `memory_recall`, `memory_recent`, `memory_world_search`,

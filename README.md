@@ -1036,6 +1036,26 @@ stdio mode), the `$env:` variables above apply directly and `localhost` URLs
 work as-is. A local or LAN model keeps all memory text on your network; the
 same env triple pointed at a hosted endpoint does not.
 
+**Optional: Sonnet primary with local fallback.** With a Claude Max plan, the
+dream pass can use Claude Sonnet as its primary extractor and keep the bundled
+local sidecar as an automatic fallback:
+
+1. `ops\install-shim-autostart.ps1` — registers the CLI shim
+   (`evals/sonnet_shim.py`) at logon on `127.0.0.1:8082` (requires a
+   logged-in `claude` CLI).
+2. Set in the daemon environment:
+   `PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:8082/v1`,
+   `PSEUDOLIFE_DREAM_MODEL=extractor`,
+   `PSEUDOLIFE_DREAM_FALLBACK_BASE_URL=http://pseudolife-extractor:8081/v1`,
+   `PSEUDOLIFE_DREAM_FALLBACK_MODEL=extractor`,
+   `PSEUDOLIFE_DREAM_EXTRACTOR_MODE=auto` (or `primary`/`fallback` to force
+   a side — also switchable live in the Console's Extractor panel).
+
+When the shim is unreachable or the CLI is logged out, dreams automatically
+use the fallback; the Console's Observatory shows which extractor is active.
+Leave `PSEUDOLIFE_DREAM_FALLBACK_BASE_URL` unset to keep the existing
+single-extractor behavior.
+
 What gets consolidated and when is configurable under `memory.dream`
 (`eligible_sources` / `exclude_sources`, and the `min_batch` / `idle_seconds`
 backlog+quiescence thresholds that `memory_dream(action="status")` reports).
