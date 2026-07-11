@@ -285,6 +285,9 @@ class _FakeService:
         return {"pulled": 1, "claims": 1, "inserted": 1, "confirmed": 0,
                 "contested": 0, "superseded": 0, "cursor": 123.0}
 
+    def dream_run_auto(self, *, limit=None):
+        return {**self.dream_run(None), "extractor": "primary"}
+
 
 def test_run_sweep_once_disabled():
     from pseudolife_memory.memory.dream import run_sweep_once

@@ -545,6 +545,9 @@ class FixtureService:
                 "contested": 1, "superseded": 1, "relations": 3, "lessons": 1,
                 "cursor": _NOW}
 
+    def dream_run_auto(self, limit=None):
+        return {**self.dream_run(None, limit=limit), "extractor": "primary"}
+
     def consolidation_candidates(self, query=None, episode=None, sources=None,
                                  tags=None, top_k=20, min_cohesion=0.6,
                                  min_cluster_size=2, max_clusters=10):

@@ -574,6 +574,6 @@ def run_sweep_once(service) -> dict:
     if not status["would_fire"]:
         return {"fired": False, "reason": "below_threshold",
                 "backlog": status["backlog"]}
-    result = service.dream_run(build_extractor(cfg))
+    result = service.dream_run_auto()
     logger.info("dream sweep fired: %s", result)
     return {"fired": True, **result}

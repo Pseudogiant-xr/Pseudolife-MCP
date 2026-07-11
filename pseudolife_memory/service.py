@@ -368,6 +368,10 @@ class MemoryService:
         # Count of durable-save failures (cortex/world/lessons). Exposed via the
         # daemon /health probe so swallowed-then-surfaced saves are observable.
         self._persist_errors = 0
+        # Last extractor selection made by dream_run_auto (sonnet-sidecar-cutover,
+        # 2026-07-11): {"which": "primary"|"fallback", "base_url": str | None,
+        # "at": float} — surfaced via dream_status. None until a dream has run.
+        self._last_dream_extractor: dict | None = None
 
     def _resolve_writer(self) -> tuple[str, str | None]:
         """The ``(writer_id, session_id)`` to attribute the current write to —
@@ -2388,6 +2392,28 @@ class MemoryService:
                 "traces": traces_n, "sources_attributed": sources_attributed,
                 "quarantined": quarantined}
 
+    def dream_run_auto(self, *, limit: int | None = None) -> dict[str, Any]:
+        """dream_run with primary/fallback extractor selection (2026-07-11
+        sonnet-sidecar-cutover spec): probe-and-choose per invocation, record
+        which side served for dream_status, and stamp the result. The single
+        entry point for every LIVE dream trigger (sweep, console, MCP tool,
+        session-end); the bench harness keeps calling dream_run directly."""
+        from pseudolife_memory.memory.dream import build_extractor_with_fallback
+        try:
+            extractor, which = build_extractor_with_fallback(
+                self.config.memory.dream)
+        except ValueError as e:
+            return {"error": str(e), "pulled": 0, "claims": 0}
+        import time as _t
+        self._last_dream_extractor = {
+            "which": which,
+            "base_url": getattr(extractor, "base_url", None),
+            "at": _t.time(),
+        }
+        result = self.dream_run(extractor, limit=limit)
+        result["extractor"] = which
+        return result
+
     def _dream_reflush_stale(self, entries: list[dict]) -> int:
         """After a claim/trace write failure, verify the pulled batch's
         in-memory→PG entry mapping and re-insert entries whose rows are gone
@@ -2643,8 +2669,7 @@ class MemoryService:
 
         def _run() -> None:
             try:
-                from pseudolife_memory.memory.dream import build_extractor
-                self.dream_run(build_extractor(self.config.memory.dream))
+                self.dream_run_auto()
             except Exception:  # noqa: BLE001 — background best-effort
                 logger.warning("session-end dream failed", exc_info=True)
 

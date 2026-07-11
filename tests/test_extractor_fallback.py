@@ -173,3 +173,39 @@ def test_builder_unconfigured_is_noop():
                                                 build_extractor_with_fallback)
     ext, which = build_extractor_with_fallback(DreamConfig())
     assert which == "primary" and isinstance(ext, NoOpExtractor)
+
+
+# ── service.dream_run_auto ────────────────────────────────────────────────
+
+class _FakeService:
+    """Only what dream_run_auto touches — avoids embedder/PG bring-up."""
+    from pseudolife_memory.service import MemoryService as _MS
+    dream_run_auto = _MS.dream_run_auto
+
+    def __init__(self, cfg):
+        from types import SimpleNamespace
+        self.config = SimpleNamespace(memory=SimpleNamespace(dream=cfg))
+        self._last_dream_extractor = None
+        self.ran_with = None
+
+    def dream_run(self, extractor, *, limit=None):
+        self.ran_with = extractor
+        return {"pulled": 0, "claims": 0}
+
+
+def test_dream_run_auto_records_selection(monkeypatch):
+    from pseudolife_memory.memory import dream as d
+    monkeypatch.setattr(d, "probe_endpoint", lambda *a, **k: False)
+    svc = _FakeService(_cfg("http://p:1/v1", fb="http://f:2/v1"))
+    res = svc.dream_run_auto()
+    assert res["extractor"] == "fallback"
+    assert svc._last_dream_extractor["which"] == "fallback"
+    assert svc._last_dream_extractor["base_url"] == "http://f:2/v1"
+    assert svc.ran_with.base_url == "http://f:2/v1"
+
+
+def test_dream_run_auto_surfaces_config_error():
+    svc = _FakeService(_cfg("http://p:1/v1", mode="fallback"))
+    res = svc.dream_run_auto()
+    assert "error" in res and "fallback" in res["error"]
+    assert svc.ran_with is None
