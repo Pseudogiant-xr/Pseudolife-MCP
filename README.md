@@ -122,17 +122,18 @@ briefing) live in the **Cortex Console** (`/api/*`) and the
 `pseudolife-mcp briefing` CLI — they left the MCP surface in the 2026-07-02
 consolidation.
 
-**Toolset tiers.** Set `PSEUDOLIFE_MCP_TOOLSET=core` to expose only the lean
-**core** set (the rest stay available with the default `full`): `memory_store`,
-`memory_search`, `memory_get`, `memory_fact_get`, `memory_fact_set`,
-`memory_fact_resolve`, `memory_graph`, `memory_recall`, `memory_graph_relate`,
-`memory_world_search`, `memory_world_set`, `memory_lesson_search`,
-`memory_outcome`, `memory_session_title`, `memory_episode_start`,
-`memory_episode_end`, `document_search`, `document_ingest`, `memory_stats`.
-Recommended for weak-model / public / token-conscious deployments — the
-19-tool manifest is ~40% leaner than `full`, and it covers the entire
-recall/capture/reflect workflow. The Cortex Console is unaffected (it talks
-REST).
+**Toolset tiers.** Three visibility tiers — `minimal` (7 tools: the
+recall/capture loop + the gate), `core` (20: + graph/recall, world facts,
+lessons, documents, episodes), `full` (33) — filtered per session at
+`tools/list`; hidden tools stay callable by name. Defaults:
+`PSEUDOLIFE_MCP_TOOLSET` (shipped: `core`) sets the baseline;
+`PSEUDOLIFE_MCP_TIER_MAP="claude-desktop:minimal,claude-code:core"` sets
+per-client defaults by writer id. Any session can step its own tier up or
+down at runtime with `memory_toolset(action="expand"|"collapse"|"status")`
+— the daemon emits `tools/list_changed`, and clients that ignore it can
+still call the tools named in the result. Eager-loading clients (Claude
+Desktop) start at ~1.5k tokens of manifest on `minimal`; clients that
+defer schemas client-side (Claude Code) barely notice tiers at all.
 
 ## Architecture
 

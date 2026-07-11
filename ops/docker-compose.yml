@@ -104,6 +104,11 @@ services:
       # clients that defer MCP schemas client-side (e.g. Claude Code), where
       # the extra tools cost only their names until a schema is requested.
       PSEUDOLIFE_MCP_TOOLSET: ${PSEUDOLIFE_MCP_TOOLSET:-core}
+      # Per-writer default tiers, "writer:tier" CSV (e.g.
+      # "claude-desktop:minimal,claude-code:core"). Empty = everyone gets
+      # the PSEUDOLIFE_MCP_TOOLSET default. Any session can step its own
+      # tier up/down at runtime via the memory_toolset tool.
+      PSEUDOLIFE_MCP_TIER_MAP: ${PSEUDOLIFE_MCP_TIER_MAP:-}
       CUDA_VISIBLE_DEVICES: "-1"
       HF_HUB_OFFLINE: "1"
       TRANSFORMERS_OFFLINE: "1"

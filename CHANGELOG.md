@@ -13,6 +13,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Console, `dream_status` extractor fields, shim `/health` CLI check,
   `ops/install-shim-autostart.ps1`. Inert until the fallback URL is set.
 
+### Added (2026-07-11 — session-scoped toolset tiers)
+- **Three visibility tiers** (`minimal` ⊂ `core` ⊂ `full`) filtered per
+  session at `tools/list`; all tools always register and hidden tools stay
+  callable (core mode previously *unregistered* them — calls now succeed).
+- **`memory_toolset(action)`** — expand/collapse THIS session's tier one
+  rung at a time (floor = the session's default), `status` for the ladder;
+  emits `tools/list_changed` (capability now advertised).
+- **`PSEUDOLIFE_MCP_TIER_MAP`** — per-writer default tiers
+  (`claude-desktop:minimal,claude-code:core`); `PSEUDOLIFE_MCP_TOOLSET`
+  becomes the default tier rather than a registration gate.
+- **Docstring trim + manifest budgets** — per-tier char caps pinned by
+  tests (minimal ≤4.5k, core ≤9.5k, full ≤15.5k; per-tool 1.6k).
+
 ### Changed (2026-07-10 — toolset tier overridable per deployment)
 - **`PSEUDOLIFE_MCP_TOOLSET` in `ops/docker-compose.yml` now reads from the
   environment** (`${PSEUDOLIFE_MCP_TOOLSET:-core}`): the shipped default stays
