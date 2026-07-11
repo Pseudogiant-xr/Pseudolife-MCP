@@ -4024,7 +4024,12 @@ class MemoryService:
             dismissed=dismissed, max_support_overlap=cfg.max_support_overlap)
         merge_cands, link_cands = gc.partition_candidates(
             near, entities, edges, merge_min_similarity=cfg.merge_min_similarity)
-        junk = gc.junk_entities(entities, edges, max_degree=cfg.junk_max_degree)
+        from pseudolife_memory.graph import norm_name as _nn
+        known_norms = frozenset(
+            {e["canonical"] for e in entities}
+            | {_nn(a) for als in g["aliases"].values() for a in als})
+        junk = gc.junk_entities(entities, edges, max_degree=cfg.junk_max_degree,
+                                known_norms=known_norms)
         if include_snippets:
             candidates = self._attach_candidate_snippets(
                 link_cands, entities, entries, traces, cfg.max_context_snippets,

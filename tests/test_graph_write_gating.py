@@ -101,6 +101,25 @@ def test_junk_entities_flags_metric_readings_and_lists():
     assert [j["reason"] for j in out2] == ["list-artifact"]
 
 
+def test_junk_entities_flags_resolvable_compounds_only():
+    from pseudolife_memory.memory.graph_consolidation import junk_entities
+    ents = [{"id": 1, "display": "memory_lesson_search/world_search"},
+            {"id": 2, "display": "pg+extractor"},
+            {"id": 3, "display": "ops/backup.ps1"},       # extension-exempt
+            {"id": 4, "display": "C++"}]                  # empty right side
+    known = frozenset({"memory-lesson-search", "world-search", "pg",
+                       "extractor", "ops", "backup-ps1"})
+    out = junk_entities(ents, [], max_degree=1, known_norms=known)
+    reasons = {j["display"]: j["reason"] for j in out}
+    assert reasons.get("memory_lesson_search/world_search") == "compound-artifact"
+    assert reasons.get("pg+extractor") == "compound-artifact"
+    assert "ops/backup.ps1" not in reasons
+    assert "C++" not in reasons
+    # without known_norms (default) nothing is flagged as compound
+    out2 = junk_entities(ents, [], max_degree=1)
+    assert all(j["reason"] != "compound-artifact" for j in out2)
+
+
 def test_dream_edge_floor_drops_type_violations_by_default():
     # Hard type-violations score 0.1125-0.175; the shipped floor must
     # exceed that (pre-fix it was 0.0 = write everything).
