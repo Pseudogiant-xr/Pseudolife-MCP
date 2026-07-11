@@ -43,6 +43,7 @@ def near_duplicate_names(name, existing, *, min_jaccard=0.6,
     if min_jaccard is None or min_jaccard <= 0:
         return []
     from pseudolife_memory.graph import norm_name
+    from pseudolife_memory.memory.graph_consolidation import variant_conflict
     cand_tokens = _token_set(name)
     if not cand_tokens:
         return []
@@ -51,6 +52,9 @@ def near_duplicate_names(name, existing, *, min_jaccard=0.6,
     for e in existing:
         if tuple(sorted((cand_canon, e.get("canonical") or ""))) in dismissed:
             continue
+        if (variant_conflict(name, e.get("display") or "")
+                or variant_conflict(name, e.get("canonical") or "")):
+            continue          # size/quant/version mismatch: never a merge
         best = 0.0
         for variant in [e.get("canonical"), e.get("display"),
                         *(e.get("aliases") or [])]:

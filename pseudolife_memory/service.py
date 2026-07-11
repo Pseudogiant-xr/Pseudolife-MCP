@@ -1667,6 +1667,12 @@ class MemoryService:
             ss = set(scope_map.get(src_e["id"], []))
             ds = set(scope_map.get(dst_e["id"], []))
             if ss and ds and not (ss & ds):
+                if relation == "related-to":
+                    # Untyped fallback across disjoint projects carries no
+                    # information (2026-07-11: 4/4 such proposals rejected).
+                    logger.debug("dream relation dropped (cross-project-"
+                                 "untyped): %r -> %r", raw_src, raw_dst)
+                    continue
                 self._storage.insert_proposal(
                     src_e["id"], relation, dst_e["id"], conf, None,
                     f"cross-project: {sorted(ss)} x {sorted(ds)}",
@@ -2177,6 +2183,7 @@ class MemoryService:
             if thr <= 0 or not new_entities:
                 return 0
             from pseudolife_memory.graph import norm_name
+            from pseudolife_memory.memory.graph_consolidation import variant_conflict
             filed = 0
             with self._lock:
                 self._ensure_init()
@@ -2209,6 +2216,8 @@ class MemoryService:
                     pair = tuple(sorted((norm_name(disp), norm_name(target))))
                     if pair[0] == pair[1] or pair in dismissed:
                         continue
+                    if variant_conflict(disp, target):
+                        continue    # size/quant/version mismatch: never a merge
                     a = self._resolve_or_create_entity(disp)
                     b = self._resolve_or_create_entity(target)
                     if a["id"] == b["id"]:
@@ -3321,6 +3330,16 @@ class MemoryService:
                 found["etype"] = etype
             found["created"] = False
             return found
+        # Slot-key fold (2026-07-11): a dreamed name that IS an existing fact
+        # slot key ("entity.attribute") resolves to the slot's owner entity
+        # instead of minting a node named after the whole key. Exact-match
+        # only; recursion terminates because the owner's norm differs from n
+        # and cannot itself be a slot key (keys concat two non-empty norms).
+        slot_owner = st.find_fact_slot_entity(n)
+        if slot_owner is not None and norm_name(slot_owner) != n:
+            logger.debug("entity folded to slot owner (slot-key): %r -> %r",
+                         name, slot_owner)
+            return self._resolve_or_create_entity(slot_owner, etype=etype)
         eid = st.ensure_entity(n, display=name.strip(), etype=etype)
         if propose_dupes:
             self._propose_write_dedup(eid, name)
@@ -4024,7 +4043,12 @@ class MemoryService:
             dismissed=dismissed, max_support_overlap=cfg.max_support_overlap)
         merge_cands, link_cands = gc.partition_candidates(
             near, entities, edges, merge_min_similarity=cfg.merge_min_similarity)
-        junk = gc.junk_entities(entities, edges, max_degree=cfg.junk_max_degree)
+        from pseudolife_memory.graph import norm_name as _nn
+        known_norms = frozenset(
+            {e["canonical"] for e in entities}
+            | {_nn(a) for als in g["aliases"].values() for a in als})
+        junk = gc.junk_entities(entities, edges, max_degree=cfg.junk_max_degree,
+                                known_norms=known_norms)
         if include_snippets:
             candidates = self._attach_candidate_snippets(
                 link_cands, entities, entries, traces, cfg.max_context_snippets,

@@ -68,6 +68,12 @@ def _list(params: dict, key: str) -> list[str] | None:
     return items or None
 
 
+def _decided_by(body: dict) -> str:
+    """Extract decided_by from body, default to 'human'; invalid values fall back."""
+    v = body.get("decided_by")
+    return v if v in ("human", "agent") else "human"
+
+
 class ConsoleRoutes:
     """Builds the method+path → handler dispatch table around a service."""
 
@@ -191,9 +197,13 @@ class ConsoleRoutes:
         p("/api/graph/merge", lambda q, b: svc.graph_merge(b["from"], b["into"]))
         p("/api/graph/accept-proposal", lambda q, b: svc.graph_accept_proposal(b["id"]))
         p("/api/graph/reject-proposal", lambda q, b: svc.graph_reject_proposal(b["id"]))
-        p("/api/graph/accept-entity-merge", lambda q, b: svc.graph_accept_entity_merge(b["id"]))
+        p("/api/graph/accept-entity-merge",
+          lambda q, b: svc.graph_accept_entity_merge(
+              b["id"], decided_by=_decided_by(b)))
         p("/api/graph/accept-entity-junk", lambda q, b: svc.graph_accept_entity_junk(b["id"]))
-        p("/api/graph/reject-entity-proposal", lambda q, b: svc.graph_reject_entity_proposal(b["id"]))
+        p("/api/graph/reject-entity-proposal",
+          lambda q, b: svc.graph_reject_entity_proposal(
+              b["id"], decided_by=_decided_by(b)))
 
         # ---- dream / consolidation ----
         g("/api/dream/status", lambda q, b: svc.dream_status())

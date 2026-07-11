@@ -101,6 +101,25 @@ def test_junk_entities_flags_metric_readings_and_lists():
     assert [j["reason"] for j in out2] == ["list-artifact"]
 
 
+def test_junk_entities_flags_resolvable_compounds_only():
+    from pseudolife_memory.memory.graph_consolidation import junk_entities
+    ents = [{"id": 1, "display": "memory_lesson_search/world_search"},
+            {"id": 2, "display": "pg+extractor"},
+            {"id": 3, "display": "ops/backup.ps1"},       # extension-exempt
+            {"id": 4, "display": "C++"}]                  # empty right side
+    known = frozenset({"memory-lesson-search", "world-search", "pg",
+                       "extractor", "ops", "backup-ps1"})
+    out = junk_entities(ents, [], max_degree=1, known_norms=known)
+    reasons = {j["display"]: j["reason"] for j in out}
+    assert reasons.get("memory_lesson_search/world_search") == "compound-artifact"
+    assert reasons.get("pg+extractor") == "compound-artifact"
+    assert "ops/backup.ps1" not in reasons
+    assert "C++" not in reasons
+    # without known_norms (default) nothing is flagged as compound
+    out2 = junk_entities(ents, [], max_degree=1)
+    assert all(j["reason"] != "compound-artifact" for j in out2)
+
+
 def test_dream_edge_floor_drops_type_violations_by_default():
     # Hard type-violations score 0.1125-0.175; the shipped floor must
     # exceed that (pre-fix it was 0.0 = write everything).
@@ -287,7 +306,7 @@ def test_dream_cross_project_edge_becomes_proposal(svc):
     svc.graph_assign_scope("xproj-b-thing", "proj-b")
 
     n = svc._link_dream_relations([
-        {"src": "xproj-a-thing", "relation": "related-to", "dst": "xproj-b-thing"},
+        {"src": "xproj-a-thing", "relation": "uses", "dst": "xproj-b-thing"},
     ])
 
     assert n == 0
@@ -295,6 +314,37 @@ def test_dream_cross_project_edge_becomes_proposal(svc):
     assert not any("xproj-b-thing" in (e["src"], e["dst"]) for e in nb["edges"])
     assert any(p["src"] == "xproj-a-thing" and p["dst"] == "xproj-b-thing"
                for p in svc._storage.pending_proposals())
+
+
+def test_cross_project_untyped_relation_dropped(svc):
+    # 2026-07-11: untyped (related-to fallback) cross-project pairs carry no
+    # information — 4/4 such proposals were hand-rejected. Only a TYPED
+    # relation across disjoint projects still earns a review proposal.
+    svc.stats()
+    with svc._lock:
+        svc._resolve_or_create_entity("alpha-tool")
+        svc._resolve_or_create_entity("beta-tool")
+    svc.graph_assign_scope("alpha-tool", "proj-a")
+    svc.graph_assign_scope("beta-tool", "proj-b")
+
+    def _cross_count():
+        return svc._storage.conn.execute(
+            "SELECT count(*) FROM edge_proposals "
+            "WHERE source = 'dream-cross-project'").fetchone()[0]
+
+    # untyped fallback across disjoint scopes: dropped, no proposal
+    n = svc._link_dream_relations([
+        {"src": "alpha-tool", "relation": "correlates-with", "dst": "beta-tool"}])
+    assert n == 0 and _cross_count() == 0
+    # a TYPED relation across disjoint scopes still files a proposal
+    n2 = svc._link_dream_relations([
+        {"src": "alpha-tool", "relation": "uses", "dst": "beta-tool"}])
+    assert n2 == 0 and _cross_count() == 1
+    # the LITERAL "related-to" label resolves in the registry but is equally
+    # information-free across disjoint scopes: dropped, no new proposal
+    n3 = svc._link_dream_relations([
+        {"src": "alpha-tool", "relation": "related-to", "dst": "beta-tool"}])
+    assert n3 == 0 and _cross_count() == 1
 
 
 def test_dream_same_project_edge_still_written(svc):
@@ -445,3 +495,42 @@ def test_dream_alias_candidate_respects_dismissed_and_disable(svc):
         assert _alias_props(svc) == []
     finally:
         svc.config.memory.dream.alias_candidate_min_cosine = old
+
+
+def test_dream_alias_candidate_blocks_variant_conflict(svc):
+    """E4B vs E2B names embed nearly identically but denote different models —
+    the alias post-pass must not file a merge proposal for them."""
+    svc.cortex_write("Gemma 4 E2B extractor sidecar", "version", "e2b",
+                     support="user")
+    svc.store("sidecar swap note", source="t")
+    _drain(svc, _ClaimStub("Gemma 4 E4B extractor sidecar"))
+    assert _alias_props(svc) == []
+
+
+# ── slot-key folding at entity creation ──────────────────────────────────
+
+def test_find_fact_slot_entity(storage):
+    storage.conn.execute(
+        "INSERT INTO facts (entity, attribute, entity_norm, attribute_norm,"
+        " value, status, confidence, asserted_at, last_confirmed)"
+        " VALUES (%s,%s,%s,%s,%s,'current',0.9,1.0,1.0)",
+        ("2026-07-11-known-facts-window", "delivered-components",
+         "2026-07-11-known-facts-window", "delivered-components", "x"))
+    assert storage.find_fact_slot_entity(
+        "2026-07-11-known-facts-window-delivered-components"
+    ) == "2026-07-11-known-facts-window"
+    assert storage.find_fact_slot_entity("no-such-slot") is None
+
+
+def test_resolve_or_create_folds_slot_key_to_owner(svc):
+    svc.cortex_write("2026-07-11-known-facts-window", "delivered-components",
+                     "gate+config+tests", support="user")
+    svc.stats()
+    with svc._lock:
+        e = svc._resolve_or_create_entity(
+            "2026-07-11-known-facts-window.delivered-components")
+    assert e["display"] == "2026-07-11-known-facts-window"
+    # non-slot dotted names are untouched
+    with svc._lock:
+        e2 = svc._resolve_or_create_entity("psycopg/transaction.py")
+    assert e2["display"] == "psycopg/transaction.py"

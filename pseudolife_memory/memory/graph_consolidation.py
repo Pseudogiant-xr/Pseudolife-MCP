@@ -277,6 +277,29 @@ def _is_list_artifact(name: str) -> bool:
     return sum(1 for p in _split_outside_parens(str(name)) if p) >= 2
 
 
+_COMPOUND_SEP = re.compile(r"[+/]")
+_FILE_EXTENSION = re.compile(r"\.[A-Za-z0-9]{1,4}$")
+
+
+def _compound_halves(name: str) -> tuple[str, str] | None:
+    """Split at the FIRST ``/`` or ``+``; both halves must be non-empty and
+    carry alphanumeric content, and neither may end in a dot-extension (file
+    paths are exempt: ``ops/backup.ps1``). Detection-only feeder — a compound
+    is junk-PROPOSED, never write-dropped (2026-07-11: ``pg+extractor``)."""
+    s = str(name)
+    m = _COMPOUND_SEP.search(s)
+    if not m:
+        return None
+    a, b = s[:m.start()].strip(), s[m.end():].strip()
+    if not a or not b:
+        return None
+    if not re.search(r"[A-Za-z0-9]", a) or not re.search(r"[A-Za-z0-9]", b):
+        return None
+    if _FILE_EXTENSION.search(a) or _FILE_EXTENSION.search(b):
+        return None
+    return a, b
+
+
 def junk_name_reason(name: str) -> str | None:
     """Write-time entity-name gate: the reason ``name`` must never become a
     graph entity (``concat-artifact`` / ``bare-number`` / ``status-word`` /
@@ -352,7 +375,9 @@ def partition_candidates(pairs: list[dict], entities: list[dict], edges: list[di
     links: list[dict] = []
     for p in pairs:
         reason = (_name_contains(p["src"], p["dst"])
-                  if float(p.get("similarity", 0.0)) >= merge_min_similarity else None)
+                  if float(p.get("similarity", 0.0)) >= merge_min_similarity
+                  and not variant_conflict(p["src"], p["dst"])
+                  else None)
         if reason is None:
             links.append(p)
             continue
@@ -369,7 +394,8 @@ def partition_candidates(pairs: list[dict], entities: list[dict], edges: list[di
 
 
 def junk_entities(entities: list[dict], edges: list[dict], *,
-                  max_degree: int = 1) -> list[dict]:
+                  max_degree: int = 1,
+                  known_norms: frozenset[str] | None = None) -> list[dict]:
     """Over-extraction artifacts: bare numbers, <=2-char displays, or status-words —
     only when weakly connected (degree <= max_degree). Proposal-only; never deletes."""
     deg = degree_counts(edges)
@@ -384,6 +410,16 @@ def junk_entities(entities: list[dict], edges: list[dict], *,
             out.append({"entity_id": e["id"], "display": e["display"],
                         "reason": "list-artifact"})  # degree-agnostic
             continue
+        if known_norms:
+            halves = _compound_halves(d)
+            if halves:
+                na, nb = norm_name(halves[0]), norm_name(halves[1])
+                nd = norm_name(d)
+                if (na and nb and na != nb and na != nd and nb != nd
+                        and na in known_norms and nb in known_norms):
+                    out.append({"entity_id": e["id"], "display": e["display"],
+                                "reason": "compound-artifact"})  # degree-agnostic
+                    continue
         if deg.get(e["id"], 0) > max_degree:
             continue
         if _BARE_NUMBER.match(d):

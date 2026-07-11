@@ -338,6 +338,16 @@ def test_entity_proposal_routes(svc):
     assert r.dispatch("POST", "/api/graph/reject-entity-proposal", {}, {"id": 3})["rejected"]
 
 
+def test_graph_entity_verdicts_pass_decided_by(svc):
+    r = ConsoleRoutes(svc)
+    out = r.dispatch("POST", "/api/graph/accept-entity-merge", {},
+                     {"id": 1, "decided_by": "agent"})
+    assert out["decided_by"] == "agent"
+    out2 = r.dispatch("POST", "/api/graph/reject-entity-proposal", {},
+                      {"id": 3, "decided_by": "bogus"})
+    assert out2["decided_by"] == "human"    # invalid values fall back
+
+
 def test_entity_provenance_route(svc):
     r = ConsoleRoutes(svc)
     out = r.dispatch("GET", "/api/graph/entity-provenance", {"entity": "daemon"}, {})
