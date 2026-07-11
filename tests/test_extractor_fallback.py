@@ -209,3 +209,25 @@ def test_dream_run_auto_surfaces_config_error():
     res = svc.dream_run_auto()
     assert "error" in res and "fallback" in res["error"]
     assert svc.ran_with is None
+
+
+# ── dream_status extractor fields ─────────────────────────────────────────
+
+def test_dream_status_fields_no_fallback(monkeypatch):
+    from pseudolife_memory.memory.dream import _status_extractor_fields
+    fields = _status_extractor_fields(_cfg("http://p:1/v1"), None)
+    assert fields["extractor_mode"] == "auto"
+    assert fields["primary_url"] == "http://p:1/v1"
+    assert fields["fallback_url"] is None
+    assert fields["primary_healthy"] is None          # no probe when inert
+    assert fields["last_dream_extractor"] is None
+
+
+def test_dream_status_fields_with_fallback(monkeypatch):
+    from pseudolife_memory.memory import dream as d
+    monkeypatch.setattr(d, "probe_endpoint", lambda *a, **k: True)
+    last = {"which": "primary", "base_url": "http://p:1/v1", "at": 123.0}
+    fields = d._status_extractor_fields(
+        _cfg("http://p:1/v1", fb="http://f:2/v1"), last)
+    assert fields["primary_healthy"] is True
+    assert fields["last_dream_extractor"] == last

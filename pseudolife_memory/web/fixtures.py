@@ -538,7 +538,13 @@ class FixtureService:
     # dream / consolidation
     def dream_status(self):
         return {"backlog": 14, "idle_seconds": 2100.0, "dream_cursor": _NOW - 6 * _H,
-                "would_fire": True}
+                "would_fire": True, "extractor_mode": "auto",
+                "primary_url": "http://host.docker.internal:8082/v1",
+                "fallback_url": "http://pseudolife-extractor:8081/v1",
+                "primary_healthy": True,
+                "last_dream_extractor": {"which": "primary",
+                                         "base_url": "http://host.docker.internal:8082/v1",
+                                         "at": _NOW - 2 * _H}}
 
     def dream_run(self, extractor, limit=None):
         return {"pulled": 14, "claims": 9, "inserted": 5, "confirmed": 2,

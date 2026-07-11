@@ -2458,8 +2458,11 @@ class MemoryService:
             backlog >= cfg.min_batch
             or (backlog >= 1 and idle >= cfg.idle_seconds)
         ))
+        from pseudolife_memory.memory.dream import _status_extractor_fields
         return {"backlog": backlog, "idle_seconds": idle,
-                "dream_cursor": cursor, "would_fire": would_fire}
+                "dream_cursor": cursor, "would_fire": would_fire,
+                **_status_extractor_fields(
+                    cfg, getattr(self, "_last_dream_extractor", None))}
 
     def warmup(self):
         """Eagerly load embedder + reranker + NLI so the first real tool call

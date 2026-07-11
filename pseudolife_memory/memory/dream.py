@@ -518,6 +518,22 @@ def build_extractor_with_fallback(cfg) -> tuple["DreamExtractor", str]:
     ), "fallback"
 
 
+def _status_extractor_fields(cfg, last_dream_extractor) -> dict:
+    """Extractor-visibility block for ``dream_status`` (console badge).
+    Probes the primary ONLY when a fallback is configured — the inert
+    single-extractor deploy pays no probe cost on a status poll."""
+    r = resolve_endpoints(cfg)
+    has_fallback = bool(r["fallback_url"] and r["fallback_model"])
+    return {
+        "extractor_mode": r["mode"],
+        "primary_url": r["primary_url"],
+        "fallback_url": r["fallback_url"] if has_fallback else None,
+        "primary_healthy": (probe_endpoint(r["primary_url"], timeout=2.0)
+                            if has_fallback and r["primary_url"] else None),
+        "last_dream_extractor": last_dream_extractor,
+    }
+
+
 def build_extractor(cfg) -> DreamExtractor:
     """Pick the extractor from config: an OpenAI-compatible endpoint when a
     base-URL + model are set, else a no-op (no automatic regex writes —
