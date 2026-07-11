@@ -113,6 +113,17 @@ def _embedding_in(value: Any):
     return np.asarray(value, dtype=np.float32)
 
 
+def _embedding_out(value: Any):
+    """Normalize a vector column read to a float32 numpy array. pgvector
+    <0.5 hands psycopg reads back as numpy arrays; 0.5+ returns ``Vector``
+    objects, which ``np.asarray`` cannot coerce (TypeError)."""
+    if value is None:
+        return None
+    if hasattr(value, "to_numpy"):  # pgvector.Vector (0.5+ psycopg reads)
+        value = value.to_numpy()
+    return np.asarray(value, dtype=np.float32)
+
+
 class PostgresStorage:
     """Durable layer under the in-memory bands / cortex (single writer)."""
 
@@ -263,7 +274,7 @@ class PostgresStorage:
         out = []
         for row in rows:
             d = dict(zip(cols, row))
-            d["embedding"] = np.asarray(d["embedding"], dtype=np.float32)
+            d["embedding"] = _embedding_out(d["embedding"])
             out.append(d)
         return out
 
@@ -457,8 +468,7 @@ class PostgresStorage:
         out = []
         for row in rows:
             d = dict(zip(cols, row))
-            if d["embedding"] is not None:
-                d["embedding"] = np.asarray(d["embedding"], dtype=np.float32)
+            d["embedding"] = _embedding_out(d["embedding"])
             out.append(d)
         return out
 
@@ -480,8 +490,7 @@ class PostgresStorage:
         out = []
         for row in rows:
             d = dict(zip(cols, row))
-            if d["embedding"] is not None:
-                d["embedding"] = np.asarray(d["embedding"], dtype=np.float32)
+            d["embedding"] = _embedding_out(d["embedding"])
             out.append(d)
         return out
 
@@ -502,8 +511,7 @@ class PostgresStorage:
         out = []
         for row in rows:
             d = dict(zip(cols, row))
-            if d["embedding"] is not None:
-                d["embedding"] = np.asarray(d["embedding"], dtype=np.float32)
+            d["embedding"] = _embedding_out(d["embedding"])
             out.append(d)
         return out
 
