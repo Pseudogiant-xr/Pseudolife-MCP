@@ -375,7 +375,9 @@ def partition_candidates(pairs: list[dict], entities: list[dict], edges: list[di
     links: list[dict] = []
     for p in pairs:
         reason = (_name_contains(p["src"], p["dst"])
-                  if float(p.get("similarity", 0.0)) >= merge_min_similarity else None)
+                  if float(p.get("similarity", 0.0)) >= merge_min_similarity
+                  and not variant_conflict(p["src"], p["dst"])
+                  else None)
         if reason is None:
             links.append(p)
             continue

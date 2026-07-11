@@ -277,3 +277,20 @@ def test_apply_response_also_lists_merge_proposals(svc):
         "merge", d, c, 0.9, "write-dedup: test2", _t.time())
     out = svc.deep_dream(apply=True)
     assert any(m["id"] == pid for m in out["merge_proposals"])
+
+
+def test_partition_candidates_variant_conflict_stays_link():
+    from pseudolife_memory.memory.graph_consolidation import partition_candidates
+    pairs = [{"src_id": 1, "dst_id": 2, "src": "gemma-E4B Q4_K_M",
+              "dst": "gemma-E4B", "similarity": 0.99}]
+    ents = [{"id": 1, "display": "gemma-E4B Q4_K_M"},
+            {"id": 2, "display": "gemma-E4B"}]
+    merges, links = partition_candidates(pairs, ents, [])
+    assert merges == [] and len(links) == 1
+    # control: same-variant containment still partitions as a merge
+    pairs2 = [{"src_id": 1, "dst_id": 2, "src": "update.ps1",
+               "dst": "ops/update.ps1", "similarity": 0.99}]
+    ents2 = [{"id": 1, "display": "update.ps1"},
+             {"id": 2, "display": "ops/update.ps1"}]
+    merges2, links2 = partition_candidates(pairs2, ents2, [])
+    assert len(merges2) == 1 and links2 == []
