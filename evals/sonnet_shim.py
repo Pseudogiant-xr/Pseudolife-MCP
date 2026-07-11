@@ -39,6 +39,9 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))      # repo root
+from pseudolife_memory.memory.dream import _SYSTEM_PROMPT  # noqa: E402
+
 DEFAULT_CLI = Path(
     r"C:\Users\HAMO9\AppData\Local\Packages\Claude_pzs8sxrjxfjjc"
     r"\LocalCache\Roaming\Claude\claude-code\2.1.205\claude.exe")
@@ -51,14 +54,22 @@ _MAX_ARGV_SYSTEM = 24000
 class ClaudeCli:
     """One ``claude -p`` subprocess per call, serialized."""
 
-    def __init__(self, cli: Path, model: str, call_timeout: float):
+    def __init__(self, cli: Path, model: str, call_timeout: float,
+                 system_override: str | None = None):
         self.cli = cli
         self.model = model
         self.call_timeout = call_timeout
+        self.system_override = system_override
         self.lock = threading.Lock()
         self.calls = 0
 
     def chat(self, system: str, user: str) -> str:
+        if self.system_override and system.startswith(_SYSTEM_PROMPT):
+            # Swap the claims-extraction prompt prefix for the variant,
+            # PRESERVING whatever the harness appended after it (vocab hint
+            # etc.). Other prompts (relations, lessons) pass through
+            # untouched — the override targets claims extraction only.
+            system = self.system_override + system[len(_SYSTEM_PROMPT):]
         cmd = [str(self.cli), "-p", "--model", self.model,
                "--output-format", "json",
                "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
@@ -159,11 +170,23 @@ def main():
     ap.add_argument("--model", default="claude-sonnet-5")
     ap.add_argument("--port", type=int, default=8082)
     ap.add_argument("--call-timeout", type=float, default=300.0)
+    ap.add_argument("--system-prompt-file", type=Path, default=None,
+                    help="replace the production _SYSTEM_PROMPT prefix with "
+                         "this file's body (text after the first '---' line, "
+                         "or the whole file if no separator); the harness's "
+                         "appended vocab hint is preserved")
     args = ap.parse_args()
 
     if not args.cli.exists():
         sys.exit(f"claude CLI not found at {args.cli}")
-    cli = ClaudeCli(args.cli, args.model, args.call_timeout)
+    override = None
+    if args.system_prompt_file:
+        raw = args.system_prompt_file.read_text(encoding="utf-8")
+        override = raw.split("\n---\n", 1)[-1].strip()
+        print(f"sonnet_shim: system prompt override from "
+              f"{args.system_prompt_file} ({len(override)} chars)", flush=True)
+    cli = ClaudeCli(args.cli, args.model, args.call_timeout,
+                    system_override=override)
     srv = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(cli))
     print(f"sonnet_shim: serving {args.model} on "
           f"http://127.0.0.1:{args.port}/v1", flush=True)
