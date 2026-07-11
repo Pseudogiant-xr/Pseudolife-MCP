@@ -26,6 +26,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Docstring trim + manifest budgets** — per-tier char caps pinned by
   tests (minimal ≤4.5k, core ≤9.5k, full ≤15.5k; per-tool 1.6k).
 
+### Added (2026-07-11 — entity hygiene guards)
+- Entity hygiene guards (2026-07-11 curation follow-up): slot-key names fold
+  to their fact's owner entity; new junk classes `metric-reading`,
+  `list-artifact` (write gate + detection) and `compound-artifact`
+  (detection-only); variant-token (size/quant/version) conflicts hard-block
+  merge proposals in write-dedup, the dream-alias post-pass, and deep-dream
+  partition; cross-project dream proposals now require a typed relation;
+  REST entity-verdict routes accept `decided_by`.
+
 ### Changed (2026-07-10 — toolset tier overridable per deployment)
 - **`PSEUDOLIFE_MCP_TOOLSET` in `ops/docker-compose.yml` now reads from the
   environment** (`${PSEUDOLIFE_MCP_TOOLSET:-core}`): the shipped default stays
