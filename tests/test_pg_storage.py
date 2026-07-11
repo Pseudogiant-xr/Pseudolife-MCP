@@ -146,13 +146,17 @@ def test_vector_column_roundtrip(pg_conn):
     import numpy as np
     from pgvector.psycopg import register_vector
 
+    from pseudolife_memory.storage.postgres import _embedding_out
+
     register_vector(pg_conn)
     vec = np.arange(384, dtype=np.float32) / 384.0
     pg_conn.execute(
         "INSERT INTO entries (band, text, embedding, ts) VALUES (%s, %s, %s, %s)",
         ("working", "vector probe", vec, 0.0),
     )
-    out = pg_conn.execute("SELECT embedding FROM entries").fetchone()[0]
+    # Raw read: pgvector <0.5 returns numpy arrays, 0.5+ returns Vector —
+    # normalize the same way the production read path does.
+    out = _embedding_out(pg_conn.execute("SELECT embedding FROM entries").fetchone()[0])
     assert np.allclose(out, vec, atol=1e-6)
 
 
