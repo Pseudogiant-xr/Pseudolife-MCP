@@ -150,22 +150,18 @@ def memory_store(
     tags: list[str] | None = None,
     origin: Literal["user", "action", "agent"] | None = None,
 ) -> dict[str, Any]:
-    """Store one durable fact, decision, or observation in associative memory.
-
-    Use proactively when you learn something worth keeping: a preference, a
-    decision, an outcome, a correction. One claim per call. Near-duplicates
-    are dropped by the surprise gate (``stored=False``,
-    ``reason="below_surprise_threshold"`` — a feature, not an error). This
-    feeds the associative stream; the background dream pass distils canonical
-    facts from it later. For a fact you want canonical NOW, use
-    ``memory_fact_set`` instead.
+    """Store one durable fact, decision, or observation. Use proactively
+    for anything worth keeping — one claim per call. Near-duplicates are
+    dropped by the surprise gate (``stored=False``,
+    ``reason="below_surprise_threshold"`` — not an error). Dream distils
+    facts later; for canonical NOW use ``memory_fact_set``.
 
     Args:
         text: The claim to remember.
         source: Stable per-project/topic tag for later filtering.
-        tags: Optional cross-cutting labels, e.g. ``["decision", "blocker"]``.
-        origin: Who asserted it — ``"user"`` (the human said it), ``"action"``
-            (a tool confirmed it), or ``"agent"`` (you concluded it).
+        tags: Optional labels, e.g. ``["decision", "blocker"]``.
+        origin: Who asserted it — ``"user"`` / ``"action"`` (tool
+            confirmed) / ``"agent"`` (you concluded).
 
     Returns: ``{stored, surprise, reason, cortex_promoted}``.
     """
@@ -239,32 +235,25 @@ def memory_search(
     explain: bool = False,
     verbose: bool = False,
 ) -> dict[str, Any]:
-    """Retrieve memories relevant to a query — associative recall plus
-    canonical facts.
-
-    Call at the start of a task and whenever prior context may apply.
-    Canonical cortex facts arrive under ``cortex`` AHEAD of the associative
-    ``entries`` — they are the current, deduped answer (treat origin
-    ``agent`` as revisable; ``contested: true`` means a conflict awaits
-    ``memory_fact_resolve``). ``low_confidence=True`` means no confident
-    match: prefer to abstain rather than answer from weak entries. On a
-    superseded entry, prefer its ``superseded_by_text``.
+    """Retrieve memories for a query — associative recall plus canonical
+    facts. Call at task start or when context may apply. ``cortex``
+    facts arrive AHEAD of ``entries`` — the current, deduped answer
+    (``contested: true`` awaits ``memory_fact_resolve``).
+    ``low_confidence=True``: no confident match, prefer abstaining. On a
+    superseded entry, prefer ``superseded_by_text``.
 
     Args:
-        query: Natural-language description; specific queries retrieve better.
+        query: Natural-language description; specific beats vague.
         top_k: Max results (default 8).
         sources / bands / episodes / tags: Optional filters (AND across
-            kinds, OR within a list). Band names, most→least recent:
-            working, micro, instant, fast, medium, slow, archival, forever.
+            kinds, OR within list).
         min_score: Override the 0.25 relevance floor.
-        disable_recency_boost: True for state-probe queries where recency
-            bias is unwelcome.
-        rerank / bm25: Tri-state config overrides. ``bm25=True`` helps
-            exact-keyword queries (function names, versions, error codes);
-            ``rerank=True`` cross-encodes the top candidates (~200ms).
-        explain: Attach a ranking ``trace`` for debugging (implies verbose).
-        verbose: Full per-entry metadata; default entries are compact
-            ``{id, text, source, tags, score}`` + supersession when set.
+        disable_recency_boost: True to disable recency bias.
+        rerank / bm25: Tri-state overrides; ``bm25`` aids keyword
+            queries, ``rerank`` cross-encodes (~200ms).
+        explain: Attach a ranking ``trace``; implies verbose.
+        verbose: Full per-entry metadata; default compact ``{id, text,
+            source, tags, score}`` + supersession when set.
 
     Returns: ``{query, count, entries, cortex, low_confidence}``.
     """
@@ -460,18 +449,14 @@ def memory_reinforce(entry_id: int) -> dict[str, Any]:
 
 @_tool(tier="minimal")
 def memory_fact_get(entity: str, attribute: str) -> dict[str, Any]:
-    """Look up the one CURRENT canonical value at an ``(entity, attribute)``
-    slot — the unambiguous "what is X now?" read. One current value per
-    slot, no ranking, no stale duplicates; matching is
-    case/separator-insensitive. A null record means the slot is empty, not
-    that the topic is unknown — ``memory_search`` still finds associative
-    context.
+    """Look up the one CURRENT value at an ``(entity, attribute)`` slot.
+    One value per slot, case/separator-insensitive. A null record means
+    EMPTY, not unknown — ``memory_search`` still finds context.
 
     Returns: ``{record | null, contenders}`` (+ ``entity_ref`` when the
-    entity has a graph node). A non-empty ``contenders`` list is an
-    unsettled conflict — see ``memory_fact_resolve``. On an empty slot,
-    ``candidates`` lists nearby current slots (same entity first, then
-    similar slots) — ranked leads, not the answer.
+    entity has a graph node). Non-empty ``contenders`` = unsettled
+    conflict (see ``memory_fact_resolve``); on an empty slot,
+    ``candidates`` lists nearby slots — ranked leads, not answers.
     """
     out = {
         "record": service.cortex_lookup(entity, attribute),
@@ -500,15 +485,14 @@ def memory_fact_set(
 ) -> dict[str, Any]:
     """Assert a canonical fact NOW — insert, confirm, or correct a slot.
 
-    Setting a new value at an existing ``(entity, attribute)`` slot
-    supersedes the old one (kept as history). If the write conflicts with a
-    higher-tier fact (e.g. user-stated), it is parked as a contender instead
-    (``action="contested"``, with the winning value under ``current``) —
-    check with the human, then settle via ``memory_fact_resolve``.
+    A new value at an existing slot supersedes the old (kept as history).
+    A write conflicting with a higher-tier fact is parked as a contender
+    (``action="contested"``, winner under ``current``) — check with the
+    human, settle via ``memory_fact_resolve``.
 
     Args:
-        origin: ``"user"`` / ``"action"`` / ``"agent"`` (default agent) —
-            who asserts it. Set ``"user"`` for things the human told you.
+        origin: ``"user"`` / ``"action"`` / ``"agent"`` (default) — who
+            asserts it. Use ``"user"`` for things the human told you.
         confidence: 0..1, default 0.8.
 
     Returns: ``{action: inserted|confirmed|superseded|contested, ...record}``.
@@ -623,21 +607,18 @@ def memory_outcome(
     detail: str | None = None,
     polarity: str | None = None,
 ) -> dict[str, Any]:
-    """Record a procedural outcome signal — what worked, what failed, or
-    what the user corrected — the moment it lands. The dream synthesises
-    accumulated signals into durable lessons surfaced at future session
-    starts; logging outcomes is how you stop repeating mistakes.
+    """Record a procedural outcome — what worked, failed, or was
+    corrected — the moment it lands. Dream synthesises signals into
+    lessons surfaced next session; logging stops repeated mistakes.
 
     Args:
-        task: Kind of task, in stable wording ("deploy engine to host").
+        task: Kind of task, stable wording ("deploy engine to host").
         outcome: ``success`` | ``failure`` | ``correction``.
-        about: The tool/source/approach the outcome concerns (optional but
-            makes the lesson traversable).
+        about: The tool/approach concerned (aids traversal).
         detail: What worked / what the dead-end was.
         polarity: ``+`` do-this | ``-`` avoid; usually omit (inferred).
 
-    Returns: ``{recorded, signal_id, task, outcome}``. Requires Postgres
-    storage — file mode returns ``{recorded: false, reason}``.
+    Returns: ``{recorded, signal_id, task, outcome}``; needs Postgres.
     """
     return service.record_outcome(
         task, outcome, about=about, detail=detail, polarity=polarity)
@@ -681,22 +662,20 @@ def memory_forget(
     tag: str | None = None,
 ) -> dict[str, Any]:
     """Hard-delete from one memory store. Cleanup for junk/test data — no
-    audit trail. For "this is now wrong, but keep the history" use
-    ``memory_fact_set`` (facts) or ``memory_supersede`` (memories) instead.
+    audit trail. For "now wrong, keep history" use ``memory_fact_set``
+    (facts) or ``memory_supersede`` (memories) instead.
 
     Scopes:
-        ``memory``: associative entries matching ``text`` / ``substring`` /
-            ``source`` / ``episode`` / ``tag`` (at least one filter
-            required; filters OR-combine — ANY match deletes, unlike
-            memory_search's AND).
-        ``fact``: canonical fact slots — ``entity`` required; omit
-            ``attribute`` to purge every slot under the entity.
+        ``memory``: entries matching ``text`` / ``substring`` / ``source``
+            / ``episode`` / ``tag`` (at least one; filters OR-combine —
+            ANY match deletes, unlike memory_search's AND).
+        ``fact``: canonical slots — ``entity`` required; omit
+            ``attribute`` to purge the whole entity.
         ``world``: world facts — ``entity`` (+ optional ``attribute``).
-        ``lesson``: lessons — pass the task as ``entity``, the aspect as
+        ``lesson``: pass the task as ``entity``, the aspect as
             ``attribute``.
 
-    Returns: ``{deleted_count, ...}`` for scope memory; ``{removed, ...}``
-    otherwise; ``{error}`` on a bad scope or missing argument.
+    Returns: ``{deleted_count | removed, ...}``; ``{error}`` on bad input.
     """
     if scope == "memory":
         if not any((text, substring, source, episode, tag)):
@@ -731,19 +710,17 @@ def memory_dream(
 
     Actions:
         ``status``: backlog + whether a sweep would fire. Read-only.
-        ``pull``: memories not yet consolidated (oldest-first, up to
-            ``limit``) — read them, write slot-shaped facts via
-            ``memory_fact_set``, then commit.
-        ``commit``: advance the dream cursor to ``cursor`` (the newest
+        ``pull``: unconsolidated memories (oldest-first, up to ``limit``)
+            — read them, write slot-shaped facts via ``memory_fact_set``,
+            then commit.
+        ``commit``: advance the dream cursor to ``cursor`` (newest
             timestamp from the pull).
-        ``run``: one server-side dream with the configured extractor (up to
-            ``limit``; loop until ``pulled=0`` to drain the backlog).
-        ``deep``: full-corpus graph consolidation. Dry-run preview by
-            default; ``apply=true`` snapshots the graph tables (undo file;
-            refuses if it can't) then commits the provably-safe self-clean.
-            Settle the returned link candidates via ``memory_graph_review``
-            (propose / dismiss_pair) or the Console's Atlas queue;
-            ``snippets=false`` omits candidate evidence.
+        ``run``: one server-side dream with the configured extractor
+            (loop until ``pulled=0`` to drain).
+        ``deep``: full-corpus graph consolidation. Dry-run by default;
+            ``apply=true`` snapshots the graph tables first (refuses if it
+            can't). Settle returned candidates via ``memory_graph_review``;
+            ``snippets=false`` omits evidence.
 
     Returns: per-action dict; ``{error}`` on a bad action or missing cursor.
     """
@@ -778,20 +755,17 @@ def memory_graph_review(
     verdict before they touch the real graph.
 
     Actions:
-        ``list``: pending findings/proposals (optionally filtered by
-            ``scope``).
+        ``list``: pending findings/proposals (optional ``scope`` filter).
         ``propose``: submit link proposals ``[{src, relation, dst,
             similarity?, rationale?}]`` — stored for review, never written
-            to the graph directly.
-        ``dismiss_pair``: record that ``src`` and ``dst`` (entity names) are
-            genuinely distinct — the pair stops resurfacing as a duplicate
-            finding or deep-dream candidate.
+            directly.
+        ``dismiss_pair``: mark ``src``/``dst`` as genuinely distinct — the
+            pair stops resurfacing as a duplicate candidate.
         ``accept_link`` / ``reject_link``: settle an edge proposal by
             ``proposal_id``.
-        ``accept_merge``: fold a near-duplicate entity into its canonical
-            twin.
+        ``accept_merge``: fold a near-duplicate entity into its twin.
         ``accept_junk``: delete an over-extraction artifact entity.
-        ``reject_entity``: keep the entity; dismiss its merge/junk proposal.
+        ``reject_entity``: keep the entity; dismiss its proposal.
 
     Returns: per-action dict; ``{error}`` on a bad action or missing input.
     """

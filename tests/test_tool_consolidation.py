@@ -259,16 +259,17 @@ def test_removed_tools_are_gone(tmp_path: Path, monkeypatch) -> None:
     assert still_there == [], f"tools that should have left the surface: {still_there}"
 
 
-def test_descriptions_are_terse(tmp_path: Path, monkeypatch) -> None:
-    """The manifest is loaded into agent context every session. Pre-
-    consolidation it cost ~37k chars; the consolidated surface must stay
-    at half that or less, with no single tool ballooning."""
+def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
+    """The manifest is eager agent context for non-deferring clients; each
+    tier's visible descriptions must fit its budget (spec 2026-07-11)."""
     monkeypatch.setenv("PSEUDOLIFE_MCP_TOOLSET", "full")
     mod = _reload(tmp_path, monkeypatch)
 
     tools = asyncio.run(mod.mcp.list_tools())
-    fat = [(t.name, len(t.description or "")) for t in tools
-           if len(t.description or "") > 1600]
+    sizes = {t.name: len(t.description or "") for t in tools}
+    fat = [(n, s) for n, s in sizes.items() if s > 1600]
     assert fat == [], f"over-long tool descriptions: {fat}"
-    total = sum(len(t.description or "") for t in tools)
-    assert total <= 18_000, f"tool-description payload too large: {total} chars"
+    budgets = {"minimal": 4500, "core": 9500, "full": 15500}
+    for tier, cap in budgets.items():
+        total = sum(sizes[n] for n in mod._visible_tool_names(tier))
+        assert total <= cap, f"{tier} manifest {total} chars exceeds {cap}"
