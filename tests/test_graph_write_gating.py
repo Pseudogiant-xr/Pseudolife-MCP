@@ -464,3 +464,13 @@ def test_dream_alias_candidate_respects_dismissed_and_disable(svc):
         assert _alias_props(svc) == []
     finally:
         svc.config.memory.dream.alias_candidate_min_cosine = old
+
+
+def test_dream_alias_candidate_blocks_variant_conflict(svc):
+    """E4B vs E2B names embed nearly identically but denote different models —
+    the alias post-pass must not file a merge proposal for them."""
+    svc.cortex_write("Gemma 4 E2B extractor sidecar", "version", "e2b",
+                     support="user")
+    svc.store("sidecar swap note", source="t")
+    _drain(svc, _ClaimStub("Gemma 4 E4B extractor sidecar"))
+    assert _alias_props(svc) == []

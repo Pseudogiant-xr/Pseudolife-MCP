@@ -2177,6 +2177,7 @@ class MemoryService:
             if thr <= 0 or not new_entities:
                 return 0
             from pseudolife_memory.graph import norm_name
+            from pseudolife_memory.memory.graph_consolidation import variant_conflict
             filed = 0
             with self._lock:
                 self._ensure_init()
@@ -2209,6 +2210,8 @@ class MemoryService:
                     pair = tuple(sorted((norm_name(disp), norm_name(target))))
                     if pair[0] == pair[1] or pair in dismissed:
                         continue
+                    if variant_conflict(disp, target):
+                        continue    # size/quant/version mismatch: never a merge
                     a = self._resolve_or_create_entity(disp)
                     b = self._resolve_or_create_entity(target)
                     if a["id"] == b["id"]:
