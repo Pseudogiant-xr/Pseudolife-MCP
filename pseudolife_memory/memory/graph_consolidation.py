@@ -202,7 +202,7 @@ _VARIANT_PATTERNS = (
     re.compile(_VB + r"\d+(?:\.\d+)?[MK]?B" + _VE, re.IGNORECASE),    # 26B / 4B
     re.compile(_VB + r"Q\d[_-]K(?:[_-](?:XS|S|M|L|XL))?" + _VE,       # Q4_K_XL (K required)
                re.IGNORECASE),
-    re.compile(_VB + r"q\d[_-]\d" + _VE),                             # q4_0
+    re.compile(_VB + r"q\d[_-]\d" + _VE, re.IGNORECASE),              # q4_0 / Q4_0
     re.compile(_VB + r"UD[_-]Q[A-Za-z0-9_-]*" + _VE, re.IGNORECASE),  # UD-Q4_K_XL
     re.compile(r"\d+\.\d+(?:\.\d+)*"),                                # 0.2.0 / 3.6
 )

@@ -95,6 +95,8 @@ def test_variant_conflict_blocks_cross_model_pairs():
     assert variant_conflict("gemma-E4B Q4_K_M", "Gemma-4-E4B-QAT (UD-Q4_K_XL)")
     assert variant_conflict("gemma-4-26B", "Gemma 4 E4B")
     assert variant_conflict("Qwen3.5-4B", "Qwen3.6-27B")
+    # uppercase is the canonical GGUF quant spelling
+    assert variant_conflict("gemma Q4_0", "gemma Q8_0")
 
 
 def test_variant_conflict_allows_same_or_absent_variants():
