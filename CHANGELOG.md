@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-10 — toolset tier overridable per deployment)
+- **`PSEUDOLIFE_MCP_TOOLSET` in `ops/docker-compose.yml` now reads from the
+  environment** (`${PSEUDOLIFE_MCP_TOOLSET:-core}`): the shipped default stays
+  `core`, but a deployment can set `PSEUDOLIFE_MCP_TOOLSET=full` in `ops/.env`
+  without editing the compose file. Useful for clients that defer MCP tool
+  schemas client-side (e.g. Claude Code), where the full surface costs only
+  the extra tool names until a schema is actually requested.
+
 ### Changed (2026-07-10 — compact-by-default recall payloads)
 - **The five recall-path tools return compact entries by default** —
   `memory_search`, `memory_recall`, `memory_recent`, `memory_world_search`,

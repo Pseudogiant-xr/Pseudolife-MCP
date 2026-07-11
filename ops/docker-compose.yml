@@ -97,11 +97,13 @@ services:
       PSEUDOLIFE_WRITER_ID: claude-code
       # Tool-surface tier: "full" (all tools) or "core" (lean 19-tool set —
       # everything the CLAUDE.md recall/capture/reflect workflow references).
-      # Core is the deployed default since 2026-07-10: the manifest is agent
+      # Core is the shipped default since 2026-07-10: the manifest is agent
       # context every turn, and the trimmed tail (dream/graph-review/admin)
-      # runs on daemon cadence or via the Cortex Console anyway. Comment out
-      # (or set "full") for admin sessions that need the whole surface.
-      PSEUDOLIFE_MCP_TOOLSET: core
+      # runs on daemon cadence or via the Cortex Console anyway. Override per
+      # deployment in ops/.env (PSEUDOLIFE_MCP_TOOLSET=full) — worthwhile for
+      # clients that defer MCP schemas client-side (e.g. Claude Code), where
+      # the extra tools cost only their names until a schema is requested.
+      PSEUDOLIFE_MCP_TOOLSET: ${PSEUDOLIFE_MCP_TOOLSET:-core}
       CUDA_VISIBLE_DEVICES: "-1"
       HF_HUB_OFFLINE: "1"
       TRANSFORMERS_OFFLINE: "1"
