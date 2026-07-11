@@ -1,0 +1,17 @@
+{
+  "rung": "e4b-ft",
+  "label": "Arm-1 registry-datagen candidate (e4b-arm1-Q4_K_M.gguf, 2026-07-12)",
+  "kind": "llm",
+  "extract_seconds": 21.6,
+  "consolidation": {
+    "pulled": 26,
+    "claims": 17,
+    "inserted": 17,
+    "superseded": 0
+  },
+  "gold_recoverable": 0.9,
+  "stale_leak": 0.0,
+  "tokens_per_query": 1.8,
+  "search_latency_ms": 4.5,
+  "status": "ok"
+}

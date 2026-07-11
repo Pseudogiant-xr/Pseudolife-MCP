@@ -43,6 +43,7 @@ import torch.nn.functional as F
 from unsloth import FastModel        # before transformers/trl (patches them)
 from datasets import Dataset
 from transformers import default_data_collator
+from transformers.trainer_utils import get_last_checkpoint
 from trl import SFTConfig, SFTTrainer
 
 REPO = Path("/mnt/c/Users/HAMO9/ClaudeCode/PseudoLife-MCP")
@@ -57,6 +58,16 @@ MAX_SEQ = 5120
 NOTES_VIEW_SEQ = 4096
 CLAIMS_VIEW_SEQ = 1024
 HOLDOUT = 64                                      # eval rows (seeded split)
+
+
+def find_resume_checkpoint(checkpoints_dir: Path) -> str | None:
+    """Auto-detect a checkpoint to resume from — makes a crashed/killed run
+    resumable by just re-running the exact same command (2026-07-12: save_steps
+    checkpointing existed but nothing reloaded it, so a restart silently began
+    from scratch and threw away every prior checkpoint's progress)."""
+    if not checkpoints_dir.exists():
+        return None
+    return get_last_checkpoint(str(checkpoints_dir))
 
 
 def tokenize_fixed(tok, rows: list[dict], jepa_k: int = 0) -> Dataset:
@@ -291,7 +302,11 @@ def main() -> int:
             report_to="none",
         ),
     )
-    trainer.train()
+    resume = None if args.smoke else find_resume_checkpoint(
+        args.out_dir / "checkpoints")
+    if resume:
+        print(f"resuming from checkpoint: {resume}", flush=True)
+    trainer.train(resume_from_checkpoint=resume)
     if args.smoke:
         print("SMOKETEST OK")
         return 0
