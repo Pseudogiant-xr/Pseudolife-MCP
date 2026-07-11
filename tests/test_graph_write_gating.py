@@ -72,6 +72,35 @@ def test_junk_name_reason_new_rules_spare_legitimate_names():
     assert junk_name_reason("P2P protocol") is None                 # P<digit><letter>: no shard boundary
 
 
+def test_junk_name_reason_blocks_metric_readings_and_lists():
+    # 2026-07-11 curation classes: metric readings and captured enumerations
+    assert junk_name_reason("stale 0.8") == "metric-reading"
+    assert junk_name_reason("stale 0.0") == "metric-reading"
+    assert junk_name_reason("stale_leak 0.7-0.8") == "metric-reading"
+    assert junk_name_reason("data/, ops/.env, *.pt") == "list-artifact"
+
+
+def test_junk_name_reason_spares_metric_and_list_near_misses():
+    assert junk_name_reason("CUDA Toolkit 13.1") is None        # uppercase token
+    assert junk_name_reason("Gemma 4 E4B") is None              # non-decimal tail
+    assert junk_name_reason("User (HAMO9, pseudogiant92@gmail.com)") is None
+    assert junk_name_reason("8-band continuum") is None
+
+
+def test_junk_entities_flags_metric_readings_and_lists():
+    from pseudolife_memory.memory.graph_consolidation import junk_entities
+    ents = [{"id": 1, "display": "stale 0.8"},
+            {"id": 2, "display": "data/, ops/.env, *.pt"}]
+    out = junk_entities(ents, [], max_degree=1)
+    assert {(j["display"], j["reason"]) for j in out} == {
+        ("stale 0.8", "metric-reading"),
+        ("data/, ops/.env, *.pt", "list-artifact")}
+    # list-artifact is degree-agnostic (like concat-artifact); metric-reading
+    # respects the degree cap
+    out2 = junk_entities(ents, [], max_degree=-1)
+    assert [j["reason"] for j in out2] == ["list-artifact"]
+
+
 def test_dream_edge_floor_drops_type_violations_by_default():
     # Hard type-violations score 0.1125-0.175; the shipped floor must
     # exceed that (pre-fix it was 0.0 = write everything).

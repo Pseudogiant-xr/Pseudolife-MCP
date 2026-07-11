@@ -190,6 +190,9 @@ _ACTION_PREFIX = re.compile(r"^action:\s", re.IGNORECASE)
 _STATUS_SHARD = re.compile(r"^P\d+[ _]")                   # "P3 SURFACE POLISH"
 _SENTENCE_TOKENS = 7                                       # task/status phrases
 
+_DECIMAL_OR_RANGE = re.compile(r"^\d+\.\d+(?:-\d+(?:\.\d+)?)?$")  # 0.8 / 0.7-0.8
+_LOWER_TOKEN = re.compile(r"^[a-z][a-z0-9_-]*$")
+
 # Variant tokens: size / quant / dotted-version markers whose DIFFERENCE means
 # two names denote different artifacts (E4B vs E2B, Q4_K_M vs Q4_K_XL) even when
 # every other token matches (2026-07-11 curation: 9 such merge proposals
@@ -239,6 +242,41 @@ def _is_concat_artifact(name: str) -> bool:
     return len(parts) >= 2 and sum(1 for p in parts if p) >= 2
 
 
+def _is_metric_reading(name: str) -> bool:
+    """2-3 tokens, decimal/decimal-range tail, all other tokens lowercase — a
+    metric READING ("stale 0.8"), not an entity. Any uppercase exempts
+    ("CUDA Toolkit 13.1"); accepted trade-off: lowercase "python 3.12"-style
+    names are blocked (version belongs in a fact, not the entity name)."""
+    toks = str(name).split()
+    if not 2 <= len(toks) <= 3 or not _DECIMAL_OR_RANGE.match(toks[-1]):
+        return False
+    return all(_LOWER_TOKEN.match(t) for t in toks[:-1])
+
+
+def _split_outside_parens(s: str) -> list[str]:
+    parts: list[str] = []
+    depth, cur = 0, []
+    for ch in s:
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth = max(0, depth - 1)
+        if ch == "," and depth == 0:
+            parts.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    parts.append("".join(cur))
+    return [p.strip() for p in parts]
+
+
+def _is_list_artifact(name: str) -> bool:
+    """>=2 non-empty comma-separated segments OUTSIDE parentheses — a captured
+    enumeration ("data/, ops/.env, *.pt"), not an entity. A parenthesized
+    comma ("User (HAMO9, a@b)") does not count."""
+    return sum(1 for p in _split_outside_parens(str(name)) if p) >= 2
+
+
 def junk_name_reason(name: str) -> str | None:
     """Write-time entity-name gate: the reason ``name`` must never become a
     graph entity (``concat-artifact`` / ``bare-number`` / ``status-word`` /
@@ -275,6 +313,10 @@ def junk_name_reason(name: str) -> str | None:
         return "action-prefix"
     if _STATUS_SHARD.match(d):
         return "status-shard"
+    if _is_metric_reading(d):
+        return "metric-reading"
+    if _is_list_artifact(d):
+        return "list-artifact"
     if len(d.split()) >= _SENTENCE_TOKENS:
         return "sentence"
     return None
@@ -338,6 +380,10 @@ def junk_entities(entities: list[dict], edges: list[dict], *,
             out.append({"entity_id": e["id"], "display": e["display"],
                         "reason": "concat-artifact"})   # degree-agnostic
             continue
+        if _is_list_artifact(d):
+            out.append({"entity_id": e["id"], "display": e["display"],
+                        "reason": "list-artifact"})  # degree-agnostic
+            continue
         if deg.get(e["id"], 0) > max_degree:
             continue
         if _BARE_NUMBER.match(d):
@@ -346,6 +392,8 @@ def junk_entities(entities: list[dict], edges: list[dict], *,
             reason = "too-short"
         elif d.lower() in _JUNK_STOPWORDS:
             reason = "status-word"
+        elif _is_metric_reading(d):
+            reason = "metric-reading"
         else:
             continue
         out.append({"entity_id": e["id"], "display": e["display"], "reason": reason})
