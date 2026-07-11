@@ -125,6 +125,14 @@ services:
       # that incl. slower end-user laptops; lower to 240 for the lighter E2B.
       PSEUDOLIFE_DREAM_TIMEOUT_SECONDS: ${PSEUDOLIFE_DREAM_TIMEOUT_SECONDS:-480}
       PSEUDOLIFE_DREAM_MAX_TOKENS: ${PSEUDOLIFE_DREAM_MAX_TOKENS:-2048}
+      # Primary/fallback extractor selection (2026-07-11 sonnet-sidecar-cutover
+      # spec): point BASE_URL above at a primary (e.g. the host Sonnet shim,
+      # http://host.docker.internal:8082/v1) and FALLBACK at the in-stack
+      # sidecar; mode auto probes the primary and falls back when it is down.
+      # FALLBACK unset (default) = single-extractor behavior, no probe.
+      PSEUDOLIFE_DREAM_FALLBACK_BASE_URL: ${PSEUDOLIFE_DREAM_FALLBACK_BASE_URL:-}
+      PSEUDOLIFE_DREAM_FALLBACK_MODEL: ${PSEUDOLIFE_DREAM_FALLBACK_MODEL:-}
+      PSEUDOLIFE_DREAM_EXTRACTOR_MODE: ${PSEUDOLIFE_DREAM_EXTRACTOR_MODE:-auto}
     # Linux only: make host.docker.internal resolve to the host (Docker Desktop
     # on Windows/macOS provides it automatically). Needed when the extractor
     # override above points at a model server on the host machine.
