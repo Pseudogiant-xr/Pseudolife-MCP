@@ -105,7 +105,13 @@ RUNGS: dict[str, dict] = {
                "label": "E4B QLoRA extractor fine-tune Q4_K_M (distill SFT 2026-07-06)",
                "base_url": "http://127.0.0.1:8081/v1",
                "model": "extractor"},
-    # cloud rung intentionally omitted — sovereign-only sweep (user decision).
+    # Cloud ceiling probe (2026-07-11, user-requested): Claude via the Max-plan
+    # CLI, served by evals/sonnet_shim.py. Deliberately NOT in LADDER_ORDER —
+    # the default sweep stays sovereign-only; run with --rung sonnet-5.
+    "sonnet-5": {"kind": "llm",
+                 "label": "Claude Sonnet 5 (Max-plan CLI shim, ceiling probe)",
+                 "base_url": "http://127.0.0.1:8082/v1",
+                 "model": "extractor"},
 }
 LADDER_ORDER = ["naive-rag", "floor", "gemma-e2b", "gemma-e4b",
                 "qwen3.5-4b", "granite-h-tiny", "lfm2-8b-a1b", "ornith-9b",

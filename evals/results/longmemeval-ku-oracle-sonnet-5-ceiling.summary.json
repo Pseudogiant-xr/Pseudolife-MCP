@@ -1,0 +1,20 @@
+{
+  "dataset": "oracle",
+  "extractor": "sonnet-5",
+  "n": 78,
+  "arms": {
+    "rag": {
+      "accuracy": 0.526,
+      "context_tokens": 1637.8
+    },
+    "cortex": {
+      "accuracy": 0.462,
+      "context_tokens": 66.9
+    },
+    "hybrid": {
+      "accuracy": 0.641,
+      "context_tokens": 985.7
+    }
+  },
+  "superseded_total": 59
+}
