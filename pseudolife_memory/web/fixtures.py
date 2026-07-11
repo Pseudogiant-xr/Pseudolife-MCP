@@ -514,14 +514,16 @@ class FixtureService:
     def graph_reject_proposal(self, proposal_id):
         return {"rejected": True, "id": int(proposal_id)}
 
-    def graph_accept_entity_merge(self, proposal_id):
-        return {"accepted": True, "from": "live daemon", "into": "daemon"}
+    def graph_accept_entity_merge(self, proposal_id, *, decided_by="human"):
+        return {"accepted": True, "from": "live daemon", "into": "daemon",
+                "decided_by": decided_by}
 
     def graph_accept_entity_junk(self, proposal_id):
         return {"accepted": True, "entity": "2"}
 
-    def graph_reject_entity_proposal(self, proposal_id):
-        return {"rejected": True, "id": int(proposal_id)}
+    def graph_reject_entity_proposal(self, proposal_id, *, decided_by="human"):
+        return {"rejected": True, "id": int(proposal_id),
+                "decided_by": decided_by}
 
     # engram traces / retention
     def get_entry(self, entry_id):
