@@ -3324,6 +3324,16 @@ class MemoryService:
                 found["etype"] = etype
             found["created"] = False
             return found
+        # Slot-key fold (2026-07-11): a dreamed name that IS an existing fact
+        # slot key ("entity.attribute") resolves to the slot's owner entity
+        # instead of minting a node named after the whole key. Exact-match
+        # only; recursion terminates because the owner's norm differs from n
+        # and cannot itself be a slot key (keys concat two non-empty norms).
+        slot_owner = st.find_fact_slot_entity(n)
+        if slot_owner is not None and norm_name(slot_owner) != n:
+            logger.debug("entity folded to slot owner (slot-key): %r -> %r",
+                         name, slot_owner)
+            return self._resolve_or_create_entity(slot_owner, etype=etype)
         eid = st.ensure_entity(n, display=name.strip(), etype=etype)
         if propose_dupes:
             self._propose_write_dedup(eid, name)

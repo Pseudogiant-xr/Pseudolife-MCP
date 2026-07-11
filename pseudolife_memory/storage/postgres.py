@@ -646,6 +646,17 @@ class PostgresStorage:
         ]
         return d
 
+    def find_fact_slot_entity(self, key_norm: str) -> str | None:
+        """Display entity of a CURRENT fact whose slot key — entity_norm and
+        attribute_norm hyphen-joined, matching graph.norm_name's separator
+        folding — equals ``key_norm``. Small table + create-miss-only calls,
+        so the unindexed concat scan is fine."""
+        row = self.conn.execute(
+            "SELECT entity FROM facts WHERE status = 'current' "
+            "AND entity_norm || '-' || attribute_norm = %s LIMIT 1",
+            (key_norm,)).fetchone()
+        return row[0] if row else None
+
     def add_alias(self, alias_norm: str, entity_id: int) -> None:
         with self._txn():
             self.conn.execute(

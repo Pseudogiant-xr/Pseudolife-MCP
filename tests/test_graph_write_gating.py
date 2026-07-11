@@ -474,3 +474,32 @@ def test_dream_alias_candidate_blocks_variant_conflict(svc):
     svc.store("sidecar swap note", source="t")
     _drain(svc, _ClaimStub("Gemma 4 E4B extractor sidecar"))
     assert _alias_props(svc) == []
+
+
+# ── slot-key folding at entity creation ──────────────────────────────────
+
+def test_find_fact_slot_entity(storage):
+    storage.conn.execute(
+        "INSERT INTO facts (entity, attribute, entity_norm, attribute_norm,"
+        " value, status, confidence, asserted_at, last_confirmed)"
+        " VALUES (%s,%s,%s,%s,%s,'current',0.9,1.0,1.0)",
+        ("2026-07-11-known-facts-window", "delivered-components",
+         "2026-07-11-known-facts-window", "delivered-components", "x"))
+    assert storage.find_fact_slot_entity(
+        "2026-07-11-known-facts-window-delivered-components"
+    ) == "2026-07-11-known-facts-window"
+    assert storage.find_fact_slot_entity("no-such-slot") is None
+
+
+def test_resolve_or_create_folds_slot_key_to_owner(svc):
+    svc.cortex_write("2026-07-11-known-facts-window", "delivered-components",
+                     "gate+config+tests", support="user")
+    svc.stats()
+    with svc._lock:
+        e = svc._resolve_or_create_entity(
+            "2026-07-11-known-facts-window.delivered-components")
+    assert e["display"] == "2026-07-11-known-facts-window"
+    # non-slot dotted names are untouched
+    with svc._lock:
+        e2 = svc._resolve_or_create_entity("psycopg/transaction.py")
+    assert e2["display"] == "psycopg/transaction.py"
