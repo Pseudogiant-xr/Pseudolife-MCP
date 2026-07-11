@@ -461,6 +461,63 @@ def resolve_endpoints(cfg) -> dict:
     return out
 
 
+def probe_endpoint(base_url: str, timeout: float = 3.0) -> bool:
+    """Is an OpenAI-compatible endpoint alive? GET /health at the base with
+    any trailing /v1 stripped (the sonnet shim serves /health at root and
+    answers 503 when its CLI is logged out); a 404 there means a plain
+    llama-server, so retry as GET {base_url}/models. Only HTTP 200 counts."""
+    import urllib.error
+    import urllib.request
+
+    root = base_url.rstrip("/")
+    root = root.removesuffix("/v1")
+    for url in (f"{root}/health", f"{base_url.rstrip('/')}/models"):
+        try:
+            with urllib.request.urlopen(url, timeout=timeout) as resp:
+                return resp.status == 200
+        except urllib.error.HTTPError as e:
+            if e.code == 404 and url.endswith("/health"):
+                continue                      # llama-server: try /models
+            return False
+        except Exception:  # noqa: BLE001 — connection refused, timeout, DNS
+            return False
+    return False
+
+
+def build_extractor_with_fallback(cfg) -> tuple["DreamExtractor", str]:
+    """Selection step for the LIVE dream path: returns (extractor, which)
+    with which in {"primary", "fallback"}. Fallback unset => exactly
+    ``build_extractor`` (no probe, single-extractor behavior). Mode "auto"
+    probes the primary per invocation — recovery is automatic at the next
+    sweep. Raises ValueError for mode "fallback" with no fallback URL.
+    The bench/eval harness never calls this — it constructs extractors
+    directly so runs stay pinned to one endpoint."""
+    import os
+
+    r = resolve_endpoints(cfg)
+    api_key = os.environ.get("PSEUDOLIFE_DREAM_API_KEY") or cfg.extractor_api_key
+    if r["mode"] == "fallback":
+        if not (r["fallback_url"] and r["fallback_model"]):
+            raise ValueError(
+                "extractor_mode=fallback but no fallback endpoint is "
+                "configured (fallback_base_url/fallback_model)")
+        return OpenAICompatExtractor(
+            r["fallback_url"], r["fallback_model"], api_key=api_key,
+            max_tokens=r["max_tokens"], timeout_seconds=r["timeout"],
+        ), "fallback"
+    if not (r["fallback_url"] and r["fallback_model"]) or r["mode"] == "primary":
+        return build_extractor(cfg), "primary"
+    # mode == "auto" with a configured fallback: probe, then choose.
+    if r["primary_url"] and probe_endpoint(r["primary_url"]):
+        return build_extractor(cfg), "primary"
+    logger.warning("dream primary extractor %s unreachable — using fallback %s",
+                   r["primary_url"], r["fallback_url"])
+    return OpenAICompatExtractor(
+        r["fallback_url"], r["fallback_model"], api_key=api_key,
+        max_tokens=r["max_tokens"], timeout_seconds=r["timeout"],
+    ), "fallback"
+
+
 def build_extractor(cfg) -> DreamExtractor:
     """Pick the extractor from config: an OpenAI-compatible endpoint when a
     base-URL + model are set, else a no-op (no automatic regex writes —

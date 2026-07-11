@@ -51,3 +51,125 @@ def test_resolve_endpoints_bad_mode_falls_back_to_auto(monkeypatch):
     from pseudolife_memory.memory.dream import resolve_endpoints
     monkeypatch.setenv("PSEUDOLIFE_DREAM_EXTRACTOR_MODE", "bogus")
     assert resolve_endpoints(DreamConfig())["mode"] == "auto"
+
+
+# ── probe + builder ───────────────────────────────────────────────────────
+
+class _HealthHandler(http.server.BaseHTTPRequestHandler):
+    health_status = 200   # per-subclass override
+    models_status = 200
+
+    def do_GET(self):  # noqa: N802
+        status = (type(self).health_status if self.path == "/health"
+                  else type(self).models_status if self.path.endswith("/models")
+                  else 404)
+        self.send_response(status)
+        self.send_header("content-length", "2")
+        self.end_headers()
+        self.wfile.write(b"{}")
+
+    def log_message(self, *a):
+        pass
+
+
+@contextlib.contextmanager
+def _health_server(health_status=200, models_status=200):
+    handler = type("H", (_HealthHandler,),
+                   {"health_status": health_status,
+                    "models_status": models_status})
+    srv = http.server.HTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{srv.server_address[1]}/v1"
+    finally:
+        srv.shutdown()
+
+
+def test_probe_health_ok():
+    from pseudolife_memory.memory.dream import probe_endpoint
+    with _health_server() as base:
+        assert probe_endpoint(base) is True
+
+
+def test_probe_health_503_is_down():
+    # A shim whose CLI is logged out answers /health with 503 -> primary down.
+    from pseudolife_memory.memory.dream import probe_endpoint
+    with _health_server(health_status=503) as base:
+        assert probe_endpoint(base) is False
+
+
+def test_probe_404_health_falls_back_to_models():
+    # Plain llama-server: no /health at root, but /v1/models answers.
+    from pseudolife_memory.memory.dream import probe_endpoint
+    with _health_server(health_status=404, models_status=200) as base:
+        assert probe_endpoint(base) is True
+
+
+def test_probe_unreachable_is_down():
+    from pseudolife_memory.memory.dream import probe_endpoint
+    assert probe_endpoint("http://127.0.0.1:9/v1", timeout=0.3) is False
+
+
+def _cfg(base, fb=None, mode="auto"):
+    return DreamConfig(extractor_source="config",
+                       extractor_base_url=base, extractor_model="m",
+                       fallback_base_url=fb, fallback_model="m2",
+                       extractor_mode=mode)
+
+
+def test_builder_no_fallback_skips_probe(monkeypatch):
+    from pseudolife_memory.memory import dream as d
+
+    def _boom(*a, **k):
+        raise AssertionError("probe must not run when fallback is unset")
+    monkeypatch.setattr(d, "probe_endpoint", _boom)
+    ext, which = d.build_extractor_with_fallback(_cfg("http://p:1/v1"))
+    assert which == "primary" and ext.base_url == "http://p:1/v1"
+
+
+def test_builder_auto_primary_up(monkeypatch):
+    from pseudolife_memory.memory import dream as d
+    monkeypatch.setattr(d, "probe_endpoint", lambda *a, **k: True)
+    ext, which = d.build_extractor_with_fallback(
+        _cfg("http://p:1/v1", fb="http://f:2/v1"))
+    assert which == "primary" and ext.base_url == "http://p:1/v1"
+
+
+def test_builder_auto_primary_down(monkeypatch):
+    from pseudolife_memory.memory import dream as d
+    monkeypatch.setattr(d, "probe_endpoint", lambda *a, **k: False)
+    ext, which = d.build_extractor_with_fallback(
+        _cfg("http://p:1/v1", fb="http://f:2/v1"))
+    assert which == "fallback" and ext.base_url == "http://f:2/v1"
+    assert ext.model == "m2"
+
+
+def test_builder_forced_primary_never_probes(monkeypatch):
+    from pseudolife_memory.memory import dream as d
+
+    def _boom(*a, **k):
+        raise AssertionError("probe must not run in forced modes")
+    monkeypatch.setattr(d, "probe_endpoint", _boom)
+    ext, which = d.build_extractor_with_fallback(
+        _cfg("http://p:1/v1", fb="http://f:2/v1", mode="primary"))
+    assert which == "primary" and ext.base_url == "http://p:1/v1"
+
+
+def test_builder_forced_fallback(monkeypatch):
+    from pseudolife_memory.memory import dream as d
+    ext, which = d.build_extractor_with_fallback(
+        _cfg("http://p:1/v1", fb="http://f:2/v1", mode="fallback"))
+    assert which == "fallback" and ext.base_url == "http://f:2/v1"
+
+
+def test_builder_forced_fallback_without_url_raises():
+    from pseudolife_memory.memory.dream import build_extractor_with_fallback
+    with pytest.raises(ValueError, match="fallback"):
+        build_extractor_with_fallback(_cfg("http://p:1/v1", mode="fallback"))
+
+
+def test_builder_unconfigured_is_noop():
+    from pseudolife_memory.memory.dream import (NoOpExtractor,
+                                                build_extractor_with_fallback)
+    ext, which = build_extractor_with_fallback(DreamConfig())
+    assert which == "primary" and isinstance(ext, NoOpExtractor)
