@@ -231,3 +231,16 @@ def test_dream_status_fields_with_fallback(monkeypatch):
         _cfg("http://p:1/v1", fb="http://f:2/v1"), last)
     assert fields["primary_healthy"] is True
     assert fields["last_dream_extractor"] == last
+
+
+# ── console schema entries ────────────────────────────────────────────────
+
+def test_config_io_has_fallback_knobs():
+    from pseudolife_memory.web.config_io import KNOBS
+    paths = {e["path"] for e in KNOBS}
+    assert "memory.dream.extractor_mode" in paths
+    assert "memory.dream.fallback_base_url" in paths
+    assert "memory.dream.fallback_model" in paths
+    mode = next(e for e in KNOBS if e["path"] == "memory.dream.extractor_mode")
+    assert mode["type"] == "enum"
+    assert mode["options"] == ["auto", "primary", "fallback"]
