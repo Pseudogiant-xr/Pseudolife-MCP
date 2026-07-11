@@ -1018,6 +1018,56 @@ def document_search(query: str, top_k: int = 5) -> dict[str, Any]:
     return service.search_documents(query=query, top_k=top_k)
 
 
+def _resolve_session_tier() -> str:
+    """Tier for the CURRENT request: session override → writer map → env
+    default. Writer falls back to the daemon's default id so direct-HTTP
+    clients (no X-PL-Writer header) still match the tier map. Safe outside
+    a request (returns the env default)."""
+    from pseudolife_memory.toolset_tiers import resolve_tier
+    from pseudolife_memory.writer_context import _http_writer_session
+    writer, session = _http_writer_session()
+    return resolve_tier(
+        writer or os.environ.get("PSEUDOLIFE_WRITER_ID"), session,
+        state=_SESSION_TIERS, tier_map=_TIER_MAP, default_tier=_DEFAULT_TIER,
+    )
+
+
+def _wire_transport_tiering() -> None:
+    """Replace the transport tools/list handler with the tier-filtered view
+    and advertise tools.listChanged (the SDK default omits it, verified on
+    mcp 1.27.2). The raw handler bypasses the SDK's caching wrapper — that
+    wrapper CLEARS the tool cache and refills it with whatever the handler
+    returns, which would strip hidden tools of call-time validation. We
+    feed the cache the full registry instead."""
+    import mcp.types as mtypes
+    from mcp.server.lowlevel.server import NotificationOptions
+
+    server = mcp._mcp_server
+
+    async def _filtered_list(_req) -> mtypes.ServerResult:
+        tools = await FastMCP.list_tools(mcp)   # full registry, mcp.types.Tool
+        server._tool_cache.update({t.name: t for t in tools})
+        names = _visible_tool_names(_resolve_session_tier())
+        return mtypes.ServerResult(mtypes.ListToolsResult(
+            tools=[t for t in tools if t.name in names]))
+
+    server.request_handlers[mtypes.ListToolsRequest] = _filtered_list
+
+    _orig = server.create_initialization_options
+
+    def _init_opts(notification_options=None, experimental_capabilities=None):
+        return _orig(
+            notification_options=notification_options
+            or NotificationOptions(tools_changed=True),
+            experimental_capabilities=experimental_capabilities,
+        )
+
+    server.create_initialization_options = _init_opts
+
+
+_wire_transport_tiering()
+
+
 def _flush_on_exit() -> None:
     # Gated, not unconditional: only persist if THIS process mutated state.
     # An idle/read-only subprocess exiting must never clobber a sibling

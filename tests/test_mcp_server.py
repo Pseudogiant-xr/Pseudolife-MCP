@@ -671,3 +671,92 @@ def test_memory_recall_compact_by_default(monkeypatch) -> None:
                                      "verbose": True})
     assert full["entities"][0]["facts"][0]["confidence"] == 0.8
     assert full["edges"][0]["tag"] == "confirmed"
+
+
+# ---------------------------------------------------------------------------
+# Session-scoped tier visibility at the transport (spec 2026-07-11)
+# ---------------------------------------------------------------------------
+
+from types import SimpleNamespace
+
+
+class _FakeReqCtx:
+    """Bind fake HTTP headers into the SDK's request_ctx for one test."""
+    def __init__(self, headers: dict[str, str]):
+        self._headers = headers
+        self._token = None
+    def __enter__(self):
+        from mcp.server.lowlevel.server import request_ctx
+        self._token = request_ctx.set(
+            SimpleNamespace(request=SimpleNamespace(headers=self._headers)))
+        return self
+    def __exit__(self, *exc):
+        from mcp.server.lowlevel.server import request_ctx
+        request_ctx.reset(self._token)
+
+
+async def _transport_list(mod) -> list:
+    import mcp.types as mtypes
+    handler = mod.mcp._mcp_server.request_handlers[mtypes.ListToolsRequest]
+    result = await handler(None)
+    return result.root.tools
+
+
+def _reload_tiered(tmp_path, monkeypatch, **env):
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("PSEUDOLIFE_WRITER_ID", raising=False)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    import importlib
+    import pseudolife_memory.mcp_server as mod
+    importlib.reload(mod)
+    return mod
+
+
+def test_transport_list_filters_by_writer_map(tmp_path: Path, monkeypatch) -> None:
+    mod = _reload_tiered(tmp_path, monkeypatch,
+                         PSEUDOLIFE_MCP_TOOLSET="core",
+                         PSEUDOLIFE_MCP_TIER_MAP="claude-desktop:minimal")
+    with _FakeReqCtx({"x-pl-writer": "claude-desktop", "x-pl-session": "d1"}):
+        names = {t.name for t in asyncio.run(_transport_list(mod))}
+    assert names == mod._visible_tool_names("minimal")
+    # No headers (stdio/tests) -> env default tier
+    with _FakeReqCtx({}):
+        names = {t.name for t in asyncio.run(_transport_list(mod))}
+    assert names == mod._visible_tool_names("core")
+
+
+def test_transport_list_env_writer_fallback(tmp_path: Path, monkeypatch) -> None:
+    """Direct-HTTP Claude Code sends no X-PL-Writer; the daemon's default
+    writer id (PSEUDOLIFE_WRITER_ID) feeds the tier map instead."""
+    mod = _reload_tiered(tmp_path, monkeypatch,
+                         PSEUDOLIFE_MCP_TOOLSET="full",
+                         PSEUDOLIFE_MCP_TIER_MAP="claude-code:core",
+                         PSEUDOLIFE_WRITER_ID="claude-code")
+    with _FakeReqCtx({"x-pl-session": "c1"}):
+        names = {t.name for t in asyncio.run(_transport_list(mod))}
+    assert names == mod._visible_tool_names("core")
+
+
+def test_hidden_tools_stay_callable(tmp_path: Path, monkeypatch) -> None:
+    """Visibility is not a call gate: a full-tier tool dispatches fine in a
+    minimal-default deployment."""
+    mod = _reload_tiered(tmp_path, monkeypatch, PSEUDOLIFE_MCP_TOOLSET="minimal")
+    _invoke("memory_store", {"text": "hidden-call probe", "source": "t"})
+    out = _invoke("memory_recent", {"n": 1})       # memory_recent is full-tier
+    assert out["count"] == 1
+
+
+def test_initialization_advertises_list_changed(tmp_path: Path, monkeypatch) -> None:
+    mod = _reload_tiered(tmp_path, monkeypatch)
+    opts = mod.mcp._mcp_server.create_initialization_options()
+    assert opts.capabilities.tools.listChanged is True
+
+
+def test_tool_cache_prefilled_with_full_set(tmp_path: Path, monkeypatch) -> None:
+    """Hidden tools keep call-time input validation: the SDK tool cache is
+    fed the FULL registry, not the filtered view."""
+    mod = _reload_tiered(tmp_path, monkeypatch, PSEUDOLIFE_MCP_TOOLSET="minimal")
+    with _FakeReqCtx({"x-pl-session": "m1"}):
+        asyncio.run(_transport_list(mod))
+    assert set(mod.mcp._mcp_server._tool_cache) == set(mod._TOOL_TIERS)
