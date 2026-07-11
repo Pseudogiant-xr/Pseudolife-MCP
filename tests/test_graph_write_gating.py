@@ -316,6 +316,32 @@ def test_dream_cross_project_edge_becomes_proposal(svc):
                for p in svc._storage.pending_proposals())
 
 
+def test_cross_project_untyped_relation_dropped(svc):
+    # 2026-07-11: untyped (related-to fallback) cross-project pairs carry no
+    # information — 4/4 such proposals were hand-rejected. Only a TYPED
+    # relation across disjoint projects still earns a review proposal.
+    svc.stats()
+    with svc._lock:
+        svc._resolve_or_create_entity("alpha-tool")
+        svc._resolve_or_create_entity("beta-tool")
+    svc.graph_assign_scope("alpha-tool", "proj-a")
+    svc.graph_assign_scope("beta-tool", "proj-b")
+
+    def _cross_count():
+        return svc._storage.conn.execute(
+            "SELECT count(*) FROM edge_proposals "
+            "WHERE source = 'dream-cross-project'").fetchone()[0]
+
+    # untyped fallback across disjoint scopes: dropped, no proposal
+    n = svc._link_dream_relations([
+        {"src": "alpha-tool", "relation": "correlates-with", "dst": "beta-tool"}])
+    assert n == 0 and _cross_count() == 0
+    # a TYPED relation across disjoint scopes still files a proposal
+    n2 = svc._link_dream_relations([
+        {"src": "alpha-tool", "relation": "uses", "dst": "beta-tool"}])
+    assert n2 == 0 and _cross_count() == 1
+
+
 def test_dream_same_project_edge_still_written(svc):
     svc.graph_relate("xproj-c-thing", "uses", "xproj-c-helper")
     svc.graph_assign_scope("xproj-c-thing", "proj-c")
