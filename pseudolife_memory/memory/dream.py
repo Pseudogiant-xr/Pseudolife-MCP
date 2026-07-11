@@ -406,6 +406,61 @@ class OpenAICompatExtractor:
         return out
 
 
+_EXTRACTOR_MODES = ("auto", "primary", "fallback")
+
+
+def resolve_endpoints(cfg) -> dict:
+    """Resolve primary + fallback endpoint settings honouring the same
+    env-vs-config ownership as ``build_extractor``: ``extractor_source ==
+    "env"`` (the ops contract) lets PSEUDOLIFE_DREAM_* env vars override the
+    dataclass; ``"config"`` uses the config values and ignores env. An
+    unknown mode degrades to "auto" (never crash the sweep on a typo'd env
+    var). Returns {mode, primary_url, primary_model, fallback_url,
+    fallback_model, max_tokens, timeout}."""
+    import os
+
+    def _env_num(name, fallback, cast):
+        raw = os.environ.get(name)
+        if not raw:
+            return fallback
+        try:
+            return cast(raw)
+        except (TypeError, ValueError):
+            return fallback
+
+    from_config = getattr(cfg, "extractor_source", "env") == "config"
+    if from_config:
+        out = {
+            "primary_url": cfg.extractor_base_url,
+            "primary_model": cfg.extractor_model,
+            "fallback_url": cfg.fallback_base_url,
+            "fallback_model": cfg.fallback_model,
+            "mode": cfg.extractor_mode,
+            "max_tokens": cfg.extractor_max_tokens,
+            "timeout": cfg.extractor_timeout_seconds,
+        }
+    else:
+        out = {
+            "primary_url": (os.environ.get("PSEUDOLIFE_DREAM_BASE_URL")
+                            or cfg.extractor_base_url),
+            "primary_model": (os.environ.get("PSEUDOLIFE_DREAM_MODEL")
+                              or cfg.extractor_model),
+            "fallback_url": (os.environ.get("PSEUDOLIFE_DREAM_FALLBACK_BASE_URL")
+                             or cfg.fallback_base_url),
+            "fallback_model": (os.environ.get("PSEUDOLIFE_DREAM_FALLBACK_MODEL")
+                               or cfg.fallback_model),
+            "mode": (os.environ.get("PSEUDOLIFE_DREAM_EXTRACTOR_MODE")
+                     or cfg.extractor_mode),
+            "max_tokens": _env_num("PSEUDOLIFE_DREAM_MAX_TOKENS",
+                                   cfg.extractor_max_tokens, int),
+            "timeout": _env_num("PSEUDOLIFE_DREAM_TIMEOUT_SECONDS",
+                                cfg.extractor_timeout_seconds, float),
+        }
+    if out["mode"] not in _EXTRACTOR_MODES:
+        out["mode"] = "auto"
+    return out
+
+
 def build_extractor(cfg) -> DreamExtractor:
     """Pick the extractor from config: an OpenAI-compatible endpoint when a
     base-URL + model are set, else a no-op (no automatic regex writes —

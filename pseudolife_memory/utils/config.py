@@ -297,6 +297,17 @@ class DreamConfig:
     # the dream is a background sweep (600s interval) so latency is irrelevant.
     # Override per-deploy with ``PSEUDOLIFE_DREAM_TIMEOUT_SECONDS``.
     extractor_timeout_seconds: float = 240.0
+    # Primary/fallback extractor selection (2026-07-11 sonnet-sidecar-cutover
+    # spec). fallback_base_url unset => single-extractor behavior identical
+    # to before (no probe, no selection). extractor_mode: "auto" probes the
+    # primary and falls back; "primary" never falls back (outages hold);
+    # "fallback" skips the primary entirely (sovereign-only override).
+    # Env: PSEUDOLIFE_DREAM_FALLBACK_BASE_URL / _FALLBACK_MODEL /
+    # _EXTRACTOR_MODE (honoured when extractor_source == "env").
+    # Timeout/max_tokens are shared with the primary — no fallback copies.
+    fallback_base_url: str | None = None
+    fallback_model: str | None = None
+    extractor_mode: str = "auto"
     # GAM #2 graph-from-text: the dream also extracts (src,relation,dst) triples
     # into the graph (separate extract_relations call — the bench winner). Edges
     # are dream-inferred, so a modest confidence below explicit graph_relate (0.8)
