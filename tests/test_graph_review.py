@@ -205,3 +205,20 @@ def test_near_duplicate_names_respects_dismissed_and_threshold():
     assert near_duplicate_names("cortex console", existing) == []
     # disabled
     assert near_duplicate_names("postgres", existing, min_jaccard=0) == []
+
+
+def test_near_duplicate_names_blocks_variant_conflicts():
+    from pseudolife_memory.memory.graph_review import near_duplicate_names
+    existing = [{"id": 7, "canonical": "gemma-4-e2b-it-qat-ud-q4-k-xl",
+                 "display": "gemma-4-E2B-it-qat-UD-Q4_K_XL", "aliases": []}]
+    hits = near_duplicate_names("gemma-4-E4B-it-qat-UD-Q4_K_XL", existing,
+                                min_jaccard=0.3)
+    assert hits == []
+
+
+def test_near_duplicate_names_still_matches_same_variant():
+    from pseudolife_memory.memory.graph_review import near_duplicate_names
+    existing = [{"id": 7, "canonical": "ops-update-ps1",
+                 "display": "ops/update.ps1", "aliases": []}]
+    hits = near_duplicate_names("update.ps1", existing, min_jaccard=0.3)
+    assert [h["entity_id"] for h in hits] == [7]
