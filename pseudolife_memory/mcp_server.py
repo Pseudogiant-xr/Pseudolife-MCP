@@ -58,7 +58,7 @@ from typing import Any, Literal
 os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
 
 from anyio import to_thread  # noqa: E402
-from mcp.server.fastmcp import FastMCP  # noqa: E402
+from mcp.server.fastmcp import Context, FastMCP  # noqa: E402
 
 from pseudolife_memory.service import MemoryService  # noqa: E402
 
@@ -365,6 +365,72 @@ def memory_stats() -> dict[str, Any]:
     retrieval feels off.
     """
     return service.stats()
+
+
+_TIER_ADDS = {
+    "core": "graph + recall, world facts, lessons, documents, stats, "
+            "episodes, memory_get/fact_resolve",
+    "full": "supersede/forget/history/reinforce, recent, dream + "
+            "graph-review, aliases, consolidation, relation-define",
+}
+
+
+async def _notify_list_changed(ctx: Context) -> bool:
+    """Best-effort tools/list_changed. False when there is no live
+    transport session (tests, embedded stdio) — the memory_toolset result
+    names the newly visible tools, and calls are ungated regardless."""
+    try:
+        await ctx.session.send_tool_list_changed()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+async def memory_toolset(
+    action: Literal["expand", "collapse", "status"],
+    ctx: Context,
+) -> dict[str, Any]:
+    """Adjust THIS session's visible toolset, one tier at a time
+    (minimal → core → full; session-scoped, free, instant). Core adds
+    graph/recall, world facts, lessons, documents; full adds
+    supersede/forget/history, dream and graph-review admin. ``status``
+    reports the ladder. Hidden tools remain callable by exact name.
+    """
+    from pseudolife_memory.toolset_tiers import TIERS, step
+    from pseudolife_memory.writer_context import _http_writer_session
+
+    writer, session = _http_writer_session()
+    default_tier = (_TIER_MAP.get((writer or os.environ.get(
+        "PSEUDOLIFE_WRITER_ID") or "").strip().lower()) or _DEFAULT_TIER)
+    current = _resolve_session_tier()
+
+    if action == "status":
+        return {"current": current, "default": default_tier,
+                "ladder": list(TIERS), "adds": _TIER_ADDS}
+
+    new = step(current, +1 if action == "expand" else -1,
+               floor="minimal" if action == "expand" else default_tier)
+    if new == current:
+        return {"changed": False, "current": current,
+                "reason": ("already at full" if action == "expand"
+                           else f"already at this session's floor ({default_tier})")}
+
+    _SESSION_TIERS.set(session, new)
+    before, after = _visible_tool_names(current), _visible_tool_names(new)
+    out: dict[str, Any] = {
+        "changed": True, "current": new, "previous": current,
+        "visible_tools_added": sorted(after - before),
+        "visible_tools_removed": sorted(before - after),
+    }
+    out["list_changed_sent"] = await _notify_list_changed(ctx)
+    return out
+
+
+# Native async registration: the handler must touch the transport session
+# (send_tool_list_changed), so it skips the _async_offload thread hop — its
+# body is dict ops only and cannot block the event loop.
+_TOOL_TIERS["memory_toolset"] = "minimal"
+mcp.tool()(memory_toolset)
 
 
 # core memory_fact_get returns source_entries ids —

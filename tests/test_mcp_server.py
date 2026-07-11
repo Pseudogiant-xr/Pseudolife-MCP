@@ -56,6 +56,7 @@ def test_all_tools_registered() -> None:
         "memory_recent",
         "memory_supersede",
         "memory_stats",
+        "memory_toolset",
         "document_ingest",
         "document_search",
         # Episodes + consolidation.
@@ -171,9 +172,8 @@ def test_get_neighbors_tool_is_gone() -> None:
 
 _EXPECTED_MINIMAL = sorted([
     # The 7-tool eager surface for minimal-tier clients (Claude Desktop).
-    # memory_toolset joins in the gate-tool task; until then 6.
     "memory_store", "memory_search", "memory_fact_get", "memory_fact_set",
-    "memory_outcome", "memory_session_title",
+    "memory_outcome", "memory_session_title", "memory_toolset",
 ])
 
 _EXPECTED_CORE = sorted(_EXPECTED_MINIMAL + [
@@ -760,3 +760,72 @@ def test_tool_cache_prefilled_with_full_set(tmp_path: Path, monkeypatch) -> None
     with _FakeReqCtx({"x-pl-session": "m1"}):
         asyncio.run(_transport_list(mod))
     assert set(mod.mcp._mcp_server._tool_cache) == set(mod._TOOL_TIERS)
+
+
+def test_memory_toolset_ladder_and_status(tmp_path: Path, monkeypatch) -> None:
+    mod = _reload_tiered(tmp_path, monkeypatch,
+                         PSEUDOLIFE_MCP_TOOLSET="core",
+                         PSEUDOLIFE_MCP_TIER_MAP="claude-desktop:minimal")
+    with _FakeReqCtx({"x-pl-writer": "claude-desktop", "x-pl-session": "lad1"}):
+        st = _invoke("memory_toolset", {"action": "status"})
+        assert st["current"] == "minimal" and st["default"] == "minimal"
+        assert st["ladder"] == ["minimal", "core", "full"]
+        assert set(st["adds"]) == {"core", "full"}
+
+        up = _invoke("memory_toolset", {"action": "expand"})
+        assert up["changed"] is True and up["current"] == "core"
+        assert "memory_recall" in up["visible_tools_added"]
+        assert up["list_changed_sent"] is False   # no live transport session here
+
+        up2 = _invoke("memory_toolset", {"action": "expand"})
+        assert up2["current"] == "full"
+        top = _invoke("memory_toolset", {"action": "expand"})
+        assert top["changed"] is False            # already at the top
+
+        down = _invoke("memory_toolset", {"action": "collapse"})
+        assert down["current"] == "core"
+        down2 = _invoke("memory_toolset", {"action": "collapse"})
+        assert down2["current"] == "minimal"
+        floor = _invoke("memory_toolset", {"action": "collapse"})
+        assert floor["changed"] is False          # floored at the session default
+
+        # And the transport list follows the override
+        names = {t.name for t in asyncio.run(_transport_list(mod))}
+        assert names == mod._visible_tool_names("minimal")
+
+
+def test_memory_toolset_expansion_is_session_scoped(tmp_path: Path, monkeypatch) -> None:
+    mod = _reload_tiered(tmp_path, monkeypatch,
+                         PSEUDOLIFE_MCP_TOOLSET="minimal")
+    with _FakeReqCtx({"x-pl-session": "sA"}):
+        _invoke("memory_toolset", {"action": "expand"})
+    with _FakeReqCtx({"x-pl-session": "sA"}):
+        names = {t.name for t in asyncio.run(_transport_list(mod))}
+    assert names == mod._visible_tool_names("core")
+    with _FakeReqCtx({"x-pl-session": "sB"}):   # untouched session stays minimal
+        names_b = {t.name for t in asyncio.run(_transport_list(mod))}
+    assert names_b == mod._visible_tool_names("minimal")
+
+
+def test_memory_toolset_is_minimal_tier_and_registered() -> None:
+    from pseudolife_memory import mcp_server as mod
+    assert mod._TOOL_TIERS["memory_toolset"] == "minimal"
+    assert "memory_toolset" in {t.name for t in asyncio.run(mod.mcp.list_tools())}
+
+
+def test_list_changed_attempted_on_change_not_on_noop(tmp_path: Path, monkeypatch) -> None:
+    """Spec test item 4: the notification fires on a tier change and is NOT
+    attempted on a no-op (expand at full / collapse at floor)."""
+    mod = _reload_tiered(tmp_path, monkeypatch, PSEUDOLIFE_MCP_TOOLSET="core")
+    calls = []
+
+    async def _spy(ctx):
+        calls.append(True)
+        return True
+
+    monkeypatch.setattr(mod, "_notify_list_changed", _spy)
+    with _FakeReqCtx({"x-pl-session": "n1"}):
+        out = _invoke("memory_toolset", {"action": "expand"})   # core -> full
+        assert out["changed"] is True and calls == [True]
+        noop = _invoke("memory_toolset", {"action": "expand"})  # already full
+        assert noop["changed"] is False and calls == [True]     # no second send
