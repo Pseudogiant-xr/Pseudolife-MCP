@@ -944,7 +944,37 @@ class ContinuumMemorySystem:
             tail = combined[top_n:]
             head_texts = [e.text for e, _, _ in head]
             head_orig_scores = [float(s) for _, s, _ in head]
-            ce_scores = self._reranker.rerank(query_text, head_texts)
+            # Margin gate: when the two best bi-encoder scores are already
+            # decisively separated, the cross-encoder can only reshuffle a
+            # ranking that wasn't in doubt — skip the ~200ms pass. The head
+            # is neural + reference CONCATENATED (not globally sorted), so
+            # the gap must be measured on sorted scores. A single-candidate
+            # head is trivially unambiguous. skip_margin=0 disables the gate.
+            skip_margin = (
+                float(getattr(self.config.reranker, "skip_margin", 0.0))
+                if hasattr(self.config, "reranker")
+                else 0.0
+            )
+            skip_for_margin = False
+            if skip_margin > 0.0:
+                ranked = sorted(head_orig_scores, reverse=True)
+                margin = (
+                    ranked[0] - ranked[1] if len(ranked) >= 2 else float("inf")
+                )
+                skip_for_margin = margin >= skip_margin
+            if skip_for_margin:
+                ce_scores: list[float] = []
+                if _trace is not None:
+                    _trace["reranker"] = {
+                        "fired": False,
+                        "reason": "unambiguous_margin",
+                        "margin": (
+                            round(margin, 4) if margin != float("inf") else None
+                        ),
+                        "skip_margin": skip_margin,
+                    }
+            else:
+                ce_scores = self._reranker.rerank(query_text, head_texts)
             if ce_scores:
                 fused = self._reranker.fuse(head_orig_scores, ce_scores)
                 reranked = [
@@ -977,7 +1007,7 @@ class ContinuumMemorySystem:
                             )
                         ],
                     }
-            elif _trace is not None:
+            elif _trace is not None and not skip_for_margin:
                 _trace["reranker"] = {
                     "fired": False,
                     "reason": "rerank_failed_or_unavailable",

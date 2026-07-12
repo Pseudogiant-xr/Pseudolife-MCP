@@ -6,6 +6,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-12 — embedding backend + cache, reranker margin gate)
+- **ONNX embedding backend** (`embedding.backend: onnx`, new `[onnx]` extra =
+  `optimum[onnxruntime]`) — the same MiniLM through onnxruntime at ~3x the
+  single-text encode speed on CPU (5.0ms → 1.6ms measured) with **bit-identical
+  embeddings** (fp32 cosine vs torch = 1.00000; the qint8 variants were
+  rejected for ~0.008 cosine drift). Fail-soft: any load failure falls back to
+  torch with a warning. Under `HF_HUB_OFFLINE=1` (the daemon's runtime
+  contract) the pipeline resolves the model to its local HF snapshot first —
+  optimum otherwise calls the hub tree API even when fully cached. The MCP
+  defaults overlay flips `backend` to `onnx` whenever optimum is importable
+  (the daemon image now bakes it + the ONNX weights); plain pip installs stay
+  on torch. `embedding.backend` in config.yaml overrides either way.
+- **Embedding LRU cache** (`embedding.cache_size`, default 1024, 0 disables) —
+  keyed on `(text, normalize)`; repeat encodes of the same string (query text
+  re-embedded across search + slot ops, dedup keys, warmup probes) skip the
+  model forward entirely. Returned tensors are always fresh copies, so caller
+  mutation can't poison the cache. Hit/miss counters on the pipeline.
+- **Reranker margin gate** (`reranker.skip_margin`, default 0.0 = off) — when
+  set, the cross-encoder pass (~200ms) is skipped iff the gap between the two
+  best bi-encoder-adjusted scores is >= the margin (measured on *sorted* head
+  scores — the head is neural + reference concatenated, not globally sorted);
+  a one-candidate head is trivially unambiguous. Skips are visible in the
+  retrieval trace as `reranker.reason = "unambiguous_margin"`. Opt-in: no
+  deployment default until a threshold is tuned against real traffic.
+
 ### Changed (2026-07-12 — retrieval + graph lookup performance)
 - **Slot-query pool (Pool 1.5) inverted index** — `memory_search` no longer
   scans every band entry per `query_text` query; slot tokens live in a

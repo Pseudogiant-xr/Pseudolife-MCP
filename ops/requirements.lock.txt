@@ -45,6 +45,7 @@ narwhals==2.22.1
 networkx==3.6.1
 numpy==2.5.0
 oauthlib==3.3.1
+onnx==1.22.0
 onnxruntime==1.27.0
 opentelemetry-api==1.42.1
 opentelemetry-exporter-otlp-proto-common==1.42.1
@@ -52,6 +53,8 @@ opentelemetry-exporter-otlp-proto-grpc==1.42.1
 opentelemetry-proto==1.42.1
 opentelemetry-sdk==1.42.1
 opentelemetry-semantic-conventions==0.63b1
+optimum==2.1.0
+optimum-onnx==0.1.0
 orjson==3.11.9
 overrides==7.7.0
 packaging==26.2

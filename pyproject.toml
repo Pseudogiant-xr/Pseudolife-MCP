@@ -50,6 +50,15 @@ rerank = [
 pdf = [
     "pypdfium2>=4",
 ]
+# ONNX embedding backend — ~3x faster single-text encode on CPU with
+# bit-identical embeddings. Off by default; set ``embedding.backend =
+# "onnx"`` in config to enable (falls back to torch when unavailable).
+# sentence-transformers' native ONNX backend delegates to optimum;
+# onnxruntime itself is already a transitive dep (ChromaDB).
+onnx = [
+    "sentence-transformers>=3.2",
+    "optimum[onnxruntime]>=1.23",
+]
 
 [project.scripts]
 pseudolife-mcp = "pseudolife_memory.cli:main"

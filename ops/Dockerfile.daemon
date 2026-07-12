@@ -45,15 +45,19 @@ RUN pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.12.0"
 COPY pyproject.toml README.md /app/
 COPY ops/requirements.lock.txt /app/requirements.lock.txt
 COPY pseudolife_memory /app/pseudolife_memory
-RUN pip install -c /app/requirements.lock.txt /app \
+RUN pip install -c /app/requirements.lock.txt "/app[onnx]" \
     && pip install -U "setuptools==78.1.1"
 
 # 3) Bake the embedding model (~90 MB) into the image so cold start needs
 #    no network — kills the HF HEAD-check flakiness and the slow first run.
 #    The image sets HF_HUB_OFFLINE=1 for runtime; override to 0 for just this
-#    step so the one-time download is allowed at build time.
+#    step so the one-time download is allowed at build time. Loading with
+#    backend="onnx" caches onnx/model.onnx (+90 MB) on top of the torch
+#    weights — the runtime offline load resolves both from this cache.
 RUN HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 \
-    python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+    python -c "from sentence_transformers import SentenceTransformer; \
+SentenceTransformer('all-MiniLM-L6-v2'); \
+SentenceTransformer('all-MiniLM-L6-v2', backend='onnx', model_kwargs={'file_name': 'onnx/model.onnx'})"
 
 # Runtime data (neural weights, ChromaDB, cortex snapshot) lives here on a
 # mounted volume so it survives container recreation.

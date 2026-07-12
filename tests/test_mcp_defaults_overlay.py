@@ -38,3 +38,35 @@ def test_mcp_defaults_apply_when_no_config_file(tmp_path):
     assert svc.config.memory.surprise_threshold == 0.0
     assert svc.config.memory.traces.retention_boost == 1.0
     assert svc.config.memory.meta_filter.enabled is False
+
+
+def test_onnx_backend_defaults_on_when_optimum_installed(tmp_path, monkeypatch):
+    """The daemon image ships optimum[onnxruntime]; with it installed the
+    MCP default flips the embedder to the ~3x-faster ONNX backend
+    (bit-identical embeddings, fail-soft back to torch)."""
+    import pseudolife_memory.service as service_mod
+
+    monkeypatch.setattr(service_mod, "_onnx_embedding_available", lambda: True)
+    svc = MemoryService(data_dir=tmp_path)
+    assert svc.config.embedding.backend == "onnx"
+
+
+def test_onnx_backend_stays_torch_without_optimum(tmp_path, monkeypatch):
+    """A plain pip install (no [onnx] extra) must stay on torch — never
+    default into a backend that can only warn-and-fall-back."""
+    import pseudolife_memory.service as service_mod
+
+    monkeypatch.setattr(service_mod, "_onnx_embedding_available", lambda: False)
+    svc = MemoryService(data_dir=tmp_path)
+    assert svc.config.embedding.backend == "torch"
+
+
+def test_user_backend_choice_survives_mcp_defaults(tmp_path, monkeypatch):
+    import pseudolife_memory.service as service_mod
+
+    monkeypatch.setattr(service_mod, "_onnx_embedding_available", lambda: True)
+    (tmp_path / "config.yaml").write_text(
+        "embedding:\n  backend: torch\n", encoding="utf-8",
+    )
+    svc = MemoryService(data_dir=tmp_path)
+    assert svc.config.embedding.backend == "torch"

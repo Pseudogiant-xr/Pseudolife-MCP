@@ -300,6 +300,13 @@ def _origin_from_source(source: str | None) -> str | None:
     return _SOURCE_ORIGIN.get((source or "").strip().lower())
 
 
+def _onnx_embedding_available() -> bool:
+    """True when the optional ``[onnx]`` extra (optimum) is installed."""
+    import importlib.util  # noqa: PLC0415
+
+    return importlib.util.find_spec("optimum") is not None
+
+
 class MemoryService:
     """Thin orchestration over CMS + embedder + reference bank + contrastive.
 
@@ -453,6 +460,13 @@ class MemoryService:
         # library default stays 0.0 (no-op) — this is a deployment-build choice.
         if absent("memory.traces.retention_boost"):
             config.memory.traces.retention_boost = 1.0
+        # ONNX embedder whenever the optional extra is installed (the
+        # daemon image bakes it): ~3x faster single-text encode on CPU
+        # with bit-identical embeddings (fp32 ONNX). Gated on the import
+        # so a plain pip install stays on torch and never logs the
+        # warn-and-fall-back path.
+        if absent("embedding.backend") and _onnx_embedding_available():
+            config.embedding.backend = "onnx"
 
     def _ensure_init(self) -> None:
         if self._cms is not None:

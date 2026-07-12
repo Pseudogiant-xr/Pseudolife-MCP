@@ -1294,7 +1294,8 @@ python -m pseudolife_memory.web.devserver   # http://127.0.0.1:8770/ui/
 | Episodes + tags | Session episodes daemon-owned, keyed by stable per-session id (`mcp-session-id` / `X-PL-Session`); lazy-open + idle reaper + prune-empty; nested sub-episodes (`memory_episode_*`, schema v15) with subtree-expanded recall; multi-valued `tags=[...]` |
 | Session briefing | SessionStart hook injects unsure-graph + lessons + verified world facts + last-session recap (`pseudolife-mcp briefing`) |
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
-| Cross-encoder reranker | Optional (`rerank=True` per call, ~80 MB) |
+| Cross-encoder reranker | Optional (`rerank=True` per call, ~80 MB; `reranker.skip_margin` skips the pass when the top-2 bi-encoder gap is decisive) |
+| ONNX embedding backend | Optional (`pip install .[onnx]`, ~90 MB extra weights) — ~3x faster CPU encode, bit-identical embeddings; auto-enabled when installed, `embedding.backend` overrides |
 | BM25 hybrid pool | Optional (`bm25=True` per call, stdlib only) |
 | NLI contradiction scorer | Optional (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, graph visualiser, search/trace, config editor (read-mostly, token-gated like `/mcp`) |

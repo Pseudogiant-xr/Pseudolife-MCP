@@ -14,6 +14,21 @@ class EmbeddingConfig:
     model_name: str = "all-MiniLM-L6-v2"
     device: str = "cuda"
     batch_size: int = 64
+    # "torch" (default) or "onnx" — onnxruntime via sentence-transformers'
+    # native backend (needs optimum[onnxruntime]). ~3x faster single-text
+    # encode on CPU with bit-identical embeddings; falls back to torch with
+    # a warning when the backend can't load.
+    backend: str = "torch"
+    # Which ONNX file inside the model repo to load. Explicit because the
+    # MiniLM repo ships nine variants and sentence-transformers otherwise
+    # warns and picks one itself. fp32 keeps parity exact; the qint8
+    # variants trade ~0.008 cosine drift for ~25% more speed.
+    onnx_file_name: str = "onnx/model.onnx"
+    # LRU cache over (text, normalize) -> embedding. The daemon embeds the
+    # same strings repeatedly (query text for search + slot ops, dedup
+    # keys, warmup probes); repeats skip the model forward entirely.
+    # 0 disables. ~1.5 KB per entry at dim 384.
+    cache_size: int = 1024
 
 
 @dataclass
@@ -203,6 +218,17 @@ class RerankerConfig:
     model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     top_n: int = 20
     fusion_weight: float = 0.7
+    # Skip the cross-encoder pass when the gap between the two best
+    # bi-encoder-adjusted scores is >= this margin — a decisively
+    # separated head can only be reshuffled, not fixed, by reranking.
+    # 0.0 (default) disables the gate: the reranker fires whenever
+    # enabled, exactly the pre-gate behavior.
+    # CAUTION: a skip returns raw bi-encoder scores, which sit lower than
+    # fused (0.7*sigmoid(ce)) scores for strong matches — don't combine a
+    # nonzero margin with a search_confidence_floor tuned to the fused
+    # scale, or decisive winners just under the floor will spuriously
+    # abstain.
+    skip_margin: float = 0.0
 
 
 @dataclass
