@@ -18,6 +18,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   defaults overlay flips `backend` to `onnx` whenever optimum is importable
   (the daemon image now bakes it + the ONNX weights); plain pip installs stay
   on torch. `embedding.backend` in config.yaml overrides either way.
+  Lock note: `optimum-onnx` (all releases) caps `transformers<4.58`, so the
+  image pins step back to `transformers==4.57.6` + `huggingface_hub==0.36.2`
+  — the exact stack the full suite (1022 tests) validated locally. Revisit
+  when optimum-onnx supports transformers 5.x.
 - **Embedding LRU cache** (`embedding.cache_size`, default 1024, 0 disables) —
   keyed on `(text, normalize)`; repeat encodes of the same string (query text
   re-embedded across search + slot ops, dedup keys, warmup probes) skip the
