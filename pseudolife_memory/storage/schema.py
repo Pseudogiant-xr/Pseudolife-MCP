@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 21
+SCHEMA_META_VERSION = 22
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -93,6 +93,11 @@ CREATE TABLE IF NOT EXISTS edges (
   superseded_at DOUBLE PRECISION,
   UNIQUE (src_id, relation, dst_id)
 );
+-- v22: the UNIQUE(src_id, relation, dst_id) constraint index covers
+-- src_id-leading lookups, but dst_id-only lookups (merge_entity's
+-- dst-side dedup/repoint, any "what points to X" traversal) had no
+-- supporting index and fell back to a sequential scan.
+CREATE INDEX IF NOT EXISTS edges_dst_idx ON edges (dst_id);
 
 CREATE TABLE IF NOT EXISTS edge_proposals (
   id BIGSERIAL PRIMARY KEY,

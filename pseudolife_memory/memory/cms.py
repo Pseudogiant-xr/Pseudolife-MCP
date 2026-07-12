@@ -29,6 +29,7 @@ outside the MIRAS spectrum (no gradient updates, documents not memories).
 from __future__ import annotations
 
 import logging
+import re
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -81,6 +82,38 @@ logger = logging.getLogger(__name__)
 #                 state. Pre-v6 entries default to ``None`` / ``[]`` on
 #                 load; pre-v6 ``episodes`` block defaults to empty.
 SCHEMA_VERSION = 6
+
+# Shared tokenizer for the slot-query pool (Pool 1.5): the query side and
+# the entry-slot-token index below must use the identical rule, or the two
+# silently drift apart and the index stops finding matches the old
+# full-scan version would have found.
+_SLOT_TOKEN_STOP_WORDS = {
+    "the", "and", "you", "your", "for", "have", "had", "has",
+    "with", "from", "this", "that", "what", "where", "when",
+    "who", "why", "how", "are", "was", "were", "been", "being",
+    "into", "onto", "out", "did", "does", "doing", "say", "said",
+    "can", "will", "would", "should", "could", "may", "might",
+    "any", "some", "all", "not", "yes", "tell", "tells", "told",
+}
+_SLOT_TOKEN_RE = re.compile(r"[a-z']{3,}")
+
+
+def _content_tokens(text: str) -> set[str]:
+    """Lowercase content-word tokens (≥3 chars, stop-words dropped)."""
+    return {
+        t for t in _SLOT_TOKEN_RE.findall(text.lower())
+        if t not in _SLOT_TOKEN_STOP_WORDS
+    }
+
+
+def _entry_slot_tokens(entry: "MemoryEntry") -> set[str]:
+    """Content tokens across an entry's slot (entity, value) pairs —
+    attribute is skipped (usually a structural label like "type"/"breed",
+    less informative for query matching)."""
+    tokens: set[str] = set()
+    for s_entity, _s_attr, s_value, _polarity in entry.slots:
+        tokens |= _content_tokens(f"{s_entity} {s_value}")
+    return tokens
 
 
 class ContinuumMemorySystem:
@@ -198,6 +231,15 @@ class ContinuumMemorySystem:
         # and the band MLPs restarted from fresh init. Entries are NOT
         # affected (they live in storage); surfaced via stats().
         self.weights_reset: bool = False
+
+        # Slot-token inverted index (Pool 1.5 candidate gathering,
+        # 2026-07-12 perf fix): token -> entries whose slots contain it,
+        # across every band. Built lazily on first query and rebuilt
+        # whenever a write dirties it, instead of scanning every entry in
+        # every band on every ``query_text`` search — see
+        # :meth:`_rebuild_slot_index` / :meth:`_slot_query_pool`.
+        self._slot_token_index: dict[str, list[MemoryEntry]] = {}
+        self._slot_index_dirty: bool = True
 
     @property
     def total_memories(self) -> int:
@@ -321,6 +363,7 @@ class ContinuumMemorySystem:
                 (s.entity, s.attribute, s.value, s.polarity)
                 for s in slots
             ]
+            self._slot_index_dirty = True
             # Update the rolling coreference anchor — last text's first
             # named entity (if any) becomes the default referent for the
             # next message's pronouns.
@@ -957,6 +1000,23 @@ class ContinuumMemorySystem:
     # Slot fact-sheet (v0.7+)
     # ------------------------------------------------------------------
 
+    def _rebuild_slot_index(self) -> None:
+        """Rebuild ``_slot_token_index`` (token -> entries) from every
+        band's entries — the same lazy-dirty-flag idiom
+        :class:`~pseudolife_memory.memory.miras.band.MIRASBand` already
+        uses for its cosine pattern matrix. Runs once per batch of writes
+        (:meth:`_slot_query_pool` calls this only when
+        ``_slot_index_dirty``), not once per query."""
+        index: dict[str, list[MemoryEntry]] = {}
+        for band in self.bands:
+            for entry in band.entries:
+                if not entry.slots:
+                    continue
+                for tok in _entry_slot_tokens(entry):
+                    index.setdefault(tok, []).append(entry)
+        self._slot_token_index = index
+        self._slot_index_dirty = False
+
     def _slot_query_pool(
         self,
         query_text: str,
@@ -970,12 +1030,12 @@ class ContinuumMemorySystem:
     ) -> list[tuple["MemoryEntry", float, float]]:
         """Pull entries via slot-token overlap with the query.
 
-        Walks every band's entries, looks at each entry's
-        ``(entity, attribute, value, polarity)`` slot triples, and
-        scores the entry by how much of the query text's content
-        tokens overlap with slot entities or values. Returns the
-        top-k hits, score-sorted, with the same ``(entry, score,
-        surprise)`` tuple shape the neural pool emits.
+        Looks the query's content tokens up in the slot-token inverted
+        index (:meth:`_rebuild_slot_index`) instead of scanning every
+        entry in every band, then scores only the entries that share at
+        least one token with the query. Returns the top-k hits,
+        score-sorted, with the same ``(entry, score, surprise)`` tuple
+        shape the neural pool emits.
 
         Designed to be a *belt and suspenders* second channel: the
         neural pool catches paraphrastic / fuzzy matches, the slot
@@ -983,78 +1043,60 @@ class ContinuumMemorySystem:
         attribute mentions). When both pools hit the same entry the
         ``seen_texts`` dedup keeps it from double-counting.
         """
-        import re as _re  # noqa: PLC0415
-
-        # Tokenise the query: lowercase content words ≥ 3 chars,
-        # excluding obvious stop-words that would over-match.
-        STOP = {
-            "the", "and", "you", "your", "for", "have", "had", "has",
-            "with", "from", "this", "that", "what", "where", "when",
-            "who", "why", "how", "are", "was", "were", "been", "being",
-            "into", "onto", "out", "did", "does", "doing", "say", "said",
-            "can", "will", "would", "should", "could", "may", "might",
-            "any", "some", "all", "not", "yes", "tell", "tells", "told",
-        }
-        tokens = {
-            t for t in _re.findall(r"[a-z']{3,}", query_text.lower())
-            if t not in STOP
-        }
+        tokens = _content_tokens(query_text)
         if not tokens:
             return []
+
+        if self._slot_index_dirty:
+            self._rebuild_slot_index()
 
         slot_trace_block: list[dict] | None = None
         if _trace is not None:
             slot_trace_block = []
             _trace["slot_pool"] = slot_trace_block
 
+        # Union of entries indexed under any query token — replaces the
+        # previous full "every band, every entry" scan.
+        candidate_entries: dict[int, "MemoryEntry"] = {}
+        for tok in tokens:
+            for e in self._slot_token_index.get(tok, ()):
+                candidate_entries[id(e)] = e
+
         candidates: list[tuple["MemoryEntry", float, float]] = []
-        for band in self.bands:
-            if band_filter is not None and band.name not in band_filter:
+        for entry in candidate_entries.values():
+            if entry.text in seen_texts:
                 continue
-            for entry in band.entries:
-                if entry.text in seen_texts:
-                    continue
-                if source_filter is not None and entry.source not in source_filter:
-                    continue
-                if episode_filter is not None and entry.episode_id not in episode_filter:
-                    continue
-                if tag_filter is not None and not (set(entry.tags) & tag_filter):
-                    continue
-                if not entry.slots:
-                    continue
+            if source_filter is not None and entry.source not in source_filter:
+                continue
+            if band_filter is not None and entry.bank not in band_filter:
+                continue
+            if episode_filter is not None and entry.episode_id not in episode_filter:
+                continue
+            if tag_filter is not None and not (set(entry.tags) & tag_filter):
+                continue
 
-                # Collect tokens from slot entity + value (attribute is
-                # usually a structural label like "type"/"breed" — less
-                # informative for query matching).
-                slot_tokens: set[str] = set()
-                for s_entity, _s_attr, s_value, _polarity in entry.slots:
-                    for t in _re.findall(
-                        r"[a-z']{3,}", (s_entity + " " + s_value).lower(),
-                    ):
-                        if t not in STOP:
-                            slot_tokens.add(t)
+            slot_tokens = _entry_slot_tokens(entry)
+            overlap = tokens & slot_tokens
+            if not overlap:
+                continue
 
-                overlap = tokens & slot_tokens
-                if not overlap:
-                    continue
-
-                # Score: fraction of slot tokens that matched, blended
-                # with absolute overlap count so a 2/2 match beats a
-                # 1/1 lone-word match. Clamp to keep neural-pool entries
-                # rankable alongside.
-                confidence = len(overlap) / max(len(slot_tokens), 1)
-                score = float(min(0.95, 0.55 + 0.35 * confidence))
-                if entry.superseded_at is not None:
-                    score *= 0.55   # Mirror the supersession demotion.
-                candidates.append((entry, score, 0.0))
-                if slot_trace_block is not None:
-                    slot_trace_block.append({
-                        "text_preview": entry.text[:80],
-                        "source": entry.source,
-                        "overlap_tokens": sorted(overlap),
-                        "score": round(score, 4),
-                        "superseded": entry.superseded_at is not None,
-                    })
+            # Score: fraction of slot tokens that matched, blended
+            # with absolute overlap count so a 2/2 match beats a
+            # 1/1 lone-word match. Clamp to keep neural-pool entries
+            # rankable alongside.
+            confidence = len(overlap) / max(len(slot_tokens), 1)
+            score = float(min(0.95, 0.55 + 0.35 * confidence))
+            if entry.superseded_at is not None:
+                score *= 0.55   # Mirror the supersession demotion.
+            candidates.append((entry, score, 0.0))
+            if slot_trace_block is not None:
+                slot_trace_block.append({
+                    "text_preview": entry.text[:80],
+                    "source": entry.source,
+                    "overlap_tokens": sorted(overlap),
+                    "score": round(score, 4),
+                    "superseded": entry.superseded_at is not None,
+                })
 
         candidates.sort(key=lambda x: x[1], reverse=True)
         return candidates[:k]
@@ -1195,6 +1237,7 @@ class ContinuumMemorySystem:
         if promoted:
             source.entries = remaining
             source._dirty = True
+            self._slot_index_dirty = True
             self._consolidation_events.append({
                 "timestamp": time.time(),
                 "from_bank": source.name,
@@ -1465,6 +1508,7 @@ class ContinuumMemorySystem:
             band.entries.clear()
             band._dirty = True
             band.surprise_ema = 0.0
+        self._slot_index_dirty = True
         self._interaction_count = 0
         self._surprise_history = {b.name: [] for b in self.bands}
         self._consolidation_events = []
@@ -1531,12 +1575,15 @@ class ContinuumMemorySystem:
             if band_changed:
                 band.entries = kept
                 band._dirty = True
+        if removed:
+            self._slot_index_dirty = True
         if self.storage is not None and removed_ids:
             self.storage.delete_entry_ids(removed_ids)
         return removed
 
     def _on_band_evict(self, entry: MemoryEntry) -> None:
         """Capacity eviction callback — keep storage in lockstep."""
+        self._slot_index_dirty = True
         if self.storage is not None and entry.db_id is not None:
             try:
                 self.storage.delete_entry_ids([entry.db_id])

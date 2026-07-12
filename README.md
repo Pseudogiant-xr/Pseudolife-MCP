@@ -502,7 +502,7 @@ Connection / deployment env vars:
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v21). Unset → v0.1 file-only mode. |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v22). Unset → v0.1 file-only mode. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). |
 | `PSEUDOLIFE_MCP_HOST` / `_PORT` | `127.0.0.1` / `8765` | Daemon bind address. |
 | `PSEUDOLIFE_MCP_TOKEN` | _(unset)_ | Bearer token; **required** to bind a non-loopback host. |
@@ -1298,7 +1298,7 @@ python -m pseudolife_memory.web.devserver   # http://127.0.0.1:8770/ui/
 | BM25 hybrid pool | Optional (`bm25=True` per call, stdlib only) |
 | NLI contradiction scorer | Optional (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, graph visualiser, search/trace, config editor (read-mostly, token-gated like `/mcp`) |
-| Schema version | v21 (Postgres meta version) — v11 temporal/provenance stamp, v12 graph-insight communities, v13 provenance-trace engram + reinforcements, v14 episode `session_key`, v15 episode `parent_id` (nesting), v16 `entity_sources` (per-entity project attribution), v17 `edge_proposals` (deep-dream link candidates), v18 `entity_proposals` (deep-dream merge/junk candidates), v19 partial unique indexes enforcing one current row per slot on facts/world_facts/lessons (+ startup heal of pre-existing duplicates; per-slot write-through persistence replaces the full-table snapshot rewrite), v20 `dismissed_pairs` (reviewed-distinct pairs stop resurfacing as duplicate findings), v21 `merge_decisions` audit + write-time near-duplicate merge proposals; additive `ADD COLUMN IF NOT EXISTS` on daemon start; legacy file-mode `.pt` banks auto-migrate into Postgres |
+| Schema version | v22 (Postgres meta version) — v11 temporal/provenance stamp, v12 graph-insight communities, v13 provenance-trace engram + reinforcements, v14 episode `session_key`, v15 episode `parent_id` (nesting), v16 `entity_sources` (per-entity project attribution), v17 `edge_proposals` (deep-dream link candidates), v18 `entity_proposals` (deep-dream merge/junk candidates), v19 partial unique indexes enforcing one current row per slot on facts/world_facts/lessons (+ startup heal of pre-existing duplicates; per-slot write-through persistence replaces the full-table snapshot rewrite), v20 `dismissed_pairs` (reviewed-distinct pairs stop resurfacing as duplicate findings), v21 `merge_decisions` audit + write-time near-duplicate merge proposals, v22 `edges(dst_id)` index (dst-side graph lookups no longer sequential-scan); additive `ADD COLUMN IF NOT EXISTS` on daemon start; legacy file-mode `.pt` banks auto-migrate into Postgres |
 
 ## What's not built yet
 
