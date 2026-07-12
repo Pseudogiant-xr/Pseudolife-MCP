@@ -29,8 +29,37 @@ if (-not (Test-Path $promptPath)) { throw "prompt file not found: $promptPath" }
 New-Item -ItemType Directory -Force (Split-Path -Parent $LogFile) | Out-Null
 
 $taskName = "PseudoLife Sonnet Shim"
-$inner = "& '$PythonExe' '$repo\evals\sonnet_shim.py' --port $Port " +
-         "--system-prompt-file '$promptPath' *>> '$LogFile'"
+# -WindowStyle Hidden only hides a console window it still allocates — on
+# Windows 11 with Windows Terminal set as the default terminal app, WT
+# intercepts that console-allocation moment and opens a visible (blank)
+# tab anyway, for the entire lifetime of the process (confirmed live:
+# 2026-07-12, a real reboot showed a persistent blank WT tab owning the
+# shim as its child). CreateNoWindow via .NET ProcessStartInfo skips
+# console allocation entirely, so WT has nothing to attach a tab to —
+# validated standalone (detached long-running child survives its spawner
+# exiting; redirected output confirmed correct) before wiring in here.
+# The scheduled task launches this tiny spawner, which starts the real
+# python.exe chain fully detached (CreateNoWindow, own console-less
+# session) and returns immediately, so the Task-Scheduler-owned window is
+# at most a sub-second flash rather than persisting for the shim's whole
+# runtime.
+#
+# cmd.exe's `/c` argument parsing mishandles a command line containing
+# MORE than one quoted segment (e.g. a quoted exe path AND a quoted script
+# arg) unless the whole thing is wrapped in one extra redundant pair of
+# quotes (a documented `cmd /?` workaround) — hence the doubled `""` below.
+$innerCmd = "`"$PythonExe`" `"$repo\evals\sonnet_shim.py`" --port $Port " +
+            "--system-prompt-file `"$promptPath`""
+$cmdArgs = "/c `"$innerCmd >> `"`"$LogFile`"`" 2>&1`""
+$inner = @"
+`$psi = New-Object System.Diagnostics.ProcessStartInfo
+`$psi.FileName = 'cmd.exe'
+`$psi.Arguments = '$($cmdArgs -replace "'", "''")'
+`$psi.UseShellExecute = `$false
+`$psi.CreateNoWindow = `$true
+`$psi.WorkingDirectory = '$repo'
+[System.Diagnostics.Process]::Start(`$psi) | Out-Null
+"@
 $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
 
 $action = New-ScheduledTaskAction -Execute "powershell.exe" `
