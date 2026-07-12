@@ -166,3 +166,17 @@ def test_readme_documents_claude_mcp_wiring() -> None:
     text = _README.read_text(encoding="utf-8")
     assert "claude mcp add" in text
     assert ".mcp.json" in text
+
+
+def test_changelog_mentions_current_schema_version() -> None:
+    """A schema bump must be chronicled: v22 initially shipped with no
+    CHANGELOG entry (2026-07-12), caught only in post-deploy review. Every
+    bump of ``SCHEMA_META_VERSION`` forces a matching ``vNN`` mention in
+    CHANGELOG.md — old mentions accumulate harmlessly; only the current
+    version is checked."""
+    from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
+
+    changelog = (_README.parent / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert re.search(rf"\bv{SCHEMA_META_VERSION}\b", changelog), (
+        f"schema is v{SCHEMA_META_VERSION} but CHANGELOG.md never mentions "
+        f"v{SCHEMA_META_VERSION} — add an entry under [Unreleased]")
