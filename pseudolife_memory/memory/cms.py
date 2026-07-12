@@ -233,13 +233,21 @@ class ContinuumMemorySystem:
         self.weights_reset: bool = False
 
         # Slot-token inverted index (Pool 1.5 candidate gathering,
-        # 2026-07-12 perf fix): token -> entries whose slots contain it,
-        # across every band. Built lazily on first query and rebuilt
-        # whenever a write dirties it, instead of scanning every entry in
-        # every band on every ``query_text`` search — see
-        # :meth:`_rebuild_slot_index` / :meth:`_slot_query_pool`.
-        self._slot_token_index: dict[str, list[MemoryEntry]] = {}
+        # 2026-07-12 perf fix): token -> (ordinal, containing band, entry)
+        # for every slotted entry, across every band. Built lazily on
+        # first query instead of scanning every entry in every band on
+        # every ``query_text`` search. Maintenance: a store EXTENDS it in
+        # place (a new entry only ever adds tokens), while removals
+        # (evict / delete / promote / clear) and wholesale replacement
+        # (load / hydrate) flag it dirty for a lazy full rebuild. The
+        # ordinal preserves band-then-insertion order so equal-score
+        # ties rank deterministically (set/dict iteration order varies
+        # with PYTHONHASHSEED across processes); the band name keys the
+        # ``bands=`` filter on actual containment, not the entry's
+        # ``bank`` stamp (stale after a preset-change hydration).
+        self._slot_token_index: dict[str, list[tuple[int, str, MemoryEntry]]] = {}
         self._slot_index_dirty: bool = True
+        self._slot_index_ordinal: int = 0
 
     @property
     def total_memories(self) -> int:
@@ -363,7 +371,16 @@ class ContinuumMemorySystem:
                 (s.entity, s.attribute, s.value, s.polarity)
                 for s in slots
             ]
-            self._slot_index_dirty = True
+            # Slot-index upkeep: a new entry can only ADD tokens, so a
+            # live (non-dirty) index is extended in place rather than
+            # flagged for rebuild — the daemon's steady state interleaves
+            # store/search, and dirtying on every store would rebuild on
+            # nearly every search. A slotless entry (the common case;
+            # slot extraction is precision-gated) contributes nothing.
+            # If the index is already dirty, the pending rebuild will
+            # pick this entry up. Removals still flag dirty.
+            if entry.slots and not self._slot_index_dirty:
+                self._slot_index_add(self.bands[0].name, entry)
             # Update the rolling coreference anchor — last text's first
             # named entity (if any) becomes the default referent for the
             # next message's pronouns.
@@ -1001,21 +1018,41 @@ class ContinuumMemorySystem:
     # ------------------------------------------------------------------
 
     def _rebuild_slot_index(self) -> None:
-        """Rebuild ``_slot_token_index`` (token -> entries) from every
-        band's entries — the same lazy-dirty-flag idiom
+        """Rebuild ``_slot_token_index`` (token -> (ordinal, band, entry))
+        from every band's entries — the same lazy-dirty-flag idiom
         :class:`~pseudolife_memory.memory.miras.band.MIRASBand` already
-        uses for its cosine pattern matrix. Runs once per batch of writes
-        (:meth:`_slot_query_pool` calls this only when
-        ``_slot_index_dirty``), not once per query."""
-        index: dict[str, list[MemoryEntry]] = {}
+        uses for its cosine pattern matrix. Runs only after a removal or
+        wholesale entry replacement (:meth:`_slot_query_pool` calls this
+        when ``_slot_index_dirty``); plain stores extend the index in
+        place via :meth:`_slot_index_add` instead. The ordinal records
+        the band-then-insertion walk position for deterministic
+        tie-breaking at query time."""
+        index: dict[str, list[tuple[int, str, MemoryEntry]]] = {}
+        ordinal = 0
         for band in self.bands:
             for entry in band.entries:
                 if not entry.slots:
                     continue
-                for tok in _entry_slot_tokens(entry):
-                    index.setdefault(tok, []).append(entry)
+                tokens = _entry_slot_tokens(entry)
+                if not tokens:
+                    continue
+                item = (ordinal, band.name, entry)
+                ordinal += 1
+                for tok in tokens:
+                    index.setdefault(tok, []).append(item)
         self._slot_token_index = index
+        self._slot_index_ordinal = ordinal
         self._slot_index_dirty = False
+
+    def _slot_index_add(self, band_name: str, entry: "MemoryEntry") -> None:
+        """Extend a live slot index with one freshly-stored entry."""
+        tokens = _entry_slot_tokens(entry)
+        if not tokens:
+            return
+        item = (self._slot_index_ordinal, band_name, entry)
+        self._slot_index_ordinal += 1
+        for tok in tokens:
+            self._slot_token_index.setdefault(tok, []).append(item)
 
     def _slot_query_pool(
         self,
@@ -1056,19 +1093,26 @@ class ContinuumMemorySystem:
             _trace["slot_pool"] = slot_trace_block
 
         # Union of entries indexed under any query token — replaces the
-        # previous full "every band, every entry" scan.
-        candidate_entries: dict[int, "MemoryEntry"] = {}
+        # previous full "every band, every entry" scan. Visited in
+        # ordinal (band-then-insertion) order so the stable score sort
+        # below breaks ties exactly like the old scan did, independent
+        # of PYTHONHASHSEED.
+        candidate_map: dict[int, tuple[int, str, "MemoryEntry"]] = {}
         for tok in tokens:
-            for e in self._slot_token_index.get(tok, ()):
-                candidate_entries[id(e)] = e
+            for item in self._slot_token_index.get(tok, ()):
+                candidate_map[id(item[2])] = item
 
         candidates: list[tuple["MemoryEntry", float, float]] = []
-        for entry in candidate_entries.values():
+        for _ordinal, band_name, entry in sorted(
+                candidate_map.values(), key=lambda t: t[0]):
             if entry.text in seen_texts:
                 continue
-            if source_filter is not None and entry.source not in source_filter:
+            # Filter on the band that CONTAINS the entry (recorded at
+            # index time), not entry.bank — the stamp can go stale when a
+            # preset change makes hydration re-route rows into band[0].
+            if band_filter is not None and band_name not in band_filter:
                 continue
-            if band_filter is not None and entry.bank not in band_filter:
+            if source_filter is not None and entry.source not in source_filter:
                 continue
             if episode_filter is not None and entry.episode_id not in episode_filter:
                 continue
@@ -1421,6 +1465,9 @@ class ContinuumMemorySystem:
             for b in self.bands
         }
         self._consolidation_events = state.get("consolidation_events", [])
+        # Band entries were wholesale replaced without going through
+        # store() — a previously-built slot index must not survive.
+        self._slot_index_dirty = True
 
     def _load_schema_v2(self, state: dict) -> None:
         """v0.5+ layout: ``bands`` keyed by band name."""
@@ -1455,6 +1502,9 @@ class ContinuumMemorySystem:
         # v6 episode log — pre-v6 saves have no ``episodes`` key, in which
         # case from_dict returns an empty manager.
         self.episodes = EpisodeManager.from_dict(state.get("episodes") or {})
+        # Band entries were wholesale replaced without going through
+        # store() — a previously-built slot index must not survive.
+        self._slot_index_dirty = True
 
     def _load_legacy_hopfield(self, path: Path) -> None:
         """Migrate from the v0.3.x Hopfield memory format.
@@ -1495,6 +1545,9 @@ class ContinuumMemorySystem:
                 last_band._dirty = True
 
             self._interaction_count = state.get("interaction_count", 0)
+            # Entries appended without going through store() — invalidate
+            # any previously-built slot index.
+            self._slot_index_dirty = True
         except Exception:
             pass  # Silently fail legacy migration — old format may be malformed.
 

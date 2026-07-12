@@ -103,6 +103,9 @@ def hydrate_cms(cms, storage) -> int:
         band.entries.append(row_to_entry(row, device=band.device))
         band._dirty = True
         count += 1
+    # Entries were appended without going through cms.store() — any
+    # previously-built slot-token index must rebuild (mirrors band._dirty).
+    cms._slot_index_dirty = True
     em = EpisodeManager()
     for ep in storage.load_episodes():
         em.episodes[ep["id"]] = Episode(**ep)

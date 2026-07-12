@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-12 — retrieval + graph lookup performance)
+- **Slot-query pool (Pool 1.5) inverted index** — `memory_search` no longer
+  scans every band entry per `query_text` query; slot tokens live in a
+  token → (ordinal, band, entry) index. Stores extend it in place (slotless
+  stores — the common case — leave it untouched), so interleaved store/search
+  traffic never pays a full rebuild; removals (evict / delete / promote /
+  clear) and wholesale replacement (`load` / `hydrate_cms`) flag a lazy
+  rebuild. Band filtering keys on the containing band (matching the old
+  full-scan semantics even for stale `bank` stamps after a preset change),
+  and equal-score ties keep deterministic band-then-insertion order across
+  processes.
+- **`edges(dst_id)` index (schema v21 → v22)** — dst-side edge lookups
+  (`merge_entity`'s dedup/repoint, reverse traversals) stop sequential
+  scanning; the `UNIQUE(src_id, relation, dst_id)` constraint index only
+  serves src-leading queries.
+
 ### Added (2026-07-11 — Sonnet extractor sidecar cutover)
 - Dream extractor primary/fallback selection: `PSEUDOLIFE_DREAM_FALLBACK_BASE_URL`
   / `_FALLBACK_MODEL` / `_EXTRACTOR_MODE` (auto|primary|fallback), automatic
