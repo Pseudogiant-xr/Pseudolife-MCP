@@ -35,7 +35,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-DEFAULT_CLI = Path(r"C:\Users\HAMO9\ClaudeCode\llama.cpp-diffusion\build\bin\Release\llama-diffusion-cli.exe")
+DEFAULT_CLI = Path.home() / r"ClaudeCode\llama.cpp-diffusion\build\bin\Release\llama-diffusion-cli.exe"
 PROMPT_MARKER = "\n> "
 # Empty thought stub the template still emits with thinking disabled.
 _THOUGHT_RE = re.compile(r"^\s*<\|channel>thought\s*.*?<channel\|>", re.DOTALL)

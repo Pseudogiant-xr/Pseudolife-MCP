@@ -71,7 +71,8 @@ RUNGS: dict[str, dict] = {
     # model ids match exactly what the servers report at /v1/models (incl. the
     # .gguf suffix) — llama.cpp ignores the field, LM Studio matches it.
     "qwen-a3b": {"kind": "llm", "label": "Qwen3.6-35B-A3B (homelab 5800X3D)",
-                 "base_url": "http://192.168.0.130:1236/v1",
+                 "base_url": os.environ.get("PSEUDOLIFE_BENCH_A3B_URL",
+                                            "http://127.0.0.1:1236/v1"),
                  "model": "Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf"},
     "qwen-27b": {"kind": "llm", "label": "Qwen3.6-27B (4090)",
                  "base_url": os.environ.get("PSEUDOLIFE_BENCH_QWEN_URL",

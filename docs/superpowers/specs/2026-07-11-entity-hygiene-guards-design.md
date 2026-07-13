@@ -66,7 +66,7 @@ weak classes.
 ### 2b. `list-artifact` — write gate + detection
 
 Splitting on commas *outside parentheses* yields ≥ 2 non-empty segments.
-Catches `data/, ops/.env, *.pt`. Passes `User (HAMO9, pseudogiant92@gmail.com)`
+Catches `data/, ops/.env, *.pt`. Passes `User (jdoe, jdoe@example.com)`
 (comma is parenthesized). Detection side: degree-agnostic like
 `concat-artifact` (a list name is junk no matter how connected it got).
 

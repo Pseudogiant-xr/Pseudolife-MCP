@@ -31,8 +31,8 @@ instead of a guess.
 | `floor`     | deterministic regex (`RegexExtractor`) | — (in-process)           |
 | `gemma-e2b` | Gemma 4 E2B (Q4) CPU sidecar       | `http://127.0.0.1:8081/v1`   |
 | `gemma-e4b` | Gemma 4 E4B (Q4) CPU sidecar       | `http://127.0.0.1:8081/v1`   |
-| `qwen-a3b`  | Qwen3.6-35B-A3B (homelab 5800X3D)  | `http://192.168.0.130:1236/v1` |
-| `qwen-27b`  | Qwen3.6-27B (4090)                 | `http://192.168.0.10:1234/v1`  |
+| `qwen-a3b`  | Qwen3.6-35B-A3B (homelab 5800X3D)  | `$PSEUDOLIFE_BENCH_A3B_URL` (default `http://127.0.0.1:1236/v1`) |
+| `qwen-27b`  | Qwen3.6-27B (4090)                 | `$PSEUDOLIFE_BENCH_QWEN_URL` (default `http://127.0.0.1:1234/v1`) |
 
 The cloud rung is intentionally omitted — this is a sovereign-only sweep.
 

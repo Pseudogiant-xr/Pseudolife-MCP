@@ -83,7 +83,7 @@ def test_junk_name_reason_blocks_metric_readings_and_lists():
 def test_junk_name_reason_spares_metric_and_list_near_misses():
     assert junk_name_reason("CUDA Toolkit 13.1") is None        # uppercase token
     assert junk_name_reason("Gemma 4 E4B") is None              # non-decimal tail
-    assert junk_name_reason("User (HAMO9, pseudogiant92@gmail.com)") is None
+    assert junk_name_reason("User (jdoe, jdoe@example.com)") is None
     assert junk_name_reason("8-band continuum") is None
 
 

@@ -273,7 +273,7 @@ def _split_outside_parens(s: str) -> list[str]:
 def _is_list_artifact(name: str) -> bool:
     """>=2 non-empty comma-separated segments OUTSIDE parentheses — a captured
     enumeration ("data/, ops/.env, *.pt"), not an entity. A parenthesized
-    comma ("User (HAMO9, a@b)") does not count."""
+    comma ("User (jdoe, a@b)") does not count."""
     return sum(1 for p in _split_outside_parens(str(name)) if p) >= 2
 
 

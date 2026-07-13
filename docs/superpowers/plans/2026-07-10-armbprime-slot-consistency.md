@@ -321,7 +321,7 @@ means the canonicalizer corrupted rows — stop).
 
 - [ ] **Step 1: Pre-flight VRAM headroom** — `nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader`; need desktop usage ≤ ~1.5GB (ask the user to close Discord/Spotify/Steam/Signal/browsers if higher).
 
-- [ ] **Step 2: Smoke** (WSL, `~/e4b-train` venv, repo at `/mnt/c/Users/HAMO9/ClaudeCode/PseudoLife-MCP`)
+- [ ] **Step 2: Smoke** (WSL, `~/e4b-train` venv, repo at `/mnt/c/Users/<user>/ClaudeCode/PseudoLife-MCP`)
 
 ```bash
 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True python evals/distill_train_e4b.py \
@@ -355,7 +355,7 @@ Expected completion: `train_runtime` line (~8600s), merged
 source ~/e4b-train/bin/activate && \
 python ~/llama.cpp/convert_hf_to_gguf.py ~/e4b-sonnet2/merged --outfile ~/e4b-sonnet2-bf16.gguf && \
 ~/llama.cpp/build/bin/llama-quantize ~/e4b-sonnet2-bf16.gguf ~/e4b-sonnet2-Q4_K_M.gguf Q4_K_M && \
-cp ~/e4b-sonnet2-Q4_K_M.gguf /mnt/c/Users/HAMO9/ClaudeCode/PseudoLife-MCP/evals/models/e4b-sonnet2-Q4_K_M.gguf
+cp ~/e4b-sonnet2-Q4_K_M.gguf /mnt/c/Users/<user>/ClaudeCode/PseudoLife-MCP/evals/models/e4b-sonnet2-Q4_K_M.gguf
 ```
 
 Expected: final GGUF = 5,335,290,144 bytes (same as every e4b-line Q4_K_M).
@@ -374,7 +374,7 @@ Expected: final GGUF = 5,335,290,144 bytes (same as every e4b-line Q4_K_M).
 - [ ] **Step 1: Serve candidate + ladder gate**
 
 ```powershell
-docker run -d --name pseudolife-mcp-extractor-bench --gpus all --no-healthcheck -p 127.0.0.1:8081:8081 -v "C:\Users\HAMO9\ClaudeCode\PseudoLife-MCP\evals\models\e4b-sonnet2-Q4_K_M.gguf:/models/extractor.gguf:ro" ghcr.io/ggml-org/llama.cpp:server-cuda --model /models/extractor.gguf --host 0.0.0.0 --port 8081 --ctx-size 8192 --jinja --parallel 1 -ngl 999
+docker run -d --name pseudolife-mcp-extractor-bench --gpus all --no-healthcheck -p 127.0.0.1:8081:8081 -v "C:\Users\<user>\ClaudeCode\PseudoLife-MCP\evals\models\e4b-sonnet2-Q4_K_M.gguf:/models/extractor.gguf:ro" ghcr.io/ggml-org/llama.cpp:server-cuda --model /models/extractor.gguf --host 0.0.0.0 --port 8081 --ctx-size 8192 --jinja --parallel 1 -ngl 999
 # wait for /health, then:
 $env:PYTHONPATH="."; .venv\Scripts\python.exe evals\ladder_sweep.py --rung e4b-ft
 Move-Item evals\results\e4b-ft.json evals\results\e4b-sonnet2-ladder.json -Force
@@ -391,7 +391,7 @@ docker rm -f pseudolife-mcp-extractor-bench
 # relaunch the same docker run with e4b-extractor-Q4_K_M.gguf mounted, wait /health
 $env:PYTHONPATH="."; .venv\Scripts\python.exe evals\longmemeval_bench.py --dataset oracle --extractor e4b-ft --tag sonnet2-baseline --phase extract
 docker rm -f pseudolife-mcp-extractor-bench
-Start-Process -FilePath "C:\Users\HAMO9\ClaudeCode\llama.ccp\run-server-turboq.bat"   # Qwen :1234 (NOT cmd /c)
+Start-Process -FilePath "C:\Users\<user>\ClaudeCode\llama.ccp\run-server-turboq.bat"   # Qwen :1234 (NOT cmd /c)
 # wait for :1234/health, then answer+judge both tags SAME SITTING:
 $env:PYTHONPATH="."; .venv\Scripts\python.exe evals\longmemeval_bench.py --dataset oracle --extractor e4b-ft --tag sonnet2 --phase answer
 $env:PYTHONPATH="."; .venv\Scripts\python.exe evals\longmemeval_bench.py --dataset oracle --extractor e4b-ft --tag sonnet2-baseline --phase answer

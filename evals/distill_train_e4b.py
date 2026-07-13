@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 import torch
@@ -46,7 +47,9 @@ from transformers import default_data_collator
 from transformers.trainer_utils import get_last_checkpoint
 from trl import SFTConfig, SFTTrainer
 
-REPO = Path("/mnt/c/Users/HAMO9/ClaudeCode/PseudoLife-MCP")
+# Runs inside WSL; point at the Windows checkout (/mnt/c/Users/<you>/...).
+REPO = Path(os.environ.get("PSEUDOLIFE_REPO",
+                           str(Path.home() / "PseudoLife-MCP")))
 DATA = REPO / "evals/data/distill-extract-clean.jsonl"
 OUT = Path.home() / "e4b-extractor"               # WSL-local: fast disk io
 # 5120 (not the measured max 6,418): at 8192 the fixed-shape compile itself

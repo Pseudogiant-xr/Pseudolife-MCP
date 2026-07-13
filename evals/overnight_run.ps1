@@ -3,14 +3,15 @@
 # extractors: Gemma E2B (bench container), Gemma E4B (swapped GGUF), Qwen-27B (4090).
 # Each step is best-effort: a failure is logged and the run continues.
 $ErrorActionPreference = "Continue"
-$repo = "C:\Users\HAMO9\ClaudeCode\PseudoLife-MCP"
+$repo = Split-Path -Parent $PSScriptRoot
 Set-Location $repo
 $py  = ".\.venv\Scripts\python.exe"
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $out = Join-Path $repo "data\overnight-$stamp"
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 $env:HF_HUB_OFFLINE="1"; $env:TRANSFORMERS_OFFLINE="1"; $env:TORCHDYNAMO_DISABLE="1"; $env:PYTHONPATH="."
-$E4B = "C:/Users/HAMO9/ClaudeCode/PseudoLife-MCP/evals/models/gemma-4-E4B-it-Q4_K_M.gguf"
+# docker -v wants forward slashes on Windows
+$E4B = (Join-Path $repo "evals\models\gemma-4-E4B-it-Q4_K_M.gguf") -replace '\\', '/'
 $logf = Join-Path $out "run.log"
 
 function Log($m){ $line = "$((Get-Date).ToString('HH:mm:ss')) $m"; $line; $line | Out-File -FilePath $logf -Append -Encoding utf8 }

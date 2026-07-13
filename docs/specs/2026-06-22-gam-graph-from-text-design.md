@@ -44,7 +44,7 @@ variants**:
   a triples-only prompt.
 
 For each variant × model — **Gemma-2B E2B (shipped floor)** and a **Qwen ceiling**
-(4090 `192.168.0.10:1234` or homelab `192.168.0.130:1236`, whichever is reachable;
+(the 4090 or homelab endpoint, whichever is reachable;
 skip unreachable rungs like the ladder sweep) — it reports:
 
 - **triple precision / recall** vs a hand-annotated gold corpus (a triple matches

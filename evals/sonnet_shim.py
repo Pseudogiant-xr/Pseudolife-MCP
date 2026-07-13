@@ -31,7 +31,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -42,9 +44,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))      # repo root
 from pseudolife_memory.memory.dream import _SYSTEM_PROMPT  # noqa: E402
 
-DEFAULT_CLI = Path(
-    r"C:\Users\HAMO9\AppData\Local\Packages\Claude_pzs8sxrjxfjjc"
-    r"\LocalCache\Roaming\Claude\claude-code\2.1.205\claude.exe")
+# The `claude` CLI from PATH; PSEUDOLIFE_SHIM_CLAUDE_CLI or --cli overrides
+# for installs whose binary isn't on PATH.
+DEFAULT_CLI = Path(os.environ.get("PSEUDOLIFE_SHIM_CLAUDE_CLI")
+                   or shutil.which("claude") or "claude")
 # A fenced reply ("```json\n...\n```") would fail the extractor's json.loads.
 _FENCE_RE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL)
 # Windows CreateProcess caps the command line at 32767 chars; leave margin.

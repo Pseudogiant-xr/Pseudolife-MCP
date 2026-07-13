@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -166,6 +167,32 @@ def test_readme_documents_claude_mcp_wiring() -> None:
     text = _README.read_text(encoding="utf-8")
     assert "claude mcp add" in text
     assert ".mcp.json" in text
+
+
+def test_tracked_tree_carries_no_maintainer_identifiers() -> None:
+    """The 2026-07-03 history scrub regressed within a week: a test fixture
+    re-asserted the maintainer's scrubbed email verbatim, and docs/eval
+    harnesses accumulated ``C:\\Users\\<username>`` paths. A history rewrite
+    is one-shot; keeping the tree clean is a treadmill — so guard the tracked
+    tree mechanically. The needles are assembled from fragments so this file
+    passes its own check."""
+    needles = [("HAM" "O9").lower(), "pseudogiant" + "92"]
+    repo = Path(__file__).resolve().parents[1]
+    try:
+        proc = subprocess.run(["git", "ls-files"], cwd=repo, check=True,
+                              capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        pytest.skip("not a git checkout")
+    hits = []
+    for rel in proc.stdout.splitlines():
+        try:
+            text = (repo / rel).read_text(encoding="utf-8",
+                                          errors="ignore").lower()
+        except OSError:
+            continue
+        if any(n in text for n in needles):
+            hits.append(rel)
+    assert hits == [], f"maintainer identifiers in tracked files: {hits}"
 
 
 def test_changelog_mentions_current_schema_version() -> None:

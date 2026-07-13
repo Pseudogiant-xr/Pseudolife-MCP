@@ -895,7 +895,7 @@ git commit -m "feat(shim): own per-session id + episode lifecycle (X-PL-Session)
 The shim owns lifecycle; the SessionStart `episode-start` and SessionEnd `episode-end` hooks would now double-open/close with a *different* (Claude session_id) key. Remove them; keep the briefing + context hooks.
 
 **Files:**
-- Modify: `C:\Users\HAMO9\.claude\settings.json`
+- Modify: `C:\Users\<user>\.claude\settings.json`
 - Modify: `README.md` (drop the episode-hook snippet; note the shim now owns lifecycle)
 
 - [ ] **Step 1:** Remove the third `SessionStart` hook object (`pseudolife-mcp episode-start`) and the entire `SessionEnd` block from `settings.json`. Leave the static-context echo and `pseudolife-mcp briefing --hook-json` hooks intact.
