@@ -191,10 +191,16 @@ def make_handler(cli: ClaudeCli):
     return Handler
 
 
-def main():
+def _parse_args(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--cli", type=Path, default=DEFAULT_CLI)
     ap.add_argument("--model", default="claude-sonnet-5")
+    ap.add_argument("--host", default="127.0.0.1",
+                    help="bind address; on Linux Docker Engine the daemon "
+                         "container reaches the host via the docker bridge "
+                         "IP (host-gateway), so bind that (e.g. 172.17.0.1) "
+                         "instead of loopback — 0.0.0.0 exposes the "
+                         "unauthenticated shim to the LAN")
     ap.add_argument("--port", type=int, default=8082)
     ap.add_argument("--call-timeout", type=float, default=300.0)
     ap.add_argument("--system-prompt-file", type=Path, default=None,
@@ -202,7 +208,11 @@ def main():
                          "this file's body (text after the first '---' line, "
                          "or the whole file if no separator); the harness's "
                          "appended vocab hint is preserved")
-    args = ap.parse_args()
+    return ap.parse_args(argv)
+
+
+def main():
+    args = _parse_args()
 
     if not args.cli.exists():
         sys.exit(f"claude CLI not found at {args.cli}")
@@ -214,9 +224,9 @@ def main():
               f"{args.system_prompt_file} ({len(override)} chars)", flush=True)
     cli = ClaudeCli(args.cli, args.model, args.call_timeout,
                     system_override=override)
-    srv = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(cli))
+    srv = ThreadingHTTPServer((args.host, args.port), make_handler(cli))
     print(f"sonnet_shim: serving {args.model} on "
-          f"http://127.0.0.1:{args.port}/v1", flush=True)
+          f"http://{args.host}:{args.port}/v1", flush=True)
     srv.serve_forever()
 
 

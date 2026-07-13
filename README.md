@@ -13,6 +13,7 @@ Requires Docker and Claude Code. From clone to first memory:
 ```bash
 git clone https://github.com/Pseudogiant-xr/PseudoLife-MCP.git
 cd PseudoLife-MCP
+ops/preflight.sh    # or ops\preflight.ps1 — checks docker/git/claude, prints the exact fix for anything missing
 docker volume create pseudolife-mcp-bank
 docker volume create pseudolife-mcp-state
 docker compose -f ops/docker-compose.yml up -d --build   # first build ~2.5 GB, once
@@ -21,6 +22,12 @@ docker compose -f ops/docker-compose.yml up -d --build   # first build ~2.5 GB, 
 curl http://127.0.0.1:8765/health
 claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
 ```
+
+Linux (Docker Engine): the docker commands need your user in the `docker`
+group — `sudo usermod -aG docker $USER`, then log out and back in (the
+preflight script checks this). Optional knobs live in `ops/.env`
+(`cp ops/.env.example ops/.env` — the update scripts scaffold it too; every
+value is commented, a missing file runs entirely on defaults).
 
 Then in any Claude Code session: *"remember that my staging box is
 haze-02"* → Claude calls `memory_store`; next session, *"which box is
@@ -1012,7 +1019,8 @@ file interpolates it into the daemon) and restart the daemon
 ```dotenv
 # ops/.env — point dream consolidation at a local model server.
 # From inside the container the host machine is host.docker.internal, NOT
-# localhost. (Linux: also uncomment extra_hosts in ops/docker-compose.yml.)
+# localhost (works on Linux too via the extra_hosts entry shipped in
+# ops/docker-compose.yml).
 PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:1234/v1
 PSEUDOLIFE_DREAM_MODEL=qwen3.6-27b
 ```
@@ -1042,16 +1050,29 @@ same env triple pointed at a hosted endpoint does not.
 dream pass can use Claude Sonnet as its primary extractor and keep the bundled
 local sidecar as an automatic fallback:
 
-1. `ops\install-shim-autostart.ps1` — registers the CLI shim
-   (`evals/sonnet_shim.py`) at logon on `127.0.0.1:8082` (requires a
-   logged-in `claude` CLI).
-2. Set in the daemon environment:
+1. Register the CLI shim (`evals/sonnet_shim.py`) to start automatically —
+   requires a logged-in `claude` CLI:
+   - Windows: `ops\install-shim-autostart.ps1` (Task Scheduler, at logon,
+     `127.0.0.1:8082`).
+   - Linux: `ops/install-shim-autostart.sh` (systemd `--user` unit; binds
+     the docker bridge IP so the daemon container can reach it —
+     `host-gateway` routes container→host traffic to the bridge, where a
+     loopback bind is invisible).
+2. Set in `ops/.env` (both vars must flip together — pointing only one at
+   the shim leaves dreams silently on the sidecar):
    `PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:8082/v1`,
    `PSEUDOLIFE_DREAM_MODEL=extractor`,
    `PSEUDOLIFE_DREAM_FALLBACK_BASE_URL=http://pseudolife-extractor:8081/v1`,
    `PSEUDOLIFE_DREAM_FALLBACK_MODEL=extractor`,
    `PSEUDOLIFE_DREAM_EXTRACTOR_MODE=auto` (or `primary`/`fallback` to force
    a side — also switchable live in the Console's Extractor panel).
+3. Redeploy (`ops/update.ps1` / `ops/update.sh`), then **verify**:
+   `memory_dream(action="status")` should show `fallback_url` populated and,
+   with the shim up, `primary_healthy: true`; after the next dream,
+   `last_dream_extractor.which` should read `primary` against the `:8082`
+   URL. The daemon also logs a startup warning for the common
+   half-configurations (unresolvable `host.docker.internal`, `auto` without
+   a fallback, primary == fallback).
 
 When the shim is unreachable or the CLI is logged out, dreams automatically
 use the fallback; the Console's Observatory shows which extractor is active.

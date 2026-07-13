@@ -233,6 +233,57 @@ def test_dream_status_fields_with_fallback(monkeypatch):
     assert fields["last_dream_extractor"] == last
 
 
+# ── startup misconfig warnings (issues #11/#12) ──────────────────────────
+
+def test_startup_warnings_stock_default_is_clean(monkeypatch):
+    # The shipped default (in-stack sidecar primary, no fallback, mode=auto)
+    # must not warn — and must not pay a DNS lookup.
+    from pseudolife_memory.memory import dream as d
+
+    def _boom(*a, **k):
+        raise AssertionError("no DNS lookup for the in-stack sidecar URL")
+    monkeypatch.setattr(d, "_host_resolves", _boom)
+    assert d.startup_extractor_warnings(DreamConfig()) == []
+
+
+def test_startup_warns_when_host_docker_internal_unresolvable(monkeypatch):
+    # Linux Docker Engine without extra_hosts: every probe fails silently.
+    from pseudolife_memory.memory import dream as d
+    monkeypatch.setattr(d, "_host_resolves", lambda h: False)
+    warnings = d.startup_extractor_warnings(
+        _cfg("http://host.docker.internal:8082/v1", fb="http://f:2/v1"))
+    assert any("extra_hosts" in w for w in warnings)
+
+
+def test_startup_no_dns_warning_when_resolvable(monkeypatch):
+    from pseudolife_memory.memory import dream as d
+    monkeypatch.setattr(d, "_host_resolves", lambda h: True)
+    warnings = d.startup_extractor_warnings(
+        _cfg("http://host.docker.internal:8082/v1", fb="http://f:2/v1"))
+    assert not any("extra_hosts" in w for w in warnings)
+
+
+def test_startup_warns_auto_host_primary_without_fallback(monkeypatch):
+    # Host-side primary + mode=auto + no fallback: auto is inert and a down
+    # endpoint means dreams fail — the #11/#12 half-configured cutover.
+    from pseudolife_memory.memory import dream as d
+    monkeypatch.setattr(d, "_host_resolves", lambda h: True)
+    warnings = d.startup_extractor_warnings(
+        _cfg("http://host.docker.internal:8082/v1"))
+    assert any("PSEUDOLIFE_DREAM_FALLBACK_BASE_URL" in w for w in warnings)
+
+
+def test_startup_warns_primary_equals_fallback(monkeypatch):
+    # The inverse half-config: fallback set but primary left at the sidecar
+    # default — both sides point at the same endpoint, the intended primary
+    # is never used.
+    from pseudolife_memory.memory import dream as d
+    monkeypatch.setattr(d, "_host_resolves", lambda h: True)
+    warnings = d.startup_extractor_warnings(
+        _cfg("http://f:2/v1", fb="http://f:2/v1"))
+    assert any("same endpoint" in w for w in warnings)
+
+
 # ── console schema entries ────────────────────────────────────────────────
 
 def test_config_io_has_fallback_knobs():

@@ -115,7 +115,7 @@ services:
       # dream consolidation routes to it. To use a BIGGER local model instead
       # (LM Studio / Ollama / llama.cpp / vLLM), override these in ops/.env —
       # from inside the container the host machine is `host.docker.internal`,
-      # not `localhost` (Linux: uncomment extra_hosts below). See the README's
+      # not `localhost` (resolves via extra_hosts below). See the README's
       # "Upgrading the extractor" section for per-runtime examples.
       PSEUDOLIFE_DREAM_BASE_URL: ${PSEUDOLIFE_DREAM_BASE_URL:-http://pseudolife-extractor:8081/v1}
       PSEUDOLIFE_DREAM_MODEL: ${PSEUDOLIFE_DREAM_MODEL:-extractor}
@@ -133,11 +133,14 @@ services:
       PSEUDOLIFE_DREAM_FALLBACK_BASE_URL: ${PSEUDOLIFE_DREAM_FALLBACK_BASE_URL:-}
       PSEUDOLIFE_DREAM_FALLBACK_MODEL: ${PSEUDOLIFE_DREAM_FALLBACK_MODEL:-}
       PSEUDOLIFE_DREAM_EXTRACTOR_MODE: ${PSEUDOLIFE_DREAM_EXTRACTOR_MODE:-auto}
-    # Linux only: make host.docker.internal resolve to the host (Docker Desktop
-    # on Windows/macOS provides it automatically). Needed when the extractor
-    # override above points at a model server on the host machine.
-    # extra_hosts:
-    #   - "host.docker.internal:host-gateway"
+    # Make host.docker.internal resolve to the host on Linux Docker Engine
+    # (Docker Desktop on Windows/macOS provides the name automatically, and
+    # this entry is harmless there). Enabled by default since issue #11: with
+    # it commented out, a host-side extractor URL (Sonnet shim, LM Studio,
+    # Ollama) silently fails every probe on Linux and dreams stay on the
+    # fallback forever.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "127.0.0.1:8765:8765"
     volumes:

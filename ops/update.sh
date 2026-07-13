@@ -27,6 +27,12 @@ compose_file="$repo/ops/docker-compose.yml"
 env_file="$repo/ops/.env"
 override_file="$repo/ops/docker-compose.override.yml"
 compose=(-f "$compose_file")
+# Scaffold the (gitignored) machine-local env from the example so its knobs
+# are discoverable — every line ships commented, so this changes nothing.
+if [ ! -f "$env_file" ] && [ -f "$repo/ops/.env.example" ]; then
+    cp "$repo/ops/.env.example" "$env_file"
+    echo "==> Scaffolded ops/.env from ops/.env.example (all values commented)."
+fi
 # Machine-local overrides (e.g. a fine-tuned GGUF mount) live in the gitignored
 # override file; explicit -f disables compose's auto-merge, so add it here.
 [ -f "$override_file" ] && compose+=(-f "$override_file")

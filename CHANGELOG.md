@@ -6,6 +6,37 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-14 — Linux install parity + install UX, issues #11/#12/#13)
+- **`ops/install-shim-autostart.sh`** — Linux parity for the Sonnet-shim
+  autostart (`systemd --user` unit; the `.ps1` was Windows-only, so a Linux
+  user following the README silently stayed on the sidecar). Binds the docker
+  bridge IP, not loopback: `host-gateway` routes container→host traffic to
+  the bridge, where a `127.0.0.1` bind is invisible. `sonnet_shim.py` grew a
+  `--host` flag (default `127.0.0.1`) to support that.
+- **`ops/preflight.sh` / `ops/preflight.ps1`** — check-only doctor scripts
+  (issue #13 first slice): verify docker (installed / daemon reachable /
+  socket permission), compose v2, git, python, and the `claude` CLI, printing
+  the exact remediation line per failure. Never installs anything.
+- **Startup warnings for silent extractor half-configurations**
+  (`startup_extractor_warnings` in `dream.py`, logged by the daemon at dream
+  sweep start): unresolvable `host.docker.internal` (missing `extra_hosts`),
+  `extractor_mode=auto` with a host-side primary but no fallback (auto is
+  inert), and primary == fallback (the intended primary is never used). The
+  stock single-extractor default stays silent.
+
+### Changed (2026-07-14 — Linux install parity + install UX, issues #11/#12/#13)
+- **`extra_hosts: host.docker.internal:host-gateway` is now enabled by
+  default** in `ops/docker-compose.yml` (was a commented snippet) — on Linux
+  Docker Engine, any host-side extractor URL silently failed every probe and
+  dreams stayed on the fallback forever; the entry is harmless on Docker
+  Desktop.
+- **`ops/update.ps1|.sh` scaffold `ops/.env`** from `ops/.env.example` when
+  missing (all values commented — behavior unchanged, knobs discoverable).
+- README: preflight + Linux docker-group prerequisite in the Quickstart, and
+  the Sonnet-primary section gained the Linux autostart path, the
+  "both vars flip together" warning, and a `memory_dream(action="status")`
+  verify step.
+
 ### Changed (2026-07-12 — release hygiene: machine-local compose overrides)
 - **Extractor GGUF swaps moved to `ops/docker-compose.override.yml`**
   (gitignored) — the tracked compose file no longer mounts a fine-tuned GGUF

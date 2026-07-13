@@ -27,6 +27,14 @@ def _cli(monkeypatch, chat_ok: bool):
     return cli
 
 
+def test_parse_args_host_defaults_to_loopback():
+    # --host exists for Linux host-gateway reachability (issue #11): the
+    # container reaches the host via the docker bridge IP, so a 127.0.0.1
+    # bind is invisible to it. Default stays loopback-only.
+    assert shim._parse_args([]).host == "127.0.0.1"
+    assert shim._parse_args(["--host", "172.17.0.1"]).host == "172.17.0.1"
+
+
 def test_health_ok_when_cli_answers(monkeypatch):
     ok, detail = _cli(monkeypatch, True).health()
     assert ok is True

@@ -1189,7 +1189,8 @@ def start_dream_sweep() -> None:
         return
     if not service.config.memory.dream.enabled:
         return
-    from pseudolife_memory.memory.dream import build_extractor, NoOpExtractor
+    from pseudolife_memory.memory.dream import (build_extractor, NoOpExtractor,
+                                                startup_extractor_warnings)
     if isinstance(build_extractor(service.config.memory.dream), NoOpExtractor):
         logger.warning(
             "dream enabled but no extractor LLM configured "
@@ -1197,6 +1198,8 @@ def start_dream_sweep() -> None:
             "disabled; only memory_fact_set writes canonical facts. Configure the "
             "extractor sidecar to populate the cortex."
         )
+    for warning in startup_extractor_warnings(service.config.memory.dream):
+        logger.warning("dream extractor config: %s", warning)
     _dream_sweep_started = True
     interval = float(service.config.memory.dream.sweep_interval_seconds)
     threading.Thread(

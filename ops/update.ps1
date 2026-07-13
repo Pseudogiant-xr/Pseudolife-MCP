@@ -18,6 +18,13 @@ $composeFile = Join-Path $repo "ops\docker-compose.yml"
 $envFile = Join-Path $repo "ops\.env"
 $overrideFile = Join-Path $repo "ops\docker-compose.override.yml"
 $compose = @("-f", $composeFile)
+# Scaffold the (gitignored) machine-local env from the example so its knobs
+# are discoverable — every line ships commented, so this changes nothing.
+$exampleFile = Join-Path $repo "ops\.env.example"
+if (-not (Test-Path $envFile) -and (Test-Path $exampleFile)) {
+    Copy-Item $exampleFile $envFile
+    Write-Host "==> Scaffolded ops/.env from ops/.env.example (all values commented)."
+}
 # Machine-local overrides (e.g. a fine-tuned GGUF mount) live in the gitignored
 # override file; explicit -f disables compose's auto-merge, so add it here.
 if (Test-Path $overrideFile) { $compose += @("-f", $overrideFile) }

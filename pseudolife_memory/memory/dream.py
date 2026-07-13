@@ -484,6 +484,53 @@ def probe_endpoint(base_url: str, timeout: float = 3.0) -> bool:
     return False
 
 
+def _host_resolves(hostname: str) -> bool:
+    import socket
+    try:
+        socket.getaddrinfo(hostname, None)
+        return True
+    except OSError:
+        return False
+
+
+_HOST_GATEWAY_NAME = "host.docker.internal"
+
+
+def startup_extractor_warnings(cfg) -> list[str]:
+    """Config-sanity checks for daemon startup — the misconfigurations that
+    leave the dream pass silently on the wrong extractor (issues #11/#12).
+    Returns human-readable warning strings; the caller logs them. The stock
+    single-extractor default (in-stack sidecar, no fallback) stays silent."""
+    r = resolve_endpoints(cfg)
+    urls = [u for u in (r["primary_url"], r["fallback_url"]) if u]
+    has_fallback = bool(r["fallback_url"] and r["fallback_model"])
+    out: list[str] = []
+    if (any(_HOST_GATEWAY_NAME in u for u in urls)
+            and not _host_resolves(_HOST_GATEWAY_NAME)):
+        out.append(
+            f"an extractor URL uses {_HOST_GATEWAY_NAME} but the name does not "
+            "resolve — on Linux Docker Engine the daemon needs the extra_hosts "
+            f"'{_HOST_GATEWAY_NAME}:host-gateway' entry in ops/docker-compose.yml "
+            "(shipped enabled; restore it if removed). Until it resolves, every "
+            "probe fails and dreams silently run on the fallback (or fail).")
+    if (r["mode"] == "auto" and not has_fallback
+            and r["primary_url"] and _HOST_GATEWAY_NAME in r["primary_url"]):
+        out.append(
+            f"dream primary {r['primary_url']} is host-side but no fallback is "
+            "configured — extractor_mode=auto is inert (single-extractor, no "
+            "probe) and dreams fail while the endpoint is down. Set "
+            "PSEUDOLIFE_DREAM_FALLBACK_BASE_URL/_MODEL to keep the in-stack "
+            "sidecar as automatic fallback; verify with "
+            'memory_dream(action="status").')
+    if has_fallback and r["primary_url"] == r["fallback_url"]:
+        out.append(
+            f"dream primary and fallback are the same endpoint "
+            f"({r['primary_url']}) — the intended primary is never used; "
+            "point PSEUDOLIFE_DREAM_BASE_URL at the primary and verify with "
+            'memory_dream(action="status").')
+    return out
+
+
 def build_extractor_with_fallback(cfg) -> tuple["DreamExtractor", str]:
     """Selection step for the LIVE dream path: returns (extractor, which)
     with which in {"primary", "fallback"}. Fallback unset => exactly
