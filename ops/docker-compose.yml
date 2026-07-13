@@ -165,17 +165,19 @@ services:
       timeout: 5s
       retries: 5
       start_period: 90s
-    # Benchmark/swap: mount a different GGUF over the baked default without a
-    # rebuild (drop the volumes: block to fall back to the baked base E4B QAT).
-    # Active mount: Arm-1 registry-datagen fine-tune (2026-07-12, Sonnet+v1
-    # teacher via the shim, per-chain key registry) — KU-oracle cortex 0.705 /
-    # hybrid 0.756 vs prior e4b-ft 0.603/0.744 (same-session comparison),
-    # ladder gold 0.9/stale_leak 0.0. Prior e4b-ft GGUF kept on disk as an
-    # instant rollback (evals/models/e4b-extractor-Q4_K_M.gguf) — just revert
-    # this line. This is the FALLBACK extractor only (Sonnet shim is primary;
-    # this container serves dreams only when the shim is unreachable).
-    volumes:
-      - ../evals/models/e4b-arm1-Q4_K_M.gguf:/models/extractor.gguf:ro
+    # Swap in a different GGUF without a rebuild: put the mount in a
+    # machine-local ops/docker-compose.override.yml (gitignored — never
+    # reference files here that aren't in the repo, or fresh clones get an
+    # empty directory mounted over the model and the sidecar crash-loops):
+    #
+    #   services:
+    #     pseudolife-extractor:
+    #       volumes:
+    #         - ../evals/models/my-finetune-Q4_K_M.gguf:/models/extractor.gguf:ro
+    #
+    # ops/update.ps1|.sh add the override automatically when the file exists;
+    # for manual compose commands append `-f ops/docker-compose.override.yml`.
+    # Without an override the baked base model (Dockerfile.extractor) serves.
 
 volumes:
   # External so `docker compose down -v` cannot remove them — the bank survives

@@ -16,7 +16,11 @@ $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
 $composeFile = Join-Path $repo "ops\docker-compose.yml"
 $envFile = Join-Path $repo "ops\.env"
+$overrideFile = Join-Path $repo "ops\docker-compose.override.yml"
 $compose = @("-f", $composeFile)
+# Machine-local overrides (e.g. a fine-tuned GGUF mount) live in the gitignored
+# override file; explicit -f disables compose's auto-merge, so add it here.
+if (Test-Path $overrideFile) { $compose += @("-f", $overrideFile) }
 if (Test-Path $envFile) { $compose = @("--env-file", $envFile) + $compose }
 
 # 1. Backup the bank (pg_dump inside the container) — the always-first rule.

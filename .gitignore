@@ -1,6 +1,11 @@
 # Local compose env overrides (machine-specific volume names etc.) — never committed.
 .env
 
+# Machine-local compose overrides (e.g. fine-tuned GGUF mounts over the baked
+# extractor default) — referencing personal files from the tracked compose file
+# would break fresh clones, so they live here instead.
+ops/docker-compose.override.yml
+
 # Python
 __pycache__/
 *.py[cod]

@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-12 — release hygiene: machine-local compose overrides)
+- **Extractor GGUF swaps moved to `ops/docker-compose.override.yml`**
+  (gitignored) — the tracked compose file no longer mounts a fine-tuned GGUF
+  that only exists on the maintainer's machine (a fresh clone got an empty
+  directory bind-mounted over `/models/extractor.gguf` and the sidecar
+  crash-looped; the baked base model now serves by default).
+  `ops/update.ps1|.sh` add the override automatically when the file exists
+  (explicit `-f` disables compose's auto-merge); manual compose commands
+  append `-f ops/docker-compose.override.yml`.
+- **`ops/.env.example`** — a commented template for every env override the
+  compose stack reads (volume names, `POSTGRES_PASSWORD`, `TZ`, toolset tier
+  map, dream extractor primary/fallback endpoints).
+- Dev harnesses and docs no longer hardcode maintainer-machine paths or LAN
+  endpoints: eval scripts derive from `$env:USERPROFILE`/`Path.home()`/
+  `$PSScriptRoot`, `sonnet_shim.py` resolves the `claude` CLI from `PATH`
+  (`PSEUDOLIFE_SHIM_CLAUDE_CLI` or `--cli` overrides), and the `qwen-a3b`
+  bench rung reads `PSEUDOLIFE_BENCH_A3B_URL` (default localhost) like the
+  existing `PSEUDOLIFE_BENCH_QWEN_URL`.
+
 ### Added (2026-07-12 — embedding backend + cache, reranker margin gate)
 - **ONNX embedding backend** (`embedding.backend: onnx`, new `[onnx]` extra =
   `optimum[onnxruntime]`) — the same MiniLM through onnxruntime at ~3x the

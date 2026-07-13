@@ -1032,7 +1032,8 @@ stop pseudolife-extractor`) or left running as a fallback to switch back to.
 Middle option, no GPU required: bake the **Gemma 4 E4B** sidecar instead of the
 E2B (also ladder-verified; slower but stronger) — see the `MODEL_URL` build-arg
 in `ops/Dockerfile.extractor`, or mount any GGUF over `/models/extractor.gguf`
-(comment in the compose file). If you run the daemon *outside* Docker (embedded
+via a machine-local `ops/docker-compose.override.yml` (gitignored; example in
+the compose file). If you run the daemon *outside* Docker (embedded
 stdio mode), the `$env:` variables above apply directly and `localhost` URLs
 work as-is. A local or LAN model keeps all memory text on your network; the
 same env triple pointed at a hosted endpoint does not.

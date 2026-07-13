@@ -25,7 +25,11 @@ done
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 compose_file="$repo/ops/docker-compose.yml"
 env_file="$repo/ops/.env"
+override_file="$repo/ops/docker-compose.override.yml"
 compose=(-f "$compose_file")
+# Machine-local overrides (e.g. a fine-tuned GGUF mount) live in the gitignored
+# override file; explicit -f disables compose's auto-merge, so add it here.
+[ -f "$override_file" ] && compose+=(-f "$override_file")
 [ -f "$env_file" ] && compose=(--env-file "$env_file" "${compose[@]}")
 
 # 1. Backup the bank (pg_dump inside the container) — the always-first rule.
