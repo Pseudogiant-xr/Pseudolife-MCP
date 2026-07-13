@@ -39,8 +39,8 @@ from pseudolife_memory.memory.slots import Slot
 
 # Version of the file-mode cortex *snapshot* format (``cortex_state.pt``) — bumped
 # only when that on-disk layout changes. NOT the Postgres bank schema version
-# (that is ``storage.schema.SCHEMA_META_VERSION``, currently 13). The two are
-# independent numbers; don't conflate them.
+# (that is ``storage.schema.SCHEMA_META_VERSION``, a separate and much larger
+# number). The two are independent; don't conflate them.
 SCHEMA_VERSION = 8
 
 # Any run of separators (space . _ - /) is one boundary, so trivial naming
