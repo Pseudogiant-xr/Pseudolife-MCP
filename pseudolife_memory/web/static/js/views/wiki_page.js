@@ -1,6 +1,6 @@
 // views/wiki_page.js — the live-rendered entity wiki page (spec 2026-07-15 §B).
 // Pure render over GET /api/wiki: no LLM, no staleness, read-only.
-import { el, mount, loadingBlock, errorBlock } from "../util.js";
+import { el, mount, loadingBlock, errorBlock, safeHttpUrl } from "../util.js";
 import { api } from "../api.js";
 import { badge } from "../components.js";
 import { colorFor } from "../graphview.js";
@@ -90,13 +90,16 @@ function render(host, d, nav, onExplore) {
       d.projects.length ? ` · ${d.projects.map((p) => p.source).join(", ")}` : ""),
     flagBanner(d),
     factsSection(d),
-    section("World", d.world_facts.map((w) =>
-      el("div", { class: "wp-world" },
+    section("World", d.world_facts.map((w) => {
+      // Render-time scheme guard (same rule as views/world.js): only http(s)
+      // becomes a link, anything else stays inert text.
+      const href = safeHttpUrl(w.source_url);
+      return el("div", { class: "wp-world" },
         el("span", { class: "mono dim" }, w.attribute), " ", w.value, " ",
-        w.source_url
-          ? el("a", { href: w.source_url, target: "_blank",
-                      rel: "noopener noreferrer" }, "source")
-          : null))),
+        href
+          ? el("a", { href, target: "_blank", rel: "noopener noreferrer" }, "source")
+          : (w.source_url ? el("span", { class: "dim" }, w.source_url) : null));
+    })),
     relationsSection(d, nav),
     section("Mentions", d.mentions.map((m) =>
       el("div", { class: "wp-mention" },

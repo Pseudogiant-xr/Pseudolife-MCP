@@ -116,3 +116,10 @@ export function errorBlock(err) {
   const msg = err && err.code === 401 ? "Unauthorized — set an access token." : (err?.message || String(err));
   return el("div", { class: "error-box" }, el("div", { class: "big" }, "Request failed"), el("div", { class: "mono" }, msg));
 }
+
+// source_url values are agent/LLM-authored, so a javascript:/data: URL rendered
+// as a raw <a href> would execute on click. Only http(s) may become a link;
+// callers render anything else as inert text.
+export function safeHttpUrl(url) {
+  return /^https?:\/\//i.test(url || "") ? url : null;
+}

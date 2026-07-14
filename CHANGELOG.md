@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-15 — Atlas stage 1: entity wiki pages)
+- **`GET /api/wiki?entity=X`** — one-call, live-rendered entity page for the
+  console: identity + aliases + project attribution + first-seen, canonical
+  facts (with lazy supersession history), cited world facts, relations in/out
+  (derived edges marked with rule provenance), provenance mentions, a merged
+  newest-first timeline, and open review flags (proposals + unattributed;
+  never re-runs the full review scan). No LLM in the loop — pages are
+  assembled from structured data at request time, so they cannot go stale.
+- **Console: clicking a graph node opens the entity's wiki page** in a
+  browsable panel (replaces the small node-panel); entity names inside the
+  page are wikilinks that swap the page in place.
+- Storage: `find_entity`/`load_graph` expose `entities.created_at`
+  (additive; feeds first-seen and the upcoming galaxy time scrubber).
+
 ### Added (2026-07-14 — state-volume backup/restore, v2 release audit)
 - **`ops/backup.ps1|.sh` now also tar the daemon state volume** into a
   sibling `pseudolife_state-<stamp>.tgz`: ingested `document_ingest` files
