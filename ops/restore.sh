@@ -10,12 +10,20 @@
 #                                         #   safety-dump current bank first,
 #                                         #   stop daemon, drop+recreate db,
 #                                         #   restore, start daemon, health.
+#   ops/restore.sh --apply --state-archive <pseudolife_state-*.tgz>
+#                                         # ALSO replace the daemon state
+#                                         # volume (ingested documents +
+#                                         # cortex/graph snapshots) from a
+#                                         # backup.sh state tar. Opt-in: a
+#                                         # DB-only restore must not clobber
+#                                         # current state.
 #
 # The rehearsal NEVER touches the live database — it exists so the restore
 # path is a rehearsed procedure, not a hope.
 set -euo pipefail
 
 BACKUP_FILE=""
+STATE_ARCHIVE=""
 CONTAINER="pseudolife-mcp-postgres"
 DAEMON_CONTAINER="pseudolife-mcp-daemon"
 DB="pseudolife_memory"
@@ -25,6 +33,7 @@ APPLY=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --backup-file)      BACKUP_FILE="$2"; shift 2 ;;
+        --state-archive)    STATE_ARCHIVE="$2"; shift 2 ;;
         --container)        CONTAINER="$2"; shift 2 ;;
         --daemon-container) DAEMON_CONTAINER="$2"; shift 2 ;;
         --db)               DB="$2"; shift 2 ;;
@@ -43,6 +52,16 @@ if [ -z "$BACKUP_FILE" ]; then
 fi
 [ -s "$BACKUP_FILE" ] || { echo "backup artifact missing or empty: $BACKUP_FILE" >&2; exit 1; }
 echo "==> Backup: $BACKUP_FILE ($(( $(wc -c < "$BACKUP_FILE") / 1024 )) KB)"
+
+if [ -n "$STATE_ARCHIVE" ]; then
+    [ -s "$STATE_ARCHIVE" ] || { echo "state archive missing or empty: $STATE_ARCHIVE" >&2; exit 1; }
+    echo "==> State archive: $STATE_ARCHIVE ($(( $(wc -c < "$STATE_ARCHIVE") / 1024 )) KB)"
+else
+    newest_state="$(ls -1t "$repo/data/backups"/pseudolife_state-*.tgz 2>/dev/null | head -1 || true)"
+    if [ -n "$newest_state" ]; then
+        echo "==> Note: state archives exist (newest: $(basename "$newest_state")); pass --state-archive to restore ingested documents + cortex/graph snapshots too."
+    fi
+fi
 
 stamp="$(date +%Y%m%d-%H%M%S)"
 tmp="/tmp/pl_restore-$stamp.sql.gz"
@@ -70,19 +89,38 @@ if [ "$APPLY" -eq 0 ]; then
     fi
 
     printf '%-14s %10s %10s\n' "table" "live" "restored"
-    any_empty=0
+    any_lost=0
     for t in $tables; do
         live="$(count_rows "$DB" "$t")"
         restored="$(count_rows "$scratch" "$t")"
         printf '%-14s %10s %10s\n' "$t" "$live" "$restored"
+        # Alarm only when the LIVE bank has rows the backup lost — an
+        # absolute-zero check false-fails on a young bank (no dreams run
+        # yet = legitimately 0 facts) and teaches users to distrust a
+        # perfectly good backup.
         case "$t" in entries|facts)
-            [ "$restored" -gt 0 ] || any_empty=1 ;;
+            if [ "$live" -gt 0 ] && [ "$restored" -le 0 ]; then any_lost=1; fi ;;
         esac
     done
     docker exec "$CONTAINER" psql -q -U "$DB_USER" -d postgres -c "DROP DATABASE $scratch"
-    if [ "$any_empty" -eq 1 ]; then
-        echo "restored bank has empty entries/facts - investigate before trusting this backup" >&2
+    if [ "$any_lost" -eq 1 ]; then
+        echo "live bank has entries/facts but the restored copy has none - investigate before trusting this backup" >&2
         exit 1
+    fi
+
+    if [ -n "$STATE_ARCHIVE" ]; then
+        # Integrity-check the state tar (listing decompresses everything).
+        echo "==> Rehearsing state archive (list-only, nothing written)..."
+        state_tmp="/tmp/pl_state_rehearse.tgz"
+        docker cp "$STATE_ARCHIVE" "$DAEMON_CONTAINER:$state_tmp"
+        if n="$(docker exec "$DAEMON_CONTAINER" sh -c "tar tzf $state_tmp | wc -l")"; then
+            docker exec "$DAEMON_CONTAINER" rm -f "$state_tmp" || true
+            echo "==> State archive OK ($n entries)."
+        else
+            docker exec "$DAEMON_CONTAINER" rm -f "$state_tmp" || true
+            echo "state archive is unreadable - investigate before trusting it" >&2
+            exit 1
+        fi
     fi
     echo "==> Rehearsal PASSED: the backup restores cleanly. (Counts differ from live only by writes since the dump.)"
 else
@@ -100,6 +138,23 @@ else
     if ! docker exec "$CONTAINER" sh -c "gunzip -c $tmp | psql -q -v ON_ERROR_STOP=1 -U $DB_USER -d $DB > /dev/null"; then
         echo "RESTORE FAILED mid-way; daemon left stopped. The pre-restore safety dump is in data/backups." >&2
         exit 1
+    fi
+
+    if [ -n "$STATE_ARCHIVE" ]; then
+        # Replace /data (the state volume) while the daemon is stopped.
+        # Runs the daemon's own image (already local, has tar) with
+        # --volumes-from, so no volume-name resolution or image pull is
+        # needed. The safety backup above already tarred the current state.
+        echo "==> Restoring the state volume from $STATE_ARCHIVE..."
+        img="$(docker inspect -f '{{.Config.Image}}' "$DAEMON_CONTAINER")"
+        dir="$(cd "$(dirname "$STATE_ARCHIVE")" && pwd)"
+        name="$(basename "$STATE_ARCHIVE")"
+        if ! docker run --rm --entrypoint sh --volumes-from "$DAEMON_CONTAINER" \
+            -v "$dir:/pl_backup:ro" "$img" \
+            -c "find /data -mindepth 1 -delete && tar xzf /pl_backup/$name -C /data"; then
+            echo "STATE RESTORE FAILED; daemon left stopped. The pre-restore safety state tar is in data/backups." >&2
+            exit 1
+        fi
     fi
 
     echo "==> Restarting the daemon..."

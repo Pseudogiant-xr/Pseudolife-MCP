@@ -1,3 +1,7 @@
+#Requires -Version 7
+# ^ Windows PowerShell 5.1 (powershell.exe) writes UTF-8 WITH a BOM, which
+#   garbles the first key of ops/.env and can break settings.json parsing —
+#   run this under pwsh 7+ (winget install Microsoft.PowerShell).
 # One-shot idempotent installer for the PseudoLife-MCP stack (issue #13
 # tier 2). Everything downstream of Docker: preflight -> volumes -> extractor
 # choice -> compose up -> session hooks -> CLAUDE.md memory block ->

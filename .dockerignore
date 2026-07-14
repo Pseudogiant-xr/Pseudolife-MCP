@@ -21,3 +21,11 @@ chromadb
 *.md
 !README.md
 docs
+
+# Never part of any image (no Dockerfile COPYs these) — and evals/models can
+# hold tens of GB of local GGUF checkpoints that would be tarred into every
+# `docker compose build` context, bloating the build cache for nothing.
+evals
+tests
+examples
+unsloth_compiled_cache

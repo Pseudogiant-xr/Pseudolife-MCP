@@ -161,9 +161,16 @@ echo "==> docker compose up -d --build (first build downloads images — grab a 
 docker compose "${compose[@]}" up -d --build
 
 # ── 7. Sonnet shim autostart (Sonnet modes) ────────────────────────────────
+# Best-effort, like the .ps1: a host without systemd --user (macOS, some WSL)
+# must not abort the install between `compose up` and the hooks/mcp-add/health
+# steps — that strands a running stack that was never wired into Claude Code.
 if [ "$EXTRACTOR" != "sidecar" ]; then
     echo "==> Registering the Sonnet shim autostart (systemd --user)..."
-    "$repo/ops/install-shim-autostart.sh" --port "$SHIM_PORT"
+    if ! "$repo/ops/install-shim-autostart.sh" --port "$SHIM_PORT"; then
+        echo "WARNING: shim autostart registration failed (no systemd --user on this host?)" >&2
+        echo "  Re-run later: ops/install-shim-autostart.sh --port $SHIM_PORT" >&2
+        echo "  Or start it manually: python evals/sonnet_shim.py --port $SHIM_PORT --system-prompt-file evals/prompts/sonnet_extractor_v1.md" >&2
+    fi
 fi
 
 # ── 8. session lifecycle hooks ─────────────────────────────────────────────

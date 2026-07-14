@@ -150,6 +150,10 @@ class EmbeddingPipeline:
         """
         if isinstance(texts, str):
             texts = [texts]
+        if not texts:
+            # torch.stack raises on an empty list; preserve the pre-cache
+            # contract of returning an empty (0, dim) tensor.
+            return torch.empty((0, self._dim))
 
         rows: list[torch.Tensor | None] = [None] * len(texts)
         misses: list[int] = []

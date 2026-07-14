@@ -8,6 +8,10 @@
 $script:fails = 0
 
 function Ok($msg)   { Write-Host "  OK   $msg" -ForegroundColor Green }
+function Warn($msg, $fix) {
+    Write-Host "  WARN $msg" -ForegroundColor Yellow
+    Write-Host "        fix: $fix"
+}
 function Fail($msg, $fix) {
     Write-Host "  FAIL $msg" -ForegroundColor Red
     Write-Host "        fix: $fix"
@@ -34,6 +38,22 @@ if (Get-Command docker -ErrorAction SilentlyContinue) {
     docker compose version *> $null
     if ($LASTEXITCODE -eq 0) { Ok "docker compose v2" }
     else { Fail "docker compose v2 plugin missing" "Docker Desktop bundles it - update Docker Desktop" }
+}
+
+# -- ports 8765 (daemon) / 5433 (postgres): free, or held by our own stack -----
+# Warn-only: a taken port turns into a cryptic "port is already allocated" at
+# compose up; held-by-us means an existing install (idempotent re-run is fine).
+$running = @(docker ps --format "{{.Names}}" 2>$null)
+foreach ($p in @(@{Port=8765; Svc="daemon"; Cont="pseudolife-mcp-daemon"},
+                 @{Port=5433; Svc="postgres"; Cont="pseudolife-mcp-postgres"})) {
+    if ($running -contains $p.Cont) {
+        Ok "port $($p.Port) held by $($p.Cont) (existing install)"
+    } elseif (Get-NetTCPConnection -LocalPort $p.Port -State Listen -ErrorAction SilentlyContinue) {
+        Warn "port $($p.Port) is already in use (needed for the $($p.Svc))" `
+             "free the port (e.g. a native Postgres on 5433), then re-run - compose up will otherwise fail with 'port is already allocated'"
+    } else {
+        Ok "port $($p.Port) free ($($p.Svc))"
+    }
 }
 
 # -- git ----------------------------------------------------------------------

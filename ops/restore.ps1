@@ -8,12 +8,20 @@
 #                                            #   safety-dump current bank first,
 #                                            #   stop daemon, drop+recreate db,
 #                                            #   restore, start daemon, health.
+#   ops\restore.ps1 -Apply -StateArchive <pseudolife_state-*.tgz>
+#                                            # ALSO replace the daemon state
+#                                            # volume (ingested documents +
+#                                            # cortex/graph snapshots) from a
+#                                            # backup.ps1 state tar. Opt-in:
+#                                            # a DB-only restore must not
+#                                            # clobber current state.
 #
 # The rehearsal NEVER touches the live database — it exists so the restore
 # path is a rehearsed procedure, not a hope (2026-07-02 review P2: the only
 # restore guidance in the repo was a code comment).
 param(
     [string]$BackupFile = "",
+    [string]$StateArchive = "",
     [string]$Container = "pseudolife-mcp-postgres",
     [string]$DaemonContainer = "pseudolife-mcp-daemon",
     [string]$Db = "pseudolife_memory",
@@ -35,6 +43,19 @@ if (-not (Test-Path $BackupFile) -or (Get-Item $BackupFile).Length -eq 0) {
     throw "backup artifact missing or empty: $BackupFile"
 }
 Write-Host "==> Backup: $BackupFile ($([math]::Round((Get-Item $BackupFile).Length/1KB)) KB)"
+
+if ($StateArchive) {
+    if (-not (Test-Path $StateArchive) -or (Get-Item $StateArchive).Length -eq 0) {
+        throw "state archive missing or empty: $StateArchive"
+    }
+    Write-Host "==> State archive: $StateArchive ($([math]::Round((Get-Item $StateArchive).Length/1KB)) KB)"
+} else {
+    $newestState = Get-ChildItem (Join-Path $repo "data\backups") -Filter "pseudolife_state-*.tgz" -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($newestState) {
+        Write-Host "==> Note: state archives exist (newest: $($newestState.Name)); pass -StateArchive to restore ingested documents + cortex/graph snapshots too."
+    }
+}
 
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $tmp = "/tmp/pl_restore-$stamp.sql.gz"
@@ -65,13 +86,30 @@ try {
         $live = Get-Counts $Db
         $restored = Get-Counts $scratch
         Write-Host ("{0,-14} {1,10} {2,10}" -f "table", "live", "restored")
-        $anyEmpty = $false
+        $anyLost = $false
         foreach ($t in $tables) {
             Write-Host ("{0,-14} {1,10} {2,10}" -f $t, $live[$t], $restored[$t])
-            if ($t -in @("entries", "facts") -and $restored[$t] -le 0) { $anyEmpty = $true }
+            # Alarm only when the LIVE bank has rows the backup lost — an
+            # absolute-zero check false-fails on a young bank (no dreams run
+            # yet = legitimately 0 facts) and teaches users to distrust a
+            # perfectly good backup.
+            if ($t -in @("entries", "facts") -and $live[$t] -gt 0 -and $restored[$t] -le 0) { $anyLost = $true }
         }
         docker exec $Container psql -q -U $User -d postgres -c "DROP DATABASE $scratch"
-        if ($anyEmpty) { throw "restored bank has empty entries/facts - investigate before trusting this backup" }
+        if ($anyLost) { throw "live bank has entries/facts but the restored copy has none - investigate before trusting this backup" }
+
+        if ($StateArchive) {
+            # Integrity-check the state tar (listing decompresses everything).
+            Write-Host "==> Rehearsing state archive (list-only, nothing written)..."
+            $stateTmp = "/tmp/pl_state_rehearse.tgz"
+            docker cp $StateArchive "${DaemonContainer}:$stateTmp"
+            if ($LASTEXITCODE -ne 0) { throw "docker cp into $DaemonContainer failed - is the daemon container present?" }
+            $n = docker exec $DaemonContainer sh -c "tar tzf $stateTmp | wc -l"
+            $tarOk = $LASTEXITCODE -eq 0
+            docker exec $DaemonContainer rm -f $stateTmp
+            if (-not $tarOk) { throw "state archive is unreadable - investigate before trusting it" }
+            Write-Host "==> State archive OK ($($n.Trim()) entries)."
+        }
         Write-Host "==> Rehearsal PASSED: the backup restores cleanly. (Counts differ from live only by writes since the dump.)"
     }
     else {
@@ -88,6 +126,22 @@ try {
         docker exec $Container psql -q -U $User -d postgres -c "CREATE DATABASE $Db"
         docker exec $Container sh -c "gunzip -c $tmp | psql -q -v ON_ERROR_STOP=1 -U $User -d $Db > /dev/null"
         if ($LASTEXITCODE -ne 0) { throw "RESTORE FAILED mid-way; daemon left stopped. The pre-restore safety dump is in data\backups." }
+
+        if ($StateArchive) {
+            # Replace /data (the state volume) while the daemon is stopped.
+            # Runs the daemon's own image (already local, has tar) with
+            # --volumes-from, so no volume-name resolution or image pull is
+            # needed. The safety backup above already tarred the current state.
+            Write-Host "==> Restoring the state volume from $StateArchive..."
+            $img = docker inspect -f '{{.Config.Image}}' $DaemonContainer
+            if ($LASTEXITCODE -ne 0) { throw "cannot inspect $DaemonContainer; state volume NOT restored, daemon left stopped" }
+            $dir = (Get-Item $StateArchive).DirectoryName
+            $name = Split-Path $StateArchive -Leaf
+            docker run --rm --entrypoint sh --volumes-from $DaemonContainer `
+                -v "${dir}:/pl_backup:ro" $img `
+                -c "find /data -mindepth 1 -delete && tar xzf /pl_backup/$name -C /data"
+            if ($LASTEXITCODE -ne 0) { throw "STATE RESTORE FAILED; daemon left stopped. The pre-restore safety state tar is in data\backups." }
+        }
 
         Write-Host "==> Restarting the daemon..."
         docker start $DaemonContainer | Out-Null

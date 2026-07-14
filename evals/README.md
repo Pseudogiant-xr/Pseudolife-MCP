@@ -47,22 +47,27 @@ Note this is *separate* from the default-on compose sidecar
 (`pseudolife-mcp-extractor`), which is internal-only (`expose:`, not `ports:`)
 and reachable only by the daemon on the compose network.
 
-**Gemma E2B** (default baked image):
+**Gemma E2B** — bake the E2B image (the shipped default is now the E4B v2
+fine-tune, so E2B needs an explicit `MODEL_URL`), then serve it:
 
 ```bash
+docker build -f ops/Dockerfile.extractor -t pseudolife-extractor:gemma4-e2b \
+  --build-arg MODEL_URL=https://huggingface.co/unsloth/gemma-4-E2B-it-qat-GGUF/resolve/main/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf ops
 docker run -d --name pseudolife-mcp-extractor-bench -p 127.0.0.1:8081:8081 \
   pseudolife-extractor:gemma4-e2b
 ```
 
 **Gemma E4B** — stop the E2B container, then serve the E4B GGUF on the same
-port. Either bake a second image:
+port. The ladder's `gemma-e4b` rung is the QAT *base* model (the shipped
+default image bakes the v2 *fine-tune*, a different artifact — mount or bake
+the base explicitly for a like-for-like rung):
 
 ```bash
-docker build -f ops/Dockerfile.extractor -t pseudolife-extractor:gemma4-e4b \
-  --build-arg MODEL_URL=https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/resolve/main/gemma-4-E4B-it-Q4_K_M.gguf ops
+docker build -f ops/Dockerfile.extractor -t pseudolife-extractor:gemma4-e4b-base \
+  --build-arg MODEL_URL=https://huggingface.co/unsloth/gemma-4-E4B-it-qat-GGUF/resolve/main/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf ops
 docker rm -f pseudolife-mcp-extractor-bench
 docker run -d --name pseudolife-mcp-extractor-bench -p 127.0.0.1:8081:8081 \
-  pseudolife-extractor:gemma4-e4b
+  pseudolife-extractor:gemma4-e4b-base
 ```
 
 …or mount any GGUF over the baked default without a rebuild:
@@ -321,7 +326,8 @@ Gemma 2B (tuned prompt)       5/6       5/5     correction-polarity FIXED
   (merged 3→2, mis-polarised a success), so it was reverted. Accepted as a
   genuine small-model capability gap; **low real-world risk** because signals come
   from deliberate `memory_outcome` calls + correction auto-tags, not arbitrary
-  chatter. Revisit if a larger default sidecar (Gemma E4B) is ever shipped.
+  chatter. (The default sidecar has since moved to E4B-class — 2026-07-06,
+  now the E4B v2 fine-tune — which narrows this gap.)
 - Gemma already handles the **merged fail→success** case and **clustering** well
   — better than the v1 live smoke suggested (that smoke's inversion was not
   systematic at temperature 0).

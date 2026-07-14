@@ -20,12 +20,13 @@
 #
 # ⚠️  TWO VOLUMES HOLD STATE. The bank volume (default `pseudolife-mcp-bank`) is
 #     the canonical bank (entries + facts + graph). The state volume (default
-#     `pseudolife-mcp-state`) holds the daemon's learned neural weights + ChromaDB
-#     + cortex snapshot. To rebuild images (e.g. CVE hardening) use `up -d --build`
-#     or `stop`/`start` — these keep both volumes. NEVER use `down -v`,
+#     `pseudolife-mcp-state`) holds ChromaDB (ingested documents) + the cortex
+#     and graph snapshots. To rebuild images (e.g. CVE hardening) use `up -d
+#     --build` or `stop`/`start` — these keep both volumes. NEVER use `down -v`,
 #     `docker volume rm`, or `docker system prune --volumes`: they DELETE state.
 #     (Both volumes are `external` below so `down -v` skips them, but the manual
-#     volume commands still bite — and always `ops/backup.ps1` before any teardown.)
+#     volume commands still bite — and always `ops/backup.ps1` before any
+#     teardown: it captures BOTH volumes — the pg_dump plus a state-volume tar.)
 #
 # Ports bind 127.0.0.1 only. Postgres (5433) is never exposed beyond the
 # compose network + loopback; the daemon (8765) is the only thing Claude
@@ -39,6 +40,15 @@
 # `docker exec pseudolife-mcp-postgres psql -U pseudolife -d postgres -c
 # "ALTER USER pseudolife PASSWORD '<new>'"` plus updating ops/.env to match).
 name: pseudolife-mcp
+
+# Cap container logs — Docker's json-file default has NO size limit, so
+# months of daemon/pg/extractor stdout otherwise grow the disk unbounded.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   pseudolife-pg:
     build:
@@ -47,6 +57,7 @@ services:
     image: pseudolife-pg:16
     container_name: pseudolife-mcp-postgres
     restart: unless-stopped
+    logging: *default-logging
     environment:
       POSTGRES_USER: pseudolife
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pseudolife}
@@ -72,6 +83,7 @@ services:
     image: pseudolife-daemon:0.7.0
     container_name: pseudolife-mcp-daemon
     restart: unless-stopped
+    logging: *default-logging
     # No depends_on for the extractor: dream extraction is runtime HTTP with
     # per-sweep retry (a probe against a still-loading extractor just fails
     # and retries next sweep), and the sidecar must be disableable via a
@@ -160,6 +172,7 @@ services:
     image: pseudolife-extractor:gemma4-e4b
     container_name: pseudolife-mcp-extractor
     restart: unless-stopped
+    logging: *default-logging
     expose:
       - "8081"
     # The base llama.cpp image bakes a healthcheck against port 8080; our server

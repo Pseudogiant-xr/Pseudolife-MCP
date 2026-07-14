@@ -316,11 +316,12 @@ class DreamConfig:
     # parses to fewer/zero claims). 2048 ≈ 40-80 claims. Override per-deploy with
     # ``PSEUDOLIFE_DREAM_MAX_TOKENS``.
     extractor_max_tokens: int = 2048
-    # The default CPU sidecar (Gemma E2B Q4) generates at ~30 tok/s, so a full
-    # ``extractor_max_tokens`` (2048) generation is ~70s — plus prompt processing
-    # of the texts + vocab hint. The old 20s default timed the dream out (claims:0
-    # → no cortex write). 240s gives headroom for slower end-user CPUs/laptops too;
-    # the dream is a background sweep (600s interval) so latency is irrelevant.
+    # A small CPU extractor generates at ~12-30 tok/s depending on the bake, so
+    # a full ``extractor_max_tokens`` (2048) generation is ~70-170s — plus prompt
+    # processing of the texts + vocab hint. The old 20s default timed the dream
+    # out (claims:0 → no cortex write). 240s covers the lighter bakes; the Docker
+    # stack ships 480s for the default E4B sidecar (see ops/docker-compose.yml).
+    # The dream is a background sweep (600s interval) so latency is irrelevant.
     # Override per-deploy with ``PSEUDOLIFE_DREAM_TIMEOUT_SECONDS``.
     extractor_timeout_seconds: float = 240.0
     # Primary/fallback extractor selection (2026-07-11 sonnet-sidecar-cutover

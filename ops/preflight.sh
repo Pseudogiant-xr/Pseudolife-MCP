@@ -10,6 +10,7 @@ set -u
 fails=0
 
 ok()   { printf '  \033[32mOK\033[0m   %s\n' "$1"; }
+warn() { printf '  \033[33mWARN\033[0m %s\n' "$1"; printf '        fix: %s\n' "$2"; }
 fail() { printf '  \033[31mFAIL\033[0m %s\n' "$1"; printf '        fix: %s\n' "$2"; fails=$((fails+1)); }
 
 echo "PseudoLife-MCP preflight (checks only — nothing is installed or changed)"
@@ -41,6 +42,35 @@ else
     fail "docker compose v2 plugin missing" \
          "Docker Desktop bundles it; on Linux: https://docs.docker.com/compose/install/linux/ (Arch: sudo pacman -S docker-compose)"
 fi
+
+# ── ports 8765 (daemon) / 5433 (postgres): free, or held by our own stack ──
+# Warn-only: a taken port turns into a cryptic "port is already allocated" at
+# compose up; held-by-us means an existing install (idempotent re-run is fine).
+port_listening() { # $1 = port; rc 0 = listening, 1 = free, 2 = cannot tell
+    if command -v ss >/dev/null 2>&1; then
+        ss -ltn 2>/dev/null | grep -qE "[:.]$1([[:space:]]|$)"
+    elif command -v lsof >/dev/null 2>&1; then
+        lsof -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1
+    else
+        return 2
+    fi
+}
+running="$(docker ps --format '{{.Names}}' 2>/dev/null || true)"
+for spec in "8765 daemon pseudolife-mcp-daemon" "5433 postgres pseudolife-mcp-postgres"; do
+    set -- $spec
+    port="$1"; svc="$2"; cont="$3"
+    if printf '%s\n' "$running" | grep -qx "$cont"; then
+        ok "port $port held by $cont (existing install)"
+    else
+        port_listening "$port" && rc=0 || rc=$?
+        if [ "$rc" -eq 0 ]; then
+            warn "port $port is already in use (needed for the $svc)" \
+                 "free the port (e.g. a native Postgres on 5433), then re-run — compose up will otherwise fail with 'port is already allocated'"
+        elif [ "$rc" -eq 1 ]; then
+            ok "port $port free ($svc)"
+        fi
+    fi
+done
 
 # ── git ────────────────────────────────────────────────────────────────────
 if command -v git >/dev/null 2>&1; then

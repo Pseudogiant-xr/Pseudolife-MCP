@@ -1,3 +1,6 @@
+#Requires -Version 7
+# ^ enforced, not just documented: 5.1's Set-Content writes a BOM into
+#   settings.json.
 # Idempotently add the PseudoLife-MCP session-start briefing to Claude Code's
 # SessionStart hooks, ALONGSIDE (never replacing) any existing hooks.
 #

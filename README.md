@@ -142,6 +142,7 @@ Console (REST) — the manifest is agent context every session, so it stays lean
 | `memory_relation_define(name, description, ...)` | Grow the closed relation vocabulary (deliberate, rare act) |
 | `document_ingest(path, source?)` | Index a file (txt/md/pdf) in the reference bank |
 | `document_search(query, top_k?)` | RAG search over the reference bank only |
+| `memory_toolset(action)` | Check or change this session's visibility tier: `status` / `expand` / `collapse` (see "Toolset tiers" below) |
 
 Each tool returns plain JSON. See `pseudolife_memory/mcp_server.py` for
 docstrings — those are what Claude reads to decide when to call which tool.
@@ -331,11 +332,16 @@ without touching Postgres or the extractor:
 ./ops/update.sh         # Linux / macOS
 ```
 
-It backs up the bank (`pg_dump`), tags a rollback image, rebuilds + recreates
-**only** the daemon (`docker compose up -d --no-deps --build pseudolife-daemon`),
-and waits for `/health`. It never runs `down -v`. (Host-process install: just
+It backs up the bank (`pg_dump` + a state-volume tar), tags a rollback image
+(keeping the newest 2, older ones are pruned), rebuilds + recreates **only**
+the daemon (`docker compose up -d --no-deps --build pseudolife-daemon`), and
+waits for `/health`. It never runs `down -v`. (Host-process install: just
 restart the daemon — `pip install -e .` is editable, so a restart picks up the
 new code.)
+
+Repeated `--build` deploys also accumulate Docker *build cache*; reclaim it
+now and then with `docker builder prune` (safe — it only touches build
+layers). Never use `docker system prune --volumes`, which deletes volumes.
 
 ## Wire into Claude Code
 
@@ -424,13 +430,18 @@ The daemon **refuses to bind a non-loopback host without a token**, and
 Postgres itself stays loopback-only — the LAN only ever sees the daemon.
 
 **Backups:** `ops\backup.ps1` (Windows) / `ops/backup.sh` (Linux/macOS) runs
-`pg_dump` inside the container into `data\backups\` with 7-day rotation, plus
-an optional off-disk mirror via `PSEUDOLIFE_BACKUP_MIRROR`;
+`pg_dump` inside the container into `data\backups\` with 7-day rotation, and
+also tars the daemon **state volume** (ingested `document_ingest` files,
+cortex snapshot, graph snapshots — those live only there, not in Postgres)
+into a sibling `pseudolife_state-*.tgz`. An optional off-disk mirror via
+`PSEUDOLIFE_BACKUP_MIRROR` carries both artifacts;
 `PSEUDOLIFE_BACKUP_MIRROR_KEEP=N` (or `-MirrorKeep` / `--mirror-keep`) caps
-the mirror at the newest N files — handy for cloud-synced folders. The matching
-`restore` script rehearses the newest backup into a scratch database by
-default (never touching the live bank) and only replaces the live bank with
-an explicit `-Apply` / `--apply`.
+the mirror at the newest N files per kind — handy for cloud-synced folders.
+The matching `restore` script rehearses the newest backup into a scratch
+database by default (never touching the live bank) and only replaces the live
+bank with an explicit `-Apply` / `--apply`; add
+`-StateArchive <pseudolife_state-*.tgz>` / `--state-archive` to also restore
+the state volume (opt-in, so a DB-only restore never clobbers current state).
 
 ## Recommended agent setup (CLAUDE.md)
 
@@ -1027,21 +1038,25 @@ dream with the configured extractor. Under the single-writer cortex a *successfu
 pass that finds no canonical facts writes nothing and advances the cursor; a
 **failed** call (timeout, network, malformed output) instead **holds the cursor**,
 so those memories are retried next sweep rather than skipped — there is no regex
-fallback either way. The extractor timeout defaults to **240s** (a CPU model emits
-~30 tok/s, so a full `PSEUDOLIFE_DREAM_MAX_TOKENS` generation is ~70s) — raise it
+fallback either way. The extractor timeout defaults to **240s** in code; the
+Docker stack ships **480s** (`PSEUDOLIFE_DREAM_TIMEOUT_SECONDS` in the compose
+file) because the default E4B sidecar generates at ~12–15 tok/s on CPU, so a
+full `PSEUDOLIFE_DREAM_MAX_TOKENS` generation runs ~150–170s — raise it further
 for slower hardware. The same env vars also upgrade `memory_dream(action="run")`.
 A local model keeps all text on-box; a hosted endpoint does not.
 
 **Tier 2, batteries-included — the CPU extractor sidecar (default-on).** The stack
-ships a llama.cpp sidecar with a small model baked in (Gemma 4 E2B — the
-benchmarked minimum-viable extractor), and `ops/docker-compose.yml` starts it by
+ships a llama.cpp sidecar with a model baked in (the bespoke Gemma 4 E4B
+extractor fine-tune, ~5.3 GB — see "Upgrading the extractor" below for the
+lighter E2B bake), and `ops/docker-compose.yml` starts it by
 default and routes dream consolidation to it. It's internal-only (never published
 to the host). Single-writer cortex relies on it: with no extractor configured, the
 cortex is populated only by `memory_fact_set` and the daemon logs a startup
 warning. Reasoning models work too — the extractor disables their `<think>` trace
 so they return structured output instead of an empty budget. The `evals/`
-extractor-ladder benchmark is how that default model was chosen (Gemma 4 E2B beats
-naive-RAG at ~25× fewer tokens/query); see `evals/README.md`.
+extractor-ladder benchmark is how the default was chosen (even the smallest
+bake, Gemma 4 E2B, beats naive-RAG at ~25× fewer tokens/query); see
+`evals/README.md`.
 
 **Upgrading the extractor — bigger local models.** If you have a GPU (or a
 beefier box on your LAN), any OpenAI-compatible server can replace the sidecar —
@@ -1183,7 +1198,8 @@ by default (entries + facts + graph). A second external volume,
 band-counter `weights.pt`, and the cortex snapshot. Both are declared `external`
 in `ops/docker-compose.yml` precisely so a container teardown can't take them
 with it. The host `data/` dir then holds only backups (`data/backups/` from
-`ops/backup.ps1`) and one-time legacy-import staging — *not* the live bank.
+`ops/backup.ps1` — a `pg_dump` of the bank *plus* a tar of the state volume)
+and one-time legacy-import staging — *not* the live bank.
 
 To wipe the bank in this mode you must drop those volumes deliberately —
 **never `docker compose down -v` or `docker volume rm` without `ops/backup.ps1`
@@ -1306,7 +1322,7 @@ extractor:
 The consolidated-facts posture beats naive RAG by 9 points while reading
 ~40% of the context — and the fact spine alone delivers 92% of RAG's
 accuracy on **3.6% of its token budget**. Running floor (Gemma 4 E2B, the
-default CPU sidecar) vs ceiling (Qwen3.6-27B) extractors with the RAG arm
+smallest CPU-sidecar bake) vs ceiling (Qwen3.6-27B) extractors with the RAG arm
 as a fixed control isolates **extraction quality as the dominant factor**
 in fact-spine accuracy — the measured case for the "Upgrading the
 extractor" section above. Full methodology, the harder full-haystack

@@ -6,6 +6,55 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-14 — state-volume backup/restore, v2 release audit)
+- **`ops/backup.ps1|.sh` now also tar the daemon state volume** into a
+  sibling `pseudolife_state-<stamp>.tgz`: ingested `document_ingest` files
+  (ChromaDB), the cortex snapshot, and graph snapshots live *only* there, so
+  the pg_dump alone silently lost them on disaster recovery despite the
+  compose header telling users a backup covers "state". Warn-never-throw (a
+  stopped daemon skips the tar loudly but never aborts a deploy's backup
+  step); rotation and the off-disk mirror cover both artifact kinds
+  (`-MirrorKeep`/`--mirror-keep` caps each kind at newest N).
+- **`ops/restore.ps1 -StateArchive <tgz>` / `restore.sh --state-archive`** —
+  opt-in state-volume restore (a DB-only restore must not clobber current
+  state): rehearsal integrity-lists the tar; `-Apply` replaces `/data` while
+  the daemon is stopped, via the daemon's own image with `--volumes-from`
+  (no volume-name resolution, no image pull). Without the flag, restore
+  prints a hint when state archives exist.
+
+### Fixed (2026-07-14 — v2 release audit)
+- **Restore rehearsal no longer false-fails on a young bank** — the
+  entries/facts sanity check now alarms only when the *live* bank has rows
+  the restored copy lost; a fresh install with no dream-run facts (0 rows)
+  produced a valid backup that the rehearsal declared untrustworthy.
+- **`ops/install.sh` no longer aborts mid-install when shim autostart fails**
+  (parity with the `.ps1`): on a host without `systemd --user` (macOS, some
+  WSL), a Sonnet-mode install died between `compose up` and the
+  hooks/`claude mcp add`/health steps — a running stack never wired into
+  Claude Code. Step 7 is now best-effort with a re-run hint.
+- **`ops/install.ps1` and `ops/install-hook.ps1` now enforce
+  `#Requires -Version 7`** — under Windows PowerShell 5.1 their
+  `Set-Content -Encoding utf8` writes a BOM that garbles the first `ops/.env`
+  key and can break `settings.json` parsing; 5.1 users now fail fast with the
+  pwsh install pointer instead of writing corrupted config.
+- **`encode([])` returns an empty `(0, dim)` tensor again** — the 2026-07-12
+  embedding-cache rework made `torch.stack` raise on an empty text list
+  (latent; no current caller can pass one, guard restored for defensiveness).
+
+### Changed (2026-07-14 — v2 release audit: disk hygiene + preflight)
+- **All three compose services now cap container logs** (`json-file`,
+  `max-size: 10m` × 3 files) — Docker's default json-file driver has no size
+  limit, so months of daemon/pg/extractor stdout grew the disk unbounded.
+  Applies on the next `up -d` (container recreate).
+- **`.dockerignore` now excludes `evals/`, `tests/`, `examples/`, and
+  `unsloth_compiled_cache/`** — no Dockerfile copies from them, and a
+  populated `evals/models/` (tens of GB of local GGUFs) was being tarred
+  into every `docker compose build` context and build-cache entry.
+- **`ops/preflight.ps1|.sh` now check ports 8765/5433** (warn-only): a taken
+  port previously surfaced as a cryptic compose "port is already allocated";
+  ports held by an existing PseudoLife stack count as OK, so idempotent
+  re-runs stay green.
+
 ### Changed (2026-07-14 — extractor default = published v2 fine-tune)
 - **`ops/Dockerfile.extractor` now bakes the bespoke extractor fine-tune by
   default** (`MODEL_URL` →

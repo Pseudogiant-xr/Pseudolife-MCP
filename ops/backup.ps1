@@ -1,12 +1,15 @@
-# pg_dump the PseudoLife-MCP database to data\backups\ with 7-day rotation.
+# pg_dump the PseudoLife-MCP database to data\backups\ with 7-day rotation,
+# plus a tar of the daemon state volume (ChromaDB reference documents, cortex
+# snapshot, graph snapshots) — the bank alone does not cover document_ingest.
 #
 #   ops\backup.ps1                 # dump into <repo>\data\backups
 #   ops\backup.ps1 -KeepDays 30
-#   ops\backup.ps1 -MirrorKeep 2   # cap the mirror at the newest 2 files
+#   ops\backup.ps1 -MirrorKeep 2   # cap the mirror at the newest 2 per kind
 #
 # Runs pg_dump INSIDE the container (no local postgres client needed).
 param(
     [string]$Container = "pseudolife-mcp-postgres",
+    [string]$DaemonContainer = "pseudolife-mcp-daemon",
     [string]$Db = "pseudolife_memory",
     [string]$User = "pseudolife",
     [string]$OutDir = "",
@@ -47,30 +50,59 @@ if (-not (Test-Path $out) -or (Get-Item $out).Length -eq 0) {
     throw "backup artifact missing or empty: $out"
 }
 
-# Rotation.
-Get-ChildItem $OutDir -Filter "pseudolife_memory-*.sql.gz" |
-    Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-$KeepDays) } |
-    Remove-Item -Force
+# State volume (ChromaDB reference documents + cortex snapshot + graph
+# snapshots), tarred from inside the daemon container — the only place those
+# live; a pg_dump alone loses every document_ingest on restore. Warn, never
+# throw: the DB dump above is the critical artifact and deploys must not
+# abort because the daemon happens to be stopped (the skip is loud).
+$stateOut = Join-Path $OutDir "pseudolife_state-$stamp.tgz"
+try {
+    $stateTmp = "/tmp/pl_state-$stamp.tgz"
+    docker exec $DaemonContainer sh -c "tar czf $stateTmp -C /data ."
+    if ($LASTEXITCODE -ne 0) { throw "tar failed inside container $DaemonContainer" }
+    docker cp "${DaemonContainer}:$stateTmp" $stateOut
+    docker exec $DaemonContainer rm -f $stateTmp
+    if (-not (Test-Path $stateOut) -or (Get-Item $stateOut).Length -eq 0) {
+        throw "state artifact missing or empty: $stateOut"
+    }
+    Write-Host "State volume -> $stateOut"
+} catch {
+    Write-Warning "STATE VOLUME NOT BACKED UP (ingested documents + cortex/graph snapshots live there; is the daemon running?): $_"
+}
 
-# Off-disk mirror (opt-in; KeepDays retention, or newest-N with -MirrorKeep).
+# Rotation.
+foreach ($pat in "pseudolife_memory-*.sql.gz", "pseudolife_state-*.tgz") {
+    Get-ChildItem $OutDir -Filter $pat |
+        Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-$KeepDays) } |
+        Remove-Item -Force
+}
+
+# Off-disk mirror (opt-in; KeepDays retention, or newest-N per kind with
+# -MirrorKeep). Mirrors both artifacts: the DB dump and the state tar.
 if ($MirrorDir) {
     try {
         New-Item -ItemType Directory -Force -Path $MirrorDir | Out-Null
-        Copy-Item $out $MirrorDir -Force
-        $m = Join-Path $MirrorDir (Split-Path $out -Leaf)
-        if ((Test-Path $m) -and (Get-Item $m).Length -eq (Get-Item $out).Length) {
+        $artifacts = @($out)
+        if (Test-Path $stateOut) { $artifacts += $stateOut }
+        foreach ($a in $artifacts) {
+            Copy-Item $a $MirrorDir -Force
+            $m = Join-Path $MirrorDir (Split-Path $a -Leaf)
+            if ((Test-Path $m) -and (Get-Item $m).Length -eq (Get-Item $a).Length) {
+                Write-Host "Mirrored to $m"
+            } else {
+                Write-Warning "mirror copy missing or size mismatch: $m"
+            }
+        }
+        foreach ($pat in "pseudolife_memory-*.sql.gz", "pseudolife_state-*.tgz") {
             if ($MirrorKeep -gt 0) {
-                Get-ChildItem $MirrorDir -Filter "pseudolife_memory-*.sql.gz" |
+                Get-ChildItem $MirrorDir -Filter $pat |
                     Sort-Object Name -Descending | Select-Object -Skip $MirrorKeep |
                     Remove-Item -Force
             } else {
-                Get-ChildItem $MirrorDir -Filter "pseudolife_memory-*.sql.gz" |
+                Get-ChildItem $MirrorDir -Filter $pat |
                     Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-$KeepDays) } |
                     Remove-Item -Force
             }
-            Write-Host "Mirrored to $m"
-        } else {
-            Write-Warning "mirror copy missing or size mismatch: $m"
         }
     } catch {
         Write-Warning "backup mirror failed (primary backup is safe): $_"
