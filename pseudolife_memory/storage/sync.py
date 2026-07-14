@@ -15,7 +15,8 @@ from typing import Any
 
 import torch
 
-from pseudolife_memory.memory.cortex import CortexRecord, CortexStore
+from pseudolife_memory.memory.cortex import (CortexRecord, CortexStore,
+                                             SUPERSESSION_LOG_CAP)
 from pseudolife_memory.memory.episodes import Episode, EpisodeManager
 from pseudolife_memory.memory.titans_memory import MemoryEntry
 
@@ -181,7 +182,8 @@ def sync_cortex_slots(cortex: CortexStore, storage) -> int:
         storage.replace_slot_facts(slots, rows)
         cortex.dirty_slots -= slots
     if meta_dirty:
-        storage.meta_set(_CORTEX_LOG_KEY, cortex.supersession_log[-200:])
+        storage.meta_set(_CORTEX_LOG_KEY,
+                         cortex.supersession_log[-SUPERSESSION_LOG_CAP:])
         storage.meta_set(_CORTEX_CURSOR_KEY, cortex.dream_cursor)
         cortex.meta_dirty = False
     return len(rows)
@@ -202,7 +204,8 @@ def snapshot_cortex(cortex: CortexStore, storage) -> int:
         row["entity_id"] = emap.get(norm_name(row["entity"]))
         row["object_entity_id"] = emap.get(norm_name(row["value"]))
     storage.replace_facts(rows)
-    storage.meta_set(_CORTEX_LOG_KEY, cortex.supersession_log[-200:])
+    storage.meta_set(_CORTEX_LOG_KEY,
+                     cortex.supersession_log[-SUPERSESSION_LOG_CAP:])
     storage.meta_set(_CORTEX_CURSOR_KEY, cortex.dream_cursor)
     # A full snapshot persists everything — outstanding dirty marks are moot.
     cortex.dirty_slots.clear()
