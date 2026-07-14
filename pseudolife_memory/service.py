@@ -1888,6 +1888,41 @@ class MemoryService:
                         _norm_key(d["entity"]), _norm_key(d["attribute"]))
             return {"count": len(rows), "entries": rows}
 
+    def compact_superseded(self) -> dict[str, Any]:
+        """Purge old superseded/retired versions from the three canonical
+        stores (spec 2026-07-14): per slot keep the newest
+        ``memory.compaction.keep_per_slot`` non-live records, purge the rest
+        once older than ``min_age_days``. current/contested are never
+        touched; the per-slot sync deletes the purged rows from PG. Runs on
+        the dream sweep tick; safe to call any time."""
+        from pseudolife_memory.memory.compaction import compact_store
+
+        cfg = self.config.memory.compaction
+        if not cfg.enabled:
+            return {"facts": 0, "world_facts": 0, "lessons": 0, "total": 0,
+                    "skipped": "disabled"}
+        with self._lock:
+            self._ensure_init()
+            kw = dict(keep_per_slot=cfg.keep_per_slot,
+                      min_age_days=cfg.min_age_days)
+            out = {"facts": 0, "world_facts": 0, "lessons": 0}
+            if self._cortex is not None:
+                out["facts"] = compact_store(self._cortex, **kw)
+                if out["facts"]:
+                    self._save_cortex()
+            if getattr(self, "_world", None) is not None:
+                out["world_facts"] = compact_store(self._world, **kw)
+                if out["world_facts"]:
+                    self._save_world()
+            if getattr(self, "_lessons", None) is not None:
+                out["lessons"] = compact_store(self._lessons, **kw)
+                if out["lessons"]:
+                    self._save_lessons()
+            out["total"] = sum(out.values())
+            if out["total"]:
+                logger.info("compaction purged %s", out)
+            return out
+
     def history(self, entity: str, attribute: str) -> dict[str, Any]:
         """The version timeline at a ``(entity, attribute)`` slot — current +
         superseded records, oldest→newest by tx_time, each attributed

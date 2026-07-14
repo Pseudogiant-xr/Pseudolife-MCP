@@ -8,13 +8,15 @@ from __future__ import annotations
 
 import torch
 
+from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
+
 from pseudolife_memory.memory.compaction import compact_store
 from pseudolife_memory.memory.cortex import CortexStore, CortexRecord
 from pseudolife_memory.memory.lessons import LessonStore
 from pseudolife_memory.memory.slots import Slot
 from pseudolife_memory.memory.world_cortex import WorldCortexStore
 
-EMB = torch.zeros(8)
+EMB = torch.zeros(384)   # facts.embedding is vector(384) — PG enforces it
 T0 = 1_000_000.0
 DAY = 86400.0
 
@@ -204,3 +206,68 @@ def test_compaction_console_knobs_registered():
     paths = {k["path"] for k in KNOBS}
     assert {"memory.compaction.enabled", "memory.compaction.keep_per_slot",
             "memory.compaction.min_age_days"} <= paths
+
+
+# ── service integration ─────────────────────────────────────────────────
+
+def _seed_versions(svc, n=6, base=T0):
+    """n successive values at one cortex slot through the public API."""
+    for i in range(n):
+        svc.cortex_write("proj", "version", f"v{i}", support="user",
+                         now=base + i * 10)
+
+
+def test_service_compact_disabled_is_noop(pristine_service):
+    svc = pristine_service
+    svc.config.memory.compaction.enabled = False
+    try:
+        _seed_versions(svc)
+        out = svc.compact_superseded()
+        assert out["total"] == 0 and out.get("skipped") == "disabled"
+    finally:
+        svc.config.memory.compaction.enabled = True
+        svc.cortex_forget("proj")
+
+
+def test_service_compact_purges_and_preserves_history(pristine_service):
+    svc = pristine_service
+    cfg = svc.config.memory.compaction
+    cfg.keep_per_slot, cfg.min_age_days = 2, 0.0
+    try:
+        _seed_versions(svc)
+        out = svc.compact_superseded()
+        assert out["facts"] == 3 and out["total"] == 3
+        h = svc.history("proj", "version")
+        values = [v["value"] for v in h["versions"]]
+        assert values == ["v3", "v4", "v5"]          # newest-2 priors + current
+        # Churn signal preserved: latest change ts is the current record's
+        # asserted_at, which survives compaction.
+        idx = svc._cortex_change_index()
+        assert idx["proj"] == T0 + 50
+    finally:
+        cfg.keep_per_slot, cfg.min_age_days = 3, 30.0
+        svc.cortex_forget("proj")
+
+
+# ── PG persistence (the dirty-slots hook is load-bearing) ───────────────
+
+def test_compaction_deletes_pg_rows(pg_conn, pg_url):
+    from pseudolife_memory.storage.postgres import PostgresStorage
+    from pseudolife_memory.storage.sync import sync_cortex_slots
+
+    storage = PostgresStorage(pg_url)
+    try:
+        s = _facts_store(6)                    # 1 current + 5 superseded
+        sync_cortex_slots(s, storage)
+        n_before = pg_conn.execute(
+            "SELECT count(*) FROM facts WHERE status = 'superseded'"
+        ).fetchone()[0]
+        assert n_before == 5
+        compact_store(s, keep_per_slot=2, min_age_days=0.0, now=T0 + 10 * DAY)
+        sync_cortex_slots(s, storage)          # dirty slot -> rows rewritten
+        rows = pg_conn.execute(
+            "SELECT value, status FROM facts ORDER BY id").fetchall()
+        assert sorted(v for v, st in rows if st == 'superseded') == ["v3", "v4"]
+        assert [v for v, st in rows if st == 'current'] == ["v5"]
+    finally:
+        storage.close()
