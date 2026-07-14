@@ -32,11 +32,13 @@ def _seed(svc, *, band="forever", source="pseudolife"):
         "superseded_by_text": None, "last_logical_turn": None, "episode_id": None,
         "episode_title": None, "tags": [], "slots": [],
     })
+    # Through the real write path so the in-memory cortex (which wiki_page
+    # reads) and the persisted facts row stay in step; then pin the graph FK
+    # the provenance bridge keys on.
+    svc.cortex_write("daemon", "role", "serves MCP", confidence=0.9, support="user")
     st.conn.execute(
-        "INSERT INTO facts (entity, attribute, entity_norm, attribute_norm, value, "
-        "status, confidence, asserted_at, last_confirmed, entity_id) "
-        "VALUES ('daemon','role','daemon','role','serves MCP','current',0.9,1.0,1.0,%s)",
-        (eid,))
+        "UPDATE facts SET entity_id = %s "
+        "WHERE entity_norm = 'daemon' AND attribute_norm = 'role'", (eid,))
     st.add_trace("daemon", "role", entry_id, 1234.0)
     st.upsert_entity_source(eid, source, "derived", time.time())
     st.conn.execute(
@@ -54,3 +56,53 @@ def test_find_entity_and_load_graph_expose_created_at(svc):
     assert isinstance(e["created_at"], float) and e["created_at"] > 0
     g = st.load_graph()
     assert all(isinstance(row["created_at"], float) for row in g["entities"])
+
+
+def test_wiki_page_assembles_identity_facts_relations_mentions(svc):
+    _seed(svc)
+    out = svc.wiki_page("daemon")
+    assert out["found"] is True and out["entity"] == "daemon"
+    assert out["canonical"] == "daemon" and isinstance(out["first_seen"], float)
+    assert any(p["source"] == "pseudolife" for p in out["projects"])
+    assert [f["attribute"] for f in out["facts"]] == ["role"]
+    assert out["facts"][0]["history_available"] is False
+    assert any(r["target"] == "docker-desktop" and r["relation"] == "runs-on"
+               for r in out["relations"]["out"])
+    # The inverse edge is derived (rule provenance) and must be marked as such.
+    assert all(r["derived"] for r in out["relations"]["in"])
+    assert any(r["source"] == "docker-desktop" for r in out["relations"]["in"])
+    assert out["mentions"] and "docker" in out["mentions"][0]["text"]
+
+
+def test_wiki_page_timeline_merges_and_orders_newest_first(svc):
+    _seed(svc)
+    tl = svc.wiki_page("daemon")["timeline"]
+    kinds = {t["kind"] for t in tl}
+    assert {"entity-created", "edge-asserted", "fact-stamped", "mention"} <= kinds
+    ts = [t["ts"] for t in tl]
+    assert ts == sorted(ts, reverse=True)
+
+
+def test_wiki_page_world_facts_filtered_to_entity(svc):
+    _seed(svc)
+    svc.world_write("daemon", "latest-release", "v2.0",
+                    source_url="https://example.com/rel", source_quote="v2.0 shipped")
+    svc.world_write("unrelated", "x", "y",
+                    source_url="https://example.com/x", source_quote="q")
+    wf = svc.wiki_page("daemon")["world_facts"]
+    assert [w["attribute"] for w in wf] == ["latest-release"]
+    assert wf[0]["source_url"] == "https://example.com/rel"
+
+
+def test_wiki_page_unknown_entity_not_found(svc):
+    assert svc.wiki_page("nonexistent thing")["found"] is False
+
+
+def test_wiki_page_resolves_colloquial_name_and_flags_unattributed(svc):
+    with svc._lock:
+        svc._ensure_init()
+        svc._resolve_or_create_entity("lonely node")
+    svc._storage.conn.commit()
+    out = svc.wiki_page("Lonely Node")
+    assert out["found"] is True and out["entity"] == "lonely node"
+    assert {"kind": "unattributed"} in out["flags"]
