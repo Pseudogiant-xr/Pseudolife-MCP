@@ -5,6 +5,7 @@
 #   ops/update.sh                  # backup -> tag rollback -> daemon-only rebuild -> health
 #   ops/update.sh --tag pre-x      # name the rollback image tag suffix
 #   ops/update.sh --no-backup      # skip the pg_dump (NOT recommended)
+#   ops/update.sh --keep-rollbacks 5  # rollback tags to retain (default 2)
 #
 # Rebuilds + recreates ONLY the daemon container (`--no-deps`), so Postgres and
 # the extractor are never touched. The bank lives in EXTERNAL volumes; this never
@@ -13,11 +14,13 @@ set -euo pipefail
 
 TAG=""
 NO_BACKUP=0
+KEEP_ROLLBACKS=2
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --tag)       TAG="$2"; shift 2 ;;
-        --no-backup) NO_BACKUP=1; shift ;;
+        --tag)            TAG="$2"; shift 2 ;;
+        --no-backup)      NO_BACKUP=1; shift ;;
+        --keep-rollbacks) KEEP_ROLLBACKS="$2"; shift 2 ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
@@ -58,6 +61,15 @@ if docker image inspect "$image_tag" >/dev/null 2>&1; then
     echo "==> Tagged rollback image: $rollback"
 else
     echo "WARNING: no current $image_tag image to tag (first build?)." >&2
+fi
+
+# 2b. Retention: drop stale pre-* rollback tags beyond the newest N — one is
+#     minted per deploy and they otherwise pile up without bound (~60 tags in
+#     a 177GB docker_data.vhdx by 2026-07-14 on the Windows side). The script
+#     never touches the deployed tag or an image a running container uses; a
+#     retention hiccup must not abort the deploy.
+if ! "$(dirname "$0")/prune-rollbacks.sh" --keep "$KEEP_ROLLBACKS" --repository "${image_tag%%:*}"; then
+    echo "WARNING: rollback-tag retention failed (deploy continues)." >&2
 fi
 
 # 3. Rebuild + recreate ONLY the daemon. `--no-deps` is what keeps Postgres and

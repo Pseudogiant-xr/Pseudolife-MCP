@@ -1,14 +1,15 @@
-"""Rollback-tag retention: ``ops/prune-rollbacks.ps1`` + its update.ps1 wiring.
+"""Rollback-tag retention: ``ops/prune-rollbacks.ps1|.sh`` + update.ps1|.sh wiring.
 
 Why this exists: update.ps1 tags a ``pre-*`` rollback image on every deploy and
 never garbage-collected them — by 2026-07-14 that was ~60 stale tags inside a
-177GB docker_data.vhdx, pruned by hand. The retention script keeps the newest N
-rollback tags and removes the rest, never touching the deployed tag, any image
+177GB docker_data.vhdx, pruned by hand. The retention scripts keep the newest N
+rollback tags and remove the rest, never touching the deployed tag, any image
 in use by a running container, or volumes.
 
-The tests drive the REAL script under pwsh with a stubbed ``docker``
-*function* (a PowerShell function shadows docker.exe on command lookup), so the
-exact docker CLI contract is pinned without needing a Docker daemon.
+The tests drive the REAL scripts with a stubbed ``docker``: for PowerShell a
+function (functions shadow docker.exe on command lookup), for bash an
+``export -f``-ed function (inherited by the child bash running the script), so
+each script's exact docker CLI contract is pinned without a Docker daemon.
 """
 
 from __future__ import annotations
@@ -21,11 +22,27 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[1]
-SCRIPT = REPO / "ops" / "prune-rollbacks.ps1"
+PS1_SCRIPT = REPO / "ops" / "prune-rollbacks.ps1"
+SH_SCRIPT = REPO / "ops" / "prune-rollbacks.sh"
 UPDATE_PS1 = REPO / "ops" / "update.ps1"
+UPDATE_SH = REPO / "ops" / "update.sh"
 PWSH = shutil.which("pwsh") or shutil.which("powershell")
 
-pytestmark = pytest.mark.skipif(PWSH is None, reason="PowerShell not on PATH")
+
+def _find_bash() -> str | None:
+    # Prefer Git Bash on Windows — System32 bash.exe launches WSL, where the
+    # C:-style script paths don't resolve.
+    for cand in (r"C:\Program Files\Git\bin\bash.exe",
+                 r"C:\Program Files\Git\usr\bin\bash.exe"):
+        if Path(cand).exists():
+            return cand
+    found = shutil.which("bash")
+    if found and "system32" not in found.lower():
+        return found
+    return None
+
+
+BASH = _find_bash()
 
 LIVE = "sha256:" + "a" * 16   # image the running daemon container uses
 ID_B = "sha256:" + "b" * 16
@@ -63,9 +80,8 @@ def _fixture():
     }
 
 
-def _run(tmp_path: Path, fixture: dict, *args: str):
-    """Run the retention script with `docker` stubbed from the fixture.
-    Returns (completed_process, list of refs passed to `docker rmi`)."""
+def _run_ps1(tmp_path: Path, fixture: dict, *args: str):
+    """Run the .ps1 with `docker` stubbed as a PowerShell function."""
     fx_path = tmp_path / "fixture.json"
     fx_path.write_text(json.dumps(fixture), encoding="utf-8")
     rmi_log = tmp_path / "rmi.log"
@@ -93,7 +109,7 @@ function global:docker {{
     if ($a[0] -eq "rmi") {{ Add-Content "{rmi_log}" $a[1]; return }}
     throw "unexpected docker call: $($a -join ' ')"
 }}
-& "{SCRIPT}" {" ".join(args)}
+& "{PS1_SCRIPT}" {" ".join(args)}
 ''',
         encoding="utf-8",
     )
@@ -106,8 +122,89 @@ function global:docker {{
     return proc, removed
 
 
-def test_default_keeps_newest_two_rollbacks(tmp_path):
-    proc, removed = _run(tmp_path, _fixture())
+def _run_sh(tmp_path: Path, fixture: dict, *args: str):
+    """Run the .sh with `docker` stubbed as an exported bash function
+    (inherited by the child bash that runs the script)."""
+    fx_dir = tmp_path / "fx"
+    fx_dir.mkdir(exist_ok=True)
+    (fx_dir / "containers.txt").write_text(
+        "".join(c + "\n" for c in fixture["running_containers"]),
+        encoding="utf-8", newline="\n")
+    (fx_dir / "container_images.txt").write_text(
+        "".join(f"{c} {i}\n" for c, i in fixture["container_images"].items()),
+        encoding="utf-8", newline="\n")
+    (fx_dir / "tags.tsv").write_text(
+        "".join(f"{ref}\t{t['id']}\t{t['created']}\n"
+                for ref, t in fixture["tags"].items()),
+        encoding="utf-8", newline="\n")
+    rmi_log = tmp_path / "rmi.log"
+    rmi_log.write_text("", encoding="utf-8")
+    driver = tmp_path / "driver.sh"
+    driver.write_text(
+        f'''#!/usr/bin/env bash
+set -u
+export FX="{fx_dir.as_posix()}"
+export RMI_LOG="{rmi_log.as_posix()}"
+docker() {{
+    if [ "$1" = "ps" ] && [ "$2" = "-q" ]; then
+        cat "$FX/containers.txt"
+    elif [ "$1" = "inspect" ] && [ "$2" = "--format" ] && [ "$3" = "{{{{.Image}}}}" ]; then
+        shift 3
+        for c in "$@"; do awk -v c="$c" '$1==c{{print $2}}' "$FX/container_images.txt"; done
+    elif [ "$1" = "image" ] && [ "$2" = "ls" ] && [ "$4" = "--format" ]; then
+        if [ "$3" = "{DAEMON}" ]; then cut -f1 "$FX/tags.tsv"; fi
+    elif [ "$1" = "image" ] && [ "$2" = "inspect" ] && [ "$3" = "--format" ]; then
+        line="$(awk -F'\\t' -v r="$5" '$1==r{{print $2 "|" $3}}' "$FX/tags.tsv")"
+        if [ -z "$line" ]; then echo "image inspect on unknown ref: $5" >&2; return 1; fi
+        id="${{line%%|*}}"; created="${{line##*|}}"
+        case "$4" in
+            "{{{{.Id}}}}|{{{{.Created}}}}") echo "$id|$created" ;;
+            "{{{{.Created}}}}|{{{{.Id}}}}") echo "$created|$id" ;;
+            *) echo "unexpected inspect format: $4" >&2; return 1 ;;
+        esac
+    elif [ "$1" = "rmi" ]; then
+        echo "$2" >> "$RMI_LOG"
+    else
+        echo "unexpected docker call: $*" >&2
+        return 1
+    fi
+}}
+export -f docker
+bash "{SH_SCRIPT.as_posix()}" "$@"
+''',
+        encoding="utf-8", newline="\n")
+    proc = subprocess.run(
+        [BASH, str(driver), *args],
+        capture_output=True, text=True, timeout=120,
+    )
+    removed = [ln for ln in rmi_log.read_text(encoding="utf-8").splitlines()
+               if ln.strip()]
+    return proc, removed
+
+
+@pytest.fixture(params=["ps1", "sh"])
+def prune(request, tmp_path):
+    """Run the retention script variant under test. Call as
+    ``prune(fixture, keep=N)``; returns (proc, removed_refs)."""
+    if request.param == "ps1":
+        if PWSH is None:
+            pytest.skip("PowerShell not on PATH")
+
+        def run(fixture, keep=None):
+            args = ("-Keep", str(keep)) if keep is not None else ()
+            return _run_ps1(tmp_path, fixture, *args)
+    else:
+        if BASH is None:
+            pytest.skip("bash not available")
+
+        def run(fixture, keep=None):
+            args = ("--keep", str(keep)) if keep is not None else ()
+            return _run_sh(tmp_path, fixture, *args)
+    return run
+
+
+def test_default_keeps_newest_two_rollbacks(prune):
+    proc, removed = prune(_fixture())
     assert proc.returncode == 0, proc.stderr
     assert sorted(removed) == [
         f"{DAEMON}:0.7.0-pre-linux-parity",
@@ -115,17 +212,17 @@ def test_default_keeps_newest_two_rollbacks(tmp_path):
     ]
 
 
-def test_keep_parameter_overrides_retention_count(tmp_path):
-    proc, removed = _run(tmp_path, _fixture(), "-Keep", "3")
+def test_keep_parameter_overrides_retention_count(prune):
+    proc, removed = prune(_fixture(), keep=3)
     assert proc.returncode == 0, proc.stderr
     assert removed == [f"{DAEMON}:0.7.0-pre-update-20260701-000000"]
 
 
-def test_deployed_tag_and_dangling_ref_are_never_candidates(tmp_path):
-    # Even -Keep 0 must only ever remove pre-* rollback tags that no running
+def test_deployed_tag_and_dangling_ref_are_never_candidates(prune):
+    # Even keep=0 must only ever remove pre-* rollback tags that no running
     # container uses: 0.7.0 and <none> stay, and the just-tagged rollback is
     # protected because the running daemon still uses its image.
-    proc, removed = _run(tmp_path, _fixture(), "-Keep", "0")
+    proc, removed = prune(_fixture(), keep=0)
     assert proc.returncode == 0, proc.stderr
     assert f"{DAEMON}:0.7.0" not in removed
     assert f"{DAEMON}:<none>" not in removed
@@ -133,25 +230,25 @@ def test_deployed_tag_and_dangling_ref_are_never_candidates(tmp_path):
     assert f"{DAEMON}:0.7.0-pre-update-20260712-225543" in removed
 
 
-def test_image_in_use_by_running_container_is_kept(tmp_path):
+def test_image_in_use_by_running_container_is_kept(prune):
     fx = _fixture()
     # A (stopped-deploy recovery, say) container still runs the oldest
     # rollback image: that tag must survive even though it is beyond N.
     fx["running_containers"].append("cont-old")
     fx["container_images"]["cont-old"] = ID_D
-    proc, removed = _run(tmp_path, fx)
+    proc, removed = prune(fx)
     assert proc.returncode == 0, proc.stderr
     assert removed == [f"{DAEMON}:0.7.0-pre-linux-parity"]
 
 
-def test_nothing_to_prune_is_a_quiet_success(tmp_path):
+def test_nothing_to_prune_is_a_quiet_success(prune):
     fx = _fixture()
     fx["tags"] = {
         f"{DAEMON}:0.7.0": {"id": LIVE, "created": "2026-07-14T12:00:00.5Z"},
         f"{DAEMON}:0.7.0-pre-update-20260714-120000":
             {"id": LIVE, "created": "2026-07-14T12:00:00.5Z"},
     }
-    proc, removed = _run(tmp_path, fx)
+    proc, removed = prune(fx)
     assert proc.returncode == 0, proc.stderr
     assert removed == []
     # The script must still have run and said so (otherwise this test would
@@ -166,3 +263,12 @@ def test_update_ps1_wires_retention_in():
     assert "KeepRollbacks" in text
     assert "prune-rollbacks.ps1" in text
     assert "$KeepRollbacks = 2" in text
+
+
+def test_update_sh_wires_retention_in():
+    """update.sh (the Linux/macOS port) must mirror the wiring: a
+    --keep-rollbacks flag defaulting to 2 and a non-fatal retention call."""
+    text = UPDATE_SH.read_text(encoding="utf-8")
+    assert "--keep-rollbacks" in text
+    assert "prune-rollbacks.sh" in text
+    assert "KEEP_ROLLBACKS=2" in text
