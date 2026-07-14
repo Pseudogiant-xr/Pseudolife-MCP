@@ -77,3 +77,17 @@ with open(path, "w", encoding="utf-8") as f:
     json.dump(obj, f, indent=2)
     f.write("\n")
 PY
+
+# The hooks wire the session lifecycle, but the memory LOOP only fires if a
+# standing instruction tells the agent to use the tools (issue #12: an install
+# with healthy hooks + daemon still never called memory_* because no CLAUDE.md
+# carried the block). Check-and-advise only — never edit CLAUDE.md unasked.
+repo="$(cd "$(dirname "$0")/.." && pwd)"
+claude_md="$(dirname "$SETTINGS_PATH")/CLAUDE.md"
+if ! grep -q "pseudolife-memory" "$claude_md" 2>/dev/null; then
+  echo ""
+  echo "REMINDER: $claude_md has no PseudoLife memory section — without a"
+  echo "standing instruction the memory tools sit unused. Append the bundled block:"
+  echo "  cat $repo/examples/CLAUDE.memory.md >> $claude_md"
+  echo "(or add it to a per-project CLAUDE.md / AGENTS.md instead)"
+fi

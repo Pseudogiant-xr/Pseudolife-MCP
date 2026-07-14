@@ -21,6 +21,12 @@ docker compose -f ops/docker-compose.yml up -d --build   # first build ~2.5 GB, 
 # Verify, then wire into Claude Code:
 curl http://127.0.0.1:8765/health
 claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
+
+# Teach Claude the memory loop — REQUIRED, not optional: without a standing
+# instruction the tools sit unused. Append the bundled block to your global
+# CLAUDE.md (applies to every project):
+cat examples/CLAUDE.memory.md >> ~/.claude/CLAUDE.md
+# (PowerShell: Add-Content "$env:USERPROFILE\.claude\CLAUDE.md" (Get-Content examples\CLAUDE.memory.md -Raw))
 ```
 
 Linux (Docker Engine): the docker commands need your user in the `docker`
@@ -401,11 +407,22 @@ an explicit `-Apply` / `--apply`.
 
 ## Recommended agent setup (CLAUDE.md)
 
-The server's value depends entirely on the agent *using* it well. Encode the loop
-as a standing instruction so it fires every session — add a block like the
-following to your `CLAUDE.md` (Claude Code), `AGENTS.md`, or the equivalent. Treat
-memory as **RECALL at the start, CAPTURE as you go, REFLECT at the end** (session
-episodes open/close for you via the lifecycle hooks above):
+The server's value depends entirely on the agent *using* it well — **this step
+is what makes the memory loop actually fire**; installs that skip it end up
+with a healthy daemon whose tools are never called. Encode the loop as a
+standing instruction: append the bundled block to your **global**
+`~/.claude/CLAUDE.md` (applies to every project) or a per-project `CLAUDE.md`
+/ `AGENTS.md`:
+
+```bash
+cat examples/CLAUDE.memory.md >> ~/.claude/CLAUDE.md
+```
+```powershell
+Add-Content "$env:USERPROFILE\.claude\CLAUDE.md" (Get-Content examples\CLAUDE.memory.md -Raw)
+```
+
+Treat memory as **RECALL at the start, CAPTURE as you go, REFLECT at the end**
+(session episodes open/close for you via the lifecycle hooks above). The block:
 
 ```markdown
 ## Memory — use it every session (tools: `mcp__pseudolife-memory__*`)

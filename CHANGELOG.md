@@ -25,6 +25,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   stock single-extractor default stays silent.
 
 ### Changed (2026-07-14 — Linux install parity + install UX, issues #11/#12/#13)
+- **The CLAUDE.md memory-loop block is now a first-class install step** — the
+  Quickstart appends `examples/CLAUDE.memory.md` to `~/.claude/CLAUDE.md`
+  explicitly, the agent-setup section leads with the same one-liners, and
+  `ops/install-hook.ps1|.sh` warn (check-and-advise only, never editing
+  CLAUDE.md) when the settings-adjacent CLAUDE.md lacks the block. A fresh
+  install on another machine (#12) ended with healthy hooks + daemon but a
+  memory loop that never fired, because no standing instruction existed and
+  the README only carried it in a deep section.
 - **`extra_hosts: host.docker.internal:host-gateway` is now enabled by
   default** in `ops/docker-compose.yml` (was a commented snippet) — on Linux
   Docker Engine, any host-side extractor URL silently failed every probe and

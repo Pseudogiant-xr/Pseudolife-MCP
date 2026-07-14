@@ -95,3 +95,18 @@ if (-not $hasEnd) {
 }
 
 $obj | ConvertTo-Json -Depth 30 | Set-Content -Path $SettingsPath -Encoding utf8
+
+# The hooks wire the session lifecycle, but the memory LOOP only fires if a
+# standing instruction tells the agent to use the tools (issue #12: an install
+# with healthy hooks + daemon still never called memory_* because no CLAUDE.md
+# carried the block). Check-and-advise only — never edit CLAUDE.md unasked.
+$repo = Split-Path -Parent $PSScriptRoot
+$claudeMd = Join-Path (Split-Path -Parent $SettingsPath) "CLAUDE.md"
+$hasBlock = (Test-Path $claudeMd) -and
+    ((Get-Content $claudeMd -Raw) -match 'pseudolife-memory')
+if (-not $hasBlock) {
+    Write-Host ""
+    Write-Warning "$claudeMd has no PseudoLife memory section - without a standing instruction the memory tools sit unused. Append the bundled block:"
+    Write-Host "  Add-Content `"$claudeMd`" (Get-Content `"$repo\examples\CLAUDE.memory.md`" -Raw)"
+    Write-Host "(or add it to a per-project CLAUDE.md / AGENTS.md instead)"
+}
