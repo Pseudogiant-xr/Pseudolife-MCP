@@ -175,8 +175,12 @@ def test_tracked_tree_carries_no_maintainer_identifiers() -> None:
     harnesses accumulated ``C:\\Users\\<username>`` paths. A history rewrite
     is one-shot; keeping the tree clean is a treadmill — so guard the tracked
     tree mechanically. The needles are assembled from fragments so this file
-    passes its own check."""
-    needles = [("HAM" "O9").lower(), "pseudogiant" + "92"]
+    passes its own check.
+
+    The maintainer's homelab subnet is banned wholesale: synthetic RFC1918
+    fixtures must use ``192.168.1.x`` (or ``192.168.x.x`` placeholders),
+    never the real ``.0.x`` subnet that leaked via eval-harness defaults."""
+    needles = [("HAM" "O9").lower(), "pseudogiant" + "92", "192.168." + "0."]
     repo = Path(__file__).resolve().parents[1]
     try:
         proc = subprocess.run(["git", "ls-files"], cwd=repo, check=True,

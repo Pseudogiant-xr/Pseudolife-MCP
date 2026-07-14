@@ -75,12 +75,12 @@ def test_user_write_supersedes_lower_tier():
 
 def test_below_margin_same_tier_now_records_contender():
     store = CortexStore(supersede_confidence_margin=0.15)
-    store.write_fact(Slot("box", "ip", "192.168.0.104"), _unit(27), confidence=0.9,
+    store.write_fact(Slot("box", "ip", "192.168.1.104"), _unit(27), confidence=0.9,
                      support="agent", now=1.0)
     res = store.write_fact(Slot("box", "ip", "10.0.0.5"), _unit(28), confidence=0.5,
                            support="agent", now=2.0)
     assert res.action == "contested"
-    assert store.lookup("box", "ip").value == "192.168.0.104"
+    assert store.lookup("box", "ip").value == "192.168.1.104"
     assert len(store.contenders_for("box", "ip")) == 1
 
 

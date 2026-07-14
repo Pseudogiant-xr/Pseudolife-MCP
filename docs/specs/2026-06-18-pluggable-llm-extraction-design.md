@@ -162,7 +162,7 @@ consolidation sweep (off hot-path):                                │ claims
 - **Rung 4 (4090)** is the daily-driver GPU — opt-in; requires llama.cpp serving
   there + explicit go-ahead before running (standing caution).
 - **Rung 3 (homelab 5800X3D)** requires Qwen 3.6 35B A3B served (llama.cpp/
-  Ollama) and reachable on the LAN (192.168.0.x).
+  Ollama) and reachable on the LAN (192.168.x.x).
 - **Rungs 1/2** are self-contained (run unattended); cost is image/volume size
   (~1.5–3 GB Q4 GGUF) and CPU extraction time.
 
