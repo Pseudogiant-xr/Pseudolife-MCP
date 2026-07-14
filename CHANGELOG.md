@@ -54,6 +54,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   port previously surfaced as a cryptic compose "port is already allocated";
   ports held by an existing PseudoLife stack count as OK, so idempotent
   re-runs stay green.
+### Added (2026-07-14 — superseded-row compaction)
+- **Superseded-row compaction** — corrections no longer grow the canonical
+  stores forever: on each dream sweep tick, `facts`/`world_facts`/`lessons`
+  keep the newest 3 superseded/retired versions per slot and purge older
+  ones after 30 days (config `memory.compaction.*`, console group
+  "Retention"; the per-slot sync deletes the PG rows). `memory_history`
+  timelines keep their recent versions; entries (bounded band eviction,
+  supersession is retrieval-load-bearing) and edges (sticky-removal
+  tombstones the dream's `revive=False` depends on) are deliberately
+  untouched. The in-memory cortex supersession log is now capped at its
+  persisted size (200). No schema change. Spec:
+  `docs/superpowers/specs/2026-07-14-superseded-row-compaction-design.md`.
 
 ### Changed (2026-07-14 — extractor default = published v2 fine-tune)
 - **`ops/Dockerfile.extractor` now bakes the bespoke extractor fine-tune by
