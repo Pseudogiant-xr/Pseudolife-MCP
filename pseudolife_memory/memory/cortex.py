@@ -69,6 +69,11 @@ def _norm_value(s: str) -> str:
 # reports ``origin == "user"`` (corroboration), not ``"agent"``.
 SUPPORT_PRECEDENCE = ("user", "action", "agent")
 
+# In-RAM cap on the supersession audit log. Persistence already stores only
+# the newest 200 (storage/sync.py); without this in-place trim the list grew
+# for the daemon's whole uptime — same growth class as superseded rows.
+SUPERSESSION_LOG_CAP = 200
+
 
 def _norm_support(s: str | None) -> str | None:
     s = (s or "").strip().casefold()
@@ -343,6 +348,8 @@ class CortexStore:
             "writer_id": writer_id,
             "session_id": session_id,
         })
+        if len(self.supersession_log) > SUPERSESSION_LOG_CAP:
+            del self.supersession_log[:-SUPERSESSION_LOG_CAP]
 
     # ------------------------------------------------------------------
     # Contenders — a conflicting write that may not supersede is parked here

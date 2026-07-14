@@ -170,3 +170,16 @@ def test_lesson_store_compaction():
     assert n == 2
     assert ls.lookup("deploy", "pitfall").value == "lesson 3"
     assert ("deploy", "pitfall") in ls.dirty_slots
+
+
+# ── supersession_log cap (same growth class) ────────────────────────────
+
+def test_supersession_log_capped_in_memory():
+    from pseudolife_memory.memory.cortex import SUPERSESSION_LOG_CAP
+    s = CortexStore()
+    for i in range(SUPERSESSION_LOG_CAP + 50):
+        s.write_fact(Slot("proj", "version", f"v{i}"), EMB,
+                     support="user", now=T0 + i)
+    assert len(s.supersession_log) == SUPERSESSION_LOG_CAP
+    # Newest entries survive the trim.
+    assert s.supersession_log[-1]["new_value"] == f"v{SUPERSESSION_LOG_CAP + 49}"
