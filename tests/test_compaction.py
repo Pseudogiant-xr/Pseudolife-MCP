@@ -271,3 +271,19 @@ def test_compaction_deletes_pg_rows(pg_conn, pg_url):
         assert [v for v, st in rows if st == 'current'] == ["v5"]
     finally:
         storage.close()
+
+
+# ── dream sweep trigger ─────────────────────────────────────────────────
+
+def test_sweep_compacts_even_when_dream_gate_closed(pristine_service, monkeypatch):
+    from pseudolife_memory.memory.dream import run_sweep_once
+    svc = pristine_service
+    monkeypatch.setattr(svc.config.memory.dream, "enabled", True)
+    calls = []
+    monkeypatch.setattr(svc, "compact_superseded",
+                        lambda: calls.append(1) or {"total": 7})
+    monkeypatch.setattr(svc, "dream_status",
+                        lambda: {"would_fire": False, "backlog": 0})
+    out = run_sweep_once(svc)
+    assert calls == [1]
+    assert out["fired"] is False and out["compacted"] == 7

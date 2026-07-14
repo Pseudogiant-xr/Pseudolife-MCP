@@ -280,6 +280,10 @@ class _FakeService:
         return {"backlog": self._backlog, "idle_seconds": 0.0,
                 "dream_cursor": 0.0, "would_fire": self._would_fire}
 
+    def compact_superseded(self):
+        # Mirrors MemoryService.compact_superseded (runs on every sweep tick).
+        return {"facts": 0, "world_facts": 0, "lessons": 0, "total": 0}
+
     def dream_run(self, extractor):
         self.ran = True
         return {"pulled": 1, "claims": 1, "inserted": 1, "confirmed": 0,
