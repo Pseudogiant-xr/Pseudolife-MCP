@@ -2,6 +2,7 @@
 #
 #   ops\backup.ps1                 # dump into <repo>\data\backups
 #   ops\backup.ps1 -KeepDays 30
+#   ops\backup.ps1 -MirrorKeep 2   # cap the mirror at the newest 2 files
 #
 # Runs pg_dump INSIDE the container (no local postgres client needed).
 param(
@@ -15,7 +16,13 @@ param(
     # on ANOTHER disk / synced share. Mirror failure warns, never throws —
     # the primary backup already succeeded and deploys must not abort
     # because a mirror drive is unplugged.
-    [string]$MirrorDir = $env:PSEUDOLIFE_BACKUP_MIRROR
+    [string]$MirrorDir = $env:PSEUDOLIFE_BACKUP_MIRROR,
+    # Keep exactly the newest N files on the MIRROR, by filename stamp — the
+    # mirror is typically a cloud-synced folder (Google Drive etc.) where
+    # mtimes are untrustworthy and space is metered. 0 = the primary's
+    # age-based KeepDays rotation (the pre-knob behavior).
+    [ValidateRange(0, 10000)][int]$MirrorKeep = $(
+        if ($env:PSEUDOLIFE_BACKUP_MIRROR_KEEP) { [int]$env:PSEUDOLIFE_BACKUP_MIRROR_KEEP } else { 0 })
 )
 
 $ErrorActionPreference = "Stop"
@@ -45,16 +52,22 @@ Get-ChildItem $OutDir -Filter "pseudolife_memory-*.sql.gz" |
     Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-$KeepDays) } |
     Remove-Item -Force
 
-# Off-disk mirror (opt-in; same retention).
+# Off-disk mirror (opt-in; KeepDays retention, or newest-N with -MirrorKeep).
 if ($MirrorDir) {
     try {
         New-Item -ItemType Directory -Force -Path $MirrorDir | Out-Null
         Copy-Item $out $MirrorDir -Force
         $m = Join-Path $MirrorDir (Split-Path $out -Leaf)
         if ((Test-Path $m) -and (Get-Item $m).Length -eq (Get-Item $out).Length) {
-            Get-ChildItem $MirrorDir -Filter "pseudolife_memory-*.sql.gz" |
-                Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-$KeepDays) } |
-                Remove-Item -Force
+            if ($MirrorKeep -gt 0) {
+                Get-ChildItem $MirrorDir -Filter "pseudolife_memory-*.sql.gz" |
+                    Sort-Object Name -Descending | Select-Object -Skip $MirrorKeep |
+                    Remove-Item -Force
+            } else {
+                Get-ChildItem $MirrorDir -Filter "pseudolife_memory-*.sql.gz" |
+                    Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-$KeepDays) } |
+                    Remove-Item -Force
+            }
             Write-Host "Mirrored to $m"
         } else {
             Write-Warning "mirror copy missing or size mismatch: $m"

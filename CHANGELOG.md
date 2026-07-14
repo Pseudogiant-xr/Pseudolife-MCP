@@ -29,6 +29,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a running container uses (protects the just-minted rollback mid-deploy
   too), and never touches volumes; a retention failure warns but does not
   abort the deploy.
+- **Count-based mirror retention in `ops/backup.ps1|.sh`** — `-MirrorKeep N`
+  / `--mirror-keep N` / `PSEUDOLIFE_BACKUP_MIRROR_KEEP=N` caps the off-disk
+  mirror at the newest N files by filename stamp (cloud-synced folders have
+  untrustworthy mtimes and metered space; the age-based `KeepDays` window
+  kept 10+ files there with no way to say "exactly N"). Unset/0 preserves
+  the age-based behavior; the primary `data/backups` rotation is unchanged.
 
 ### Added (2026-07-14 — one-shot installer with extractor choice, #13 tier 2)
 - **`ops/install.sh` / `ops/install.ps1`** — idempotent one-command install:

@@ -425,7 +425,9 @@ Postgres itself stays loopback-only — the LAN only ever sees the daemon.
 
 **Backups:** `ops\backup.ps1` (Windows) / `ops/backup.sh` (Linux/macOS) runs
 `pg_dump` inside the container into `data\backups\` with 7-day rotation, plus
-an optional off-disk mirror via `PSEUDOLIFE_BACKUP_MIRROR`. The matching
+an optional off-disk mirror via `PSEUDOLIFE_BACKUP_MIRROR`;
+`PSEUDOLIFE_BACKUP_MIRROR_KEEP=N` (or `-MirrorKeep` / `--mirror-keep`) caps
+the mirror at the newest N files — handy for cloud-synced folders. The matching
 `restore` script rehearses the newest backup into a scratch database by
 default (never touching the live bank) and only replaces the live bank with
 an explicit `-Apply` / `--apply`.

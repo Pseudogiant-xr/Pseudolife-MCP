@@ -4,12 +4,15 @@
 #
 #   ops/backup.sh                  # dump into <repo>/data/backups
 #   ops/backup.sh --keep-days 30
+#   ops/backup.sh --mirror-keep 2  # cap the mirror at the newest 2 files
 #
 # Runs pg_dump INSIDE the container (no local postgres client needed).
 # Off-disk mirror: point --mirror-dir (or PSEUDOLIFE_BACKUP_MIRROR) at a
 # folder on ANOTHER disk / synced share. Mirror failure warns, never throws —
 # the primary backup already succeeded and deploys must not abort because a
-# mirror drive is unplugged.
+# mirror drive is unplugged. --mirror-keep (or PSEUDOLIFE_BACKUP_MIRROR_KEEP)
+# caps the mirror at the newest N files by filename stamp — cloud-synced
+# folders have untrustworthy mtimes and metered space; 0 = age-based.
 set -euo pipefail
 
 CONTAINER="pseudolife-mcp-postgres"
@@ -18,18 +21,23 @@ DB_USER="pseudolife"
 OUT_DIR=""
 KEEP_DAYS=7
 MIRROR_DIR="${PSEUDOLIFE_BACKUP_MIRROR:-}"
+MIRROR_KEEP="${PSEUDOLIFE_BACKUP_MIRROR_KEEP:-0}"
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --container)  CONTAINER="$2"; shift 2 ;;
-        --db)         DB="$2"; shift 2 ;;
-        --user)       DB_USER="$2"; shift 2 ;;
-        --out-dir)    OUT_DIR="$2"; shift 2 ;;
-        --keep-days)  KEEP_DAYS="$2"; shift 2 ;;
-        --mirror-dir) MIRROR_DIR="$2"; shift 2 ;;
+        --container)   CONTAINER="$2"; shift 2 ;;
+        --db)          DB="$2"; shift 2 ;;
+        --user)        DB_USER="$2"; shift 2 ;;
+        --out-dir)     OUT_DIR="$2"; shift 2 ;;
+        --keep-days)   KEEP_DAYS="$2"; shift 2 ;;
+        --mirror-dir)  MIRROR_DIR="$2"; shift 2 ;;
+        --mirror-keep) MIRROR_KEEP="$2"; shift 2 ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
+case "$MIRROR_KEEP" in
+    ''|*[!0-9]*) echo "--mirror-keep must be a non-negative integer" >&2; exit 2 ;;
+esac
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 [ -n "$OUT_DIR" ] || OUT_DIR="$repo/data/backups"
@@ -54,11 +62,18 @@ fi
 # Rotation.
 find "$OUT_DIR" -maxdepth 1 -name 'pseudolife_memory-*.sql.gz' -mtime +"$KEEP_DAYS" -delete
 
-# Off-disk mirror (opt-in; same retention).
+# Off-disk mirror (opt-in; --keep-days retention, or newest-N with --mirror-keep).
 if [ -n "$MIRROR_DIR" ]; then
     if mkdir -p "$MIRROR_DIR" 2>/dev/null && cp "$out" "$MIRROR_DIR/" 2>/dev/null \
         && [ "$(wc -c < "$MIRROR_DIR/$(basename "$out")")" -eq "$(wc -c < "$out")" ]; then
-        find "$MIRROR_DIR" -maxdepth 1 -name 'pseudolife_memory-*.sql.gz' -mtime +"$KEEP_DAYS" -delete
+        if [ "$MIRROR_KEEP" -gt 0 ]; then
+            ls -1 "$MIRROR_DIR" | grep -E '^pseudolife_memory-.*\.sql\.gz$' | sort -r \
+                | tail -n +$((MIRROR_KEEP + 1)) | while IFS= read -r f; do
+                    rm -f "$MIRROR_DIR/$f"
+                done || true
+        else
+            find "$MIRROR_DIR" -maxdepth 1 -name 'pseudolife_memory-*.sql.gz' -mtime +"$KEEP_DAYS" -delete
+        fi
         echo "Mirrored to $MIRROR_DIR/$(basename "$out")"
     else
         echo "WARNING: backup mirror failed (primary backup is safe)" >&2
