@@ -8,15 +8,41 @@ memory that persists across sessions — surviving context compactions and
 
 ## Quickstart
 
-Requires Docker and Claude Code. From clone to first memory:
+Requires Docker and Claude Code. One command from clone to first memory:
 
 ```bash
 git clone https://github.com/Pseudogiant-xr/PseudoLife-MCP.git
 cd PseudoLife-MCP
+ops/install.sh          # Windows: ops\install.ps1
+```
+
+The installer runs the preflight (one exact fix line per missing
+prerequisite), asks which **dream extractor** should consolidate memories —
+
+- **sidecar** — the bundled local CPU model; works for everyone, ~9 GB image;
+- **sonnet-fallback** — Claude Sonnet primary via a CLI shim, sidecar as
+  automatic fallback (needs a logged-in Max-plan `claude` CLI);
+- **sonnet-only** — Sonnet only; the sidecar image is **never built or
+  pulled** (~9 GB lighter; dreams pause while the shim is down) —
+
+then brings the stack up, installs the session hooks, offers to append the
+memory-loop block to `~/.claude/CLAUDE.md` (required for the loop to actually
+fire), runs `claude mcp add`, and health-checks the daemon. Idempotent:
+re-run any time; re-run with `--extractor <mode>` to switch extractor setups.
+Non-interactive: `ops/install.sh --extractor sidecar --claude-md append`.
+
+Linux (Docker Engine): the docker commands need your user in the `docker`
+group — `sudo usermod -aG docker $USER`, then log out and back in (the
+preflight checks this).
+
+<details>
+<summary>Manual install (the steps the installer automates)</summary>
+
+```bash
 ops/preflight.sh    # or ops\preflight.ps1 — checks docker/git/claude, prints the exact fix for anything missing
 docker volume create pseudolife-mcp-bank
 docker volume create pseudolife-mcp-state
-docker compose -f ops/docker-compose.yml up -d --build   # first build ~2.5 GB, once
+docker compose -f ops/docker-compose.yml up -d --build   # first build, once
 
 # Verify, then wire into Claude Code:
 curl http://127.0.0.1:8765/health
@@ -29,11 +55,10 @@ cat examples/CLAUDE.memory.md >> ~/.claude/CLAUDE.md
 # (PowerShell: Add-Content "$env:USERPROFILE\.claude\CLAUDE.md" (Get-Content examples\CLAUDE.memory.md -Raw))
 ```
 
-Linux (Docker Engine): the docker commands need your user in the `docker`
-group — `sudo usermod -aG docker $USER`, then log out and back in (the
-preflight script checks this). Optional knobs live in `ops/.env`
-(`cp ops/.env.example ops/.env` — the update scripts scaffold it too; every
-value is commented, a missing file runs entirely on defaults).
+Optional knobs live in `ops/.env` (`cp ops/.env.example ops/.env` — the
+install/update scripts scaffold it too; every value is commented, a missing
+file runs entirely on defaults).
+</details>
 
 Then in any Claude Code session: *"remember that my staging box is
 haze-02"* → Claude calls `memory_store`; next session, *"which box is
@@ -1065,7 +1090,10 @@ same env triple pointed at a hosted endpoint does not.
 
 **Optional: Sonnet primary with local fallback.** With a Claude Max plan, the
 dream pass can use Claude Sonnet as its primary extractor and keep the bundled
-local sidecar as an automatic fallback:
+local sidecar as an automatic fallback. The installer does all of this in one
+go — `ops/install.sh --extractor sonnet-fallback` (or `sonnet-only` to skip
+the sidecar entirely; `ops\install.ps1 -Extractor ...` on Windows). The manual
+steps:
 
 1. Register the CLI shim (`evals/sonnet_shim.py`) to start automatically —
    requires a logged-in `claude` CLI:

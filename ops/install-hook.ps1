@@ -55,43 +55,33 @@ if (-not $hasBriefing) {
     Write-Host "Briefing hook already present in $SettingsPath - skipping."
 }
 
-# ---- episode lifecycle hooks (idempotent, alongside the briefing hook) ----
-if (-not ($obj.hooks.PSObject.Properties.Name -contains 'SessionEnd')) {
-    $obj.hooks | Add-Member -NotePropertyName SessionEnd -NotePropertyValue @()
+# Episode hooks are OBSOLETE since the 2026-06-30 session-scoped episodes
+# rework: the daemon lazily opens/closes episodes keyed by mcp-session-id
+# (see README "Session lifecycle hooks"). Earlier installer versions added
+# them — remove any we find so old installs converge too.
+function Remove-HookCommand($groups, $needle) {
+    $removed = $false
+    $keptGroups = @()
+    foreach ($group in @($groups)) {
+        if ($null -eq $group) { continue }
+        $keptHooks = @(@($group.hooks) | Where-Object { $_.command -notlike "*$needle*" })
+        if ($keptHooks.Count -ne @($group.hooks).Count) { $removed = $true }
+        if ($keptHooks.Count -gt 0) {
+            $group.hooks = $keptHooks
+            $keptGroups += $group
+        }
+    }
+    return @{ removed = $removed; groups = $keptGroups }
 }
 
-$hasStart = $false
-foreach ($group in @($obj.hooks.SessionStart)) {
-    foreach ($h in @($group.hooks)) {
-        if ($h.command -like "*pseudolife-mcp episode-start*") { $hasStart = $true }
-    }
-}
-if (-not $hasStart) {
-    $startGroup = [pscustomobject]@{
-        hooks = @([pscustomobject]@{ type = 'command';
-            command = 'pseudolife-mcp episode-start' })
-    }
-    $obj.hooks.SessionStart = @($obj.hooks.SessionStart) + $startGroup
-    Write-Host "Installed SessionStart episode-start hook."
-} else {
-    Write-Host "episode-start hook already present - skipping."
-}
+$r = Remove-HookCommand $obj.hooks.SessionStart "pseudolife-mcp episode-start"
+$obj.hooks.SessionStart = $r.groups
+if ($r.removed) { Write-Host "Removed obsolete episode-start hook (daemon owns episodes now)." }
 
-$hasEnd = $false
-foreach ($group in @($obj.hooks.SessionEnd)) {
-    foreach ($h in @($group.hooks)) {
-        if ($h.command -like "*pseudolife-mcp episode-end*") { $hasEnd = $true }
-    }
-}
-if (-not $hasEnd) {
-    $endGroup = [pscustomobject]@{
-        hooks = @([pscustomobject]@{ type = 'command';
-            command = 'pseudolife-mcp episode-end' })
-    }
-    $obj.hooks.SessionEnd = @($obj.hooks.SessionEnd) + $endGroup
-    Write-Host "Installed SessionEnd episode-end hook."
-} else {
-    Write-Host "episode-end hook already present - skipping."
+if ($obj.hooks.PSObject.Properties.Name -contains 'SessionEnd') {
+    $r = Remove-HookCommand $obj.hooks.SessionEnd "pseudolife-mcp episode-end"
+    $obj.hooks.SessionEnd = $r.groups
+    if ($r.removed) { Write-Host "Removed obsolete episode-end hook (daemon owns episodes now)." }
 }
 
 $obj | ConvertTo-Json -Depth 30 | Set-Content -Path $SettingsPath -Encoding utf8

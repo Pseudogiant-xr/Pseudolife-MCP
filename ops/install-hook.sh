@@ -61,17 +61,27 @@ else:
     print(f"Installed SessionStart briefing hook -> {path}")
     print(f"  command: {briefing_cmd}")
 
-if has_command(hooks["SessionStart"], "pseudolife-mcp episode-start"):
-    print("episode-start hook already present - skipping.")
-else:
-    add_group(hooks["SessionStart"], "pseudolife-mcp episode-start")
-    print("Installed SessionStart episode-start hook.")
+# Episode hooks are OBSOLETE since the 2026-06-30 session-scoped episodes
+# rework: the daemon lazily opens/closes episodes keyed by mcp-session-id
+# (see README "Session lifecycle hooks"). Earlier installer versions added
+# them — remove any we find so old installs converge too.
 
-if has_command(hooks["SessionEnd"], "pseudolife-mcp episode-end"):
-    print("episode-end hook already present - skipping.")
-else:
-    add_group(hooks["SessionEnd"], "pseudolife-mcp episode-end")
-    print("Installed SessionEnd episode-end hook.")
+
+def drop_command(groups, needle):
+    removed = False
+    for g in groups:
+        before = len(g.get("hooks") or [])
+        g["hooks"] = [h for h in (g.get("hooks") or [])
+                      if needle not in (h.get("command") or "")]
+        removed = removed or len(g["hooks"]) != before
+    groups[:] = [g for g in groups if g.get("hooks")]
+    return removed
+
+
+if drop_command(hooks["SessionStart"], "pseudolife-mcp episode-start"):
+    print("Removed obsolete episode-start hook (daemon owns episodes now).")
+if drop_command(hooks["SessionEnd"], "pseudolife-mcp episode-end"):
+    print("Removed obsolete episode-end hook (daemon owns episodes now).")
 
 with open(path, "w", encoding="utf-8") as f:
     json.dump(obj, f, indent=2)

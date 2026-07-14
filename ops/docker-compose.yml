@@ -72,11 +72,14 @@ services:
     image: pseudolife-daemon:0.7.0
     container_name: pseudolife-mcp-daemon
     restart: unless-stopped
+    # No depends_on for the extractor: dream extraction is runtime HTTP with
+    # per-sweep retry (a probe against a still-loading extractor just fails
+    # and retries next sweep), and the sidecar must be disableable via a
+    # `profiles:` override for sonnet-only installs — a hard dependency on a
+    # profile-disabled service is a compose error.
     depends_on:
       pseudolife-pg:
         condition: service_healthy
-      pseudolife-extractor:
-        condition: service_started
     environment:
       # Reaches Postgres over the compose network by service name (internal
       # port 5432, not the host-published 5433). Password mirrors the pg

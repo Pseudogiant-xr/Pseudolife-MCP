@@ -70,9 +70,17 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
     -RestartInterval (New-TimeSpan -Minutes 1)
 
 Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+# CIM cmdlet errors here do NOT reliably terminate even under
+# $ErrorActionPreference = "Stop" (observed live: an unelevated run printed
+# "Access is denied" and fell through to the success message). Force it, and
+# verify the task actually exists before claiming success.
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
-    -Settings $settings -Description "Sonnet extractor CLI shim (dream pass primary; E4B sidecar is fallback)" | Out-Null
-Start-ScheduledTask -TaskName $taskName
+    -Settings $settings -Description "Sonnet extractor CLI shim (dream pass primary; E4B sidecar is fallback)" `
+    -ErrorAction Stop | Out-Null
+if (-not (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue)) {
+    throw "task '$taskName' was not registered (run from an ELEVATED pwsh)"
+}
+Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
 Write-Host "Registered + started '$taskName' (port $Port, log $LogFile)."
 Write-Host "Cutover env for the daemon (.env or compose override):"
 Write-Host "  PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:$Port/v1"

@@ -6,6 +6,42 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-14 — one-shot installer with extractor choice, #13 tier 2)
+- **`ops/install.sh` / `ops/install.ps1`** — idempotent one-command install:
+  preflight → volumes → **extractor choice** → compose up → session hooks →
+  CLAUDE.md memory block (consent prompt; `--claude-md append|skip`) →
+  `claude mcp add` → health check → per-mode verify hints. The extractor mode
+  is always an explicit choice (`--extractor sidecar|sonnet-fallback|
+  sonnet-only`; interactive prompt, no default); re-running with a different
+  mode is the supported way to switch. Dream env lives in a managed marker
+  block in `ops/.env`, so user lines outside it survive re-runs.
+- **The extractor sidecar is now optional** (`sonnet-only` mode): the
+  installer writes `profiles: ["disabled"]` for the sidecar into the
+  gitignored compose override, so the ~9 GB image is never built or pulled;
+  the mode sets `PSEUDOLIFE_DREAM_EXTRACTOR_MODE=primary` (states the intent,
+  keeps the auto-without-fallback startup warning silent) and dreams pause
+  with per-sweep retry while the shim is down. A pre-existing user override
+  (e.g. a GGUF mount) is never merged into — the snippet is printed instead.
+  Spec: `docs/superpowers/specs/2026-07-14-installer-extractor-choice-design.md`.
+
+### Changed (2026-07-14 — one-shot installer with extractor choice, #13 tier 2)
+- **The daemon no longer `depends_on` the extractor sidecar** — extraction is
+  runtime HTTP with per-sweep retry, and a hard dependency on a
+  profile-disabled service is a compose error. Worst case for stock installs:
+  a dream sweep fires before the extractor finishes loading → that probe
+  fails and retries next sweep.
+
+### Fixed (2026-07-14 — hook installer + shim autostart, found by installer live-test)
+- **`ops/install-hook.ps1|.sh` no longer install the obsolete episode-start/
+  episode-end hooks** (obsolete since the 2026-06-30 session-scoped episodes
+  rework — the daemon owns episode lifecycle, keyed by `mcp-session-id`) and
+  now **remove** any found, so installs that got them earlier converge.
+- **`ops/install-shim-autostart.ps1` no longer claims success when
+  `Register-ScheduledTask` is denied** (CIM cmdlet errors don't reliably
+  terminate under `$ErrorActionPreference = "Stop"`): the cmdlet gets an
+  explicit `-ErrorAction Stop` plus a Get-ScheduledTask existence check, so
+  an unelevated run now throws and `install.ps1` prints the recovery steps.
+
 ### Added (2026-07-14 — Linux install parity + install UX, issues #11/#12/#13)
 - **`ops/install-shim-autostart.sh`** — Linux parity for the Sonnet-shim
   autostart (`systemd --user` unit; the `.ps1` was Windows-only, so a Linux
