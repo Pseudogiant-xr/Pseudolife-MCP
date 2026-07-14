@@ -17,6 +17,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   mount. The lighter E2B QAT bake for constrained machines is unchanged
   (`--build-arg MODEL_URL=…`), as is the runtime GGUF mount override.
 
+### Added (2026-07-14 — rollback-tag retention in the deploy script)
+- **`ops/prune-rollbacks.ps1`**, called by `update.ps1` after tagging each new
+  rollback image (and safe to run standalone): keeps the newest N `pre-*`
+  rollback tags of the daemon image and `docker rmi`s the rest — one tag was
+  minted per deploy and never garbage-collected, which had piled up ~60 stale
+  tags inside a 177GB docker_data.vhdx by 2026-07-14. N defaults to 2 and is
+  overridable via `update.ps1 -KeepRollbacks N`. Never removes the deployed
+  tag (it doesn't match the `pre-*` naming) or any image a running container
+  uses (protects the just-minted rollback mid-deploy too), and never touches
+  volumes; a retention failure warns but does not abort the deploy.
+
 ### Added (2026-07-14 — one-shot installer with extractor choice, #13 tier 2)
 - **`ops/install.sh` / `ops/install.ps1`** — idempotent one-command install:
   preflight → volumes → **extractor choice** → compose up → session hooks →

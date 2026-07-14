@@ -3,13 +3,15 @@
 #   ops\update.ps1                 # backup -> tag rollback -> daemon-only rebuild -> health
 #   ops\update.ps1 -Tag pre-x      # name the rollback image tag suffix
 #   ops\update.ps1 -NoBackup       # skip the pg_dump (NOT recommended)
+#   ops\update.ps1 -KeepRollbacks 5  # rollback tags to retain (default 2)
 #
 # Rebuilds + recreates ONLY the daemon container (`--no-deps`), so Postgres and
 # the extractor are never touched. The bank lives in EXTERNAL volumes; this never
 # runs `down -v`. Run after `git pull` (or local edits) to deploy daemon changes.
 param(
     [string]$Tag = "",
-    [switch]$NoBackup
+    [switch]$NoBackup,
+    [int]$KeepRollbacks = 2
 )
 
 $ErrorActionPreference = "Stop"
@@ -51,6 +53,17 @@ if ($LASTEXITCODE -eq 0) {
     Write-Host "==> Tagged rollback image: $rollback"
 } else {
     Write-Warning "No current $imageTag image to tag (first build?)."
+}
+
+# 2b. Retention: drop stale pre-* rollback tags beyond the newest N — one is
+#     minted per deploy and they otherwise pile up without bound (~60 tags in
+#     a 177GB docker_data.vhdx by 2026-07-14). The script never touches the
+#     deployed tag or an image a running container uses; a retention hiccup
+#     must not abort the deploy.
+try {
+    & (Join-Path $PSScriptRoot "prune-rollbacks.ps1") -Keep $KeepRollbacks -Repository ($imageTag -split ':')[0]
+} catch {
+    Write-Warning "Rollback-tag retention failed (deploy continues): $_"
 }
 
 # 3. Rebuild + recreate ONLY the daemon. `--no-deps` is what keeps Postgres and
