@@ -187,6 +187,7 @@ class ConsoleRoutes:
         g("/api/graph/path", lambda q, b: svc.graph_path(
             _s(q, "source"), _s(q, "target"), max_hops=_i(q, "max_hops", 8)))
         g("/api/graph/review", lambda q, b: svc.graph_review(scope=_s(q, "scope")))
+        g("/api/wiki", lambda q, b: svc.wiki_page(_s(q, "entity")))
         g("/api/graph/entity-provenance", lambda q, b: svc.entity_provenance(
             _s(q, "entity"), limit=_i(q, "limit", 20)))
         p("/api/graph/assign-scope", lambda q, b: svc.graph_assign_scope(b["entity"], b["source"]))

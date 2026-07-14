@@ -470,6 +470,47 @@ class FixtureService:
                     {"id": 9, "band": "slow", "source": "homelab-local-models", "ts": 1782100000.0,
                      "text": "daemon image pseudolife-daemon:0.2.0 rebuilt and deployed"}]}
 
+    def wiki_page(self, entity, mentions_limit=20, timeline_limit=30):
+        name = entity or "daemon"
+        return {
+            "found": True, "entity": name, "canonical": name.lower(),
+            "etype": "service", "aliases": [f"the {name}"],
+            "projects": [{"source": "pseudolife-mcp", "count": 3, "origin": "derived"}],
+            "community": 1, "first_seen": 1779600000.0,
+            "facts": [
+                {"attribute": "role", "value": "serves MCP", "confidence": 0.9,
+                 "origin": "user", "asserted_at": 1781600000.0,
+                 "history_available": True},
+                {"attribute": "transport", "value": "http", "confidence": 0.8,
+                 "origin": "action", "asserted_at": 1782000000.0,
+                 "history_available": False},
+            ],
+            "world_facts": [
+                {"attribute": "latest-release", "value": "v2.0", "confidence": 0.8,
+                 "source_url": "https://example.com/rel",
+                 "retrieved_at": 1782200000.0},
+            ],
+            "relations": {
+                "out": [{"relation": "runs-on", "target": "docker-desktop",
+                         "derived": False, "confidence": 0.9, "tag": "EXTRACTED"}],
+                "in": [{"relation": "monitors", "source": "watchdog",
+                        "derived": True, "via": ["rule:monitors"]}],
+            },
+            "mentions": [
+                {"id": 42, "band": "slow", "source": "pseudolife-mcp",
+                 "ts": 1782100000.0, "text": f"the {name} runs in docker",
+                 "episode_title": "containerization"},
+            ],
+            "timeline": [
+                {"ts": 1782200000.0, "kind": "fact-stamped", "text": "transport = http"},
+                {"ts": 1782100000.0, "kind": "mention",
+                 "text": f"the {name} runs in docker"},
+                {"ts": 1779600000.0, "kind": "entity-created",
+                 "text": f"“{name}” first seen"},
+            ],
+            "flags": [],
+        }
+
     def chain(self, entity, limit=20):
         return {"found": True, "entity": entity, "count": 4, "events": [
             {"t": 1782100000.0, "kind": "fact_set",
