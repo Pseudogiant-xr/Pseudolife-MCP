@@ -619,16 +619,16 @@ class PostgresStorage:
 
     def find_entity(self, name_norm: str) -> dict | None:
         """Resolve a normalized name via canonical first, then aliases."""
-        cols = ("id", "canonical", "display", "etype")
+        cols = ("id", "canonical", "display", "etype", "created_at")
         row = self.conn.execute(
-            "SELECT id, canonical, display, etype FROM entities "
+            "SELECT id, canonical, display, etype, created_at FROM entities "
             "WHERE canonical = %s",
             (name_norm,),
         ).fetchone()
         if row is None:
             row = self.conn.execute(
                 """
-                SELECT e.id, e.canonical, e.display, e.etype
+                SELECT e.id, e.canonical, e.display, e.etype, e.created_at
                 FROM entity_aliases a JOIN entities e ON e.id = a.entity_id
                 WHERE a.alias = %s
                 """,
@@ -1199,10 +1199,10 @@ class PostgresStorage:
     def load_graph(self) -> dict:
         """Whole live graph (entities + aliases + non-superseded edges) —
         small by design, loaded per query for on-read inference."""
-        ent_cols = ("id", "canonical", "display", "etype")
+        ent_cols = ("id", "canonical", "display", "etype", "created_at")
         entities = [
             dict(zip(ent_cols, r)) for r in self.conn.execute(
-                "SELECT id, canonical, display, etype FROM entities "
+                "SELECT id, canonical, display, etype, created_at FROM entities "
                 "ORDER BY id",
             ).fetchall()
         ]
