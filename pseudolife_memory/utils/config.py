@@ -449,6 +449,17 @@ class LessonsConfig:
 
 
 @dataclass
+class CompactionConfig:
+    """Superseded-row compaction over facts/world_facts/lessons (spec
+    2026-07-14). Per slot: keep the newest ``keep_per_slot`` non-live
+    records; purge the rest once older than ``min_age_days``. Runs on the
+    dream sweep tick."""
+    enabled: bool = True
+    keep_per_slot: int = 3
+    min_age_days: float = 30.0
+
+
+@dataclass
 class MetaFilterConfig:
     """Self-reference meta-statement filter on the store path.
 
@@ -542,6 +553,8 @@ class MemoryConfig:
     cortex: CortexConfig = field(default_factory=CortexConfig)
     # Procedural / outcome memory — lessons store (schema v10).
     lessons: LessonsConfig = field(default_factory=LessonsConfig)
+    # Superseded-row compaction (keep-newest-N + min-age; spec 2026-07-14).
+    compaction: CompactionConfig = field(default_factory=CompactionConfig)
     # memory_recall — live MemCoT iterative retrieval (read-only).
     recall: RecallConfig = field(default_factory=RecallConfig)
     # Topology analytics computed during dream (Track B).
@@ -723,6 +736,10 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
         if "traces" in mem_raw:
             config.memory.traces = _dict_to_dataclass(
                 TracesConfig, mem_raw["traces"],
+            )
+        if "compaction" in mem_raw:
+            config.memory.compaction = _dict_to_dataclass(
+                CompactionConfig, mem_raw["compaction"],
             )
         if "deep_dream" in mem_raw:
             config.memory.deep_dream = _dict_to_dataclass(

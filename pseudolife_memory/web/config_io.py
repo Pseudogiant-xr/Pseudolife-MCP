@@ -235,6 +235,21 @@ KNOBS: list[dict[str, Any]] = [
     {"path": "memory.recall.default_top_k", "group": "Recall",
      "label": "Recall top-k", "type": "int", "default": 5, "min": 1, "max": 50,
      "step": 1, "restart": False, "help": "Results per internal recall search."},
+    # ── Retention ──────────────────────────────────────────────────────────
+    {"path": "memory.compaction.enabled", "group": "Retention",
+     "label": "Superseded-row compaction", "type": "bool", "default": True,
+     "restart": False,
+     "help": "Purge old superseded fact/world/lesson versions on the dream "
+             "sweep (keep-newest-N per slot + min-age)."},
+    {"path": "memory.compaction.keep_per_slot", "group": "Retention",
+     "label": "Versions kept per slot", "type": "int", "default": 3,
+     "min": 0, "max": 50, "step": 1, "restart": False,
+     "help": "Superseded versions always kept per (entity, attribute) slot."},
+    {"path": "memory.compaction.min_age_days", "group": "Retention",
+     "label": "Min age before purge (days)", "type": "float", "default": 30.0,
+     "min": 0.0, "max": 365.0, "step": 1.0, "restart": False,
+     "help": "A superseded version younger than this is never purged, "
+             "whatever the per-slot count."},
     # ── Presentation ───────────────────────────────────────────────────────
     {"path": "time.relative_age", "group": "Presentation",
      "label": "Relative age labels", "type": "bool", "default": True,

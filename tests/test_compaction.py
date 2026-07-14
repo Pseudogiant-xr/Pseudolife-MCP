@@ -183,3 +183,24 @@ def test_supersession_log_capped_in_memory():
     assert len(s.supersession_log) == SUPERSESSION_LOG_CAP
     # Newest entries survive the trim.
     assert s.supersession_log[-1]["new_value"] == f"v{SUPERSESSION_LOG_CAP + 49}"
+
+
+# ── config ──────────────────────────────────────────────────────────────
+
+def test_compaction_config_defaults_and_yaml(tmp_path):
+    from pseudolife_memory.utils.config import AppConfig, load_config
+    c = AppConfig().memory.compaction
+    assert (c.enabled, c.keep_per_slot, c.min_age_days) == (True, 3, 30.0)
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(
+        "memory:\n  compaction:\n    enabled: false\n"
+        "    keep_per_slot: 5\n    min_age_days: 7\n")
+    loaded = load_config(cfg_file).memory.compaction
+    assert (loaded.enabled, loaded.keep_per_slot, loaded.min_age_days) == (False, 5, 7)
+
+
+def test_compaction_console_knobs_registered():
+    from pseudolife_memory.web.config_io import KNOBS
+    paths = {k["path"] for k in KNOBS}
+    assert {"memory.compaction.enabled", "memory.compaction.keep_per_slot",
+            "memory.compaction.min_age_days"} <= paths
