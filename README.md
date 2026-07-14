@@ -1079,8 +1079,9 @@ Per-runtime defaults (all serve the same `/v1/chat/completions` shape):
 
 The unused sidecar can be stopped (`docker compose -f ops/docker-compose.yml
 stop pseudolife-extractor`) or left running as a fallback to switch back to.
-Middle option, no GPU required: bake the **Gemma 4 E4B** sidecar instead of the
-E2B (also ladder-verified; slower but stronger) — see the `MODEL_URL` build-arg
+The default bake is the bespoke [PseudoLife extractor fine-tune](https://huggingface.co/Pseudogiant-xr/pseudolife-extractor-gemma-4-e4b)
+(Gemma 4 E4B QLoRA); constrained machines can bake the lighter **Gemma 4 E2B
+QAT** instead (also ladder-verified) — see the `MODEL_URL` build-arg
 in `ops/Dockerfile.extractor`, or mount any GGUF over `/models/extractor.gguf`
 via a machine-local `ops/docker-compose.override.yml` (gitignored; example in
 the compose file). If you run the daemon *outside* Docker (embedded

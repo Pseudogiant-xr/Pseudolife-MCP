@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-14 — extractor default = published v2 fine-tune)
+- **`ops/Dockerfile.extractor` now bakes the bespoke extractor fine-tune by
+  default** (`MODEL_URL` →
+  `Pseudogiant-xr/pseudolife-extractor-gemma-4-e4b/…/pseudolife-extractor-e4b-v2-Q4_K_M.gguf`
+  on Hugging Face, ~5.3 GB) instead of the Gemma 4 E4B QAT base model. This is
+  the Arm-1 registry-datagen student (same-session KU-oracle: cortex 0.705 vs
+  0.603, hybrid 0.756 vs 0.744 against the prior fine-tune; ladder stale-leak
+  0.0) — fresh installs now get the production extractor without a local GGUF
+  mount. The lighter E2B QAT bake for constrained machines is unchanged
+  (`--build-arg MODEL_URL=…`), as is the runtime GGUF mount override.
+
 ### Added (2026-07-14 — one-shot installer with extractor choice, #13 tier 2)
 - **`ops/install.sh` / `ops/install.ps1`** — idempotent one-command install:
   preflight → volumes → **extractor choice** → compose up → session hooks →
