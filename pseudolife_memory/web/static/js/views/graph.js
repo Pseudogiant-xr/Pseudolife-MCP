@@ -11,10 +11,11 @@
 //   #/atlas , #/atlas?entity=X  → Overview (X highlighted) — legacy aliases
 import { el, mount, fmtNum, loadingBlock, emptyBlock, errorBlock } from "../util.js";
 import { api } from "../api.js";
-import { badge, facetBar } from "../components.js";
+import { facetBar } from "../components.js";
 import { ForceGraph, renderGalaxy, cleanupGalaxy, tableView, legend,
-         zoomControls, fullscreenBtn, colorFor } from "../graphview.js";
+         zoomControls, fullscreenBtn } from "../graphview.js";
 import { reviewPanel } from "../atlas_review.js";
+import { openWikiPanel } from "./wiki_page.js";
 import { confirmDialog, openModal, closeModal, toast } from "../ui.js";
 
 // Middle-ellipsis a long name so a modal button label can't overflow/clip.
@@ -125,25 +126,9 @@ export async function renderGraph(root, ctx) {
       state.scope === "all" ? "The graph is empty." : `No attributed entities in “${state.scope}”.`);
   }
 
+  // The wiki page replaces the old inline node-panel (Atlas stage 1).
   function showNode(wrap, node) {
-    wrap.querySelector(".node-panel")?.remove();
-    const panel = el("div", { class: "node-panel" },
-      el("div", { class: "np-head" },
-        el("span", { class: "sw", style: { width: "10px", height: "10px", borderRadius: "50%",
-          background: colorFor(node.etype) } }),
-        el("span", { class: "name" }, node.entity),
-        el("button", { class: "x", title: "close", onclick: () => panel.remove() }, "✕")),
-      el("div", { class: "np-body" },
-        node.etype ? el("div", { style: { marginBottom: "8px" } }, badge(node.etype)) : null,
-        (node.facts || []).length
-          ? (node.facts || []).map((f) => el("div", { class: "np-fact" },
-              el("div", { class: "a" }, f.attribute), el("div", {}, f.value)))
-          : el("div", { class: "dim", style: { fontSize: ".84rem" } }, "no canonical facts"),
-        el("div", { style: { display: "flex", gap: "8px", marginTop: "12px" } },
-          el("button", { class: "btn sm primary", onclick: () => goExplore(node.entity) }, "Explore from here"),
-          el("button", { class: "btn sm", title: `Cortex facts filtered to ${node.entity}`,
-            onclick: () => { location.hash = "#/cortex?q=" + encodeURIComponent(node.entity); } }, "Facts ↗"))));
-    wrap.appendChild(panel);
+    openWikiPanel(wrap, node.entity, { onExplore: (id) => goExplore(id) });
   }
 
   // ── Overview: whole graph + scope + Review ────────────────────────────────
