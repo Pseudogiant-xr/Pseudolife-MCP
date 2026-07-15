@@ -6,6 +6,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-15 — Atlas stage 3: time, review, focus)
+- Galaxy time scrubber: replay the bank's growth — stars/edges appear by
+  `created_at`/`asserted_at` over a fixed layout (visibility only, never
+  re-simulated), with play/pause and a date readout; auto-play disabled under
+  reduced motion.
+- Contextual review: entities named in open findings pulse in the galaxy
+  (static warn tint under reduced motion); wiki-page flag banners carry the
+  same confirm-gated actions as the review drawer (merge / reject / accept /
+  assign — identical descriptors, one action path); acting refreshes the
+  galaxy and reopens the page.
+- Isolate toggle on wiki pages: dims everything beyond the entity's 2-hop
+  neighborhood client-side (no fetch) — the explore-mode replacement.
+
 ### Added (2026-07-15 — Atlas stage 2: the galaxy is the map)
 - Console Graph tab rebuilt around the 3D galaxy: memory-state encodings
   (size = connections + facts, hue = project/community, brightness = recency),

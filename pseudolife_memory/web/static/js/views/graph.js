@@ -126,6 +126,7 @@ export async function renderGraph(root, ctx) {
   function openPage(wrap, id, { fly = "now" } = {}) {
     state.entity = id;
     reflectHash();
+    if (galaxy) galaxy.clearIsolate();   // a stale isolate dim shouldn't follow navigation
     openWikiPanel(wrap, id, {
       onExplore: (name) => { galaxy && galaxy.flyTo(name); },
       onNavigate: (name) => { galaxy && galaxy.flyTo(name); openPage(wrap, name); },

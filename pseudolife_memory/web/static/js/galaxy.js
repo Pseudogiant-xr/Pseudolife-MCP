@@ -178,6 +178,26 @@ export async function createGalaxy(host, data, opts = {}) {
 
   live = { fg, THREE, wrap, mountPt, state };
 
+  // Re-set every state-dependent accessor with a FRESH closure. Passing the
+  // same function reference back can be treated as "unchanged" by the prop
+  // system and silently skip the scene update — fresh identities always take.
+  function poke() {
+    fg.nodeColor((n) => nodeColor(n));
+    fg.linkColor((l) => {
+      const dimmed = state.dim &&
+        !(state.dim.has(l.source.id ?? l.source) && state.dim.has(l.target.id ?? l.target));
+      if (dimmed) return "rgba(90,100,115,0.06)";
+      return l.derived ? "rgba(150,170,200,0.20)" : "rgba(150,170,200,0.42)";
+    });
+    fg.nodeVisibility((n) => state.tCut == null || (n.created_at || 0) <= state.tCut);
+    fg.linkVisibility((l) => {
+      if (state.tCut == null) return true;
+      const sc = (l.source && l.source.created_at) || 0;
+      const tc = (l.target && l.target.created_at) || 0;
+      return (l.asserted_at || 0) <= state.tCut && sc <= state.tCut && tc <= state.tCut;
+    });
+  }
+
   // camera: fit once spread, again on settle (stage-1 lesson: the layout's
   // centroid drifts — zoomToFit tracks it instead of staring at the origin)
   const fitCam = () => { try { fg.zoomToFit(400, 40); } catch {} };
@@ -294,8 +314,7 @@ export async function createGalaxy(host, data, opts = {}) {
       const apply = (v) => {
         state.tCut = v >= 1000 ? null : t0 + (t1 - t0) * (v / 1000);
         label.textContent = state.tCut == null ? "now" : fmtD(state.tCut);
-        fg.nodeVisibility(fg.nodeVisibility());    // re-evaluate accessors
-        fg.linkVisibility(fg.linkVisibility());
+        poke();
       };
       function stopPlay() {
         if (playing) { clearInterval(playing); playing = null; playBtn.textContent = "▶"; }
@@ -332,7 +351,7 @@ export async function createGalaxy(host, data, opts = {}) {
   }
   function setQuery(q) {
     state.query = (q || "").trim().toLowerCase();
-    fg.nodeColor(nodeColor);                 // re-evaluate the accessor
+    poke();
   }
   function flyToBest(q) {
     const s = (q || "").trim().toLowerCase();
@@ -344,7 +363,7 @@ export async function createGalaxy(host, data, opts = {}) {
   }
   function setFlagged(names) {
     state.flagged = names instanceof Set ? names : new Set(names || []);
-    fg.nodeColor(nodeColor);                 // reduced-motion tint path
+    poke();                                  // reduced-motion tint path
   }
   function isolate(name, depth = 2) {
     const adj = new Map();
@@ -368,12 +387,12 @@ export async function createGalaxy(host, data, opts = {}) {
       frontier = next;
     }
     state.dim = keep;
-    fg.nodeColor(nodeColor); fg.linkColor(fg.linkColor());
+    poke();
     return true;
   }
   function clearIsolate() {
     state.dim = null;
-    fg.nodeColor(nodeColor); fg.linkColor(fg.linkColor());
+    poke();
   }
   const handle = { flyTo, setQuery, flyToBest, setFlagged, isolate, clearIsolate,
                    fg, destroy: destroyGalaxy };
