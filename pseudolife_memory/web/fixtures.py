@@ -334,8 +334,11 @@ class FixtureService:
         # Deterministically spread demo nodes across the advertised projects so
         # every scope in graph_projects() has matching members (coherent demo).
         _FX_PROJECTS = ("pseudolife-mcp", "gw2-reshade", "hermes-infra")
-        for nd in nodes:
+        for i, nd in enumerate(nodes):
             nd["sources"] = [_FX_PROJECTS[sum(ord(ch) for ch in nd["entity"]) % 3]]
+            nd["created_at"] = 1779600000.0 + i * 86400.0
+        for i, e in enumerate(edges):
+            e["asserted_at"] = 1780600000.0 + i * 43200.0
         if scope and scope != "all":
             keep = {nd["entity"] for nd in nodes if scope in nd["sources"]}
             nodes = [nd for nd in nodes if nd["entity"] in keep]
