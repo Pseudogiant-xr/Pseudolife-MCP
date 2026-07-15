@@ -173,6 +173,9 @@ export async function createGalaxy(host, data, opts = {}) {
     .linkDirectionalArrowLength(3)
     .width(r0.width).height(r0.height)
     .showNavInfo(false)                      // we render our own hint line
+    // Pre-simulate before first paint so an early fly-to (which freezes the
+    // layout) still lands on a mostly-settled map, not a mid-explosion one.
+    .warmupTicks(reduce ? 120 : 60)
     .cooldownTime(reduce ? 0 : 12000)
     .onNodeClick((n) => onNodeClick(n.id));
 
@@ -198,10 +201,18 @@ export async function createGalaxy(host, data, opts = {}) {
     });
   }
 
-  // camera: fit once spread, again on settle (stage-1 lesson: the layout's
-  // centroid drifts — zoomToFit tracks it instead of staring at the origin)
+  // ── camera policy ─────────────────────────────────────────────────────────
+  // The camera NEVER moves on its own once the user has expressed intent
+  // (orbit, wheel, or fly-to). Auto-fit runs only on an untouched view: once
+  // early (700ms, layout has spread) and once at settle. A fly-to also
+  // FREEZES the simulation — the star being inspected must stay where the
+  // camera put it; the old "re-fly at settle to correct drift" produced an
+  // uncommanded zoom-out-zoom-in (reported 2026-07-15).
+  let interacted = false;
+  wrap.addEventListener("pointerdown", () => { interacted = true; }, { capture: true });
+  wrap.addEventListener("wheel", () => { interacted = true; }, { capture: true, passive: true });
   const fitCam = () => { try { fg.zoomToFit(400, 40); } catch {} };
-  setTimeout(() => { if (mountPt.isConnected) fitCam(); }, 700);
+  setTimeout(() => { if (mountPt.isConnected && !interacted) fitCam(); }, 700);
 
   // ── nebulae + constellations (recomputed when the engine cools) ──────────
   const nebulae = new THREE.Group();
@@ -235,17 +246,11 @@ export async function createGalaxy(host, data, opts = {}) {
       nebulae.add(label);
     }
   }
-  // Camera policy on engine-stop: fit the whole graph exactly once — unless a
-  // fly-to happened first (deep links fly during warmup), in which case
-  // re-center on that target instead, since the star drifted while settling.
-  // Refitting on every stop would yank the camera after each drag.
+  // Engine-stop: fit exactly once, and only if the user never touched the
+  // camera. Nebulae recompute here regardless (positions are final).
   let fitted = false;
-  let lastFly = null;
   fg.onEngineStop(() => {
-    if (!fitted) {
-      fitted = true;
-      if (lastFly) flyTo(lastFly); else fitCam();
-    }
+    if (!fitted) { fitted = true; if (!interacted) fitCam(); }
     paintNebulae();
   });
   setTimeout(() => { if (mountPt.isConnected) paintNebulae(); }, 1600);
@@ -341,7 +346,10 @@ export async function createGalaxy(host, data, opts = {}) {
   function flyTo(name) {
     const n = fg.graphData().nodes.find((x) => x.id === name);
     if (!n || n.x == null) return false;
-    lastFly = name;
+    interacted = true;
+    // Freeze the layout mid-warmup: the inspected star must not drift out of
+    // frame, and freezing beats correcting with a second uncommanded fly.
+    try { fg.cooldownTicks(0); } catch {}
     const d = Math.hypot(n.x, n.y, n.z) || 1;
     const dist = 55 + nodeVal(n) * 2;
     const ratio = 1 + dist / d;

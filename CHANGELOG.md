@@ -7,6 +7,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed (2026-07-15 — Atlas polish)
+- **No more self-moving camera** — selecting a star during the initial
+  layout warmup froze the view target correctly, but the settle-time "drift
+  correction" re-flew the camera (a visible zoom-out-zoom-in). Fly-to now
+  freezes the simulation instead (the inspected star cannot drift), auto-fit
+  runs only on a completely untouched view, and the layout pre-simulates 60
+  warmup ticks so an early freeze still lands on a formed map.
 - **Galaxy pulse is a decision signal again** — stars pulse only for
   item-level findings awaiting judgment (duplicates, merge/junk candidates,
   proposed links). Bulk hygiene lists (orphan / unattributed / dubious-edge —
