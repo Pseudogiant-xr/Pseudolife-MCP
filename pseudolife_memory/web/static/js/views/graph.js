@@ -54,15 +54,48 @@ export async function renderGraph(root, ctx) {
   const host = el("div", {});
   mount(root, toolbar, reviewHost, host);
 
-  // Every entity name a finding touches — lights up the matching stars.
+  // A star pulses only for ITEM-LEVEL decisions waiting on the user —
+  // duplicates and dream proposals. Bulk hygiene lists (orphan/unattributed/
+  // dubious_edge run to 1000+ entities on the live bank) would light up the
+  // whole galaxy and turn the signal into noise; they stay drawer-only.
+  const PULSE_TYPES = new Set(["duplicate", "merge_candidate", "junk_candidate", "proposed_link"]);
+  let reviewCache = null;   // last findings — feeds pulses AND per-page banners
+
   function flaggedNames(findings) {
     const out = new Set();
     const add = (v) => { if (typeof v === "string" && v) out.add(v); };
     for (const f of findings || []) {
+      if (!PULSE_TYPES.has(f.type)) continue;
       for (const e of f.entities || []) { add(e); add(e && e.entity); }
       for (const m of f.merges || []) { add(m.from); add(m.into); }
       for (const l of f.links || []) { add(l.src); add(l.dst); }
-      for (const e of f.edges || []) { add(e.src); add(e.dst); }
+    }
+    return out;
+  }
+
+  // Findings touching one entity, shaped like wiki flags — so a pulsing
+  // star's page always shows WHY it pulses, with the drawer's own actions.
+  function extraFlagsFor(name) {
+    const out = [];
+    for (const f of (reviewCache && reviewCache.findings) || []) {
+      if (f.type === "duplicate") {
+        const [a, b] = f.entities || [];
+        if (a === name || b === name)
+          out.push({ kind: "duplicate", a, b, other: a === name ? b : a });
+      } else if (f.type === "merge_candidate") {
+        for (const m of f.merges || [])
+          if (m.from === name || m.into === name)
+            out.push({ kind: "merge_candidate", id: m.id, entity: m.from, into: m.into });
+      } else if (f.type === "junk_candidate") {
+        for (const e of f.entities || [])
+          if (e && e.entity === name)
+            out.push({ kind: "junk_candidate", id: e.id, entity: e.entity });
+      } else if (f.type === "proposed_link") {
+        for (const l of f.links || [])
+          if (l.src === name || l.dst === name)
+            out.push({ kind: "proposed_link", id: l.id, src: l.src,
+                       relation: l.relation, dst: l.dst });
+      }
     }
     return out;
   }
@@ -70,8 +103,8 @@ export async function renderGraph(root, ctx) {
   async function lightFlags() {
     if (!galaxy) return;
     try {
-      const rd = await api.get("/api/graph/review", { scope: state.scope });
-      galaxy && galaxy.setFlagged(flaggedNames(rd.findings));
+      reviewCache = await api.get("/api/graph/review", { scope: state.scope });
+      galaxy && galaxy.setFlagged(flaggedNames(reviewCache.findings));
     } catch { /* non-fatal — stars just don't pulse */ }
   }
 
@@ -133,6 +166,7 @@ export async function renderGraph(root, ctx) {
       onIsolate: (name, on) => (galaxy
         ? (on ? galaxy.isolate(name, 2) : (galaxy.clearIsolate(), true)) : false),
       onFlagAction: (d) => actOnFinding(d),
+      extraFlags: extraFlagsFor(id),
     });
     if (!galaxy) return;
     if (fly === "late") setTimeout(() => { if (wrap.isConnected && galaxy) galaxy.flyTo(id); }, 1900);
@@ -151,6 +185,8 @@ export async function renderGraph(root, ctx) {
   async function refreshAfterMutation() {
     if (state.review) await loadReview();
     await load();
+    await lightFlags();   // refresh the cache BEFORE reopening, so the page's
+                          // banner reflects the mutation, not the stale scan
     const wrap = host.querySelector(".graph-wrap");
     if (state.entity && wrap) openPage(wrap, state.entity, { fly: "late" });
   }

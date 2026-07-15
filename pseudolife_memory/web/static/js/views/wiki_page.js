@@ -64,13 +64,33 @@ function relationsSection(d, nav) {
 
 // Flag banners carry the SAME action descriptors the review drawer emits, so
 // the shell's confirm-gated actOnFinding handles both surfaces identically.
-function flagBanner(d, onFlagAction) {
-  if (!d.flags.length) return null;
+// `extraFlags` are client-injected from the shell's cached review scan
+// (analyzer findings like duplicates never live in the wiki payload); server
+// and client can both know a proposal, so dedupe by kind+identity.
+function mergeFlags(serverFlags, extraFlags) {
+  const seen = new Set();
+  const out = [];
+  for (const f of [...(serverFlags || []), ...(extraFlags || [])]) {
+    const key = `${f.kind}:${f.id ?? ""}:${f.a ?? ""}:${f.b ?? ""}:${f.src ?? ""}:${f.dst ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(f);
+  }
+  return out;
+}
+
+function flagBanner(d, flags, onFlagAction) {
+  if (!flags.length) return null;
   const act = (label, desc, kind) => onFlagAction
     ? el("button", { class: "btn sm" + (kind === "danger" ? " danger" : ""),
         onclick: () => onFlagAction(desc) }, label)
     : null;
-  return el("div", { class: "wp-flags" }, d.flags.map((f) => {
+  return el("div", { class: "wp-flags" }, flags.map((f) => {
+    if (f.kind === "duplicate")
+      return el("div", { class: "chip warn wp-flag" },
+        `possible duplicate of “${f.other}” `,
+        act("Merge", { kind: "merge-named", from: f.a, into: f.b }),
+        act("Mark distinct", { kind: "dismiss-duplicate", a: f.a, b: f.b }));
     if (f.kind === "unattributed")
       return el("div", { class: "chip warn wp-flag" },
         "unattributed — no project owns this entity ",
@@ -96,7 +116,8 @@ function flagBanner(d, onFlagAction) {
 }
 
 function render(host, d, nav, opts) {
-  const { onExplore, onIsolate, onFlagAction } = opts;
+  const { onExplore, onIsolate, onFlagAction, extraFlags } = opts;
+  const flags = mergeFlags(d.flags, extraFlags);
   mount(host,
     el("div", { class: "wp-head" },
       el("span", { class: "sw", style: { background: colorFor(d.etype) } }),
@@ -110,7 +131,7 @@ function render(host, d, nav, opts) {
       `first seen ${fmtDate(d.first_seen)}`,
       d.community != null ? ` · community ${d.community}` : "",
       d.projects.length ? ` · ${d.projects.map((p) => p.source).join(", ")}` : ""),
-    flagBanner(d, onFlagAction),
+    flagBanner(d, flags, onFlagAction),
     factsSection(d),
     section("World", d.world_facts.map((w) => {
       // Render-time scheme guard (same rule as views/world.js): only http(s)

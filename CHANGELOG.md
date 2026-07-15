@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-07-15 — Atlas polish)
+- **Galaxy pulse is a decision signal again** — stars pulse only for
+  item-level findings awaiting judgment (duplicates, merge/junk candidates,
+  proposed links). Bulk hygiene lists (orphan / unattributed / dubious-edge —
+  1,700+ names on the live bank) no longer light up the whole galaxy; they
+  stay in the Review drawer.
+- **Clicking a pulsing star now shows WHY it pulses**: the shell injects the
+  cached review findings for that entity into its wiki-page banner (deduped
+  against server-side flags), with the drawer's own confirm-gated actions —
+  duplicate pairs get Merge / Mark distinct in place.
+
 ### Added (2026-07-15 — Atlas stage 3: time, review, focus)
 - Galaxy time scrubber: replay the bank's growth — stars/edges appear by
   `created_at`/`asserted_at` over a fixed layout (visibility only, never
