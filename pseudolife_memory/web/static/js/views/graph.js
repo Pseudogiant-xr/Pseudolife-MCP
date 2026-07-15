@@ -54,6 +54,27 @@ export async function renderGraph(root, ctx) {
   const host = el("div", {});
   mount(root, toolbar, reviewHost, host);
 
+  // Every entity name a finding touches — lights up the matching stars.
+  function flaggedNames(findings) {
+    const out = new Set();
+    const add = (v) => { if (typeof v === "string" && v) out.add(v); };
+    for (const f of findings || []) {
+      for (const e of f.entities || []) { add(e); add(e && e.entity); }
+      for (const m of f.merges || []) { add(m.from); add(m.into); }
+      for (const l of f.links || []) { add(l.src); add(l.dst); }
+      for (const e of f.edges || []) { add(e.src); add(e.dst); }
+    }
+    return out;
+  }
+
+  async function lightFlags() {
+    if (!galaxy) return;
+    try {
+      const rd = await api.get("/api/graph/review", { scope: state.scope });
+      galaxy && galaxy.setFlagged(flaggedNames(rd.findings));
+    } catch { /* non-fatal — stars just don't pulse */ }
+  }
+
   // ── data + paint ──────────────────────────────────────────────────────────
   async function load() {
     destroyGalaxy(); galaxy = null;
@@ -95,6 +116,7 @@ export async function renderGraph(root, ctx) {
       return;
     }
     wrap.appendChild(fullscreenBtn(wrap));
+    lightFlags();                        // fire-and-forget: pulse flagged stars
     if (state.entity) {                  // deep link: open page + fly once laid out
       openPage(wrap, state.entity, { fly: "late" });
     }
@@ -104,9 +126,13 @@ export async function renderGraph(root, ctx) {
   function openPage(wrap, id, { fly = "now" } = {}) {
     state.entity = id;
     reflectHash();
+    if (galaxy) galaxy.clearIsolate();   // a stale isolate dim shouldn't follow navigation
     openWikiPanel(wrap, id, {
       onExplore: (name) => { galaxy && galaxy.flyTo(name); },
       onNavigate: (name) => { galaxy && galaxy.flyTo(name); openPage(wrap, name); },
+      onIsolate: (name, on) => (galaxy
+        ? (on ? galaxy.isolate(name, 2) : (galaxy.clearIsolate(), true)) : false),
+      onFlagAction: (d) => actOnFinding(d),
     });
     if (!galaxy) return;
     if (fly === "late") setTimeout(() => { if (wrap.isConnected && galaxy) galaxy.flyTo(id); }, 1900);
@@ -125,6 +151,8 @@ export async function renderGraph(root, ctx) {
   async function refreshAfterMutation() {
     if (state.review) await loadReview();
     await load();
+    const wrap = host.querySelector(".graph-wrap");
+    if (state.entity && wrap) openPage(wrap, state.entity, { fly: "late" });
   }
 
   async function postAll(calls, okMsg) {

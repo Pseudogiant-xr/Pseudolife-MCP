@@ -62,19 +62,41 @@ function relationsSection(d, nav) {
     d.relations.in.map((r) => line(r, r.source, "←")));
 }
 
-function flagBanner(d) {
+// Flag banners carry the SAME action descriptors the review drawer emits, so
+// the shell's confirm-gated actOnFinding handles both surfaces identically.
+function flagBanner(d, onFlagAction) {
   if (!d.flags.length) return null;
+  const act = (label, desc, kind) => onFlagAction
+    ? el("button", { class: "btn sm" + (kind === "danger" ? " danger" : ""),
+        onclick: () => onFlagAction(desc) }, label)
+    : null;
   return el("div", { class: "wp-flags" }, d.flags.map((f) => {
     if (f.kind === "unattributed")
-      return el("div", { class: "chip warn" }, "unattributed — no project owns this entity");
+      return el("div", { class: "chip warn wp-flag" },
+        "unattributed — no project owns this entity ",
+        act("Assign", { kind: "assign", entities: [d.entity] }));
     if (f.kind === "proposed_link")
-      return el("div", { class: "chip warn" }, `proposed link: ${f.src} ${f.relation} ${f.dst}`);
-    return el("div", { class: "chip warn" },
+      return el("div", { class: "chip warn wp-flag" },
+        `proposed link: ${f.src} ${f.relation} ${f.dst} `,
+        act("Accept", { kind: "accept-link", id: f.id }),
+        act("Reject", { kind: "reject-link", id: f.id }));
+    if (f.kind === "merge_candidate")
+      return el("div", { class: "chip warn wp-flag" },
+        `suggested merge: ${f.entity} → ${f.into} `,
+        act("Merge", { kind: "merge-entity", id: f.id, from: f.entity, into: f.into }),
+        act("Reject", { kind: "reject-entity", id: f.id }));
+    if (f.kind === "junk_candidate")
+      return el("div", { class: "chip warn wp-flag" },
+        `suspected junk: ${f.entity ?? d.entity} `,
+        act("Delete", { kind: "junk-entity", id: f.id, entity: f.entity ?? d.entity }, "danger"),
+        act("Reject", { kind: "reject-entity", id: f.id }));
+    return el("div", { class: "chip warn wp-flag" },
       `${f.kind}: ${f.entity ?? ""}${f.into ? " → " + f.into : ""}`);
   }));
 }
 
-function render(host, d, nav, onExplore) {
+function render(host, d, nav, opts) {
+  const { onExplore, onIsolate, onFlagAction } = opts;
   mount(host,
     el("div", { class: "wp-head" },
       el("span", { class: "sw", style: { background: colorFor(d.etype) } }),
@@ -88,7 +110,7 @@ function render(host, d, nav, onExplore) {
       `first seen ${fmtDate(d.first_seen)}`,
       d.community != null ? ` · community ${d.community}` : "",
       d.projects.length ? ` · ${d.projects.map((p) => p.source).join(", ")}` : ""),
-    flagBanner(d),
+    flagBanner(d, onFlagAction),
     factsSection(d),
     section("World", d.world_facts.map((w) => {
       // Render-time scheme guard (same rule as views/world.js): only http(s)
@@ -111,8 +133,18 @@ function render(host, d, nav, onExplore) {
         el("span", { class: "dim mono" }, fmtDate(t.ts)),
         el("span", { class: "wp-tl-kind" }, t.kind), " ", t.text))),
     el("div", { class: "wp-actions" },
-      el("button", { class: "btn sm primary", onclick: () => onExplore(d.entity) },
+      el("button", { class: "btn sm primary", onclick: () => onExplore && onExplore(d.entity) },
         "Focus in galaxy"),
+      (() => {
+        if (!onIsolate) return null;
+        let on = false;
+        const b = el("button", { class: "btn sm", onclick: () => {
+          on = !on ? !!onIsolate(d.entity, true) : (onIsolate(d.entity, false), false);
+          b.classList.toggle("on", on);
+          b.textContent = on ? "Show all" : "Isolate";
+        } }, "Isolate");
+        return b;
+      })(),
       el("button", { class: "btn sm", title: `Cortex facts filtered to ${d.entity}`,
         onclick: () => { location.hash = "#/cortex?q=" + encodeURIComponent(d.entity); } },
         "Facts ↗")));
@@ -122,7 +154,7 @@ function render(host, d, nav, onExplore) {
 // opts.onNavigate — wikilink clicks route here when set (the Atlas shell uses
 // it to fly the camera alongside the page swap); default is an in-place swap.
 export function openWikiPanel(wrap, entityName, opts = {}) {
-  const { onExplore, onNavigate } = opts;
+  const { onNavigate } = opts;
   let panel = wrap.querySelector(".wiki-panel");
   if (!panel) { panel = el("div", { class: "wiki-panel" }); wrap.appendChild(panel); }
   const host = el("div", { class: "wp-body" });
@@ -142,6 +174,6 @@ export function openWikiPanel(wrap, entityName, opts = {}) {
           "No page — this entity isn't in the graph."));
       return;
     }
-    render(host, d, nav, onExplore || (() => {}));
+    render(host, d, nav, opts);
   }).catch((err) => { if (host.isConnected) mount(host, errorBlock(err)); });
 }

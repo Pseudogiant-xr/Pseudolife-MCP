@@ -128,11 +128,17 @@ export async function createGalaxy(host, data, opts = {}) {
     derived: !!e.derived, asserted_at: e.asserted_at }));
   const r0 = wrap.getBoundingClientRect();
 
-  const state = { query: "" };
+  // State layers, priority: search query > isolate dim > flagged tint
+  // (reduced-motion only; motion users get the pulse) > base recency color.
+  const state = { query: "", dim: null, flagged: new Set(), tCut: null };
+  const WARN = "#e8b341";
   const nodeColor = (n) => {
-    const base = colors[n.id] || "#6b7280";
-    if (!state.query) return base;
-    return n.id.toLowerCase().includes(state.query) ? "#ffffff" : "rgba(90,100,115,0.25)";
+    if (state.query) {
+      return n.id.toLowerCase().includes(state.query) ? "#ffffff" : "rgba(90,100,115,0.25)";
+    }
+    if (state.dim && !state.dim.has(n.id)) return "rgba(90,100,115,0.16)";
+    if (reduce && state.flagged.has(n.id)) return WARN;
+    return colors[n.id] || "#6b7280";
   };
   const nodeVal = (n) => 1 + (deg[n.id] || 0) + (facts[n.id] || 0) * 0.6;
 
@@ -151,7 +157,19 @@ export async function createGalaxy(host, data, opts = {}) {
       n.__label = sp;
       return sp;
     })
-    .linkColor((l) => (l.derived ? "rgba(150,170,200,0.20)" : "rgba(150,170,200,0.42)"))
+    .nodeVisibility((n) => state.tCut == null || (n.created_at || 0) <= state.tCut)
+    .linkVisibility((l) => {
+      if (state.tCut == null) return true;
+      const sc = (l.source && l.source.created_at) || 0;
+      const tc = (l.target && l.target.created_at) || 0;
+      return (l.asserted_at || 0) <= state.tCut && sc <= state.tCut && tc <= state.tCut;
+    })
+    .linkColor((l) => {
+      const dimmed = state.dim &&
+        !(state.dim.has(l.source.id ?? l.source) && state.dim.has(l.target.id ?? l.target));
+      if (dimmed) return "rgba(90,100,115,0.06)";
+      return l.derived ? "rgba(150,170,200,0.20)" : "rgba(150,170,200,0.42)";
+    })
     .linkDirectionalArrowLength(3)
     .width(r0.width).height(r0.height)
     .showNavInfo(false)                      // we render our own hint line
@@ -159,6 +177,26 @@ export async function createGalaxy(host, data, opts = {}) {
     .onNodeClick((n) => onNodeClick(n.id));
 
   live = { fg, THREE, wrap, mountPt, state };
+
+  // Re-set every state-dependent accessor with a FRESH closure. Passing the
+  // same function reference back can be treated as "unchanged" by the prop
+  // system and silently skip the scene update — fresh identities always take.
+  function poke() {
+    fg.nodeColor((n) => nodeColor(n));
+    fg.linkColor((l) => {
+      const dimmed = state.dim &&
+        !(state.dim.has(l.source.id ?? l.source) && state.dim.has(l.target.id ?? l.target));
+      if (dimmed) return "rgba(90,100,115,0.06)";
+      return l.derived ? "rgba(150,170,200,0.20)" : "rgba(150,170,200,0.42)";
+    });
+    fg.nodeVisibility((n) => state.tCut == null || (n.created_at || 0) <= state.tCut);
+    fg.linkVisibility((l) => {
+      if (state.tCut == null) return true;
+      const sc = (l.source && l.source.created_at) || 0;
+      const tc = (l.target && l.target.created_at) || 0;
+      return (l.asserted_at || 0) <= state.tCut && sc <= state.tCut && tc <= state.tCut;
+    });
+  }
 
   // camera: fit once spread, again on settle (stage-1 lesson: the layout's
   // centroid drifts — zoomToFit tracks it instead of staring at the origin)
@@ -227,6 +265,21 @@ export async function createGalaxy(host, data, opts = {}) {
     }
     ranked.sort((a, b) => a.d - b.d);
     for (let i = 0; i < ranked.length; i++) ranked[i].n.__label.visible = i < LABEL_NEAREST;
+    // labels: hide when the star is hidden by the scrubber or dimmed by isolate
+    for (const r of ranked) {
+      const hidden = (state.tCut != null && (r.n.created_at || 0) > state.tCut)
+                  || (state.dim && !state.dim.has(r.n.id));
+      if (hidden) r.n.__label.visible = false;
+    }
+    // flagged stars pulse (skip under reduced motion — they get a tint instead)
+    if (!reduce && state.flagged.size) {
+      const s = 1 + 0.22 * Math.sin(performance.now() / 300);
+      for (const n of ns) {
+        if (!n.__threeObj) continue;
+        if (state.flagged.has(n.id)) n.__threeObj.scale.setScalar(s);
+        else if (n.__threeObj.scale.x !== 1) n.__threeObj.scale.setScalar(1);
+      }
+    }
     live.raf = requestAnimationFrame(labelLoop);
   }
   live.raf = requestAnimationFrame(labelLoop);
@@ -244,6 +297,46 @@ export async function createGalaxy(host, data, opts = {}) {
   wrap.appendChild(el("div", { class: "graph-hint" },
     "drag to orbit · scroll to zoom · click a star"));
 
+  // ── time scrubber: replay the bank's growth (visibility only — the layout
+  // is computed once on the full graph and never re-simulated) ──────────────
+  const times = [
+    ...nodes.map((n) => n.created_at || 0),
+    ...links.map((l) => l.asserted_at || 0),
+  ].filter(Boolean);
+  if (times.length >= 2) {
+    const t0 = Math.min(...times), t1 = Math.max(...times);
+    if (t1 > t0) {
+      const fmtD = (ts) => new Date(ts * 1000).toISOString().slice(0, 10);
+      const label = el("span", { class: "scrub-date mono" }, "now");
+      const slider = el("input", { type: "range", min: "0", max: "1000", value: "1000",
+        name: "scrub", "aria-label": "time scrubber" });
+      let playing = null;
+      const apply = (v) => {
+        state.tCut = v >= 1000 ? null : t0 + (t1 - t0) * (v / 1000);
+        label.textContent = state.tCut == null ? "now" : fmtD(state.tCut);
+        poke();
+      };
+      function stopPlay() {
+        if (playing) { clearInterval(playing); playing = null; playBtn.textContent = "▶"; }
+      }
+      slider.oninput = () => { stopPlay(); apply(+slider.value); };
+      const playBtn = el("button", { class: "scrub-play", title: "replay growth",
+        "aria-label": "replay growth", onclick: () => {
+          if (reduce) return;                      // no auto-animation
+          if (playing) { stopPlay(); return; }
+          let v = 0;
+          playBtn.textContent = "❚❚";
+          playing = setInterval(() => {
+            v += 12;
+            if (v >= 1000) { v = 1000; stopPlay(); }
+            slider.value = String(v);
+            apply(v);
+          }, 100);
+        } }, "▶");
+      wrap.appendChild(el("div", { class: "scrub-bar" }, playBtn, slider, label));
+    }
+  }
+
   // ── public handle ─────────────────────────────────────────────────────────
   function flyTo(name) {
     const n = fg.graphData().nodes.find((x) => x.id === name);
@@ -258,7 +351,7 @@ export async function createGalaxy(host, data, opts = {}) {
   }
   function setQuery(q) {
     state.query = (q || "").trim().toLowerCase();
-    fg.nodeColor(nodeColor);                 // re-evaluate the accessor
+    poke();
   }
   function flyToBest(q) {
     const s = (q || "").trim().toLowerCase();
@@ -268,7 +361,41 @@ export async function createGalaxy(host, data, opts = {}) {
     if (m) flyTo(m.id);
     return m ? m.id : null;
   }
-  const handle = { flyTo, setQuery, flyToBest, destroy: destroyGalaxy };
+  function setFlagged(names) {
+    state.flagged = names instanceof Set ? names : new Set(names || []);
+    poke();                                  // reduced-motion tint path
+  }
+  function isolate(name, depth = 2) {
+    const adj = new Map();
+    const addAdj = (a, b) => {
+      if (!adj.has(a)) adj.set(a, []);
+      adj.get(a).push(b);
+    };
+    for (const l of links) {
+      const s = typeof l.source === "object" ? l.source.id : l.source;
+      const t = typeof l.target === "object" ? l.target.id : l.target;
+      addAdj(s, t); addAdj(t, s);
+    }
+    if (!adj.has(name) && !nodes.some((n) => n.id === name)) return false;
+    const keep = new Set([name]);
+    let frontier = [name];
+    for (let d = 0; d < depth; d++) {
+      const next = [];
+      for (const cur of frontier) for (const nb of adj.get(cur) || []) {
+        if (!keep.has(nb)) { keep.add(nb); next.push(nb); }
+      }
+      frontier = next;
+    }
+    state.dim = keep;
+    poke();
+    return true;
+  }
+  function clearIsolate() {
+    state.dim = null;
+    poke();
+  }
+  const handle = { flyTo, setQuery, flyToBest, setFlagged, isolate, clearIsolate,
+                   fg, destroy: destroyGalaxy };
   wrap.__galaxy = handle;   // debug/QA handle (parity with the old canvas.__fg)
   return handle;
 }

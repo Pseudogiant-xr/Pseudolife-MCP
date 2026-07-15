@@ -678,3 +678,15 @@ code.ic { font-family:var(--font-mono); font-size:.84em; padding:1px 5px; border
   z-index: 30; overflow-y: auto; padding: 16px;
   background: var(--bg-2); border-right: 1px solid var(--line-2);
   box-shadow: var(--shadow-pop); animation: slidein .2s var(--ease); }
+
+/* ── Atlas stage 3: time scrubber + flag banners ────────────────────────── */
+.scrub-bar { position: absolute; left: 50%; transform: translateX(-50%); bottom: 12px;
+  display: flex; align-items: center; gap: 10px; padding: 6px 12px; z-index: 6;
+  background: var(--bg-2); border: 1px solid var(--line-2); border-radius: 999px;
+  box-shadow: var(--shadow-pop); }
+.scrub-bar input[type="range"] { width: min(320px, 40vw); }
+.scrub-play { background: none; border: none; cursor: pointer; color: var(--ink-3);
+  font-size: .9rem; }
+.scrub-date { font-size: .74rem; color: var(--ink-3); min-width: 74px; text-align: right; }
+.graph-wrap.galaxy .graph-hint { left: 18px; transform: none; }
+.wp-flag { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
