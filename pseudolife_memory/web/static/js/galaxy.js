@@ -143,12 +143,33 @@ export async function createGalaxy(host, data, opts = {}) {
   };
   const nodeVal = (n) => 1 + (deg[n.id] || 0) + (facts[n.id] || 0) * 0.6;
 
+  // ONE definition per state-dependent accessor. poke() re-installs fresh
+  // thin wrappers around these — never restated bodies. (The 2026-07-15
+  // hide-orphans bug: poke() carried a stale COPY of nodeVisible that
+  // predated the orphan check, so every poke silently erased the feature.)
+  const nodeVisible = (n) => {
+    if (state.hideOrphans && !deg[n.id]) return false;     // no connections
+    return state.tCut == null || (n.created_at || 0) <= state.tCut;
+  };
+  const linkVisible = (l) => {
+    if (state.tCut == null) return true;
+    const sc = (l.source && l.source.created_at) || 0;
+    const tc = (l.target && l.target.created_at) || 0;
+    return (l.asserted_at || 0) <= state.tCut && sc <= state.tCut && tc <= state.tCut;
+  };
+  const linkColorOf = (l) => {
+    const dimmed = state.dim &&
+      !(state.dim.has(l.source.id ?? l.source) && state.dim.has(l.target.id ?? l.target));
+    if (dimmed) return "rgba(90,100,115,0.06)";
+    return l.derived ? "rgba(150,170,200,0.20)" : "rgba(150,170,200,0.42)";
+  };
+
   const fg = new FG(mountPt, {})
     .graphData({ nodes, links })
     .backgroundColor("rgba(0,0,0,0)")
     .nodeId("id")
     .nodeLabel((n) => n.id)
-    .nodeColor(nodeColor)
+    .nodeColor((n) => nodeColor(n))
     .nodeVal(nodeVal)
     .nodeThreeObjectExtend(true)
     .nodeThreeObject((n) => {
@@ -158,22 +179,9 @@ export async function createGalaxy(host, data, opts = {}) {
       n.__label = sp;
       return sp;
     })
-    .nodeVisibility((n) => {
-      if (state.hideOrphans && !deg[n.id]) return false;   // no connections
-      return state.tCut == null || (n.created_at || 0) <= state.tCut;
-    })
-    .linkVisibility((l) => {
-      if (state.tCut == null) return true;
-      const sc = (l.source && l.source.created_at) || 0;
-      const tc = (l.target && l.target.created_at) || 0;
-      return (l.asserted_at || 0) <= state.tCut && sc <= state.tCut && tc <= state.tCut;
-    })
-    .linkColor((l) => {
-      const dimmed = state.dim &&
-        !(state.dim.has(l.source.id ?? l.source) && state.dim.has(l.target.id ?? l.target));
-      if (dimmed) return "rgba(90,100,115,0.06)";
-      return l.derived ? "rgba(150,170,200,0.20)" : "rgba(150,170,200,0.42)";
-    })
+    .nodeVisibility((n) => nodeVisible(n))
+    .linkVisibility((l) => linkVisible(l))
+    .linkColor((l) => linkColorOf(l))
     .linkDirectionalArrowLength(3)
     .width(r0.width).height(r0.height)
     .showNavInfo(false)                      // we render our own hint line
@@ -188,21 +196,12 @@ export async function createGalaxy(host, data, opts = {}) {
   // Re-set every state-dependent accessor with a FRESH closure. Passing the
   // same function reference back can be treated as "unchanged" by the prop
   // system and silently skip the scene update — fresh identities always take.
+  // Wrappers only: the logic lives in the named accessors above.
   function poke() {
     fg.nodeColor((n) => nodeColor(n));
-    fg.linkColor((l) => {
-      const dimmed = state.dim &&
-        !(state.dim.has(l.source.id ?? l.source) && state.dim.has(l.target.id ?? l.target));
-      if (dimmed) return "rgba(90,100,115,0.06)";
-      return l.derived ? "rgba(150,170,200,0.20)" : "rgba(150,170,200,0.42)";
-    });
-    fg.nodeVisibility((n) => state.tCut == null || (n.created_at || 0) <= state.tCut);
-    fg.linkVisibility((l) => {
-      if (state.tCut == null) return true;
-      const sc = (l.source && l.source.created_at) || 0;
-      const tc = (l.target && l.target.created_at) || 0;
-      return (l.asserted_at || 0) <= state.tCut && sc <= state.tCut && tc <= state.tCut;
-    });
+    fg.linkColor((l) => linkColorOf(l));
+    fg.nodeVisibility((n) => nodeVisible(n));
+    fg.linkVisibility((l) => linkVisible(l));
   }
 
   // ── camera policy ─────────────────────────────────────────────────────────
@@ -375,7 +374,7 @@ export async function createGalaxy(host, data, opts = {}) {
   }
   function setHideOrphans(on) {
     state.hideOrphans = !!on;
-    fg.nodeVisibility(fg.nodeVisibility());   // re-evaluate (visibility only)
+    poke();
   }
   function orphanCount() {
     return nodes.reduce((c, n) => c + (deg[n.id] ? 0 : 1), 0);
