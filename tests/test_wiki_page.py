@@ -106,3 +106,11 @@ def test_wiki_page_resolves_colloquial_name_and_flags_unattributed(svc):
     out = svc.wiki_page("Lonely Node")
     assert out["found"] is True and out["entity"] == "lonely node"
     assert {"kind": "unattributed"} in out["flags"]
+
+
+def test_whole_graph_payload_carries_timestamps(svc):
+    _seed(svc)
+    out = svc.graph_neighborhood(entity=None)
+    assert out["found"] is True
+    assert all(isinstance(n["created_at"], float) for n in out["nodes"])
+    assert all(isinstance(e["asserted_at"], float) for e in out["edges"])

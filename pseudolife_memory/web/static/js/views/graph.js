@@ -1,159 +1,130 @@
-// views/graph.js — the unified knowledge-graph surface. Two modes over the one
-// shared renderer (graphview.js):
-//   • Overview — the WHOLE graph, no seed, coloured by project (all scopes) or
-//     community (one project), with a Review queue of graph-hygiene findings.
-//   • Explore — a seed entity + depth neighbourhood, coloured by entity type.
-// The mode is a pure function of the hash so deep links and the mode toggle
-// share one code path:
-//   #/graph                     → Overview (whole map)
-//   #/graph?entity=X            → Explore X's neighbourhood
-//   #/graph?mode=explore        → Explore (empty seed prompt)
-//   #/atlas , #/atlas?entity=X  → Overview (X highlighted) — legacy aliases
+// views/graph.js — the Atlas surface (stage 2): a full-bleed 3D galaxy with a
+// wiki panel and the review drawer. The galaxy IS the map; `table` is the
+// data/accessibility fallback (and the automatic one when WebGL/bundle fails).
+//   #/graph                → galaxy, whole scoped graph
+//   #/graph?entity=X       → galaxy + X's wiki page open, camera on X
+//   #/graph?view=table     → table mode
+//   legacy: #/atlas, mode=, depth= — routed here, extra params ignored.
 import { el, mount, fmtNum, loadingBlock, emptyBlock, errorBlock } from "../util.js";
 import { api } from "../api.js";
 import { facetBar } from "../components.js";
-import { ForceGraph, renderGalaxy, cleanupGalaxy, tableView, legend,
-         zoomControls, fullscreenBtn } from "../graphview.js";
-import { reviewPanel } from "../atlas_review.js";
+import { tableView, fullscreenBtn } from "../graphview.js";
+import { createGalaxy, destroyGalaxy } from "../galaxy.js";
 import { openWikiPanel } from "./wiki_page.js";
+import { reviewPanel } from "../atlas_review.js";
 import { confirmDialog, openModal, closeModal, toast } from "../ui.js";
 
 // Middle-ellipsis a long name so a modal button label can't overflow/clip.
 const ellipsisMid = (s, max = 22) =>
   s.length <= max ? s : `${s.slice(0, max - 9)}…${s.slice(-8)}`;
 
-// `view` (map/galaxy/table) and `review` persist across mode switches; the rest
-// is re-derived from the hash on every render.
-let state = { mode: "overview", scope: "all", entity: "", depth: 1, view: "map", review: false };
-let reviewData = null;
-let fg = null;
+let state = { scope: "all", view: "galaxy", entity: "", review: false, q: "" };
+let galaxy = null;
 
 function parseHash() {
   const h = location.hash || "";
-  const base = h.replace(/^#\/?/, "").split("?")[0].split("/")[0] || "graph";
   const qi = h.indexOf("?");
   const p = new URLSearchParams(qi >= 0 ? h.slice(qi + 1) : "");
   const entity = p.get("entity") || "";
-  const m = p.get("mode");
-  const mode = (m === "explore" || m === "overview") ? m
-             : (base === "graph" && entity) ? "explore" : "overview";
-  return { mode, entity, scope: p.get("scope") || "all",
-           depth: parseInt(p.get("depth") || "1", 10) || 1 };
+  return { entity,
+           scope: p.get("scope") || state.scope || "all",
+           // an explicit entity deep link overrides a sticky table view — the
+           // link's intent is "show me this entity", which needs the galaxy
+           view: p.get("view") === "table" ? "table"
+               : entity ? "galaxy" : state.view };
 }
 
-// Build a hash for the current state in a given mode (drives re-render).
-function hashFor(mode) {
+// Update the address bar without re-triggering the router (panel swaps and
+// camera moves are in-surface navigation, not route changes).
+function reflectHash() {
   const p = new URLSearchParams();
-  p.set("mode", mode);
   if (state.entity) p.set("entity", state.entity);
-  if (mode === "overview" && state.scope && state.scope !== "all") p.set("scope", state.scope);
-  if (mode === "explore" && state.depth && state.depth !== 1) p.set("depth", String(state.depth));
-  return "#/graph?" + p.toString();
+  if (state.scope && state.scope !== "all") p.set("scope", state.scope);
+  if (state.view === "table") p.set("view", "table");
+  const qs = p.toString();
+  history.replaceState(null, "", location.pathname + "#/graph" + (qs ? "?" + qs : ""));
 }
 
 export async function renderGraph(root, ctx) {
   const h = parseHash();
-  state.mode = h.mode;
-  state.entity = h.entity;
-  state.scope = h.scope;
-  state.depth = h.depth;
+  state.entity = h.entity; state.scope = h.scope; state.view = h.view;
 
-  const host = el("div", {});
-  const reviewHost = el("div", { style: { marginBottom: "12px", display: "none" } });
   const toolbar = el("div", { class: "toolbar" });
+  const reviewHost = el("div", { class: "review-drawer", style: { display: "none" } });
+  const host = el("div", {});
   mount(root, toolbar, reviewHost, host);
 
-  const modeToggle = facetBar(
-    [{ value: "overview", label: "Overview" }, { value: "explore", label: "Explore" }],
-    state.mode, (m) => { if (m !== state.mode) location.hash = hashFor(m); });
-  const viewToggle = facetBar(
-    [{ value: "map", label: "map" }, { value: "galaxy", label: "galaxy" }, { value: "table", label: "table" }],
-    state.view, (v) => { state.view = v; paint(host._data); });
+  // ── data + paint ──────────────────────────────────────────────────────────
+  async function load() {
+    destroyGalaxy(); galaxy = null;
+    mount(host, loadingBlock("Charting the galaxy…"));
+    try {
+      const data = await api.get("/api/graph", { scope: state.scope });
+      host._data = data;
+      await paint(data);
+    } catch (err) { mount(host, errorBlock(err)); }
+  }
 
-  // ── shared painting ───────────────────────────────────────────────────────
-  function goExplore(id) { state.entity = id; state.mode = "explore"; location.hash = hashFor("explore"); }
-
-  function paint(data) {
-    if (fg) { fg.stop(); fg = null; }
-    cleanupGalaxy();
+  async function paint(data) {
+    destroyGalaxy(); galaxy = null;
     const nodes = (data && data.nodes) || [];
     if (!data || data.found === false || !nodes.length) {
-      mount(host, emptyState(data));
+      mount(host, emptyBlock("No graph in scope",
+        state.scope === "all" ? "The graph is empty." : `No attributed entities in “${state.scope}”.`));
       return;
     }
-    const colorBy = state.mode === "explore" ? "etype"
-                  : (state.scope === "all" ? "project" : "community");
-    const shown = nodes.length;
-    // Only the whole-graph overview is capped; flag it so missing nodes read as
-    // a readability cap, not data loss.
-    const banner = (state.mode === "overview" && data.truncated)
+    const colorBy = state.scope === "all" ? "project" : "community";
+    const banner = data.truncated
       ? el("div", { class: "chip warn", style: { display: "inline-flex", marginBottom: "10px" } },
-          `showing the ${fmtNum(shown)} most-connected of ${fmtNum(data.total_nodes ?? shown)} entities`
-          + (state.scope === "all" ? " — pick a project to map it in full" : " — refine the scope to see more"))
+          `showing the ${fmtNum(nodes.length)} most-connected of ${fmtNum(data.total_nodes ?? nodes.length)} entities`
+          + (state.scope === "all" ? " — pick a project to map it in full" : ""))
       : null;
     const viewHost = el("div", {});
     mount(host, banner, viewHost);
 
-    if (state.view === "table") { mount(viewHost, tableView(data)); return; }
-    if (state.view === "galaxy") {
-      renderGalaxy(viewHost, data, { colorBy, onNodeClick: (id) => goExplore(id) });
+    if (state.view === "table") { mount(viewHost, tableView(data)); reflectHash(); return; }
+
+    const wrap = el("div", { class: "graph-wrap galaxy" });
+    mount(viewHost, wrap);
+    galaxy = await createGalaxy(wrap, data, { colorBy, onNodeClick: (id) => openPage(wrap, id) });
+    if (!galaxy) {                       // bundle/WebGL failure → live fallback
+      state.view = "table";
+      toast("3D engine unavailable — showing the table view", "bad");
+      mount(viewHost, tableView(data));
+      reflectHash();
       return;
     }
-    const wrap = el("div", { class: "graph-wrap" });
-    const canvas = el("canvas", {});
-    wrap.appendChild(canvas);
-    mount(viewHost, wrap);
-    fg = new ForceGraph(canvas, wrap, data, { seed: state.entity, colorBy,
-      onSelect: (node) => showNode(wrap, node) });
-    wrap.appendChild(zoomControls(fg));
-    const etypes = state.mode === "explore"
-      ? [...new Set(nodes.map((n) => n.etype).filter(Boolean))] : [];
-    wrap.appendChild(legend(etypes, state.mode === "explore" ? "etype" : colorBy));
-    wrap.appendChild(el("div", { class: "graph-hint" },
-      state.mode === "explore"
-        ? "scroll to zoom · drag background to pan · click a node"
-        : `${fmtNum(shown)} entities · scroll to zoom · drag to pan · click a node`));
     wrap.appendChild(fullscreenBtn(wrap));
-  }
-
-  function emptyState(data) {
-    if (state.mode === "explore") {
-      return state.entity
-        ? emptyBlock("No graph here", `No relations around “${state.entity}”.`)
-        : emptyBlock("Explore the graph", "Enter a seed entity above, or switch to Overview for the whole map.");
+    if (state.entity) {                  // deep link: open page + fly once laid out
+      openPage(wrap, state.entity, { fly: "late" });
     }
-    return emptyBlock("No graph in scope",
-      state.scope === "all" ? "The graph is empty." : `No attributed entities in “${state.scope}”.`);
+    reflectHash();
   }
 
-  // The wiki page replaces the old inline node-panel (Atlas stage 1).
-  function showNode(wrap, node) {
-    openWikiPanel(wrap, node.entity, { onExplore: (id) => goExplore(id) });
+  function openPage(wrap, id, { fly = "now" } = {}) {
+    state.entity = id;
+    reflectHash();
+    openWikiPanel(wrap, id, {
+      onExplore: (name) => { galaxy && galaxy.flyTo(name); },
+      onNavigate: (name) => { galaxy && galaxy.flyTo(name); openPage(wrap, name); },
+    });
+    if (!galaxy) return;
+    if (fly === "late") setTimeout(() => { if (wrap.isConnected && galaxy) galaxy.flyTo(id); }, 1900);
+    else galaxy.flyTo(id);
   }
 
-  // ── Overview: whole graph + scope + Review ────────────────────────────────
-  async function loadOverview() {
-    if (fg) { fg.stop(); fg = null; }
-    cleanupGalaxy();
-    mount(host, loadingBlock("Mapping the graph…"));
-    try {
-      const data = await api.get("/api/graph", { scope: state.scope });
-      host._data = data;
-      paint(data);
-    } catch (err) { mount(host, errorBlock(err)); }
-  }
-
+  // ── review drawer (same findings API + actions as before) ────────────────
   async function loadReview() {
     mount(reviewHost, loadingBlock("Scanning the graph…"));
     try {
-      reviewData = await api.get("/api/graph/review", { scope: state.scope });
-      mount(reviewHost, reviewPanel(reviewData, (f) => actOnFinding(f)));
+      const rd = await api.get("/api/graph/review", { scope: state.scope });
+      mount(reviewHost, reviewPanel(rd, (f) => actOnFinding(f)));
     } catch (err) { mount(reviewHost, errorBlock(err)); }
   }
 
   async function refreshAfterMutation() {
     if (state.review) await loadReview();
-    await loadOverview();
+    await load();
   }
 
   async function postAll(calls, okMsg) {
@@ -259,46 +230,37 @@ export async function renderGraph(root, ctx) {
     }
   }
 
-  // ── Explore: seed + depth neighbourhood ───────────────────────────────────
-  async function loadExplore() {
-    if (fg) { fg.stop(); fg = null; }
-    cleanupGalaxy();
-    if (!state.entity) { paint(null); return; }   // empty seed → prompt, no fetch
-    mount(host, loadingBlock("Walking the graph…"));
-    try {
-      const data = await api.get("/api/graph", { entity: state.entity, depth: state.depth });
-      host._data = data;
-      paint(data);
-    } catch (err) { mount(host, errorBlock(err)); }
-  }
+  // ── toolbar ───────────────────────────────────────────────────────────────
+  let projects = [];
+  try { projects = (await api.get("/api/graph/projects")).projects || []; } catch { /* non-fatal */ }
+  const scopeOpts = [{ value: "all", label: "all projects" }]
+    .concat(projects.map((p) => ({ value: p.source, label: `${p.source} (${p.entities})` })));
+  const switcher = facetBar(scopeOpts, state.scope,
+    (v) => { state.scope = v; state.entity = ""; load(); if (state.review) loadReview(); });
 
-  // ── toolbar wiring per mode ───────────────────────────────────────────────
-  if (state.mode === "overview") {
-    let projects = [];
-    try { projects = (await api.get("/api/graph/projects")).projects || []; } catch { /* non-fatal */ }
-    const scopeOpts = [{ value: "all", label: "all projects" }]
-      .concat(projects.map((p) => ({ value: p.source, label: `${p.source} (${p.entities})` })));
-    const switcher = facetBar(scopeOpts, state.scope,
-      (v) => { state.scope = v; loadOverview(); if (state.review) loadReview(); });
-    const reviewBtn = el("button", { class: "facet" + (state.review ? " on" : ""),
-      onclick: () => { state.review = !state.review; reviewBtn.classList.toggle("on", state.review);
-        reviewHost.style.display = state.review ? "" : "none"; if (state.review) loadReview(); } },
-      "Review");
-    mount(toolbar, modeToggle, el("span", { class: "eyebrow" }, "scope"), switcher,
-      el("span", { class: "grow" }), reviewBtn, viewToggle);
-    reviewHost.style.display = state.review ? "" : "none";
-    if (state.review) loadReview();
-    loadOverview();
-  } else {
-    const entityInput = el("input", { type: "text", value: state.entity, placeholder: "seed entity…",
-      name: "entity", "aria-label": "seed entity", style: { maxWidth: "260px" },
-      onkeydown: (e) => { if (e.key === "Enter") { state.entity = e.target.value.trim(); location.hash = hashFor("explore"); } } });
-    const depthSel = el("select", { name: "depth", "aria-label": "depth", style: { width: "auto" },
-      onchange: (e) => { state.depth = parseInt(e.target.value, 10); location.hash = hashFor("explore"); } },
-      [1, 2, 3].map((d) => el("option", { value: d, selected: d === state.depth }, `depth ${d}`)));
-    const goBtn = el("button", { class: "btn",
-      onclick: () => { state.entity = entityInput.value.trim(); location.hash = hashFor("explore"); } }, "Explore");
-    mount(toolbar, modeToggle, entityInput, depthSel, goBtn, el("span", { class: "grow" }), viewToggle);
-    loadExplore();
-  }
+  const search = el("input", { type: "search", class: "galaxy-search",
+    placeholder: "find a star…", name: "q", "aria-label": "search entities",
+    oninput: (e) => { state.q = e.target.value; galaxy && galaxy.setQuery(state.q); },
+    onkeydown: (e) => {
+      if (e.key === "Enter" && galaxy) {
+        const hitWrap = host.querySelector(".graph-wrap");
+        const hit = galaxy.flyToBest(state.q);
+        if (hit && hitWrap) openPage(hitWrap, hit);
+      }
+      if (e.key === "Escape") { e.target.value = ""; state.q = ""; galaxy && galaxy.setQuery(""); }
+    } });
+
+  const reviewBtn = el("button", { class: "facet" + (state.review ? " on" : ""),
+    onclick: () => { state.review = !state.review; reviewBtn.classList.toggle("on", state.review);
+      reviewHost.style.display = state.review ? "" : "none"; if (state.review) loadReview(); } },
+    "Review");
+  const viewToggle = facetBar(
+    [{ value: "galaxy", label: "galaxy" }, { value: "table", label: "table" }],
+    state.view, (v) => { state.view = v; paint(host._data); });
+
+  mount(toolbar, el("span", { class: "eyebrow" }, "scope"), switcher, search,
+    el("span", { class: "grow" }), reviewBtn, viewToggle);
+  reviewHost.style.display = state.review ? "" : "none";
+  if (state.review) loadReview();
+  await load();
 }

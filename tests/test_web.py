@@ -417,3 +417,9 @@ def test_wiki_route_returns_fixture_page(svc):
                 "relations", "mentions", "timeline", "flags", "first_seen"):
         assert key in out
     assert set(out["relations"]) == {"out", "in"}
+
+
+def test_graph_route_nodes_carry_timestamps(svc):
+    out = ConsoleRoutes(svc).dispatch("GET", "/api/graph", {"scope": "all"}, {})
+    assert all("created_at" in n for n in out["nodes"])
+    assert all("asserted_at" in e for e in out["edges"])

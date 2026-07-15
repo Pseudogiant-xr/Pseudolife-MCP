@@ -112,20 +112,24 @@ function render(host, d, nav, onExplore) {
         el("span", { class: "wp-tl-kind" }, t.kind), " ", t.text))),
     el("div", { class: "wp-actions" },
       el("button", { class: "btn sm primary", onclick: () => onExplore(d.entity) },
-        "Explore from here"),
+        "Focus in galaxy"),
       el("button", { class: "btn sm", title: `Cortex facts filtered to ${d.entity}`,
         onclick: () => { location.hash = "#/cortex?q=" + encodeURIComponent(d.entity); } },
         "Facts ↗")));
 }
 
 // Open (or refresh) the wiki panel inside `wrap` for `entityName`.
-export function openWikiPanel(wrap, entityName, { onExplore } = {}) {
+// opts.onNavigate — wikilink clicks route here when set (the Atlas shell uses
+// it to fly the camera alongside the page swap); default is an in-place swap.
+export function openWikiPanel(wrap, entityName, opts = {}) {
+  const { onExplore, onNavigate } = opts;
   let panel = wrap.querySelector(".wiki-panel");
   if (!panel) { panel = el("div", { class: "wiki-panel" }); wrap.appendChild(panel); }
   const host = el("div", { class: "wp-body" });
   mount(panel, host);
   mount(host, loadingBlock("Opening page…"));
-  const nav = (name) => openWikiPanel(wrap, name, { onExplore });
+  const nav = (name) => (onNavigate ? onNavigate(name)
+                                    : openWikiPanel(wrap, name, opts));
   api.get("/api/wiki", { entity: entityName }).then((d) => {
     if (!host.isConnected) return;
     if (!d.found) {

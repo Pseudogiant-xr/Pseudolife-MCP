@@ -671,3 +671,10 @@ code.ic { font-family:var(--font-mono); font-size:.84em; padding:1px 5px; border
 .wp-hist { margin-left:6px; cursor:pointer; background:none; border:none; color:var(--ink-3); }
 .wp-hist-item { font-size:.82rem; margin:3px 0; }
 .wikilink { color:var(--accent); text-decoration:none; border-bottom:1px dotted; }
+
+/* ── Atlas stage 2: galaxy shell ────────────────────────────────────────── */
+.galaxy-search { max-width: 220px; }
+.review-drawer { position: fixed; left: 0; top: 0; bottom: 0; width: min(440px, 92vw);
+  z-index: 30; overflow-y: auto; padding: 16px;
+  background: var(--bg-2); border-right: 1px solid var(--line-2);
+  box-shadow: var(--shadow-pop); animation: slidein .2s var(--ease); }

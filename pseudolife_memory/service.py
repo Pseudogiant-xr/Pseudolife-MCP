@@ -3849,7 +3849,8 @@ class MemoryService:
             by_id[e["id"]] = e["display"]
             node = {"entity": e["display"], "canonical": e["canonical"],
                     "etype": e["etype"], "aliases": g["aliases"].get(e["id"], []),
-                    "community": comm.get(e["id"]), "sources": src_map.get(e["id"], [])}
+                    "community": comm.get(e["id"]), "sources": src_map.get(e["id"], []),
+                    "created_at": float(e["created_at"])}
             if include_facts:
                 node["facts"] = facts_by_norm.get(e["canonical"], [])
             nodes.append(node)
@@ -3859,6 +3860,7 @@ class MemoryService:
              "dst": by_id[e["dst_id"]], "derived": False,
              "confidence": round(float(e["confidence"]), 4),
              "origin": e.get("origin"),
+             "asserted_at": float(e["asserted_at"]),
              "tag": _classify_edge(e)}
             for e in g["edges"]
             if e["src_id"] in by_id and e["dst_id"] in by_id]
