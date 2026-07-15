@@ -376,7 +376,7 @@ export async function createGalaxy(host, data, opts = {}) {
     fg.nodeColor(nodeColor); fg.linkColor(fg.linkColor());
   }
   const handle = { flyTo, setQuery, flyToBest, setFlagged, isolate, clearIsolate,
-                   destroy: destroyGalaxy };
+                   fg, destroy: destroyGalaxy };
   wrap.__galaxy = handle;   // debug/QA handle (parity with the old canvas.__fg)
   return handle;
 }

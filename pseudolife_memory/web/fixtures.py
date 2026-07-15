@@ -511,7 +511,13 @@ class FixtureService:
                 {"ts": 1779600000.0, "kind": "entity-created",
                  "text": f"“{name}” first seen"},
             ],
-            "flags": [],
+            # Representative open findings so the console's flag banners (and
+            # their confirm-gated actions) are exercisable against fixtures.
+            "flags": [
+                {"kind": "merge_candidate", "id": 40, "entity": name,
+                 "into": "docker-desktop", "reason": "write-dedup", "score": 0.82},
+                {"kind": "unattributed"},
+            ],
         }
 
     def chain(self, entity, limit=20):
