@@ -11,21 +11,30 @@ const ETYPE_COLOR = {
 
 export function colorFor(etype) { return ETYPE_COLOR[etype] || ETYPE_COLOR.default; }
 
-export function communityColor(n) {
-  if (n.community != null && n.community !== "") {
-    const h = (Math.abs(Number(n.community)) * 47) % 360;
-    return `hsl(${h} 65% 60%)`;
-  }
-  return colorFor(n.etype);
+// Hue derivation is exported separately so the galaxy can pair the same hues
+// with its own recency-driven lightness. null hue ⇒ caller falls back.
+export function communityHue(n) {
+  return (n.community != null && n.community !== "")
+    ? (Math.abs(Number(n.community)) * 47) % 360 : null;
 }
 
-// Deterministic hue from the entity's first source; unattributed → neutral grey.
-export function projectColor(n) {
+// Deterministic hue from the entity's first source; unattributed → null.
+export function projectHue(n) {
   const s = (n.sources && n.sources[0]) || "";
-  if (!s) return "#6b7280";
+  if (!s) return null;
   let h = 0;
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-  return `hsl(${h % 360} 62% 58%)`;
+  return h % 360;
+}
+
+export function communityColor(n) {
+  const h = communityHue(n);
+  return h == null ? colorFor(n.etype) : `hsl(${h} 65% 60%)`;
+}
+
+export function projectColor(n) {
+  const h = projectHue(n);
+  return h == null ? "#6b7280" : `hsl(${h} 62% 58%)`;
 }
 
 function nodeFill(n, colorBy) {
