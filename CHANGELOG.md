@@ -7,6 +7,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed (2026-07-15 — Atlas polish)
+- **"Assign a project" is a combobox** — the modal suggests every existing
+  project (native datalist) while still accepting a brand-new name, so
+  near-duplicate scopes ("Pseudolife" vs "pseudolife") stop being minted by
+  accident.
 - **"hide orphans" toolbar toggle** — hides degree-0 entities (the sparse
   halo unlocked by the whole-bank cap raise) in both galaxy and table views.
   Visibility-only: the layout never recomputes; the button shows the live

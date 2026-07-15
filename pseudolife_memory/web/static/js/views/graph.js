@@ -293,11 +293,17 @@ export async function renderGraph(root, ctx) {
     }
     if (d.kind === "assign") {                            // unattributed / orphan (bulk)
       const ents = d.entities || [];
-      const input = el("input", { type: "text", placeholder: "project / source name", name: "project" });
+      // Combobox: existing projects as suggestions (picking one avoids the
+      // near-duplicate-scope trap, e.g. "Pseudolife" vs "pseudolife"), while
+      // typing a brand-new project name still works.
+      const dl = el("datalist", { id: "assign-project-options" },
+        projects.map((p) => el("option", { value: p.source })));
+      const input = el("input", { type: "text", placeholder: "project / source name",
+        name: "project", list: "assign-project-options", autocomplete: "off" });
       openModal({
         title: "Assign a project",
         body: el("div", {}, el("p", { class: "dim", style: { marginTop: 0 } },
-          `Tag ${ents.length} unattributed entit${ents.length === 1 ? "y" : "ies"} with a project. They'll appear under that scope.`), input),
+          `Tag ${ents.length} unattributed entit${ents.length === 1 ? "y" : "ies"} with a project. They'll appear under that scope.`), input, dl),
         actions: [
           { label: "Cancel", onClick: closeModal },
           { label: "Assign", kind: "primary", onClick: async () => {
