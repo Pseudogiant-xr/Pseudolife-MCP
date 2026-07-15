@@ -690,3 +690,15 @@ code.ic { font-family:var(--font-mono); font-size:.84em; padding:1px 5px; border
 .scrub-date { font-size: .74rem; color: var(--ink-3); min-width: 74px; text-align: right; }
 .graph-wrap.galaxy .graph-hint { left: 18px; transform: none; }
 .wp-flag { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+/* ── Full-bleed galaxy: use the whole window, not the reading column ────── */
+/* The 1320px column is right for prose views; the map wants the viewport.  */
+.content[data-route="graph"] > * { max-width: none; }
+.graph-wrap.galaxy { height: max(440px, calc(100dvh - 248px)); }
+.graph-wrap.galaxy:fullscreen, .graph-wrap.galaxy.maximized { height: 100vh; }
+
+/* Wiki panel: never scroll sideways — wrap long fact values instead. */
+.wiki-panel { overflow-x: hidden; width: min(560px, 42%); }
+.wiki-panel .tbl { table-layout: fixed; width: 100%; }
+.wiki-panel .tbl td { overflow-wrap: anywhere; white-space: normal; }
+.wp-body { overflow-wrap: anywhere; }

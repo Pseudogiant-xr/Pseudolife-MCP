@@ -127,6 +127,9 @@ async function renderRoute() {
   closeDrawer(); closeModal();   // never leave an overlay across a route change
   const r = byId[routeId()];
   current = r;
+  // Views can opt out of the centered reading column via CSS keyed on this
+  // (the galaxy wants the whole viewport, prose views want --maxw).
+  viewEl.dataset.route = r.navAs || r.id;
   titleEl.textContent = r.label;
   document.documentElement.style.setProperty("--accent", r.accent);
   paintNav();
