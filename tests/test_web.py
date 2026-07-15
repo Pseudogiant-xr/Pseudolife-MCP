@@ -408,3 +408,12 @@ def test_tokened_api_skips_host_gate(svc):
                   headers=[(b"host", b"192.168.1.20:8765"),
                            (b"authorization", b"Bearer s3cret")])
     assert st == 200
+
+
+def test_wiki_route_returns_fixture_page(svc):
+    out = ConsoleRoutes(svc).dispatch("GET", "/api/wiki", {"entity": "daemon"}, {})
+    assert out["found"] is True and out["entity"] == "daemon"
+    for key in ("aliases", "projects", "facts", "world_facts",
+                "relations", "mentions", "timeline", "flags", "first_seen"):
+        assert key in out
+    assert set(out["relations"]) == {"out", "in"}

@@ -648,3 +648,26 @@ code.ic { font-family:var(--font-mono); font-size:.84em; padding:1px 5px; border
   .gauge-row { grid-template-columns:100px 1fr; }
   .gauge-row .gauge-val { grid-column:2; text-align:right; }
 }
+
+/* ── Wiki panel (Atlas stage 1) ─────────────────────────────────────────── */
+.wiki-panel { position:absolute; top:12px; right:12px; bottom:12px; width:min(460px,42%);
+  background:var(--bg-2); border:1px solid var(--line-2); border-radius:var(--radius-sm);
+  box-shadow:var(--shadow-pop); overflow-y:auto; animation:slidein .2s var(--ease); z-index:5; }
+.wp-body { padding:14px 16px; }
+.wp-head { display:flex; align-items:center; gap:8px; }
+.wp-head h2 { margin:0; font-family:var(--font-display); font-size:1.05rem; overflow-wrap:anywhere; }
+.wp-head .sw { width:10px; height:10px; border-radius:50%; flex:0 0 auto; }
+.wp-head .x { cursor:pointer; color:var(--ink-3); background:none; border:none; font-size:1rem; }
+.wp-meta { font-size:.8rem; margin:4px 0 10px; }
+.wp-section { margin:12px 0; }
+.wp-section-title { font-size:.72rem; text-transform:uppercase; letter-spacing:.08em;
+  color:var(--ink-3); margin-bottom:6px; }
+.wp-rel, .wp-mention, .wp-tl, .wp-world { font-size:.86rem; margin:4px 0; }
+.wp-mention { padding:6px 0; border-bottom:1px solid var(--line); }
+.wp-mention:last-child { border-bottom:none; }
+.wp-tl-kind { font-size:.7rem; color:var(--ink-3); margin:0 6px; }
+.wp-flags { margin:8px 0; display:flex; flex-direction:column; gap:4px; }
+.wp-actions { display:flex; gap:8px; margin-top:14px; }
+.wp-hist { margin-left:6px; cursor:pointer; background:none; border:none; color:var(--ink-3); }
+.wp-hist-item { font-size:.82rem; margin:3px 0; }
+.wikilink { color:var(--accent); text-decoration:none; border-bottom:1px dotted; }

@@ -3638,6 +3638,115 @@ class MemoryService:
         return {"found": True, "entity": e["display"],
                 "sources": sources, "entries": entries}
 
+    def wiki_page(self, entity: str, *, mentions_limit: int = 20,
+                  timeline_limit: int = 30) -> dict[str, Any]:
+        """Everything the console's wiki page needs for one entity, in one
+        call: identity + attribution, canonical facts, cited world facts,
+        relations (in/out, derived marked), provenance mentions, a merged
+        newest-first chronology, and open review flags. Read-only; never
+        creates entities and never runs the full review scan."""
+        from pseudolife_memory import graph as G
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return dict(self._GRAPH_UNAVAILABLE)
+            st = self._storage
+            e = st.find_entity(G.norm_name(entity))
+            if e is None:
+                return {"found": False, "entity": entity}
+            eid = e["id"]
+            projects = st.sources_for_entity(eid)
+            community = st.load_communities()["assignment"].get(eid)
+            g = st.load_graph()
+            mentions = st.entries_for_entity(eid, limit=mentions_limit)
+            entity_props = [p for p in st.pending_entity_proposals()
+                            if eid in (p.get("entity_id"), p.get("into_id"))]
+            edge_props = [p for p in st.pending_proposals()
+                          if eid in (p.get("src_id"), p.get("dst_id"))]
+            facts = []
+            if self._cortex is not None:
+                for rec in self._cortex.current_records():
+                    if G.norm_name(rec.entity) != e["canonical"]:
+                        continue
+                    facts.append({
+                        "attribute": rec.attribute, "value": rec.value,
+                        "confidence": round(float(rec.confidence), 4),
+                        "origin": rec.origin, "asserted_at": rec.asserted_at,
+                        "history_available": rec.supersedes_value is not None,
+                    })
+            world_facts = []
+            if self._world is not None:
+                for rec in self._world.current_records():
+                    if G.norm_name(rec.entity) != e["canonical"]:
+                        continue
+                    world_facts.append({
+                        "attribute": rec.attribute, "value": rec.value,
+                        "confidence": round(float(rec.confidence), 4),
+                        "source_url": rec.source_url,
+                        "retrieved_at": rec.retrieved_at,
+                    })
+        facts.sort(key=lambda f: f["attribute"])
+        world_facts.sort(key=lambda f: f["attribute"])
+
+        # Relations via the existing depth-1 neighborhood (derived edges marked,
+        # provenance tags included). Outside the lock — it locks itself.
+        nb = self.graph_neighborhood(entity, depth=1, include_facts=False)
+        rel_out, rel_in = [], []
+        for ed in nb.get("edges", []):
+            row: dict[str, Any] = {"relation": ed["relation"],
+                                   "derived": bool(ed.get("derived"))}
+            if row["derived"]:
+                row["via"] = ed.get("via")
+            else:
+                row["confidence"] = ed.get("confidence")
+                row["tag"] = ed.get("tag")
+            if ed["src"] == e["display"]:
+                rel_out.append({**row, "target": ed["dst"]})
+            elif ed["dst"] == e["display"]:
+                rel_in.append({**row, "source": ed["src"]})
+
+        disp = {en["id"]: en["display"] for en in g["entities"]}
+        timeline = [{"ts": float(e["created_at"]), "kind": "entity-created",
+                     "text": f"“{e['display']}” first seen"}]
+        for ed in g["edges"]:
+            if eid in (ed["src_id"], ed["dst_id"]):
+                timeline.append({
+                    "ts": float(ed["asserted_at"]), "kind": "edge-asserted",
+                    "text": (f"{disp.get(ed['src_id'], '?')} {ed['relation']} "
+                             f"{disp.get(ed['dst_id'], '?')}")})
+        for f in facts:
+            timeline.append({"ts": float(f["asserted_at"] or 0.0),
+                             "kind": "fact-stamped",
+                             "text": f"{f['attribute']} = {f['value']}"})
+        for m in mentions:
+            timeline.append({"ts": float(m["ts"] or 0.0), "kind": "mention",
+                             "text": (m["text"] or "")[:120]})
+        timeline.sort(key=lambda t: t["ts"], reverse=True)
+        timeline = timeline[:timeline_limit]
+
+        flags: list[dict[str, Any]] = []
+        for p in entity_props:
+            flags.append({"kind": p["kind"], "id": p["id"],
+                          "entity": disp.get(p.get("entity_id")),
+                          "into": disp.get(p.get("into_id")),
+                          "reason": p.get("reason"), "score": p.get("score")})
+        for p in edge_props:
+            flags.append({"kind": "proposed_link", "id": p["id"],
+                          "src": disp.get(p.get("src_id")),
+                          "relation": p.get("relation"),
+                          "dst": disp.get(p.get("dst_id")),
+                          "confidence": p.get("confidence")})
+        if not projects:
+            flags.append({"kind": "unattributed"})
+
+        return {"found": True, "entity": e["display"],
+                "canonical": e["canonical"], "etype": e["etype"],
+                "aliases": e["aliases"], "projects": projects,
+                "community": community, "first_seen": float(e["created_at"]),
+                "facts": facts, "world_facts": world_facts,
+                "relations": {"out": rel_out, "in": rel_in},
+                "mentions": mentions, "timeline": timeline, "flags": flags}
+
     def graph_alias(self, entity: str, alias: str) -> dict[str, Any]:
         """Bind ``alias`` → ``entity`` (auto-created). All fact and graph
         lookups resolve aliases first."""

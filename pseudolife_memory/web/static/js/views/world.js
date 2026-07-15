@@ -1,5 +1,5 @@
 // views/world.js — world cortex: cited external facts with age-decayed trust.
-import { el, mount, clear, fmtAge, loadingBlock, emptyBlock, errorBlock, debounce } from "../util.js";
+import { el, mount, clear, fmtAge, loadingBlock, emptyBlock, errorBlock, debounce, safeHttpUrl } from "../util.js";
 import { api } from "../api.js";
 import { badge, confMeter, searchBox } from "../components.js";
 
@@ -35,14 +35,6 @@ export async function renderWorld(root) {
 function freshnessBadge(fc) {
   const m = { evergreen: "world", slow: "action", volatile: "agent" };
   return badge(fc || "volatile", m[fc] || "");
-}
-
-// source_url is agent/LLM-authored (memory_world_set has no scheme check at
-// write time), so a javascript:/data: URL rendered as a raw <a href> would
-// execute on click. Only render http(s) as a clickable link; anything else
-// shows as inert text.
-function safeHttpUrl(url) {
-  return /^https?:\/\//i.test(url || "") ? url : null;
 }
 
 function worldCard(w) {
