@@ -18,7 +18,8 @@ import { confirmDialog, openModal, closeModal, toast } from "../ui.js";
 const ellipsisMid = (s, max = 22) =>
   s.length <= max ? s : `${s.slice(0, max - 9)}…${s.slice(-8)}`;
 
-let state = { scope: "all", view: "galaxy", entity: "", review: false, q: "" };
+let state = { scope: "all", view: "galaxy", entity: "", review: false, q: "",
+              hideOrphans: false };
 let galaxy = null;
 
 function parseHash() {
@@ -53,6 +54,14 @@ export async function renderGraph(root, ctx) {
   const reviewHost = el("div", { class: "review-drawer", style: { display: "none" } });
   const host = el("div", {});
   mount(root, toolbar, reviewHost, host);
+
+  // Degree-0 entities form the sparse halo around the galaxy — the toggle
+  // hides them (visibility only; the layout is untouched).
+  function withoutOrphans(data) {
+    const connected = new Set();
+    for (const e of data.edges || []) { connected.add(e.src); connected.add(e.dst); }
+    return { ...data, nodes: (data.nodes || []).filter((n) => connected.has(n.entity)) };
+  }
 
   // A star pulses only for ITEM-LEVEL decisions waiting on the user —
   // duplicates and dream proposals. Bulk hygiene lists (orphan/unattributed/
@@ -136,7 +145,11 @@ export async function renderGraph(root, ctx) {
     const viewHost = el("div", {});
     mount(host, banner, viewHost);
 
-    if (state.view === "table") { mount(viewHost, tableView(data)); reflectHash(); return; }
+    if (state.view === "table") {
+      mount(viewHost, tableView(state.hideOrphans ? withoutOrphans(data) : data));
+      reflectHash();
+      return;
+    }
 
     const wrap = el("div", { class: "graph-wrap galaxy" });
     mount(viewHost, wrap);
@@ -149,6 +162,8 @@ export async function renderGraph(root, ctx) {
       return;
     }
     wrap.appendChild(fullscreenBtn(wrap));
+    if (state.hideOrphans) galaxy.setHideOrphans(true);
+    paintOrphanBtn();
     lightFlags();                        // fire-and-forget: pulse flagged stars
     if (state.entity) {                  // deep link: open page + fly once laid out
       openPage(wrap, state.entity, { fly: "late" });
@@ -314,6 +329,20 @@ export async function renderGraph(root, ctx) {
       if (e.key === "Escape") { e.target.value = ""; state.q = ""; galaxy && galaxy.setQuery(""); }
     } });
 
+  const orphanBtn = el("button", {
+    class: "facet" + (state.hideOrphans ? " on" : ""),
+    title: "Hide entities with no connections (the sparse halo)",
+    onclick: () => {
+      state.hideOrphans = !state.hideOrphans;
+      orphanBtn.classList.toggle("on", state.hideOrphans);
+      if (state.view === "table") { paint(host._data); return; }
+      if (galaxy) galaxy.setHideOrphans(state.hideOrphans);
+    } }, "hide orphans");
+  function paintOrphanBtn() {
+    const n = galaxy ? galaxy.orphanCount() : 0;
+    orphanBtn.textContent = n ? `hide orphans (${n})` : "hide orphans";
+  }
+
   const reviewBtn = el("button", { class: "facet" + (state.review ? " on" : ""),
     onclick: () => { state.review = !state.review; reviewBtn.classList.toggle("on", state.review);
       reviewHost.style.display = state.review ? "" : "none"; if (state.review) loadReview(); } },
@@ -323,7 +352,7 @@ export async function renderGraph(root, ctx) {
     state.view, (v) => { state.view = v; paint(host._data); });
 
   mount(toolbar, el("span", { class: "eyebrow" }, "scope"), switcher, search,
-    el("span", { class: "grow" }), reviewBtn, viewToggle);
+    el("span", { class: "grow" }), orphanBtn, reviewBtn, viewToggle);
   reviewHost.style.display = state.review ? "" : "none";
   if (state.review) loadReview();
   await load();

@@ -7,6 +7,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed (2026-07-15 — Atlas polish)
+- **"hide orphans" toolbar toggle** — hides degree-0 entities (the sparse
+  halo unlocked by the whole-bank cap raise) in both galaxy and table views.
+  Visibility-only: the layout never recomputes; the button shows the live
+  orphan count.
 - **Whole-bank galaxy** — the seedless graph cap defaults to 2000 nodes
   (was 300, a guard for the retired 2D canvas's O(n²) per-frame sim). The
   full ~1.2k-entity bank now renders, orphans included; the cap machinery

@@ -130,7 +130,8 @@ export async function createGalaxy(host, data, opts = {}) {
 
   // State layers, priority: search query > isolate dim > flagged tint
   // (reduced-motion only; motion users get the pulse) > base recency color.
-  const state = { query: "", dim: null, flagged: new Set(), tCut: null };
+  const state = { query: "", dim: null, flagged: new Set(), tCut: null,
+                  hideOrphans: false };
   const WARN = "#e8b341";
   const nodeColor = (n) => {
     if (state.query) {
@@ -157,7 +158,10 @@ export async function createGalaxy(host, data, opts = {}) {
       n.__label = sp;
       return sp;
     })
-    .nodeVisibility((n) => state.tCut == null || (n.created_at || 0) <= state.tCut)
+    .nodeVisibility((n) => {
+      if (state.hideOrphans && !deg[n.id]) return false;   // no connections
+      return state.tCut == null || (n.created_at || 0) <= state.tCut;
+    })
     .linkVisibility((l) => {
       if (state.tCut == null) return true;
       const sc = (l.source && l.source.created_at) || 0;
@@ -369,6 +373,13 @@ export async function createGalaxy(host, data, opts = {}) {
     if (m) flyTo(m.id);
     return m ? m.id : null;
   }
+  function setHideOrphans(on) {
+    state.hideOrphans = !!on;
+    fg.nodeVisibility(fg.nodeVisibility());   // re-evaluate (visibility only)
+  }
+  function orphanCount() {
+    return nodes.reduce((c, n) => c + (deg[n.id] ? 0 : 1), 0);
+  }
   function setFlagged(names) {
     state.flagged = names instanceof Set ? names : new Set(names || []);
     poke();                                  // reduced-motion tint path
@@ -403,7 +414,7 @@ export async function createGalaxy(host, data, opts = {}) {
     poke();
   }
   const handle = { flyTo, setQuery, flyToBest, setFlagged, isolate, clearIsolate,
-                   fg, destroy: destroyGalaxy };
+                   setHideOrphans, orphanCount, fg, destroy: destroyGalaxy };
   wrap.__galaxy = handle;   // debug/QA handle (parity with the old canvas.__fg)
   return handle;
 }
