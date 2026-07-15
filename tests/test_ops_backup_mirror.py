@@ -110,9 +110,11 @@ def backup(request, tmp_path):
             args = ["-OutDir", f'"{out_dir}"', "-MirrorDir", f'"{mirror}"']
             if mirror_keep is not None:
                 args += ["-MirrorKeep", str(mirror_keep)]
-            env = None
+            # Hermetic by default: the machine may legitimately set the knob
+            # (it's a real user setting) — scrub it unless the test opts in.
+            env = os.environ.copy()
+            env.pop("PSEUDOLIFE_BACKUP_MIRROR_KEEP", None)
             if env_keep is not None:
-                env = os.environ.copy()
                 env["PSEUDOLIFE_BACKUP_MIRROR_KEEP"] = str(env_keep)
             return _run_ps1(tmp_path, *args, env=env), out_dir, mirror
     else:
@@ -123,9 +125,10 @@ def backup(request, tmp_path):
             args = ["--out-dir", str(out_dir), "--mirror-dir", str(mirror)]
             if mirror_keep is not None:
                 args += ["--mirror-keep", str(mirror_keep)]
-            env = None
+            # Hermetic by default (see the ps1 twin above).
+            env = os.environ.copy()
+            env.pop("PSEUDOLIFE_BACKUP_MIRROR_KEEP", None)
             if env_keep is not None:
-                env = os.environ.copy()
                 env["PSEUDOLIFE_BACKUP_MIRROR_KEEP"] = str(env_keep)
             return _run_sh(tmp_path, *args, env=env), out_dir, mirror
     return run
