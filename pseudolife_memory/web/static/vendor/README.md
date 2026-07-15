@@ -66,8 +66,6 @@ Attribution: `3d-force-graph` © Vasco Asturiano (MIT); `three.js` © three.js
 authors (MIT); d3 modules © Mike Bostock (ISC); ngraph © Andrei Kashcha
 (BSD-3-Clause).
 
-## `3d-force-graph.bundle.js` (legacy — removal pending)
-
-The previous esm.sh bundle (`3d-force-graph@1.73.6`, MIT) that exported only
-the default constructor. Superseded by `galaxy.bundle.js`; deleted once
-nothing imports it (Atlas stage 2, task 4).
+(The previous `3d-force-graph.bundle.js` — an esm.sh bundle exporting only the
+default constructor — was superseded by `galaxy.bundle.js` and removed in
+Atlas stage 2.)

@@ -6,6 +6,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-15 — Atlas stage 2: the galaxy is the map)
+- Console Graph tab rebuilt around the 3D galaxy: memory-state encodings
+  (size = connections + facts, hue = project/community, brightness = recency),
+  community nebulae with constellation labels, proximity-faded star labels
+  (nearest 40), search with dim/highlight + Enter-to-fly, and wiki-page
+  click-through — clicking a star or a wikilink flies the camera and opens the
+  page. Review queue lives in a left drawer; table mode is the fallback
+  (automatic, with a notice, when WebGL/the 3D bundle is unavailable).
+- `/api/graph` whole-graph payload carries `created_at` per node and
+  `asserted_at` per edge (additive; feeds the recency encoding now, the time
+  scrubber in stage 3).
+- Vendored `galaxy.bundle.js` (3d-force-graph 1.73.6 + three 0.185.1 from one
+  dependency graph — single three instance; esbuild, legal comments embedded;
+  license audit MIT×18/ISC×14/BSD-3×4, allowlist-gated, inventory + reproducible
+  build recipe in `vendor/README.md`) replaces `3d-force-graph.bundle.js`.
+
+### Removed (2026-07-15 — Atlas stage 2)
+- The 2D canvas force-graph map and the Overview/Explore mode split. Legacy
+  `mode=`/`depth=` deep links still resolve (extra params ignored); an
+  `entity=` deep link overrides a sticky table view.
+
 ### Added (2026-07-15 — Atlas stage 1: entity wiki pages)
 - **`GET /api/wiki?entity=X`** — one-call, live-rendered entity page for the
   console: identity + aliases + project attribution + first-seen, canonical

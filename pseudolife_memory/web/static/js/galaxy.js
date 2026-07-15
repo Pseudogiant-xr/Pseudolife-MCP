@@ -197,7 +197,19 @@ export async function createGalaxy(host, data, opts = {}) {
       nebulae.add(label);
     }
   }
-  fg.onEngineStop(() => { fitCam(); paintNebulae(); });
+  // Camera policy on engine-stop: fit the whole graph exactly once — unless a
+  // fly-to happened first (deep links fly during warmup), in which case
+  // re-center on that target instead, since the star drifted while settling.
+  // Refitting on every stop would yank the camera after each drag.
+  let fitted = false;
+  let lastFly = null;
+  fg.onEngineStop(() => {
+    if (!fitted) {
+      fitted = true;
+      if (lastFly) flyTo(lastFly); else fitCam();
+    }
+    paintNebulae();
+  });
   setTimeout(() => { if (mountPt.isConnected) paintNebulae(); }, 1600);
 
   // ── proximity labels: nearest N visible, re-ranked continuously ──────────
@@ -236,6 +248,7 @@ export async function createGalaxy(host, data, opts = {}) {
   function flyTo(name) {
     const n = fg.graphData().nodes.find((x) => x.id === name);
     if (!n || n.x == null) return false;
+    lastFly = name;
     const d = Math.hypot(n.x, n.y, n.z) || 1;
     const dist = 55 + nodeVal(n) * 2;
     const ratio = 1 + dist / d;
