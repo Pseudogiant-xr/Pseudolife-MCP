@@ -154,6 +154,7 @@ export async function createGalaxy(host, data, opts = {}) {
     .linkColor((l) => (l.derived ? "rgba(150,170,200,0.20)" : "rgba(150,170,200,0.42)"))
     .linkDirectionalArrowLength(3)
     .width(r0.width).height(r0.height)
+    .showNavInfo(false)                      // we render our own hint line
     .cooldownTime(reduce ? 0 : 12000)
     .onNodeClick((n) => onNodeClick(n.id));
 
@@ -254,5 +255,7 @@ export async function createGalaxy(host, data, opts = {}) {
     if (m) flyTo(m.id);
     return m ? m.id : null;
   }
-  return { flyTo, setQuery, flyToBest, destroy: destroyGalaxy };
+  const handle = { flyTo, setQuery, flyToBest, destroy: destroyGalaxy };
+  wrap.__galaxy = handle;   // debug/QA handle (parity with the old canvas.__fg)
+  return handle;
 }

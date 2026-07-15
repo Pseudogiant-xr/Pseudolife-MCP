@@ -25,9 +25,13 @@ function parseHash() {
   const h = location.hash || "";
   const qi = h.indexOf("?");
   const p = new URLSearchParams(qi >= 0 ? h.slice(qi + 1) : "");
-  return { entity: p.get("entity") || "",
+  const entity = p.get("entity") || "";
+  return { entity,
            scope: p.get("scope") || state.scope || "all",
-           view: p.get("view") === "table" ? "table" : state.view };
+           // an explicit entity deep link overrides a sticky table view — the
+           // link's intent is "show me this entity", which needs the galaxy
+           view: p.get("view") === "table" ? "table"
+               : entity ? "galaxy" : state.view };
 }
 
 // Update the address bar without re-triggering the router (panel swaps and
