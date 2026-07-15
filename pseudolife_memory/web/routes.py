@@ -179,7 +179,11 @@ class ConsoleRoutes:
         g("/api/graph", lambda q, b: svc.graph_neighborhood(
             entity=_s(q, "entity"), depth=_i(q, "depth", 1),
             include_facts=_tribool(q, "include_facts") is not False,
-            to=_s(q, "to"), scope=_s(q, "scope"), max_nodes=_i(q, "limit", 300)))
+            # 300 guarded the retired 2D canvas (O(n²) per-frame sim). The 3D
+            # galaxy layouts once (Barnes-Hut) and renders in WebGL — 2000
+            # covers the whole bank (~1.2k) with headroom; the cap machinery
+            # stays as the safety valve for a future 10k-entity bank.
+            to=_s(q, "to"), scope=_s(q, "scope"), max_nodes=_i(q, "limit", 2000)))
         g("/api/graph/projects", lambda q, b: svc.graph_projects())
         g("/api/graph/digest", lambda q, b: svc.graph_digest())
         g("/api/graph/communities",
