@@ -15,7 +15,8 @@ Requires Docker and Claude Code. One command from clone to first memory:
 ```bash
 git clone https://github.com/Pseudogiant-xr/PseudoLife-MCP.git
 cd PseudoLife-MCP
-ops/install.sh          # Windows: ops\install.ps1
+ops/install.sh          # Linux / macOS
+ops\install.ps1         # Windows (pwsh 7+)
 ```
 
 The installer runs the preflight (one exact fix line per missing
