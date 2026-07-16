@@ -110,6 +110,26 @@ def _post_episode(url: str, token: str | None, path: str, payload: dict) -> None
         pass
 
 
+def _toolset_changed(result) -> bool:
+    """True when a memory_toolset call actually moved the tier (its result
+    carries ``changed: true``). Reads structured content first, falls back
+    to the JSON text block."""
+    structured = getattr(result, "structuredContent", None)
+    if isinstance(structured, dict):
+        inner = structured.get("result")
+        target = inner if isinstance(inner, dict) else structured
+        return target.get("changed") is True
+    for block in getattr(result, "content", None) or []:
+        text = getattr(block, "text", None)
+        if not text:
+            continue
+        try:
+            return json.loads(text).get("changed") is True
+        except Exception:  # noqa: BLE001
+            continue
+    return False
+
+
 async def _proxy(url: str, token: str | None, session_uid: str) -> None:
     import contextlib
 
@@ -117,6 +137,7 @@ async def _proxy(url: str, token: str | None, session_uid: str) -> None:
     from mcp.client.session import ClientSession
     from mcp.client.streamable_http import streamablehttp_client
     from mcp.server.lowlevel import Server
+    from mcp.server.lowlevel.server import NotificationOptions
     from mcp.server.stdio import stdio_server
 
     headers = _session_headers(token, session_uid)
@@ -150,17 +171,26 @@ async def _proxy(url: str, token: str | None, session_uid: str) -> None:
     async def _call_tool(name: str, arguments: dict | None):
         async with _upstream() as remote:
             result = await remote.call_tool(name, arguments or {})
-            # Forward structured output too — the tools advertise an
-            # outputSchema, so a content-only proxy would trip the
-            # downstream client's structured-output validation.
-            structured = getattr(result, "structuredContent", None)
-            if structured is not None:
-                return result.content, structured
-            return result.content
+        # The daemon's tools/list_changed lands on the per-call upstream
+        # session above and dies with it, so a tier change would be invisible
+        # to the real client — re-emit it on the downstream stdio session.
+        if name == "memory_toolset" and _toolset_changed(result):
+            try:
+                await server.request_context.session.send_tool_list_changed()
+            except Exception:  # noqa: BLE001 — notify is best-effort
+                pass
+        # Forward structured output too — the tools advertise an
+        # outputSchema, so a content-only proxy would trip the
+        # downstream client's structured-output validation.
+        structured = getattr(result, "structuredContent", None)
+        if structured is not None:
+            return result.content, structured
+        return result.content
 
     async with stdio_server() as (r, w):
         await server.run(
-            r, w, server.create_initialization_options(),
+            r, w, server.create_initialization_options(
+                NotificationOptions(tools_changed=True)),
         )
 
 

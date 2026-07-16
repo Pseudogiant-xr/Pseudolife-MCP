@@ -129,6 +129,74 @@ def test_shim_survives_idle_gap(tmp_path):
         _reap_daemon(port)
 
 
+def test_shim_forwards_list_changed_on_toolset_expand(tmp_path):
+    """The 2026-07-16 morning-brief regression: a tier expansion must reach
+    the REAL client. The shim's per-call upstream design means the daemon's
+    tools/list_changed lands on an ephemeral session and dies there — the
+    shim itself must (a) advertise tools.listChanged downstream and (b) emit
+    the notification when memory_toolset reports changed=true. The final
+    list_tools also proves the session override survives per-call reconnects
+    (X-PL-Session keying)."""
+    import asyncio
+
+    url = resolve_test_db_url()
+    if not _pg_reachable(url):
+        pytest.skip("no test Postgres reachable")
+
+    port = _free_port()
+    env = {
+        **os.environ,
+        "PSEUDOLIFE_MCP_DAEMON_URL": f"http://127.0.0.1:{port}",
+        "PSEUDOLIFE_MCP_HOST": "127.0.0.1",
+        "PSEUDOLIFE_MCP_PORT": str(port),
+        "PSEUDOLIFE_MCP_DATABASE_URL": url,
+        "PSEUDOLIFE_MCP_DATA_DIR": str(tmp_path),
+        "PSEUDOLIFE_MCP_TOOLSET": "minimal",  # world tools start hidden
+    }
+    env.pop("PSEUDOLIFE_MCP_TOKEN", None)  # loopback, no token needed
+    env.pop("PSEUDOLIFE_MCP_TIER_MAP", None)
+
+    async def _drive():
+        import mcp.types as types
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
+
+        params = StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "pseudolife_memory.cli"],  # no arg -> shim
+            env=env,
+        )
+
+        list_changed = asyncio.Event()
+
+        async def _on_message(message) -> None:
+            root = getattr(message, "root", message)
+            if isinstance(root, types.ToolListChangedNotification):
+                list_changed.set()
+
+        async with stdio_client(params) as (r, w):
+            async with ClientSession(r, w, message_handler=_on_message) as s:
+                init = await s.initialize()
+                assert init.capabilities.tools.listChanged is True
+
+                tools = {t.name for t in (await s.list_tools()).tools}
+                assert "memory_world_search" not in tools  # minimal tier
+
+                res = await s.call_tool("memory_toolset", {"action": "expand"})
+                text = " ".join(getattr(c, "text", "") for c in res.content)
+                assert '"changed":true' in text.replace(" ", "").lower()
+
+                await asyncio.wait_for(list_changed.wait(), timeout=10)
+
+                tools = {t.name for t in (await s.list_tools()).tools}
+                assert "memory_world_search" in tools  # core tier now
+
+    try:
+        asyncio.run(asyncio.wait_for(_drive(), timeout=120))
+    finally:
+        _reap_daemon(port)
+
+
 # ── Session identity + lifecycle (unit; no daemon) ────────────────────────────
 
 

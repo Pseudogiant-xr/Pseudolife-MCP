@@ -38,6 +38,9 @@ evals/results/banks/
 pseudolife_memory/web/.devdata/
 *.bak
 
+# Tee'd deploy-script output from working sessions — regenerable scratch.
+deploy-*.log
+
 # UI QA scratch (screenshots, browser-driver output)
 .qa/
 .playwright-mcp/

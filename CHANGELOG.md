@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-07-16 — public-release cut
+
+Everything since the 0.7.0 cut: the whole-bank galaxy console work, the
+one-shot installer with extractor choice, Linux install parity, the published
+E4B v2 extractor fine-tune as the shipped default, rollback-tag and backup
+retention, the v2 release audit (state-volume backups, install hardening,
+disk-growth caps), and the toolset-tier visibility rework.
+
 ### Fixed (2026-07-15 — Atlas polish)
 - **"Assign a project" is a combobox** — the modal suggests every existing
   project (native datalist) while still accepting a brand-new name, so
@@ -541,6 +549,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   number field as "no edit" instead of sending `""` (raw `float('')` error);
   the Observatory band-count subtitle reads from the live preset instead of
   a hardcoded "8".
+
+## [0.7.0] - 2026-07-04
+
+(Header restored 2026-07-16: the original 0.7.0 cut (3ab06fc) placed it here;
+a same-day edit (60bdf61) accidentally replaced the header line with its own
+subsection, silently dissolving the release boundary for twelve days.)
 
 ### Fixed (2026-07-04 — pre-release UI/UX pass)
 - **`memory_outcome` no longer coerces an unknown outcome to `"success"`**
@@ -1391,5 +1405,6 @@ graph on top of the associative continuum.
   `memory_supersede` / `memory_delete` / `memory_stats` / `memory_save` plus the
   document RAG tools.
 
+[0.8.0]: https://github.com/Pseudogiant-xr/PseudoLife-MCP/releases/tag/v0.8.0
 [0.7.0]: https://github.com/Pseudogiant-xr/PseudoLife-MCP/releases/tag/v0.7.0
 [0.2.0]: https://github.com/Pseudogiant-xr/PseudoLife-MCP/releases/tag/v0.2.0
