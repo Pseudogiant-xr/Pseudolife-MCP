@@ -5,7 +5,9 @@ tools/list handler (mcp_server._wire_transport_tiering) filters by the
 session's resolved tier. Ordering: minimal ⊂ core ⊂ full. Resolution:
 session override (memory_toolset) → writer map (PSEUDOLIFE_MCP_TIER_MAP)
 → env default (PSEUDOLIFE_MCP_TOOLSET). Visibility is a token lever, not
-a security boundary — hidden tools stay callable; auth is the bearer token.
+a security boundary — the server does not reject hidden-tool calls, but
+Claude clients gate calls against their own tools/list, so in practice a
+session expands its tier first; auth is the bearer token.
 """
 from __future__ import annotations
 

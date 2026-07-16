@@ -57,6 +57,21 @@ entries, a cached view of the graph, a memoized score):
 GitHub releases, PyPI, and the MCP registry all serve from this repo; a
 release touches them in this order (first done 2026-07-16, v0.8.0).
 
+0. **Docs currency pass before the cut** — the guard tests pin numbers
+   (schema, identifiers), but *framing* drifts silently: the 2026-07-16
+   pass found 15 stale claims the guards can't see. Re-verify the
+   drift-prone claim classes against code before any release:
+   what's bundled/default (extractor model + size, embedding weights),
+   the transport story (HTTP-first; shim = host-process only), lifecycle
+   ownership (episodes are daemon-owned; briefing is the only hook),
+   tool count/tiers and the hidden-tools-need-expand rule, shipped config
+   defaults (surprise gate is permissive), image/install sizes, and any
+   "can't / doesn't / no X" absolute — those age worst. Surfaces: README,
+   CONTRIBUTING, SECURITY, evals/README, examples/ (CLAUDE.memory.md is
+   injected into user CLAUDE.mds — its tool surface must match exactly),
+   docs/runbooks, ops/.env.example comments. The README is the PyPI
+   description, so its fixes only reach PyPI at the next version.
+
 1. **Version cut touches four files together**: the CHANGELOG (`## [N.N.N]`
    header over `[Unreleased]` — one fragile line; the tag↔section guard test
    exists because an adjacent edit once deleted it silently), `pyproject.toml`,

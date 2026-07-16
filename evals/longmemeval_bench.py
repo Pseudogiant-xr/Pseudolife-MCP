@@ -65,8 +65,9 @@ DATASETS = {
     "oracle": DATA_DIR / "longmemeval_oracle.json",
     "s": DATA_DIR / "longmemeval_s_cleaned.json",
 }
-# The experiment variable. gemma-e2b is the SHIPPED sidecar's QAT weights,
-# served on the GPU for bench speed (identical outputs at temperature 0).
+# The experiment variable. gemma-e2b is the smallest ladder-verified sidecar
+# bake (the shipped default is now the E4B v2 fine-tune), served on the GPU
+# for bench speed (identical outputs at temperature 0).
 EXTRACTORS = {
     "qwen-27b": "http://127.0.0.1:1234/v1",
     "gemma-e2b": "http://127.0.0.1:8081/v1",

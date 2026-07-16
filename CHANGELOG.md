@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-16 — WSL memory guidance matches the E4B sidecar)
+- **`ops/wslconfig.example` sizing was still E2B-era** (stack "~2 GiB
+  resident", 16 GB laptop → `memory=6GB`): the default E4B v2 bake mmaps a
+  ~5.3 GB model, so the guidance now plans ~6–7 GiB for sidecar mode
+  (16 GB → `8GB`, 32 GB → `10GB`) and notes sonnet-only installs need ~1 GiB.
+  README's WSL note updated to match.
+
 ### Added (2026-07-16 — CLI help)
 - **`pseudolife-mcp --help` / `-h` / `help`** prints a usage summary of all
   six modes and exits 0; unknown modes now point at `--help`. Previously the

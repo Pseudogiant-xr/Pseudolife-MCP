@@ -6,10 +6,12 @@ knowledge-update corpus through each rung of the extractor ladder — from the
 deterministic regex floor up to LAN GPU models — and reports whether each
 rung beats naive-RAG on staleness, gold recovery, and token efficiency.
 
-This is **not** part of the test suite or the shipped package. It exists to
-make the "should the sidecar be default-on, and at which rung?" decision
+This is **not** part of the test suite or the shipped package. It was built
+to make the "should the sidecar be default-on, and at which rung?" decision
 (see `docs/specs/2026-06-18-pluggable-llm-extraction-design.md` §4) with data
-instead of a guess.
+instead of a guess — decided since: default-on, and the shipped bake has
+climbed the ladder to the E4B v2 fine-tune. It remains the harness for
+vetting any future extractor change.
 
 ## Isolation & safety
 
@@ -201,9 +203,10 @@ Three arms answer every question from the same ingested memory:
 
 Model roles are split so extraction quality is the **only** variable:
 
-- **Extractor** (varies): `gemma-e2b` (the shipped CPU sidecar's model,
-  GPU-served for bench speed — ladder-verified identical output at
-  temperature 0) = the **floor**; `qwen-27b` = the local **ceiling**.
+- **Extractor** (varies): `gemma-e2b` (the smallest ladder-verified sidecar
+  bake — the shipped default is now the E4B v2 fine-tune — GPU-served for
+  bench speed, ladder-verified identical output at temperature 0) = the
+  **floor**; `qwen-27b` = the local **ceiling**.
 - **Answerer + judge** (constant): Qwen3.6-27B for every run, LongMemEval's
   LLM-as-judge protocol. All calls request `temperature: 0`.
 

@@ -2,10 +2,11 @@
 #
 # WHY: Docker Desktop's WSL2 backend (the "VmmemWSL"/"Vmmem" process) by default
 # may grow to ~50% of host RAM and caches aggressively without handing memory
-# back to Windows. The PseudoLife stack itself is small — measured resident:
-#   postgres ~30 MiB, daemon ~400 MiB, extractor (Gemma E2B Q4) ~1.4 GiB
-#   => ~2 GiB resident (~4 GiB incl. the full model mmap).
-# So capping WSL2 well above that is plenty and keeps RAM free for Windows.
+# back to Windows. The PseudoLife stack's footprint:
+#   postgres ~30 MiB, daemon ~400 MiB, extractor = the default Gemma 4 E4B v2
+#   bake is a ~5.3 GB model that llama.cpp mmaps — plan ~6-7 GiB for the full
+#   stack under dream load. Sonnet-only installs (no sidecar) need only ~1 GiB.
+# Capping WSL2 above that keeps RAM free for Windows without starving dreams.
 #
 # HOW: copy this file to your user profile as ".wslconfig", then apply with
 #   wsl --shutdown     (closes WSL/Docker; Docker Desktop restarts the backend)
@@ -13,9 +14,10 @@
 #   PowerShell:  Copy-Item ops\wslconfig.example "$env:USERPROFILE\.wslconfig"
 #   then:        wsl --shutdown
 #
-# Tune `memory` to your machine. Guidance:
-#   16 GB laptop -> memory=6GB   ;  32 GB laptop -> memory=8GB
+# Tune `memory` to your machine. Guidance (sidecar mode):
+#   16 GB laptop -> memory=8GB   ;  32 GB laptop -> memory=10GB
 #   64 GB+ desktop -> memory=16GB (or omit to use the WSL default)
+# Sonnet-only installs can go lower: 4-6GB is comfortable.
 
 [wsl2]
 memory=8GB

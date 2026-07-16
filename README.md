@@ -294,8 +294,9 @@ docker compose -f ops/docker-compose.yml up -d --build
 
 > **Windows + Docker memory.** Docker Desktop's WSL2 backend (the `Vmmem` /
 > `VmmemWSL` process) defaults to claiming up to ~50% of host RAM and caches
-> aggressively without releasing it. The stack itself needs only ~2–4 GB resident,
-> so cap the VM: copy `ops/wslconfig.example` to `%USERPROFILE%\.wslconfig`
+> aggressively without releasing it. The stack needs ~6–7 GB under dream load
+> with the default sidecar (~1 GB in `sonnet-only` mode), so cap the VM:
+> copy `ops/wslconfig.example` to `%USERPROFILE%\.wslconfig`
 > (tune `memory=` to your machine), then `wsl --shutdown` to apply. After a
 > `wsl --shutdown`, if the daemon becomes unreachable on `127.0.0.1:8765`, run
 > `docker restart pseudolife-mcp-daemon` to re-establish the host port forward.
