@@ -303,6 +303,7 @@ class ConsoleRoutes:
         sources = _safe(svc.list_sources, {"sources": [], "total": 0})
         tags = _safe(svc.list_tags, {"tags": [], "total": 0})
         dream = _safe(svc.dream_status, {})
+        loop = _safe(svc.loop_health, {"available": False})
 
         bands = stats.get("bands", []) if isinstance(stats, dict) else []
         total_entries = 0
@@ -334,4 +335,5 @@ class ConsoleRoutes:
             },
             "stats": stats,
             "dream": dream,
+            "loop": loop,
         }

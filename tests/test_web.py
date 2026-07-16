@@ -295,6 +295,19 @@ def test_asgi_api_overview(svc):
     assert st == 200 and b"counts" in body
 
 
+def test_overview_carries_loop_health(svc):
+    """The Observatory loop-health tile reads overview.loop — the measurement
+    side of the memory-loop instructions."""
+    import json
+
+    st, body = _call(_app(svc), "GET", "/api/overview")
+    assert st == 200
+    loop = json.loads(body)["loop"]
+    assert loop["available"] is True
+    assert loop["stores"]["current"] >= 0
+    assert "stores_per_session" in loop and "last_lesson_at" in loop
+
+
 def test_asgi_unknown_api_404(svc):
     st, _ = _call(_app(svc), "GET", "/api/bogus")
     assert st == 404

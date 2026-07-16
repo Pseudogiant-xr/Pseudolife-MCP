@@ -1756,6 +1756,26 @@ class MemoryService:
             self._annotate_lesson_staleness(rows)
             return {"count": len(rows), "entries": rows}
 
+    def loop_health(self, window_days: int = 7,
+                    now: float | None = None) -> dict[str, Any]:
+        """Is the memory loop actually being exercised? Windowed activity
+        counts + per-session rates for the Console tile. Needs Postgres —
+        ``{"available": False}`` without (never raises)."""
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return {"available": False}
+            h = self._storage.loop_health(
+                window_s=float(window_days) * 86400.0, now=now)
+        sessions = h.get("sessions") or 0
+
+        def _rate(n: int) -> float | None:
+            return round(n / sessions, 2) if sessions else None
+
+        return {"available": True, "window_days": int(window_days), **h,
+                "stores_per_session": _rate(h["stores"]["current"]),
+                "outcomes_per_session": _rate(h["outcomes"]["current"])}
+
     def _cortex_change_index(self) -> dict[str, float]:
         """norm-entity → latest cortex change ts (assertions + supersessions,
         over ALL records incl. superseded) — the churn signal behind lesson

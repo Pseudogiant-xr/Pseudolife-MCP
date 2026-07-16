@@ -15,6 +15,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   stores listed in effectively arbitrary order (stable sort + promotion
   relocations), which flaked `recent`-ordering assertions under load.
 
+### Added (2026-07-16 — Console loop-health tile)
+- **Observatory "Loop health" panel**: windowed (7d vs prior 7d) stores and
+  outcome-signal counts with trend arrows and a success/failure/correction
+  breakdown, session count, per-session rates, pending signals, and
+  last-lesson recency — the measurement side of the memory-loop
+  instructions. Head chip flags "no outcomes logged" when the REFLECT beat
+  isn't firing. Data: new `loop_health` on `PostgresStorage` (indexed
+  COUNT queries; consumed signals still count — retention is the only
+  eraser) wrapped by `MemoryService.loop_health` (`{"available": false}`
+  without Postgres), surfaced as `loop` in `/api/overview`.
+
 ### Added (2026-07-16 — cold-bank onboarding in the session-start hook)
 - `/api/hook/session-start` appends a short seeding guide when the bank is
   provably empty (`total_memories == 0`): name the session, store a few

@@ -565,6 +565,44 @@ class PostgresStorage:
             )
         return cur.rowcount
 
+    def loop_health(self, window_s: float, now: float | None = None) -> dict:
+        """Windowed loop-activity counts for the Console tile: current vs the
+        immediately preceding window of stores + outcome signals, session
+        episodes (parent_id IS NULL), pending signals, lesson recency.
+        Read-only, all on indexed timestamp columns. Consumed signals still
+        count as outcomes — consumption is the dream's drain cursor, not a
+        judgement; the caveat is upstream retention (signal_retention_days)
+        deleting rows older than its cutoff."""
+        t = time.time() if now is None else float(now)
+        cutoff, prev_cutoff = t - window_s, t - 2 * window_s
+
+        def _window_counts(table: str, ts_col: str) -> dict:
+            row = self.conn.execute(
+                f"SELECT COUNT(*) FILTER (WHERE {ts_col} >= %s), "
+                f"COUNT(*) FILTER (WHERE {ts_col} >= %s AND {ts_col} < %s) "
+                f"FROM {table}", (cutoff, prev_cutoff, cutoff)).fetchone()
+            return {"current": row[0], "previous": row[1]}
+
+        stores = _window_counts("entries", "ts")
+        outcomes = _window_counts("outcome_signals", "created_at")
+        outcomes["by_outcome"] = {
+            o: n for o, n in self.conn.execute(
+                "SELECT outcome, COUNT(*) FROM outcome_signals "
+                "WHERE created_at >= %s GROUP BY outcome", (cutoff,))}
+        sessions = self.conn.execute(
+            "SELECT COUNT(*) FROM episodes "
+            "WHERE started_at >= %s AND parent_id IS NULL",
+            (cutoff,)).fetchone()[0]
+        pending = self.conn.execute(
+            "SELECT COUNT(*) FROM outcome_signals WHERE consumed_at IS NULL"
+        ).fetchone()[0]
+        last_lesson, lessons_current = self.conn.execute(
+            "SELECT MAX(asserted_at), COUNT(*) FILTER (WHERE status = 'current') "
+            "FROM lessons").fetchone()
+        return {"stores": stores, "outcomes": outcomes, "sessions": sessions,
+                "pending_signals": pending, "last_lesson_at": last_lesson,
+                "lessons_current": lessons_current}
+
     # ── meta ────────────────────────────────────────────────────────────
 
     def meta_set(self, key: str, value: Any) -> None:

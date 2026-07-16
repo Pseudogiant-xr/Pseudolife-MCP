@@ -43,6 +43,7 @@ export async function renderObservatory(root, ctx) {
   const stats = ov.stats || {};
   const dream = ov.dream || {};
   const health = ov.health || {};
+  const loop = ov.loop || {};
 
   mount(root,
     signalsStrip(health, dream, counts),
@@ -52,6 +53,7 @@ export async function renderObservatory(root, ctx) {
       distributionsPanel(counts, sources),
       el("div", { style: { display: "grid", gap: "16px", gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))" } },
         dreamPanel(dream, cfg, ctx),
+        loopHealthPanel(loop),
         systemPanel(health, stats))),
   );
 }
@@ -188,6 +190,52 @@ function dreamPanel(dream, cfg, ctx) {
         el("span", { class: "spacer", style: { marginLeft: "auto" } }),
         el("button", { class: "btn sm", onclick: () => openConsolidationDrawer(ctx) }, "Review consolidation"),
         runBtn)));
+}
+
+// Loop health — is the RECALL/CAPTURE/REFLECT loop actually being exercised?
+// Windowed counts from overview.loop (needs Postgres; degrades to a hint).
+function loopHealthPanel(loop) {
+  const head = el("div", { class: "panel-head" },
+    el("span", { class: "nav-dot", style: { "--dot": "var(--c-episode)" } }),
+    el("h2", {}, "Loop health"),
+    el("span", { class: "sub" }, loop.available ? `last ${loop.window_days ?? 7}d` : ""),
+    el("span", { class: "spacer" }),
+    loop.available
+      ? ((loop.outcomes?.current ?? 0) > 0
+          ? el("span", { class: "chip ok" }, "outcomes flowing")
+          : el("span", { class: "chip warn" }, "no outcomes logged"))
+      : null);
+
+  if (!loop.available)
+    return el("div", { class: "panel" }, head,
+      el("div", { class: "panel-body" },
+        el("div", { class: "empty" }, el("div", { class: "big" }, "Needs Postgres"),
+          "Loop metrics read windowed counts from the bank.")));
+
+  const o = loop.outcomes || {};
+  const by = o.by_outcome || {};
+  const rows = [
+    ["stores", el("span", {}, fmtNum(loop.stores?.current ?? 0), " ",
+      trendArrow(loop.stores?.current, loop.stores?.previous))],
+    ["outcomes", el("span", {}, fmtNum(o.current ?? 0), " ", trendArrow(o.current, o.previous),
+      el("span", { class: "dim", style: { marginLeft: "8px", fontSize: ".82rem" } },
+        `${by.success || 0}✓ ${by.failure || 0}✗ ${by.correction || 0}↺`))],
+    ["sessions", fmtNum(loop.sessions ?? 0)],
+    ["per session", `${loop.stores_per_session ?? "—"} stores · ${loop.outcomes_per_session ?? "—"} outcomes`],
+    ["pending signals", fmtNum(loop.pending_signals ?? 0) + " (next dream distils)"],
+    ["last lesson", loop.last_lesson_at ? fmtAge(loop.last_lesson_at) : "never"],
+  ];
+  return el("div", { class: "panel" }, head,
+    el("div", { class: "panel-body" },
+      el("dl", { class: "kv" }, rows.flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)]))));
+}
+
+function trendArrow(cur, prev) {
+  if (prev == null || cur == null || cur === prev)
+    return el("span", { class: "dim", title: "flat vs previous window" }, "→");
+  const up = cur > prev;
+  return el("span", { style: { color: up ? "var(--c-ok)" : "var(--c-warn)" },
+    title: `previous window: ${fmtNum(prev)}` }, up ? "▲" : "▼");
 }
 
 function gaugeRow(label, val, max, text, amber) {

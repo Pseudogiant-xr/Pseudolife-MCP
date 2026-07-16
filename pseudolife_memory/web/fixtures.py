@@ -205,6 +205,16 @@ class FixtureService:
     def session_briefing(self, max_unsure=3, max_lessons=3, max_world=3):
         return {"markdown": "## Memory briefing (fixture)\n- lesson: prefer bar over foo"}
 
+    def loop_health(self, window_days=7, now=None):
+        return {"available": True, "window_days": window_days,
+                "stores": {"current": 42, "previous": 31},
+                "outcomes": {"current": 6, "previous": 3,
+                             "by_outcome": {"success": 4, "failure": 1,
+                                            "correction": 1}},
+                "sessions": 9, "pending_signals": 2,
+                "last_lesson_at": _NOW - 26 * _H, "lessons_current": 14,
+                "stores_per_session": 4.67, "outcomes_per_session": 0.67}
+
     # episodes
     def episode_list(self, limit=20, include_open=True):
         eps = [
