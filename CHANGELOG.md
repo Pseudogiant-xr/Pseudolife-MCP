@@ -6,6 +6,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-07-16 — toolset-tier follow-ups)
+- **`memory_toolset` docstring** no longer claims hidden tools remain
+  callable by exact name — Claude harnesses gate tool calls client-side
+  against their own list, so clients must expand first. The tiers spec's
+  failure-modes section records the confirming incident.
+
 ## [0.8.0] — 2026-07-16 — public-release cut
 
 Everything since the 0.7.0 cut: the whole-bank galaxy console work, the
@@ -13,6 +19,19 @@ one-shot installer with extractor choice, Linux install parity, the published
 E4B v2 extractor fine-tune as the shipped default, rollback-tag and backup
 retention, the v2 release audit (state-volume backups, install hardening,
 disk-growth caps), and the toolset-tier visibility rework.
+
+### Fixed (2026-07-16 — tier changes now reach shim clients)
+- **Shim forwards `tools/list_changed`** (landed inside the release-cut
+  commit) — the shim's per-call upstream design meant the daemon's
+  tier-change notification died on an ephemeral session and never reached
+  the real client, which then rejected the newly visible tools client-side
+  ("No such tool available" — Claude harnesses gate calls against their own
+  list, so "hidden tools stay callable" never held in practice). The shim
+  now advertises `tools.listChanged` in its downstream capabilities and
+  re-emits the notification whenever a `memory_toolset` call reports
+  `changed: true`. Found via the daily morning-brief scheduled task, which
+  lost `memory_world_search`/`set` when the 2026-07-11 tier map demoted its
+  writer (`claude-desktop`) to minimal.
 
 ### Fixed (2026-07-15 — Atlas polish)
 - **"Assign a project" is a combobox** — the modal suggests every existing

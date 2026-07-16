@@ -384,7 +384,7 @@ async def memory_toolset(
     (minimal → core → full; session-scoped, free, instant). Core adds
     graph/recall, world facts, lessons, documents; full adds
     supersede/forget/history, dream and graph-review admin. ``status``
-    reports the ladder. Hidden tools remain callable by exact name.
+    reports the ladder. Expand first: clients reject hidden-tool calls.
     """
     from pseudolife_memory.toolset_tiers import TIERS, step
     from pseudolife_memory.writer_context import _http_writer_session

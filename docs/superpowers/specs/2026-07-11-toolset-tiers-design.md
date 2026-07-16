@@ -161,6 +161,19 @@ outcome ≈600, fact_get/fact_set ≈550 each, gate ≈450.)
   `memory_toolset` result lists the newly visible tools; calls are ungated,
   so the agent proceeds. Live-verify with the user's Claude Desktop; document
   the observed behavior in the README.
+  - **CONFIRMED FAILED 2026-07-16** (morning-brief scheduled task, runs via
+    the desktop shim as writer `claude-desktop` → minimal): "calls are
+    ungated" holds only at the wire. Claude harnesses gate tool calls
+    *client-side* against their own list ("No such tool available" — the
+    call never reaches the daemon), so a hidden tool is effectively
+    uncallable. Worse, the shim's per-call upstream connections meant the
+    daemon's `list_changed` died on an ephemeral session and the client
+    never re-listed. Fixes shipped same day: the shim now advertises
+    `tools.listChanged` downstream and re-emits `list_changed` after a
+    `memory_toolset` call with `changed: true`
+    (tests/test_shim.py::test_shim_forwards_list_changed_on_toolset_expand),
+    and this machine's tier map moved `claude-desktop` to `core` so the
+    scheduled task's world tools are visible at init.
 - **Unknown writer / no headers**: env default tier. Malformed
   `PSEUDOLIFE_MCP_TIER_MAP` entries are logged and skipped, never fatal.
 - **Shim reconnects mid-session**: `x-pl-session` is stable per shim session,
