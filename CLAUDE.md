@@ -69,6 +69,11 @@ leaked email already cost a full history rewrite plus a fresh-repo publish.
 - **Commit identity stays the GitHub noreply address**
   (`Pseudogiant-xr@users.noreply.github.com`); tee'd script output
   (`deploy-*.log` etc.) stays out of the tree — it embeds absolute home paths.
+- **Commit METADATA is a leak channel the guard test can't see**: GitHub
+  web-UI edits stamp the account's real email unless Settings → Emails →
+  "Keep my email addresses private" is ON (verified on, 2026-07-16 — it was
+  off, and one web edit leaked; inspect any unexpected remote commit with
+  `git show --format=%ae` before building on it).
 - **If a real secret ever lands in a pushed commit: rotate it first.** A
   rewrite is tidiness, not remediation.
 
