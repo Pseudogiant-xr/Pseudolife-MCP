@@ -1,0 +1,21 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.Pseudogiant-xr/pseudolife-mcp",
+  "title": "PseudoLife Memory",
+  "description": "Persistent long-term memory for Claude: memory bank, fact cortex, dream consolidation, graph.",
+  "repository": {
+    "url": "https://github.com/Pseudogiant-xr/PseudoLife-MCP",
+    "source": "github"
+  },
+  "version": "0.8.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "pseudolife-mcp",
+      "version": "0.8.0.post1",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

@@ -26,6 +26,13 @@ E4B v2 extractor fine-tune as the shipped default, rollback-tag and backup
 retention, the v2 release audit (state-volume backups, install hardening,
 disk-growth caps), and the toolset-tier visibility rework.
 
+### Fixed (2026-07-16 — 0.8.0.post1, metadata only)
+- **PyPI `0.8.0.post1`** — identical code to 0.8.0; corrects the `mcp-name`
+  ownership marker's namespace casing (`io.github.Pseudogiant-xr/…` — the MCP
+  registry matches the GitHub username case-sensitively) and adds
+  `server.json`, the registry manifest. Published to the official MCP
+  registry as `io.github.Pseudogiant-xr/pseudolife-mcp`.
+
 ### Fixed (2026-07-16 — PyPI packaging)
 - **The wheel now ships the Cortex Console** — `[tool.setuptools.package-data]`
   carries `pseudolife_memory/web/static/**` (css/fonts/js/index.html); without

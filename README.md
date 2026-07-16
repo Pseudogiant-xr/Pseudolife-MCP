@@ -1,6 +1,6 @@
 # PseudoLife-MCP
 
-<!-- mcp-name: io.github.pseudogiant-xr/pseudolife-mcp -->
+<!-- mcp-name: io.github.Pseudogiant-xr/pseudolife-mcp -->
 
 **Persistent long-term memory for Claude Code via the Model Context Protocol.**
 
