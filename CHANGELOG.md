@@ -6,6 +6,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security (2026-07-16 — Dependabot triage: all four alerts unreachable, no bump possible)
+- Triaged the four Dependabot alerts on `ops/requirements.lock.txt` (the
+  daemon-image lock; none affect `pyproject.toml` install floors). All four
+  were dismissed as *vulnerable code not used*, with the reasoning recorded
+  in the lockfile header:
+  - **chromadb CVE-2026-45829** (critical, pre-auth code injection in the
+    Chroma HTTP server API): no patched release exists — 1.5.9 is both the
+    locked and the latest version. The daemon embeds
+    `chromadb.PersistentClient` with fixed collection parameters and never
+    runs the Chroma server, so the vulnerable endpoint is not exposed. Bump
+    when a patched release lands.
+  - **transformers CVE-2026-1839 / CVE-2026-4372 / CVE-2026-5241** (Trainer
+    checkpoint load, malicious-config RCE, LightGlue `trust_remote_code`
+    bypass): fixed only in 5.x, but the image's ONNX embedding backend
+    (`optimum-onnx`, latest 0.1.0) caps `transformers<4.58`, and 4.57.6 is
+    the last 4.x release — no backport exists. All three require loading
+    attacker-controlled models or checkpoints; the image runs
+    `HF_HUB_OFFLINE=1` with pinned weights baked at build time, so none of
+    the paths are reachable. Bump to ≥5.5 once optimum-onnx supports
+    transformers 5.x.
+
 ### Changed (2026-07-16 — README restructured into a front door + docs/guide)
 - **README.md cut from ~1450 to ~540 lines**: it keeps the front-door
   material (badges, hook, Quickstart, tools table, install, wiring, basic
