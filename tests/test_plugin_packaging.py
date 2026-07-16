@@ -89,3 +89,43 @@ def test_plugin_dream_command_matches_examples():
     plugin = _read("plugin/commands/dream.md")
     examples = _strip_leading_html_comment(_read("examples/commands/dream.md"))
     assert plugin.strip() == examples.strip()
+
+
+# ── tool-surface guards ─────────────────────────────────────────────────────
+
+def _referenced_tools(text: str) -> set[str]:
+    """Backticked tool mentions, e.g. `memory_search(...)` → memory_search.
+    Deliberately skips `mcp__pseudolife-memory__*` (prefix, not a tool)."""
+    return set(re.findall(r"`((?:memory|document)_[a-z_]+)", text))
+
+
+def test_instruction_blocks_reference_only_core_visible_tools():
+    """The standing instructions are injected into EVERY session; a tool they
+    name must exist and stay visible if PSEUDOLIFE_MCP_TOOLSET=core ever
+    flips on (the 2026-07-10 tool-cost review's pending lever) — otherwise
+    the block tells the model to call tools its tools/list doesn't carry."""
+    from pseudolife_memory.mcp_server import _TOOL_TIERS
+    from pseudolife_memory.web.session_hook import (MEMORY_LOOP_BLOCK,
+                                                    ONBOARDING_BLOCK)
+    referenced = (_referenced_tools(MEMORY_LOOP_BLOCK)
+                  | _referenced_tools(ONBOARDING_BLOCK))
+    assert len(referenced) >= 10          # regex sanity — the block names many
+
+    unknown = referenced - set(_TOOL_TIERS)
+    assert not unknown, f"instruction blocks name unregistered tools: {unknown}"
+
+    hidden_at_core = {t for t in referenced if _TOOL_TIERS[t] == "full"}
+    assert not hidden_at_core, (
+        f"instruction blocks name full-tier tools hidden at core: "
+        f"{hidden_at_core} — promote them or drop the mention")
+
+
+def test_plugin_commands_reference_only_real_tools():
+    """Commands are on-demand (a session can expand its tier first), so
+    existence is the bar here, not core visibility."""
+    from pseudolife_memory.mcp_server import _TOOL_TIERS
+    for rel in ("plugin/commands/dream.md", "plugin/commands/memory-status.md"):
+        referenced = _referenced_tools(_read(rel))
+        assert referenced, f"{rel}: regex found no tool mentions"
+        unknown = referenced - set(_TOOL_TIERS)
+        assert not unknown, f"{rel} names unregistered tools: {unknown}"
