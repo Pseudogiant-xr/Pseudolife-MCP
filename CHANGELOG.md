@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-16 — richer memory-loop instructions + per-user override)
+- **The served memory-loop instructions are now the full three-beat loop**
+  (RECALL / CAPTURE / REFLECT with the hard-won operational details: the
+  `fact_get` null-slot footgun, `superseded_by_text` handling, session
+  titling, sub-episodes, `source="status"` routing, the surprise-gate note,
+  a new *never store secrets* rule, and a `memory_recall` pointer for
+  multi-hop questions). Applies to both the plugin-served context
+  (`MEMORY_LOOP_BLOCK`) and `examples/CLAUDE.memory.md` — guard-kept
+  identical. Roughly 650 tokens per session, up from ~300.
+- **`<data_dir>/hook-instructions.md` override**: when present and
+  non-blank, `/api/hook/session-start` serves it instead of the shipped
+  block (briefing still appended) — customize the standing instructions
+  without forking the plugin; blank or unreadable falls back to the default.
+
 ### Added (2026-07-16 — Claude Code plugin + in-repo marketplace)
 - **Claude Code plugin `pseudolife-memory`** (`plugin/`), installable from
   this repo as a marketplace (`/plugin marketplace add

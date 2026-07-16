@@ -410,6 +410,25 @@ def test_hook_session_start_post_rejected(svc):
     assert st == 405
 
 
+def test_hook_session_start_override_file_replaces_instructions(svc):
+    """<data_dir>/hook-instructions.md lets a user serve their own standing
+    instructions instead of the shipped block (briefing still appended)."""
+    (svc.data_dir / "hook-instructions.md").write_text(
+        "## My house rules\nAlways check the runbook first.", encoding="utf-8")
+    st, body = _call(_app(svc), "GET", "/api/hook/session-start")
+    text = body.decode("utf-8")
+    assert st == 200
+    assert "My house rules" in text
+    assert "RECALL" not in text          # shipped block replaced
+    assert "(fixture)" in text           # briefing still appended
+
+
+def test_hook_session_start_blank_override_falls_back(svc):
+    (svc.data_dir / "hook-instructions.md").write_text("  \n", encoding="utf-8")
+    st, body = _call(_app(svc), "GET", "/api/hook/session-start")
+    assert st == 200 and b"memory_search" in body
+
+
 def test_entity_proposal_routes(svc):
     r = ConsoleRoutes(svc)
     assert r.dispatch("POST", "/api/graph/accept-entity-merge", {}, {"id": 1})["accepted"]
