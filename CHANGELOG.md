@@ -11,10 +11,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   callable by exact name — Claude harnesses gate tool calls client-side
   against their own list, so clients must expand first. The tiers spec's
   failure-modes section records the confirming incident.
-- **`ops/update.ps1` requires PowerShell 7** (`#Requires -Version 7`, same
-  guard as the installers) — Windows PowerShell 5.1 turns benign native
-  stderr (e.g. docker inspecting a not-yet-built image tag) into a
-  terminating error mid-deploy.
+- **Every ops script requires PowerShell 7** (`#Requires -Version 7`,
+  previously only the installers had it; now also update, backup, restore,
+  preflight, prune-rollbacks, install-autostart) — Windows PowerShell 5.1
+  turns benign native stderr (e.g. docker inspecting a not-yet-built image
+  tag) into a terminating error mid-deploy; 5.1 now refuses upfront with a
+  clear version error instead.
 
 ## [0.8.0] — 2026-07-16 — public-release cut
 

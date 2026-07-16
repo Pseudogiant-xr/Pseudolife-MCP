@@ -1,3 +1,4 @@
+#Requires -Version 7
 # Register the PseudoLife-MCP daemon to start at logon (Windows Task Scheduler).
 #
 #   ops\install-autostart.ps1                 # uses the repo .venv or system python

@@ -1,3 +1,4 @@
+#Requires -Version 7
 # Preflight / doctor: CHECK-ONLY prerequisite audit for a fresh install
 # (issue #13 — converts "mysterious failure" into "run this line"). Verifies
 # each prerequisite and prints the exact remediation for anything missing;

@@ -1,3 +1,4 @@
+#Requires -Version 7
 # Prune stale pre-* rollback tags of the daemon image, keeping the newest N.
 #
 #   ops\prune-rollbacks.ps1              # keep the 2 newest rollback tags

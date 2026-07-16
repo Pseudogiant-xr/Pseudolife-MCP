@@ -1,3 +1,4 @@
+#Requires -Version 7
 # Restore a PseudoLife-MCP pg_dump backup (the inverse of ops\backup.ps1).
 #
 #   ops\restore.ps1                          # REHEARSAL (default, safe):

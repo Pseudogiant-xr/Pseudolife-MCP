@@ -1,3 +1,4 @@
+#Requires -Version 7
 # pg_dump the PseudoLife-MCP database to data\backups\ with 7-day rotation,
 # plus a tar of the daemon state volume (ChromaDB reference documents, cortex
 # snapshot, graph snapshots) — the bank alone does not cover document_ingest.
