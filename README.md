@@ -72,9 +72,12 @@ Console: <http://127.0.0.1:8765/ui/>. Details: [Install](#install--containerized
 
 ## What this is
 
-A memory engine exposed over MCP. There's no chat UI and no bundled
-model — just tools Claude calls to store and recall what matters. It
-layers several complementary stores:
+A memory engine exposed over MCP. There's no chat UI and no LLM doing the
+thinking — Claude is the intelligence; these are tools it calls to store and
+recall what matters. (Models *are* bundled as plumbing: baked embedding
+weights for retrieval, and the optional CPU extractor sidecar that
+consolidates memories into facts while you sleep.) It layers several
+complementary stores:
 
 - **Associative continuum** — an 8-tier recency-tiered embedding store
   (working → forever) ranked by **cosine** similarity, with novelty-gated
@@ -101,14 +104,16 @@ layers several complementary stores:
   ingest.
 
 State lives in Postgres (the durable source of truth) behind a single
-long-lived daemon; every session attaches through a thin stdio shim. The
+long-lived daemon; every session attaches over HTTP (or, for host-process
+installs, a thin stdio shim). The
 result: Claude can pick up where it left off, correct itself when facts
 change, and reason over relationships — without you re-explaining context
 each session.
 
 ## Tools exposed
 
-The surface was consolidated 2026-07-02 (55 → 32 tools): lifecycle families
+The surface was consolidated 2026-07-02 (55 → 32 tools; now 33 with
+`memory_toolset`): lifecycle families
 became verb-dispatched tools (`memory_dream`, `memory_forget`,
 `memory_graph_review`), and dump/introspection views moved to the Cortex
 Console (REST) — the manifest is agent context every session, so it stays lean.
@@ -167,13 +172,16 @@ consolidation.
 **Toolset tiers.** Three visibility tiers — `minimal` (7 tools: the
 recall/capture loop + the gate), `core` (20: + graph/recall, world facts,
 lessons, documents, episodes), `full` (33) — filtered per session at
-`tools/list`; hidden tools stay callable by name. Defaults:
+`tools/list`. The filter is visibility, not auth (the bearer token is the
+security boundary) — but Claude clients gate calls against their own tool
+list, so in practice a session expands its tier before calling a hidden
+tool. Defaults:
 `PSEUDOLIFE_MCP_TOOLSET` (shipped: `core`) sets the baseline;
 `PSEUDOLIFE_MCP_TIER_MAP="claude-desktop:minimal,claude-code:core"` sets
 per-client defaults by writer id. Any session can step its own tier up or
 down at runtime with `memory_toolset(action="expand"|"collapse"|"status")`
-— the daemon emits `tools/list_changed`, and clients that ignore it can
-still call the tools named in the result. Eager-loading clients (Claude
+— the daemon emits `tools/list_changed` so the client refreshes its
+list. Eager-loading clients (Claude
 Desktop) start at ~1.5k tokens of manifest on `minimal`; clients that
 defer schemas client-side (Claude Code) barely notice tiers at all.
 
@@ -263,8 +271,9 @@ extractor to be configured).
 The whole stack — Postgres **and** the memory daemon — runs in Docker.
 No host Python, no torch install, no version skew; the daemon image bakes
 in CPU-only torch and the `all-MiniLM-L6-v2` weights, so it runs
-identically on Windows / macOS / Linux. Requires only Docker (~2.5 GB
-daemon image + the Postgres image, built once).
+identically on Windows / macOS / Linux. Requires only Docker; built once:
+~3 GB daemon image + ~0.6 GB Postgres + ~9 GB extractor sidecar (skip the
+sidecar entirely with the installer's `sonnet-only` mode).
 
 ```bash
 git clone https://github.com/Pseudogiant-xr/PseudoLife-MCP.git
@@ -317,11 +326,12 @@ ops\install-autostart.ps1
 Start-ScheduledTask -TaskName "PseudoLife-MCP Daemon"
 ```
 
-The `pseudolife-mcp` console-script is now on your PATH with four modes:
-`pseudolife-mcp serve` (the daemon), `pseudolife-mcp` (the stdio shim —
-auto-starts the daemon if absent), `pseudolife-mcp embedded` (the
-v0.1 in-process stdio server; no daemon, no Postgres — an escape hatch), and
-`pseudolife-mcp briefing` (print the session-start briefing; used by the hook).
+The `pseudolife-mcp` console-script is now on your PATH — run
+`pseudolife-mcp --help` for all modes. The main ones: `pseudolife-mcp serve`
+(the daemon), `pseudolife-mcp` (the stdio shim — auto-starts the daemon if
+absent), `pseudolife-mcp embedded` (the v0.1 in-process stdio server; no
+daemon, no Postgres — an escape hatch), and `pseudolife-mcp briefing`
+(print the session-start briefing; used by the hook).
 
 ## Updating
 
@@ -463,7 +473,8 @@ Add-Content "$env:USERPROFILE\.claude\CLAUDE.md" (Get-Content examples\CLAUDE.me
 ```
 
 Treat memory as **RECALL at the start, CAPTURE as you go, REFLECT at the end**
-(session episodes open/close for you via the lifecycle hooks above). The block:
+(session episodes open/close for you — the daemon owns their lifecycle, keyed
+by MCP session; see *Session lifecycle hooks* below). The block:
 
 ```markdown
 ## Memory — use it every session (tools: `mcp__pseudolife-memory__*`)
@@ -653,8 +664,9 @@ Loads what you've worked on before, persistent across compactions.
 ```
 memory_store("Decided to use stdio transport for the MCP because no port conflicts", source="pseudolife")
 ```
-Stores a real decision. Skip fleeting chatter — the surprise gate will
-drop near-duplicates anyway.
+Stores a real decision. Skip fleeting chatter — the shipped store gate is
+permissive (it keeps what you send), so deliberate, durable claims only.
+(Raise `surprise_threshold` above zero to auto-drop near-duplicates.)
 
 **When corrected:**
 ```
@@ -809,9 +821,11 @@ agent memory ([HiMem 2026](https://arxiv.org/abs/2601.06377);
 consolidation — turning episodes into reusable semantic notes — *the*
 most-important under-implemented capability of long-term LLM memory.
 
-PseudoLife-MCP can't run an LLM inside the server (Claude Code doesn't
-yet expose MCP sampling — see [feature request #1785](https://github.com/anthropics/claude-code/issues/1785)).
-But it can surface clusters for Claude to consolidate manually:
+The dream pass (the extractor sidecar) handles fact extraction server-side,
+but the server can't borrow *Claude's* judgment mid-call (Claude Code doesn't
+yet expose MCP sampling — see [feature request #1785](https://github.com/anthropics/claude-code/issues/1785)),
+so near-duplicate cleanup is surfaced as clusters for Claude to consolidate
+deliberately:
 
 ```
 memory_consolidation_candidates(query="MCP transport choice", top_k=20)
@@ -1005,16 +1019,17 @@ Because it keys on the **cursor**, not on "sessions", returning to an old sessio
 later just appends more tail — nothing is reprocessed, and there is no
 "session finished" event to detect.
 
-Extraction is pluggable; pick the tier that fits — **no self-hosted model is
-required**:
+Extraction is pluggable; pick the tier that fits — the stack ships with
+tier 2 preconfigured (the extractor sidecar), and **no self-hosted model is
+required** if you'd rather not run one:
 
 | Tier | How it runs | Needs | Quality |
 |------|-------------|-------|---------|
 | **0 — baseline** | `memory_dream(action="run")` (regex floor) — headless, on-box, free | nothing | weak (`X is Y`, `key: value`, port/version) |
-| **1 — default** | the **agent itself** is the gateway: the `/dream` command | the agent you already run | highest |
-| **2 — opt-in** | daemon auto-sweep calls a configured OpenAI-compatible endpoint | one base-URL + key + model | high; free if local |
+| **1 — agent-driven** | the **agent itself** is the gateway: the `/dream` command | the agent you already run | highest |
+| **2 — shipped default** | daemon auto-sweep calls an OpenAI-compatible endpoint — the bundled sidecar out of the box, or any endpoint you point it at | nothing (sidecar) / one base-URL + key + model | high; free if local |
 
-**Tier 1 — `/dream` (recommended).** Copy `examples/commands/dream.md` to
+**Tier 1 — `/dream` (agent-driven).** Copy `examples/commands/dream.md` to
 `.claude/commands/dream.md` in any project, then run `/dream`. The agent reads
 `memory_dream(action="pull")`, extracts durable current-state facts, writes them
 with `memory_fact_set`, and commits the cursor. To run it on a cadence instead
@@ -1233,7 +1248,8 @@ writes are failing to reach Postgres; check `docker logs
 pseudolife-mcp-daemon`).
 
 - **First build is slow / big.** The daemon image bakes in CPU torch and the
-  embedding model (~2.5 GB, several minutes). Every start after that is
+  embedding model (~3 GB, several minutes; the extractor sidecar adds a
+  ~5.3 GB model download on its first build). Every start after that is
   offline and fast — if a *rebuild* is re-downloading models, the Docker
   layer cache was pruned.
 - **Daemon unreachable after `wsl --shutdown`** (Windows): the host port
@@ -1273,8 +1289,8 @@ docker volume rm pseudolife-mcp-bank pseudolife-mcp-state
 ```
 
 Host-process installs: also unregister the logon task (`Unregister-ScheduledTask
--TaskName "PseudoLife-MCP Daemon"`) and remove the SessionStart/SessionEnd
-hooks that `install-hook.ps1` / `install-hook.sh` added to
+-TaskName "PseudoLife-MCP Daemon"`) and remove the SessionStart briefing
+hook that `install-hook.ps1` / `install-hook.sh` added to
 `~/.claude/settings.json` (a timestamped `.bak-*` sits next to it).
 
 ## Testing
@@ -1371,7 +1387,7 @@ python -m pseudolife_memory.web.devserver   # http://127.0.0.1:8770/ui/
 
 | Capability | Status |
 |---|---|
-| Transport | MCP stdio shim → HTTP daemon |
+| Transport | Streamable-HTTP MCP daemon (`/mcp`); optional stdio shim for host-process installs |
 | Storage | Postgres 16 + pgvector (source of truth); ChromaDB for the reference bank |
 | Associative continuum | 8-tier cosine MIRAS bands, novelty-gated storage, contradiction detection, supersession |
 | Canonical-fact cortex | Single-writer: LLM dream pass + `memory_fact_*` (regex auto-promote opt-in, default off) |
@@ -1394,11 +1410,12 @@ python -m pseudolife_memory.web.devserver   # http://127.0.0.1:8770/ui/
 
 - **Reflection via MCP sampling** — the MCP protocol has a `sampling`
   capability that lets servers ask the client (Claude) to generate text.
-  Wiring that up would bring the periodic-reflection feature back without
-  needing a bundled LLM. [Claude Code doesn't yet support
+  Wiring that up would let the dream borrow *Claude itself* as the extractor
+  instead of a sidecar or shim. [Claude Code doesn't yet support
   sampling](https://github.com/anthropics/claude-code/issues/1785) — until
-  it does, `memory_consolidation_candidates` + `memory_consolidate`
-  give Claude the same outcome through manual tool calls.
+  it does, the sidecar handles extraction and
+  `memory_consolidation_candidates` + `memory_consolidate` give Claude
+  deliberate consolidation through manual tool calls.
 - **Cross-machine sync** — memory lives on one PC's disk. Syncing
   `data/` via rclone / syncthing / git-lfs is left as an exercise.
 - **Hierarchical summarisation** — periodic auto-summaries at multiple
