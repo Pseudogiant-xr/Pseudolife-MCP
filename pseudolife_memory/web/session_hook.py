@@ -68,6 +68,25 @@ of a session may lag a few seconds (one-time warmup).
 """
 
 
+ONBOARDING_BLOCK = """\
+Your memory bank is EMPTY — this session is where it starts. Seed it as you
+work: name the session (`memory_session_title`), store two or three durable
+facts about the current project (`memory_store`), set one canonical value
+you'll want back (`memory_fact_set`), and log the first `memory_outcome`
+when something works or fails. The dream consolidates whatever you capture
+into facts, a knowledge graph, and lessons — a seeded bank compounds; an
+empty one stays empty."""
+
+
+def _cold_bank(service: Any) -> bool:
+    """True only when the bank is provably empty — any doubt means warm
+    (onboarding noise on a working bank is worse than none on a cold one)."""
+    try:
+        return (service.stats() or {}).get("total_memories") == 0
+    except Exception:  # noqa: BLE001 — never break a session start
+        return False
+
+
 def _instructions(service: Any) -> str:
     """The shipped block, unless the user placed an override at
     ``<data_dir>/hook-instructions.md`` (blank/unreadable → shipped block)."""
@@ -87,6 +106,8 @@ def session_start_context(service: Any, authorized: bool) -> str:
     instructions are public repo content, the briefing is memory content)."""
     parts = [_instructions(service)]
     if authorized:
+        if _cold_bank(service):
+            parts.append(ONBOARDING_BLOCK)
         try:
             md = (service.session_briefing() or {}).get("markdown", "") or ""
         except Exception:  # noqa: BLE001 — never break a session start

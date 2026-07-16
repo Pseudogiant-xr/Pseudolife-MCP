@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-16 — cold-bank onboarding in the session-start hook)
+- `/api/hook/session-start` appends a short seeding guide when the bank is
+  provably empty (`total_memories == 0`): name the session, store a few
+  durable facts, set one canonical value, log the first outcome. Warm
+  banks, stats failures, and unauthorized token-gated requests never see
+  it — onboarding noise on a working bank is worse than none on a cold one.
+
 ### Changed (2026-07-16 — richer memory-loop instructions + per-user override)
 - **The served memory-loop instructions are now the full three-beat loop**
   (RECALL / CAPTURE / REFLECT with the hard-won operational details: the

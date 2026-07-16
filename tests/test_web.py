@@ -429,6 +429,43 @@ def test_hook_session_start_blank_override_falls_back(svc):
     assert st == 200 and b"memory_search" in body
 
 
+def test_hook_session_start_cold_bank_gets_onboarding(svc):
+    """An empty bank appends seeding guidance — first-run must not be
+    instructions + silence."""
+    svc.stats = lambda: {"total_memories": 0}
+    st, body = _call(_app(svc), "GET", "/api/hook/session-start")
+    assert st == 200
+    assert b"memory bank is EMPTY" in body
+    assert b"memory_search" in body      # instructions still lead
+
+
+def test_hook_session_start_warm_bank_no_onboarding(svc):
+    # FixtureService reports 1840 memories — no onboarding noise
+    st, body = _call(_app(svc), "GET", "/api/hook/session-start")
+    assert st == 200
+    assert b"memory bank is EMPTY" not in body
+
+
+def test_hook_session_start_stats_failure_no_onboarding(svc):
+    def boom():
+        raise RuntimeError("db down")
+    svc.stats = boom
+    st, body = _call(_app(svc), "GET", "/api/hook/session-start")
+    assert st == 200
+    assert b"memory_search" in body
+    assert b"memory bank is EMPTY" not in body
+
+
+def test_hook_session_start_unauthorized_no_onboarding(svc):
+    """Bank state is memory metadata — token-set unauthorized callers get
+    the static instructions only."""
+    svc.stats = lambda: {"total_memories": 0}
+    app = _app(svc, token="secret")
+    st, body = _call(app, "GET", "/api/hook/session-start")
+    assert st == 200
+    assert b"memory bank is EMPTY" not in body
+
+
 def test_entity_proposal_routes(svc):
     r = ConsoleRoutes(svc)
     assert r.dispatch("POST", "/api/graph/accept-entity-merge", {}, {"id": 1})["accepted"]
