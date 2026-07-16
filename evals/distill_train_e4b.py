@@ -49,7 +49,7 @@ from trl import SFTConfig, SFTTrainer
 
 # Runs inside WSL; point at the Windows checkout (/mnt/c/Users/<you>/...).
 REPO = Path(os.environ.get("PSEUDOLIFE_REPO",
-                           str(Path.home() / "PseudoLife-MCP")))
+                           str(Path.home() / "Pseudolife-MCP")))
 DATA = REPO / "evals/data/distill-extract-clean.jsonl"
 OUT = Path.home() / "e4b-extractor"               # WSL-local: fast disk io
 # 5120 (not the measured max 6,418): at 8192 the fixed-shape compile itself

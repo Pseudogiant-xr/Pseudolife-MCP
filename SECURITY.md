@@ -15,7 +15,7 @@ Pre-1.0: only the latest release (and current `master`) receives fixes.
 
 ## Threat model — what the design promises
 
-PseudoLife-MCP stores *your agent's memory* — treat the bank as sensitive.
+Pseudolife-MCP stores *your agent's memory* — treat the bank as sensitive.
 The shipped configuration is deliberately conservative:
 
 - **Loopback by default.** The daemon and Postgres publish to `127.0.0.1`

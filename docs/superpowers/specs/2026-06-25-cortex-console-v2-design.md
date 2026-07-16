@@ -7,7 +7,7 @@
 ## Context
 
 The Cortex Console (v1) is a daemon-served, no-build, vanilla-ESM operator
-console for PseudoLife-MCP. It shipped on `master` with eight tabs and a
+console for Pseudolife-MCP. It shipped on `master` with eight tabs and a
 "precision observatory instrument" aesthetic. A full review (architecture,
 docs, code, comparable tools, and a live visual pass) found that the UI is
 high-craft, but three things are now true:

@@ -4,7 +4,7 @@ consolidation (Tier C C-6).
 The motivation
 --------------
 
-Long-running PseudoLife banks accumulate near-duplicate memories — the
+Long-running Pseudolife banks accumulate near-duplicate memories — the
 same fact phrased five different ways across five sessions. The
 literature on agent memory (HiMem 2026; MIRIX 2024; the ICML 2025
 position paper) calls this out as the single most-important

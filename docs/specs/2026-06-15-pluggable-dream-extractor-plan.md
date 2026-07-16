@@ -573,9 +573,9 @@ git commit -m "feat(dream): expose memory_dream_pull/status/commit/run MCP tools
 <!-- examples/commands/dream.md
 Copy to .claude/commands/dream.md in any project to get /dream. -->
 ---
-description: Consolidate recent PseudoLife memories into canonical cortex facts
+description: Consolidate recent Pseudolife memories into canonical cortex facts
 ---
-Run a dream pass over the PseudoLife-MCP bank:
+Run a dream pass over the Pseudolife-MCP bank:
 
 1. Call `memory_dream_status`. If `would_fire` is false and there is no backlog,
    report "nothing to consolidate" and stop.

@@ -116,7 +116,7 @@ primary-down and falls back instead of dreaming into 500s.
 ### 6. Ops — new `ops/install-shim-autostart.ps1`
 
 A dedicated script (the daemon autostart script is legacy pre-Docker; do not
-resurrect it) registering a Scheduled Task "PseudoLife Sonnet Shim" at logon:
+resurrect it) registering a Scheduled Task "Pseudolife Sonnet Shim" at logon:
 
 ```
 python evals/sonnet_shim.py --port 8082 \

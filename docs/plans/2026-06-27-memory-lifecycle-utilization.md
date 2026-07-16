@@ -889,9 +889,9 @@ git commit -m "feat(ops): register SessionStart/SessionEnd episode hooks (idempo
 
 **Interfaces:** none (documentation/behavioral).
 
-- [ ] **Step 1: Replace the PseudoLife-MCP memory section**
+- [ ] **Step 1: Replace the Pseudolife-MCP memory section**
 
-Replace the existing `## PseudoLife-MCP memory — use it every session` section in `~/.claude/CLAUDE.md` with the RECALL→CAPTURE→REFLECT block verbatim from the spec (`docs/specs/2026-06-27-memory-lifecycle-utilization-design.md`, section 1c). Keep the surrounding "Coding discipline (Karpathy principles)" section untouched.
+Replace the existing `## Pseudolife-MCP memory — use it every session` section in `~/.claude/CLAUDE.md` with the RECALL→CAPTURE→REFLECT block verbatim from the spec (`docs/specs/2026-06-27-memory-lifecycle-utilization-design.md`, section 1c). Keep the surrounding "Coding discipline (Karpathy principles)" section untouched.
 
 - [ ] **Step 2: Verify in a fresh session**
 

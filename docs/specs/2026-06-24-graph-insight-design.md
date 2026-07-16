@@ -5,13 +5,13 @@
 **Status:** design approved, pending implementation plan
 **Provenance:** Track B of the graphify competitive evaluation (2026-06-24).
 Track A (recall hub-gating) shipped; this builds the topology insight layer
-graphify's `analyze.py`/`cluster.py` demonstrate, adapted to PseudoLife's data
+graphify's `analyze.py`/`cluster.py` demonstrate, adapted to Pseudolife's data
 model (provenance tiers, contested facts) rather than graphify's code-specific
 signals.
 
 ## Problem
 
-PseudoLife has a knowledge graph (Postgres `entities` hub + NetworkX read-model)
+Pseudolife has a knowledge graph (Postgres `entities` hub + NetworkX read-model)
 but no topology analytics. `dream` consolidates memories into edges, but nothing
 surfaces the *shape* of what the graph knows: which entities are central, which
 connections are surprising, what is worth verifying. graphify computes
@@ -152,7 +152,7 @@ top-N
 `[{src, dst, relation, confidence, origin, score, why}]`, where `why`
 is a human reason (e.g. "agent-inferred bridge between community 2 and 5").
 
-### D — Suggested questions (PseudoLife signals)
+### D — Suggested questions (Pseudolife signals)
 - **contested_fact** — from `cortex_records` with `contested == True`: *"Which
   value of `{attr}` for `{entity}` is correct — `{current}` or `{contender}`?"*
   (we carry `contender_value`/`contender_origin`). Uses our real contested-fact

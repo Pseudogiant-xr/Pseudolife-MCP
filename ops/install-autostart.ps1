@@ -1,5 +1,5 @@
 #Requires -Version 7
-# Register the PseudoLife-MCP daemon to start at logon (Windows Task Scheduler).
+# Register the Pseudolife-MCP daemon to start at logon (Windows Task Scheduler).
 #
 #   ops\install-autostart.ps1                 # uses the repo .venv or system python
 #   ops\install-autostart.ps1 -Token "secret" # also export a LAN token
@@ -23,7 +23,7 @@ if (-not $PythonExe) {
     $PythonExe = (Test-Path $venv) ? $venv : (Get-Command python).Source
 }
 
-$taskName = "PseudoLife-MCP Daemon"
+$taskName = "Pseudolife-MCP Daemon"
 $envPrefix = "`$env:PSEUDOLIFE_MCP_HOST='$BindHost'; " +
              "`$env:PSEUDOLIFE_MCP_PORT='$Port'; " +
              "`$env:PSEUDOLIFE_MCP_DATABASE_URL='$DatabaseUrl'; " +
@@ -42,7 +42,7 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
     -RestartInterval (New-TimeSpan -Minutes 1)
 
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
-    -Settings $settings -Force -Description "PseudoLife-MCP memory daemon" | Out-Null
+    -Settings $settings -Force -Description "Pseudolife-MCP memory daemon" | Out-Null
 
 Write-Host "Registered '$taskName' (logon) -> $PythonExe -m pseudolife_memory.cli serve"
 Write-Host "Start now with:  Start-ScheduledTask -TaskName '$taskName'"

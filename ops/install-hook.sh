@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Idempotently add the PseudoLife-MCP session-start briefing to Claude Code's
+# Idempotently add the Pseudolife-MCP session-start briefing to Claude Code's
 # SessionStart hooks, ALONGSIDE (never replacing) any existing hooks.
 # Bash port of ops/install-hook.ps1 for Linux/macOS hosts.
 #
@@ -96,7 +96,7 @@ repo="$(cd "$(dirname "$0")/.." && pwd)"
 claude_md="$(dirname "$SETTINGS_PATH")/CLAUDE.md"
 if ! grep -q "pseudolife-memory" "$claude_md" 2>/dev/null; then
   echo ""
-  echo "REMINDER: $claude_md has no PseudoLife memory section — without a"
+  echo "REMINDER: $claude_md has no Pseudolife memory section — without a"
   echo "standing instruction the memory tools sit unused. Append the bundled block:"
   echo "  cat $repo/examples/CLAUDE.memory.md >> $claude_md"
   echo "(or add it to a per-project CLAUDE.md / AGENTS.md instead)"

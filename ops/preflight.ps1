@@ -19,7 +19,7 @@ function Fail($msg, $fix) {
     $script:fails++
 }
 
-Write-Host "PseudoLife-MCP preflight (checks only - nothing is installed or changed)"
+Write-Host "Pseudolife-MCP preflight (checks only - nothing is installed or changed)"
 
 # -- docker: installed + daemon reachable ------------------------------------
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {

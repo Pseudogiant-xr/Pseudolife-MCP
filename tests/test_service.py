@@ -62,12 +62,12 @@ class TestSearch:
         self, pristine_service: MemoryService,
     ) -> None:
         # Use richer, overlapping content so cosine clears MIN_SCORE (0.25)
-        # on the small MiniLM-L6 embedder. Shorter "PseudoLife v0.7.6" type
+        # on the small MiniLM-L6 embedder. Shorter "Pseudolife v0.7.6" type
         # queries hover right around the threshold and produce flaky
         # zero-result runs — those are still useful real-world queries, but
         # the test shouldn't depend on the threshold knife-edge.
         pristine_service.store(
-            "PseudoLife v0.7.6 ships three new memory features: HyDE-lite "
+            "Pseudolife v0.7.6 ships three new memory features: HyDE-lite "
             "query expansion, periodic reflection / dreaming, and "
             "contrastive learning from negative signals.",
             source="pseudolife",
@@ -78,18 +78,18 @@ class TestSearch:
             source="general",
         )
         result = pristine_service.search(
-            "What memory features does PseudoLife v0.7.6 ship?", top_k=5,
+            "What memory features does Pseudolife v0.7.6 ship?", top_k=5,
         )
         assert result["count"] >= 1
-        # The top entry should be the PseudoLife one, not the cat one.
-        assert "PseudoLife" in result["entries"][0]["text"]
+        # The top entry should be the Pseudolife one, not the cat one.
+        assert "Pseudolife" in result["entries"][0]["text"]
 
     def test_search_filters_by_source(
         self, pristine_service: MemoryService,
     ) -> None:
         pristine_service.store("Python tip about list comprehensions", source="general")
         pristine_service.store(
-            "PseudoLife v0.7.6 ships HyDE and Reflection", source="pseudolife",
+            "Pseudolife v0.7.6 ships HyDE and Reflection", source="pseudolife",
         )
         result = pristine_service.search(
             "comprehensions", top_k=5, sources=["pseudolife"],
@@ -247,11 +247,11 @@ class TestTrace:
         self, pristine_service: MemoryService,
     ) -> None:
         pristine_service.store(
-            "Trace test: PseudoLife uses 8-band continuum memory",
+            "Trace test: Pseudolife uses 8-band continuum memory",
             source="trace-test",
         )
         out = pristine_service.trace(
-            "PseudoLife continuum memory", top_k=5,
+            "Pseudolife continuum memory", top_k=5,
         )
         # Same envelope as search, plus a ``trace`` key.
         assert "query" in out
@@ -590,7 +590,7 @@ class TestReranker:
         _reset_reranker(pristine_service)
 
         pristine_service.store(
-            "PseudoLife uses ChromaDB for the reference document bank",
+            "Pseudolife uses ChromaDB for the reference document bank",
             source="project",
         )
         pristine_service.store(
@@ -598,13 +598,13 @@ class TestReranker:
             source="kitchen",
         )
         out = pristine_service.search(
-            "PseudoLife uses ChromaDB reference document bank",
+            "Pseudolife uses ChromaDB reference document bank",
             top_k=5,
             rerank=True,
         )
         assert out["count"] >= 1
         # The lexically-aligned memory should land at the top.
-        assert "PseudoLife" in out["entries"][0]["text"]
+        assert "Pseudolife" in out["entries"][0]["text"]
 
     def test_rerank_failure_falls_back_to_biencoder(
         self,

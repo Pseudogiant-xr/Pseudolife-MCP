@@ -1,4 +1,4 @@
-"""PseudoLife-MCP — persistent long-term memory wrapped as an MCP server.
+"""Pseudolife-MCP — persistent long-term memory wrapped as an MCP server.
 
 Top-level re-exports for convenience. The MCP server itself lives in
 :mod:`pseudolife_memory.mcp_server`; the high-level wrapper is in

@@ -1,6 +1,6 @@
-# Contributing to PseudoLife-MCP
+# Contributing to Pseudolife-MCP
 
-Thanks for wanting to improve PseudoLife-MCP. This is a small, carefully
+Thanks for wanting to improve Pseudolife-MCP. This is a small, carefully
 tested codebase — the bar for merging is "surgical, tested, and explained",
 not "big".
 
@@ -66,7 +66,7 @@ from hard experience:
 
 ## Licensing of contributions
 
-PseudoLife-MCP is Apache-2.0. By contributing you agree to the
+Pseudolife-MCP is Apache-2.0. By contributing you agree to the
 [Developer Certificate of Origin](https://developercertificate.org/) —
 sign your commits off to say so:
 

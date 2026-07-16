@@ -3,7 +3,7 @@
 The real daemon can't run a second ``MemoryService`` against the live Postgres
 (schema DDL takes a lock), so all visual QA of the console runs against this
 fixture service via :mod:`pseudolife_memory.web.devserver`. The data is
-deliberately self-referential — PseudoLife's memory of building itself — so the
+deliberately self-referential — Pseudolife's memory of building itself — so the
 console looks realistic in screenshots. Shapes mirror the real service methods
 (verified against ``cms.stats`` / the cortex/world/lessons dumps).
 """
@@ -74,13 +74,13 @@ _LESSONS = [
 # ── associative stream ──────────────────────────────────────────────────────
 _BANDS = ["working", "micro", "instant", "fast", "medium", "slow", "archival", "forever"]
 _STREAM = [
-    ("Building a web frontend (Cortex Console) for PseudoLife-MCP — overnight /loop build.", "pseudolife", "instant", ["frontend", "web-ui"], 6 * 60),
+    ("Building a web frontend (Cortex Console) for Pseudolife-MCP — overnight /loop build.", "pseudolife", "instant", ["frontend", "web-ui"], 6 * 60),
     ("memory_recall mechanical seeder is now query-first: seed precision 1.0 vs 0.262.", "pseudolife", "instant", ["memory_recall", "milestone"], 8 * _H),
     ("GAM #2 graph-population is live; dream writes origin=agent relation edges on sweeps.", "pseudolife", "fast", ["gam", "graph"], 1 * _D),
     ("Procedural/outcome memory (lessons, schema v10) merged to master and pushed.", "pseudolife", "medium", ["lessons", "merged"], 2 * _D),
     ("World-knowledge cortex Phase 3 complete: sourced facts + age-decayed freshness.", "pseudolife", "slow", ["world-knowledge", "complete"], 11 * _D),
     ("Postgres bank wipe incident — never down -v; external volumes + backup.ps1 added.", "pseudolife", "forever", ["incident", "guard"], 13 * _D),
-    ("Evaluated Perplexity Brain vs PseudoLife; the one real gap was procedural memory.", "pseudolife", "slow", ["research", "competitive"], 4 * _D),
+    ("Evaluated Perplexity Brain vs Pseudolife; the one real gap was procedural memory.", "pseudolife", "slow", ["research", "competitive"], 4 * _D),
     ("Cosine spine (v0.5): bands are plain cosine stores; novelty surprise gate.", "pseudolife", "archival", ["v0.5", "cosine"], 30 * _D),
 ]
 

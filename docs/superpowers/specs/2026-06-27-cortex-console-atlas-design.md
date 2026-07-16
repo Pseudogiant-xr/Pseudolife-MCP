@@ -32,7 +32,7 @@ topics; a 16-node `gw2-reshade` cluster (Guild Wars 2 ReShade config) looks like
 it "invaded" the project graph when it is simply a different project with nowhere
 to live. The audit also found, within the un-scoped graph:
 
-- a **duplicate entity** never aliased — `web frontend ("PseudoLife Cortex
+- a **duplicate entity** never aliased — `web frontend ("Pseudolife Cortex
   Console")` (community 1) and `Cortex Console web frontend` (community 2) are
   the same thing, splitting the UI cluster across two communities (the source of
   the "why does X bridge to Y" confusion in the session briefing);
@@ -276,7 +276,7 @@ matching `tests/test_web.py`:
 | Finding | Members (real) | Action |
 |---|---|---|
 | Belongs to another project | `gw2-reshade` cluster (16) — GW2 ReShade config | Assign to `gw2-reshade` |
-| Duplicate entity | `web frontend ("PseudoLife Cortex Console")` ↔ `Cortex Console web frontend` | Merge |
+| Duplicate entity | `web frontend ("Pseudolife Cortex Console")` ↔ `Cortex Console web frontend` | Merge |
 | Dubious edges | `memory_recall →runs-on→ docker-desktop`; `→stores-data-in→ postgres` | Prune |
 | Orphan dyads | ~20 isolated 2-node communities | Review |
 | Test artifacts | `payments/payments-db`, `pl-healthcheck-target`, `deploy-smoke-*`, `noise agent` | Delete |

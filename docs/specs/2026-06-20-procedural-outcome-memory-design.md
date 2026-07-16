@@ -1,7 +1,7 @@
 # Procedural / outcome memory ("lessons") — design spec
 
 Status: **proposed (design)**, pending review + plan.
-Target: **PseudoLife-MCP** `origin/master`. Add a third memory primitive beside the
+Target: **Pseudolife-MCP** `origin/master`. Add a third memory primitive beside the
 declarative cortex (`facts`) and world cortex (`world_facts`): a *procedural*
 store of **lessons** — what worked, what was a dead-end, and what got corrected,
 keyed to a **task-type** and tagged with an **outcome**. Lessons are written
@@ -19,7 +19,7 @@ of — `memory/world_cortex.py`, `world_facts`).
 
 ## 1. Motivation
 
-Every memory PseudoLife stores today is **declarative**: an `(entity, attribute)
+Every memory Pseudolife stores today is **declarative**: an `(entity, attribute)
 → value` truth about the user's world (`facts`) or the external world
 (`world_facts`). The system has no **procedural** memory — it never records the
 outcomes of *its own work*. So across sessions it cannot learn that, for a given
@@ -29,7 +29,7 @@ Y → Z. It re-derives that context every time.
 This is the one capability gap surfaced by the 2026-06-18 review of Perplexity
 "Brain": its distinguishing primitive is agent-work memory tagged with
 success / failure / correction signals, consolidated overnight into reusable
-lessons. PseudoLife already matches or beats Brain on consolidation (the dream,
+lessons. Pseudolife already matches or beats Brain on consolidation (the dream,
 which is on-demand, not batch-only), the context graph (AGE/NetworkX), provenance
 (world-cortex citations + cortex provenance tiers), sessions (episodes), and
 removal (`*_forget` / supersession). Procedural/outcome memory — especially

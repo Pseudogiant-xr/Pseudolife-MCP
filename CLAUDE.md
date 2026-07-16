@@ -1,4 +1,4 @@
-# PseudoLife-MCP — project conventions
+# Pseudolife-MCP — project conventions
 
 Conventions that aren't derivable from a quick read of the code. Follow them
 exactly; they exist because each one was violated at least once.
@@ -120,7 +120,7 @@ leaked email already cost a full history rewrite plus a fresh-repo publish.
 - **If a real secret ever lands in a pushed commit: rotate it first.** A
   rewrite is tidiness, not remediation.
 
-## Memory (PseudoLife MCP tools)
+## Memory (Pseudolife MCP tools)
 
 Log `memory_outcome` at task end — success/failure/correction signals are the
 only feeder for the lessons surfaced at session start. Deploys and eval results

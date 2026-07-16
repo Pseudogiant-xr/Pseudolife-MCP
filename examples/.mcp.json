@@ -1,8 +1,8 @@
 {
-  "_comment": "Copy to your project's .mcp.json or merge into ~/.claude/mcp_servers.json. Points at the v0.2 stdio shim (pseudolife-mcp.exe), which connects every session to the shared daemon and auto-starts it if absent. Replace C:\\path\\to\\PseudoLife-MCP with your clone path. The DATABASE_URL matches ops/docker-compose.yml defaults. For the daemon-less v0.1 escape hatch use command python -m pseudolife_memory.cli embedded instead.",
+  "_comment": "Copy to your project's .mcp.json or merge into ~/.claude/mcp_servers.json. Points at the v0.2 stdio shim (pseudolife-mcp.exe), which connects every session to the shared daemon and auto-starts it if absent. Replace C:\\path\\to\\Pseudolife-MCP with your clone path. The DATABASE_URL matches ops/docker-compose.yml defaults. For the daemon-less v0.1 escape hatch use command python -m pseudolife_memory.cli embedded instead.",
   "mcpServers": {
     "pseudolife-memory": {
-      "command": "C:\\path\\to\\PseudoLife-MCP\\.venv\\Scripts\\pseudolife-mcp.exe",
+      "command": "C:\\path\\to\\Pseudolife-MCP\\.venv\\Scripts\\pseudolife-mcp.exe",
       "env": {
         "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:8765",
         "PSEUDOLIFE_MCP_DATABASE_URL": "postgresql://pseudolife:pseudolife@127.0.0.1:5433/pseudolife_memory",

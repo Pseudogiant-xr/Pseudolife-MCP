@@ -34,7 +34,7 @@ REFERENCES entries(id) ON DELETE CASCADE` is correct and gives automatic fading.
 
 ## Brain mapping (the design lens)
 
-| PseudoLife | Brain | Role |
+| Pseudolife | Brain | Role |
 |---|---|---|
 | Bands (`entries`) | Hippocampus | fast, dense, **episodic**, capacity-limited and **evicting** (transient traces) |
 | Cortex facts (`facts`) | Neocortex | slow, terse, **semantic**, durable |

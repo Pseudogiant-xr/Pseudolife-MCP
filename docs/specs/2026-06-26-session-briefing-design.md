@@ -19,8 +19,8 @@ block.
 ## Why a CLI + hook (not server-side injection)
 
 There is **no server-side context injection** in the MCP path —
-`context_builder.py` is desktop-app PseudoLife legacy (it builds a "You are
-PseudoLife" *system prompt*), unused by the MCP server. The MCP server exposes
+`context_builder.py` is desktop-app Pseudolife legacy (it builds a "You are
+Pseudolife" *system prompt*), unused by the MCP server. The MCP server exposes
 tools; the *client* decides what to inject. In Claude Code the injection point is
 a **SessionStart hook** (runs a command, injects its stdout). So the briefing is
 delivered as: a server-side assembler, a thin CLI that prints it, and a hook that

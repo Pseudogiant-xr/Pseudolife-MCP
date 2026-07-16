@@ -356,7 +356,7 @@ class DreamConfig:
     # this threshold, a merge proposal is filed for review (same queue and
     # review flow as the Jaccard detector above; never auto-folded). Semantic
     # complement to token Jaccard: "production extractor sidecar" ~
-    # "PseudoLife-MCP default extractor sidecar" is Jaccard 0.33 but cosine
+    # "Pseudolife-MCP default extractor sidecar" is Jaccard 0.33 but cosine
     # 0.65 (all-MiniLM-L6-v2 calibration 2026-07-07: paraphrase pairs scored
     # 0.53-0.77, unrelated pairs <= 0.17). 0 disables.
     alias_candidate_min_cosine: float = 0.5
@@ -463,7 +463,7 @@ class CompactionConfig:
 class MetaFilterConfig:
     """Self-reference meta-statement filter on the store path.
 
-    Designed for PseudoLife's chat flow where model responses are
+    Designed for Pseudolife's chat flow where model responses are
     auto-captured. In the MCP build every store is deliberate, so
     ``MemoryService._apply_mcp_defaults`` disables it.
     """

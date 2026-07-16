@@ -1,7 +1,7 @@
 # Writer-aware temporal memory (v0.4) — design spec
 
 Status: **proposed (design)**, pending review + plan.
-Target: **PseudoLife-MCP** `origin/master` (after the lessons/v10 feature, which is
+Target: **Pseudolife-MCP** `origin/master` (after the lessons/v10 feature, which is
 merged at `f303846`). Give every memory write a robust temporal + provenance
 stamp — `(tx_time, valid_time, hlc, writer_id, session_id)` — so the agent gains
 a real *sense of time*, ordering is deterministic under load and immune to

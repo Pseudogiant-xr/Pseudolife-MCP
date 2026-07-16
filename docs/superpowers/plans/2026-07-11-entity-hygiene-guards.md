@@ -840,7 +840,7 @@ Not a subagent task; requires Task 11 deployed. All REST verdicts include `"deci
 - [ ] **GND split:** inspect `memory_graph(entity="GND")`; if all provenance is GND Share (expected), rename via the Console/SQL display update to `GND Share`; any Enshrouded-server facts move to a new `GND (Enshrouded server)` entity first.
 - [ ] **Scope pass:** for each unattributed entity (the `unattributed` review finding), majority-project from its `entity_sources` rows → `POST /api/graph/assign-scope`; skip when no clear majority.
 - [ ] **Periphery sweep:** `memory_dream(action="deep")` preview, then `apply=true` (snapshot!); batch-judge new junk/merge proposals — accept junk for `metric-reading`/`list-artifact`/`concat-artifact`/`compound-artifact`, dismiss variant pairs, leave judgment calls pending in Atlas.
-- [ ] Record outcomes in PseudoLife memory (`memory_store` + `memory_outcome`).
+- [ ] Record outcomes in Pseudolife memory (`memory_store` + `memory_outcome`).
 
 ### Task 13 (BLOCKED — user go required): extraction-quality ladder re-run
 

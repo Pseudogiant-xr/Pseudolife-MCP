@@ -1,4 +1,4 @@
-"""MCP tool surface — exposes the PseudoLife memory tools to Claude Code.
+"""MCP tool surface — exposes the Pseudolife memory tools to Claude Code.
 
 Built on the FastMCP decorator API from the official ``mcp`` Python SDK.
 Each ``@_tool()`` becomes a JSON-RPC tool. The surface (consolidated
@@ -82,7 +82,7 @@ _data_dir = os.environ.get("PSEUDOLIFE_MCP_DATA_DIR")
 _config_path = os.environ.get("PSEUDOLIFE_MCP_CONFIG")
 service = MemoryService(data_dir=_data_dir, config_path=_config_path)
 
-mcp = FastMCP("PseudoLife Memory")
+mcp = FastMCP("Pseudolife Memory")
 
 from pseudolife_memory.toolset_tiers import (
     SessionTierState, normalize_tier, parse_tier_map, rank as _tier_rank,
@@ -829,7 +829,7 @@ def memory_episode_end() -> dict[str, Any]:
 @_tool(tier="minimal")  # the recommended workflow names the session early.
 def memory_session_title(title: str) -> dict[str, Any]:
     """Name THIS session's auto-opened episode (default titles are
-    generic). Call once at the start of work — e.g. ``"PseudoLife-MCP"`` or
+    generic). Call once at the start of work — e.g. ``"Pseudolife-MCP"`` or
     ``"auth-refactor"`` — so session recaps read meaningfully. Idempotent;
     call again to rename.
     """
@@ -1238,7 +1238,7 @@ def start_session_reaper() -> None:
 def _run_embedded_stdio() -> None:
     """v0.1-style in-process stdio server (also the shim's escape hatch)."""
     logger.info(
-        "PseudoLife-MCP embedded stdio starting (data_dir=%s, config=%s)",
+        "Pseudolife-MCP embedded stdio starting (data_dir=%s, config=%s)",
         service.data_dir,
         _config_path or "<defaults>",
     )

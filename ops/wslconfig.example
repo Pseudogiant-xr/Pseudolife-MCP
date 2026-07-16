@@ -1,8 +1,8 @@
-# Example WSL2 config for running the PseudoLife-MCP Docker stack on Windows.
+# Example WSL2 config for running the Pseudolife-MCP Docker stack on Windows.
 #
 # WHY: Docker Desktop's WSL2 backend (the "VmmemWSL"/"Vmmem" process) by default
 # may grow to ~50% of host RAM and caches aggressively without handing memory
-# back to Windows. The PseudoLife stack's footprint:
+# back to Windows. The Pseudolife stack's footprint:
 #   postgres ~30 MiB, daemon ~400 MiB, extractor = the default Gemma 4 E4B v2
 #   bake is a ~5.3 GB model that llama.cpp mmaps — plan ~6-7 GiB for the full
 #   stack under dream load. Sonnet-only installs (no sidecar) need only ~1 GiB.

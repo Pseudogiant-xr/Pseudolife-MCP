@@ -950,7 +950,7 @@ git commit -m "feat(shim): /health runs a real CLI check (503 when logged out)"
 
 **Interfaces:**
 - Consumes: `evals/sonnet_shim.py` CLI (`--port`, `--system-prompt-file`), the Task 1 env var names.
-- Produces: Scheduled Task "PseudoLife Sonnet Shim"; documented cutover env values.
+- Produces: Scheduled Task "Pseudolife Sonnet Shim"; documented cutover env values.
 
 - [ ] **Step 1: Write the script**
 
@@ -984,7 +984,7 @@ $promptPath = Join-Path $repo $PromptFile
 if (-not (Test-Path $promptPath)) { throw "prompt file not found: $promptPath" }
 New-Item -ItemType Directory -Force (Split-Path -Parent $LogFile) | Out-Null
 
-$taskName = "PseudoLife Sonnet Shim"
+$taskName = "Pseudolife Sonnet Shim"
 $inner = "& '$PythonExe' '$repo\evals\sonnet_shim.py' --port $Port " +
          "--system-prompt-file '$promptPath' *>> '$LogFile'"
 $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
@@ -1075,5 +1075,5 @@ git commit -m "feat(ops): sonnet shim autostart script + cutover docs"
 - [ ] **Step 2: Register the shim task** — `ops\install-shim-autostart.ps1`; confirm `curl http://127.0.0.1:8082/health` → 200.
 - [ ] **Step 3: Set the five cutover env values** in the daemon's compose environment and recreate the daemon container (`docker compose up -d` — NEVER `down -v`).
 - [ ] **Step 4: Validate primary path** — console Observatory shows "extractor: primary ✓"; trigger a dream (Run dream), result toast OK, daemon log shows the sonnet endpoint served it.
-- [ ] **Step 5: Validate fallback** — stop the shim task (`Stop-ScheduledTask "PseudoLife Sonnet Shim"`), refresh Observatory (badge: "FALLBACK (primary down)"), run a dream (served by E4B), restart the task, badge returns to "primary ✓".
+- [ ] **Step 5: Validate fallback** — stop the shim task (`Stop-ScheduledTask "Pseudolife Sonnet Shim"`), refresh Observatory (badge: "FALLBACK (primary down)"), run a dream (served by E4B), restart the task, badge returns to "primary ✓".
 - [ ] **Step 6: Watch the first week** — eyeball dream logs for v1-prompt quality on live developer-workflow content (spec risk note).

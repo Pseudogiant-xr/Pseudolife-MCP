@@ -1,7 +1,7 @@
 # Pluggable dream extractor — design spec
 
 Status: **proposed (design)**, pending review + plan.
-Target: **PseudoLife-MCP** `origin/master`. Core-only; no external-agent deps.
+Target: **Pseudolife-MCP** `origin/master`. Core-only; no external-agent deps.
 Touches `pseudolife_memory/service.py`, `mcp_server.py`, `daemon.py`,
 `utils/config.py`, a new `pseudolife_memory/memory/dream.py` (extractor
 abstraction + LLM client), `commands/` (a `/dream` recipe), docs, and tests.

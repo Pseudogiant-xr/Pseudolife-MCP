@@ -1,4 +1,4 @@
-# PseudoLife Cortex Console — web frontend design
+# Pseudolife Cortex Console — web frontend design
 
 **Status:** shipped v1 (merged to master). Superseded by `docs/superpowers/specs/2026-06-25-cortex-console-v2-design.md`.
 **Branch:** merged (was `feat/web-ui`)
@@ -6,7 +6,7 @@
 
 ## Problem
 
-PseudoLife-MCP is a powerful multi-layer memory engine, but the only way to
+Pseudolife-MCP is a powerful multi-layer memory engine, but the only way to
 see or steer it is through MCP tool calls issued by an LLM. A human operator
 has no way to:
 
@@ -51,7 +51,7 @@ as a deferred follow-on, so this is a roadmapped feature, not scope creep.
   approach and the tabbed IA.
 - **Mem0 / Zep / Letta / Cognee (2026 comparisons)** — Zep's headline
   differentiator is a *temporal* knowledge graph that tracks how facts change
-  over time (fact-validity windows). PseudoLife **already has this**
+  over time (fact-validity windows). Pseudolife **already has this**
   (`memory_history`, HLC ordering, `valid_time`/`tx_time`, supersession) — so
   a fact-evolution timeline is essentially free and is a standout feature.
 - **KG-visualisation UX research** (arXiv 2304.01311; FalkorDB) — users want

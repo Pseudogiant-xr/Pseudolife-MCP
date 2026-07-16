@@ -1,6 +1,6 @@
 # Tier C — Episodic Memory + Tag Slice (Design Spec)
 
-**Status:** Approved 2026-05-27. Targets PseudoLife-MCP after Tier B2 ships.
+**Status:** Approved 2026-05-27. Targets Pseudolife-MCP after Tier B2 ships.
 
 ## Motivation
 
@@ -10,7 +10,7 @@ The literature on long-term LLM agent memory ([Position paper, ICML 2025](https:
 2. **Consolidation** — turning clusters of related episodes into reusable semantic notes. Called out as the single most-important / least-implemented capability.
 3. **Contextual binding** — *when/where/why* an event occurred, beyond a bare timestamp.
 
-PseudoLife-MCP today flattens all memory into one shape (text + embedding + source-tag + timestamp). Tier C adds episodic structure and a Claude-driven consolidation workflow without requiring MCP sampling (Claude Code doesn't support it yet — see [feature request #1785](https://github.com/anthropics/claude-code/issues/1785)).
+Pseudolife-MCP today flattens all memory into one shape (text + embedding + source-tag + timestamp). Tier C adds episodic structure and a Claude-driven consolidation workflow without requiring MCP sampling (Claude Code doesn't support it yet — see [feature request #1785](https://github.com/anthropics/claude-code/issues/1785)).
 
 ## Scope
 

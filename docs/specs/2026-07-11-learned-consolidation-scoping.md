@@ -23,7 +23,7 @@ The common failure is optimizing a *proxy* (label imitation, prompt hints).
 Auto-Dreamer and MemoPilot both argue the fix: train the consolidation
 decision itself against a *downstream* objective. Auto-Dreamer's learned
 offline consolidator — the exact fast-acquire / slow-consolidate split
-PseudoLife already implements as episodic store vs dream pass — beat fixed,
+Pseudolife already implements as episodic store vs dream pass — beat fixed,
 RL, and prompted baselines with a 6–12× smaller bank and transferred across
 domains without retraining.
 

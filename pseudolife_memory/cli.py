@@ -29,7 +29,7 @@ modes:
   episode-end    close it
   help           show this message (also -h / --help)
 
-docs: https://github.com/Pseudogiant-xr/PseudoLife-MCP
+docs: https://github.com/Pseudogiant-xr/Pseudolife-MCP
 """
 
 

@@ -1,6 +1,6 @@
-# Cortex for PseudoLife-MCP — implementation spec (core-only)
+# Cortex for Pseudolife-MCP — implementation spec (core-only)
 
-Status: proposed. Target repo: **PseudoLife-MCP** (`origin`), core-only, branched
+Status: proposed. Target repo: **Pseudolife-MCP** (`origin`), core-only, branched
 off `origin/master` (`adc39a8`). Deliberately excludes the agent-side gateway "dream".
 
 ## 1. Why (model-agnostic motivation)
@@ -181,7 +181,7 @@ New:
    pseudolife_memory/service.py tests/test_cortex.py tests/test_cortex_service.py`.
 3. Implement §3 (promotion + `_origin_from_source`), §4 (origin params), §5
    (`mcp_server.py` tools + cortex-aware search), §7 (config).
-4. `pytest -q`. Then commit + push to `origin` (PseudoLife-MCP). PR/merge per repo
+4. `pytest -q`. Then commit + push to `origin` (Pseudolife-MCP). PR/merge per repo
    norms.
 - No data migration: a fresh `cortex_state.pt` starts empty and auto-promotion fills
   it. `store()` stays backward-compatible (new `origin` is optional).

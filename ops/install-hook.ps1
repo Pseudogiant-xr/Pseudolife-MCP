@@ -1,7 +1,7 @@
 #Requires -Version 7
 # ^ enforced, not just documented: 5.1's Set-Content writes a BOM into
 #   settings.json.
-# Idempotently add the PseudoLife-MCP session-start briefing to Claude Code's
+# Idempotently add the Pseudolife-MCP session-start briefing to Claude Code's
 # SessionStart hooks, ALONGSIDE (never replacing) any existing hooks.
 #
 #   ops\install-hook.ps1
@@ -99,7 +99,7 @@ $hasBlock = (Test-Path $claudeMd) -and
     ((Get-Content $claudeMd -Raw) -match 'pseudolife-memory')
 if (-not $hasBlock) {
     Write-Host ""
-    Write-Warning "$claudeMd has no PseudoLife memory section - without a standing instruction the memory tools sit unused. Append the bundled block:"
+    Write-Warning "$claudeMd has no Pseudolife memory section - without a standing instruction the memory tools sit unused. Append the bundled block:"
     Write-Host "  Add-Content `"$claudeMd`" (Get-Content `"$repo\examples\CLAUDE.memory.md`" -Raw)"
     Write-Host "(or add it to a per-project CLAUDE.md / AGENTS.md instead)"
 }

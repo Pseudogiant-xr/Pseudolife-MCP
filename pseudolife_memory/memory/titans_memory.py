@@ -40,7 +40,7 @@ class MemoryEntry:
     retrieval. ``None`` for pre-v5 entries and for entries that have
     never been superseded.
 
-    ``episode_id`` / ``episode_title`` (schema v6, PseudoLife-MCP Tier C)
+    ``episode_id`` / ``episode_title`` (schema v6, Pseudolife-MCP Tier C)
     stamp the entry with the open episode at store time. ``None`` when no
     episode was active. ``episode_title`` is denormalised so retrieval
     responses can show the label without joining against the episode log.

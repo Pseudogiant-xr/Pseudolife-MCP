@@ -1,7 +1,7 @@
 # Small-model supersession + tunable abstention guard — design spec
 
 Status: **proposed (design)**, pending review + plan.
-Target: **PseudoLife-MCP** `origin/master`. Two small, independent, data-driven
+Target: **Pseudolife-MCP** `origin/master`. Two small, independent, data-driven
 knobs that close the two gaps the 2026-06-18 extractor-ladder sweep exposed
 (`evals/README.md` §Findings). Both are additive and behaviour-preserving at
 their default values. Touches `pseudolife_memory/memory/cortex.py`,

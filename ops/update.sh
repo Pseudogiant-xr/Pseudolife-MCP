@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Safely update ONLY the PseudoLife-MCP daemon to the current checkout code.
+# Safely update ONLY the Pseudolife-MCP daemon to the current checkout code.
 # Bash port of ops/update.ps1 for Linux/macOS hosts.
 #
 #   ops/update.sh                  # backup -> tag rollback -> daemon-only rebuild -> health

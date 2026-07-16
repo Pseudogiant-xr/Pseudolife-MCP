@@ -1,4 +1,4 @@
-"""Episode lifecycle and tag normalisation for PseudoLife-MCP (Tier C).
+"""Episode lifecycle and tag normalisation for Pseudolife-MCP (Tier C).
 
 An *episode* is a bracket around a logical work session — a project
 sprint, a debugging push, a single user task. While an episode is open,

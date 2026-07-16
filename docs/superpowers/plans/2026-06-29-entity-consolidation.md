@@ -27,7 +27,7 @@
 - [ ] **Step 1: Create the feature branch**
 
 ```bash
-cd /c/Users/<user>/ClaudeCode/PseudoLife-MCP
+cd /c/Users/<user>/ClaudeCode/Pseudolife-MCP
 git checkout master && git pull --ff-only
 git checkout -b feat/entity-consolidation
 ```

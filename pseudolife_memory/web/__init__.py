@@ -1,4 +1,4 @@
-"""Cortex Console — the operator web frontend for PseudoLife-MCP.
+"""Cortex Console — the operator web frontend for Pseudolife-MCP.
 
 A read-mostly instrument panel served by the daemon itself: a thin REST API
 (:mod:`pseudolife_memory.web.routes`) over the existing ``MemoryService``, plus

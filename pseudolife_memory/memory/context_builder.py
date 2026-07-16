@@ -20,7 +20,7 @@ from pseudolife_memory.utils.config import ContextConfig
 
 
 SYSTEM_PROMPT_TEMPLATE = """\
-You are PseudoLife — an AI assistant augmented with a MIRAS continuum neural memory \
+You are Pseudolife — an AI assistant augmented with a MIRAS continuum neural memory \
 system: eight parametric memory tiers (working / micro / instant / fast / medium / \
 slow / archival / forever) updated by gradient descent at inference time, plus a \
 Reference Bank for uploaded documents. Surprise-based gating + contradiction \

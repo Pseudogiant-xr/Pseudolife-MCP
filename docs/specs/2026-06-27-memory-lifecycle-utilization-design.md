@@ -116,7 +116,7 @@ POST /api/episode/end    {session_key}               → svc.episode_end_session
   mirroring `briefing_cli.py`: hit the running daemon, never auto-start one,
   **swallow all errors and exit 0**.
 - Read Claude Code's **hook stdin JSON** for `session_id` (→ `session_key`) and
-  `cwd` (→ title, e.g. `PseudoLife-MCP — 2026-06-27`). On malformed/empty stdin,
+  `cwd` (→ title, e.g. `Pseudolife-MCP — 2026-06-27`). On malformed/empty stdin,
   fall back to a random `session_key` and still exit 0.
 
 **Hooks — [`ops/install-hook.ps1`](../../ops/install-hook.ps1)**
@@ -153,7 +153,7 @@ Replace the current memory section with an explicit **session lifecycle** so
 every subsystem has a trigger (RECALL → CAPTURE → REFLECT):
 
 ```markdown
-## PseudoLife-MCP memory — your long-term memory (use it every session)
+## Pseudolife-MCP memory — your long-term memory (use it every session)
 One shared neural-memory bank across all sessions (tools: `mcp__pseudolife-memory__*`).
 Treat it as a loop with three beats: RECALL at the start, CAPTURE as you go,
 REFLECT at the end. Episodes are opened/closed for you by session hooks — every

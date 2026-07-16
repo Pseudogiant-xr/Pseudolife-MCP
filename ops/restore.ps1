@@ -1,5 +1,5 @@
 #Requires -Version 7
-# Restore a PseudoLife-MCP pg_dump backup (the inverse of ops\backup.ps1).
+# Restore a Pseudolife-MCP pg_dump backup (the inverse of ops\backup.ps1).
 #
 #   ops\restore.ps1                          # REHEARSAL (default, safe):
 #                                            #   newest backup -> scratch db,

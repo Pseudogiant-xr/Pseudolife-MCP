@@ -1,14 +1,14 @@
 # Dev-domain extractor — scoping note (follow-on)
 
 **Status**: scoping seed (not a spec yet — brainstorm before building) · **Date**: 2026-07-07
-**Origin**: user raised during the Stage-1.5 Sonnet-datagen pilot — the extractor should be strong on the domain PseudoLife is actually used for (software engineering), not just personal-assistant facts.
+**Origin**: user raised during the Stage-1.5 Sonnet-datagen pilot — the extractor should be strong on the domain Pseudolife is actually used for (software engineering), not just personal-assistant facts.
 
 ## The gap
 
 The bespoke extractor is trained/evaluated on LongMemEval `_s`, whose sessions
 are personal-assistant flavored (travel, recipes, health, hobbies). The recall
 prompt values "life, preferences, possessions, plans, relationships, health,
-work, history." The facts that PseudoLife's real (dev) use turns on are
+work, history." The facts that Pseudolife's real (dev) use turns on are
 under-represented:
 
 - **tech stack / tooling**: "daemon runs in Docker", "extractor is Gemma-4-E4B",
@@ -37,7 +37,7 @@ they read as impersonal Q&A), which is wrong for a dev-memory system.
 
 | option | pro | con |
 |---|---|---|
-| User's own PseudoLife transcripts / episodes | perfectly on-domain, real | small volume; eval-contamination risk if we later eval on the live bank; needs careful holdout |
+| User's own Pseudolife transcripts / episodes | perfectly on-domain, real | small volume; eval-contamination risk if we later eval on the live bank; needs careful holdout |
 | Public dev-conversation datasets | zero authoring | mostly single-turn Q&A — lack the multi-session continuity + supersession structure that LongMemEval provides |
 | **Synthesize dev-persona histories** (recommended) | controllable, on-domain, teaches supersession on tech facts, no contamination | authoring cost; must avoid a synthetic-distribution gap |
 

@@ -50,7 +50,7 @@ class TestTokenize:
         assert "process_chunk_v2" in toks
 
     def test_keeps_dotted_versions_whole(self) -> None:
-        toks = tokenize("ship PseudoLife v0.7.6 today")
+        toks = tokenize("ship Pseudolife v0.7.6 today")
         assert "v0.7.6" in toks
 
     def test_drops_stop_words(self) -> None:
@@ -147,8 +147,8 @@ class TestScore:
 
     def test_dotted_version_token(self) -> None:
         idx = BM25Index([
-            _make_entry("PseudoLife v0.7.6 ships new features"),
-            _make_entry("PseudoLife v0.7.5 was the previous release"),
+            _make_entry("Pseudolife v0.7.6 ships new features"),
+            _make_entry("Pseudolife v0.7.5 was the previous release"),
             _make_entry("the cat sat on the mat"),
         ])
         hits = idx.score("v0.7.6", top_k=5)

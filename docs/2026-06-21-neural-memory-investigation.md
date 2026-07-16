@@ -63,7 +63,7 @@ query vector that's only ~0.4-cosine-faithful drags the ranking below clean cosi
   exists but only splits one embedding into coordinate halves (predict the V-half of `x` from
   `x`) — still self-derived, not a learned cross-item association.
 - **The learned gates are inert — the code says so.** `SurpriseModulatedUpdate`'s own
-  docstring: *"PseudoLife has no training loop (memory is updated only at inference time), so
+  docstring: *"Pseudolife has no training loop (memory is updated only at inference time), so
   the gate weights stay at their xavier-init values forever and contribute essentially random
   multiplicative noise rather than learned modulation."* TITANS' learned surprise/forget gate
   is replaced by a hand-rolled deterministic sigmoid because there is nothing to train it with.

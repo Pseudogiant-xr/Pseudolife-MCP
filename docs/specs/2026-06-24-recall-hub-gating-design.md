@@ -236,4 +236,4 @@ Dev-only, not CI.
 Track A of the graphify competitive evaluation (2026-06-24). graphify's query
 path is lexical (IDF + trigram + hub-gated BFS), not embedding-based; the
 transferable mechanism here is the hub-gated traversal discipline, layered onto
-PseudoLife's existing seeds. Track B (insight/digest layer) is deferred.
+Pseudolife's existing seeds. Track B (insight/digest layer) is deferred.

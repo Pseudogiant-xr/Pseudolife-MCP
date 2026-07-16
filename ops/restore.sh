@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Restore a PseudoLife-MCP pg_dump backup (the inverse of ops/backup.sh).
+# Restore a Pseudolife-MCP pg_dump backup (the inverse of ops/backup.sh).
 # Bash port of ops/restore.ps1 for Linux/macOS hosts.
 #
 #   ops/restore.sh                        # REHEARSAL (default, safe):

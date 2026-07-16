@@ -50,8 +50,8 @@ def test_extract_text_plain(tmp_path):
 
 def test_extract_pdf(tmp_path):
     p = tmp_path / "doc.pdf"
-    _make_minimal_pdf(p, "PseudoLife pdfium test")
-    assert "PseudoLife pdfium test" in extract_text(p)
+    _make_minimal_pdf(p, "Pseudolife pdfium test")
+    assert "Pseudolife pdfium test" in extract_text(p)
 
 
 def test_extract_pdf_pypdf_fallback(tmp_path, monkeypatch):

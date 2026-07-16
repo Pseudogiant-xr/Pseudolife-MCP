@@ -11,7 +11,7 @@ current facts; supersessions 156→118); qwen-27b captured MORE answers
 slots degrades retrieval ranking. `known_facts_window` stays 0 (code inert,
 default-off). Results archived in `evals/results/*-w0/-w20*`.
 **Origin:** TiMem (arXiv 2601.02845) historical-window consolidation, adapted to
-PseudoLife's flat slot cortex. Successor experiment to Stage 1.5 (closed
+Pseudolife's flat slot cortex. Successor experiment to Stage 1.5 (closed
 2026-07-10: training-side arms neutral or negative; forward hypothesis was
 "fix key reuse at the point the extractor writes, not post-hoc").
 
@@ -42,7 +42,7 @@ emit a claim the notes do not state):
 
 Relevance ranking reuses the existing batch-text embedding (one encode,
 shared with the vocab hint). TiMem's literal "3 most recent same-level
-memories" is translated to relevance-matching because PseudoLife's cortex is
+memories" is translated to relevance-matching because Pseudolife's cortex is
 a flat slot store, not a temporally scoped tree; recency would bench well on
 small oracle banks and degrade on the live bank.
 

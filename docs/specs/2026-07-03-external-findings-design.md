@@ -6,7 +6,7 @@ Origin: comparison review of GitNexus, graphify, and Penpax/Graphify Labs.
 
 ## Goal
 
-Adopt five externally-validated ideas into PseudoLife-MCP, in two waves:
+Adopt five externally-validated ideas into Pseudolife-MCP, in two waves:
 
 | ID | Feature | Source | Wave |
 |----|---------|--------|------|

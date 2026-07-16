@@ -28,7 +28,7 @@ $promptPath = Join-Path $repo $PromptFile
 if (-not (Test-Path $promptPath)) { throw "prompt file not found: $promptPath" }
 New-Item -ItemType Directory -Force (Split-Path -Parent $LogFile) | Out-Null
 
-$taskName = "PseudoLife Sonnet Shim"
+$taskName = "Pseudolife Sonnet Shim"
 # -WindowStyle Hidden only hides a console window it still allocates — on
 # Windows 11 with Windows Terminal set as the default terminal app, WT
 # intercepts that console-allocation moment and opens a visible (blank)

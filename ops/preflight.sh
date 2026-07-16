@@ -13,7 +13,7 @@ ok()   { printf '  \033[32mOK\033[0m   %s\n' "$1"; }
 warn() { printf '  \033[33mWARN\033[0m %s\n' "$1"; printf '        fix: %s\n' "$2"; }
 fail() { printf '  \033[31mFAIL\033[0m %s\n' "$1"; printf '        fix: %s\n' "$2"; fails=$((fails+1)); }
 
-echo "PseudoLife-MCP preflight (checks only — nothing is installed or changed)"
+echo "Pseudolife-MCP preflight (checks only — nothing is installed or changed)"
 
 # ── docker: installed, daemon reachable, permission to use the socket ──────
 if ! command -v docker >/dev/null 2>&1; then

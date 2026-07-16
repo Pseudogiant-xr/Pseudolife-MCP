@@ -1,4 +1,4 @@
-"""MemoryService — high-level wrapper over the PseudoLife memory stack.
+"""MemoryService — high-level wrapper over the Pseudolife memory stack.
 
 One ``MemoryService`` per data directory. The MCP server (see
 :mod:`pseudolife_memory.mcp_server`) holds a single instance for the
@@ -13,7 +13,7 @@ Design notes
   ``memory_store`` with a summary it composes itself. Contrastive stays
   because it doesn't need an LLM.
 
-* **No silent fallbacks.** PseudoLife's chat path swallows memory errors so
+* **No silent fallbacks.** Pseudolife's chat path swallows memory errors so
   the user's conversation never breaks. For an MCP tool Claude is calling
   deliberately, errors should surface — so this layer lets exceptions
   propagate and the MCP server converts them into structured error
@@ -349,7 +349,7 @@ class MemoryService:
         self.config.memory.reference.persist_dir = str(self.data_dir / "chromadb")
 
         # Defaults that make sense for the *Claude* use-case differ from
-        # the human-chat defaults shipped with PseudoLife — see README.
+        # the human-chat defaults shipped with Pseudolife — see README.
         # Overlay only: keys the user explicitly set in config.yaml win.
         self._apply_mcp_defaults(self.config, user_keys=_user_yaml_leaves(cfg_candidate))
 
@@ -414,7 +414,7 @@ class MemoryService:
     def _apply_mcp_defaults(
         config: AppConfig, user_keys: frozenset[str] = frozenset(),
     ) -> None:
-        """Tweak PseudoLife defaults for the MCP / Claude use case.
+        """Tweak Pseudolife defaults for the MCP / Claude use case.
 
         ``user_keys`` is the set of dotted leaf keys the user explicitly
         set in config.yaml — those are respected, never clobbered (the
@@ -2223,7 +2223,7 @@ class MemoryService:
         write-dedup (dismissed pairs suppressed, unique index dedupes,
         Atlas/graph_review surfaces it, a human settles it — never
         auto-folded). Complements ``_propose_write_dedup``: paraphrase
-        coreference ("production extractor sidecar" ~ "PseudoLife-MCP default
+        coreference ("production extractor sidecar" ~ "Pseudolife-MCP default
         extractor sidecar") shares almost no tokens but embeds close.
         Returns the number of proposals filed; never raises."""
         import time as _t

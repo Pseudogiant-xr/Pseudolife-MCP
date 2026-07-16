@@ -13,7 +13,7 @@ Live testing of `memory_recall` showed the **mechanical seeder is too liberal**:
 `query + " ".join(hits)`, so a populous bank's co-mentioning hit snippets drag in
 many irrelevant, often edge-less seeds. Observed: `"what does pseudolife-mcp run
 on?"` seeded 7 entities (`pseudolife-mcp`, `postgres`, `docker-desktop`, `Brain`,
-`Pseudolife`, `PseudoLife-MCP daemon`, `MemCoT`) — only `pseudolife-mcp` was the
+`Pseudolife`, `Pseudolife-MCP daemon`, `MemCoT`) — only `pseudolife-mcp` was the
 real subject; the rest came from co-mentioning snippets. It still bridged, but
 wastes graph calls and latency and muddies the result.
 

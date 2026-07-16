@@ -3,7 +3,7 @@
 # the stack is batteries-included: `docker compose --profile extractor up`
 # needs no manual model step and works offline after the build.
 #
-# Default = the bespoke PseudoLife extractor fine-tune (Gemma 4 E4B QLoRA,
+# Default = the bespoke Pseudolife extractor fine-tune (Gemma 4 E4B QLoRA,
 # registry-datagen v2, Q4_K_M ~5.3GB) — beats the prior fine-tune on the
 # LongMemEval knowledge-update bench (same-session: cortex 0.705 vs 0.603,
 # hybrid 0.756 vs 0.744; ladder stale-leak 0.0). Evals and provenance:

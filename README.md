@@ -1,4 +1,4 @@
-# PseudoLife-MCP
+# Pseudolife-MCP
 
 <!-- mcp-name: io.github.Pseudogiant-xr/pseudolife-mcp -->
 
@@ -13,8 +13,8 @@ memory that persists across sessions — surviving context compactions and
 Requires Docker and Claude Code. One command from clone to first memory:
 
 ```bash
-git clone https://github.com/Pseudogiant-xr/PseudoLife-MCP.git
-cd PseudoLife-MCP
+git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
+cd Pseudolife-MCP
 ops/install.sh          # Linux / macOS
 ops\install.ps1         # Windows (pwsh 7+)
 ```
@@ -276,8 +276,8 @@ identically on Windows / macOS / Linux. Requires only Docker; built once:
 sidecar entirely with the installer's `sonnet-only` mode).
 
 ```bash
-git clone https://github.com/Pseudogiant-xr/PseudoLife-MCP.git
-cd PseudoLife-MCP
+git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
+cd Pseudolife-MCP
 
 # 1. One-time: create the two persistent volumes (bank + daemon state).
 docker volume create pseudolife-mcp-bank
@@ -313,8 +313,8 @@ want to hack on the daemon or run the embedder on a local GPU. Requires
 Python 3.10+, Docker Desktop, and ~600 MB of disk.
 
 ```powershell
-git clone https://github.com/Pseudogiant-xr/PseudoLife-MCP.git
-cd PseudoLife-MCP
+git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
+cd Pseudolife-MCP
 python -m venv .venv
 .venv\Scripts\activate
 pip install -e .
@@ -324,7 +324,7 @@ docker compose -f ops/docker-compose.yml up -d --build pseudolife-pg
 
 # 2. Register the daemon to auto-start at logon (binds 127.0.0.1:8765).
 ops\install-autostart.ps1
-Start-ScheduledTask -TaskName "PseudoLife-MCP Daemon"
+Start-ScheduledTask -TaskName "Pseudolife-MCP Daemon"
 ```
 
 The `pseudolife-mcp` console-script is now on your PATH — run
@@ -412,7 +412,7 @@ the daemon and proxies. It does *not* work with the containerized daemon
 {
   "mcpServers": {
     "pseudolife-memory": {
-      "command": "C:\\path\\to\\PseudoLife-MCP\\.venv\\Scripts\\pseudolife-mcp.exe",
+      "command": "C:\\path\\to\\Pseudolife-MCP\\.venv\\Scripts\\pseudolife-mcp.exe",
       "env": {
         "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:8765",
         "PSEUDOLIFE_MCP_DATABASE_URL": "postgresql://pseudolife:pseudolife@127.0.0.1:5433/pseudolife_memory",
@@ -423,7 +423,7 @@ the daemon and proxies. It does *not* work with the containerized daemon
 }
 ```
 
-Replace `C:\path\to\PseudoLife-MCP` with wherever you cloned the repo. The
+Replace `C:\path\to\Pseudolife-MCP` with wherever you cloned the repo. The
 `PSEUDOLIFE_MCP_DATABASE_URL` matches the bundled `ops/docker-compose.yml`
 defaults (user/password `pseudolife`, host port `5433`) — change it only if you
 edit the compose file or override the password. The default password is safe
@@ -1115,7 +1115,7 @@ Per-runtime defaults (all serve the same `/v1/chat/completions` shape):
 
 The unused sidecar can be stopped (`docker compose -f ops/docker-compose.yml
 stop pseudolife-extractor`) or left running as a fallback to switch back to.
-The default bake is the bespoke [PseudoLife extractor fine-tune](https://huggingface.co/Pseudogiant-xr/pseudolife-extractor-gemma-4-e4b)
+The default bake is the bespoke [Pseudolife extractor fine-tune](https://huggingface.co/Pseudogiant-xr/pseudolife-extractor-gemma-4-e4b)
 (Gemma 4 E4B QLoRA); constrained machines can bake the lighter **Gemma 4 E2B
 QAT** instead (also ladder-verified) — see the `MODEL_URL` build-arg
 in `ops/Dockerfile.extractor`, or mount any GGUF over `/models/extractor.gguf`
@@ -1290,7 +1290,7 @@ docker volume rm pseudolife-mcp-bank pseudolife-mcp-state
 ```
 
 Host-process installs: also unregister the logon task (`Unregister-ScheduledTask
--TaskName "PseudoLife-MCP Daemon"`) and remove the SessionStart briefing
+-TaskName "Pseudolife-MCP Daemon"`) and remove the SessionStart briefing
 hook that `install-hook.ps1` / `install-hook.sh` added to
 `~/.claude/settings.json` (a timestamped `.bak-*` sits next to it).
 
@@ -1355,7 +1355,7 @@ An operator dashboard served by the daemon itself — point a browser at
 unchanged; the console is additive). It's a read-mostly instrument panel for
 seeing and steering the memory a human otherwise can't observe.
 
-![Cortex Console — Observatory view](https://raw.githubusercontent.com/Pseudogiant-xr/PseudoLife-MCP/master/docs/images/cortex-console-observatory.png)
+![Cortex Console — Observatory view](https://raw.githubusercontent.com/Pseudogiant-xr/Pseudolife-MCP/master/docs/images/cortex-console-observatory.png)
 
 - **Observatory** — health, per-layer counts, the 8-band MIRAS continuum
   (capacity fill + hit rate), and dream backlog/quiescence gauges.

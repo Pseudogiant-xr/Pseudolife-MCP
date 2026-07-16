@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-shot idempotent installer for the PseudoLife-MCP stack (issue #13
+# One-shot idempotent installer for the Pseudolife-MCP stack (issue #13
 # tier 2). Everything downstream of Docker: preflight -> volumes -> extractor
 # choice -> compose up -> session hooks -> CLAUDE.md memory block ->
 # claude mcp add -> health. Re-running is safe; re-running with a different

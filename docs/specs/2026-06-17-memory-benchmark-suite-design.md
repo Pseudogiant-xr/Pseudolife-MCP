@@ -1,18 +1,18 @@
 # Memory benchmark suite — design spec
 
 Status: **proposed (design)**, pending review + plan.
-Target: **PseudoLife-MCP** `origin/master`. Dev-only; ships a new top-level
+Target: **Pseudolife-MCP** `origin/master`. Dev-only; ships a new top-level
 `evals/` tree, a small engine change (ingestion-time timestamp), docs, and a
 results corpus. Does **not** touch the hot path or the public package.
 
 > One-line intent: produce a **rigorous, reproducible, pre-registered**
-> measurement of whether PseudoLife-MCP's memory is *good enough and
+> measurement of whether Pseudolife-MCP's memory is *good enough and
 > differentiated enough* to productize — and, if so, the credibility artifact
 > that sells it.
 
 ## 1. Problem
 
-We want to decide whether to invest in productizing PseudoLife-MCP. That
+We want to decide whether to invest in productizing Pseudolife-MCP. That
 decision must be **evidence-led**, not vibes-led, because:
 
 1. **Internal go/no-go.** The agent-memory category is crowded and partly
@@ -115,7 +115,7 @@ contaminated absolute number can't flatter us.
 
 ## 5. System-under-test (SUT) adapter
 
-PseudoLife-MCP is driven **only through its MCP tools** (no private internals) so
+Pseudolife-MCP is driven **only through its MCP tools** (no private internals) so
 the adapter measures the actual product.
 
 **Ingestion** (per benchmark conversation):

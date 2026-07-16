@@ -30,7 +30,7 @@
 - [ ] **Step 1: Create the feature branch**
 
 ```bash
-cd /c/Users/<user>/ClaudeCode/PseudoLife-MCP
+cd /c/Users/<user>/ClaudeCode/Pseudolife-MCP
 git checkout master && git pull
 git checkout -b feat/deep-dream-graph-consolidation
 ```

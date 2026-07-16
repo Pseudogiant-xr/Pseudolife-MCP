@@ -1,4 +1,4 @@
-# PostgreSQL 16 + pgvector for PseudoLife-MCP.
+# PostgreSQL 16 + pgvector for Pseudolife-MCP.
 #
 # Base: the official pgvector image (postgres:16, Debian) with the pgvector
 # extension prebuilt. Apache AGE was removed in the graph-foundation work

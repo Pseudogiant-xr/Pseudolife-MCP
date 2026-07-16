@@ -243,7 +243,7 @@ git commit -m "feat(evals): flag-gated LLM-JEPA auxiliary loss in E4B distill tr
 git stash   # only if Task 1 is uncommitted; otherwise:
 git show HEAD~1:evals/distill_train_e4b.py > /tmp/train_baseline.py
 source ~/e4b-train/bin/activate
-cd /mnt/c/Users/<user>/ClaudeCode/PseudoLife-MCP
+cd /mnt/c/Users/<user>/ClaudeCode/Pseudolife-MCP
 python /tmp/train_baseline.py --smoke 2>&1 | tee /tmp/smoke_baseline.log
 ```
 
@@ -294,7 +294,7 @@ the run log notes in the PR/commit message for Task 3 (no repo file change).
 
 ```bash
 source ~/e4b-train/bin/activate
-cd /mnt/c/Users/<user>/ClaudeCode/PseudoLife-MCP
+cd /mnt/c/Users/<user>/ClaudeCode/Pseudolife-MCP
 nohup python evals/distill_train_e4b.py --jepa-lambda 1.0 \
     --out-dir ~/e4b-jepa > ~/e4b-jepa-run.log 2>&1 &
 ```
@@ -319,7 +319,7 @@ python ~/llama.cpp/convert_hf_to_gguf.py ~/e4b-jepa/merged \
 ~/llama.cpp/build/bin/llama-quantize ~/e4b-jepa/e4b-jepa-bf16.gguf \
     ~/e4b-jepa/e4b-jepa-Q4_K_M.gguf Q4_K_M
 cp ~/e4b-jepa/e4b-jepa-Q4_K_M.gguf \
-    /mnt/c/Users/<user>/ClaudeCode/PseudoLife-MCP/evals/models/
+    /mnt/c/Users/<user>/ClaudeCode/Pseudolife-MCP/evals/models/
 ```
 
 (If the llama.cpp checkout lives elsewhere, use wherever

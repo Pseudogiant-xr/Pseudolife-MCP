@@ -6,7 +6,7 @@
 
 **Architecture:** All tools always register with FastMCP; a replacement lowlevel `tools/list` handler filters by the session's resolved tier (session override → writer map → env default). A new native-async `memory_toolset` tool steps the session's tier up/down and emits `tools/list_changed`. Pure tier logic lives in a new `pseudolife_memory/toolset_tiers.py`; wiring stays in `mcp_server.py`.
 
-**Tech Stack:** Python 3.12, mcp SDK 1.27.2 (pinned; behaviors verified 2026-07-11), pytest. Test venv: `C:\Users\<user>\ClaudeCode\PseudoLife-MCP\.venv\Scripts\python.exe -m pytest`.
+**Tech Stack:** Python 3.12, mcp SDK 1.27.2 (pinned; behaviors verified 2026-07-11), pytest. Test venv: `C:\Users\<user>\ClaudeCode\Pseudolife-MCP\.venv\Scripts\python.exe -m pytest`.
 
 **Spec:** `docs/superpowers/specs/2026-07-11-toolset-tiers-design.md`
 
@@ -101,7 +101,7 @@ def test_resolve_tier_precedence():
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `C:\Users\<user>\ClaudeCode\PseudoLife-MCP\.venv\Scripts\python.exe -m pytest tests/test_toolset_tiers.py -q`
+Run: `C:\Users\<user>\ClaudeCode\Pseudolife-MCP\.venv\Scripts\python.exe -m pytest tests/test_toolset_tiers.py -q`
 Expected: FAIL — `ModuleNotFoundError: No module named 'pseudolife_memory.toolset_tiers'`
 
 - [ ] **Step 3: Write the module**
@@ -225,7 +225,7 @@ def resolve_tier(writer: str | None, session_key: str | None, *,
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `C:\Users\<user>\ClaudeCode\PseudoLife-MCP\.venv\Scripts\python.exe -m pytest tests/test_toolset_tiers.py -q`
+Run: `C:\Users\<user>\ClaudeCode\Pseudolife-MCP\.venv\Scripts\python.exe -m pytest tests/test_toolset_tiers.py -q`
 Expected: 6 passed
 
 - [ ] **Step 5: Commit**
@@ -300,7 +300,7 @@ Delete `test_should_register_gate_logic` (the function it tests is going away) a
 
 - [ ] **Step 2: Run to verify failures**
 
-Run: `C:\Users\<user>\ClaudeCode\PseudoLife-MCP\.venv\Scripts\python.exe -m pytest tests/test_mcp_server.py -q -k "register or visible or tier_map"`
+Run: `C:\Users\<user>\ClaudeCode\Pseudolife-MCP\.venv\Scripts\python.exe -m pytest tests/test_mcp_server.py -q -k "register or visible or tier_map"`
 Expected: FAIL — `AttributeError: ... has no attribute '_visible_tool_names'` (and the core-env registration count mismatch, 19 != 32).
 
 - [ ] **Step 3: Migrate mcp_server.py**
@@ -349,7 +349,7 @@ Also drop the stale `# core memory_fact_get returns source_entries ids —` comm
 
 - [ ] **Step 4: Run the file's suite**
 
-Run: `C:\Users\<user>\ClaudeCode\PseudoLife-MCP\.venv\Scripts\python.exe -m pytest tests/test_mcp_server.py tests/test_release_ux.py tests/test_tool_consolidation.py -q`
+Run: `C:\Users\<user>\ClaudeCode\Pseudolife-MCP\.venv\Scripts\python.exe -m pytest tests/test_mcp_server.py tests/test_release_ux.py tests/test_tool_consolidation.py -q`
 Expected: PASS (the release-ux core-loop test passes because core tools still register; consolidation tests pass because full registration is now unconditional).
 
 - [ ] **Step 5: Commit**
@@ -467,7 +467,7 @@ def test_tool_cache_prefilled_with_full_set(tmp_path: Path, monkeypatch) -> None
 
 - [ ] **Step 2: Run to verify failures**
 
-Run: `C:\Users\<user>\ClaudeCode\PseudoLife-MCP\.venv\Scripts\python.exe -m pytest tests/test_mcp_server.py -q -k "transport or hidden or list_changed or cache_prefilled"`
+Run: `C:\Users\<user>\ClaudeCode\Pseudolife-MCP\.venv\Scripts\python.exe -m pytest tests/test_mcp_server.py -q -k "transport or hidden or list_changed or cache_prefilled"`
 Expected: FAIL — the un-replaced FastMCP handler returns all tools for every case (`test_transport_list_filters_by_writer_map` asserts minimal), and `listChanged is False`.
 
 - [ ] **Step 3: Implement wiring** (mcp_server.py, after `memory_toolset`'s future home — concretely, just above the `# ── Consolidated lifecycle verbs` section or at module end before `_flush_on_exit`):
@@ -527,7 +527,7 @@ Note: `FastMCP.list_tools(mcp)` (unbound call) rather than `mcp.list_tools()` �
 
 - [ ] **Step 4: Run the tests**
 
-Run: `C:\Users\<user>\ClaudeCode\PseudoLife-MCP\.venv\Scripts\python.exe -m pytest tests/test_mcp_server.py -q`
+Run: `C:\Users\<user>\ClaudeCode\Pseudolife-MCP\.venv\Scripts\python.exe -m pytest tests/test_mcp_server.py -q`
 Expected: all pass, including the older `test_all_tools_registered` (it calls `mod.mcp.list_tools()` directly — the registry view, unfiltered).
 
 - [ ] **Step 5: Commit**
@@ -627,7 +627,7 @@ Also update `test_all_tools_registered` (add `"memory_toolset"` to the expected 
 
 - [ ] **Step 2: Run to verify failures**
 
-Run: `C:\Users\<user>\ClaudeCode\PseudoLife-MCP\.venv\Scripts\python.exe -m pytest tests/test_mcp_server.py -q -k toolset`
+Run: `C:\Users\<user>\ClaudeCode\Pseudolife-MCP\.venv\Scripts\python.exe -m pytest tests/test_mcp_server.py -q -k toolset`
 Expected: FAIL — `Unknown tool: memory_toolset`.
 
 - [ ] **Step 3: Implement** (after `memory_stats` in mcp_server.py):
@@ -703,7 +703,7 @@ Add `from mcp.server.fastmcp import Context` next to the existing `FastMCP` impo
 
 - [ ] **Step 4: Run the tests**
 
-Run: `C:\Users\<user>\ClaudeCode\PseudoLife-MCP\.venv\Scripts\python.exe -m pytest tests/test_mcp_server.py -q`
+Run: `C:\Users\<user>\ClaudeCode\Pseudolife-MCP\.venv\Scripts\python.exe -m pytest tests/test_mcp_server.py -q`
 Expected: all pass (including the async-offload test: native async tools count as async).
 
 - [ ] **Step 5: Commit**
@@ -748,7 +748,7 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `C:\Users\<user>\ClaudeCode\PseudoLife-MCP\.venv\Scripts\python.exe -m pytest tests/test_tool_consolidation.py::test_descriptions_fit_tier_budgets -q`
+Run: `C:\Users\<user>\ClaudeCode\Pseudolife-MCP\.venv\Scripts\python.exe -m pytest tests/test_tool_consolidation.py::test_descriptions_fit_tier_budgets -q`
 Expected: FAIL — minimal ≈ 5.4k > 4500 (and full over 15500).
 
 - [ ] **Step 3: Replace the eight docstrings** with these (verbatim; prose-only change, no signature or Args semantics touched):
@@ -930,7 +930,7 @@ Expected: FAIL — minimal ≈ 5.4k > 4500 (and full over 15500).
 
 - [ ] **Step 4: Run budgets + full MCP tests; iterate wording ONLY if a budget still fails** (tighten the same eight docstrings further — do not touch other tools without noting it in the commit message):
 
-Run: `C:\Users\<user>\ClaudeCode\PseudoLife-MCP\.venv\Scripts\python.exe -m pytest tests/test_tool_consolidation.py tests/test_mcp_server.py -q`
+Run: `C:\Users\<user>\ClaudeCode\Pseudolife-MCP\.venv\Scripts\python.exe -m pytest tests/test_tool_consolidation.py tests/test_mcp_server.py -q`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -997,7 +997,7 @@ defer schemas client-side (Claude Code) barely notice tiers at all.
 
 - [ ] **Step 4: Full suite**
 
-Run: `C:\Users\<user>\ClaudeCode\PseudoLife-MCP\.venv\Scripts\python.exe -m pytest tests/ -q`
+Run: `C:\Users\<user>\ClaudeCode\Pseudolife-MCP\.venv\Scripts\python.exe -m pytest tests/ -q`
 Expected: all pass (~915+).
 
 - [ ] **Step 5: Commit**
@@ -1014,11 +1014,11 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ### Task 7: Deploy + live verification (main session, not a subagent)
 
 **Files:**
-- Modify: `C:\Users\<user>\ClaudeCode\PseudoLife-MCP\ops\.env` (machine-local, gitignored)
+- Modify: `C:\Users\<user>\ClaudeCode\Pseudolife-MCP\ops\.env` (machine-local, gitignored)
 
 - [ ] **Step 1:** Merge the worktree branch to master (`git push . <branch>:master` from the worktree if the main checkout is busy on another branch; plain ff-merge otherwise).
 - [ ] **Step 2:** Edit `ops/.env`: replace the `PSEUDOLIFE_MCP_TOOLSET=full` line (added 2026-07-11) with `PSEUDOLIFE_MCP_TIER_MAP=claude-desktop:minimal,claude-code:core` (baseline stays the compose default `core`).
-- [ ] **Step 3:** Deploy: `& C:\Users\<user>\ClaudeCode\PseudoLife-MCP\ops\update.ps1 -Tag pre-toolset-tiers` — expect backup, rollback tag, daemon-only rebuild, `Healthy. schema=21`.
+- [ ] **Step 3:** Deploy: `& C:\Users\<user>\ClaudeCode\Pseudolife-MCP\ops\update.ps1 -Tag pre-toolset-tiers` — expect backup, rollback tag, daemon-only rebuild, `Healthy. schema=21`.
 - [ ] **Step 4:** Verify from this session (a direct-HTTP `claude-code` client): the deferred tool list should show the core set; call `memory_toolset(status)` → `{current: "core"}`; `expand` → full-tier names in `visible_tools_added`.
 - [ ] **Step 5:** Ask the user to open Claude Desktop and confirm: (a) the pseudolife server lists 7 tools; (b) asking Desktop's Claude to run `memory_toolset(expand)` grows the visible list (tests `list_changed` honoring). Record the observed behavior in README if Desktop ignores the notification.
 - [ ] **Step 6:** `memory_store` the deploy record + `memory_outcome` success/failure honestly.

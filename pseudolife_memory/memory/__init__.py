@@ -1,6 +1,6 @@
 """Neural memory subsystem — MIRAS continuum + ChromaDB reference bank.
 
-Slimmed copy from PseudoLife: only the memory layer travels — no LLM
+Slimmed copy from Pseudolife: only the memory layer travels — no LLM
 backends, no chat engine, no Electron. Built to be wrapped by an MCP
 server so Claude can use the bank as a persistent cross-session memory.
 """

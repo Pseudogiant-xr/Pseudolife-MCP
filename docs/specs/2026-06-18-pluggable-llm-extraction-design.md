@@ -1,7 +1,7 @@
 # Pluggable LLM extraction + minimum-viable-model benchmark — design spec
 
 Status: **proposed (design)**, pending review + plan.
-Target: **PseudoLife-MCP** `origin/master`. Adds an optional compose service +
+Target: **Pseudolife-MCP** `origin/master`. Adds an optional compose service +
 config + a small abstention knob + a dev-only `evals/` ladder sweep. Reuses the
 existing `OpenAICompatExtractor` / dream machinery — no new extractor code on the
 hot path. Touches `ops/docker-compose.yml`, a new `ops/Dockerfile.extractor`
@@ -16,7 +16,7 @@ this feeds).
 
 ## 1. Problem
 
-The 2026-06-17 pre-flight (Tier A + Tier B) established that PseudoLife-MCP's
+The 2026-06-17 pre-flight (Tier A + Tier B) established that Pseudolife-MCP's
 *mechanism* (cortex supersession, abstention-by-null, transitive graph) works in
 clean conditions, but on **realistically-phrased ingested conversation** it
 degrades to ≈ naive-RAG: stale-leak 0.33 == RAG 0.33, gold-recoverable 0.6 < RAG

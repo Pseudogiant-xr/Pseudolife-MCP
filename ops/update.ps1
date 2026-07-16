@@ -1,5 +1,5 @@
 #Requires -Version 7
-# Safely update ONLY the PseudoLife-MCP daemon to the current checkout code.
+# Safely update ONLY the Pseudolife-MCP daemon to the current checkout code.
 # (v7 guard: Windows PowerShell 5.1 turns benign native stderr — e.g. docker
 # inspecting a not-yet-built image tag — into a terminating NativeCommandError.)
 #

@@ -450,7 +450,7 @@ def test_dream_alias_candidate_files_semantic_merge_proposal(svc):
     """A dreamed paraphrase of an existing cortex entity (near-zero token
     overlap, so the Jaccard write-dedup can't see it) files a merge proposal
     for review."""
-    svc.cortex_write("PseudoLife-MCP default extractor sidecar", "version",
+    svc.cortex_write("Pseudolife-MCP default extractor sidecar", "version",
                      "e4b", support="user")
     svc.store("sidecar deploy note", source="t")
     _drain(svc, _ClaimStub("production extractor sidecar"))
@@ -458,7 +458,7 @@ def test_dream_alias_candidate_files_semantic_merge_proposal(svc):
     assert len(props) == 1
     assert {props[0]["entity"], props[0]["into"]} == {
         "production extractor sidecar",
-        "PseudoLife-MCP default extractor sidecar"}
+        "Pseudolife-MCP default extractor sidecar"}
     # Same claim re-dreamed: entity is no longer new -> nothing re-filed.
     svc.store("sidecar deploy note again", source="t")
     _drain(svc, _ClaimStub("production extractor sidecar"))
@@ -466,7 +466,7 @@ def test_dream_alias_candidate_files_semantic_merge_proposal(svc):
 
 
 def test_dream_alias_candidate_ignores_unrelated_entities(svc):
-    svc.cortex_write("PseudoLife-MCP default extractor sidecar", "version",
+    svc.cortex_write("Pseudolife-MCP default extractor sidecar", "version",
                      "e4b", support="user")
     svc.store("budget note", source="t")
     _drain(svc, _ClaimStub("quarterly budget report"))
@@ -475,12 +475,12 @@ def test_dream_alias_candidate_ignores_unrelated_entities(svc):
 
 def test_dream_alias_candidate_respects_dismissed_and_disable(svc):
     from pseudolife_memory.graph import norm_name
-    svc.cortex_write("PseudoLife-MCP default extractor sidecar", "version",
+    svc.cortex_write("Pseudolife-MCP default extractor sidecar", "version",
                      "e4b", support="user")
     svc.stats()
     svc._storage.dismiss_pair(*sorted((
         norm_name("production extractor sidecar"),
-        norm_name("PseudoLife-MCP default extractor sidecar"))))
+        norm_name("Pseudolife-MCP default extractor sidecar"))))
     svc.store("sidecar deploy note", source="t")
     _drain(svc, _ClaimStub("production extractor sidecar"))
     assert _alias_props(svc) == []

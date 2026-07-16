@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pseudolife-mcp"
-version = "0.8.0.post1"
-description = "PseudoLife persistent long-term memory exposed as an MCP server for Claude Code"
+version = "0.8.1"
+description = "Pseudolife persistent long-term memory exposed as an MCP server for Claude Code"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "Apache-2.0"}
 
-# Core deps — same memory stack as PseudoLife (torch + MIRAS + ChromaDB),
+# Core deps — same memory stack as Pseudolife (torch + MIRAS + ChromaDB),
 # minus the LLM backends, FastAPI, and Electron-side machinery. MCP SDK on
 # top so Claude Code can attach over stdio.
 dependencies = [
@@ -61,10 +61,10 @@ onnx = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Pseudogiant-xr/PseudoLife-MCP"
-Repository = "https://github.com/Pseudogiant-xr/PseudoLife-MCP"
-Changelog = "https://github.com/Pseudogiant-xr/PseudoLife-MCP/blob/master/CHANGELOG.md"
-Issues = "https://github.com/Pseudogiant-xr/PseudoLife-MCP/issues"
+Homepage = "https://github.com/Pseudogiant-xr/Pseudolife-MCP"
+Repository = "https://github.com/Pseudogiant-xr/Pseudolife-MCP"
+Changelog = "https://github.com/Pseudogiant-xr/Pseudolife-MCP/blob/master/CHANGELOG.md"
+Issues = "https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues"
 
 [project.scripts]
 pseudolife-mcp = "pseudolife_memory.cli:main"

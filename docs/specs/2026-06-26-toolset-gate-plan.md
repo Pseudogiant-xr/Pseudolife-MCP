@@ -252,7 +252,7 @@ Expected: FAIL — `_should_register` / `_TOOL_TIERS` don't exist yet.
 
 - [ ] **Step 3: Add the gate primitives**
 
-In `pseudolife_memory/mcp_server.py`, immediately after `mcp = FastMCP("PseudoLife Memory")` (line 80), add:
+In `pseudolife_memory/mcp_server.py`, immediately after `mcp = FastMCP("Pseudolife Memory")` (line 80), add:
 
 ```python
 # Tool-surface tier gate (P1.5). Default "full" = every tool registers (no

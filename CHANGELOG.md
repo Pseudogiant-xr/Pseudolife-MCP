@@ -1,10 +1,21 @@
 # Changelog
 
-All notable changes to PseudoLife-MCP are documented here. The format is based
+All notable changes to Pseudolife-MCP are documented here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.8.1] — 2026-07-16 — Pseudolife (one word), release automation, CLI help
+
+### Changed (2026-07-16 — the name is a word now)
+- **"PseudoLife" → "Pseudolife" everywhere** (87 files): the name now reads
+  as a coined closed compound — like *pseudocode*, *pseudonym* — rather than
+  a CamelCase brand; machine identifiers (`pseudolife-mcp`, volumes,
+  containers, env vars) were already lowercase and are unchanged. This
+  includes the MCP server display name (`FastMCP("Pseudolife Memory")`), the
+  Cortex Console title, and repo URLs (now matching the GitHub repo's actual
+  casing; old-casing URLs redirect regardless).
 
 ### Added (2026-07-16 — PyPI Trusted Publishing workflow)
 - **`.github/workflows/release.yml`** — publishing a GitHub release now
@@ -200,7 +211,7 @@ disk-growth caps), and the toolset-tier visibility rework.
   into every `docker compose build` context and build-cache entry.
 - **`ops/preflight.ps1|.sh` now check ports 8765/5433** (warn-only): a taken
   port previously surfaced as a cryptic compose "port is already allocated";
-  ports held by an existing PseudoLife stack count as OK, so idempotent
+  ports held by an existing Pseudolife stack count as OK, so idempotent
   re-runs stay green.
 ### Added (2026-07-14 — superseded-row compaction)
 - **Superseded-row compaction** — corrections no longer grow the canonical
@@ -484,7 +495,7 @@ disk-growth caps), and the toolset-tier visibility rework.
   review queue — dismissed-pair suppression, unique-index dedupe, Atlas
   merge queue, and the accept/dismiss flows are all reused, and nothing is
   ever auto-folded. Semantic complement to the token-Jaccard write-dedup:
-  paraphrase coreference ("production extractor sidecar" ~ "PseudoLife-MCP
+  paraphrase coreference ("production extractor sidecar" ~ "Pseudolife-MCP
   default extractor sidecar", Jaccard 0.33) embeds at cosine 0.65 while
   unrelated pairs calibrate ≤ 0.17 on all-MiniLM-L6-v2. Dream summaries gain
   an `alias_candidates` count.
@@ -1457,7 +1468,7 @@ graph on top of the associative continuum.
 ### Migration
 - On first daemon run, a pre-v8 `cms_state.pt` in `PSEUDOLIFE_MCP_DATA_DIR` is
   auto-migrated into Postgres; the originals are renamed `*.pre-v8.bak` (never
-  deleted). The MCP build is not save-compatible with the desktop PseudoLife app.
+  deleted). The MCP build is not save-compatible with the desktop Pseudolife app.
 
 ## [0.1.0] - Initial release
 
@@ -1468,6 +1479,7 @@ graph on top of the associative continuum.
   `memory_supersede` / `memory_delete` / `memory_stats` / `memory_save` plus the
   document RAG tools.
 
-[0.8.0]: https://github.com/Pseudogiant-xr/PseudoLife-MCP/releases/tag/v0.8.0
-[0.7.0]: https://github.com/Pseudogiant-xr/PseudoLife-MCP/releases/tag/v0.7.0
-[0.2.0]: https://github.com/Pseudogiant-xr/PseudoLife-MCP/releases/tag/v0.2.0
+[0.8.1]: https://github.com/Pseudogiant-xr/Pseudolife-MCP/releases/tag/v0.8.1
+[0.8.0]: https://github.com/Pseudogiant-xr/Pseudolife-MCP/releases/tag/v0.8.0
+[0.7.0]: https://github.com/Pseudogiant-xr/Pseudolife-MCP/releases/tag/v0.7.0
+[0.2.0]: https://github.com/Pseudogiant-xr/Pseudolife-MCP/releases/tag/v0.2.0

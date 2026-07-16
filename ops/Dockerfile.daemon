@@ -1,4 +1,4 @@
-# PseudoLife-MCP memory daemon — the whole compute side in one image.
+# Pseudolife-MCP memory daemon — the whole compute side in one image.
 #
 #   docker compose -f ops/docker-compose.yml up -d --build   # start / rebuild
 #

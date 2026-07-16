@@ -1,7 +1,7 @@
 # Single-writer cortex — eliminate auto-promote fragmentation — design spec
 
 Status: **proposed (design)**, pending review + plan.
-Target: **PseudoLife-MCP** `origin/master`. Make the LLM dream pass the *sole*
+Target: **Pseudolife-MCP** `origin/master`. Make the LLM dream pass the *sole*
 auto-writer of canonical cortex facts; retire the deterministic regex
 auto-promote as a cortex writer; ship the local extractor LLM as a default,
 required stack component; and add a one-time, reviewed cleanup pass for the

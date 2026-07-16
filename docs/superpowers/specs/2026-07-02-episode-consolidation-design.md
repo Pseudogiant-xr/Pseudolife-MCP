@@ -107,14 +107,14 @@ signal the transport can't provide.
 
 ## Consolidation plan for the live bank (post-deploy, via REST)
 
-- 10× generic `session - 2026-07-02 *` → new **"PseudoLife-MCP - 2026-07-02"**
+- 10× generic `session - 2026-07-02 *` → new **"Pseudolife-MCP - 2026-07-02"**
   (hint: review-roadmap arc P0→P3, tool consolidation, graph-quality fixes).
   "Full deep codebase review (Fable 5, 2026-07-02)" stays its own named root.
 - `session - 2026-07-01 16:49` + `… 23:27` + `session - 2026-07-02 00:00`
-  (content dated 2026-07-01) → **"PseudoLife-MCP - 2026-07-01"**.
-- `session - 2026-06-30 13:37` + `… 14:43` → **"PseudoLife-MCP - 2026-06-30"**
+  (content dated 2026-07-01) → **"Pseudolife-MCP - 2026-07-01"**.
+- `session - 2026-06-30 13:37` + `… 14:43` → **"Pseudolife-MCP - 2026-06-30"**
   (session-scoped-episodes rework arc).
-- 3 roots titled "PseudoLife-MCP - 2026-06-29" → merged into the 6-entry one.
+- 3 roots titled "Pseudolife-MCP - 2026-06-29" → merged into the 6-entry one.
 - Named episodes (brainstorms, hardening, ML-brief migration, llama.ccp)
   untouched.
 

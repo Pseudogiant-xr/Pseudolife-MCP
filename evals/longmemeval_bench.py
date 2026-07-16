@@ -1,7 +1,7 @@
 """LongMemEval knowledge-update bench — the supersession subset, end to end.
 
 Runs the LongMemEval (arXiv 2410.10813) *knowledge-update* questions through
-the full PseudoLife pipeline: ingest each haystack session turn-by-turn, dream
+the full Pseudolife pipeline: ingest each haystack session turn-by-turn, dream
 after every session (the real cadence — consolidation between sessions), then
 answer through three retrieval arms and judge with an LLM:
 
