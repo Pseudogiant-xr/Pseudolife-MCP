@@ -56,6 +56,8 @@ about, e.g.:
 
 ## Hardening pointers
 
-See the README sections on LAN sharing (`PSEUDOLIFE_MCP_TOKEN`), the
-compose file's port-binding comments, and `ops/backup.*` — backups are part
-of your security posture too.
+See the guide's sections on
+[LAN sharing](docs/guide/configuration.md#sharing-memory-on-the-lan)
+(`PSEUDOLIFE_MCP_TOKEN`) and
+[backups](docs/guide/configuration.md#backups), plus the compose file's
+port-binding comments — backups are part of your security posture too.

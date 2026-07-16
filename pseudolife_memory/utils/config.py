@@ -305,7 +305,7 @@ class DreamConfig:
     extractor_model: str | None = None
     # Who owns the extractor endpoint settings above: "env" (default) keeps
     # the ops contract — PSEUDOLIFE_DREAM_* env vars override the dataclass,
-    # as the compose file and README document. "config" hands control to
+    # as the compose file and docs/guide/dreaming.md document. "config" hands control to
     # this config (the Console's Extractor panel writes here), ignoring the
     # env vars — the honest way to let a UI change win over a compose-baked
     # env default without silently breaking existing env-driven deploys.
@@ -421,7 +421,8 @@ class CortexConfig:
     # vs 28% at 0.2, with identical end-to-end accuracy. 0.1 was tried and served
     # more gold facts but measurably hurt: the extra weak facts dilute the context
     # and the consumer abstains ("distractor-induced under-confidence").
-    # Abstention-on deployments still override upward (see README: 0.65 pairing).
+    # Abstention-on deployments still override upward (see
+    # docs/guide/retrieval.md: the 0.65 pairing).
     guard_min_score: float = 0.2
     # Dream-path slot resolver: a paraphrased dreamed claim adopts an existing
     # current slot when its value-free slot embedding cosine >= this. <=0 disables

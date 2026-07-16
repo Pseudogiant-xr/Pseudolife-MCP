@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-16 — README restructured into a front door + docs/guide)
+- **README.md cut from ~1450 to ~540 lines**: it keeps the front-door
+  material (badges, hook, Quickstart, tools table, install, wiring, basic
+  usage patterns, capabilities, troubleshooting) and links out for depth;
+  the deep material moved to six new user-facing pages under
+  **`docs/guide/`** — `configuration.md`, `retrieval.md`, `dreaming.md`,
+  `episodes.md`, `memory-model.md`, `benchmarks.md`. The README doubles as
+  the PyPI description, so the shorter version ships at the next release.
+  Guard tests moved with their content (`tests/test_release_ux.py`): the
+  schema-version DSN-row pin now points at `docs/guide/configuration.md`,
+  the no-test-count rule sweeps every guide page, and two new guards pin
+  the MCP-registry `mcp-name` marker in the README and require every
+  `docs/guide/` page to be linked from the README (nothing moved goes
+  dark). `docs/README.md` now distinguishes the maintained `guide/` pages
+  from internal design history.
+
 ## [0.8.1] — 2026-07-16 — Pseudolife (one word), release automation, CLI help
 
 ### Changed (2026-07-16 — the name is a word now)

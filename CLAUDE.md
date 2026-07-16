@@ -9,11 +9,13 @@ exactly; they exist because each one was violated at least once.
    perf change gets one, in the existing dated-subsection style. Docs-only and
    test-only changes are exempt.
 2. **Schema bumps** touch four places together: `SCHEMA_META_VERSION` in
-   `pseudolife_memory/storage/schema.py`, the two README mentions (capabilities
-   table + DSN row — pinned by `tests/test_release_ux.py`), the version-pin
-   tests (`test_schema_v13.py`, `test_schema_v16.py`, `test_temporal_stamp.py`,
-   plus a new `test_schema_vNN.py` for the addition itself), and a CHANGELOG
-   mention of `vNN` (pinned by `test_release_ux.py`).
+   `pseudolife_memory/storage/schema.py`, the doc mentions (README
+   capabilities table + the DSN row and version-history table in
+   `docs/guide/configuration.md` — pinned by `tests/test_release_ux.py`),
+   the version-pin tests (`test_schema_v13.py`, `test_schema_v16.py`,
+   `test_temporal_stamp.py`, plus a new `test_schema_vNN.py` for the
+   addition itself), and a CHANGELOG mention of `vNN` (pinned by
+   `test_release_ux.py`).
 3. **Full suite before commit** — `HF_HUB_OFFLINE=1 python -m pytest tests/`
    with the bench Postgres up (127.0.0.1:5433); PG-backed tests skip silently
    without it, which is not a pass.
@@ -67,6 +69,10 @@ release touches them in this order (first done 2026-07-16, v0.8.0).
    tool count/tiers and the hidden-tools-need-expand rule, shipped config
    defaults (surprise gate is permissive), image/install sizes, and any
    "can't / doesn't / no X" absolute — those age worst. Surfaces: README,
+   **docs/guide/*.md** (the user-facing guide pages the 2026-07-16
+   restructure moved the README's deep material into — configuration,
+   retrieval, dreaming, episodes, memory-model, benchmarks; they carry the
+   same drift-prone claims the README used to),
    CONTRIBUTING, SECURITY, evals/README, examples/ (CLAUDE.memory.md is
    injected into user CLAUDE.mds — its tool surface must match exactly),
    docs/runbooks, ops/.env.example comments. The README is the PyPI

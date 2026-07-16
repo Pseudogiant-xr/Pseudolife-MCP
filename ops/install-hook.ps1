@@ -60,7 +60,7 @@ if (-not $hasBriefing) {
 
 # Episode hooks are OBSOLETE since the 2026-06-30 session-scoped episodes
 # rework: the daemon lazily opens/closes episodes keyed by mcp-session-id
-# (see README "Session lifecycle hooks"). Earlier installer versions added
+# (see docs/guide/episodes.md). Earlier installer versions added
 # them — remove any we find so old installs converge too.
 function Remove-HookCommand($groups, $needle) {
     $removed = $false

@@ -349,7 +349,8 @@ class MemoryService:
         self.config.memory.reference.persist_dir = str(self.data_dir / "chromadb")
 
         # Defaults that make sense for the *Claude* use-case differ from
-        # the human-chat defaults shipped with Pseudolife — see README.
+        # the human-chat defaults shipped with Pseudolife — see
+        # docs/guide/configuration.md.
         # Overlay only: keys the user explicitly set in config.yaml win.
         self._apply_mcp_defaults(self.config, user_keys=_user_yaml_leaves(cfg_candidate))
 

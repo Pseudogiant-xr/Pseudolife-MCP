@@ -132,15 +132,30 @@ def test_list_endpoints_report_total_and_truncated(routes, path) -> None:
     assert capped["truncated"] is True
 
 
-# ── README version claims: mechanical drift guard ─────────────────────────
+# ── README / docs-guide version claims: mechanical drift guard ────────────
+#
+# The deep material moved out of the README into docs/guide/ (2026-07-16
+# restructure — the README doubles as the PyPI description and had grown to
+# ~1450 lines). The guards moved WITH their content: the capabilities-table
+# schema claim stayed in the README, the DSN row now lives in
+# docs/guide/configuration.md, and the no-test-count rule sweeps every
+# guide page.
 
 _README = Path(__file__).resolve().parents[1] / "README.md"
+_DOCS_GUIDE = _README.parent / "docs" / "guide"
+
+
+def _guide_pages() -> list[Path]:
+    pages = sorted(_DOCS_GUIDE.glob("*.md"))
+    assert pages, "docs/guide/ must exist and hold the user-facing guide pages"
+    return pages
 
 
 def test_readme_schema_version_matches_code() -> None:
     """The schema version in README went stale three times (v11→13→19/20 vs
     21) when hand-edited. Every explicit 'current schema' claim must match
-    ``SCHEMA_META_VERSION``."""
+    ``SCHEMA_META_VERSION`` — the capabilities table in the README, and the
+    DSN row that moved to docs/guide/configuration.md."""
     from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
 
     text = _README.read_text(encoding="utf-8")
@@ -148,17 +163,39 @@ def test_readme_schema_version_matches_code() -> None:
     assert claims, "README capabilities table must state the schema version"
     assert all(int(c) == SCHEMA_META_VERSION for c in claims), (
         f"README says schema v{claims}, code says v{SCHEMA_META_VERSION}")
-    dsn = re.findall(r"source of truth \(schema v(\d+)\)", text)
+    config_page = _DOCS_GUIDE / "configuration.md"
+    conf = config_page.read_text(encoding="utf-8")
+    dsn = re.findall(r"source of truth \(schema v(\d+)\)", conf)
+    assert dsn, "docs/guide/configuration.md must state the schema in the DSN row"
     assert all(int(c) == SCHEMA_META_VERSION for c in dsn), (
-        f"README DSN row says v{dsn}, code says v{SCHEMA_META_VERSION}")
+        f"configuration.md DSN row says v{dsn}, code says v{SCHEMA_META_VERSION}")
 
 
-def test_readme_makes_no_hardcoded_test_count_claims() -> None:
-    """Test counts (384→514→547→834...) go stale within weeks. The README
-    must not claim a specific suite size."""
+def test_readme_carries_mcp_registry_marker() -> None:
+    """The MCP registry validates PyPI ownership against this exact marker
+    in the README (case-sensitive namespace — capital P). Losing it breaks
+    the next registry publish; it must survive any README restructure."""
     text = _README.read_text(encoding="utf-8")
-    stale = re.findall(r"\b\d{3,4}(?:\+)? tests\b", text)
-    assert stale == [], f"hardcoded test-count claims in README: {stale}"
+    assert "<!-- mcp-name: io.github.Pseudogiant-xr/pseudolife-mcp -->" in text
+
+
+def test_docs_make_no_hardcoded_test_count_claims() -> None:
+    """Test counts (384→514→547→834...) go stale within weeks. Neither the
+    README nor any docs/guide page may claim a specific suite size."""
+    for page in [_README, *_guide_pages()]:
+        text = page.read_text(encoding="utf-8")
+        stale = re.findall(r"\b\d{3,4}(?:\+)? tests\b", text)
+        assert stale == [], f"hardcoded test-count claims in {page.name}: {stale}"
+
+
+def test_docs_guide_pages_are_linked_from_readme() -> None:
+    """Every guide page must be reachable from the front door — a page the
+    README never links to is undiscoverable (the restructure's contract:
+    nothing moved out of the README goes dark)."""
+    text = _README.read_text(encoding="utf-8")
+    missing = [p.name for p in _guide_pages()
+               if f"docs/guide/{p.name}" not in text]
+    assert missing == [], f"docs/guide pages not linked from README: {missing}"
 
 
 def test_readme_documents_claude_mcp_wiring() -> None:

@@ -262,7 +262,8 @@ Qwen3.6-27B:
   extractor) while cortex collapses 0.564 → 0.192 when the extractor
   shrinks. The retrieval spine is fine; what goes *into* it decides
   everything. (This is the measured case for pointing the dream at a
-  bigger local model — see the README's "Upgrading the extractor".)
+  bigger local model — see "Upgrading the extractor" in
+  `docs/guide/dreaming.md`.)
 - **Supersession chains matter**: surfacing each fact's earlier values
   lifted the whole board vs current-value-only contexts (hybrid 0.590 →
   0.705 on oracle) — knowledge-update questions ask about the original

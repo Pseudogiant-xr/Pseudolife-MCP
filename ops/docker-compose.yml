@@ -130,8 +130,8 @@ services:
       # dream consolidation routes to it. To use a BIGGER local model instead
       # (LM Studio / Ollama / llama.cpp / vLLM), override these in ops/.env —
       # from inside the container the host machine is `host.docker.internal`,
-      # not `localhost` (resolves via extra_hosts below). See the README's
-      # "Upgrading the extractor" section for per-runtime examples.
+      # not `localhost` (resolves via extra_hosts below). See docs/guide/dreaming.md
+      # "Upgrading the extractor" for per-runtime examples.
       PSEUDOLIFE_DREAM_BASE_URL: ${PSEUDOLIFE_DREAM_BASE_URL:-http://pseudolife-extractor:8081/v1}
       PSEUDOLIFE_DREAM_MODEL: ${PSEUDOLIFE_DREAM_MODEL:-extractor}
       PSEUDOLIFE_DREAM_API_KEY: ${PSEUDOLIFE_DREAM_API_KEY:-}

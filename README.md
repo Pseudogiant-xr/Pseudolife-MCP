@@ -53,13 +53,12 @@ prerequisite), asks which **dream extractor** should consolidate memories —
 
 then brings the stack up, installs the session hooks, offers to append the
 memory-loop block to `~/.claude/CLAUDE.md` (required for the loop to actually
-fire), runs `claude mcp add`, and health-checks the daemon. Idempotent:
-re-run any time; re-run with `--extractor <mode>` to switch extractor setups.
-Non-interactive: `ops/install.sh --extractor sidecar --claude-md append`.
-
-Linux (Docker Engine): the docker commands need your user in the `docker`
-group — `sudo usermod -aG docker $USER`, then log out and back in (the
-preflight checks this).
+fire), runs `claude mcp add`, and health-checks the daemon. Idempotent —
+re-run any time; `--extractor <mode>` switches extractor setups, and
+`ops/install.sh --extractor sidecar --claude-md append` runs
+non-interactively. Linux (Docker Engine): your user must be in the `docker`
+group — `sudo usermod -aG docker $USER`, then log out/in (the preflight
+checks this).
 
 <details>
 <summary>Manual install (the steps the installer automates)</summary>
@@ -89,9 +88,7 @@ file runs entirely on defaults).
 Then in any Claude Code session: *"remember that my staging box is
 haze-02"* → Claude calls `memory_store`; next session, *"which box is
 staging?"* → `memory_search` finds it. Browse everything at the Cortex
-Console: <http://127.0.0.1:8765/ui/>. Details: [Install](#install--containerized-recommended-any-os)
-· [Wire into Claude Code](#wire-into-claude-code) · [Configuration](#configuration)
-· [Data layout & backups](#data-layout) · [Cortex Console](#cortex-console-web-ui).
+Console: <http://127.0.0.1:8765/ui/>.
 
 ## What this is
 
@@ -99,47 +96,51 @@ A memory engine exposed over MCP. There's no chat UI and no LLM doing the
 thinking — Claude is the intelligence; these are tools it calls to store and
 recall what matters. (Models *are* bundled as plumbing: baked embedding
 weights for retrieval, and the optional CPU extractor sidecar that
-consolidates memories into facts while you sleep.) It layers several
-complementary stores:
+consolidates memories into facts while you sleep.)
 
-- **Associative continuum** — an 8-tier recency-tiered embedding store
-  (working → forever) ranked by **cosine** similarity, with novelty-gated
-  storage, contradiction detection, and supersession. This is the fuzzy
-  "what do I know that's related to X" recall. (A test-time-trained neural
-  blend was trialled and removed in v0.5 — it underperformed plain cosine;
-  see `docs/2026-06-21-neural-memory-investigation.md`. The research code is
-  archived on the `archive/neural-memory-titans` branch.)
-- **Cortex** — a slot-keyed store of canonical facts (one *current* value
-  per `entity.attribute`), with deterministic reads, provenance tiers
-  (`user > action > agent`), and contender parking instead of silent
-  overwrites.
-- **Knowledge graph** — typed entities and edges over those facts, with a
-  closed relation vocabulary, on-read transitive/inverse inference. Backed by
-  a Postgres `entities` hub (source of truth) + NetworkX derived read-model
-  behind a swappable `GraphStore` interface; no AGE/Cypher dependency.
-- **World cortex** — durable, *cited* facts about external reality (a
-  current version, a price, who holds a role) with age-decayed trust, kept
-  separate from your own facts.
-- **Procedural memory (lessons)** — what worked, what was a dead end, and
-  what the user corrected, keyed to a *task-type* and learned from the
-  agent's own work. Dead-ends are first-class and traversable in the graph.
-- **Reference bank** — a ChromaDB document store for RAG over files you
-  ingest.
+It layers several complementary stores: the **associative continuum** (an
+8-tier recency-tiered embedding store, working → forever, ranked by cosine
+similarity with novelty-gated storage, contradiction detection, and
+supersession); the **cortex** (slot-keyed canonical facts — one *current*
+value per `entity.attribute` — with provenance tiers and contender parking
+instead of silent overwrites); a typed **knowledge graph** over those facts
+with a closed relation vocabulary and on-read inference; the **world
+cortex** (durable *cited* facts about external reality, age-decayed trust);
+**procedural lessons** learned from the agent's own work; and a ChromaDB
+**reference bank** for document RAG. The canonical layers in depth:
+[the memory model](docs/guide/memory-model.md); the graph and multi-hop
+recall: [retrieval](docs/guide/retrieval.md).
 
 State lives in Postgres (the durable source of truth) behind a single
 long-lived daemon; every session attaches over HTTP (or, for host-process
-installs, a thin stdio shim). The
-result: Claude can pick up where it left off, correct itself when facts
-change, and reason over relationships — without you re-explaining context
-each session.
+installs, a thin stdio shim). The result: Claude can pick up where it left
+off, correct itself when facts change, and reason over relationships —
+without you re-explaining context each session.
+
+## Documentation
+
+This README is the front door — install, wiring, and the basic loop. The
+deep material lives in the user guide:
+
+| Page | What's in it |
+|---|---|
+| [Configuration](docs/guide/configuration.md) | Env vars, tuned defaults, toolset tiers, stdio shim, LAN sharing, data layout, backups, schema history |
+| [Retrieval](docs/guide/retrieval.md) | Reranker, BM25 hybrid, abstention floors, ranking-trace debugging, `memory_recall`, the knowledge graph |
+| [Dreaming](docs/guide/dreaming.md) | Extractor tiers, the bundled sidecar, upgrading the extractor, Sonnet-fallback, cadence, deep dream, consolidation |
+| [Episodes & sessions](docs/guide/episodes.md) | Daemon-owned session episodes, the briefing hook, nested sub-episodes, tags |
+| [The memory model](docs/guide/memory-model.md) | Cortex slots, provenance contenders, world cortex, lessons, temporal/HLC stamps |
+| [Benchmarks](docs/guide/benchmarks.md) | LongMemEval results; why extraction quality dominates |
+
+Plus [`evals/README.md`](evals/README.md) (full benchmark methodology) and
+[CONTRIBUTING](CONTRIBUTING.md).
 
 ## Tools exposed
 
 The surface was consolidated 2026-07-02 (55 → 32 tools; now 33 with
-`memory_toolset`): lifecycle families
-became verb-dispatched tools (`memory_dream`, `memory_forget`,
-`memory_graph_review`), and dump/introspection views moved to the Cortex
-Console (REST) — the manifest is agent context every session, so it stays lean.
+`memory_toolset`): lifecycle families became verb-dispatched tools
+(`memory_dream`, `memory_forget`, `memory_graph_review`), and
+dump/introspection views moved to the Cortex Console (REST) — the manifest
+is agent context every session, so it stays lean.
 
 | Tool | Purpose |
 |------|---------|
@@ -173,40 +174,21 @@ Console (REST) — the manifest is agent context every session, so it stays lean
 | `memory_relation_define(name, description, ...)` | Grow the closed relation vocabulary (deliberate, rare act) |
 | `document_ingest(path, source?)` | Index a file (txt/md/pdf) in the reference bank |
 | `document_search(query, top_k?)` | RAG search over the reference bank only |
-| `memory_toolset(action)` | Check or change this session's visibility tier: `status` / `expand` / `collapse` (see "Toolset tiers" below) |
+| `memory_toolset(action)` | Check or change this session's visibility tier: `status` / `expand` / `collapse` |
 
 Each tool returns plain JSON. See `pseudolife_memory/mcp_server.py` for
 docstrings — those are what Claude reads to decide when to call which tool.
+The five recall-path tools return **compact entries** by default (result
+payloads are agent context on every retrieval); pass `verbose=true` for full
+metadata. Full-table dumps and topology views live in the **Cortex Console**
+(`/api/*`) and the `pseudolife-mcp briefing` CLI.
 
-**Compact results.** The five recall-path tools (`memory_search`,
-`memory_recall`, `memory_recent`, `memory_world_search`,
-`memory_lesson_search`) return compact entries by default — for the
-associative stream that's `{id, text, source, tags, score}` plus the
-supersession signal when set — because result payloads are agent context on
-every retrieval. Pass `verbose=true` (or `explain=true` on `memory_search`)
-for the full metadata: timestamps, counters, band/episode attribution, and
-fact/edge provenance. Cortex Console REST responses are unaffected.
-Full-table dumps and topology views (`facts`, `world`, `lessons`, sources,
-tags, episodes list, graph digest/communities, shortest path, session
-briefing) live in the **Cortex Console** (`/api/*`) and the
-`pseudolife-mcp briefing` CLI — they left the MCP surface in the 2026-07-02
-consolidation.
-
-**Toolset tiers.** Three visibility tiers — `minimal` (7 tools: the
-recall/capture loop + the gate), `core` (20: + graph/recall, world facts,
-lessons, documents, episodes), `full` (33) — filtered per session at
-`tools/list`. The filter is visibility, not auth (the bearer token is the
-security boundary) — but Claude clients gate calls against their own tool
-list, so in practice a session expands its tier before calling a hidden
-tool. Defaults:
-`PSEUDOLIFE_MCP_TOOLSET` (shipped: `core`) sets the baseline;
-`PSEUDOLIFE_MCP_TIER_MAP="claude-desktop:minimal,claude-code:core"` sets
-per-client defaults by writer id. Any session can step its own tier up or
-down at runtime with `memory_toolset(action="expand"|"collapse"|"status")`
-— the daemon emits `tools/list_changed` so the client refreshes its
-list. Eager-loading clients (Claude
-Desktop) start at ~1.5k tokens of manifest on `minimal`; clients that
-defer schemas client-side (Claude Code) barely notice tiers at all.
+**Toolset tiers.** Three visibility tiers — `minimal` (7 tools), `core`
+(20, the shipped default), `full` (33) — filtered per session at
+`tools/list`; a session steps its own tier up or down with `memory_toolset`
+before calling a hidden tool. Defaults, per-client mapping, and weak-model
+deployments:
+[Configuration — toolset tiers](docs/guide/configuration.md#toolset-tiers).
 
 ## Architecture
 
@@ -228,66 +210,12 @@ LAN agent ────────┘  or stdio shim         (single writer)    
 ```
 
 This kills two v0.1 hazards by construction: a single writer means
-concurrent sessions can't clobber each other, and entries are
-transactional so a crash can't wipe the bank (only the retrainable
-weights cache rides the periodic save).
-
-### Knowledge graph (ontology-lite)
-
-The cortex's canonical facts are joined to a typed entity graph
-(Postgres mode only). Edges use a **closed relation vocabulary** —
-builtins `depends-on`*, `part-of`*, `runs-on`↔`hosts`, `uses`,
-`configures`, `stores-data-in`, `related-to` (* = transitive) — so a
-weak model can't fragment the graph with `depends_on`/`dependsOn`
-variants: common forms normalize automatically, true unknowns are
-rejected *with suggestions*. Soft type hints warn but never reject.
-Transitive closure and inverse mirroring are computed **on read** by
-NetworkX inside `memory_graph`; derived edges arrive marked
-`derived: true` with rule provenance, so multi-hop conclusions read as
-plain facts — the server reasons, the model reads.
-
-The graph store is Postgres `entities` hub as source of truth, with a
-NetworkX derived read-model built on demand — behind a swappable `GraphStore`
-interface. There is no AGE/Cypher dependency; `memory_graph` serves
-multi-hop queries (neighborhood + derived/inverse edges + shortest path).
-
-**Weak-model deployments:** set `PSEUDOLIFE_MCP_TOOLSET=core` — it exposes the
-curated core set and hides the power/hygiene tools (`memory_forget`,
-`memory_relation_define`, `memory_dream`, `memory_graph_review`, …) that a
-small model can misuse.
-
-### memory_recall (multi-hop retrieval)
-
-`memory_recall(query, hops=3, top_k=5)` answers **relational questions**
-by iteratively following the knowledge graph — things `memory_search`
-can't do with a single flat similarity pass.
-
-**When to use it vs `memory_search`:**
-
-- Use `memory_recall` for chain-of-links questions: "what does X ultimately
-  run on?", "where does Y's data end up?", "how does A reach C?".
-- Use `memory_search` for direct lookups: "what is X's port?", "what did I
-  decide about Y?" — those are flat similarity queries and `memory_search` is
-  faster and simpler.
-
-**How it works.** `memory_recall` searches for a seed entity in the query,
-then walks its graph neighbourhood one hop per iteration (up to `hops`,
-capped at 5), accumulating bridging entities, facts, edges, and paths. It is
-**read-only** — it never writes to the bank or the graph.
-
-**Return shape:**
-`seeds`, `entities` (each with current canonical facts), `edges` (with a
-`derived` flag for inferred transitive/inverse links), `paths`, supporting
-`texts`, and `iterations`.
-
-**`low_confidence: true`** means no seed entity matched the query — the graph
-had no starting point. In that case fall back to `memory_search`.
-
-**Driver config.** By default `memory_recall` uses the **mechanical** seed
-driver (token-intersection heuristic — no LLM call, deterministic, fast).
-Set `PSEUDOLIFE_RECALL_DRIVER=llm` to use the dream endpoint for seed
-resolution (better recall on ambiguous entity names; requires the dream
-extractor to be configured).
+concurrent sessions can't clobber each other, and entries are transactional
+so a crash can't wipe the bank. On top of the associative bands sit the
+canonical layers — cortex, world facts, lessons, temporal/HLC stamps
+([the memory model](docs/guide/memory-model.md)) — joined to a typed
+knowledge graph walkable via `memory_graph` and multi-hop `memory_recall`
+([retrieval & the graph](docs/guide/retrieval.md)).
 
 ## Install — containerized (recommended, any OS)
 
@@ -315,47 +243,23 @@ docker compose -f ops/docker-compose.yml up -d --build
 > creating `ops/.env` with `PSEUDOLIFE_BANK_VOLUME=ops_pseudolife_pgdata` and
 > `PSEUDOLIFE_STATE_VOLUME=ops_pseudolife_data` before `up`. See the compose header.
 
-> **Windows + Docker memory.** Docker Desktop's WSL2 backend (the `Vmmem` /
-> `VmmemWSL` process) defaults to claiming up to ~50% of host RAM and caches
-> aggressively without releasing it. The stack needs ~6–7 GB under dream load
-> with the default sidecar (~1 GB in `sonnet-only` mode), so cap the VM:
-> copy `ops/wslconfig.example` to `%USERPROFILE%\.wslconfig`
-> (tune `memory=` to your machine), then `wsl --shutdown` to apply. After a
-> `wsl --shutdown`, if the daemon becomes unreachable on `127.0.0.1:8765`, run
-> `docker restart pseudolife-mcp-daemon` to re-establish the host port forward.
+> **Windows:** Docker Desktop's WSL2 VM claims up to ~50% of host RAM by
+> default; the stack needs ~6–7 GB under dream load with the default sidecar
+> (~1 GB in `sonnet-only` mode) — cap the VM via `ops/wslconfig.example`
+> (see [Troubleshooting](#troubleshooting)).
 
 The daemon serves MCP at `http://127.0.0.1:8765/mcp` and restarts with
 Docker — no logon task needed. First build downloads the model into the
 image (once); every container start after that is offline and fast. Wire
-Claude Code in over **HTTP** (below).
+Claude Code in over **HTTP** (below). Where the data actually lives, and
+how to back it up:
+[Configuration — data layout](docs/guide/configuration.md#data-layout).
 
-## Install — host process (Windows, for GPU / dev)
-
-Runs Postgres in Docker but the daemon on host Python. Use this if you
-want to hack on the daemon or run the embedder on a local GPU. Requires
-Python 3.10+, Docker Desktop, and ~600 MB of disk.
-
-```powershell
-git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
-cd Pseudolife-MCP
-python -m venv .venv
-.venv\Scripts\activate
-pip install -e .
-
-# 1. Start Postgres 16 + pgvector (one-time build, then persistent).
-docker compose -f ops/docker-compose.yml up -d --build pseudolife-pg
-
-# 2. Register the daemon to auto-start at logon (binds 127.0.0.1:8765).
-ops\install-autostart.ps1
-Start-ScheduledTask -TaskName "Pseudolife-MCP Daemon"
-```
-
-The `pseudolife-mcp` console-script is now on your PATH — run
-`pseudolife-mcp --help` for all modes. The main ones: `pseudolife-mcp serve`
-(the daemon), `pseudolife-mcp` (the stdio shim — auto-starts the daemon if
-absent), `pseudolife-mcp embedded` (the v0.1 in-process stdio server; no
-daemon, no Postgres — an escape hatch), and `pseudolife-mcp briefing`
-(print the session-start briefing; used by the hook).
+**Host-process install (Windows, for GPU / dev):** run Postgres in Docker
+but the daemon on host Python — for hacking on the daemon or running the
+embedder on a local GPU. Steps, the `pseudolife-mcp` CLI modes, and the
+logon autostart task:
+[Configuration — host-process install](docs/guide/configuration.md#host-process-install-windows-for-gpu--dev).
 
 ## Updating
 
@@ -369,16 +273,12 @@ without touching Postgres or the extractor:
 ./ops/update.sh         # Linux / macOS
 ```
 
-It backs up the bank (`pg_dump` + a state-volume tar), tags a rollback image
-(keeping the newest 2, older ones are pruned), rebuilds + recreates **only**
-the daemon (`docker compose up -d --no-deps --build pseudolife-daemon`), and
-waits for `/health`. It never runs `down -v`. (Host-process install: just
-restart the daemon — `pip install -e .` is editable, so a restart picks up the
-new code.)
-
-Repeated `--build` deploys also accumulate Docker *build cache*; reclaim it
-now and then with `docker builder prune` (safe — it only touches build
-layers). Never use `docker system prune --volumes`, which deletes volumes.
+It backs up the bank (`pg_dump` + a state-volume tar), tags a rollback
+image, rebuilds + recreates **only** the daemon, and waits for `/health`.
+It never runs `down -v`. (Host-process install: just restart the daemon —
+`pip install -e .` is editable.) Reclaim accumulated build cache now and
+then with `docker builder prune` (safe — it only touches build layers);
+never `docker system prune --volumes`, which deletes volumes.
 
 ## Wire into Claude Code
 
@@ -406,79 +306,18 @@ a `.mcp.json` at a project root for project scope:
 }
 ```
 
-If you ran the daemon with a `PSEUDOLIFE_MCP_TOKEN`, add the bearer header:
-
-```json
-{
-  "mcpServers": {
-    "pseudolife-memory": {
-      "type": "http",
-      "url": "http://127.0.0.1:8765/mcp",
-      "headers": { "Authorization": "Bearer <your-token>" }
-    }
-  }
-}
-```
-
-This is the cleanest cross-OS setup: the only host-side state is this URL.
+If you ran the daemon with a `PSEUDOLIFE_MCP_TOKEN`, add a `headers` key:
+`"headers": { "Authorization": "Bearer <your-token>" }`.
 
 **Verify:** run `claude mcp list` (the server should report ✓ connected),
 then ask Claude to *"store a memory that this install works"* and check it
 appears in the Stream tab of the Console at <http://127.0.0.1:8765/ui/>.
 
-**stdio shim (host-process installs only).** If you run the daemon on host
-Python and prefer stdio, point at the **shim** instead — it find-or-starts
-the daemon and proxies. It does *not* work with the containerized daemon
-(nothing to spawn on the host):
-
-```json
-{
-  "mcpServers": {
-    "pseudolife-memory": {
-      "command": "C:\\path\\to\\Pseudolife-MCP\\.venv\\Scripts\\pseudolife-mcp.exe",
-      "env": {
-        "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:8765",
-        "PSEUDOLIFE_MCP_DATABASE_URL": "postgresql://pseudolife:pseudolife@127.0.0.1:5433/pseudolife_memory",
-        "PSEUDOLIFE_MCP_DATA_DIR": "${USERPROFILE}\\.pseudolife-mcp"
-      }
-    }
-  }
-}
-```
-
-Replace `C:\path\to\Pseudolife-MCP` with wherever you cloned the repo. The
-`PSEUDOLIFE_MCP_DATABASE_URL` matches the bundled `ops/docker-compose.yml`
-defaults (user/password `pseudolife`, host port `5433`) — change it only if you
-edit the compose file or override the password. The default password is safe
-for the stock loopback-only stack (nothing off-box can reach Postgres); to use
-your own anyway, set `POSTGRES_PASSWORD` in `ops/.env` **before the first
-launch** (see the note in `ops/docker-compose.yml` for changing it later).
-
-The shim is torch-free, so sessions attach near-instantly; the daemon
-pays the one-time embedder warmup once for everyone. On first run with a
-v≤0.1 `cms_state.pt` present in `PSEUDOLIFE_MCP_DATA_DIR`, the daemon
-auto-migrates it into Postgres and renames the originals `*.pre-v8.bak`
-(never deletes them).
-
-**Sharing memory on the LAN:** run the daemon with
-`PSEUDOLIFE_MCP_HOST=0.0.0.0` and a `PSEUDOLIFE_MCP_TOKEN`; remote
-clients set the same `PSEUDOLIFE_MCP_DAEMON_URL` + `PSEUDOLIFE_MCP_TOKEN`.
-The daemon **refuses to bind a non-loopback host without a token**, and
-Postgres itself stays loopback-only — the LAN only ever sees the daemon.
-
-**Backups:** `ops\backup.ps1` (Windows) / `ops/backup.sh` (Linux/macOS) runs
-`pg_dump` inside the container into `data\backups\` with 7-day rotation, and
-also tars the daemon **state volume** (ingested `document_ingest` files,
-cortex snapshot, graph snapshots — those live only there, not in Postgres)
-into a sibling `pseudolife_state-*.tgz`. An optional off-disk mirror via
-`PSEUDOLIFE_BACKUP_MIRROR` carries both artifacts;
-`PSEUDOLIFE_BACKUP_MIRROR_KEEP=N` (or `-MirrorKeep` / `--mirror-keep`) caps
-the mirror at the newest N files per kind — handy for cloud-synced folders.
-The matching `restore` script rehearses the newest backup into a scratch
-database by default (never touching the live bank) and only replaces the live
-bank with an explicit `-Apply` / `--apply`; add
-`-StateArchive <pseudolife_state-*.tgz>` / `--state-archive` to also restore
-the state volume (opt-in, so a DB-only restore never clobbers current state).
+Preferring stdio on a host-process install? A thin torch-free **shim**
+proxies stdio to the daemon:
+[stdio shim](docs/guide/configuration.md#stdio-shim-host-process-installs-only)
+· [LAN sharing](docs/guide/configuration.md#sharing-memory-on-the-lan)
+· [backups & restore rehearsal](docs/guide/configuration.md#backups).
 
 ## Recommended agent setup (CLAUDE.md)
 
@@ -491,778 +330,142 @@ standing instruction: append the bundled block to your **global**
 
 ```bash
 cat examples/CLAUDE.memory.md >> ~/.claude/CLAUDE.md
-```
-```powershell
-Add-Content "$env:USERPROFILE\.claude\CLAUDE.md" (Get-Content examples\CLAUDE.memory.md -Raw)
+# PowerShell: Add-Content "$env:USERPROFILE\.claude\CLAUDE.md" (Get-Content examples\CLAUDE.memory.md -Raw)
 ```
 
-Treat memory as **RECALL at the start, CAPTURE as you go, REFLECT at the end**
-(session episodes open/close for you — the daemon owns their lifecycle, keyed
-by MCP session; see *Session lifecycle hooks* below). The block:
+The block ([`examples/CLAUDE.memory.md`](examples/CLAUDE.memory.md)) teaches
+the loop: **RECALL at the start** (`memory_search` / `memory_lesson_search` /
+`memory_fact_get` / `memory_world_search`), **CAPTURE as you go**
+(`memory_store` with an honest `origin`, `memory_fact_set` for canonical
+facts, `memory_world_set` for cited external facts, `source="status"` for
+verbose logs so they stay out of the dream), **REFLECT at the end**
+(`memory_outcome` — the dream distils these signals into the lessons
+surfaced at your next session start).
 
-```markdown
-## Memory — use it every session (tools: `mcp__pseudolife-memory__*`)
-RECALL at task start:
-- `memory_search(<task>)` for prior context/decisions/gotchas;
-  `memory_lesson_search(<task>)` for what worked / what to avoid (heed `polarity:-`);
-  `memory_fact_get(entity, attribute)` for one canonical value;
-  `memory_world_search(<topic>)` when an external fact may be stale.
-CAPTURE as durable things arise (one claim per call):
-- `memory_store` for durable context (set `origin`: user/action/agent);
-  `memory_fact_set` for a canonical single-value fact (correct by re-setting the slot);
-  `memory_world_set(..., source_url=, source_quote=)` for a verified EXTERNAL fact (cite it);
-  open a named sub-episode with `memory_episode_start` for a big multi-step task.
-  Route verbose status/logs under `source="status"` (searchable, but excluded from
-  the dream so they don't pollute the graph).
-REFLECT at task end / when an outcome lands:
-- `memory_outcome(task, outcome, about=, detail=)` for a success / dead-end / correction —
-  the dream distils these into the lessons surfaced at your next session start.
-```
-
-The same block ships as a copyable file:
-[`examples/CLAUDE.memory.md`](examples/CLAUDE.memory.md).
-
-The `dream` pass periodically distils stored memories into canonical facts and a
-knowledge graph; the Console's Atlas view (`/api/graph/digest`,
-`/api/graph/communities`) then surfaces the graph's shape (hubs, communities,
-surprising links, questions worth answering).
-
-### Session lifecycle hooks (recommended)
-
-Two things wire to Claude Code's session lifecycle so the memory loop runs
-reliably — without the agent having to remember:
-
-1. **SessionStart briefing.** `pseudolife-mcp briefing` prints a compact block:
-   **what your memory is unsure about** (surprising graph links + open
-   questions), **lessons from past work** (avoid / prefer), **verified world
-   facts** (fresh, cited, age-ranked), and **where we left off** (a one-line
-   recap of your last closed session). Empty sections are omitted, so a cold
-   bank injects nothing.
-2. **Episode lifecycle is owned by the daemon — no hooks required.** Each
-   `memory_store` is stamped to its session's episode, keyed by a stable
-   per-session id: the transport's `mcp-session-id` for a direct-HTTP client
-   (the shipped path — stable for the whole session), or a stdio shim's
-   `X-PL-Session`. Because a direct-HTTP client has no shim/hook in the path,
-   the daemon **lazily opens** a session episode on the first store of a new
-   session (so empty sessions never leave a husk) and an **idle reaper** closes
-   it once inactive — firing the end-of-session dream, or pruning it if empty
-   (`PSEUDOLIFE_SESSION_IDLE_SECONDS`, default 30 min). One open episode is
-   tracked *per session*, so concurrent sessions (e.g. different projects) never
-   clobber each other. (Earlier versions drove this from `SessionStart`/
-   `SessionEnd` episode hooks keyed by Claude's session id; those are obsolete.
-   The legacy `pseudolife-mcp episode-start/-end` CLI + shim path remain for
-   stdio clients.) A store arriving after the reaper closed the episode
-   **resumes** it — same session id, same episode — rather than opening a new
-   husk (`PSEUDOLIFE_SESSION_RESUME_SECONDS`, default 6 h; `0` disables).
-   Direct-HTTP titles start generic (`session - YYYY-MM-DD HH:MM`, since the
-   daemon has no project `cwd`) — name the session with
-   `memory_session_title` (store responses carry an `episode_hint` until you
-   do); a session closing still-generic gets an auto-derived
-   `"{dominant source} - {stamp}: {first-entry snippet}"` title. Fragmented
-   history is repairable over REST: `POST /api/episodes/rename` and
-   `POST /api/episodes/merge`. Set `TZ` in `ops/.env` for local time.
-
-One command installs the briefing hook:
-
-```powershell
-.\ops\install-hook.ps1     # Windows (PowerShell 7)
-```
-```bash
-./ops/install-hook.sh      # Linux / macOS
-```
-
-It backs up your `settings.json`, then adds the hook **alongside** any existing
-ones (idempotent — safe to re-run; it installs only what's missing). Requires
-`pseudolife-mcp` on PATH — `pip install -e .` in the repo puts it there.
-
-Prefer to wire it by hand? The briefing's `--hook-json` flag emits the
-`hookSpecificOutput.additionalContext` payload Claude Code injects:
-
-```json
-{
-  "hooks": {
-    "SessionStart": [
-      { "hooks": [
-        { "type": "command", "command": "pseudolife-mcp briefing --hook-json" }
-      ] }
-    ]
-  }
-}
-```
-
-The briefing connects to the *already-running* daemon (never starts one) and
-does nothing if the daemon is down — it can't slow or break session start.
-Tune the briefing budget with `--max-unsure N` / `--max-lessons N` /
-`--max-world N` (default 3 each). The briefing content is also available on
-demand via the CLI or the Console's `/api/briefing` route.
-
-## Configuration
-
-Connection / deployment env vars:
-
-| Variable | Default | Effect |
-|----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v22). Unset → v0.1 file-only mode. |
-| `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). |
-| `PSEUDOLIFE_MCP_HOST` / `_PORT` | `127.0.0.1` / `8765` | Daemon bind address. |
-| `PSEUDOLIFE_MCP_TOKEN` | _(unset)_ | Bearer token; **required** to bind a non-loopback host. |
-| `PSEUDOLIFE_MCP_TRUST_BIND` | _(unset)_ | Set `1` to allow a non-loopback bind without a token when the boundary is external (containerized, loopback-published). The compose daemon sets this; never set it for a host daemon. |
-| `PSEUDOLIFE_MCP_DATA_DIR` | `./data` (cwd-relative) | Weights cache + legacy-migration source + ChromaDB. |
-| `PSEUDOLIFE_MCP_CONFIG` | `<data_dir>/config.yaml` if present, else built-ins | Override MIRAS / embedding / memory config. |
-| `PSEUDOLIFE_WRITER_ID` | `unknown` | Identifies this writer on every canonical write (schema v11). The shim forwards it as the `X-PL-Writer` header; the compose daemon sets `claude-code`. |
-
-The built-in defaults are tuned for Claude's use case:
-
-- **Surprise threshold `0.0`** — the v0.5 store gate measures *novelty*
-  (`1 − max cos` to existing entries). Claude stores deliberately, so the
-  gate stays permissive (store everything; novelty still drives
-  eviction/promotion scoring). Raise it above zero to dedup near-duplicate
-  stores.
-- **Meta-filter off** (`memory.meta_filter.enabled = false` in the MCP
-  build) — the filter exists to drop auto-captured chat noise ("I don't
-  have anything saved about that"); every MCP store is a deliberate tool
-  call, and the filter's patterns collided with legitimate dev facts
-  about memory systems themselves.
-- **Recency base half-life 24h** (`memory.recency_base_half_life_s =
-  86400`, vs the 1h chat default) — Claude Code sessions are hours-to-
-  days apart; with a 1h half-life the recency boost was effectively
-  always zero. Halves per band depth as before (1d → 2d → 4d → …).
-- **MIRAS preset `continuum`** — the 8-tier `working / micro / instant /
-  fast / medium / slow / archival / forever` continuum. Bands are plain
-  cosine vector stores (v0.5); a band spec is capacity + consolidation
-  cadence + promotion thresholds + an eviction policy.
-- **No NLI scorer** — the `cross-encoder/nli-deberta-v3-xsmall`
-  contradiction model is ~278 MB and optional. The four-path detector
-  works without it. Install with `pip install .[nli]` if you want it.
-- **Cross-encoder reranker off** — the `ms-marco-MiniLM-L-6-v2` reranker
-  (~80 MB) is wired into the pipeline but disabled by default. Flip it
-  on either globally (`memory.reranker.enabled = true` in config) or
-  per-call (`memory_search(..., rerank=True)`). First call lazy-loads
-  the model from the HuggingFace hub; subsequent calls cost ~10ms per
-  reranked candidate. Details below under **Cross-encoder reranking**.
-- **BM25 hybrid lexical pool off** — a pure-stdlib BM25 sparse-retrieval
-  channel runs in parallel with the dense embedder when enabled, fusing
-  scores so exact-keyword queries (`process_chunk_v2`, `v0.7.6`,
-  error codes) still surface even if the embedder underweights them.
-  Off by default; flip via `memory.bm25.enabled = true` or
-  `memory_search(..., bm25=True)`. Details below under
-  **BM25 hybrid retrieval**.
-- **Abstention off** (`memory.search_confidence_floor = 0.0`) — set it
-  above zero and `memory_search` returns `low_confidence: true` whenever
-  the top match scores below the floor, so the agent can abstain instead
-  of answering from a weak hit. A cortex fact in the result always
-  overrides it — but *which* cortex facts count is now tunable via
-  `memory.cortex.guard_min_score` (default `0.2`; a LongMemEval retrieval
-  replay showed the old `0.3` floor served *zero* facts for 60% of
-  questions, because terse fact embeddings rarely score 0.3 against a
-  natural-language query even when they are the answer — while going
-  below 0.2 measurably hurt by diluting the context with weak facts):
-  only facts scoring at/above it are treated as a confident answer, so
-  weak topically-adjacent facts stop suppressing abstention.
-  The two are calibrated as a **pair**; the `evals/` sweep recommends
-  `guard_min_score = 0.65` + `search_confidence_floor = 0.70` for an
-  abstention-on deployment (doubles abstention recall at zero false-abstain).
-- **Dream slot resolver off** (`memory.cortex.dream_slot_match_threshold =
-  0.0`) — a positive cosine floor lets the dream pass map a paraphrased
-  `(entity, attribute)` onto an existing slot before writing, to catch
-  small-model supersession forks. ⚠️ Calibration found **no measurable
-  benefit** on the benchmark (stale-leak flat; a false-merge at `0.80`):
-  the residual fragmentation comes from the deterministic regex
-  auto-promote, not paraphrase. Left off; enable only with the
-  false-merge risk in mind. See
-  `docs/specs/2026-06-19-single-writer-cortex-design.md` for the
-  structural fix.
-- **No HyDE / no reflection** — both rely on an LLM callback. Claude *is*
-  the LLM, so the natural way to reflect is for Claude to call
-  `memory_store` with a self-composed summary.
+One command — `ops\install-hook.ps1` (Windows, PowerShell 7) or
+`ops/install-hook.sh` (Linux/macOS) — installs the **SessionStart briefing
+hook** (what your memory is unsure about + lessons from past work +
+verified world facts + where we left off, injected at every session start).
+It backs up your `settings.json` and is idempotent. The manual hook JSON,
+the briefing budget flags, and how session episodes open/close/resume
+without any hooks: [Episodes & sessions](docs/guide/episodes.md).
 
 ## Usage patterns
 
-**At session start:**
+**At session start** — loads what you've worked on before, persistent
+across compactions:
 ```
 memory_search("project context for X")
 ```
-Loads what you've worked on before, persistent across compactions.
 
-**During work:**
+**During work** — store real decisions; skip fleeting chatter (the shipped
+store gate is permissive, so deliberate, durable claims only):
 ```
 memory_store("Decided to use stdio transport for the MCP because no port conflicts", source="pseudolife")
 ```
-Stores a real decision. Skip fleeting chatter — the shipped store gate is
-permissive (it keeps what you send), so deliberate, durable claims only.
-(Raise `surprise_threshold` above zero to auto-drop near-duplicates.)
 
-**When corrected:**
+**When corrected** — marks the old fact superseded *and* stores the
+correction; both surface in future retrieval, the new one ranked higher:
 ```
 memory_supersede(
   "Provider interface uses synchronous calls",
   "Provider interface uses async calls — sync version was the v0.7 prototype only"
 )
 ```
-Marks the old fact superseded *and* stores the correction. Both will
-surface in future retrieval, with the new one ranked higher.
 
-**Discovering what's in the bank:** open the Cortex Console — sources, tags,
-episodes, and full-table views all live there (`/api/sources`, `/api/tags`,
-`/api/episodes`, …). Band tensors autosave on a cadence and flush on clean
-exit; there is no manual save step.
-
-**Debugging a retrieval miss:**
-```
-memory_search("why didn't X come back?", sources=["pseudolife"], explain=True)
-```
-Returns the normal search result plus a `trace` dict: every
-tier's candidates with raw_score, recency boost, source/supersession
-multipliers, and the `drop_reason` (or `kept=True`) for each. The
-`final_topk` block shows exactly which entries reached the result set
-and what score they carried.
-
-Also useful for state-probe queries where recency bias is unwelcome:
-```
-memory_search("current Python version", disable_recency_boost=True)
-```
-
-**Hygiene:**
+**Hygiene** — hard-delete (at least one filter is required for scope
+`memory`, preventing accidental wholesale deletion); for "keep the history
+but mark it wrong" use `memory_supersede` instead:
 ```
 memory_forget(scope="memory", source="test-noise")
-memory_forget(scope="memory", substring="Junk entry")
 memory_forget(scope="fact", entity="test-entity")
 ```
-At least one filter is required for scope `memory` — a bare call returns
-an error to prevent accidental wholesale deletion. For "keep the history
-but mark it wrong" use `memory_supersede` instead.
 
-**Cross-encoder reranking (Tier B):**
-```
-memory_search("which python testing framework do we use", rerank=True)
-```
-After the bi-encoder retrieval builds the top-N candidate set, run
-`cross-encoder/ms-marco-MiniLM-L-6-v2` over each `(query, candidate)`
-pair and fuse the resulting relevance score with the bi-encoder score:
-```
-final = fusion_weight * sigmoid(ce_score) + (1 - fusion_weight) * original
-```
-The default `fusion_weight = 0.7` leans on the cross-encoder but
-preserves enough of the bi-encoder signal that recency / source /
-supersession multipliers still nudge order on near-ties. Off by
-default — enable per call with `rerank=True`, or globally via:
-```yaml
-memory:
-  reranker:
-    enabled: true
-    model_name: cross-encoder/ms-marco-MiniLM-L-6-v2
-    top_n: 20            # rerank the top-N candidates only
-    fusion_weight: 0.7   # 1.0 = pure CE, 0.0 = pure bi-encoder
-```
-First call lazy-loads the ~80 MB model from the HuggingFace Hub; later
-calls cost ~10 ms per reranked candidate on CPU (≈ 200 ms wall-clock
-added to a top-20 search). If the model fails to load, the reranker
-disables itself silently and retrieval falls back to bi-encoder ranking
-— search never breaks because of an optional component.
-
-`memory_search(..., rerank=True, explain=True)` surfaces the per-candidate
-`original_score`, `ce_score`, and `fused_score` under `trace.reranker`
-so you can see exactly how the cross-encoder reshuffled the
-bi-encoder ordering.
-
-**BM25 hybrid retrieval (Tier B2):**
-```
-memory_search("process_chunk_v2", bm25=True)
-memory_search("ship blocker for v9.42.0", bm25=True)
-```
-Dense MiniLM-L6 embeddings are great for *semantic* similarity but
-can underweight tokens with no real semantic neighbours — function
-names, version strings, error codes, hex hashes. BM25 is the classic
-sparse-lexical scorer (Okapi BM25 with Lucene-style IDF) that weights
-tokens by inverse document frequency, so rare-but-exact tokens count
-for a lot. The BM25 pool runs in parallel with dense retrieval and
-fuses with weighted score-sum:
-```
-final = dense_score + weight * normalized_bm25_score
-```
-Entries already in the dense pool get *boosted*; entries only BM25
-found enter at `weight * normalized_bm25` (intentionally below a
-typical dense hit so semantic recall still drives ordering). The
-tokenizer keeps underscored identifiers and dotted version strings
-whole, lowercases everything, and filters a tiny stop list.
-Configure globally with:
-```yaml
-memory:
-  bm25:
-    enabled: true
-    k1: 1.5       # term-frequency saturation
-    b: 0.75       # length-normalisation
-    weight: 0.3   # contribution to the fused score
-    top_n: 20     # how many BM25 hits to consider
-    min_score: 0.1  # floor on normalised BM25 (drops noise)
-```
-No new dependencies — pure stdlib. Cost is one O(N tokens) index
-rebuild per query, ≈ 20-50ms on a 40K-entry bank.
-
-`memory_search(..., bm25=True, explain=True)` records per-hit `raw_bm25`,
-`normalized`, and any BM25-only injections under `trace.bm25`.
-
-**Episodes + tags (Tier C):**
-
-An *episode* is a bracketed working session. While an episode is open, every
-memory stored carries the episode's id + title automatically, so later queries
-can scope by session. **Session episodes open and close for you**, daemon-owned
-and keyed by a stable per-session id (the transport `mcp-session-id`, or a shim's
-`X-PL-Session`) so concurrent sessions don't collide; the daemon lazily opens one
-on first store and an idle reaper closes it. For a substantial multi-step task you
-open a **nested sub-episode** under the session:
-
-```
-memory_episode_start("auth refactor")            # nests under the open session
-memory_store("Decided to keep tags orthogonal to source instead of merging them")
-memory_episode_end()                             # pops back to the session
-memory_search("design choices", episodes=[session_id])  # expands to the subtree
-memory_episode_summary(session_id)               # stats + tag distribution + recent entries
-```
-
-Episodes **nest** (schema v15): `memory_episode_start` opens a child under the
-current open episode — the parent stays open — `memory_episode_end` pops back to
-it, and closing the session cascade-closes any still-open children. A
-session-scoped `memory_search(episodes=[root_id])` expands to the whole subtree,
-so a sub-episode's entries surface under their parent session too. (Calling
-`memory_episode_start` with nothing open simply opens a root.) In Postgres mode
-episodes live in the `episodes` table (`session_key` + `parent_id` columns); in
-file mode they ride `cms_state.pt` under the `episodes` key.
-
-Tags are a parallel multi-valued axis to `source`: pass
-`tags=["decision", "blocker"]` on store, filter with
-`memory_search(..., tags=[...])`. Normalised at store time (lowercased,
-stripped, deduped). Set intersection non-empty for the filter to pass
-(OR within the filter list, AND with the other filters).
-
-**Consolidation workflow (Tier C):**
-
-Long-running banks accumulate near-duplicate memories — the same fact
-phrased five different ways across five sessions. The literature on
-agent memory ([HiMem 2026](https://arxiv.org/abs/2601.06377);
-[MIRIX 2024](https://arxiv.org/abs/2507.07957); the
-[ICML 2025 position paper](https://arxiv.org/abs/2502.06975)) calls
-consolidation — turning episodes into reusable semantic notes — *the*
-most-important under-implemented capability of long-term LLM memory.
-
-The dream pass (the extractor sidecar) handles fact extraction server-side,
-but the server can't borrow *Claude's* judgment mid-call (Claude Code doesn't
-yet expose MCP sampling — see [feature request #1785](https://github.com/anthropics/claude-code/issues/1785)),
-so near-duplicate cleanup is surfaced as clusters for Claude to consolidate
-deliberately:
-
-```
-memory_consolidation_candidates(query="MCP transport choice", top_k=20)
-# → {clusters: [{cohesion: 0.84, size: 3, members: [<entry>, ...]}, ...]}
-
-memory_consolidate(
-  replaces=["MCP uses stdio transport", "stdio was chosen for MCP", "decided on stdio for MCP"],
-  new_text="MCP transport is stdio — chosen over TCP to avoid port conflicts.",
-  tags=["consolidated"],
-)
-# → {superseded_count: 3, new_memory_stored: true, ...}
-```
-
-The clustering is deterministic greedy: highest-relevance entry seeds
-the cluster, any unclustered candidate whose cosine with the seed
-clears `min_cohesion` (default 0.6) joins, cohesion is the mean
-intra-cluster cosine, clusters are sorted by `cohesion × size`. Cost
-is O(N²) within the candidate pool, bounded to `top_k` candidates.
-
-`memory_consolidate` reuses the supersession machinery so the
-predecessors stay in the bank but rank below the canonical note —
-the audit trail survives but retrieval defaults to the current
-phrasing. Useful idiom: tag the consolidation with `["consolidated"]`
-so you can later scan with `memory_search(..., tags=["consolidated"])`
-to see what's been distilled.
-
-### Canonical facts — the cortex (schema v8)
-
-Alongside the associative continuum (the 8 MIRAS bands) sits the **cortex**: a
-slot-keyed canonical-fact store. Where the continuum is similarity-ranked and
-decaying, the cortex is **identity-not-similarity, supersession-not-decay,
-currency-not-frequency** — one *current* value per `(entity, attribute)` slot,
-retrievable out of the context window.
-
-- **Single-writer capture.** The LLM **dream** pass (the extractor sidecar) is the
-  sole *automatic* writer of canonical facts, plus deliberate `memory_fact_set`
-  calls. The deterministic regex auto-promote on `store` is now **opt-in**
-  (`memory.cortex.auto_promote`, default **off**): it mis-splits compound entity
-  names (`"payments database host"` → `payments` / `database host`) and fragments
-  slots, so it ships off — see
-  `docs/specs/2026-06-19-single-writer-cortex-design.md`. (When enabled it still
-  uses the precision-first dev lexicon: `<entity> <attr> is <value>` with the
-  attribute drawn from a closed set — port / version / host / branch / default
-  timeout / … — plus `my <attr> is <value>`, `<Entity>'s <attr> is <value>`,
-  `the <attr> of <entity> is <value>`, and single-line `<entity> <attr>: <value>`.)
-  A one-time `ops/dedup_cortex.py` (dry-run-first, reversible) collapses sibling
-  slots left by past auto-promotes.
-- **Deterministic read.** `memory_fact_get("project", "language")` returns the
-  one current value — no ranking, no stale duplicates. `memory_search` also
-  surfaces matching facts ahead of associative hits (a `"cortex"` block).
-- **Deliberate write / correction.** `memory_fact_set(entity, attribute, value,
-  origin="user")` asserts a fact at higher confidence; setting a new value at an
-  existing slot supersedes the old (kept as audit history).
-
-### Provenance contenders — never silently overwrite a user fact
-
-Every cortex fact carries a provenance tier: **`user` > `action` > `agent`**
-(set via `origin=`, or defaulted from `source`). A write may only *supersede* a
-slot whose current value is backed by an equal-or-weaker tier. A **weaker-tier**
-write (e.g. an `agent` value conflicting with a `user`-stated fact), or one below
-the confidence margin, is **not applied** — it's parked as a *contender*:
-
-```python
-memory_fact_set("db", "host", "10.0.0.5", origin="user")   # current
-memory_fact_set("db", "host", "10.0.0.9", origin="agent")  # -> action="contested"
-# current stays 10.0.0.5; "10.0.0.9" is parked. memory_fact_get shows both;
-# memory_search flags the fact "contested": true.
-memory_fact_resolve("db", "host", accept=True)   # human said yes -> adopt (user-confirmed)
-# or accept=False -> discard the contender, current unchanged.
-```
-
-This catches the case where the agent *decides* to update something and the human
-only said "yes/proceed": the discrepancy surfaces (at the write, in search, and in
-`memory_fact_get`) so the agent can check in rather than overwrite. Set
-`memory.cortex.protect_provenance: false` in `config.yaml` to disable and restore
-pure newer-wins.
-
-### World knowledge — the world cortex (schema v9)
-
-A third layer sits beside the personal cortex: the **world cortex**, for durable
-facts about *external* reality that a frozen training cut-off may have wrong or
-stale — a current model version, a price, who holds a role, a research finding.
-It's a separate slot-keyed store (its own `world_facts` table, `origin=source`),
-so external claims never mingle with the user/project facts.
-
-```
-memory_world_set("anthropic", "latest-model", "opus-4.8",
-                 source_url="https://...", source_quote="Opus 4.8 is the latest...",
-                 freshness_class="volatile")   # weeks | "slow" months | "evergreen" never
-memory_world_search("which Claude model is current")
-# → entries with effective_confidence (age-decayed), a `stale` flag, and the citation
-```
-
-Each fact carries a **citation** (`source_url` + the 1–2 sentence `source_quote`,
-not the whole page) and a `freshness_class` that drives **age-decayed trust** at
-read time: past 2×TTL a fact is flagged `stale` (a lead to re-verify, not truth).
-The trust contract: prefer a fresh, *cited* world fact over frozen training
-intuition when they conflict — but cite it ("as of <date>, per <source>") rather
-than presenting it as your own knowledge; your own cortex/episodic facts stay the
-highest-trust ground truth. `memory_search` surfaces matching world facts in a
-separate block, and the Console's world view (`/api/world`) lists them all for audit.
-
-> The world cortex here is populated **manually** via `memory_world_set`. The
-> live-web `research_ingest` action (fetch + distil cited world facts
-> automatically) is an agent-side capability that depends on the agent's
-> web tool — it is not part of the standalone MCP server.
-
-### Procedural memory — the lessons store (schema v10)
-
-A fourth layer learns from the agent's *own work*. Where the cortex stores
-*declarative* facts ("X is Y"), the lessons store is *procedural*: keyed by a
-**task-type** and an **aspect** (`approach` / `pitfall` / `tool-choice` /
-`correction`), each lesson carries an **outcome** (`success` / `failure` /
-`correction`) and a **polarity** (`+` do-this / `-` avoid). Its own `lessons`
-table keeps it isolated from the personal and world cortex.
-
-Capture is cheap and in-session; synthesis is single-writer (the dream):
-
-```
-# during a task, log what happened — this writes a SIGNAL, not a lesson:
-memory_outcome("deploy engine to host", "failure",
-               about="tar --same-owner", detail="chown errors aborted the extract")
-memory_outcome("deploy engine to host", "success", about="tar --no-same-owner")
-# user corrections are auto-captured when a user-tier memory_fact_set supersedes a value.
-
-# the dream later distils accumulated signals into durable lessons; recall them at task start:
-memory_lesson_search("how do I deploy the engine to a host")
-# → [{task, aspect, lesson, about, polarity:"-"|"+", outcome, confidence, score}, ...]
-```
-
-Lessons are also **traversable in the graph**: a task-type becomes an
-`etype='task-type'` entity, and each lesson adds a `prefers` (positive) or
-`avoids` (negative / dead-end) edge to the tool/source it concerns — so
-`memory_graph("deploy engine to host")` shows what to reach for and what to
-avoid. Retrieval is embedding-on-query (mirrors `memory_world_search`); the
-graph edges power structured traversal.
-
-> Single-writer: `memory_outcome` only ever logs a signal — the dream's LLM
-> extractor is the sole writer of lessons. With no extractor configured, signals
-> accumulate (pruned by retention) and no lessons are synthesised, exactly as the
-> cortex behaves without an extractor. The synthesised lessons are **auto-injected
-> at session start** by the `pseudolife-mcp briefing` SessionStart hook (the
-> "lessons from past work" block) — see *Session lifecycle hooks*.
-
-### Sense of time + multi-writer attribution (schema v11)
-
-Every canonical write (cortex, world, lessons) now carries a **temporal /
-provenance stamp** so the agent has a real sense of *when* a fact held and *who*
-set it — and so concurrent writers can't silently clobber each other:
-
-- **`tx_time`** — when this version was *written* (wall-clock display).
-- **`valid_time`** — when the fact became *true* (event time). A lesson
-  synthesised from an outcome signal inherits the signal's observation time, not
-  the dream's write time, so the two clocks stay honest (bitemporal).
-- **`(hlc_phys, hlc_logical)`** — a **Hybrid Logical Clock** that is the
-  *ordering authority* for supersession. Wall clocks can jump backwards (NTP
-  steps, clock skew across sessions); the HLC is monotonic, so "newer wins" is
-  jitter-proof — a later write always supersedes, even if its wall time reads
-  earlier. Wall time is display-only.
-- **`writer_id` / `session_id`** — which writer/session made the change. The
-  daemon reads an `X-PL-Writer` header per request (the stdio shim forwards
-  `PSEUDOLIFE_WRITER_ID`) and mints a per-connection session id, so a Codex
-  session, a second Claude session, and the dream are all distinguishable.
-
-Reads surface this: serialised facts include the stamp plus a human `age`
-("3 days ago"), and **`memory_history(entity, attribute)`** returns the full
-version timeline — current + superseded, oldest→newest, each attributed. The
-supersession log records the writer/session too.
-
-> **Writer topology.** The live path is a single daemon with a coarse lock
-> (`write_mode=snapshot`) — correct by construction. The schema also lays a
-> dormant `write_mode=occ` seam (a `version` column + per-row compare-and-swap)
-> for a future multi-process writer; selecting it raises `NotImplementedError`
-> until that Phase-2 path is built.
->
-> **Collision fix (v0.4) + AGE removal.** The DB role is `pseudolife`; the old
-> Apache AGE graph was also named `pseudolife`, which made AGE create a
-> `pseudolife` schema that shadowed the real `public` bank. AGE has since been
-> removed entirely — edges live in the relational `edges` table (the source of
-> truth), so the collision can no longer recur. `ops/migrate_drop_age.py` drops
-> the AGE graph + extension from an existing bank (back up first), and every
-> connection still pins `search_path` to `public` (asserted on startup).
-> `ops/retire_by_writer.py` supersedes a rogue writer's rows in one shot.
+**Discovering what's in the bank:** open the Cortex Console — sources, tags,
+episodes, and full-table views all live there. Going deeper:
+[reranking, BM25, abstention, and trace debugging](docs/guide/retrieval.md)
+· [episodes + tags](docs/guide/episodes.md#episodes--tags)
+· [canonical facts, contenders, world facts, lessons](docs/guide/memory-model.md)
+· [the consolidation workflow](docs/guide/dreaming.md#consolidation-workflow-agent-driven-dedup).
 
 ## Dreaming — consolidating memories into facts
 
-A **dream** distils the recent associative stream (MIRAS) into canonical cortex
-facts: pull unconsolidated memories → extract `(entity, attribute, value)` →
-`memory_fact_set` → advance a monotonic cursor so each memory is processed once.
-Because it keys on the **cursor**, not on "sessions", returning to an old session
-later just appends more tail — nothing is reprocessed, and there is no
-"session finished" event to detect.
-
-Extraction is pluggable; pick the tier that fits — the stack ships with
-tier 2 preconfigured (the extractor sidecar), and **no self-hosted model is
-required** if you'd rather not run one:
+A **dream** distils the recent associative stream into canonical cortex
+facts while you're not looking: pull unconsolidated memories → extract
+`(entity, attribute, value)` → advance a cursor so nothing is reprocessed.
+Extraction is pluggable:
 
 | Tier | How it runs | Needs | Quality |
 |------|-------------|-------|---------|
-| **0 — baseline** | `memory_dream(action="run")` (regex floor) — headless, on-box, free | nothing | weak (`X is Y`, `key: value`, port/version) |
+| **0 — baseline** | `memory_dream(action="run")` (regex floor) — headless, on-box, free | nothing | weak |
 | **1 — agent-driven** | the **agent itself** is the gateway: the `/dream` command | the agent you already run | highest |
-| **2 — shipped default** | daemon auto-sweep calls an OpenAI-compatible endpoint — the bundled sidecar out of the box, or any endpoint you point it at | nothing (sidecar) / one base-URL + key + model | high; free if local |
+| **2 — shipped default** | daemon auto-sweep → the bundled CPU sidecar, or any OpenAI-compatible endpoint | nothing (sidecar) | high; free if local |
 
-**Tier 1 — `/dream` (agent-driven).** Copy `examples/commands/dream.md` to
-`.claude/commands/dream.md` in any project, then run `/dream`. The agent reads
-`memory_dream(action="pull")`, extracts durable current-state facts, writes them
-with `memory_fact_set`, and commits the cursor. To run it on a cadence instead
-of by hand, point a scheduled agent/cron job at the same prompt.
+The stack ships tier 2 preconfigured (the bespoke Gemma 4 E4B extractor
+fine-tune in a llama.cpp sidecar, internal-only). The sweep cadence,
+pointing dreams at a bigger local model or at Claude Sonnet with automatic
+sidecar fallback, the full-corpus **deep dream** graph pass, and the
+privacy/cost trade-offs: [Dreaming](docs/guide/dreaming.md).
 
-**Tier 0 — zero-config.** Call `memory_dream(action="run")` (or schedule it)
-for a fully headless pass with the deterministic regex floor — no LLM, nothing
-leaves the machine.
+## Benchmarks
 
-**Tier 2 — headless auto-sweep.** Point the daemon at any OpenAI-compatible
-endpoint and it dreams on its own — no agent, no manual trigger:
+On the knowledge-update subset of
+[LongMemEval](https://arxiv.org/abs/2410.10813) (oracle variant,
+local-ceiling extractor), the consolidated-facts posture beats naive RAG by
+9 points while reading ~40% of the context:
 
-```powershell
-$env:PSEUDOLIFE_DREAM_BASE_URL = "http://localhost:11434/v1"   # e.g. Ollama
-$env:PSEUDOLIFE_DREAM_MODEL    = "qwen2.5:7b"
-# $env:PSEUDOLIFE_DREAM_API_KEY = "sk-..."           # hosted endpoints (Haiku, OpenRouter, ...)
-# $env:PSEUDOLIFE_DREAM_TIMEOUT_SECONDS = "240"      # raise for a slow CPU / big model (default 240)
-# $env:PSEUDOLIFE_DREAM_MAX_TOKENS      = "2048"     # extractor output budget (default 2048)
-```
+| arm | accuracy | context tokens/question |
+|-----|----------|------------------------|
+| naive RAG (top-6 turns) | 0.615 | 1638 |
+| cortex facts only | 0.564 | **59** |
+| **hybrid (facts + top-3 turns)** | **0.705** | 979 |
 
-The daemon runs a background sweep every `memory.dream.sweep_interval_seconds`;
-each tick it checks the same backlog+quiescence trigger and, if it fires, runs a
-dream with the configured extractor. Under the single-writer cortex a *successful*
-pass that finds no canonical facts writes nothing and advances the cursor; a
-**failed** call (timeout, network, malformed output) instead **holds the cursor**,
-so those memories are retried next sweep rather than skipped — there is no regex
-fallback either way. The extractor timeout defaults to **240s** in code; the
-Docker stack ships **480s** (`PSEUDOLIFE_DREAM_TIMEOUT_SECONDS` in the compose
-file) because the default E4B sidecar generates at ~12–15 tok/s on CPU, so a
-full `PSEUDOLIFE_DREAM_MAX_TOKENS` generation runs ~150–170s — raise it further
-for slower hardware. The same env vars also upgrade `memory_dream(action="run")`.
-A local model keeps all text on-box; a hosted endpoint does not.
+The fact spine alone delivers 92% of RAG's accuracy on **3.6% of its token
+budget**. Setup, caveats, and why extraction quality is the dominant
+factor: [Benchmarks](docs/guide/benchmarks.md); full methodology:
+[`evals/README.md`](evals/README.md).
 
-**Tier 2, batteries-included — the CPU extractor sidecar (default-on).** The stack
-ships a llama.cpp sidecar with a model baked in (the bespoke Gemma 4 E4B
-extractor fine-tune, ~5.3 GB — see "Upgrading the extractor" below for the
-lighter E2B bake), and `ops/docker-compose.yml` starts it by
-default and routes dream consolidation to it. It's internal-only (never published
-to the host). Single-writer cortex relies on it: with no extractor configured, the
-cortex is populated only by `memory_fact_set` and the daemon logs a startup
-warning. Reasoning models work too — the extractor disables their `<think>` trace
-so they return structured output instead of an empty budget. The `evals/`
-extractor-ladder benchmark is how the default was chosen (even the smallest
-bake, Gemma 4 E2B, beats naive-RAG at ~25× fewer tokens/query); see
-`evals/README.md`.
+## Cortex Console (web UI)
 
-**Upgrading the extractor — bigger local models.** If you have a GPU (or a
-beefier box on your LAN), any OpenAI-compatible server can replace the sidecar —
-the ladder measured a Qwen3.6-27B on a single RTX 4090 at the quality ceiling
-(gold 1.0 / stale-leak 0.0) while extracting ~5× faster than the CPU sidecar.
-Two ways to switch:
+An operator dashboard served by the daemon itself — point a browser at
+**`http://127.0.0.1:8765/ui/`** (the `/health` and `/mcp` endpoints are
+unchanged; the console is additive). It's a read-mostly instrument panel for
+seeing and steering the memory a human otherwise can't observe:
+**Observatory** (health, per-layer counts, the 8-band continuum, dream
+gauges), **Cortex** (canonical facts with provenance, version-history
+timelines, inline Accept/Discard for contested slots), **World / Lessons /
+Episodes**, **Stream** (live search with rerank/BM25 toggles and a
+ranking-trace debugger), **Graph** (interactive force-directed visualiser),
+and **Console** (every safe `config.yaml` scalar with live-vs-restart
+badges, diff-preview, and atomic save).
 
-*From the Console (no restart):* the **Extractor** panel in the Cortex
-Console's config view edits the endpoint, model, timeout, and token budget
-live — flip its "Settings source" switch to `config` first (while it is
-`env`, the default, the `PSEUDOLIFE_DREAM_*` variables below own the
-settings and the panel's values are ignored). The API key stays env-only
-either way.
+**Auth** mirrors `/mcp`: `/ui` (static shell) and `/health` are open; `/api/*`
+requires the same `PSEUDOLIFE_MCP_TOKEN` bearer when one is set (the console
+prompts for it and stores it locally). No build step, no CDN, fully offline —
+vanilla ES modules + vendored OFL fonts served straight from the daemon.
+Developing the UI? A fixture-backed dev server (no Postgres, no torch)
+renders the real frontend against canned data:
+`python -m pseudolife_memory.web.devserver` → `http://127.0.0.1:8770/ui/`.
 
-*Via env:* for the Docker stack, set the override in `ops/.env` (the compose
-file interpolates it into the daemon) and restart the daemon
-(`docker compose -f ops/docker-compose.yml up -d --no-deps pseudolife-daemon`):
+## Capabilities at a glance
 
-```dotenv
-# ops/.env — point dream consolidation at a local model server.
-# From inside the container the host machine is host.docker.internal, NOT
-# localhost (works on Linux too via the extra_hosts entry shipped in
-# ops/docker-compose.yml).
-PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:1234/v1
-PSEUDOLIFE_DREAM_MODEL=qwen3.6-27b
-```
-
-Per-runtime defaults (all serve the same `/v1/chat/completions` shape):
-
-| Runtime | Typical base URL (from the container) | `PSEUDOLIFE_DREAM_MODEL` |
-|---------|----------------------------------------|--------------------------|
-| **LM Studio** | `http://host.docker.internal:1234/v1` | the model's API identifier shown in LM Studio's server tab |
-| **Ollama** | `http://host.docker.internal:11434/v1` | the tag, e.g. `qwen2.5:14b` |
-| **llama.cpp** (`llama-server`) | `http://host.docker.internal:8080/v1` | anything (single-model server ignores it) |
-| **vLLM** | `http://host.docker.internal:8000/v1` | the `--served-model-name` |
-| LAN box | `http://192.168.x.x:PORT/v1` | per the runtime above |
-
-The unused sidecar can be stopped (`docker compose -f ops/docker-compose.yml
-stop pseudolife-extractor`) or left running as a fallback to switch back to.
-The default bake is the bespoke [Pseudolife extractor fine-tune](https://huggingface.co/Pseudogiant-xr/pseudolife-extractor-gemma-4-e4b)
-(Gemma 4 E4B QLoRA); constrained machines can bake the lighter **Gemma 4 E2B
-QAT** instead (also ladder-verified) — see the `MODEL_URL` build-arg
-in `ops/Dockerfile.extractor`, or mount any GGUF over `/models/extractor.gguf`
-via a machine-local `ops/docker-compose.override.yml` (gitignored; example in
-the compose file). If you run the daemon *outside* Docker (embedded
-stdio mode), the `$env:` variables above apply directly and `localhost` URLs
-work as-is. A local or LAN model keeps all memory text on your network; the
-same env triple pointed at a hosted endpoint does not.
-
-**Optional: Sonnet primary with local fallback.** With a Claude Max plan, the
-dream pass can use Claude Sonnet as its primary extractor and keep the bundled
-local sidecar as an automatic fallback. The installer does all of this in one
-go — `ops/install.sh --extractor sonnet-fallback` (or `sonnet-only` to skip
-the sidecar entirely; `ops\install.ps1 -Extractor ...` on Windows). The manual
-steps:
-
-1. Register the CLI shim (`evals/sonnet_shim.py`) to start automatically —
-   requires a logged-in `claude` CLI:
-   - Windows: `ops\install-shim-autostart.ps1` (Task Scheduler, at logon,
-     `127.0.0.1:8082`).
-   - Linux: `ops/install-shim-autostart.sh` (systemd `--user` unit; binds
-     the docker bridge IP so the daemon container can reach it —
-     `host-gateway` routes container→host traffic to the bridge, where a
-     loopback bind is invisible).
-2. Set in `ops/.env` (both vars must flip together — pointing only one at
-   the shim leaves dreams silently on the sidecar):
-   `PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:8082/v1`,
-   `PSEUDOLIFE_DREAM_MODEL=extractor`,
-   `PSEUDOLIFE_DREAM_FALLBACK_BASE_URL=http://pseudolife-extractor:8081/v1`,
-   `PSEUDOLIFE_DREAM_FALLBACK_MODEL=extractor`,
-   `PSEUDOLIFE_DREAM_EXTRACTOR_MODE=auto` (or `primary`/`fallback` to force
-   a side — also switchable live in the Console's Extractor panel).
-3. Redeploy (`ops/update.ps1` / `ops/update.sh`), then **verify**:
-   `memory_dream(action="status")` should show `fallback_url` populated and,
-   with the shim up, `primary_healthy: true`; after the next dream,
-   `last_dream_extractor.which` should read `primary` against the `:8082`
-   URL. The daemon also logs a startup warning for the common
-   half-configurations (unresolvable `host.docker.internal`, `auto` without
-   a fallback, primary == fallback).
-
-When the shim is unreachable or the CLI is logged out, dreams automatically
-use the fallback; the Console's Observatory shows which extractor is active.
-Leave `PSEUDOLIFE_DREAM_FALLBACK_BASE_URL` unset to keep the existing
-single-extractor behavior.
-
-What gets consolidated and when is configurable under `memory.dream`
-(`eligible_sources` / `exclude_sources`, and the `min_batch` / `idle_seconds`
-backlog+quiescence thresholds that `memory_dream(action="status")` reports).
-
-**Cadence — quiescence-gated, daemon-only.** The auto-sweep (Tier 2) fires when:
-
-```
-backlog ≥ min_batch (8)   OR   (backlog ≥ 1 AND idle ≥ idle_seconds (600s))
-```
-
-polled every `sweep_interval_seconds` (600s). It runs **only in the daemon** — the
-embedded stdio mode never sweeps. There is **no turn-based trigger** (the cortex
-does not "dream every N turns"), by design: consolidating mid-session would distil
-half-formed, still-changing state into canonical facts and burn the CPU extractor
-during your foreground work. So during an active session, prose-stored facts stay
-in the searchable bands and reach the cortex once you go quiet (~10 min idle) or a
-backlog of 8 accumulates.
-
-**Want a fact canonical *now*, mid-session?** Two on-demand paths bypass the wait:
-`memory_fact_set` writes a canonical fact instantly, and `memory_dream(action="run")`
-forces a full consolidation sweep on the spot (the `/dream` command wraps it).
-`memory_search` finds the original prose the entire time regardless.
-
-**Privacy & cost.** Tier 0 is on-box and free. Tier 1 spends the agent tokens
-you already pay for (a scheduled daily dream is small but non-zero). Tier 2 with a
-*cloud* endpoint sends memory text off-box — a local model (e.g. Ollama) keeps it
-on-machine.
-
-**Deep dream — full-corpus graph consolidation.** The incremental dream (tiers
-above) is window-local: it distils only the recent MIRAS tail into cortex facts.
-`memory_dream(action="deep")` is a separate, manually-triggered full-corpus GRAPH
-pass (Phase-2 'C'). A dry-run (default) returns a preview of what it would change:
-re-scored edges, hard type-violation edges queued for supersession, exact-duplicate
-entity pairs queued for merging, and semantic link *candidates* across sessions
-(each with truncated context snippets; items the apply path would dedupe are
-flagged `already_proposed`). Adding `apply=True` first dumps the five graph
-tables to a JSON undo file under `data_dir/graph_snapshots/` (refusing with
-`snapshot_failed` if it can't), then commits the safe self-clean (re-score +
-supersede violations + merge exact dups) and returns `candidates` for review.
-The agent then drives Step C in the same session (see the `/dream deep` flow in
-`examples/commands/dream.md`): judge each candidate from its snippets, post the
-real relations with `memory_graph_review(action="propose")` — they land in the
-Atlas Review queue (`proposed_link` findings) for per-item accept/reject before
-anything reaches live edges — and record clearly-distinct pairs with
-`memory_graph_review(action="dismiss_pair")` so they stop resurfacing. See
-`docs/runbooks/deep-dream.md` for the operator procedure.
-
-## Data layout
-
-**Containerized / daemon mode (recommended).** The durable source of truth is
-**Postgres**, which lives in an *external* Docker volume — `pseudolife-mcp-bank`
-by default (entries + facts + graph). A second external volume,
-`pseudolife-mcp-state`, holds the daemon's ChromaDB reference bank, the
-band-counter `weights.pt`, and the cortex snapshot. Both are declared `external`
-in `ops/docker-compose.yml` precisely so a container teardown can't take them
-with it. The host `data/` dir then holds only backups (`data/backups/` from
-`ops/backup.ps1` — a `pg_dump` of the bank *plus* a tar of the state volume)
-and one-time legacy-import staging — *not* the live bank.
-
-To wipe the bank in this mode you must drop those volumes deliberately —
-**never `docker compose down -v` or `docker volume rm` without `ops/backup.ps1`
-first**; `stop` / `start` and `up -d --build` keep both volumes.
-
-**File mode (no daemon / no Postgres — the `embedded` CLI, or unset
-`PSEUDOLIFE_MCP_DATABASE_URL`).** Everything lives under `PSEUDOLIFE_MCP_DATA_DIR`:
-
-```
-data/
-├── memory_state/
-│   └── cms_state.pt        # 8-tier MIRAS entries + metadata (file mode)
-├── cortex_state.pt         # Slot-keyed canonical facts (cortex, schema v8)
-├── chromadb/               # Reference bank (RAG documents)
-└── config.yaml             # Optional overrides
-```
-
-In **file mode only**, wipe memory by deleting `data/` and restarting; wipe just
-documents via `data/chromadb/`; wipe just the episodic bands via
-`data/memory_state/`. (In containerized mode these files are not the source of
-truth — see the volume note above.)
+| Capability | Status |
+|---|---|
+| Transport | Streamable-HTTP MCP daemon (`/mcp`); optional stdio shim for host-process installs |
+| Storage | Postgres 16 + pgvector (source of truth); ChromaDB for the reference bank |
+| Associative continuum | 8-tier cosine MIRAS bands, novelty-gated storage, contradiction detection, supersession |
+| Canonical-fact cortex | Single-writer: LLM dream pass + `memory_fact_*` (regex auto-promote opt-in, default off) |
+| Provenance contenders | Tier-rank guard `user > action > agent`; `memory_fact_resolve` |
+| Knowledge graph | Typed entities/edges, closed relation vocab, on-read closure (Postgres + NetworkX, no AGE/Cypher) |
+| World cortex | `memory_world_*` — cited external facts + age-decayed freshness (manual ingest) |
+| Procedural memory | `memory_outcome` (signals) → dream-synthesised lessons via `memory_lesson_search`; `prefers`/`avoids` graph edges; single-writer |
+| Sense of time + multi-writer | Per-write stamp (tx/valid time, HLC ordering, writer/session); `memory_history`; relative `age` on reads; `write_mode` seam (snapshot live, occ Phase-2) |
+| Episodes + tags | Session episodes daemon-owned, keyed by stable per-session id; lazy-open + idle reaper + prune-empty; nested sub-episodes with subtree-expanded recall; multi-valued `tags=[...]` |
+| Session briefing | SessionStart hook injects unsure-graph + lessons + verified world facts + last-session recap (`pseudolife-mcp briefing`) |
+| Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
+| Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); BM25 hybrid pool (`bm25=True`, stdlib only); ONNX embedding backend (`pip install .[onnx]` — ~3x faster CPU encode, bit-identical, auto-enabled when installed); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
+| Web console | Cortex Console at `/ui/` — health/stats, fact review + history, graph visualiser, search/trace, config editor (read-mostly, token-gated like `/mcp`) |
+| Schema version | v22 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start; legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
 
 ## Troubleshooting
 
@@ -1285,22 +488,17 @@ pseudolife-mcp-daemon`).
   `127.0.0.1:5433` (Postgres). Change the host side in
   `ops/docker-compose.yml` if either collides.
 - **Console shows "offline" / Unauthorized**: "offline" means the daemon
-  isn't reachable (see above). A 401 prompt means the daemon runs with
-  `PSEUDOLIFE_MCP_TOKEN` — paste the same token into the Console's Token
-  dialog.
+  isn't reachable (see above); a 401 prompt means it runs with
+  `PSEUDOLIFE_MCP_TOKEN` — paste that token into the Console's Token dialog.
 - **Claude Code doesn't see the tools**: `claude mcp list` should show
   `pseudolife-memory` ✓ connected. If not, re-check the URL
   (`http://127.0.0.1:8765/mcp` — the `/mcp` path matters) and the bearer
-  header when a token is set.
-- **A tool call hangs on first use**: the first call after a cold start
-  loads the embedder (a few seconds, once per daemon start). The
-  session-start briefing hook never blocks — it skips silently when the
-  daemon is down.
+  header when a token is set. A first call after a cold start loads the
+  embedder (a few seconds, once per daemon start).
 
 ## Uninstall
 
-Deletion is deliberate at every step — nothing here is reversible past the
-backups you keep:
+Deletion is deliberate at every step:
 
 ```bash
 # 1. Optional: take a final backup first (ops/backup.ps1 or ops/backup.sh).
@@ -1312,145 +510,31 @@ claude mcp remove pseudolife-memory
 docker volume rm pseudolife-mcp-bank pseudolife-mcp-state
 ```
 
-Host-process installs: also unregister the logon task (`Unregister-ScheduledTask
--TaskName "Pseudolife-MCP Daemon"`) and remove the SessionStart briefing
-hook that `install-hook.ps1` / `install-hook.sh` added to
-`~/.claude/settings.json` (a timestamped `.bak-*` sits next to it).
+Host-process installs: also unregister the logon task
+(`Unregister-ScheduledTask -TaskName "Pseudolife-MCP Daemon"`) and remove
+the SessionStart briefing hook from `~/.claude/settings.json` (a
+timestamped `.bak-*` sits next to it).
 
 ## Testing
 
-```powershell
-.venv\Scripts\activate
-pip install -e .[dev]
-pytest tests/ -v
-```
-
-The suite covers every layer: the MemoryService surface, retrieval scoring
-(cross-encoder reranker / BM25 hybrid), the cortex + world cortex + lessons
-stores, episodes + tags, the dream extractors (including the regression that
-a *failed* extraction holds the cursor so memories are retried, not
-skipped), the knowledge graph (+ insight layer and multi-hop recall),
-Postgres storage (schema idempotency, write-through consistency, legacy
-`.pt` migration, concurrent-writer safety), the HTTP daemon + stdio shim,
-the MCP tool surface (schema + end-to-end invocation for every exposed
-tool, plus a description-budget guard that keeps the manifest lean), and
-the Cortex Console REST API. Model-heavy pieces are stubbed where possible
-so the suite stays fast and offline.
-
-The PG-backed suites target a throwaway `pseudolife_memory_test` database on
-the bundled dev container (`ops/docker-compose.yml`, port 5433) — created on
-first run and reset per-test, so repeat runs stay green and never touch your
-real bank. Point them elsewhere with `PSEUDOLIFE_TEST_DATABASE_URL`. With the
-container up, `pytest tests/` runs everything; without any Postgres, the PG
-suites skip and the pure-logic suites still pass.
-
-## Benchmarks
-
-Measured on the **knowledge-update subset of
-[LongMemEval](https://arxiv.org/abs/2410.10813)** (78 questions) — the
-"user's facts change over time" ability the HLC supersession spine exists
-for. Everything local: extraction, answering, and LLM-as-judge grading all
-run on the author's own hardware (judge = Qwen3.6-27B at temperature 0),
-so compare *within* the table, not against GPT-4o-judged leaderboards.
-
-On the oracle variant (evidence sessions only), with the local-ceiling
-extractor:
-
-| arm | accuracy | context tokens/question |
-|-----|----------|------------------------|
-| naive RAG (top-6 turns) | 0.615 | 1638 |
-| cortex facts only | 0.564 | **59** |
-| **hybrid (facts + top-3 turns)** | **0.705** | 979 |
-
-The consolidated-facts posture beats naive RAG by 9 points while reading
-~40% of the context — and the fact spine alone delivers 92% of RAG's
-accuracy on **3.6% of its token budget**. Running floor (Gemma 4 E2B, the
-smallest CPU-sidecar bake) vs ceiling (Qwen3.6-27B) extractors with the RAG arm
-as a fixed control isolates **extraction quality as the dominant factor**
-in fact-spine accuracy — the measured case for the "Upgrading the
-extractor" section above. Full methodology, the harder full-haystack
-(`_s`) results, and every finding: [`evals/README.md`](evals/README.md).
-
-## Cortex Console (web UI)
-
-An operator dashboard served by the daemon itself — point a browser at
-**`http://127.0.0.1:8765/ui/`** (the `/health` and `/mcp` endpoints are
-unchanged; the console is additive). It's a read-mostly instrument panel for
-seeing and steering the memory a human otherwise can't observe.
-
-![Cortex Console — Observatory view](https://raw.githubusercontent.com/Pseudogiant-xr/Pseudolife-MCP/master/docs/images/cortex-console-observatory.png)
-
-- **Observatory** — health, per-layer counts, the 8-band MIRAS continuum
-  (capacity fill + hit rate), and dream backlog/quiescence gauges.
-- **Cortex** — canonical facts grouped by entity with provenance tiers and
-  confidence; click a fact for its **version-history timeline**; contested
-  slots surface inline with Accept/Discard (`memory_fact_resolve`).
-- **World / Lessons / Episodes** — cited external facts (freshness + decayed
-  trust), do/avoid procedural lessons, and the session timeline with summaries.
-- **Stream** — live search with rerank/BM25 toggles, the associative stream,
-  and a **ranking-trace debugger** (why an entry did/didn't surface).
-- **Graph** — an interactive force-directed visualiser of the knowledge graph
-  (drag, click-to-expand, derived vs explicit edges) with a table view.
-- **Console** — the config "knobs & dials": every safe scalar in `config.yaml`
-  with a description, live-vs-restart badge, diff-preview, and an atomic save
-  (timestamped backup; live knobs apply in-process).
-
-**Auth** mirrors `/mcp`: `/ui` (static shell) and `/health` are open; `/api/*`
-requires the same `PSEUDOLIFE_MCP_TOKEN` bearer when one is set (the console
-prompts for it and stores it locally). No build step, no CDN, fully offline —
-vanilla ES modules + vendored OFL fonts served straight from the daemon.
-
-**Developing the UI:** a fixture-backed dev server (no Postgres, no torch)
-renders the real frontend against canned data for fast iteration:
-
-```bash
-python -m pseudolife_memory.web.devserver   # http://127.0.0.1:8770/ui/
-```
-
-## Capabilities at a glance
-
-| Capability | Status |
-|---|---|
-| Transport | Streamable-HTTP MCP daemon (`/mcp`); optional stdio shim for host-process installs |
-| Storage | Postgres 16 + pgvector (source of truth); ChromaDB for the reference bank |
-| Associative continuum | 8-tier cosine MIRAS bands, novelty-gated storage, contradiction detection, supersession |
-| Canonical-fact cortex | Single-writer: LLM dream pass + `memory_fact_*` (regex auto-promote opt-in, default off) |
-| Provenance contenders | Tier-rank guard `user > action > agent`; `memory_fact_resolve` |
-| Knowledge graph | Typed entities/edges, closed relation vocab, on-read closure (Postgres + NetworkX, no AGE/Cypher) |
-| World cortex | `memory_world_*` — cited external facts + age-decayed freshness (manual ingest) |
-| Procedural memory | `memory_outcome` (signals) → dream-synthesised lessons via `memory_lesson_search`; `prefers`/`avoids` graph edges; single-writer |
-| Sense of time + multi-writer | Per-write stamp (tx/valid time, HLC ordering, writer/session); `memory_history`; relative `age` on reads; `write_mode` seam (snapshot live, occ Phase-2) |
-| Episodes + tags | Session episodes daemon-owned, keyed by stable per-session id (`mcp-session-id` / `X-PL-Session`); lazy-open + idle reaper + prune-empty; nested sub-episodes (`memory_episode_*`, schema v15) with subtree-expanded recall; multi-valued `tags=[...]` |
-| Session briefing | SessionStart hook injects unsure-graph + lessons + verified world facts + last-session recap (`pseudolife-mcp briefing`) |
-| Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
-| Cross-encoder reranker | Optional (`rerank=True` per call, ~80 MB; `reranker.skip_margin` skips the pass when the top-2 bi-encoder gap is decisive) |
-| ONNX embedding backend | Optional (`pip install .[onnx]`, ~90 MB extra weights) — ~3x faster CPU encode, bit-identical embeddings; auto-enabled when installed, `embedding.backend` overrides |
-| BM25 hybrid pool | Optional (`bm25=True` per call, stdlib only) |
-| NLI contradiction scorer | Optional (`pip install .[nli]`, ~278 MB) |
-| Web console | Cortex Console at `/ui/` — health/stats, fact review + history, graph visualiser, search/trace, config editor (read-mostly, token-gated like `/mcp`) |
-| Schema version | v22 (Postgres meta version) — v11 temporal/provenance stamp, v12 graph-insight communities, v13 provenance-trace engram + reinforcements, v14 episode `session_key`, v15 episode `parent_id` (nesting), v16 `entity_sources` (per-entity project attribution), v17 `edge_proposals` (deep-dream link candidates), v18 `entity_proposals` (deep-dream merge/junk candidates), v19 partial unique indexes enforcing one current row per slot on facts/world_facts/lessons (+ startup heal of pre-existing duplicates; per-slot write-through persistence replaces the full-table snapshot rewrite), v20 `dismissed_pairs` (reviewed-distinct pairs stop resurfacing as duplicate findings), v21 `merge_decisions` audit + write-time near-duplicate merge proposals, v22 `edges(dst_id)` index (dst-side graph lookups no longer sequential-scan); additive `ADD COLUMN IF NOT EXISTS` on daemon start; legacy file-mode `.pt` banks auto-migrate into Postgres |
+`pip install -e .[dev]`, then `pytest tests/`. The suite covers every
+layer, from the MemoryService surface to the Cortex Console REST API;
+model-heavy pieces are stubbed so it stays fast and offline. The PG-backed
+suites target a throwaway `pseudolife_memory_test` database on the bundled
+dev container (never your real bank) and skip cleanly without Postgres.
+Full dev setup: [CONTRIBUTING](CONTRIBUTING.md).
 
 ## What's not built yet
 
-- **Reflection via MCP sampling** — the MCP protocol has a `sampling`
-  capability that lets servers ask the client (Claude) to generate text.
-  Wiring that up would let the dream borrow *Claude itself* as the extractor
-  instead of a sidecar or shim. [Claude Code doesn't yet support
-  sampling](https://github.com/anthropics/claude-code/issues/1785) — until
-  it does, the sidecar handles extraction and
-  `memory_consolidation_candidates` + `memory_consolidate` give Claude
-  deliberate consolidation through manual tool calls.
-- **Cross-machine sync** — memory lives on one PC's disk. Syncing
-  `data/` via rclone / syncthing / git-lfs is left as an exercise.
-- **Hierarchical summarisation** — periodic auto-summaries at multiple
-  time scales (daily, weekly). Mostly subsumed by Tier C's episode +
-  consolidation flow; what's left is the *cadence* automation.
-- **Automated world-knowledge *ingestion*** — the world cortex stores and serves
-  cited external facts, and the SessionStart briefing now surfaces them (the
-  *verified world facts* block), but *populating* it from the live web
-  (`research_ingest`) still needs a web-fetch tool the standalone server doesn't
-  ship. Today, assert world facts with `memory_world_set` (an agent with web
-  access can automate the fetch+cite step); the read surface is already in place.
+- **Reflection via MCP sampling** — would let the dream borrow *Claude
+  itself* as the extractor;
+  [Claude Code doesn't yet support it](https://github.com/anthropics/claude-code/issues/1785).
+- **Cross-machine sync** — memory lives on one PC's disk; syncing via
+  rclone / syncthing is left as an exercise.
+- **Automated world-knowledge ingestion** — populating the world cortex
+  from the live web needs a web-fetch tool the standalone server doesn't
+  ship; an agent with web access can automate the fetch+cite step today
+  via `memory_world_set`.
 
 ## License
 
