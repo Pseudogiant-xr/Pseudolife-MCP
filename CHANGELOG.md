@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-16 — PyPI Trusted Publishing workflow)
+- **`.github/workflows/release.yml`** — publishing a GitHub release now
+  builds + `twine check`s and uploads to PyPI via Trusted Publishing (OIDC;
+  no stored API token), gated on a tag==pyproject version guard and the
+  `pypi` environment's required-reviewer approval. One-time setup: add the
+  Trusted Publisher on PyPI (owner/repo/workflow/environment) and create the
+  `pypi` environment with a required reviewer, then retire the API token.
+
 ### Changed (2026-07-16 — WSL memory guidance matches the E4B sidecar)
 - **`ops/wslconfig.example` sizing was still E2B-era** (stack "~2 GiB
   resident", 16 GB laptop → `memory=6GB`): the default E4B v2 bake mmaps a
