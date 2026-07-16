@@ -60,12 +60,24 @@ onnx = [
     "optimum[onnxruntime]>=1.23",
 ]
 
+[project.urls]
+Homepage = "https://github.com/Pseudogiant-xr/PseudoLife-MCP"
+Repository = "https://github.com/Pseudogiant-xr/PseudoLife-MCP"
+Changelog = "https://github.com/Pseudogiant-xr/PseudoLife-MCP/blob/master/CHANGELOG.md"
+Issues = "https://github.com/Pseudogiant-xr/PseudoLife-MCP/issues"
+
 [project.scripts]
 pseudolife-mcp = "pseudolife_memory.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["pseudolife_memory*"]
+
+[tool.setuptools.package-data]
+# The Cortex Console is served from inside the package — the wheel must
+# carry its static assets (css/fonts/js/index.html) or a pip install gets
+# a 404 console.
+"pseudolife_memory.web" = ["static/**"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

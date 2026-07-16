@@ -1,5 +1,7 @@
 # PseudoLife-MCP
 
+<!-- mcp-name: io.github.pseudogiant-xr/pseudolife-mcp -->
+
 **Persistent long-term memory for Claude Code via the Model Context Protocol.**
 
 An MCP server that gives Claude (or any MCP-capable client) a long-term
@@ -1335,7 +1337,7 @@ An operator dashboard served by the daemon itself — point a browser at
 unchanged; the console is additive). It's a read-mostly instrument panel for
 seeing and steering the memory a human otherwise can't observe.
 
-![Cortex Console — Observatory view](docs/images/cortex-console-observatory.png)
+![Cortex Console — Observatory view](https://raw.githubusercontent.com/Pseudogiant-xr/PseudoLife-MCP/master/docs/images/cortex-console-observatory.png)
 
 - **Observatory** — health, per-layer counts, the 8-band MIRAS continuum
   (capacity fill + hit rate), and dream backlog/quiescence gauges.

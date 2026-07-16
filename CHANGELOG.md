@@ -26,6 +26,17 @@ E4B v2 extractor fine-tune as the shipped default, rollback-tag and backup
 retention, the v2 release audit (state-volume backups, install hardening,
 disk-growth caps), and the toolset-tier visibility rework.
 
+### Fixed (2026-07-16 — PyPI packaging)
+- **The wheel now ships the Cortex Console** — `[tool.setuptools.package-data]`
+  carries `pseudolife_memory/web/static/**` (css/fonts/js/index.html); without
+  it a pip install served a 404 console (the Docker image was unaffected — it
+  copies the whole package tree).
+- `[project.urls]` (Homepage/Repository/Changelog/Issues) for the PyPI
+  sidebar; the MCP registry ownership marker
+  (`mcp-name: io.github.pseudogiant-xr/pseudolife-mcp`) embedded in the
+  README, which is the package description; the README screenshot switched
+  to an absolute URL so it renders off-repo.
+
 ### Fixed (2026-07-16 — tier changes now reach shim clients)
 - **Shim forwards `tools/list_changed`** (landed inside the release-cut
   commit) — the shim's per-call upstream design meant the daemon's
