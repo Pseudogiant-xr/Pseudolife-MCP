@@ -202,6 +202,9 @@ class FixtureService:
     def lessons_dump(self, limit=120):
         return {"count": len(_LESSONS), "entries": [_lesson_dict(t) for t in _LESSONS][:limit]}
 
+    def session_briefing(self, max_unsure=3, max_lessons=3, max_world=3):
+        return {"markdown": "## Memory briefing (fixture)\n- lesson: prefer bar over foo"}
+
     # episodes
     def episode_list(self, limit=20, include_open=True):
         eps = [

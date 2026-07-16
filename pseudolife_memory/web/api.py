@@ -27,6 +27,7 @@ from typing import Any, Callable
 from urllib.parse import urlsplit
 
 from pseudolife_memory.web.routes import ConsoleRoutes
+from pseudolife_memory.web.session_hook import session_start_context
 
 logger = logging.getLogger("pseudolife-mcp.web")
 
@@ -209,7 +210,25 @@ def build_console_app(
                 await _send_bytes(send, 500, b"static error", "text/plain")
             return
 
-        # 4) console REST API (token-gated like /mcp)
+        # 4) plugin SessionStart hook context (plain text, 200 always). The
+        # instructions half is public repo content, so an unauthorized
+        # request (token set, no bearer) still gets it — but never the
+        # briefing, which is memory content. Loopback gating as for /api.
+        if path == "/api/hook/session-start":
+            denied = _browser_gate(scope)
+            if denied:
+                await _send_json(send, 403, {"error": denied})
+                return
+            if method != "GET":
+                await _send_json(send, 405, {"error": "method_not_allowed"})
+                return
+            text = await asyncio.get_running_loop().run_in_executor(
+                None, session_start_context, service, _authorized(scope))
+            await _send_bytes(send, 200, text.encode("utf-8"),
+                              "text/plain; charset=utf-8", "no-store")
+            return
+
+        # 5) console REST API (token-gated like /mcp)
         if path.startswith("/api/") or path == "/api":
             denied = _browser_gate(scope)
             if denied:
@@ -266,7 +285,7 @@ def build_console_app(
                 await _send_json(send, 500, {"error": str(exc)})
             return
 
-        # 5) everything else -> the MCP app (token gate preserved)
+        # 6) everything else -> the MCP app (token gate preserved)
         if not _authorized(scope):
             await _send_json(send, 401, {
                 "error": "unauthorized",

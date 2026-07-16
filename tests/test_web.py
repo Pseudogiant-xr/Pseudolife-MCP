@@ -331,6 +331,85 @@ def test_asgi_root_redirects(svc):
     assert st == 307
 
 
+# ── /api/hook/session-start (plugin SessionStart hook endpoint) ─────────────
+# Serves the memory-loop instructions (+ briefing) as plain text for the
+# Claude Code plugin's curl hook. Contract: 200 always, instructions always,
+# memory content only when authorized, capped under the 10k hook stdout limit.
+
+def _call_with_headers(app, method, path, headers=None):
+    async def run():
+        scope = {"type": "http", "method": method, "path": path,
+                 "query_string": b"", "headers": headers or []}
+
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        out = {"status": None, "headers": [], "body": bytearray()}
+
+        async def send(m):
+            if m["type"] == "http.response.start":
+                out["status"] = m["status"]
+                out["headers"] = m.get("headers", [])
+            elif m["type"] == "http.response.body":
+                out["body"].extend(m.get("body", b""))
+
+        await app(scope, receive, send)
+        return out["status"], dict(out["headers"]), bytes(out["body"])
+
+    return asyncio.run(run())
+
+
+def test_hook_session_start_serves_instructions_as_text(svc):
+    st, headers, body = _call_with_headers(_app(svc), "GET",
+                                           "/api/hook/session-start")
+    assert st == 200
+    assert headers[b"content-type"].startswith(b"text/plain")
+    text = body.decode("utf-8")
+    assert "memory_search" in text and "memory_outcome" in text
+
+
+def test_hook_session_start_appends_briefing(svc):
+    st, body = _call(_app(svc), "GET", "/api/hook/session-start")
+    assert st == 200 and b"(fixture)" in body
+
+
+def test_hook_session_start_token_set_no_bearer_instructions_only(svc):
+    """Token set + unauthorized: standing instructions are public repo
+    content and still serve, but the briefing (memory content) must not."""
+    app = _app(svc, token="secret")
+    st, body = _call(app, "GET", "/api/hook/session-start")
+    assert st == 200
+    assert b"memory_search" in body
+    assert b"(fixture)" not in body
+
+
+def test_hook_session_start_token_with_bearer_appends_briefing(svc):
+    app = _app(svc, token="secret")
+    st, body = _call(app, "GET", "/api/hook/session-start",
+                     headers=[(b"authorization", b"Bearer secret")])
+    assert st == 200 and b"(fixture)" in body
+
+
+def test_hook_session_start_briefing_failure_still_serves(svc):
+    def boom(**kw):
+        raise RuntimeError("boom")
+    svc.session_briefing = boom
+    st, body = _call(_app(svc), "GET", "/api/hook/session-start")
+    assert st == 200 and b"memory_search" in body
+
+
+def test_hook_session_start_capped_under_hook_stdout_limit(svc):
+    svc.session_briefing = lambda **kw: {"markdown": "x" * 20000}
+    st, body = _call(_app(svc), "GET", "/api/hook/session-start")
+    assert st == 200
+    assert len(body.decode("utf-8")) <= 9_500
+
+
+def test_hook_session_start_post_rejected(svc):
+    st, _ = _call(_app(svc), "POST", "/api/hook/session-start")
+    assert st == 405
+
+
 def test_entity_proposal_routes(svc):
     r = ConsoleRoutes(svc)
     assert r.dispatch("POST", "/api/graph/accept-entity-merge", {}, {"id": 1})["accepted"]

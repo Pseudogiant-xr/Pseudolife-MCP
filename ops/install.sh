@@ -174,6 +174,19 @@ if [ "$EXTRACTOR" != "sidecar" ]; then
 fi
 
 # ── 8. session lifecycle hooks ─────────────────────────────────────────────
+# The Claude Code plugin (pseudolife-memory@pseudolife-mcp) owns the wiring
+# when installed: bundled MCP server, SessionStart hook, and the memory-loop
+# context. Doubling up would inject the briefing twice.
+if grep -q "pseudolife-memory@pseudolife-mcp" \
+        "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null; then
+    echo "==> pseudolife-memory Claude Code plugin detected — skipping session"
+    echo "    hooks, CLAUDE.md block, and mcp add (the plugin provides all three)."
+    SKIP_WIRING=1
+else
+    SKIP_WIRING=""
+fi
+
+if [ -z "$SKIP_WIRING" ]; then
 echo "==> Installing Claude Code session hooks..."
 "$repo/ops/install-hook.sh"
 
@@ -208,6 +221,7 @@ else
     claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
     echo "==> Wired into Claude Code (claude mcp add)."
 fi
+fi  # SKIP_WIRING
 
 # ── 11. health ─────────────────────────────────────────────────────────────
 echo "==> Waiting for the daemon to report healthy..."

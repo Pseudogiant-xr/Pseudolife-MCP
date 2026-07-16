@@ -6,6 +6,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-16 — Claude Code plugin + in-repo marketplace)
+- **Claude Code plugin `pseudolife-memory`** (`plugin/`), installable from
+  this repo as a marketplace (`/plugin marketplace add
+  Pseudogiant-xr/Pseudolife-MCP` → `/plugin install
+  pseudolife-memory@pseudolife-mcp`). It replaces the installer's three
+  wiring steps: a bundled `.mcp.json` (HTTP server at `127.0.0.1:8765/mcp`)
+  instead of `claude mcp add`, a SessionStart hook (bash + curl, no pip
+  package on the host) instead of the settings.json briefing hook, and the
+  memory-loop instructions served as session context instead of the
+  CLAUDE.md append. Ships `/dream` and a new `/memory-status` command.
+  Spec: `docs/superpowers/specs/2026-07-16-claude-code-plugin-design.md`.
+- **New daemon endpoint `GET /api/hook/session-start`** (plain text, 200
+  always): the memory-loop instruction block plus the session briefing.
+  Loopback-gated like the rest of `/api`; with a token set, an
+  unauthorized request gets the instructions only — never memory content.
+  Response capped at 9,500 chars (Claude Code's 10k hook-stdout limit).
+- **Installers skip wiring when the plugin is installed** (detected via
+  `~/.claude/plugins/installed_plugins.json`) so hook + CLAUDE.md + mcp-add
+  don't double up.
+- Guard tests (`tests/test_plugin_packaging.py`): memory-loop block ==
+  `examples/CLAUDE.memory.md`, plugin `/dream` == `examples/commands/dream.md`,
+  plugin.json version == pyproject version (the release version-cut now
+  touches **five** files), manifest/hook wiring sanity.
+
 ### Changed (2026-07-16 — sonnet-only leads the extractor choice)
 - **Installer menu reordered**: the interactive extractor prompt in
   `ops/install.sh` / `ops/install.ps1` now offers `1) sonnet-only`,

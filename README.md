@@ -284,7 +284,21 @@ never `docker system prune --volumes`, which deletes volumes.
 
 ## Wire into Claude Code
 
-**HTTP transport (recommended — required for the containerized stack).**
+**Plugin (easiest).** With the daemon running, two commands inside Claude
+Code wire everything — the MCP server, the session-start briefing hook,
+the memory-loop instructions, and the `/dream` + `/memory-status` commands:
+
+```
+/plugin marketplace add Pseudogiant-xr/Pseudolife-MCP
+/plugin install pseudolife-memory@pseudolife-mcp
+```
+
+The plugin replaces the manual `claude mcp add`, the settings.json hook,
+**and** the CLAUDE.md block below — the same standing instructions arrive as
+session context from the daemon. Details, non-default ports/tokens, and
+migration from manual wiring: [plugin/README.md](plugin/README.md).
+
+**HTTP transport (manual equivalent).**
 The daemon already serves MCP over HTTP, so point Claude Code straight at
 it — no shim, no host command, nothing OS-specific. One command:
 
@@ -325,10 +339,11 @@ proxies stdio to the daemon:
 
 The server's value depends entirely on the agent *using* it well — **this step
 is what makes the memory loop actually fire**; installs that skip it end up
-with a healthy daemon whose tools are never called. Encode the loop as a
-standing instruction: append the bundled block to your **global**
-`~/.claude/CLAUDE.md` (applies to every project) or a per-project `CLAUDE.md`
-/ `AGENTS.md`:
+with a healthy daemon whose tools are never called. **Plugin users skip this
+section**: the plugin's SessionStart hook injects the same block every
+session. Everyone else encodes the loop as a standing instruction: append the
+bundled block to your **global** `~/.claude/CLAUDE.md` (applies to every
+project) or a per-project `CLAUDE.md` / `AGENTS.md`:
 
 ```bash
 cat examples/CLAUDE.memory.md >> ~/.claude/CLAUDE.md

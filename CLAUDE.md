@@ -54,10 +54,13 @@ entries, a cached view of the graph, a memoized score):
   spot-check that each hook is load-bearing by disabling it and confirming the
   test goes red (a hook that never fires red is decoration, and worth saying so).
 
-## Release / publish procedure (three public surfaces)
+## Release / publish procedure (four public surfaces)
 
-GitHub releases, PyPI, and the MCP registry all serve from this repo; a
-release touches them in this order (first done 2026-07-16, v0.8.0).
+GitHub releases, PyPI, the MCP registry, and the Claude Code plugin
+marketplace (`.claude-plugin/marketplace.json` + `plugin/` — served straight
+from master, no publish step; users pull via `/plugin marketplace update`)
+all serve from this repo; a release touches them in this order (first done
+2026-07-16, v0.8.0).
 
 0. **Docs currency pass before the cut** — the guard tests pin numbers
    (schema, identifiers), but *framing* drifts silently: the 2026-07-16
@@ -78,10 +81,13 @@ release touches them in this order (first done 2026-07-16, v0.8.0).
    docs/runbooks, ops/.env.example comments. The README is the PyPI
    description, so its fixes only reach PyPI at the next version.
 
-1. **Version cut touches four files together**: the CHANGELOG (`## [N.N.N]`
+1. **Version cut touches five files together**: the CHANGELOG (`## [N.N.N]`
    header over `[Unreleased]` — one fragile line; the tag↔section guard test
    exists because an adjacent edit once deleted it silently), `pyproject.toml`,
-   the compose daemon image tag, and **both** version fields in `server.json`.
+   the compose daemon image tag, **both** version fields in `server.json`,
+   and `plugin/.claude-plugin/plugin.json` (pinned to pyproject by
+   `tests/test_plugin_packaging.py`; the plugin marketplace serves from
+   this repo, so bumping it is also what ships plugin updates).
    Tag `vN.N.N` at the exact commit the artifacts build from.
 2. **Build + inspect before upload**: `python -m build`, `twine check dist/*`,
    then open the wheel — Console static assets present (33 files under

@@ -1,0 +1,16 @@
+{
+  "description": "Pseudolife-MCP session-start context: memory-loop instructions + briefing from the daemon",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

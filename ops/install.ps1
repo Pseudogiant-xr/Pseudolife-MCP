@@ -163,6 +163,18 @@ if ($Extractor -ne "sidecar") {
 }
 
 # -- 8. session lifecycle hooks -----------------------------------------------------
+# The Claude Code plugin (pseudolife-memory@pseudolife-mcp) owns the wiring
+# when installed: bundled MCP server, SessionStart hook, and the memory-loop
+# context. Doubling up would inject the briefing twice.
+$installedPlugins = Join-Path $env:USERPROFILE ".claude\plugins\installed_plugins.json"
+$skipWiring = (Test-Path $installedPlugins) -and
+    ((Get-Content $installedPlugins -Raw) -match 'pseudolife-memory@pseudolife-mcp')
+if ($skipWiring) {
+    Write-Host "==> pseudolife-memory Claude Code plugin detected - skipping session"
+    Write-Host "    hooks, CLAUDE.md block, and mcp add (the plugin provides all three)."
+}
+
+if (-not $skipWiring) {
 Write-Host "==> Installing Claude Code session hooks..."
 & (Join-Path $PSScriptRoot "install-hook.ps1")
 
@@ -199,6 +211,7 @@ if ($LASTEXITCODE -eq 0) {
     claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
     Write-Host "==> Wired into Claude Code (claude mcp add)."
 }
+}  # -not $skipWiring
 
 # -- 11. health -----------------------------------------------------------------------
 Write-Host "==> Waiting for the daemon to report healthy..."

@@ -1,5 +1,3 @@
-<!-- examples/commands/dream.md
-Copy to .claude/commands/dream.md in any project to get /dream. -->
 ---
 description: Consolidate recent Pseudolife memories into canonical cortex facts
 argument-hint: "[deep]"
