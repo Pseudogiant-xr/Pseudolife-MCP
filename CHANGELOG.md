@@ -6,6 +6,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-16 — CLI help)
+- **`pseudolife-mcp --help` / `-h` / `help`** prints a usage summary of all
+  six modes and exits 0; unknown modes now point at `--help`. Previously the
+  first thing a fresh `pip install` user typed answered "unknown mode".
+
 ### Fixed (2026-07-16 — toolset-tier follow-ups)
 - **`memory_toolset` docstring** no longer claims hidden tools remain
   callable by exact name — Claude harnesses gate tool calls client-side

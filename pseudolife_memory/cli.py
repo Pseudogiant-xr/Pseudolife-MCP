@@ -14,9 +14,30 @@ from __future__ import annotations
 
 import sys
 
+_USAGE = """\
+pseudolife-mcp — persistent long-term memory for Claude over MCP
+
+usage: pseudolife-mcp [mode]
+
+modes:
+  (no arg)       stdio shim: find/start the daemon and proxy to it
+  serve          run the HTTP memory daemon (deployment mode)
+  embedded       in-process stdio server — no daemon, no Postgres (escape hatch)
+  briefing       print the session-start briefing (for a SessionStart hook;
+                 --hook-json emits Claude Code hook JSON)
+  episode-start  open a session episode (legacy hook helper)
+  episode-end    close it
+  help           show this message (also -h / --help)
+
+docs: https://github.com/Pseudogiant-xr/PseudoLife-MCP
+"""
+
 
 def main() -> None:
     mode = sys.argv[1] if len(sys.argv) > 1 else "shim"
+    if mode in ("help", "-h", "--help"):
+        print(_USAGE, end="")
+        sys.exit(0)
     if mode == "serve":
         from pseudolife_memory.daemon import run_daemon
         run_daemon()
@@ -34,7 +55,7 @@ def main() -> None:
         run_episode(mode)
     else:
         print(
-            f"unknown mode {mode!r}; use: serve | embedded | (no arg = shim)",
+            f"unknown mode {mode!r}; see: pseudolife-mcp --help",
             file=sys.stderr,
         )
         sys.exit(2)

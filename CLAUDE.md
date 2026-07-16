@@ -52,6 +52,30 @@ entries, a cached view of the graph, a memoized score):
   spot-check that each hook is load-bearing by disabling it and confirming the
   test goes red (a hook that never fires red is decoration, and worth saying so).
 
+## Release / publish procedure (three public surfaces)
+
+GitHub releases, PyPI, and the MCP registry all serve from this repo; a
+release touches them in this order (first done 2026-07-16, v0.8.0).
+
+1. **Version cut touches four files together**: the CHANGELOG (`## [N.N.N]`
+   header over `[Unreleased]` — one fragile line; the tag↔section guard test
+   exists because an adjacent edit once deleted it silently), `pyproject.toml`,
+   the compose daemon image tag, and **both** version fields in `server.json`.
+   Tag `vN.N.N` at the exact commit the artifacts build from.
+2. **Build + inspect before upload**: `python -m build`, `twine check dist/*`,
+   then open the wheel — Console static assets present (33 files under
+   `web/static/`), no stray top-level dirs, the `mcp-name` marker in METADATA,
+   no identifiers (grep the METADATA for the guard list).
+3. **PyPI**: the user uploads (`twine upload dist/*`, token auth). PyPI never
+   accepts a same-version re-upload — metadata-only fixes are a `.postN`.
+4. **MCP registry** (`mcp-publisher login github` is the user's; `publish` is
+   scriptable): the README marker must read exactly
+   `mcp-name: io.github.Pseudogiant-xr/pseudolife-mcp` — the namespace is
+   matched **case-sensitively** against the GitHub username (capital P), and
+   validation reads the **latest** PyPI release's description. The registry
+   `description` field caps at 100 chars. Verify:
+   `curl "https://registry.modelcontextprotocol.io/v0.1/servers?search=pseudolife"`.
+
 ## Repo hygiene — no PII, ever (public repo)
 
 Anything pushed is public forever: GitHub keeps merged-PR commits reachable
