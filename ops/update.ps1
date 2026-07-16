@@ -1,4 +1,7 @@
+#Requires -Version 7
 # Safely update ONLY the PseudoLife-MCP daemon to the current checkout code.
+# (v7 guard: Windows PowerShell 5.1 turns benign native stderr — e.g. docker
+# inspecting a not-yet-built image tag — into a terminating NativeCommandError.)
 #
 #   ops\update.ps1                 # backup -> tag rollback -> daemon-only rebuild -> health
 #   ops\update.ps1 -Tag pre-x      # name the rollback image tag suffix
