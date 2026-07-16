@@ -1280,6 +1280,7 @@ class ContinuumMemorySystem:
                     promoted_copy.last_logical_turn = entry.last_logical_turn
                     promoted_copy.superseded_at = entry.superseded_at
                     promoted_copy.timestamp = entry.timestamp
+                    promoted_copy.seq = entry.seq
                     promoted_copy.access_count = entry.access_count
                     # v0.7+ also carries structured slots across promotion.
                     promoted_copy.slots = list(entry.slots)

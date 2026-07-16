@@ -135,6 +135,26 @@ class TestRecent:
         assert texts[0].startswith("Memory C")
         assert texts[-1].startswith("Memory A")
 
+    def test_recent_tie_break_same_timestamp_newest_first(
+        self, pristine_service: MemoryService, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Stores landing in the same clock tick must still come out
+        newest-first (regression: full-suite load collapsed three stores
+        onto one ``time.time()`` tick and ``recent`` returned them
+        oldest-first)."""
+        import time as _time
+
+        frozen = _time.time()
+        monkeypatch.setattr(_time, "time", lambda: frozen)
+        pristine_service.store("Tie A — first", source="t")
+        pristine_service.store("Tie B — second", source="t")
+        pristine_service.store("Tie C — third", source="t")
+        monkeypatch.undo()
+        result = pristine_service.recent(n=3)
+        texts = [e["text"] for e in result["entries"]]
+        assert texts[0].startswith("Tie C")
+        assert texts[-1].startswith("Tie A")
+
     def test_recent_caps_at_n(
         self, pristine_service: MemoryService,
     ) -> None:

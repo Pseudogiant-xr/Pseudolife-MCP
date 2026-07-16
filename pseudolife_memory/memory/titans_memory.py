@@ -10,10 +10,16 @@ machinery is archived on the ``archive/neural-memory-titans`` branch.
 
 from __future__ import annotations
 
+import itertools
 import time
 from dataclasses import dataclass, field
 
 import torch
+
+# Process-wide creation counter backing ``MemoryEntry.seq``. ``next()`` on an
+# ``itertools.count`` is atomic under the GIL, so concurrent stores get
+# distinct, ordered stamps without extra locking.
+_seq_counter = itertools.count(1)
 
 
 @dataclass
@@ -81,10 +87,19 @@ class MemoryEntry:
     # hydrate, bumped in-memory on each bump path, never written back via a save
     # path. Read by RetentionPolicy.source_weighted_score (MTT retention).
     reinforcements: int = 0
+    # Process-monotonic creation sequence (transient, like ``db_id`` — NOT
+    # persisted; hydration re-stamps entries in load order, which is insertion
+    # order). Breaks ordering ties when wall-clock timestamps collide within
+    # one ``time.time()`` tick — the wall clock alone cannot order same-tick
+    # stores, and band promotion relocates entries so list position can't
+    # either. Preserved across promotion (a relocation, not a re-creation).
+    seq: int = 0
 
     def __post_init__(self):
         if self.timestamp == 0.0:
             self.timestamp = time.time()
+        if self.seq == 0:
+            self.seq = next(_seq_counter)
 
 
 @dataclass

@@ -917,7 +917,9 @@ class MemoryService:
                     if tag_filter and not (set(entry.tags) & tag_filter):
                         continue
                     all_entries.append(entry)
-            all_entries.sort(key=lambda e: e.timestamp, reverse=True)
+            # ``seq`` tie-breaks entries whose wall-clock timestamps collide
+            # within one tick — same-tick stores must still list newest-first.
+            all_entries.sort(key=lambda e: (e.timestamp, e.seq), reverse=True)
             limited = all_entries[: max(0, int(n))]
             return {
                 "count": len(limited),

@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-07-16 — deterministic `recent` ordering on same-tick stores)
+- **`recent` now tie-breaks entries whose wall-clock timestamps collide**
+  within one `time.time()` tick. Each `MemoryEntry` carries a transient
+  process-monotonic creation sequence (`seq` — not persisted; hydration
+  re-stamps in insertion order), preserved across band promotion, and
+  `recent` sorts by `(timestamp, seq)` descending. Previously same-tick
+  stores listed in effectively arbitrary order (stable sort + promotion
+  relocations), which flaked `recent`-ordering assertions under load.
+
 ### Added (2026-07-16 — cold-bank onboarding in the session-start hook)
 - `/api/hook/session-start` appends a short seeding guide when the bank is
   provably empty (`total_memories == 0`): name the session, store a few
