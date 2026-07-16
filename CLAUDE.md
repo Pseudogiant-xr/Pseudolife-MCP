@@ -52,6 +52,26 @@ entries, a cached view of the graph, a memoized score):
   spot-check that each hook is load-bearing by disabling it and confirming the
   test goes red (a hook that never fires red is decoration, and worth saying so).
 
+## Repo hygiene — no PII, ever (public repo)
+
+Anything pushed is public forever: GitHub keeps merged-PR commits reachable
+via `refs/pull/*`, which owners cannot purge (Support ticket only) — one
+leaked email already cost a full history rewrite plus a fresh-repo publish.
+
+- **Never commit PII or machine identifiers**: emails, OS usernames
+  (`C:\Users\<real name>`), hostnames, LAN IPs/subnets, tokens/keys. Docs and
+  tests use placeholders (`<user>`, `example.com`) or the synthetic `10.0.0.x`
+  examples already in the tree.
+- **Extend the guard, don't just scrub**: a removal without a test regresses
+  (2026-07-12 lesson). Any newly-spotted identifier class gets added to
+  `tests/test_release_ux.py::test_tracked_tree_carries_no_maintainer_identifiers`
+  with a watched RED before the scrub.
+- **Commit identity stays the GitHub noreply address**
+  (`Pseudogiant-xr@users.noreply.github.com`); tee'd script output
+  (`deploy-*.log` etc.) stays out of the tree — it embeds absolute home paths.
+- **If a real secret ever lands in a pushed commit: rotate it first.** A
+  rewrite is tidiness, not remediation.
+
 ## Memory (PseudoLife MCP tools)
 
 Log `memory_outcome` at task end — success/failure/correction signals are the
