@@ -45,17 +45,19 @@ ops\install.ps1         # Windows (pwsh 7+)
 The installer runs the preflight (one exact fix line per missing
 prerequisite), asks which **dream extractor** should consolidate memories —
 
-- **sidecar** — the bundled local CPU model; works for everyone, ~9 GB image;
-- **sonnet-fallback** — Claude Sonnet primary via a CLI shim, sidecar as
-  automatic fallback (needs a logged-in Max-plan `claude` CLI);
-- **sonnet-only** — Sonnet only; the sidecar image is **never built or
-  pulled** (~9 GB lighter; dreams pause while the shim is down) —
+- **sonnet-only** — the lightest install: Claude Sonnet via a CLI shim
+  (needs a logged-in Max-plan `claude` CLI); the sidecar image is **never
+  built or pulled** (~9 GB lighter; dreams pause while the shim is down);
+- **sonnet-fallback** — Sonnet primary, the bundled sidecar as automatic
+  fallback (Max-plan CLI plus the ~9 GB image);
+- **sidecar** — the bundled local CPU model; no Claude plan needed, works
+  for everyone (~9 GB image) —
 
 then brings the stack up, installs the session hooks, offers to append the
 memory-loop block to `~/.claude/CLAUDE.md` (required for the loop to actually
 fire), runs `claude mcp add`, and health-checks the daemon. Idempotent —
 re-run any time; `--extractor <mode>` switches extractor setups, and
-`ops/install.sh --extractor sidecar --claude-md append` runs
+`ops/install.sh --extractor sonnet-only --claude-md append` runs
 non-interactively. Linux (Docker Engine): your user must be in the `docker`
 group — `sudo usermod -aG docker $USER`, then log out/in (the preflight
 checks this).

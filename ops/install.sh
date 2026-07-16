@@ -12,12 +12,12 @@
 #
 # Extractor modes (spec: docs/superpowers/specs/
 # 2026-07-14-installer-extractor-choice-design.md):
-#   sidecar          bundled local CPU extractor only (stock default; no
-#                    Claude Max plan needed)
-#   sonnet-fallback  Claude Sonnet primary via the CLI shim, sidecar as
-#                    automatic fallback (needs a logged-in Max-plan CLI)
 #   sonnet-only      Sonnet only — the 9.4 GB sidecar image is never built
 #                    or pulled; dreams pause while the shim is down
+#   sonnet-fallback  Claude Sonnet primary via the CLI shim, sidecar as
+#                    automatic fallback (needs a logged-in Max-plan CLI)
+#   sidecar          bundled local CPU extractor only (stock default; no
+#                    Claude Max plan needed)
 set -euo pipefail
 
 EXTRACTOR=""
@@ -66,16 +66,16 @@ if [ -z "$EXTRACTOR" ]; then
     fi
     echo ""
     echo "Which dream extractor should consolidate memories?"
-    echo "  1) sidecar          — bundled local CPU model (works for everyone; ~9 GB image)"
-    echo "  2) sonnet-fallback  — Claude Sonnet primary, sidecar auto-fallback (needs logged-in Max-plan CLI)"
-    echo "  3) sonnet-only      — Sonnet only; sidecar never built (~9 GB lighter; dreams pause when the shim is down)"
+    echo "  1) sonnet-only      — lightest: Sonnet only; sidecar never built (~9 GB lighter; needs logged-in Max-plan CLI; dreams pause when the shim is down)"
+    echo "  2) sonnet-fallback  — Claude Sonnet primary, sidecar auto-fallback (Max-plan CLI plus the ~9 GB image)"
+    echo "  3) sidecar          — bundled local CPU model (no Claude plan needed, works for everyone; ~9 GB image)"
     while [ -z "$EXTRACTOR" ]; do
         printf "Choose 1/2/3: "
         read -r choice
         case "$choice" in
-            1) EXTRACTOR=sidecar ;;
+            1) EXTRACTOR=sonnet-only ;;
             2) EXTRACTOR=sonnet-fallback ;;
-            3) EXTRACTOR=sonnet-only ;;
+            3) EXTRACTOR=sidecar ;;
             *) echo "  please answer 1, 2 or 3" ;;
         esac
     done

@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-16 — sonnet-only leads the extractor choice)
+- **Installer menu reordered**: the interactive extractor prompt in
+  `ops/install.sh` / `ops/install.ps1` now offers `1) sonnet-only`,
+  `2) sonnet-fallback`, `3) sidecar` (was sidecar-first), framing
+  sonnet-only as the lightest install — the ~9 GB sidecar image is never
+  built or pulled. **The number→mode mapping changed**: pressing `1` now
+  selects sonnet-only, not sidecar. Non-interactive `--extractor <mode>`
+  flags are unaffected. The README Quickstart bullets and its
+  non-interactive example were reordered to match.
+
 ### Security (2026-07-16 — Dependabot triage: all four alerts unreachable, no bump possible)
 - Triaged the four Dependabot alerts on `ops/requirements.lock.txt` (the
   daemon-image lock; none affect `pyproject.toml` install floors). All four
