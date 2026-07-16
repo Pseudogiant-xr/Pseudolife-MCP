@@ -2,11 +2,34 @@
 
 <!-- mcp-name: io.github.Pseudogiant-xr/pseudolife-mcp -->
 
+[![PyPI](https://img.shields.io/pypi/v/pseudolife-mcp)](https://pypi.org/project/pseudolife-mcp/)
+[![CI](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/workflows/ci.yml/badge.svg)](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![Python 3.10+](https://img.shields.io/pypi/pyversions/pseudolife-mcp)](https://pypi.org/project/pseudolife-mcp/)
+
 **Persistent long-term memory for Claude Code via the Model Context Protocol.**
 
 An MCP server that gives Claude (or any MCP-capable client) a long-term
 memory that persists across sessions — surviving context compactions and
 `/clear` resets. Claude is the LLM; this server is its memory on disk.
+
+![Cortex Console — Observatory view](https://raw.githubusercontent.com/Pseudogiant-xr/Pseudolife-MCP/master/docs/images/cortex-console-observatory.png)
+
+What you get:
+
+- **Associative memory that ages like memory should** — an 8-band recency
+  continuum from `working` to `forever`, ranked by cosine similarity, with
+  contradiction detection and supersession.
+- **Canonical facts, not vibes** — one *current* value per `entity.attribute`
+  slot; corrections supersede rather than silently overwrite, and the full
+  version history survives.
+- **Dreams** — a bundled extractor (or Claude Sonnet via your Max plan)
+  consolidates the memory stream into facts and a knowledge graph while
+  you're not looking.
+- **Lessons from its own work** — successes, dead-ends, and your corrections
+  become do/avoid guidance surfaced at the start of every session.
+- **A web console to watch it think** — the Cortex Console above, plus cited
+  world facts, session episodes, and document RAG.
 
 ## Quickstart
 
