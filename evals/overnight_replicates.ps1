@@ -46,7 +46,10 @@ function Start-Qwen {
 function Invoke-WithRetry($label, $stepArgs) {
     for ($try = 1; $try -le $maxRetries; $try++) {
         if (-not (Start-Qwen)) { Log "$label : no endpoint (try $try)"; Stop-Qwen; continue }
-        & $py @stepArgs
+        # Out-Host: keep native output visible without contaminating this
+        # function's OUTPUT stream — the caller consumes it as a boolean, and
+        # @(lines..., $false) coerces truthy, silently breaking failure checks.
+        & $py @stepArgs 2>&1 | Out-Host
         if ($LASTEXITCODE -eq 0) { Log "$label : done"; return $true }
         Log "$label : exited $LASTEXITCODE (try $try/$maxRetries) — restarting server"
         Stop-Qwen
