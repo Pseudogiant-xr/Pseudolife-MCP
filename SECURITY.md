@@ -27,6 +27,43 @@ The shipped configuration is deliberately conservative:
 - **Postgres is never LAN-exposed.** Remote clients only ever reach the
   daemon.
 
+## Memory poisoning
+
+A memory system has an attack surface ordinary tools don't: content the
+agent *reads* can try to get itself *stored*, and anything stored shapes
+every later session. The 2026 literature (MINJA, arXiv 2601.05504) shows
+query-only injection against agent memories succeeding at high rates — and
+that agents cannot be *talked* out of a poisoned memory (conversational
+correction relapses; deletion is the only remediation).
+
+How this maps onto Pseudolife:
+
+- **The write path is the agent.** Nothing writes to the bank except MCP
+  tool calls made by your model. A hostile web page or document cannot
+  write directly — but it can try to convince the model to call
+  `memory_store` on its behalf. That instruction-following boundary is the
+  model's, not this server's; assume it will occasionally fail.
+- **The surprise gate is an admission filter, not a trust filter.** It
+  drops near-duplicates. Novel malicious content passes it *preferentially*.
+  Do not mistake novelty gating for a defense.
+- **Dreams amplify.** The consolidation pass promotes episodic text into
+  canonical cortex facts that outrank raw entries at recall time. A
+  poisoned entry that survives to a dream becomes a poisoned *fact* with
+  elevated authority. Mitigations that exist today: provenance tiers
+  (`user` origin outranks `action`, which outranks `agent` — a planted
+  agent-origin claim cannot silently overwrite a user-stated fact),
+  per-entry `source` tags, `source="status"` exclusion from dream
+  extraction, and the engram cross-index (every cortex fact links back to
+  its source entries, so a bad fact is auditable to the entry that fed it).
+- **Remediation is deletion, not correction.** If a poisoned memory lands:
+  `memory_forget` the entry, then follow its engram links and retire any
+  cortex facts derived from it. Supersession history is your audit trail.
+  Telling the agent "that was wrong" only adds a correction alongside live
+  poison.
+
+Not yet built (roadmap, not promises): trust-weighted consolidation and a
+quarantine tier for low-trust sources ahead of the dream pass.
+
 ## In scope
 
 Reports that break one of those promises are exactly what we want to hear
@@ -41,6 +78,9 @@ about, e.g.:
 - Unsafe deserialization (e.g. of legacy `.pt` state files).
 - Anything that lets one MCP client read or write another machine's bank
   through the daemon.
+- A path that lets *content* (a stored memory, an ingested document, graph
+  text) execute, exfiltrate, or write to the bank without a tool call —
+  i.e. a break in the "the write path is the agent" boundary above.
 
 ## Out of scope
 
@@ -51,6 +91,10 @@ about, e.g.:
   the token, contrary to the docs — the daemon already refuses the
   footgun configuration it can detect.
 - Resource exhaustion of your own local daemon by your own client.
+- The model *choosing* to store attacker-authored text it read (prompt
+  injection against the agent) — that boundary belongs to the model/host;
+  this file documents how to contain and remediate it, and hardening that
+  containment is in scope.
 - Vulnerabilities purely in upstream dependencies (report upstream; we
   track and take patched releases).
 
