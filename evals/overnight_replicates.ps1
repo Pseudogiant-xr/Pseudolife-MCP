@@ -68,7 +68,7 @@ try {
         $label = "$($cfg.Extractor)/$(if ($cfg.Tag) { $cfg.Tag } else { '(untagged)' })"
         Log "=== $label : spawn $N replicates ==="
         & $py $replicatePy spawn --extractor $cfg.Extractor --tag $cfg.Tag -n $N
-        if ($LASTEXITCODE -ne 0) { Log "$label : spawn failed"; continue }
+        if ($LASTEXITCODE -ne 0) { Log "$label : spawn failed"; $failed += $label; continue }
         if (-not (Invoke-WithRetry "$label run" @(
                 $replicatePy, "run", "--extractor", $cfg.Extractor,
                 "--tag", $cfg.Tag))) {
