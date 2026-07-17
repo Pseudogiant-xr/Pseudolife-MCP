@@ -1,3 +1,4 @@
+#Requires -Version 7
 # Arm-1 re-verification overnight run (spec 2026-07-18).
 #
 # For each config below: spawn N stripped replicates of the existing judged
@@ -62,24 +63,36 @@ $configs = @(
 )
 
 try {
+    $failed = @()
     foreach ($cfg in $configs) {
         $label = "$($cfg.Extractor)/$(if ($cfg.Tag) { $cfg.Tag } else { '(untagged)' })"
         Log "=== $label : spawn $N replicates ==="
         & $py $replicatePy spawn --extractor $cfg.Extractor --tag $cfg.Tag -n $N
         if ($LASTEXITCODE -ne 0) { Log "$label : spawn failed"; continue }
-        Invoke-WithRetry "$label run" @(
-            $replicatePy, "run", "--extractor", $cfg.Extractor,
-            "--tag", $cfg.Tag) | Out-Null
+        if (-not (Invoke-WithRetry "$label run" @(
+                $replicatePy, "run", "--extractor", $cfg.Extractor,
+                "--tag", $cfg.Tag))) {
+            $failed += $label
+            continue
+        }
         & $py $replicatePy agg --extractor $cfg.Extractor --tag $cfg.Tag
+    }
+
+    if ($failed.Count -gt 0) {
+        Log "INCOMPLETE RUN — configs that never finished judging: $($failed -join ', ')"
+        Log "compare skipped; re-run this script to resume (per-row resumable)."
+        exit 1
     }
 
     Log "=== compare: arm1 vs arm1-baseline ==="
     foreach ($arm in @("cortex", "hybrid")) {
         & $py $replicatePy compare --extractor e4b-ft --tag arm1 `
             --b-tag arm1-baseline --arm $arm
+        if ($LASTEXITCODE -ne 0) { Log "compare ($arm) failed"; exit 1 }
     }
     Log ("PRE-REGISTERED RULE: cortex p < 0.05 confirms the Arm-1 gain; " +
          "otherwise flag the extractor default for revisit.")
+    exit 0
 } finally {
     Stop-Qwen
     Log "overnight replicates finished"
