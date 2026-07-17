@@ -13,6 +13,14 @@ for. Everything local: extraction, answering, and LLM-as-judge grading all
 run on the author's own hardware (judge = Qwen3.6-27B at temperature 0),
 so compare *within* the table, not against GPT-4o-judged leaderboards.
 
+> **Reading the numbers.** Accuracies below are single-run point
+> estimates unless marked mean ± std. Repeated runs of an *identical*
+> config vary by several points from answerer/judge noise alone (observed
+> spread: ~7.7 pp on the cortex arm at n=78), so small single-run
+> differences between configs are not meaningful. Decision-grade
+> comparisons use replicates and a paired test — see
+> [Variance and replication](../../evals/README.md#variance-and-replication).
+
 On the oracle variant (evidence sessions only), with the local-ceiling
 extractor:
 

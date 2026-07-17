@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-18 — eval replication layer + regression gate)
+- **evals**: `evals/replicate.py` — answer-phase replication over
+  `longmemeval_bench.py` (`spawn`/`run`/`agg`/`compare`/`gate-check`/
+  `baseline`): stripped `-rN` replicate files, mean±std aggregation to
+  `.agg.json`, paired permutation compare. Measured motivation: identical
+  configs vary ~7.7 pp cortex accuracy run-to-run (judge-side noise), wider
+  than several previously-published single-run deltas.
+- **evals**: `evals/regression_gate.ps1` (pinned replicated `arm1-gate`
+  slice vs committed `regression_gate.baseline.json`; covers
+  retrieval/serving/judging — the ladder still covers extraction) and
+  `evals/overnight_replicates.ps1` (Arm-1 re-verification, pre-registered
+  p < 0.05 rule).
+- **docs**: variance/replication methodology in `evals/README.md`; honesty
+  note in `docs/guide/benchmarks.md` (single-run numbers carry a ~7.7 pp
+  noise band).
+
 ### Fixed (2026-07-16 — deterministic `recent` ordering on same-tick stores)
 - **`recent` now tie-breaks entries whose wall-clock timestamps collide**
   within one `time.time()` tick. Each `MemoryEntry` carries a transient

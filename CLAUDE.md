@@ -53,6 +53,10 @@ entries, a cached view of the graph, a memoized score):
 - TDD with a watched RED per the superpowers skill; for invalidation contracts,
   spot-check that each hook is load-bearing by disabling it and confirming the
   test goes red (a hook that never fires red is decoration, and worth saying so).
+- Eval- or retrieval-affecting changes run `evals/regression_gate.ps1`
+  before commit (pinned replicated slice vs committed baseline; exit 1 =
+  regression). Extraction/dream-path changes re-run the ladder instead —
+  the gate deliberately does not cover them.
 
 ## Release / publish procedure (four public surfaces)
 

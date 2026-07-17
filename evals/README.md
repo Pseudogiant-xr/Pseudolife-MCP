@@ -283,6 +283,35 @@ questions; these runs are all-local (27B answerer, 4-bit quant) on the
 78-question knowledge-update slice. Compare arms and extractors *within*
 this table, not against leaderboards.
 
+## Variance and replication
+
+Single runs of this bench are noisy: three runs of the identical
+sonnet-5-v1 config (same bank, byte-identical contexts, temperature 0)
+scored cortex 0.808 / 0.731 / 0.782 — a ~7.7 pp spread coming entirely
+from the answerer/judge side. Differences inside that band are not
+decisions. MemDelta (arXiv 2606.29914) documents the same failure across
+the field: identical aggregate scores can disagree on 16–66 % of items,
+and single-run memory-bench comparisons routinely measure judge noise.
+
+Convention: any comparison used for a decision runs ≥3 answer-phase
+replicates per config and reports mean ± std; config-vs-config claims
+use the paired permutation test. Findings tables in this file are
+point-in-time snapshots — where a `.agg.json` exists next to a results
+file, the aggregate is authoritative.
+
+Workflow (contexts are persisted at extract time, so replicates never
+re-extract):
+
+    python evals/replicate.py spawn --extractor e4b-ft --tag arm1 -n 4
+    python evals/replicate.py run   --extractor e4b-ft --tag arm1
+    python evals/replicate.py agg   --extractor e4b-ft --tag arm1
+    python evals/replicate.py compare --extractor e4b-ft --tag arm1 \
+        --b-tag arm1-baseline --arm cortex
+
+`evals/regression_gate.ps1` runs a pinned, replicated slice against the
+committed baseline (`evals/results/regression_gate.baseline.json`) —
+see the script header for scope and the `-Establish` flow.
+
 ---
 
 # Lesson-synthesis benchmark (`lesson_synthesis_bench.py`)
