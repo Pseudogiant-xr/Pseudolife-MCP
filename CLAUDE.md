@@ -71,7 +71,12 @@ all serve from this repo; a release touches them in this order (first done
    ownership (episodes are daemon-owned; briefing is the only hook),
    tool count/tiers and the hidden-tools-need-expand rule, shipped config
    defaults (surprise gate is permissive), image/install sizes, and any
-   "can't / doesn't / no X" absolute — those age worst. Surfaces: README,
+   "can't / doesn't / no X" absolute — those age worst. **Translated front
+   doors** (`docs/i18n/README.{zh,ja,ko,pt-br,es}.md`): if the narrative or
+   quickstart in `docs/i18n/README.source.md` changed, bump its
+   `i18n-source` version and re-run the translation subagents — the guard
+   (`tests/test_i18n_readme.py`) pins code blocks + sync markers but cannot
+   read prose. Surfaces: README,
    **docs/guide/*.md** (the user-facing guide pages the 2026-07-16
    restructure moved the README's deep material into — configuration,
    retrieval, dreaming, episodes, memory-model, benchmarks; they carry the

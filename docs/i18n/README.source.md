@@ -1,0 +1,88 @@
+<!-- i18n-source: v1 (2026-07-17) — canonical English text for the translated
+     front doors in this directory. Translators: keep every fenced code block
+     byte-identical (commands are never translated); keep "Pseudolife-MCP",
+     "Claude Code", "MCP", "Cortex Console", and tool names like
+     memory_search in English; translate everything else in a natural
+     technical register. Each translation must carry the matching
+     "i18n-sync" marker (guard: tests/test_i18n_readme.py). Volatile claims
+     (versions, sizes, counts, defaults) deliberately live only in the
+     English docs this file links to. -->
+
+# Pseudolife-MCP
+
+**Persistent long-term memory for Claude Code via the Model Context Protocol.**
+
+An MCP server that gives Claude (or any MCP-capable client) a long-term
+memory that persists across sessions — surviving context compactions and
+`/clear` resets. Claude is the LLM; this server is its memory on disk.
+
+What you get:
+
+- **Associative memory that ages like memory should** — a recency continuum
+  of memory bands ranked by similarity, with contradiction detection and
+  supersession: corrections replace old answers instead of piling up
+  beside them.
+- **Canonical facts, not vibes** — one *current* value per
+  `entity.attribute` slot; corrections supersede rather than silently
+  overwrite, and the full version history survives.
+- **Dreams** — while you're away, an extractor consolidates the memory
+  stream into canonical facts and a knowledge graph.
+- **Lessons from its own work** — successes, dead-ends, and your
+  corrections become do/avoid guidance surfaced at the start of every
+  session.
+- **A web console to watch it think** — the Cortex Console: memory stream,
+  fact history, knowledge-graph atlas, session episodes, and document RAG.
+
+## Quickstart
+
+Requires Docker and Claude Code. One command from clone to first memory:
+
+```bash
+git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
+cd Pseudolife-MCP
+ops/install.sh          # Linux / macOS
+ops\install.ps1         # Windows (pwsh 7+)
+```
+
+The installer checks prerequisites (printing one exact fix line for anything
+missing), asks which dream extractor to use — Claude Sonnet via your Max
+plan (the lightest install) or a bundled local model that works without any
+plan — brings the stack up, wires everything into Claude Code, and
+health-checks the daemon. It is idempotent: re-run it any time.
+
+With the daemon running, the Claude Code **plugin** is the easiest wiring —
+two commands set up the MCP server, the session-start memory briefing, and
+the `/dream` + `/memory-status` commands:
+
+```
+/plugin marketplace add Pseudogiant-xr/Pseudolife-MCP
+/plugin install pseudolife-memory@pseudolife-mcp
+```
+
+Then, in any Claude Code session: *"remember that my staging box is
+haze-02"* — and in a fresh session days later, *"which box is staging?"*
+gets the answer back from memory. Browse everything in the Cortex Console
+at `http://127.0.0.1:8765/ui/`.
+
+## How it works
+
+Claude stores one claim at a time as it works (`memory_store`,
+`memory_fact_set`); a surprise gate drops near-duplicates. Between
+sessions, the **dream** distils the stream into canonical facts, graph
+relations, and procedural lessons. At every session start, a briefing
+injects what the memory is unsure about, lessons from past work, and where
+you left off. Retrieval blends semantic search over the memory bands with
+the canonical fact store, so corrected answers win over stale ones.
+
+## Documentation (English)
+
+The canonical, always-current documentation is in English:
+
+- [README](../../README.md) — full install, wiring, tools, troubleshooting
+- [Configuration](../guide/configuration.md) · [Retrieval](../guide/retrieval.md)
+  · [Dreaming](../guide/dreaming.md) · [Episodes](../guide/episodes.md)
+  · [Memory model](../guide/memory-model.md) · [Benchmarks](../guide/benchmarks.md)
+
+This page is a translated introduction, synced to the English README at the
+version noted below; where they disagree, the English documentation is
+authoritative.

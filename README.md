@@ -7,6 +7,12 @@
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![Python 3.10+](https://img.shields.io/pypi/pyversions/pseudolife-mcp)](https://pypi.org/project/pseudolife-mcp/)
 
+[简体中文](docs/i18n/README.zh.md) ·
+[日本語](docs/i18n/README.ja.md) ·
+[한국어](docs/i18n/README.ko.md) ·
+[Português (BR)](docs/i18n/README.pt-br.md) ·
+[Español](docs/i18n/README.es.md)
+
 **Persistent long-term memory for Claude Code via the Model Context Protocol.**
 
 An MCP server that gives Claude (or any MCP-capable client) a long-term
