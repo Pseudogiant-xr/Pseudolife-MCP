@@ -34,6 +34,30 @@ The consolidated-facts posture beats naive RAG by 9 points while reading
 ~40% of the context — and the fact spine alone delivers 92% of RAG's
 accuracy on **3.6% of its token budget**.
 
+## Replicated results (2026-07-18)
+
+The first 5-replicate runs (same banks, answer/judge phase re-run per
+replicate; mean ± std) on the shipped-default fine-tuned extractor
+(`e4b-ft`, Arm-1) vs its same-model pre-fine-tune baseline:
+
+| arm | Arm-1 (shipped default) | baseline | paired p (78 questions) |
+|-----|------------------------|----------|-------------------------|
+| naive RAG (control) | 0.574 ± 0.006 | 0.585 ± 0.015 | — |
+| cortex facts only | 0.682 ± 0.017 | 0.603 ± 0.013 | **0.17** |
+| hybrid | 0.762 ± 0.027 | 0.749 ± 0.015 | 0.83 |
+
+Read honestly: the Arm-1 fine-tune's cortex-arm gain has a +8-point point
+estimate but does **not** clear the pre-registered p < 0.05 on the paired
+per-question test — the fine-tune fixes some questions and regresses
+others, so the evidence for the shipped default is *suggestive, not
+confirmed*, and the hybrid arm shows no measurable benefit at all. The
+earlier single-run "+0.102" comparison overstated the effect. The
+ceiling-extractor headline above (0.705 hybrid) is itself a single run
+whose config predates context persistence and cannot be replicated
+as-is; its nearest replicable sibling (`qwen-27b` window-0 bank) scores
+hybrid 0.695 ± 0.017 across 5 replicates — treat 0.705 as the top edge
+of that band, not a point fact.
+
 ## Extraction quality is the dominant factor
 
 Running floor (Gemma 4 E2B, the smallest CPU-sidecar bake) vs ceiling

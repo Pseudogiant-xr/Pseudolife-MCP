@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-18 — Arm-1 deploy evidence downgraded by replication)
+- **First replicated LongMemEval-KU comparison** (5 replicates/config,
+  paired permutation test, n=78): the shipped Arm-1 fine-tuned extractor's
+  cortex gain is +0.080 at **p = 0.17** (pre-registered threshold 0.05 —
+  not confirmed; the single-run "+0.102" was inflated), and the hybrid arm
+  shows no measurable benefit (p = 0.83). Default stays (point estimate
+  positive, no evidence of harm) but is flagged for revisit. The untagged
+  `qwen-27b` 0.705 headline run predates context persistence and is
+  unreplicable; its replicable sibling (`w0`) scores hybrid 0.695 ± 0.017.
+  Docs renumbered accordingly (`docs/guide/benchmarks.md`,
+  `evals/README.md`).
+
 ### Added (2026-07-18 — eval replication layer + regression gate)
 - **evals**: `evals/replicate.py` — answer-phase replication over
   `longmemeval_bench.py` (`spawn`/`run`/`agg`/`compare`/`gate-check`/

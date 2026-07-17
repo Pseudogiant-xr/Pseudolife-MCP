@@ -312,6 +312,32 @@ re-extract):
 committed baseline (`evals/results/regression_gate.baseline.json`) —
 see the script header for scope and the `-Establish` flow.
 
+### Findings — 2026-07-18 (first replicated comparison)
+
+5 replicates per config (`overnight_replicates.ps1`), paired permutation
+test over the 78 questions:
+
+| config | rag | cortex | hybrid |
+|---|---|---|---|
+| `e4b-ft` arm1 (shipped default) | 0.574 ± 0.006 | 0.682 ± 0.017 | 0.762 ± 0.027 |
+| `e4b-ft` arm1-baseline | 0.585 ± 0.015 | 0.603 ± 0.013 | 0.749 ± 0.015 |
+| `qwen-27b` w0 | 0.579 ± 0.019 | 0.536 ± 0.025 | 0.695 ± 0.017 |
+
+- **Arm-1 verdict**: cortex delta +0.080 at paired **p = 0.17** (pre-registered
+  threshold 0.05) — *not confirmed*; hybrid delta +0.013 at p = 0.83. The
+  original single-run "+0.102" deploy evidence was inflated by judge noise
+  and question-level heterogeneity (the fine-tune fixes some questions,
+  regresses others). The shipped default is flagged for revisit, not
+  reverted — the point estimate is still positive and nothing here shows
+  the fine-tune *hurting*.
+- **The untagged `qwen-27b` run (README's 0.705 hybrid) is unreplicable** —
+  it predates per-question context persistence. Its nearest replicable
+  sibling (`w0`, same knobs, different bank) puts the qwen-27b class at
+  hybrid 0.695 ± 0.017; read 0.705 as that band's upper edge.
+- Replicating is cheap: each 5-replicate config took ~17 minutes of
+  answer-phase GPU time. There is no longer a reason to publish single-run
+  comparisons.
+
 ---
 
 # Lesson-synthesis benchmark (`lesson_synthesis_bench.py`)

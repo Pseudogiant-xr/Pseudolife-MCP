@@ -1,0 +1,53 @@
+{
+  "n_replicates": 5,
+  "replicates": [
+    "arm1",
+    "arm1-r2",
+    "arm1-r3",
+    "arm1-r4",
+    "arm1-r5"
+  ],
+  "n_questions": 78,
+  "arms": {
+    "rag": {
+      "accuracies": [
+        0.5769,
+        0.5641,
+        0.5769,
+        0.5769,
+        0.5769
+      ],
+      "mean": 0.57434,
+      "std": 0.005724334022399427
+    },
+    "cortex": {
+      "accuracies": [
+        0.7051,
+        0.6795,
+        0.6923,
+        0.6667,
+        0.6667
+      ],
+      "mean": 0.68206,
+      "std": 0.016689158157318786
+    },
+    "hybrid": {
+      "accuracies": [
+        0.7564,
+        0.7949,
+        0.7436,
+        0.7821,
+        0.7308
+      ],
+      "mean": 0.76156,
+      "std": 0.02659328862702018
+    }
+  },
+  "source_files": [
+    "longmemeval-ku-oracle-e4b-ft-arm1.jsonl",
+    "longmemeval-ku-oracle-e4b-ft-arm1-r2.jsonl",
+    "longmemeval-ku-oracle-e4b-ft-arm1-r3.jsonl",
+    "longmemeval-ku-oracle-e4b-ft-arm1-r4.jsonl",
+    "longmemeval-ku-oracle-e4b-ft-arm1-r5.jsonl"
+  ]
+}
