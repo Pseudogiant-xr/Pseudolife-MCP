@@ -183,3 +183,66 @@ def test_gate_verdict():
     failures = replicate.gate_verdict(_agg(0.60), baseline)
     assert len(failures) == len(replicate.ARMS)
     assert "cortex" in " ".join(failures)
+
+
+def _seed_base(tmp_path, tag="arm1", n_rows=3, extractor="e4b-ft"):
+    rows = [_row(f"q{i}") for i in range(n_rows)]
+    _write_jsonl(replicate.result_file("oracle", extractor, tag, tmp_path),
+                 rows)
+    return rows
+
+
+def test_cli_spawn_creates_stripped_replicates(tmp_path):
+    _seed_base(tmp_path)
+    rc = replicate.main(["spawn", "--extractor", "e4b-ft", "--tag", "arm1",
+                         "-n", "2", "--results-dir", str(tmp_path)])
+    assert rc == 0
+    for i in (2, 3):
+        rows = replicate.load_rows(replicate.result_file(
+            "oracle", "e4b-ft", f"arm1-r{i}", tmp_path))
+        assert len(rows) == 3
+        assert not any(replicate.is_judged(r) for r in rows)
+    # idempotent: re-spawn leaves existing files alone
+    marker = replicate.result_file("oracle", "e4b-ft", "arm1-r2", tmp_path)
+    before = marker.read_text(encoding="utf-8")
+    assert replicate.main(["spawn", "--extractor", "e4b-ft", "--tag", "arm1",
+                           "-n", "2", "--results-dir", str(tmp_path)]) == 0
+    assert marker.read_text(encoding="utf-8") == before
+
+
+def test_cli_spawn_rejects_unjudged_source(tmp_path):
+    _write_jsonl(replicate.result_file("oracle", "e4b-ft", "arm1", tmp_path),
+                 [_row("q0", judged=False)])
+    with pytest.raises(SystemExit):
+        replicate.main(["spawn", "--extractor", "e4b-ft", "--tag", "arm1",
+                        "-n", "1", "--results-dir", str(tmp_path)])
+
+
+def test_cli_copy(tmp_path):
+    _seed_base(tmp_path)
+    rc = replicate.main(["copy", "--extractor", "e4b-ft", "--tag", "arm1",
+                         "--to-tag", "arm1-gate",
+                         "--results-dir", str(tmp_path)])
+    assert rc == 0
+    rows = replicate.load_rows(replicate.result_file(
+        "oracle", "e4b-ft", "arm1-gate", tmp_path))
+    assert len(rows) == 3 and not any(replicate.is_judged(r) for r in rows)
+    with pytest.raises(SystemExit):        # refuses to overwrite
+        replicate.main(["copy", "--extractor", "e4b-ft", "--tag", "arm1",
+                        "--to-tag", "arm1-gate",
+                        "--results-dir", str(tmp_path)])
+
+
+def test_cli_agg_writes_agg_json(tmp_path):
+    _seed_base(tmp_path)
+    _write_jsonl(replicate.result_file("oracle", "e4b-ft", "arm1-r2",
+                                       tmp_path),
+                 [_row("q0", correct=False), _row("q1"), _row("q2")])
+    rc = replicate.main(["agg", "--extractor", "e4b-ft", "--tag", "arm1",
+                         "--results-dir", str(tmp_path)])
+    assert rc == 0
+    agg = json.loads((tmp_path /
+                      "longmemeval-ku-oracle-e4b-ft-arm1.agg.json"
+                      ).read_text(encoding="utf-8"))
+    assert agg["n_replicates"] == 2
+    assert agg["arms"]["cortex"]["accuracies"] == [1.0, 0.6667]

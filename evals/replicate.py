@@ -185,3 +185,101 @@ def gate_verdict(agg: dict, baseline: dict) -> list[str]:
                 f"{arm}: mean {cur} < baseline {b['mean']} - "
                 f"margin {b['margin']}")
     return failures
+
+
+# ── CLI ───────────────────────────────────────────────────────────────────
+def _agg_path(base: Path) -> Path:
+    # removesuffix, not with_suffix: extractor names contain dots.
+    return base.with_name(base.name.removesuffix(".jsonl") + ".agg.json")
+
+
+def _load_judged_source(args) -> list[dict]:
+    src = result_file(args.dataset, args.extractor, args.tag,
+                      args.results_dir)
+    rows = load_rows(src)
+    if not rows:
+        sys.exit(f"source not found or empty: {src}")
+    if not all(is_judged(r) for r in rows):
+        sys.exit(f"source not fully judged: {src}")
+    return rows
+
+
+def cmd_spawn(args) -> int:
+    rows = _load_judged_source(args)
+    stripped = strip_judged(rows)
+    for i in range(2, args.n + 2):
+        dst = result_file(args.dataset, args.extractor,
+                          replicate_tag(args.tag, i), args.results_dir)
+        if dst.exists():
+            print(f"exists, kept: {dst.name}")
+            continue
+        write_rows(dst, stripped)
+        print(f"spawned: {dst.name}")
+    return 0
+
+
+def cmd_copy(args) -> int:
+    rows = _load_judged_source(args)
+    dst = result_file(args.dataset, args.extractor, args.to_tag,
+                      args.results_dir)
+    if dst.exists():
+        sys.exit(f"refusing to overwrite: {dst}")
+    write_rows(dst, strip_judged(rows))
+    print(f"copied (stripped): {dst.name}")
+    return 0
+
+
+def cmd_agg(args) -> int:
+    found = discover(args.dataset, args.extractor, args.tag,
+                     args.results_dir)
+    if not found:
+        sys.exit("no result files found")
+    agg = aggregate({t: load_rows(p) for t, p in found.items()})
+    agg["source_files"] = [p.name for p in found.values()]
+    base = result_file(args.dataset, args.extractor, args.tag,
+                       args.results_dir)
+    _agg_path(base).write_text(json.dumps(agg, indent=2), encoding="utf-8")
+    label = f"{args.extractor}{f' [{args.tag}]' if args.tag else ''}"
+    print(f"\n{args.dataset} / {label} — {agg['n_replicates']} replicates, "
+          f"{agg['n_questions']} questions")
+    print(f"{'arm':<10}{'mean':>8}{'std':>8}  accuracies")
+    for arm in ARMS:
+        a = agg["arms"][arm]
+        std = f"{a['std']:.4f}" if a["std"] is not None else "-"
+        print(f"{arm:<10}{a['mean']:>8.4f}{std:>8}  {a['accuracies']}")
+    print(f"wrote {_agg_path(base).name}")
+    return 0
+
+
+def _common(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--dataset", default="oracle")
+    p.add_argument("--extractor", required=True)
+    p.add_argument("--tag", default="")
+    p.add_argument("--results-dir", type=Path, default=RESULTS_DIR)
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    p = sub.add_parser("spawn", help="create stripped replicate files")
+    _common(p)
+    p.add_argument("-n", type=int, default=4,
+                   help="replicates to create beyond the original (r2..)")
+    p.set_defaults(fn=cmd_spawn)
+
+    p = sub.add_parser("copy", help="strip-copy the base file to a new tag")
+    _common(p)
+    p.add_argument("--to-tag", required=True)
+    p.set_defaults(fn=cmd_copy)
+
+    p = sub.add_parser("agg", help="aggregate replicates -> .agg.json")
+    _common(p)
+    p.set_defaults(fn=cmd_agg)
+
+    args = ap.parse_args(argv)
+    return args.fn(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
