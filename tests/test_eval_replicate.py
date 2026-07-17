@@ -153,3 +153,33 @@ def test_paired_permutation_null_and_signal():
     assert replicate.paired_permutation(a, b) == sig
     with pytest.raises(ValueError, match="question sets"):
         replicate.paired_permutation(a, {"other": 1.0})
+
+
+def _agg(mean: float, std: float = 0.02) -> dict:
+    return {"n_replicates": 3, "replicates": ["t", "t-r2", "t-r3"],
+            "n_questions": 78,
+            "arms": {arm: {"accuracies": [mean], "mean": mean, "std": std}
+                     for arm in replicate.ARMS}}
+
+
+def test_make_baseline_margins():
+    base = replicate.make_baseline(_agg(0.7, std=0.04), commit="abc1234")
+    assert base["commit"] == "abc1234"
+    assert base["arms"]["cortex"] == {"mean": 0.7, "std": 0.04,
+                                      "margin": 0.08}
+    tight = replicate.make_baseline(_agg(0.7, std=0.005), commit="abc")
+    assert tight["arms"]["cortex"]["margin"] == replicate.BASELINE_FLOOR
+    single = replicate.make_baseline(
+        {**_agg(0.7), "arms": {a: {"accuracies": [0.7], "mean": 0.7,
+                                   "std": None}
+                               for a in replicate.ARMS}}, commit="abc")
+    assert single["arms"]["cortex"]["margin"] == replicate.BASELINE_FLOOR
+
+
+def test_gate_verdict():
+    baseline = replicate.make_baseline(_agg(0.70, std=0.02), commit="abc")
+    assert replicate.gate_verdict(_agg(0.70), baseline) == []
+    assert replicate.gate_verdict(_agg(0.67), baseline) == []   # inside margin
+    failures = replicate.gate_verdict(_agg(0.60), baseline)
+    assert len(failures) == len(replicate.ARMS)
+    assert "cortex" in " ".join(failures)

@@ -161,3 +161,27 @@ def paired_permutation(a_rates: dict[str, float], b_rates: dict[str, float],
     return {"delta": round(observed, 4),
             "p_value": round((hits + 1) / (n + 1), 5),
             "n_questions": len(diffs)}
+
+
+# ── regression gate ───────────────────────────────────────────────────────
+def make_baseline(agg: dict, commit: str,
+                  floor: float = BASELINE_FLOOR) -> dict:
+    arms = {}
+    for arm, a in agg["arms"].items():
+        margin = max(floor, 2 * (a["std"] or 0.0))
+        arms[arm] = {"mean": a["mean"], "std": a["std"],
+                     "margin": round(margin, 4)}
+    return {"established_at": datetime.now().isoformat(timespec="seconds"),
+            "commit": commit, "n_replicates": agg["n_replicates"],
+            "arms": arms}
+
+
+def gate_verdict(agg: dict, baseline: dict) -> list[str]:
+    failures = []
+    for arm, b in baseline["arms"].items():
+        cur = agg["arms"][arm]["mean"]
+        if cur is None or cur < b["mean"] - b["margin"]:
+            failures.append(
+                f"{arm}: mean {cur} < baseline {b['mean']} - "
+                f"margin {b['margin']}")
+    return failures
