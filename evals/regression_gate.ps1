@@ -71,8 +71,8 @@ if (Test-Path $banks) {
 }
 
 # -- Stage 2: judge replicates --------------------------------------------
-if (-not (Start-Qwen)) { Log "no Qwen endpoint"; exit 2 }
 try {
+    if (-not (Start-Qwen)) { Log "no Qwen endpoint"; exit 2 }
     & $py $replicatePy run --extractor e4b-ft --tag arm1-gate
     if ($LASTEXITCODE -ne 0) { Log "run (r1) failed"; exit 2 }
     if ($Replicates -gt 1) {
@@ -83,6 +83,7 @@ try {
         if ($LASTEXITCODE -ne 0) { Log "run (rN) failed"; exit 2 }
     }
     & $py $replicatePy agg --extractor e4b-ft --tag arm1-gate
+    if ($LASTEXITCODE -ne 0) { Log "agg failed"; exit 2 }
 
     # -- Stage 3: verdict --------------------------------------------------
     if ($Establish) {
