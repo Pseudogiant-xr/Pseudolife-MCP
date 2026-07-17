@@ -246,3 +246,11 @@ def test_cli_agg_writes_agg_json(tmp_path):
                       ).read_text(encoding="utf-8"))
     assert agg["n_replicates"] == 2
     assert agg["arms"]["cortex"]["accuracies"] == [1.0, 0.6667]
+
+
+def test_cli_agg_rejects_unjudged_only(tmp_path):
+    _write_jsonl(replicate.result_file("oracle", "e4b-ft", "arm1", tmp_path),
+                 [_row("q0", judged=False)])
+    with pytest.raises(SystemExit):
+        replicate.main(["agg", "--extractor", "e4b-ft", "--tag", "arm1",
+                        "--results-dir", str(tmp_path)])

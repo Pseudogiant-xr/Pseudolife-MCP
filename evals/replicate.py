@@ -235,6 +235,9 @@ def cmd_agg(args) -> int:
     if not found:
         sys.exit("no result files found")
     agg = aggregate({t: load_rows(p) for t, p in found.items()})
+    if agg["n_replicates"] == 0:
+        sys.exit("no fully-judged replicates yet — run the answer phase "
+                 "first (replicate.py run)")
     agg["source_files"] = [p.name for p in found.values()]
     base = result_file(args.dataset, args.extractor, args.tag,
                        args.results_dir)
