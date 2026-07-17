@@ -55,3 +55,9 @@ pseudolife_memory/web/.devserver.log
 .DS_Store
 Thumbs.db
 unsloth_compiled_cache/
+
+# regression-gate transient working files (stage-0 cleans them each run)
+evals/results/*-gate.jsonl
+evals/results/*-gate-r*.jsonl
+evals/results/*-gate.agg.json
+evals/results/*-gate*.summary.json

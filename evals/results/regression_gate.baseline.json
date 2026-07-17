@@ -1,0 +1,22 @@
+{
+  "established_at": "2026-07-18T03:32:18",
+  "commit": "11c0051",
+  "n_replicates": 3,
+  "arms": {
+    "rag": {
+      "mean": 0.5641,
+      "std": 0.0,
+      "margin": 0.03
+    },
+    "cortex": {
+      "mean": 0.7051,
+      "std": 0.0,
+      "margin": 0.03
+    },
+    "hybrid": {
+      "mean": 0.7820666666666667,
+      "std": 0.012850032425380648,
+      "margin": 0.03
+    }
+  }
+}
