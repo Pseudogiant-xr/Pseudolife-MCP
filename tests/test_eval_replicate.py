@@ -4,6 +4,8 @@ Pure-function tests only: no endpoints, no GPU, no Postgres. The module
 must import without pulling ladder_sweep/torch (that is itself asserted).
 """
 import json
+import random
+import statistics
 import subprocess
 import sys
 from pathlib import Path
@@ -100,3 +102,54 @@ def test_load_rows_tolerates_blank_and_bad_lines(tmp_path):
     rows = replicate.load_rows(p)
     assert [r["question_id"] for r in rows] == ["q1"]
     assert replicate.load_rows(tmp_path / "missing.jsonl") == []
+
+
+def test_aggregate_math():
+    # 4 questions; r1 = 4/4 correct, r2 = 2/4 correct -> mean 0.75
+    r1 = [_row(f"q{i}", correct=True) for i in range(4)]
+    r2 = ([_row("q0", correct=True), _row("q1", correct=True),
+           _row("q2", correct=False), _row("q3", correct=False)])
+    agg = replicate.aggregate({"arm1": r1, "arm1-r2": r2})
+    assert agg["n_replicates"] == 2
+    assert agg["n_questions"] == 4
+    assert agg["replicates"] == ["arm1", "arm1-r2"]
+    for arm in replicate.ARMS:
+        assert agg["arms"][arm]["accuracies"] == [1.0, 0.5]
+        assert agg["arms"][arm]["mean"] == pytest.approx(0.75)
+        assert agg["arms"][arm]["std"] == pytest.approx(
+            statistics.stdev([1.0, 0.5]))
+
+
+def test_aggregate_skips_unjudged_replicate():
+    r1 = [_row("q0"), _row("q1")]
+    pending = [_row("q0", judged=False), _row("q1", judged=False)]
+    agg = replicate.aggregate({"arm1": r1, "arm1-r2": pending})
+    assert agg["n_replicates"] == 1
+    assert agg["arms"]["cortex"]["std"] is None
+
+
+def test_question_rates_and_mismatch():
+    r1 = [_row("q0", correct=True), _row("q1", correct=False)]
+    r2 = [_row("q0", correct=False), _row("q1", correct=False)]
+    rates = replicate.question_rates({"a": r1, "a-r2": r2}, "cortex")
+    assert rates == {"q0": 0.5, "q1": 0.0}
+    with pytest.raises(ValueError, match="question sets"):
+        replicate.question_rates({"a": r1, "a-r2": [_row("qX")]}, "cortex")
+
+
+def test_paired_permutation_null_and_signal():
+    rng = random.Random(42)
+    qids = [f"q{i}" for i in range(78)]
+    a = {q: rng.random() for q in qids}
+    null = replicate.paired_permutation(a, dict(a))
+    assert null["delta"] == 0.0
+    assert null["p_value"] > 0.9            # identical sides: no effect
+    b = {q: max(0.0, a[q] - 0.3) for q in qids}
+    sig = replicate.paired_permutation(a, b)
+    assert sig["delta"] > 0.2
+    assert sig["p_value"] < 0.01
+    assert sig["n_questions"] == 78
+    # deterministic under the fixed default seed
+    assert replicate.paired_permutation(a, b) == sig
+    with pytest.raises(ValueError, match="question sets"):
+        replicate.paired_permutation(a, {"other": 1.0})

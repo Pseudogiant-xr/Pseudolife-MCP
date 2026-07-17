@@ -98,3 +98,66 @@ def discover(dataset: str, extractor: str, tag: str = "",
         if _REPLICA_SUFFIX.fullmatch(rest):
             found[f"{tag}{rest}" if tag else rest[1:]] = p
     return found
+
+
+# ── statistics ────────────────────────────────────────────────────────────
+def accuracy(rows: list[dict], arm: str) -> float | None:
+    judged = [r for r in rows if is_judged(r)]
+    if not judged:
+        return None
+    return sum(bool(r[f"{arm}_correct"]) for r in judged) / len(judged)
+
+
+def aggregate(rows_by_tag: dict[str, list[dict]]) -> dict:
+    judged = {t: rows for t, rows in rows_by_tag.items()
+              if rows and all(is_judged(r) for r in rows)}
+    tags = sorted(judged)
+    out = {
+        "n_replicates": len(tags),
+        "replicates": tags,
+        "n_questions": len(judged[tags[0]]) if tags else 0,
+        "arms": {},
+    }
+    for arm in ARMS:
+        accs = [round(accuracy(judged[t], arm), 4) for t in tags]
+        out["arms"][arm] = {
+            "accuracies": accs,
+            "mean": statistics.fmean(accs) if accs else None,
+            "std": statistics.stdev(accs) if len(accs) >= 2
+            else None,
+        }
+    return out
+
+
+def question_rates(rows_by_tag: dict[str, list[dict]],
+                   arm: str) -> dict[str, float]:
+    judged = {t: rows for t, rows in rows_by_tag.items()
+              if rows and all(is_judged(r) for r in rows)}
+    per_q: dict[str, list[bool]] = {}
+    qid_sets = []
+    for rows in judged.values():
+        qid_sets.append({r["question_id"] for r in rows})
+        for r in rows:
+            per_q.setdefault(r["question_id"], []).append(
+                bool(r[f"{arm}_correct"]))
+    if len({frozenset(s) for s in qid_sets}) > 1:
+        raise ValueError("question sets differ between replicates")
+    return {q: statistics.fmean(v) for q, v in per_q.items()}
+
+
+def paired_permutation(a_rates: dict[str, float], b_rates: dict[str, float],
+                       n: int = 10000, seed: int = 0) -> dict:
+    if set(a_rates) != set(b_rates):
+        raise ValueError("question sets differ between configs")
+    diffs = [a_rates[q] - b_rates[q] for q in sorted(a_rates)]
+    observed = statistics.fmean(diffs)
+    rng = random.Random(seed)
+    hits = 0
+    for _ in range(n):
+        flipped = statistics.fmean(
+            d if rng.random() < 0.5 else -d for d in diffs)
+        if abs(flipped) >= abs(observed) - 1e-12:
+            hits += 1
+    return {"delta": round(observed, 4),
+            "p_value": round((hits + 1) / (n + 1), 5),
+            "n_questions": len(diffs)}
