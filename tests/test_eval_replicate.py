@@ -266,7 +266,25 @@ def test_cli_run_dry_run(tmp_path, capsys):
     assert rc == 0
     out = capsys.readouterr().out
     assert "arm1-r2" in out and "pending" in out
-    assert "ladder_sweep" not in sys.modules               # still lazy
+
+
+def test_cli_run_dry_run_stays_lazy(tmp_path):
+    # Clean interpreter: the dry-run path must not import the bench stack.
+    _seed_base(tmp_path)
+    _write_jsonl(replicate.result_file("oracle", "e4b-ft", "arm1-r2",
+                                       tmp_path),
+                 [_row("q0", judged=False)])
+    evals_dir = str(Path(__file__).resolve().parents[1] / "evals")
+    code = (
+        "import sys; sys.path.insert(0, sys.argv[1]); import replicate; "
+        "rc = replicate.main(['run', '--extractor', 'e4b-ft', "
+        "'--tag', 'arm1', '--dry-run', '--results-dir', sys.argv[2]]); "
+        "banned = {'torch', 'ladder_sweep', 'longmemeval_bench'}; "
+        "hit = sorted(banned & set(sys.modules)); "
+        "sys.exit(('heavy imports: ' + ', '.join(hit)) if hit else rc)"
+    )
+    subprocess.run([sys.executable, "-c", code, evals_dir, str(tmp_path)],
+                   check=True)
 
 
 def _seed_pair(tmp_path):
