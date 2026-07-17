@@ -1,0 +1,86 @@
+# Arm-1 re-verification overnight run (spec 2026-07-18).
+#
+# For each config below: spawn N stripped replicates of the existing judged
+# JSONL, answer-phase them against the local Qwen 27B judge, aggregate to
+# mean +/- std. Then paired-permutation compare arm1 vs arm1-baseline.
+#
+# PRE-REGISTERED RULE: paired p < 0.05 on the cortex arm confirms the Arm-1
+# gain (shipped default stands, docs get mean+/-std); otherwise the
+# extractor-default decision is flagged for revisit.
+#
+# Resumable: kill and re-run continues per row (bench semantics).
+param([int]$N = 4)
+$ErrorActionPreference = "Continue"
+$repo = Split-Path -Parent $PSScriptRoot
+$py = Join-Path $repo ".venv\Scripts\python.exe"
+$replicatePy = Join-Path $repo "evals\replicate.py"
+$qwenDir = "$env:USERPROFILE\ClaudeCode\llama.ccp"
+$env:PYTHONPATH = $repo
+$maxRetries = 8
+
+function Log($msg) { Write-Host "$(Get-Date -Format 'HH:mm:ss') $msg" }
+
+function Wait-Endpoint($url, $seconds) {
+    for ($i = 0; $i -lt ($seconds / 5); $i++) {
+        try { Invoke-RestMethod -Uri $url -TimeoutSec 3 | Out-Null; return $true }
+        catch { Start-Sleep -Seconds 5 }
+    }
+    return $false
+}
+
+function Stop-Qwen {
+    Get-Process llama-server -ErrorAction SilentlyContinue |
+        Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 3
+}
+
+function Start-Qwen {
+    if (Wait-Endpoint "http://127.0.0.1:1234/v1/models" 5) { return $true }
+    Log "starting Qwen 27B server"
+    Start-Process -FilePath cmd.exe -WorkingDirectory $qwenDir -WindowStyle Minimized `
+        -ArgumentList '/c', "`"$qwenDir\run-server-turboq.bat`" > qwen-server.log 2>&1"
+    return (Wait-Endpoint "http://127.0.0.1:1234/v1/models" 300)
+}
+
+function Invoke-WithRetry($label, $stepArgs) {
+    for ($try = 1; $try -le $maxRetries; $try++) {
+        if (-not (Start-Qwen)) { Log "$label : no endpoint (try $try)"; Stop-Qwen; continue }
+        & $py @stepArgs
+        if ($LASTEXITCODE -eq 0) { Log "$label : done"; return $true }
+        Log "$label : exited $LASTEXITCODE (try $try/$maxRetries) — restarting server"
+        Stop-Qwen
+        Start-Sleep -Seconds 10
+    }
+    Log "$label : GAVE UP after $maxRetries tries"
+    return $false
+}
+
+$configs = @(
+    @{ Extractor = "e4b-ft";   Tag = "arm1" },
+    @{ Extractor = "e4b-ft";   Tag = "arm1-baseline" },
+    @{ Extractor = "qwen-27b"; Tag = "" }
+)
+
+try {
+    foreach ($cfg in $configs) {
+        $label = "$($cfg.Extractor)/$(if ($cfg.Tag) { $cfg.Tag } else { '(untagged)' })"
+        Log "=== $label : spawn $N replicates ==="
+        & $py $replicatePy spawn --extractor $cfg.Extractor --tag $cfg.Tag -n $N
+        if ($LASTEXITCODE -ne 0) { Log "$label : spawn failed"; continue }
+        Invoke-WithRetry "$label run" @(
+            $replicatePy, "run", "--extractor", $cfg.Extractor,
+            "--tag", $cfg.Tag) | Out-Null
+        & $py $replicatePy agg --extractor $cfg.Extractor --tag $cfg.Tag
+    }
+
+    Log "=== compare: arm1 vs arm1-baseline ==="
+    foreach ($arm in @("cortex", "hybrid")) {
+        & $py $replicatePy compare --extractor e4b-ft --tag arm1 `
+            --b-tag arm1-baseline --arm $arm
+    }
+    Log ("PRE-REGISTERED RULE: cortex p < 0.05 confirms the Arm-1 gain; " +
+         "otherwise flag the extractor default for revisit.")
+} finally {
+    Stop-Qwen
+    Log "overnight replicates finished"
+}
