@@ -25,21 +25,20 @@ sys.path.insert(0, str(ROOT))
 
 import pytest
 
-from pseudolife_memory.service import MemoryService
-
 
 @pytest.fixture(scope="module")
-def warm_service(tmp_path_factory: pytest.TempPathFactory) -> MemoryService:
+def warm_service(tmp_path_factory: pytest.TempPathFactory):
     """One service per test module — embedder stays warm, data dir
     survives for the module. Tests that need a pristine bank should use
     :func:`pristine_service` (function-scoped) instead.
     """
+    from pseudolife_memory.service import MemoryService
     data_dir = tmp_path_factory.mktemp("warm-service")
     return MemoryService(data_dir=data_dir)
 
 
 @pytest.fixture
-def pristine_service(warm_service: MemoryService) -> MemoryService:
+def pristine_service(warm_service):
     """Function-scoped wrapper that clears the warm service's banks.
 
     Re-uses the loaded embedder + torch graphs but guarantees each test
