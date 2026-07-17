@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 # Silence torch.dynamo before any import. Mirrors the production server.
 os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
@@ -25,9 +26,12 @@ sys.path.insert(0, str(ROOT))
 
 import pytest
 
+if TYPE_CHECKING:
+    from pseudolife_memory.service import MemoryService
+
 
 @pytest.fixture(scope="module")
-def warm_service(tmp_path_factory: pytest.TempPathFactory):
+def warm_service(tmp_path_factory: pytest.TempPathFactory) -> MemoryService:
     """One service per test module — embedder stays warm, data dir
     survives for the module. Tests that need a pristine bank should use
     :func:`pristine_service` (function-scoped) instead.
@@ -38,7 +42,7 @@ def warm_service(tmp_path_factory: pytest.TempPathFactory):
 
 
 @pytest.fixture
-def pristine_service(warm_service):
+def pristine_service(warm_service: MemoryService) -> MemoryService:
     """Function-scoped wrapper that clears the warm service's banks.
 
     Re-uses the loaded embedder + torch graphs but guarantees each test

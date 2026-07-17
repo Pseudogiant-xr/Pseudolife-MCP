@@ -4,6 +4,7 @@ Pure-function tests only: no endpoints, no GPU, no Postgres. The module
 must import without pulling ladder_sweep/torch (that is itself asserted).
 """
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -36,8 +37,15 @@ def _write_jsonl(path: Path, rows: list[dict]) -> None:
 
 
 def test_module_imports_light():
-    assert "ladder_sweep" not in sys.modules
-    assert "torch" not in sys.modules
+    # A clean subprocess: importing replicate must not pull heavy modules.
+    evals_dir = str(Path(__file__).resolve().parents[1] / "evals")
+    code = (
+        "import sys; sys.path.insert(0, sys.argv[1]); import replicate; "
+        "banned = {'torch', 'ladder_sweep', 'longmemeval_bench'}; "
+        "hit = sorted(banned & set(sys.modules)); "
+        "sys.exit('heavy imports: ' + ', '.join(hit) if hit else 0)"
+    )
+    subprocess.run([sys.executable, "-c", code, evals_dir], check=True)
 
 
 def test_result_file_matches_bench_convention(tmp_path):
