@@ -254,3 +254,85 @@ def test_cli_agg_rejects_unjudged_only(tmp_path):
     with pytest.raises(SystemExit):
         replicate.main(["agg", "--extractor", "e4b-ft", "--tag", "arm1",
                         "--results-dir", str(tmp_path)])
+
+
+def test_cli_run_dry_run(tmp_path, capsys):
+    _seed_base(tmp_path)                                   # judged base
+    _write_jsonl(replicate.result_file("oracle", "e4b-ft", "arm1-r2",
+                                       tmp_path),
+                 [_row("q0", judged=False)])               # pending
+    rc = replicate.main(["run", "--extractor", "e4b-ft", "--tag", "arm1",
+                         "--dry-run", "--results-dir", str(tmp_path)])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "arm1-r2" in out and "pending" in out
+    assert "ladder_sweep" not in sys.modules               # still lazy
+
+
+def _seed_pair(tmp_path):
+    """arm1 clearly better than arm1-baseline, 2 judged replicates each."""
+    n = 20
+    good = [_row(f"q{i}", correct=(i % 10 != 0)) for i in range(n)]
+    bad = [_row(f"q{i}", correct=(i % 2 == 0)) for i in range(n)]
+    for tag, rows in [("arm1", good), ("arm1-r2", good),
+                      ("arm1-baseline", bad), ("arm1-baseline-r2", bad)]:
+        _write_jsonl(replicate.result_file("oracle", "e4b-ft", tag,
+                                           tmp_path), rows)
+
+
+def test_cli_compare(tmp_path, capsys):
+    _seed_pair(tmp_path)
+    rc = replicate.main(["compare", "--extractor", "e4b-ft", "--tag", "arm1",
+                         "--b-tag", "arm1-baseline", "--arm", "cortex",
+                         "--results-dir", str(tmp_path)])
+    assert rc == 0
+    result = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert result["delta"] == pytest.approx(0.9 - 0.5)
+    assert result["p_value"] < 0.05
+    assert result["a_mean"] == pytest.approx(0.9)
+    assert result["b_mean"] == pytest.approx(0.5)
+
+
+def test_cli_compare_requires_two_replicates(tmp_path):
+    _seed_base(tmp_path)                                   # only r1 on A side
+    _write_jsonl(replicate.result_file("oracle", "e4b-ft", "arm1-baseline",
+                                       tmp_path), [_row("q0")])
+    with pytest.raises(SystemExit):
+        replicate.main(["compare", "--extractor", "e4b-ft", "--tag", "arm1",
+                        "--b-tag", "arm1-baseline",
+                        "--results-dir", str(tmp_path)])
+
+
+def test_cli_gate_check_exit_codes(tmp_path):
+    _seed_base(tmp_path, tag="arm1-gate")
+    _write_jsonl(replicate.result_file("oracle", "e4b-ft", "arm1-gate-r2",
+                                       tmp_path),
+                 [_row(f"q{i}") for i in range(3)])
+    baseline_path = tmp_path / "regression_gate.baseline.json"
+    # missing baseline -> exit 2
+    with pytest.raises(SystemExit) as e:
+        replicate.main(["gate-check", "--extractor", "e4b-ft",
+                        "--tag", "arm1-gate",
+                        "--baseline", str(baseline_path),
+                        "--results-dir", str(tmp_path)])
+    assert e.value.code == 2
+    # establish baseline at current perf (mean 1.0) -> pass
+    assert replicate.main(["baseline", "--extractor", "e4b-ft",
+                           "--tag", "arm1-gate",
+                           "--out", str(baseline_path),
+                           "--results-dir", str(tmp_path)]) == 0
+    assert replicate.main(["gate-check", "--extractor", "e4b-ft",
+                           "--tag", "arm1-gate",
+                           "--baseline", str(baseline_path),
+                           "--results-dir", str(tmp_path)]) == 0
+    # regressed data -> exit 1
+    baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+    for arm in replicate.ARMS:
+        baseline["arms"][arm]["mean"] = 1.5      # unreachable baseline
+    baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
+    with pytest.raises(SystemExit) as e:
+        replicate.main(["gate-check", "--extractor", "e4b-ft",
+                        "--tag", "arm1-gate",
+                        "--baseline", str(baseline_path),
+                        "--results-dir", str(tmp_path)])
+    assert e.value.code == 1

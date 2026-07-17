@@ -188,6 +188,104 @@ def gate_verdict(agg: dict, baseline: dict) -> list[str]:
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────
+def cmd_run(args) -> int:
+    found = discover(args.dataset, args.extractor, args.tag,
+                     args.results_dir)
+    if not found:
+        sys.exit("no result files found")
+    pending = [t for t, p in found.items()
+               if any(not is_judged(r) for r in load_rows(p))]
+    if not pending:
+        print("nothing pending — all replicates judged")
+        return 0
+    print(f"pending replicates: {', '.join(pending)}")
+    if args.dry_run:
+        return 0
+    if args.results_dir != RESULTS_DIR:
+        sys.exit("run only operates on the real results dir "
+                 "(the bench owns file placement)")
+    from longmemeval_bench import report, run_answer  # noqa: PLC0415 — heavy
+    for t in pending:
+        run_answer(args.dataset, args.extractor, t)
+        report(args.dataset, args.extractor, t)
+    return 0
+
+
+def _rates_for(args, extractor: str, tag: str, arm: str) -> tuple[dict[str, float], dict]:
+    found = discover(args.dataset, extractor, tag, args.results_dir)
+    rows_by_tag = {t: load_rows(p) for t, p in found.items()}
+    judged = {t: rows for t, rows in rows_by_tag.items()
+              if rows and all(is_judged(r) for r in rows)}
+    if len(judged) < 2:
+        sys.exit(f"{extractor}/{tag or '(untagged)'}: need >=2 judged "
+                 f"replicates, have {len(judged)} — run spawn/run first")
+    return question_rates(judged, arm), aggregate(judged)
+
+
+def cmd_compare(args) -> int:
+    b_extractor = args.b_extractor or args.extractor
+    a_rates, a_agg = _rates_for(args, args.extractor, args.tag, args.arm)
+    b_rates, b_agg = _rates_for(args, b_extractor, args.b_tag, args.arm)
+    result = paired_permutation(a_rates, b_rates,
+                                n=args.permutations, seed=args.seed)
+    result.update({
+        "arm": args.arm,
+        "a": f"{args.extractor}/{args.tag or '(untagged)'}",
+        "b": f"{b_extractor}/{args.b_tag or '(untagged)'}",
+        "a_mean": a_agg["arms"][args.arm]["mean"],
+        "a_std": a_agg["arms"][args.arm]["std"],
+        "b_mean": b_agg["arms"][args.arm]["mean"],
+        "b_std": b_agg["arms"][args.arm]["std"],
+    })
+    print(json.dumps(result))
+    return 0
+
+
+def cmd_gate_check(args) -> int:
+    if not args.baseline.exists():
+        print(f"no baseline at {args.baseline}\n"
+              "establish one on a known-good tree with:\n"
+              "  evals\\regression_gate.ps1 -Establish")
+        sys.exit(2)
+    try:
+        baseline = json.loads(args.baseline.read_text(encoding="utf-8"))
+        baseline["arms"]
+    except (ValueError, KeyError):
+        print(f"invalid baseline file: {args.baseline}")
+        sys.exit(2)
+    found = discover(args.dataset, args.extractor, args.tag,
+                     args.results_dir)
+    agg = aggregate({t: load_rows(p) for t, p in found.items()})
+    failures = gate_verdict(agg, baseline)
+    if failures:
+        print("REGRESSION GATE: FAIL")
+        for f in failures:
+            print(f"  {f}")
+        sys.exit(1)
+    print(f"REGRESSION GATE: PASS ({agg['n_replicates']} replicates vs "
+          f"baseline {baseline['commit']})")
+    return 0
+
+
+def cmd_baseline(args) -> int:
+    found = discover(args.dataset, args.extractor, args.tag,
+                     args.results_dir)
+    agg = aggregate({t: load_rows(p) for t, p in found.items()})
+    if agg["n_replicates"] < 1:
+        sys.exit("no judged replicates to establish a baseline from")
+    try:
+        commit = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"], capture_output=True,
+            text=True, check=True).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        commit = "unknown"
+    baseline = make_baseline(agg, commit, floor=args.floor)
+    args.out.write_text(json.dumps(baseline, indent=2), encoding="utf-8")
+    print(f"baseline established at {args.out} (commit {commit}, "
+          f"{agg['n_replicates']} replicates)")
+    return 0
+
+
 def _agg_path(base: Path) -> Path:
     # removesuffix, not with_suffix: extractor names contain dots.
     return base.with_name(base.name.removesuffix(".jsonl") + ".agg.json")
@@ -279,6 +377,31 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("agg", help="aggregate replicates -> .agg.json")
     _common(p)
     p.set_defaults(fn=cmd_agg)
+
+    p = sub.add_parser("run", help="answer-phase all pending replicates")
+    _common(p)
+    p.add_argument("--dry-run", action="store_true")
+    p.set_defaults(fn=cmd_run)
+
+    p = sub.add_parser("compare", help="paired permutation test A vs B")
+    _common(p)
+    p.add_argument("--b-extractor", default=None)
+    p.add_argument("--b-tag", default="")
+    p.add_argument("--arm", choices=ARMS, default="cortex")
+    p.add_argument("--permutations", type=int, default=10000)
+    p.add_argument("--seed", type=int, default=0)
+    p.set_defaults(fn=cmd_compare)
+
+    p = sub.add_parser("gate-check", help="replicate means vs baseline")
+    _common(p)
+    p.add_argument("--baseline", type=Path, default=DEFAULT_BASELINE)
+    p.set_defaults(fn=cmd_gate_check)
+
+    p = sub.add_parser("baseline", help="(re)establish the gate baseline")
+    _common(p)
+    p.add_argument("--out", type=Path, default=DEFAULT_BASELINE)
+    p.add_argument("--floor", type=float, default=BASELINE_FLOOR)
+    p.set_defaults(fn=cmd_baseline)
 
     args = ap.parse_args(argv)
     return args.fn(args)
