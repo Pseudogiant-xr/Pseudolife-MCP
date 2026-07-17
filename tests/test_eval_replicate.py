@@ -336,3 +336,17 @@ def test_cli_gate_check_exit_codes(tmp_path):
                         "--baseline", str(baseline_path),
                         "--results-dir", str(tmp_path)])
     assert e.value.code == 1
+
+
+def test_cli_compare_mismatched_questions_exits_cleanly(tmp_path):
+    a = [_row("q0"), _row("q1")]
+    b = [_row("q0"), _row("qX")]
+    for tag, rows in [("arm1", a), ("arm1-r2", a),
+                      ("arm1-baseline", b), ("arm1-baseline-r2", b)]:
+        _write_jsonl(replicate.result_file("oracle", "e4b-ft", tag,
+                                           tmp_path), rows)
+    with pytest.raises(SystemExit) as e:
+        replicate.main(["compare", "--extractor", "e4b-ft", "--tag", "arm1",
+                        "--b-tag", "arm1-baseline",
+                        "--results-dir", str(tmp_path)])
+    assert "question sets" in str(e.value)

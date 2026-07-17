@@ -224,10 +224,13 @@ def _rates_for(args, extractor: str, tag: str, arm: str) -> tuple[dict[str, floa
 
 def cmd_compare(args) -> int:
     b_extractor = args.b_extractor or args.extractor
-    a_rates, a_agg = _rates_for(args, args.extractor, args.tag, args.arm)
-    b_rates, b_agg = _rates_for(args, b_extractor, args.b_tag, args.arm)
-    result = paired_permutation(a_rates, b_rates,
-                                n=args.permutations, seed=args.seed)
+    try:
+        a_rates, a_agg = _rates_for(args, args.extractor, args.tag, args.arm)
+        b_rates, b_agg = _rates_for(args, b_extractor, args.b_tag, args.arm)
+        result = paired_permutation(a_rates, b_rates,
+                                    n=args.permutations, seed=args.seed)
+    except ValueError as e:
+        sys.exit(f"compare: {e}")
     result.update({
         "arm": args.arm,
         "a": f"{args.extractor}/{args.tag or '(untagged)'}",
@@ -251,7 +254,8 @@ def cmd_gate_check(args) -> int:
         baseline = json.loads(args.baseline.read_text(encoding="utf-8"))
         baseline["arms"]
     except (ValueError, KeyError):
-        print(f"invalid baseline file: {args.baseline}")
+        print(f"invalid baseline file: {args.baseline}\n"
+              "re-establish with: evals\\regression_gate.ps1 -Establish")
         sys.exit(2)
     found = discover(args.dataset, args.extractor, args.tag,
                      args.results_dir)
