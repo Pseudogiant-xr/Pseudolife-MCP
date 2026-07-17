@@ -303,6 +303,10 @@ def _load_judged_source(args) -> list[dict]:
         sys.exit(f"source not found or empty: {src}")
     if not all(is_judged(r) for r in rows):
         sys.exit(f"source not fully judged: {src}")
+    needed = ("contexts", "question_date")
+    if any(k not in r for r in rows for k in needed):
+        sys.exit(f"source predates context persistence (missing "
+                 f"{'/'.join(needed)}) — cannot replicate: {src}")
     return rows
 
 

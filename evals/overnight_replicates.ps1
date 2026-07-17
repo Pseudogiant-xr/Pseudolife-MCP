@@ -59,7 +59,11 @@ function Invoke-WithRetry($label, $stepArgs) {
 $configs = @(
     @{ Extractor = "e4b-ft";   Tag = "arm1" },
     @{ Extractor = "e4b-ft";   Tag = "arm1-baseline" },
-    @{ Extractor = "qwen-27b"; Tag = "" }
+    # NOTE: the untagged qwen-27b run (README 0.705) predates context
+    # persistence and cannot be replicated; w0 is the same knob config
+    # (window=0 control) with persisted contexts — a qwen-27b-class
+    # variance estimate, NOT a replication of the published number.
+    @{ Extractor = "qwen-27b"; Tag = "w0" }
 )
 
 try {

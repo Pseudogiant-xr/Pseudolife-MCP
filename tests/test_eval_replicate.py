@@ -218,6 +218,18 @@ def test_cli_spawn_rejects_unjudged_source(tmp_path):
                         "-n", "1", "--results-dir", str(tmp_path)])
 
 
+def test_cli_spawn_rejects_contextless_source(tmp_path):
+    rows = [_row("q0")]
+    for r in rows:
+        del r["contexts"], r["question_date"]
+    _write_jsonl(replicate.result_file("oracle", "qwen-27b", "", tmp_path),
+                 rows)
+    with pytest.raises(SystemExit) as e:
+        replicate.main(["spawn", "--extractor", "qwen-27b", "-n", "1",
+                        "--results-dir", str(tmp_path)])
+    assert "context" in str(e.value)
+
+
 def test_cli_copy(tmp_path):
     _seed_base(tmp_path)
     rc = replicate.main(["copy", "--extractor", "e4b-ft", "--tag", "arm1",

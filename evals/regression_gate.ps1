@@ -1,3 +1,4 @@
+#Requires -Version 7
 # Regression gate: pinned oracle/e4b-ft "arm1" slice, replicated, vs the
 # committed baseline (evals/results/regression_gate.baseline.json).
 #
