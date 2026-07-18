@@ -1878,11 +1878,15 @@ class MemoryService:
                         rid, attempts)
                     break                          # keep episode order
                 for c in claims:
-                    self._storage.add_signal(
-                        task=c["task"], outcome=c["outcome"],
-                        about=c.get("about"), detail=c.get("detail"),
-                        origin="inferred", episode_id=rid)
-                    written += 1
+                    try:
+                        self._storage.add_signal(
+                            task=c["task"], outcome=c["outcome"],
+                            about=c.get("about"), detail=c.get("detail"),
+                            origin="inferred", episode_id=rid)
+                        written += 1
+                    except Exception as exc:  # noqa: BLE001 — never break a dream
+                        logger.warning(
+                            "inferred signal skipped (%s): %s", exc, c)
                 cur["retry"].pop(rid, None)
                 cur["ts"] = cand["ended_at"]
                 self._save_infer_cursor(cur)

@@ -201,3 +201,18 @@ def test_stage_skips_extractor_without_method(closed_zero_signal_episode):
     svc, _root = closed_zero_signal_episode
     stats = svc.infer_outcomes_stage(object())
     assert stats.get("skipped") == "no-extractor"
+
+
+def test_stage_survives_malformed_claim_dict(closed_zero_signal_episode):
+    svc, root_id = closed_zero_signal_episode
+    fake = _FakeInferExtractor([[
+        {"bad": "no task key"},
+        {"task": "good claim", "outcome": "success",
+         "about": None, "detail": None},
+    ]])
+    stats = svc.infer_outcomes_stage(fake)
+    assert stats == {"scanned": 1, "written": 1}     # bad one skipped, not fatal
+    sigs = _pending_inferred(svc, root_id)
+    assert [s["task"] for s in sigs] == ["good claim"]
+    with svc._lock:
+        assert svc._pending_inference_candidates() == []   # cursor advanced
