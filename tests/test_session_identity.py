@@ -208,3 +208,30 @@ def test_outcome_with_header_and_handle(pg_service):
     sigs = [s for s in svc._storage.pending_signals(limit=100)
             if s.get("episode_id") == ep["id"]]
     assert len(sigs) == 1
+
+
+# ── Task 5: hook endpoints — register on start, close on end (identity
+# tier 3, spec 2026-07-18) ────────────────────────────────────────────────
+
+
+def test_hook_start_registers_and_advertises(pg_service):
+    from pseudolife_memory.web.session_hook import hook_session_start
+    text = hook_session_start(pg_service, session_id="claudeSess1",
+                              source="startup")
+    assert "Session episode:" in text
+    assert pg_service._resolve_writer()[1] == "claudeSess1"
+    # idempotent on resume
+    text2 = hook_session_start(pg_service, session_id="claudeSess1",
+                               source="resume")
+    assert text.splitlines()[0] == text2.splitlines()[0]
+
+
+def test_hook_end_closes_and_clears_only_owner(pg_service):
+    from pseudolife_memory.web.session_hook import (
+        hook_session_end, hook_session_start)
+    hook_session_start(pg_service, session_id="claudeSess2", source="startup")
+    pg_service.store("an entry", source="t")
+    assert hook_session_end(pg_service, session_id="other") == {"ok": True}
+    assert pg_service._resolve_writer()[1] == "claudeSess2"   # not cleared
+    assert hook_session_end(pg_service, session_id="claudeSess2") == {"ok": True}
+    assert pg_service._resolve_writer()[1] is None
