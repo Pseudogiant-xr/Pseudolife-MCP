@@ -1839,7 +1839,8 @@ class MemoryService:
         cfg = self.config.memory.lessons
         if self._storage is None:
             return {"scanned": 0, "written": 0, "skipped": "no-storage"}
-        if not (cfg.enabled and cfg.infer_outcomes):
+        if not (cfg.enabled and cfg.infer_outcomes
+                and cfg.infer_outcomes_max_signals > 0):
             return {"scanned": 0, "written": 0, "skipped": "disabled"}
         fn = getattr(extractor, "infer_outcomes", None)
         if fn is None:
@@ -1860,6 +1861,13 @@ class MemoryService:
             with self._lock:
                 cur = self._load_infer_cursor()
                 rid = cand["root_id"]
+                # Another concurrent dream (fire-and-forget vs sweep — no
+                # dream-level mutex) may have processed this episode while
+                # our extractor call ran unlocked: re-check before writing.
+                if (cur["ts"] >= cand["ended_at"]
+                        or self._storage.count_signals_for_episodes(
+                            [rid]) > 0):
+                    continue
                 if claims is None:                 # malformed: bounded retry
                     attempts = int(cur["retry"].get(rid, 0)) + 1
                     if attempts >= 2:
@@ -2606,7 +2614,14 @@ class MemoryService:
             cursor = self._cortex.dream_cursor
 
             lessons_cfg = self.config.memory.lessons
-            if lessons_cfg.enabled and lessons_cfg.infer_outcomes:
+            from pseudolife_memory.memory.dream import resolve_endpoints
+            _r = resolve_endpoints(cfg)
+            _has_extractor = bool(
+                (_r["primary_url"] and _r["primary_model"])
+                or (_r["fallback_url"] and _r["fallback_model"]))
+            if (lessons_cfg.enabled and lessons_cfg.infer_outcomes
+                    and lessons_cfg.infer_outcomes_max_signals > 0
+                    and _has_extractor):
                 infer_pending = len(self._pending_inference_candidates())
                 retry_pending = len(self._load_infer_cursor()["retry"])
             else:

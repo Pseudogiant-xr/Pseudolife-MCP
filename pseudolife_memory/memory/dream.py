@@ -209,6 +209,9 @@ def _parse_outcome_claims(content: str, cap: int) -> list[dict] | None:
     Enum violations are dropped, never coerced (record_outcome rule)."""
     import json as _json
 
+    if cap <= 0:
+        return []
+
     s, e = content.find("{"), content.rfind("}")
     if s == -1 or e <= s:
         return None

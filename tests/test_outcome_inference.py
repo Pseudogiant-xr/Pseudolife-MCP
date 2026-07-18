@@ -201,6 +201,12 @@ def test_stage_respects_kill_switch(closed_zero_signal_episode):
 
 def test_dream_status_counts_inference_pending(closed_zero_signal_episode):
     svc, _root = closed_zero_signal_episode
+    # dream_status's infer_pending gate (fix 3) also requires a configured
+    # extractor endpoint — set one directly on the config (no env vars, no
+    # network) so this test keeps exercising the kill-switch behavior it
+    # was written for.
+    svc.config.memory.dream.extractor_base_url = "http://example.test/v1"
+    svc.config.memory.dream.extractor_model = "test-model"
     st = svc.dream_status()
     assert st["infer_outcomes"]["pending"] == 1
     assert st["would_fire"] is True
@@ -274,3 +280,56 @@ def test_mixed_batch_keeps_default_confidence(closed_zero_signal_episode):
     lesson = row["entries"][0]
     assert lesson["confidence"] == pytest.approx(0.6)
     assert "inferred" not in (lesson.get("provenance") or [])
+
+
+# ── final-review fixes: cap<=0 disables, commit-time re-check, status gate ──
+
+
+def test_cap_zero_disables_feature(closed_zero_signal_episode):
+    svc, _root = closed_zero_signal_episode
+    svc.config.memory.lessons.infer_outcomes_max_signals = 0
+    assert svc.infer_outcomes_stage(
+        _FakeInferExtractor([])).get("skipped") == "disabled"
+    st = svc.dream_status()
+    assert st["infer_outcomes"]["pending"] == 0
+
+
+def test_parse_outcome_claims_cap_zero():
+    from pseudolife_memory.memory.dream import _parse_outcome_claims
+    assert _parse_outcome_claims(
+        '{"outcomes": [{"task": "t", "outcome": "success"}]}', cap=0) == []
+
+
+def test_commit_recheck_skips_already_processed(closed_zero_signal_episode):
+    svc, root_id = closed_zero_signal_episode
+
+    class _RacingExtractor:
+        def infer_outcomes(self, context_text, *, cap=3):
+            # simulate a concurrent dream finishing while we were unlocked
+            svc._storage.add_signal(task="raced", outcome="success",
+                                    episode_id=root_id)
+            return [{"task": "dup", "outcome": "success",
+                     "about": None, "detail": None}]
+
+    stats = svc.infer_outcomes_stage(_RacingExtractor())
+    assert stats["written"] == 0                    # duplicate write skipped
+    sigs = [s for s in svc._storage.pending_signals(limit=100)
+            if s.get("episode_id") == root_id]
+    assert [s["task"] for s in sigs] == ["raced"]   # only the racer's signal
+
+
+def test_dream_status_gates_pending_on_configured_extractor(
+        closed_zero_signal_episode):
+    """Fix 3: a NoOp/extractor-less deploy (no primary or fallback endpoint
+    configured — the default here) must not pin ``would_fire`` forever via
+    a phantom infer_pending count, even though a real candidate exists and
+    the feature is otherwise on. Config-only check, offline — no monkeypatch
+    of env vars needed since the default config already has no endpoint."""
+    svc, _root = closed_zero_signal_episode
+    assert svc.config.memory.dream.extractor_base_url is None
+    assert svc.config.memory.dream.fallback_base_url is None
+    with svc._lock:
+        assert len(svc._pending_inference_candidates()) == 1   # real candidate
+    st = svc.dream_status()
+    assert st["infer_outcomes"]["pending"] == 0
+    assert st["infer_outcomes"]["retry_pending"] == 0
