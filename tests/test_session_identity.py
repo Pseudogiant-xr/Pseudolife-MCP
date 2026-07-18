@@ -95,9 +95,17 @@ def test_episode_end_fallthrough_guarded(pg_service):
     tok = set_writer_context("w", "attacker-key")
     try:
         res = svc.episode_end()               # no open sub-episode for attacker
-        assert res.get("closed") is None      # must NOT pop victim's root
+        # attacker has a resolved identity but owns nothing open, so
+        # open_leaf_for("attacker-key") is None before the ownership-mismatch
+        # branch is even reached -> plain no-op, not the mismatch dict.
+        assert res == {}
     finally:
         reset_writer_context(tok)
+    with svc._lock:
+        open_roots = [e for e in svc._cms.episodes.episodes.values()
+                      if e.parent_id is None and e.ended_at is None
+                      and e.session_key == "victim-key"]
+    assert len(open_roots) == 1
 
 
 def test_episode_end_no_identity_never_pops_foreign_root(pg_service):
@@ -111,6 +119,11 @@ def test_episode_end_no_identity_never_pops_foreign_root(pg_service):
     tok = set_writer_context("w", None)
     try:
         res = svc.episode_end()
-        assert res.get("closed") is None
+        assert res == {"closed": None, "reason": "no owned open session"}
     finally:
         reset_writer_context(tok)
+    with svc._lock:
+        open_roots = [e for e in svc._cms.episodes.episodes.values()
+                      if e.parent_id is None and e.ended_at is None
+                      and e.session_key == "victim-key"]
+    assert len(open_roots) == 1
