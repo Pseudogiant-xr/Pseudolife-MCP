@@ -44,7 +44,11 @@ def reset_writer_context(token) -> None:
 
 def _http_writer_session() -> tuple[str | None, str | None]:
     """Best-effort ``(writer_id, session_id)`` from the live MCP request, or
-    ``(None, None)`` when not inside a daemon HTTP request."""
+    ``(None, None)`` when not inside a daemon HTTP request.
+
+    DEPRECATED: Use :func:`resolve_writer_detailed` or :func:`resolve_writer`
+    instead. This function exists only for backward compatibility with
+    :mod:`mcp_server` and tests."""
     try:
         from mcp.server.lowlevel.server import request_ctx
 
@@ -63,10 +67,40 @@ def _http_writer_session() -> tuple[str | None, str | None]:
         return (None, None)
 
 
-def resolve_writer(default_writer: str) -> tuple[str, str | None]:
-    """The ``(writer_id, session_id)`` to stamp on a write right now."""
+def _http_writer_session_detailed() -> tuple[str | None, str | None, str | None]:
+    """Best-effort ``(writer_id, header_session, transport_session)`` from the
+    live MCP request. ``header_session`` is the integrator-asserted
+    ``X-PL-Session`` (identity tier 1); ``transport_session`` is the
+    transport's ``mcp-session-id`` — per-CONNECTION in multiplexing clients,
+    and REMOVED from the MCP spec in the 2026-07-28 revision (SEP-2567), so
+    it is a legacy fallback only."""
+    try:
+        from mcp.server.lowlevel.server import request_ctx
+
+        req = getattr(request_ctx.get(), "request", None)
+        if req is None:
+            return (None, None, None)
+        headers = req.headers
+        return (headers.get("x-pl-writer"), headers.get("x-pl-session"),
+                headers.get("mcp-session-id"))
+    except Exception:  # noqa: BLE001  (LookupError when unset; ImportError; ...)
+        return (None, None, None)
+
+
+def resolve_writer_detailed(
+        default_writer: str) -> tuple[str, str | None, str | None]:
+    """``(writer_id, header_session, transport_session)`` for this request.
+    An explicit override binds its session into the HEADER slot — overrides
+    are the strongest assertion we have."""
     w, s = _WRITER_CTX.get()
     if w is not None:
-        return (w, s)
-    hw, hs = _http_writer_session()
-    return (hw or default_writer, hs)
+        return (w, s, None)
+    hw, hs, ts = _http_writer_session_detailed()
+    return (hw or default_writer, hs, ts)
+
+
+def resolve_writer(default_writer: str) -> tuple[str, str | None]:
+    """Compat wrapper: ``(writer_id, session)`` with the pre-contract merge
+    (header wins over transport). Prefer ``resolve_writer_detailed``."""
+    w, hs, ts = resolve_writer_detailed(default_writer)
+    return (w, hs or ts)
