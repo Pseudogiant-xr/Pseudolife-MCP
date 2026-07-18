@@ -235,3 +235,89 @@ def test_hook_end_closes_and_clears_only_owner(pg_service):
     assert pg_service._resolve_writer()[1] == "claudeSess2"   # not cleared
     assert hook_session_end(pg_service, session_id="claudeSess2") == {"ok": True}
     assert pg_service._resolve_writer()[1] is None
+
+
+# ── Task 6 (security fix): hook mutation paths honor the bearer gate ───────
+# Verified finding: branch 4 (session-start) only used `_authorized(scope)`
+# to gate the briefing CONTENT, and branch 4b (session-end) never checked it
+# at all — with PSEUDOLIFE_MCP_TOKEN configured, an unauthenticated LAN
+# client could still hijack the active-session pointer and force-close
+# sessions. ASGI-level coverage (there was none in either direction).
+
+import asyncio
+import json
+
+from pseudolife_memory.web.api import build_console_app
+
+
+async def _stub_mcp(scope, receive, send):
+    await send({"type": "http.response.start", "status": 501, "headers": []})
+    await send({"type": "http.response.body", "body": b""})
+
+
+def _hook_call(app, method, path, query="", headers=None, body=b""):
+    async def run():
+        scope = {"type": "http", "method": method, "path": path,
+                 "query_string": query.encode(), "headers": headers or []}
+
+        async def receive():
+            return {"type": "http.request", "body": body, "more_body": False}
+
+        out = {"status": None, "body": bytearray()}
+
+        async def send(m):
+            if m["type"] == "http.response.start":
+                out["status"] = m["status"]
+            elif m["type"] == "http.response.body":
+                out["body"].extend(m.get("body", b""))
+
+        await app(scope, receive, send)
+        return out["status"], bytes(out["body"])
+
+    return asyncio.run(run())
+
+
+def test_hook_endpoints_unauthorized_with_token_do_not_mutate(pg_service):
+    """Token configured, no bearer header: session-start must serve the
+    instructions only (no registration, no advertisement, no pointer write)
+    and session-end must be rejected outright — pre-fix, both silently
+    mutated state regardless of the token."""
+    svc = pg_service
+    app = build_console_app(_stub_mcp, "secret", lambda: {"status": "ok"}, svc)
+
+    st, body = _hook_call(app, "GET", "/api/hook/session-start",
+                          query="session_id=evil")
+    assert st == 200
+    text = body.decode("utf-8")
+    assert "memory_search" in text            # instructions still serve
+    assert "Session episode:" not in text     # no advertisement
+    assert svc._resolve_writer()[1] is None   # no pointer hijack
+    with svc._lock:
+        assert not any(e.session_key == "evil"
+                       for e in svc._cms.episodes.episodes.values())
+
+    st2, _ = _hook_call(app, "POST", "/api/hook/session-end",
+                        body=json.dumps({"session_id": "evil"}).encode())
+    assert st2 == 401
+    assert svc._resolve_writer()[1] is None
+
+
+def test_hook_endpoints_authorized_with_token_mutate_normally(pg_service):
+    """With the correct bearer, both hook endpoints behave exactly as they
+    do with no token configured: session-start registers + advertises,
+    session-end closes and clears the pointer it owns."""
+    svc = pg_service
+    app = build_console_app(_stub_mcp, "secret", lambda: {"status": "ok"}, svc)
+    auth = [(b"authorization", b"Bearer secret")]
+
+    st, body = _hook_call(app, "GET", "/api/hook/session-start",
+                          query="session_id=goodSess", headers=auth)
+    assert st == 200
+    assert "Session episode:" in body.decode("utf-8")
+    assert svc._resolve_writer()[1] == "goodSess"
+
+    st2, body2 = _hook_call(app, "POST", "/api/hook/session-end", headers=auth,
+                            body=json.dumps({"session_id": "goodSess"}).encode())
+    assert st2 == 200
+    assert json.loads(body2) == {"ok": True}
+    assert svc._resolve_writer()[1] is None

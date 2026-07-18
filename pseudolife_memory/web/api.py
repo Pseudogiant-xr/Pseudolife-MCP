@@ -216,7 +216,11 @@ def build_console_app(
         # briefing, which is memory content. Loopback gating as for /api.
         # An optional ?session_id= (+ ?source=) registers the session's
         # episode and active-session pointer (identity tier 3) and prepends
-        # the episode-handle advertisement line.
+        # the episode-handle advertisement line — but only when authorized:
+        # unauthorized-with-token callers must not be able to mint/hijack the
+        # active-session pointer just by hitting this endpoint, so session_id
+        # and source are dropped entirely (byte-identical to the plain
+        # instructions-only response) rather than merely gated on output.
         if path == "/api/hook/session-start":
             denied = _browser_gate(scope)
             if denied:
@@ -225,17 +229,23 @@ def build_console_app(
             if method != "GET":
                 await _send_json(send, 405, {"error": "method_not_allowed"})
                 return
+            authorized = _authorized(scope)
             params = _parse_query(scope)
+            session_id = params.get("session_id") if authorized else None
+            source = params.get("source") if authorized else None
             text = await asyncio.get_running_loop().run_in_executor(
-                None, hook_session_start, service, params.get("session_id"),
-                params.get("source"), _authorized(scope))
+                None, hook_session_start, service, session_id, source,
+                authorized)
             await _send_bytes(send, 200, text.encode("utf-8"),
                               "text/plain; charset=utf-8", "no-store")
             return
 
         # 4b) plugin SessionEnd hook: closes the session's episode and clears
         # the active-session pointer (only if still owned). Fail-open, always
-        # 200 — mirrors session-start's contract.
+        # 200 — mirrors session-start's contract. Unlike session-start there
+        # is no unauthorized-safe subset of this call (it's pure mutation),
+        # so a configured token is enforced outright, same shape as /api's
+        # 401.
         if path == "/api/hook/session-end":
             denied = _browser_gate(scope)
             if denied:
@@ -243,6 +253,11 @@ def build_console_app(
                 return
             if method != "POST":
                 await _send_json(send, 405, {"error": "method_not_allowed"})
+                return
+            if not _authorized(scope):
+                await _send_json(send, 401, {
+                    "error": "unauthorized",
+                    "hint": "Authorization: Bearer <PSEUDOLIFE_MCP_TOKEN>"})
                 return
             raw = await _read_body(receive)
             body: dict = {}

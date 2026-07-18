@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-07-19 — hook mutation paths honor the bearer gate)
+- **`GET /api/hook/session-start` and `POST /api/hook/session-end` mutated
+  state without the bearer-token check when `PSEUDOLIFE_MCP_TOKEN` is
+  configured** — session-start only used `_authorized(scope)` to gate the
+  briefing *content*, not the `?session_id=` episode registration / active-
+  session pointer write, and session-end never checked it at all. On a
+  LAN-exposed token-gated daemon this let an unauthenticated client hijack
+  the active-session pointer (misattributing untagged writes) or
+  force-close sessions. Fixed: session-start now drops `session_id`/`source`
+  entirely when unauthorized (output stays byte-identical to the
+  instructions-only response — no registration, no advertisement); session-
+  end now returns 401 (same shape as `/api`'s gate) when a token is
+  configured and the bearer is missing/wrong. ASGI-level regression coverage
+  added in `tests/test_session_identity.py` (there was none before, in
+  either direction).
+
 ### Fixed (2026-07-19 — session identity: header+handle attribution)
 - **`memory_store` / `memory_fact_set` / `memory_outcome` attribution is now
   unconditional on a valid `episode` handle, even when a header session
