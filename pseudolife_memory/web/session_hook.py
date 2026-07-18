@@ -135,7 +135,12 @@ def _episode_advertisement(session_id: str, source: str | None, service: Any) ->
     one-line episode-handle advertisement, or "" on any failure (fail-open —
     a registration hiccup must not break session start)."""
     try:
-        ep = service.episode_start_session(session_id, "session")
+        # Generic-shaped title so the auto-titler recognises and replaces it
+        # at close (GENERIC_TITLE_RE) — a literal "session" would stick
+        # forever (2026-07-19 whole-branch review, finding 2).
+        import time as _t
+        ep = service.episode_start_session(
+            session_id, _t.strftime("session - %Y-%m-%d %H:%M"))
         service.set_active_session(session_id)
         short = (ep.get("id") or "")[:12]
         if not short:
