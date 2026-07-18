@@ -1,4 +1,4 @@
-"""MCP tool surface — exposes the Pseudolife memory tools to Claude Code.
+"""MCP tool surface — exposes the Pseudolife memory tools to MCP clients.
 
 Built on the FastMCP decorator API from the official ``mcp`` Python SDK.
 Each ``@_tool()`` becomes a JSON-RPC tool. The surface (consolidated
@@ -82,7 +82,9 @@ _data_dir = os.environ.get("PSEUDOLIFE_MCP_DATA_DIR")
 _config_path = os.environ.get("PSEUDOLIFE_MCP_CONFIG")
 service = MemoryService(data_dir=_data_dir, config_path=_config_path)
 
-mcp = FastMCP("Pseudolife Memory")
+_MCP_INSTRUCTIONS = """Pseudolife is durable memory shared across sessions. At task start, call memory_search for relevant context and memory_lesson_search for prior outcomes. Store durable facts, decisions, corrections, and useful observations with memory_store (one claim per call); use memory_fact_set for canonical current values. At task end, record success, failure, or correction with memory_outcome. Use memory_toolset(action="expand") before calling tools outside the visible tier."""
+
+mcp = FastMCP("Pseudolife Memory", instructions=_MCP_INSTRUCTIONS)
 
 from pseudolife_memory.toolset_tiers import (
     SessionTierState, normalize_tier, parse_tier_map, rank as _tier_rank,
@@ -146,7 +148,7 @@ def _tool(*, tier: str = "full"):
 @_tool(tier="minimal")
 def memory_store(
     text: str,
-    source: str = "claude",
+    source: str = "agent",
     tags: list[str] | None = None,
     origin: Literal["user", "action", "agent"] | None = None,
 ) -> dict[str, Any]:

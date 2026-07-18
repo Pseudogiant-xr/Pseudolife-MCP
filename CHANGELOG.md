@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-18 — client-neutral MCP guidance)
+- **The MCP initialization now advertises the memory workflow through the
+  protocol's `instructions` field** — clients that honor server instructions,
+  including Codex, learn the recall/capture/outcome loop without relying on a
+  Claude-specific standing-instructions file. Package and registry descriptions
+  now describe MCP-compatible agents rather than a single client.
+- **Default tool attribution is no longer Claude-specific** — unsourced MCP
+  stores use `source="agent"`. Existing memories and explicit `source` values
+  are unchanged.
+
 ### Changed (2026-07-18 — Arm-1 deploy evidence downgraded by replication)
 - **First replicated LongMemEval-KU comparison** (5 replicates/config,
   paired permutation test, n=78): the shipped Arm-1 fine-tuned extractor's
@@ -145,7 +155,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `docs/guide/` page to be linked from the README (nothing moved goes
   dark). `docs/README.md` now distinguishes the maintained `guide/` pages
   from internal design history.
-
 ## [0.8.1] — 2026-07-16 — Pseudolife (one word), release automation, CLI help
 
 ### Changed (2026-07-16 — the name is a word now)

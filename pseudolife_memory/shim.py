@@ -1,6 +1,6 @@
 """stdio shim — find (or start) the daemon, then proxy MCP over to it.
 
-Claude Code launches this per session via the ``pseudolife-mcp`` script.
+An MCP client launches this per session via the ``pseudolife-mcp`` script.
 It owns NO storage and loads NO models: one daemon process holds the
 bank, every session attaches through here (or directly over HTTP).
 

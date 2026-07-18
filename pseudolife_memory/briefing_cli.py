@@ -17,7 +17,7 @@ import urllib.request
 
 
 def _as_hook_json(md: str) -> str:
-    """Wrap the briefing markdown as a Claude Code SessionStart hook payload
+    """Wrap the briefing markdown as a SessionStart hook payload
     (``hookSpecificOutput.additionalContext``). Empty string when there's nothing
     to inject — so the hook adds no context on a cold bank / down daemon."""
     md = (md or "").strip()
@@ -50,7 +50,7 @@ def run_briefing() -> None:
     ap.add_argument("--max-lessons", type=int, default=3)
     ap.add_argument("--max-world", type=int, default=3)
     ap.add_argument("--hook-json", action="store_true",
-                    help="emit a Claude Code SessionStart hook payload "
+                    help="emit a Claude Code/Codex SessionStart hook payload "
                          "(hookSpecificOutput.additionalContext) instead of raw markdown")
     args, _ = ap.parse_known_args(sys.argv[2:])  # argv[1] == "briefing"
 
