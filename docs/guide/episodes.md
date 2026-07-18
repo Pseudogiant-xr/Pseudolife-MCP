@@ -36,12 +36,14 @@ reliably — without the agent having to remember:
      pass `episode="<id>"` on writes when running concurrent sessions. A
      SessionEnd hook closes that session's episode and clears the pointer
      when the session ends.
-   - **Ownership guard.** `memory_episode_end`, the direct
-     `POST /api/episode/end` with no `session_key` in the body, and the
-     idle reaper can only close a root episode whose `session_key` matches
-     the caller's own resolved identity — a session can no longer pop
-     another, still-open session's root by accident. No match is a no-op:
-     `{"closed": null, "reason": "no owned open session"}`.
+   - **Ownership guard.** `memory_episode_end` and the direct
+     `POST /api/episode/end` with no `session_key` in the body can only
+     close a root episode whose `session_key` matches the caller's own
+     resolved identity — a session can no longer pop another, still-open
+     session's root by accident. No match is a no-op:
+     `{"closed": null, "reason": "no owned open session"}`. The idle
+     reaper is separate: it closes any root idle past the threshold,
+     using each root's own key — that's its job, not a guard bypass.
    - **Direct-HTTP / sessionless clients** (no shim, no hook, no explicit
      handle) still get episodes: the daemon **lazily opens** one on the
      first store of a new session (so empty sessions never leave a husk)
