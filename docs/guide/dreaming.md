@@ -82,8 +82,13 @@ naive-RAG at ~25× fewer tokens/query); see
 
 If you have a GPU (or a beefier box on your LAN), any OpenAI-compatible
 server can replace the sidecar — the ladder measured a Qwen3.6-27B on a
-single RTX 4090 at the quality ceiling (gold 1.0 / stale-leak 0.0) while
-extracting ~5× faster than the CPU sidecar. Two ways to switch:
+single RTX 4090 at the ladder ceiling (gold 1.0 / stale-leak 0.0) while
+extracting ~5× faster than the CPU sidecar. The win is speed, not recall:
+in the replicated LongMemEval-KU comparison
+([`evals/README.md`](../../evals/README.md), 2026-07-18) the bundled
+fine-tune outscores the generic 27B class end-to-end (hybrid 0.762 ± 0.027
+vs 0.695 ± 0.017), so point at a bigger *generic* model for faster dreams,
+not better answers. Two ways to switch:
 
 *From the Console (no restart):* the **Extractor** panel in the Cortex
 Console's config view edits the endpoint, model, timeout, and token budget
