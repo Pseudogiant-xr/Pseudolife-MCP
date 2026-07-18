@@ -301,7 +301,11 @@ INFER_FIXTURES = [
                  "- (pseudolife) Root cause: the test polls before the server "
                  "binds; timeout changes are a dead-end, poll readiness "
                  "instead"),
-     "expect": {("timeout", "failure")}},
+     # Keyword is title-derived ("websocket"), like every other fixture: the
+     # schema routes tool/approach nouns ("timeout") into `about`, not `task`,
+     # so a task-field match on "timeout" would punish schema-compliant models
+     # (review finding, 2026-07-18).
+     "expect": {("websocket", "failure")}},
     {"name": "user-corrected-me",
      "context": ("Session: configure the postgres search_path\n"
                  "- (pseudolife) set a code-level pin for search_path in the "
