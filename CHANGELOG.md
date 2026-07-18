@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security (2026-07-18 — mcp 1.28.1, Dependabot alert 5)
+- **`mcp` bumped 1.28.0 → 1.28.1 in `ops/requirements.lock.txt`**
+  (CVE-2026-59950 / GHSA-vj7q-gjh5-988w, high: the SDK's WebSocket server
+  transport accepted requests without Host/Origin validation). The daemon
+  serves streamable HTTP only and never mounts the WebSocket transport, so
+  the vulnerable path was unreachable — taken anyway as a clean patch bump:
+  no transitive pin moves, and every 1.28.1 constraint is already satisfied
+  by the existing lockfile pins.
+
 ### Fixed (2026-07-18 — client-neutrality follow-ups)
 - **The `agent` default source no longer hijacks derived session titles** —
   it joins `claude` in the title vote's noise set, so real project sources
