@@ -198,12 +198,14 @@ def test_docs_guide_pages_are_linked_from_readme() -> None:
     assert missing == [], f"docs/guide pages not linked from README: {missing}"
 
 
-def test_readme_documents_claude_mcp_wiring() -> None:
-    """A newcomer must be able to wire the daemon into Claude Code from the
-    README alone — the one-liner and/or the config file name."""
+def test_readme_documents_supported_mcp_clients() -> None:
+    """A newcomer must be able to wire either supported coding agent into the
+    daemon from the README alone."""
     text = _README.read_text(encoding="utf-8")
     assert "claude mcp add" in text
     assert ".mcp.json" in text
+    assert "codex mcp add" in text
+    assert ".codex/hooks.json" in text
 
 
 def test_tracked_tree_carries_no_maintainer_identifiers() -> None:

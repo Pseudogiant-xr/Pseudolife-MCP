@@ -1,16 +1,32 @@
 #!/usr/bin/env bash
-# Idempotently add the Pseudolife-MCP session-start briefing to Claude Code's
-# SessionStart hooks, ALONGSIDE (never replacing) any existing hooks.
+# Idempotently add the Pseudolife-MCP session-start briefing to Claude Code or
+# Codex SessionStart hooks, ALONGSIDE (never replacing) existing hooks.
 # Bash port of ops/install-hook.ps1 for Linux/macOS hosts.
 #
 #   ops/install-hook.sh
+#   ops/install-hook.sh --client codex
 #   ops/install-hook.sh /path/to/settings.json
 #
 # Backs up settings.json first; re-running is a no-op once installed. Uses
 # python3 (no jq dependency) for the JSON edit.
 set -euo pipefail
 
-SETTINGS_PATH="${1:-$HOME/.claude/settings.json}"
+CLIENT=claude
+if [ "${1:-}" = "--client" ]; then
+  CLIENT="${2:-}"
+  shift 2
+fi
+case "$CLIENT" in claude|codex) ;; *)
+  echo "invalid --client '$CLIENT' (claude|codex)" >&2; exit 2 ;;
+esac
+if [ "$CLIENT" = codex ]; then
+  default_settings="$HOME/.codex/hooks.json"
+  instruction_file=AGENTS.md
+else
+  default_settings="$HOME/.claude/settings.json"
+  instruction_file=CLAUDE.md
+fi
+SETTINGS_PATH="${1:-$default_settings}"
 COMMAND="${2:-pseudolife-mcp briefing --hook-json}"
 
 # Prefer python3 but accept python (verified runnable — Windows ships a
@@ -90,14 +106,14 @@ PY
 
 # The hooks wire the session lifecycle, but the memory LOOP only fires if a
 # standing instruction tells the agent to use the tools (issue #12: an install
-# with healthy hooks + daemon still never called memory_* because no CLAUDE.md
-# carried the block). Check-and-advise only — never edit CLAUDE.md unasked.
+# with healthy hooks + daemon still never called memory_* because no standing
+# instructions carried the block). Check-and-advise only — never edit it here.
 repo="$(cd "$(dirname "$0")/.." && pwd)"
-claude_md="$(dirname "$SETTINGS_PATH")/CLAUDE.md"
-if ! grep -q "pseudolife-memory" "$claude_md" 2>/dev/null; then
+instruction_path="$(dirname "$SETTINGS_PATH")/$instruction_file"
+if ! grep -q "pseudolife-memory" "$instruction_path" 2>/dev/null; then
   echo ""
-  echo "REMINDER: $claude_md has no Pseudolife memory section — without a"
-  echo "standing instruction the memory tools sit unused. Append the bundled block:"
-  echo "  cat $repo/examples/CLAUDE.memory.md >> $claude_md"
+  echo "REMINDER: $instruction_path has no Pseudolife memory section."
+  echo "Append the bundled block for stronger recall/capture guidance:"
+  echo "  cat $repo/examples/CLAUDE.memory.md >> $instruction_path"
   echo "(or add it to a per-project CLAUDE.md / AGENTS.md instead)"
 fi

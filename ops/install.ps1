@@ -4,12 +4,12 @@
 #   run this under pwsh 7+ (winget install Microsoft.PowerShell).
 # One-shot idempotent installer for the Pseudolife-MCP stack (issue #13
 # tier 2). Everything downstream of Docker: preflight -> volumes -> extractor
-# choice -> compose up -> session hooks -> CLAUDE.md memory block ->
-# claude mcp add -> health. Re-running is safe; re-running with a different
+# choice -> compose up -> client hooks -> standing instructions ->
+# MCP registration -> health. Re-running is safe; re-running with a different
 # -Extractor is the supported way to switch modes.
 #
 #   ops\install.ps1                                    # interactive
-#   ops\install.ps1 -Extractor sidecar                 # non-interactive
+#   ops\install.ps1 -Extractor sidecar -Client codex   # non-interactive
 #   ops\install.ps1 -Extractor sonnet-fallback -ClaudeMd append
 #   ops\install.ps1 -Extractor sonnet-only -ClaudeMd skip
 #
@@ -21,8 +21,12 @@
 param(
     [ValidateSet("", "sidecar", "sonnet-fallback", "sonnet-only")]
     [string]$Extractor = "",
+    [ValidateSet("claude", "codex", "both")]
+    [string]$Client = "claude",
     [ValidateSet("", "append", "skip")]
     [string]$ClaudeMd = "",
+    [ValidateSet("", "append", "skip")]
+    [string]$Instructions = "",
     [int]$ShimPort = 8082
 )
 $ErrorActionPreference = "Stop"
@@ -38,7 +42,7 @@ $interactive = [Environment]::UserInteractive -and -not [Console]::IsInputRedire
 
 # -- 1. preflight --------------------------------------------------------------
 Write-Host "==> Preflight..."
-& (Join-Path $PSScriptRoot "preflight.ps1")
+& (Join-Path $PSScriptRoot "preflight.ps1") -Client $Client
 if ($LASTEXITCODE -ne 0) { throw "Preflight failed - fix the line(s) above and re-run." }
 
 # -- 2. extractor choice (explicit, no default) ---------------------------------
@@ -105,6 +109,12 @@ switch ($Extractor) {
         $block.Add("PSEUDOLIFE_DREAM_EXTRACTOR_MODE=primary")
     }
 }
+$writerId = switch ($Client) {
+    "claude" { "claude-code" }
+    "codex" { "codex" }
+    default { "mcp-client" }
+}
+$block.Add("PSEUDOLIFE_WRITER_ID=$writerId")
 $block.Add($EnvEnd)
 Set-Content -Path $envFile -Value (@($kept) + @($block)) -Encoding utf8
 Write-Host "==> Wrote managed block in ops/.env"
@@ -163,56 +173,78 @@ if ($Extractor -ne "sidecar") {
 }
 
 # -- 8. session lifecycle hooks -----------------------------------------------------
-# The Claude Code plugin (pseudolife-memory@pseudolife-mcp) owns the wiring
-# when installed: bundled MCP server, SessionStart hook, and the memory-loop
-# context. Doubling up would inject the briefing twice.
+$clients = if ($Client -eq "both") { @("claude", "codex") } else { @($Client) }
 $installedPlugins = Join-Path $env:USERPROFILE ".claude\plugins\installed_plugins.json"
-$skipWiring = (Test-Path $installedPlugins) -and
+$claudePluginInstalled = (Test-Path $installedPlugins) -and
     ((Get-Content $installedPlugins -Raw) -match 'pseudolife-memory@pseudolife-mcp')
-if ($skipWiring) {
-    Write-Host "==> pseudolife-memory Claude Code plugin detected - skipping session"
-    Write-Host "    hooks, CLAUDE.md block, and mcp add (the plugin provides all three)."
+if ($claudePluginInstalled -and ($clients -contains "claude")) {
+    Write-Host "==> pseudolife-memory Claude Code plugin detected - skipping Claude"
+    Write-Host "    hook, CLAUDE.md block, and mcp add (the plugin provides all three)."
 }
 
-if (-not $skipWiring) {
-Write-Host "==> Installing Claude Code session hooks..."
-& (Join-Path $PSScriptRoot "install-hook.ps1")
+$briefingCommand = "docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json"
+foreach ($selectedClient in $clients) {
+    if (($selectedClient -eq "claude") -and $claudePluginInstalled) { continue }
+    Write-Host "==> Installing $selectedClient session hook..."
+    & (Join-Path $PSScriptRoot "install-hook.ps1") -Client $selectedClient -Command $briefingCommand
+}
 
-# -- 9. CLAUDE.md memory block (consent; never edited without it) -------------------
-$claudeMdPath = Join-Path $env:USERPROFILE ".claude\CLAUDE.md"
-$hasBlock = (Test-Path $claudeMdPath) -and
-    ((Get-Content $claudeMdPath -Raw) -match 'pseudolife-memory')
-if ($hasBlock) {
-    Write-Host "==> CLAUDE.md memory block already present - skipping."
-} else {
-    if (-not $ClaudeMd) {
+# -- 9. standing memory instructions (consent; never edited without it) -------------
+# -ClaudeMd remains a compatibility alias for existing automation.
+$instructionChoice = if ($Instructions) { $Instructions } else { $ClaudeMd }
+foreach ($selectedClient in $clients) {
+    if (($selectedClient -eq "claude") -and $claudePluginInstalled) { continue }
+    $instructionPath = if ($selectedClient -eq "codex") {
+        Join-Path $env:USERPROFILE ".codex\AGENTS.md"
+    } else {
+        Join-Path $env:USERPROFILE ".claude\CLAUDE.md"
+    }
+    $hasBlock = (Test-Path $instructionPath) -and
+        ((Get-Content $instructionPath -Raw) -match 'pseudolife-memory')
+    if ($hasBlock) {
+        Write-Host "==> Memory block already present in $instructionPath - skipping."
+        continue
+    }
+    $choice = $instructionChoice
+    if (-not $choice) {
         if ($interactive) {
-            $yn = Read-Host "Append the memory-loop block to $claudeMdPath? [Y/n]"
-            $ClaudeMd = if ($yn -match '^[Nn]') { "skip" } else { "append" }
+            $yn = Read-Host "Append the memory-loop block to $instructionPath? [Y/n]"
+            $choice = if ($yn -match '^[Nn]') { "skip" } else { "append" }
         } else {
-            $ClaudeMd = "skip"
+            $choice = "skip"
         }
     }
-    if ($ClaudeMd -eq "append") {
-        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $claudeMdPath) | Out-Null
-        Add-Content -Path $claudeMdPath -Value (Get-Content (Join-Path $repo "examples\CLAUDE.memory.md") -Raw)
-        Write-Host "==> Appended memory block to $claudeMdPath"
+    if ($choice -eq "append") {
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $instructionPath) | Out-Null
+        Add-Content -Path $instructionPath -Value (Get-Content (Join-Path $repo "examples\CLAUDE.memory.md") -Raw)
+        Write-Host "==> Appended memory block to $instructionPath"
     } else {
-        Write-Host "SKIPPED: without a standing instruction the memory tools sit unused. Later:"
-        Write-Host "  Add-Content `"$claudeMdPath`" (Get-Content `"$repo\examples\CLAUDE.memory.md`" -Raw)"
+        Write-Host "SKIPPED: MCP server instructions still provide the core memory loop. Optional stronger guidance:"
+        Write-Host "  Add-Content `"$instructionPath`" (Get-Content `"$repo\examples\CLAUDE.memory.md`" -Raw)"
     }
 }
 
-# -- 10. wire into Claude Code --------------------------------------------------------
-claude mcp get pseudolife-memory *> $null
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "==> MCP server already wired into Claude Code - skipping."
-} else {
-    claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
-    Write-Host "==> Wired into Claude Code (claude mcp add)."
+# -- 10. wire into selected MCP clients ----------------------------------------------
+foreach ($selectedClient in $clients) {
+    if (($selectedClient -eq "claude") -and $claudePluginInstalled) { continue }
+    if ($selectedClient -eq "codex") {
+        codex mcp get pseudolife-memory *> $null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "==> MCP server already wired into Codex - skipping."
+        } else {
+            codex mcp add pseudolife-memory --url http://127.0.0.1:8765/mcp
+            Write-Host "==> Wired into Codex (codex mcp add)."
+        }
+    } else {
+        claude mcp get pseudolife-memory *> $null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "==> MCP server already wired into Claude Code - skipping."
+        } else {
+            claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
+            Write-Host "==> Wired into Claude Code (claude mcp add)."
+        }
+    }
 }
-}  # -not $skipWiring
-
 # -- 11. health -----------------------------------------------------------------------
 Write-Host "==> Waiting for the daemon to report healthy..."
 $h = $null
@@ -242,4 +274,4 @@ switch ($Extractor) {
         Write-Host "Note: dreams pause (and retry next sweep) whenever the shim is down or the CLI is logged out."
     }
 }
-Write-Host "Done. First session: just tell Claude to remember something."
+Write-Host "Done. First session: tell your coding agent to remember something."

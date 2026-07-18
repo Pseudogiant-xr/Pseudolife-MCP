@@ -4,7 +4,12 @@
 # each prerequisite and prints the exact remediation for anything missing;
 # never installs or changes anything. Exit 0 = ready to install.
 #
-#   ops\preflight.ps1
+#   ops\preflight.ps1 -Client claude|codex|both
+
+param(
+    [ValidateSet("claude", "codex", "both")]
+    [string]$Client = "claude"
+)
 
 $script:fails = 0
 
@@ -69,11 +74,20 @@ if ((Get-Command python -ErrorAction SilentlyContinue) -or (Get-Command python3 
          "https://www.python.org/downloads/ or: winget install Python.Python.3.12"
 }
 
-# -- claude CLI ----------------------------------------------------------------
-if (Get-Command claude -ErrorAction SilentlyContinue) { Ok "claude CLI" }
-else {
-    Fail "claude CLI not found" `
-         "npm install -g @anthropic-ai/claude-code   (needs Node; see https://docs.anthropic.com/en/docs/claude-code)"
+# -- selected MCP client CLI(s) -------------------------------------------------
+if ($Client -in @("claude", "both")) {
+    if (Get-Command claude -ErrorAction SilentlyContinue) { Ok "claude CLI" }
+    else {
+        Fail "claude CLI not found" `
+             "npm install -g @anthropic-ai/claude-code   (needs Node; see https://docs.anthropic.com/en/docs/claude-code)"
+    }
+}
+if ($Client -in @("codex", "both")) {
+    if (Get-Command codex -ErrorAction SilentlyContinue) { Ok "codex CLI" }
+    else {
+        Fail "codex CLI not found" `
+             "install Codex: https://developers.openai.com/codex/cli/"
+    }
 }
 
 Write-Host ""
