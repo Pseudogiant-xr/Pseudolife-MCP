@@ -43,28 +43,12 @@ def reset_writer_context(token) -> None:
 
 
 def _http_writer_session() -> tuple[str | None, str | None]:
-    """Best-effort ``(writer_id, session_id)`` from the live MCP request, or
-    ``(None, None)`` when not inside a daemon HTTP request.
+    """Best-effort ``(writer_id, session_id)`` from the live MCP request.
 
-    DEPRECATED: Use :func:`resolve_writer_detailed` or :func:`resolve_writer`
-    instead. This function exists only for backward compatibility with
-    :mod:`mcp_server` and tests."""
-    try:
-        from mcp.server.lowlevel.server import request_ctx
-
-        req = getattr(request_ctx.get(), "request", None)
-        if req is None:
-            return (None, None)
-        headers = req.headers
-        # Prefer the shim's stable per-session id; the transport's
-        # ``mcp-session-id`` is stable per session for a direct-HTTP client
-        # (persistent connection) and per-call only for the reconnecting shim.
-        return (
-            headers.get("x-pl-writer"),
-            headers.get("x-pl-session") or headers.get("mcp-session-id"),
-        )
-    except Exception:  # noqa: BLE001  (LookupError when unset; ImportError; ...)
-        return (None, None)
+    Compat shim over :func:`_http_writer_session_detailed` — prefer that
+    (this merge loses the header-vs-transport distinction)."""
+    w, hs, ts = _http_writer_session_detailed()
+    return (w, hs or ts)
 
 
 def _http_writer_session_detailed() -> tuple[str | None, str | None, str | None]:
