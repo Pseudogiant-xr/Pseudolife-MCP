@@ -152,6 +152,21 @@ _LESSON_SYSTEM_PROMPT = (
 )
 
 
+_OUTCOME_INFER_SYSTEM_PROMPT = (
+    "You review the stored record of one work session and infer what "
+    "OUTCOMES it reached. Reply with JSON only: {\"outcomes\": [{\"task\": "
+    "<short stable task-type phrase>, \"outcome\": \"success\" | "
+    "\"failure\" | \"correction\", \"about\": <tool/approach concerned, or "
+    "null>, \"detail\": <one sentence of evidence quoted or paraphrased "
+    "from the record>}]}.\n"
+    "- Claim only outcomes the record actually evidences; prefer fewer, "
+    "better-grounded claims.\n"
+    "- failure = an approach hit a dead-end; correction = the user "
+    "corrected the assistant; success = something verifiably worked.\n"
+    "- If the record shows no clear outcome, return {\"outcomes\": []}."
+)
+
+
 _RELATIONS_PROMPT_HEAD = (
     "You extract durable RELATIONSHIPS between named entities from notes, as "
     'JSON: {"relations":[{"src":..,"relation":..,"dst":..}]}. Use ONLY these '
@@ -183,6 +198,42 @@ def _format_signals(signals: list[dict]) -> str:
             parts.append(f"polarity={s['polarity']}")
         lines.append(" ".join(parts))
     return "\n".join(lines)
+
+
+def _parse_outcome_claims(content: str, cap: int) -> list[dict] | None:
+    """Parse an outcome-inference reply. ``None`` = malformed (retryable),
+    ``[]`` = the model found nothing (valid, advance), else claims.
+    Enum violations are dropped, never coerced (record_outcome rule)."""
+    import json as _json
+
+    s, e = content.find("{"), content.rfind("}")
+    if s == -1 or e <= s:
+        return None
+    try:
+        parsed = _json.loads(content[s:e + 1])
+    except ValueError:
+        return None
+    if not isinstance(parsed, dict) or "outcomes" not in parsed:
+        return None
+    raw = parsed["outcomes"]
+    if not isinstance(raw, list):
+        return None
+    out: list[dict] = []
+    for c in raw:
+        if not isinstance(c, dict):
+            continue
+        task = str(c.get("task", "")).strip()
+        outcome = str(c.get("outcome", "")).strip()
+        if not task or outcome not in ("success", "failure", "correction"):
+            continue
+        out.append({
+            "task": task, "outcome": outcome,
+            "about": str(c.get("about", "") or "").strip() or None,
+            "detail": str(c.get("detail", "") or "").strip() or None,
+        })
+        if len(out) >= cap:
+            break
+    return out
 
 
 class ExtractorError(Exception):
@@ -404,6 +455,41 @@ class OpenAICompatExtractor:
             out.append(RelationClaim(src=src, relation=rel, dst=dst,
                                      confidence=conf))
         return out
+
+    def infer_outcomes(self, context_text: str, *,
+                       cap: int = 3) -> list[dict] | None:
+        """Infer outcome signals from one closed episode's stored record.
+        Transport failure raises ExtractorError (stage holds its cursor);
+        malformed content returns None (bounded retry); [] is a valid
+        nothing-found."""
+        import json
+        import urllib.request
+
+        headers = {"content-type": "application/json"}
+        if self.api_key:
+            headers["authorization"] = f"Bearer {self.api_key}"
+        try:
+            body = json.dumps({
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": _OUTCOME_INFER_SYSTEM_PROMPT},
+                    {"role": "user", "content": context_text},
+                ],
+                "response_format": {"type": "json_object"},
+                "max_tokens": self.max_tokens,
+                "temperature": 0,
+                "chat_template_kwargs": {"enable_thinking": False},
+            }).encode()
+            req = urllib.request.Request(
+                f"{self.base_url}/chat/completions", data=body,
+                headers=headers, method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                data = json.loads(resp.read().decode())
+            content = data["choices"][0]["message"]["content"] or ""
+        except Exception as exc:  # noqa: BLE001 — transport, not content
+            raise ExtractorError(f"infer_outcomes failed: {exc}") from exc
+        return _parse_outcome_claims(content, cap)
 
 
 _EXTRACTOR_MODES = ("auto", "primary", "fallback")

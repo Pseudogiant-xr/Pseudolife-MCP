@@ -447,6 +447,11 @@ class LessonsConfig:
     # When False, the dream skips signal drain / lesson synthesis (signals still
     # pruned by retention).
     synthesize_in_dream: bool = True
+    # Auto-outcome inference (spec 2026-07-18): infer signals for episodes
+    # that close with entries but zero explicit outcomes. origin="inferred";
+    # lessons from all-inferred batches start at confidence 0.4.
+    infer_outcomes: bool = True
+    infer_outcomes_max_signals: int = 3
 
 
 @dataclass
