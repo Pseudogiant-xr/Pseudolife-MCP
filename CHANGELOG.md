@@ -26,16 +26,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`resolved[0] if resolved is not None else ...`, no header check) and
   needed no change; pinned with a regression test regardless.
 
-### Changed (2026-07-19 — project-scope hygiene)
-- **Scope derivation policy** (`memory.scopes` config): the entity-sources
-  backfill now case-folds scope keys (`Pseudolife` and `pseudolife` are one
-  scope), skips meta source tags that must never become projects
-  (`scopes.exclude`, default `status`/`claude`/`agent`/`correction`), and
-  writes an additional umbrella scope for sources mapped in `scopes.rollup`
-  (both rows kept — family view and fine-grained filter coexist). Previously
-  every distinct `entries.source` string minted its own Atlas project,
-  fragmenting one project family across many scopes.
-
 ### Removed (2026-07-18 — neural-era residue sweep)
 - **`pseudolife_memory/memory/contrastive.py` deleted** — the
   `ContrastiveUpdater` / `NegativeSignalDetector` classes were constructed
