@@ -5,14 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pseudolife-mcp"
 version = "0.8.1"
-description = "Pseudolife persistent long-term memory exposed as an MCP server for Claude Code"
+description = "Pseudolife persistent long-term memory for MCP-compatible coding agents"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "Apache-2.0"}
 
 # Core deps — same memory stack as Pseudolife (torch + MIRAS + ChromaDB),
 # minus the LLM backends, FastAPI, and Electron-side machinery. MCP SDK on
-# top so Claude Code can attach over stdio.
+# top so MCP-compatible clients can attach over stdio or Streamable HTTP.
 dependencies = [
     "torch>=2.1.0",
     "sentence-transformers>=2.2.0",

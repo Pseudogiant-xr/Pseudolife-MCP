@@ -7,7 +7,7 @@
 # Windows / macOS / Linux with no host Python and no first-run download.
 #
 # The daemon serves MCP over streamable HTTP at /mcp (and /health). Point
-# Claude Code at http://127.0.0.1:8765/mcp — no stdio shim needed.
+# MCP clients at http://127.0.0.1:8765/mcp — no stdio shim needed.
 #
 # Build context is the repo ROOT (see docker-compose.yml: context: ..),
 # so paths below are relative to the project root.

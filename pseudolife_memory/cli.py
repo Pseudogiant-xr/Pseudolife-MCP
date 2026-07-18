@@ -15,7 +15,7 @@ from __future__ import annotations
 import sys
 
 _USAGE = """\
-pseudolife-mcp — persistent long-term memory for Claude over MCP
+pseudolife-mcp — persistent long-term memory for coding agents over MCP
 
 usage: pseudolife-mcp [mode]
 
@@ -24,7 +24,7 @@ modes:
   serve          run the HTTP memory daemon (deployment mode)
   embedded       in-process stdio server — no daemon, no Postgres (escape hatch)
   briefing       print the session-start briefing (for a SessionStart hook;
-                 --hook-json emits Claude Code hook JSON)
+                 --hook-json emits Claude Code/Codex hook JSON)
   episode-start  open a session episode (legacy hook helper)
   episode-end    close it
   help           show this message (also -h / --help)

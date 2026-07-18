@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-18 — client-neutral MCP guidance)
+- **The MCP initialization now advertises the memory workflow through the
+  protocol's `instructions` field** — clients that honor server instructions,
+  including Codex, learn the recall/capture/outcome loop without relying on a
+  Claude-specific standing-instructions file. Package and registry descriptions
+  now describe MCP-compatible agents rather than a single client.
+- **Default tool attribution is no longer Claude-specific** — unsourced MCP
+  stores use `source="agent"`. Existing memories and explicit `source` values
+  are unchanged.
+
 ### Changed (2026-07-18 — outcome-inference abstention hardening)
 - **The inference prompt now requires an attempt-with-result before
   claiming an outcome**: read-only/note-taking sessions and deferred
