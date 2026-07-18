@@ -333,3 +333,47 @@ def test_dream_status_gates_pending_on_configured_extractor(
     st = svc.dream_status()
     assert st["infer_outcomes"]["pending"] == 0
     assert st["infer_outcomes"]["retry_pending"] == 0
+
+
+# ── same-tick sibling collision (reap_idle_sessions closes multiple roots ──
+# in one sweep with independent time.time() calls per close; they can land
+# on the identical float) ────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def two_same_tick_episodes(pg_service):
+    """Two closed, zero-signal session episodes whose root ``ended_at`` is
+    forced to the identical float value, reproducing what a single
+    ``reap_idle_sessions`` sweep can produce for two idle roots closed back
+    to back."""
+    svc = pg_service
+    svc.episode_start_session("sess-a", "Session A")
+    svc.store("task a entry", source="claude")
+    closed_a = svc.episode_end_session("sess-a", run_dream=False)
+    svc.episode_start_session("sess-b", "Session B")
+    svc.store("task b entry", source="claude")
+    closed_b = svc.episode_end_session("sess-b", run_dream=False)
+    assert closed_a and closed_b   # non-empty subtrees survive prune-on-close
+    root_a, root_b = closed_a["id"], closed_b["id"]
+    with svc._lock:
+        em = svc._cms.episodes.episodes
+        same_ts = em[root_a].ended_at
+        em[root_b].ended_at = same_ts
+        svc._persist_episodes()
+    return svc, root_a, root_b
+
+
+def test_same_tick_siblings_both_processed(two_same_tick_episodes):
+    svc, root_a, root_b = two_same_tick_episodes
+    fake = _FakeInferExtractor([
+        [{"task": "task a", "outcome": "success", "about": None,
+          "detail": None}],
+        [{"task": "task b", "outcome": "failure", "about": None,
+          "detail": None}],
+    ])
+    stats = svc.infer_outcomes_stage(fake)
+    assert stats == {"scanned": 2, "written": 2}
+    for rid, task in [(root_a, "task a"), (root_b, "task b")]:
+        sigs = [s for s in svc._storage.pending_signals(limit=100)
+                if s.get("episode_id") == rid]
+        assert [s["task"] for s in sigs] == [task]

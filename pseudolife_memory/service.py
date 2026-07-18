@@ -1864,7 +1864,11 @@ class MemoryService:
                 # Another concurrent dream (fire-and-forget vs sweep — no
                 # dream-level mutex) may have processed this episode while
                 # our extractor call ran unlocked: re-check before writing.
-                if (cur["ts"] >= cand["ended_at"]
+                # STRICTLY greater — same-tick siblings share ended_at, and a
+                # >= here would strand the second one forever (its claims
+                # skipped, yet the candidate filter needs ended_at > cursor).
+                # "Already written" is caught by the signal count instead.
+                if (cur["ts"] > cand["ended_at"]
                         or self._storage.count_signals_for_episodes(
                             [rid]) > 0):
                     continue
