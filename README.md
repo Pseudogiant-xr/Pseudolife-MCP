@@ -13,11 +13,11 @@
 [Português (BR)](docs/i18n/README.pt-br.md) ·
 [Español](docs/i18n/README.es.md)
 
-**Persistent long-term memory for Claude Code via the Model Context Protocol.**
+**Persistent long-term memory for Claude Code, Codex, and other MCP clients.**
 
-An MCP server that gives Claude (or any MCP-capable client) a long-term
-memory that persists across sessions — surviving context compactions and
-`/clear` resets. Claude is the LLM; this server is its memory on disk.
+An MCP server that gives coding agents a long-term memory that persists across
+sessions — surviving context compactions and fresh tasks. Your coding agent is
+the intelligence; this server is its memory on disk.
 
 ![Cortex Console — Observatory view](https://raw.githubusercontent.com/Pseudogiant-xr/Pseudolife-MCP/master/docs/images/cortex-console-observatory.png)
 
@@ -39,13 +39,16 @@ What you get:
 
 ## Quickstart
 
-Requires Docker and Claude Code. One command from clone to first memory:
+Requires Docker and Claude Code, Codex, or both. One command from clone to
+first memory (Claude remains the compatibility default):
 
 ```bash
 git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
 cd Pseudolife-MCP
 ops/install.sh          # Linux / macOS
 ops\install.ps1         # Windows (pwsh 7+)
+# Codex: add --client codex / -Client codex
+# Both:  add --client both  / -Client both
 ```
 
 The installer runs the preflight (one exact fix line per missing
@@ -59,32 +62,33 @@ prerequisite), asks which **dream extractor** should consolidate memories —
 - **sidecar** — the bundled local CPU model; no Claude plan needed, works
   for everyone (~9 GB image) —
 
-then brings the stack up, installs the session hooks, offers to append the
-memory-loop block to `~/.claude/CLAUDE.md` (required for the loop to actually
-fire), runs `claude mcp add`, and health-checks the daemon. Idempotent —
-re-run any time; `--extractor <mode>` switches extractor setups, and
-`ops/install.sh --extractor sonnet-only --claude-md append` runs
-non-interactively. Linux (Docker Engine): your user must be in the `docker`
-group — `sudo usermod -aG docker $USER`, then log out/in (the preflight
-checks this).
+then brings the stack up, installs the selected clients' session hooks, offers
+to append the memory-loop block to `~/.claude/CLAUDE.md` and/or
+`~/.codex/AGENTS.md`, registers the HTTP MCP server, and health-checks the
+daemon. The server also advertises the core loop through MCP `instructions`,
+so the standing file reinforces the protocol guidance. Idempotent — re-run any
+time; `--extractor <mode>` switches extractor setups. Non-interactive example:
+`ops/install.sh --extractor sidecar --client codex --instructions append`.
+Linux (Docker Engine): your user must be in the `docker` group —
+`sudo usermod -aG docker $USER`, then log out/in (the preflight checks this).
 
 <details>
 <summary>Manual install (the steps the installer automates)</summary>
 
 ```bash
-ops/preflight.sh    # or ops\preflight.ps1 — checks docker/git/claude, prints the exact fix for anything missing
+ops/preflight.sh --client codex    # or ops\preflight.ps1 -Client codex
 docker volume create pseudolife-mcp-bank
 docker volume create pseudolife-mcp-state
 docker compose -f ops/docker-compose.yml up -d --build   # first build, once
 
-# Verify, then wire into Claude Code:
+# Verify, then wire into one or both clients:
 curl http://127.0.0.1:8765/health
 claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
+codex mcp add pseudolife-memory --url http://127.0.0.1:8765/mcp
 
-# Teach Claude the memory loop — REQUIRED, not optional: without a standing
-# instruction the tools sit unused. Append the bundled block to your global
-# CLAUDE.md (applies to every project):
+# Reinforce the protocol-level memory loop with a global standing instruction:
 cat examples/CLAUDE.memory.md >> ~/.claude/CLAUDE.md
+cat examples/CLAUDE.memory.md >> ~/.codex/AGENTS.md
 # (PowerShell: Add-Content "$env:USERPROFILE\.claude\CLAUDE.md" (Get-Content examples\CLAUDE.memory.md -Raw))
 ```
 
@@ -93,15 +97,15 @@ install/update scripts scaffold it too; every value is commented, a missing
 file runs entirely on defaults).
 </details>
 
-Then in any Claude Code session: *"remember that my staging box is
-haze-02"* → Claude calls `memory_store`; next session, *"which box is
+Then in either coding agent: *"remember that my staging box is
+haze-02"* → the agent calls `memory_store`; next session, *"which box is
 staging?"* → `memory_search` finds it. Browse everything at the Cortex
 Console: <http://127.0.0.1:8765/ui/>.
 
 ## What this is
 
 A memory engine exposed over MCP. There's no chat UI and no LLM doing the
-thinking — Claude is the intelligence; these are tools it calls to store and
+thinking — your coding agent is the intelligence; these are tools it calls to store and
 recall what matters. (Models *are* bundled as plumbing: baked embedding
 weights for retrieval, and the optional CPU extractor sidecar that
 consolidates memories into facts while you sleep.)
@@ -288,7 +292,7 @@ It never runs `down -v`. (Host-process install: just restart the daemon —
 then with `docker builder prune` (safe — it only touches build layers);
 never `docker system prune --volumes`, which deletes volumes.
 
-## Wire into Claude Code
+## Wire into your coding agent
 
 **Plugin (easiest).** With the daemon running, two commands inside Claude
 Code wire everything — the MCP server, the session-start briefing hook,
@@ -305,8 +309,10 @@ session context from the daemon. Details, non-default ports/tokens, and
 migration from manual wiring: [plugin/README.md](plugin/README.md).
 
 **HTTP transport (manual equivalent).**
-The daemon already serves MCP over HTTP, so point Claude Code straight at
-it — no shim, no host command, nothing OS-specific. One command:
+The daemon already serves MCP over HTTP, so point either client straight at
+it — no shim, no host command, nothing OS-specific.
+
+Claude Code:
 
 ```bash
 claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
@@ -328,11 +334,24 @@ a `.mcp.json` at a project root for project scope:
 }
 ```
 
+Codex:
+
+```bash
+codex mcp add pseudolife-memory --url http://127.0.0.1:8765/mcp
+```
+
+Or add the equivalent user-level entry to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.pseudolife-memory]
+url = "http://127.0.0.1:8765/mcp"
+```
+
 If you ran the daemon with a `PSEUDOLIFE_MCP_TOKEN`, add a `headers` key:
 `"headers": { "Authorization": "Bearer <your-token>" }`.
 
-**Verify:** run `claude mcp list` (the server should report ✓ connected),
-then ask Claude to *"store a memory that this install works"* and check it
+**Verify:** run `claude mcp list` or `codex mcp list` (the server should report
+connected), then ask the agent to *"store a memory that this install works"* and check it
 appears in the Stream tab of the Console at <http://127.0.0.1:8765/ui/>.
 
 Preferring stdio on a host-process install? A thin torch-free **shim**
@@ -341,19 +360,24 @@ proxies stdio to the daemon:
 · [LAN sharing](docs/guide/configuration.md#sharing-memory-on-the-lan)
 · [backups & restore rehearsal](docs/guide/configuration.md#backups).
 
-## Recommended agent setup (CLAUDE.md)
+## Recommended agent setup (CLAUDE.md / AGENTS.md)
 
 The server's value depends entirely on the agent *using* it well — **this step
-is what makes the memory loop actually fire**; installs that skip it end up
-with a healthy daemon whose tools are never called. **Plugin users skip this
-section**: the plugin's SessionStart hook injects the same block every
-session. Everyone else encodes the loop as a standing instruction: append the
-bundled block to your **global** `~/.claude/CLAUDE.md` (applies to every
-project) or a per-project `CLAUDE.md` / `AGENTS.md`:
+is what makes the memory loop actually fire**. The MCP server advertises the
+core loop through protocol-level `instructions`; this standing block provides
+stronger durable guidance. **Claude plugin users skip this section** because
+the plugin injects the same block every session. Everyone else appends it to
+Claude's global `~/.claude/CLAUDE.md`, Codex's global `~/.codex/AGENTS.md`, or
+a per-project `CLAUDE.md` / `AGENTS.md`:
 
 ```bash
 cat examples/CLAUDE.memory.md >> ~/.claude/CLAUDE.md
-# PowerShell: Add-Content "$env:USERPROFILE\.claude\CLAUDE.md" (Get-Content examples\CLAUDE.memory.md -Raw)
+cat examples/CLAUDE.memory.md >> ~/.codex/AGENTS.md
+```
+
+```powershell
+Add-Content "$env:USERPROFILE\.claude\CLAUDE.md" (Get-Content examples\CLAUDE.memory.md -Raw)
+Add-Content "$env:USERPROFILE\.codex\AGENTS.md" (Get-Content examples\CLAUDE.memory.md -Raw)
 ```
 
 The block ([`examples/CLAUDE.memory.md`](examples/CLAUDE.memory.md)) teaches
@@ -365,11 +389,12 @@ verbose logs so they stay out of the dream), **REFLECT at the end**
 (`memory_outcome` — the dream distils these signals into the lessons
 surfaced at your next session start).
 
-One command — `ops\install-hook.ps1` (Windows, PowerShell 7) or
-`ops/install-hook.sh` (Linux/macOS) — installs the **SessionStart briefing
-hook** (what your memory is unsure about + lessons from past work +
-verified world facts + where we left off, injected at every session start).
-It backs up your `settings.json` and is idempotent. The manual hook JSON,
+One command — `ops\install-hook.ps1 -Client codex` (Windows, PowerShell 7) or
+`ops/install-hook.sh --client codex` (Linux/macOS) — installs the
+**SessionStart briefing hook** for the selected client (what your memory is
+unsure about + lessons from past work + verified world facts + where we left
+off, injected at every session start). It backs up `~/.claude/settings.json`
+or `~/.codex/hooks.json` and is idempotent. The manual hook JSON,
 the briefing budget flags, and how session episodes open/close/resume
 without any hooks: [Episodes & sessions](docs/guide/episodes.md).
 
@@ -513,7 +538,8 @@ pseudolife-mcp-daemon`).
 - **Console shows "offline" / Unauthorized**: "offline" means the daemon
   isn't reachable (see above); a 401 prompt means it runs with
   `PSEUDOLIFE_MCP_TOKEN` — paste that token into the Console's Token dialog.
-- **Claude Code doesn't see the tools**: `claude mcp list` should show
+- **The coding agent doesn't see the tools**: `claude mcp list` or
+  `codex mcp list` should show
   `pseudolife-memory` ✓ connected. If not, re-check the URL
   (`http://127.0.0.1:8765/mcp` — the `/mcp` path matters) and the bearer
   header when a token is set. A first call after a cold start loads the
@@ -529,14 +555,15 @@ Deletion is deliberate at every step:
 docker compose -f ops/docker-compose.yml down
 # 3. Remove the MCP registration.
 claude mcp remove pseudolife-memory
+codex mcp remove pseudolife-memory
 # 4. Only when you're sure: delete the data volumes (THIS is the memory).
 docker volume rm pseudolife-mcp-bank pseudolife-mcp-state
 ```
 
 Host-process installs: also unregister the logon task
 (`Unregister-ScheduledTask -TaskName "Pseudolife-MCP Daemon"`) and remove
-the SessionStart briefing hook from `~/.claude/settings.json` (a
-timestamped `.bak-*` sits next to it).
+the SessionStart briefing hook from `~/.claude/settings.json` and/or
+`~/.codex/hooks.json` (a timestamped `.bak-*` sits next to each edited file).
 
 ## Testing
 

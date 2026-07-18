@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # One-shot idempotent installer for the Pseudolife-MCP stack (issue #13
 # tier 2). Everything downstream of Docker: preflight -> volumes -> extractor
-# choice -> compose up -> session hooks -> CLAUDE.md memory block ->
-# claude mcp add -> health. Re-running is safe; re-running with a different
+# choice -> compose up -> client hooks -> standing instructions ->
+# MCP registration -> health. Re-running is safe; re-running with a different
 # --extractor is the supported way to switch modes.
 #
 #   ops/install.sh                                  # interactive
-#   ops/install.sh --extractor sidecar              # non-interactive
+#   ops/install.sh --extractor sidecar --client codex
 #   ops/install.sh --extractor sonnet-fallback --claude-md append
 #   ops/install.sh --extractor sonnet-only --claude-md skip
 #
@@ -21,7 +21,9 @@
 set -euo pipefail
 
 EXTRACTOR=""
+CLIENT=claude
 CLAUDE_MD=""
+INSTRUCTIONS=""
 SHIM_PORT=8082
 
 usage() {
@@ -32,7 +34,9 @@ usage() {
 while [ $# -gt 0 ]; do
     case "$1" in
         --extractor) EXTRACTOR="$2"; shift 2 ;;
+        --client) CLIENT="$2"; shift 2 ;;
         --claude-md) CLAUDE_MD="$2"; shift 2 ;;
+        --instructions) INSTRUCTIONS="$2"; shift 2 ;;
         --shim-port) SHIM_PORT="$2"; shift 2 ;;
         -h|--help)   usage 0 ;;
         *) echo "unknown argument: $1" >&2; usage ;;
@@ -41,8 +45,14 @@ done
 case "$EXTRACTOR" in ""|sidecar|sonnet-fallback|sonnet-only) ;; *)
     echo "invalid --extractor '$EXTRACTOR' (sidecar|sonnet-fallback|sonnet-only)" >&2; exit 2 ;;
 esac
+case "$CLIENT" in claude|codex|both) ;; *)
+    echo "invalid --client '$CLIENT' (claude|codex|both)" >&2; exit 2 ;;
+esac
 case "$CLAUDE_MD" in ""|append|skip) ;; *)
     echo "invalid --claude-md '$CLAUDE_MD' (append|skip)" >&2; exit 2 ;;
+esac
+case "$INSTRUCTIONS" in ""|append|skip) ;; *)
+    echo "invalid --instructions '$INSTRUCTIONS' (append|skip)" >&2; exit 2 ;;
 esac
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
@@ -55,7 +65,7 @@ ENV_END="# <<< pseudolife-mcp install <<<"
 
 # ── 1. preflight ───────────────────────────────────────────────────────────
 echo "==> Preflight..."
-"$repo/ops/preflight.sh" || {
+"$repo/ops/preflight.sh" --client "$CLIENT" || {
     echo "Preflight failed — fix the line(s) above and re-run." >&2; exit 1; }
 
 # ── 2. extractor choice (explicit, no default) ─────────────────────────────
@@ -114,6 +124,11 @@ awk -v b="$ENV_BEGIN" -v e="$ENV_END" '
             # `primary` (not `auto`): states the single-extractor intent and
             # keeps the auto-without-fallback startup warning silent.
             echo "PSEUDOLIFE_DREAM_EXTRACTOR_MODE=primary" ;;
+    esac
+    case "$CLIENT" in
+        claude) echo "PSEUDOLIFE_WRITER_ID=claude-code" ;;
+        codex)  echo "PSEUDOLIFE_WRITER_ID=codex" ;;
+        both)   echo "PSEUDOLIFE_WRITER_ID=mcp-client" ;;
     esac
     echo "$ENV_END"
 } >> "$env_file"
@@ -174,54 +189,75 @@ if [ "$EXTRACTOR" != "sidecar" ]; then
 fi
 
 # ── 8. session lifecycle hooks ─────────────────────────────────────────────
-# The Claude Code plugin (pseudolife-memory@pseudolife-mcp) owns the wiring
-# when installed: bundled MCP server, SessionStart hook, and the memory-loop
-# context. Doubling up would inject the briefing twice.
+if [ "$CLIENT" = both ]; then clients="claude codex"; else clients="$CLIENT"; fi
 if grep -q "pseudolife-memory@pseudolife-mcp" \
         "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null; then
-    echo "==> pseudolife-memory Claude Code plugin detected — skipping session"
-    echo "    hooks, CLAUDE.md block, and mcp add (the plugin provides all three)."
-    SKIP_WIRING=1
+    CLAUDE_PLUGIN_INSTALLED=1
+    if [ "$CLIENT" = claude ] || [ "$CLIENT" = both ]; then
+        echo "==> pseudolife-memory Claude Code plugin detected — skipping Claude"
+        echo "    hook, CLAUDE.md block, and mcp add (the plugin provides all three)."
+    fi
 else
-    SKIP_WIRING=""
+    CLAUDE_PLUGIN_INSTALLED=""
 fi
 
-if [ -z "$SKIP_WIRING" ]; then
-echo "==> Installing Claude Code session hooks..."
-"$repo/ops/install-hook.sh"
+briefing_command="docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json"
+for selected_client in $clients; do
+    if [ "$selected_client" = claude ] && [ -n "$CLAUDE_PLUGIN_INSTALLED" ]; then continue; fi
+    echo "==> Installing $selected_client session hook..."
+    "$repo/ops/install-hook.sh" --client "$selected_client" "" "$briefing_command"
+done
 
 # ── 9. CLAUDE.md memory block (consent; never edited without it) ──────────
-claude_md="$HOME/.claude/CLAUDE.md"
-if grep -q "pseudolife-memory" "$claude_md" 2>/dev/null; then
-    echo "==> CLAUDE.md memory block already present — skipping."
-else
-    if [ -z "$CLAUDE_MD" ]; then
+instruction_choice="${INSTRUCTIONS:-$CLAUDE_MD}"
+for selected_client in $clients; do
+    if [ "$selected_client" = claude ] && [ -n "$CLAUDE_PLUGIN_INSTALLED" ]; then continue; fi
+    if [ "$selected_client" = codex ]; then
+        instruction_path="$HOME/.codex/AGENTS.md"
+    else
+        instruction_path="$HOME/.claude/CLAUDE.md"
+    fi
+    if grep -q "pseudolife-memory" "$instruction_path" 2>/dev/null; then
+        echo "==> Memory block already present in $instruction_path — skipping."
+        continue
+    fi
+    choice="$instruction_choice"
+    if [ -z "$choice" ]; then
         if [ -t 0 ]; then
-            printf "Append the memory-loop block to %s? [Y/n] " "$claude_md"
+            printf "Append the memory-loop block to %s? [Y/n] " "$instruction_path"
             read -r yn
-            case "$yn" in [Nn]*) CLAUDE_MD=skip ;; *) CLAUDE_MD=append ;; esac
+            case "$yn" in [Nn]*) choice=skip ;; *) choice=append ;; esac
         else
-            CLAUDE_MD=skip
+            choice=skip
         fi
     fi
-    if [ "$CLAUDE_MD" = "append" ]; then
-        mkdir -p "$(dirname "$claude_md")"
-        cat "$repo/examples/CLAUDE.memory.md" >> "$claude_md"
-        echo "==> Appended memory block to $claude_md"
+    if [ "$choice" = "append" ]; then
+        mkdir -p "$(dirname "$instruction_path")"
+        cat "$repo/examples/CLAUDE.memory.md" >> "$instruction_path"
+        echo "==> Appended memory block to $instruction_path"
     else
-        echo "SKIPPED: without a standing instruction the memory tools sit unused. Later:"
-        echo "  cat $repo/examples/CLAUDE.memory.md >> $claude_md"
+        echo "SKIPPED: MCP server instructions still provide the core memory loop. Optional stronger guidance:"
+        echo "  cat $repo/examples/CLAUDE.memory.md >> $instruction_path"
     fi
-fi
+done
 
-# ── 10. wire into Claude Code ──────────────────────────────────────────────
-if claude mcp get pseudolife-memory >/dev/null 2>&1; then
-    echo "==> MCP server already wired into Claude Code — skipping."
-else
-    claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
-    echo "==> Wired into Claude Code (claude mcp add)."
-fi
-fi  # SKIP_WIRING
+# ── 10. wire into selected MCP clients ─────────────────────────────────────
+for selected_client in $clients; do
+    if [ "$selected_client" = claude ] && [ -n "$CLAUDE_PLUGIN_INSTALLED" ]; then continue; fi
+    if [ "$selected_client" = codex ]; then
+        if codex mcp get pseudolife-memory >/dev/null 2>&1; then
+            echo "==> MCP server already wired into Codex — skipping."
+        else
+            codex mcp add pseudolife-memory --url http://127.0.0.1:8765/mcp
+            echo "==> Wired into Codex (codex mcp add)."
+        fi
+    elif claude mcp get pseudolife-memory >/dev/null 2>&1; then
+        echo "==> MCP server already wired into Claude Code — skipping."
+    else
+        claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
+        echo "==> Wired into Claude Code (claude mcp add)."
+    fi
+done
 
 # ── 11. health ─────────────────────────────────────────────────────────────
 echo "==> Waiting for the daemon to report healthy..."
@@ -249,4 +285,4 @@ case "$EXTRACTOR" in
         echo "Verify: memory_dream(action=\"status\") — primary_url on :$SHIM_PORT, extractor_mode: primary."
         echo "Note: dreams pause (and retry next sweep) whenever the shim is down or the CLI is logged out." ;;
 esac
-echo "Done. First session: just tell Claude to remember something."
+echo "Done. First session: tell your coding agent to remember something."

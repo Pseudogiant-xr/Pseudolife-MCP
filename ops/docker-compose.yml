@@ -29,8 +29,8 @@
 #     teardown: it captures BOTH volumes — the pg_dump plus a state-volume tar.)
 #
 # Ports bind 127.0.0.1 only. Postgres (5433) is never exposed beyond the
-# compose network + loopback; the daemon (8765) is the only thing Claude
-# Code talks to — point it at  http://127.0.0.1:8765/mcp  (HTTP transport,
+# compose network + loopback; the daemon (8765) is the only thing MCP clients
+# talk to — point them at http://127.0.0.1:8765/mcp (HTTP transport,
 # no stdio shim). Host port 5433 avoids collisions with a native Postgres.
 #
 # Postgres password: defaults to `pseudolife` (loopback-only, so the network
@@ -109,7 +109,7 @@ services:
       # bind host. This flag tells the daemon's guard exactly that.
       PSEUDOLIFE_MCP_TRUST_BIND: "1"
       # Writer identity stamped on every canonical write (schema v11).
-      PSEUDOLIFE_WRITER_ID: claude-code
+      PSEUDOLIFE_WRITER_ID: ${PSEUDOLIFE_WRITER_ID:-mcp-client}
       # Default toolset tier: "minimal" (7 tools: recall/capture loop + the
       # memory_toolset gate), "core" (20: + graph/recall/world/lessons/docs/
       # episodes), or "full" (all 33). Since 2026-07-11 this sets per-session

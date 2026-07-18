@@ -16,6 +16,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   stores use `source="agent"`. Existing memories and explicit `source` values
   are unchanged.
 
+### Added (2026-07-18 — Codex install parity)
+- **The one-shot installers now support `claude`, `codex`, or `both` clients**
+  (`--client` / `-Client`) while preserving Claude as the compatibility
+  default. Preflight checks only the selected client CLI; MCP registration uses
+  each client's native HTTP command; and the optional standing memory block is
+  offered for Claude's `CLAUDE.md` and Codex's `AGENTS.md`.
+- **The existing briefing hook now installs into Codex too** — the hook helpers
+  target either `~/.claude/settings.json` or `~/.codex/hooks.json`. Both clients
+  accept the same `SessionStart` `additionalContext` payload, so briefing
+  generation remains a single implementation.
+- **Container installs now register a briefing command that actually exists** —
+  the hook runs `pseudolife-mcp briefing` inside the daemon container. The old
+  one-shot flow wrote a host command without installing the host package, so
+  fresh Docker-only installs silently missed every session briefing.
+- **Installer-managed daemon provenance reflects the selected client** — writer
+  IDs use `claude-code`, `codex`, or `mcp-client` for a shared install.
+
 ### Changed (2026-07-18 — Arm-1 deploy evidence downgraded by replication)
 - **First replicated LongMemEval-KU comparison** (5 replicates/config,
   paired permutation test, n=78): the shipped Arm-1 fine-tuned extractor's

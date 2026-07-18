@@ -1,20 +1,31 @@
 #Requires -Version 7
 # ^ enforced, not just documented: 5.1's Set-Content writes a BOM into
 #   settings.json.
-# Idempotently add the Pseudolife-MCP session-start briefing to Claude Code's
-# SessionStart hooks, ALONGSIDE (never replacing) any existing hooks.
+# Idempotently add the Pseudolife-MCP session-start briefing to Claude Code or
+# Codex SessionStart hooks, ALONGSIDE (never replacing) existing hooks.
 #
 #   ops\install-hook.ps1
+#   ops\install-hook.ps1 -Client codex
 #   ops\install-hook.ps1 -SettingsPath C:\path\to\settings.json
 #
 # Backs up settings.json first; re-running is a no-op once installed. Adds a new
 # SessionStart group so existing hooks (e.g. the static "memory enabled" reminder)
 # are left untouched. Requires PowerShell 7+ (UTF-8 no-BOM JSON write).
 param(
-    [string]$SettingsPath = (Join-Path $env:USERPROFILE ".claude\settings.json"),
+    [ValidateSet("claude", "codex")]
+    [string]$Client = "claude",
+    [string]$SettingsPath = "",
     [string]$Command = "pseudolife-mcp briefing --hook-json"
 )
 $ErrorActionPreference = "Stop"
+
+if (-not $SettingsPath) {
+    $SettingsPath = if ($Client -eq "codex") {
+        Join-Path $env:USERPROFILE ".codex\hooks.json"
+    } else {
+        Join-Path $env:USERPROFILE ".claude\settings.json"
+    }
+}
 
 # Load existing settings, or start a minimal object.
 if (Test-Path $SettingsPath) {
@@ -91,15 +102,16 @@ $obj | ConvertTo-Json -Depth 30 | Set-Content -Path $SettingsPath -Encoding utf8
 
 # The hooks wire the session lifecycle, but the memory LOOP only fires if a
 # standing instruction tells the agent to use the tools (issue #12: an install
-# with healthy hooks + daemon still never called memory_* because no CLAUDE.md
-# carried the block). Check-and-advise only — never edit CLAUDE.md unasked.
+# with healthy hooks + daemon still never called memory_* because no standing
+# instructions carried the block). Check-and-advise only — never edit it here.
 $repo = Split-Path -Parent $PSScriptRoot
-$claudeMd = Join-Path (Split-Path -Parent $SettingsPath) "CLAUDE.md"
-$hasBlock = (Test-Path $claudeMd) -and
-    ((Get-Content $claudeMd -Raw) -match 'pseudolife-memory')
+$instructionFile = if ($Client -eq "codex") { "AGENTS.md" } else { "CLAUDE.md" }
+$instructionPath = Join-Path (Split-Path -Parent $SettingsPath) $instructionFile
+$hasBlock = (Test-Path $instructionPath) -and
+    ((Get-Content $instructionPath -Raw) -match 'pseudolife-memory')
 if (-not $hasBlock) {
     Write-Host ""
-    Write-Warning "$claudeMd has no Pseudolife memory section - without a standing instruction the memory tools sit unused. Append the bundled block:"
-    Write-Host "  Add-Content `"$claudeMd`" (Get-Content `"$repo\examples\CLAUDE.memory.md`" -Raw)"
+    Write-Warning "$instructionPath has no Pseudolife memory section. Append the bundled block for stronger recall/capture guidance:"
+    Write-Host "  Add-Content `"$instructionPath`" (Get-Content `"$repo\examples\CLAUDE.memory.md`" -Raw)"
     Write-Host "(or add it to a per-project CLAUDE.md / AGENTS.md instead)"
 }
