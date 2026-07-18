@@ -22,14 +22,28 @@ both endpoints are reachable:
 The ``_LESSON_SYSTEM_PROMPT`` / ``_format_signals`` below are kept in sync with
 ``pseudolife_memory/memory/dream.py`` — this file is where the prompt is *tuned*;
 port the winner back to dream.py and re-run the unit + live tests.
+
+A second, independent rung (``--infer``) benches
+``OpenAICompatExtractor.infer_outcomes`` (the auto-outcome-inference stage
+that runs at episode close) against 8 fixtures. Unlike the lesson-synthesis
+prompt above, this rung *consumes* the real prompt/parser straight from
+``pseudolife_memory.memory.dream`` (imported lazily, only when the rung
+actually runs) rather than keeping a tunable copy — it is smoke-testing the
+shipped behaviour, not iterating on it. ``--infer --dry-run`` prints the
+fixtures and exits without importing anything or touching the network:
+
+    python evals/lesson_synthesis_bench.py --infer --dry-run
+    python evals/lesson_synthesis_bench.py --infer   # probes :8081 / :8082
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import sys
 import time
 import urllib.request
+from pathlib import Path
 
 # ── prompt under test (sync with dream.py) ─────────────────────────────────
 _LESSON_SYSTEM_PROMPT = (
@@ -264,6 +278,168 @@ def run_target(name: str, base_url: str, model: str) -> dict:
             "aggregate": agg, "rows": rows}
 
 
+# ── outcome-inference rung (--infer): fixtures + scoring ───────────────────
+# Contexts mirror exactly what MemoryService._episode_inference_context builds
+# for a closed session: "Session: <title>" then "- (source)[ [superseded]]
+# text" lines (service.py) — including status-source entries, which
+# infer_outcomes deliberately does NOT exclude (unlike fact extraction).
+#
+# `expect` is either a set of (task-ish keyword, outcome) pairs — a claim is a
+# match when the keyword is a substring of the claimed `task` (case-
+# insensitive) and `outcome` matches exactly — or the literal string
+# "abstain" for fixtures with no real, resolvable outcome in the record.
+INFER_FIXTURES = [
+    {"name": "deploy-succeeded",
+     "context": ("Session: deploy the auth service to staging\n"
+                 "- (pseudolife) ran ops/update.ps1 against staging: backup, "
+                 "rebuild, health check\n"
+                 "- (status) health check green, service responding on :8080"),
+     "expect": {("deploy", "success")}},
+    {"name": "dead-end-hit",
+     "context": ("Session: fix flaky websocket test\n"
+                 "- (status) tried raising the timeout to 30s — still flaky\n"
+                 "- (pseudolife) Root cause: the test polls before the server "
+                 "binds; timeout changes are a dead-end, poll readiness "
+                 "instead"),
+     "expect": {("timeout", "failure")}},
+    {"name": "user-corrected-me",
+     "context": ("Session: configure the postgres search_path\n"
+                 "- (pseudolife) set a code-level pin for search_path in the "
+                 "app config\n"
+                 "- (status) user corrected me: use a DATABASE-level default "
+                 "search_path instead, not a code-level pin — the pin broke "
+                 "the graph tests"),
+     "expect": {("search_path", "correction")}},
+    {"name": "mixed-session",
+     "context": ("Session: speed up the python test suite\n"
+                 "- (pseudolife) tried pytest-xdist -n auto\n"
+                 "- (status) xdist cut wall time roughly 3x, keeping it\n"
+                 "- (pseudolife) also tried sharing one DB connection pool "
+                 "across workers\n"
+                 "- (status) pool sharing caused cross-test state leaks — "
+                 "reverted, dead end"),
+     "expect": {("test suite", "success"), ("test suite", "failure")}},
+    {"name": "ambiguous-1",
+     "context": ("Session: reading about vector databases\n"
+                 "- (notes) pgvector supports HNSW and IVFFlat indexes"),
+     "expect": "abstain"},
+    {"name": "ambiguous-2",
+     "context": ("Session: brainstorming names for the new CLI flag\n"
+                 "- (pseudolife) options considered: --dry-run, --preview, "
+                 "--no-op\n"
+                 "- (pseudolife) no decision made yet, revisit next session"),
+     "expect": "abstain"},
+    {"name": "status-only-session",
+     "context": ("Session: nightly backup job\n"
+                 "- (status) backup started 02:00 UTC\n"
+                 "- (status) backup completed 02:14 UTC, 12GB written, "
+                 "checksum verified"),
+     "expect": {("backup", "success")}},
+    {"name": "single-entry-thin",
+     "context": ("Session: fix the stale version link in the README\n"
+                 "- (pseudolife) updated the README badge link from v0.7.0 "
+                 "to v0.8.0"),
+     "expect": {("readme", "success")}},
+]
+
+
+def score_infer_fixture(fx: dict, claims: list[dict] | None) -> dict:
+    """Score one --infer fixture against the extractor's claims.
+
+    ``claims is None`` (malformed reply) always scores 0 with a note.
+    Abstain fixtures score 1.0 iff the extractor returned ``[]``. Outcome
+    fixtures score the fraction of expected (keyword, outcome) pairs matched
+    — keyword checked via substring-in-task, outcome via exact match — and
+    raise an ``extra_flag`` when the extractor claimed more than
+    ``len(expect) + 1`` things (over-claiming on a bounded record).
+    """
+    expect = fx["expect"]
+    if claims is None:
+        return {"name": fx["name"], "score": 0.0, "n_claims": 0,
+                "extra_flag": False, "note": "malformed reply (None)"}
+    if expect == "abstain":
+        ok = claims == []
+        return {"name": fx["name"], "score": 1.0 if ok else 0.0,
+                "n_claims": len(claims), "extra_flag": False,
+                "note": "" if ok else "expected abstain, got claims"}
+    remaining = set(expect)
+    for c in claims:
+        task = _norm(c.get("task"))
+        outcome = str(c.get("outcome", "")).strip()
+        hit = next((pair for pair in remaining
+                    if pair[0].lower() in task and pair[1] == outcome), None)
+        if hit is not None:
+            remaining.discard(hit)
+    matched = len(expect) - len(remaining)
+    score = matched / len(expect) if expect else 0.0
+    extra_flag = len(claims) > len(expect) + 1
+    return {"name": fx["name"], "score": round(score, 3),
+            "n_claims": len(claims), "extra_flag": extra_flag,
+            "note": "extra claims beyond expected+1" if extra_flag else ""}
+
+
+def _probe_infer(base_url: str, timeout: float = 3.0) -> bool:
+    """Reachability check — GET <base_url>/models (llama.cpp/OpenAI-compat
+    servers serve it); used only to auto-pick an --infer endpoint."""
+    try:
+        req = urllib.request.Request(base_url.rstrip("/") + "/models", method="GET")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.status == 200
+    except Exception:
+        return False
+
+
+# Candidates probed in order when --infer-url isn't given explicitly.
+INFER_TARGETS = [
+    ("gemma", "http://127.0.0.1:8081/v1", "extractor"),
+    ("sonnet-shim", "http://127.0.0.1:8082/v1", "claude-sonnet-5"),
+]
+
+
+def run_infer(base_url: str, model: str) -> dict:
+    """Run every INFER_FIXTURES entry through a real
+    ``OpenAICompatExtractor.infer_outcomes`` call. Imports
+    ``pseudolife_memory`` lazily so plain fixture printing (--dry-run) never
+    needs the package or the network."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root
+    from pseudolife_memory.memory.dream import OpenAICompatExtractor
+
+    extractor = OpenAICompatExtractor(base_url, model, timeout_seconds=150.0)
+    rows = []
+    for fx in INFER_FIXTURES:
+        try:
+            claims = extractor.infer_outcomes(fx["context"], cap=3)
+        except Exception as exc:  # noqa: BLE001 — ExtractorError or transport
+            rows.append({"name": fx["name"], "score": 0.0, "n_claims": 0,
+                        "extra_flag": False, "note": f"error: {exc}"})
+            continue
+        rows.append(score_infer_fixture(fx, claims))
+    scores = [r["score"] for r in rows]
+    mean_score = round(sum(scores) / len(scores), 3) if scores else 0.0
+    return {"base_url": base_url, "model": model, "rows": rows,
+            "mean_score": mean_score}
+
+
+def print_infer_dry_run() -> None:
+    print(f"\n=== --infer --dry-run: {len(INFER_FIXTURES)} fixtures, no "
+          "endpoint call ===")
+    for fx in INFER_FIXTURES:
+        print(f"\n[{fx['name']}]")
+        print(fx["context"])
+        print(f"  expect: {fx['expect']}")
+
+
+def print_infer_report(result: dict) -> None:
+    print(f"\n=== outcome-inference ({result['model']} @ {result['base_url']}) ===")
+    for r in result["rows"]:
+        print(f"   - {r['name']:24s} score={r['score']:.2f} "
+              f"claims={r['n_claims']} extra_flag={r['extra_flag']} {r['note']}")
+    print(f"  mean score: {result['mean_score']:.3f}  "
+          f"({len(result['rows'])} fixtures)")
+    print("\n===JSON===")
+    print(json.dumps(result, ensure_ascii=False))
+
+
 # Endpoints assume execution INSIDE the daemon container; override via CLI.
 TARGETS = {
     "gemma": ("http://pseudolife-extractor:8081/v1", "extractor"),
@@ -276,7 +452,35 @@ def main() -> None:
     ap.add_argument("--target", default="all", help="gemma | qwen-27b | all")
     ap.add_argument("--gemma-url", default=os.environ.get("GEMMA_URL"))
     ap.add_argument("--qwen-url", default=os.environ.get("QWEN_URL"))
+    ap.add_argument("--infer", action="store_true",
+                    help="run the outcome-inference rung (8 fixtures) "
+                         "instead of lesson synthesis")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="with --infer: print fixtures and exit, no import/network")
+    ap.add_argument("--infer-url", default=os.environ.get("INFER_URL"))
+    ap.add_argument("--infer-model", default=os.environ.get("INFER_MODEL"))
     args = ap.parse_args()
+
+    if args.infer:
+        if args.dry_run:
+            print_infer_dry_run()
+            return
+        base_url, model = args.infer_url, args.infer_model
+        if not base_url:
+            for name, url, mdl in INFER_TARGETS:
+                if _probe_infer(url):
+                    base_url, model = url, mdl
+                    print(f"(auto-picked reachable endpoint: {name} @ {url})")
+                    break
+            else:
+                sys.exit(
+                    "no --infer-url given and none of "
+                    f"{[u for _, u, _ in INFER_TARGETS]} is reachable — "
+                    "start an extractor endpoint or pass --dry-run")
+        result = run_infer(base_url, model or "extractor")
+        print_infer_report(result)
+        return
+
     if args.gemma_url:
         TARGETS["gemma"] = (args.gemma_url, TARGETS["gemma"][1])
     if args.qwen_url:
