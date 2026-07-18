@@ -530,6 +530,17 @@ class PostgresStorage:
             ).fetchone()
         return int(row[0])
 
+    def count_signals_for_episodes(self, episode_ids: list[str]) -> int:
+        """Total outcome signals (consumed or not) across ``episode_ids`` —
+        the auto-inference candidate scan's "already has a signal" check."""
+        if not episode_ids:
+            return 0
+        row = self.conn.execute(
+            "SELECT COUNT(*) FROM outcome_signals WHERE episode_id = ANY(%s)",
+            (episode_ids,),
+        ).fetchone()
+        return int(row[0])
+
     def pending_signals(self, limit: int | None = None) -> list[dict]:
         cols = ("id",) + _SIGNAL_COLS
         sql = (

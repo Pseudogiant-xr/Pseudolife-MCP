@@ -2784,6 +2784,71 @@ class MemoryService:
                     counts[entry.episode_id] = counts.get(entry.episode_id, 0) + 1
         return counts
 
+    _INFER_CURSOR_KEY = "outcome_inference_cursor"
+
+    def _load_infer_cursor(self) -> dict:
+        """Meta-backed cursor for the auto-outcome-inference scan. Shape
+        ``{"ts": float, "retry": {episode_id: attempt_count}}``. File mode
+        (no storage) always sees the default — the scan is a no-op there."""
+        raw = self._storage.get_meta(self._INFER_CURSOR_KEY) \
+            if self._storage else None
+        if isinstance(raw, dict):
+            return {"ts": float(raw.get("ts", 0.0)),
+                    "retry": dict(raw.get("retry", {}))}
+        return {"ts": 0.0, "retry": {}}
+
+    def _save_infer_cursor(self, cur: dict) -> None:
+        if self._storage is not None:
+            self._storage.set_meta(self._INFER_CURSOR_KEY, cur)
+
+    def _episode_inference_context(self, root, subtree: set[str]) -> str:
+        """All daemon-visible session context, INCLUDING status/log-source
+        entries — dream.exclude_sources protects fact extraction, not this
+        (spec 2026-07-18, decision 2)."""
+        assert self._cms is not None
+        em = self._cms.episodes
+        lines = [f"Session: {root.title or '(untitled)'}"]
+        for e in em.episodes.values():
+            if e.id in subtree and e.id != root.id and e.title:
+                lines.append(f"Sub-task: {e.title}")
+        entries = [en for band in self._cms.bands for en in band.entries
+                   if en.episode_id in subtree]
+        entries.sort(key=lambda en: en.timestamp)
+        for en in entries:
+            mark = " [superseded]" if en.superseded_at else ""
+            lines.append(f"- ({en.source}){mark} {en.text}")
+        return "\n".join(lines)
+
+    def _pending_inference_candidates(self, *, limit: int = 8) -> list[dict]:
+        """Caller MUST hold the lock. Closed session roots past the cursor
+        with >=1 subtree entry and zero subtree outcome signals."""
+        assert self._cms is not None
+        if self._storage is None:
+            return []
+        cur = self._load_infer_cursor()
+        em = self._cms.episodes
+        counts = self._episode_entry_counts()
+        roots = sorted(
+            (e for e in em.episodes.values()
+             if e.parent_id is None and e.session_key
+             and e.ended_at is not None and e.ended_at > cur["ts"]),
+            key=lambda e: e.ended_at)
+        out: list[dict] = []
+        for root in roots:
+            subtree = {root.id} | {
+                e.id for e in em.episodes.values()
+                if em._descends_from(e, root.id)}
+            if sum(counts.get(i, 0) for i in subtree) == 0:
+                continue
+            if self._storage.count_signals_for_episodes(list(subtree)) > 0:
+                continue
+            out.append({"root_id": root.id, "ended_at": root.ended_at,
+                        "context": self._episode_inference_context(
+                            root, subtree)})
+            if len(out) >= limit:
+                break
+        return out
+
     def _delete_episode_row(self, episode_id: str) -> None:
         """Best-effort persistent delete of one episode row. No-op in file mode."""
         if self._storage is None:
