@@ -41,6 +41,24 @@ reliably — without the agent having to remember:
    `POST /api/episodes/rename` and `POST /api/episodes/merge`. Set `TZ` in
    `ops/.env` for local time.
 
+## Inferred outcomes at session close
+
+Most sessions never call `memory_outcome` — the agent stores facts and
+moves on without logging how the work went. When a session episode closes
+with stored entries but zero outcome signals, the end-of-session dream
+runs an extra stage that infers up to 3 signals from the episode's own
+record (`origin="inferred"`) before the usual lesson synthesis — the
+context deliberately includes status-source entries too, since a
+session's own status chatter is still evidence of how it went, just
+weaker evidence than an explicit `memory_outcome` call. Lessons synthesised
+from a batch that is *entirely* inferred signals are written at a
+discounted confidence (0.4 vs the usual 0.6); a lesson that already
+exists at a higher confidence isn't dragged down — the write path keeps
+the higher value, as it always has. Kill switch:
+`memory.lessons.infer_outcomes: false` (see
+[Configuration](configuration.md)); the signal cap per episode
+(`infer_outcomes_max_signals`, default 3) is tunable alongside it.
+
 ## Installing the briefing hook
 
 One command installs the briefing hook:

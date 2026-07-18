@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-18 — auto-outcome inference at episode close)
+- **The daemon now infers outcome signals for silent sessions**: when a
+  session episode closes with stored entries but zero `memory_outcome`
+  calls (35% of real sessions, measured 2026-07-18), a new dream stage
+  infers up to 3 signals (`origin="inferred"`) from the episode's own
+  record — including status-source entries — and the same dream
+  synthesizes lessons from them at confidence 0.4 (vs 0.6 explicit).
+  Cursor + bounded retry live in `meta` (no schema change).
+  `dream_status` gains an `infer_outcomes` block and `would_fire` counts
+  pending inference. Kill switch: `memory.lessons.infer_outcomes: false`.
+
 ### Changed (2026-07-18 — Arm-1 deploy evidence downgraded by replication)
 - **First replicated LongMemEval-KU comparison** (5 replicates/config,
   paired permutation test, n=78): the shipped Arm-1 fine-tuned extractor's

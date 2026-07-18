@@ -70,6 +70,12 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
 - **No HyDE / no reflection** — both rely on an LLM callback. Claude *is*
   the LLM, so the natural way to reflect is for Claude to call
   `memory_store` with a self-composed summary.
+- **Auto-outcome inference on** (`memory.lessons.infer_outcomes = true`) —
+  a session episode that closes with entries but zero `memory_outcome`
+  calls gets up to `memory.lessons.infer_outcomes_max_signals` (default
+  `3`) signals inferred from its own record on the end-of-session dream;
+  see [Episodes](episodes.md#inferred-outcomes-at-session-close). Set
+  either to `false` / `0` to turn it off.
 
 ## Toolset tiers
 
