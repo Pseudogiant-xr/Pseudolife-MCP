@@ -709,7 +709,9 @@ Scoring per fixture: call `extractor.infer_outcomes(context, cap=3)`; **abstain 
 - [ ] **Step 3: Smoke it** against whichever extractor endpoint is up (`--infer` with the sidecar on :8081 or Sonnet shim; if none is running, `--infer --dry-run` should print the fixtures and exit 0 — add that flag). Record output in the commit message body.
 - [ ] **Step 4: Commit** — `feat(evals): outcome-inference rung in lesson synthesis bench (8 fixtures, E4B target)` (+ trailer).
 
----### Task 7: docs + CHANGELOG
+---
+
+### Task 7: docs + CHANGELOG
 
 **Files:**
 - Modify: `docs/guide/episodes.md` (feature section), `docs/guide/configuration.md` (two config rows in the tuned-defaults/env table area for lessons), `docs/guide/dreaming.md` (one line in the stage list if it enumerates stages), `CHANGELOG.md` (`[Unreleased]`).
