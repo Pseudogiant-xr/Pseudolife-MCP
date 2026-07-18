@@ -55,3 +55,62 @@ def test_pointer_persists_and_clear_only_if_owner(pg_service):
     assert svc.clear_active_session("s1") is True
     assert svc._resolve_writer()[1] is None
     assert svc._storage.get_meta("active_session_pointer") is None
+
+
+# ── Ownership guards on both episode-close paths (Task 3) ────────────────────
+# The observed bug: `episode_end_session(None)` used to force-close ANY open
+# root, and `episode_end()`'s no-identity fallback popped whatever episode
+# happened to be globally "current" — either way, one workstream could pop
+# another's session episode out from under it.
+
+
+def test_end_session_never_pops_foreign_root(pg_service):
+    svc = pg_service
+    svc.episode_start_session("victim-key", "victim session")
+    svc.store("victim entry", source="t")          # non-empty -> survives close-prune
+    tok = set_writer_context("w", None)            # resolver yields no identity
+    try:
+        res = svc.episode_end_session(None)
+        assert res == {"closed": None, "reason": "no owned open session"}
+    finally:
+        reset_writer_context(tok)
+    tok = set_writer_context("w", "attacker-key")  # identity that owns nothing
+    try:
+        res = svc.episode_end_session(None)
+        assert res == {"closed": None, "reason": "no owned open session"}
+    finally:
+        reset_writer_context(tok)
+    tok = set_writer_context("w", "victim-key")    # the owner can close it
+    try:
+        res = svc.episode_end_session(None)
+        assert res.get("id")
+    finally:
+        reset_writer_context(tok)
+
+
+def test_episode_end_fallthrough_guarded(pg_service):
+    svc = pg_service
+    svc.episode_start_session("victim-key", "victim session")
+    svc.store("victim entry", source="t")
+    tok = set_writer_context("w", "attacker-key")
+    try:
+        res = svc.episode_end()               # no open sub-episode for attacker
+        assert res.get("closed") is None      # must NOT pop victim's root
+    finally:
+        reset_writer_context(tok)
+
+
+def test_episode_end_no_identity_never_pops_foreign_root(pg_service):
+    """The real fallthrough: no resolved identity at all, while another
+    session's root is the globally "current" episode. `Episodes.open_episode`
+    would hand back that root regardless of ownership if the guard weren't
+    there."""
+    svc = pg_service
+    svc.episode_start_session("victim-key", "victim session")
+    svc.store("victim entry", source="t")
+    tok = set_writer_context("w", None)
+    try:
+        res = svc.episode_end()
+        assert res.get("closed") is None
+    finally:
+        reset_writer_context(tok)

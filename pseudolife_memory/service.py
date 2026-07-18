@@ -2773,12 +2773,27 @@ class MemoryService:
 
     def episode_end(self) -> dict[str, Any]:
         """Close the caller's currently-open leaf episode and pop to its parent.
-        Empty dict if none open for the caller's session."""
+        ``{}`` when nothing is open for the caller.
+
+        Ownership guard (spec 2026-07-18): with no resolved session identity,
+        ``Episodes.end_leaf`` falls back to whichever episode is globally
+        "current" — which may belong to a different, still-active session.
+        Before closing, the candidate leaf's ``session_key`` is compared
+        against the resolved identity; a mismatch (including "something is
+        open but I have no identity") is refused as a no-op rather than
+        popping a foreign session's episode."""
         with self._lock:
             self._ensure_init()
             assert self._cms is not None
+            em = self._cms.episodes
             _, session_id = self._resolve_writer()
-            closed = self._cms.episodes.end_leaf(session_key=session_id)
+            ep = (em.open_leaf_for(session_id) if session_id is not None
+                  else em.open_episode())
+            if ep is None:
+                return {}
+            if ep.session_key != session_id:
+                return {"closed": None, "reason": "no owned open session"}
+            closed = em.end_leaf(session_key=session_id)
             self._persist_episodes()
             return self._episode_to_dict(closed) if closed is not None else {}
 
@@ -2810,29 +2825,46 @@ class MemoryService:
         background dream so the session's outcome signals become lessons by the
         next session start, and return the closed root episode dict.
 
-        ``session_key=None`` closes ANY open root (a force-close escape hatch).
-        The shim always supplies a real key, so that only applies to a direct
-        ``POST /api/episode/end`` with no ``session_key``."""
+        An explicit non-``None`` ``session_key`` is an explicit target (the
+        shim/hook/REST path, unchanged): no match still returns ``{}``.
+        ``session_key=None`` (a direct ``POST /api/episode/end`` with no
+        ``session_key`` in the body) used to force-close ANY open root — a
+        blind pop that could close another workstream's session. It now
+        resolves the caller's own identity via ``_resolve_writer`` instead and
+        closes only THAT identity's root; if the identity is unresolved or
+        owns no open root, nothing is closed and ``{"closed": None, "reason":
+        "no owned open session"}`` is returned (ownership guard, spec
+        2026-07-18)."""
+        ownership_guard = session_key is None
+        if session_key is None:
+            _, session_key = self._resolve_writer()
+        if session_key is None:
+            return {"closed": None, "reason": "no owned open session"}
         with self._lock:
             self._ensure_init()
             assert self._cms is not None
-            result, fire = self._close_session_locked(session_key, run_dream)
+            result, fire, found = self._close_session_locked(session_key, run_dream)
+        if ownership_guard and not found:
+            return {"closed": None, "reason": "no owned open session"}
         if fire:
             self._fire_and_forget_dream()
         return result
 
     def _close_session_locked(
         self, session_key: str | None, run_dream: bool,
-    ) -> tuple[dict[str, Any], bool]:
+    ) -> tuple[dict[str, Any], bool, bool]:
         """Cascade-close the session root for ``session_key`` and prune the
         subtree if it captured zero entries. Caller MUST hold the lock and have
         ensured init (so both ``episode_end_session`` and the idle reaper can
         reuse it without re-entering the non-reentrant lock). Returns
-        ``(result_dict, should_fire_dream)``; ``result_dict`` is ``{}`` when
-        nothing matched or the subtree was pruned empty."""
+        ``(result_dict, should_fire_dream, found)``; ``result_dict`` is ``{}``
+        when nothing matched OR the subtree was pruned empty — ``found``
+        disambiguates the two (``False`` only when no root matched
+        ``session_key`` at all)."""
         assert self._cms is not None
         em = self._cms.episodes
         closed = em.end_session(session_key)
+        found = closed is not None
         result = self._episode_to_dict(closed) if closed is not None else {}
         pruned = False
         if closed is not None:
@@ -2852,7 +2884,7 @@ class MemoryService:
         if not pruned:
             self._persist_episodes()
         fire = bool(run_dream and result and not pruned)
-        return ({} if pruned else result), fire
+        return ({} if pruned else result), fire, found
 
     def reap_idle_sessions(
         self, idle_seconds: float, now: float | None = None,
@@ -2892,7 +2924,7 @@ class MemoryService:
                 if now - activity >= idle_seconds:
                     targets.append(root.session_key)
             for sk in targets:
-                _result, fire = self._close_session_locked(sk, run_dream=True)
+                _result, fire, _found = self._close_session_locked(sk, run_dream=True)
                 reaped.append(sk)
                 fired_any = fired_any or fire
         if fired_any:
