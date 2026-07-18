@@ -611,7 +611,7 @@ class MemoryService:
     def store(
         self,
         text: str,
-        source: str = "claude",
+        source: str = "agent",
         tags: list[str] | None = None,
         origin: str | None = None,
     ) -> dict[str, Any]:

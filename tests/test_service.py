@@ -44,12 +44,13 @@ class TestStore:
         recent = pristine_service.recent(n=1)
         assert recent["entries"][0]["source"] == "my-tag"
 
-    def test_store_default_source_is_claude(
+    def test_store_default_source_is_client_neutral(
         self, pristine_service: MemoryService,
     ) -> None:
+        # "agent" since 2026-07-18 (was "claude") — matches the MCP surface.
         pristine_service.store("Default-source fact for the test")
         recent = pristine_service.recent(n=1)
-        assert recent["entries"][0]["source"] == "claude"
+        assert recent["entries"][0]["source"] == "agent"
 
 
 # ---------------------------------------------------------------------------

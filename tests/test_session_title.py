@@ -32,3 +32,23 @@ def test_system_dir_is_not_a_project_title():
     for d in (r"C:\Windows\System32", r"C:\Windows", r"C:\Windows\SysWOW64"):
         t = title_from_cwd(d, now=1782780930.0)
         assert t.startswith("session - "), t
+
+
+def test_default_agent_source_is_noise_in_dominant_source_vote():
+    # "agent" is the MCP memory_store default source (client-neutral since
+    # 2026-07-18, was "claude") — like the old default it carries no project
+    # identity, so it must only win the title vote when nothing else is there.
+    from pseudolife_memory.session_title import derive_session_title
+
+    entries = [
+        (1.0, "agent", "stored a note"),
+        (2.0, "agent", "stored another note"),
+        (3.0, "agent", "and one more"),
+        (4.0, "myproject", "deployed the fix"),
+        (5.0, "myproject", "verified live"),
+    ]
+    title = derive_session_title(0.0, entries)
+    assert title.startswith("myproject - ")
+
+    only_default = [(1.0, "agent", "stored a note")]
+    assert derive_session_title(0.0, only_default).startswith("agent - ")

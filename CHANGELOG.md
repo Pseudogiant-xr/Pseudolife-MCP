@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-07-18 — client-neutrality follow-ups)
+- **The `agent` default source no longer hijacks derived session titles** —
+  it joins `claude` in the title vote's noise set, so real project sources
+  keep winning the dominant-source vote (it still wins when it's all there
+  is). The service-layer `store()` default now matches the MCP surface
+  (`agent`, was `claude`).
+- **`docs/guide/configuration.md` writer row updated** for the
+  client-selectable compose default (`mcp-client`), including the migration
+  note for pre-selector installs whose tier map keys on `claude-code`.
+
 ### Added (2026-07-18 — client-neutral MCP guidance)
 - **The MCP initialization now advertises the memory workflow through the
   protocol's `instructions` field** — clients that honor server instructions,

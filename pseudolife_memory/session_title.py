@@ -24,7 +24,7 @@ GENERIC_TITLE_RE = re.compile(r"^session - \d{4}-\d{2}-\d{2} \d{2}:\d{2}$")
 
 # Routing sources that carry progress noise rather than project identity —
 # they only win the dominant-source vote when nothing else is present.
-_NOISE_SOURCES = {"status", "log", "claude", "conversation"}
+_NOISE_SOURCES = {"status", "log", "claude", "agent", "conversation"}
 
 _SNIPPET_CHARS = 60
 
