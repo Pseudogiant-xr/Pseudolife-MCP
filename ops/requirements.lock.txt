@@ -50,7 +50,7 @@ jsonschema==4.26.0
 kubernetes==36.0.2
 markdown-it-py==4.2.0
 MarkupSafe==3.0.3
-mcp==1.28.0
+mcp==1.28.1
 mdurl==0.1.2
 mmh3==5.2.1
 mpmath==1.3.0
