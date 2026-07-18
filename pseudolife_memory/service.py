@@ -4227,15 +4227,19 @@ class MemoryService:
 
     def graph_backfill_sources(self) -> dict[str, Any]:
         """Refresh entity->project attribution from fact provenance. Cheap,
-        idempotent, manual overrides preserved. Takes the lock itself, so callers
-        must NOT hold it (mirrors graph_backfill in dream_run, which runs after
-        the lock is released)."""
+        idempotent, manual overrides preserved. Applies memory.scopes policy
+        (meta-source exclusions + umbrella rollups, case-folded keys). Takes
+        the lock itself, so callers must NOT hold it (mirrors graph_backfill
+        in dream_run, which runs after the lock is released)."""
         import time as _time
+        scopes = self.config.memory.scopes
         with self._lock:
             self._ensure_init()
             if self._storage is None:
                 return {"attributed": 0}
-            n = self._storage.backfill_entity_sources(_time.time())
+            n = self._storage.backfill_entity_sources(
+                _time.time(), rollup=scopes.rollup,
+                exclude=frozenset(scopes.exclude))
         return {"attributed": n}
 
     def graph_digest(self) -> dict[str, Any]:

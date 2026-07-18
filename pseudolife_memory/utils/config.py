@@ -503,6 +503,18 @@ class TracesConfig:
 
 
 @dataclass
+class ScopesConfig:
+    """Project-scope derivation (entity_sources backfill). ``exclude`` lists
+    source tags that must never become projects — meta/chatter tags leak into
+    the Atlas project list otherwise. ``rollup`` maps a fine-grained source to
+    an umbrella project; the backfill writes BOTH scopes, so the family view
+    and the precise filter coexist. Scope keys are always case-folded."""
+    exclude: list[str] = field(default_factory=lambda: [
+        "status", "claude", "agent", "correction"])
+    rollup: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
 class RecallConfig:
     """memory_recall — live MemCoT iterative retrieval (read-only).
 
@@ -567,6 +579,8 @@ class MemoryConfig:
     graph_insight: GraphInsightConfig = field(default_factory=GraphInsightConfig)
     # Engram cross-index (provenance-as-link, schema v13).
     traces: TracesConfig = field(default_factory=TracesConfig)
+    # Project-scope derivation — meta-source exclusions + umbrella rollups.
+    scopes: ScopesConfig = field(default_factory=ScopesConfig)
     # Meta-statement filter on the store path (off in the MCP build).
     meta_filter: MetaFilterConfig = field(default_factory=MetaFilterConfig)
     # Base recency half-life at band depth 0; doubles per depth.
@@ -750,6 +764,10 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
         if "deep_dream" in mem_raw:
             config.memory.deep_dream = _dict_to_dataclass(
                 DeepDreamConfig, mem_raw["deep_dream"],
+            )
+        if "scopes" in mem_raw:
+            config.memory.scopes = _dict_to_dataclass(
+                ScopesConfig, mem_raw["scopes"],
             )
     if "context" in raw:
         config.context = _dict_to_dataclass(ContextConfig, raw["context"])
