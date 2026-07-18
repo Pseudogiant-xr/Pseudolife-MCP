@@ -10,8 +10,8 @@ Design notes
 ------------
 * **No LLM dependency.** Reflection / HyDE were dropped from this build —
   Claude is the LLM, so the natural way to reflect is for Claude to call
-  ``memory_store`` with a summary it composes itself. Contrastive stays
-  because it doesn't need an LLM.
+  ``memory_store`` with a summary it composes itself (and, since the
+  auto-outcome stage, for the dream to infer what a session never logged).
 
 * **No silent fallbacks.** Pseudolife's chat path swallows memory errors so
   the user's conversation never breaks. For an MCP tool Claude is calling

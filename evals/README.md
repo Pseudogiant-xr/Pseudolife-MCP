@@ -636,3 +636,15 @@ is also the shape the deep-dream Step-C workflow reuses when dispatching Opus
 subagents over `memory_deep_dream` candidates. Each candidate's
 `src_snippets`/`dst_snippets` slot into the same prompt template, so a subagent
 trained on the bench corpus transfers directly to the live consolidation run.
+
+---
+
+# Capture metrics (`capture_metrics.py`)
+
+Read-only report over the **live** bank measuring the memory loop's beats:
+capture coverage, outcome coverage of substantive sessions, per-session
+store density, failure+correction share, and the explicit-vs-inferred
+outcome mix. Carries the 2026-07-18 pre-auto-outcome baseline in its
+docstring and the success criteria for the 2-3-week re-measurement.
+
+    python evals/capture_metrics.py [--json] [--since YYYY-MM-DD]
