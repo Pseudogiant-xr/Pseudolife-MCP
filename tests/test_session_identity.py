@@ -108,6 +108,50 @@ def test_episode_end_fallthrough_guarded(pg_service):
     assert len(open_roots) == 1
 
 
+# ── Task 4: `episode` handle on write tools (identity tier 2) ────────────────
+
+
+def test_store_with_valid_handle_attributes_and_keys(pg_service):
+    svc = pg_service
+    ep = svc.episode_start_session("keyA", "session A")
+    res = svc.store("handled entry", source="t", episode=ep["id"][:12])
+    assert "episode_warning" not in res
+    found = [e for band in svc._cms.bands for e in band.entries
+             if e.text == "handled entry"]
+    assert found and found[0].episode_id == ep["id"]
+
+
+def test_store_with_bad_handle_warns_and_degrades(pg_service):
+    svc = pg_service
+    res = svc.store("degraded entry", source="t", episode="nope-not-real")
+    assert res["episode_warning"] == "unknown or closed episode handle"
+    assert res.get("stored") is not None      # the write itself succeeded
+
+
+def test_outcome_with_handle_lands_on_episode(pg_service):
+    svc = pg_service
+    ep = svc.episode_start_session("keyB", "session B")
+    svc.record_outcome(task="t", outcome="success", episode=ep["id"][:12])
+    sigs = [s for s in svc._storage.pending_signals(limit=100)
+            if s.get("episode_id") == ep["id"]]
+    assert len(sigs) == 1
+
+
+def test_short_prefix_rejected(pg_service):
+    svc = pg_service
+    ep = svc.episode_start_session("keyC", "session C")
+    res = svc.store("short prefix", source="t", episode=ep["id"][:4])
+    assert res["episode_warning"] == "unknown or closed episode handle"
+
+
+def test_fact_set_with_valid_handle_stamps_session_key(pg_service):
+    svc = pg_service
+    ep = svc.episode_start_session("keyD", "session D")
+    res = svc.cortex_write("widget", "color", "blue", episode=ep["id"][:10])
+    assert "episode_warning" not in res
+    assert res.get("session_id") == "keyD"
+
+
 def test_episode_end_no_identity_never_pops_foreign_root(pg_service):
     """The real fallthrough: no resolved identity at all, while another
     session's root is the globally "current" episode. `Episodes.open_episode`
