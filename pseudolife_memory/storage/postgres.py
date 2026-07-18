@@ -1165,13 +1165,21 @@ class PostgresStorage:
             out.setdefault(eid, []).append(source)
         return out
 
-    def backfill_entity_sources(self, now: float) -> int:
+    def backfill_entity_sources(self, now: float, *,
+                                rollup: dict[str, str] | None = None,
+                                exclude: frozenset[str] | None = None) -> int:
         """Derive entity->source attribution from the fact-provenance link:
         facts.entity_id is the authoritative FK to entities; facts.entity_norm
         shares the cortex normalization with memory_traces.entity_norm; entries
         carry the source. Keying by entity_id avoids the graph/cortex norm
         mismatch. Writes/refreshes origin='derived'; never overwrites 'manual'.
-        Idempotent: count is recomputed from DISTINCT entries."""
+        Idempotent: count is recomputed from DISTINCT entries.
+
+        Scope keys are case-folded ('Pseudolife' and 'pseudolife' are one
+        scope). Sources in ``exclude`` (case-insensitive) never become
+        projects — meta tags like status/claude leak in otherwise. A source in
+        ``rollup`` ALSO writes its umbrella scope (both rows kept, so the
+        family view and the fine-grained filter coexist)."""
         rows = self.conn.execute(
             "SELECT m.entity_id, en.source, COUNT(DISTINCT t.entry_id) AS cnt "
             "FROM (SELECT DISTINCT entity_id, entity_norm FROM facts "
@@ -1181,9 +1189,21 @@ class PostgresStorage:
             "WHERE en.source <> '' "
             "GROUP BY m.entity_id, en.source"
         ).fetchall()
+        excl = {str(s).strip().lower() for s in (exclude or ())}
+        roll = {str(k).strip().lower(): str(v).strip().lower()
+                for k, v in (rollup or {}).items()}
+        agg: dict[tuple[int, str], int] = {}
+        for entity_id, source, cnt in rows:
+            key = str(source).strip().lower()
+            if not key or key in excl:
+                continue
+            agg[(entity_id, key)] = agg.get((entity_id, key), 0) + int(cnt)
+            umb = roll.get(key)
+            if umb and umb != key and umb not in excl:
+                agg[(entity_id, umb)] = agg.get((entity_id, umb), 0) + int(cnt)
         n = 0
         with self._txn():
-            for entity_id, source, cnt in rows:
+            for (entity_id, source), cnt in agg.items():
                 self.conn.execute(
                     "INSERT INTO entity_sources (entity_id, source, count, origin, updated_at) "
                     "VALUES (%s, %s, %s, 'derived', %s) "
@@ -1191,7 +1211,7 @@ class PostgresStorage:
                     "  count = EXCLUDED.count, updated_at = EXCLUDED.updated_at, "
                     "  origin = CASE WHEN entity_sources.origin = 'manual' "
                     "                THEN 'manual' ELSE 'derived' END",
-                    (entity_id, source, int(cnt), now))
+                    (entity_id, source, cnt, now))
                 n += 1
         return n
 

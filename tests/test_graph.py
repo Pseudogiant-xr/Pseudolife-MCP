@@ -516,6 +516,71 @@ def test_backfill_preserves_manual(svc):
     assert by_src.get("es-auto") == "derived"
 
 
+def test_backfill_excludes_meta_and_normalizes_case(svc):
+    # Meta source tags (status/claude/...) must not become projects, and scope
+    # keys are case-folded so 'Pseudolife' and 'pseudolife' are one scope.
+    import time as _t
+    from pseudolife_memory.memory.cortex import _norm_key
+    svc.cortex_write("es-meta", "role", "thing", support="user")
+    st = svc._storage
+    svc.store("es-meta mention a", source="Claude")
+    ea = st.conn.execute("SELECT id FROM entries ORDER BY id DESC LIMIT 1").fetchone()[0]
+    svc.store("es-meta mention b", source="ES-Proj")
+    eb = st.conn.execute("SELECT id FROM entries ORDER BY id DESC LIMIT 1").fetchone()[0]
+    en, an = _norm_key("es-meta"), _norm_key("role")
+    st.add_trace(en, an, ea, _t.time())
+    st.add_trace(en, an, eb, _t.time())
+    st.backfill_entity_sources(_t.time(), exclude=frozenset({"claude"}))
+    eid = st.conn.execute(
+        "SELECT entity_id FROM facts WHERE entity_norm=%s AND status='current' "
+        "AND entity_id IS NOT NULL LIMIT 1", (en,)).fetchone()[0]
+    srcs = {r["source"] for r in st.sources_for_entity(eid)}
+    assert "es-proj" in srcs                      # lowercased scope key
+    assert not srcs & {"claude", "Claude", "ES-Proj"}
+
+
+def test_backfill_rollup_adds_umbrella(svc):
+    # A rolled-up source keeps its fine-grained scope AND gains the umbrella.
+    import time as _t
+    from pseudolife_memory.memory.cortex import _norm_key
+    svc.cortex_write("es-roll", "role", "thing", support="user")
+    st = svc._storage
+    svc.store("es-roll mention", source="es-sub")
+    e1 = st.conn.execute("SELECT id FROM entries ORDER BY id DESC LIMIT 1").fetchone()[0]
+    en = _norm_key("es-roll")
+    st.add_trace(en, _norm_key("role"), e1, _t.time())
+    st.backfill_entity_sources(_t.time(), rollup={"es-sub": "es-umbrella"})
+    eid = st.conn.execute(
+        "SELECT entity_id FROM facts WHERE entity_norm=%s AND status='current' "
+        "AND entity_id IS NOT NULL LIMIT 1", (en,)).fetchone()[0]
+    srcs = {r["source"] for r in st.sources_for_entity(eid)}
+    assert {"es-sub", "es-umbrella"} <= srcs
+
+
+def test_graph_backfill_sources_applies_scopes_config(svc):
+    # The service passes memory.scopes config (rollup + exclude) through.
+    import time as _t
+    from pseudolife_memory.memory.cortex import _norm_key
+    svc.config.memory.scopes.rollup = {"es-cfg-sub": "es-cfg-umbrella"}
+    svc.config.memory.scopes.exclude = ["es-cfg-meta"]
+    svc.cortex_write("es-cfg", "role", "thing", support="user")
+    st = svc._storage
+    svc.store("es-cfg mention a", source="es-cfg-sub")
+    ea = st.conn.execute("SELECT id FROM entries ORDER BY id DESC LIMIT 1").fetchone()[0]
+    svc.store("es-cfg mention b", source="es-cfg-meta")
+    eb = st.conn.execute("SELECT id FROM entries ORDER BY id DESC LIMIT 1").fetchone()[0]
+    en, an = _norm_key("es-cfg"), _norm_key("role")
+    st.add_trace(en, an, ea, _t.time())
+    st.add_trace(en, an, eb, _t.time())
+    svc.graph_backfill_sources()
+    eid = st.conn.execute(
+        "SELECT entity_id FROM facts WHERE entity_norm=%s AND status='current' "
+        "AND entity_id IS NOT NULL LIMIT 1", (en,)).fetchone()[0]
+    srcs = {r["source"] for r in st.sources_for_entity(eid)}
+    assert {"es-cfg-sub", "es-cfg-umbrella"} <= srcs
+    assert "es-cfg-meta" not in srcs
+
+
 def test_graph_backfill_sources_service(svc):
     import time as _t
     from pseudolife_memory.memory.cortex import _norm_key
