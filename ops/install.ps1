@@ -27,7 +27,9 @@ param(
     [string]$ClaudeMd = "",
     [ValidateSet("", "append", "skip")]
     [string]$Instructions = "",
-    [int]$ShimPort = 8082
+    [int]$ShimPort = 8082,
+    [ValidateSet("shim", "http")]
+    [string]$Transport = "shim"
 )
 $ErrorActionPreference = "Stop"
 
@@ -239,9 +241,55 @@ foreach ($selectedClient in $clients) {
         claude mcp get pseudolife-memory *> $null
         if ($LASTEXITCODE -eq 0) {
             Write-Host "==> MCP server already wired into Claude Code - skipping."
+        } elseif ($Transport -eq "shim") {
+            $shimInstalled = $false
+            if (Get-Command pipx -ErrorAction SilentlyContinue) {
+                $pipxList = pipx list 2>$null
+                if ($pipxList -match "package pseudolife-mcp ") {
+                    pipx upgrade pseudolife-mcp
+                } else {
+                    pipx install pseudolife-mcp
+                }
+                if ($LASTEXITCODE -eq 0) {
+                    $shimInstalled = $true
+                } else {
+                    Write-Warning "pipx install/upgrade pseudolife-mcp failed (exit $LASTEXITCODE)."
+                }
+            } else {
+                # Probe every candidate interpreter independently - a stale/broken
+                # `py` launcher must not block falling through to a viable `python`.
+                $interpreterCandidates = @(
+                    @{ Label = "py -3"; Cmd = "py"; Args = @("-3") },
+                    @{ Label = "python"; Cmd = "python"; Args = @() }
+                ) | Where-Object { Get-Command $_.Cmd -ErrorAction SilentlyContinue }
+                foreach ($candidate in $interpreterCandidates) {
+                    $exe = $candidate.Cmd
+                    $exeArgs = $candidate.Args
+                    & $exe @exeArgs -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)"
+                    if ($LASTEXITCODE -ne 0) { continue }
+                    & $exe @exeArgs -m pip install --user pseudolife-mcp
+                    if ($LASTEXITCODE -eq 0) {
+                        $shimInstalled = $true
+                        break
+                    } else {
+                        Write-Warning "$($candidate.Label) -m pip install --user pseudolife-mcp failed (exit $LASTEXITCODE)."
+                    }
+                }
+            }
+            if ($shimInstalled) {
+                claude mcp remove pseudolife-memory *> $null
+                claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
+                Write-Host "==> Wired into Claude Code via the pseudolife-mcp shim - per-session identity (required for correct episodes with concurrent sessions)."
+            } else {
+                Write-Warning "Could not install the pseudolife-mcp shim - no working pipx or Python (>=3.10, py -3 or python) was found, or the shim install itself failed (see warnings above)."
+                Write-Host "  Without the shim, concurrent Claude Code sessions share one episode identity."
+                Write-Host "  Install pipx or Python >=3.10 and re-run, or pass -Transport http to silence this."
+                claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
+                Write-Host "==> Wired into Claude Code via HTTP (fallback - shim tooling not found or shim install failed)."
+            }
         } else {
             claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
-            Write-Host "==> Wired into Claude Code (claude mcp add)."
+            Write-Host "==> Wired into Claude Code via HTTP (-Transport http)."
         }
     }
 }

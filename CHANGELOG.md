@@ -16,6 +16,53 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   every distinct `entries.source` string minted its own Atlas project,
   fragmenting one project family across many scopes.
 
+### Changed (2026-07-19 — session identity contract)
+- **Episodes no longer key on the transport connection.** Five-tier
+  identity: shim `X-PL-Session` → explicit `episode` handle on write tools
+  (advertised in the session briefing) → hook-registered session (SessionStart
+  now forwards Claude Code's `session_id`; new SessionEnd hook closes the
+  episode promptly) → legacy `mcp-session-id` (removed from MCP 2026-07-28,
+  SEP-2567) → writer+idle-gap floor. A session can no longer close another
+  session's episode (`episode_end` ownership guard). The installer now wires
+  the stdio shim by default (`--transport http` to opt out) — per-session
+  identity for concurrent sessions.
+
+### Fixed (2026-07-19 — hook mutation paths honor the bearer gate)
+- **`GET /api/hook/session-start` and `POST /api/hook/session-end` mutated
+  state without the bearer-token check when `PSEUDOLIFE_MCP_TOKEN` is
+  configured** — session-start only used `_authorized(scope)` to gate the
+  briefing *content*, not the `?session_id=` episode registration / active-
+  session pointer write, and session-end never checked it at all. On a
+  LAN-exposed token-gated daemon this let an unauthenticated client hijack
+  the active-session pointer (misattributing untagged writes) or
+  force-close sessions. Fixed: session-start now drops `session_id`/`source`
+  entirely when unauthorized (output stays byte-identical to the
+  instructions-only response — no registration, no advertisement); session-
+  end now returns 401 (same shape as `/api`'s gate) when a token is
+  configured and the bearer is missing/wrong. ASGI-level regression coverage
+  added in `tests/test_session_identity.py` (there was none before, in
+  either direction).
+
+### Fixed (2026-07-19 — session identity: header+handle attribution)
+- **`memory_store` / `memory_fact_set` / `memory_outcome` attribution is now
+  unconditional on a valid `episode` handle, even when a header session
+  (`X-PL-Session` / `set_writer_context` override) is also present** — per
+  the design contract's "Precedence rationale" (`docs/superpowers/specs/
+  2026-07-18-session-identity-contract-design.md`), the header wins
+  *identity* but the write must still attribute to the handle's episode.
+  `MemoryService.store()` previously wrote its attribution override to
+  `self._cms.bands[0].entries[-1]` **after** `CMS.store()` returned — but
+  `CMS.store()` runs its promotion walk internally before returning, and
+  promotion builds a **new** `MemoryEntry` object in the destination band
+  (`CMS._consolidate`), so a promoted entry silently kept the header
+  session's lazily-opened episode instead of the handle's. Fixed by adding
+  `CMS.store(..., attribution_episode_id=...)`, applied to the entry
+  immediately after the session-key stamp and before both the write-through
+  insert and the promotion walk, so it lands in the persisted row and
+  survives promotion. `record_outcome` already attributed unconditionally
+  (`resolved[0] if resolved is not None else ...`, no header check) and
+  needed no change; pinned with a regression test regardless.
+
 ### Removed (2026-07-18 — neural-era residue sweep)
 - **`pseudolife_memory/memory/contrastive.py` deleted** — the
   `ContrastiveUpdater` / `NegativeSignalDetector` classes were constructed

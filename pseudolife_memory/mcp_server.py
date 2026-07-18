@@ -151,23 +151,25 @@ def memory_store(
     source: str = "agent",
     tags: list[str] | None = None,
     origin: Literal["user", "action", "agent"] | None = None,
+    episode: str | None = None,
 ) -> dict[str, Any]:
     """Store one durable fact, decision, or observation. Use proactively
     for anything worth keeping — one claim per call. Near-duplicates are
-    dropped by the surprise gate (``stored=False``,
-    ``reason="below_surprise_threshold"`` — not an error). Dream distils
-    facts later; for canonical NOW use ``memory_fact_set``.
+    dropped, not erred (``stored=False``,
+    ``reason="below_surprise_threshold"``). For canonical NOW use
+    ``memory_fact_set``.
 
     Args:
         text: The claim to remember.
         source: Stable per-project/topic tag for later filtering.
         tags: Optional labels, e.g. ``["decision", "blocker"]``.
-        origin: Who asserted it — ``"user"`` / ``"action"`` (tool
-            confirmed) / ``"agent"`` (you concluded).
+        origin: Who asserted it — ``"user"`` / ``"action"`` / ``"agent"``.
+        episode: Episode handle for attribution.
 
     Returns: ``{stored, surprise, reason, cortex_promoted}``.
     """
-    return service.store(text=text, source=source, tags=tags, origin=origin)
+    return service.store(
+        text=text, source=source, tags=tags, origin=origin, episode=episode)
 
 
 def _restates_fact(entry_text: str, value: str) -> bool:
@@ -485,24 +487,26 @@ def memory_fact_set(
     value: str,
     origin: Literal["user", "action", "agent"] | None = None,
     confidence: float = 0.8,
+    episode: str | None = None,
 ) -> dict[str, Any]:
     """Assert a canonical fact NOW — insert, confirm, or correct a slot.
 
     A new value at an existing slot supersedes the old (kept as history).
-    A write conflicting with a higher-tier fact is parked as a contender
-    (``action="contested"``, winner under ``current``) — check with the
-    human, settle via ``memory_fact_resolve``.
+    A conflicting write is parked as a contender (``action="contested"``,
+    winner under ``current``) — check with the human, settle via
+    ``memory_fact_resolve``.
 
     Args:
         origin: ``"user"`` / ``"action"`` / ``"agent"`` (default) — who
-            asserts it. Use ``"user"`` for things the human told you.
+            asserts it (``"user"`` = the human told you).
         confidence: 0..1, default 0.8.
+        episode: Episode handle for attribution.
 
     Returns: ``{action: inserted|confirmed|superseded|contested, ...record}``.
     """
     return service.cortex_write(
         entity, attribute, value,
-        confidence=confidence, support=(origin or "agent"),
+        confidence=confidence, support=(origin or "agent"), episode=episode,
     )
 
 
@@ -609,10 +613,11 @@ def memory_outcome(
     about: str | None = None,
     detail: str | None = None,
     polarity: str | None = None,
+    episode: str | None = None,
 ) -> dict[str, Any]:
     """Record a procedural outcome — what worked, failed, or was
-    corrected — the moment it lands. Dream synthesises signals into
-    lessons surfaced next session; logging stops repeated mistakes.
+    corrected. Dream synthesises signals into lessons surfaced next
+    session; logging stops repeated mistakes.
 
     Args:
         task: Kind of task, stable wording ("deploy engine to host").
@@ -620,11 +625,13 @@ def memory_outcome(
         about: The tool/approach concerned (aids traversal).
         detail: What worked / what the dead-end was.
         polarity: ``+`` do-this | ``-`` avoid; usually omit (inferred).
+        episode: Episode handle for attribution.
 
     Returns: ``{recorded, signal_id, task, outcome}``; needs Postgres.
     """
     return service.record_outcome(
-        task, outcome, about=about, detail=detail, polarity=polarity)
+        task, outcome, about=about, detail=detail, polarity=polarity,
+        episode=episode)
 
 
 @_tool(tier="core")

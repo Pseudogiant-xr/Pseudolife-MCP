@@ -56,7 +56,7 @@ from pseudolife_memory.memory.cortex import CortexStore
 from pseudolife_memory.memory.slots import Slot
 from pseudolife_memory.session_title import (
     GENERIC_TITLE_RE, derive_session_title)
-from pseudolife_memory.writer_context import resolve_writer
+from pseudolife_memory.writer_context import resolve_writer_detailed
 from pseudolife_memory.utils.config import (
     AppConfig,
     ContextConfig,
@@ -380,12 +380,59 @@ class MemoryService:
         # 2026-07-11): {"which": "primary"|"fallback", "base_url": str | None,
         # "at": float} — surfaced via dream_status. None until a dream has run.
         self._last_dream_extractor: dict | None = None
+        # Identity tier 3 (spec 2026-07-18): machine-scoped active-session
+        # pointer, set by the SessionStart hook / cleared by SessionEnd.
+        # ``(session_id, ts)`` or None. In-memory always; persisted to
+        # Postgres meta (loaded once in _ensure_init) when storage is up —
+        # file-mode keeps this process-local only.
+        self._active_session: tuple[str, float] | None = None
+
+    _ACTIVE_SESSION_META_KEY = "active_session_pointer"
 
     def _resolve_writer(self) -> tuple[str, str | None]:
-        """The ``(writer_id, session_id)`` to attribute the current write to —
-        per-request when inside the daemon (``X-PL-Writer`` header), else the
-        process default. See :mod:`pseudolife_memory.writer_context`."""
-        return resolve_writer(self._writer_id)
+        """Identity tiers 1/3/4 (spec 2026-07-18): X-PL-Session header ->
+        hook-registered active session -> legacy mcp-session-id (removed
+        from MCP 2026-07-28). Tier 2 (episode handle) is per-call at the
+        write sites; tier 5 is the reaper's idle-gap floor."""
+        w, header_s, transport_s = resolve_writer_detailed(self._writer_id)
+        if header_s:
+            return (w, header_s)
+        active = getattr(self, "_active_session", None)
+        if active is not None:
+            return (w, active[0])
+        return (w, transport_s)
+
+    def set_active_session(self, session_id: str | None) -> None:
+        """Machine-scoped active-session pointer (identity tier 3): set by
+        the SessionStart hook, cleared by SessionEnd. Last-start-wins by
+        design — concurrent unheaded sessions are the shim's/handle's job."""
+        with self._lock:
+            self._ensure_init()
+            if session_id:
+                self._active_session = (str(session_id), time.time())
+                if self._storage is not None:
+                    self._storage.set_meta(
+                        self._ACTIVE_SESSION_META_KEY,
+                        {"session_id": str(session_id),
+                         "ts": self._active_session[1]})
+            else:
+                self._active_session = None
+                if self._storage is not None:
+                    self._storage.set_meta(self._ACTIVE_SESSION_META_KEY, None)
+
+    def clear_active_session(self, session_id: str) -> bool:
+        """Clear the pointer only if it currently names ``session_id``.
+
+        Must not hold ``self._lock`` while calling :meth:`set_active_session`
+        (non-reentrant) — check ownership under the lock, release, then
+        delegate the actual clear."""
+        with self._lock:
+            self._ensure_init()
+            cur = getattr(self, "_active_session", None)
+            if cur is None or cur[0] != session_id:
+                return False
+        self.set_active_session(None)
+        return True
 
     def _assert_public_search_path(self) -> None:
         """Fail loud if the shared connection would resolve unqualified tables to
@@ -510,6 +557,12 @@ class MemoryService:
             self._assert_public_search_path()
             from pseudolife_memory.memory.graph_store import PostgresNetworkxGraphStore
             self._graph = PostgresNetworkxGraphStore(self._storage)
+            # Identity tier 3: hydrate the active-session pointer left by a
+            # prior process (daemon restart) so tier resolution survives it.
+            raw = self._storage.get_meta(self._ACTIVE_SESSION_META_KEY)
+            if isinstance(raw, dict) and raw.get("session_id"):
+                self._active_session = (str(raw["session_id"]),
+                                         float(raw.get("ts") or 0.0))
         self._cms = ContinuumMemorySystem(
             self.config.memory,
             reference_bank=self._reference,
@@ -614,6 +667,7 @@ class MemoryService:
         source: str = "agent",
         tags: list[str] | None = None,
         origin: str | None = None,
+        episode: str | None = None,
     ) -> dict[str, Any]:
         """Embed and store a memory through the CMS pipeline.
 
@@ -625,6 +679,13 @@ class MemoryService:
         any canonical facts auto-promoted from this text into the cortex. When
         omitted it is defaulted from ``source`` (conversation->user, claude->
         agent, tool->action). See :meth:`_promote_slots`.
+
+        ``episode`` (identity tier 2, spec 2026-07-18): an open episode id or
+        unambiguous prefix (>=8 chars) — attributes this entry to that
+        episode. A header session (tier 1) still wins overall identity, but
+        the entry's ``episode_id`` targets the handle regardless. An unknown/
+        closed/ambiguous handle degrades silently: the store still proceeds,
+        and ``"episode_warning"`` is added to the result.
 
         Returns ``{"stored": bool, "surprise": float, "reason": str|None,
         "cortex_promoted": int}``. Stores can be rejected by either the
@@ -640,10 +701,22 @@ class MemoryService:
                         "cortex_promoted": 0}
             embedding = self._embedder.encode_single(text)
             _, session_id = self._resolve_writer()
+            resolved = self._resolve_episode_handle(episode)
+            episode_warning = episode is not None and resolved is None
+            if resolved is not None:
+                _, header_session, _ = resolve_writer_detailed(self._writer_id)
+                if not header_session:
+                    session_id = resolved[1]
             self._ensure_session_episode(session_id)
+            # Attribution always targets the handle's episode, even when a
+            # header session won identity above (spec: identity and target
+            # episode are separable) — passed into CMS.store so it lands
+            # before that call's own promotion walk, which would otherwise
+            # move the entry to a new object and strand a post-hoc override.
             stored, surprise = self._cms.store(
                 text, embedding, source=source, tags=tags,
                 session_key=session_id,
+                attribution_episode_id=resolved[0] if resolved is not None else None,
             )
             reason: str | None = None
             if not stored:
@@ -679,6 +752,8 @@ class MemoryService:
                 out["episode_hint"] = (
                     "session episode is untitled — call "
                     "memory_session_title('<project> - <topic>')")
+            if episode_warning:
+                out["episode_warning"] = "unknown or closed episode handle"
             return out
 
     def _promote_slots(self, text: str, *, source: str, origin: str | None) -> int:
@@ -1288,6 +1363,7 @@ class MemoryService:
         provenance: list[str] | None = None,
         support: str | None = None,
         now: float | None = None,
+        episode: str | None = None,
     ) -> dict[str, Any]:
         """Write / confirm / supersede a canonical fact at the
         ``(entity, attribute)`` slot. The claim is embedded through the same
@@ -1297,6 +1373,14 @@ class MemoryService:
         it), ``"action"`` (a tool/agent action confirmed it), or ``"agent"`` (the
         agent merely said it). It accumulates on the record (``origin`` = the
         strongest tier seen), so corroboration is first-class.
+
+        ``episode`` (identity tier 2): an open episode id or unambiguous
+        prefix (>=8 chars). Facts have no separate attribution field, so a
+        valid handle IS the identity for this call — it becomes the
+        ``session_id`` stamp, unless a header session (tier 1) is present, in
+        which case the header wins outright. An unknown/closed/ambiguous
+        handle degrades silently: the write still proceeds, and
+        ``"episode_warning"`` is added to the result.
 
         Returns ``{"action": "inserted"|"confirmed"|"superseded"|"contested",
         ...record fields}``. On ``"contested"`` the returned record is the parked
@@ -1310,6 +1394,12 @@ class MemoryService:
             emb = self._embedder.encode_single(claim)
             slot_emb = self._embedder.encode_single(f"{entity} {attribute}".strip())
             writer_id, session_id = self._resolve_writer()
+            resolved = self._resolve_episode_handle(episode)
+            episode_warning = episode is not None and resolved is None
+            if resolved is not None:
+                _, header_session, _ = resolve_writer_detailed(self._writer_id)
+                if not header_session:
+                    session_id = resolved[1]
             res = self._cortex.write_fact(
                 Slot(entity, attribute, value),
                 emb,
@@ -1336,6 +1426,8 @@ class MemoryService:
             if res.action == "contested":
                 cur = self._cortex.lookup(entity, attribute)
                 out["current"] = _cortex_record_to_dict(cur) if cur is not None else None
+            if episode_warning:
+                out["episode_warning"] = "unknown or closed episode handle"
             return out
 
     def cortex_lookup(self, entity: str, attribute: str) -> dict[str, Any] | None:
@@ -1566,10 +1658,17 @@ class MemoryService:
 
     def record_outcome(self, task: str, outcome: str, about: str | None = None,
                        detail: str | None = None, polarity: str | None = None,
-                       origin: str = "action") -> dict[str, Any]:
+                       origin: str = "action",
+                       episode: str | None = None) -> dict[str, Any]:
         """Record a cheap in-session outcome signal (success | failure |
         correction). Single-writer: this never writes a lesson — the dream
-        synthesises lessons from the accumulated signals."""
+        synthesises lessons from the accumulated signals.
+
+        ``episode`` (identity tier 2): an open episode id or unambiguous
+        prefix (>=8 chars) — attributes this signal to that episode instead
+        of the global current one. An unknown/closed/ambiguous handle
+        degrades silently: the signal is still recorded, and
+        ``"episode_warning"`` is added to the result."""
         # Refuse — never coerce — an unknown outcome: silently mapping e.g.
         # "failed" to "success" would invert a dead-end into a do-this lesson.
         if outcome not in ("success", "failure", "correction"):
@@ -1581,11 +1680,17 @@ class MemoryService:
                 return {"recorded": False, "reason": "signals require Postgres storage"}
             if not self.config.memory.lessons.enabled:
                 return {"recorded": False, "reason": "lessons disabled"}
+            resolved = self._resolve_episode_handle(episode)
+            episode_warning = episode is not None and resolved is None
+            episode_id = resolved[0] if resolved is not None else self._current_episode_id()
             sid = self._storage.add_signal(
                 task=task, outcome=outcome, about=about, detail=detail,
                 polarity=polarity, origin=origin,
-                episode_id=self._current_episode_id())
-            return {"recorded": True, "signal_id": sid, "task": task, "outcome": outcome}
+                episode_id=episode_id)
+            out = {"recorded": True, "signal_id": sid, "task": task, "outcome": outcome}
+            if episode_warning:
+                out["episode_warning"] = "unknown or closed episode handle"
+            return out
 
     def lesson_write(self, task: str, aspect: str, lesson: str, *,
                      about: str | None = None, outcome: str = "success",
@@ -2720,12 +2825,27 @@ class MemoryService:
 
     def episode_end(self) -> dict[str, Any]:
         """Close the caller's currently-open leaf episode and pop to its parent.
-        Empty dict if none open for the caller's session."""
+        ``{}`` when nothing is open for the caller.
+
+        Ownership guard (spec 2026-07-18): with no resolved session identity,
+        ``Episodes.end_leaf`` falls back to whichever episode is globally
+        "current" — which may belong to a different, still-active session.
+        Before closing, the candidate leaf's ``session_key`` is compared
+        against the resolved identity; a mismatch (including "something is
+        open but I have no identity") is refused as a no-op rather than
+        popping a foreign session's episode."""
         with self._lock:
             self._ensure_init()
             assert self._cms is not None
+            em = self._cms.episodes
             _, session_id = self._resolve_writer()
-            closed = self._cms.episodes.end_leaf(session_key=session_id)
+            ep = (em.open_leaf_for(session_id) if session_id is not None
+                  else em.open_episode())
+            if ep is None:
+                return {}
+            if ep.session_key != session_id:
+                return {"closed": None, "reason": "no owned open session"}
+            closed = em.end_leaf(session_key=session_id)
             self._persist_episodes()
             return self._episode_to_dict(closed) if closed is not None else {}
 
@@ -2757,29 +2877,46 @@ class MemoryService:
         background dream so the session's outcome signals become lessons by the
         next session start, and return the closed root episode dict.
 
-        ``session_key=None`` closes ANY open root (a force-close escape hatch).
-        The shim always supplies a real key, so that only applies to a direct
-        ``POST /api/episode/end`` with no ``session_key``."""
+        An explicit non-``None`` ``session_key`` is an explicit target (the
+        shim/hook/REST path, unchanged): no match still returns ``{}``.
+        ``session_key=None`` (a direct ``POST /api/episode/end`` with no
+        ``session_key`` in the body) used to force-close ANY open root — a
+        blind pop that could close another workstream's session. It now
+        resolves the caller's own identity via ``_resolve_writer`` instead and
+        closes only THAT identity's root; if the identity is unresolved or
+        owns no open root, nothing is closed and ``{"closed": None, "reason":
+        "no owned open session"}`` is returned (ownership guard, spec
+        2026-07-18)."""
+        ownership_guard = session_key is None
+        if session_key is None:
+            _, session_key = self._resolve_writer()
+        if session_key is None:
+            return {"closed": None, "reason": "no owned open session"}
         with self._lock:
             self._ensure_init()
             assert self._cms is not None
-            result, fire = self._close_session_locked(session_key, run_dream)
+            result, fire, found = self._close_session_locked(session_key, run_dream)
+        if ownership_guard and not found:
+            return {"closed": None, "reason": "no owned open session"}
         if fire:
             self._fire_and_forget_dream()
         return result
 
     def _close_session_locked(
         self, session_key: str | None, run_dream: bool,
-    ) -> tuple[dict[str, Any], bool]:
+    ) -> tuple[dict[str, Any], bool, bool]:
         """Cascade-close the session root for ``session_key`` and prune the
         subtree if it captured zero entries. Caller MUST hold the lock and have
         ensured init (so both ``episode_end_session`` and the idle reaper can
         reuse it without re-entering the non-reentrant lock). Returns
-        ``(result_dict, should_fire_dream)``; ``result_dict`` is ``{}`` when
-        nothing matched or the subtree was pruned empty."""
+        ``(result_dict, should_fire_dream, found)``; ``result_dict`` is ``{}``
+        when nothing matched OR the subtree was pruned empty — ``found``
+        disambiguates the two (``False`` only when no root matched
+        ``session_key`` at all)."""
         assert self._cms is not None
         em = self._cms.episodes
         closed = em.end_session(session_key)
+        found = closed is not None
         result = self._episode_to_dict(closed) if closed is not None else {}
         pruned = False
         if closed is not None:
@@ -2799,7 +2936,7 @@ class MemoryService:
         if not pruned:
             self._persist_episodes()
         fire = bool(run_dream and result and not pruned)
-        return ({} if pruned else result), fire
+        return ({} if pruned else result), fire, found
 
     def reap_idle_sessions(
         self, idle_seconds: float, now: float | None = None,
@@ -2839,7 +2976,7 @@ class MemoryService:
                 if now - activity >= idle_seconds:
                     targets.append(root.session_key)
             for sk in targets:
-                _result, fire = self._close_session_locked(sk, run_dream=True)
+                _result, fire, _found = self._close_session_locked(sk, run_dream=True)
                 reaped.append(sk)
                 fired_any = fired_any or fire
         if fired_any:
@@ -2957,6 +3094,23 @@ class MemoryService:
             self._storage.delete_episode(episode_id)
         except Exception as exc:  # noqa: BLE001
             logger.warning("episode delete failed: %s", exc)
+
+    def _resolve_episode_handle(
+            self, handle: str | None) -> tuple[str, str | None] | None:
+        """Identity tier 2 (spec 2026-07-18): match ``handle`` (a daemon-minted
+        episode id or an unambiguous prefix, >=8 chars) against an OPEN root
+        episode. Caller MUST hold the lock. Returns ``(episode_id,
+        session_key)`` on exactly one match; ``None`` on any miss — callers
+        warn-and-degrade, never raise (a stale handle must not lose a
+        memory)."""
+        if not handle or len(handle) < 8 or self._cms is None:
+            return None
+        matches = [e for e in self._cms.episodes.episodes.values()
+                   if e.parent_id is None and e.ended_at is None
+                   and e.id.startswith(handle)]
+        if len(matches) != 1:
+            return None
+        return (matches[0].id, matches[0].session_key)
 
     def _ensure_session_episode(self, session_key: str | None) -> str | None:
         """Daemon-owned lazy episode open. In the direct-HTTP transport there is

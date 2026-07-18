@@ -15,24 +15,49 @@ reliably — without the agent having to remember:
    **verified world facts** (fresh, cited, age-ranked), and **where we left
    off** (a one-line recap of your last closed session). Empty sections are
    omitted, so a cold bank injects nothing.
-2. **Episode lifecycle is owned by the daemon — no hooks required.** Each
-   `memory_store` is stamped to its session's episode, keyed by a stable
-   per-session id: the transport's `mcp-session-id` for a direct-HTTP
-   client (the shipped path — stable for the whole session), or a stdio
-   shim's `X-PL-Session`. Because a direct-HTTP client has no shim/hook in
-   the path, the daemon **lazily opens** a session episode on the first
-   store of a new session (so empty sessions never leave a husk) and an
-   **idle reaper** closes it once inactive — firing the end-of-session
-   dream, or pruning it if empty (`PSEUDOLIFE_SESSION_IDLE_SECONDS`,
-   default 30 min). One open episode is tracked *per session*, so
-   concurrent sessions (e.g. different projects) never clobber each other.
-   (Earlier versions drove this from `SessionStart`/`SessionEnd` episode
-   hooks keyed by Claude's session id; those are obsolete. The legacy
-   `pseudolife-mcp episode-start/-end` CLI + shim path remain for stdio
-   clients.) A store arriving after the reaper closed the episode
-   **resumes** it — same session id, same episode — rather than opening a
-   new husk (`PSEUDOLIFE_SESSION_RESUME_SECONDS`, default 6 h; `0`
-   disables). Direct-HTTP titles start generic
+2. **Episode lifecycle is owned by the daemon, keyed by a resolved session
+   identity — hooks make that identity precise, but nothing about opening
+   or closing an episode requires them.** Five tiers, strict precedence
+   (full table + rationale:
+   [Configuration — session identity](configuration.md#session-identity)):
+   a stdio shim's per-process `X-PL-Session` header outranks an explicit
+   `episode` handle passed on a write, which outranks the SessionStart-hook-
+   registered active session, which outranks the legacy transport
+   `mcp-session-id` (per-**connection**, not per-session, and removed
+   entirely by the MCP 2026-07-28 revision — SEP-2567, "Sessionless" — so
+   treat it as a dying fallback, not something to depend on), which falls
+   back to writer id + idle-gap sessionization when nothing above resolved.
+   - **Hook-registered identity.** The plugin's SessionStart hook forwards
+     Claude Code's own `session_id` to the daemon, which opens (or
+     resumes) that session's root episode immediately — no longer lazily
+     on first store — and sets it as the machine-scoped active-session
+     pointer. The returned briefing text carries a one-line **handle
+     advertisement**: the episode id (truncated) plus the instruction to
+     pass `episode="<id>"` on writes when running concurrent sessions. A
+     SessionEnd hook closes that session's episode and clears the pointer
+     when the session ends.
+   - **Ownership guard.** `memory_episode_end` and the direct
+     `POST /api/episode/end` with no `session_key` in the body can only
+     close a root episode whose `session_key` matches the caller's own
+     resolved identity — a session can no longer pop another, still-open
+     session's root by accident. No match is a no-op:
+     `{"closed": null, "reason": "no owned open session"}`. The idle
+     reaper is separate: it closes any root idle past the threshold,
+     using each root's own key — that's its job, not a guard bypass.
+   - **Direct-HTTP / sessionless clients** (no shim, no hook, no explicit
+     handle) still get episodes: the daemon **lazily opens** one on the
+     first store of a new session (so empty sessions never leave a husk)
+     and the **idle reaper** closes it once inactive — firing the
+     end-of-session dream, or pruning it if empty
+     (`PSEUDOLIFE_SESSION_IDLE_SECONDS`, default 30 min). One open episode
+     is tracked *per resolved identity*, so concurrent sessions (e.g.
+     different projects) don't clobber each other, subject to tier 3's
+     last-start-wins limitation (see Configuration).
+
+   A store arriving after the reaper closed the episode **resumes** it —
+   same identity, same episode — rather than opening a new husk
+   (`PSEUDOLIFE_SESSION_RESUME_SECONDS`, default 6 h; `0` disables).
+   Direct-HTTP titles start generic
    (`session - YYYY-MM-DD HH:MM`, since the daemon has no project `cwd`) —
    name the session with `memory_session_title` (store responses carry an
    `episode_hint` until you do); a session closing still-generic gets an
@@ -101,11 +126,13 @@ demand via the CLI or the Console's `/api/briefing` route.
 An *episode* is a bracketed working session. While an episode is open,
 every memory stored carries the episode's id + title automatically, so
 later queries can scope by session. **Session episodes open and close for
-you**, daemon-owned and keyed by a stable per-session id (the transport
-`mcp-session-id`, or a shim's `X-PL-Session`) so concurrent sessions don't
-collide; the daemon lazily opens one on first store and an idle reaper
-closes it. For a substantial multi-step task you open a **nested
-sub-episode** under the session:
+you**, daemon-owned and keyed by a resolved session identity (five tiers —
+shim header, `episode` handle, hook registration, legacy transport id, or
+idle-gap sessionization; see
+[Configuration — session identity](configuration.md#session-identity)) so
+concurrent sessions don't collide; absent a hook or shim, the daemon lazily
+opens one on first store and an idle reaper closes it. For a substantial
+multi-step task you open a **nested sub-episode** under the session:
 
 ```
 memory_episode_start("auth refactor")            # nests under the open session

@@ -7,11 +7,23 @@ content as ``examples/CLAUDE.memory.md`` — guard-tested in
 session briefing. Users can replace the shipped instructions by writing
 ``<data_dir>/hook-instructions.md``. A briefing must never break a session
 start: this module never raises and the endpoint always answers 200.
+
+When the hook passes a ``session_id`` (identity tier 3, spec 2026-07-18),
+``hook_session_start`` additionally registers a session episode and the
+active-session pointer, and prepends a one-line advertisement of the episode
+handle so the agent can pass ``episode=`` on writes from concurrent sessions.
+``hook_session_end`` mirrors this on the SessionEnd hook: it closes the
+session's episode and clears the pointer (only if still owned). Both are
+fail-open — registration/close failures are logged and never surface to the
+caller.
 """
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger("pseudolife-mcp.web")
 
 # Claude Code caps SessionStart hook stdout at 10,000 chars (overflow is
 # spilled to a file + preview, which defeats the point) — stay clear of it.
@@ -116,3 +128,64 @@ def session_start_context(service: Any, authorized: bool) -> str:
         if md:
             parts.append(md)
     return "\n\n".join(parts)[:HOOK_CONTEXT_MAX_CHARS]
+
+
+def _episode_advertisement(session_id: str, source: str | None, service: Any) -> str:
+    """Register the session (idempotent per ``session_id``) and return the
+    one-line episode-handle advertisement, or "" on any failure (fail-open —
+    a registration hiccup must not break session start)."""
+    try:
+        # Generic-shaped title so the auto-titler recognises and replaces it
+        # at close (GENERIC_TITLE_RE) — a literal "session" would stick
+        # forever (2026-07-19 whole-branch review, finding 2).
+        import time as _t
+        ep = service.episode_start_session(
+            session_id, _t.strftime("session - %Y-%m-%d %H:%M"))
+        service.set_active_session(session_id)
+        short = (ep.get("id") or "")[:12]
+        if not short:
+            return ""
+        return (f'Session episode: {short} — pass episode="{short}" on memory '
+                f"writes when running concurrent sessions.")
+    except Exception:  # noqa: BLE001 — never break a session start
+        logger.exception(
+            "session-start identity registration failed for session_id=%r "
+            "(source=%r)", session_id, source)
+        return ""
+
+
+def hook_session_start(
+    service: Any, session_id: str | None = None, source: str | None = None,
+    authorized: bool = True,
+) -> str:
+    """``session_start_context`` plus (when ``session_id`` is given) identity
+    registration: opens/re-fires the session's episode, sets it as the active
+    session (identity tier 3), and prepends the episode-handle advertisement.
+    Without ``session_id`` this is exactly ``session_start_context``'s
+    behaviour. Never raises; the endpoint always answers 200."""
+    prefix = ""
+    if session_id:
+        ad = _episode_advertisement(session_id, source, service)
+        if ad:
+            prefix = ad + "\n\n"
+    body = session_start_context(service, authorized)
+    return (prefix + body)[:HOOK_CONTEXT_MAX_CHARS]
+
+
+def hook_session_end(service: Any, session_id: str | None = None) -> dict[str, Any]:
+    """Close the session's episode and clear the active-session pointer (only
+    if it still names ``session_id`` — the ownership guard means a foreign
+    SessionEnd can't clear another session's pointer). Fail-open: errors are
+    logged, never raised; always returns ``{"ok": True}``."""
+    if session_id:
+        try:
+            service.episode_end_session(session_id)
+        except Exception:  # noqa: BLE001 — never break a session end
+            logger.exception(
+                "session-end episode close failed for session_id=%r", session_id)
+        try:
+            service.clear_active_session(session_id)
+        except Exception:  # noqa: BLE001 — never break a session end
+            logger.exception(
+                "session-end pointer clear failed for session_id=%r", session_id)
+    return {"ok": True}

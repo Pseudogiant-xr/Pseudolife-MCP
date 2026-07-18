@@ -27,7 +27,7 @@ from typing import Any, Callable
 from urllib.parse import urlsplit
 
 from pseudolife_memory.web.routes import ConsoleRoutes
-from pseudolife_memory.web.session_hook import session_start_context
+from pseudolife_memory.web.session_hook import hook_session_end, hook_session_start
 
 logger = logging.getLogger("pseudolife-mcp.web")
 
@@ -214,6 +214,13 @@ def build_console_app(
         # instructions half is public repo content, so an unauthorized
         # request (token set, no bearer) still gets it — but never the
         # briefing, which is memory content. Loopback gating as for /api.
+        # An optional ?session_id= (+ ?source=) registers the session's
+        # episode and active-session pointer (identity tier 3) and prepends
+        # the episode-handle advertisement line — but only when authorized:
+        # unauthorized-with-token callers must not be able to mint/hijack the
+        # active-session pointer just by hitting this endpoint, so session_id
+        # and source are dropped entirely (byte-identical to the plain
+        # instructions-only response) rather than merely gated on output.
         if path == "/api/hook/session-start":
             denied = _browser_gate(scope)
             if denied:
@@ -222,10 +229,48 @@ def build_console_app(
             if method != "GET":
                 await _send_json(send, 405, {"error": "method_not_allowed"})
                 return
+            authorized = _authorized(scope)
+            params = _parse_query(scope)
+            session_id = params.get("session_id") if authorized else None
+            source = params.get("source") if authorized else None
             text = await asyncio.get_running_loop().run_in_executor(
-                None, session_start_context, service, _authorized(scope))
+                None, hook_session_start, service, session_id, source,
+                authorized)
             await _send_bytes(send, 200, text.encode("utf-8"),
                               "text/plain; charset=utf-8", "no-store")
+            return
+
+        # 4b) plugin SessionEnd hook: closes the session's episode and clears
+        # the active-session pointer (only if still owned). Fail-open, always
+        # 200 — mirrors session-start's contract. Unlike session-start there
+        # is no unauthorized-safe subset of this call (it's pure mutation),
+        # so a configured token is enforced outright, same shape as /api's
+        # 401.
+        if path == "/api/hook/session-end":
+            denied = _browser_gate(scope)
+            if denied:
+                await _send_json(send, 403, {"error": denied})
+                return
+            if method != "POST":
+                await _send_json(send, 405, {"error": "method_not_allowed"})
+                return
+            if not _authorized(scope):
+                await _send_json(send, 401, {
+                    "error": "unauthorized",
+                    "hint": "Authorization: Bearer <PSEUDOLIFE_MCP_TOKEN>"})
+                return
+            raw = await _read_body(receive)
+            body: dict = {}
+            if raw:
+                try:
+                    body = json.loads(raw.decode("utf-8"))
+                except json.JSONDecodeError:
+                    body = {}
+            if not isinstance(body, dict):
+                body = {}
+            result = await asyncio.get_running_loop().run_in_executor(
+                None, hook_session_end, service, body.get("session_id"))
+            await _send_json(send, 200, result)
             return
 
         # 5) console REST API (token-gated like /mcp)
