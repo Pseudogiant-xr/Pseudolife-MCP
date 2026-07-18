@@ -22,17 +22,20 @@ so compare *within* the table, not against GPT-4o-judged leaderboards.
 > [Variance and replication](../../evals/README.md#variance-and-replication).
 
 On the oracle variant (evidence sessions only), with the local-ceiling
-extractor:
+extractor (5 replicates, 2026-07-19 context-persisted bank):
 
-| arm | accuracy | context tokens/question |
-|-----|----------|------------------------|
-| naive RAG (top-6 turns) | 0.615 | 1638 |
-| cortex facts only | 0.564 | **59** |
-| **hybrid (facts + top-3 turns)** | **0.705** | 979 |
+| arm | accuracy (mean ± std) | context tokens/question |
+|-----|----------------------|------------------------|
+| naive RAG (top-6 turns) | 0.567 ± 0.017 | 1638 |
+| cortex facts only | 0.559 ± 0.030 | **~60** |
+| **hybrid (facts + top-3 turns)** | **0.710 ± 0.019** | ~1000 |
 
-The consolidated-facts posture beats naive RAG by 9 points while reading
-~40% of the context — and the fact spine alone delivers 92% of RAG's
-accuracy on **3.6% of its token budget**.
+The consolidated-facts posture beats naive RAG by ~14 points while
+reading ~60% of the context — and the fact spine alone matches RAG's
+accuracy on **under 4% of its token budget**. Notably, the shipped E4B
+fine-tune's replicated hybrid (0.762 ± 0.027, table below) beats this
+27B ceiling — on knowledge updates, the specialised small extractor
+outperforms generic bigger models.
 
 ## Replicated results (2026-07-18)
 
@@ -51,12 +54,10 @@ estimate but does **not** clear the pre-registered p < 0.05 on the paired
 per-question test — the fine-tune fixes some questions and regresses
 others, so the evidence for the shipped default is *suggestive, not
 confirmed*, and the hybrid arm shows no measurable benefit at all. The
-earlier single-run "+0.102" comparison overstated the effect. The
-ceiling-extractor headline above (0.705 hybrid) is itself a single run
-whose config predates context persistence and cannot be replicated
-as-is; its nearest replicable sibling (`qwen-27b` window-0 bank) scores
-hybrid 0.695 ± 0.017 across 5 replicates — treat 0.705 as the top edge
-of that band, not a point fact.
+earlier single-run "+0.102" comparison overstated the effect. (The
+ceiling table above was renumbered 2026-07-19 from a fresh
+context-persisted 5-replicate run — its historical single-run
+predecessor, hybrid 0.705, landed inside the replicated band.)
 
 ## Extraction quality is the dominant factor
 

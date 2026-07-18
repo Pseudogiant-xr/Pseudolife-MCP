@@ -338,6 +338,22 @@ test over the 78 questions:
   answer-phase GPU time. There is no longer a reason to publish single-run
   comparisons.
 
+**2026-07-19 addendum** (overnight replication sweep):
+
+| config | rag | cortex | hybrid |
+|---|---|---|---|
+| `qwen-27b` ceiling-v2 (fresh oracle bank, context-persisted) | 0.567 ± 0.017 | 0.559 ± 0.030 | 0.710 ± 0.019 |
+| `qwen-27b` `_s` haystack | 0.321 ± 0.027 | 0.195 ± 0.011 | 0.367 ± 0.015 |
+
+- The historical single-run headline (oracle hybrid 0.705, unreplicable
+  bank) is retired: ceiling-v2 replicates it inside the band and is fully
+  reproducible (`--tag ceiling-v2` banks + contexts persisted).
+- The `_s` (realistic full-haystack) single-run 0.372 also holds under
+  replication (0.367 ± 0.015). The tight low cortex band (0.195 ± 0.011)
+  is the starvation signature — the known `_s` weak spot.
+- Cross-model: the shipped E4B v2 fine-tune's hybrid (0.762 ± 0.027)
+  beats the 27B ceiling's (0.710 ± 0.019) on this subset.
+
 ---
 
 # Lesson-synthesis benchmark (`lesson_synthesis_bench.py`)
