@@ -1,7 +1,7 @@
-<!-- i18n-source: v1 (2026-07-17) — canonical English text for the translated
+<!-- i18n-source: v2 (2026-07-18) — canonical English text for the translated
      front doors in this directory. Translators: keep every fenced code block
      byte-identical (commands are never translated); keep "Pseudolife-MCP",
-     "Claude Code", "MCP", "Cortex Console", and tool names like
+     "Claude Code", "Codex", "MCP", "Cortex Console", and tool names like
      memory_search in English; translate everything else in a natural
      technical register. Each translation must carry the matching
      "i18n-sync" marker (guard: tests/test_i18n_readme.py). Volatile claims
@@ -10,11 +10,11 @@
 
 # Pseudolife-MCP
 
-**Persistent long-term memory for Claude Code via the Model Context Protocol.**
+**Persistent long-term memory for Claude Code, Codex, and other MCP clients.**
 
-An MCP server that gives Claude (or any MCP-capable client) a long-term
-memory that persists across sessions — surviving context compactions and
-`/clear` resets. Claude is the LLM; this server is its memory on disk.
+An MCP server that gives coding agents a long-term memory that persists
+across sessions — surviving context compactions and fresh tasks. Your
+coding agent is the intelligence; this server is its memory on disk.
 
 What you get:
 
@@ -35,38 +35,49 @@ What you get:
 
 ## Quickstart
 
-Requires Docker and Claude Code. One command from clone to first memory:
+Requires Docker and Claude Code, Codex, or both. One command from clone to
+first memory (Claude is the default client):
 
 ```bash
 git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
 cd Pseudolife-MCP
 ops/install.sh          # Linux / macOS
 ops\install.ps1         # Windows (pwsh 7+)
+# Codex: add --client codex / -Client codex
+# Both:  add --client both  / -Client both
 ```
 
 The installer checks prerequisites (printing one exact fix line for anything
 missing), asks which dream extractor to use — Claude Sonnet via your Max
 plan (the lightest install) or a bundled local model that works without any
-plan — brings the stack up, wires everything into Claude Code, and
-health-checks the daemon. It is idempotent: re-run it any time.
+plan — brings the stack up, wires the selected clients (the session-start
+briefing hook, the standing memory-loop instruction in `~/.claude/CLAUDE.md`
+or `~/.codex/AGENTS.md`, and the MCP server registration), and health-checks
+the daemon. It is idempotent: re-run it any time.
 
-With the daemon running, the Claude Code **plugin** is the easiest wiring —
-two commands set up the MCP server, the session-start memory briefing, and
-the `/dream` + `/memory-status` commands:
+With the daemon running, the Claude Code **plugin** is the easiest wiring
+for Claude — two commands set up the MCP server, the session-start memory
+briefing, and the `/dream` + `/memory-status` commands:
 
 ```
 /plugin marketplace add Pseudogiant-xr/Pseudolife-MCP
 /plugin install pseudolife-memory@pseudolife-mcp
 ```
 
-Then, in any Claude Code session: *"remember that my staging box is
+Codex registers the server directly:
+
+```bash
+codex mcp add pseudolife-memory --url http://127.0.0.1:8765/mcp
+```
+
+Then, in either coding agent: *"remember that my staging box is
 haze-02"* — and in a fresh session days later, *"which box is staging?"*
 gets the answer back from memory. Browse everything in the Cortex Console
 at `http://127.0.0.1:8765/ui/`.
 
 ## How it works
 
-Claude stores one claim at a time as it works (`memory_store`,
+The agent stores one claim at a time as it works (`memory_store`,
 `memory_fact_set`); a surprise gate drops near-duplicates. Between
 sessions, the **dream** distils the stream into canonical facts, graph
 relations, and procedural lessons. At every session start, a briefing

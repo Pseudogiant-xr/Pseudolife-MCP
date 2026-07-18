@@ -1,12 +1,12 @@
-<!-- i18n-sync: v1 -->
+<!-- i18n-sync: v2 -->
 
 # Pseudolife-MCP
 
-[英文版 README](../../README.md) · 已同步:v1(2026-07-17)
+[英文版 README](../../README.md) · 已同步:v2(2026-07-18)
 
-**通过 Model Context Protocol(MCP)为 Claude Code 提供持久的长期记忆。**
+**为 Claude Code、Codex 及其他 MCP 客户端提供持久的长期记忆。**
 
-这是一个 MCP 服务器,为 Claude(或任何支持 MCP 的客户端)提供跨会话持久保存的长期记忆——即使经历上下文压缩和 `/clear` 重置,记忆依然留存。Claude 负责语言理解与生成,这个服务器则是它落在磁盘上的记忆。
+这是一个 MCP 服务器,为编码智能体提供跨会话持久保存的长期记忆——即使经历上下文压缩和全新任务,记忆依然留存。你的编码智能体负责智能本身,这个服务器则是它落在磁盘上的记忆。
 
 你将获得:
 
@@ -18,29 +18,37 @@
 
 ## 快速开始
 
-需要 Docker 和 Claude Code。从克隆仓库到获得第一条记忆,只需一条命令:
+需要 Docker,以及 Claude Code、Codex,或两者皆可。从克隆仓库到获得第一条记忆,只需一条命令(默认客户端为 Claude):
 
 ```bash
 git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
 cd Pseudolife-MCP
 ops/install.sh          # Linux / macOS
 ops\install.ps1         # Windows (pwsh 7+)
+# Codex: add --client codex / -Client codex
+# Both:  add --client both  / -Client both
 ```
 
-安装脚本会检查前置依赖(缺少什么就打印一行明确的修复命令),询问使用哪种梦境提取器——通过你的 Max 套餐调用 Claude Sonnet(安装最轻量)或使用内置的本地模型(无需任何套餐即可运行)——随后启动整套服务、将其接入 Claude Code,并对守护进程做健康检查。该脚本是幂等的:随时可以重复执行。
+安装脚本会检查前置依赖(缺少什么就打印一行明确的修复命令),询问使用哪种梦境提取器——通过你的 Max 套餐调用 Claude Sonnet(安装最轻量)或使用内置的本地模型(无需任何套餐即可运行)——随后启动整套服务,为所选客户端完成接入(会话开始时的简报钩子、写入 `~/.claude/CLAUDE.md` 或 `~/.codex/AGENTS.md` 的常驻记忆循环指令,以及 MCP 服务器注册),并对守护进程做健康检查。该脚本是幂等的:随时可以重复执行。
 
-守护进程启动后,接入最简单的方式是 Claude Code 的**插件**——两条命令即可配置好 MCP 服务器、会话开始时的记忆简报,以及 `/dream` 与 `/memory-status` 命令:
+守护进程启动后,对 Claude 而言,接入最简单的方式是 Claude Code 的**插件**——两条命令即可配置好 MCP 服务器、会话开始时的记忆简报,以及 `/dream` 与 `/memory-status` 命令:
 
 ```
 /plugin marketplace add Pseudogiant-xr/Pseudolife-MCP
 /plugin install pseudolife-memory@pseudolife-mcp
 ```
 
-之后,在任意 Claude Code 会话中说一句:*“记住我的 staging 服务器是 haze-02”*——几天后开启一个全新会话,再问一句:*“哪台是 staging 服务器?”*,答案就会从记忆中被找回。你可以在 Cortex Console(`http://127.0.0.1:8765/ui/`)中浏览一切。
+Codex 则直接注册该服务器:
+
+```bash
+codex mcp add pseudolife-memory --url http://127.0.0.1:8765/mcp
+```
+
+之后,在任意一种编码智能体中说一句:*“记住我的 staging 服务器是 haze-02”*——几天后开启一个全新会话,再问一句:*“哪台是 staging 服务器?”*,答案就会从记忆中被找回。你可以在 Cortex Console(`http://127.0.0.1:8765/ui/`)中浏览一切。
 
 ## 工作原理
 
-Claude 在工作过程中会逐条存入声明(`memory_store`、`memory_fact_set`);一道意外度过滤会剔除近似重复的内容。在会话之间,**dream** 会把记忆流蒸馏为规范事实、图谱关系与过程性经验教训。每次会话开始时,简报都会注入记忆中尚不确定的部分、过往工作的经验教训,以及你上次停下的地方。检索会将记忆带上的语义搜索与规范事实库结合起来,使已更正的答案胜过过时的答案。
+该智能体在工作过程中会逐条存入声明(`memory_store`、`memory_fact_set`);一道意外度过滤会剔除近似重复的内容。在会话之间,**dream** 会把记忆流蒸馏为规范事实、图谱关系与过程性经验教训。每次会话开始时,简报都会注入记忆中尚不确定的部分、过往工作的经验教训,以及你上次停下的地方。检索会将记忆带上的语义搜索与规范事实库结合起来,使已更正的答案胜过过时的答案。
 
 ## 文档(英文)
 

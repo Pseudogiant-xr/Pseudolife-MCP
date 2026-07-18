@@ -1,14 +1,14 @@
-<!-- i18n-sync: v1 -->
+<!-- i18n-sync: v2 -->
 
 # Pseudolife-MCP
 
-[영어 원본 README](../../README.md)와 동기화됨 — synced: v1 (2026-07-17)
+[영어 원본 README](../../README.md)와 동기화됨 — synced: v2 (2026-07-18)
 
-**Model Context Protocol(MCP)을 통해 Claude Code에 영구적인 장기 메모리를 제공합니다.**
+**Claude Code, Codex, 그리고 그 밖의 MCP 클라이언트를 위한 영구적인 장기 메모리.**
 
-Claude(또는 MCP를 지원하는 모든 클라이언트)에게 세션을 넘나들며 유지되는 장기
-메모리를 제공하는 MCP 서버입니다 — 컨텍스트 압축과 `/clear` 초기화에도 살아남습니다.
-Claude는 LLM이고, 이 서버는 디스크에 저장되는 그 메모리입니다.
+코딩 에이전트에게 세션을 넘나들며 유지되는 장기 메모리를 제공하는 MCP 서버입니다 —
+컨텍스트 압축과 새로운 작업에도 살아남습니다. 코딩 에이전트가 지능이고, 이 서버는
+디스크에 저장되는 그 메모리입니다.
 
 제공하는 기능:
 
@@ -27,40 +27,49 @@ Claude는 LLM이고, 이 서버는 디스크에 저장되는 그 메모리입니
 
 ## 빠른 시작
 
-Docker와 Claude Code가 필요합니다. 클론부터 첫 메모리 저장까지 명령 한 줄이면
-충분합니다:
+Docker와 Claude Code, Codex, 또는 둘 다가 필요합니다. 클론부터 첫 메모리 저장까지
+명령 한 줄이면 충분합니다 (Claude가 기본 클라이언트입니다):
 
 ```bash
 git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
 cd Pseudolife-MCP
 ops/install.sh          # Linux / macOS
 ops\install.ps1         # Windows (pwsh 7+)
+# Codex: add --client codex / -Client codex
+# Both:  add --client both  / -Client both
 ```
 
 설치 스크립트는 필수 구성 요소를 점검하고(누락된 항목이 있으면 정확한 해결
 명령을 한 줄로 출력합니다), 어떤 드림 추출기를 사용할지 묻습니다 — Max 플랜을
 통한 Claude Sonnet(가장 가벼운 설치) 또는 어떤 플랜 없이도 동작하는 번들 로컬
-모델 중 하나입니다 — 그런 다음 스택을 띄우고, Claude Code에 모든 것을 연결하고,
-데몬 상태를 점검합니다. 멱등적(idempotent)으로 동작하므로 언제든 다시 실행해도
-안전합니다.
+모델 중 하나입니다 — 그런 다음 스택을 띄우고, 선택한 클라이언트를 연결하며
+(세션 시작 브리핑 훅, `~/.claude/CLAUDE.md` 또는 `~/.codex/AGENTS.md`의 상시
+메모리 루프 지침, 그리고 MCP 서버 등록), 데몬 상태를 점검합니다. 멱등적
+(idempotent)으로 동작하므로 언제든 다시 실행해도 안전합니다.
 
-데몬이 실행 중이라면, Claude Code **플러그인**이 가장 쉬운 연결 방법입니다 —
-명령 두 줄로 MCP 서버, 세션 시작 시 메모리 브리핑, 그리고 `/dream` +
-`/memory-status` 명령까지 한 번에 설정됩니다:
+데몬이 실행 중이라면, Claude Code **플러그인**이 Claude를 위한 가장 쉬운 연결
+방법입니다 — 명령 두 줄로 MCP 서버, 세션 시작 시 메모리 브리핑, 그리고
+`/dream` + `/memory-status` 명령까지 한 번에 설정됩니다:
 
 ```
 /plugin marketplace add Pseudogiant-xr/Pseudolife-MCP
 /plugin install pseudolife-memory@pseudolife-mcp
 ```
 
-이후 어떤 Claude Code 세션에서든 *"내 스테이징 박스는 haze-02라고
+Codex는 서버를 직접 등록합니다:
+
+```bash
+codex mcp add pseudolife-memory --url http://127.0.0.1:8765/mcp
+```
+
+이후 두 코딩 에이전트 중 어느 쪽에서든 *"내 스테이징 박스는 haze-02라고
 기억해줘"*라고 말하면 — 며칠 후 새 세션에서 *"스테이징 박스가 뭐였지?"*라고
 물었을 때 메모리에서 답을 가져옵니다. Cortex Console
 (`http://127.0.0.1:8765/ui/`)에서 모든 내용을 둘러볼 수 있습니다.
 
 ## 동작 방식
 
-Claude는 작업하면서 한 번에 하나씩 주장(claim)을 저장하며(`memory_store`,
+에이전트는 작업하면서 한 번에 하나씩 주장(claim)을 저장하며(`memory_store`,
 `memory_fact_set`), 서프라이즈 게이트(surprise gate)가 거의 중복된 항목을
 걸러냅니다. 세션 사이에는 **드림(dream)**이 스트림을 정규화된 사실, 그래프
 관계, 절차적 교훈으로 압축합니다. 매 세션 시작 시 브리핑이 메모리가 확신하지

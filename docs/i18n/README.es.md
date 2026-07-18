@@ -1,15 +1,15 @@
-<!-- i18n-sync: v1 -->
+<!-- i18n-sync: v2 -->
 
 # Pseudolife-MCP
 
-> Traducción del [README](../../README.md) canónico — sincronizado: v1 (2026-07-17)
+> Traducción del [README](../../README.md) canónico — sincronizado: v2 (2026-07-18)
 
-**Memoria persistente a largo plazo para Claude Code a través del Model Context Protocol (MCP).**
+**Memoria persistente a largo plazo para Claude Code, Codex y otros clientes MCP.**
 
-Un servidor MCP que le da a Claude (o a cualquier cliente compatible con MCP)
-una memoria de largo plazo que persiste entre sesiones — sobreviviendo a las
-compactaciones de contexto y a los reinicios de `/clear`. Claude es el LLM;
-este servidor es su memoria en disco.
+Un servidor MCP que le da a los agentes de codificación una memoria de largo
+plazo que persiste entre sesiones — sobreviviendo a las compactaciones de
+contexto y a las tareas nuevas. Tu agente de codificación es la
+inteligencia; este servidor es su memoria en disco.
 
 Lo que obtienes:
 
@@ -32,41 +32,53 @@ Lo que obtienes:
 
 ## Inicio rápido
 
-Requiere Docker y Claude Code. Un solo comando desde el clone hasta el
-primer recuerdo:
+Requiere Docker y Claude Code, Codex, o ambos. Un solo comando desde el
+clone hasta el primer recuerdo (Claude es el cliente por defecto):
 
 ```bash
 git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
 cd Pseudolife-MCP
 ops/install.sh          # Linux / macOS
 ops\install.ps1         # Windows (pwsh 7+)
+# Codex: add --client codex / -Client codex
+# Both:  add --client both  / -Client both
 ```
 
 El instalador comprueba los requisitos previos (mostrando una línea exacta
 de solución para lo que falte), pregunta qué extractor de sueños usar —
 Claude Sonnet a través de tu plan Max (la instalación más ligera) o un
 modelo local incluido que funciona sin ningún plan —, levanta la pila,
-conecta todo con Claude Code, y verifica el estado del daemon. Es
-idempotente: puedes volver a ejecutarlo en cualquier momento.
+conecta los clientes seleccionados (el hook de resumen al inicio de
+sesión, la instrucción permanente del ciclo de memoria en
+`~/.claude/CLAUDE.md` o `~/.codex/AGENTS.md`, y el registro del servidor
+MCP), y verifica el estado del daemon. Es idempotente: puedes volver a
+ejecutarlo en cualquier momento.
 
 Con el daemon en ejecución, el **plugin** de Claude Code es la forma más
-sencilla de conectarlo todo — dos comandos configuran el servidor MCP, el
-resumen de memoria al inicio de sesión, y los comandos `/dream` +
-`/memory-status`:
+sencilla de conectarlo todo para Claude — dos comandos configuran el
+servidor MCP, el resumen de memoria al inicio de sesión, y los comandos
+`/dream` + `/memory-status`:
 
 ```
 /plugin marketplace add Pseudogiant-xr/Pseudolife-MCP
 /plugin install pseudolife-memory@pseudolife-mcp
 ```
 
-Luego, en cualquier sesión de Claude Code: *"recuerda que mi servidor de
-staging es haze-02"* — y en una sesión nueva, días después, *"¿cuál es el
-servidor de staging?"* obtiene la respuesta de vuelta desde la memoria.
-Explora todo en la Cortex Console en `http://127.0.0.1:8765/ui/`.
+Codex registra el servidor directamente:
+
+```bash
+codex mcp add pseudolife-memory --url http://127.0.0.1:8765/mcp
+```
+
+Luego, en cualquiera de los dos agentes de codificación: *"recuerda que mi
+servidor de staging es haze-02"* — y en una sesión nueva, días después,
+*"¿cuál es el servidor de staging?"* obtiene la respuesta de vuelta desde
+la memoria. Explora todo en la Cortex Console en
+`http://127.0.0.1:8765/ui/`.
 
 ## Cómo funciona
 
-Claude guarda una afirmación a la vez mientras trabaja (`memory_store`,
+El agente guarda una afirmación a la vez mientras trabaja (`memory_store`,
 `memory_fact_set`); una compuerta de novedad descarta los casi duplicados.
 Entre sesiones, el **sueño** destila el flujo en hechos canónicos,
 relaciones de grafo y lecciones de procedimiento. Al inicio de cada
