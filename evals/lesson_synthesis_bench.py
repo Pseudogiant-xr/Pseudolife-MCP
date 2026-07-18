@@ -285,7 +285,7 @@ def run_target(name: str, base_url: str, model: str) -> dict:
 # infer_outcomes deliberately does NOT exclude (unlike fact extraction).
 #
 # `expect` is either a set of (task-ish keyword, outcome) pairs — a claim is a
-# match when the keyword is a substring of the claimed `task` (case-
+# match when the keyword is a substring of the claimed `task`+`about` (case-
 # insensitive) and `outcome` matches exactly — or the literal string
 # "abstain" for fixtures with no real, resolvable outcome in the record.
 INFER_FIXTURES = [
@@ -322,7 +322,12 @@ INFER_FIXTURES = [
                  "across workers\n"
                  "- (status) pool sharing caused cross-test state leaks — "
                  "reverted, dead end"),
-     "expect": {("test suite", "success"), ("test suite", "failure")}},
+     # Second keyword is "pool", not "test suite": the schema asks for a
+     # short task-type phrase per outcome, and a model that correctly
+     # splits the two sub-attempts words the second around the pool
+     # experiment — demanding the session title in both punished correct
+     # behavior (2026-07-18 E4B diagnostics).
+     "expect": {("test suite", "success"), ("pool", "failure")}},
     {"name": "ambiguous-1",
      "context": ("Session: reading about vector databases\n"
                  "- (notes) pgvector supports HNSW and IVFFlat indexes"),
@@ -353,7 +358,7 @@ def score_infer_fixture(fx: dict, claims: list[dict] | None) -> dict:
     ``claims is None`` (malformed reply) always scores 0 with a note.
     Abstain fixtures score 1.0 iff the extractor returned ``[]``. Outcome
     fixtures score the fraction of expected (keyword, outcome) pairs matched
-    — keyword checked via substring-in-task, outcome via exact match — and
+    — keyword checked via substring over task+about, outcome exact — and
     raise an ``extra_flag`` when the extractor claimed more than
     ``len(expect) + 1`` things (over-claiming on a bounded record).
     """
@@ -368,10 +373,16 @@ def score_infer_fixture(fx: dict, claims: list[dict] | None) -> dict:
                 "note": "" if ok else "expected abstain, got claims"}
     remaining = set(expect)
     for c in claims:
-        task = _norm(c.get("task"))
+        # Match against task AND about: the schema routes approach nouns
+        # into `about`, and a model may legitimately keep the session-level
+        # task phrase while naming the sub-approach there (2026-07-18:
+        # Sonnet words mixed-session that way; E4B splits task types —
+        # both are schema-compliant, the metric must accept either).
+        grounding = _norm(f"{c.get('task') or ''} {c.get('about') or ''}")
         outcome = str(c.get("outcome", "")).strip()
         hit = next((pair for pair in remaining
-                    if pair[0].lower() in task and pair[1] == outcome), None)
+                    if pair[0].lower() in grounding and pair[1] == outcome),
+                   None)
         if hit is not None:
             remaining.discard(hit)
     matched = len(expect) - len(remaining)

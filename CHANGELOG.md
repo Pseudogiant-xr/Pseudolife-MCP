@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-18 — outcome-inference abstention hardening)
+- **The inference prompt now requires an attempt-with-result before
+  claiming an outcome**: read-only/note-taking sessions and deferred
+  decisions abstain instead of inventing signals, and the
+  correction-vs-failure boundary is explicit (an approach failing on its
+  own is failure; correction requires the user correcting the assistant).
+  Bundled-sidecar (E4B) score on the `--infer` rung: 0.562 → 0.875 with
+  both abstention fixtures passing; Sonnet primary unregressed
+  (~0.90 over 3 runs). Bench matcher now grounds expected keywords
+  against `task`+`about` (both schema-compliant phrasings accepted).
+
 ### Added (2026-07-18 — auto-outcome inference at episode close)
 - **The daemon now infers outcome signals for silent sessions**: when a
   session episode closes with stored entries but zero `memory_outcome`
