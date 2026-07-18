@@ -72,6 +72,31 @@ def test_plugin_hook_wiring():
     assert "curl" in script and "--max-time" in script
     assert "not reachable" in script          # the fallback guidance
     assert "PSEUDOLIFE_MCP_TOKEN" in script   # bearer passthrough for token setups
+    # session_id/source forwarded from stdin hook JSON (spec: tiered session
+    # resolution needs the client-provided id, not just the daemon default)
+    assert '"session_id"' in script
+    assert '"source"' in script
+    assert "session_id=${SID}" in script
+
+
+def test_plugin_hook_wiring_session_end():
+    """SessionEnd must be wired to session-end.sh, mirroring SessionStart's
+    group structure, and the script must POST the episode-close call while
+    never blocking session end (always exit 0) and honoring the bearer
+    token the same way session-start.sh does."""
+    hooks = json.loads(_read("plugin/hooks/hooks.json"))
+    groups = hooks["hooks"]["SessionEnd"]
+    commands = [h["command"] for g in groups for h in g["hooks"]]
+    assert any("${CLAUDE_PLUGIN_ROOT}/hooks/session-end.sh" in c
+               for c in commands)
+
+    script = _read("plugin/hooks/session-end.sh")
+    assert "/api/hook/session-end" in script
+    assert "curl" in script and "--max-time" in script
+    assert "-X POST" in script
+    assert '"session_id"' in script
+    assert "PSEUDOLIFE_MCP_TOKEN" in script   # bearer passthrough for token setups
+    assert re.search(r"^exit 0\s*$", script, re.M)   # must never block session end
 
 
 # ── content sync ────────────────────────────────────────────────────────────
