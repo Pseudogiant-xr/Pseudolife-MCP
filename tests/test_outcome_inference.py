@@ -120,3 +120,84 @@ def test_cursor_roundtrip_defaults(pg_service):
         assert svc._load_infer_cursor() == {"ts": 0.0, "retry": {}}
         svc._save_infer_cursor({"ts": 12.5, "retry": {"e1": 1}})
         assert svc._load_infer_cursor() == {"ts": 12.5, "retry": {"e1": 1}}
+
+
+# ── infer_outcomes_stage (dream stage) ───────────────────────────────────────
+
+
+class _FakeInferExtractor:
+    def __init__(self, script):
+        self.script = list(script)   # each: list | None | Exception
+        self.calls = 0
+
+    def infer_outcomes(self, context_text, *, cap=3):
+        self.calls += 1
+        item = self.script.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+
+def _pending_inferred(svc, root_id):
+    return [s for s in svc._storage.pending_signals(limit=100)
+            if s.get("episode_id") == root_id]
+
+
+def test_stage_writes_inferred_signals_and_advances(closed_zero_signal_episode):
+    svc, root_id = closed_zero_signal_episode
+    fake = _FakeInferExtractor([[{"task": "deploy", "outcome": "success",
+                                  "about": None, "detail": "verified"}]])
+    stats = svc.infer_outcomes_stage(fake)
+    assert stats == {"scanned": 1, "written": 1}
+    sigs = _pending_inferred(svc, root_id)
+    assert len(sigs) == 1 and sigs[0]["origin"] == "inferred"
+    # structurally idempotent: episode now has signals, cursor advanced
+    assert svc.infer_outcomes_stage(
+        _FakeInferExtractor([])) == {"scanned": 0, "written": 0}
+
+
+def test_stage_clean_empty_advances_without_writes(closed_zero_signal_episode):
+    svc, root_id = closed_zero_signal_episode
+    assert svc.infer_outcomes_stage(
+        _FakeInferExtractor([[]])) == {"scanned": 1, "written": 0}
+    assert _pending_inferred(svc, root_id) == []
+    with svc._lock:
+        assert svc._pending_inference_candidates() == []   # cursor moved
+
+
+def test_stage_malformed_retries_twice_then_advances(closed_zero_signal_episode):
+    svc, root_id = closed_zero_signal_episode
+    assert svc.infer_outcomes_stage(
+        _FakeInferExtractor([None])) == {"scanned": 1, "written": 0}
+    with svc._lock:
+        assert svc._load_infer_cursor()["retry"] == {root_id: 1}
+        assert len(svc._pending_inference_candidates()) == 1   # still pending
+    assert svc.infer_outcomes_stage(
+        _FakeInferExtractor([None])) == {"scanned": 1, "written": 0}
+    with svc._lock:
+        cur = svc._load_infer_cursor()
+        assert cur["retry"] == {}                # cleared
+        assert svc._pending_inference_candidates() == []   # advanced past
+
+
+def test_stage_transport_failure_holds_cursor(closed_zero_signal_episode):
+    svc, root_id = closed_zero_signal_episode
+    from pseudolife_memory.memory.dream import ExtractorError
+    stats = svc.infer_outcomes_stage(
+        _FakeInferExtractor([ExtractorError("down")]))
+    assert stats["written"] == 0
+    with svc._lock:
+        assert len(svc._pending_inference_candidates()) == 1   # untouched
+
+
+def test_stage_respects_kill_switch(closed_zero_signal_episode):
+    svc, _root = closed_zero_signal_episode
+    svc.config.memory.lessons.infer_outcomes = False
+    stats = svc.infer_outcomes_stage(_FakeInferExtractor([]))
+    assert stats.get("skipped") == "disabled"
+
+
+def test_stage_skips_extractor_without_method(closed_zero_signal_episode):
+    svc, _root = closed_zero_signal_episode
+    stats = svc.infer_outcomes_stage(object())
+    assert stats.get("skipped") == "no-extractor"

@@ -1831,6 +1831,63 @@ class MemoryService:
                 self._save_lessons()
             return {"removed": removed, "task": task, "aspect": aspect}
 
+    def infer_outcomes_stage(self, extractor) -> dict[str, Any]:
+        """Dream stage (spec 2026-07-18): infer outcome signals for closed
+        zero-signal episodes. Locked pull -> unlocked extract -> locked
+        commit; transport failure halts with cursor held; malformed output
+        gets 2 attempts then the cursor advances past the episode."""
+        cfg = self.config.memory.lessons
+        if self._storage is None:
+            return {"scanned": 0, "written": 0, "skipped": "no-storage"}
+        if not (cfg.enabled and cfg.infer_outcomes):
+            return {"scanned": 0, "written": 0, "skipped": "disabled"}
+        fn = getattr(extractor, "infer_outcomes", None)
+        if fn is None:
+            return {"scanned": 0, "written": 0, "skipped": "no-extractor"}
+        with self._lock:
+            self._ensure_init()
+            candidates = self._pending_inference_candidates()
+        scanned = written = 0
+        for cand in candidates:
+            try:                                   # unlocked: extractor call
+                claims = fn(cand["context"],
+                            cap=cfg.infer_outcomes_max_signals)
+            except Exception as exc:  # noqa: BLE001 — transport: hold cursor
+                logger.warning(
+                    "outcome inference halted (%s); cursor held", exc)
+                break
+            scanned += 1
+            with self._lock:
+                cur = self._load_infer_cursor()
+                rid = cand["root_id"]
+                if claims is None:                 # malformed: bounded retry
+                    attempts = int(cur["retry"].get(rid, 0)) + 1
+                    if attempts >= 2:
+                        cur["retry"].pop(rid, None)
+                        cur["ts"] = cand["ended_at"]
+                        self._save_infer_cursor(cur)
+                        logger.warning(
+                            "outcome inference: advancing past episode %s "
+                            "after %d malformed attempts", rid, attempts)
+                        continue
+                    cur["retry"][rid] = attempts
+                    self._save_infer_cursor(cur)
+                    logger.warning(
+                        "outcome inference: malformed output for episode "
+                        "%s (attempt %d); will retry next dream",
+                        rid, attempts)
+                    break                          # keep episode order
+                for c in claims:
+                    self._storage.add_signal(
+                        task=c["task"], outcome=c["outcome"],
+                        about=c.get("about"), detail=c.get("detail"),
+                        origin="inferred", episode_id=rid)
+                    written += 1
+                cur["retry"].pop(rid, None)
+                cur["ts"] = cand["ended_at"]
+                self._save_infer_cursor(cur)
+        return {"scanned": scanned, "written": written}
+
     def synthesize_lessons(self, extractor, *, limit: int | None = None) -> dict[str, Any]:
         """Drain pending outcome signals and synthesise lessons via ``extractor``.
 
@@ -2318,11 +2375,13 @@ class MemoryService:
             # pending — synthesise lessons regardless. Still refresh the graph
             # digest so manual graph edits (cleanup, direct graph_relate) are
             # reflected even when there is no memory backlog.
+            outcome_inference = self.infer_outcomes_stage(extractor)
             lessons = self.synthesize_lessons(extractor)
             graph_insight = self._safe_refresh_graph_insight()
             return {"pulled": 0, "claims": 0, "inserted": 0, "confirmed": 0,
                     "contested": 0, "superseded": 0, "relations": 0,
                     "cursor": pulled["cursor"], "lessons": lessons,
+                    "outcome_inference": outcome_inference,
                     "graph_insight": graph_insight}
         from pseudolife_memory.memory.cortex import _norm_key
         import time as _time
@@ -2463,13 +2522,15 @@ class MemoryService:
         # just created resolve to their graph nodes instead of re-creating.
         alias_candidates = self._propose_dream_alias_candidates(
             new_entities, known_entities)
+        outcome_inference = self.infer_outcomes_stage(extractor)
         lessons = self.synthesize_lessons(extractor)
         graph_insight = self._safe_refresh_graph_insight()
         sources_attributed = self.graph_backfill_sources().get("attributed", 0)
         return {"pulled": len(entries), "claims": sum(tally.values()),
                 "cursor": newest, "relations": relations_n, **tally,
                 "alias_candidates": alias_candidates,
-                "lessons": lessons, "graph_insight": graph_insight,
+                "lessons": lessons, "outcome_inference": outcome_inference,
+                "graph_insight": graph_insight,
                 "traces": traces_n, "sources_attributed": sources_attributed,
                 "quarantined": quarantined}
 
