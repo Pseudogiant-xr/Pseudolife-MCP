@@ -71,12 +71,10 @@ def test_plugin_hook_wiring():
     assert "/api/hook/session-start" in script
     assert "curl" in script and "--max-time" in script
     assert "not reachable" in script          # the fallback guidance
-    assert "PSEUDOLIFE_MCP_TOKEN" in script   # bearer passthrough for token setups
-    # session_id/source forwarded from stdin hook JSON (spec: tiered session
-    # resolution needs the client-provided id, not just the daemon default)
-    assert '"session_id"' in script
-    assert '"source"' in script
-    assert "session_id=${SID}" in script
+    # Pin bearer-token forwarding in the actual curl call
+    assert '"${AUTH[@]}"' in script
+    # Pin query-string construction and forwarding to curl (session_id/source)
+    assert '"${URL}/api/hook/session-start${QS}"' in script
 
 
 def test_plugin_hook_wiring_session_end():
@@ -94,8 +92,12 @@ def test_plugin_hook_wiring_session_end():
     assert "/api/hook/session-end" in script
     assert "curl" in script and "--max-time" in script
     assert "-X POST" in script
-    assert '"session_id"' in script
-    assert "PSEUDOLIFE_MCP_TOKEN" in script   # bearer passthrough for token setups
+    # Pin bearer-token forwarding in the actual curl invocation
+    assert '"${AUTH[@]}"' in script
+    # Pin session_id in the POST data payload (with shell escaping for -d flag)
+    assert r'"{\"session_id\":\"${SID}\"}"' in script
+    # Pin the endpoint target
+    assert '"${URL}/api/hook/session-end"' in script
     assert re.search(r"^exit 0\s*$", script, re.M)   # must never block session end
 
 
