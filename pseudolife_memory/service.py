@@ -56,7 +56,7 @@ from pseudolife_memory.memory.cortex import CortexStore
 from pseudolife_memory.memory.slots import Slot
 from pseudolife_memory.session_title import (
     GENERIC_TITLE_RE, derive_session_title)
-from pseudolife_memory.writer_context import resolve_writer
+from pseudolife_memory.writer_context import resolve_writer_detailed
 from pseudolife_memory.utils.config import (
     AppConfig,
     ContextConfig,
@@ -380,12 +380,59 @@ class MemoryService:
         # 2026-07-11): {"which": "primary"|"fallback", "base_url": str | None,
         # "at": float} — surfaced via dream_status. None until a dream has run.
         self._last_dream_extractor: dict | None = None
+        # Identity tier 3 (spec 2026-07-18): machine-scoped active-session
+        # pointer, set by the SessionStart hook / cleared by SessionEnd.
+        # ``(session_id, ts)`` or None. In-memory always; persisted to
+        # Postgres meta (loaded once in _ensure_init) when storage is up —
+        # file-mode keeps this process-local only.
+        self._active_session: tuple[str, float] | None = None
+
+    _ACTIVE_SESSION_META_KEY = "active_session_pointer"
 
     def _resolve_writer(self) -> tuple[str, str | None]:
-        """The ``(writer_id, session_id)`` to attribute the current write to —
-        per-request when inside the daemon (``X-PL-Writer`` header), else the
-        process default. See :mod:`pseudolife_memory.writer_context`."""
-        return resolve_writer(self._writer_id)
+        """Identity tiers 1/3/4 (spec 2026-07-18): X-PL-Session header ->
+        hook-registered active session -> legacy mcp-session-id (removed
+        from MCP 2026-07-28). Tier 2 (episode handle) is per-call at the
+        write sites; tier 5 is the reaper's idle-gap floor."""
+        w, header_s, transport_s = resolve_writer_detailed(self._writer_id)
+        if header_s:
+            return (w, header_s)
+        active = getattr(self, "_active_session", None)
+        if active is not None:
+            return (w, active[0])
+        return (w, transport_s)
+
+    def set_active_session(self, session_id: str | None) -> None:
+        """Machine-scoped active-session pointer (identity tier 3): set by
+        the SessionStart hook, cleared by SessionEnd. Last-start-wins by
+        design — concurrent unheaded sessions are the shim's/handle's job."""
+        with self._lock:
+            self._ensure_init()
+            if session_id:
+                self._active_session = (str(session_id), time.time())
+                if self._storage is not None:
+                    self._storage.set_meta(
+                        self._ACTIVE_SESSION_META_KEY,
+                        {"session_id": str(session_id),
+                         "ts": self._active_session[1]})
+            else:
+                self._active_session = None
+                if self._storage is not None:
+                    self._storage.set_meta(self._ACTIVE_SESSION_META_KEY, None)
+
+    def clear_active_session(self, session_id: str) -> bool:
+        """Clear the pointer only if it currently names ``session_id``.
+
+        Must not hold ``self._lock`` while calling :meth:`set_active_session`
+        (non-reentrant) — check ownership under the lock, release, then
+        delegate the actual clear."""
+        with self._lock:
+            self._ensure_init()
+            cur = getattr(self, "_active_session", None)
+            if cur is None or cur[0] != session_id:
+                return False
+        self.set_active_session(None)
+        return True
 
     def _assert_public_search_path(self) -> None:
         """Fail loud if the shared connection would resolve unqualified tables to
@@ -510,6 +557,12 @@ class MemoryService:
             self._assert_public_search_path()
             from pseudolife_memory.memory.graph_store import PostgresNetworkxGraphStore
             self._graph = PostgresNetworkxGraphStore(self._storage)
+            # Identity tier 3: hydrate the active-session pointer left by a
+            # prior process (daemon restart) so tier resolution survives it.
+            raw = self._storage.get_meta(self._ACTIVE_SESSION_META_KEY)
+            if isinstance(raw, dict) and raw.get("session_id"):
+                self._active_session = (str(raw["session_id"]),
+                                         float(raw.get("ts") or 0.0))
         self._cms = ContinuumMemorySystem(
             self.config.memory,
             reference_bank=self._reference,
