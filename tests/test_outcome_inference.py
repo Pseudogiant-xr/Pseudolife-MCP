@@ -197,6 +197,18 @@ def test_stage_respects_kill_switch(closed_zero_signal_episode):
     assert stats.get("skipped") == "disabled"
 
 
+# ── dream_status outcome inference reporting ────────────────────────────────
+
+def test_dream_status_counts_inference_pending(closed_zero_signal_episode):
+    svc, _root = closed_zero_signal_episode
+    st = svc.dream_status()
+    assert st["infer_outcomes"]["pending"] == 1
+    assert st["would_fire"] is True
+    svc.config.memory.lessons.infer_outcomes = False
+    st = svc.dream_status()
+    assert st["infer_outcomes"]["pending"] == 0
+
+
 def test_stage_skips_extractor_without_method(closed_zero_signal_episode):
     svc, _root = closed_zero_signal_episode
     stats = svc.infer_outcomes_stage(object())

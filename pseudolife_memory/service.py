@@ -2591,6 +2591,7 @@ class MemoryService:
         import time as _t
         cfg = self.config.memory.dream
         backlog = self.dream_pull(limit=10**9)["count"]
+
         with self._lock:
             self._ensure_init()
             assert self._cms is not None and self._cortex is not None
@@ -2599,14 +2600,25 @@ class MemoryService:
                 default=0.0,
             )
             cursor = self._cortex.dream_cursor
+
+            lessons_cfg = self.config.memory.lessons
+            if lessons_cfg.enabled and lessons_cfg.infer_outcomes:
+                infer_pending = len(self._pending_inference_candidates())
+                retry_pending = len(self._load_infer_cursor()["retry"])
+            else:
+                infer_pending = retry_pending = 0
+
         idle = (_t.time() - latest) if latest else 0.0
         would_fire = bool(cfg.enabled and (
             backlog >= cfg.min_batch
             or (backlog >= 1 and idle >= cfg.idle_seconds)
+            or infer_pending >= 1
         ))
         from pseudolife_memory.memory.dream import _status_extractor_fields
         return {"backlog": backlog, "idle_seconds": idle,
                 "dream_cursor": cursor, "would_fire": would_fire,
+                "infer_outcomes": {"pending": infer_pending,
+                                   "retry_pending": retry_pending},
                 **_status_extractor_fields(
                     cfg, getattr(self, "_last_dream_extractor", None))}
 
