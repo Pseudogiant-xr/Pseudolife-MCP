@@ -196,7 +196,10 @@ def _format_signals(signals: list[dict]) -> str:
             parts.append(f"detail={s['detail']!r}")
         if s.get("polarity"):
             parts.append(f"polarity={s['polarity']}")
-        lines.append(" ".join(parts))
+        line = " ".join(parts)
+        if s.get("origin") == "inferred":
+            line = f"[machine-inferred] {line}"
+        lines.append(line)
     return "\n".join(lines)
 
 

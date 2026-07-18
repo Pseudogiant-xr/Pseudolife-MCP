@@ -228,3 +228,49 @@ def test_stage_survives_malformed_claim_dict(closed_zero_signal_episode):
     assert [s["task"] for s in sigs] == ["good claim"]
     with svc._lock:
         assert svc._pending_inference_candidates() == []   # cursor advanced
+
+
+# ── all-inferred batch confidence discount ──────────────────────────────────
+
+def test_all_inferred_batch_discounts_lesson_confidence(closed_zero_signal_episode):
+    svc, root_id = closed_zero_signal_episode
+    svc._storage.add_signal(task="deploy daemon", outcome="failure",
+                            detail="rollback needed", origin="inferred",
+                            episode_id=root_id)
+
+    class _LessonExtractor:
+        def extract_lessons(self, signals):
+            assert all(s.get("origin") == "inferred" for s in signals)
+            return [{"task": "deploy daemon", "aspect": "process",
+                     "lesson": "verify health before rollback",
+                     "polarity": "-", "outcome": "failure"}]
+
+    res = svc.synthesize_lessons(_LessonExtractor())
+    assert res["lessons"] == 1
+    row = svc.lesson_search("deploy daemon", top_k=1)
+    lesson = row["entries"][0]
+    assert lesson["confidence"] == pytest.approx(0.4)
+    assert "inferred" in (lesson.get("provenance") or [])
+
+
+def test_mixed_batch_keeps_default_confidence(closed_zero_signal_episode):
+    svc, root_id = closed_zero_signal_episode
+    svc._storage.add_signal(task="deploy daemon", outcome="failure",
+                            detail="rollback needed", origin="inferred",
+                            episode_id=root_id)
+    svc._storage.add_signal(task="deploy daemon", outcome="success",
+                            detail="explicit report", origin="agent",
+                            episode_id=root_id)
+
+    class _LessonExtractor:
+        def extract_lessons(self, signals):
+            return [{"task": "deploy daemon", "aspect": "process",
+                     "lesson": "verify health before rollback",
+                     "polarity": "-", "outcome": "failure"}]
+
+    res = svc.synthesize_lessons(_LessonExtractor())
+    assert res["lessons"] == 1
+    row = svc.lesson_search("deploy daemon", top_k=1)
+    lesson = row["entries"][0]
+    assert lesson["confidence"] == pytest.approx(0.6)
+    assert "inferred" not in (lesson.get("provenance") or [])

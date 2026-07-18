@@ -1912,6 +1912,8 @@ class MemoryService:
             signals = self._storage.pending_signals(limit=limit)
         if not signals:
             return {"signals": 0, "lessons": 0}
+        all_inferred = bool(signals) and all(
+            s.get("origin") == "inferred" for s in signals)
         fn = getattr(extractor, "extract_lessons", None)
         if fn is None:
             return {"signals": len(signals), "lessons": 0, "skipped": "no-extractor"}
@@ -1933,9 +1935,11 @@ class MemoryService:
                     c["task"], c.get("aspect", "lesson"), c["lesson"],
                     about=c.get("about"), outcome=c.get("outcome", "success"),
                     polarity=c.get("polarity", "+"),
-                    confidence=float(c.get("confidence", 0.6)),
+                    confidence=(0.4 if all_inferred
+                                else float(c.get("confidence", 0.6))),
                     origin=c.get("origin", "agent"),
-                    provenance=set(c.get("provenance") or []),
+                    provenance=(set(c.get("provenance") or [])
+                                | ({"inferred"} if all_inferred else set())),
                     valid_time=batch_valid_time)
                 written += 1
             except Exception as exc:  # noqa: BLE001
