@@ -6,6 +6,36 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-07-19 — session identity: header+handle attribution)
+- **`memory_store` / `memory_fact_set` / `memory_outcome` attribution is now
+  unconditional on a valid `episode` handle, even when a header session
+  (`X-PL-Session` / `set_writer_context` override) is also present** — per
+  the design contract's "Precedence rationale" (`docs/superpowers/specs/
+  2026-07-18-session-identity-contract-design.md`), the header wins
+  *identity* but the write must still attribute to the handle's episode.
+  `MemoryService.store()` previously wrote its attribution override to
+  `self._cms.bands[0].entries[-1]` **after** `CMS.store()` returned — but
+  `CMS.store()` runs its promotion walk internally before returning, and
+  promotion builds a **new** `MemoryEntry` object in the destination band
+  (`CMS._consolidate`), so a promoted entry silently kept the header
+  session's lazily-opened episode instead of the handle's. Fixed by adding
+  `CMS.store(..., attribution_episode_id=...)`, applied to the entry
+  immediately after the session-key stamp and before both the write-through
+  insert and the promotion walk, so it lands in the persisted row and
+  survives promotion. `record_outcome` already attributed unconditionally
+  (`resolved[0] if resolved is not None else ...`, no header check) and
+  needed no change; pinned with a regression test regardless.
+
+### Changed (2026-07-19 — project-scope hygiene)
+- **Scope derivation policy** (`memory.scopes` config): the entity-sources
+  backfill now case-folds scope keys (`Pseudolife` and `pseudolife` are one
+  scope), skips meta source tags that must never become projects
+  (`scopes.exclude`, default `status`/`claude`/`agent`/`correction`), and
+  writes an additional umbrella scope for sources mapped in `scopes.rollup`
+  (both rows kept — family view and fine-grained filter coexist). Previously
+  every distinct `entries.source` string minted its own Atlas project,
+  fragmenting one project family across many scopes.
+
 ### Removed (2026-07-18 — neural-era residue sweep)
 - **`pseudolife_memory/memory/contrastive.py` deleted** — the
   `ContrastiveUpdater` / `NegativeSignalDetector` classes were constructed

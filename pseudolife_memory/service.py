@@ -708,23 +708,16 @@ class MemoryService:
                 if not header_session:
                     session_id = resolved[1]
             self._ensure_session_episode(session_id)
+            # Attribution always targets the handle's episode, even when a
+            # header session won identity above (spec: identity and target
+            # episode are separable) — passed into CMS.store so it lands
+            # before that call's own promotion walk, which would otherwise
+            # move the entry to a new object and strand a post-hoc override.
             stored, surprise = self._cms.store(
                 text, embedding, source=source, tags=tags,
                 session_key=session_id,
+                attribution_episode_id=resolved[0] if resolved is not None else None,
             )
-            if stored and resolved is not None and self._cms.bands[0].entries:
-                # Attribution always targets the handle's episode, even when a
-                # header session won identity above (spec: identity and
-                # target episode are separable).
-                entry = self._cms.bands[0].entries[-1]
-                entry.episode_id = resolved[0]
-                ep = self._cms.episodes.episodes.get(resolved[0])
-                if ep is not None:
-                    entry.episode_title = ep.title
-                if self._storage is not None and entry.db_id is not None:
-                    self._storage.update_entry(
-                        entry.db_id, episode_id=entry.episode_id,
-                        episode_title=entry.episode_title)
             reason: str | None = None
             if not stored:
                 # Mirror the gates in CMS.store so callers know why.

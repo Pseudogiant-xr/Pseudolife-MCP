@@ -171,3 +171,40 @@ def test_episode_end_no_identity_never_pops_foreign_root(pg_service):
                       if e.parent_id is None and e.ended_at is None
                       and e.session_key == "victim-key"]
     assert len(open_roots) == 1
+
+
+def test_handle_with_header_present_header_wins_identity(pg_service):
+    """Header session wins identity resolution, but handle target still gets
+    the attribution. This is the design doc's 'one disagreement case that
+    matters': when both are present, the handle's episode receives the write
+    while the header session becomes the resolved identity."""
+    svc = pg_service
+    ep = svc.episode_start_session("handleKey", "handle session")
+    tok = set_writer_context("w", "headerKey")
+    try:
+        res = svc.store("both present", source="t", episode=ep["id"][:12])
+        assert "episode_warning" not in res
+        found = [e for band in svc._cms.bands for e in band.entries
+                 if e.text == "both present"]
+        # attribution targets the handle's episode...
+        assert found and found[0].episode_id == ep["id"]
+        # ...while identity resolution still yields the header session
+        assert svc._resolve_writer() == ("w", "headerKey")
+    finally:
+        reset_writer_context(tok)
+
+
+def test_outcome_with_header_and_handle(pg_service):
+    """Pin: record_outcome attributes to the handle's episode unconditionally,
+    same as store() — a header session must not steal the signal's
+    attribution (spec 2026-07-18, "Precedence rationale")."""
+    svc = pg_service
+    ep = svc.episode_start_session("handleKey2", "handle session 2")
+    tok = set_writer_context("w", "headerKey2")
+    try:
+        svc.record_outcome(task="t", outcome="success", episode=ep["id"][:12])
+    finally:
+        reset_writer_context(tok)
+    sigs = [s for s in svc._storage.pending_signals(limit=100)
+            if s.get("episode_id") == ep["id"]]
+    assert len(sigs) == 1

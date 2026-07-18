@@ -267,6 +267,7 @@ class ContinuumMemorySystem:
         source: str = "",
         tags: list[str] | None = None,
         session_key: str | None = None,
+        attribution_episode_id: str | None = None,
     ) -> tuple[bool, float]:
         """Store a new memory through the CMS pipeline.
 
@@ -282,6 +283,17 @@ class ContinuumMemorySystem:
            near-identical to the fact it replaces. Otherwise apply the
            normal gate.
         5. Store in the first (fastest) band and periodically promote.
+
+        ``attribution_episode_id`` (identity tier 2, spec 2026-07-18):
+        overrides the ``session_key``-derived episode stamp with this
+        specific (already-validated open) episode id — the handle wins
+        attribution even when ``session_key`` resolves the header's own
+        (different) session episode. Applied BEFORE the write-through
+        insert and the promotion walk below, so it is what gets persisted
+        and what survives promotion (:meth:`_consolidate` copies
+        ``episode_id`` off the entry, not off ``session_key``) — doing
+        this after :meth:`store` returns would race the very promotion it
+        triggers internally, since a promoted entry is a new object.
 
         Returns:
             Tuple of ``(was_stored, surprise_score)``.
@@ -357,6 +369,16 @@ class ContinuumMemorySystem:
             # current leaf when no key is supplied (embedded / legacy). No-op
             # when nothing is open. Carries context through promotion.
             self.episodes.stamp(entry, session_key)
+            # Attribution override (identity tier 2): a valid episode handle
+            # targets ITS episode regardless of what session_key stamped
+            # above. Must land before the write-through insert and the
+            # promotion walk further down — both key off the entry object,
+            # not off session_key, so this is the only point that survives.
+            if attribution_episode_id is not None:
+                entry.episode_id = attribution_episode_id
+                target_ep = self.episodes.episodes.get(attribution_episode_id)
+                if target_ep is not None:
+                    entry.episode_title = target_ep.title
             # Tag stamp (schema v6, Tier C). Normalised once here so
             # downstream filters can do plain set-intersection.
             entry.tags = normalize_tags(tags)

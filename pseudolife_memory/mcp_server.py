@@ -153,8 +153,9 @@ def memory_store(
     origin: Literal["user", "action", "agent"] | None = None,
     episode: str | None = None,
 ) -> dict[str, Any]:
-    """Store one durable fact, decision, or observation — one claim per
-    call. Near-duplicates are dropped, not erred (``stored=False``,
+    """Store one durable fact, decision, or observation. Use proactively
+    for anything worth keeping — one claim per call. Near-duplicates are
+    dropped, not erred (``stored=False``,
     ``reason="below_surprise_threshold"``). For canonical NOW use
     ``memory_fact_set``.
 
@@ -163,7 +164,7 @@ def memory_store(
         source: Stable per-project/topic tag for later filtering.
         tags: Optional labels, e.g. ``["decision", "blocker"]``.
         origin: Who asserted it — ``"user"`` / ``"action"`` / ``"agent"``.
-        episode: Handle from the briefing — attributes this write there.
+        episode: Episode handle for attribution.
 
     Returns: ``{stored, surprise, reason, cortex_promoted}``.
     """
@@ -499,7 +500,7 @@ def memory_fact_set(
         origin: ``"user"`` / ``"action"`` / ``"agent"`` (default) — who
             asserts it (``"user"`` = the human told you).
         confidence: 0..1, default 0.8.
-        episode: Handle from the briefing — attributes this write there.
+        episode: Episode handle for attribution.
 
     Returns: ``{action: inserted|confirmed|superseded|contested, ...record}``.
     """
@@ -623,8 +624,8 @@ def memory_outcome(
         outcome: ``success`` | ``failure`` | ``correction``.
         about: The tool/approach concerned (aids traversal).
         detail: What worked / what the dead-end was.
-        polarity: ``+``/``-``; usually omit (inferred).
-        episode: Handle from the briefing — attributes this write there.
+        polarity: ``+`` do-this | ``-`` avoid; usually omit (inferred).
+        episode: Episode handle for attribution.
 
     Returns: ``{recorded, signal_id, task, outcome}``; needs Postgres.
     """
