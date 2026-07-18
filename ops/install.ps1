@@ -27,7 +27,9 @@ param(
     [string]$ClaudeMd = "",
     [ValidateSet("", "append", "skip")]
     [string]$Instructions = "",
-    [int]$ShimPort = 8082
+    [int]$ShimPort = 8082,
+    [ValidateSet("shim", "http")]
+    [string]$Transport = "shim"
 )
 $ErrorActionPreference = "Stop"
 
@@ -239,9 +241,43 @@ foreach ($selectedClient in $clients) {
         claude mcp get pseudolife-memory *> $null
         if ($LASTEXITCODE -eq 0) {
             Write-Host "==> MCP server already wired into Claude Code - skipping."
+        } elseif ($Transport -eq "shim") {
+            $shimInstalled = $false
+            if (Get-Command pipx -ErrorAction SilentlyContinue) {
+                $pipxList = pipx list 2>$null
+                if ($pipxList -match "package pseudolife-mcp ") {
+                    pipx upgrade pseudolife-mcp
+                } else {
+                    pipx install pseudolife-mcp
+                }
+                $shimInstalled = $true
+            } elseif (Get-Command py -ErrorAction SilentlyContinue) {
+                & py -3 -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)"
+                if ($LASTEXITCODE -eq 0) {
+                    py -3 -m pip install --user pseudolife-mcp
+                    $shimInstalled = $true
+                }
+            } elseif (Get-Command python -ErrorAction SilentlyContinue) {
+                & python -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)"
+                if ($LASTEXITCODE -eq 0) {
+                    python -m pip install --user pseudolife-mcp
+                    $shimInstalled = $true
+                }
+            }
+            if ($shimInstalled) {
+                claude mcp remove pseudolife-memory *> $null
+                claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
+                Write-Host "==> Wired into Claude Code via the pseudolife-mcp shim - per-session identity (required for correct episodes with concurrent sessions)."
+            } else {
+                Write-Warning "Neither pipx nor a suitable python (>=3.10, py -3 or python) was found - cannot install the pseudolife-mcp shim."
+                Write-Host "  Without the shim, concurrent Claude Code sessions share one episode identity."
+                Write-Host "  Install pipx or Python >=3.10 and re-run, or pass -Transport http to silence this."
+                claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
+                Write-Host "==> Wired into Claude Code via HTTP (fallback - shim tooling not found)."
+            }
         } else {
             claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
-            Write-Host "==> Wired into Claude Code (claude mcp add)."
+            Write-Host "==> Wired into Claude Code via HTTP (-Transport http)."
         }
     }
 }

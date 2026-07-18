@@ -25,6 +25,7 @@ CLIENT=claude
 CLAUDE_MD=""
 INSTRUCTIONS=""
 SHIM_PORT=8082
+TRANSPORT=shim
 
 usage() {
     sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
@@ -38,6 +39,7 @@ while [ $# -gt 0 ]; do
         --claude-md) CLAUDE_MD="$2"; shift 2 ;;
         --instructions) INSTRUCTIONS="$2"; shift 2 ;;
         --shim-port) SHIM_PORT="$2"; shift 2 ;;
+        --transport) TRANSPORT="$2"; shift 2 ;;
         -h|--help)   usage 0 ;;
         *) echo "unknown argument: $1" >&2; usage ;;
     esac
@@ -53,6 +55,9 @@ case "$CLAUDE_MD" in ""|append|skip) ;; *)
 esac
 case "$INSTRUCTIONS" in ""|append|skip) ;; *)
     echo "invalid --instructions '$INSTRUCTIONS' (append|skip)" >&2; exit 2 ;;
+esac
+case "$TRANSPORT" in shim|http) ;; *)
+    echo "invalid --transport '$TRANSPORT' (shim|http)" >&2; exit 2 ;;
 esac
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
@@ -253,9 +258,36 @@ for selected_client in $clients; do
         fi
     elif claude mcp get pseudolife-memory >/dev/null 2>&1; then
         echo "==> MCP server already wired into Claude Code — skipping."
+    elif [ "$TRANSPORT" = "shim" ]; then
+        shim_installed=""
+        if command -v pipx >/dev/null 2>&1; then
+            if pipx list 2>/dev/null | grep -q "package pseudolife-mcp "; then
+                pipx upgrade pseudolife-mcp
+            else
+                pipx install pseudolife-mcp
+            fi
+            shim_installed=1
+        elif command -v python3 >/dev/null 2>&1 && python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
+            python3 -m pip install --user pseudolife-mcp
+            shim_installed=1
+        elif command -v python >/dev/null 2>&1 && python -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
+            python -m pip install --user pseudolife-mcp
+            shim_installed=1
+        fi
+        if [ -n "$shim_installed" ]; then
+            claude mcp remove pseudolife-memory 2>/dev/null || true
+            claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
+            echo "==> Wired into Claude Code via the pseudolife-mcp shim — per-session identity (required for correct episodes with concurrent sessions)."
+        else
+            echo "WARNING: neither pipx nor a suitable python3 (>=3.10) was found — cannot install the pseudolife-mcp shim." >&2
+            echo "  Without the shim, concurrent Claude Code sessions share one episode identity." >&2
+            echo "  Install pipx or python3 >=3.10 and re-run, or pass --transport http to silence this." >&2
+            claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
+            echo "==> Wired into Claude Code via HTTP (fallback — shim tooling not found)."
+        fi
     else
         claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
-        echo "==> Wired into Claude Code (claude mcp add)."
+        echo "==> Wired into Claude Code via HTTP (--transport http)."
     fi
 done
 
