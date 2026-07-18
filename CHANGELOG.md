@@ -6,6 +6,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Removed (2026-07-18 — neural-era residue sweep)
+- **`pseudolife_memory/memory/contrastive.py` deleted** — the
+  `ContrastiveUpdater` / `NegativeSignalDetector` classes were constructed
+  nowhere on any daemon path (the zombie sweep noted this at
+  `service.py:541-543`); verified unreferenced anywhere in code, tests, or
+  docs before removal. `ContrastiveConfig` (the config dataclass consumers
+  actually touch) lives in `pseudolife_memory/utils/config.py` and is
+  untouched.
+  `pseudolife_memory/memory/context_builder.py` was checked against the same
+  claim but is **not** dead — `service.py` imports its `_relative_time`
+  helper and `pseudolife_memory/memory/__init__.py` re-exports
+  `ContextBuilder` — so it was kept.
+- **`pseudolife_memory/memory/miras/retention.py` docstrings corrected** —
+  the module and factory docstrings described `weight_decay` as "gradient
+  shrinkage of the memory weights" applied during an update step that no
+  longer exists post-v0.5. Rewritten to say plainly that `weight_decay` is
+  vestigial (kept only for factory-signature parity), matching the honest
+  framing `RetentionPolicy` in `protocols.py` already carried. No behavior
+  changed.
+  `pseudolife_memory/memory/titans_memory.py` was audited against the same
+  claim: it already documents plainly that the TITANS neural memory is gone
+  and the file only hosts the `MemoryEntry` / `RetrievalResult` dataclasses,
+  so no edit was needed there.
+  Archive pointer for all removed neural machinery: branch
+  `archive/neural-memory-titans`.
+
 ### Security (2026-07-18 — mcp 1.28.1, Dependabot alert 5)
 - **`mcp` bumped 1.28.0 → 1.28.1 in `ops/requirements.lock.txt`**
   (CVE-2026-59950 / GHSA-vj7q-gjh5-988w, high: the SDK's WebSocket server

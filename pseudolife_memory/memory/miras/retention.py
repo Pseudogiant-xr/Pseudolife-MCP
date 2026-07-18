@@ -2,8 +2,10 @@
 
 Retention has three coupled responsibilities:
 
-* ``weight_decay`` — applied during the update step. Implements gradient
-  shrinkage of the memory weights toward zero between updates.
+* ``weight_decay`` — vestigial since v0.5 (a band is a plain cosine store
+  with no trained weights to decay). Kept as a factory parameter only so
+  the named policies retain a uniform signature; see
+  :class:`~pseudolife_memory.memory.miras.protocols.RetentionPolicy`.
 * ``decay_factor_on_contradiction`` — multiplier applied by
   :func:`src.memory.contradiction.decay_contradicted_entries` to the
   embedding magnitude of an entry once it's been superseded.
@@ -74,11 +76,12 @@ def _surprise_heavy_score(entry: "MemoryEntry", now: float) -> float:
 
 
 def balanced(weight_decay: float = 0.001, retention_boost: float = 0.0) -> RetentionPolicy:
-    """The v0.4.x default — modest decay, half-and-half eviction weighting.
+    """The default eviction weighting: access-rate plus a surprise bonus.
 
-    Reproduces the v0.4.x ``TitansMemoryBank`` behaviour exactly when
-    paired with :class:`SGDMomentumUpdate` and the default contradiction-
-    decay factor of 0.3 from ``cms.py:176``.
+    ``weight_decay`` is accepted only for signature parity with the other
+    named policies — it is vestigial since v0.5 and unused by any code
+    path. The behavioural default is
+    ``decay_factor_on_contradiction=0.3`` (see ``cms.py:176``).
     """
     return RetentionPolicy(
         weight_decay=weight_decay,
@@ -92,10 +95,10 @@ def balanced(weight_decay: float = 0.001, retention_boost: float = 0.0) -> Reten
 def recency_heavy(weight_decay: float = 0.005, retention_boost: float = 0.0) -> RetentionPolicy:
     """Recency-biased eviction + faster contradiction decay.
 
-    Higher ``weight_decay`` so the memory body itself drifts away from
-    stale patterns faster. ``decay_factor_on_contradiction`` is smaller
-    (0.2) — superseded facts are pushed lower in retrieval scores more
-    aggressively.
+    ``weight_decay`` is vestigial (see :func:`balanced`) and has no effect;
+    the recency bias comes entirely from :func:`_recency_heavy_score`.
+    ``decay_factor_on_contradiction`` is smaller (0.2) — superseded facts
+    are pushed lower in retrieval scores more aggressively.
     """
     return RetentionPolicy(
         weight_decay=weight_decay,
@@ -109,11 +112,11 @@ def recency_heavy(weight_decay: float = 0.005, retention_boost: float = 0.0) -> 
 def surprise_heavy(weight_decay: float = 0.0005, retention_boost: float = 0.0) -> RetentionPolicy:
     """Surprise-biased eviction + gentler contradiction decay.
 
-    Lower ``weight_decay`` to preserve learned associations long-term;
-    high-surprise entries survive eviction even when access is low. The
-    contradiction-decay factor is 0.5 — superseded facts are still
-    visible but down-weighted (useful for slow bands where the "old"
-    pattern still has informational value).
+    ``weight_decay`` is vestigial (see :func:`balanced`) and has no effect;
+    high-surprise entries survive eviction even when access is low purely
+    via :func:`_surprise_heavy_score`. The contradiction-decay factor is
+    0.5 — superseded facts are still visible but down-weighted (useful for
+    slow bands where the "old" pattern still has informational value).
     """
     return RetentionPolicy(
         weight_decay=weight_decay,
