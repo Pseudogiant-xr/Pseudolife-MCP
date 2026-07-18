@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-19 — session identity contract)
+- **Episodes no longer key on the transport connection.** Five-tier
+  identity: shim `X-PL-Session` → explicit `episode` handle on write tools
+  (advertised in the session briefing) → hook-registered session (SessionStart
+  now forwards Claude Code's `session_id`; new SessionEnd hook closes the
+  episode promptly) → legacy `mcp-session-id` (removed from MCP 2026-07-28,
+  SEP-2567) → writer+idle-gap floor. A session can no longer close another
+  session's episode (`episode_end` ownership guard). The installer now wires
+  the stdio shim by default (`--transport http` to opt out) — per-session
+  identity for concurrent sessions.
+
 ### Fixed (2026-07-19 — hook mutation paths honor the bearer gate)
 - **`GET /api/hook/session-start` and `POST /api/hook/session-end` mutated
   state without the bearer-token check when `PSEUDOLIFE_MCP_TOKEN` is

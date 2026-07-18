@@ -127,12 +127,16 @@ absent), `pseudolife-mcp embedded` (the v0.1 in-process stdio server; no
 daemon, no Postgres — an escape hatch), and `pseudolife-mcp briefing`
 (print the session-start briefing; used by the hook).
 
-## stdio shim (host-process installs only)
+## stdio shim (per-session identity)
 
-If you run the daemon on host Python and prefer stdio, point Claude Code at
-the **shim** instead of the HTTP URL — it find-or-starts the daemon and
-proxies. It does *not* work with the containerized daemon (nothing to spawn
-on the host):
+The installer wires this by default (`ops/install.sh` / `ops/install.ps1`;
+pass `--transport http` / `-Transport http` to opt out) because it's the
+mechanism that gives **concurrent** Claude Code sessions distinct identity —
+a per-process `X-PL-Session` header, the strongest of the five
+[session-identity](#session-identity) tiers. The shim works against
+**either** daemon deployment, host-process or the containerized stack — it's
+just an HTTP client to `PSEUDOLIFE_MCP_DAEMON_URL` and only spawns a new host
+daemon when nothing answers there already. Point Claude Code at it directly:
 
 ```json
 {
@@ -163,6 +167,41 @@ the one-time embedder warmup once for everyone. On first run with a v≤0.1
 `cms_state.pt` present in `PSEUDOLIFE_MCP_DATA_DIR`, the daemon
 auto-migrates it into Postgres and renames the originals `*.pre-v8.bak`
 (never deletes them).
+
+## Session identity
+
+Every request resolves "which session/episode does this write belong to"
+through one chokepoint, evaluated in strict precedence order:
+
+| tier | source | scope | notes |
+|---|---|---|---|
+| 1 | `X-PL-Session` header | per shim process = per session | the stdio shim sends this on every call; any integrator can |
+| 2 | explicit `episode` argument | per call | pass an open episode id (or its unambiguous ≥8-char prefix) on `memory_store` / `memory_outcome` / `memory_fact_set`; the daemon mints it and advertises it in the SessionStart briefing |
+| 3 | hook-registered active session | machine-scoped pointer | the SessionStart hook forwards Claude Code's own `session_id`; a SessionEnd hook closes it |
+| 4 | `mcp-session-id` header | per connection | legacy fallback — the MCP 2026-07-28 revision (SEP-2567, "Sessionless") removes this header and protocol sessions entirely, so treat this tier as a dead end, not something to build on |
+| 5 | none | — | writer id + idle-gap sessionization (the reaper) — the documented floor when nothing above resolved |
+
+**Why the header outranks the handle when both are present.** A shim
+header is infrastructure-asserted per OS process; an `episode` handle is
+model-supplied and can be confused between two concurrent sessions'
+briefings. But identity and target episode are separable — a write still
+lands in the handle's named episode even when the header wins identity for
+stamping. An unknown, closed, or ambiguous handle never fails the write —
+it degrades to the next tier and the result carries
+`"episode_warning": "unknown or closed episode handle"`.
+
+**Tier 3's limitation.** The active-session pointer is one machine-scoped
+value, last-start-wins: whichever SessionStart hook fired most recently
+owns it until its own SessionEnd clears it (or a later SessionStart
+overwrites it). Two concurrent sessions that are both *unheaded* (no shim)
+and *handle-less* (no `episode` argument) still misattribute to the newer
+one — tiers 1 and 2 are the actual concurrency answer, not tier 3. Accepted
+as YAGNI until a real multi-writer/LAN deployment needs a per-writer
+pointer.
+
+The resolved identity becomes the episode's `session_key` wherever it's
+used; `session_key` is a free-text field, so none of this required a schema
+change.
 
 ## Sharing memory on the LAN
 

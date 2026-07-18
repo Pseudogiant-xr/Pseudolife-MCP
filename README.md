@@ -124,8 +124,9 @@ cortex** (durable *cited* facts about external reality, age-decayed trust);
 recall: [retrieval](docs/guide/retrieval.md).
 
 State lives in Postgres (the durable source of truth) behind a single
-long-lived daemon; every session attaches over HTTP (or, for host-process
-installs, a thin stdio shim). The result: Claude can pick up where it left
+long-lived daemon; every session attaches through a thin stdio shim
+(installer default — per-session identity) or directly over HTTP
+(single-session setups). The result: Claude can pick up where it left
 off, correct itself when facts change, and reason over relationships —
 without you re-explaining context each session.
 
@@ -211,8 +212,10 @@ the in-memory MIRAS bands are a write-through cache hydrated at startup
 (a small `weights.pt` persists only band counters — there are no MLP weights).
 
 The daemon runs **either** containerized (recommended — portable, no host
-Python) **or** as a host process. Claude Code attaches **either** directly
-over HTTP (recommended) **or** through a thin torch-free stdio **shim**:
+Python) **or** as a host process. Claude Code attaches through a thin
+torch-free stdio **shim** (the installer default — per-session identity,
+needed for concurrent sessions) **or** directly over **HTTP** (simpler for
+a single session):
 
 ```
 Claude session A ─┐  HTTP (recommended)
@@ -354,9 +357,10 @@ If you ran the daemon with a `PSEUDOLIFE_MCP_TOKEN`, add a `headers` key:
 connected), then ask the agent to *"store a memory that this install works"* and check it
 appears in the Stream tab of the Console at <http://127.0.0.1:8765/ui/>.
 
-Preferring stdio on a host-process install? A thin torch-free **shim**
-proxies stdio to the daemon:
-[stdio shim](docs/guide/configuration.md#stdio-shim-host-process-installs-only)
+Preferring stdio (this is what the installer wires by default, for
+per-session identity)? A thin torch-free **shim** proxies stdio to the
+daemon:
+[stdio shim](docs/guide/configuration.md#stdio-shim-per-session-identity)
 · [LAN sharing](docs/guide/configuration.md#sharing-memory-on-the-lan)
 · [backups & restore rehearsal](docs/guide/configuration.md#backups).
 
@@ -499,7 +503,7 @@ renders the real frontend against canned data:
 
 | Capability | Status |
 |---|---|
-| Transport | Streamable-HTTP MCP daemon (`/mcp`); optional stdio shim for host-process installs |
+| Transport | Streamable-HTTP MCP daemon (`/mcp`); stdio shim is the installer default (per-session identity) — HTTP remains for single-session setups |
 | Storage | Postgres 16 + pgvector (source of truth); ChromaDB for the reference bank |
 | Associative continuum | 8-tier cosine MIRAS bands, novelty-gated storage, contradiction detection, supersession |
 | Canonical-fact cortex | Single-writer: LLM dream pass + `memory_fact_*` (regex auto-promote opt-in, default off) |
