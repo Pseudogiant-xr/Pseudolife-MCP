@@ -207,7 +207,9 @@ to whatever session the Claude Code hook last registered, so its writes are
 attributed to Claude's session episode. The fix is the same as for
 concurrent sessions: give the second client a tier-1 identity (run it
 through the stdio shim) or pass explicit tier-2 `episode` handles on its
-writes.
+writes. The installer's shim mode wires **Codex** through the shim by
+default (2026-07-19), so an installer-wired Codex doesn't hit this;
+ChatGPT connectors and other direct-HTTP clients still do.
 
 **Pointer TTL.** A client that crashes or is killed never fires SessionEnd,
 so without a bound its pointer would attribute every later tier-3 write to a
