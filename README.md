@@ -82,8 +82,15 @@ docker volume create pseudolife-mcp-bank
 docker volume create pseudolife-mcp-state
 docker compose -f ops/docker-compose.yml up -d --build   # first build, once
 
-# Verify, then wire into one or both clients:
+# Verify, then wire the transport into one or both clients.
 curl http://127.0.0.1:8765/health
+
+# Stdio shim (the installer's default — per-session episode identity):
+pip install pseudolife-mcp
+claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
+codex mcp add pseudolife-memory -- pseudolife-mcp
+
+# ...or direct HTTP (no pip package needed; fine for single-session setups):
 claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
 codex mcp add pseudolife-memory --url http://127.0.0.1:8765/mcp
 
@@ -317,11 +324,18 @@ shim by default — per-session episode identity) or the one-liner below.
 Details, non-default ports/tokens, and migration:
 [plugin/README.md](plugin/README.md).
 
-**HTTP transport (manual equivalent).**
-The daemon already serves MCP over HTTP, so point either client straight at
-it — no shim, no host command, nothing OS-specific.
+**Manual transport registration.** The installer's default (shim mode)
+registers a thin stdio shim — one shim process per session, so every
+session carries its own tier-1 identity. The same wiring by hand:
 
-Claude Code:
+```bash
+pip install pseudolife-mcp
+claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
+```
+
+Direct HTTP works too — the daemon serves MCP over HTTP natively (no shim,
+no host command, nothing OS-specific; concurrent sessions then share one
+episode identity, so it fits single-session setups best):
 
 ```bash
 claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
