@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-07-19 — analyzer: pruned-edge lesson entities leave the unattributed queue)
+- **The graph analyzer's "entities with no project" finding now also excludes
+  entities referenced by `lessons.entity_id`/`object_entity_id`** — the
+  residual tail of the 0.9.0 lesson-entity exclusion. That exclusion keyed on
+  edge signal (all edges `prefers`/`avoids`), so lesson entities whose lesson
+  edges were pruned by hygiene carry ZERO edges and stayed flagged (4 on the
+  live bank). The service now passes the lesson-referenced id set from
+  storage into the analyzer, which stays DB-free.
+
 ## [0.9.0] - 2026-07-19
 
 ### Changed (2026-07-19 — analyzer: lesson entities leave the unattributed queue)

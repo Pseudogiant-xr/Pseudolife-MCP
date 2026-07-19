@@ -1157,6 +1157,18 @@ class PostgresStorage:
             "ORDER BY en.ts DESC LIMIT %s",
             (entity_id, int(limit))).fetchall()]
 
+    def lesson_entity_ids(self) -> set[int]:
+        """Entity ids referenced by any lesson row (subject or about-object).
+        graph_review excludes these from the unattributed finding — lesson-
+        minted nodes whose prefers/avoids edges were pruned have no edge
+        signal left to identify them by."""
+        rows = self.conn.execute(
+            "SELECT entity_id FROM lessons WHERE entity_id IS NOT NULL "
+            "UNION "
+            "SELECT object_entity_id FROM lessons "
+            "WHERE object_entity_id IS NOT NULL").fetchall()
+        return {r[0] for r in rows}
+
     def entity_sources_map(self) -> dict[int, list[str]]:
         out: dict[int, list[str]] = {}
         for eid, source in self.conn.execute(

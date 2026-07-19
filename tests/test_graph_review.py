@@ -52,6 +52,22 @@ def test_unattributed_excludes_lesson_only_entities():
     assert un and un[0]["entities"] == ["orphan-of-project"]
 
 
+def test_unattributed_excludes_lesson_referenced_ids():
+    # 2026-07-19 residual tail: entities referenced by lessons.entity_id /
+    # object_entity_id whose prefers/avoids edges were later pruned have ZERO
+    # edges, so the edge signal above can't identify them. The service passes
+    # the lesson-referenced id set explicitly.
+    ents = _ents("deploy engine to host", "orphan-of-project")
+    un = gr.unattributed(ents, {}, (), lesson_entity_ids={1})
+    assert un and un[0]["entities"] == ["orphan-of-project"]
+
+
+def test_review_threads_lesson_entity_ids():
+    ents = _ents("lesson-task-node")
+    out = gr.review([], ents, {}, lesson_entity_ids={1})
+    assert not [f for f in out["findings"] if f["type"] == "unattributed"]
+
+
 def test_unattributed_keeps_entities_with_mixed_edges():
     # A prefers edge alone doesn't immunize: an entity also carrying normal
     # relations is a real graph citizen and stays flagged when sourceless.
