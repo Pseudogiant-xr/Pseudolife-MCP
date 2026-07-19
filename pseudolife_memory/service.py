@@ -4109,6 +4109,38 @@ class MemoryService:
         return {"dismissed": True, "new": new, "store": store,
                 "a_key": a_key, "b_key": b_key}
 
+    def curation_duplicates(self) -> dict[str, Any]:
+        """Standing listing of the deep dream's lesson/world cross-key
+        near-duplicate pairs — the same candidates deep_dream reports, minus
+        the graph-wide pass, so the Console review drawer can load them on
+        demand and dismissals take effect immediately."""
+        cfg = self.config.memory.deep_dream
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return dict(self._GRAPH_UNAVAILABLE)
+            dismissed = self._storage.dismissed_pairs()
+            lesson_recs = self._curation_records("lesson", cfg.snippet_max_chars)
+            world_recs = self._curation_records("world", cfg.snippet_max_chars)
+        lesson_dups, world_dups = self._slot_duplicate_listings(
+            lesson_recs, world_recs, dismissed)
+        return {"lesson_duplicates": lesson_dups,
+                "world_duplicates": world_dups}
+
+    def _slot_duplicate_listings(self, lesson_recs, world_recs,
+                                 dismissed) -> tuple[list[dict], list[dict]]:
+        """The lesson/world cross-key duplicate listings from pre-read record
+        snapshots — shared by deep_dream and curation_duplicates so the two
+        can never drift on threshold/top-k/dismissal wiring."""
+        from pseudolife_memory.memory import graph_consolidation as gc
+        cfg = self.config.memory.deep_dream
+        def one(recs, store):
+            return gc.slot_duplicate_candidates(
+                recs, min_similarity=cfg.curation_min_similarity,
+                top_k=cfg.curation_top_k,
+                dismissed=_store_dismissed(dismissed, store))
+        return one(lesson_recs, "lesson"), one(world_recs, "world")
+
     def entity_provenance(self, entity: str, *, limit: int = 20) -> dict[str, Any]:
         """Why does this entity exist? Its project attribution (entity_sources)
         plus the MIRAS source entries behind its facts — band/source/ts/text — so
@@ -4729,14 +4761,8 @@ class MemoryService:
         # near-duplicate lesson/world slots. Settled by the reviewer via
         # curation_dismiss_duplicate (distinct) or the existing forget /
         # re-write tools (duplicate) — the deep dream never deletes them.
-        lesson_dups = gc.slot_duplicate_candidates(
-            lesson_recs, min_similarity=cfg.curation_min_similarity,
-            top_k=cfg.curation_top_k,
-            dismissed=_store_dismissed(dismissed, "lesson"))
-        world_dups = gc.slot_duplicate_candidates(
-            world_recs, min_similarity=cfg.curation_min_similarity,
-            top_k=cfg.curation_top_k,
-            dismissed=_store_dismissed(dismissed, "world"))
+        lesson_dups, world_dups = self._slot_duplicate_listings(
+            lesson_recs, world_recs, dismissed)
 
         totals = {"entities": len(entities), "edges": len(edges),
                   "candidates": len(candidates)}
