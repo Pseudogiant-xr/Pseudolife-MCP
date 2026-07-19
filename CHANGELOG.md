@@ -6,6 +6,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-19 — graph hygiene round 2: scope purge, nested topics, edge quarantine)
+- **`backfill_entity_sources` now purges contaminated derived scope rows** on
+  every run: sources in `memory.scopes.exclude` and legacy mixed-case scope
+  keys are deleted (`origin='derived'` only — manual assignments are never
+  touched). Previously the backfill only upserted, so an excluded meta tag
+  re-inserted once (e.g. by pre-scope-policy code) stayed a "project" forever.
+  Benign stale derived rows are deliberately kept: attribution must not decay
+  when retention prunes the entries it was derived from.
+- **`/api/graph/projects` is rollup-aware**: a source mapped to an umbrella in
+  `memory.scopes.rollup` now carries `parent` (additive field), and the
+  Console's project switcher nests children under their umbrella (`↳` prefix)
+  instead of rendering the family as flat peers.
+- **Low-confidence dream edges are quarantined to `edge_proposals`** instead
+  of the live graph: edges scoring below the new
+  `memory.dream.relation_quarantine_below` (default 0.5) file a review
+  proposal (`source="dream-low-confidence"`). At the default this catches
+  exactly the untyped `related-to` co-mention edges (confidence 0.45), which
+  were entering the live graph at ~19/day (dubious-edge findings 34 → 120 in
+  four days). Typed clean edges (0.70) are unaffected; `0.0` disables the
+  quarantine and restores write-live behavior.
+
 ### Fixed (2026-07-19 — concurrent test runs no longer terminate each other)
 - **Two overlapping `pytest tests/` invocations produced 15–170 nondeterministic
   `psycopg.errors.AdminShutdown` failures/errors with a different victim set

@@ -594,12 +594,18 @@ def test_dream_extract_relations_populates_graph(svc):
         {"src": "Acme", "relation": "no-such-rel", "dst": "Beta"},   # -> related-to
         {"src": "loop", "relation": "uses", "dst": "loop"},          # self-loop dropped
     ]), ["some text"])
-    assert n == 2
+    assert n == 1
     g = svc.graph_neighborhood("checkout-service", depth=1)
     edges = {(e["src"], e["relation"], e["dst"]) for e in g["edges"]}
     assert ("checkout-service", "runs-on", "host-1") in edges  # normalized relation
+    # the related-to fallback (conf 0.45) is quarantined to edge_proposals,
+    # not written live (relation_quarantine_below, 2026-07-19)
     g2 = svc.graph_neighborhood("acme", depth=1)
-    assert any(e["relation"] == "related-to" for e in g2["edges"])  # fallback kept
+    assert not any(e["relation"] == "related-to" for e in g2.get("edges", []))
+    quarantined = svc._storage.conn.execute(
+        "SELECT count(*) FROM edge_proposals "
+        "WHERE source = 'dream-low-confidence'").fetchone()[0]
+    assert quarantined == 1
 
 
 def test_dream_extract_relations_failure_is_isolated(svc):
@@ -667,14 +673,18 @@ def test_dream_relations_enable_multihop(svc):
 
 
 def test_dream_relations_reject_lesson_only_predicates(svc):
-    # prefers/avoids are lesson-only; graph-from-text must not write them even if
-    # the model emits one — it falls back to related-to.
+    # prefers/avoids are lesson-only; graph-from-text must not write them even
+    # if the model emits one — it falls back to related-to, which (as an
+    # untyped 0.45 edge) is then quarantined to edge_proposals, never live.
     n = svc._dream_extract_relations(_RelStubExtractor(relations=[
         {"src": "deploy-task", "relation": "prefers", "dst": "rsync"}]), ["text"])
-    assert n == 1
+    assert n == 0
     g = svc.graph_neighborhood("deploy-task", depth=1)
-    rels = {e["relation"] for e in g["edges"]}
-    assert "related-to" in rels and "prefers" not in rels
+    assert "prefers" not in {e["relation"] for e in g.get("edges", [])}
+    row = svc._storage.conn.execute(
+        "SELECT relation FROM edge_proposals "
+        "WHERE source = 'dream-low-confidence'").fetchone()
+    assert row is not None and row[0] == "related-to"
 
 
 def test_traces_config_default():

@@ -346,6 +346,12 @@ class DreamConfig:
     # them at the source instead of leaving them for deep-dream cleanup.
     # Set 0.0 to restore the old write-everything behavior.
     min_relation_confidence: float = 0.2
+    # Edges at/above the floor but below this route to edge_proposals for
+    # review instead of the live graph. At 0.5 this quarantines exactly the
+    # untyped related-to co-mention edges (conf 0.45) — the dominant
+    # review-queue pollutant (~19/day, dubious count 34 -> 120 in four days,
+    # 2026-07-19). Typed clean edges (0.70) are unaffected. 0.0 disables.
+    relation_quarantine_below: float = 0.5
     # Write-time dedup: when the dream mints a NEW entity whose name-token
     # Jaccard against an existing canonical/display/alias reaches this
     # threshold, a merge proposal is filed for review (never auto-folded).

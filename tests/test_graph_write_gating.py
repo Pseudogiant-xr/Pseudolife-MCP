@@ -347,13 +347,41 @@ def test_cross_project_untyped_relation_dropped(svc):
     assert n3 == 0 and _cross_count() == 1
 
 
+def test_dream_untyped_low_confidence_edge_quarantined(svc):
+    # 2026-07-19: untyped co-mention edges (related-to, conf 0.45) were the
+    # dominant review-queue pollutant (~19/day straight into the live graph;
+    # dubious count 34 -> 120 in four days). Below
+    # dream.relation_quarantine_below they file an edge proposal for review
+    # instead of a live edge; typed relations (0.70) are unaffected.
+    svc.stats()
+    with svc._lock:
+        svc._resolve_or_create_entity("quar-a")
+        svc._resolve_or_create_entity("quar-b")
+    svc.graph_assign_scope("quar-a", "proj-q")
+    svc.graph_assign_scope("quar-b", "proj-q")
+
+    n = svc._link_dream_relations([
+        {"src": "quar-a", "relation": "correlates-with", "dst": "quar-b"}])
+
+    assert n == 0
+    nb = svc.graph_neighborhood("quar-a", depth=1)
+    assert not any("quar-b" in (e["src"], e["dst"]) for e in nb["edges"])
+    quarantined = svc._storage.conn.execute(
+        "SELECT count(*) FROM edge_proposals "
+        "WHERE source = 'dream-low-confidence'").fetchone()[0]
+    assert quarantined == 1
+
+
 def test_dream_same_project_edge_still_written(svc):
+    # A TYPED same-project edge passes both the cross-project gate and the
+    # low-confidence quarantine (untyped related-to now quarantines instead —
+    # see test_dream_untyped_low_confidence_edge_quarantined).
     svc.graph_relate("xproj-c-thing", "uses", "xproj-c-helper")
     svc.graph_assign_scope("xproj-c-thing", "proj-c")
     svc.graph_assign_scope("xproj-c-helper", "proj-c")
 
     n = svc._link_dream_relations([
-        {"src": "xproj-c-thing", "relation": "related-to", "dst": "xproj-c-helper"},
+        {"src": "xproj-c-thing", "relation": "uses", "dst": "xproj-c-helper"},
     ])
     assert n == 1
 
