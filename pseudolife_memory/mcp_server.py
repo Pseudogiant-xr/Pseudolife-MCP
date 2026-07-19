@@ -730,9 +730,8 @@ def memory_dream(
         ``deep``: full-corpus graph consolidation. Dry-run by default;
             ``apply=true`` snapshots the graph tables first (refuses if it
             can't). Settle returned candidates via ``memory_graph_review``;
-            ``snippets=false`` omits evidence. Also lists
-            ``lesson_duplicates`` / ``world_duplicates`` — cross-key
-            near-duplicate slots to curate by hand (never auto-deleted).
+            ``snippets=false`` omits evidence. Also lists lesson/world
+            duplicate slots for hand curation (never auto-deleted).
 
     Returns: per-action dict; ``{error}`` on a bad action or missing cursor.
     """
@@ -754,14 +753,15 @@ def memory_dream(
 
 @_tool()
 def memory_graph_review(
-    action: Literal["list", "propose", "dismiss_pair", "accept_link",
-                    "reject_link", "accept_merge", "accept_junk",
-                    "reject_entity"] = "list",
+    action: Literal["list", "propose", "dismiss_pair", "dismiss_slot_pair",
+                    "accept_link", "reject_link", "accept_merge",
+                    "accept_junk", "reject_entity"] = "list",
     proposal_id: int | None = None,
     proposals: list[dict] | None = None,
     scope: str | None = None,
     src: str | None = None,
     dst: str | None = None,
+    store: str | None = None,
 ) -> dict[str, Any]:
     """Work the graph review queue — deep-dream proposals that need a
     verdict before they touch the real graph.
@@ -773,6 +773,8 @@ def memory_graph_review(
             directly.
         ``dismiss_pair``: mark ``src``/``dst`` as genuinely distinct — the
             pair stops resurfacing as a duplicate candidate.
+        ``dismiss_slot_pair``: same for lesson/world duplicate listings
+            (``store``; ``src``/``dst`` = listed "entity|attribute" keys).
         ``accept_link`` / ``reject_link``: settle an edge proposal by
             ``proposal_id``.
         ``accept_merge``: fold a near-duplicate entity into its twin.
@@ -791,6 +793,15 @@ def memory_graph_review(
         if not src or not dst:
             return {"error": "src_dst_required"}
         return service.graph_dismiss_duplicate(src, dst)
+    if action == "dismiss_slot_pair":
+        # Listed keys fold literal pipes into "-" (service._slot_key), so the
+        # first "|" is always the entity/attribute boundary.
+        if not store or not src or not dst or "|" not in src or "|" not in dst:
+            return {"error": "store_src_dst_required",
+                    "detail": "store='lesson'|'world'; src/dst are "
+                              "'entity|attribute' keys from the deep response"}
+        return service.curation_dismiss_duplicate(
+            store, *src.split("|", 1), *dst.split("|", 1))
     handlers = {
         "accept_link": service.graph_accept_proposal,
         "reject_link": service.graph_reject_proposal,
@@ -804,8 +815,8 @@ def memory_graph_review(
     if handler is None:
         return {"error": "unknown_action",
                 "actions": ["list", "propose", "dismiss_pair",
-                            "accept_link", "reject_link", "accept_merge",
-                            "accept_junk", "reject_entity"]}
+                            "dismiss_slot_pair", "accept_link", "reject_link",
+                            "accept_merge", "accept_junk", "reject_entity"]}
     if proposal_id is None:
         return {"error": "proposal_id_required", "action": action}
     return handler(proposal_id)

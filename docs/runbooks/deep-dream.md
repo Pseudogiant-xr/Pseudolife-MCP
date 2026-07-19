@@ -61,9 +61,10 @@ lessons and source_url for world facts). Nothing is ever auto-deleted:
 - **Duplicate** → keep the better-keyed slot; drop the other via
   `memory_forget(scope="lesson"|"world", ...)` (or re-write the surviving
   slot first to fold in anything the dropped one added).
-- **Distinct** → `POST /api/curation/dismiss-duplicate` with
-  `{store, a_entity, a_attribute, b_entity, b_attribute}` — the pair is
-  persisted (namespaced in `dismissed_pairs`) and never re-listed.
+- **Distinct** → `memory_graph_review(action="dismiss_slot_pair",
+  store="lesson"|"world", src=<a_key>, dst=<b_key>)` (REST equivalent:
+  `POST /api/curation/dismiss-duplicate`) — the pair is persisted
+  (namespaced in `dismissed_pairs`) and never re-listed.
 - **Unsure** → leave listed; the pair costs one of the
   `memory.deep_dream.curation_top_k` slots until settled.
 

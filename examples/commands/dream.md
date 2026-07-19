@@ -62,8 +62,8 @@ reviewed proposals:
    - **Duplicate**: keep the better-keyed slot and drop the other via
      `memory_forget(scope="lesson"|"world", ...)`, folding anything the
      dropped slot added into the survivor first.
-   - **Distinct**: `POST /api/curation/dismiss-duplicate` with
-     `{store, a_entity, a_attribute, b_entity, b_attribute}` so the pair
+   - **Distinct**: `memory_graph_review(action="dismiss_slot_pair",
+     store="lesson"|"world", src=<a_key>, dst=<b_key>)` so the pair
      never re-lists.
    - **Unsure**: leave listed. Do not guess.
 6. Report: superseded / merged / proposed / dismissed counts, merges you

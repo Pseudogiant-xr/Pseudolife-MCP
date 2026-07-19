@@ -224,11 +224,25 @@ def _lesson_record_to_dict(rec) -> dict[str, Any]:
 
 
 # Slot stores the deep dream lists cross-key duplicate candidates for, and the
-# dismissed_pairs namespace prefix each uses ("lesson:" / "world:"). Normalised
-# slot keys collapse every separator to "-" (cortex._norm_key), so neither ":"
-# nor the "|" slot-key joiner can appear inside a component — the namespaced
-# keys can never collide with the graph-name dismissals sharing the table.
+# dismissed_pairs namespace prefix each uses ("lesson:" / "world:"). The
+# namespaced rows can never collide with the graph-name dismissals sharing the
+# table because graph.norm_name strips ":" (its separator class) while every
+# curation row starts with a colon-bearing store prefix — NOT because slot
+# keys are colon-free: cortex._norm_key's separator class is [\s._-/], so a
+# literal ":" (arXiv ids, "MCP: X") survives inside a component. That is
+# harmless here since _store_dismissed strips the prefix by fixed length,
+# never by splitting on ":".
 _CURATION_STORES = ("lesson", "world")
+
+
+def _slot_key(entity_norm: str, attribute_norm: str) -> str:
+    """Identity string for a slot: normalized components joined with ``|``.
+    ``_norm_key`` does NOT strip ``|``, so a literal pipe in a component would
+    make the joined form ambiguous (("a|b","c") vs ("a","b|c")); fold pipes to
+    ``-`` first. Both the listing (_curation_records) and the dismissal
+    (curation_dismiss_duplicate) must build keys through this helper so a
+    dismissal always matches the listing that produced it."""
+    return f"{entity_norm.replace('|', '-')}|{attribute_norm.replace('|', '-')}"
 
 
 def _store_dismissed(dismissed: set[tuple[str, str]], store: str) -> set[tuple[str, str]]:
@@ -4086,7 +4100,7 @@ class MemoryService:
         bn, ba = _norm_key(b_entity), _norm_key(b_attribute)
         if not (an and aa and bn and ba) or (an, aa) == (bn, ba):
             return {"dismissed": False, "reason": "bad_pair", "store": store}
-        a_key, b_key = f"{an}|{aa}", f"{bn}|{ba}"
+        a_key, b_key = _slot_key(an, aa), _slot_key(bn, ba)
         with self._lock:
             self._ensure_init()
             if self._storage is None:
@@ -4851,7 +4865,7 @@ class MemoryService:
         src = self._lessons if store == "lesson" else self._world
         out: list[dict] = []
         for r in (src.current_records() if src is not None else []):
-            d = {"key": "|".join(r.key), "entity": r.entity,
+            d = {"key": _slot_key(*r.key), "entity": r.entity,
                  "attribute": r.attribute,
                  "value": r.value[:value_cap] if value_cap else r.value,
                  "embedding": (r.embedding.detach().cpu().numpy()

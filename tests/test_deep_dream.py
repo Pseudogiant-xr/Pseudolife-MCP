@@ -377,3 +377,15 @@ def test_apply_lists_store_duplicates_but_never_deletes(svc):
     # do-not-auto-delete guard: every record is still current after apply
     assert len(svc._lessons.current_records()) == 3
     assert len(svc._world.current_records()) == 2
+
+
+def test_slot_key_folds_literal_pipes():
+    # _norm_key does NOT strip "|" (its separator class is whitespace ._-/),
+    # so the "|" slot-key joiner would be ambiguous: ("a|b","c") and
+    # ("a","b|c") would join identically. _slot_key folds literal pipes in
+    # the components, keeping the encoding injective for both the listing
+    # and the dismissal side.
+    from pseudolife_memory.service import _slot_key
+    assert _slot_key("a-b", "c") == "a-b|c"
+    assert _slot_key("a|b", "c") == "a-b|c"          # folded, not ambiguous
+    assert _slot_key("a|b", "c") != _slot_key("a", "b|c")

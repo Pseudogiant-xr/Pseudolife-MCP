@@ -19,11 +19,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `curation_min_similarity` = 0.80 / `curation_top_k` = 20). Listing-only:
   nothing is auto-deleted — duplicates are settled with the existing
   `memory_forget` tools, and genuinely-distinct pairs are dismissed via the
-  new `POST /api/curation/dismiss-duplicate` (service
+  new `memory_graph_review(action="dismiss_slot_pair")` /
+  `POST /api/curation/dismiss-duplicate` (service
   `curation_dismiss_duplicate`), persisted in the existing
-  `dismissed_pairs` table under a `lesson:`/`world:` namespace (normalised
-  slot keys cannot contain `:`/`|`, so graph-name dismissals can't collide;
-  no schema change).
+  `dismissed_pairs` table under a `lesson:`/`world:` namespace (safe
+  because `graph.norm_name` strips `:` while every curation row carries a
+  colon-bearing prefix, so graph-name dismissals can't collide; literal
+  `|` in a slot component is folded to `-` to keep the joined key
+  unambiguous; no schema change).
 
 ### Fixed (2026-07-19 — analyzer: pruned-edge lesson entities leave the unattributed queue)
 - **The graph analyzer's "entities with no project" finding now also excludes
