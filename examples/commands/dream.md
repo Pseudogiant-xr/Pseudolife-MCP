@@ -56,7 +56,18 @@ reviewed proposals:
      src=..., dst=...)` so the pair never re-proposes.
    - **Unsure**: leave pending for the Atlas queue. Do not guess; scopes that
      don't overlap are a strong distinct signal.
-5. Report: superseded / merged / proposed / dismissed counts, merges you
+5. Triage the returned `lesson_duplicates` / `world_duplicates` (cross-key
+   near-duplicate slots in the lesson / world stores; listing-only — the
+   dream never deletes them). Judge from the per-side values:
+   - **Duplicate**: keep the better-keyed slot and drop the other via
+     `memory_forget(scope="lesson"|"world", ...)`, folding anything the
+     dropped slot added into the survivor first.
+   - **Distinct**: `POST /api/curation/dismiss-duplicate` with
+     `{store, a_entity, a_attribute, b_entity, b_attribute}` so the pair
+     never re-lists.
+   - **Unsure**: leave listed. Do not guess.
+6. Report: superseded / merged / proposed / dismissed counts, merges you
    applied or rejected (they appear under "recent merge decisions" in Atlas),
-   and the snapshot filename. Link proposals still need a human verdict
+   lesson/world pairs settled, and the snapshot filename. Link proposals
+   still need a human verdict
    (`accept_link` / `reject_link` or Atlas).

@@ -324,3 +324,68 @@ def test_junk_entities_flags_concat_artifacts_regardless_of_degree():
     edges = [_edge(10, 1, "related-to", 2, 0.45), _edge(11, 1, "related-to", 3, 0.45)]
     out = {j["entity_id"]: j["reason"] for j in gc.junk_entities(ents, edges, max_degree=1)}
     assert out == {1: "concat-artifact"}   # 2 and 3 are real; flagged despite degree 2
+
+
+# --- store curation: cross-key near-duplicate slot pairs (lessons / world) ----
+
+def _slot_rec(key, entity, attribute, value, emb, **extra):
+    return {"key": key, "entity": entity, "attribute": attribute,
+            "value": value, "embedding": emb, **extra}
+
+
+def test_slot_duplicate_candidates_pairs_cross_key_near_dups():
+    recs = [
+        _slot_rec("deploy-daemon|approach", "deploy daemon", "approach",
+                  "backup first", _vec(1, 0)),
+        _slot_rec("deploy-host|pitfall", "deploy host", "pitfall",
+                  "always backup first", _vec(1, 0.05)),
+        _slot_rec("gpu-run|approach", "gpu run", "approach",
+                  "keep compile on", _vec(0, 1)),
+    ]
+    out = gc.slot_duplicate_candidates(recs, min_similarity=0.85, top_k=20)
+    assert len(out) == 1
+    c = out[0]
+    # pair keys are emitted sorted (a_key < b_key) for stable identity
+    assert (c["a_key"], c["b_key"]) == ("deploy-daemon|approach", "deploy-host|pitfall")
+    assert c["similarity"] >= 0.85
+    # the record's label fields ride along as evidence; embedding/key do not
+    assert c["a"] == {"entity": "deploy daemon", "attribute": "approach",
+                      "value": "backup first"}
+    assert c["b"]["value"] == "always backup first"
+    assert "embedding" not in c["a"] and "key" not in c["b"]
+
+
+def test_slot_duplicate_candidates_respects_dismissed():
+    recs = [
+        _slot_rec("a|x", "a", "x", "v1", _vec(1, 0)),
+        _slot_rec("b|y", "b", "y", "v2", _vec(1, 0)),
+        _slot_rec("c|z", "c", "z", "v3", _vec(1, 0)),
+    ]
+    out = gc.slot_duplicate_candidates(
+        recs, min_similarity=0.85, top_k=20, dismissed={("a|x", "b|y")})
+    pairs = {(c["a_key"], c["b_key"]) for c in out}
+    assert pairs == {("a|x", "c|z"), ("b|y", "c|z")}
+
+
+def test_slot_duplicate_candidates_skips_records_without_embeddings():
+    recs = [
+        _slot_rec("a|x", "a", "x", "v1", _vec(1, 0)),
+        _slot_rec("b|y", "b", "y", "v2", None),        # legacy row, no embedding
+        _slot_rec("c|z", "c", "z", "v3", _vec(1, 0)),
+    ]
+    out = gc.slot_duplicate_candidates(recs, min_similarity=0.85, top_k=20)
+    assert {(c["a_key"], c["b_key"]) for c in out} == {("a|x", "c|z")}
+
+
+def test_slot_duplicate_candidates_orders_and_caps():
+    recs = [
+        _slot_rec("a|x", "a", "x", "v1", _vec(1, 0)),
+        _slot_rec("b|y", "b", "y", "v2", _vec(1, 0)),       # sim 1.0 with a|x
+        _slot_rec("c|z", "c", "z", "v3", _vec(1, 0.2)),     # lower sim with both
+    ]
+    out = gc.slot_duplicate_candidates(recs, min_similarity=0.85, top_k=20)
+    assert [(c["a_key"], c["b_key"]) for c in out][0] == ("a|x", "b|y")
+    assert [c["similarity"] for c in out] == sorted(
+        (c["similarity"] for c in out), reverse=True)
+    capped = gc.slot_duplicate_candidates(recs, min_similarity=0.85, top_k=1)
+    assert len(capped) == 1 and capped[0]["similarity"] == 1.0

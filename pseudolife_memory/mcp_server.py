@@ -730,7 +730,9 @@ def memory_dream(
         ``deep``: full-corpus graph consolidation. Dry-run by default;
             ``apply=true`` snapshots the graph tables first (refuses if it
             can't). Settle returned candidates via ``memory_graph_review``;
-            ``snippets=false`` omits evidence.
+            ``snippets=false`` omits evidence. Also lists
+            ``lesson_duplicates`` / ``world_duplicates`` — cross-key
+            near-duplicate slots to curate by hand (never auto-deleted).
 
     Returns: per-action dict; ``{error}`` on a bad action or missing cursor.
     """

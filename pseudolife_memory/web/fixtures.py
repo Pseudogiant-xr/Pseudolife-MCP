@@ -562,6 +562,12 @@ class FixtureService:
     def graph_dismiss_duplicate(self, a, b):
         return {"dismissed": True, "new": True, "a": a, "b": b}
 
+    def curation_dismiss_duplicate(self, store, a_entity, a_attribute,
+                                   b_entity, b_attribute):
+        return {"dismissed": True, "new": True, "store": store,
+                "a_key": f"{a_entity}|{a_attribute}",
+                "b_key": f"{b_entity}|{b_attribute}"}
+
     def graph_delete_entity(self, entity):
         return {"deleted": True, "entity": entity}
 

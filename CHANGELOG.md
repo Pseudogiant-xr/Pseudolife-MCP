@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-19 — deep dream: lesson/world cross-key duplicate curation)
+- **`memory_dream(action="deep")` now lists curation candidates for the
+  lesson and world stores** — `lesson_duplicates` / `world_duplicates` in
+  both dry-run and apply responses. Dedup/supersession in those stores is
+  strictly per-slot (`(task, aspect)` / `(entity, attribute)`), so
+  near-duplicates parked under different keys accumulated silently (a
+  2026-07-19 manual sweep found 6 duplicate lesson groups and 1 duplicate
+  world slot). The new `graph_consolidation.slot_duplicate_candidates`
+  reuses the deep dream's cosine candidate-pair approach over the records'
+  own embeddings (floor/cap via the new `memory.deep_dream`
+  `curation_min_similarity` = 0.80 / `curation_top_k` = 20). Listing-only:
+  nothing is auto-deleted — duplicates are settled with the existing
+  `memory_forget` tools, and genuinely-distinct pairs are dismissed via the
+  new `POST /api/curation/dismiss-duplicate` (service
+  `curation_dismiss_duplicate`), persisted in the existing
+  `dismissed_pairs` table under a `lesson:`/`world:` namespace (normalised
+  slot keys cannot contain `:`/`|`, so graph-name dismissals can't collide;
+  no schema change).
+
 ### Fixed (2026-07-19 — analyzer: pruned-edge lesson entities leave the unattributed queue)
 - **The graph analyzer's "entities with no project" finding now also excludes
   entities referenced by `lessons.entity_id`/`object_entity_id`** — the
