@@ -297,19 +297,24 @@ never `docker system prune --volumes`, which deletes volumes.
 
 ## Wire into your coding agent
 
-**Plugin (easiest).** With the daemon running, two commands inside Claude
-Code wire everything — the MCP server, the session-start briefing hook,
-the memory-loop instructions, and the `/dream` + `/memory-status` commands:
+**Plugin (hooks + commands).** With the daemon running, two commands inside
+Claude Code wire the session hooks (briefing + episode identity), the
+memory-loop instructions, and the `/dream` + `/memory-status` commands:
 
 ```
 /plugin marketplace add Pseudogiant-xr/Pseudolife-MCP
 /plugin install pseudolife-memory@pseudolife-mcp
 ```
 
-The plugin replaces the manual `claude mcp add`, the settings.json hook,
-**and** the CLAUDE.md block below — the same standing instructions arrive as
-session context from the daemon. Details, non-default ports/tokens, and
-migration from manual wiring: [plugin/README.md](plugin/README.md).
+The plugin replaces the settings.json hook **and** the CLAUDE.md block below
+— the same standing instructions arrive as session context from the daemon.
+It deliberately does **not** bundle the MCP server: Claude Code loads a
+plugin server alongside any user-registered one with no deduplication, which
+doubled every session's tool namespace next to the installer's registration
+— so the transport is registered exactly once, by `ops/install.*` (stdio
+shim by default — per-session episode identity) or the one-liner below.
+Details, non-default ports/tokens, and migration:
+[plugin/README.md](plugin/README.md).
 
 **HTTP transport (manual equivalent).**
 The daemon already serves MCP over HTTP, so point either client straight at

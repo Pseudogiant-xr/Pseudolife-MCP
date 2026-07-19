@@ -1,7 +1,7 @@
 {
   "name": "pseudolife-memory",
   "version": "0.8.1",
-  "description": "Persistent long-term memory for Claude Code — wiring for the Pseudolife-MCP daemon (MCP server + session-start briefing hook + memory commands). Requires the daemon stack: https://github.com/Pseudogiant-xr/Pseudolife-MCP#quickstart",
+  "description": "Persistent long-term memory for Claude Code — wiring for the Pseudolife-MCP daemon (session briefing + identity hooks + memory commands; MCP transport via the installer's stdio shim or claude mcp add). Requires the daemon stack: https://github.com/Pseudogiant-xr/Pseudolife-MCP#quickstart",
   "author": {
     "name": "Pseudogiant-xr",
     "url": "https://github.com/Pseudogiant-xr"

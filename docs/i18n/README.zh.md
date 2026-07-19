@@ -1,8 +1,8 @@
-<!-- i18n-sync: v2 -->
+<!-- i18n-sync: v3 -->
 
 # Pseudolife-MCP
 
-[英文版 README](../../README.md) · 已同步:v2(2026-07-18)
+[英文版 README](../../README.md) · 已同步:v3 (2026-07-19)
 
 **为 Claude Code、Codex 及其他 MCP 客户端提供持久的长期记忆。**
 
@@ -31,7 +31,7 @@ ops\install.ps1         # Windows (pwsh 7+)
 
 安装脚本会检查前置依赖(缺少什么就打印一行明确的修复命令),询问使用哪种梦境提取器——通过你的 Max 套餐调用 Claude Sonnet(安装最轻量)或使用内置的本地模型(无需任何套餐即可运行)——随后启动整套服务,为所选客户端完成接入(会话开始时的简报钩子、写入 `~/.claude/CLAUDE.md` 或 `~/.codex/AGENTS.md` 的常驻记忆循环指令,以及 MCP 服务器注册),并对守护进程做健康检查。该脚本是幂等的:随时可以重复执行。
 
-守护进程启动后,对 Claude 而言,接入最简单的方式是 Claude Code 的**插件**——两条命令即可配置好 MCP 服务器、会话开始时的记忆简报,以及 `/dream` 与 `/memory-status` 命令:
+守护进程启动后,Claude Code 的**插件**会添加会话开始时的记忆简报,以及 `/dream` 与 `/memory-status` 命令——MCP 服务器本身由安装脚本注册,因此插件绝不会重复注册它的工具:
 
 ```
 /plugin marketplace add Pseudogiant-xr/Pseudolife-MCP

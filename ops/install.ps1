@@ -181,7 +181,8 @@ $claudePluginInstalled = (Test-Path $installedPlugins) -and
     ((Get-Content $installedPlugins -Raw) -match 'pseudolife-memory@pseudolife-mcp')
 if ($claudePluginInstalled -and ($clients -contains "claude")) {
     Write-Host "==> pseudolife-memory Claude Code plugin detected - skipping Claude"
-    Write-Host "    hook, CLAUDE.md block, and mcp add (the plugin provides all three)."
+    Write-Host "    hook and CLAUDE.md block (the plugin provides both). The plugin no"
+    Write-Host "    longer bundles an MCP server, so the transport is still wired below."
 }
 
 $briefingCommand = "docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json"
@@ -227,8 +228,9 @@ foreach ($selectedClient in $clients) {
 }
 
 # -- 10. wire into selected MCP clients ----------------------------------------------
+# Runs even with the plugin installed: the plugin is the hooks/commands layer
+# only, so the MCP transport (shim by default) always comes from here.
 foreach ($selectedClient in $clients) {
-    if (($selectedClient -eq "claude") -and $claudePluginInstalled) { continue }
     if ($selectedClient -eq "codex") {
         codex mcp get pseudolife-memory *> $null
         if ($LASTEXITCODE -eq 0) {

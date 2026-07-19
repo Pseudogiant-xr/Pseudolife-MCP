@@ -46,15 +46,16 @@ def test_plugin_manifest_version_matches_pyproject():
     assert manifest["version"] == version
 
 
-def test_plugin_mcp_json_points_at_daemon():
-    """URL and token must honor the same env knobs as the hook script —
-    a marketplace-installed plugin lives in a managed cache, so 'edit the
-    plugin's .mcp.json' is not a real configuration path."""
-    mcp = json.loads(_read("plugin/.mcp.json"))
-    server = mcp["mcpServers"]["pseudolife-memory"]
-    assert server["type"] == "http"
-    assert server["url"] == "${PSEUDOLIFE_MCP_DAEMON_URL:-http://127.0.0.1:8765}/mcp"
-    assert server["headers"]["Authorization"] == "Bearer ${PSEUDOLIFE_MCP_TOKEN}"
+def test_plugin_ships_no_mcp_server():
+    """The plugin is the hooks/commands layer only (2026-07-19): MCP transport
+    is registered by ops/install.* (stdio shim by default — per-session
+    identity) or the README one-liner. A bundled server would sit beside that
+    registration and double every session's tool namespace — Claude Code loads
+    both with no dedup, and the only off-switch is disabling the whole plugin,
+    which would also kill the identity/briefing hooks."""
+    assert not (ROOT / "plugin" / ".mcp.json").exists()
+    manifest = json.loads(_read("plugin/.claude-plugin/plugin.json"))
+    assert "mcpServers" not in manifest
 
 
 def test_plugin_hook_wiring():

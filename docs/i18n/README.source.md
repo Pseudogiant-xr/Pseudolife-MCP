@@ -1,4 +1,4 @@
-<!-- i18n-source: v2 (2026-07-18) — canonical English text for the translated
+<!-- i18n-source: v3 (2026-07-19) — canonical English text for the translated
      front doors in this directory. Translators: keep every fenced code block
      byte-identical (commands are never translated); keep "Pseudolife-MCP",
      "Claude Code", "Codex", "MCP", "Cortex Console", and tool names like
@@ -55,9 +55,10 @@ briefing hook, the standing memory-loop instruction in `~/.claude/CLAUDE.md`
 or `~/.codex/AGENTS.md`, and the MCP server registration), and health-checks
 the daemon. It is idempotent: re-run it any time.
 
-With the daemon running, the Claude Code **plugin** is the easiest wiring
-for Claude — two commands set up the MCP server, the session-start memory
-briefing, and the `/dream` + `/memory-status` commands:
+With the daemon running, the Claude Code **plugin** adds the session-start
+memory briefing and the `/dream` + `/memory-status` commands — the MCP
+server itself is registered by the installer, so the plugin never doubles
+its tools:
 
 ```
 /plugin marketplace add Pseudogiant-xr/Pseudolife-MCP

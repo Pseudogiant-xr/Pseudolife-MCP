@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-19 — plugin no longer bundles the MCP server)
+- **The Claude Code plugin is now the hooks + commands layer only**: its
+  `.mcp.json` (HTTP server entry) is removed. Claude Code loads a plugin
+  MCP server *alongside* any user-registered server for the same daemon —
+  no deduplication, no per-server disable (only the whole-plugin toggle,
+  which would also kill the identity/briefing hooks) — so plugin + installer
+  users carried a doubled tool namespace in every session. The MCP transport
+  is now always registered by `ops/install.*` (stdio shim by default, HTTP
+  with `--transport http`) or the README's `claude mcp add` one-liner; the
+  installer's plugin-detected branch still skips the hook and CLAUDE.md
+  wiring but no longer skips the transport step. **Migration (existing
+  plugin users):** after the plugin updates, run the installer once (or the
+  one-liner) to register the transport — and if you had both before, the
+  duplication disappears on its own.
+
 ### Changed (2026-07-19 — project-scope hygiene)
 - **Scope derivation policy** (`memory.scopes` config): the entity-sources
   backfill now case-folds scope keys (`Pseudolife` and `pseudolife` are one
