@@ -53,3 +53,7 @@ REFLECT — at task end, or the moment an outcome lands:
 Be judicious — one claim per call; skip fleeting chatter (the surprise gate
 drops near-duplicates; `stored=false` is not an error). The first memory call
 of a session may lag a few seconds (one-time warmup).
+
+If this session has NO `memory_*` tools, the MCP transport isn't registered
+(this briefing arrives via a hook, a separate channel) — tell the user to run
+the repo installer (`ops/install.sh` / `ops\install.ps1`), which wires it.

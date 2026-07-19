@@ -1,8 +1,8 @@
-<!-- i18n-sync: v2 -->
+<!-- i18n-sync: v3 -->
 
 # Pseudolife-MCP
 
-[영어 원본 README](../../README.md)와 동기화됨 — synced: v2 (2026-07-18)
+[영어 원본 README](../../README.md)와 동기화됨 — synced: v3 (2026-07-19)
 
 **Claude Code, Codex, 그리고 그 밖의 MCP 클라이언트를 위한 영구적인 장기 메모리.**
 
@@ -47,9 +47,9 @@ ops\install.ps1         # Windows (pwsh 7+)
 메모리 루프 지침, 그리고 MCP 서버 등록), 데몬 상태를 점검합니다. 멱등적
 (idempotent)으로 동작하므로 언제든 다시 실행해도 안전합니다.
 
-데몬이 실행 중이라면, Claude Code **플러그인**이 Claude를 위한 가장 쉬운 연결
-방법입니다 — 명령 두 줄로 MCP 서버, 세션 시작 시 메모리 브리핑, 그리고
-`/dream` + `/memory-status` 명령까지 한 번에 설정됩니다:
+데몬이 실행 중이라면, Claude Code **플러그인**은 세션 시작 시 메모리 브리핑과
+`/dream` + `/memory-status` 명령을 추가합니다 — MCP 서버 자체는 설치
+스크립트가 등록하므로, 플러그인이 도구를 이중으로 등록하는 일은 없습니다:
 
 ```
 /plugin marketplace add Pseudogiant-xr/Pseudolife-MCP

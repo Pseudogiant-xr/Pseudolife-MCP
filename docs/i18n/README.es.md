@@ -1,8 +1,8 @@
-<!-- i18n-sync: v2 -->
+<!-- i18n-sync: v3 -->
 
 # Pseudolife-MCP
 
-> Traducción del [README](../../README.md) canónico — sincronizado: v2 (2026-07-18)
+> Traducción del [README](../../README.md) canónico — sincronizado: v3 (2026-07-19)
 
 **Memoria persistente a largo plazo para Claude Code, Codex y otros clientes MCP.**
 
@@ -54,10 +54,10 @@ sesión, la instrucción permanente del ciclo de memoria en
 MCP), y verifica el estado del daemon. Es idempotente: puedes volver a
 ejecutarlo en cualquier momento.
 
-Con el daemon en ejecución, el **plugin** de Claude Code es la forma más
-sencilla de conectarlo todo para Claude — dos comandos configuran el
-servidor MCP, el resumen de memoria al inicio de sesión, y los comandos
-`/dream` + `/memory-status`:
+Con el daemon en ejecución, el **plugin** de Claude Code añade el resumen
+de memoria al inicio de sesión y los comandos `/dream` + `/memory-status`
+— el propio servidor MCP lo registra el instalador, así que el plugin
+nunca duplica sus herramientas:
 
 ```
 /plugin marketplace add Pseudogiant-xr/Pseudolife-MCP

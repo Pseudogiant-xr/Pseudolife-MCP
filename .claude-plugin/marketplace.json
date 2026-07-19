@@ -8,7 +8,7 @@
     {
       "name": "pseudolife-memory",
       "source": "./plugin",
-      "description": "Wires the Pseudolife-MCP memory daemon into Claude Code: MCP server, session-start briefing hook, /dream and /memory-status commands."
+      "description": "Wires the Pseudolife-MCP daemon into Claude Code: session briefing + identity hooks, /dream and /memory-status commands. MCP transport is registered separately (installer shim or claude mcp add)."
     }
   ]
 }

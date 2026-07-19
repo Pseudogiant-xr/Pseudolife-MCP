@@ -200,7 +200,8 @@ if grep -q "pseudolife-memory@pseudolife-mcp" \
     CLAUDE_PLUGIN_INSTALLED=1
     if [ "$CLIENT" = claude ] || [ "$CLIENT" = both ]; then
         echo "==> pseudolife-memory Claude Code plugin detected — skipping Claude"
-        echo "    hook, CLAUDE.md block, and mcp add (the plugin provides all three)."
+        echo "    hook and CLAUDE.md block (the plugin provides both). The plugin no"
+        echo "    longer bundles an MCP server, so the transport is still wired below."
     fi
 else
     CLAUDE_PLUGIN_INSTALLED=""
@@ -247,8 +248,9 @@ for selected_client in $clients; do
 done
 
 # ── 10. wire into selected MCP clients ─────────────────────────────────────
+# Runs even with the plugin installed: the plugin is the hooks/commands layer
+# only, so the MCP transport (shim by default) always comes from here.
 for selected_client in $clients; do
-    if [ "$selected_client" = claude ] && [ -n "$CLAUDE_PLUGIN_INSTALLED" ]; then continue; fi
     if [ "$selected_client" = codex ]; then
         if codex mcp get pseudolife-memory >/dev/null 2>&1; then
             echo "==> MCP server already wired into Codex — skipping."
