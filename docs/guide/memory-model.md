@@ -147,9 +147,10 @@ provenance stamp** so the agent has a real sense of *when* a fact held and
   time reads earlier. Wall time is display-only.
 - **`writer_id` / `session_id`** — which writer/session made the change.
   The daemon reads an `X-PL-Writer` header per request (the stdio shim
-  forwards `PSEUDOLIFE_WRITER_ID`) and mints a per-connection session id,
-  so a Codex session, a second Claude session, and the dream are all
-  distinguishable.
+  forwards `PSEUDOLIFE_WRITER_ID`) and resolves the session id through the
+  five-tier [session-identity](configuration.md#session-identity) contract
+  (the shim's `X-PL-Session` header preferred), so a Codex session, a second
+  Claude session, and the dream are all distinguishable.
 
 Reads surface this: serialised facts include the stamp plus a human `age`
 ("3 days ago"), and **`memory_history(entity, attribute)`** returns the

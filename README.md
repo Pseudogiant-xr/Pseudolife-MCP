@@ -517,7 +517,7 @@ renders the real frontend against canned data:
 | World cortex | `memory_world_*` — cited external facts + age-decayed freshness (manual ingest) |
 | Procedural memory | `memory_outcome` (signals) → dream-synthesised lessons via `memory_lesson_search`; `prefers`/`avoids` graph edges; single-writer |
 | Sense of time + multi-writer | Per-write stamp (tx/valid time, HLC ordering, writer/session); `memory_history`; relative `age` on reads; `write_mode` seam (snapshot live, occ Phase-2) |
-| Episodes + tags | Session episodes daemon-owned, keyed by stable per-session id; lazy-open + idle reaper + prune-empty; nested sub-episodes with subtree-expanded recall; multi-valued `tags=[...]` |
+| Episodes + tags | Session episodes daemon-owned, keyed by a resolved five-tier session identity; hook/shim eager-open or lazy-open + idle reaper + prune-empty + resume-after-reap; nested sub-episodes with subtree-expanded recall; multi-valued `tags=[...]` |
 | Session briefing | SessionStart hook injects unsure-graph + lessons + verified world facts + last-session recap (`pseudolife-mcp briefing`) |
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
 | Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); BM25 hybrid pool (`bm25=True`, stdlib only); ONNX embedding backend (`pip install .[onnx]` — ~3x faster CPU encode, bit-identical, auto-enabled when installed); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |

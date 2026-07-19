@@ -1,0 +1,53 @@
+{
+  "n_replicates": 5,
+  "replicates": [
+    "",
+    "r2",
+    "r3",
+    "r4",
+    "r5"
+  ],
+  "n_questions": 78,
+  "arms": {
+    "rag": {
+      "accuracies": [
+        0.3205,
+        0.3462,
+        0.3462,
+        0.2821,
+        0.3077
+      ],
+      "mean": 0.32054,
+      "std": 0.02720005514700292
+    },
+    "cortex": {
+      "accuracies": [
+        0.2051,
+        0.1923,
+        0.1923,
+        0.2051,
+        0.1795
+      ],
+      "mean": 0.19485999999999998,
+      "std": 0.010709248339636173
+    },
+    "hybrid": {
+      "accuracies": [
+        0.3718,
+        0.359,
+        0.3846,
+        0.3718,
+        0.3462
+      ],
+      "mean": 0.36668,
+      "std": 0.014594245441268968
+    }
+  },
+  "source_files": [
+    "longmemeval-ku-s-qwen-27b.jsonl",
+    "longmemeval-ku-s-qwen-27b-r2.jsonl",
+    "longmemeval-ku-s-qwen-27b-r3.jsonl",
+    "longmemeval-ku-s-qwen-27b-r4.jsonl",
+    "longmemeval-ku-s-qwen-27b-r5.jsonl"
+  ]
+}
