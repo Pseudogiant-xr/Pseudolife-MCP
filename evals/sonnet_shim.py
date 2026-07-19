@@ -68,6 +68,7 @@ class ClaudeCli:
         self._health_ok: bool | None = None
         self._health_detail = ""
         self._health_at = 0.0
+        self._health_refreshing = False
 
     def chat(self, system: str, user: str) -> str:
         if self.system_override and system.startswith(_SYSTEM_PROMPT):
@@ -113,19 +114,35 @@ class ClaudeCli:
     _HEALTH_TTL = 300.0  # one trivial CLI call per 5 min keeps /health honest
 
     def health(self) -> tuple[bool, str]:
-        """Real usability check: run a trivial completion so a logged-out or
+        """Real usability check: a trivial completion so a logged-out or
         broken CLI turns /health into 503 (the daemon's fallback probe treats
-        that as primary-down). Cached for _HEALTH_TTL seconds."""
+        that as primary-down). Stale-while-revalidate (2026-07-19): the check
+        takes SECONDS while the daemon probes with a 3s timeout — a blocking
+        refresh on cache expiry made every post-idle probe time out, so
+        dreams silently fell back on a healthy shim (3/3 that day). A stale
+        cache answers instantly with the last verdict and refreshes in a
+        background thread; only an empty cache blocks (startup warms it)."""
         now = time.monotonic()
-        if self._health_ok is not None and now - self._health_at < self._HEALTH_TTL:
-            return self._health_ok, self._health_detail
+        if self._health_ok is None:
+            return self._health_refresh()
+        ok, detail = self._health_ok, self._health_detail  # pre-refresh verdict
+        if (now - self._health_at >= self._HEALTH_TTL
+                and not self._health_refreshing):
+            self._health_refreshing = True
+            threading.Thread(target=self._health_refresh, daemon=True).start()
+        return ok, detail
+
+    def _health_refresh(self) -> tuple[bool, str]:
         try:
-            self.chat("", "Reply with exactly: OK")
-            self._health_ok, self._health_detail = True, ""
-        except Exception as e:  # noqa: BLE001 — any failure means unusable
-            self._health_ok, self._health_detail = False, str(e)[:300]
-        self._health_at = now
-        return self._health_ok, self._health_detail
+            try:
+                self.chat("", "Reply with exactly: OK")
+                self._health_ok, self._health_detail = True, ""
+            except Exception as e:  # noqa: BLE001 — any failure means unusable
+                self._health_ok, self._health_detail = False, str(e)[:300]
+            self._health_at = time.monotonic()
+            return self._health_ok, self._health_detail
+        finally:
+            self._health_refreshing = False
 
 
 def make_handler(cli: ClaudeCli):
@@ -224,6 +241,10 @@ def main():
               f"{args.system_prompt_file} ({len(override)} chars)", flush=True)
     cli = ClaudeCli(args.cli, args.model, args.call_timeout,
                     system_override=override)
+    # Warm the health cache before serving: the only blocking health path is
+    # an empty cache, and this guarantees no request ever hits it.
+    ok, detail = cli.health()
+    print(f"sonnet_shim: health warm -> {'ok' if ok else detail}", flush=True)
     srv = ThreadingHTTPServer((args.host, args.port), make_handler(cli))
     print(f"sonnet_shim: serving {args.model} on "
           f"http://{args.host}:{args.port}/v1", flush=True)

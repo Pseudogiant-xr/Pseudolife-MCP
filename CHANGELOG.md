@@ -7,10 +7,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed (2026-07-19 — spurious extractor fallback + its visibility)
+- **The sonnet shim's `/health` is stale-while-revalidate** — the actual root
+  cause of the spurious fallbacks (the restart correlation was a red
+  herring): on cache expiry (5-min TTL) `/health` ran a REAL `claude -p`
+  completion taking seconds, while the daemon probes with a 3s timeout, so
+  any dream arriving after an idle period hit the stale cache, timed out,
+  and silently fell back (3/3 live dreams). A stale cache now answers
+  instantly with the last verdict and refreshes in a background thread; the
+  startup path warms the cache before the server accepts connections, so no
+  request ever hits the blocking empty-cache branch. (Requires a shim
+  restart to take effect.)
 - **The auto-mode extractor probe retries once** (2s apart) before falling
-  back: the first probe after a daemon container restart reliably fails
-  (host-gateway cold start) while the endpoint is healthy — two consecutive
-  live dreams degraded to the fallback extractor spuriously.
+  back — belt-and-braces for genuinely transient probe failures.
 - **The Console's extractor chip now warns when the LAST dream ran on the
   fallback** even though the primary is healthy again — previously that state
   rendered the green "primary ✓" chip with the fallback run visible only in
