@@ -352,6 +352,29 @@ def test_dream_run_promotes_and_advances_cursor(svc):
     assert again["pulled"] == 0
 
 
+def test_dream_run_stamps_relation_entities_with_entry_sources(svc):
+    # Regression (2026-07-19, caught in live verification): dream_pull's entry
+    # dicts dropped the source field, so dream_run's call site silently built
+    # an EMPTY batch_sources set and relation endpoints stayed unattributed —
+    # the one link in the stamping chain no unit test covered.
+    class _BothStub:
+        def extract(self, texts, vocab, known_facts=None):
+            return []
+        def extract_relations(self, texts, registry):
+            return [{"src": "stamp-e2e-svc", "relation": "runs-on",
+                     "dst": "stamp-e2e-host"}]
+
+    svc.store("stamp-e2e probe mention", source="stamp-e2e-proj")
+    out = svc.dream_run(_BothStub())
+    assert out["relations"] == 1
+    from pseudolife_memory.graph import norm_name
+    st = svc._storage
+    for name in ("stamp-e2e-svc", "stamp-e2e-host"):
+        eid = st.find_entity(norm_name(name))["id"]
+        assert "stamp-e2e-proj" in {
+            r["source"] for r in st.sources_for_entity(eid)}, name
+
+
 def test_dream_status_would_fire_on_idle(svc):
     svc.config.memory.dream.min_batch = 100        # never fires on batch
     svc.config.memory.dream.idle_seconds = 0.0     # everything counts as idle

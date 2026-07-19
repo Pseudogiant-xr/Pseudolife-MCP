@@ -16,7 +16,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the "entities with no project" review finding. The stamp also feeds the
   cross-project gate within the same batch, so a freshly minted entity from
   project A linking to a project-B entity is routed to review like any other
-  cross-project claim.
+  cross-project claim. Follow-up fix (caught in live verification):
+  `dream_pull` entry dicts now carry `source` — they didn't, so `dream_run`
+  silently passed an empty source set and nothing was stamped; regression
+  pinned by an end-to-end `dream_run` test.
 - **The relations extraction prompt no longer invites `related-to`.** The old
   tail ("if a real connection fits none of the specific ones, use
   'related-to'") was the source of the untyped co-mention faucet the
