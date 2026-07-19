@@ -2362,6 +2362,10 @@ class MemoryService:
                         "timestamp": e.timestamp,
                         "episode_id": e.episode_id,
                         "db_id": e.db_id,
+                        # dream_run stamps relation-minted entities with the
+                        # batch's sources — dropping this field silently
+                        # disables that (2026-07-19 regression).
+                        "source": e.source,
                     }
                     for e in rows
                 ],
