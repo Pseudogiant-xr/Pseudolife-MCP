@@ -270,12 +270,19 @@ class OpenAICompatExtractor:
     extractable claims returns ``[]``. Uses stdlib urllib — no new deps."""
 
     def __init__(self, base_url: str, model: str, *, api_key: str | None = None,
-                 max_tokens: int = 400, timeout_seconds: float = 20.0) -> None:
+                 max_tokens: int = 400, timeout_seconds: float = 20.0,
+                 system_prompt: str | None = None) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.api_key = api_key or None
         self.max_tokens = int(max_tokens)
         self.timeout = float(timeout_seconds)
+        # Base system prompt for claims extraction. Defaults to the shipped
+        # ``_SYSTEM_PROMPT`` (the daemon never passes this arg, so its behaviour
+        # is byte-identical). Off-label harnesses (e.g. the LME-V2 trajectory
+        # smoke) pass a domain-specific variant; the vocab/known-facts hints are
+        # still appended, so key-reuse across a batch is preserved.
+        self.system_prompt = system_prompt if system_prompt is not None else _SYSTEM_PROMPT
 
     def extract(self, texts: list[str], vocab: list[str],
                 known_facts: list[tuple[str, str, str]] | None = None,
@@ -294,7 +301,7 @@ class OpenAICompatExtractor:
                 "model": self.model,
                 "messages": [
                     {"role": "system",
-                     "content": _SYSTEM_PROMPT + _vocab_hint(vocab)
+                     "content": self.system_prompt + _vocab_hint(vocab)
                                 + _facts_hint(known_facts)},
                     # Numbered so the model can cite which note each claim came
                     # from ("source") — per-claim attribution without giving up
