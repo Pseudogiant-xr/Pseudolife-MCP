@@ -57,6 +57,60 @@ def test_pointer_persists_and_clear_only_if_owner(pg_service):
     assert svc._storage.get_meta("active_session_pointer") is None
 
 
+# ── Pointer TTL (finding 4, 2026-07-19): a crashed client that never fires
+# SessionEnd must not attract other clients' tier-3 writes forever ───────────
+
+
+def test_pointer_expires_past_ttl(pg_service, monkeypatch):
+    """A pointer older than the TTL is ignored — tier 3 falls through instead
+    of attributing to a dead session."""
+    svc = pg_service
+    monkeypatch.setenv("PSEUDOLIFE_ACTIVE_SESSION_TTL_SECONDS", "3600")
+    svc.set_active_session("liveSess")
+    assert svc._resolve_writer()[1] == "liveSess"          # fresh -> resolves
+    # age the pointer past the TTL (refresh is on-set only, so this is stale)
+    svc._active_session = ("liveSess", svc._active_session[1] - 7200)
+    assert svc._resolve_writer()[1] is None                # expired -> ignored
+
+
+def test_pointer_ttl_zero_disables(pg_service, monkeypatch):
+    """TTL=0 disables expiry (matching the resume-window convention) — an
+    ancient pointer still resolves."""
+    svc = pg_service
+    monkeypatch.setenv("PSEUDOLIFE_ACTIVE_SESSION_TTL_SECONDS", "0")
+    svc.set_active_session("s")
+    svc._active_session = ("s", 0.0)                        # ancient timestamp
+    assert svc._resolve_writer()[1] == "s"
+
+
+def test_pointer_legacy_shape_without_ts_is_stale(pg_service, monkeypatch):
+    """A legacy pointer hydrates to ts=0.0 (no timestamp field); under a
+    positive TTL that reads as infinitely old and is ignored until the next
+    SessionStart re-registers it — fail-safe, not a crash."""
+    svc = pg_service
+    monkeypatch.setenv("PSEUDOLIFE_ACTIVE_SESSION_TTL_SECONDS", "21600")
+    svc._active_session = ("legacySess", 0.0)
+    assert svc._resolve_writer()[1] is None
+
+
+def test_pointer_legacy_shape_hydration_from_meta(pg_service, tmp_path):
+    """End-to-end hydration of a pre-TTL persisted pointer (2026-07-19 review
+    coverage note): a meta row without a ``ts`` field — written by a daemon
+    older than the TTL change — must hydrate through ``_ensure_init`` as
+    ts=0.0, not crash, and read as stale under a positive TTL."""
+    from pseudolife_memory.service import MemoryService
+
+    pg_service._storage.set_meta(
+        "active_session_pointer", {"session_id": "preTtlSess"})  # no "ts"
+    svc2 = MemoryService(data_dir=tmp_path / "second")
+    try:
+        svc2._ensure_init()  # env still points at the test PG (fixture-set)
+        assert svc2._active_session == ("preTtlSess", 0.0)
+        assert svc2._resolve_writer()[1] is None  # default TTL 6h -> stale
+    finally:
+        svc2._storage.close()  # don't leak a backend onto the shared bench PG
+
+
 # ── Ownership guards on both episode-close paths (Task 3) ────────────────────
 # The observed bug: `episode_end_session(None)` used to force-close ANY open
 # root, and `episode_end()`'s no-identity fallback popped whatever episode

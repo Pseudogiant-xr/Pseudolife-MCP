@@ -397,10 +397,40 @@ class MemoryService:
         w, header_s, transport_s = resolve_writer_detailed(self._writer_id)
         if header_s:
             return (w, header_s)
-        active = getattr(self, "_active_session", None)
-        if active is not None:
-            return (w, active[0])
+        active_id = self._active_session_id()
+        if active_id is not None:
+            return (w, active_id)
         return (w, transport_s)
+
+    def _active_session_id(self, now: float | None = None) -> str | None:
+        """The tier-3 active-session pointer's session id, or None when it is
+        absent or stale (finding 4, 2026-07-19).
+
+        A client that crashes/is killed never fires SessionEnd, so its pointer
+        would otherwise attribute every later tier-3 write to a dead session
+        indefinitely. A pointer older than
+        ``PSEUDOLIFE_ACTIVE_SESSION_TTL_SECONDS`` (default 6 h — the resume
+        window, past which a return starts a fresh episode anyway; ``0``
+        disables the TTL, matching the resume-window convention) is treated as
+        stale and ignored, so tier 3 falls through to the transport/idle-gap
+        floor.
+
+        Refresh is on-set only: SessionStart re-stamps ``ts`` (Claude Code
+        re-fires it on resume/compact, keeping a genuinely active session
+        alive), and resolution never mutates. A legacy pointer with no stored
+        timestamp hydrates to ``ts=0.0``, which reads as infinitely old and is
+        ignored until the next SessionStart re-registers it — fail-safe, never
+        a crash."""
+        active = getattr(self, "_active_session", None)
+        if active is None:
+            return None
+        ttl = float(os.environ.get("PSEUDOLIFE_ACTIVE_SESSION_TTL_SECONDS",
+                                   "21600"))
+        if ttl > 0:
+            now = time.time() if now is None else now
+            if now - active[1] > ttl:
+                return None
+        return active[0]
 
     def set_active_session(self, session_id: str | None) -> None:
         """Machine-scoped active-session pointer (identity tier 3): set by
@@ -2855,13 +2885,22 @@ class MemoryService:
         """Idempotent open for a shim-driven session episode.
 
         If an episode is already open with the same ``session_key`` (a
-        resume/compact re-fire), return it unchanged. Otherwise open a new
-        root — WITHOUT closing any other session's open episode, so concurrent
-        sessions (different projects) coexist cleanly.
+        resume/compact re-fire), return it unchanged. If the idle reaper
+        recently closed it (within the resume window), reopen that same root
+        rather than forking a new one (finding 5, 2026-07-19). Otherwise open
+        a new root — WITHOUT closing any other session's open episode, so
+        concurrent sessions (different projects) coexist cleanly.
         """
         with self._lock:
             self._ensure_init()
             assert self._cms is not None
+            existing = (self._cms.episodes.open_leaf_for(session_key)
+                        if session_key is not None else None)
+            if existing is not None:
+                return self._episode_to_dict(existing)
+            resumed = self._resume_closed_session_locked(session_key)
+            if resumed is not None:
+                return self._episode_to_dict(resumed)
             ep = self._cms.episodes.start_session(
                 title=title, session_key=session_key, hint=hint)
             self._persist_episodes()
@@ -3128,31 +3167,53 @@ class MemoryService:
         existing = em.open_leaf_for(session_key)
         if existing is not None:
             return existing.id
-        # Resume-on-return: the idle reaper closes a session episode during a
-        # long pause, but the same mcp-session-id is by construction the same
-        # client session — reopen its episode instead of leaving a husk chain.
-        # The window only exists so a days-idle session starts a fresh episode.
-        resume = float(os.environ.get(
-            "PSEUDOLIFE_SESSION_RESUME_SECONDS", "21600"))
-        if resume > 0:
-            closed = [e for e in em.episodes.values()
-                      if e.session_key == session_key
-                      and e.parent_id is None and e.ended_at is not None]
-            if closed:
-                last = max(closed, key=lambda e: e.ended_at)
-                if time.time() - last.ended_at <= resume:
-                    last.ended_at = None
-                    last.closed_by_new_start = False
-                    em.current_id = last.id
-                    self._persist_episodes()
-                    logger.info("resumed session episode %s (session_key=%s)",
-                                last.id, session_key)
-                    return last.id
+        resumed = self._resume_closed_session_locked(session_key)
+        if resumed is not None:
+            return resumed.id
         title = time.strftime("session - %Y-%m-%d %H:%M")
         ep = em.start_session(title=title, session_key=session_key)
         self._persist_episodes()
         logger.info("opened session episode %s (session_key=%s)", ep.id, session_key)
         return ep.id
+
+    def _resume_closed_session_locked(self, session_key: str | None):
+        """Reopen a recently-reaped root for ``session_key`` so a return
+        continues the same episode instead of forking a new one. The idle
+        reaper closes a session episode during a long pause, but the same
+        resolved identity is by construction the same client session. Returns
+        the reopened Episode, or None when there's no key, no closed root, or
+        the newest closed root is past
+        ``PSEUDOLIFE_SESSION_RESUME_SECONDS`` (default 6 h; ``0`` disables so a
+        days-idle session starts fresh). Caller holds the lock; persists on a
+        resume.
+
+        Shared by the store path (:meth:`_ensure_session_episode`) and the
+        hook path (:meth:`episode_start_session`) — before this was split, a
+        SessionStart re-fire (resume/compact) after a reap forked a second
+        root while a store resumed, fragmenting one session (finding 5,
+        2026-07-19)."""
+        if not session_key or self._cms is None:
+            return None
+        resume = float(os.environ.get(
+            "PSEUDOLIFE_SESSION_RESUME_SECONDS", "21600"))
+        if resume <= 0:
+            return None
+        em = self._cms.episodes
+        closed = [e for e in em.episodes.values()
+                  if e.session_key == session_key
+                  and e.parent_id is None and e.ended_at is not None]
+        if not closed:
+            return None
+        last = max(closed, key=lambda e: e.ended_at)
+        if time.time() - last.ended_at > resume:
+            return None
+        last.ended_at = None
+        last.closed_by_new_start = False
+        em.current_id = last.id
+        self._persist_episodes()
+        logger.info("resumed session episode %s (session_key=%s)",
+                    last.id, session_key)
+        return last
 
     def set_session_title(self, title: str) -> dict[str, Any]:
         """Rename THIS request's session episode (the root keyed by the caller's

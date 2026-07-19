@@ -166,6 +166,41 @@ def test_store_opens_fresh_episode_outside_resume_window(
     assert any(e["id"] != first["id"] and e["ended_at"] is None for e in roots)
 
 
+def test_episode_start_session_resumes_recently_reaped_root(pristine_service):
+    """A SessionStart re-fire (source=resume/compact) after the idle reaper
+    closed the root must resume it, not fork a second episode for the same
+    session (finding 5, 2026-07-19). The store path already resumed via
+    ``_ensure_session_episode``; the hook path (``episode_start_session``)
+    did not, so a long session that got reaped then re-fired the hook
+    fragmented into two roots."""
+    service = pristine_service
+    opened = service.episode_start_session("SESS-H", "session - 2026-07-19 10:00")
+    _store_in_session(service, "SESS-H", "work before the idle gap")
+    service.reap_idle_sessions(idle_seconds=0, now=9e12)   # reaper closes it
+    reopened = service.episode_start_session("SESS-H", "session - 2026-07-19 16:00")
+    roots = [e for e in _episodes_by_id(service).values()
+             if e["session_key"] == "SESS-H" and e["parent_id"] is None]
+    assert len(roots) == 1                       # resumed, not forked
+    assert reopened["id"] == opened["id"]
+    assert roots[0]["ended_at"] is None          # reopened
+
+
+def test_episode_start_session_forks_outside_resume_window(
+        pristine_service, monkeypatch):
+    """With the resume window disabled the hook path opens a fresh root, same
+    as the store path — the resume behavior is one shared window."""
+    monkeypatch.setenv("PSEUDOLIFE_SESSION_RESUME_SECONDS", "0")
+    service = pristine_service
+    opened = service.episode_start_session("SESS-HF", "session - 2026-07-19 10:00")
+    _store_in_session(service, "SESS-HF", "work before the long gap")
+    service.reap_idle_sessions(idle_seconds=0, now=9e12)
+    reopened = service.episode_start_session("SESS-HF", "session - 2026-07-19 22:00")
+    roots = [e for e in _episodes_by_id(service).values()
+             if e["session_key"] == "SESS-HF" and e["parent_id"] is None]
+    assert len(roots) == 2                       # window 0 -> never resume
+    assert reopened["id"] != opened["id"]
+
+
 # ── auto-title on close ──────────────────────────────────────────────────────
 
 
