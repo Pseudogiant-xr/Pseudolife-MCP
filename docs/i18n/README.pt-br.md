@@ -1,8 +1,8 @@
-<!-- i18n-sync: v4 -->
+<!-- i18n-sync: v5 -->
 
 # Pseudolife-MCP
 
-[README original em inglês](../../README.md) — sincronizado: v3 (2026-07-19)
+[README original em inglês](../../README.md) — sincronizado: v5 (2026-07-19)
 
 **Memória de longo prazo persistente para Claude Code, Codex e outros clientes MCP.**
 
@@ -49,11 +49,10 @@ usar — Claude Sonnet via seu plano Max (a instalação mais leve), Sonnet
 com o modelo local incluído como fallback automático, ou apenas o modelo
 local incluído, que não precisa de nenhum plano. Em seguida, ele sobe a
 stack, conecta os clientes selecionados (o hook de briefing no início da
-sessão e o registro do transporte MCP), oferece anexar a instrução
-permanente do loop de memória a `~/.claude/CLAUDE.md` ou
-`~/.codex/AGENTS.md`, e faz o health-check do daemon. Ele é idempotente:
-pode ser executado novamente a qualquer momento; `--extractor <mode>`
-alterna entre as configurações de extrator.
+sessão, que entrega a orientação do loop de memória a cada sessão, e o
+registro do transporte MCP), e faz o health-check do daemon. Ele é
+idempotente: pode ser executado novamente a qualquer momento;
+`--extractor <mode>` alterna entre as configurações de extrator.
 
 Com o daemon em execução, o **plugin** do Claude Code adiciona o briefing
 de memória no início da sessão, a orientação permanente do loop de

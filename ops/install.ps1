@@ -208,21 +208,18 @@ foreach ($selectedClient in $clients) {
         Write-Host "==> Memory block already present in $instructionPath - skipping."
         continue
     }
-    $choice = $instructionChoice
-    if (-not $choice) {
-        if ($interactive) {
-            $yn = Read-Host "Append the memory-loop block to $instructionPath? [Y/n]"
-            $choice = if ($yn -match '^[Nn]') { "skip" } else { "append" }
-        } else {
-            $choice = "skip"
-        }
-    }
+    # No interactive prompt: the session hook briefing delivers the same
+    # block every session, so a standing-file copy would double-inject.
+    # Explicit opt-in only (-Instructions append) — useful for subagent
+    # visibility and hook-less setups.
+    $choice = if ($instructionChoice) { $instructionChoice } else { "skip" }
     if ($choice -eq "append") {
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $instructionPath) | Out-Null
         Add-Content -Path $instructionPath -Value (Get-Content (Join-Path $repo "examples\CLAUDE.memory.md") -Raw)
         Write-Host "==> Appended memory block to $instructionPath"
     } else {
-        Write-Host "SKIPPED: MCP server instructions still provide the core memory loop. Optional stronger guidance:"
+        Write-Host "==> Standing memory block not written (the session hook briefing already"
+        Write-Host "    delivers the memory loop each session). To add it anyway:"
         Write-Host "  Add-Content `"$instructionPath`" (Get-Content `"$repo\examples\CLAUDE.memory.md`" -Raw)"
     }
 }
