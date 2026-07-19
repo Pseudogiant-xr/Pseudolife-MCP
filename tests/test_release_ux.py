@@ -250,3 +250,28 @@ def test_changelog_mentions_current_schema_version() -> None:
     assert re.search(rf"\bv{SCHEMA_META_VERSION}\b", changelog), (
         f"schema is v{SCHEMA_META_VERSION} but CHANGELOG.md never mentions "
         f"v{SCHEMA_META_VERSION} — add an entry under [Unreleased]")
+
+
+def test_every_release_tag_has_a_changelog_section() -> None:
+    """A release boundary in CHANGELOG.md is one fragile ``## [N.N.N]``
+    line: the 0.7.0 cut inserted it (3ab06fc), and a same-day edit
+    (60bdf61) replaced that exact line with its own subsection, silently
+    dissolving the release into [Unreleased] for 12 days until the 0.8.0
+    cut found it via ``git log -S``. Every vN.N.N tag must keep a
+    matching section header."""
+    repo = _README.parent
+    try:
+        proc = subprocess.run(["git", "tag", "-l"], cwd=repo, check=True,
+                              capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        pytest.skip("not a git checkout")
+    versions = [m.group(1) for line in proc.stdout.splitlines()
+                if (m := re.fullmatch(r"v(\d+\.\d+\.\d+)", line.strip()))]
+    if not versions:
+        pytest.skip("no vN.N.N release tags in this clone")
+    changelog = (repo / "CHANGELOG.md").read_text(encoding="utf-8")
+    headers = set(re.findall(r"^## \[(\d+\.\d+\.\d+)\]", changelog, flags=re.M))
+    missing = [v for v in versions if v not in headers]
+    assert missing == [], (
+        f"release tags without a '## [N.N.N]' CHANGELOG section: {missing} "
+        f"— a later edit likely overwrote the header line")

@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-19 — analyzer: lesson entities leave the unattributed queue)
+- **The graph analyzer's "entities with no project" finding now excludes
+  lesson-only entities** — task/approach nodes minted by `memory_outcome`
+  whose every edge is a `prefers`/`avoids` lesson relation. They carry no
+  fact traces or mentions, so the mention-scan can never attribute them;
+  flagging them was permanent review-queue noise (~137 on the live bank).
+  Entities that also carry normal relations still flag as before.
+
 ### Fixed (2026-07-19 — spurious extractor fallback + its visibility)
 - **The sonnet shim's `/health` is stale-while-revalidate** — the actual root
   cause of the spurious fallbacks (the restart correlation was a red
