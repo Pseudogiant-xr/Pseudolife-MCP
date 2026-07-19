@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-07-19 — concurrent test runs no longer terminate each other)
+- **Two overlapping `pytest tests/` invocations produced 15–170 nondeterministic
+  `psycopg.errors.AdminShutdown` failures/errors with a different victim set
+  every run** — `pg_conn` (and evals' `reset_bench()`) reap every other backend
+  on their database before truncating, and both runs shared one
+  `pseudolife_memory_test` / `pseudolife_memory_bench`, so each run's reaper
+  killed the other run's live connections. Each pytest process now provisions
+  private per-run databases (`pseudolife_memory_test_<pid>`,
+  `pseudolife_memory_bench_<pid>`), dropped at exit, with dead-run leftovers
+  pruned on the next run (pid-liveness-checked, so live concurrent runs are
+  never touched). `PSEUDOLIFE_TEST_DATABASE_URL` still wins verbatim (CI), and
+  eval CLI runs keep the fixed bench name (`PSEUDOLIFE_BENCH_DB` is only pinned
+  by the test suite). Regression pins in `tests/test_pg_run_isolation.py`.
+
 ### Changed (2026-07-19 — project-scope hygiene)
 - **Scope derivation policy** (`memory.scopes` config): the entity-sources
   backfill now case-folds scope keys (`Pseudolife` and `pseudolife` are one
