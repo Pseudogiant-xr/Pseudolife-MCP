@@ -178,6 +178,27 @@ def test_entity_sources_project_counts(storage):
     assert counts["es-px"] == 2 and counts["es-py"] == 1
 
 
+def test_lesson_entity_ids_unions_subject_and_object(storage):
+    # NOTE: keep this in the storage tier (above the svc fixture) — pg_conn
+    # reaps every other backend on the test DB, so a storage-fixture test
+    # running after svc exists would kill the shared service's connection.
+    a = storage.ensure_entity("lesson-task-ent", display="lesson-task-ent")
+    b = storage.ensure_entity("lesson-about-ent", display="lesson-about-ent")
+    storage.conn.execute(
+        "INSERT INTO lessons (entity, attribute, entity_norm, attribute_norm, "
+        "value, status, confidence, asserted_at, last_confirmed, "
+        "entity_id, object_entity_id) "
+        "VALUES ('lesson-task-ent', 'approach', 'lesson-task-ent', 'approach', "
+        "'x', 'current', 0.6, 1.0, 1.0, %s, %s)", (a, b))
+    storage.conn.execute(
+        "INSERT INTO lessons (entity, attribute, entity_norm, attribute_norm, "
+        "value, status, confidence, asserted_at, last_confirmed) "
+        "VALUES ('null-link', 'approach', 'null-link', 'approach', "
+        "'y', 'current', 0.6, 1.0, 1.0)")
+    got = storage.lesson_entity_ids()
+    assert {a, b} <= got and None not in got
+
+
 # ── service-level (real embedder; one shared instance) ──────────────────
 
 @pytest.fixture(scope="module")
@@ -869,3 +890,21 @@ def test_accept_merge_stamps_decider_and_review_lists_recent(svc):
     review = svc.graph_review()
     mine = next(m for m in review["recent_merges"] if m["proposal_id"] == pid)
     assert mine["decided_by"] == "agent" and mine["status"] == "accepted"
+
+
+def test_graph_review_excludes_lesson_entities_with_pruned_edges(svc):
+    # Residual tail (2026-07-19): a lesson-minted pair whose prefers/avoids
+    # edge was pruned by hygiene — zero edges left, but lessons still carry
+    # entity_id/object_entity_id, so unattributed must not flag them.
+    svc.lesson_write("residual lesson task", "approach", "keep it",
+                     about="residual-lesson-obj", now=70.0)
+    st = svc._storage
+    tid = st.find_entity("residual-lesson-task")["id"]
+    oid = st.find_entity("residual-lesson-obj")["id"]
+    st.conn.execute("DELETE FROM edges WHERE src_id = %s AND dst_id = %s",
+                    (tid, oid))
+    review = svc.graph_review()
+    un = [f for f in review["findings"] if f["type"] == "unattributed"]
+    flagged = set(un[0]["entities"]) if un else set()
+    assert "residual lesson task" not in flagged
+    assert "residual-lesson-obj" not in flagged

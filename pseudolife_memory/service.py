@@ -4028,6 +4028,7 @@ class MemoryService:
             proposals = self._storage.pending_proposals()
             entity_proposals = self._storage.pending_entity_proposals()
             dismissed = self._storage.dismissed_pairs()
+            lesson_ids = self._storage.lesson_entity_ids()
         entities, edges = g["entities"], g["edges"]
         if scope and scope != "all":
             keep = {eid for eid, ss in src_map.items() if scope in ss}
@@ -4035,7 +4036,8 @@ class MemoryService:
             edges = [e for e in edges if e["src_id"] in keep and e["dst_id"] in keep]
         out = gr.review(edges, entities, src_map, proposals=proposals,
                         entity_proposals=entity_proposals,
-                        dismissed_pairs=dismissed)
+                        dismissed_pairs=dismissed,
+                        lesson_entity_ids=lesson_ids)
         with self._lock:
             out["recent_merges"] = self._storage.recent_entity_decisions()
         return out
