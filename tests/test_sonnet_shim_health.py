@@ -56,6 +56,34 @@ def test_health_result_is_cached(monkeypatch):
     monkeypatch.setattr(cli, "chat", _boom)
     assert cli.health()[0] is True          # served from cache
     assert calls["n"] == 0
+
+
+def test_health_stale_cache_served_while_revalidating(monkeypatch):
+    # 2026-07-19: the health check runs a REAL completion (seconds) while the
+    # daemon probes /health with a 3s timeout — a BLOCKING refresh on cache
+    # expiry made every post-idle probe time out, so dreams silently fell
+    # back on a healthy shim (3/3 live dreams that day). A stale cache must
+    # answer instantly with the last verdict and refresh in the background;
+    # the refreshed verdict serves the NEXT probe.
+    cli = _cli(monkeypatch, True)
+    assert cli.health()[0] is True           # warm
+    calls = {"n": 0}
+
+    def _boom(s, u):
+        calls["n"] += 1
+        raise RuntimeError("nope")
+    monkeypatch.setattr(cli, "chat", _boom)
     cli._health_at = time.monotonic() - 301  # expire the cache
+
+    t0 = time.monotonic()
+    ok, _ = cli.health()
+    assert ok is True                        # stale verdict, served instantly
+    assert time.monotonic() - t0 < 0.5
+
+    deadline = time.monotonic() + 5.0        # background refresh lands
+    while calls["n"] == 0 and time.monotonic() < deadline:
+        time.sleep(0.02)
+    while cli._health_ok is not False and time.monotonic() < deadline:
+        time.sleep(0.02)
     assert cli.health()[0] is False
-    assert calls["n"] == 1
+    assert calls["n"] == 1                   # exactly one refresh, no stampede
