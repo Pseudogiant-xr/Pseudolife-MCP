@@ -593,11 +593,16 @@ def test_dream_extract_relations_populates_graph(svc):
         {"src": "checkout-service", "relation": "runs_on", "dst": "host-1"},
         {"src": "Acme", "relation": "no-such-rel", "dst": "Beta"},   # -> related-to
         {"src": "loop", "relation": "uses", "dst": "loop"},          # self-loop dropped
-    ]), ["some text"])
+    ]), ["some text"], batch_sources={"relbatch-proj"})
     assert n == 1
     g = svc.graph_neighborhood("checkout-service", depth=1)
     edges = {(e["src"], e["relation"], e["dst"]) for e in g["edges"]}
     assert ("checkout-service", "runs-on", "host-1") in edges  # normalized relation
+    # batch provenance travels through the plumbing to minted entities
+    from pseudolife_memory.graph import norm_name
+    cs_id = svc._storage.find_entity(norm_name("checkout-service"))["id"]
+    assert "relbatch-proj" in {
+        r["source"] for r in svc._storage.sources_for_entity(cs_id)}
     # the related-to fallback (conf 0.45) is quarantined to edge_proposals,
     # not written live (relation_quarantine_below, 2026-07-19)
     g2 = svc.graph_neighborhood("acme", depth=1)
@@ -606,6 +611,16 @@ def test_dream_extract_relations_populates_graph(svc):
         "SELECT count(*) FROM edge_proposals "
         "WHERE source = 'dream-low-confidence'").fetchone()[0]
     assert quarantined == 1
+
+
+def test_relations_prompt_discourages_untyped_fallback():
+    # 2026-07-19: the old tail invited 'related-to' as a generic fallback —
+    # the source of the ~19/day co-mention faucet the quarantine now diverts.
+    # The prompt must prefer typed relations and skip co-occurrence pairs.
+    from pseudolife_memory.memory.dream import _relations_prompt
+    p = _relations_prompt([("runs-on", "service runs on host")])
+    assert "merely appear together" in p
+    assert "skip the pair" in p
 
 
 def test_dream_extract_relations_failure_is_isolated(svc):

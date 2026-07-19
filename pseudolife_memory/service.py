@@ -1770,10 +1770,14 @@ class MemoryService:
         relation = "avoids" if polarity == "-" else "prefers"
         self._graph.upsert_edge(tid, relation, oid, confidence=0.7, origin="action")
 
-    def _link_dream_relations(self, relations: list[dict]) -> int:
+    def _link_dream_relations(self, relations: list[dict], *,
+                              batch_sources: set[str] | None = None) -> int:
         """Upsert dream-extracted (src,relation,dst) edges. Closed-vocab
         (resolve_relation; unknown -> related-to), entities resolved alias-aware
         and pinned to the Postgres hub, self-loops dropped, origin='agent'.
+        ``batch_sources`` (the entry sources of the dream batch) stamps
+        provenance onto entities MINTED here — relation endpoints have no fact
+        traces, so the backfill can never scope them after the fact.
         Caller holds the lock; no-op in file mode. Returns edges written."""
         if self._storage is None or not relations:
             return 0
@@ -1784,6 +1788,7 @@ class MemoryService:
         known = [r["name"] for r in self._graph.load_relations()
                  if r["name"] not in ("prefers", "avoids")]
         floor = float(self.config.memory.dream.min_relation_confidence)
+        stamp = self.config.memory.scopes.scope_keys(batch_sources)
         n = 0
         from pseudolife_memory.memory.graph_consolidation import junk_name_reason
         scope_map = self._storage.entity_sources_map()
@@ -1813,6 +1818,14 @@ class MemoryService:
                 continue
             src_e = self._resolve_or_create_entity(raw_src, propose_dupes=True)
             dst_e = self._resolve_or_create_entity(raw_dst, propose_dupes=True)
+            for ent in (src_e, dst_e):
+                if ent.get("created") and stamp:
+                    for s in sorted(stamp):
+                        self._storage.upsert_entity_source(
+                            ent["id"], s, "derived", _t.time())
+                    # keep the preloaded map coherent so the cross-project
+                    # gate below sees the scope this entity was just given
+                    scope_map[ent["id"]] = sorted(stamp)
             # Cross-project gate: entities attributed to disjoint projects
             # merely coexist in the shared bank — route the claim to
             # edge_proposals for human review instead of the live graph.
@@ -1851,7 +1864,8 @@ class MemoryService:
             n += 1
         return n
 
-    def _dream_extract_relations(self, extractor, texts: list[str]) -> int:
+    def _dream_extract_relations(self, extractor, texts: list[str],
+                                 batch_sources: set[str] | None = None) -> int:
         """Gated, best-effort graph-from-text for one dream batch: run the LLM
         relations call UNLOCKED (slow network), then write edges LOCKED. A
         failure logs and returns 0 — it must never break fact consolidation or
@@ -1870,7 +1884,8 @@ class MemoryService:
                             if r["name"] not in ("prefers", "avoids")]
             rels = rel_fn(texts, registry)
             with self._lock:
-                return self._link_dream_relations(rels)
+                return self._link_dream_relations(
+                    rels, batch_sources=batch_sources)
         except Exception as exc:  # noqa: BLE001 — best-effort; never break the dream
             logger.warning("dream relation extraction failed (%s); claims kept",
                            exc)
@@ -2683,7 +2698,9 @@ class MemoryService:
             return _held("claim write failed", exc)
         newest = max(e["timestamp"] for e in entries)
         self.dream_commit(newest)
-        relations_n = self._dream_extract_relations(extractor, texts)
+        relations_n = self._dream_extract_relations(
+            extractor, texts,
+            batch_sources={e["source"] for e in entries if e.get("source")})
         # After relations linking, so paraphrase entities the relations pass
         # just created resolve to their graph nodes instead of re-creating.
         alias_candidates = self._propose_dream_alias_candidates(

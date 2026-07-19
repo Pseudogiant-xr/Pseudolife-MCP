@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-19 — dream graphing: provenance stamping + typed-relation prompt)
+- **Dream-minted relation entities now carry project provenance.** Entities
+  CREATED while linking a dream batch's relations are stamped into
+  `entity_sources` with the batch's entry sources (scopes policy applied via
+  the new shared `ScopesConfig.scope_keys()`: case-fold, exclusions, umbrella
+  rollup; `origin='derived'`). Relation endpoints have no fact traces, so the
+  backfill could never attribute them after the fact — they were the bulk of
+  the "entities with no project" review finding. The stamp also feeds the
+  cross-project gate within the same batch, so a freshly minted entity from
+  project A linking to a project-B entity is routed to review like any other
+  cross-project claim.
+- **The relations extraction prompt no longer invites `related-to`.** The old
+  tail ("if a real connection fits none of the specific ones, use
+  'related-to'") was the source of the untyped co-mention faucet the
+  quarantine diverts. The prompt now demands the most specific listed
+  relation, restricts `related-to` to explicitly-stated connections, and
+  instructs skipping pairs that merely appear together in the same note.
+
 ### Changed (2026-07-19 — installer wires Codex through the stdio shim)
 - **Shim mode now applies to both clients.** The installer's Codex branch
   registered plain HTTP unconditionally, so an installer-wired Codex was

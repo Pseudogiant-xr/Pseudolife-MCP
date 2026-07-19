@@ -519,6 +519,25 @@ class ScopesConfig:
         "status", "claude", "agent", "correction"])
     rollup: dict[str, str] = field(default_factory=dict)
 
+    def scope_keys(self, sources) -> set[str]:
+        """Fold raw source tags into the scope keys this policy admits:
+        case-folded, excluded tags dropped, rollup umbrellas added alongside
+        their fine-grained key. Shared by the backfill and write-time
+        provenance stamping so the two can never disagree."""
+        excl = {str(s).strip().lower() for s in self.exclude}
+        roll = {str(k).strip().lower(): str(v).strip().lower()
+                for k, v in self.rollup.items()}
+        out: set[str] = set()
+        for s in sources or ():
+            key = str(s).strip().lower()
+            if not key or key in excl:
+                continue
+            out.add(key)
+            umb = roll.get(key)
+            if umb and umb != key and umb not in excl:
+                out.add(umb)
+        return out
+
 
 @dataclass
 class RecallConfig:
