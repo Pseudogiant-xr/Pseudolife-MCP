@@ -246,12 +246,19 @@ def probe(base_url: str, timeout: float = 4.0) -> bool:
         return False
 
 
+def _bench_db_name() -> str:
+    # PSEUDOLIFE_BENCH_DB: the test suite pins a per-run name here so that
+    # reset_bench()'s backend reap + truncate can't hit a concurrent suite
+    # run (tests/conftest.py). Eval CLI runs leave it unset -> fixed name.
+    return os.environ.get("PSEUDOLIFE_BENCH_DB", "pseudolife_memory_bench")
+
+
 def bench_url() -> str:
     base = os.environ.get(
         "PSEUDOLIFE_BENCH_ADMIN_URL",
         "postgresql://pseudolife:pseudolife@127.0.0.1:5433/postgres",
     )
-    return base.rsplit("/", 1)[0] + "/pseudolife_memory_bench"
+    return base.rsplit("/", 1)[0] + "/" + _bench_db_name()
 
 
 _ALL_TABLES = (
@@ -275,10 +282,10 @@ def reset_bench() -> str:
     with psycopg.connect(admin, connect_timeout=5, autocommit=True) as conn:
         row = conn.execute(
             "SELECT 1 FROM pg_database WHERE datname = %s",
-            ("pseudolife_memory_bench",),
+            (_bench_db_name(),),
         ).fetchone()
         if row is None:
-            conn.execute('CREATE DATABASE "pseudolife_memory_bench"')
+            conn.execute(f'CREATE DATABASE "{_bench_db_name()}"')
 
     url = bench_url()
     from pseudolife_memory.storage.schema import ensure_schema

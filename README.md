@@ -574,8 +574,9 @@ the SessionStart briefing hook from `~/.claude/settings.json` and/or
 `pip install -e .[dev]`, then `pytest tests/`. The suite covers every
 layer, from the MemoryService surface to the Cortex Console REST API;
 model-heavy pieces are stubbed so it stays fast and offline. The PG-backed
-suites target a throwaway `pseudolife_memory_test` database on the bundled
-dev container (never your real bank) and skip cleanly without Postgres.
+suites each target a throwaway per-run `pseudolife_memory_test_<pid>`
+database on the bundled dev container (never your real bank; concurrent
+runs can't collide), dropped on exit, and skip cleanly without Postgres.
 Full dev setup: [CONTRIBUTING](CONTRIBUTING.md).
 
 ## What's not built yet

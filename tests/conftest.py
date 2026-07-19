@@ -24,6 +24,33 @@ os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+# Bench-DB isolation: evals' reset_bench() reaps every backend on its
+# database before truncating, so concurrent suite runs must not share one
+# bench DB (same crossfire as pg_fixtures' per-run test DB — see its module
+# docstring). Pin a per-run name before any test imports ladder_sweep, and
+# drop the database at exit. Eval CLI runs are unaffected (env unset there).
+if "PSEUDOLIFE_BENCH_DB" not in os.environ:
+    os.environ["PSEUDOLIFE_BENCH_DB"] = f"pseudolife_memory_bench_{os.getpid()}"
+
+    def _drop_run_bench_db() -> None:
+        try:
+            import psycopg
+
+            admin = os.environ.get(
+                "PSEUDOLIFE_BENCH_ADMIN_URL",
+                "postgresql://pseudolife:pseudolife@127.0.0.1:5433/postgres",
+            )
+            admin = admin.rsplit("/", 1)[0] + "/postgres"
+            db = os.environ["PSEUDOLIFE_BENCH_DB"]
+            with psycopg.connect(admin, connect_timeout=3, autocommit=True) as conn:
+                conn.execute(f'DROP DATABASE IF EXISTS "{db}" WITH (FORCE)')
+        except Exception:  # noqa: BLE001 — best-effort; pg_fixtures prunes leftovers
+            pass
+
+    import atexit
+
+    atexit.register(_drop_run_bench_db)
+
 import pytest
 
 if TYPE_CHECKING:
