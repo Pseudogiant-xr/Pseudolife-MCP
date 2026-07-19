@@ -581,6 +581,30 @@ def test_graph_backfill_sources_applies_scopes_config(svc):
     assert "es-cfg-meta" not in srcs
 
 
+def test_backfill_purges_excluded_and_case_variant_rows(svc):
+    # Contaminated derived rows — excluded meta tags (re-inserted by
+    # pre-scope-policy code) and legacy mixed-case scope keys — are purged on
+    # every backfill run; upsert-only left them immortal (2026-07-19). Benign
+    # stale derived rows survive (attribution must not decay when the
+    # underlying entries are pruned by retention), and manual rows are never
+    # touched, even for excluded sources.
+    import time as _t
+    svc._ensure_init()  # noqa: SLF001
+    st = svc._storage
+    a = st.ensure_entity("es-purge-ent", display="es-purge-ent")
+    st.upsert_entity_source(a, "es-purge-meta", "derived", _t.time())   # excluded
+    st.upsert_entity_source(a, "ES-Purge-Case", "derived", _t.time())   # mixed case
+    st.upsert_entity_source(a, "es-purge-old", "derived", _t.time())    # benign stale
+    st.upsert_entity_source(a, "es-purge-meta2", "manual", _t.time())   # manual, excluded
+    st.backfill_entity_sources(
+        _t.time(), exclude=frozenset({"es-purge-meta", "es-purge-meta2"}))
+    srcs = {r["source"] for r in st.sources_for_entity(a)}
+    assert "es-purge-meta" not in srcs
+    assert "ES-Purge-Case" not in srcs
+    assert "es-purge-old" in srcs
+    assert "es-purge-meta2" in srcs
+
+
 def test_graph_backfill_sources_service(svc):
     import time as _t
     from pseudolife_memory.memory.cortex import _norm_key
@@ -606,6 +630,22 @@ def test_graph_projects_lists_sources(svc):
     a = st.ensure_entity("es-proj-ent", display="es-proj-ent")
     st.upsert_entity_source(a, "es-proj-z", "derived", _t.time())
     assert any(p["source"] == "es-proj-z" for p in svc.graph_projects()["projects"])
+
+
+def test_graph_projects_annotates_rollup_parent(svc):
+    # The projects list is rollup-aware: a source mapped to an umbrella in
+    # memory.scopes.rollup carries parent=<umbrella> so the UI can nest the
+    # family instead of rendering umbrella and children as flat peers.
+    import time as _t
+    svc._ensure_init()  # noqa: SLF001
+    svc.config.memory.scopes.rollup = {"es-nest-child": "es-nest-parent"}
+    st = svc._storage
+    a = st.ensure_entity("es-nest-ent", display="es-nest-ent")
+    st.upsert_entity_source(a, "es-nest-child", "derived", _t.time())
+    st.upsert_entity_source(a, "es-nest-parent", "derived", _t.time())
+    projs = {p["source"]: p for p in svc.graph_projects()["projects"]}
+    assert projs["es-nest-child"].get("parent") == "es-nest-parent"
+    assert projs["es-nest-parent"].get("parent") is None
 
 
 def test_graph_delete_entity_removes_node_and_edges(svc):

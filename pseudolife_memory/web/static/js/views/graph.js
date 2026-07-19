@@ -318,8 +318,18 @@ export async function renderGraph(root, ctx) {
   // ── toolbar ───────────────────────────────────────────────────────────────
   let projects = [];
   try { projects = (await api.get("/api/graph/projects")).projects || []; } catch { /* non-fatal */ }
+  // Rollup-aware ordering: umbrella scopes first (API order = entities desc),
+  // each followed by its children indented with ↳; children whose parent has
+  // no row of its own fall back to the flat tail.
+  const tops = projects.filter((p) => !p.parent);
+  const kids = projects.filter((p) => p.parent);
+  const ordered = tops
+    .flatMap((t) => [t, ...kids.filter((k) => k.parent === t.source)])
+    .concat(kids.filter((k) => !tops.some((t) => t.source === k.parent)));
   const scopeOpts = [{ value: "all", label: "all projects" }]
-    .concat(projects.map((p) => ({ value: p.source, label: `${p.source} (${p.entities})` })));
+    .concat(ordered.map((p) => ({
+      value: p.source,
+      label: `${p.parent ? "↳ " : ""}${p.source} (${p.entities})` })));
   const switcher = facetBar(scopeOpts, state.scope,
     (v) => { state.scope = v; state.entity = ""; load(); if (state.review) loadReview(); });
 

@@ -1832,6 +1832,17 @@ class MemoryService:
                 logger.debug("dream relation proposed (cross-project): %r -> %r",
                              raw_src, raw_dst)
                 continue
+            # Low-confidence quarantine: untyped co-mention edges (related-to,
+            # 0.45) pollute the live graph ~19/day — below the quarantine
+            # threshold the claim goes to edge_proposals for review instead.
+            if conf < float(self.config.memory.dream.relation_quarantine_below):
+                self._storage.insert_proposal(
+                    src_e["id"], relation, dst_e["id"], conf, None,
+                    f"low-confidence dream edge ({conf:g})",
+                    "dream-low-confidence", _t.time())
+                logger.debug("dream relation quarantined (low-confidence): "
+                             "%r -> %r", raw_src, raw_dst)
+                continue
             # revive=False: a dream re-assertion must not resurrect an edge
             # a human (or deep-dream) superseded — removals stay sticky.
             self._graph.upsert_edge(src_e["id"], relation, dst_e["id"],
@@ -4207,15 +4218,26 @@ class MemoryService:
                     "dst_type": dst_type}
 
     def graph_projects(self) -> dict[str, Any]:
-        """Return all project sources with their entity counts.
+        """Return all project sources with their entity counts. Rollup-aware:
+        a source mapped to an umbrella in ``memory.scopes.rollup`` carries
+        ``parent`` so consumers can nest the family instead of rendering
+        umbrella and children as flat peers.
 
-        Returns ``{"projects": [{"source": str, "entities": int}, ...]}``.
+        Returns ``{"projects": [{"source": str, "entities": int,
+        "parent"?: str}, ...]}``.
         """
+        roll = {str(k).strip().lower(): str(v).strip().lower()
+                for k, v in self.config.memory.scopes.rollup.items()}
         with self._lock:
             self._ensure_init()
             if self._storage is None:
                 return {"projects": []}
-            return {"projects": self._storage.project_source_counts()}
+            projects = self._storage.project_source_counts()
+        for p in projects:
+            umb = roll.get(p["source"])
+            if umb and umb != p["source"]:
+                p["parent"] = umb
+        return {"projects": projects}
 
     def _whole_graph(self, scope: str | None, include_facts: bool,
                      max_nodes: int | None = None) -> dict[str, Any]:

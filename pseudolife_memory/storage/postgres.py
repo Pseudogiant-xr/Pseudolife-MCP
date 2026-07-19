@@ -1203,6 +1203,17 @@ class PostgresStorage:
                 agg[(entity_id, umb)] = agg.get((entity_id, umb), 0) + int(cnt)
         n = 0
         with self._txn():
+            # Purge contaminated derived rows: excluded sources (immortal
+            # otherwise — upserts refresh them but nothing removed them,
+            # 2026-07-19) and legacy mixed-case keys (new writes are always
+            # case-folded, so a mixed-case row would shadow forever as a
+            # separate scope). Benign stale derived rows are deliberately
+            # KEPT: attribution must not decay when retention prunes the
+            # entries it was derived from. Manual rows are never touched.
+            self.conn.execute(
+                "DELETE FROM entity_sources WHERE origin = 'derived' AND "
+                "(LOWER(TRIM(source)) = ANY(%s) OR source <> LOWER(source))",
+                (list(excl),))
             for (entity_id, source), cnt in agg.items():
                 self.conn.execute(
                     "INSERT INTO entity_sources (entity_id, source, count, origin, updated_at) "
