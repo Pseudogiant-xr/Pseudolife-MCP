@@ -568,6 +568,47 @@ class FixtureService:
                 "a_key": f"{a_entity}|{a_attribute}",
                 "b_key": f"{b_entity}|{b_attribute}"}
 
+    def curation_duplicates(self):
+        # Representative lesson/world cross-key duplicate pairs so the
+        # console's curation section (and its Mark-distinct action) is
+        # exercisable against fixtures. Shape pinned by
+        # tests/test_fixture_contract.py against what atlas_review.js reads.
+        return {
+            "lesson_duplicates": [{
+                "a_key": "deploy-daemon-to-homelab-host|approach",
+                "b_key": "deploy-the-daemon-to-the-host|pitfall",
+                "a": {"entity": "deploy daemon to homelab host",
+                      "attribute": "approach",
+                      "value": "Take a pg_dump backup via ops/backup.ps1 "
+                               "before deploying the daemon.",
+                      "polarity": "+", "outcome": "success",
+                      "about": "ops/backup.ps1"},
+                "b": {"entity": "deploy the daemon to the host",
+                      "attribute": "pitfall",
+                      "value": "Always take a pg_dump backup via "
+                               "ops/backup.ps1 before deploying the daemon "
+                               "to the homelab host.",
+                      "polarity": "+", "outcome": "success",
+                      "about": "ops/backup.ps1"},
+                "similarity": 0.9312,
+            }],
+            "world_duplicates": [{
+                "a_key": "mcp-spec-2026-07-28|session-identity",
+                "b_key": "mcp-specification|session-id-status",
+                "a": {"entity": "MCP spec 2026-07-28",
+                      "attribute": "session identity",
+                      "value": "protocol sessions are removed; explicit "
+                               "state handles are required",
+                      "source_url": "https://example.com/spec-2026-07-28"},
+                "b": {"entity": "MCP specification",
+                      "attribute": "session-id status",
+                      "value": "protocol sessions removed; explicit state "
+                               "handles required",
+                      "source_url": "https://example.com/spec"},
+                "similarity": 0.8871,
+            }],
+        }
+
     def graph_delete_entity(self, entity):
         return {"deleted": True, "entity": entity}
 
