@@ -6,7 +6,7 @@
 // its MIRAS provenance (sources + source entries) so a human can judge from
 // evidence, not names alone. Mutations are owned by atlas.js via onAct(desc);
 // provenance is a read this panel hydrates itself.
-import { el, fmtAge, pressable } from "./util.js";
+import { el, fmtAge, pressable, safeHttpUrl } from "./util.js";
 import { panel, badge, tagBadge } from "./components.js";
 import { api } from "./api.js";
 
@@ -266,6 +266,62 @@ function linkItem(l, onAct) {
     btn("Accept", { onClick: () => onAct({ kind: "accept-link", id: l.id }) }),
     btn("Reject", { kind: "ghost", onClick: () => onAct({ kind: "reject-link", id: l.id }) }),
   ], [s, d]);
+}
+
+// ── store curation (lesson/world cross-key duplicate pairs) ─────────────────
+// Listed by GET /api/curation/duplicates — the same candidates the deep dream
+// reports as lesson_duplicates/world_duplicates. Only the genuinely-distinct
+// verdict is actionable here; true duplicates are settled agent-side with the
+// memory_forget tools (the listing never deletes anything).
+
+export function curationPanel(data, onAct) {
+  const lessons = (data && data.lesson_duplicates) || [];
+  const world = (data && data.world_duplicates) || [];
+  if (!lessons.length && !world.length) return null;
+  return panel("Store curation",
+    el("div", {},
+      lessons.map((p) => slotDupRow("lesson", p, onAct)),
+      world.map((p) => slotDupRow("world", p, onAct))),
+    { accent: "var(--c-lessons)", sub: String(lessons.length + world.length) });
+}
+
+// One side of a pair: entity·attribute key chip + the value as evidence, plus
+// the store's own context fields (polarity/outcome/about | source_url).
+function slotSide(store, s) {
+  const extras = store === "lesson"
+    ? [s.polarity ? badge(s.polarity === "-" ? "avoid" : "do",
+                          s.polarity === "-" ? "contested" : "action") : null,
+       dim(s.outcome), s.about ? dim(`about ${s.about}`) : null]
+    : [srcLink(s.source_url)];
+  return el("div", { style: { display: "flex", alignItems: "center", gap: "8px",
+      flexWrap: "wrap", padding: "3px 0" } },
+    el("span", { class: "mono", style: CHIP }, `${s.entity} · ${s.attribute}`),
+    dim(snippet(s.value)), ...extras);
+}
+
+// Render-time scheme guard (same rule as views/world.js): only http(s)
+// becomes a link, anything else stays inert text.
+function srcLink(url) {
+  if (!url) return null;
+  const href = safeHttpUrl(url);
+  return href
+    ? el("a", { href, target: "_blank", rel: "noopener noreferrer",
+        style: { fontSize: "12px" } }, "source")
+    : dim(url);
+}
+
+function slotDupRow(store, p, onAct) {
+  return el("div", { style: {
+      borderLeft: `3px solid var(--c-${store === "lesson" ? "lessons" : "world"})`,
+      padding: "8px 10px", marginBottom: "8px", background: "var(--bg-2)",
+      borderRadius: "0 8px 8px 0" } },
+    el("div", { style: { display: "flex", alignItems: "center", gap: "8px" } },
+      badge(`${store} duplicate`), sim(p.similarity),
+      el("span", { style: { marginLeft: "auto" } },
+        btn("Mark distinct", { kind: "ghost", onClick: () =>
+          onAct({ kind: "dismiss-slot-pair", store, a: p.a, b: p.b }) }))),
+    el("div", { style: { marginTop: "6px" } },
+      slotSide(store, p.a), slotSide(store, p.b)));
 }
 
 function dupItem(f, onAct) {

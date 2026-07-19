@@ -362,6 +362,39 @@ def test_curation_dismiss_rejects_unknown_store_and_self_pair(svc):
     assert same["dismissed"] is False and same["reason"] == "bad_pair"
 
 
+def test_curation_duplicates_standing_listing(svc):
+    """The Console review drawer's standing listing: the same lesson/world
+    pairs the deep dream reports, without the graph-wide dream pass, and
+    reflecting dismissals immediately."""
+    _stage_lesson_dups(svc)
+    out = svc.curation_duplicates()
+    c = _lesson_dup_pair(out)
+    assert c is not None, out.get("lesson_duplicates")
+    assert {"a_key", "b_key", "a", "b", "similarity"} <= set(c)
+    # exact label contract the Console renders per lesson side
+    assert set(c["a"]) == {"entity", "attribute", "value",
+                           "polarity", "outcome", "about"}
+    assert out["world_duplicates"] == []
+    svc.curation_dismiss_duplicate(
+        "lesson", "deploy daemon to homelab host", "approach",
+        "deploy the daemon to the host", "pitfall")
+    assert _lesson_dup_pair(svc.curation_duplicates()) is None
+
+
+def test_curation_duplicates_world_side_carries_source_url(svc):
+    svc.world_write("MCP spec 2026-07-28", "session identity",
+                    "protocol sessions are removed; explicit state handles are required",
+                    source_url="https://example.com/a")
+    svc.world_write("MCP specification", "session-id status",
+                    "protocol sessions removed; explicit state handles required",
+                    source_url="https://example.com/b")
+    out = svc.curation_duplicates()
+    assert len(out["world_duplicates"]) == 1
+    # exact label contract the Console renders per world side
+    assert set(out["world_duplicates"][0]["a"]) == {"entity", "attribute",
+                                                    "value", "source_url"}
+
+
 def test_apply_lists_store_duplicates_but_never_deletes(svc):
     _stage_lesson_dups(svc)
     svc.world_write("MCP spec 2026-07-28", "session identity",

@@ -70,6 +70,28 @@ def test_fixture_trace_matches_drawer_contract():
     _assert_drawer_shape(fx, "FixtureService.trace")
 
 
+# What atlas_review.js's curation section actually reads per duplicate pair.
+_CURATION_PAIR_KEYS = {"a_key", "b_key", "a", "b", "similarity"}
+_CURATION_LESSON_SIDE_KEYS = {"entity", "attribute", "value",
+                              "polarity", "outcome", "about"}
+_CURATION_WORLD_SIDE_KEYS = {"entity", "attribute", "value", "source_url"}
+
+
+def test_fixture_curation_duplicates_match_panel_contract():
+    out = FixtureService().curation_duplicates()
+    assert out["lesson_duplicates"] and out["world_duplicates"]
+    for pair in out["lesson_duplicates"]:
+        assert _CURATION_PAIR_KEYS <= set(pair), f"pair keys: {sorted(pair)}"
+        for side in (pair["a"], pair["b"]):
+            assert _CURATION_LESSON_SIDE_KEYS <= set(side), (
+                f"lesson side keys: {sorted(side)}")
+    for pair in out["world_duplicates"]:
+        assert _CURATION_PAIR_KEYS <= set(pair), f"pair keys: {sorted(pair)}"
+        for side in (pair["a"], pair["b"]):
+            assert _CURATION_WORLD_SIDE_KEYS <= set(side), (
+                f"world side keys: {sorted(side)}")
+
+
 def test_entry_dicts_match_entry_card_contract():
     real = _entry_to_dict(MemoryEntry(
         text="probe", embedding=torch.zeros(4), surprise_score=0.0,

@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-19 — Console: store-curation review panel in the Atlas drawer)
+- **The lesson/world duplicate listings are now reviewable in the Console.**
+  The Atlas Review drawer gains a "Store curation" panel rendering each
+  `lesson_duplicates` / `world_duplicates` pair with both sides'
+  entity/attribute/value (plus polarity/outcome/about for lessons and a
+  scheme-guarded `source_url` link for world facts) and a confirm-gated
+  "Mark distinct" button posting to `POST /api/curation/dismiss-duplicate`.
+  Backed by a new standing `GET /api/curation/duplicates` (service
+  `curation_duplicates`) that computes the same pairs as the deep dream —
+  shared listing helper, so thresholds/dismissals can't drift — without the
+  graph-wide dream pass, so the drawer loads them on demand and dismissals
+  take effect immediately. Only the distinct verdict is actionable in the
+  UI; true duplicates are still settled agent-side via `memory_forget`
+  (nothing is ever auto-deleted).
+
 ### Added (2026-07-19 — deep dream: lesson/world cross-key duplicate curation)
 - **`memory_dream(action="deep")` now lists curation candidates for the
   lesson and world stores** — `lesson_duplicates` / `world_duplicates` in
