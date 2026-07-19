@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-07-19 — spurious extractor fallback + its visibility)
+- **The auto-mode extractor probe retries once** (2s apart) before falling
+  back: the first probe after a daemon container restart reliably fails
+  (host-gateway cold start) while the endpoint is healthy — two consecutive
+  live dreams degraded to the fallback extractor spuriously.
+- **The Console's extractor chip now warns when the LAST dream ran on the
+  fallback** even though the primary is healthy again — previously that state
+  rendered the green "primary ✓" chip with the fallback run visible only in
+  the hover tooltip, so silent degradation stayed silent.
+
 ### Changed (2026-07-19 — dream graphing: provenance stamping + typed-relation prompt)
 - **Dream-minted relation entities now carry project provenance.** Entities
   CREATED while linking a dream batch's relations are stamped into
