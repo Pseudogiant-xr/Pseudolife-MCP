@@ -41,6 +41,29 @@ def test_unattributed_flags_entities_without_sources():
     assert un and un[0]["entities"] == ["orphan-of-project"] and un[0]["action"] == "assign"
 
 
+def test_unattributed_excludes_lesson_only_entities():
+    # 2026-07-19 hygiene follow-up: lesson-minted task/approach entities exist
+    # only as prefers/avoids endpoints — the mention-scan can never attribute
+    # them, so flagging them is permanent queue noise.
+    ents = _ents("deploy engine to host", "ops/update.ps1", "orphan-of-project")
+    edges = [{"src_id": 1, "relation": "prefers", "dst_id": 2,
+              "origin": "action", "confidence": 0.9}]
+    un = gr.unattributed(ents, {}, edges)
+    assert un and un[0]["entities"] == ["orphan-of-project"]
+
+
+def test_unattributed_keeps_entities_with_mixed_edges():
+    # A prefers edge alone doesn't immunize: an entity also carrying normal
+    # relations is a real graph citizen and stays flagged when sourceless.
+    ents = _ents("task-ish", "docker-desktop")
+    edges = [{"src_id": 1, "relation": "prefers", "dst_id": 2,
+              "origin": "action", "confidence": 0.9},
+             {"src_id": 2, "relation": "runs-on", "dst_id": 1,
+              "origin": "agent", "confidence": 0.8}]
+    un = gr.unattributed(ents, {}, edges)
+    assert un and set(un[0]["entities"]) == {"task-ish", "docker-desktop"}
+
+
 def test_review_aggregates_all_groups():
     ents = _ents("payments-db", "lonely")
     out = gr.review([], ents, {})

@@ -138,8 +138,21 @@ def test_artifacts(entities):
              "entities": names, "action": "delete"}]
 
 
-def unattributed(entities, entity_sources_map):
-    names = sorted(e["display"] for e in entities if e["id"] not in entity_sources_map)
+_LESSON_RELATIONS = frozenset({"prefers", "avoids"})
+
+
+def unattributed(entities, entity_sources_map, edges=()):
+    """Entities whose every edge is a lesson relation (prefers/avoids) are
+    lesson-minted task/approach nodes — the mention-scan can never attribute
+    them, so they are excluded rather than flagged forever."""
+    rels: dict = {}
+    for ed in edges:
+        for eid in (ed["src_id"], ed["dst_id"]):
+            rels.setdefault(eid, set()).add(ed.get("relation", ""))
+    lesson_only = {eid for eid, rs in rels.items() if rs <= _LESSON_RELATIONS}
+    names = sorted(e["display"] for e in entities
+                   if e["id"] not in entity_sources_map
+                   and e["id"] not in lesson_only)
     if not names:
         return []
     return [{"type": "unattributed", "severity": "info",
@@ -184,7 +197,7 @@ def review(edges, entities, entity_sources_map, proposals=None, entity_proposals
     findings = (duplicate_candidates(entities, dismissed=dismissed_pairs or frozenset())
                 + test_artifacts(entities)
                 + dubious_edges(edges, entities) + orphans(edges, entities)
-                + unattributed(entities, entity_sources_map)
+                + unattributed(entities, entity_sources_map, edges)
                 + proposed_links(proposals or [])
                 + merge_candidates(entity_proposals or [])
                 + junk_candidates(entity_proposals or []))
