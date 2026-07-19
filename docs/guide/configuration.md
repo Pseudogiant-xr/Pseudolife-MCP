@@ -199,6 +199,16 @@ one — tiers 1 and 2 are the actual concurrency answer, not tier 3. Accepted
 as YAGNI until a real multi-writer/LAN deployment needs a per-writer
 pointer.
 
+This cuts across clients, not just across Claude Code sessions: because the
+pointer is machine-scoped, a **second client that sets no identity of its
+own** — e.g. Codex or a ChatGPT connector talking to the daemon over direct
+HTTP with no shim, no hook, and no `episode` argument — resolves at tier 3
+to whatever session the Claude Code hook last registered, so its writes are
+attributed to Claude's session episode. The fix is the same as for
+concurrent sessions: give the second client a tier-1 identity (run it
+through the stdio shim) or pass explicit tier-2 `episode` handles on its
+writes.
+
 **Pointer TTL.** A client that crashes or is killed never fires SessionEnd,
 so without a bound its pointer would attribute every later tier-3 write to a
 dead session until the next SessionStart overwrote it. The pointer therefore
