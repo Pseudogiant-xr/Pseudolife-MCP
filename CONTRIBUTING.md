@@ -18,15 +18,17 @@ pip install -e .[dev]
 ```
 
 Tests need a Postgres to talk to. Easiest is the bundled stack's instance
-(`docker compose -f ops/docker-compose.yml up -d pseudolife-pg`), which
-matches the default:
+(`docker compose -f ops/docker-compose.yml up -d pseudolife-pg`) — the suite
+finds it at `127.0.0.1:5433` on its own. Point at a different server with
+`PSEUDOLIFE_TEST_DATABASE_URL` (it wins whenever set):
 
 ```bash
 export PSEUDOLIFE_TEST_DATABASE_URL="postgresql://pseudolife:pseudolife@127.0.0.1:5433/pseudolife_memory_test"
 ```
 
-The test fixture creates and truncates the `*_test` database itself — it
-never touches a live bank.
+Without that override each pytest process provisions its own private
+`pseudolife_memory_test_<pid>` database and drops it at interpreter exit, so
+concurrent runs never terminate each other — and no live bank is ever touched.
 
 ## Running the tests
 
