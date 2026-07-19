@@ -1,6 +1,8 @@
 # Deep Dream — operator runbook
 
-Manual, full-corpus graph consolidation. Graph-only (cortex/MIRAS untouched).
+Manual, full-corpus graph consolidation. Writes touch the graph only
+(cortex/MIRAS untouched); the lesson and world stores are additionally
+*listed* for curation (cross-key duplicates), never written.
 
 ## 1. Preview (no writes)
 Call `memory_dream(action="deep")` (dry-run by default). Review:
@@ -16,6 +18,10 @@ Call `memory_dream(action="deep")` (dry-run by default). Review:
   analyzer), each side enriched with display/etype/degree/scopes/snippets;
   accept folds `from` into `into` exactly as shown (write-dedup rows are
   stored lower-degree → higher-degree at insert time).
+- `lesson_duplicates` / `world_duplicates` — cross-key near-duplicate slot
+  pairs in the lesson / world stores (slot supersession only dedups within
+  one key, so these accumulate silently). Listing-only, in dry-run AND
+  apply; settle them in step 3c.
 
 ## 2. Apply self-clean
 `memory_dream(action="deep", apply=true)`. The daemon first dumps the five
@@ -47,6 +53,20 @@ Judge each `merge_proposals` item from its per-side snippets/scopes:
 - **Distinct** → `memory_graph_review(action="reject_entity", proposal_id=...)`
   plus `dismiss_pair` so the pair never re-proposes.
 - **Unsure** → leave pending; disjoint `scopes` is a strong distinct signal.
+
+## 3c. Step C — settle lesson/world duplicate listings (this session)
+Judge each `lesson_duplicates` / `world_duplicates` pair from the values shown
+(each side carries entity/attribute/value, plus polarity/outcome/about for
+lessons and source_url for world facts). Nothing is ever auto-deleted:
+- **Duplicate** → keep the better-keyed slot; drop the other via
+  `memory_forget(scope="lesson"|"world", ...)` (or re-write the surviving
+  slot first to fold in anything the dropped one added).
+- **Distinct** → `memory_graph_review(action="dismiss_slot_pair",
+  store="lesson"|"world", src=<a_key>, dst=<b_key>)` (REST equivalent:
+  `POST /api/curation/dismiss-duplicate`) — the pair is persisted
+  (namespaced in `dismissed_pairs`) and never re-listed.
+- **Unsure** → leave listed; the pair costs one of the
+  `memory.deep_dream.curation_top_k` slots until settled.
 
 ## 4. Confirm in Atlas
 Open Atlas Review → `proposed_link` findings → accept (promotes to a real edge)
