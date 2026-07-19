@@ -342,7 +342,16 @@ a `.mcp.json` at a project root for project scope:
 }
 ```
 
-Codex:
+Codex — the installer's default (shim mode) wires the same stdio shim, so a
+Codex session gets its own tier-1 identity instead of inheriting a
+concurrent Claude session's episode:
+
+```bash
+pip install pseudolife-mcp
+codex mcp add pseudolife-memory -- pseudolife-mcp
+```
+
+The HTTP one-liner works too (no pip package needed):
 
 ```bash
 codex mcp add pseudolife-memory --url http://127.0.0.1:8765/mcp

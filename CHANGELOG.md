@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-19 — installer wires Codex through the stdio shim)
+- **Shim mode now applies to both clients.** The installer's Codex branch
+  registered plain HTTP unconditionally, so an installer-wired Codex was
+  exactly the "second client with no identity of its own" the session-
+  identity docs warn about — while a Claude Code session's hook pointer is
+  fresh, Codex writes attribute to Claude's episode (tier 3). `--transport
+  shim` (the default) now wires Codex as `codex mcp add pseudolife-memory
+  -- pseudolife-mcp`, giving each Codex session its own tier-1
+  `X-PL-Session` identity; HTTP remains the fallback when no shim tooling
+  exists and the explicit `--transport http` choice. The shim install is
+  memoized so `--client both` runs pipx/pip once. (In the PowerShell
+  installer the shim block became a function — every native command in it
+  pipes to `Out-Host`, since a PS function's return value would otherwise
+  absorb pipx/pip output and make a failed install read as success at the
+  call site.)
+
 ### Changed (2026-07-19 — graph hygiene round 2: scope purge, nested topics, edge quarantine)
 - **`backfill_entity_sources` now purges contaminated derived scope rows** on
   every run: sources in `memory.scopes.exclude` and legacy mixed-case scope
