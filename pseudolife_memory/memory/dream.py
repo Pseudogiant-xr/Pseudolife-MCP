@@ -184,10 +184,14 @@ _RELATIONS_PROMPT_HEAD = (
     "relation names:\n"
 )
 _RELATIONS_PROMPT_TAIL = (
-    "\nIf a real connection fits none of the specific ones, use 'related-to'. "
-    "src and dst are entity names (services, hosts, tools, components). Skip "
-    "opinions, chit-chat, and anything with no entity-to-entity relationship. "
-    'Return {"relations":[]} if nothing qualifies.'
+    "\nAlways prefer the most specific listed relation. Use 'related-to' ONLY "
+    "when the text explicitly states a meaningful connection that fits no "
+    "listed relation — NEVER for entities that merely appear together in the "
+    "same note. When no listed relation fits and no explicit connection is "
+    "stated, skip the pair. src and dst are entity names (services, hosts, "
+    "tools, components). Skip opinions, chit-chat, and anything with no "
+    'entity-to-entity relationship. Return {"relations":[]} if nothing '
+    "qualifies."
 )
 
 
