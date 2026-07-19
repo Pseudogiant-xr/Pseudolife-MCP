@@ -93,6 +93,24 @@ def test_pointer_legacy_shape_without_ts_is_stale(pg_service, monkeypatch):
     assert svc._resolve_writer()[1] is None
 
 
+def test_pointer_legacy_shape_hydration_from_meta(pg_service, tmp_path):
+    """End-to-end hydration of a pre-TTL persisted pointer (2026-07-19 review
+    coverage note): a meta row without a ``ts`` field — written by a daemon
+    older than the TTL change — must hydrate through ``_ensure_init`` as
+    ts=0.0, not crash, and read as stale under a positive TTL."""
+    from pseudolife_memory.service import MemoryService
+
+    pg_service._storage.set_meta(
+        "active_session_pointer", {"session_id": "preTtlSess"})  # no "ts"
+    svc2 = MemoryService(data_dir=tmp_path / "second")
+    try:
+        svc2._ensure_init()  # env still points at the test PG (fixture-set)
+        assert svc2._active_session == ("preTtlSess", 0.0)
+        assert svc2._resolve_writer()[1] is None  # default TTL 6h -> stale
+    finally:
+        svc2._storage.close()  # don't leak a backend onto the shared bench PG
+
+
 # ── Ownership guards on both episode-close paths (Task 3) ────────────────────
 # The observed bug: `episode_end_session(None)` used to force-close ANY open
 # root, and `episode_end()`'s no-identity fallback popped whatever episode
