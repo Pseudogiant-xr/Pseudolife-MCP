@@ -397,10 +397,40 @@ class MemoryService:
         w, header_s, transport_s = resolve_writer_detailed(self._writer_id)
         if header_s:
             return (w, header_s)
-        active = getattr(self, "_active_session", None)
-        if active is not None:
-            return (w, active[0])
+        active_id = self._active_session_id()
+        if active_id is not None:
+            return (w, active_id)
         return (w, transport_s)
+
+    def _active_session_id(self, now: float | None = None) -> str | None:
+        """The tier-3 active-session pointer's session id, or None when it is
+        absent or stale (finding 4, 2026-07-19).
+
+        A client that crashes/is killed never fires SessionEnd, so its pointer
+        would otherwise attribute every later tier-3 write to a dead session
+        indefinitely. A pointer older than
+        ``PSEUDOLIFE_ACTIVE_SESSION_TTL_SECONDS`` (default 6 h — the resume
+        window, past which a return starts a fresh episode anyway; ``0``
+        disables the TTL, matching the resume-window convention) is treated as
+        stale and ignored, so tier 3 falls through to the transport/idle-gap
+        floor.
+
+        Refresh is on-set only: SessionStart re-stamps ``ts`` (Claude Code
+        re-fires it on resume/compact, keeping a genuinely active session
+        alive), and resolution never mutates. A legacy pointer with no stored
+        timestamp hydrates to ``ts=0.0``, which reads as infinitely old and is
+        ignored until the next SessionStart re-registers it — fail-safe, never
+        a crash."""
+        active = getattr(self, "_active_session", None)
+        if active is None:
+            return None
+        ttl = float(os.environ.get("PSEUDOLIFE_ACTIVE_SESSION_TTL_SECONDS",
+                                   "21600"))
+        if ttl > 0:
+            now = time.time() if now is None else now
+            if now - active[1] > ttl:
+                return None
+        return active[0]
 
     def set_active_session(self, session_id: str | None) -> None:
         """Machine-scoped active-session pointer (identity tier 3): set by

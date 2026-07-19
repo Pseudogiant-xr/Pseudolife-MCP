@@ -35,7 +35,11 @@ reliably — without the agent having to remember:
      advertisement**: the episode id (truncated) plus the instruction to
      pass `episode="<id>"` on writes when running concurrent sessions. A
      SessionEnd hook closes that session's episode and clears the pointer
-     when the session ends.
+     when the session ends. If a client crashes without firing SessionEnd,
+     the pointer expires after `PSEUDOLIFE_ACTIVE_SESSION_TTL_SECONDS`
+     (default 6 h, the resume window; `0` disables) so a dead session stops
+     attracting later tier-3 writes — SessionStart re-stamps it, so an active
+     session (Claude Code re-fires the hook on resume/compact) stays live.
    - **Ownership guard.** `memory_episode_end` and the direct
      `POST /api/episode/end` with no `session_key` in the body can only
      close a root episode whose `session_key` matches the caller's own
