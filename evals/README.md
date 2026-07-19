@@ -514,9 +514,11 @@ multi-hop corpus through three arms and isolates two attribution deltas —
 lift from looping alone (arm B − baseline) and lift from adding graph traversal
 (arm A − B).
 
-This is **not** part of the test suite or the shipped package. It informs the
-decision of whether a MemCoT retrieval loop (and the graph edge path in
-particular) should become part of the default query path.
+This is **not** part of the test suite or the shipped package. It's the
+harness that validated the loop before promotion: the MemCoT retrieval loop
+now ships as the read-only `memory_recall` MCP tool
+(`pseudolife_memory/memory/recall.py`), and this bench remains the
+measurement rig for tuning it.
 
 ## Isolation & safety
 

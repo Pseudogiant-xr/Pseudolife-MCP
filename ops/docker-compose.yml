@@ -80,7 +80,7 @@ services:
       dockerfile: ops/Dockerfile.daemon
     # Keep this tag in step with the package version in pyproject.toml; the
     # update scripts read it from here (single source of truth for deploys).
-    image: pseudolife-daemon:0.8.1
+    image: pseudolife-daemon:0.9.0
     container_name: pseudolife-mcp-daemon
     restart: unless-stopped
     logging: *default-logging
