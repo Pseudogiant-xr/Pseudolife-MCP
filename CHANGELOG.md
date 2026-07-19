@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-07-19 — resume-after-reap fragmentation on the hook path)
+- **A SessionStart re-fire after the idle reaper no longer forks the
+  episode.** Resume-on-return (reopen a recently-reaped session root instead
+  of leaving a husk) lived only in the store path, so when the idle reaper
+  closed a long session's root and Claude Code then re-fired SessionStart
+  (source `resume`/`compact`), the hook path (`episode_start_session`) opened
+  a *second* root for the same session — fragmenting one logical session
+  across two episodes (and feeding the zero-signal outcome-inference scan a
+  spurious candidate). Both paths now share one `_resume_closed_session_locked`
+  helper, so a return via either resumes the same root within
+  `PSEUDOLIFE_SESSION_RESUME_SECONDS` (default 6 h; `0` disables).
+
 ### Fixed (2026-07-19 — active-session pointer TTL)
 - **A crashed client's tier-3 pointer no longer misattributes forever.** The
   machine-scoped active-session pointer (identity tier 3) is set at
