@@ -42,6 +42,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -121,8 +122,116 @@ def load_questions(category_filter=None) -> list[dict]:
     return questions
 
 
+# --------------------------------------------------------------------------- #
+# accessibility-tree resolution (Fix A) — turn opaque action bids into the
+# human-readable module/page labels the raw trees hide.
+#
+# The web-agent acts by bid (``click('1269')``); the human label ("Reports")
+# lives only in the ``accessibility_tree`` node that bid names. Ingesting whole
+# trees reintroduces the multi-MB haystack scale (and was what starved the
+# corpus of gold labels — the gold module names appear 0× in a bid-only ingest).
+# So instead of dumping trees we distil two compact, high-signal lines per
+# state: the resolved ACTION label and a capped PAGE context (title + headers).
+# --------------------------------------------------------------------------- #
+# A tree line: optional ``[bid]`` prefix, then ``role 'name'``, then flags.
+_TREE_LINE_RE = re.compile(r"^\s*(?:\[(?P<bid>\w+)\]\s*)?"
+                           r"(?P<role>[A-Za-z]+)\s+'(?P<name>[^']*)'(?P<rest>.*)$")
+# An action string like ``click('1269')`` / ``fill('113', 'x', True)`` /
+# ``select_option('a60', 'assigned_to')`` — the first quoted arg is the bid.
+_ACTION_BID_RE = re.compile(r"^[A-Za-z_]+\(\s*'(?P<bid>[^']+)'")
+# Action function name -> a past-tense verb for the resolved line.
+_ACTION_VERB = {
+    "click": "clicked", "dblclick": "double-clicked", "fill": "filled",
+    "press": "pressed", "select_option": "selected", "hover": "hovered",
+    "clear": "cleared", "check": "checked", "uncheck": "unchecked",
+    "focus": "focused", "type": "typed",
+}
+# Roles worth surfacing as page landmarks/headers (the "breadcrumbs/headers"
+# fallback): where module names like "Problems"/"Reports" actually live.
+_LANDMARK_ROLES = ("heading", "main")
+
+
+def _parse_bid_map(tree: str) -> dict[str, str]:
+    """Map ``bid -> "role 'name'...rest"`` for every bidded line in one tree."""
+    out: dict[str, str] = {}
+    for line in (tree or "").splitlines():
+        m = _TREE_LINE_RE.match(line)
+        if m and m.group("bid"):
+            out[m.group("bid")] = (
+                f"{m.group('role')} '{m.group('name')}'{m.group('rest')}").strip()
+    return out
+
+
+def _resolve_bid(bid: str, tree: str) -> tuple[str, str] | None:
+    """Resolve one ``bid`` against a tree to ``(role, name)`` or ``None``."""
+    if not bid:
+        return None
+    for line in (tree or "").splitlines():
+        m = _TREE_LINE_RE.match(line)
+        if m and m.group("bid") == bid:
+            return m.group("role"), m.group("name")
+    return None
+
+
+def _resolve_action(action: str, prev_tree: str,
+                    same_tree: str) -> str | None:
+    """A compact resolved-action line, or ``None`` if the bid won't resolve.
+
+    ``state[i].action`` is the action decided while observing ``state[i-1]`` (its
+    element lives in the PRE-action tree — a navigation ``click`` targets a link
+    that is gone once the page changes), so ``prev_tree`` is authoritative;
+    ``same_tree`` is a fallback for the initial state / rare reorderings.
+    """
+    m = _ACTION_BID_RE.match((action or "").strip())
+    if not m:
+        return None
+    bid = m.group("bid")
+    hit = _resolve_bid(bid, prev_tree) or _resolve_bid(bid, same_tree)
+    if not hit:
+        return None
+    role, name = hit
+    if not name:
+        return None
+    fn = (action or "").split("(", 1)[0].strip()
+    verb = _ACTION_VERB.get(fn, fn or "acted on")
+    return f'{verb}: {role} "{name}"'
+
+
+def _page_context(tree: str, max_labels: int, char_cap: int) -> str:
+    """A compact ``page: <title>`` line plus a few landmark/header labels.
+
+    Distils the module/page the state is ON (the ``RootWebArea`` title) and its
+    headers — the high-signal, human-readable content the raw tree buries. Capped
+    by ``max_labels`` distinct labels and a hard ``char_cap`` so a pathological
+    tree can never reintroduce the multi-MB scale.
+    """
+    parts: list[str] = []
+    seen: set[tuple[str, str]] = set()
+    for line in (tree or "").splitlines():
+        m = _TREE_LINE_RE.match(line)
+        if not m:
+            continue
+        role, name, rest = m.group("role"), m.group("name"), m.group("rest")
+        if role == "RootWebArea" and not any(p.startswith("page:") for p in parts):
+            if name:
+                parts.insert(0, f"page: {name}")
+            continue
+        take = (role in _LANDMARK_ROLES
+                or (role == "button" and "expanded=True" in rest)
+                or (role == "tab" and "selected=True" in rest))
+        if take and name and (role, name) not in seen:
+            seen.add((role, name))
+            if len(seen) <= max_labels:
+                parts.append(f'{role}: "{name}"')
+    block = "\n".join(parts)
+    if char_cap and len(block) > char_cap:
+        block = block[:char_cap] + " ...[capped]"
+    return block
+
+
 def trajectory_to_turns(traj: dict, *, include_observations: bool = False,
-                        observation_chars: int = 2000) -> list[str]:
+                        observation_chars: int = 2000,
+                        max_page_labels: int = 8) -> list[str]:
     """Flatten one LME-V2 trajectory into a list of text turns for ``svc.store``.
 
     Turn 0 frames the task (goal + environment + outcome). Each subsequent turn
@@ -131,11 +240,18 @@ def trajectory_to_turns(traj: dict, *, include_observations: bool = False,
 
     Text-only. Two fields are intentionally dropped or gated:
       * ``screenshot`` — a PNG path (multimodal); always skipped.
-      * ``accessibility_tree`` — the text page observation. Skipped by default:
-        it is huge (single trees run to tens of KB) and is the main driver of
-        the 115M-token haystacks. ``include_observations=True`` folds it back in,
-        truncated to ``observation_chars`` per state. Whether the memory system
-        should ingest observations at all is OPEN QUESTION 1 for the smoke.
+      * ``accessibility_tree`` — the text page observation. Skipped by default
+        (default off keeps the plain thought+action baseline). With
+        ``include_observations=True`` the tree is NOT dumped; it is distilled
+        (Fix A) into two compact lines per state, each bounded by
+        ``observation_chars``:
+          - a resolved ACTION line (``clicked: link "Reports"``) — the action's
+            bid mapped to its node's role+name (against the pre-action tree);
+          - a capped PAGE context (``page: <title>`` + up to ``max_page_labels``
+            landmark/header labels) — where the gold module/page names live.
+        This recovers the human-readable labels the bid-only baseline drops
+        (gold module names go from 0 occurrences to present) WITHOUT the
+        multi-MB scale a raw-tree dump reintroduces.
     """
     env = traj.get("environment", "?")
     domain = traj.get("domain", "?")
@@ -144,7 +260,10 @@ def trajectory_to_turns(traj: dict, *, include_observations: bool = False,
     turns: list[str] = [
         f"[task | {domain}/{env} | outcome={outcome}] {goal}"
     ]
-    for st in traj.get("states", []):
+    states = traj.get("states", [])
+    prev_tree = ""
+    for st in states:
+        tree = st.get("accessibility_tree") or ""
         parts = [f"[step {st.get('state_index')}] url: {st.get('url', '')}"]
         thought = (st.get("thought") or "").strip()
         if thought:
@@ -153,12 +272,21 @@ def trajectory_to_turns(traj: dict, *, include_observations: bool = False,
         if action:
             parts.append(f"action: {action}")
         if include_observations:
-            tree = (st.get("accessibility_tree") or "").strip()
-            if tree:
-                if observation_chars and len(tree) > observation_chars:
-                    tree = tree[:observation_chars] + " ...[truncated]"
-                parts.append(f"observation:\n{tree}")
+            obs: list[str] = []
+            if action:
+                resolved = _resolve_action(action, prev_tree, tree)
+                if resolved:
+                    obs.append(resolved)
+            ctx = _page_context(tree, max_page_labels, observation_chars)
+            if ctx:
+                obs.append(ctx)
+            block = "\n".join(obs)
+            if observation_chars and len(block) > observation_chars:
+                block = block[:observation_chars] + " ...[capped]"
+            if block:
+                parts.append(block)
         turns.append("\n".join(parts))
+        prev_tree = tree
     return turns
 
 

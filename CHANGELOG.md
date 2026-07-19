@@ -6,6 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-19 — LongMemEval-V2 pilot CPU fixes: trajectory ingest recovers gold labels)
+- **`OpenAICompatExtractor` gained an optional `system_prompt` argument**
+  (default `None` → the shipped `_SYSTEM_PROMPT`, so the daemon and every
+  product path stay byte-identical). Off-label harnesses can now supply a
+  domain-specific base extraction prompt while still getting the vocab /
+  known-facts hints appended. Used by the LME-V2 smoke's trajectory-mode prompt.
+- **LME-V2 evals harness (`evals/lme_v2_*`) — three post-mortem fixes** (all
+  evals-side; no product behavior change beyond the extractor arg above):
+  *Fix A* — `trajectory_to_turns(include_observations=True)` no longer dumps raw
+  `accessibility_tree`s (which were ~47× the baseline corpus and, being opaque
+  bids, contained **zero** occurrences of the gold module names). It distils
+  each state into a resolved action label (bid → node role+name, resolved
+  against the pre-action tree) plus a capped page context (title + headers). For
+  question `025db8ef` the gold term "Problems" goes 0 → 10 occurrences at 1.43×
+  the baseline size. *Fix B* — a trajectory-mode extraction prompt that pulls the
+  ordered workflow + environment affordances instead of durable user facts.
+  *Fix C* — a cross-trajectory synthesis pass clustering same-task procedure
+  claims into a canonical "typical workflow" fact, weighting `outcome=success`
+  over `failure`. New `evals/lme_v2_check0.py` gates the corpus rebuild.
+
 ### Changed (2026-07-19 — graph hygiene round 2: scope purge, nested topics, edge quarantine)
 - **`backfill_entity_sources` now purges contaminated derived scope rows** on
   every run: sources in `memory.scopes.exclude` and legacy mixed-case scope

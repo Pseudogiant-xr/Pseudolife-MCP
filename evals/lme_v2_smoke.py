@@ -7,9 +7,18 @@ LME-V2 *trajectories* instead of chat sessions:
 
   Category   : ``procedure`` (workflow-knowledge, 74 questions, ALL text-only).
                NOT ``errors-gotchas`` — those are multimodal (FORMAT-NOTES.md).
-  Observations: OFF (thought+action turns only; the adapter's default). Workflow
-               knowledge lives in thought+action, and observations reintroduce
-               the 115M-token scale — see OPEN QUESTION 1.
+  Observations: ON, DISTILLED (Fix A). The adapter no longer dumps raw trees
+               (that starved the corpus of gold labels AND was 47x the baseline);
+               with ``include_observations=True`` each state contributes a
+               resolved action label (``clicked: link "Reports"`` — the opaque
+               bid mapped to its node) plus a capped page context (title +
+               headers). Gold module names go from 0 occurrences to present.
+  Extraction : trajectory-mode prompt (Fix B) — extracts the ORDERED WORKFLOW and
+               environment affordances, not durable user facts. The shipped
+               ``_SYSTEM_PROMPT`` and all product paths stay byte-identical.
+  Synthesis  : a cross-trajectory pass (Fix C) clusters same-task procedure
+               claims into a canonical 'typical workflow' fact, weighting
+               ``outcome=success`` trajectories over ``failure`` on conflict.
   Store policy: every adapted turn stored (store-everything v1; voluntary-capture
                simulation is a future arm).
   Dream cadence: one dream per TRAJECTORY (the natural unit — one goal — and it
@@ -76,6 +85,147 @@ ARMS = ("rag", "cortex", "hybrid")
 
 # qwen-27b serves extractor AND answerer/judge for the smoke (one endpoint).
 EXTRACTOR_URL = os.environ.get("LME_V2_EXTRACTOR_URL", "http://127.0.0.1:1234/v1")
+
+
+# --------------------------------------------------------------------------- #
+# Fix B — trajectory-mode extraction prompt (EVALS-ONLY).
+#
+# The shipped ``_SYSTEM_PROMPT`` asks for durable, current-state USER facts and
+# skips narrative/transient state — exactly what a web-agent trajectory is, so
+# it yields ~nothing (5 claims / 458 turns in the overnight smoke). This variant
+# targets trajectory content: it extracts the ORDERED WORKFLOW (the class that
+# answers `procedure` questions) and environment affordances, and drops the
+# click-by-click narrative. It is passed to ``OpenAICompatExtractor`` via its
+# optional ``system_prompt`` arg; the shipped daemon prompt and every product
+# code path are untouched (the regression gate pins those).
+_TRAJECTORY_SYSTEM_PROMPT = (
+    "You distil a web/enterprise AGENT TRAJECTORY into durable, reusable "
+    "knowledge. The numbered notes are the ordered steps of ONE agent task: the "
+    "goal and outcome (step 1), then per step the page it was on, its thought, "
+    "the raw action, and — where resolvable — the human-readable label it "
+    "clicked and the page title/headers it saw. Output JSON only: "
+    '{"claims":[{"entity":..,"attribute":..,"value":..,"confidence":0..1,'
+    '"source":<number of the step the claim came from>}]}.\n'
+    "Extract exactly two kinds of claim and nothing else:\n"
+    "1. PROCEDURE (workflow) claim — for the task the trajectory pursues, the "
+    "ordered MODULES/PAGES the workflow moves through. entity = the task type, "
+    "a short stable phrase (e.g. 'reassign incidents by assignment group'); "
+    "attribute = 'modules used (in order)'; value = the ordered, human-readable "
+    "module/page names separated by '; ', read from the resolved click labels "
+    "and page titles (NEVER the raw bids). Emit ONE ordered claim for the task, "
+    "not one per click.\n"
+    "2. ENVIRONMENT/AFFORDANCE claim — for a module or page the agent used, what "
+    "it is FOR or what it reaches. entity = the module/page name; attribute = "
+    "one of 'purpose' | 'contains' | 'reached via'; value = the concise fact.\n"
+    "Read the goal plus the ordered visited/clicked labels and emit the "
+    "WORKFLOW, not the narrative. DROP click-by-click detail: individual clicks, "
+    "typing, focus changes, transient UI state, and one-off values are not "
+    "durable. Reuse one consistent entity+attribute across steps about the SAME "
+    "task or module.\n"
+    "Worked example — collapsing a navigation sequence into ONE ordered-modules "
+    "claim. Steps:\n"
+    "  [1] [task] outcome=success  file a new expense report for a business trip\n"
+    '  [2] page: Home | Concur; clicked: link "Expenses"\n'
+    '  [3] page: Expenses | Concur; clicked: button "New Report"\n'
+    '  [4] page: Create Report | Concur; clicked: menuitem "Add Expense"\n'
+    "  [5] page: Add Expense | Concur\n"
+    "Correct output:\n"
+    '  {"claims":['
+    '{"entity":"file a new expense report","attribute":"modules used (in order)",'
+    '"value":"Expenses; New Report; Add Expense","confidence":0.8,"source":2},'
+    '{"entity":"Expenses","attribute":"purpose","value":"lists and creates '
+    'expense reports","confidence":0.7,"source":3}]}\n'
+    "Five click-steps became ONE ordered-modules procedure claim plus one "
+    "affordance claim — no per-click claims. Return {\"claims\":[]} if the "
+    "trajectory shows no reusable procedure or environment knowledge."
+)
+
+# Attribute keywords that mark a claim as an ordered-workflow PROCEDURE claim
+# (Fix C clusters only these; environment/affordance claims pass through).
+_PROCEDURE_ATTR_KEYS = ("module", "workflow", "order", "step", "procedure")
+
+
+def _norm_value(v: str) -> str:
+    return re.sub(r"\s+", " ", (v or "").strip()).lower()
+
+
+def synthesize_procedures(claims: list[dict]) -> list[dict]:
+    """Fix C — cross-trajectory synthesis over accumulated PROCEDURE claims.
+
+    Clusters procedure claims by (task entity, attribute), then emits one
+    canonical 'typical workflow' claim per cluster. When trajectories disagree on
+    the ordering, ``outcome='success'`` trajectories outweigh ``'failure'`` ones;
+    with no success signal it falls back to the plain majority ordering. Pure and
+    GPU-free — structurally unit-tested; full validation is the GPU smoke's job.
+
+    Input claims are dicts with ``entity``/``attribute``/``value``/``outcome``.
+    Returns canonical dicts with ``entity``/``attribute``/``value``/``support``
+    (success trajectories backing the winner, or total when none succeeded) and
+    ``conflicts`` (claims whose ordering differed from the winner).
+    """
+    clusters: dict[tuple[str, str], list[dict]] = {}
+    for c in claims or []:
+        attr = str(c.get("attribute", ""))
+        if not any(k in attr.lower() for k in _PROCEDURE_ATTR_KEYS):
+            continue
+        key = (str(c.get("entity", "")).strip().lower(), attr.strip().lower())
+        clusters.setdefault(key, []).append(c)
+
+    out: list[dict] = []
+    for members in clusters.values():
+        # Tally success and total support per distinct (normalised) value.
+        success: dict[str, int] = {}
+        total: dict[str, int] = {}
+        display: dict[str, str] = {}      # normalised -> first-seen spelling
+        for c in members:
+            nv = _norm_value(c.get("value", ""))
+            if not nv:
+                continue
+            display.setdefault(nv, str(c.get("value", "")).strip())
+            total[nv] = total.get(nv, 0) + 1
+            if str(c.get("outcome", "")).strip().lower() == "success":
+                success[nv] = success.get(nv, 0) + 1
+        if not total:
+            continue
+        # Success majority wins; ties/absence fall back to overall majority.
+        if success:
+            winner = max(success, key=lambda v: (success[v], total.get(v, 0)))
+            support = success[winner]
+        else:
+            winner = max(total, key=lambda v: total[v])
+            support = total[winner]
+        conflicts = sum(n for v, n in total.items() if v != winner)
+        sample = members[0]
+        out.append({
+            "entity": str(sample.get("entity", "")).strip(),
+            "attribute": f"typical workflow ({str(sample.get('attribute', '')).strip()})",
+            "value": display[winner],
+            "support": support,
+            "conflicts": conflicts,
+        })
+    return out
+
+
+class _RecordingExtractor:
+    """Wraps an ``OpenAICompatExtractor`` to capture every claim it emits, tagged
+    with the CURRENT trajectory's outcome — the per-trajectory attribution Fix C's
+    synthesis needs (the cortex loses outcome once claims consolidate). Delegates
+    extraction verbatim; adds no behaviour of its own. Precedent:
+    ``window_echo_check._Recording``."""
+
+    def __init__(self, inner) -> None:
+        self.inner = inner
+        self.current_outcome: str | None = None
+        self.records: list[dict] = []
+
+    def extract(self, texts, vocab, known_facts=None):
+        claims = self.inner.extract(texts, vocab, known_facts)
+        for c in claims:
+            self.records.append({
+                "entity": c["entity"], "attribute": c["attribute"],
+                "value": c["value"], "outcome": self.current_outcome,
+            })
+        return claims
 
 
 # --------------------------------------------------------------------------- #
@@ -277,13 +427,18 @@ def load_rows(path: Path) -> list[dict]:
 # --------------------------------------------------------------------------- #
 def ingest_and_dream(svc, extractor, trajectories: list[dict], ex_url,
                      probe) -> dict:
-    """Store every adapted turn of each trajectory (observations off), dreaming
-    to consolidation after EACH trajectory — one trajectory ~= one session."""
+    """Store every adapted turn of each trajectory (observations ON — resolved
+    action labels + capped page context, Fix A), dreaming to consolidation after
+    EACH trajectory — one trajectory ~= one session. When ``extractor`` is a
+    ``_RecordingExtractor`` its ``current_outcome`` is set per trajectory so
+    Fix C's synthesis can weight success over failure."""
     tally = {"trajectories": 0, "turns": 0, "claims": 0, "inserted": 0,
              "superseded": 0, "extract_seconds": 0.0}
     held = 0
     for traj in trajectories:
-        for turn in A.trajectory_to_turns(traj):   # include_observations=False
+        if hasattr(extractor, "current_outcome"):
+            extractor.current_outcome = traj.get("outcome")
+        for turn in A.trajectory_to_turns(traj, include_observations=True):
             svc.store(turn, source="bench")
             tally["turns"] += 1
         tally["trajectories"] += 1
@@ -385,10 +540,27 @@ def run_smoke(limit: int, max_traj: int) -> None:
         tmp = Path(tempfile.mkdtemp(prefix="lme2_"))
         svc = build_service(tmp)                       # dedicated bench DB
         svc.config.memory.dream.extract_relations = False   # facts only
-        extractor = OpenAICompatExtractor(EXTRACTOR_URL, "bench",
-                                          max_tokens=4096, timeout_seconds=600.0)
+        # Fix B: trajectory-mode extraction prompt (product prompt untouched).
+        base_extractor = OpenAICompatExtractor(
+            EXTRACTOR_URL, "bench", max_tokens=4096, timeout_seconds=600.0,
+            system_prompt=_TRAJECTORY_SYSTEM_PROMPT)
+        # Fix C: record per-trajectory claims (with outcome) for synthesis.
+        extractor = _RecordingExtractor(base_extractor)
         tally = ingest_and_dream(svc, extractor, trajectories, EXTRACTOR_URL,
                                  probe)
+
+        # Fix C: one cross-trajectory synthesis pass over the accumulated
+        # procedure claims -> canonical 'typical workflow' facts, written back so
+        # the cortex/hybrid arms can retrieve them.
+        canon = synthesize_procedures(extractor.records)
+        for c in canon:
+            # support=='action' corroboration: success-backed workflow knowledge.
+            svc.cortex_write(c["entity"], c["attribute"], c["value"],
+                             support="action")
+        tally["procedure_claims"] = len(
+            [r for r in extractor.records
+             if any(k in r["attribute"].lower() for k in _PROCEDURE_ATTR_KEYS)])
+        tally["canonical_workflows"] = len(canon)
 
         t_retr = time.perf_counter()
         contexts = build_contexts(svc, q["question"])
@@ -408,6 +580,7 @@ def run_smoke(limit: int, max_traj: int) -> None:
             "max_trajectories": max_traj,
             "contexts": contexts,          # persisted — re-scorable without GPU
             "consolidation": tally,
+            "synthesized_workflows": canon,   # Fix C canonical claims (audit)
             "retrieval_seconds": retrieval_seconds,
             "wall_seconds": round(time.perf_counter() - t_start, 1),
         }
@@ -473,7 +646,11 @@ def dry_run(limit: int, max_traj: int) -> int:
     print("=" * 72)
     print(f"PLAN — LME-V2 smoke (DRY RUN, offline)")
     print(f"  category            : {CATEGORY} (workflow-knowledge, text-only)")
-    print(f"  observations        : OFF (thought+action only)")
+    print(f"  observations        : ON (Fix A: resolved action labels + capped "
+          f"page context; NOT raw trees)")
+    print(f"  extraction prompt   : trajectory-mode (Fix B; product prompt "
+          f"untouched)")
+    print(f"  synthesis           : cross-trajectory workflow pass (Fix C)")
     print(f"  store policy        : every adapted turn")
     print(f"  dream cadence        : one dream per trajectory")
     print(f"  questions selected  : {len(questions)} (--limit {limit})")
@@ -499,9 +676,10 @@ def dry_run(limit: int, max_traj: int) -> int:
         found = load_trajectories_by_ids(traj_ids)
         print(f"  on disk: {len(found)}/{len(traj_ids)} selected trajectories "
               f"present in {A.TRAJECTORIES_SMALL_FILE.name}")
-        n_turns = sum(len(A.trajectory_to_turns(found[t]))
+        n_turns = sum(len(A.trajectory_to_turns(found[t],
+                                                include_observations=True))
                       for t in traj_ids if t in found)
-        print(f"  adapted turns (observations off): {n_turns} across "
+        print(f"  adapted turns (observations distilled): {n_turns} across "
               f"{len(found)} trajectories")
     print("\ndry-run OK — no endpoints contacted.")
     return 0
