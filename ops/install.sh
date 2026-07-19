@@ -227,22 +227,18 @@ for selected_client in $clients; do
         echo "==> Memory block already present in $instruction_path — skipping."
         continue
     fi
-    choice="$instruction_choice"
-    if [ -z "$choice" ]; then
-        if [ -t 0 ]; then
-            printf "Append the memory-loop block to %s? [Y/n] " "$instruction_path"
-            read -r yn
-            case "$yn" in [Nn]*) choice=skip ;; *) choice=append ;; esac
-        else
-            choice=skip
-        fi
-    fi
+    # No interactive prompt: the session hook briefing delivers the same
+    # block every session, so a standing-file copy would double-inject.
+    # Explicit opt-in only (--instructions append) — useful for subagent
+    # visibility and hook-less setups.
+    choice="${instruction_choice:-skip}"
     if [ "$choice" = "append" ]; then
         mkdir -p "$(dirname "$instruction_path")"
         cat "$repo/examples/CLAUDE.memory.md" >> "$instruction_path"
         echo "==> Appended memory block to $instruction_path"
     else
-        echo "SKIPPED: MCP server instructions still provide the core memory loop. Optional stronger guidance:"
+        echo "==> Standing memory block not written (the session hook briefing already"
+        echo "    delivers the memory loop each session). To add it anyway:"
         echo "  cat $repo/examples/CLAUDE.memory.md >> $instruction_path"
     fi
 done

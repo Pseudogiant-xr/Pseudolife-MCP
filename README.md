@@ -62,14 +62,17 @@ prerequisite), asks which **dream extractor** should consolidate memories —
 - **sidecar** — the bundled local CPU model; no Claude plan needed, works
   for everyone (~9 GB image) —
 
-then brings the stack up, installs the selected clients' session hooks, offers
-to append the memory-loop block to `~/.claude/CLAUDE.md` and/or
-`~/.codex/AGENTS.md`, registers the MCP transport (the stdio shim by
-default, direct HTTP via `--transport http`), and health-checks the
-daemon. The server also advertises the core loop through MCP `instructions`,
-so the standing file reinforces the protocol guidance. Idempotent — re-run any
-time; `--extractor <mode>` switches extractor setups. Non-interactive example:
-`ops/install.sh --extractor sidecar --client codex --instructions append`.
+then brings the stack up, installs the selected clients' session hooks,
+registers the MCP transport (the stdio shim by default, direct HTTP via
+`--transport http`), and health-checks the daemon. The session-hook briefing
+delivers the memory-loop guidance every session, and the server also
+advertises the core loop through MCP `instructions` — so no standing-file
+edit is needed or offered. `--instructions append` additionally writes the
+block from `examples/CLAUDE.memory.md` into `~/.claude/CLAUDE.md` /
+`~/.codex/AGENTS.md` (useful for subagent visibility or hook-less setups).
+Idempotent — re-run any time; `--extractor <mode>` switches extractor
+setups. Non-interactive example:
+`ops/install.sh --extractor sidecar --client codex`.
 Linux (Docker Engine): your user must be in the `docker` group —
 `sudo usermod -aG docker $USER`, then log out/in (the preflight checks this).
 
@@ -397,11 +400,12 @@ daemon:
 
 The server's value depends entirely on the agent *using* it well — **this step
 is what makes the memory loop actually fire**. The MCP server advertises the
-core loop through protocol-level `instructions`; this standing block provides
-stronger durable guidance. **Claude plugin users skip this section** because
-the plugin injects the same block every session. Everyone else appends it to
-Claude's global `~/.claude/CLAUDE.md`, Codex's global `~/.codex/AGENTS.md`, or
-a per-project `CLAUDE.md` / `AGENTS.md`:
+core loop through protocol-level `instructions`, and the session hook (one
+command, below) delivers the full block every session — **plugin users and
+hook users need nothing more**. If you want it in a standing file instead —
+or additionally, for subagent visibility (subagents read `CLAUDE.md` but not
+hook output) — append it to Claude's global `~/.claude/CLAUDE.md`, Codex's
+global `~/.codex/AGENTS.md`, or a per-project `CLAUDE.md` / `AGENTS.md`:
 
 ```bash
 cat examples/CLAUDE.memory.md >> ~/.claude/CLAUDE.md

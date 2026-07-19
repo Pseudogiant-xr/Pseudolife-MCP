@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-19 — installer no longer prompts for the CLAUDE.md block)
+- **The standing memory-loop block is opt-in, not a prompt.** The installer's
+  "Append the memory-loop block?" question (default Y) double-injected: the
+  session-hook briefing already delivers the byte-identical block every
+  session, so accepting the default cost ~60 duplicated lines of context per
+  session. The interactive prompt is removed; the default is skip, with the
+  one-liner printed for anyone who wants the standing copy. Explicit
+  `--instructions append` / `-Instructions append` (and the `--claude-md` /
+  `-ClaudeMd` compatibility aliases) still write it — useful for subagent
+  visibility (subagents read CLAUDE.md but not hook output) and hook-less
+  setups. i18n source bumped to v5 for the quickstart-narrative change.
+
 ### Fixed (2026-07-19 — analyzer: pruned-edge lesson entities leave the unattributed queue)
 - **The graph analyzer's "entities with no project" finding now also excludes
   entities referenced by `lessons.entity_id`/`object_entity_id`** — the
