@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-19
+
 ### Changed (2026-07-19 — analyzer: lesson entities leave the unattributed queue)
 - **The graph analyzer's "entities with no project" finding now excludes
   lesson-only entities** — task/approach nodes minted by `memory_outcome`

@@ -76,6 +76,13 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   `3`) signals inferred from its own record on the end-of-session dream;
   see [Episodes](episodes.md#inferred-outcomes-at-session-close). Set
   either to `false` / `0` to turn it off.
+- **Dream edge quarantine on** (`memory.dream.relation_quarantine_below =
+  0.5`) — dream-extracted graph edges scoring below the floor are filed as
+  review proposals (`source="dream-low-confidence"`) instead of entering
+  the live graph. At the default this catches exactly the untyped
+  `related-to` co-mention edges (confidence 0.45); typed relations (0.70)
+  write live as before. Set `0.0` to disable and restore write-live
+  behavior.
 
 ## Toolset tiers
 
