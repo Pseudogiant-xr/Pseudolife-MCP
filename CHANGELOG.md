@@ -6,6 +6,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-19 — deep dream: lesson/world cross-key duplicate curation)
+- **`memory_dream(action="deep")` now lists curation candidates for the
+  lesson and world stores** — `lesson_duplicates` / `world_duplicates` in
+  both dry-run and apply responses. Dedup/supersession in those stores is
+  strictly per-slot (`(task, aspect)` / `(entity, attribute)`), so
+  near-duplicates parked under different keys accumulated silently (a
+  2026-07-19 manual sweep found 6 duplicate lesson groups and 1 duplicate
+  world slot). The new `graph_consolidation.slot_duplicate_candidates`
+  reuses the deep dream's cosine candidate-pair approach over the records'
+  own embeddings (floor/cap via the new `memory.deep_dream`
+  `curation_min_similarity` = 0.80 / `curation_top_k` = 20). Listing-only:
+  nothing is auto-deleted — duplicates are settled with the existing
+  `memory_forget` tools, and genuinely-distinct pairs are dismissed via the
+  new `memory_graph_review(action="dismiss_slot_pair")` /
+  `POST /api/curation/dismiss-duplicate` (service
+  `curation_dismiss_duplicate`), persisted in the existing
+  `dismissed_pairs` table under a `lesson:`/`world:` namespace (safe
+  because `graph.norm_name` strips `:` while every curation row carries a
+  colon-bearing prefix, so graph-name dismissals can't collide; literal
+  `|` in a slot component is folded to `-` to keep the joined key
+  unambiguous; no schema change).
+
 ### Changed (2026-07-19 — installer no longer prompts for the CLAUDE.md block)
 - **The standing memory-loop block is opt-in, not a prompt.** The installer's
   "Append the memory-loop block?" question (default Y) double-injected: the

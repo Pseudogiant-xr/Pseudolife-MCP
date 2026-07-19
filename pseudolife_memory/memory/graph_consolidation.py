@@ -167,6 +167,53 @@ def candidate_pairs(vectors: dict[int, np.ndarray], edges: list[dict],
     return scored[:top_k]
 
 
+# --- Store curation: cross-key near-duplicate slot pairs ----------------------
+
+def slot_duplicate_candidates(records: list[dict], *,
+                              min_similarity: float = 0.80, top_k: int = 20,
+                              dismissed: set[tuple[str, str]] | None = None,
+                              ) -> list[dict]:
+    """Cross-key near-duplicate pairs in a slot-keyed store (lessons / world
+    facts) — the store-curation REVIEW candidates. Slot supersession dedups
+    only WITHIN one ``(entity, attribute)`` slot, so near-duplicates parked
+    under different keys accumulate silently; this surfaces them the same way
+    :func:`candidate_pairs` surfaces unlinked graph entities: cosine over the
+    records' own embeddings, floor + top-k, human-dismissed pairs skipped.
+    Listing-only — settling (forget / re-key / dismiss) stays with the
+    reviewer; nothing is deleted here.
+
+    Each record: ``{"key": <norm slot key>, "embedding": vector | None,
+    ...label fields}``. Records without embeddings (legacy rows) are skipped.
+    Output pairs are ``{a_key, b_key, a, b, similarity}`` with
+    ``a_key < b_key`` and the label fields (everything but key/embedding)
+    carried as evidence."""
+    recs = [r for r in records if r.get("embedding") is not None]
+    vecs = [_l2(np.asarray(r["embedding"], dtype=np.float32).reshape(-1))
+            for r in recs]
+
+    def _label(r: dict) -> dict:
+        return {k: v for k, v in r.items() if k not in ("key", "embedding")}
+
+    scored: list[dict] = []
+    for i in range(len(recs)):
+        for j in range(i + 1, len(recs)):
+            ka, kb = sorted((recs[i]["key"], recs[j]["key"]))
+            if ka == kb:
+                continue
+            if dismissed and (ka, kb) in dismissed:
+                continue
+            sim = float(np.dot(vecs[i], vecs[j]))
+            if sim < min_similarity:
+                continue
+            a, b = ((recs[i], recs[j]) if recs[i]["key"] == ka
+                    else (recs[j], recs[i]))
+            scored.append({"a_key": ka, "b_key": kb,
+                           "a": _label(a), "b": _label(b),
+                           "similarity": round(sim, 4)})
+    scored.sort(key=lambda c: (-c["similarity"], c["a_key"], c["b_key"]))
+    return scored[:top_k]
+
+
 # --- SP-1: entity consolidation (merge + junk surfacing) ----------------------
 
 _JUNK_STOPWORDS = frozenset({

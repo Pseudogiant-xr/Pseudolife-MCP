@@ -198,6 +198,8 @@ class ConsoleRoutes:
         p("/api/graph/unrelate", lambda q, b: svc.graph_unrelate(b["src"], b["relation"], b["dst"]))
         p("/api/graph/bless-edge", lambda q, b: svc.graph_bless_edge(b["src"], b["relation"], b["dst"]))
         p("/api/graph/dismiss-duplicate", lambda q, b: svc.graph_dismiss_duplicate(b["a"], b["b"]))
+        p("/api/curation/dismiss-duplicate", lambda q, b: svc.curation_dismiss_duplicate(
+            b["store"], b["a_entity"], b["a_attribute"], b["b_entity"], b["b_attribute"]))
         p("/api/graph/delete-entity", lambda q, b: svc.graph_delete_entity(b["entity"]))
         p("/api/graph/merge", lambda q, b: svc.graph_merge(b["from"], b["into"]))
         p("/api/graph/accept-proposal", lambda q, b: svc.graph_accept_proposal(b["id"]))

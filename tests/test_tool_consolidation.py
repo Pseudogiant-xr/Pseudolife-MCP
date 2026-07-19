@@ -273,3 +273,25 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     for tier, cap in budgets.items():
         total = sum(sizes[n] for n in mod._visible_tool_names(tier))
         assert total <= cap, f"{tier} manifest {total} chars exceeds {cap}"
+
+
+def test_graph_review_dismiss_slot_pair_routes_to_service(tmp_path: Path, monkeypatch) -> None:
+    # Step-3c driver verb: an agent triaging the deep response's
+    # lesson_duplicates / world_duplicates must be able to record "these
+    # slots are distinct" over MCP (parity with dismiss_pair). src/dst are
+    # the listed "entity|attribute" keys; the MCP layer splits at the FIRST
+    # "|" (listing keys fold literal pipes, so the split is unambiguous).
+    mod = _reload(tmp_path, monkeypatch)
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        mod.service, "curation_dismiss_duplicate",
+        lambda store, ae, aa, be, ba: calls.append((store, ae, aa, be, ba))
+        or {"dismissed": True})
+    out = _invoke("memory_graph_review",
+                  {"action": "dismiss_slot_pair", "store": "lesson",
+                   "src": "deploy-daemon|approach", "dst": "deploy-host|pitfall"})
+    assert out == {"dismissed": True}
+    assert calls == [("lesson", "deploy-daemon", "approach",
+                      "deploy-host", "pitfall")]
+    bad = mod.memory_graph_review("dismiss_slot_pair", store="lesson", src="no-pipe")
+    assert bad.get("error") == "store_src_dst_required"
