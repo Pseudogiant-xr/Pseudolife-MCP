@@ -66,10 +66,25 @@ from master, no publish step; users pull via `/plugin marketplace update`)
 all serve from this repo; a release touches them in this order (first done
 2026-07-16, v0.8.0).
 
-0. **Docs currency pass before the cut** — the guard tests pin numbers
-   (schema, identifiers), but *framing* drifts silently: the 2026-07-16
-   pass found 15 stale claims the guards can't see. Re-verify the
-   drift-prone claim classes against code before any release:
+0. **Docs currency pass before the cut** — two checks, and (a) is the one
+   that gets skipped because nothing fails when you miss it.
+
+   **(a) Absence — is the new behavior documented at all?** List the
+   behavior changes since the last tag (`git log vN.N.N..HEAD`, the
+   CHANGELOG's `[Unreleased]`) and ask of each: *which user-facing page
+   describes this?* A capability with no guide entry contradicts nothing,
+   so no guard test and no re-verify pass will ever surface it — only this
+   question will. Schema v16–v18 shipped undocumented exactly this way, and
+   0.10.0's headline extraction change lived in the CHANGELOG alone until
+   it was caught by hand at the release gate. A CHANGELOG entry is a record
+   of a change, not documentation of a behavior. Corollary: never exclude a
+   file from this pass on the strength of an earlier read that was looking
+   for something else — a narrow check does not justify a broad exclusion.
+
+   **(b) Contradiction — do the existing claims still hold?** The guard
+   tests pin numbers (schema, identifiers), but *framing* drifts silently:
+   the 2026-07-16 pass found 15 stale claims the guards can't see.
+   Re-verify the drift-prone claim classes against code before any release:
    what's bundled/default (extractor model + size, embedding weights),
    the transport story (HTTP-first; shim = host-process only), lifecycle
    ownership (episodes are daemon-owned; briefing is the only hook),
