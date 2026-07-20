@@ -29,6 +29,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   answer straight from the documented-procedure fact in 3–4 s; rag composes
   the same answer from raw task turns in ~25 s. The n=1 diagnosis chain is
   closed; next step is the wider procedure-question slice.
+- **10-question procedure slice (`slice1` / `slice1-compose` tags,
+  bm25+rerank+lexical-cortex, 100-trajectory haystacks):** deterministic
+  accuracy KU prompt rag 0.30 / cortex 0.30 / **hybrid 0.60**; compose prompt
+  rag 0.50 / cortex 0.30 / **hybrid 0.70** — from 0.00 across every arm
+  before Fixes A–E. Hybrid ≥ both single channels on both prompts; V2
+  procedure hybrid 0.70 is in line with the V1 knowledge-update hybrid oracle
+  (0.705). One llama-server crash mid-run (WinError 10054) was caught by the
+  probe-gated abort and the run resumed losslessly from its per-question
+  JSONL cursor.
 
 ### Changed (2026-07-20 — LongMemEval-V2 Fix D: capture knowledge-article body text)
 - **LME-V2 adapter now captures ServiceNow KB *article body text*** (evals-only;
