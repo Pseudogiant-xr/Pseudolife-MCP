@@ -62,13 +62,17 @@ prerequisite), asks which **dream extractor** should consolidate memories —
 - **sidecar** — the bundled local CPU model; no Claude plan needed, works
   for everyone (~9 GB image) —
 
-then brings the stack up, installs the selected clients' session hooks, offers
-to append the memory-loop block to `~/.claude/CLAUDE.md` and/or
-`~/.codex/AGENTS.md`, registers the HTTP MCP server, and health-checks the
-daemon. The server also advertises the core loop through MCP `instructions`,
-so the standing file reinforces the protocol guidance. Idempotent — re-run any
-time; `--extractor <mode>` switches extractor setups. Non-interactive example:
-`ops/install.sh --extractor sidecar --client codex --instructions append`.
+then brings the stack up, installs the selected clients' session hooks,
+registers the MCP transport (the stdio shim by default, direct HTTP via
+`--transport http`), and health-checks the daemon. The session-hook briefing
+delivers the memory-loop guidance every session, and the server also
+advertises the core loop through MCP `instructions` — so no standing-file
+edit is needed or offered. `--instructions append` additionally writes the
+block from `examples/CLAUDE.memory.md` into `~/.claude/CLAUDE.md` /
+`~/.codex/AGENTS.md` (useful for subagent visibility or hook-less setups).
+Idempotent — re-run any time; `--extractor <mode>` switches extractor
+setups. Non-interactive example:
+`ops/install.sh --extractor sidecar --client codex`.
 Linux (Docker Engine): your user must be in the `docker` group —
 `sudo usermod -aG docker $USER`, then log out/in (the preflight checks this).
 
@@ -81,8 +85,15 @@ docker volume create pseudolife-mcp-bank
 docker volume create pseudolife-mcp-state
 docker compose -f ops/docker-compose.yml up -d --build   # first build, once
 
-# Verify, then wire into one or both clients:
+# Verify, then wire the transport into one or both clients.
 curl http://127.0.0.1:8765/health
+
+# Stdio shim (the installer's default — per-session episode identity):
+pip install pseudolife-mcp
+claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
+codex mcp add pseudolife-memory -- pseudolife-mcp
+
+# ...or direct HTTP (no pip package needed; fine for single-session setups):
 claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
 codex mcp add pseudolife-memory --url http://127.0.0.1:8765/mcp
 
@@ -157,7 +168,7 @@ is agent context every session, so it stays lean.
 
 | Tool | Purpose |
 |------|---------|
-| `memory_store(text, source?, tags?, origin?)` | Remember one durable fact / decision / observation (canonical facts reach the cortex via the dream pass or `memory_fact_set`) |
+| `memory_store(text, source?, tags?, origin?, episode?)` | Remember one durable fact / decision / observation (canonical facts reach the cortex via the dream pass or `memory_fact_set`) |
 | `memory_search(query, top_k?, filters..., rerank?, bm25?, explain?, verbose?)` | Associative retrieval; canonical `cortex` facts surface ahead of recall hits; `explain=True` attaches a ranking trace |
 | `memory_recent(n?, sources?, episodes?, tags?, verbose?)` | Newest stores, timestamp-ordered (debug + session catch-up) |
 | `memory_supersede(old_text, new_text)` | Explicit correction — mark a memory obsolete, keep it as history |
@@ -165,12 +176,12 @@ is agent context every session, so it stays lean.
 | `memory_stats()` | Per-band sizes, hit rates, totals |
 | `memory_get(entry_id)` / `memory_reinforce(entry_id)` | Dereference a memory id to its full episode (+ `consolidated_into`); reinforce it after finding it useful |
 | `memory_fact_get(entity, attribute)` | The one CURRENT canonical value at a slot (+ parked contenders); on an empty slot returns ranked `candidates` (same-entity, then similar slots) |
-| `memory_fact_set(entity, attribute, value, origin?, confidence?)` | Assert a canonical fact deliberately (insert / confirm / supersede / contest) |
+| `memory_fact_set(entity, attribute, value, origin?, confidence?, episode?)` | Assert a canonical fact deliberately (insert / confirm / supersede / contest) |
 | `memory_fact_resolve(entity, attribute, accept)` | Settle a contested slot — adopt (`true`) or discard (`false`) the contender |
 | `memory_history(entity, attribute?)` | With `attribute`: version timeline at a slot, with writer/temporal stamps. Without: the entity's causal chain — dated fact/entry/edge/lesson events ("what led to X") |
 | `memory_world_set(entity, attribute, value, source_url?, ...)` | Assert a cited WORLD fact (external knowledge; age-decayed trust by freshness class) |
 | `memory_world_search(query, top_k?, verbose?)` | Search world facts — each carries `effective_confidence`, a `stale` flag, and its citation |
-| `memory_outcome(task, outcome, about?, detail?, polarity?)` | Record a procedural outcome signal (`success`/`failure`/`correction`); the dream distils signals into lessons |
+| `memory_outcome(task, outcome, about?, detail?, polarity?, episode?)` | Record a procedural outcome signal (`success`/`failure`/`correction`); the dream distils signals into lessons |
 | `memory_lesson_search(query, top_k?, verbose?)` | Recall learned lessons for the task at hand — heed `polarity` `-` dead-ends; `re_verify` flags lessons whose subject facts changed since |
 | `memory_dream(action, limit?, cursor?, apply?, snippets?)` | Drive the dream: `status` / `pull` / `commit` / `run` (server-side extractor) / `deep` (full-corpus graph consolidation; dry-run unless `apply`, which snapshots the graph tables first; `snippets=false` omits candidate evidence; responses carry evidence-enriched `merge_proposals` for near-duplicate triage) |
 | `memory_graph_review(action, proposal_id?, proposals?, scope?, src?, dst?)` | Work the review queue: `list` / `propose` / `dismiss_pair` / `accept_link` / `reject_link` / `accept_merge` / `accept_junk` / `reject_entity` (merge/entity decisions are audit-stamped `decided_by=agent` over MCP, `human` via Console) |
@@ -316,11 +327,18 @@ shim by default — per-session episode identity) or the one-liner below.
 Details, non-default ports/tokens, and migration:
 [plugin/README.md](plugin/README.md).
 
-**HTTP transport (manual equivalent).**
-The daemon already serves MCP over HTTP, so point either client straight at
-it — no shim, no host command, nothing OS-specific.
+**Manual transport registration.** The installer's default (shim mode)
+registers a thin stdio shim — one shim process per session, so every
+session carries its own tier-1 identity. The same wiring by hand:
 
-Claude Code:
+```bash
+pip install pseudolife-mcp
+claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
+```
+
+Direct HTTP works too — the daemon serves MCP over HTTP natively (no shim,
+no host command, nothing OS-specific; concurrent sessions then share one
+episode identity, so it fits single-session setups best):
 
 ```bash
 claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
@@ -342,7 +360,16 @@ a `.mcp.json` at a project root for project scope:
 }
 ```
 
-Codex:
+Codex — the installer's default (shim mode) wires the same stdio shim, so a
+Codex session gets its own tier-1 identity instead of inheriting a
+concurrent Claude session's episode:
+
+```bash
+pip install pseudolife-mcp
+codex mcp add pseudolife-memory -- pseudolife-mcp
+```
+
+The HTTP one-liner works too (no pip package needed):
 
 ```bash
 codex mcp add pseudolife-memory --url http://127.0.0.1:8765/mcp
@@ -373,11 +400,12 @@ daemon:
 
 The server's value depends entirely on the agent *using* it well — **this step
 is what makes the memory loop actually fire**. The MCP server advertises the
-core loop through protocol-level `instructions`; this standing block provides
-stronger durable guidance. **Claude plugin users skip this section** because
-the plugin injects the same block every session. Everyone else appends it to
-Claude's global `~/.claude/CLAUDE.md`, Codex's global `~/.codex/AGENTS.md`, or
-a per-project `CLAUDE.md` / `AGENTS.md`:
+core loop through protocol-level `instructions`, and the session hook (one
+command, below) delivers the full block every session — **plugin users and
+hook users need nothing more**. If you want it in a standing file instead —
+or additionally, for subagent visibility (subagents read `CLAUDE.md` but not
+hook output) — append it to Claude's global `~/.claude/CLAUDE.md`, Codex's
+global `~/.codex/AGENTS.md`, or a per-project `CLAUDE.md` / `AGENTS.md`:
 
 ```bash
 cat examples/CLAUDE.memory.md >> ~/.claude/CLAUDE.md
@@ -468,17 +496,18 @@ privacy/cost trade-offs: [Dreaming](docs/guide/dreaming.md).
 
 On the knowledge-update subset of
 [LongMemEval](https://arxiv.org/abs/2410.10813) (oracle variant,
-local-ceiling extractor), the consolidated-facts posture beats naive RAG by
-9 points while reading ~40% of the context:
+local-ceiling extractor; 5 replicates, mean ± std), the consolidated-facts
+posture beats naive RAG by ~14 points while reading ~60% of the context:
 
-| arm | accuracy | context tokens/question |
-|-----|----------|------------------------|
-| naive RAG (top-6 turns) | 0.615 | 1638 |
-| cortex facts only | 0.564 | **59** |
-| **hybrid (facts + top-3 turns)** | **0.705** | 979 |
+| arm | accuracy (mean ± std) | context tokens/question |
+|-----|----------------------|------------------------|
+| naive RAG (top-6 turns) | 0.567 ± 0.017 | 1638 |
+| cortex facts only | 0.559 ± 0.030 | **~60** |
+| **hybrid (facts + top-3 turns)** | **0.710 ± 0.019** | ~1000 |
 
-The fact spine alone delivers 92% of RAG's accuracy on **3.6% of its token
-budget**. Setup, caveats, and why extraction quality is the dominant
+The fact spine alone matches RAG's accuracy on **under 4% of its token
+budget** — and the shipped E4B fine-tune's replicated hybrid
+(0.762 ± 0.027) beats this 27B-class ceiling. Setup, caveats, and why extraction quality is the dominant
 factor: [Benchmarks](docs/guide/benchmarks.md); full methodology:
 [`evals/README.md`](evals/README.md).
 
@@ -531,9 +560,9 @@ version, storage backend, auth state, and `persist_errors` (non-zero means
 writes are failing to reach Postgres; check `docker logs
 pseudolife-mcp-daemon`).
 
-- **First build is slow / big.** The daemon image bakes in CPU torch and the
-  embedding model (~3 GB, several minutes; the extractor sidecar adds a
-  ~5.3 GB model download on its first build). Every start after that is
+- **First build is slow / big.** The daemon image (~3 GB, several minutes to
+  build) bakes in CPU torch and the embedding model; the extractor sidecar
+  adds a ~5.3 GB model download on its first build. Every start after that is
   offline and fast — if a *rebuild* is re-downloading models, the Docker
   layer cache was pruned.
 - **Daemon unreachable after `wsl --shutdown`** (Windows): the host port

@@ -184,10 +184,14 @@ _RELATIONS_PROMPT_HEAD = (
     "relation names:\n"
 )
 _RELATIONS_PROMPT_TAIL = (
-    "\nIf a real connection fits none of the specific ones, use 'related-to'. "
-    "src and dst are entity names (services, hosts, tools, components). Skip "
-    "opinions, chit-chat, and anything with no entity-to-entity relationship. "
-    'Return {"relations":[]} if nothing qualifies.'
+    "\nAlways prefer the most specific listed relation. Use 'related-to' ONLY "
+    "when the text explicitly states a meaningful connection that fits no "
+    "listed relation — NEVER for entities that merely appear together in the "
+    "same note. When no listed relation fits and no explicit connection is "
+    "stated, skip the pair. src and dst are entity names (services, hosts, "
+    "tools, components). Skip opinions, chit-chat, and anything with no "
+    'entity-to-entity relationship. Return {"relations":[]} if nothing '
+    "qualifies."
 )
 
 
@@ -641,6 +645,22 @@ def startup_extractor_warnings(cfg) -> list[str]:
     return out
 
 
+# Seconds between the two probe attempts in auto mode (tests zero this).
+_probe_retry_delay = 2.0
+
+
+def _probe_primary(url: str) -> bool:
+    """Probe with ONE retry: the first probe after a daemon container restart
+    reliably fails (host-gateway cold start) while the endpoint is healthy —
+    2/2 live dreams on 2026-07-19 fell back spuriously on a healthy shim."""
+    import time
+
+    if probe_endpoint(url):
+        return True
+    time.sleep(_probe_retry_delay)
+    return probe_endpoint(url)
+
+
 def build_extractor_with_fallback(cfg) -> tuple["DreamExtractor", str]:
     """Selection step for the LIVE dream path: returns (extractor, which)
     with which in {"primary", "fallback"}. Fallback unset => exactly
@@ -664,8 +684,9 @@ def build_extractor_with_fallback(cfg) -> tuple["DreamExtractor", str]:
         ), "fallback"
     if not (r["fallback_url"] and r["fallback_model"]) or r["mode"] == "primary":
         return build_extractor(cfg), "primary"
-    # mode == "auto" with a configured fallback: probe, then choose.
-    if r["primary_url"] and probe_endpoint(r["primary_url"]):
+    # mode == "auto" with a configured fallback: probe (with one retry —
+    # see _probe_primary), then choose.
+    if r["primary_url"] and _probe_primary(r["primary_url"]):
         return build_extractor(cfg), "primary"
     logger.warning("dream primary extractor %s unreachable — using fallback %s",
                    r["primary_url"], r["fallback_url"])

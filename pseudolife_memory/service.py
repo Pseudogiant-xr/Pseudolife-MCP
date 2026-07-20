@@ -223,6 +223,36 @@ def _lesson_record_to_dict(rec) -> dict[str, Any]:
     }
 
 
+# Slot stores the deep dream lists cross-key duplicate candidates for, and the
+# dismissed_pairs namespace prefix each uses ("lesson:" / "world:"). The
+# namespaced rows can never collide with the graph-name dismissals sharing the
+# table because graph.norm_name strips ":" (its separator class) while every
+# curation row starts with a colon-bearing store prefix — NOT because slot
+# keys are colon-free: cortex._norm_key's separator class is [\s._-/], so a
+# literal ":" (arXiv ids, "MCP: X") survives inside a component. That is
+# harmless here since _store_dismissed strips the prefix by fixed length,
+# never by splitting on ":".
+_CURATION_STORES = ("lesson", "world")
+
+
+def _slot_key(entity_norm: str, attribute_norm: str) -> str:
+    """Identity string for a slot: normalized components joined with ``|``.
+    ``_norm_key`` does NOT strip ``|``, so a literal pipe in a component would
+    make the joined form ambiguous (("a|b","c") vs ("a","b|c")); fold pipes to
+    ``-`` first. Both the listing (_curation_records) and the dismissal
+    (curation_dismiss_duplicate) must build keys through this helper so a
+    dismissal always matches the listing that produced it."""
+    return f"{entity_norm.replace('|', '-')}|{attribute_norm.replace('|', '-')}"
+
+
+def _store_dismissed(dismissed: set[tuple[str, str]], store: str) -> set[tuple[str, str]]:
+    """The subset of dismissed_pairs rows belonging to ``store``'s namespace,
+    with the prefix stripped back to bare slot keys."""
+    pre = store + ":"
+    return {(a[len(pre):], b[len(pre):]) for a, b in dismissed
+            if a.startswith(pre) and b.startswith(pre)}
+
+
 # Map a store ``source`` tag to a cortex ``origin`` tier (provenance-of-kind).
 # MCP can't see the conversation, so origin is defaulted from source (or set
 # explicitly by the caller). Unknown sources -> None (origin left blank).
@@ -1770,10 +1800,14 @@ class MemoryService:
         relation = "avoids" if polarity == "-" else "prefers"
         self._graph.upsert_edge(tid, relation, oid, confidence=0.7, origin="action")
 
-    def _link_dream_relations(self, relations: list[dict]) -> int:
+    def _link_dream_relations(self, relations: list[dict], *,
+                              batch_sources: set[str] | None = None) -> int:
         """Upsert dream-extracted (src,relation,dst) edges. Closed-vocab
         (resolve_relation; unknown -> related-to), entities resolved alias-aware
         and pinned to the Postgres hub, self-loops dropped, origin='agent'.
+        ``batch_sources`` (the entry sources of the dream batch) stamps
+        provenance onto entities MINTED here — relation endpoints have no fact
+        traces, so the backfill can never scope them after the fact.
         Caller holds the lock; no-op in file mode. Returns edges written."""
         if self._storage is None or not relations:
             return 0
@@ -1784,6 +1818,7 @@ class MemoryService:
         known = [r["name"] for r in self._graph.load_relations()
                  if r["name"] not in ("prefers", "avoids")]
         floor = float(self.config.memory.dream.min_relation_confidence)
+        stamp = self.config.memory.scopes.scope_keys(batch_sources)
         n = 0
         from pseudolife_memory.memory.graph_consolidation import junk_name_reason
         scope_map = self._storage.entity_sources_map()
@@ -1813,6 +1848,14 @@ class MemoryService:
                 continue
             src_e = self._resolve_or_create_entity(raw_src, propose_dupes=True)
             dst_e = self._resolve_or_create_entity(raw_dst, propose_dupes=True)
+            for ent in (src_e, dst_e):
+                if ent.get("created") and stamp:
+                    for s in sorted(stamp):
+                        self._storage.upsert_entity_source(
+                            ent["id"], s, "derived", _t.time())
+                    # keep the preloaded map coherent so the cross-project
+                    # gate below sees the scope this entity was just given
+                    scope_map[ent["id"]] = sorted(stamp)
             # Cross-project gate: entities attributed to disjoint projects
             # merely coexist in the shared bank — route the claim to
             # edge_proposals for human review instead of the live graph.
@@ -1851,7 +1894,8 @@ class MemoryService:
             n += 1
         return n
 
-    def _dream_extract_relations(self, extractor, texts: list[str]) -> int:
+    def _dream_extract_relations(self, extractor, texts: list[str],
+                                 batch_sources: set[str] | None = None) -> int:
         """Gated, best-effort graph-from-text for one dream batch: run the LLM
         relations call UNLOCKED (slow network), then write edges LOCKED. A
         failure logs and returns 0 — it must never break fact consolidation or
@@ -1870,7 +1914,8 @@ class MemoryService:
                             if r["name"] not in ("prefers", "avoids")]
             rels = rel_fn(texts, registry)
             with self._lock:
-                return self._link_dream_relations(rels)
+                return self._link_dream_relations(
+                    rels, batch_sources=batch_sources)
         except Exception as exc:  # noqa: BLE001 — best-effort; never break the dream
             logger.warning("dream relation extraction failed (%s); claims kept",
                            exc)
@@ -2347,6 +2392,10 @@ class MemoryService:
                         "timestamp": e.timestamp,
                         "episode_id": e.episode_id,
                         "db_id": e.db_id,
+                        # dream_run stamps relation-minted entities with the
+                        # batch's sources — dropping this field silently
+                        # disables that (2026-07-19 regression).
+                        "source": e.source,
                     }
                     for e in rows
                 ],
@@ -2683,7 +2732,9 @@ class MemoryService:
             return _held("claim write failed", exc)
         newest = max(e["timestamp"] for e in entries)
         self.dream_commit(newest)
-        relations_n = self._dream_extract_relations(extractor, texts)
+        relations_n = self._dream_extract_relations(
+            extractor, texts,
+            batch_sources={e["source"] for e in entries if e.get("source")})
         # After relations linking, so paraphrase entities the relations pass
         # just created resolve to their graph nodes instead of re-creating.
         alias_candidates = self._propose_dream_alias_candidates(
@@ -4007,6 +4058,7 @@ class MemoryService:
             proposals = self._storage.pending_proposals()
             entity_proposals = self._storage.pending_entity_proposals()
             dismissed = self._storage.dismissed_pairs()
+            lesson_ids = self._storage.lesson_entity_ids()
         entities, edges = g["entities"], g["edges"]
         if scope and scope != "all":
             keep = {eid for eid, ss in src_map.items() if scope in ss}
@@ -4014,7 +4066,8 @@ class MemoryService:
             edges = [e for e in edges if e["src_id"] in keep and e["dst_id"] in keep]
         out = gr.review(edges, entities, src_map, proposals=proposals,
                         entity_proposals=entity_proposals,
-                        dismissed_pairs=dismissed)
+                        dismissed_pairs=dismissed,
+                        lesson_entity_ids=lesson_ids)
         with self._lock:
             out["recent_merges"] = self._storage.recent_entity_decisions()
         return out
@@ -4033,6 +4086,60 @@ class MemoryService:
                 return dict(self._GRAPH_UNAVAILABLE)
             new = self._storage.dismiss_pair(an, bn)
         return {"dismissed": True, "new": new, "a": a, "b": b}
+
+    def curation_dismiss_duplicate(self, store: str, a_entity: str, a_attribute: str,
+                                   b_entity: str, b_attribute: str) -> dict[str, Any]:
+        """Human verdict on a lesson/world duplicate listing: the two slots are
+        genuinely distinct. Persisted in dismissed_pairs under the store's
+        namespace prefix (see _CURATION_STORES) so the deep dream never
+        re-lists the pair."""
+        from pseudolife_memory.memory.cortex import _norm_key
+        if store not in _CURATION_STORES:
+            return {"dismissed": False, "reason": "bad_store", "store": store}
+        an, aa = _norm_key(a_entity), _norm_key(a_attribute)
+        bn, ba = _norm_key(b_entity), _norm_key(b_attribute)
+        if not (an and aa and bn and ba) or (an, aa) == (bn, ba):
+            return {"dismissed": False, "reason": "bad_pair", "store": store}
+        a_key, b_key = _slot_key(an, aa), _slot_key(bn, ba)
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return dict(self._GRAPH_UNAVAILABLE)
+            new = self._storage.dismiss_pair(f"{store}:{a_key}", f"{store}:{b_key}")
+        return {"dismissed": True, "new": new, "store": store,
+                "a_key": a_key, "b_key": b_key}
+
+    def curation_duplicates(self) -> dict[str, Any]:
+        """Standing listing of the deep dream's lesson/world cross-key
+        near-duplicate pairs — the same candidates deep_dream reports, minus
+        the graph-wide pass, so the Console review drawer can load them on
+        demand and dismissals take effect immediately."""
+        cfg = self.config.memory.deep_dream
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return dict(self._GRAPH_UNAVAILABLE)
+            dismissed = self._storage.dismissed_pairs()
+            lesson_recs = self._curation_records("lesson", cfg.snippet_max_chars)
+            world_recs = self._curation_records("world", cfg.snippet_max_chars)
+        lesson_dups, world_dups = self._slot_duplicate_listings(
+            lesson_recs, world_recs, dismissed)
+        return {"lesson_duplicates": lesson_dups,
+                "world_duplicates": world_dups}
+
+    def _slot_duplicate_listings(self, lesson_recs, world_recs,
+                                 dismissed) -> tuple[list[dict], list[dict]]:
+        """The lesson/world cross-key duplicate listings from pre-read record
+        snapshots — shared by deep_dream and curation_duplicates so the two
+        can never drift on threshold/top-k/dismissal wiring."""
+        from pseudolife_memory.memory import graph_consolidation as gc
+        cfg = self.config.memory.deep_dream
+        def one(recs, store):
+            return gc.slot_duplicate_candidates(
+                recs, min_similarity=cfg.curation_min_similarity,
+                top_k=cfg.curation_top_k,
+                dismissed=_store_dismissed(dismissed, store))
+        return one(lesson_recs, "lesson"), one(world_recs, "world")
 
     def entity_provenance(self, entity: str, *, limit: int = 20) -> dict[str, Any]:
         """Why does this entity exist? Its project attribution (entity_sources)
@@ -4619,6 +4726,8 @@ class MemoryService:
             dismissed = self._storage.dismissed_pairs()
             prop_keys = self._storage.entity_proposal_keys()
             pending_props = self._storage.pending_entity_proposals()
+            lesson_recs = self._curation_records("lesson", cfg.snippet_max_chars)
+            world_recs = self._curation_records("world", cfg.snippet_max_chars)
         entities, edges = g["entities"], g["edges"]
 
         rescore = gc.rescore_edges(edges, entities)
@@ -4648,6 +4757,12 @@ class MemoryService:
             pending_props, entities, edges, entries, traces, mentions,
             scope_map, cfg.max_context_snippets, cfg.snippet_max_chars,
             include_snippets)
+        # Store curation (listing-only, both dry-run and apply): cross-key
+        # near-duplicate lesson/world slots. Settled by the reviewer via
+        # curation_dismiss_duplicate (distinct) or the existing forget /
+        # re-write tools (duplicate) — the deep dream never deletes them.
+        lesson_dups, world_dups = self._slot_duplicate_listings(
+            lesson_recs, world_recs, dismissed)
 
         totals = {"entities": len(entities), "edges": len(edges),
                   "candidates": len(candidates)}
@@ -4666,6 +4781,8 @@ class MemoryService:
                                     "already_proposed": ("junk", j["entity_id"]) in prop_keys}
                                    for j in junk],
                     "merge_proposals": merge_proposals,
+                    "lesson_duplicates": lesson_dups,
+                    "world_duplicates": world_dups,
                     "candidates": candidates, "totals": totals}
 
         snapshot = self._write_graph_snapshot()
@@ -4709,6 +4826,8 @@ class MemoryService:
                 "merged": merged, "merge_proposed": merge_proposed,
                 "junk_proposed": junk_proposed, "snapshot": snapshot,
                 "merge_proposals": merge_proposals,
+                "lesson_duplicates": lesson_dups,
+                "world_duplicates": world_dups,
                 "candidates": candidates, "totals": totals}
 
     def _write_graph_snapshot(self) -> str | None:
@@ -4762,6 +4881,27 @@ class MemoryService:
             c["src_snippets"] = snippets(c["src_id"])
             c["dst_snippets"] = snippets(c["dst_id"])
         return candidates
+
+    def _curation_records(self, store: str, value_cap: int) -> list[dict]:
+        """Label + embedding snapshot of a slot store's CURRENT records, shaped
+        for graph_consolidation.slot_duplicate_candidates. Caller holds the
+        lock. Values are truncated to ``value_cap`` chars (listing evidence,
+        like candidate snippets); records without embeddings are passed
+        through and skipped by the pure function."""
+        src = self._lessons if store == "lesson" else self._world
+        out: list[dict] = []
+        for r in (src.current_records() if src is not None else []):
+            d = {"key": _slot_key(*r.key), "entity": r.entity,
+                 "attribute": r.attribute,
+                 "value": r.value[:value_cap] if value_cap else r.value,
+                 "embedding": (r.embedding.detach().cpu().numpy()
+                               if r.embedding is not None else None)}
+            if store == "lesson":
+                d.update(polarity=r.polarity, outcome=r.outcome, about=r.about)
+            else:
+                d.update(source_url=r.source_url)
+            out.append(d)
+        return out
 
     def _enrich_merge_proposals(self, pending, entities, edges, entries,
                                 traces, mentions, scope_map, k, max_chars,

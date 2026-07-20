@@ -99,6 +99,129 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   claims into a canonical "typical workflow" fact, weighting `outcome=success`
   over `failure`. New `evals/lme_v2_check0.py` gates the corpus rebuild.
 
+### Added (2026-07-19 — Console: store-curation review panel in the Atlas drawer)
+- **The lesson/world duplicate listings are now reviewable in the Console.**
+  The Atlas Review drawer gains a "Store curation" panel rendering each
+  `lesson_duplicates` / `world_duplicates` pair with both sides'
+  entity/attribute/value (plus polarity/outcome/about for lessons and a
+  scheme-guarded `source_url` link for world facts) and a confirm-gated
+  "Mark distinct" button posting to `POST /api/curation/dismiss-duplicate`.
+  Backed by a new standing `GET /api/curation/duplicates` (service
+  `curation_duplicates`) that computes the same pairs as the deep dream —
+  shared listing helper, so thresholds/dismissals can't drift — without the
+  graph-wide dream pass, so the drawer loads them on demand and dismissals
+  take effect immediately. Only the distinct verdict is actionable in the
+  UI; true duplicates are still settled agent-side via `memory_forget`
+  (nothing is ever auto-deleted).
+
+### Added (2026-07-19 — deep dream: lesson/world cross-key duplicate curation)
+- **`memory_dream(action="deep")` now lists curation candidates for the
+  lesson and world stores** — `lesson_duplicates` / `world_duplicates` in
+  both dry-run and apply responses. Dedup/supersession in those stores is
+  strictly per-slot (`(task, aspect)` / `(entity, attribute)`), so
+  near-duplicates parked under different keys accumulated silently (a
+  2026-07-19 manual sweep found 6 duplicate lesson groups and 1 duplicate
+  world slot). The new `graph_consolidation.slot_duplicate_candidates`
+  reuses the deep dream's cosine candidate-pair approach over the records'
+  own embeddings (floor/cap via the new `memory.deep_dream`
+  `curation_min_similarity` = 0.80 / `curation_top_k` = 20). Listing-only:
+  nothing is auto-deleted — duplicates are settled with the existing
+  `memory_forget` tools, and genuinely-distinct pairs are dismissed via the
+  new `memory_graph_review(action="dismiss_slot_pair")` /
+  `POST /api/curation/dismiss-duplicate` (service
+  `curation_dismiss_duplicate`), persisted in the existing
+  `dismissed_pairs` table under a `lesson:`/`world:` namespace (safe
+  because `graph.norm_name` strips `:` while every curation row carries a
+  colon-bearing prefix, so graph-name dismissals can't collide; literal
+  `|` in a slot component is folded to `-` to keep the joined key
+  unambiguous; no schema change).
+
+### Changed (2026-07-19 — installer no longer prompts for the CLAUDE.md block)
+- **The standing memory-loop block is opt-in, not a prompt.** The installer's
+  "Append the memory-loop block?" question (default Y) double-injected: the
+  session-hook briefing already delivers the byte-identical block every
+  session, so accepting the default cost ~60 duplicated lines of context per
+  session. The interactive prompt is removed; the default is skip, with the
+  one-liner printed for anyone who wants the standing copy. Explicit
+  `--instructions append` / `-Instructions append` (and the `--claude-md` /
+  `-ClaudeMd` compatibility aliases) still write it — useful for subagent
+  visibility (subagents read CLAUDE.md but not hook output) and hook-less
+  setups. i18n source bumped to v5 for the quickstart-narrative change.
+
+### Fixed (2026-07-19 — analyzer: pruned-edge lesson entities leave the unattributed queue)
+- **The graph analyzer's "entities with no project" finding now also excludes
+  entities referenced by `lessons.entity_id`/`object_entity_id`** — the
+  residual tail of the 0.9.0 lesson-entity exclusion. That exclusion keyed on
+  edge signal (all edges `prefers`/`avoids`), so lesson entities whose lesson
+  edges were pruned by hygiene carry ZERO edges and stayed flagged (4 on the
+  live bank). The service now passes the lesson-referenced id set from
+  storage into the analyzer, which stays DB-free.
+
+## [0.9.0] - 2026-07-19
+
+### Changed (2026-07-19 — analyzer: lesson entities leave the unattributed queue)
+- **The graph analyzer's "entities with no project" finding now excludes
+  lesson-only entities** — task/approach nodes minted by `memory_outcome`
+  whose every edge is a `prefers`/`avoids` lesson relation. They carry no
+  fact traces or mentions, so the mention-scan can never attribute them;
+  flagging them was permanent review-queue noise (~137 on the live bank).
+  Entities that also carry normal relations still flag as before.
+
+### Fixed (2026-07-19 — spurious extractor fallback + its visibility)
+- **The sonnet shim's `/health` is stale-while-revalidate** — the actual root
+  cause of the spurious fallbacks (the restart correlation was a red
+  herring): on cache expiry (5-min TTL) `/health` ran a REAL `claude -p`
+  completion taking seconds, while the daemon probes with a 3s timeout, so
+  any dream arriving after an idle period hit the stale cache, timed out,
+  and silently fell back (3/3 live dreams). A stale cache now answers
+  instantly with the last verdict and refreshes in a background thread; the
+  startup path warms the cache before the server accepts connections, so no
+  request ever hits the blocking empty-cache branch. (Requires a shim
+  restart to take effect.)
+- **The auto-mode extractor probe retries once** (2s apart) before falling
+  back — belt-and-braces for genuinely transient probe failures.
+- **The Console's extractor chip now warns when the LAST dream ran on the
+  fallback** even though the primary is healthy again — previously that state
+  rendered the green "primary ✓" chip with the fallback run visible only in
+  the hover tooltip, so silent degradation stayed silent.
+
+### Changed (2026-07-19 — dream graphing: provenance stamping + typed-relation prompt)
+- **Dream-minted relation entities now carry project provenance.** Entities
+  CREATED while linking a dream batch's relations are stamped into
+  `entity_sources` with the batch's entry sources (scopes policy applied via
+  the new shared `ScopesConfig.scope_keys()`: case-fold, exclusions, umbrella
+  rollup; `origin='derived'`). Relation endpoints have no fact traces, so the
+  backfill could never attribute them after the fact — they were the bulk of
+  the "entities with no project" review finding. The stamp also feeds the
+  cross-project gate within the same batch, so a freshly minted entity from
+  project A linking to a project-B entity is routed to review like any other
+  cross-project claim. Follow-up fix (caught in live verification):
+  `dream_pull` entry dicts now carry `source` — they didn't, so `dream_run`
+  silently passed an empty source set and nothing was stamped; regression
+  pinned by an end-to-end `dream_run` test.
+- **The relations extraction prompt no longer invites `related-to`.** The old
+  tail ("if a real connection fits none of the specific ones, use
+  'related-to'") was the source of the untyped co-mention faucet the
+  quarantine diverts. The prompt now demands the most specific listed
+  relation, restricts `related-to` to explicitly-stated connections, and
+  instructs skipping pairs that merely appear together in the same note.
+
+### Changed (2026-07-19 — installer wires Codex through the stdio shim)
+- **Shim mode now applies to both clients.** The installer's Codex branch
+  registered plain HTTP unconditionally, so an installer-wired Codex was
+  exactly the "second client with no identity of its own" the session-
+  identity docs warn about — while a Claude Code session's hook pointer is
+  fresh, Codex writes attribute to Claude's episode (tier 3). `--transport
+  shim` (the default) now wires Codex as `codex mcp add pseudolife-memory
+  -- pseudolife-mcp`, giving each Codex session its own tier-1
+  `X-PL-Session` identity; HTTP remains the fallback when no shim tooling
+  exists and the explicit `--transport http` choice. The shim install is
+  memoized so `--client both` runs pipx/pip once. (In the PowerShell
+  installer the shim block became a function — every native command in it
+  pipes to `Out-Host`, since a PS function's return value would otherwise
+  absorb pipx/pip output and make a failed install read as success at the
+  call site.)
+
 ### Changed (2026-07-19 — graph hygiene round 2: scope purge, nested topics, edge quarantine)
 - **`backfill_entity_sources` now purges contaminated derived scope rows** on
   every run: sources in `memory.scopes.exclude` and legacy mixed-case scope

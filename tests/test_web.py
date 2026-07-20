@@ -571,3 +571,17 @@ def test_graph_route_nodes_carry_timestamps(svc):
     out = ConsoleRoutes(svc).dispatch("GET", "/api/graph", {"scope": "all"}, {})
     assert all("created_at" in n for n in out["nodes"])
     assert all("asserted_at" in e for e in out["edges"])
+
+
+def test_curation_duplicates_route(svc):
+    out = ConsoleRoutes(svc).dispatch("GET", "/api/curation/duplicates", {}, {})
+    assert "lesson_duplicates" in out and "world_duplicates" in out
+
+
+def test_curation_dismiss_duplicate_route(svc):
+    r = ConsoleRoutes(svc)
+    out = r.dispatch("POST", "/api/curation/dismiss-duplicate", {},
+                     {"store": "lesson",
+                      "a_entity": "deploy daemon", "a_attribute": "approach",
+                      "b_entity": "deploy host", "b_attribute": "pitfall"})
+    assert out["dismissed"] is True

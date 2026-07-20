@@ -294,3 +294,131 @@ def test_partition_candidates_variant_conflict_stays_link():
              {"id": 2, "display": "ops/update.ps1"}]
     merges2, links2 = partition_candidates(pairs2, ents2, [])
     assert len(merges2) == 1 and links2 == []
+
+
+# --- store curation: lesson / world cross-key near-duplicate REVIEW listings --
+
+_DUP_LESSON = ("Always take a pg_dump backup via ops/backup.ps1 before "
+               "deploying the daemon to the homelab host.")
+
+
+def _stage_lesson_dups(svc):
+    svc.lesson_write("deploy daemon to homelab host", "approach", _DUP_LESSON)
+    svc.lesson_write("deploy the daemon to the host", "pitfall", _DUP_LESSON)
+    svc.lesson_write("train qlora on the 4090", "approach",
+                     "Keep torch.compile ON; the fused CE kernel prevents VRAM spill.")
+
+
+def _lesson_dup_pair(out):
+    for c in out["lesson_duplicates"]:
+        if {c["a_key"], c["b_key"]} == {"deploy-daemon-to-homelab-host|approach",
+                                        "deploy-the-daemon-to-the-host|pitfall"}:
+            return c
+    return None
+
+
+def test_dry_run_lists_cross_key_lesson_duplicates(svc):
+    _stage_lesson_dups(svc)
+    out = svc.deep_dream(apply=False)
+    c = _lesson_dup_pair(out)
+    assert c is not None, out.get("lesson_duplicates")
+    assert c["a"]["value"] and c["b"]["value"]          # evidence, not bare scores
+    # the unrelated lesson never pairs with the deploy pair
+    keys = {k for p in out["lesson_duplicates"] for k in (p["a_key"], p["b_key"])}
+    assert "train-qlora-on-the-4090|approach" not in keys
+    # REVIEW listing only: nothing was deleted or superseded
+    assert len(svc._lessons.current_records()) == 3
+
+
+def test_dry_run_lists_world_slot_duplicates(svc):
+    svc.world_write("MCP spec 2026-07-28", "session identity",
+                    "protocol sessions are removed; explicit state handles are required",
+                    source_url="https://example.com/a")
+    svc.world_write("MCP specification", "session-id status",
+                    "protocol sessions removed; explicit state handles required",
+                    source_url="https://example.com/b")
+    out = svc.deep_dream(apply=False)
+    assert len(out["world_duplicates"]) == 1
+    c = out["world_duplicates"][0]
+    assert {c["a"]["entity"], c["b"]["entity"]} == {"MCP spec 2026-07-28",
+                                                    "MCP specification"}
+    assert c["a"]["source_url"].startswith("https://example.com")
+
+
+def test_lesson_duplicate_dismissal_persists(svc):
+    _stage_lesson_dups(svc)
+    assert _lesson_dup_pair(svc.deep_dream(apply=False)) is not None
+    out = svc.curation_dismiss_duplicate(
+        "lesson", "deploy daemon to homelab host", "approach",
+        "deploy the daemon to the host", "pitfall")
+    assert out["dismissed"] is True
+    assert _lesson_dup_pair(svc.deep_dream(apply=False)) is None
+
+
+def test_curation_dismiss_rejects_unknown_store_and_self_pair(svc):
+    bad = svc.curation_dismiss_duplicate("cortex", "a", "x", "b", "y")
+    assert bad["dismissed"] is False and bad["reason"] == "bad_store"
+    same = svc.curation_dismiss_duplicate("lesson", "a", "x", "a", "x")
+    assert same["dismissed"] is False and same["reason"] == "bad_pair"
+
+
+def test_curation_duplicates_standing_listing(svc):
+    """The Console review drawer's standing listing: the same lesson/world
+    pairs the deep dream reports, without the graph-wide dream pass, and
+    reflecting dismissals immediately."""
+    _stage_lesson_dups(svc)
+    out = svc.curation_duplicates()
+    c = _lesson_dup_pair(out)
+    assert c is not None, out.get("lesson_duplicates")
+    assert {"a_key", "b_key", "a", "b", "similarity"} <= set(c)
+    # exact label contract the Console renders per lesson side
+    assert set(c["a"]) == {"entity", "attribute", "value",
+                           "polarity", "outcome", "about"}
+    assert out["world_duplicates"] == []
+    svc.curation_dismiss_duplicate(
+        "lesson", "deploy daemon to homelab host", "approach",
+        "deploy the daemon to the host", "pitfall")
+    assert _lesson_dup_pair(svc.curation_duplicates()) is None
+
+
+def test_curation_duplicates_world_side_carries_source_url(svc):
+    svc.world_write("MCP spec 2026-07-28", "session identity",
+                    "protocol sessions are removed; explicit state handles are required",
+                    source_url="https://example.com/a")
+    svc.world_write("MCP specification", "session-id status",
+                    "protocol sessions removed; explicit state handles required",
+                    source_url="https://example.com/b")
+    out = svc.curation_duplicates()
+    assert len(out["world_duplicates"]) == 1
+    # exact label contract the Console renders per world side
+    assert set(out["world_duplicates"][0]["a"]) == {"entity", "attribute",
+                                                    "value", "source_url"}
+
+
+def test_apply_lists_store_duplicates_but_never_deletes(svc):
+    _stage_lesson_dups(svc)
+    svc.world_write("MCP spec 2026-07-28", "session identity",
+                    "protocol sessions are removed; explicit state handles are required",
+                    source_url="https://example.com/a")
+    svc.world_write("MCP specification", "session-id status",
+                    "protocol sessions removed; explicit state handles required",
+                    source_url="https://example.com/b")
+    out = svc.deep_dream(apply=True)
+    assert out["applied"] is True
+    assert _lesson_dup_pair(out) is not None
+    assert len(out["world_duplicates"]) == 1
+    # do-not-auto-delete guard: every record is still current after apply
+    assert len(svc._lessons.current_records()) == 3
+    assert len(svc._world.current_records()) == 2
+
+
+def test_slot_key_folds_literal_pipes():
+    # _norm_key does NOT strip "|" (its separator class is whitespace ._-/),
+    # so the "|" slot-key joiner would be ambiguous: ("a|b","c") and
+    # ("a","b|c") would join identically. _slot_key folds literal pipes in
+    # the components, keeping the encoding injective for both the listing
+    # and the dismissal side.
+    from pseudolife_memory.service import _slot_key
+    assert _slot_key("a-b", "c") == "a-b|c"
+    assert _slot_key("a|b", "c") == "a-b|c"          # folded, not ambiguous
+    assert _slot_key("a|b", "c") != _slot_key("a", "b|c")

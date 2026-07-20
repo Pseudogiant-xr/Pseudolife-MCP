@@ -227,22 +227,18 @@ for selected_client in $clients; do
         echo "==> Memory block already present in $instruction_path — skipping."
         continue
     fi
-    choice="$instruction_choice"
-    if [ -z "$choice" ]; then
-        if [ -t 0 ]; then
-            printf "Append the memory-loop block to %s? [Y/n] " "$instruction_path"
-            read -r yn
-            case "$yn" in [Nn]*) choice=skip ;; *) choice=append ;; esac
-        else
-            choice=skip
-        fi
-    fi
+    # No interactive prompt: the session hook briefing delivers the same
+    # block every session, so a standing-file copy would double-inject.
+    # Explicit opt-in only (--instructions append) — useful for subagent
+    # visibility and hook-less setups.
+    choice="${instruction_choice:-skip}"
     if [ "$choice" = "append" ]; then
         mkdir -p "$(dirname "$instruction_path")"
         cat "$repo/examples/CLAUDE.memory.md" >> "$instruction_path"
         echo "==> Appended memory block to $instruction_path"
     else
-        echo "SKIPPED: MCP server instructions still provide the core memory loop. Optional stronger guidance:"
+        echo "==> Standing memory block not written (the session hook briefing already"
+        echo "    delivers the memory loop each session). To add it anyway:"
         echo "  cat $repo/examples/CLAUDE.memory.md >> $instruction_path"
     fi
 done
@@ -250,33 +246,56 @@ done
 # ── 10. wire into selected MCP clients ─────────────────────────────────────
 # Runs even with the plugin installed: the plugin is the hooks/commands layer
 # only, so the MCP transport (shim by default) always comes from here.
+# The shim install itself is client-agnostic; memoize one attempt so
+# --client both doesn't run pipx/pip twice. Called as a plain statement (not
+# in an `if` condition) so `set -e` stays live inside — a failed pipx/pip
+# aborts the run, exactly as the previous inline version did.
+SHIM_TRIED=""
+SHIM_OK=""
+ensure_shim() {
+    if [ -n "$SHIM_TRIED" ]; then return 0; fi
+    SHIM_TRIED=1
+    if command -v pipx >/dev/null 2>&1; then
+        if pipx list 2>/dev/null | grep -q "package pseudolife-mcp "; then
+            pipx upgrade pseudolife-mcp
+        else
+            pipx install pseudolife-mcp
+        fi
+        SHIM_OK=1
+    elif command -v python3 >/dev/null 2>&1 && python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
+        python3 -m pip install --user pseudolife-mcp
+        SHIM_OK=1
+    elif command -v python >/dev/null 2>&1 && python -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
+        python -m pip install --user pseudolife-mcp
+        SHIM_OK=1
+    fi
+    return 0
+}
+
 for selected_client in $clients; do
     if [ "$selected_client" = codex ]; then
         if codex mcp get pseudolife-memory >/dev/null 2>&1; then
             echo "==> MCP server already wired into Codex — skipping."
+        elif [ "$TRANSPORT" = "shim" ]; then
+            ensure_shim
+            if [ -n "$SHIM_OK" ]; then
+                codex mcp add pseudolife-memory -- pseudolife-mcp
+                echo "==> Wired into Codex via the pseudolife-mcp shim — per-session identity (a Codex session no longer inherits a concurrent Claude session's episode)."
+            else
+                echo "WARNING: shim unavailable for Codex (see warnings above) — falling back to HTTP." >&2
+                echo "  Without the shim, a Codex session running beside a Claude Code session shares its episode identity." >&2
+                codex mcp add pseudolife-memory --url http://127.0.0.1:8765/mcp
+                echo "==> Wired into Codex (codex mcp add, HTTP fallback)."
+            fi
         else
             codex mcp add pseudolife-memory --url http://127.0.0.1:8765/mcp
-            echo "==> Wired into Codex (codex mcp add)."
+            echo "==> Wired into Codex (codex mcp add, HTTP)."
         fi
     elif claude mcp get pseudolife-memory >/dev/null 2>&1; then
         echo "==> MCP server already wired into Claude Code — skipping."
     elif [ "$TRANSPORT" = "shim" ]; then
-        shim_installed=""
-        if command -v pipx >/dev/null 2>&1; then
-            if pipx list 2>/dev/null | grep -q "package pseudolife-mcp "; then
-                pipx upgrade pseudolife-mcp
-            else
-                pipx install pseudolife-mcp
-            fi
-            shim_installed=1
-        elif command -v python3 >/dev/null 2>&1 && python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
-            python3 -m pip install --user pseudolife-mcp
-            shim_installed=1
-        elif command -v python >/dev/null 2>&1 && python -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
-            python -m pip install --user pseudolife-mcp
-            shim_installed=1
-        fi
-        if [ -n "$shim_installed" ]; then
+        ensure_shim
+        if [ -n "$SHIM_OK" ]; then
             claude mcp remove pseudolife-memory 2>/dev/null || true
             claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
             echo "==> Wired into Claude Code via the pseudolife-mcp shim — per-session identity (required for correct episodes with concurrent sessions)."

@@ -208,21 +208,18 @@ foreach ($selectedClient in $clients) {
         Write-Host "==> Memory block already present in $instructionPath - skipping."
         continue
     }
-    $choice = $instructionChoice
-    if (-not $choice) {
-        if ($interactive) {
-            $yn = Read-Host "Append the memory-loop block to $instructionPath? [Y/n]"
-            $choice = if ($yn -match '^[Nn]') { "skip" } else { "append" }
-        } else {
-            $choice = "skip"
-        }
-    }
+    # No interactive prompt: the session hook briefing delivers the same
+    # block every session, so a standing-file copy would double-inject.
+    # Explicit opt-in only (-Instructions append) — useful for subagent
+    # visibility and hook-less setups.
+    $choice = if ($instructionChoice) { $instructionChoice } else { "skip" }
     if ($choice -eq "append") {
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $instructionPath) | Out-Null
         Add-Content -Path $instructionPath -Value (Get-Content (Join-Path $repo "examples\CLAUDE.memory.md") -Raw)
         Write-Host "==> Appended memory block to $instructionPath"
     } else {
-        Write-Host "SKIPPED: MCP server instructions still provide the core memory loop. Optional stronger guidance:"
+        Write-Host "==> Standing memory block not written (the session hook briefing already"
+        Write-Host "    delivers the memory loop each session). To add it anyway:"
         Write-Host "  Add-Content `"$instructionPath`" (Get-Content `"$repo\examples\CLAUDE.memory.md`" -Raw)"
     }
 }
@@ -230,55 +227,75 @@ foreach ($selectedClient in $clients) {
 # -- 10. wire into selected MCP clients ----------------------------------------------
 # Runs even with the plugin installed: the plugin is the hooks/commands layer
 # only, so the MCP transport (shim by default) always comes from here.
+# The shim install itself is client-agnostic; memoize one attempt so
+# -Client both doesn't run pipx/pip twice.
+$script:shimInstallResult = $null
+function Install-ShimOnce {
+    if ($null -ne $script:shimInstallResult) { return $script:shimInstallResult }
+    # NOTE: every native command in here pipes to Out-Host — a PS function
+    # returns ALL uncaptured output, so a bare `pipx install` would pollute
+    # the boolean return and make failures read as success at the call site
+    # (the 2026-07-19 Invoke-WithRetry lesson; $LASTEXITCODE survives the pipe).
+    $shimInstalled = $false
+    if (Get-Command pipx -ErrorAction SilentlyContinue) {
+        $pipxList = pipx list 2>$null
+        if ($pipxList -match "package pseudolife-mcp ") {
+            pipx upgrade pseudolife-mcp 2>&1 | Out-Host
+        } else {
+            pipx install pseudolife-mcp 2>&1 | Out-Host
+        }
+        if ($LASTEXITCODE -eq 0) {
+            $shimInstalled = $true
+        } else {
+            Write-Warning "pipx install/upgrade pseudolife-mcp failed (exit $LASTEXITCODE)."
+        }
+    } else {
+        # Probe every candidate interpreter independently - a stale/broken
+        # `py` launcher must not block falling through to a viable `python`.
+        $interpreterCandidates = @(
+            @{ Label = "py -3"; Cmd = "py"; Args = @("-3") },
+            @{ Label = "python"; Cmd = "python"; Args = @() }
+        ) | Where-Object { Get-Command $_.Cmd -ErrorAction SilentlyContinue }
+        foreach ($candidate in $interpreterCandidates) {
+            $exe = $candidate.Cmd
+            $exeArgs = $candidate.Args
+            & $exe @exeArgs -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" 2>&1 | Out-Host
+            if ($LASTEXITCODE -ne 0) { continue }
+            & $exe @exeArgs -m pip install --user pseudolife-mcp 2>&1 | Out-Host
+            if ($LASTEXITCODE -eq 0) {
+                $shimInstalled = $true
+                break
+            } else {
+                Write-Warning "$($candidate.Label) -m pip install --user pseudolife-mcp failed (exit $LASTEXITCODE)."
+            }
+        }
+    }
+    $script:shimInstallResult = $shimInstalled
+    return $shimInstalled
+}
+
 foreach ($selectedClient in $clients) {
     if ($selectedClient -eq "codex") {
         codex mcp get pseudolife-memory *> $null
         if ($LASTEXITCODE -eq 0) {
             Write-Host "==> MCP server already wired into Codex - skipping."
+        } elseif (($Transport -eq "shim") -and (Install-ShimOnce)) {
+            codex mcp add pseudolife-memory -- pseudolife-mcp
+            Write-Host "==> Wired into Codex via the pseudolife-mcp shim - per-session identity (a Codex session no longer inherits a concurrent Claude session's episode)."
         } else {
+            if ($Transport -eq "shim") {
+                Write-Warning "Shim unavailable for Codex (see warnings above) - falling back to HTTP."
+                Write-Host "  Without the shim, a Codex session running beside a Claude Code session shares its episode identity."
+            }
             codex mcp add pseudolife-memory --url http://127.0.0.1:8765/mcp
-            Write-Host "==> Wired into Codex (codex mcp add)."
+            Write-Host "==> Wired into Codex (codex mcp add, HTTP)."
         }
     } else {
         claude mcp get pseudolife-memory *> $null
         if ($LASTEXITCODE -eq 0) {
             Write-Host "==> MCP server already wired into Claude Code - skipping."
         } elseif ($Transport -eq "shim") {
-            $shimInstalled = $false
-            if (Get-Command pipx -ErrorAction SilentlyContinue) {
-                $pipxList = pipx list 2>$null
-                if ($pipxList -match "package pseudolife-mcp ") {
-                    pipx upgrade pseudolife-mcp
-                } else {
-                    pipx install pseudolife-mcp
-                }
-                if ($LASTEXITCODE -eq 0) {
-                    $shimInstalled = $true
-                } else {
-                    Write-Warning "pipx install/upgrade pseudolife-mcp failed (exit $LASTEXITCODE)."
-                }
-            } else {
-                # Probe every candidate interpreter independently - a stale/broken
-                # `py` launcher must not block falling through to a viable `python`.
-                $interpreterCandidates = @(
-                    @{ Label = "py -3"; Cmd = "py"; Args = @("-3") },
-                    @{ Label = "python"; Cmd = "python"; Args = @() }
-                ) | Where-Object { Get-Command $_.Cmd -ErrorAction SilentlyContinue }
-                foreach ($candidate in $interpreterCandidates) {
-                    $exe = $candidate.Cmd
-                    $exeArgs = $candidate.Args
-                    & $exe @exeArgs -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)"
-                    if ($LASTEXITCODE -ne 0) { continue }
-                    & $exe @exeArgs -m pip install --user pseudolife-mcp
-                    if ($LASTEXITCODE -eq 0) {
-                        $shimInstalled = $true
-                        break
-                    } else {
-                        Write-Warning "$($candidate.Label) -m pip install --user pseudolife-mcp failed (exit $LASTEXITCODE)."
-                    }
-                }
-            }
-            if ($shimInstalled) {
+            if (Install-ShimOnce) {
                 claude mcp remove pseudolife-memory *> $null
                 claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
                 Write-Host "==> Wired into Claude Code via the pseudolife-mcp shim - per-session identity (required for correct episodes with concurrent sessions)."

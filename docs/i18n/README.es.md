@@ -1,8 +1,8 @@
-<!-- i18n-sync: v3 -->
+<!-- i18n-sync: v5 -->
 
 # Pseudolife-MCP
 
-> Traducción del [README](../../README.md) canónico — sincronizado: v3 (2026-07-19)
+> Traducción del [README](../../README.md) canónico — sincronizado: v5 (2026-07-19)
 
 **Memoria persistente a largo plazo para Claude Code, Codex y otros clientes MCP.**
 
@@ -45,19 +45,20 @@ ops\install.ps1         # Windows (pwsh 7+)
 ```
 
 El instalador comprueba los requisitos previos (mostrando una línea exacta
-de solución para lo que falte), pregunta qué extractor de sueños usar —
-Claude Sonnet a través de tu plan Max (la instalación más ligera) o un
-modelo local incluido que funciona sin ningún plan —, levanta la pila,
+de solución para lo que falte) y pregunta qué extractor de sueños usar —
+Claude Sonnet a través de tu plan Max (la instalación más ligera), Sonnet
+con el modelo local incluido como respaldo automático, o el modelo local
+incluido por sí solo, que no necesita ningún plan. Luego levanta la pila,
 conecta los clientes seleccionados (el hook de resumen al inicio de
-sesión, la instrucción permanente del ciclo de memoria en
-`~/.claude/CLAUDE.md` o `~/.codex/AGENTS.md`, y el registro del servidor
-MCP), y verifica el estado del daemon. Es idempotente: puedes volver a
-ejecutarlo en cualquier momento.
+sesión, que entrega la guía del ciclo de memoria en cada sesión, y el
+registro del transporte MCP), y verifica el estado del daemon. Es
+idempotente: puedes volver a ejecutarlo en cualquier momento;
+`--extractor <mode>` cambia la configuración del extractor.
 
 Con el daemon en ejecución, el **plugin** de Claude Code añade el resumen
-de memoria al inicio de sesión y los comandos `/dream` + `/memory-status`
-— el propio servidor MCP lo registra el instalador, así que el plugin
-nunca duplica sus herramientas:
+de memoria al inicio de sesión, la guía permanente del ciclo de memoria y
+los comandos `/dream` + `/memory-status` — el propio servidor MCP lo
+registra el instalador, así que el plugin nunca duplica sus herramientas:
 
 ```
 /plugin marketplace add Pseudogiant-xr/Pseudolife-MCP
@@ -79,7 +80,8 @@ la memoria. Explora todo en la Cortex Console en
 ## Cómo funciona
 
 El agente guarda una afirmación a la vez mientras trabaja (`memory_store`,
-`memory_fact_set`); una compuerta de novedad descarta los casi duplicados.
+`memory_fact_set`); un almacenamiento con compuerta de novedad descarta
+los casi duplicados.
 Entre sesiones, el **sueño** destila el flujo en hechos canónicos,
 relaciones de grafo y lecciones de procedimiento. Al inicio de cada
 sesión, un resumen inyecta aquello de lo que la memoria no está segura,

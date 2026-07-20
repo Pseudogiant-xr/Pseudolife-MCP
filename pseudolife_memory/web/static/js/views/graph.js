@@ -11,7 +11,7 @@ import { facetBar } from "../components.js";
 import { tableView, fullscreenBtn } from "../graphview.js";
 import { createGalaxy, destroyGalaxy } from "../galaxy.js";
 import { openWikiPanel } from "./wiki_page.js";
-import { reviewPanel } from "../atlas_review.js";
+import { reviewPanel, curationPanel } from "../atlas_review.js";
 import { confirmDialog, openModal, closeModal, toast } from "../ui.js";
 
 // Middle-ellipsis a long name so a modal button label can't overflow/clip.
@@ -192,8 +192,15 @@ export async function renderGraph(root, ctx) {
   async function loadReview() {
     mount(reviewHost, loadingBlock("Scanning the graph…"));
     try {
-      const rd = await api.get("/api/graph/review", { scope: state.scope });
-      mount(reviewHost, reviewPanel(rd, (f) => actOnFinding(f)));
+      // Curation pairs live in the lesson/world stores, not the graph, so the
+      // listing is scope-independent and its failure is non-fatal (file-mode
+      // daemons have no dismissed_pairs table — the graph queue still renders).
+      const [rd, cd] = await Promise.all([
+        api.get("/api/graph/review", { scope: state.scope }),
+        api.get("/api/curation/duplicates").catch(() => null),
+      ]);
+      mount(reviewHost, reviewPanel(rd, (f) => actOnFinding(f)),
+            curationPanel(cd, (f) => actOnFinding(f)));
     } catch (err) { mount(reviewHost, errorBlock(err)); }
   }
 
@@ -268,6 +275,16 @@ export async function renderGraph(root, ctx) {
         message: `Record that “${d.a}” and “${d.b}” are genuinely different things? The pair stops resurfacing as a duplicate finding — permanently.`,
         confirmLabel: "Mark distinct" }))) return;
       await postAll([{ path: "/api/graph/dismiss-duplicate", body: { a: d.a, b: d.b } }], "Dismissed");
+      return;
+    }
+    if (d.kind === "dismiss-slot-pair") {                 // lesson/world curation: distinct verdict
+      // Same permanence as dismiss-duplicate: the pair never re-lists.
+      if (!(await confirmDialog({ title: "Mark as distinct",
+        message: `Record that “${d.a.entity} · ${d.a.attribute}” and “${d.b.entity} · ${d.b.attribute}” are genuinely different ${d.store} slots? The pair stops appearing in curation listings — permanently.`,
+        confirmLabel: "Mark distinct" }))) return;
+      await postAll([{ path: "/api/curation/dismiss-duplicate",
+        body: { store: d.store, a_entity: d.a.entity, a_attribute: d.a.attribute,
+                b_entity: d.b.entity, b_attribute: d.b.attribute } }], "Dismissed");
       return;
     }
     if (d.kind === "bless") {                             // dubious_edge (bulk): human "Keep"

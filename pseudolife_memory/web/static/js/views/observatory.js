@@ -92,6 +92,17 @@ function extractorChip(dream) {
       : el("span", { class: "chip bad",
           title: `primary ${dream.primary_url || ""} unreachable — dreams use the fallback` },
           "extractor: FALLBACK (primary down)");
+  // Primary healthy NOW but the most recent dream actually ran on the
+  // fallback — a green chip here hid two spurious-fallback dreams on
+  // 2026-07-19 (post-restart probe transient). Surface it until a dream
+  // lands on the primary again.
+  if (last && last.which === "fallback")
+    return el("span", { class: "chip warn",
+        title: `primary ${dream.primary_url || ""} is healthy, but the most `
+          + `recent dream ran on the fallback (${last.base_url || ""}) — `
+          + "transient probe failure or daemon restart; the next dream "
+          + "re-probes and recovers automatically" },
+      "extractor: last dream on FALLBACK");
   const lastNote = last ? ` · last dream: ${last.which}` : "";
   return el("span", { class: "chip ok", title: (dream.primary_url || "") + lastNote },
     "extractor: primary ✓");

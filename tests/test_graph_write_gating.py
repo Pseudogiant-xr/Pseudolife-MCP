@@ -372,6 +372,32 @@ def test_dream_untyped_low_confidence_edge_quarantined(svc):
     assert quarantined == 1
 
 
+def test_dream_minted_entities_stamped_with_batch_scope(svc):
+    # 2026-07-19: relation-endpoint entities minted by the dream carried no
+    # project attribution — no fact traces, so the backfill can never scope
+    # them (435 unattributed entities, all graph-only). Entities CREATED while
+    # linking a dream batch are now stamped with the batch's entry sources,
+    # scopes policy applied (case-fold + exclude + umbrella rollup).
+    # Pre-existing entities are left untouched.
+    svc.stats()
+    svc.config.memory.scopes.exclude = ["es-stamp-meta"]
+    svc.config.memory.scopes.rollup = {"es-stamp-proj": "es-stamp-family"}
+    with svc._lock:
+        pre = svc._resolve_or_create_entity("stamp-old")["id"]
+
+    n = svc._link_dream_relations(
+        [{"src": "stamp-old", "relation": "uses", "dst": "stamp-new"}],
+        batch_sources={"ES-Stamp-Proj", "es-stamp-meta"})
+
+    assert n == 1
+    from pseudolife_memory.graph import norm_name
+    st = svc._storage
+    new_id = st.find_entity(norm_name("stamp-new"))["id"]
+    srcs = {r["source"] for r in st.sources_for_entity(new_id)}
+    assert srcs == {"es-stamp-proj", "es-stamp-family"}
+    assert st.sources_for_entity(pre) == []
+
+
 def test_dream_same_project_edge_still_written(svc):
     # A TYPED same-project edge passes both the cross-project gate and the
     # low-confidence quarantine (untyped related-to now quarantines instead —

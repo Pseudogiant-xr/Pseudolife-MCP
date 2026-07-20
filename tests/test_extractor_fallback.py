@@ -138,10 +138,28 @@ def test_builder_auto_primary_up(monkeypatch):
 def test_builder_auto_primary_down(monkeypatch):
     from pseudolife_memory.memory import dream as d
     monkeypatch.setattr(d, "probe_endpoint", lambda *a, **k: False)
+    monkeypatch.setattr(d, "_probe_retry_delay", 0.0)
     ext, which = d.build_extractor_with_fallback(
         _cfg("http://p:1/v1", fb="http://f:2/v1"))
     assert which == "fallback" and ext.base_url == "http://f:2/v1"
     assert ext.model == "m2"
+
+
+def test_builder_auto_retries_probe_once(monkeypatch):
+    # 2026-07-19: the FIRST probe after a daemon container restart reliably
+    # fails (host-gateway cold start) while the shim is actually healthy —
+    # two consecutive live dreams fell back on a healthy primary. One retry
+    # after a short delay rides out the transient instead of silently
+    # degrading the dream to the fallback extractor.
+    from pseudolife_memory.memory import dream as d
+    calls = []
+    monkeypatch.setattr(d, "probe_endpoint",
+                        lambda *a, **k: bool(calls.append(1)) or len(calls) > 1)
+    monkeypatch.setattr(d, "_probe_retry_delay", 0.0)
+    ext, which = d.build_extractor_with_fallback(
+        _cfg("http://p:1/v1", fb="http://f:2/v1"))
+    assert which == "primary" and ext.base_url == "http://p:1/v1"
+    assert len(calls) == 2
 
 
 def test_builder_forced_primary_never_probes(monkeypatch):

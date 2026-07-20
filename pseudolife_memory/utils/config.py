@@ -389,6 +389,8 @@ class DeepDreamConfig:
     max_support_overlap: float = 0.8     # Jaccard on supporting-entry sets at/above which a pair is co-occurrence
     snippet_max_chars: int = 240         # per-snippet truncation in the deep response
     snapshot_keep: int = 10              # graph-snapshot undo files kept under data_dir/graph_snapshots
+    curation_min_similarity: float = 0.80  # cosine floor for a lesson/world cross-key duplicate listing; slot embeddings include the key text, so even a verbatim-duplicate value at a different key lands near ~0.82
+    curation_top_k: int = 20             # max store-curation pairs listed per store per pass
 
 
 @dataclass
@@ -518,6 +520,25 @@ class ScopesConfig:
     exclude: list[str] = field(default_factory=lambda: [
         "status", "claude", "agent", "correction"])
     rollup: dict[str, str] = field(default_factory=dict)
+
+    def scope_keys(self, sources) -> set[str]:
+        """Fold raw source tags into the scope keys this policy admits:
+        case-folded, excluded tags dropped, rollup umbrellas added alongside
+        their fine-grained key. Shared by the backfill and write-time
+        provenance stamping so the two can never disagree."""
+        excl = {str(s).strip().lower() for s in self.exclude}
+        roll = {str(k).strip().lower(): str(v).strip().lower()
+                for k, v in self.rollup.items()}
+        out: set[str] = set()
+        for s in sources or ():
+            key = str(s).strip().lower()
+            if not key or key in excl:
+                continue
+            out.add(key)
+            umb = roll.get(key)
+            if umb and umb != key and umb not in excl:
+                out.add(umb)
+        return out
 
 
 @dataclass

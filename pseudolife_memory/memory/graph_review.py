@@ -138,8 +138,26 @@ def test_artifacts(entities):
              "entities": names, "action": "delete"}]
 
 
-def unattributed(entities, entity_sources_map):
-    names = sorted(e["display"] for e in entities if e["id"] not in entity_sources_map)
+_LESSON_RELATIONS = frozenset({"prefers", "avoids"})
+
+
+def unattributed(entities, entity_sources_map, edges=(),
+                 lesson_entity_ids=frozenset()):
+    """Entities whose every edge is a lesson relation (prefers/avoids) are
+    lesson-minted task/approach nodes — the mention-scan can never attribute
+    them, so they are excluded rather than flagged forever.
+    ``lesson_entity_ids`` covers the residual tail: entities still referenced
+    by lessons.entity_id/object_entity_id whose lesson edges were pruned
+    carry ZERO edges, so the edge signal alone can't identify them."""
+    rels: dict = {}
+    for ed in edges:
+        for eid in (ed["src_id"], ed["dst_id"]):
+            rels.setdefault(eid, set()).add(ed.get("relation", ""))
+    lesson_only = {eid for eid, rs in rels.items() if rs <= _LESSON_RELATIONS}
+    names = sorted(e["display"] for e in entities
+                   if e["id"] not in entity_sources_map
+                   and e["id"] not in lesson_only
+                   and e["id"] not in lesson_entity_ids)
     if not names:
         return []
     return [{"type": "unattributed", "severity": "info",
@@ -180,11 +198,12 @@ def junk_candidates(entity_proposals):
 
 
 def review(edges, entities, entity_sources_map, proposals=None, entity_proposals=None,
-           dismissed_pairs=None):
+           dismissed_pairs=None, lesson_entity_ids=None):
     findings = (duplicate_candidates(entities, dismissed=dismissed_pairs or frozenset())
                 + test_artifacts(entities)
                 + dubious_edges(edges, entities) + orphans(edges, entities)
-                + unattributed(entities, entity_sources_map)
+                + unattributed(entities, entity_sources_map, edges,
+                               lesson_entity_ids or frozenset())
                 + proposed_links(proposals or [])
                 + merge_candidates(entity_proposals or [])
                 + junk_candidates(entity_proposals or []))

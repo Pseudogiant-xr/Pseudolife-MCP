@@ -76,6 +76,13 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   `3`) signals inferred from its own record on the end-of-session dream;
   see [Episodes](episodes.md#inferred-outcomes-at-session-close). Set
   either to `false` / `0` to turn it off.
+- **Dream edge quarantine on** (`memory.dream.relation_quarantine_below =
+  0.5`) — dream-extracted graph edges scoring below the floor are filed as
+  review proposals (`source="dream-low-confidence"`) instead of entering
+  the live graph. At the default this catches exactly the untyped
+  `related-to` co-mention edges (confidence 0.45); typed relations (0.70)
+  write live as before. Set `0.0` to disable and restore write-live
+  behavior.
 
 ## Toolset tiers
 
@@ -207,7 +214,9 @@ to whatever session the Claude Code hook last registered, so its writes are
 attributed to Claude's session episode. The fix is the same as for
 concurrent sessions: give the second client a tier-1 identity (run it
 through the stdio shim) or pass explicit tier-2 `episode` handles on its
-writes.
+writes. The installer's shim mode wires **Codex** through the shim by
+default (2026-07-19), so an installer-wired Codex doesn't hit this;
+ChatGPT connectors and other direct-HTTP clients still do.
 
 **Pointer TTL.** A client that crashes or is killed never fires SessionEnd,
 so without a bound its pointer would attribute every later tier-3 write to a
