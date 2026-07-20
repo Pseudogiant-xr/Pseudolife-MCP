@@ -22,6 +22,12 @@ import socket
 import subprocess
 import sys
 import time
+
+# Keep spawned daemons off the desktop: without this flag, a child
+# python.exe launched from a hidden/detached parent (pytest under an
+# agent harness or CI wrapper) allocates its OWN console window and
+# steals foreground focus on Windows.
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
 import urllib.request
 
 import pytest
@@ -98,6 +104,7 @@ def daemon(tmp_path_factory):
     proc = subprocess.Popen(
         [sys.executable, "-m", "pseudolife_memory.cli", "serve"],
         env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        creationflags=_NO_WINDOW,
     )
     deadline = time.time() + 60
     health = None
