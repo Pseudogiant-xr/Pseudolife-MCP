@@ -59,6 +59,62 @@ ceiling table above was renumbered 2026-07-19 from a fresh
 context-persisted 5-replicate run — its historical single-run
 predecessor, hybrid 0.705, landed inside the replicated band.)
 
+## LongMemEval-V2 — agent trajectories and procedures
+
+[LongMemEval-V2](https://arxiv.org/abs/2605.12493) (Wu et al.) is a
+different content class from the KU benchmark above: WorkArena **agent
+trajectories** — what an agent saw and clicked in an enterprise portal —
+rather than chat sessions. A 10-question `procedure` slice, 3 replicates,
+full 100-trajectory haystacks, scored by the benchmark's own deterministic
+eval functions:
+
+| arm | default answer prompt | composition-aware prompt |
+|-----|----------------------|--------------------------|
+| naive RAG (control) | 0.300 [0.30–0.30] | 0.500 [0.40–0.60] |
+| cortex facts only | 0.167 [0.00–0.30] | 0.233 [0.10–0.30] |
+| hybrid | **0.533 [0.50–0.60]** | **0.633 [0.60–0.70]** |
+
+**Hybrid beat both single channels in every replicate under both prompts** —
+the clearest evidence so far that the fact spine and raw associative recall
+are complementary rather than redundant.
+
+Read honestly: 10 questions in one category is a *pilot*, not a headline.
+The spread is wide, the cortex arm is the most run-to-run volatile (the
+extractor's generation varies between runs even at temperature 0), and none
+of this carries the 78-question paired testing the KU results above do.
+
+The more useful number is the starting one: **every arm scored 0.000**
+before five adapter and extraction fixes. The decisive fix was ours to make
+because the bug was ours to have caused — the trajectory-mode extraction
+prompt said "extract exactly two kinds of claim and nothing else", so the
+model *correctly* discarded the knowledge-base protocol articles that the
+gold answers were drawn from. Naming a third class (what a document
+prescribes) recovered the category, and the lesson was folded back into the
+shipped extraction prompt — see [what the extractor
+captures](dreaming.md#what-the-extractor-captures).
+
+## Band structure — the continuum earns nothing on ranking
+
+The 8-band cosine continuum is the memory's headline structure, so it is
+worth asking what it buys. An offline ablation rebuilt every KU answer
+context from the same banks with the bands collapsed into a **single flat
+cosine pool**, under two timestamp regimes (`wall` — every entry stamped
+now; `hist` — realistic aging), 5 replicates each, paired permutation test
+over 78 questions:
+
+| arm | Δ continuum − flat (`wall`) | p | Δ (`hist`) | p |
+|-----|---------------------------|------|-----------|------|
+| naive RAG | −0.067 | 0.10 | **−0.090** | **0.015** |
+| cortex facts only | +0.008 | 0.76 | −0.010 | 0.53 |
+| hybrid | −0.023 | 0.24 | +0.018 | 0.47 |
+
+The continuum does not beat a flat pool anywhere, and under realistic aging
+it is **significantly worse** at raw-turn selection. This is published
+as-is because a negative result about one's own centrepiece is exactly the
+kind that quietly goes unpublished: whatever the banding earns, it is not
+retrieval ranking. Any case for it has to rest on the write side —
+eviction, capacity, consolidation cadence — not on finding better answers.
+
 ## Extraction quality is the dominant factor
 
 Running floor (Gemma 4 E2B, the smallest CPU-sidecar bake) vs ceiling

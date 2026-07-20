@@ -27,10 +27,17 @@ supersession-not-decay, currency-not-frequency** — one *current* value per
   `<entity> <attr>: <value>`.) A one-time `ops/dedup_cortex.py`
   (dry-run-first, reversible) collapses sibling slots left by past
   auto-promotes.
+- **Documented vs enacted.** A fact stated by a *document* you shared (a
+  spec, policy, protocol, runbook) is captured under that document's
+  subject, distinct from a fact about what was actually done — the rule and
+  the practice occupy different slots and can disagree without either
+  overwriting the other. See [what the extractor
+  captures](dreaming.md#what-the-extractor-captures).
 - **Deterministic read.** `memory_fact_get("project", "language")` returns
   the one current value — no ranking, no stale duplicates. `memory_search`
   also surfaces matching facts ahead of associative hits (a `"cortex"`
-  block).
+  block) — the hybrid shape that outperforms either channel alone (see
+  [Benchmarks](benchmarks.md)).
 - **Deliberate write / correction.** `memory_fact_set(entity, attribute,
   value, origin="user")` asserts a fact at higher confidence; setting a new
   value at an existing slot supersedes the old (kept as audit history).

@@ -2,7 +2,7 @@
 # Register the Sonnet extractor shim as a systemd --user service (Linux
 # parity for ops/install-shim-autostart.ps1 — issue #11).
 #
-#   ops/install-shim-autostart.sh                 # default port 8082, v1 prompt
+#   ops/install-shim-autostart.sh                 # default port 8082, v2 prompt
 #   ops/install-shim-autostart.sh --port 8082 --prompt-file evals/prompts/sonnet_extractor_v2.md
 #
 # The shim wraps the Max-plan `claude` CLI as an OpenAI-compatible endpoint on
