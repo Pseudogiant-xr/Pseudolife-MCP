@@ -495,9 +495,86 @@ def answer_judge_score(row: dict) -> dict:
 
 
 # --------------------------------------------------------------------------- #
+# Retrieval variants (2026-07-20 experiment)
+# --------------------------------------------------------------------------- #
+_WORD_RE = re.compile(r"[a-z0-9]{4,}")
+
+
+def _content_tokens(text: str) -> set[str]:
+    return set(_WORD_RE.findall(text.lower().replace("-", " ")))
+
+
+def _fact_text(f: dict) -> str:
+    return f"{f.get('entity', '')} {f.get('attribute', '')} {f.get('value', '')}"
+
+
+def build_contexts_v2(svc, question: str,
+                      retrv: dict) -> tuple[dict[str, str], list[dict]]:
+    """``longmemeval_bench.build_contexts`` with the retrieval-experiment
+    knobs, plus a full-pool cortex dump (top 40 at floor 0) so "claim never
+    extracted" vs "extracted but ranked out" is distinguishable post-hoc.
+    Returns (contexts, cortex_dump)."""
+    from longmemeval_bench import (CORTEX_MIN_SCORE, CORTEX_TOP_K,
+                                   HYBRID_TOP_K, RAG_TOP_K)
+
+    raw = svc.search(question, top_k=RAG_TOP_K,
+                     bm25=(True if retrv.get("bm25") else None),
+                     rerank=(True if retrv.get("rerank") else None),
+                     ).get("entries", [])
+    raw_texts = [e.get("text", "") for e in raw]
+
+    cortex = svc.cortex_search(question, top_k=CORTEX_TOP_K,
+                               min_score=CORTEX_MIN_SCORE).get("entries", [])
+    # Instrumentation: the whole ranked fact pool, floor 0.
+    pool = svc.cortex_search(question, top_k=400, min_score=0.0
+                             ).get("entries", [])
+    dump = [{"entity": f.get("entity"), "attribute": f.get("attribute"),
+             "value": f.get("value"), "score": round(f.get("score", 0.0), 4)}
+            for f in pool[:40]]
+
+    if retrv.get("lexical_cortex"):
+        # Token-overlap rescue: cosine misses synonym-phrased procedure keys
+        # ("rebalance workload" vs "redistribute ... workload balancing").
+        q_toks = _content_tokens(question)
+        seen = {(f.get("entity"), f.get("attribute")) for f in cortex}
+        lex = []
+        for f in pool:
+            if (f.get("entity"), f.get("attribute")) in seen:
+                continue
+            overlap = len(q_toks & _content_tokens(_fact_text(f)))
+            if overlap >= 2:
+                lex.append((overlap, f))
+        lex.sort(key=lambda p: -p[0])
+        cortex = cortex + [f for _, f in lex[:8]]
+
+    fact_lines = []
+    for f in cortex:
+        line = (f"{f.get('entity', '')} — {f.get('attribute', '')}: "
+                f"{f.get('value', '')}")
+        try:
+            versions = svc.history(f.get("entity", ""),
+                                   f.get("attribute", "")).get("versions", [])
+            older = [v.get("value", "") for v in versions[:-1]
+                     if v.get("value") and v.get("value") != f.get("value")]
+            if older:
+                line += "  (earlier values, oldest first: " + " -> ".join(older) + ")"
+        except Exception:  # noqa: BLE001 — history is garnish, never fatal
+            pass
+        fact_lines.append(line)
+    contexts = {
+        "rag": "\n\n".join(raw_texts),
+        "cortex": "\n".join(fact_lines),
+        "hybrid": ("Known facts:\n" + "\n".join(fact_lines) +
+                   "\n\nRelevant memories:\n" +
+                   "\n\n".join(raw_texts[:HYBRID_TOP_K])),
+    }
+    return contexts, dump
+
+
+# --------------------------------------------------------------------------- #
 # Run
 # --------------------------------------------------------------------------- #
-def run_smoke(limit: int, max_traj: int) -> None:
+def run_smoke(limit: int, max_traj: int, retrv: dict | None = None) -> None:
     from ladder_sweep import build_service, probe
     from pseudolife_memory.memory.dream import OpenAICompatExtractor
     from longmemeval_bench import build_contexts
@@ -563,7 +640,11 @@ def run_smoke(limit: int, max_traj: int) -> None:
         tally["canonical_workflows"] = len(canon)
 
         t_retr = time.perf_counter()
-        contexts = build_contexts(svc, q["question"])
+        if retrv and any(retrv.values()):
+            contexts, cortex_dump = build_contexts_v2(svc, q["question"], retrv)
+        else:
+            contexts = build_contexts(svc, q["question"])
+            _, cortex_dump = build_contexts_v2(svc, q["question"], {})
         retrieval_seconds = round(time.perf_counter() - t_retr, 2)
         svc.flush()
 
@@ -579,6 +660,8 @@ def run_smoke(limit: int, max_traj: int) -> None:
             "trajectories_available": full,
             "max_trajectories": max_traj,
             "contexts": contexts,          # persisted — re-scorable without GPU
+            "retrieval_config": retrv or {},
+            "cortex_dump": cortex_dump,    # full-pool top-40 with scores
             "consolidation": tally,
             "synthesized_workflows": canon,   # Fix C canonical claims (audit)
             "retrieval_seconds": retrieval_seconds,
@@ -698,7 +781,28 @@ def main() -> int:
                          "trajectory list, print the plan, exit 0")
     ap.add_argument("--report", action="store_true",
                     help="summarise existing results instead of running")
+    # Retrieval experiment flags (2026-07-20): the first smoke localized the
+    # remaining failure to retrieval relevance — question phrasing vs evidence
+    # phrasing ("rebalance workload" vs "redistribute problems"). These enable
+    # the shipped-but-default-off lexical/rerank channels for entries, plus an
+    # experiment-local lexical union over cortex facts (cortex_search has no
+    # BM25 channel of its own).
+    ap.add_argument("--bm25", action="store_true",
+                    help="enable the BM25 hybrid channel on raw-turn retrieval")
+    ap.add_argument("--rerank", action="store_true",
+                    help="enable the cross-encoder reranker on raw-turn retrieval")
+    ap.add_argument("--lexical-cortex", action="store_true",
+                    help="union a token-overlap lexical channel into the "
+                         "cortex-fact selection (experiment-local)")
+    ap.add_argument("--out-tag", default="",
+                    help="suffix for the result files so runs don't overwrite "
+                         "each other (e.g. 'retrv1')")
     args = ap.parse_args()
+
+    if args.out_tag:
+        global OUT_FILE, SUMMARY_FILE
+        OUT_FILE = RESULTS_DIR / f"lme-v2-smoke-{args.out_tag}.jsonl"
+        SUMMARY_FILE = RESULTS_DIR / f"lme-v2-smoke-{args.out_tag}.summary.json"
 
     _bind_adapter_paths(resolve_data_dir())
 
@@ -707,7 +811,9 @@ def main() -> int:
     if args.report:
         report()
         return 0
-    run_smoke(args.limit, args.max_trajectories)
+    retrv = {"bm25": args.bm25, "rerank": args.rerank,
+             "lexical_cortex": args.lexical_cortex}
+    run_smoke(args.limit, args.max_trajectories, retrv)
     report()
     return 0
 
