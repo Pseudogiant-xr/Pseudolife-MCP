@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-07-21 — documented vs enacted: the dream pass learns what your documents prescribe
+
+The dream pass now captures **what a document you shared prescribes** as a
+durable fact under that document's subject, kept distinct from what was
+actually done — so a runbook's rule and a deploy that skipped it become two
+facts, not one blurred into the other. This lands on both extractor tiers
+(the bundled E4B sidecar and the Sonnet override prompt), each gated on its
+own deployed artifact.
+
+The change came out of a LongMemEval-V2 pilot where every arm scored 0.000
+until we found that our own extraction prompt — "extract exactly two kinds
+of claim and nothing else" — was making an obedient model silently discard
+the protocol documents the answers were drawn from. Also in this release:
+the Console's store-curation review panel, deep dream's lesson/world
+cross-key duplicate curation, and a hybrid-retrieval default that the same
+benchmark work validated (cortex facts ahead of associative recall beat
+either channel alone in every replicate).
+
 ### Changed (2026-07-21 — Sonnet extractor prompt v2: DOCUMENTS PRESCRIBE)
 - **`evals/prompts/sonnet_extractor_v2.md`** — v1 plus one section applying
   the LME-V2 Fix-E lesson to the Sonnet override: what a quoted/summarized
