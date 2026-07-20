@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-21 — Sonnet extractor prompt v2: DOCUMENTS PRESCRIBE)
+- **`evals/prompts/sonnet_extractor_v2.md`** — v1 plus one section applying
+  the LME-V2 Fix-E lesson to the Sonnet override: what a quoted/summarized
+  document (spec, policy, protocol, runbook, guide) prescribes is itself a
+  durable fact, extracted under the document's subject even when other notes
+  show different enacted behavior. Gated on the ladder `sonnet-5` rung:
+  metric-identical to v1 (`gold_recoverable` 1.0, `stale_leak` 0.0, 16/16
+  claims — results committed as `ladder-sonnet5-prompt-{v1,v2}.json`), and a
+  positive probe confirmed the section fires (documented rule + divergent
+  enacted behavior extracted as separate facts). The autostart installers
+  (`install-shim-autostart.ps1`/`.sh`) and install-script hints now default
+  to v2; running deployments pick it up by re-running the autostart
+  installer (or restarting the shim with the v2 `--system-prompt-file`).
+
 ### Changed (2026-07-20 — extraction prompt learns the LME-V2 lessons; hybrid default pinned)
 - **The shipped extraction prompt (`_SYSTEM_PROMPT`) now names document
   prescriptions as extractable and carries a worked example.** Two transfers

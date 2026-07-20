@@ -3,7 +3,7 @@
 # parity for ops/install-shim-autostart.ps1 — issue #11).
 #
 #   ops/install-shim-autostart.sh                 # default port 8082, v1 prompt
-#   ops/install-shim-autostart.sh --port 8082 --prompt-file evals/prompts/sonnet_extractor_v1.md
+#   ops/install-shim-autostart.sh --port 8082 --prompt-file evals/prompts/sonnet_extractor_v2.md
 #
 # The shim wraps the Max-plan `claude` CLI as an OpenAI-compatible endpoint on
 # 127.0.0.1 for the daemon's dream pass (primary extractor; the in-stack E4B
@@ -12,7 +12,7 @@
 set -euo pipefail
 
 PORT=8082
-PROMPT_FILE="evals/prompts/sonnet_extractor_v1.md"
+PROMPT_FILE="evals/prompts/sonnet_extractor_v2.md"
 PYTHON_EXE=""
 LOG_FILE="$HOME/.pseudolife-mcp/sonnet-shim.log"
 

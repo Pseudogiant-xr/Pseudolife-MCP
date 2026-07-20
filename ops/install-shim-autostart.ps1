@@ -3,8 +3,8 @@
 # (Install under pwsh 7 — the ternary below needs it; the scheduled task itself
 # runs fine under powershell.exe 5.1.)
 #
-#   ops\install-shim-autostart.ps1              # default port 8082, v1 prompt
-#   ops\install-shim-autostart.ps1 -Port 8082 -PromptFile evals\prompts\sonnet_extractor_v1.md
+#   ops\install-shim-autostart.ps1              # default port 8082, v2 prompt
+#   ops\install-shim-autostart.ps1 -Port 8082 -PromptFile evals\prompts\sonnet_extractor_v2.md
 #
 # The shim wraps the Max-plan `claude` CLI as an OpenAI-compatible endpoint on
 # 127.0.0.1 for the daemon's dream pass (primary extractor; the in-stack E4B
@@ -13,7 +13,7 @@
 param(
     [string]$PythonExe = "",
     [int]$Port = 8082,
-    [string]$PromptFile = "evals\prompts\sonnet_extractor_v1.md",
+    [string]$PromptFile = "evals\prompts\sonnet_extractor_v2.md",
     [string]$LogFile = "$env:USERPROFILE\.pseudolife-mcp\sonnet-shim.log"
 )
 

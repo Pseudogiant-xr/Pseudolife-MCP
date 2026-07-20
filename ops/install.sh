@@ -189,7 +189,7 @@ if [ "$EXTRACTOR" != "sidecar" ]; then
     if ! "$repo/ops/install-shim-autostart.sh" --port "$SHIM_PORT"; then
         echo "WARNING: shim autostart registration failed (no systemd --user on this host?)" >&2
         echo "  Re-run later: ops/install-shim-autostart.sh --port $SHIM_PORT" >&2
-        echo "  Or start it manually: python evals/sonnet_shim.py --port $SHIM_PORT --system-prompt-file evals/prompts/sonnet_extractor_v1.md" >&2
+        echo "  Or start it manually: python evals/sonnet_shim.py --port $SHIM_PORT --system-prompt-file evals/prompts/sonnet_extractor_v2.md" >&2
     fi
 fi
 
