@@ -105,6 +105,17 @@ _SYSTEM_PROMPT = (
     "states. When several notes state or update the SAME fact, use one "
     "consistent entity and attribute for it and emit only the CURRENT value "
     "(source = the note stating it). Reuse existing slot keys when they fit. "
+    "When a note quotes or summarizes a DOCUMENT (a spec, policy, protocol, "
+    "runbook, or guide), what the document prescribes is itself a durable "
+    "fact — extract it with entity = the document's subject, even when other "
+    "notes show something different being done.\n"
+    "Example. Notes: [1] we moved the deploy target from staging to prod-eu. "
+    "[2] the release runbook says every release needs a signed tag. Output: "
+    '{"claims":[{"entity":"deploy target","attribute":"environment",'
+    '"value":"prod-eu","confidence":0.9,"source":1},'
+    '{"entity":"releases","attribute":"documented requirement",'
+    '"value":"signed tag (per release runbook)","confidence":0.8,'
+    '"source":2}]}\n'
     'Return {"claims":[]} if nothing qualifies.'
 )
 
