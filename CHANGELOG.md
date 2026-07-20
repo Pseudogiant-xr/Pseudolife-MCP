@@ -6,6 +6,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-20 — extraction prompt learns the LME-V2 lessons; hybrid default pinned)
+- **The shipped extraction prompt (`_SYSTEM_PROMPT`) now names document
+  prescriptions as extractable and carries a worked example.** Two transfers
+  from the LongMemEval-V2 arc: (1) a scope-restricted extraction prompt makes
+  an obedient model silently discard content classes it doesn't name — the
+  prompt now states that what a shared DOCUMENT (spec, policy, protocol,
+  runbook, guide) prescribes is itself a durable fact, distinct from what the
+  session did; (2) small extractors follow a demonstrated format far more
+  reliably than imperative instructions — a compact worked example shows a
+  current-state update plus a `documented requirement` claim. Gated on the
+  ladder's `e4b-ft` rung (the deployed Arm-1 student): `gold_recoverable`
+  1.0 → 1.0, `stale_leak` 0.0 → 0.0, extract time flat — and claim output got
+  *cleaner* (16 claims / 16 inserts vs the baseline's 26 claims for the same
+  16 inserts; the example removed redundant duplicates). The datagen path
+  reads the same constant, so the next distillation cycle trains on the new
+  prompt automatically. `extractor_max_tokens` stays 2048 — the LME-V2 A/B
+  showed 4096 scores worse (extra deliberation rope hurts small models more
+  than truncation).
+- **Hybrid retrieval's defaults are now test-pinned** (`cortex.enabled` and
+  `cortex.search_first` both `True`, new `tests/test_hybrid_default.py`). The
+  LME-V2 procedure-slice replicates showed the hybrid context beating both
+  single channels in every replicate under both answer prompts; the defaults
+  were already correct — the pin makes flipping them a deliberate,
+  test-visible decision.
+
 ### Changed (2026-07-20 — LongMemEval-V2 Fix E: documented-protocol extraction + answer-format anchoring)
 - **LME-V2 smoke: third extraction claim kind — DOCUMENTED PROTOCOL** (evals-only).
   Fix D put the article body in front of the extractor, but the Fix-B trajectory
