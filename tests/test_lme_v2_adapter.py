@@ -116,6 +116,146 @@ def test_observation_block_is_char_capped():
 
 
 # --------------------------------------------------------------------------- #
+# Fix D — knowledge-article body capture. A KB article page (a "Knowledge
+# Portal" RootWebArea with an `article` role node) carries the PROTOCOL
+# prescription in its body StaticText/link nodes — the content procedure
+# questions are grounded in. Fix A deliberately capped page-context to
+# title+headers and never emitted body text; Fix D emits the body as its own
+# framed turn. Fixtures mirror the real ServiceNow KB trees: repr-style quoting
+# (single OR double quotes, escaped apostrophes), links interleaved with
+# StaticText inside paragraphs, and boilerplate (KB number / Authored by /
+# views / Copy Permalink) as siblings OUTSIDE the `article` subtree.
+# --------------------------------------------------------------------------- #
+TREE_ARTICLE = (
+    "RootWebArea 'Company Protocols - Agent Workload Balancing - Knowledge Portal', focused\n"
+    "\t[139] banner '', visible\n"
+    "\t\t[989] link 'Home', clickable, visible\n"
+    "\t[56] Section '', visible\n"
+    "\t\t[1012] heading 'Company Protocols - Agent Workload Balancing'\n"
+    "\t\t[1020] main ''\n"
+    "\t\t\tStaticText 'KB0010104'\n"
+    "\t\t\t[1036] button 'Attach to Private Task', clickable, visible\n"
+    "\t\t\tStaticText 'Authored by System Administrator'\n"
+    "\t\t\tStaticText 'This article has 8 views.'\n"
+    "\t\t\t[1051] time '30 days ago', visible\n"
+    "\t\t\t\tStaticText '30 days ago'\n"
+    "\t\t\t[1060] article '', clickable\n"
+    "\t\t\t\t[1061] Section ''\n"
+    "\t\t\t\t\t[1062] heading 'Agent Workload Balancing', visible\n"
+    "\t\t\t\t\t[1064] paragraph '', visible\n"
+    "\t\t\t\t\t\tStaticText 'All problems can be found in the'\n"
+    "\t\t\t\t\t\t[1065] link 'problem list', clickable\n"
+    "\t\t\t\t\t\tStaticText '.'\n"
+    "\t\t\t\t\t[1070] listitem ''\n"
+    "\t\t\t\t\t\tListMarker '0.'\n"
+    "\t\t\t\t\t\tStaticText \"This info is in the report 'Problems with hashtag {name}'.\"\n"
+    "\t\t\t\t\t[1071] paragraph ''\n"
+    "\t\t\t\t\t\tStaticText 'You can access the list of reports'\n"
+    "\t\t\t\t\t\t[1072] link 'here', clickable\n"
+    "\t\t\t\t\t\tStaticText '.'\n"
+    "\t\t\t\t\t[1078] heading '3. Re-assign the Problem'\n"
+    "\t\t\t\t\t\tStaticText 'Re-assign the low priority problem to the least busy user.'\n"
+    "\t\t\t[1086] paragraph ''\n"
+    "\t\t\t\t[1087] button 'Copy Permalink', clickable\n"
+)
+# Same portal chrome, but the SEARCH page: no `article` node -> not an article.
+TREE_KB_SEARCH = (
+    "RootWebArea 'Knowledge Search - Knowledge Portal', focused\n"
+    "\t[139] banner '', visible\n"
+    "\t\t[1004] combobox 'Search', clickable, visible\n"
+    "\t[56] Section '', visible\n"
+    "\t\t[300] heading 'Search Results', visible\n"
+    "\t\t[301] link 'Agent Workload Balancing', clickable\n"
+)
+
+
+def _article_traj(*trees):
+    return {"id": "art", "domain": "enterprise", "environment": "workarena",
+            "goal": "Balance the workload", "outcome": "success",
+            "states": [{"state_index": i, "url": f"/s{i}",
+                        "action": None if i == 0 else "click('1')",
+                        "thought": f"step {i}", "accessibility_tree": t}
+                       for i, t in enumerate(trees)]}
+
+
+def test_article_body_emitted_as_its_own_framed_turn():
+    turns = A.trajectory_to_turns(_article_traj(TREE_ARTICLE),
+                                  include_observations=True)
+    art = [t for t in turns if t.startswith("[article] ")]
+    assert len(art) == 1
+    turn = art[0]
+    # framed with the article title (RootWebArea minus the portal suffix)
+    assert turn.startswith(
+        "[article] Company Protocols - Agent Workload Balancing:")
+    # the protocol prescription (body StaticText) is present
+    assert "You can access the list of reports" in turn
+    assert "Re-assign the low priority problem to the least busy user." in turn
+
+
+def test_article_body_interleaves_links_with_staff_text_in_order():
+    turns = A.trajectory_to_turns(_article_traj(TREE_ARTICLE),
+                                  include_observations=True)
+    turn = next(t for t in turns if t.startswith("[article] "))
+    # link name 'here' sits between its surrounding StaticText, in doc order
+    i_pre = turn.index("You can access the list of reports")
+    i_link = turn.index("here", i_pre)
+    i_report = turn.index("in the report", 0)  # earlier double-quoted StaticText
+    assert i_pre < i_link
+    # the double-quoted / apostrophe-bearing StaticText survives repr-quoting
+    assert "'Problems with hashtag {name}'" in turn
+    assert i_report > 0
+
+
+def test_article_detector_excludes_the_search_page():
+    turns = A.trajectory_to_turns(_article_traj(TREE_KB_SEARCH),
+                                  include_observations=True)
+    assert not any(t.startswith("[article] ") for t in turns)
+
+
+def test_article_body_skips_boilerplate():
+    turns = A.trajectory_to_turns(_article_traj(TREE_ARTICLE),
+                                  include_observations=True)
+    turn = next(t for t in turns if t.startswith("[article] "))
+    # metadata siblings outside the `article` subtree never enter the body
+    for boiler in ("KB0010104", "Authored by", "8 views",
+                   "Copy Permalink", "Attach to Private Task", "30 days ago"):
+        assert boiler not in turn
+
+
+def test_article_emitted_once_per_trajectory_across_revisits():
+    # same article open in two states (state 0 and state 2) -> emitted ONCE
+    turns = A.trajectory_to_turns(
+        _article_traj(TREE_ARTICLE, TREE_KB_SEARCH, TREE_ARTICLE),
+        include_observations=True)
+    assert sum(t.startswith("[article] ") for t in turns) == 1
+
+
+def test_article_body_is_char_capped():
+    big_body = "".join(f"\t\t\t\t\tStaticText 'sentence {i} " + "y" * 40 + "'\n"
+                       for i in range(200))
+    tree = ("RootWebArea 'Company Protocols - Big - Knowledge Portal', focused\n"
+            "\t[1060] article '', clickable\n" + big_body)
+    turns = A.trajectory_to_turns(_article_traj(tree),
+                                  include_observations=True, article_chars=500)
+    turn = next(t for t in turns if t.startswith("[article] "))
+    body = turn.split(": ", 1)[1]
+    assert len(body) <= 560  # 500 cap + "...[capped]" marker + slack
+
+
+def test_article_body_gated_off_when_flag_false():
+    turns = A.trajectory_to_turns(_article_traj(TREE_ARTICLE),
+                                  include_observations=True,
+                                  include_article_body=False)
+    assert not any(t.startswith("[article] ") for t in turns)
+
+
+def test_article_body_gated_off_with_observations_off():
+    # article capture rides the observations path; off by default keeps baseline
+    turns = A.trajectory_to_turns(_article_traj(TREE_ARTICLE))
+    assert not any(t.startswith("[article] ") for t in turns)
+
+
+# --------------------------------------------------------------------------- #
 # Fix C — cross-trajectory synthesis (in the smoke harness, not product code)
 # --------------------------------------------------------------------------- #
 def test_synthesize_procedures_prefers_success_on_conflict():

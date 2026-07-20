@@ -6,6 +6,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-20 — LongMemEval-V2 Fix D: capture knowledge-article body text)
+- **LME-V2 adapter now captures ServiceNow KB *article body text*** (evals-only;
+  no product behavior change). Fix A distilled each state to title + landmark
+  labels + resolved action and deliberately dropped body StaticText — but some
+  `procedure` gold answers are grounded in the BODY of a "Company Protocols"
+  knowledge article (e.g. "Agent Workload Balancing" prescribes "...access the
+  list of reports... Re-assign the ... problem..."), so that prescription never
+  entered the corpus and no extractor could recover it.
+  `trajectory_to_turns(include_observations=True)` now detects article pages (a
+  `RootWebArea` titled "… Knowledge Portal" that carries an `article` role node —
+  matches exactly the five article pages across all 200 small-tier trajectories,
+  excludes every "Knowledge Search"/"Knowledge Home" chrome page) and emits each
+  distinct article's body ONCE per trajectory as a framed `[article] <title>:
+  <body>` turn, appended right after the step where it first opened. Body text
+  is the `article` subtree's StaticText/heading/link names in document order
+  (links stay interleaved so sentences read coherently; repr-style quoting with
+  escaped apostrophes is parsed correctly), boilerplate (KB number / "Authored
+  by" / views / "Copy Permalink") dropped, capped at `article_chars` (1500).
+  Gated by the new `include_article_body` flag (default on; rides the
+  observations path). For question `025db8ef` (full 100-trajectory haystack) the
+  phrase "list of reports" goes 0 → 1 and "Re-assign" 2 → 4, at 1.005× the Fix-A
+  corpus (article pages are rare — 8 turns over 5 articles). New
+  `evals/lme_v2_check_fixd.py` gates the corpus rebuild offline (CPU-only).
+
 ### Changed (2026-07-19 — LongMemEval-V2 pilot CPU fixes: trajectory ingest recovers gold labels)
 - **`OpenAICompatExtractor` gained an optional `system_prompt` argument**
   (default `None` → the shipped `_SYSTEM_PROMPT`, so the daemon and every
