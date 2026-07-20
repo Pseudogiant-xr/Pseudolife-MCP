@@ -13,6 +13,13 @@
 # PyPI never accepts a same-version re-upload — a failed run after upload
 # or a version mistake means cutting a .postN, so the guard below fails
 # fast BEFORE anything is built.
+#
+# The `registry` job then publishes to the MCP registry, authenticated by
+# GitHub Actions OIDC (`mcp-publisher login github-oidc`) — same trust model
+# as Trusted Publishing: a short-lived token minted per run, nothing stored,
+# nothing to expire between releases. It runs AFTER PyPI because registry
+# validation reads the *latest* PyPI release's description looking for the
+# `mcp-name:` marker.
 name: Release to PyPI
 
 on:
@@ -71,3 +78,113 @@ jobs:
 
       - name: Publish to PyPI (Trusted Publishing)
         uses: pypa/gh-action-pypi-publish@release/v1
+
+  registry:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # No environment gate of its own: this job is downstream of the
+    # human-approved `publish`, and it only points registry metadata at a
+    # package that is already public.
+    permissions:
+      id-token: write   # OIDC credential for `mcp-publisher login github-oidc`
+      contents: read
+    env:
+      # Pinned deliberately: an unpinned "latest" would change the publish
+      # tool under us between releases. Bump with intent.
+      PUBLISHER_VERSION: "1.8.0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guard — server.json versions must match the release tag
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          # BOTH version fields: the top-level server version and the pypi
+          # package version. They drift independently; the registry accepts a
+          # mismatch silently and then advertises the wrong package version.
+          SERVER_V="$(python3 -c "import json;print(json.load(open('server.json'))['version'])")"
+          PKG_V="$(python3 -c "import json;print(json.load(open('server.json'))['packages'][0]['version'])")"
+          echo "tag=$TAG server.json=$SERVER_V package=$PKG_V"
+          if [ "$TAG" != "$SERVER_V" ] || [ "$TAG" != "$PKG_V" ]; then
+            echo "::error::server.json versions ($SERVER_V / $PKG_V) do not both match release tag v$TAG" >&2
+            exit 1
+          fi
+
+      - name: Wait for PyPI to serve this version
+        # Registry validation fetches the LATEST PyPI release and looks for the
+        # mcp-name marker in its description. PyPI's JSON API lags the upload by
+        # seconds-to-minutes, so publishing immediately can validate against the
+        # PREVIOUS release and fail confusingly.
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          for i in $(seq 1 30); do
+            LATEST="$(curl -fsS --max-time 20 https://pypi.org/pypi/pseudolife-mcp/json | python3 -c "import json,sys;print(json.load(sys.stdin)['info']['version'])" || echo "")"
+            if [ "$LATEST" = "$TAG" ]; then
+              echo "PyPI is serving $TAG after ~$((i * 10))s"
+              exit 0
+            fi
+            echo "PyPI latest=$LATEST, want $TAG — retrying ($i/30)"
+            sleep 10
+          done
+          echo "::error::PyPI did not serve $TAG within 5 minutes" >&2
+          exit 1
+
+      - name: Verify the mcp-name marker reached PyPI
+        # The marker lives in README.md, which becomes the PyPI description.
+        # If a README edit ever drops it, the registry rejects the publish with
+        # an opaque auth-ish error — check it here where the message is clear.
+        run: |
+          curl -fsS --max-time 20 https://pypi.org/pypi/pseudolife-mcp/json \
+            | python3 -c "
+          import json, sys
+          desc = json.load(sys.stdin)['info']['description'] or ''
+          marker = 'mcp-name: io.github.Pseudogiant-xr/pseudolife-mcp'
+          if marker not in desc:
+              sys.exit('::error::PyPI description is missing the exact marker: ' + marker)
+          print('marker present in the published description')
+          "
+
+      - name: Install mcp-publisher
+        run: |
+          curl -fsSL --max-time 60 \
+            "https://github.com/modelcontextprotocol/registry/releases/download/v${PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz" \
+            -o publisher.tar.gz
+          tar -xzf publisher.tar.gz mcp-publisher
+          chmod +x mcp-publisher
+          ./mcp-publisher --version
+
+      - name: Authenticate (GitHub Actions OIDC)
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish to the MCP registry
+        run: ./mcp-publisher publish
+
+      - name: Verify the registry serves this version as latest
+        # Publish has already succeeded by this point, so an unreachable
+        # registry is a flaky read, NOT a failed release — failing here would
+        # report a phantom problem and tempt a re-publish. Only a WRONG
+        # version is a real failure.
+        run: |
+          # export, not just a shell var: the python below reads it from the
+          # environment, and GITHUB_REF_NAME still carries the leading "v".
+          export TAG="${GITHUB_REF_NAME#v}"
+          sleep 5
+          if ! curl -fsS --max-time 30 --retry 5 --retry-delay 5 --retry-all-errors \
+                 "https://registry.modelcontextprotocol.io/v0.1/servers?search=pseudolife" \
+                 -o registry.json; then
+            echo "::warning::could not read the registry to confirm (publish already reported success) — check manually"
+            exit 0
+          fi
+          python3 -c "
+          import json, os, sys
+          want = os.environ['TAG']
+          rows = json.load(open('registry.json', encoding='utf-8')).get('servers', [])
+          latest = [r for r in rows
+                    if r.get('_meta', {})
+                         .get('io.modelcontextprotocol.registry/official', {})
+                         .get('isLatest')]
+          got = latest[0]['server']['version'] if latest else None
+          if got != want:
+              sys.exit(f'::error::registry latest is {got!r}, expected {want!r}')
+          print(f'registry latest = {got}')
+          "
