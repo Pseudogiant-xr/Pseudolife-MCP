@@ -14,6 +14,12 @@ import socket
 import subprocess
 import sys
 import time
+
+# Keep spawned daemons off the desktop: without this flag, a child
+# python.exe launched from a hidden/detached parent (pytest under an
+# agent harness or CI wrapper) allocates its OWN console window and
+# steals foreground focus on Windows.
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
 import urllib.error
 import urllib.request
 
@@ -68,6 +74,7 @@ def daemon(tmp_path_factory):
     proc = subprocess.Popen(
         [sys.executable, "-m", "pseudolife_memory.cli", "serve"],
         env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        creationflags=_NO_WINDOW,
     )
     deadline = time.time() + 60  # torch import is slow on a cold cache
     health = None
@@ -207,6 +214,7 @@ def test_non_loopback_with_trust_bind_allowed(tmp_path):
     proc = subprocess.Popen(
         [sys.executable, "-m", "pseudolife_memory.cli", "serve"],
         env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        creationflags=_NO_WINDOW,
     )
     try:
         deadline = time.time() + 60
