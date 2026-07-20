@@ -336,6 +336,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   resume/compact); a legacy pointer with no stored timestamp reads as stale
   and is ignored until re-registered, never a crash.
 
+### Added (2026-07-19 — band-ablation offline rebuild)
+- **evals**: `evals/band_ablation.py` — 8-band continuum vs single-table
+  retrieval ablation as an offline context rebuild (2026-07-17 architecture
+  critique). `replay` re-ingests each LongMemEval-KU question's haystack
+  turns CPU-only (real `svc.store` path, dreaming skipped) and serialises
+  full band state per question; `rebuild` re-ranks the rag/hybrid raw-turn
+  selection from that state under two policies (`continuum` mirrors the
+  CMS Pool-1 depth-modulated recency ranking plus the slot channel;
+  `flat` is one pool with a single depth-0 recency term) × two timestamp
+  modes (`wall` = served regime, age≈0; `hist` = session-date timestamps
+  ranked from the question date, making the half-life continuum real),
+  emitting four `arm1-abl-*` JSONLs ready for `replicate.py`. Sanity gate:
+  the continuum+wall mirror re-selects the originally served rag context
+  at 1.000 agreement across all 78 questions.
+
 ### Changed (2026-07-19 — project-scope hygiene)
 - **Scope derivation policy** (`memory.scopes` config): the entity-sources
   backfill now case-folds scope keys (`Pseudolife` and `pseudolife` are one
