@@ -170,7 +170,7 @@ if ($Extractor -ne "sidecar") {
     } catch {
         Write-Warning "Shim autostart registration failed (usually elevation): $_"
         Write-Host "  Re-run later from an admin pwsh: ops\install-shim-autostart.ps1 -Port $ShimPort"
-        Write-Host "  Or start it manually: python evals\sonnet_shim.py --port $ShimPort --system-prompt-file evals\prompts\sonnet_extractor_v1.md"
+        Write-Host "  Or start it manually: python evals\sonnet_shim.py --port $ShimPort --system-prompt-file evals\prompts\sonnet_extractor_v2.md"
     }
 }
 
