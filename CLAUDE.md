@@ -123,8 +123,19 @@ all serve from this repo; a release touches them in this order (first done
    the user's one-click approval on the `pypi` environment. Manual
    `twine upload dist/*` remains the fallback. PyPI never accepts a
    same-version re-upload — metadata-only fixes are a `.postN`.
-4. **MCP registry** (`mcp-publisher login github` is the user's; `publish` is
-   scriptable): the README marker must read exactly
+4. **MCP registry — automated.** The `registry` job in `release.yml` runs
+   after the PyPI job and authenticates with `mcp-publisher login
+   github-oidc` (same trust model as Trusted Publishing: a short-lived token
+   minted per run, nothing stored, nothing to expire between cuts). It
+   guards **both** `server.json` version fields against the tag, waits for
+   PyPI to actually serve the new version, checks the marker survived into
+   the published description, publishes, then confirms the registry serves
+   it as latest. Publishing the GitHub release is now the single action that
+   lands all four surfaces.
+   *Manual fallback* (`mcp-publisher login github` then `publish`, from the
+   repo root) if the job is ever broken — note the binary is often not on
+   `PATH`; resolve it with `Get-Command mcp-publisher` rather than assuming.
+   Either way: the README marker must read exactly
    `mcp-name: io.github.Pseudogiant-xr/pseudolife-mcp` — the namespace is
    matched **case-sensitively** against the GitHub username (capital P), and
    validation reads the **latest** PyPI release's description. The registry
