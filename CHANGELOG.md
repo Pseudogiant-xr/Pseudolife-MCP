@@ -6,6 +6,99 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-20 — LongMemEval-V2 Fix E: documented-protocol extraction + answer-format anchoring)
+- **LME-V2 smoke: third extraction claim kind — DOCUMENTED PROTOCOL** (evals-only).
+  Fix D put the article body in front of the extractor, but the Fix-B trajectory
+  prompt said "exactly two kinds of claim and nothing else" (click-path
+  workflows + affordances), so the extractor *correctly* discarded document
+  prose — and `procedure` gold answers follow the documented protocol
+  (Reports → Problems), not the agent's enacted clicks (Knowledge Search →
+  Problems). `[article]` notes now yield an
+  `entity=<protocol title> / attribute='documented procedure (modules in
+  order)'` claim mapping prose steps to canonical navigator module names.
+- **Compose answer prompt: protocol authority + worked example + headroom.** A
+  named protocol's documented procedure is declared authoritative over enacted
+  click-paths; the format section now cooperates with the benchmark's own
+  `\boxed{}` convention (the scorer extracts boxed text first) instead of
+  forbidding explanations qwen ignored anyway, anchored by a tiny worked
+  example showing duplicate-module dropping and boxed termination; compose
+  answers get `max_tokens=2048` (256 truncated mid-reasoning).
+- **Result (question `025db8ef`, full 100-trajectory haystack, bm25+rerank+
+  lexical-cortex):** all three arms flip 0.000 → **1.000** on both the
+  deterministic scorer and the judge (`fixe-compose3` tag). Cortex/hybrid
+  answer straight from the documented-procedure fact in 3–4 s; rag composes
+  the same answer from raw task turns in ~25 s. The n=1 diagnosis chain is
+  closed; next step is the wider procedure-question slice.
+- **10-question procedure slice (`slice1` / `slice1-compose` tags,
+  bm25+rerank+lexical-cortex, 100-trajectory haystacks):** deterministic
+  accuracy KU prompt rag 0.30 / cortex 0.30 / **hybrid 0.60**; compose prompt
+  rag 0.50 / cortex 0.30 / **hybrid 0.70** — from 0.00 across every arm
+  before Fixes A–E. Hybrid ≥ both single channels on both prompts; V2
+  procedure hybrid 0.70 is in line with the V1 knowledge-update hybrid oracle
+  (0.705). One llama-server crash mid-run (WinError 10054) was caught by the
+  probe-gated abort and the run resumed losslessly from its per-question
+  JSONL cursor.
+- **3-replicate aggregate (`slice1` / `-r2` / `-r3`, `slice1.agg.json`):**
+  KU prompt rag 0.300 [0.30–0.30] / cortex 0.167 [0.00–0.30] / **hybrid
+  0.533 [0.50–0.60]**; compose prompt rag 0.500 [0.40–0.60] / cortex 0.233
+  [0.10–0.30] / **hybrid 0.633 [0.60–0.70]**. Hybrid beats both single
+  channels in every replicate under both prompts; rag is the most stable
+  arm, cortex the most run-to-run volatile (extraction nondeterminism —
+  llama-server generation varies across runs even at temperature 0). A
+  4096-token answer A/B (`slice1-compose4k`) scored WORSE than 2048 (hybrid
+  0.60 vs 0.70) — extra deliberation rope hurts more than truncation; the
+  compose cap stays 2048. Remaining failure classes are content-class
+  limits, not harness bugs: form-field-inventory MC (`07ffeedf`),
+  click-level navigation-detail MC (`100ff132` — detail the extraction
+  prompt deliberately drops as non-durable), and cross-workflow comparison
+  with non-converging deliberation (`4df5e6b4`). llama-server died 4× across
+  the replicate campaign (~60–90 min sustained-ingest pattern); every crash
+  was caught by the probe-gated abort and resumed losslessly.
+
+### Changed (2026-07-20 — LongMemEval-V2 Fix D: capture knowledge-article body text)
+- **LME-V2 adapter now captures ServiceNow KB *article body text*** (evals-only;
+  no product behavior change). Fix A distilled each state to title + landmark
+  labels + resolved action and deliberately dropped body StaticText — but some
+  `procedure` gold answers are grounded in the BODY of a "Company Protocols"
+  knowledge article (e.g. "Agent Workload Balancing" prescribes "...access the
+  list of reports... Re-assign the ... problem..."), so that prescription never
+  entered the corpus and no extractor could recover it.
+  `trajectory_to_turns(include_observations=True)` now detects article pages (a
+  `RootWebArea` titled "… Knowledge Portal" that carries an `article` role node —
+  matches exactly the five article pages across all 200 small-tier trajectories,
+  excludes every "Knowledge Search"/"Knowledge Home" chrome page) and emits each
+  distinct article's body ONCE per trajectory as a framed `[article] <title>:
+  <body>` turn, appended right after the step where it first opened. Body text
+  is the `article` subtree's StaticText/heading/link names in document order
+  (links stay interleaved so sentences read coherently; repr-style quoting with
+  escaped apostrophes is parsed correctly), boilerplate (KB number / "Authored
+  by" / views / "Copy Permalink") dropped, capped at `article_chars` (1500).
+  Gated by the new `include_article_body` flag (default on; rides the
+  observations path). For question `025db8ef` (full 100-trajectory haystack) the
+  phrase "list of reports" goes 0 → 1 and "Re-assign" 2 → 4, at 1.005× the Fix-A
+  corpus (article pages are rare — 8 turns over 5 articles). New
+  `evals/lme_v2_check_fixd.py` gates the corpus rebuild offline (CPU-only).
+
+### Changed (2026-07-19 — LongMemEval-V2 pilot CPU fixes: trajectory ingest recovers gold labels)
+- **`OpenAICompatExtractor` gained an optional `system_prompt` argument**
+  (default `None` → the shipped `_SYSTEM_PROMPT`, so the daemon and every
+  product path stay byte-identical). Off-label harnesses can now supply a
+  domain-specific base extraction prompt while still getting the vocab /
+  known-facts hints appended. Used by the LME-V2 smoke's trajectory-mode prompt.
+- **LME-V2 evals harness (`evals/lme_v2_*`) — three post-mortem fixes** (all
+  evals-side; no product behavior change beyond the extractor arg above):
+  *Fix A* — `trajectory_to_turns(include_observations=True)` no longer dumps raw
+  `accessibility_tree`s (which were ~47× the baseline corpus and, being opaque
+  bids, contained **zero** occurrences of the gold module names). It distils
+  each state into a resolved action label (bid → node role+name, resolved
+  against the pre-action tree) plus a capped page context (title + headers). For
+  question `025db8ef` the gold term "Problems" goes 0 → 10 occurrences at 1.43×
+  the baseline size. *Fix B* — a trajectory-mode extraction prompt that pulls the
+  ordered workflow + environment affordances instead of durable user facts.
+  *Fix C* — a cross-trajectory synthesis pass clustering same-task procedure
+  claims into a canonical "typical workflow" fact, weighting `outcome=success`
+  over `failure`. New `evals/lme_v2_check0.py` gates the corpus rebuild.
+
 ### Added (2026-07-19 — Console: store-curation review panel in the Atlas drawer)
 - **The lesson/world duplicate listings are now reviewable in the Console.**
   The Atlas Review drawer gains a "Store curation" panel rendering each

@@ -1,0 +1,66 @@
+{
+  "replicates": 3,
+  "questions": 10,
+  "arms": {
+    "KU.rag": {
+      "replicates": [
+        0.3,
+        0.3,
+        0.3
+      ],
+      "mean": 0.3,
+      "min": 0.3,
+      "max": 0.3
+    },
+    "KU.cortex": {
+      "replicates": [
+        0.3,
+        0.0,
+        0.2
+      ],
+      "mean": 0.167,
+      "min": 0.0,
+      "max": 0.3
+    },
+    "KU.hybrid": {
+      "replicates": [
+        0.6,
+        0.5,
+        0.5
+      ],
+      "mean": 0.533,
+      "min": 0.5,
+      "max": 0.6
+    },
+    "compose.rag": {
+      "replicates": [
+        0.5,
+        0.6,
+        0.4
+      ],
+      "mean": 0.5,
+      "min": 0.4,
+      "max": 0.6
+    },
+    "compose.cortex": {
+      "replicates": [
+        0.3,
+        0.3,
+        0.1
+      ],
+      "mean": 0.233,
+      "min": 0.1,
+      "max": 0.3
+    },
+    "compose.hybrid": {
+      "replicates": [
+        0.7,
+        0.6,
+        0.6
+      ],
+      "mean": 0.633,
+      "min": 0.6,
+      "max": 0.7
+    }
+  }
+}
