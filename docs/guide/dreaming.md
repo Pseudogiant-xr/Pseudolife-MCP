@@ -63,6 +63,38 @@ for slower hardware. The same env vars also upgrade
 `memory_dream(action="run")`. A local model keeps all text on-box; a hosted
 endpoint does not.
 
+## What the extractor captures
+
+The tier-2 prompt (`_SYSTEM_PROMPT` in `pseudolife_memory/memory/dream.py`,
+shared by the bundled sidecar and any endpoint you point the daemon at)
+asks for three things and deliberately skips the rest — narrative,
+opinions, meta-chat about the conversation, and values a later note already
+superseded:
+
+- **Durable current-state facts**, one slot per real fact.
+- **Updates, landed on the slot the fact already had.** When several notes
+  state or update the same fact, only the *current* value is emitted, under
+  the same entity and attribute — so the cortex supersedes rather than
+  accumulating near-duplicate slots.
+- **What a document prescribes.** When a note quotes or summarizes a spec,
+  policy, protocol, runbook, or guide, its prescription is itself a durable
+  fact, stored under the *document's* subject — and kept separate from what
+  was actually done. Paste your deploy runbook, then mention a deploy that
+  skipped a step, and you get two facts (the documented rule, and the
+  incident), not one blurred into the other.
+
+That third one is deliberate, and it is the reason the prompt names its
+content classes rather than merely forbidding noise: an extraction prompt
+that enumerates what to extract makes an obedient model **silently discard
+whatever it doesn't name** — no error, no partial result, just a class of
+knowledge that never reaches the cortex. It cost a whole benchmark category
+to find (see [Benchmarks](benchmarks.md#longmemeval-v2--agent-trajectories-and-procedures)),
+and it is worth remembering before narrowing this prompt further.
+
+The Sonnet override prompt (`evals/prompts/sonnet_extractor_v2.md`, used
+when you run the shim below) carries the same three, tuned for a larger
+model.
+
 ## The CPU extractor sidecar (batteries-included default)
 
 The stack ships a llama.cpp sidecar with a model baked in (the bespoke

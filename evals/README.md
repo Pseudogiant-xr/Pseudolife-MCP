@@ -666,3 +666,108 @@ outcome mix. Carries the 2026-07-18 pre-auto-outcome baseline in its
 docstring and the success criteria for the 2-3-week re-measurement.
 
     python evals/capture_metrics.py [--json] [--since YYYY-MM-DD]
+
+---
+
+# LongMemEval-V2 pilot (`lme_v2_smoke.py`)
+
+[LongMemEval-V2](https://arxiv.org/abs/2605.12493) swaps chat sessions for
+**WorkArena agent trajectories** — what an agent saw and clicked in an
+enterprise portal — so it stresses a content class the KU benchmark never
+touches: *procedures*. This is a pilot harness, not a production bench: one
+category (`procedure`), a small slice, deterministic scoring by the
+benchmark's own eval functions plus the same LLM judge as `longmemeval_bench`.
+
+## Pieces
+
+- `lme_v2_adapter.py` — trajectory → turn adapter. Resolves action `bid`s to
+  the human-readable labels they clicked (against the pre-action
+  accessibility tree), caps page context, and captures **knowledge-article
+  body text** as a framed `[article] <title>: <body>` turn, once per
+  trajectory. That last part is load-bearing: the gold answers for several
+  procedure questions are drawn from protocol articles the agent *read*, not
+  from what it then did.
+- `lme_v2_smoke.py` — three-arm smoke (rag / cortex / hybrid) with a dream
+  per trajectory (one trajectory ≈ one session), a trajectory-mode extraction
+  prompt, and a cross-trajectory synthesis pass that clusters procedure claims
+  into canonical `typical workflow` facts.
+- `lme_v2_check0.py`, `lme_v2_check_fixd.py` — **offline** corpus gates
+  (no inference, CPU-only). Run these before spending GPU time: they rebuild
+  the corpus and assert the gold-supporting text is actually present.
+
+## Running
+
+```bash
+# offline gates first — no model needed
+python evals/lme_v2_check_fixd.py
+
+# one question, full 100-trajectory haystack, all retrieval channels on
+python evals/lme_v2_smoke.py --limit 1 --max-trajectories 100 \
+    --bm25 --rerank --lexical-cortex --out-tag fixe
+
+# re-score an EXISTING run's persisted contexts with a different answer
+# prompt — no ingest, no dreams, no GPU-side re-extraction
+python evals/lme_v2_smoke.py --reanswer-from fixe \
+    --answer-prompt compose --out-tag fixe-compose
+```
+
+`--reanswer-from` is the cheap iteration loop: contexts are persisted per
+row, so answer-prompt A/Bs cost one answer+judge pass instead of a full
+re-ingest. Runs resume from their per-question JSONL cursor, so a crashed
+model server costs one question, not the run.
+
+## Findings — 2026-07-20
+
+10 `procedure` questions × 3 replicates, deterministic scorer
+(`lme-v2-smoke-slice1*.json`):
+
+| arm | default prompt | composition-aware prompt |
+|-----|---------------|--------------------------|
+| naive RAG | 0.300 [0.30–0.30] | 0.500 [0.40–0.60] |
+| cortex only | 0.167 [0.00–0.30] | 0.233 [0.10–0.30] |
+| hybrid | **0.533 [0.50–0.60]** | **0.633 [0.60–0.70]** |
+
+Hybrid beat both single channels in *every* replicate under both prompts.
+Treat the absolute numbers as a pilot: 10 questions, one category, no paired
+testing.
+
+Every arm scored **0.000** before five fixes, and the decisive one was
+self-inflicted — the trajectory extraction prompt said "extract exactly two
+kinds of claim and nothing else", so the extractor correctly discarded the
+protocol documents the answers came from. The lesson (**an extraction prompt
+that enumerates what to extract makes an obedient model silently drop
+everything it doesn't name — no error, no partial result**) was folded back
+into the shipped `_SYSTEM_PROMPT` and the Sonnet override prompt.
+
+---
+
+# Band-structure ablation (`band_ablation.py`)
+
+Does the 8-band continuum actually beat **one** cosine table on retrieval
+ranking? CPU-only, offline: `replay` re-ingests the KU haystacks without
+dreaming and serialises each question's full band state; `rebuild` then
+re-ranks the raw-turn selection under two policies (`continuum` — the CMS's
+real Pool-1 ranking, band-depth-modulated recency; `flat` — one pool, single
+recency term) × two timestamp regimes (`wall` — everything stamped now;
+`hist` — realistic aging), emitting four tagged JSONLs ready for the GPU
+answer phase.
+
+```bash
+python evals/band_ablation.py replay --extractor e4b-ft --src-tag arm1
+python evals/band_ablation.py rebuild --extractor e4b-ft --src-tag arm1
+# then answer/score each tag with the normal replicate machinery
+python evals/replicate.py run --extractor e4b-ft --tag arm1-abl-flat-hist -n 5
+```
+
+## Findings — 2026-07-19 (5 replicates, paired permutation, 78 questions)
+
+| arm | Δ continuum − flat (`wall`) | p | Δ (`hist`) | p |
+|-----|---------------------------|------|-----------|------|
+| naive RAG | −0.067 | 0.10 | **−0.090** | **0.015** |
+| cortex only | +0.008 | 0.76 | −0.010 | 0.53 |
+| hybrid | −0.023 | 0.24 | +0.018 | 0.47 |
+
+The continuum never beats a flat pool, and under realistic aging it is
+*significantly worse* at raw-turn selection. Whatever the banding earns, it
+is not retrieval ranking — the case for it has to rest on the write side
+(eviction, capacity, consolidation cadence).
