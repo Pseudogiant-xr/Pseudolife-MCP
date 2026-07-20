@@ -465,20 +465,46 @@ def ingest_and_dream(svc, extractor, trajectories: list[dict], ex_url,
 # --------------------------------------------------------------------------- #
 # Answer + judge + deterministic score (per arm, with query latency)
 # --------------------------------------------------------------------------- #
-def answer_judge_score(row: dict) -> dict:
+# Composition-aware answer prompt (2026-07-20). The sonnet-full run showed the
+# corpus carries the ANSWER COMPONENTS (a sibling Reports->Problems workflow +
+# the "Assigned to can be changed to reassign" affordance fact) but the KU
+# answer prompt makes the model parrot the nearest single stored workflow.
+# Procedure questions need composition + the benchmark's module-list format.
+_V2_ANSWER_SYSTEM = """\
+You answer questions about how to perform tasks in a software environment,
+using ONLY the memory context provided.
+
+The context holds procedural memory from past task executions: 'typical
+workflow (modules used (in order))' facts, module-purpose facts, and raw
+navigation snippets. The question may describe a task that NO stored
+workflow matches verbatim. In that case, COMPOSE the procedure from
+components: first work out what information the task needs and which module
+provides it (see the module-purpose facts), then which module carries out
+the action. A workflow for a related task can lend its structure.
+
+Answer format: output ONLY the module names, in order of use, separated by
+'; '. Use each module's short canonical navigator name (e.g. 'Reports',
+'Problems', 'Incidents') — not page or record variants ('Problems list',
+'Problem record' -> 'Problems'). No explanations, no extra words. If the
+context contains nothing relevant to the task, answer exactly: I don't know."""
+
+
+def answer_judge_score(row: dict, answer_system: str | None = None) -> dict:
     """Fill answer/score/judge/latency fields from the row's persisted contexts.
 
-    Reuses longmemeval_bench's answerer/judge prompts and _chat verbatim (kept
-    identical so LME-V2 vs LME-V1 runs stay comparable). The primary metric is
-    LME-V2's deterministic eval_function; the LLM judge is a secondary signal."""
+    Default ``answer_system`` is longmemeval_bench's ``_ANSWER_SYSTEM``
+    verbatim (LME-V1 comparability); pass ``_V2_ANSWER_SYSTEM`` for the
+    composition-aware variant. The primary metric is LME-V2's deterministic
+    eval_function; the LLM judge is a secondary signal."""
     from longmemeval_bench import (_chat, _ANSWER_SYSTEM, _JUDGE_SYSTEM)
     from ladder_sweep import approx_tokens
+    system = answer_system if answer_system is not None else _ANSWER_SYSTEM
     for arm in ARMS:
         ctx = row["contexts"].get(arm, "")
         prompt = (f"Question: {row['question']}\n\n"
                   f"Memory context:\n{ctx or '(empty)'}")
         t0 = time.perf_counter()
-        response = _chat(_ANSWER_SYSTEM, prompt)
+        response = _chat(system, prompt)
         row[f"{arm}_answer_seconds"] = round(time.perf_counter() - t0, 2)
         row[f"{arm}_response"] = response
         # Primary: LME-V2's own deterministic scorer over the eval_function spec.
@@ -574,7 +600,8 @@ def build_contexts_v2(svc, question: str,
 # --------------------------------------------------------------------------- #
 # Run
 # --------------------------------------------------------------------------- #
-def run_smoke(limit: int, max_traj: int, retrv: dict | None = None) -> None:
+def run_smoke(limit: int, max_traj: int, retrv: dict | None = None,
+              answer_system: str | None = None) -> None:
     from ladder_sweep import build_service, probe
     from pseudolife_memory.memory.dream import OpenAICompatExtractor
     from longmemeval_bench import build_contexts
@@ -667,7 +694,7 @@ def run_smoke(limit: int, max_traj: int, retrv: dict | None = None) -> None:
             "retrieval_seconds": retrieval_seconds,
             "wall_seconds": round(time.perf_counter() - t_start, 1),
         }
-        row = answer_judge_score(row)
+        row = answer_judge_score(row, answer_system=answer_system)
         marks = " ".join(f"{a}={'Y' if row[f'{a}_correct'] else 'n'}"
                          for a in ARMS)
         with OUT_FILE.open("a", encoding="utf-8") as fh:
@@ -676,6 +703,32 @@ def run_smoke(limit: int, max_traj: int, retrv: dict | None = None) -> None:
               f"({row['wall_seconds']}s, {tally['turns']} turns, "
               f"{tally['superseded']} superseded, retr {retrieval_seconds}s)",
               flush=True)
+
+
+def reanswer(from_tag: str, answer_system: str | None) -> None:
+    """Re-run ONLY the answer/judge/score phase over an earlier run's
+    persisted contexts (no ingest, no dreams, no GPU) — the controlled way
+    to iterate the answer prompt: same contexts, same answerer endpoint,
+    one variable."""
+    src = RESULTS_DIR / f"lme-v2-smoke-{from_tag}.jsonl"
+    rows = load_rows(src)
+    if not rows:
+        sys.exit(f"no rows in {src}")
+    from ladder_sweep import probe
+    if not probe(EXTRACTOR_URL):
+        sys.exit(f"no answerer endpoint at {EXTRACTOR_URL}")
+    print(f"re-answering {len(rows)} row(s) from {src.name} "
+          f"-> {OUT_FILE.name}", flush=True)
+    with OUT_FILE.open("w", encoding="utf-8") as fh:
+        for row in rows:
+            row = {k: v for k, v in row.items()
+                   if not any(k.startswith(a + "_") for a in ARMS)}
+            row["reanswered_from"] = from_tag
+            row = answer_judge_score(row, answer_system=answer_system)
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+            marks = " ".join(f"{a}={'Y' if row[f'{a}_correct'] else 'n'}"
+                             for a in ARMS)
+            print(f"  {row['question_id']}  {marks}", flush=True)
 
 
 def report() -> None:
@@ -797,6 +850,13 @@ def main() -> int:
     ap.add_argument("--out-tag", default="",
                     help="suffix for the result files so runs don't overwrite "
                          "each other (e.g. 'retrv1')")
+    ap.add_argument("--answer-prompt", choices=("ku", "compose"), default="ku",
+                    help="answer system prompt: 'ku' = longmemeval_bench "
+                         "verbatim (default, LME-V1 comparable); 'compose' = "
+                         "the composition-aware module-list prompt")
+    ap.add_argument("--reanswer-from", default="",
+                    help="re-run ONLY answer/judge over the persisted contexts "
+                         "of an earlier run's tag (no ingest, no dreams)")
     args = ap.parse_args()
 
     if args.out_tag:
@@ -811,9 +871,16 @@ def main() -> int:
     if args.report:
         report()
         return 0
+    answer_system = _V2_ANSWER_SYSTEM if args.answer_prompt == "compose" else None
+    if args.reanswer_from:
+        if not args.out_tag:
+            sys.exit("--reanswer-from requires --out-tag (don't overwrite the source)")
+        reanswer(args.reanswer_from, answer_system)
+        report()
+        return 0
     retrv = {"bm25": args.bm25, "rerank": args.rerank,
              "lexical_cortex": args.lexical_cortex}
-    run_smoke(args.limit, args.max_trajectories, retrv)
+    run_smoke(args.limit, args.max_trajectories, retrv, answer_system)
     report()
     return 0
 
