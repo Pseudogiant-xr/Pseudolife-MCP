@@ -6,6 +6,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-20 — LongMemEval-V2 Fix E: documented-protocol extraction + answer-format anchoring)
+- **LME-V2 smoke: third extraction claim kind — DOCUMENTED PROTOCOL** (evals-only).
+  Fix D put the article body in front of the extractor, but the Fix-B trajectory
+  prompt said "exactly two kinds of claim and nothing else" (click-path
+  workflows + affordances), so the extractor *correctly* discarded document
+  prose — and `procedure` gold answers follow the documented protocol
+  (Reports → Problems), not the agent's enacted clicks (Knowledge Search →
+  Problems). `[article]` notes now yield an
+  `entity=<protocol title> / attribute='documented procedure (modules in
+  order)'` claim mapping prose steps to canonical navigator module names.
+- **Compose answer prompt: protocol authority + worked example + headroom.** A
+  named protocol's documented procedure is declared authoritative over enacted
+  click-paths; the format section now cooperates with the benchmark's own
+  `\boxed{}` convention (the scorer extracts boxed text first) instead of
+  forbidding explanations qwen ignored anyway, anchored by a tiny worked
+  example showing duplicate-module dropping and boxed termination; compose
+  answers get `max_tokens=2048` (256 truncated mid-reasoning).
+- **Result (question `025db8ef`, full 100-trajectory haystack, bm25+rerank+
+  lexical-cortex):** all three arms flip 0.000 → **1.000** on both the
+  deterministic scorer and the judge (`fixe-compose3` tag). Cortex/hybrid
+  answer straight from the documented-procedure fact in 3–4 s; rag composes
+  the same answer from raw task turns in ~25 s. The n=1 diagnosis chain is
+  closed; next step is the wider procedure-question slice.
+
 ### Changed (2026-07-20 — LongMemEval-V2 Fix D: capture knowledge-article body text)
 - **LME-V2 adapter now captures ServiceNow KB *article body text*** (evals-only;
   no product behavior change). Fix A distilled each state to title + landmark

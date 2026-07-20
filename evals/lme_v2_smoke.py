@@ -106,7 +106,7 @@ _TRAJECTORY_SYSTEM_PROMPT = (
     "clicked and the page title/headers it saw. Output JSON only: "
     '{"claims":[{"entity":..,"attribute":..,"value":..,"confidence":0..1,'
     '"source":<number of the step the claim came from>}]}.\n'
-    "Extract exactly two kinds of claim and nothing else:\n"
+    "Extract exactly three kinds of claim and nothing else:\n"
     "1. PROCEDURE (workflow) claim — for the task the trajectory pursues, the "
     "ordered MODULES/PAGES the workflow moves through. entity = the task type, "
     "a short stable phrase (e.g. 'reassign incidents by assignment group'); "
@@ -117,6 +117,16 @@ _TRAJECTORY_SYSTEM_PROMPT = (
     "2. ENVIRONMENT/AFFORDANCE claim — for a module or page the agent used, what "
     "it is FOR or what it reaches. entity = the module/page name; attribute = "
     "one of 'purpose' | 'contains' | 'reached via'; value = the concise fact.\n"
+    "3. DOCUMENTED PROTOCOL claim — a note framed '[article] <title>: <body>' is "
+    "a knowledge-base DOCUMENT the agent read, not agent activity. Extract the "
+    "procedure the DOCUMENT prescribes, which may differ from what the agent "
+    "then clicked. entity = the protocol title, shortened (e.g. 'Agent Workload "
+    "Balancing' from '[article] Company Protocols - Agent Workload Balancing'); "
+    "attribute = 'documented procedure (modules in order)'; value = the ordered "
+    "short module/page names the document says to work through, mapped to their "
+    "canonical navigator names (e.g. 'access the list of reports' -> 'Reports'; "
+    "'open the problem and re-assign it' -> 'Problems'), separated by '; '. Emit "
+    "ONE such claim per [article] note.\n"
     "Read the goal plus the ordered visited/clicked labels and emit the "
     "WORKFLOW, not the narrative. DROP click-by-click detail: individual clicks, "
     "typing, focus changes, transient UI state, and one-off values are not "
@@ -475,18 +485,32 @@ You answer questions about how to perform tasks in a software environment,
 using ONLY the memory context provided.
 
 The context holds procedural memory from past task executions: 'typical
-workflow (modules used (in order))' facts, module-purpose facts, and raw
-navigation snippets. The question may describe a task that NO stored
+workflow (modules used (in order))' facts, 'documented procedure (modules in
+order)' facts distilled from company protocol documents, module-purpose
+facts, and raw navigation snippets. When the question says to follow a NAMED
+company protocol, that protocol's 'documented procedure' fact is
+authoritative — prefer it over any 'typical workflow' click-path recorded
+for the same task. The question may also describe a task that NO stored
 workflow matches verbatim. In that case, COMPOSE the procedure from
 components: first work out what information the task needs and which module
 provides it (see the module-purpose facts), then which module carries out
 the action. A workflow for a related task can lend its structure.
 
-Answer format: output ONLY the module names, in order of use, separated by
-'; '. Use each module's short canonical navigator name (e.g. 'Reports',
-'Problems', 'Incidents') — not page or record variants ('Problems list',
-'Problem record' -> 'Problems'). No explanations, no extra words. If the
-context contains nothing relevant to the task, answer exactly: I don't know."""
+Answer format: reason briefly if you must, then END with the final answer in
+the exact form the question requests (inside \\boxed{} when asked). The final
+answer is ONLY the module names, in order of use, separated by '; '. Use each
+module's short canonical navigator name (e.g. 'Reports', 'Problems',
+'Incidents') — not page or record variants ('Problems list', 'Problem
+record' -> 'Problems'). Never repeat a module name; if the question asks for
+N modules, give exactly N. Keep reasoning to at most three short sentences —
+then STOP and give the final answer. If the context contains nothing
+relevant to the task, answer exactly: I don't know.
+
+Example. Question: what two modules do we use, in order, to fulfil a catalog
+order? Answer in \\boxed{}. Context: 'Order Fulfilment — documented procedure
+(modules in order): Catalog; Requests; Requests'. Correct output:
+The documented procedure is Catalog then Requests (duplicate dropped).
+\\boxed{Catalog; Requests}"""
 
 
 def answer_judge_score(row: dict, answer_system: str | None = None) -> dict:
@@ -499,12 +523,15 @@ def answer_judge_score(row: dict, answer_system: str | None = None) -> dict:
     from longmemeval_bench import (_chat, _ANSWER_SYSTEM, _JUDGE_SYSTEM)
     from ladder_sweep import approx_tokens
     system = answer_system if answer_system is not None else _ANSWER_SYSTEM
+    # The compose prompt permits brief reasoning before the boxed answer, so
+    # it needs headroom the terse KU prompt does not (256 truncates mid-reason).
+    answer_max_tokens = 2048 if answer_system is not None else 256
     for arm in ARMS:
         ctx = row["contexts"].get(arm, "")
         prompt = (f"Question: {row['question']}\n\n"
                   f"Memory context:\n{ctx or '(empty)'}")
         t0 = time.perf_counter()
-        response = _chat(system, prompt)
+        response = _chat(system, prompt, max_tokens=answer_max_tokens)
         row[f"{arm}_answer_seconds"] = round(time.perf_counter() - t0, 2)
         row[f"{arm}_response"] = response
         # Primary: LME-V2's own deterministic scorer over the eval_function spec.
