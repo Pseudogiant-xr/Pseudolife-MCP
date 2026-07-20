@@ -525,6 +525,9 @@ def answer_judge_score(row: dict, answer_system: str | None = None) -> dict:
     system = answer_system if answer_system is not None else _ANSWER_SYSTEM
     # The compose prompt permits brief reasoning before the boxed answer, so
     # it needs headroom the terse KU prompt does not (256 truncates mid-reason).
+    # 2048, not more: a 4096 A/B (slice1-compose4k) scored WORSE (hybrid
+    # 0.70 -> 0.60) — extra rope lets the answerer talk itself out of correct
+    # answers more often than it rescues truncated deliberations.
     answer_max_tokens = 2048 if answer_system is not None else 256
     for arm in ARMS:
         ctx = row["contexts"].get(arm, "")

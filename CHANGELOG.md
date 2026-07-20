@@ -38,6 +38,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (0.705). One llama-server crash mid-run (WinError 10054) was caught by the
   probe-gated abort and the run resumed losslessly from its per-question
   JSONL cursor.
+- **3-replicate aggregate (`slice1` / `-r2` / `-r3`, `slice1.agg.json`):**
+  KU prompt rag 0.300 [0.30–0.30] / cortex 0.167 [0.00–0.30] / **hybrid
+  0.533 [0.50–0.60]**; compose prompt rag 0.500 [0.40–0.60] / cortex 0.233
+  [0.10–0.30] / **hybrid 0.633 [0.60–0.70]**. Hybrid beats both single
+  channels in every replicate under both prompts; rag is the most stable
+  arm, cortex the most run-to-run volatile (extraction nondeterminism —
+  llama-server generation varies across runs even at temperature 0). A
+  4096-token answer A/B (`slice1-compose4k`) scored WORSE than 2048 (hybrid
+  0.60 vs 0.70) — extra deliberation rope hurts more than truncation; the
+  compose cap stays 2048. Remaining failure classes are content-class
+  limits, not harness bugs: form-field-inventory MC (`07ffeedf`),
+  click-level navigation-detail MC (`100ff132` — detail the extraction
+  prompt deliberately drops as non-durable), and cross-workflow comparison
+  with non-converging deliberation (`4df5e6b4`). llama-server died 4× across
+  the replicate campaign (~60–90 min sustained-ingest pattern); every crash
+  was caught by the probe-gated abort and resumed losslessly.
 
 ### Changed (2026-07-20 — LongMemEval-V2 Fix D: capture knowledge-article body text)
 - **LME-V2 adapter now captures ServiceNow KB *article body text*** (evals-only;
