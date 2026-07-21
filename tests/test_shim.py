@@ -222,6 +222,80 @@ def test_post_episode_is_best_effort(monkeypatch):
                        {"session_key": "x", "title": "t"})
 
 
+def test_spawn_daemon_never_allocates_a_console_window(monkeypatch):
+    """The auto-started daemon must not cost the user a window.
+
+    ``DETACHED_PROCESS`` gives the child no console but leaves it *needing*
+    one, and on Windows 11 with Windows Terminal as the default terminal app
+    WT takes that allocation and opens a real window that steals foreground
+    focus — the same finding ops/install-shim-autostart.ps1 recorded live on
+    2026-07-12. Measured here 2026-07-21 with a window watcher over a real
+    suite run: three ``test_shim`` daemon spawns produced three focus-stealing
+    ``WindowsTerminal.exe`` windows; swapping the flag to ``CREATE_NO_WINDOW``
+    produced zero, with detachment (child outlives its spawner) intact.
+    """
+    if sys.platform != "win32":
+        pytest.skip("windows-only console-allocation semantics")
+    from pseudolife_memory import shim
+
+    seen: dict = {}
+
+    def fake_popen(argv, **kwargs):
+        seen["kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr(shim.subprocess, "Popen", fake_popen)
+    shim.spawn_daemon()
+
+    flags = seen["kwargs"]["creationflags"]
+    assert not flags & subprocess.DETACHED_PROCESS, (
+        "DETACHED_PROCESS defers console allocation to the default terminal "
+        "app, which opens a focus-stealing window")
+    assert flags & subprocess.CREATE_NO_WINDOW, (
+        "CREATE_NO_WINDOW skips console allocation entirely")
+    # Still its own group: Ctrl+C in the caller's console must not reach it.
+    assert flags & subprocess.CREATE_NEW_PROCESS_GROUP
+
+
+def test_shipped_package_never_spawns_with_detached_process():
+    """Guard the class, not just today's one site.
+
+    The 2026-07-20 pass added CREATE_NO_WINDOW to the *test files'* own daemon
+    spawns but left ``shim.spawn_daemon`` on DETACHED_PROCESS, so the windows
+    came straight back — the shipped shim was the actual source all along.
+    Any future spawn in the package has to make the same choice.
+    """
+    import io
+    import tokenize
+    from pathlib import Path
+
+    def _code_only(path: Path) -> str:
+        """Source with comments and strings dropped.
+
+        The flag name is legitimate in a comment explaining why it is not
+        used — only a real reference to it should fail this guard.
+        """
+        src = path.read_text(encoding="utf-8", errors="ignore")
+        try:
+            return " ".join(
+                t.string
+                for t in tokenize.generate_tokens(io.StringIO(src).readline)
+                if t.type not in (tokenize.COMMENT, tokenize.STRING)
+            )
+        except (tokenize.TokenError, IndentationError):  # pragma: no cover
+            return src
+
+    pkg = Path(__file__).resolve().parents[1] / "pseudolife_memory"
+    offenders = sorted(
+        p.relative_to(pkg.parent).as_posix()
+        for p in pkg.rglob("*.py")
+        if "DETACHED_PROCESS" in _code_only(p)
+    )
+    assert offenders == [], (
+        f"DETACHED_PROCESS in shipped code: {offenders} — use "
+        f"CREATE_NO_WINDOW so no console window is ever allocated")
+
+
 def _reap_daemon(port: int) -> None:
     """Best-effort cleanup of the detached daemon the shim auto-spawned."""
     import urllib.request

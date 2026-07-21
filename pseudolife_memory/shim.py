@@ -47,8 +47,15 @@ def spawn_daemon() -> None:
         "close_fds": True,
     }
     if sys.platform == "win32":
+        # CREATE_NO_WINDOW, not DETACHED_PROCESS: both keep the daemon off the
+        # caller's console, but DETACHED_PROCESS leaves it *needing* one, and
+        # Windows 11 hands that allocation to the default terminal app —
+        # Windows Terminal then opens a real window and steals foreground
+        # focus (same finding as ops/install-shim-autostart.ps1, 2026-07-12).
+        # CREATE_NO_WINDOW skips console allocation entirely; the child still
+        # outlives its spawner.
         kwargs["creationflags"] = (
-            subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+            subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
         )
     else:  # pragma: no cover - windows deployment
         kwargs["start_new_session"] = True
