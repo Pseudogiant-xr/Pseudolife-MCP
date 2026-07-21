@@ -502,7 +502,7 @@ posture beats naive RAG by ~14 points while reading ~60% of the context:
 | arm | accuracy (mean ± std) | context tokens/question |
 |-----|----------------------|------------------------|
 | naive RAG (top-6 turns) | 0.567 ± 0.017 | 1638 |
-| cortex facts only | 0.559 ± 0.030 | **~60** |
+| cortex facts only | 0.559 ± 0.029 | **~60** |
 | **hybrid (facts + top-3 turns)** | **0.710 ± 0.019** | ~1000 |
 
 The fact spine alone matches RAG's accuracy on **under 4% of its token
