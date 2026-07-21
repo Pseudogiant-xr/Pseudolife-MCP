@@ -6,6 +6,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-07-21 — the auto-started daemon no longer steals foreground focus)
+- **`shim.spawn_daemon` now spawns with `CREATE_NO_WINDOW`, not
+  `DETACHED_PROCESS`.** Both keep the daemon off the caller's console, but
+  `DETACHED_PROCESS` leaves the child *needing* a console, and Windows 11
+  hands that allocation to the configured default terminal app — Windows
+  Terminal then opens a real window that takes foreground. Every shim
+  auto-start cost the user a stolen window, in tests and in daily use alike.
+- The 2026-07-20 pass (#24) treated this as a test-harness problem and added
+  `CREATE_NO_WINDOW` to the three `subprocess.Popen` daemon spawns in
+  `test_daemon_http.py` / `test_writer_keying.py`. Those spawns were never
+  the source: the windows came from the *shipped* shim, which the suite
+  reaches through `test_shim.py`'s three auto-start tests. Instrumenting a
+  real suite run with a window watcher attributed all three focus-stealing
+  `WindowsTerminal.exe` windows to that one path; a flag matrix over the
+  exact `spawn_daemon` call then measured `DETACHED_PROCESS` → 2 visible
+  windows per spawn and `CREATE_NO_WINDOW` → 0, with detachment (the child
+  outliving its spawner) confirmed intact. Same conclusion
+  `ops/install-shim-autostart.ps1` reached live on 2026-07-12 for the Sonnet
+  shim — the shipped Python spawner had simply never been brought in line.
+- Pinned by two tests in `tests/test_shim.py`: a behavioural one asserting
+  the flags `spawn_daemon` actually passes, and a package-wide guard that
+  fails on any `DETACHED_PROCESS` *use* in `pseudolife_memory/` (comments
+  explaining the choice are tokenized out, so documenting the flag stays
+  legal). The guard exists because the previous fix's site-by-site scope is
+  exactly what let the real caller slip through.
+
 ### Added (2026-07-21 — published benchmark numbers are pinned to committed evidence)
 - **`tests/test_eval_evidence.py` fails the suite when a published number has
   no committed artifact behind it.** Every benchmark claim in the README and
