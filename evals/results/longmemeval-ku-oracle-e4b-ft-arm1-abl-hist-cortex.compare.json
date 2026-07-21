@@ -1,0 +1,12 @@
+{
+  "delta": -0.0103,
+  "p_value": 0.53105,
+  "n_questions": 78,
+  "arm": "cortex",
+  "a": "e4b-ft/arm1-abl-continuum-hist",
+  "b": "e4b-ft/arm1-abl-flat-hist",
+  "a_mean": 0.67436,
+  "a_std": 0.023288151493839074,
+  "b_mean": 0.68462,
+  "b_std": 0.011448668044798953
+}

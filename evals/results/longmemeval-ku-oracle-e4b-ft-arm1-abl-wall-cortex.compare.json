@@ -1,0 +1,12 @@
+{
+  "delta": 0.0077,
+  "p_value": 0.75742,
+  "n_questions": 78,
+  "arm": "cortex",
+  "a": "e4b-ft/arm1-abl-continuum-wall",
+  "b": "e4b-ft/arm1-abl-flat-wall",
+  "a_mean": 0.6846,
+  "a_std": 0.02328540315304846,
+  "b_mean": 0.67692,
+  "b_std": 0.037795264253607234
+}

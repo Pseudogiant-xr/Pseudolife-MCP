@@ -1,0 +1,12 @@
+{
+  "delta": -0.0231,
+  "p_value": 0.24238,
+  "n_questions": 78,
+  "arm": "hybrid",
+  "a": "e4b-ft/arm1-abl-continuum-wall",
+  "b": "e4b-ft/arm1-abl-flat-wall",
+  "a_mean": 0.7743599999999999,
+  "a_std": 0.021466322461008554,
+  "b_mean": 0.79746,
+  "b_std": 0.014021697472132229
+}

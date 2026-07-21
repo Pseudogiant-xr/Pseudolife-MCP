@@ -1,0 +1,53 @@
+{
+  "n_replicates": 5,
+  "replicates": [
+    "arm1-abl-flat-wall",
+    "arm1-abl-flat-wall-r2",
+    "arm1-abl-flat-wall-r3",
+    "arm1-abl-flat-wall-r4",
+    "arm1-abl-flat-wall-r5"
+  ],
+  "n_questions": 78,
+  "arms": {
+    "rag": {
+      "accuracies": [
+        0.6538,
+        0.6923,
+        0.6538,
+        0.6282,
+        0.6154
+      ],
+      "mean": 0.6487,
+      "std": 0.02950474538104001
+    },
+    "cortex": {
+      "accuracies": [
+        0.7051,
+        0.6154,
+        0.7051,
+        0.6923,
+        0.6667
+      ],
+      "mean": 0.67692,
+      "std": 0.037795264253607234
+    },
+    "hybrid": {
+      "accuracies": [
+        0.8077,
+        0.7821,
+        0.7821,
+        0.8077,
+        0.8077
+      ],
+      "mean": 0.79746,
+      "std": 0.014021697472132229
+    }
+  },
+  "source_files": [
+    "longmemeval-ku-oracle-e4b-ft-arm1-abl-flat-wall.jsonl",
+    "longmemeval-ku-oracle-e4b-ft-arm1-abl-flat-wall-r2.jsonl",
+    "longmemeval-ku-oracle-e4b-ft-arm1-abl-flat-wall-r3.jsonl",
+    "longmemeval-ku-oracle-e4b-ft-arm1-abl-flat-wall-r4.jsonl",
+    "longmemeval-ku-oracle-e4b-ft-arm1-abl-flat-wall-r5.jsonl"
+  ]
+}

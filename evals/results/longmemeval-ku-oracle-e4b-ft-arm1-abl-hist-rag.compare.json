@@ -1,0 +1,12 @@
+{
+  "delta": -0.0897,
+  "p_value": 0.015,
+  "n_questions": 78,
+  "arm": "rag",
+  "a": "e4b-ft/arm1-abl-continuum-hist",
+  "b": "e4b-ft/arm1-abl-flat-hist",
+  "a_mean": 0.5641,
+  "a_std": 0.020238577025077628,
+  "b_mean": 0.65384,
+  "b_std": 0.02565000974658685
+}
