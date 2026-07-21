@@ -1,0 +1,53 @@
+{
+  "n_replicates": 5,
+  "replicates": [
+    "arm1-abl-continuum-wall",
+    "arm1-abl-continuum-wall-r2",
+    "arm1-abl-continuum-wall-r3",
+    "arm1-abl-continuum-wall-r4",
+    "arm1-abl-continuum-wall-r5"
+  ],
+  "n_questions": 78,
+  "arms": {
+    "rag": {
+      "accuracies": [
+        0.5897,
+        0.5769,
+        0.5769,
+        0.5641,
+        0.6026
+      ],
+      "mean": 0.58204,
+      "std": 0.014629354052725637
+    },
+    "cortex": {
+      "accuracies": [
+        0.6795,
+        0.6795,
+        0.6538,
+        0.7179,
+        0.6923
+      ],
+      "mean": 0.6846,
+      "std": 0.02328540315304846
+    },
+    "hybrid": {
+      "accuracies": [
+        0.7564,
+        0.8077,
+        0.7564,
+        0.7692,
+        0.7821
+      ],
+      "mean": 0.7743599999999999,
+      "std": 0.021466322461008554
+    }
+  },
+  "source_files": [
+    "longmemeval-ku-oracle-e4b-ft-arm1-abl-continuum-wall.jsonl",
+    "longmemeval-ku-oracle-e4b-ft-arm1-abl-continuum-wall-r2.jsonl",
+    "longmemeval-ku-oracle-e4b-ft-arm1-abl-continuum-wall-r3.jsonl",
+    "longmemeval-ku-oracle-e4b-ft-arm1-abl-continuum-wall-r4.jsonl",
+    "longmemeval-ku-oracle-e4b-ft-arm1-abl-continuum-wall-r5.jsonl"
+  ]
+}

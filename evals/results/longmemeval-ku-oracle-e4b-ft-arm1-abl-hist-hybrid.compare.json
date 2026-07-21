@@ -1,0 +1,14 @@
+{
+  "delta": 0.0179,
+  "p_value": 0.47385,
+  "n_questions": 78,
+  "arm": "hybrid",
+  "a": "e4b-ft/arm1-abl-continuum-hist",
+  "b": "e4b-ft/arm1-abl-flat-hist",
+  "a_mean": 0.78464,
+  "a_std": 0.027786651471524947,
+  "b_mean": 0.76668,
+  "b_std": 0.02294486870740384,
+  "permutations": 10000,
+  "seed": 0
+}

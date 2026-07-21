@@ -268,6 +268,58 @@ def test_cli_agg_rejects_unjudged_only(tmp_path):
                         "--results-dir", str(tmp_path)])
 
 
+def _seed_two_judged(tmp_path, tag, correct=True):
+    for t in (tag, f"{tag}-r2"):
+        _write_jsonl(replicate.result_file("oracle", "e4b-ft", t, tmp_path),
+                     [_row("q0", correct=correct), _row("q1"), _row("q2")])
+
+
+def test_cli_compare_persists_result_to_out(tmp_path):
+    """A p-value that only ever reaches stdout cannot back a published claim.
+
+    The band-ablation significance table shipped with no artifact at all
+    because `compare` printed and forgot (2026-07-21 audit).
+    """
+    _seed_two_judged(tmp_path, "a")
+    _seed_two_judged(tmp_path, "b", correct=False)
+    out = tmp_path / "a-vs-b-cortex.compare.json"
+    rc = replicate.main(["compare", "--extractor", "e4b-ft", "--tag", "a",
+                         "--b-tag", "b", "--arm", "cortex",
+                         "--out", str(out),
+                         "--results-dir", str(tmp_path)])
+    assert rc == 0
+    saved = json.loads(out.read_text(encoding="utf-8"))
+    assert saved["arm"] == "cortex"
+    assert saved["a"] == "e4b-ft/a" and saved["b"] == "e4b-ft/b"
+    assert "delta" in saved and "p_value" in saved
+    assert saved["n_questions"] == 3
+
+
+def test_cli_compare_records_its_own_reproducibility_knobs(tmp_path):
+    """A permutation p-value is only reproducible if the artifact says how
+    it was drawn — the defaults are not self-evident to a later reader."""
+    _seed_two_judged(tmp_path, "a")
+    _seed_two_judged(tmp_path, "b", correct=False)
+    out = tmp_path / "cmp.json"
+    replicate.main(["compare", "--extractor", "e4b-ft", "--tag", "a",
+                    "--b-tag", "b", "--arm", "cortex",
+                    "--seed", "7", "--permutations", "500",
+                    "--out", str(out), "--results-dir", str(tmp_path)])
+    saved = json.loads(out.read_text(encoding="utf-8"))
+    assert saved["permutations"] == 500
+    assert saved["seed"] == 7
+
+
+def test_cli_compare_still_prints_without_out(tmp_path, capsys):
+    _seed_two_judged(tmp_path, "a")
+    _seed_two_judged(tmp_path, "b", correct=False)
+    rc = replicate.main(["compare", "--extractor", "e4b-ft", "--tag", "a",
+                         "--b-tag", "b", "--arm", "cortex",
+                         "--results-dir", str(tmp_path)])
+    assert rc == 0
+    assert "p_value" in json.loads(capsys.readouterr().out)
+
+
 def test_cli_run_dry_run(tmp_path, capsys):
     _seed_base(tmp_path)                                   # judged base
     _write_jsonl(replicate.result_file("oracle", "e4b-ft", "arm1-r2",

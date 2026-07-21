@@ -27,7 +27,7 @@ extractor (5 replicates, 2026-07-19 context-persisted bank):
 | arm | accuracy (mean ± std) | context tokens/question |
 |-----|----------------------|------------------------|
 | naive RAG (top-6 turns) | 0.567 ± 0.017 | 1638 |
-| cortex facts only | 0.559 ± 0.030 | **~60** |
+| cortex facts only | 0.559 ± 0.029 | **~60** |
 | **hybrid (facts + top-3 turns)** | **0.710 ± 0.019** | ~1000 |
 
 The consolidated-facts posture beats naive RAG by ~14 points while

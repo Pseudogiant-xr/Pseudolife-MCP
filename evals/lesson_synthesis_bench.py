@@ -462,7 +462,20 @@ TARGETS = {
 }
 
 
-def main() -> None:
+def write_result(result: dict, path: Path) -> Path:
+    """Persist a bench result so a published number has evidence behind it.
+
+    Both rungs used to print and forget, which is how the `--infer` scores
+    reached the CHANGELOG with no artifact anywhere in the repo. Guarded by
+    tests/test_eval_evidence.py.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(result, indent=2, ensure_ascii=False),
+                    encoding="utf-8")
+    return path
+
+
+def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser()
     ap.add_argument("--target", default="all", help="gemma | qwen-27b | all")
     ap.add_argument("--gemma-url", default=os.environ.get("GEMMA_URL"))
@@ -474,11 +487,23 @@ def main() -> None:
                     help="with --infer: print fixtures and exit, no import/network")
     ap.add_argument("--infer-url", default=os.environ.get("INFER_URL"))
     ap.add_argument("--infer-model", default=os.environ.get("INFER_MODEL"))
-    args = ap.parse_args()
+    ap.add_argument("--out", type=Path, default=None,
+                    help="write the result JSON here (evals/results/...); "
+                         "any score you intend to publish needs one")
+    return ap
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = build_parser().parse_args(argv)
 
     if args.infer:
         if args.dry_run:
             print_infer_dry_run()
+            if args.out:
+                write_result({"rung": "infer", "dry_run": True,
+                              "n_fixtures": len(INFER_FIXTURES),
+                              "fixtures": [f["name"] for f in INFER_FIXTURES]},
+                             args.out)
             return
         base_url, model = args.infer_url, args.infer_model
         if not base_url:
@@ -494,6 +519,8 @@ def main() -> None:
                     "start an extractor endpoint or pass --dry-run")
         result = run_infer(base_url, model or "extractor")
         print_infer_report(result)
+        if args.out:
+            write_result(result, args.out)
         return
 
     if args.gemma_url:
@@ -524,6 +551,8 @@ def main() -> None:
                   f"checks={[{k: v for k, v in c.items() if k != 'about'} for c in r['checks']]}")
     print("\n===JSON===")
     print(json.dumps(out, ensure_ascii=False))
+    if args.out:
+        write_result(out, args.out)
 
 
 if __name__ == "__main__":

@@ -239,7 +239,13 @@ def cmd_compare(args) -> int:
         "a_std": a_agg["arms"][args.arm]["std"],
         "b_mean": b_agg["arms"][args.arm]["mean"],
         "b_std": b_agg["arms"][args.arm]["std"],
+        # The draw is what makes a permutation p-value reproducible; a
+        # persisted artifact that omits it cannot be re-derived later.
+        "permutations": args.permutations,
+        "seed": args.seed,
     })
+    if args.out:
+        args.out.write_text(json.dumps(result, indent=2), encoding="utf-8")
     print(json.dumps(result))
     return 0
 
@@ -398,6 +404,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--arm", choices=ARMS, default="cortex")
     p.add_argument("--permutations", type=int, default=10000)
     p.add_argument("--seed", type=int, default=0)
+    # Any comparison whose p-value gets published needs an artifact behind
+    # it — stdout is not evidence (tests/test_eval_evidence.py enforces it).
+    p.add_argument("--out", type=Path, default=None,
+                   help="also write the result JSON here")
     p.set_defaults(fn=cmd_compare)
 
     p = sub.add_parser("gate-check", help="replicate means vs baseline")

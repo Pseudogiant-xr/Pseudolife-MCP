@@ -58,6 +58,31 @@ entries, a cached view of the graph, a memoized score):
   regression). Extraction/dream-path changes re-run the ladder instead —
   the gate deliberately does not cover them.
 
+## Publishing a benchmark number
+
+Whether a number is *right* needs a GPU and stays a human gate. Whether it
+is *backed* is pure parsing, and `tests/test_eval_evidence.py` enforces it —
+add a row there in the same change that adds the claim to the docs.
+
+- **Commit the artifact with the claim.** A number whose evidence lives only
+  in a terminal or an untracked working-copy file was never really measured:
+  nothing contradicts it, so no guard test and no currency pass will ever
+  surface it. Both audits (2026-07-17, 2026-07-21) found this same failure —
+  the band-ablation significance table shipped with all five replicates
+  untracked and no comparison artifact at all.
+- **Every bench writes a file.** `replicate.py compare` and
+  `lesson_synthesis_bench.py` both took `--out` retroactively because they
+  printed and forgot. New harnesses persist by default.
+- **A p-value needs its own artifact** — an aggregate of means cannot
+  justify a significance claim.
+- **Retire numbers at the old site, not just the new one.** The retired
+  0.705 came back in a CHANGELOG entry written *after* its retirement,
+  because the retirement note lived in a different file. Mark the superseded
+  number where a reader will meet it.
+- **Never overwrite a canonical result file on a rerun** — tag the run and
+  promote deliberately. A v2 prompt run silently rewrote `sonnet-5.json`
+  while also writing its own tagged file (2026-07-21).
+
 ## Release / publish procedure (four public surfaces)
 
 GitHub releases, PyPI, the MCP registry, and the Claude Code plugin

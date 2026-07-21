@@ -1,0 +1,53 @@
+{
+  "n_replicates": 5,
+  "replicates": [
+    "arm1-abl-continuum-hist",
+    "arm1-abl-continuum-hist-r2",
+    "arm1-abl-continuum-hist-r3",
+    "arm1-abl-continuum-hist-r4",
+    "arm1-abl-continuum-hist-r5"
+  ],
+  "n_questions": 78,
+  "arms": {
+    "rag": {
+      "accuracies": [
+        0.5513,
+        0.5385,
+        0.5769,
+        0.5897,
+        0.5641
+      ],
+      "mean": 0.5641,
+      "std": 0.020238577025077628
+    },
+    "cortex": {
+      "accuracies": [
+        0.6795,
+        0.6667,
+        0.6795,
+        0.7051,
+        0.641
+      ],
+      "mean": 0.67436,
+      "std": 0.023288151493839074
+    },
+    "hybrid": {
+      "accuracies": [
+        0.8205,
+        0.7821,
+        0.7821,
+        0.7436,
+        0.7949
+      ],
+      "mean": 0.78464,
+      "std": 0.027786651471524947
+    }
+  },
+  "source_files": [
+    "longmemeval-ku-oracle-e4b-ft-arm1-abl-continuum-hist.jsonl",
+    "longmemeval-ku-oracle-e4b-ft-arm1-abl-continuum-hist-r2.jsonl",
+    "longmemeval-ku-oracle-e4b-ft-arm1-abl-continuum-hist-r3.jsonl",
+    "longmemeval-ku-oracle-e4b-ft-arm1-abl-continuum-hist-r4.jsonl",
+    "longmemeval-ku-oracle-e4b-ft-arm1-abl-continuum-hist-r5.jsonl"
+  ]
+}

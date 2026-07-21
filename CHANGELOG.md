@@ -6,6 +6,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-21 — published benchmark numbers are pinned to committed evidence)
+- **`tests/test_eval_evidence.py` fails the suite when a published number has
+  no committed artifact behind it.** Every benchmark claim in the README and
+  `docs/guide/benchmarks.md` now names the result file it came from, and the
+  guard asserts three things: the artifact is git-tracked (a working-copy-only
+  file counts as missing, which is exactly what a fresh clone sees), its value
+  matches the doc to the published precision, and the guarded doc text still
+  exists — without that last check a reword would leave the guard green and
+  guarding nothing. Whether a number is *right* still needs a GPU and stays a
+  human gate; whether it is *backed* is pure parsing, so it runs here.
+- **The band-ablation evidence is now in the repo.** Its significance claim
+  (naive RAG under `hist`, −0.090 at p = 0.015) rested on 16 untracked
+  replicate files, four tracked base files carrying no scoring fields at all,
+  and no comparison artifact whatsoever — one `git checkout .` from being
+  unreproducible anywhere. All 40 files plus six generated comparisons are
+  committed; every one reproduces the published table exactly.
+- **`replicate.py compare` and `lesson_synthesis_bench.py` take `--out`.** Both
+  printed their results and forgot them, which is how the `--infer` rung's
+  scores reached this changelog with nothing standing behind them. Comparison
+  artifacts also record `permutations` and `seed`, without which a permutation
+  p-value cannot be re-derived.
+
+### Fixed (2026-07-21 — a double-rounded standard deviation on the front door)
+- **The local-ceiling table published `cortex 0.559 ± 0.030`; the aggregate
+  says `0.02949…`, which rounds to `0.029`.** Corrected in the README and
+  `docs/guide/benchmarks.md`. The evidence guard above found it on its first
+  run, against a number nobody had thought to question.
+
 ## [0.10.0] - 2026-07-21 — documented vs enacted: the dream pass learns what your documents prescribe
 
 The dream pass now captures **what a document you shared prescribes** as a
