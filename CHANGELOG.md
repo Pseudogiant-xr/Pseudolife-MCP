@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-21 — the extractor ladder refuses to clobber canonical results)
+- **`evals/ladder_sweep.py` never overwrites an existing result file in
+  place.** An untagged rerun of a rung whose `evals/results/<rung>.json`
+  already exists now exits up front — *before* the hours-long run starts —
+  with instructions to pass the new `--out-tag <tag>` flag, which writes
+  `<rung>-<tag>.json` alongside the canonical file for deliberate promotion.
+  The same guard covers the `--abstain` / `--supersede` sub-sweep outputs.
+  This is the code-level enforcement of the "never overwrite a canonical
+  result file on a rerun" rule, written after a rerun silently rewrote
+  `sonnet-5.json`'s timing fields in place (2026-07-21); pinned by
+  `tests/test_eval_ladder_sweep.py`.
+
 ### Fixed (2026-07-21 — the auto-started daemon no longer steals foreground focus)
 - **`shim.spawn_daemon` now spawns with `CREATE_NO_WINDOW`, not
   `DETACHED_PROCESS`.** Both keep the daemon off the caller's console, but
@@ -146,7 +158,8 @@ either channel alone in every replicate).
   rag 0.50 / cortex 0.30 / **hybrid 0.70** — from 0.00 across every arm
   before Fixes A–E. Hybrid ≥ both single channels on both prompts; V2
   procedure hybrid 0.70 is in line with the V1 knowledge-update hybrid oracle
-  (0.705). One llama-server crash mid-run (WinError 10054) was caught by the
+  (0.705 — a since-retired unreplicable single run; the replicated band is
+  0.695 ± 0.017, see the 2026-07-18 entry below). One llama-server crash mid-run (WinError 10054) was caught by the
   probe-gated abort and the run resumed losslessly from its per-question
   JSONL cursor.
 - **3-replicate aggregate (`slice1` / `-r2` / `-r3`, `slice1.agg.json`):**

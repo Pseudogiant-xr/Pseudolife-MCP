@@ -628,15 +628,22 @@ def report() -> None:
 
 
 # ---------------------------------------------------------------------------
-def main() -> int:
-    # The report table uses Unicode glyphs (↑ ↓ ✓ —); the default Windows
-    # console codec (cp1252) can't encode them. Force UTF-8 so the tool prints
-    # cleanly regardless of platform / redirection.
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
+def resolve_out_path(base: Path, tag: str | None) -> Path:
+    """Where this run's result lands. A tag names a sibling file; untagged
+    runs may only CREATE the canonical file, never replace it — a rerun once
+    silently rewrote sonnet-5.json in place (2026-07-21). Promote a tagged
+    run by copying it over the canonical file deliberately."""
+    if tag:
+        return base.with_name(f"{base.stem}-{tag}{base.suffix}")
+    if base.exists():
+        raise SystemExit(
+            f"{base} already exists — rerun with --out-tag <tag> and "
+            "promote deliberately; canonical result files are never "
+            "overwritten in place")
+    return base
 
+
+def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--rung", choices=list(RUNGS), help="run one rung")
     ap.add_argument("--abstain", choices=list(RUNGS),
@@ -649,7 +656,22 @@ def main() -> int:
     ap.add_argument("--window", type=int, default=0,
                     help="known-facts window size for every service built "
                          "by this run (0 = off; spec 2026-07-10)")
-    args = ap.parse_args()
+    ap.add_argument("--out-tag", default=None,
+                    help="write results/<name>-<TAG>.json instead of the "
+                         "canonical file (required to rerun an existing one)")
+    return ap
+
+
+def main(argv: list[str] | None = None) -> int:
+    # The report table uses Unicode glyphs (↑ ↓ ✓ —); the default Windows
+    # console codec (cp1252) can't encode them. Force UTF-8 so the tool prints
+    # cleanly regardless of platform / redirection.
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
+    args = build_parser().parse_args(argv)
     global WINDOW
     WINDOW = args.window
 
@@ -664,19 +686,26 @@ def main() -> int:
         return 0
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    # Resolve the output path BEFORE the (hours-long) run so an untagged
+    # rerun is refused up front, not after the work is done.
     if args.abstain:
+        out_path = resolve_out_path(RESULTS_DIR / "abstain.json", args.out_tag)
         out = run_abstain(args.abstain)
-        (RESULTS_DIR / "abstain.json").write_text(json.dumps(out, indent=2))
+        out_path.write_text(json.dumps(out, indent=2))
         print(json.dumps(out, indent=2))
         return 0
     if args.supersede:
+        out_path = resolve_out_path(RESULTS_DIR / "supersede.json",
+                                    args.out_tag)
         out = run_supersede(args.supersede)
-        (RESULTS_DIR / "supersede.json").write_text(json.dumps(out, indent=2))
+        out_path.write_text(json.dumps(out, indent=2))
         print(json.dumps(out, indent=2))
         return 0
     if args.rung:
+        out_path = resolve_out_path(RESULTS_DIR / f"{args.rung}.json",
+                                    args.out_tag)
         out = run_rung(args.rung)
-        (RESULTS_DIR / f"{args.rung}.json").write_text(json.dumps(out, indent=2))
+        out_path.write_text(json.dumps(out, indent=2))
         print(json.dumps(out, indent=2))
         return 0
     ap.print_help()

@@ -507,7 +507,7 @@ posture beats naive RAG by ~14 points while reading ~60% of the context:
 
 The fact spine alone matches RAG's accuracy on **under 4% of its token
 budget** — and the shipped E4B fine-tune's replicated hybrid
-(0.762 ± 0.027) beats this 27B-class ceiling. Setup, caveats, and why extraction quality is the dominant
+(0.762 ± 0.027) beats this 27B-class ceiling. Setup, caveats, and the evidence that extraction quality is the dominant
 factor: [Benchmarks](docs/guide/benchmarks.md); full methodology:
 [`evals/README.md`](evals/README.md).
 
