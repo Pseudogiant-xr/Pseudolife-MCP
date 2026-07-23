@@ -6,6 +6,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-24 — write-side band ablation + overnight harness pair)
+- **evals**: `band_ablation.py` grew the write-side arm the read-side
+  ablation could not express: `replay --band-preset flat` re-runs ingest
+  through ONE flat band at the continuum's total capacity (5,250, or
+  `--flat-cap`), injected via a `config.yaml` the service reads at
+  construction and verified loudly (band count, `surprise_threshold`
+  pinned so the arms' configs differ **only** in `memory.miras` —
+  `tests/test_band_ablation_flat.py` proves the invariant). `rebuild
+  --band-preset flat` emits `wabl-flat-{wall,hist}` answer-phase JSONLs
+  plus a survival-stats artifact (per-question stored/survivor counts per
+  arm). Only meaningful on the `s` dataset: the 2026-07-24 probe measured
+  ~28% of stored turns evicted by the continuum there vs 0% flat, while
+  `oracle` (~23 turns/question) never evicts. `--src-tag ""` now
+  addresses untagged source runs (previously produced malformed
+  double-dash filenames).
+- **evals**: overnight harness pair for the two open research threads —
+  `overnight_lme_v2.ps1` (full 74-question V2 procedure slice, supervised
+  llama-server restarts, JSONL-cursor resume), `overnight_band_wabl.ps1`
+  (`-Phase cpu` replays/rebuilds alongside a GPU night on private bench
+  DBs; `-Phase answer` for the follow-up GPU window, compares written
+  with `--out` artifacts), plus `preflight_overnight.ps1` and
+  `overnight_status.ps1` (heartbeat/ledger checks). Runbook:
+  `docs/runbooks/overnight-band-wabl-and-lme-v2-slice2.md`.
+
 ### Changed (2026-07-21 — the extractor ladder refuses to clobber canonical results)
 - **`evals/ladder_sweep.py` never overwrites an existing result file in
   place.** An untagged rerun of a rung whose `evals/results/<rung>.json`

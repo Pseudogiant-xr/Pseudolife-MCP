@@ -52,6 +52,29 @@ Usage (repo root, venv python; replay needs the bench Postgres at :5433):
 
 Then (GPU window): answer-phase the four ``arm1-abl-*`` tags — see the
 commands printed at the end of ``rebuild``.
+
+Write-side ablation (2026-07-24): the ranking ablation above holds the
+INGEST fixed — both arms rank the same already-banded survivors. The
+``--band-preset flat`` variant re-runs ingest through ONE flat band at the
+continuum's total capacity (5,250), so eviction/promotion never partitions
+by tier and different entries survive. Only meaningful on the ``s``
+full-haystack dataset (~493 turns/question vs the 200-cap ``working``
+entry band — the ``oracle`` corpus stores ~23 turns/question and never
+evicts, making the write side a no-op there):
+
+    python evals/band_ablation.py replay  --dataset s --extractor qwen-27b \\
+        --src-tag "" --band-preset continuum      # baseline dumps
+    python evals/band_ablation.py replay  --dataset s --extractor qwen-27b \\
+        --src-tag "" --band-preset flat           # flat-ingest dumps
+    python evals/band_ablation.py rebuild --dataset s --extractor qwen-27b \\
+        --src-tag ""                              # abl-* tags (4)
+    python evals/band_ablation.py rebuild --dataset s --extractor qwen-27b \\
+        --src-tag "" --band-preset flat           # wabl-flat-* tags (2)
+                                                  # + survival-stats JSON
+
+``wabl-flat-M`` vs ``abl-flat-M`` isolates the write side (same flat
+ranking, different survivor sets); vs ``abl-continuum-M`` is the
+whole-system comparison.
 """
 from __future__ import annotations
 
@@ -91,15 +114,92 @@ MODES = ("wall", "hist")
 
 
 def out_file(dataset: str, extractor: str, tag: str) -> Path:
-    return RESULTS_DIR / f"longmemeval-ku-{dataset}-{extractor}-{tag}.jsonl"
+    stem = "-".join(p for p in (dataset, extractor, tag) if p)
+    return RESULTS_DIR / f"longmemeval-ku-{stem}.jsonl"
 
 
-def band_state_dir(dataset: str, extractor: str, src_tag: str) -> Path:
-    return RESULTS_DIR / "banks" / f"{dataset}-{extractor}-{src_tag}-ablbands"
+def band_state_dir(dataset: str, extractor: str, src_tag: str,
+                   preset: str = "continuum") -> Path:
+    stem = "-".join(p for p in (dataset, extractor, src_tag) if p)
+    suffix = "" if preset == "continuum" else f"-{preset}"
+    return RESULTS_DIR / "banks" / f"{stem}-ablbands{suffix}"
 
 
 def abl_tag(src_tag: str, policy: str, mode: str) -> str:
-    return f"{src_tag}-abl-{policy}-{mode}"
+    return "-".join(p for p in (src_tag, "abl", policy, mode) if p)
+
+
+def wabl_tag(src_tag: str, mode: str) -> str:
+    """Write-side ablation tag: flat-INGEST (not just flat ranking)."""
+    return "-".join(p for p in (src_tag, "wabl-flat", mode) if p)
+
+
+def continuum_total_capacity() -> int:
+    from pseudolife_memory.memory.miras.presets import continuum_bands  # noqa: PLC0415
+    return sum(b.max_entries for b in continuum_bands())
+
+
+def write_flat_config(data_dir: Path, cap: int) -> Path:
+    """Write a config.yaml that MemoryService will pick up, replacing the
+    8-band continuum with ONE flat band of ``cap`` entries. Promotion can
+    never fire; retention matches the fast tiers' ``balanced`` policy.
+
+    ``surprise_threshold`` is pinned to 0.0 because the YAML loader's
+    default (0.3) differs from the dataclass default (0.0) the continuum
+    arm gets — pinning keeps the two arms' configs identical outside
+    ``memory.miras`` (tests/test_band_ablation_flat.py proves it).
+    """
+    p = Path(data_dir) / "config.yaml"
+    p.write_text(f"""memory:
+  surprise_threshold: 0.0
+  miras:
+    preset: custom
+    bands:
+      - name: flat
+        max_entries: {cap}
+        update_interval: 1000000000
+        promotion_access_count: 1000000000
+        promotion_surprise: 1.1
+        retention_policy: balanced
+""", encoding="utf-8")
+    return p
+
+
+def survival_stats(cont_dumps: list[dict], flat_dumps: list[dict]) -> dict:
+    """The write-side headline numbers: how much each ingest arm kept.
+
+    Both lists hold replay payload dicts; either may be empty (stats for
+    the missing side come back None rather than fabricated zeros).
+    """
+    def survivors(d: dict) -> int:
+        return sum(len(b["entries"]) for b in d["bands"])
+
+    flat_by_id = {d["question_id"]: d for d in flat_dumps}
+    questions = []
+    for d in cont_dumps:
+        f = flat_by_id.get(d["question_id"])
+        questions.append({
+            "question_id": d["question_id"],
+            "turns_stored": d["turns_stored"],
+            "continuum_survivors": survivors(d),
+            "continuum_per_band": {b["name"]: len(b["entries"])
+                                   for b in d["bands"]},
+            "flat_survivors": survivors(f) if f else None,
+        })
+
+    def loss(dumps: list[dict]) -> float | None:
+        stored = sum(d["turns_stored"] for d in dumps)
+        if not stored:
+            return None
+        kept = sum(survivors(d) for d in dumps)
+        return 1.0 - kept / stored
+
+    return {
+        "n_questions": len(questions),
+        "continuum_loss_rate": loss(cont_dumps),
+        "flat_loss_rate": loss(flat_dumps),
+        "questions": questions,
+    }
 
 
 def load_rows(path: Path) -> list[dict]:
@@ -142,8 +242,10 @@ def cmd_replay(args) -> int:
     if not served:
         sys.exit(f"no served rows for src tag {args.src_tag!r} — nothing to replay")
     by_id = {q["question_id"]: q for q in load_questions(args.dataset)}
-    out_dir = band_state_dir(args.dataset, args.extractor, args.src_tag)
+    out_dir = band_state_dir(args.dataset, args.extractor, args.src_tag,
+                             preset=args.band_preset)
     out_dir.mkdir(parents=True, exist_ok=True)
+    flat_cap = args.flat_cap or continuum_total_capacity()
 
     rows = served[: args.limit] if args.limit else served
     t_all = time.perf_counter()
@@ -160,7 +262,24 @@ def cmd_replay(args) -> int:
             continue
         t0 = time.perf_counter()
         tmp = Path(tempfile.mkdtemp(prefix="abl_"))
+        if args.band_preset == "flat":
+            # MemoryService reads <data_dir>/config.yaml at construction —
+            # writing it first is the supported custom-preset injection path.
+            write_flat_config(tmp, flat_cap)
         svc = build_service(tmp)              # fresh, truncated bench DB —
+        if args.band_preset == "flat":
+            # A silent fallback to the 8-band preset would invalidate the
+            # whole arm — verify the injection actually took, loudly.
+            # (_cms is lazy, so check the eagerly-loaded config here and
+            # the real band count after ingest below.)
+            n_cfg = len(svc.config.memory.miras.bands)
+            if svc.config.memory.miras.preset != "custom" or n_cfg != 1:
+                sys.exit(f"flat-band injection failed: preset="
+                         f"{svc.config.memory.miras.preset!r}, {n_cfg} bands "
+                         f"in config (config.yaml not picked up?)")
+            if svc.config.memory.surprise_threshold != 0.0:
+                sys.exit("flat arm surprise_threshold drifted from 0.0 — "
+                         "config confounder, aborting")
         # same knobs as longmemeval_bench.run_extract (dream config is inert
         # here — we never dream — but kept identical for faithfulness):
         svc.config.memory.dream.extract_relations = False
@@ -191,6 +310,8 @@ def cmd_replay(args) -> int:
         # the pre-search state).
         cms = svc._cms  # noqa: SLF001 — bench-style introspection
         assert cms is not None
+        if args.band_preset == "flat" and len(cms.bands) != 1:
+            sys.exit(f"flat arm built {len(cms.bands)} live bands — aborting")
         bands_out = []
         for depth, band in enumerate(cms.bands):
             bands_out.append({
@@ -219,6 +340,8 @@ def cmd_replay(args) -> int:
 
         payload = {
             "question_id": qid,
+            "band_preset": args.band_preset,
+            "flat_cap": flat_cap if args.band_preset == "flat" else None,
             "question": q["question"],
             "question_date": q["question_date"],
             "question_ts": _parse_date(q["question_date"]).timestamp(),
@@ -420,7 +543,11 @@ def cmd_rebuild(args) -> int:
     served = load_rows(out_file(args.dataset, args.extractor, args.src_tag))
     if not served:
         sys.exit(f"no served rows for src tag {args.src_tag!r}")
-    dumps_dir = band_state_dir(args.dataset, args.extractor, args.src_tag)
+    dumps_dir = band_state_dir(args.dataset, args.extractor, args.src_tag,
+                               preset=args.band_preset)
+    # Flat-INGEST dumps have one band; only the flat ranking policy is
+    # meaningful over them (the continuum ramp needs 8 depths).
+    policies = POLICIES if args.band_preset == "continuum" else ("flat",)
 
     available: list[tuple[dict, dict]] = []
     missing: list[str] = []
@@ -439,43 +566,49 @@ def cmd_rebuild(args) -> int:
         sys.exit("no band-state dumps found — run `replay` first")
 
     # ── sanity gate + selections over everything available ────────────────
-    agree_mirror = []      # continuum+wall mirror vs served (the gate)
+    agree_mirror = []      # gate-policy+wall mirror vs served (the gate)
     agree_replay = []      # real search on replayed state vs served
     agree_mirror_replay = []   # mirror vs real search (formula fidelity)
     ab_agree = {m: [] for m in MODES}   # continuum vs flat overlap, per mode
     selections: dict[tuple[str, str], dict[str, list[str]]] = {
-        (p, m): {} for p in POLICIES for m in MODES}
+        (p, m): {} for p in policies for m in MODES}
+    gate_policy = policies[0]   # continuum normally; flat for flat-ingest
 
     for row, dump in available:
-        for policy in POLICIES:
+        for policy in policies:
             for mode in MODES:
                 selections[(policy, mode)][row["question_id"]] = select_topk(
                     dump, policy, mode)
         served_set = _served_selection(dump, row["contexts"].get("rag", ""))
-        mirror = set(selections[("continuum", "wall")][row["question_id"]])
+        mirror = set(selections[(gate_policy, "wall")][row["question_id"]])
         replay_sel = set(dump.get("live_replay_rag", []))
         denom = max(1, len(served_set))
         agree_mirror.append(len(mirror & served_set) / denom)
         agree_replay.append(len(replay_sel & served_set) / denom)
         agree_mirror_replay.append(
             len(mirror & replay_sel) / max(1, len(replay_sel)))
-        for mode in MODES:
-            a = set(selections[("continuum", mode)][row["question_id"]])
-            b = set(selections[("flat", mode)][row["question_id"]])
-            ab_agree[mode].append(len(a & b) / max(1, len(a | b)))
+        if len(policies) == 2:
+            for mode in MODES:
+                a = set(selections[("continuum", mode)][row["question_id"]])
+                b = set(selections[("flat", mode)][row["question_id"]])
+                ab_agree[mode].append(len(a & b) / max(1, len(a | b)))
 
     def mean(xs):
         return sum(xs) / len(xs) if xs else 0.0
 
     print(f"\n── sanity gate ({len(available)} questions) ──────────────────")
-    print(f"continuum+wall mirror vs SERVED rag : {mean(agree_mirror):.3f}")
+    note = ("" if args.band_preset == "continuum" else
+            "  (flat-INGEST state vs continuum-served: divergence expected)")
+    print(f"{gate_policy}+wall mirror vs SERVED rag : "
+          f"{mean(agree_mirror):.3f}{note}")
     print(f"  replayed real search vs served    : {mean(agree_replay):.3f}  "
           f"(replay-state drift: skipped dreams)")
     print(f"  mirror vs replayed real search    : {mean(agree_mirror_replay):.3f}  "
           f"(offline formula fidelity)")
-    for mode in MODES:
-        print(f"continuum vs flat overlap ({mode:4s})   : "
-              f"{mean(ab_agree[mode]):.3f}  (Jaccard of top-{RAG_TOP_K})")
+    if len(policies) == 2:
+        for mode in MODES:
+            print(f"continuum vs flat overlap ({mode:4s})   : "
+                  f"{mean(ab_agree[mode]):.3f}  (Jaccard of top-{RAG_TOP_K})")
 
     if args.dry_run:
         print(f"\n── dry run: first {min(3, len(available))} questions, "
@@ -484,9 +617,11 @@ def cmd_rebuild(args) -> int:
             labels = _turn_label(dump)
             print(f"\n{row['question_id']}  {row['question'][:70]}")
             for mode in MODES:
-                a = selections[("continuum", mode)][row["question_id"]]
-                b = selections[("flat", mode)][row["question_id"]]
-                print(f"  [{mode}] {'continuum':<42}| flat")
+                a = selections[(policies[0], mode)][row["question_id"]]
+                b = (selections[("flat", mode)][row["question_id"]]
+                     if len(policies) == 2 else [])
+                print(f"  [{mode}] {policies[0]:<42}| "
+                      f"{'flat' if len(policies) == 2 else ''}")
                 for i in range(max(len(a), len(b))):
                     la = labels.get(a[i], "-")[:40] if i < len(a) else ""
                     lb = labels.get(b[i], "-")[:40] if i < len(b) else ""
@@ -496,10 +631,12 @@ def cmd_rebuild(args) -> int:
         print("\ndry run only — no files written")
         return 0
 
-    # ── write the four tagged JSONLs ──────────────────────────────────────
-    for policy in POLICIES:
+    # ── write the tagged JSONLs ───────────────────────────────────────────
+    for policy in policies:
         for mode in MODES:
-            tag = abl_tag(args.src_tag, policy, mode)
+            tag = (abl_tag(args.src_tag, policy, mode)
+                   if args.band_preset == "continuum"
+                   else wabl_tag(args.src_tag, mode))
             out_rows = []
             for row, dump in available:
                 sel = selections[(policy, mode)][row["question_id"]]
@@ -514,7 +651,8 @@ def cmd_rebuild(args) -> int:
                                       + "\n\n".join(sel[:HYBRID_TOP_K]))
                 new["contexts"] = contexts
                 new["ablation"] = {"policy": policy, "mode": mode,
-                                   "source_tag": args.src_tag}
+                                   "source_tag": args.src_tag,
+                                   "band_preset": args.band_preset}
                 for arm in ARMS:      # strip verdicts -> answer phase re-runs
                     for field in ("response", "correct", "context_tokens"):
                         new.pop(f"{arm}_{field}", None)
@@ -523,17 +661,53 @@ def cmd_rebuild(args) -> int:
             rewrite_rows(dst, out_rows)
             print(f"wrote {len(out_rows)} rows -> {dst.name}")
 
+    # ── survival-stats artifact (write-side headline; both ingest arms) ───
+    if args.band_preset == "flat":
+        cont_dir = band_state_dir(args.dataset, args.extractor, args.src_tag)
+        cont_dumps = []
+        if cont_dir.is_dir():
+            for row, _ in available:
+                p = cont_dir / f"{row['question_id']}.json.gz"
+                if p.exists():
+                    with gzip.open(p, "rt", encoding="utf-8") as fh:
+                        cont_dumps.append(json.load(fh))
+        stats = survival_stats(cont_dumps, [d for _, d in available])
+        stem = "-".join(p for p in (args.dataset, args.extractor,
+                                    args.src_tag) if p)
+        stats_path = RESULTS_DIR / f"longmemeval-ku-{stem}-wabl-survival.json"
+        stats_path.write_text(json.dumps(stats, indent=2), encoding="utf-8")
+        print(f"survival stats ({len(cont_dumps)} continuum / "
+              f"{len(available)} flat dumps) -> {stats_path.name}")
+        if not cont_dumps:
+            print("  NOTE: no continuum dumps found — run "
+                  "`replay --band-preset continuum` and rebuild again for "
+                  "the side-by-side survival comparison")
+
     ex = args.extractor
+    tags = (
+        [abl_tag(args.src_tag, p, m) for p in POLICIES for m in MODES]
+        if args.band_preset == "continuum"
+        else [wabl_tag(args.src_tag, m) for m in MODES])
+    compare_hint = (
+        f"""then per mode M in wall hist, per arm A in rag hybrid:
+  python evals/replicate.py compare --dataset {args.dataset} --extractor {ex} \\
+      --tag {abl_tag(args.src_tag, 'continuum', 'M')} --b-tag {abl_tag(args.src_tag, 'flat', 'M')} --arm A"""
+        if args.band_preset == "continuum"
+        else f"""then per mode M in wall hist, per arm A in rag hybrid:
+  # write-side isolation (same flat ranking, different survivor sets):
+  python evals/replicate.py compare --dataset {args.dataset} --extractor {ex} \\
+      --tag {abl_tag(args.src_tag, 'flat', 'M')} --b-tag {wabl_tag(args.src_tag, 'M')} --arm A
+  # whole-system (as-designed continuum vs flat everything):
+  python evals/replicate.py compare --dataset {args.dataset} --extractor {ex} \\
+      --tag {abl_tag(args.src_tag, 'continuum', 'M')} --b-tag {wabl_tag(args.src_tag, 'M')} --arm A""")
     print(f"""
 ── GPU window (answer phase; needs the Qwen endpoint at :1234) ──────────
-for each TAG in {' '.join(abl_tag(args.src_tag, p, m) for p in POLICIES for m in MODES)}:
+for each TAG in {' '.join(tags)}:
   python evals/longmemeval_bench.py --dataset {args.dataset} --extractor {ex} --tag TAG --phase answer
   python evals/replicate.py spawn --dataset {args.dataset} --extractor {ex} --tag TAG -n 4
   python evals/replicate.py run   --dataset {args.dataset} --extractor {ex} --tag TAG
   python evals/replicate.py agg   --dataset {args.dataset} --extractor {ex} --tag TAG
-then per mode M in wall hist, per arm A in rag hybrid:
-  python evals/replicate.py compare --dataset {args.dataset} --extractor {ex} \\
-      --tag {args.src_tag}-abl-continuum-M --b-tag {args.src_tag}-abl-flat-M --arm A
+{compare_hint}
 """)
     return 0
 
@@ -546,17 +720,25 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--dataset", default="oracle")
         p.add_argument("--extractor", default="e4b-ft")
         p.add_argument("--src-tag", default="arm1",
-                       help="tag of the served source run")
+                       help="tag of the served source run ('' = untagged)")
+        p.add_argument("--band-preset", choices=("continuum", "flat"),
+                       default="continuum",
+                       help="ingest band structure: the stock 8-band "
+                            "continuum, or ONE flat band (write-side "
+                            "ablation — different entries survive)")
 
     p = sub.add_parser("replay", help="CPU ingest replay -> band-state dumps")
     common(p)
     p.add_argument("--limit", type=int, default=None)
     p.add_argument("--force", action="store_true",
                    help="re-replay questions whose dump already exists")
+    p.add_argument("--flat-cap", type=int, default=None,
+                   help="flat band capacity (default: the continuum "
+                        "preset's total, currently 5250)")
     p.set_defaults(fn=cmd_replay)
 
     p = sub.add_parser("rebuild",
-                       help="offline policy rebuild -> 4 tagged JSONLs")
+                       help="offline policy rebuild -> tagged JSONLs")
     common(p)
     p.add_argument("--dry-run", action="store_true",
                    help="report agreement + 3-question side-by-side; no writes")
