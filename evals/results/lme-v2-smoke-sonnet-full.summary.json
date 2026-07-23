@@ -1,0 +1,26 @@
+{
+  "category": "procedure",
+  "n": 1,
+  "retrieval_seconds_mean": 0.54,
+  "arms": {
+    "rag": {
+      "eval_accuracy": 0.0,
+      "judge_accuracy": 1.0,
+      "context_tokens": 853.0,
+      "answer_seconds": 10.85
+    },
+    "cortex": {
+      "eval_accuracy": 0.0,
+      "judge_accuracy": 0.0,
+      "context_tokens": 1740.0,
+      "answer_seconds": 10.17
+    },
+    "hybrid": {
+      "eval_accuracy": 0.0,
+      "judge_accuracy": 0.0,
+      "context_tokens": 2297.0,
+      "answer_seconds": 5.89
+    }
+  },
+  "superseded_total": 158
+}
