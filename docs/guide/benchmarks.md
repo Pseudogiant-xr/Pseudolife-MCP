@@ -124,6 +124,13 @@ measured case for upgrading the extractor when you have local compute to
 spare (see [Dreaming — upgrading the extractor](dreaming.md#upgrading-the-extractor--bigger-local-models)).
 Even the smallest bake beats naive-RAG at ~25× fewer tokens/query.
 
+Read honestly: the floor/ceiling runs are single-run point estimates, not
+replicates. The direction is safe anyway — the cortex arm collapses
+0.564 → 0.192 when the extractor shrinks while the RAG control stays flat,
+an effect roughly five times the observed single-run noise — but
+finer-grained comparisons between adjacent extractor rungs are not
+decision-grade under the same standard the tables above are held to.
+
 The harder full-haystack (`_s`) results, the extractor-ladder screen used
 to choose the default sidecar model, and the abstention-calibration sweep
 are all in [`evals/README.md`](../../evals/README.md).
