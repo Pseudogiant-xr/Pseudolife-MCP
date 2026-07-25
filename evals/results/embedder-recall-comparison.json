@@ -1,0 +1,64 @@
+{
+  "questions": 150,
+  "haystack_turns": 74183,
+  "gold_turns": 299,
+  "arms": [
+    {
+      "arm": "all-MiniLM-L6-v2 (shipped)",
+      "model": "sentence-transformers/all-MiniLM-L6-v2",
+      "query_prefix": false,
+      "recall": {
+        "5": 0.4080267558528428,
+        "10": 0.5719063545150501,
+        "20": 0.7558528428093646
+      },
+      "hits": {
+        "5": 122,
+        "10": 171,
+        "20": 226
+      },
+      "encode_seconds": 548.3,
+      "dim": 384
+    },
+    {
+      "arm": "bge-base-en-v1.5",
+      "model": "BAAI/bge-base-en-v1.5",
+      "query_prefix": false,
+      "recall": {
+        "5": 0.5585284280936454,
+        "10": 0.7424749163879598,
+        "20": 0.8528428093645485
+      },
+      "hits": {
+        "5": 167,
+        "10": 222,
+        "20": 255
+      },
+      "encode_seconds": 5325.6,
+      "dim": 768
+    }
+  ],
+  "mcnemar_vs_shipped": [
+    {
+      "arm": "bge-base-en-v1.5",
+      "k": 5,
+      "gained": 54,
+      "lost": 9,
+      "p_value": 6.108279451688681e-09
+    },
+    {
+      "arm": "bge-base-en-v1.5",
+      "k": 10,
+      "gained": 60,
+      "lost": 9,
+      "p_value": 2.2444496451277593e-10
+    },
+    {
+      "arm": "bge-base-en-v1.5",
+      "k": 20,
+      "gained": 34,
+      "lost": 5,
+      "p_value": 2.4299079086631536e-06
+    }
+  ]
+}
