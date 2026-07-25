@@ -51,6 +51,12 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   full `working` band destroyed entries — and their storage rows — while
   the deeper bands sat nearly empty, because promotion was the only other
   way out and it requires `access_count >= N or surprise > threshold`.
+  **Changing the preset is safe**: restoring from Postgres or from
+  `cms_state.pt` reseats entries across the new band layout in one pass,
+  including rows whose old band name is gone. If the bank holds more rows
+  than the new preset seats, the deepest band is left over capacity and
+  the count logged rather than truncated at startup — normal eviction
+  drains it from there.
 - **No NLI scorer** — the `cross-encoder/nli-deberta-v3-xsmall`
   contradiction model is ~278 MB and optional. The four-path detector
   works without it. Install with `pip install .[nli]` if you want it.

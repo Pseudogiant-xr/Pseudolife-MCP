@@ -107,6 +107,10 @@ def hydrate_cms(cms, storage) -> int:
     # Entries were appended without going through cms.store() — any
     # previously-built slot-token index must rebuild (mirrors band._dirty).
     cms._slot_index_dirty = True
+    # ...and without its capacity check, so a band (especially bands[0],
+    # which absorbs rows whose band no longer exists) can be left far over
+    # capacity. Seat them before anyone reads or writes.
+    cms.rebalance_bands()
     em = EpisodeManager()
     for ep in storage.load_episodes():
         em.episodes[ep["id"]] = Episode(**ep)
