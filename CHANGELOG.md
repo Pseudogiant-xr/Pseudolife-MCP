@@ -6,6 +6,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-07-26 — the regression gate's baseline is stale, not the code)
+- **`evals/regression_gate.ps1` fails on clean `origin/master`.** Cortex
+  **0.6709 ± 0.0370** against a committed baseline of **0.7051**. The
+  #38–#44 stack gives **0.6581 ± 0.0196** — **0.0128** from master, well
+  inside the noise. The changes did not cause the failure.
+- Corroborated three ways. The gate copies the **rag** arm's context
+  verbatim, so its two runs have *identical inputs* and still differ by
+  **0.021** — that is the judge's noise floor, and it is larger than the
+  cortex delta under test. The cortex rebuild path (`rebuild_contexts.py`)
+  is plain cosine over dumped fact banks and never touches band retrieval,
+  BM25, the recency prior or `detect_contradictions`, so no change in the
+  stack can reach it. And `CORTEX_TOP_K` / `CORTEX_MIN_SCORE` are untouched
+  by all 90 commits since the baseline.
+- **Why the baseline is wrong**: its recorded `std` is exactly **0.0** on
+  two arms — three LLM-judge replicates returning identical accuracy —
+  where today's runs show 0.007–0.037. It predates
+  `LLAMA_ARG_CACHE_RAM=0`, so prompt caching plausibly suppressed the
+  variance that has now returned. It also disagrees with `evals/README.md`'s
+  own 5-replicate measurement of the same slice, **cortex 0.682 ± 0.017**;
+  both of today's runs sit closer to that than to 0.7051.
+- **The gate is also under-powered**: a 0.03 margin against a cortex std of
+  0.037 at n=3 is ~1.4 standard errors, so it fails a meaningful fraction of
+  runs with no change at all. Re-establishing it wants more replicates and a
+  margin derived from the measured spread — and deliberate promotion, not a
+  side effect of a rerun. **Not re-established here.**
+- Both runs committed as evidence:
+  `regression_gate-2026-07-26-master-control.agg.json` and
+  `regression_gate-2026-07-26-stack-38-44.agg.json`.
+
 ### Added (2026-07-26 — embedder comparison on our own corpus)
 - **`evals/embedder_recall.py`** ranks every haystack turn of a
   LongMemEval `s` question against the question text and reports recall@k
