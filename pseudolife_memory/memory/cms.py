@@ -1415,6 +1415,10 @@ class ContinuumMemorySystem:
         # for eviction resistance on the daemon, which runs
         # retention_boost=1.0 against the library default of 0.0.
         moved.reinforcements = entry.reinforcements
+        # Same text, so the memoised possession cues carry too — a
+        # relocation would otherwise re-scan every entry it moves, and at
+        # saturation a single store relocates hundreds.
+        moved.cue_flags = entry.cue_flags
         # v0.7+ carries structured slots across the move.
         moved.slots = list(entry.slots)
         # Schema v5 (v0.7.6) + MCP-fix: carry the superseding text so a

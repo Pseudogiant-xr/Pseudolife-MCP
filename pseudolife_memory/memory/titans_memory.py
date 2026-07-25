@@ -94,6 +94,14 @@ class MemoryEntry:
     # stores, and band promotion relocates entries so list position can't
     # either. Preserved across promotion (a relocation, not a re-creation).
     seq: int = 0
+    # Memoised ``(has_gain_cue, has_loss_cue)`` for ``text``, filled lazily
+    # by contradiction detection — which scans every entry of every band on
+    # every write, and for most entries the cue check IS the cost. Transient
+    # like ``db_id`` / ``seq``: never persisted, excluded from equality.
+    # Safe to cache because ``text`` is never mutated after construction
+    # (a relocation re-creates the entry rather than editing it).
+    cue_flags: tuple[bool, bool] | None = field(
+        default=None, repr=False, compare=False)
 
     def __post_init__(self):
         if self.timestamp == 0.0:

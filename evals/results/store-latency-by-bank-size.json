@@ -1,0 +1,19 @@
+{
+  "warmup_stores": 12,
+  "samples": 25,
+  "corpus": "longmemeval-s replay dumps (real MiniLM embeddings)",
+  "rows": [
+    {
+      "resident": 500,
+      "median_ms": 5.300899996655062
+    },
+    {
+      "resident": 5250,
+      "median_ms": 16.489999994519167
+    },
+    {
+      "resident": 9000,
+      "median_ms": 22.662499992293306
+    }
+  ]
+}
