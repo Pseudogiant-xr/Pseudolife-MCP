@@ -51,11 +51,26 @@ $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 if (-not $Tag) { $Tag = "pre-update-$stamp" }
 $rollback = "$imageTag-$Tag"
 docker image inspect $imageTag *> $null
-if ($LASTEXITCODE -eq 0) {
+$rollbackReady = ($LASTEXITCODE -eq 0)
+if ($rollbackReady) {
     docker tag $imageTag $rollback
     Write-Host "==> Tagged rollback image: $rollback"
 } else {
-    Write-Warning "No current $imageTag image to tag (first build?)."
+    Write-Warning "No current $imageTag image to tag (first build, or the version was bumped before this image was ever built)."
+    Write-Warning "This deploy has NO rollback image. Rolling back means rebuilding the previous code."
+}
+
+# Rollback instructions are derived from whether the tag actually exists.
+# They used to be printed unconditionally, so a skipped tag produced a
+# command that fails — worst of all on the unhealthy path below, where the
+# operator reaches for it precisely because the deploy just broke.
+$rollbackLines = if ($rollbackReady) {
+    @("      docker tag $rollback $imageTag",
+      "      docker compose -f `"$composeFile`" up -d --no-deps pseudolife-daemon")
+} else {
+    @("      (no rollback image exists for this deploy - nothing was tagged)",
+      "      Rebuild the last-good code instead, e.g.:",
+      "      git checkout master; ops\update.ps1")
 }
 
 # 2b. Retention: drop stale pre-* rollback tags beyond the newest N — one is
@@ -88,10 +103,10 @@ for ($i = 0; $i -lt 30; $i++) {
 if ($h) {
     Write-Host "==> Healthy. schema=$($h.schema) persist_errors=$($h.persist_errors)"
     Write-Host "    Rolled-back deploy if ever needed:"
-    Write-Host "      docker tag $rollback $imageTag"
-    Write-Host "      docker compose -f `"$composeFile`" up -d --no-deps pseudolife-daemon"
+    $rollbackLines | ForEach-Object { Write-Host $_ }
 } else {
     Write-Warning "Daemon did not report healthy. Logs: docker logs pseudolife-mcp-daemon"
-    Write-Warning "Rollback: docker tag $rollback $imageTag; then re-run the up line above."
+    Write-Warning "To roll back:"
+    $rollbackLines | ForEach-Object { Write-Warning $_ }
     exit 1
 }

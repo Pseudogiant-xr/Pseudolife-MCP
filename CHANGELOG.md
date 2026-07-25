@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-07-26 — the deploy scripts promised a rollback they hadn't made)
+- **`ops/update.ps1` and `ops/update.sh` only print a rollback command when
+  the rollback tag actually exists.** Both computed `$rollback`
+  unconditionally but only `docker tag`-ged it when a current image was
+  found; when it wasn't — a first build, or a version bumped before that
+  version was ever built — the tag was skipped with a warning and both exit
+  paths printed `docker tag <rollback> <image_tag>` anyway.
+- Observed live on 2026-07-26: the deploy warned *"No current
+  pseudolife-daemon:0.10.0 image to tag"* and then printed a rollback
+  command naming a tag that does not exist. **The unhealthy path is the
+  dangerous one** — the operator reaches for that command precisely because
+  the deploy just broke, and it fails.
+- Now: the no-image case says so explicitly at tag time *and* in the
+  rollback block, and offers the path that does work (rebuild the last-good
+  ref). The tagged case is unchanged.
+- Covered by `tests/test_ops_update_rollback.py`, which drives the real
+  script with `docker` and the health probe stubbed as PowerShell
+  functions, in both the healthy and unhealthy branches.
+
 ### Added (2026-07-25 — supersession on slot identity, not embedding similarity)
 - **`detect_contradictions` gained a slot-identity path, checked first.**
   When the new text and an existing entry assert different values — or
