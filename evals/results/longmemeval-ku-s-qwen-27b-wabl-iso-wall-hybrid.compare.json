@@ -1,0 +1,14 @@
+{
+  "delta": -0.1103,
+  "p_value": 0.0178,
+  "n_questions": 78,
+  "arm": "hybrid",
+  "a": "qwen-27b/abl-flat-wall",
+  "b": "qwen-27b/wabl-flat-wall",
+  "a_mean": 0.3846,
+  "a_std": 0.009050966799187793,
+  "b_mean": 0.49488000000000004,
+  "b_std": 0.014594245441268978,
+  "permutations": 10000,
+  "seed": 0
+}

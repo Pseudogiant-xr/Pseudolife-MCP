@@ -1,0 +1,53 @@
+{
+  "n_replicates": 5,
+  "replicates": [
+    "abl-continuum-hist",
+    "abl-continuum-hist-r2",
+    "abl-continuum-hist-r3",
+    "abl-continuum-hist-r4",
+    "abl-continuum-hist-r5"
+  ],
+  "n_questions": 78,
+  "arms": {
+    "rag": {
+      "accuracies": [
+        0.3333,
+        0.3205,
+        0.3077,
+        0.3333,
+        0.3333
+      ],
+      "mean": 0.32561999999999997,
+      "std": 0.011448668044798925
+    },
+    "cortex": {
+      "accuracies": [
+        0.1923,
+        0.2051,
+        0.1923,
+        0.1795,
+        0.2051
+      ],
+      "mean": 0.19485999999999998,
+      "std": 0.010709248339636173
+    },
+    "hybrid": {
+      "accuracies": [
+        0.3462,
+        0.3846,
+        0.3718,
+        0.3718,
+        0.3974
+      ],
+      "mean": 0.37435999999999997,
+      "std": 0.018985468126964885
+    }
+  },
+  "source_files": [
+    "longmemeval-ku-s-qwen-27b-abl-continuum-hist.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl-continuum-hist-r2.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl-continuum-hist-r3.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl-continuum-hist-r4.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl-continuum-hist-r5.jsonl"
+  ]
+}

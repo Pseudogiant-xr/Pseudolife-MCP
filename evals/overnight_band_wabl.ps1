@@ -63,6 +63,25 @@ function Stop-Qwen {
 function Start-Qwen {
     if (Wait-Endpoint "http://127.0.0.1:1234/v1/models" 5) { return $true }
     Log "starting Qwen 27B server (log: $qwenDir\qwen-server.log)"
+    # archive the previous server log before the '>' redirect below truncates it
+    # (crash evidence: the GGML abort message lives in the tail of the old log)
+    $qlog = Join-Path $qwenDir 'qwen-server.log'
+    if (Test-Path $qlog) {
+        $qarch = Join-Path $qwenDir ('crash-logs\qwen-server-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-prelaunch.log')
+        New-Item -ItemType Directory -Force (Split-Path $qarch) | Out-Null
+        try { Move-Item $qlog $qarch -Force -ErrorAction Stop } catch { try { Copy-Item $qlog $qarch -Force } catch {} }
+    }
+    # Round 1 (2026-07-24), SUPERSEDED as a diagnosis: the prompt cache was
+    # blamed for the ~hourly crashes and disabled here. It was not the
+    # cause (see round 2 below) — the flag stays only because the cache is
+    # pure overhead for eval prompts this hybrid model always
+    # full-reprocesses. Env var, not a bat edit — interactive use needs it.
+    $env:LLAMA_ARG_CACHE_RAM = "0"
+    # Round 2 (2026-07-25): cache-ram=0 alone did not stop the crashes —
+    # the per-request checkpoint churn (149.6 MiB recurrent-state saves)
+    # leaks KV cells at ~350 requests per launch. Checkpoints buy nothing
+    # for eval workloads (hybrid model full-reprocesses anyway); disable.
+    $env:LLAMA_ARG_CTX_CHECKPOINTS = "0"
     Start-Process -FilePath cmd.exe -WorkingDirectory $qwenDir -WindowStyle Minimized `
         -ArgumentList '/c', "`"$qwenDir\run-server-turboq.bat`" > qwen-server.log 2>&1"
     return (Wait-Endpoint "http://127.0.0.1:1234/v1/models" 300)
@@ -148,6 +167,10 @@ try {
                 $replicate, "agg", "--dataset", $ds, "--extractor", $ex,
                 "--tag", $tag) | Out-Null
         } else { $failed += $tag }
+        # Preventive recycle between tags: each tag is ~5 answer+judge
+        # passes; a fresh server per tag bounds any residual state growth
+        # (belt-and-suspenders on top of the checkpoint fix above).
+        Stop-Qwen
     }
     if ($failed.Count) {
         Log "INCOMPLETE: $($failed -join ', ') — rerun -Phase answer (resumes)"

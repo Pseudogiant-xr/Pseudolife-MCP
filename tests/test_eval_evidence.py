@@ -33,6 +33,19 @@ CEILING = RESULTS + "longmemeval-ku-oracle-qwen-27b-ceiling-v2.agg.json"
 ARM1 = RESULTS + "longmemeval-ku-oracle-e4b-ft-arm1.agg.json"
 ARM1_BASE = RESULTS + "longmemeval-ku-oracle-e4b-ft-arm1-baseline.agg.json"
 LME_V2 = RESULTS + "lme-v2-smoke-slice1.agg.json"
+LME_V2_FULL = RESULTS + "lme-v2-smoke-slice2.summary.json"
+LME_V2_FULL_COMPOSE = RESULTS + "lme-v2-smoke-slice2-compose.summary.json"
+WABL_SURVIVAL = RESULTS + "longmemeval-ku-s-qwen-27b-wabl-survival.json"
+
+
+def _wabl(tag: str) -> str:
+    return f"{RESULTS}longmemeval-ku-s-qwen-27b-{tag}.agg.json"
+
+
+def _wabl_cmp(kind: str, mode: str, arm: str) -> str:
+    """kind: 'iso' (write-side isolation) | 'sys' (whole system)."""
+    return (f"{RESULTS}longmemeval-ku-s-qwen-27b-wabl-"
+            f"{kind}-{mode}-{arm}.compare.json")
 
 
 def _abl(policy: str, mode: str) -> str:
@@ -154,6 +167,75 @@ for _arm, _needle, _wall, _hist in [
             id=f"ablation-{_mode}-{_arm}-p", doc=BENCH, needle=_needle,
             artifacts=(_abl_cmp(_mode, _arm),),
             value=lambda d: d["p_value"], stated=_p, places=_p_places))
+
+
+# ── the WRITE-side band ablation (flat INGEST, not just flat ranking) ────
+# Two comparisons per cell: 'iso' holds the ranking flat on both arms so
+# only the surviving entry sets differ; 'sys' is the continuum as designed
+# vs flat everything. The cortex arm is definitionally null here (both
+# arms build the same fact block) and so is neither published nor pinned.
+for _kind, _rows in (
+    ("iso", [
+        ("rag", "| naive RAG | −0.090 | 0.17 | −0.097 | 0.15 |",
+         (-0.090, 0.17, 2), (-0.097, 0.15, 2)),
+        ("hybrid",
+         "| hybrid | **−0.110** | **0.018** | **−0.108** | **0.027** |",
+         (-0.110, 0.018, 3), (-0.108, 0.027, 3)),
+    ]),
+    ("sys", [
+        ("rag",
+         "| naive RAG | **−0.274** | **0.0001** | **−0.251** | **0.0001** |",
+         (-0.274, 0.0001, 4), (-0.251, 0.0001, 4)),
+        ("hybrid",
+         "| hybrid | **−0.141** | **0.0038** | **−0.123** | **0.0153** |",
+         (-0.141, 0.0038, 4), (-0.123, 0.0153, 4)),
+    ]),
+):
+    for _arm, _needle, _wall, _hist in _rows:
+        for _mode, (_d, _p, _p_places) in (("wall", _wall), ("hist", _hist)):
+            # Delta from the two aggregates it is a difference of; p from
+            # the comparison artifact, which is the only thing that can
+            # justify a significance claim.
+            _a_tag = (f"abl-flat-{_mode}" if _kind == "iso"
+                      else f"abl-continuum-{_mode}")
+            CLAIMS.append(Claim(
+                id=f"wabl-{_kind}-{_mode}-{_arm}-delta", doc=BENCH,
+                needle=_needle,
+                artifacts=(_wabl(_a_tag), _wabl(f"wabl-flat-{_mode}")),
+                value=_delta(_arm), stated=_d, places=3))
+            CLAIMS.append(Claim(
+                id=f"wabl-{_kind}-{_mode}-{_arm}-p", doc=BENCH,
+                needle=_needle, artifacts=(_wabl_cmp(_kind, _mode, _arm),),
+                value=lambda d: d["p_value"], stated=_p, places=_p_places))
+
+# The eviction rate is the mechanism sentence's load-bearing number.
+CLAIMS.append(Claim(
+    id="wabl-continuum-eviction-rate", doc=BENCH,
+    needle="**evicts 31.1%\nof everything stored**",
+    artifacts=(WABL_SURVIVAL,),
+    value=lambda d: d["continuum_loss_rate"] * 100.0, stated=31.1, places=1))
+CLAIMS.append(Claim(
+    id="wabl-flat-eviction-rate", doc=BENCH,
+    needle="capacity* evicts nothing",
+    artifacts=(WABL_SURVIVAL,),
+    value=lambda d: d["flat_loss_rate"], stated=0.0, places=3))
+
+# ── the full 74-question LongMemEval-V2 procedure category ───────────────
+for _arm, _needle, _ku, _compose in [
+    ("rag", "| naive RAG (control) | 0.162 | 0.284 |", 0.162, 0.284),
+    ("cortex", "| cortex facts only | 0.068 | 0.216 |", 0.068, 0.216),
+    ("hybrid", "| hybrid | **0.243** | 0.284 |", 0.243, 0.284),
+]:
+    CLAIMS.append(Claim(
+        id=f"lmev2-full-ku-{_arm}", doc=BENCH, needle=_needle,
+        artifacts=(LME_V2_FULL,),
+        value=lambda d, a=_arm: d["arms"][a]["eval_accuracy"],
+        stated=_ku, places=3))
+    CLAIMS.append(Claim(
+        id=f"lmev2-full-compose-{_arm}", doc=BENCH, needle=_needle,
+        artifacts=(LME_V2_FULL_COMPOSE,),
+        value=lambda d, a=_arm: d["arms"][a]["eval_accuracy"],
+        stated=_compose, places=3))
 
 
 def _tracked() -> set[str]:

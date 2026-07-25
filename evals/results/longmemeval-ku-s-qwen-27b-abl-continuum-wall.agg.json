@@ -1,0 +1,53 @@
+{
+  "n_replicates": 5,
+  "replicates": [
+    "abl-continuum-wall",
+    "abl-continuum-wall-r2",
+    "abl-continuum-wall-r3",
+    "abl-continuum-wall-r4",
+    "abl-continuum-wall-r5"
+  ],
+  "n_questions": 78,
+  "arms": {
+    "rag": {
+      "accuracies": [
+        0.3077,
+        0.2949,
+        0.2949,
+        0.3205,
+        0.3333
+      ],
+      "mean": 0.31026,
+      "std": 0.01668915815731878
+    },
+    "cortex": {
+      "accuracies": [
+        0.1795,
+        0.1923,
+        0.1923,
+        0.1923,
+        0.2051
+      ],
+      "mean": 0.1923,
+      "std": 0.009050966799187812
+    },
+    "hybrid": {
+      "accuracies": [
+        0.3333,
+        0.3333,
+        0.359,
+        0.3718,
+        0.3718
+      ],
+      "mean": 0.35384000000000004,
+      "std": 0.019464917158827075
+    }
+  },
+  "source_files": [
+    "longmemeval-ku-s-qwen-27b-abl-continuum-wall.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl-continuum-wall-r2.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl-continuum-wall-r3.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl-continuum-wall-r4.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl-continuum-wall-r5.jsonl"
+  ]
+}

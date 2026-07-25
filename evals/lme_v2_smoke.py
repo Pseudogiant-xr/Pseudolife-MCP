@@ -747,13 +747,33 @@ def reanswer(from_tag: str, answer_system: str | None) -> None:
     from ladder_sweep import probe
     if not probe(EXTRACTOR_URL):
         sys.exit(f"no answerer endpoint at {EXTRACTOR_URL}")
-    print(f"re-answering {len(rows)} row(s) from {src.name} "
-          f"-> {OUT_FILE.name}", flush=True)
-    with OUT_FILE.open("w", encoding="utf-8") as fh:
-        for row in rows:
+    # Resume from our own output, exactly as run_smoke does: this path used
+    # to open "w" and re-answer from row 1, so every server crash discarded
+    # the whole pass (2026-07-25: six crashes turned ~15 min of work into
+    # 3.6 h, and only the one crash-free attempt ever produced a file).
+    variant = "compose" if answer_system else "ku"
+    existing = load_rows(OUT_FILE)
+    # Resuming makes a mixed-prompt file possible where truncating made it
+    # impossible (same --out-tag, different --answer-prompt, half the rows
+    # under each). Refuse rather than silently blend. Rows written before
+    # the variant was recorded carry no label and are treated as
+    # compatible — nothing can be inferred about them.
+    clash = {r.get("answer_prompt") for r in existing} - {None, variant}
+    if clash:
+        sys.exit(f"{OUT_FILE.name} holds rows answered with answer_prompt="
+                 f"{sorted(clash)}, but this run is {variant!r}. Use a "
+                 f"different --out-tag, or delete the file to start over.")
+    done = {r["question_id"] for r in existing}
+    pending = [r for r in rows if r["question_id"] not in done]
+    print(f"re-answering {len(pending)} of {len(rows)} row(s) from "
+          f"{src.name} -> {OUT_FILE.name}"
+          + (f" ({len(done)} already done)" if done else ""), flush=True)
+    with OUT_FILE.open("a", encoding="utf-8") as fh:
+        for row in pending:
             row = {k: v for k, v in row.items()
                    if not any(k.startswith(a + "_") for a in ARMS)}
             row["reanswered_from"] = from_tag
+            row["answer_prompt"] = variant
             row = answer_judge_score(row, answer_system=answer_system)
             fh.write(json.dumps(row, ensure_ascii=False) + "\n")
             marks = " ".join(f"{a}={'Y' if row[f'{a}_correct'] else 'n'}"
