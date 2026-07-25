@@ -1303,6 +1303,12 @@ class ContinuumMemorySystem:
         Note ``destination.store`` may itself overflow and cascade one band
         deeper; that completes before the append, so ``entries[-1]`` is
         still the entry we just placed.
+
+        **All-or-nothing.** Callers prune the source on the strength of this
+        returning, so a half-applied move — landed in the destination, still
+        live in the source — is the duplicate-``db_id`` state both callers
+        exist to avoid. On failure the destination append is rolled back and
+        the exception propagates; the entry stays wholly in the source.
         """
         destination.store(
             entry.text,
@@ -1313,6 +1319,21 @@ class ContinuumMemorySystem:
         if not destination.entries:
             return
         moved = destination.entries[-1]
+        try:
+            self._carry_identity(entry, moved, destination)
+        except Exception:
+            # Undo the append so the move stays all-or-nothing. A cascade
+            # triggered by the store above is deliberately NOT undone —
+            # that entry moved deeper legitimately and is not duplicated.
+            if destination.entries and destination.entries[-1] is moved:
+                destination.entries.pop()
+                destination._dirty = True
+            raise
+
+    def _carry_identity(self, entry: MemoryEntry, moved: MemoryEntry,
+                        destination: MIRASBand) -> None:
+        """Copy provenance onto the relocated entry. Split out of
+        :meth:`_relocate` only so the rollback there has a clean boundary."""
         moved.last_logical_turn = entry.last_logical_turn
         moved.superseded_at = entry.superseded_at
         moved.timestamp = entry.timestamp
@@ -1366,27 +1387,40 @@ class ContinuumMemorySystem:
         ac_threshold = source.promotion_access_count
         surprise_threshold = source.promotion_surprise
 
+        entries = source.entries
         promoted: list[MemoryEntry] = []
         remaining: list[MemoryEntry] = []
-        for entry in source.entries:
-            if entry.access_count >= ac_threshold or entry.surprise_score > surprise_threshold:
-                self._relocate(entry, destination)
-                promoted.append(entry)
-            else:
-                remaining.append(entry)
-
-        if promoted:
-            source.entries = remaining
-            source._dirty = True
-            self._slot_index_dirty = True
-            self._consolidation_events.append({
-                "timestamp": time.time(),
-                "from_bank": source.name,
-                "to_bank": destination.name,
-                "entries_moved": len(promoted),
-            })
-            if len(self._consolidation_events) > self._max_events:
-                self._consolidation_events = self._consolidation_events[-self._max_events:]
+        try:
+            for entry in entries:
+                if (entry.access_count >= ac_threshold
+                        or entry.surprise_score > surprise_threshold):
+                    self._relocate(entry, destination)
+                    promoted.append(entry)
+                else:
+                    remaining.append(entry)
+        finally:
+            # Prune in ``finally``: on a mid-loop raise the already-moved
+            # entries are live in the destination, and leaving them in the
+            # source too is a duplicate sharing one ``db_id`` — which
+            # over-counts ``memory_stats`` and makes the next consolidation
+            # relocate the stale copy onto the same row. ``_relocate`` is
+            # all-or-nothing, so the entry that failed did not move and
+            # belongs with the unexamined tail.
+            if promoted:
+                source.entries = remaining + entries[len(promoted) + len(remaining):]
+                source._dirty = True
+                # Only on an actual move. Consolidation ticks every store at
+                # the shallow tiers, and dirtying unconditionally would
+                # rebuild the slot index on nearly every search.
+                self._slot_index_dirty = True
+                self._consolidation_events.append({
+                    "timestamp": time.time(),
+                    "from_bank": source.name,
+                    "to_bank": destination.name,
+                    "entries_moved": len(promoted),
+                })
+                if len(self._consolidation_events) > self._max_events:
+                    self._consolidation_events = self._consolidation_events[-self._max_events:]
 
     # ------------------------------------------------------------------
     # Persistence — schema v2 (N bands) with v1 migration

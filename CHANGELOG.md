@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-07-25 — a failed band move could leave one entry in two bands)
+- **`_consolidate` now prunes the source band in a `finally`.** It moved
+  entries in a loop but pruned only after finishing, so a raise partway
+  through left every already-moved entry live in *both* the source and the
+  destination, sharing one `db_id`. Retrieval hid it (dedup is by
+  `entry.text`), but `memory_stats` over-counted and the next
+  consolidation relocated the stale copy onto the same row. Reproduced at
+  4 entries: bands held 6 rows for 4 distinct memories.
+- **`_relocate` is all-or-nothing.** It is the shared move primitive for
+  promotion *and* for capacity demotion, and both callers prune the source
+  on the strength of it returning — so a half-applied move is exactly the
+  duplicate above. A failure after the destination append now rolls that
+  append back before propagating. (`band.store` itself cannot fail after
+  appending — only attribute assignment follows — so the reachable window
+  is the provenance copy, which is what the rollback covers.)
+- Both were pre-existing; the eviction change earlier today made
+  `_relocate` a hot path, which is what made the window worth closing
+  rather than narrowing.
+
 ### Fixed (2026-07-25 — band overflow destroyed memories; depth was faking recency)
 - **Capacity eviction now demotes to the next band instead of deleting.**
   A band at capacity handed its lowest-scoring entry to `/dev/null` along
