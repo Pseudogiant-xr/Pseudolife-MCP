@@ -654,6 +654,57 @@ class TestReranker:
 
 
 class TestBM25:
+    def test_bm25_fires_by_default(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        """On since 2026-07-25. It shipped disabled, so every eval measured
+        dense-only retrieval on a 22M-param 2021 embedder — and an
+        independent harness puts plain BM25 above every dedicated memory
+        system on LongMemEval. It is stdlib and ~20-50ms at bank scale."""
+        pristine_service.store(
+            "the function process_chunk_v2 returns a tuple of (chunks, metadata)",
+            source="code",
+        )
+        out = pristine_service.trace("process_chunk_v2")
+        assert out["trace"]["bm25"]["fired"] is True
+        assert any("process_chunk_v2" in e["text"] for e in out["entries"])
+
+    def test_explicit_min_score_also_bounds_bm25_only_hits(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        """BM25-only matches are injected at ``weight * normalised_bm25``,
+        bypassing the dense pool's relevance gate. That is fine against the
+        default floor — the injected score is deliberately low — but an
+        explicit ``min_score`` is a caller contract over the whole result
+        set, so it must bound injections too."""
+        pristine_service.store("Apples grow on trees", source="t")
+        out = pristine_service.search("apples", top_k=5, min_score=0.99)
+        assert out["count"] == 0
+
+    def test_explicit_min_score_also_bounds_slot_pool_hits(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        """The slot-token pool injects at its own 0.55-0.95 scale and also
+        bypassed the dense gate. An explicit floor has to bound every pool
+        or it bounds none of them."""
+        pristine_service.store(
+            "I have a Ragdoll cat named Jacque", source="user",
+        )
+        out = pristine_service.search("Jacque", top_k=5, min_score=0.99)
+        assert out["count"] == 0
+
+    def test_default_floor_still_admits_bm25_only_hits(
+        self, pristine_service: MemoryService,
+    ) -> None:
+        """The guard above must not gut BM25 injection when no explicit
+        floor was given — injected scores sit below the default 0.25."""
+        pristine_service.store(
+            "the function process_chunk_v2 returns a tuple", source="code",
+        )
+        out = pristine_service.trace("process_chunk_v2")
+        assert out["trace"]["bm25"]["fired"] is True
+        assert any("process_chunk_v2" in e["text"] for e in out["entries"])
+
     def test_search_with_bm25_true_fires_pool(
         self, pristine_service: MemoryService,
     ) -> None:

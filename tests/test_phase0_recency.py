@@ -15,6 +15,8 @@ def _emb(seed: int) -> torch.Tensor:
 def test_half_life_uses_config_base():
     cfg = MemoryConfig()
     cfg.recency_base_half_life_s = 7200.0
+    # The depth ramp is opt-in since 2026-07-25; this pins the ramp itself.
+    cfg.recency_boost_enabled = True
     cms = ContinuumMemorySystem(cfg)
     cms.store("recency probe fact", _emb(3), source="t")
     _result, trace = cms.retrieve_with_trace(_emb(3), top_k=2)

@@ -6,6 +6,73 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-07-25 — band overflow destroyed memories; depth was faking recency)
+- **Capacity eviction now demotes to the next band instead of deleting.**
+  A band at capacity handed its lowest-scoring entry to `/dev/null` along
+  with its Postgres row, while the only *other* exit from a band —
+  promotion — requires `access_count >= N or surprise > threshold`. So an
+  unsurprising, never-retrieved entry died in the 200-slot `working` band
+  with ~5,050 slots free behind it. Measured on the LongMemEval `s`
+  replay: **31.1% of stored turns discarded at 6.4% total capacity
+  utilisation**, `working` saturated in 78/78 questions, `forever` empty
+  in all 78. Answer-evidence turns fared *worse* than average (**37.5%
+  evicted vs a 31.1% base rate**, with 58% of questions losing at least
+  one) because eviction ranks on novelty and knowledge-update evidence is
+  a restatement, hence unsurprising by construction. Overflow past the
+  deepest band is still a real drop, so summed capacity remains the bound.
+- **The depth-ramped recency boost is off by default**
+  (`memory.recency_boost_enabled = false`). Retrieval scaled scores by a
+  `0.4 → 0.0` ramp over band depth, treating depth as a proxy for age —
+  but depth is set by promotion history, which without retrieval to
+  accrue access counts tracks surprise rather than age. The ramp could
+  therefore rank a weaker match in `working` above a stronger match in a
+  deeper band; measured cost up to **18 points on the LongMemEval
+  naive-RAG arm**. Set the flag to `true` for the previous ranking.
+- **An explicit `min_score` now bounds BM25-only injections.** They enter
+  the pool at `weight × normalised_bm25`, bypassing the dense pool's
+  relevance gate entirely. The default floor deliberately still does not
+  apply to them (injected scores are ≤0.3 at the shipped weight, so 0.25
+  would admit only the top lexical hit per query), but a caller-supplied
+  floor is a contract over the whole result set.
+
+### Changed (2026-07-25 — BM25 hybrid retrieval is on by default)
+- **`memory.bm25.enabled` now defaults to `true`.** The lexical pool
+  shipped disabled, so every published retrieval number — including the
+  LongMemEval knowledge-update figures and the band ablation — measured
+  dense-only retrieval through a 22M-parameter 2021 bi-encoder. It is
+  pure stdlib, adds no dependency, and costs ~20–50ms per query at bank
+  scale. Opt out with `memory.bm25.enabled = false` or per-call
+  `bm25=False`.
+### Fixed (2026-07-25 — the llama-server eval crashes, root-caused and fixed)
+- **Every eval harness that starts the Qwen judge/answerer now disables
+  context checkpoints** (`LLAMA_ARG_CTX_CHECKPOINTS=0`). The fork's
+  create/restore/erase churn around the 149.6 MiB recurrent-state
+  checkpoints that Qwen 3.6's hybrid Gated-DeltaNet layers trigger per
+  task leaked **~285 KV cells per request**, emptying the `-c` pool at a
+  rate set by request *count* — hence `decode: failed to find a memory
+  slot`, then `GGML_ASSERT(offset + size <= ggml_nbytes(tensor))` and a
+  `0xC0000409` abort. Six overnight runs died in a tight 345–377 request
+  band; a 600-request soak with checkpoints off passed at 1.7× that, with
+  flat latency (1.8–2.2 s), flat VRAM, and zero memory-slot errors.
+  Checkpoints buy eval workloads nothing — these prompts are
+  full-reprocessed either way, and MTP speed/quality were unchanged.
+- `LLAMA_ARG_CACHE_RAM=0` is set alongside it. This was the *first*
+  diagnosis and it was **wrong** — the next run crashed six times with
+  the cache verifiably disabled. The flag stays only because the prompt
+  cache is pure overhead for eval prompts, not because it fixed anything.
+- Both are env vars set in each script's `Start-Qwen`, never CLI flags in
+  `run-server-turboq.bat`: interactive use of the same server depends on
+  warm cache hits.
+- Each `Start-Qwen` also archives the previous `qwen-server.log` to
+  `crash-logs/` before the `>` redirect truncates it. The abort message
+  lives in the tail of the *old* log, which every prior launch destroyed —
+  which is a large part of why this took two rounds to root-cause.
+- Applied uniformly to all ten harnesses with a `Start-Qwen`:
+  `bench_diffusiongemma`, `gate_e4b_ft`, `gate_window`,
+  `overnight_longmemeval`, `overnight_qat_ornith`, `overnight_replicates`,
+  `regression_gate`, `tonight_bakeoff`, plus `overnight_lme_v2` and
+  `overnight_band_wabl`.
+
 ### Fixed (2026-07-25 — the V2 reanswer path resumes instead of restarting)
 - **`lme_v2_smoke.reanswer` now resumes from its own JSONL** (append +
   skip-done), matching `run_smoke`. It previously opened the output with

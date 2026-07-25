@@ -46,9 +46,13 @@ bi-encoder ordering.
 
 ## BM25 hybrid retrieval
 
+**On by default since 2026-07-25** — pass `bm25=False` to opt out of a
+single call. It shipped disabled for a year, which meant every published
+retrieval number measured the dense pool alone.
+
 ```
-memory_search("process_chunk_v2", bm25=True)
-memory_search("ship blocker for v9.42.0", bm25=True)
+memory_search("process_chunk_v2")
+memory_search("ship blocker for v9.42.0")
 ```
 
 Dense MiniLM-L6 embeddings are great for *semantic* similarity but

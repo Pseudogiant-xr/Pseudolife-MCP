@@ -31,6 +31,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -167,9 +168,11 @@ class ContinuumMemorySystem:
                 "ContinuumMemorySystem requires at least one MIRAS band. "
                 "Check memory.miras.bands in config.yaml."
             )
-        # Capacity eviction must not leave ghost rows in storage.
-        for b in self.bands:
-            b.on_evict = self._on_band_evict
+        # Capacity eviction hands the entry down the chain (see
+        # :meth:`_on_band_evict`), so the handler needs to know which band
+        # overflowed — bind the index rather than the bare method.
+        for i, b in enumerate(self.bands):
+            b.on_evict = partial(self._on_band_evict, band_idx=i)
 
         # ── v0.4.x attribute shims ────────────────────────────────────────────
         # Code paths from before v0.5 read ``cms.instant`` / ``cms.short_term``
@@ -581,6 +584,13 @@ class ContinuumMemorySystem:
         ``min_logical_turn``, then the score-based ranking.
         """
         MIN_SCORE = 0.25 if min_score is None else float(min_score)
+        # An explicitly-passed floor is a contract over the whole result
+        # set, including BM25-only injections (which otherwise bypass the
+        # dense pool's gate entirely). The *default* floor deliberately
+        # does not bound them: injected scores are ``weight × normalised``
+        # (≤0.3 at the shipped weight), so applying 0.25 to them would
+        # admit only the single top lexical hit per query.
+        explicit_floor = min_score is not None
         # Gentle penalty for assistant-authored memories so user-authored
         # facts outrank assistant restatements of the same fact.
         ASSISTANT_SCORE_MULT = 0.85
@@ -654,7 +664,12 @@ class ContinuumMemorySystem:
                 continue
 
             # Ramp from (0.4, 3600s) at depth=0 down to (0.0, ∞) at depth=n-1.
-            if n == 1 or disable_recency_boost:
+            # Off by default since 2026-07-25 — depth is a proxy for age only
+            # if promotion tracks age, and absent retrieval it tracks surprise
+            # instead, so the ramp can invert similarity ordering (measured:
+            # up to 18 points on the LongMemEval naive-RAG arm). Re-enable
+            # with ``memory.recency_boost_enabled``.
+            if n == 1 or disable_recency_boost or not self.config.recency_boost_enabled:
                 boost, half_life = 0.0, float("inf")
             else:
                 frac = depth / (n - 1)
@@ -789,6 +804,10 @@ class ContinuumMemorySystem:
                 _trace=_trace,
             )
             for entry, score, surprise in slot_hits:
+                # Slot hits carry their own 0.55-0.95 scale and skip the
+                # dense pool's gate; an explicit caller floor still applies.
+                if explicit_floor and score < MIN_SCORE:
+                    continue
                 neural.append((entry, score, surprise))
                 seen_texts.add(entry.text)
                 if entry.bank:
@@ -867,6 +886,8 @@ class ContinuumMemorySystem:
                     # so BM25-only hits don't displace strong dense hits,
                     # but high enough to outrank weak dense matches.
                     injected_score = bm25_cfg.weight * norm_score
+                    if explicit_floor and injected_score < MIN_SCORE:
+                        continue
                     neural.append((entry, injected_score, 0.0))
                     seen_texts.add(entry.text)
                     if entry.bank:
@@ -1268,6 +1289,71 @@ class ContinuumMemorySystem:
     # Consolidation
     # ------------------------------------------------------------------
 
+    def _relocate(self, entry: MemoryEntry, destination: MIRASBand) -> None:
+        """Move ``entry`` into ``destination``, preserving its identity.
+
+        Used by both directions of band movement: selective promotion
+        (:meth:`_consolidate`) and forced overflow (:meth:`_on_band_evict`).
+        ``destination.store`` mints a fresh :class:`MemoryEntry` with
+        defaults, but a relocation must not restate provenance — timestamp
+        and access_count especially, since an entry arriving in ``slow``
+        must not look newly-created to that tier's eviction scoring. The
+        storage row moves with it rather than being re-inserted.
+
+        Note ``destination.store`` may itself overflow and cascade one band
+        deeper; that completes before the append, so ``entries[-1]`` is
+        still the entry we just placed.
+        """
+        destination.store(
+            entry.text,
+            entry.embedding.clone(),
+            source=entry.source,
+            surprise=entry.surprise_score,
+        )
+        if not destination.entries:
+            return
+        moved = destination.entries[-1]
+        moved.last_logical_turn = entry.last_logical_turn
+        moved.superseded_at = entry.superseded_at
+        moved.timestamp = entry.timestamp
+        moved.seq = entry.seq
+        moved.access_count = entry.access_count
+        # MTT retention term (protocols.py: retention_boost * log1p(...)).
+        # Dropping it here would silently make ``memory_reinforce`` a no-op
+        # for eviction resistance on the daemon, which runs
+        # retention_boost=1.0 against the library default of 0.0.
+        moved.reinforcements = entry.reinforcements
+        # v0.7+ carries structured slots across the move.
+        moved.slots = list(entry.slots)
+        # Schema v5 (v0.7.6) + MCP-fix: carry the superseding text so a
+        # supersede→move sequence doesn't silently drop the correction.
+        moved.superseded_by_text = entry.superseded_by_text
+        # Schema v6 (Tier C): episode anchoring + tags follow the entry.
+        moved.episode_id = entry.episode_id
+        moved.episode_title = entry.episode_title
+        moved.tags = list(entry.tags)
+        moved.db_id = entry.db_id
+        if self.storage is not None and entry.db_id is not None:
+            # Must not escape. On the demotion path this runs inside
+            # ``band.store`` *before* the incoming entry is appended, so a
+            # raised transient DB error would abort the caller's store and
+            # drop their memory outright — strictly worse than the
+            # delete-on-evict path this replaced, which only logged. The
+            # in-memory move stands; the row keeps its old band until the
+            # next write-through, and ``hydrate_cms`` routes by that column,
+            # so the cost of failing here is a misfiled entry, not a lost one.
+            try:
+                self.storage.update_entry(
+                    entry.db_id,
+                    band=destination.name,
+                    access_count=entry.access_count,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "band relocation write-through failed (%s -> %s): %s",
+                    entry.bank, destination.name, exc,
+                )
+
     def _consolidate(self, from_idx: int, to_idx: int) -> None:
         """Promote high-value entries from ``bands[from_idx]`` to ``bands[to_idx]``.
 
@@ -1284,49 +1370,7 @@ class ContinuumMemorySystem:
         remaining: list[MemoryEntry] = []
         for entry in source.entries:
             if entry.access_count >= ac_threshold or entry.surprise_score > surprise_threshold:
-                destination.store(
-                    entry.text,
-                    entry.embedding.clone(),
-                    source=entry.source,
-                    surprise=entry.surprise_score,
-                )
-                # Propagate the logical-turn stamp + supersession flag to
-                # the freshly-promoted entry — destination.store creates a
-                # new MemoryEntry with defaults, but the promotion is a
-                # pure relocation: the entry's provenance shouldn't change.
-                # Preserve timestamp + access_count for the same reason —
-                # an entry promoted to ``slow`` shouldn't suddenly look
-                # newly-created at the slow tier's eviction scoring.
-                if destination.entries:
-                    promoted_copy = destination.entries[-1]
-                    promoted_copy.last_logical_turn = entry.last_logical_turn
-                    promoted_copy.superseded_at = entry.superseded_at
-                    promoted_copy.timestamp = entry.timestamp
-                    promoted_copy.seq = entry.seq
-                    promoted_copy.access_count = entry.access_count
-                    # v0.7+ also carries structured slots across promotion.
-                    promoted_copy.slots = list(entry.slots)
-                    # Schema v5 (v0.7.6) + MCP-fix: also propagate the
-                    # superseding text so the supersede→promote sequence
-                    # doesn't silently drop the correction. The original
-                    # cat-Jacque ship added the field on MemoryEntry but
-                    # missed this propagation path — see upstream issue.
-                    promoted_copy.superseded_by_text = entry.superseded_by_text
-                    # Schema v6 (Tier C): episode anchoring + tags. Same
-                    # rationale — promotion is a pure relocation, so the
-                    # episode context and tag set follow the entry.
-                    promoted_copy.episode_id = entry.episode_id
-                    promoted_copy.episode_title = entry.episode_title
-                    promoted_copy.tags = list(entry.tags)
-                    # Promotion is a relocation, not a copy: the storage
-                    # row moves bands with the entry.
-                    promoted_copy.db_id = entry.db_id
-                    if self.storage is not None and entry.db_id is not None:
-                        self.storage.update_entry(
-                            entry.db_id,
-                            band=destination.name,
-                            access_count=entry.access_count,
-                        )
+                self._relocate(entry, destination)
                 promoted.append(entry)
             else:
                 remaining.append(entry)
@@ -1687,9 +1731,28 @@ class ContinuumMemorySystem:
             self.storage.delete_entry_ids(removed_ids)
         return removed
 
-    def _on_band_evict(self, entry: MemoryEntry) -> None:
-        """Capacity eviction callback — keep storage in lockstep."""
+    def _on_band_evict(self, entry: MemoryEntry, band_idx: int | None = None) -> None:
+        """Capacity eviction: demote to the next band, destroy only at the end.
+
+        Before 2026-07-25 this deleted the entry and its storage row. But
+        the only *other* way out of a band is promotion, which requires
+        ``access_count >= N or surprise > theta`` — so an unsurprising,
+        never-retrieved entry died in the head band while the deeper bands
+        sat nearly empty. Measured on the LongMemEval ``s`` replay: 31.1% of
+        stored turns discarded at **6.4%** total capacity utilisation, and
+        answer-evidence turns fared worse than average (37.5% evicted)
+        because eviction ranks on novelty and restated facts are
+        unsurprising by construction.
+
+        Handing the evictee down makes total capacity the real bound, which
+        is what the layout always claimed. Only the deepest band's overflow
+        is a true drop. ``band_idx=None`` (a hand-wired callback) keeps the
+        old delete-on-evict behaviour.
+        """
         self._slot_index_dirty = True
+        if band_idx is not None and band_idx + 1 < len(self.bands):
+            self._relocate(entry, self.bands[band_idx + 1])
+            return
         if self.storage is not None and entry.db_id is not None:
             try:
                 self.storage.delete_entry_ids([entry.db_id])
