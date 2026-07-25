@@ -6,36 +6,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Fixed (2026-07-25 — the llama-server eval crashes, root-caused and fixed)
-- **Every eval harness that starts the Qwen judge/answerer now disables
-  context checkpoints** (`LLAMA_ARG_CTX_CHECKPOINTS=0`). The fork's
-  create/restore/erase churn around the 149.6 MiB recurrent-state
-  checkpoints that Qwen 3.6's hybrid Gated-DeltaNet layers trigger per
-  task leaked **~285 KV cells per request**, emptying the `-c` pool at a
-  rate set by request *count* — hence `decode: failed to find a memory
-  slot`, then `GGML_ASSERT(offset + size <= ggml_nbytes(tensor))` and a
-  `0xC0000409` abort. Six overnight runs died in a tight 345–377 request
-  band; a 600-request soak with checkpoints off passed at 1.7× that, with
-  flat latency (1.8–2.2 s), flat VRAM, and zero memory-slot errors.
-  Checkpoints buy eval workloads nothing — these prompts are
-  full-reprocessed either way, and MTP speed/quality were unchanged.
-- `LLAMA_ARG_CACHE_RAM=0` is set alongside it. This was the *first*
-  diagnosis and it was **wrong** — the next run crashed six times with
-  the cache verifiably disabled. The flag stays only because the prompt
-  cache is pure overhead for eval prompts, not because it fixed anything.
-- Both are env vars set in each script's `Start-Qwen`, never CLI flags in
-  `run-server-turboq.bat`: interactive use of the same server depends on
-  warm cache hits.
-- Each `Start-Qwen` also archives the previous `qwen-server.log` to
-  `crash-logs/` before the `>` redirect truncates it. The abort message
-  lives in the tail of the *old* log, which every prior launch destroyed —
-  which is a large part of why this took two rounds to root-cause.
-- Applied uniformly to all ten harnesses with a `Start-Qwen`:
-  `bench_diffusiongemma`, `gate_e4b_ft`, `gate_window`,
-  `overnight_longmemeval`, `overnight_qat_ornith`, `overnight_replicates`,
-  `regression_gate`, `tonight_bakeoff`, plus `overnight_lme_v2` and
-  `overnight_band_wabl`.
-
 ### Fixed (2026-07-25 — the V2 reanswer path resumes instead of restarting)
 - **`lme_v2_smoke.reanswer` now resumes from its own JSONL** (append +
   skip-done), matching `run_smoke`. It previously opened the output with
