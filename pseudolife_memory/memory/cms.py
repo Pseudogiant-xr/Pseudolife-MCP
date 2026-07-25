@@ -323,6 +323,15 @@ class ContinuumMemorySystem:
         # if anything is flagged, force the write through regardless of
         # surprise.
         device = "cuda" if torch.cuda.is_available() else "cpu"
+        # Extracted once, here, rather than after the write: the slot-identity
+        # path needs them, and they are reused for the entry stamp below —
+        # extraction is regex-heavy and was previously run twice per store.
+        extracted_slots = extract_slots(
+            text, last_entity_context=self._last_entity_seen,
+        )
+        new_slots = [
+            (s.entity, s.attribute, s.value, s.polarity) for s in extracted_slots
+        ]
         contradiction_found = False
         all_contradicted: list[MemoryEntry] = []
         for band in self.bands:
@@ -331,6 +340,7 @@ class ContinuumMemorySystem:
                 similarity_threshold=0.7, device=device,
                 nli_scorer=self._nli_scorer,
                 nli_candidate_cap=self._nli_candidate_cap,
+                new_slots=new_slots,
             )
             if contradicted:
                 all_contradicted.extend(contradicted)
@@ -387,17 +397,13 @@ class ContinuumMemorySystem:
             # Tag stamp (schema v6, Tier C). Normalised once here so
             # downstream filters can do plain set-intersection.
             entry.tags = normalize_tags(tags)
-            # Extract structured slots (schema v4). ``last_entity_context``
-            # threads recent-entity coreference across messages — letting
-            # "I gave him away" inherit the previous turn's "Jacque" anchor.
-            slots = extract_slots(
-                text,
-                last_entity_context=self._last_entity_seen,
-            )
-            entry.slots = [
-                (s.entity, s.attribute, s.value, s.polarity)
-                for s in slots
-            ]
+            # Structured slots (schema v4), extracted above the contradiction
+            # scan because the slot-identity path needs them. Reused here
+            # rather than re-extracted — ``last_entity_context`` threads
+            # recent-entity coreference across messages, letting "I gave him
+            # away" inherit the previous turn's "Jacque" anchor, and it has
+            # not moved between the two points.
+            entry.slots = list(new_slots)
             # Slot-index upkeep: a new entry can only ADD tokens, so a
             # live (non-dirty) index is extended in place rather than
             # flagged for rebuild — the daemon's steady state interleaves

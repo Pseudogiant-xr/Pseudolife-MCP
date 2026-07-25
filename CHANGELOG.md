@@ -6,6 +6,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-25 — supersession on slot identity, not embedding similarity)
+- **`detect_contradictions` gained a slot-identity path, checked first.**
+  When the new text and an existing entry assert different values — or
+  opposite polarities — at the same normalised `(entity, attribute)` slot,
+  the old entry is superseded. Deterministic and embedding-free, using the
+  same `_norm_key` / `_norm_value` normalisation the cortex uses, so the
+  two stores agree on what counts as the same slot.
+- Why not cosine: the three existing paths all gate on similarity, which
+  is a weak discriminator here. A value swap is a *minimal* edit, so a real
+  contradiction is often more embedding-similar than a harmless
+  near-duplicate — independent measurement puts cosine at AUROC 0.59 for
+  this judgment, barely above chance. The new path reaches corrections at
+  any similarity, which is where the cosine-gated paths cannot look at all.
+- A matching key with the same value **and** polarity is a restatement, not
+  a correction, and is deliberately not flagged — restatements are exactly
+  what knowledge-update evidence looks like.
+- **Coverage is bounded by slot extraction, which is precision-gated:**
+  measured on 6,000 real conversation turns, only **0.63%** yield any slot,
+  and the path needs slots on both sides. It therefore targets deliberate
+  fact-shaped writes far more than replayed chat, and its reach will grow
+  with extractor quality rather than with tuning here.
+- Slot extraction now runs **once** per store instead of twice — it was
+  being done after the write, and the contradiction scan needs it before.
+
 ### Changed (2026-07-25 — writes no longer rescan the bank for possession cues)
 - **Contradiction detection caches its gain/loss cue flags per entry.**
   `detect_contradictions` runs over every entry of every band on every

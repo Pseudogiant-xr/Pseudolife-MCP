@@ -275,6 +275,46 @@ def _has_gain_cue(text: str) -> bool:
     return _matches_any(POSSESSION_GAIN_PATTERNS, text)
 
 
+def _slot_key(entity: str, attribute: str) -> tuple[str, str]:
+    """Slot identity, normalised exactly as the cortex normalises it so the
+    two stores agree on what counts as the same slot."""
+    from pseudolife_memory.memory.cortex import _norm_key  # noqa: PLC0415
+    return (_norm_key(entity), _norm_key(attribute))
+
+
+def _slot_contradiction(
+    new_slots: list[tuple[str, str, str, str]],
+    entry_slots: list[tuple[str, str, str, str]],
+) -> bool:
+    """True when the two slot sets assert different things at the same key.
+
+    Deterministic supersession: a new value at an existing
+    ``(entity, attribute)`` slot replaces the old one — the rule the cortex
+    has always used, applied to raw band entries. No embedding involved,
+    which is the point: a value swap is a minimal edit, so cosine ranks a
+    real contradiction *above* a harmless near-duplicate (AUROC 0.59 for
+    that judgment, barely better than chance).
+
+    A matching key with the SAME value and polarity is a restatement, not a
+    correction — and restatements are exactly what knowledge-update
+    evidence looks like, so flagging them would be actively harmful.
+    """
+    from pseudolife_memory.memory.cortex import _norm_value  # noqa: PLC0415
+    if not new_slots or not entry_slots:
+        return False
+    existing = {
+        _slot_key(e, a): (_norm_value(v), p)
+        for e, a, v, p in entry_slots
+    }
+    for entity, attribute, value, polarity in new_slots:
+        prior = existing.get(_slot_key(entity, attribute))
+        if prior is None:
+            continue
+        if prior != (_norm_value(value), polarity):
+            return True
+    return False
+
+
 def _cues_for(entry: "MemoryEntry") -> tuple[bool, bool]:
     """``(gain, loss)`` for an entry's text, computed once per entry.
 
@@ -470,11 +510,19 @@ def detect_contradictions(
     *,
     nli_scorer: NLIContradictionScorer | None = None,
     nli_candidate_cap: int = 8,
+    new_slots: list[tuple[str, str, str, str]] | None = None,
 ) -> list[MemoryEntry]:
     """Find existing memories that the new text contradicts.
 
     An entry is flagged when any of these holds:
 
+    0. **Slot-identity path** (when *new_slots* is supplied) — the new text
+       and the entry assert different values, or opposite polarities, at the
+       same normalised ``(entity, attribute)`` slot. Deterministic and
+       embedding-free: cosine is a poor discriminator here because a value
+       swap is a minimal edit, so contradictions score *higher* than benign
+       near-duplicates. Checked first because it is both the cheapest and
+       the most precise signal available.
     1. **Negation-asymmetry path** — cosine similarity ≥ ``similarity_threshold``
        AND exactly one of the two texts contains a negation/correction cue.
     2. **Affirmative-replacement path** — cosine similarity ≥
@@ -530,6 +578,12 @@ def detect_contradictions(
     for entry, sim in zip(existing_entries, sims):
         if entry.superseded_at is not None:
             continue  # already replaced; don't double-count
+
+        # Path 0: slot identity. Embedding-free, so it reaches corrections
+        # the cosine-gated paths below cannot see at all.
+        if new_slots and _slot_contradiction(new_slots, entry.slots):
+            contradicted.append(entry)
+            continue
 
         # Path 1: explicit negation asymmetry at moderate similarity
         if sim >= similarity_threshold and _negation_asymmetry(new_text, entry.text):
