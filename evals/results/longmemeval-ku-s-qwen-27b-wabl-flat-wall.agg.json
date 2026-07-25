@@ -1,0 +1,53 @@
+{
+  "n_replicates": 5,
+  "replicates": [
+    "wabl-flat-wall",
+    "wabl-flat-wall-r2",
+    "wabl-flat-wall-r3",
+    "wabl-flat-wall-r4",
+    "wabl-flat-wall-r5"
+  ],
+  "n_questions": 78,
+  "arms": {
+    "rag": {
+      "accuracies": [
+        0.6154,
+        0.5513,
+        0.5897,
+        0.5897,
+        0.5769
+      ],
+      "mean": 0.5846,
+      "std": 0.02328540315304846
+    },
+    "cortex": {
+      "accuracies": [
+        0.1795,
+        0.2051,
+        0.1923,
+        0.2051,
+        0.1923
+      ],
+      "mean": 0.19485999999999998,
+      "std": 0.010709248339636173
+    },
+    "hybrid": {
+      "accuracies": [
+        0.5128,
+        0.4872,
+        0.5,
+        0.4744,
+        0.5
+      ],
+      "mean": 0.49488000000000004,
+      "std": 0.014594245441268978
+    }
+  },
+  "source_files": [
+    "longmemeval-ku-s-qwen-27b-wabl-flat-wall.jsonl",
+    "longmemeval-ku-s-qwen-27b-wabl-flat-wall-r2.jsonl",
+    "longmemeval-ku-s-qwen-27b-wabl-flat-wall-r3.jsonl",
+    "longmemeval-ku-s-qwen-27b-wabl-flat-wall-r4.jsonl",
+    "longmemeval-ku-s-qwen-27b-wabl-flat-wall-r5.jsonl"
+  ]
+}

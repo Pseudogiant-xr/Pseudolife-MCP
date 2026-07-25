@@ -6,6 +6,52 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-07-25 — the V2 reanswer path resumes instead of restarting)
+- **`lme_v2_smoke.reanswer` now resumes from its own JSONL** (append +
+  skip-done), matching `run_smoke`. It previously opened the output with
+  `"w"` and re-read every row from source, so each retry restarted from
+  row 1: on 2026-07-25 six server crashes discarded ~29 minutes each and
+  turned ~15 minutes of compute into 3.6 hours, with only the single
+  crash-free attempt ever producing a file. A crash now costs one
+  question.
+- **Rows record their `answer_prompt` (`ku` / `compose`), and a resume
+  across a prompt change is refused.** Resuming made a mixed-prompt file
+  possible where truncation had made it impossible (same `--out-tag`,
+  different `--answer-prompt`, half the rows answered under each); the
+  run now exits and names the clash. Rows written before the label
+  existed are unlabelled and treated as compatible.
+  Pinned by `tests/test_lme_v2_smoke_resume.py`.
+
+### Changed (2026-07-25 — the 8-band continuum loses on the write side too)
+- **The continuum's last defence is gone.** The 2026-07-19 ablation showed
+  the banding earns nothing on *ranking* and left the write side
+  (eviction, capacity, cadence) as the remaining case for it. The
+  write-side ablation now measured that too — flat INGEST at the
+  continuum's total capacity (5,250) vs the stock 8 bands, `s` dataset,
+  5 replicates, paired permutation over 78 questions — and the continuum
+  **loses**. Write-side isolation (identical flat ranking, only the
+  survivor sets differ): hybrid −0.110 p=0.018 (`wall`), −0.108 p=0.027
+  (`hist`); rag −0.090/−0.097, n.s. Whole system: all four significant,
+  rag −0.274 p=0.0001, hybrid −0.141 p=0.0038. Mechanism: at ~488
+  turns/question the 200-entry `working` band overflows faster than
+  promotion drains it, so the continuum **evicts 31.1% of everything
+  stored** while a flat pool of equal total capacity evicts nothing.
+  Bounded honestly in the docs: the flat arm never evicts on this corpus,
+  so this measures partition-forced eviction vs none, not one eviction
+  *policy* vs another. Published in `docs/guide/benchmarks.md` and
+  `evals/README.md`; every delta and p-value pinned to a committed
+  artifact by `tests/test_eval_evidence.py`.
+- **The LongMemEval-V2 pilot's headline claim is retired.** The
+  10-question slice concluded *hybrid beat both single channels in every
+  replicate under both prompts*; the complete 74-question `procedure`
+  category does not reproduce it — hybrid leads under the default prompt
+  (0.243 vs rag 0.162) but **ties naive RAG under the composition-aware
+  prompt** (0.284 each). The pilot's ten questions were the first ten in
+  dataset file order and proved far easier than the category as a whole
+  (every arm roughly halves). Superseded at the site a reader meets it,
+  per the retirement rule; the pilot numbers are retained inline as
+  history.
+
 ### Added (2026-07-24 — write-side band ablation + overnight harness pair)
 - **evals**: `band_ablation.py` grew the write-side arm the read-side
   ablation could not express: `replay --band-preset flat` re-runs ingest

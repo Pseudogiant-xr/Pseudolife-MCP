@@ -769,5 +769,45 @@ python evals/replicate.py run --extractor e4b-ft --tag arm1-abl-flat-hist -n 5
 
 The continuum never beats a flat pool, and under realistic aging it is
 *significantly worse* at raw-turn selection. Whatever the banding earns, it
-is not retrieval ranking — the case for it has to rest on the write side
-(eviction, capacity, consolidation cadence).
+is not retrieval ranking — which left the write side (eviction, capacity,
+consolidation cadence) as the remaining defence. It did not hold either.
+
+## Write-side ablation — `--band-preset flat` (2026-07-25)
+
+The ranking ablation holds *ingest* fixed: both arms re-rank the same
+survivors, so it is blind to what banding does at write time.
+`replay --band-preset flat` re-runs ingest through **one flat band at the
+continuum's total capacity** (5,250 = the sum of all eight tiers),
+injected via a `config.yaml` the service reads at construction, with the
+arms' configs verified identical outside `memory.miras`. Run on the `s`
+full-haystack dataset (~488 turns/question), where capacity pressure is
+real — the `oracle` corpus stores ~23 turns/question and never evicts,
+which makes the write side untestable there.
+
+```bash
+python evals/band_ablation.py replay  --dataset s --extractor qwen-27b --src-tag "" --band-preset flat
+python evals/band_ablation.py rebuild --dataset s --extractor qwen-27b --src-tag "" --band-preset flat
+```
+
+Findings (5 replicates, paired permutation, 78 questions). `iso` holds the
+ranking flat on both arms so only the survivor sets differ; `sys` is the
+continuum as designed vs flat everything. The cortex arm is definitionally
+null (both arms build the same fact block) and is not compared.
+
+| comparison | arm | Δ (`wall`) | p | Δ (`hist`) | p |
+|---|---|---|---|---|---|
+| write-side isolation | naive RAG | −0.090 | 0.17 | −0.097 | 0.15 |
+| write-side isolation | hybrid | **−0.110** | **0.018** | **−0.108** | **0.027** |
+| whole system | naive RAG | **−0.274** | **0.0001** | **−0.251** | **0.0001** |
+| whole system | hybrid | **−0.141** | **0.0038** | **−0.123** | **0.0153** |
+
+Mechanism, visible without answering at all: the continuum **evicts 31.1%
+of everything stored** (the 200-entry `working` band overflows faster than
+promotion drains it) while a flat pool of equal total capacity evicts
+nothing — see `longmemeval-ku-s-qwen-27b-wabl-survival.json`.
+
+Bounding the claim: since the flat arm never evicts on this corpus, this
+measures *partition-forced eviction vs none*, not one eviction policy vs
+another; testing the policy would need >5,250 turns/question. What is
+established: partitioning a fixed capacity into recency tiers discards
+entries an unpartitioned store of the same size keeps, and costs accuracy.

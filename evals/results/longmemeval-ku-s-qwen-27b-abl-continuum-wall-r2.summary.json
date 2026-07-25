@@ -1,0 +1,20 @@
+{
+  "dataset": "s",
+  "extractor": "qwen-27b",
+  "n": 78,
+  "arms": {
+    "rag": {
+      "accuracy": 0.295,
+      "context_tokens": 2041.4
+    },
+    "cortex": {
+      "accuracy": 0.192,
+      "context_tokens": 27.0
+    },
+    "hybrid": {
+      "accuracy": 0.333,
+      "context_tokens": 1117.4
+    }
+  },
+  "superseded_total": 970
+}

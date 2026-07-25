@@ -95,6 +95,36 @@ phase event/retry — auditable next morning at a glance).
 4. Thread B (if slice complete): `lme-v2-smoke-slice2.summary.json` and
    `-compose` variant exist.
 
+## Crash root cause — context checkpoints (settled 2026-07-25 by soak test)
+
+The llama-server deaths (`0xC0000409` after `decode: failed to find a
+memory slot`) were **context-checkpoint churn**, not the prompt cache.
+Qwen 3.6's hybrid Gated-DeltaNet layers trigger a 149.6 MiB recurrent-state
+checkpoint per task, and the fork's create/restore/erase cycle leaks
+**~285 KV cells per request** — so the `-c` pool empties at a rate set by
+request *count*, which is why the denser answer/judge workload died faster
+(~29 min) than ingest did (40–130 min).
+
+`--ctx-checkpoints 0` removes the churn. A 600-request soak passed at
+1.7× the control band where six overnight runs died (345–377 requests):
+zero failures, flat latency (1.8–2.2 s), flat VRAM, zero memory-slot
+errors. Free for eval workloads — these prompts are full-reprocessed
+either way, and MTT speed/quality were unchanged in the soak.
+
+A first attempt blamed the prompt cache and set `LLAMA_ARG_CACHE_RAM=0`;
+the very next run crashed six times with the cache verifiably disabled,
+which is what redirected the search. Both env vars are now set in every
+harness `Start-Qwen` (eval-scoped — interactive use keeps its warm
+cache).
+
+Recorded rows were never at risk: the answer path raises on request
+failure rather than recording, so a wedged server stalls progress but
+cannot write garbage. The real cost was elsewhere —
+`lme_v2_smoke.reanswer` rewrote its output from row 1 on every retry, so
+six crashes discarded ~29 minutes each. That path now carries the same
+per-row cursor as the ingest path (and refuses to resume across an
+`--answer-prompt` change), so a crash costs one question.
+
 ## GPU window 2 (after the night — thread A's answer phase)
 
 ```powershell

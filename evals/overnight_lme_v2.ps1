@@ -55,6 +55,31 @@ function Stop-Qwen {
 function Start-Qwen {
     if (Wait-Endpoint "http://127.0.0.1:1234/v1/models" 5) { return $true }
     Log "starting Qwen 27B server (log: $qwenDir\qwen-server.log)"
+    # archive the previous server log before the '>' redirect below truncates it
+    # (crash evidence: the GGML abort message lives in the tail of the old log)
+    $qlog = Join-Path $qwenDir 'qwen-server.log'
+    if (Test-Path $qlog) {
+        $qarch = Join-Path $qwenDir ('crash-logs\qwen-server-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-prelaunch.log')
+        New-Item -ItemType Directory -Force (Split-Path $qarch) | Out-Null
+        try { Move-Item $qlog $qarch -Force -ErrorAction Stop } catch { try { Copy-Item $qlog $qarch -Force } catch {} }
+    }
+    # Round 1 (2026-07-24), SUPERSEDED as a diagnosis: the prompt cache was
+    # blamed for the ~hourly crashes and disabled here. It was not the
+    # cause (see round 2 below) — the flag stays only because the cache is
+    # pure overhead for eval prompts this hybrid model always
+    # full-reprocesses. Env var, not a bat edit: interactive use elsewhere
+    # depends on warm cache hits; the bat passes no competing CLI flag.
+    $env:LLAMA_ARG_CACHE_RAM = "0"
+    # Round 2 (2026-07-25): cache-ram=0 did NOT stop the crashes — six more
+    # 0xC0000409 aborts at a hard ~350-requests-per-launch budget with the
+    # cache verifiably off. The crash logs show 149.6 MiB recurrent-state
+    # checkpoints still churning (create/restore/erase) on every task; the
+    # leak tracks that per-request churn, not cached prompts. Checkpoints
+    # only help partial prefix reuse, which this hybrid model can't do for
+    # eval workloads anyway ("forcing full prompt re-processing"), so
+    # disabling them costs eval runs nothing (server-context.cpp:2741 gates
+    # creation on n_ctx_checkpoints > 0).
+    $env:LLAMA_ARG_CTX_CHECKPOINTS = "0"
     Start-Process -FilePath cmd.exe -WorkingDirectory $qwenDir -WindowStyle Minimized `
         -ArgumentList '/c', "`"$qwenDir\run-server-turboq.bat`" > qwen-server.log 2>&1"
     return (Wait-Endpoint "http://127.0.0.1:1234/v1/models" 300)

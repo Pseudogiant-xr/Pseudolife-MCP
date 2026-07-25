@@ -64,24 +64,40 @@ predecessor, hybrid 0.705, landed inside the replicated band.)
 [LongMemEval-V2](https://arxiv.org/abs/2605.12493) (Wu et al.) is a
 different content class from the KU benchmark above: WorkArena **agent
 trajectories** — what an agent saw and clicked in an enterprise portal —
-rather than chat sessions. A 10-question `procedure` slice, 3 replicates,
-full 100-trajectory haystacks, scored by the benchmark's own deterministic
-eval functions:
+rather than chat sessions. The **complete 74-question `procedure`
+category**, full 100-trajectory haystacks, scored by the benchmark's own
+deterministic eval functions (single pass per prompt):
 
 | arm | default answer prompt | composition-aware prompt |
 |-----|----------------------|--------------------------|
-| naive RAG (control) | 0.300 [0.30–0.30] | 0.500 [0.40–0.60] |
-| cortex facts only | 0.167 [0.00–0.30] | 0.233 [0.10–0.30] |
-| hybrid | **0.533 [0.50–0.60]** | **0.633 [0.60–0.70]** |
+| naive RAG (control) | 0.162 | 0.284 |
+| cortex facts only | 0.068 | 0.216 |
+| hybrid | **0.243** | 0.284 |
 
-**Hybrid beat both single channels in every replicate under both prompts** —
-the clearest evidence so far that the fact spine and raw associative recall
-are complementary rather than redundant.
+Hybrid leads under the default prompt. Under the composition-aware prompt
+it **ties naive RAG** — so the complementarity is real but
+prompt-dependent, not universal.
 
-Read honestly: 10 questions in one category is a *pilot*, not a headline.
-The spread is wide, the cortex arm is the most run-to-run volatile (the
-extractor's generation varies between runs even at temperature 0), and none
-of this carries the 78-question paired testing the KU results above do.
+> **Superseding the pilot.** An earlier 10-question slice (3 replicates)
+> reported — and this table now supersedes —
+> `| naive RAG (control) | 0.300 [0.30–0.30] | 0.500 [0.40–0.60] |`,
+> `| cortex facts only | 0.167 [0.00–0.30] | 0.233 [0.10–0.30] |`,
+> `| hybrid | **0.533 [0.50–0.60]** | **0.633 [0.60–0.70]** |`,
+> concluding that *hybrid beat both single channels in every replicate
+> under both prompts*. **That conclusion does not survive the full
+> category.** The pilot's ten questions were simply the first ten in
+> dataset file order, and they proved far easier than the category as a
+> whole — every arm scores roughly half as well across all 74. This is
+> what a selection-biased pilot looks like from the other side, and it is
+> the reason for running the expansion at all.
+
+Read honestly: these are single-pass point estimates, not replicated, so
+small differences between arms carry no weight — the hybrid-vs-rag tie
+under the compose prompt should be read as "no measurable difference",
+not as parity established. The cortex arm remains the most run-to-run
+volatile (extractor generation varies between runs even at temperature
+0). None of this carries the 78-question paired testing the KU results
+above do.
 
 The more useful number is the starting one: **every arm scored 0.000**
 before five adapter and extraction fixes. The decisive fix was ours to make
@@ -93,7 +109,7 @@ prescribes) recovered the category, and the lesson was folded back into the
 shipped extraction prompt — see [what the extractor
 captures](dreaming.md#what-the-extractor-captures).
 
-## Band structure — the continuum earns nothing on ranking
+## Band structure — the continuum earns nothing on either side
 
 The 8-band cosine continuum is the memory's headline structure, so it is
 worth asking what it buys. An offline ablation rebuilt every KU answer
@@ -112,8 +128,61 @@ The continuum does not beat a flat pool anywhere, and under realistic aging
 it is **significantly worse** at raw-turn selection. This is published
 as-is because a negative result about one's own centrepiece is exactly the
 kind that quietly goes unpublished: whatever the banding earns, it is not
-retrieval ranking. Any case for it has to rest on the write side —
-eviction, capacity, consolidation cadence — not on finding better answers.
+retrieval ranking. That left one defence — the write side.
+
+### The write side does not rescue it
+
+The ablation above holds *ingest* fixed: both arms re-rank the same
+surviving entries, so it cannot see what the banding does at write time.
+A second ablation re-runs ingest itself through **one flat band at the
+continuum's total capacity** (5,250 entries — the sum of all eight tiers),
+so eviction and promotion never partition by tier and a different set of
+entries survives. Run on the full-haystack `s` dataset (~488 turns per
+question), where capacity pressure is real; 5 replicates, paired
+permutation test over 78 questions.
+
+**Write-side isolation** — identical flat ranking on both arms, so the
+*only* difference is which entries survived ingest:
+
+| arm | Δ continuum − flat (`wall`) | p | Δ (`hist`) | p |
+|-----|---------------------------|------|-----------|------|
+| naive RAG | −0.090 | 0.17 | −0.097 | 0.15 |
+| hybrid | **−0.110** | **0.018** | **−0.108** | **0.027** |
+
+**Whole system** — the continuum as designed (banded ingest *and* banded
+ranking) against flat everything:
+
+| arm | Δ continuum − flat (`wall`) | p | Δ (`hist`) | p |
+|-----|---------------------------|------|-----------|------|
+| naive RAG | **−0.274** | **0.0001** | **−0.251** | **0.0001** |
+| hybrid | **−0.141** | **0.0038** | **−0.123** | **0.0153** |
+
+(The cortex arm is omitted: its context is the fact block, which both arms
+build identically, so the comparison is definitionally null. The two
+`0.0001` p-values are the resolution floor of a 10,000-permutation test —
+read them as "below 0.001", not as a precise estimate.)
+
+The mechanism is capacity accounting, and it is visible without any
+answering at all: at ~488 turns per question the continuum **evicts 31.1%
+of everything stored** — the 200-entry `working` band overflows long
+before promotion can drain it — while a flat pool of the *same total
+capacity* evicts nothing. Discarding a third of the evidence costs
+accuracy, and it does so on the arm that reads raw turns.
+
+Read honestly, and this bounds the claim: because the flat arm never
+evicts at all on this corpus, the comparison measures **eviction forced by
+tier partitioning against no eviction** — not one eviction *policy*
+against another. A corpus exceeding 5,250 turns per question would be
+needed to test the policy itself. What is established is narrower and
+still decisive for the design: partitioning a fixed capacity into
+recency tiers throws away entries that an unpartitioned store of the same
+size would have kept, and the memory is measurably worse for it.
+
+Both of the continuum's defences have now been measured and neither
+holds. The case for the banding, if there is one, has to be made on
+grounds this benchmark does not reach — and the honest engineering
+conclusion is that a flat store is the better default until such a case
+is made.
 
 ## Extraction quality is the dominant factor
 
