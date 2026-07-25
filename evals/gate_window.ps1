@@ -46,6 +46,22 @@ function Stop-Qwen {
 function Start-Qwen {
     if (Wait-Endpoint "http://127.0.0.1:1234/v1/models" 5) { return $true }
     Log "starting Qwen 27B server"
+    # archive the previous server log before the '>' redirect below truncates it
+    # (crash evidence: the GGML abort message lives in the tail of the old log)
+    $qlog = Join-Path $qwenDir 'qwen-server.log'
+    if (Test-Path $qlog) {
+        $qarch = Join-Path $qwenDir ('crash-logs\qwen-server-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-prelaunch.log')
+        New-Item -ItemType Directory -Force (Split-Path $qarch) | Out-Null
+        try { Move-Item $qlog $qarch -Force -ErrorAction Stop } catch { try { Copy-Item $qlog $qarch -Force } catch {} }
+    }
+    # Eval-run server env (full history in overnight_lme_v2.ps1): cache-ram=0
+    # because the prompt cache pins ~0.5 GiB of KV cells per cached prompt
+    # with zero hits on this hybrid model; ctx-checkpoints=0 because the
+    # per-request checkpoint churn leaks ~285 KV cells/request and crashed
+    # the server (0xC0000409) at ~350 requests. Verified by a 600-request
+    # soak 2026-07-25. Env vars, not bat edits: interactive use keeps both.
+    $env:LLAMA_ARG_CACHE_RAM = "0"
+    $env:LLAMA_ARG_CTX_CHECKPOINTS = "0"
     Start-Process -FilePath cmd.exe -WorkingDirectory $qwenDir -WindowStyle Minimized `
         -ArgumentList '/c', "`"$qwenDir\run-server-turboq.bat`" > qwen-server.log 2>&1"
     return (Wait-Endpoint "http://127.0.0.1:1234/v1/models" 300)
