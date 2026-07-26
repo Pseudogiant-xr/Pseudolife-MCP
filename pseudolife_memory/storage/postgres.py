@@ -1169,6 +1169,15 @@ class PostgresStorage:
             "WHERE object_entity_id IS NOT NULL").fetchall()
         return {r[0] for r in rows}
 
+    def entity_fact_counts(self) -> dict[int, int]:
+        """Current-fact count per entity — the evidence signal that merge-
+        direction ranking uses alongside degree, so a contentless node cannot
+        become the target that absorbs a fact-rich one (2026-07-26)."""
+        return {eid: int(n) for eid, n in self.conn.execute(
+            "SELECT entity_id, COUNT(*) FROM facts "
+            "WHERE status = 'current' AND entity_id IS NOT NULL "
+            "GROUP BY entity_id").fetchall()}
+
     def entity_sources_map(self) -> dict[int, list[str]]:
         out: dict[int, list[str]] = {}
         for eid, source in self.conn.execute(

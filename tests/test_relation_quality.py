@@ -4,6 +4,28 @@ from pseudolife_memory.memory.relation_quality import (
 )
 
 
+def test_git_branch_names_type_as_concepts():
+    # 2026-07-26: a cross-project proposal claimed "llama-server runs-on
+    # feat/lme-v2-pilot". It survived because a branch name typed as UNKNOWN,
+    # and unknown is deliberately neutral — so no type violation fired and the
+    # edge scored a clean 0.70. Branch names are concepts, exactly like the
+    # already-listed "master"/"main", which makes the pair a hard violation
+    # and drops it at the source instead of filing it for review.
+    for b in ("feat/lme-v2-pilot", "fix/slot-key-flattening",
+              "chore/drop-md-prompt", "eval/gate-10-replicates",
+              "ci/registry-oidc-publish", "refactor/x", "release/0.10.0"):
+        assert infer_type(b) == "concept", b
+    assert is_hard_type_violation("llama-server", "runs-on", "feat/lme-v2-pilot")
+    assert edge_confidence("llama-server", "runs-on", "feat/lme-v2-pilot") < 0.2
+
+
+def test_branch_typing_does_not_capture_real_paths():
+    # The rule must not swallow directory-prefixed FILES or plural dirs.
+    assert infer_type("docs/guide/benchmarks.md") == "file"
+    assert infer_type("evals/ladder_sweep.py") == "file"
+    assert infer_type("tools/headless_export.py") == "file"
+
+
 @pytest.mark.parametrize("name,expected", [
     ("user", "person"), ("the user", "person"),
     ("schema 11", "concept"), ("schema v8", "concept"), ("11", "concept"),

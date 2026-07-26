@@ -611,6 +611,66 @@ class _RelStubExtractor:
         return [dict(r) for r in self._relations]
 
 
+def test_unflatten_slot_key_claims_splits_flattened_keys():
+    # 2026-07-26: the vocab hint lists slot keys as `entity.attribute`
+    # (cortex._norm_key collapses every separator to '-', so exactly ONE dot
+    # is the join). Extractors periodically "reuse" a key by copying the whole
+    # string into `entity` and writing the literal "value" as the attribute —
+    # minting `0-9-0-release.deployment-status` as an entity that duplicates a
+    # correctly-shaped fact.
+    from pseudolife_memory.memory.dream import unflatten_slot_key_claims
+    vocab = ["0-9-0-release.commit", "0-9-0-release.deployment-status"]
+
+    out = unflatten_slot_key_claims(
+        [{"entity": "0-9-0-release.deployment-status", "attribute": "value",
+          "value": "live", "confidence": 0.9, "origin": "agent"}], vocab)
+    assert out[0]["entity"] == "0-9-0-release"
+    assert out[0]["attribute"] == "deployment-status"
+    assert out[0]["value"] == "live" and out[0]["confidence"] == 0.9
+
+    # a NEW attribute on a KNOWN entity still splits
+    out = unflatten_slot_key_claims(
+        [{"entity": "0-9-0-release.rollback-caveat", "attribute": "value",
+          "value": "x", "confidence": 0.8, "origin": "agent"}], vocab)
+    assert (out[0]["entity"], out[0]["attribute"]) == (
+        "0-9-0-release", "rollback-caveat")
+
+
+def test_unflatten_slot_key_claims_leaves_real_dotted_entities_alone():
+    # All guards must hold: split only when the attribute is literally "value"
+    # AND the prefix is a known entity. `llama.cpp` / `host.docker.internal`
+    # are real entities and must survive untouched.
+    from pseudolife_memory.memory.dream import unflatten_slot_key_claims
+    vocab = ["llama-cpp.build", "0-9-0-release.commit"]
+    keep = [
+        {"entity": "llama.cpp", "attribute": "build", "value": "b9371",
+         "confidence": 0.9, "origin": "agent"},          # attribute != "value"
+        {"entity": "host.docker.internal", "attribute": "value", "value": "ok",
+         "confidence": 0.9, "origin": "agent"},          # prefix not an entity
+        {"entity": "plain-entity", "attribute": "value", "value": "v",
+         "confidence": 0.9, "origin": "agent"},          # no dot at all
+    ]
+    assert unflatten_slot_key_claims([dict(c) for c in keep], vocab) == keep
+
+
+def test_dream_run_unflattens_slot_key_claims(svc):
+    # End-to-end: a flattened claim lands on the real slot and mints no dotted
+    # entity.
+    class _FlatStub:
+        def extract(self, texts, vocab, known_facts=None):
+            return [{"entity": "sk-probe.deploy-status", "attribute": "value",
+                     "value": "shipped", "confidence": 0.9, "origin": "agent"}]
+
+    svc.cortex_write("sk-probe", "commit", "abc123", support="user")
+    svc.store("sk-probe note", source="pseudolife-mcp")
+    svc.dream_run(_FlatStub())
+
+    got = svc.cortex_lookup("sk-probe", "deploy-status")
+    assert got is not None and got["value"] == "shipped"
+    from pseudolife_memory.graph import norm_name
+    assert svc._storage.find_entity(norm_name("sk-probe.deploy-status")) is None
+
+
 def test_dream_extract_relations_populates_graph(svc):
     n = svc._dream_extract_relations(_RelStubExtractor(relations=[
         {"src": "checkout-service", "relation": "runs_on", "dst": "host-1"},

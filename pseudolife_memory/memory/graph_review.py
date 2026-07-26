@@ -115,15 +115,21 @@ def file_concept_split(a, b):
     return None
 
 
-def duplicate_candidates(entities, *, min_jaccard=0.6, dismissed=frozenset()):
+def duplicate_candidates(entities, *, min_jaccard=0.6, dismissed=frozenset(),
+                         lesson_ids=frozenset()):
     """``dismissed`` holds human-settled false positives as ordered
     (canonical_a, canonical_b) tuples — those pairs never re-flag.
 
-    A file/concept pair (see ``file_concept_split``) carries ``action:
+    ``lesson_ids`` (see :func:`lesson_only_ids`) are skipped entirely: a
+    lesson node is named ``<artifact> <aspect>`` so it shares almost every
+    token with the artifact it merely mentions, and dismissing the pair does
+    not stop the next lesson from minting another one (2026-07-26).
+
+    A file/concept pair (see :func:`file_concept_split`) carries ``action:
     "relate"`` and a ``suggested_relation`` instead of ``"merge"``, with the
     file listed first so the edge reads ``<file> implements <concept>``."""
     toks = [(e["id"], e["display"], _token_set(e["display"]), e.get("canonical"))
-            for e in entities]
+            for e in entities if e["id"] not in lesson_ids]
     out = []
     for i in range(len(toks)):
         for j in range(i + 1, len(toks)):
@@ -148,9 +154,14 @@ def duplicate_candidates(entities, *, min_jaccard=0.6, dismissed=frozenset()):
     return out
 
 
-def orphans(edges, entities, *, max_degree=1):
+def orphans(edges, entities, *, max_degree=1, lesson_ids=frozenset()):
+    """``lesson_ids`` (see :func:`lesson_only_ids`) are weakly connected BY
+    DESIGN — one prefers/avoids edge each — so counting them inflates this
+    informational finding without ever being actionable."""
     deg = degree_counts(edges)
-    names = sorted(e["display"] for e in entities if deg.get(e["id"], 0) <= max_degree)
+    names = sorted(e["display"] for e in entities
+                   if deg.get(e["id"], 0) <= max_degree
+                   and e["id"] not in lesson_ids)
     if not names:
         return []
     return [{"type": "orphan", "severity": "info",
@@ -186,23 +197,34 @@ def test_artifacts(entities):
 _LESSON_RELATIONS = frozenset({"prefers", "avoids"})
 
 
-def unattributed(entities, entity_sources_map, edges=(),
-                 lesson_entity_ids=frozenset()):
-    """Entities whose every edge is a lesson relation (prefers/avoids) are
-    lesson-minted task/approach nodes — the mention-scan can never attribute
-    them, so they are excluded rather than flagged forever.
+def lesson_only_ids(edges, lesson_entity_ids=frozenset()):
+    """Entity ids that are lesson-minted task/approach nodes: every edge they
+    carry is a lesson relation (prefers/avoids), i.e. they exist only because
+    ``memory_outcome`` recorded a task. They are not graph entities — the
+    mention-scan can never attribute them, they are weakly connected by
+    construction, and their ``<artifact> <aspect>`` names shadow the real
+    artifact in duplicate findings.
+
     ``lesson_entity_ids`` covers the residual tail: entities still referenced
-    by lessons.entity_id/object_entity_id whose lesson edges were pruned
-    carry ZERO edges, so the edge signal alone can't identify them."""
+    by lessons.entity_id/object_entity_id whose lesson edges were pruned carry
+    ZERO edges, so the edge signal alone cannot identify them."""
     rels: dict = {}
     for ed in edges:
         for eid in (ed["src_id"], ed["dst_id"]):
             rels.setdefault(eid, set()).add(ed.get("relation", ""))
-    lesson_only = {eid for eid, rs in rels.items() if rs <= _LESSON_RELATIONS}
+    out = {eid for eid, rs in rels.items() if rs <= _LESSON_RELATIONS}
+    out.update(lesson_entity_ids)
+    return out
+
+
+def unattributed(entities, entity_sources_map, edges=(),
+                 lesson_entity_ids=frozenset()):
+    """Entities with no project, excluding lesson-minted nodes (see
+    :func:`lesson_only_ids`) which can never be attributed."""
+    lesson_only = lesson_only_ids(edges, lesson_entity_ids)
     names = sorted(e["display"] for e in entities
                    if e["id"] not in entity_sources_map
-                   and e["id"] not in lesson_only
-                   and e["id"] not in lesson_entity_ids)
+                   and e["id"] not in lesson_only)
     if not names:
         return []
     return [{"type": "unattributed", "severity": "info",
@@ -244,9 +266,14 @@ def junk_candidates(entity_proposals):
 
 def review(edges, entities, entity_sources_map, proposals=None, entity_proposals=None,
            dismissed_pairs=None, lesson_entity_ids=None):
-    findings = (duplicate_candidates(entities, dismissed=dismissed_pairs or frozenset())
+    # One lesson-node computation shared by every finding that must ignore
+    # them — duplicates, orphans and unattributed alike (2026-07-26).
+    lesson_ids = lesson_only_ids(edges, lesson_entity_ids or frozenset())
+    findings = (duplicate_candidates(entities, dismissed=dismissed_pairs or frozenset(),
+                                     lesson_ids=lesson_ids)
                 + test_artifacts(entities)
-                + dubious_edges(edges, entities) + orphans(edges, entities)
+                + dubious_edges(edges, entities)
+                + orphans(edges, entities, lesson_ids=lesson_ids)
                 + unattributed(entities, entity_sources_map, edges,
                                lesson_entity_ids or frozenset())
                 + proposed_links(proposals or [])
