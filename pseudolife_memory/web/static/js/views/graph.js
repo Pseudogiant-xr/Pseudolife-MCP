@@ -268,6 +268,16 @@ export async function renderGraph(root, ctx) {
       await postAll([{ path: "/api/graph/reject-proposal", body: { id: d.id } }], "Dismissed");
       return;
     }
+    if (d.kind === "relate-named") {                      // duplicate: file implements concept
+      // Records the edge the pair actually stands in, then marks the pair
+      // distinct so it stops re-listing — the merge/dismiss binary loses one
+      // or the other.
+      await postAll([
+        { path: "/api/graph/relate", body: { src: d.src, relation: d.relation, dst: d.dst } },
+        { path: "/api/graph/dismiss-duplicate", body: { a: d.src, b: d.dst } },
+      ], `Related (${d.relation})`);
+      return;
+    }
     if (d.kind === "dismiss-duplicate") {                 // duplicate: genuinely-distinct verdict
       // Permanent: the pair never resurfaces as a duplicate finding or
       // deep-dream candidate — worth one confirm, unlike ordinary rejects.

@@ -80,9 +80,48 @@ def _token_set(name):
             if len(t) > 2 or any(c.isdigit() for c in t)}
 
 
+_CODE_FILE_RE = re.compile(
+    r"\.(py|js|mjs|ts|tsx|jsx|ps1|sh|bat|rb|go|rs|java|c|cc|cpp|h|hpp)$", re.I)
+
+
+def _stem_key(name):
+    """Fold a bare name for stem comparison: case, separators and the
+    directory prefix all ignored."""
+    return re.sub(r"[^a-z0-9]+", "", str(name).rsplit("/", 1)[-1].lower())
+
+
+def file_concept_split(a, b):
+    """``(file, concept)`` when one name is a SOURCE FILE and the other is its
+    own bare stem — ``("band.py", "band")``, ``("evals/dg_shim.py", "dg_shim")``.
+
+    Such a pair is neither a duplicate nor unrelated. The concept usually has
+    identity the file does not: an independent runtime ("dream" runs-on the
+    host shim, "band" stores-data-in postgres — both FALSE of the module), or
+    several implementing files (`backup.sh` AND `ops/backup.ps1` realize
+    "Backup", so no single merge is even well-defined). Merging asserts false
+    things about the file; dismissing throws away a real relationship. Callers
+    offer ``relate`` instead and let the reviewer pick the edge — the
+    suggestion is only a default (2026-07-26 curation review).
+
+    Returns ``None`` unless exactly one side is code and the stems match, so
+    two source files (``test_shim.py`` / ``tests/test_shim.py``) and non-code
+    pairs (``README.md`` / ``README``) keep the ordinary merge action.
+    """
+    for f, c in ((a, b), (b, a)):
+        if not _CODE_FILE_RE.search(str(f)) or _CODE_FILE_RE.search(str(c)):
+            continue
+        if _stem_key(_CODE_FILE_RE.sub("", str(f))) == _stem_key(c):
+            return f, c
+    return None
+
+
 def duplicate_candidates(entities, *, min_jaccard=0.6, dismissed=frozenset()):
     """``dismissed`` holds human-settled false positives as ordered
-    (canonical_a, canonical_b) tuples — those pairs never re-flag."""
+    (canonical_a, canonical_b) tuples — those pairs never re-flag.
+
+    A file/concept pair (see ``file_concept_split``) carries ``action:
+    "relate"`` and a ``suggested_relation`` instead of ``"merge"``, with the
+    file listed first so the edge reads ``<file> implements <concept>``."""
     toks = [(e["id"], e["display"], _token_set(e["display"]), e.get("canonical"))
             for e in entities]
     out = []
@@ -94,11 +133,17 @@ def duplicate_candidates(entities, *, min_jaccard=0.6, dismissed=frozenset()):
             if tuple(sorted((toks[i][3] or "", toks[j][3] or ""))) in dismissed:
                 continue
             jac = len(a & b) / len(a | b)
-            if jac >= min_jaccard:
-                out.append({"type": "duplicate", "severity": "warn",
-                            "label": f"{toks[i][1]} ↔ {toks[j][1]}",
-                            "entities": [toks[i][1], toks[j][1]],
-                            "score": round(jac, 3), "action": "merge"})
+            if jac < min_jaccard:
+                continue
+            pair = file_concept_split(toks[i][1], toks[j][1])
+            names = list(pair) if pair else [toks[i][1], toks[j][1]]
+            found = {"type": "duplicate", "severity": "warn",
+                     "label": f"{names[0]} ↔ {names[1]}", "entities": names,
+                     "score": round(jac, 3),
+                     "action": "relate" if pair else "merge"}
+            if pair:
+                found["suggested_relation"] = "implements"
+            out.append(found)
     out.sort(key=lambda f: -f["score"])
     return out
 
