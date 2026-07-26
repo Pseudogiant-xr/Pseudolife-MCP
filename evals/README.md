@@ -312,6 +312,37 @@ re-extract):
 committed baseline (`evals/results/regression_gate.baseline.json`) —
 see the script header for scope and the `-Establish` flow.
 
+> **The committed baseline is stale and the gate is under-powered
+> (2026-07-26). Treat a cortex-arm failure as uninformative until it is
+> re-established.** Running the gate on clean `origin/master` fails it:
+> cortex **0.6709 ± 0.0370**, against a baseline of **0.7051**. The same
+> gate on the #38–#44 stack gives **0.6581 ± 0.0196** — a difference from
+> master of **0.0128**, well inside the noise.
+>
+> The noise floor is directly measurable here, because the gate copies the
+> **rag** arm's context verbatim: identical inputs, and the two runs differ
+> by **0.021**. Any cortex delta below that is judge variance, not signal.
+>
+> Two independent reasons the 0.7051 baseline should not be trusted:
+> - Its recorded `std` is **exactly 0.0** on two arms — three LLM-judge
+>   replicates returning identical accuracy. Today's runs show 0.007–0.037.
+>   The baseline was established 2026-07-18, before `LLAMA_ARG_CACHE_RAM=0`
+>   turned the server's prompt cache off; caching plausibly suppressed the
+>   replicate variance that has now reappeared.
+> - It disagrees with this file's own more careful 5-replicate measurement
+>   of the same slice below — **cortex 0.682 ± 0.017**. Both of today's
+>   3-replicate runs sit nearer that figure than the baseline does.
+>
+> The margin is also smaller than the spread it has to survive: 0.03
+> against a cortex std of 0.037 at n=3, i.e. ~1.4 standard errors, so the
+> gate fails a meaningful fraction of the time with no change at all.
+> Re-establishing it should use **more replicates and a margin derived from
+> the measured spread**, and — per the benchmark rules — be promoted
+> deliberately rather than as a side effect of a rerun.
+>
+> Evidence: `regression_gate-2026-07-26-master-control.agg.json` (clean
+> master) and `regression_gate-2026-07-26-stack-38-44.agg.json`.
+
 ### Findings — 2026-07-18 (first replicated comparison)
 
 5 replicates per config (`overnight_replicates.ps1`), paired permutation
