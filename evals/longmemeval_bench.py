@@ -87,6 +87,11 @@ EXTRACTORS = {
     # Claude Sonnet 5 ceiling probe (2026-07-11): served by evals/sonnet_shim.py
     # wrapping the Max-plan claude CLI (same :8082 shim-swap slot as dg).
     "sonnet-5": "http://127.0.0.1:8082/v1",
+    # Smarter-teacher comparators (2026-07-26): sonnet_shim.py --model
+    # claude-opus-5 / claude-fable-5 on dedicated ports (:8082 stays the
+    # production sonnet shim).
+    "opus-5": "http://127.0.0.1:8083/v1",
+    "fable-5": "http://127.0.0.1:8084/v1",
 }
 # Answerer + judge — constant across runs, so extractor is the only variable.
 QWEN_URL = os.environ.get("PSEUDOLIFE_BENCH_QWEN_URL", "http://127.0.0.1:1234/v1")
