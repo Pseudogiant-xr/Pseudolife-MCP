@@ -58,10 +58,28 @@ stamp="$(date +%Y%m%d-%H%M%S)"
 rollback="$image_tag-$TAG"
 if docker image inspect "$image_tag" >/dev/null 2>&1; then
     docker tag "$image_tag" "$rollback"
+    rollback_ready=1
     echo "==> Tagged rollback image: $rollback"
 else
-    echo "WARNING: no current $image_tag image to tag (first build?)." >&2
+    rollback_ready=0
+    echo "WARNING: no current $image_tag image to tag (first build, or the version was bumped before this image was ever built)." >&2
+    echo "WARNING: this deploy has NO rollback image. Rolling back means rebuilding the previous code." >&2
 fi
+
+# Rollback instructions follow whether the tag actually exists. They used to
+# print unconditionally, so a skipped tag produced a command that fails —
+# worst on the unhealthy path below, where the operator reaches for it
+# precisely because the deploy just broke.
+print_rollback() {
+    if [ "$rollback_ready" = "1" ]; then
+        echo "      docker tag $rollback $image_tag"
+        echo "      docker compose -f \"$compose_file\" up -d --no-deps pseudolife-daemon"
+    else
+        echo "      (no rollback image exists for this deploy - nothing was tagged)"
+        echo "      Rebuild the last-good code instead, e.g.:"
+        echo "      git checkout master && ops/update.sh"
+    fi
+}
 
 # 2b. Retention: drop stale pre-* rollback tags beyond the newest N — one is
 #     minted per deploy and they otherwise pile up without bound (~60 tags in
@@ -91,10 +109,10 @@ done
 if [ -n "$healthy" ]; then
     echo "==> Healthy."
     echo "    Rolled-back deploy if ever needed:"
-    echo "      docker tag $rollback $image_tag"
-    echo "      docker compose -f \"$compose_file\" up -d --no-deps pseudolife-daemon"
+    print_rollback
 else
     echo "WARNING: daemon did not report healthy. Logs: docker logs pseudolife-mcp-daemon" >&2
-    echo "WARNING: rollback: docker tag $rollback $image_tag; then re-run the up line above." >&2
+    echo "WARNING: to roll back:" >&2
+    print_rollback >&2
     exit 1
 fi
