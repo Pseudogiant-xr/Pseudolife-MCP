@@ -14,6 +14,33 @@ def test_duplicate_candidates_flags_near_identical_names():
     assert "postgres" not in dups[0]["label"]
 
 
+def test_file_concept_pair_offers_relate_not_merge():
+    # 2026-07-26 curation review: a source file and the feature/role it
+    # implements are NOT duplicates — the concept usually has independent
+    # runtime identity ("dream" runs-on the host shim; "band" stores-data-in
+    # postgres), so merging asserts false things about the file. They are not
+    # unrelated either, so a plain dismissal throws the link away. The finding
+    # offers `relate`, and the file is listed first so the suggested edge
+    # reads <file> implements <concept>.
+    dups = gr.duplicate_candidates(_ents("band", "band.py"))
+    assert dups, "the pair must still surface as a finding"
+    f = dups[0]
+    assert f["action"] == "relate"
+    assert f["suggested_relation"] == "implements"
+    assert f["entities"] == ["band.py", "band"]
+
+
+def test_file_concept_detection_ignores_unrelated_and_two_file_pairs():
+    # Only a file paired with ITS OWN bare stem qualifies. Two source files,
+    # or a file next to an unrelated concept, keep the ordinary merge action.
+    assert gr.file_concept_split("band.py", "band") == ("band.py", "band")
+    assert gr.file_concept_split("evals/dg_shim.py", "dg_shim") == (
+        "evals/dg_shim.py", "dg_shim")
+    assert gr.file_concept_split("test_shim.py", "tests/test_shim.py") is None
+    assert gr.file_concept_split("band.py", "postgres") is None
+    assert gr.file_concept_split("README.md", "README") is None   # not code
+
+
 def test_test_artifacts_matches_known_patterns():
     ents = _ents("payments/payments-db", "pl-healthcheck-target", "pseudolife-mcp")
     arts = gr.test_artifacts(ents)

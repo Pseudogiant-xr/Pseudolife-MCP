@@ -7,6 +7,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Changed (2026-07-26 — gate baseline re-established at 10 replicates; default raised)
+### Added (2026-07-26 — `relate` action for file/concept duplicate findings)
+- **The review queue can now record an edge instead of forcing merge-or-dismiss.**
+  A duplicate finding whose two names are a source file and its own bare stem
+  (`band.py` ↔ `band`, `evals/dg_shim.py` ↔ `dg_shim`) now carries
+  `action: "relate"` plus a `suggested_relation` (default `implements`), with
+  the file listed first so the edge reads `<file> implements <concept>`. Backed
+  by a new `POST /api/graph/relate` and a Relate button in the Atlas review
+  drawer, which writes the edge and then marks the pair distinct.
+  **Why:** these pairs are neither duplicates nor unrelated. The concept
+  routinely has identity the file does not — an independent runtime (`dream`
+  *runs-on* the host shim, `band` *stores-data-in* postgres, both false of the
+  module) or several implementing files (`backup.sh` **and** `ops/backup.ps1`
+  realize `Backup`, so no single merge is even well-defined). Merging asserts
+  false things about the file; dismissing discards a real relationship — and
+  dismissal is permanent. The `implements` relation already described exactly
+  this case ("a concrete artifact that realizes an abstract role"); only the
+  queue's action vocabulary was missing it. Two-source-file pairs
+  (`test_shim.py` / `tests/test_shim.py`) and non-code pairs (`README.md` /
+  `README`) keep the ordinary merge action.
+
+### Changed (2026-07-26 — regression-gate baseline re-established at 8 replicates)
 - **`evals/results/regression_gate.baseline.json` re-established on clean
   `origin/master` (commit `959ecad`) with 10 replicates**, replacing the
   3-replicate baseline from 2026-07-18 that both master and the #38–#44

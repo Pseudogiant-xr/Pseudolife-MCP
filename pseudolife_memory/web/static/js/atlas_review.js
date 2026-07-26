@@ -328,9 +328,20 @@ function dupItem(f, onAct) {
   const [a, b] = f.entities || [];
   if (!a || !b) return null;
   const ra = entityRef(a), rb = entityRef(b);
+  // action "relate" marks a file/concept pair: neither a merge (the concept
+  // holds facts that are false of the file) nor unrelated (dismissing throws
+  // the link away). Offer the edge first, with the analyzer's suggestion as
+  // the default relation — a is the file, b the concept.
+  const relate = f.action === "relate"
+    ? btn(`Relate (${f.suggested_relation || "implements"})`, {
+        onClick: () => onAct({ kind: "relate-named", src: a, dst: b,
+          relation: f.suggested_relation || "implements" }) })
+    : null;
   return itemRow([
     ra.chip, dim("↔"), rb.chip, f.score != null ? dim(`jaccard ${(+f.score).toFixed(2)}`) : null,
-    btn("Merge", { onClick: () => onAct({ kind: "merge-named", from: a, into: b }) }),
+    relate,
+    btn("Merge", { kind: relate ? "ghost" : undefined,
+      onClick: () => onAct({ kind: "merge-named", from: a, into: b }) }),
     btn("Dismiss", { kind: "ghost", onClick: () => onAct({ kind: "dismiss-duplicate", a, b }) }),
   ], [ra, rb]);
 }
