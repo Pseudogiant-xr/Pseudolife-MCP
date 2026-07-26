@@ -113,6 +113,17 @@ RUNGS: dict[str, dict] = {
                  "label": "Claude Sonnet 5 (Max-plan CLI shim, ceiling probe)",
                  "base_url": "http://127.0.0.1:8082/v1",
                  "model": "extractor"},
+    # Smarter-teacher comparators (2026-07-26): same shim, dedicated ports so
+    # the production sonnet shim on :8082 is never repurposed mid-run. Also
+    # NOT in LADDER_ORDER — run with --rung opus-5 / --rung fable-5.
+    "opus-5": {"kind": "llm",
+               "label": "Claude Opus 5 (Max-plan CLI shim, ceiling probe)",
+               "base_url": "http://127.0.0.1:8083/v1",
+               "model": "extractor"},
+    "fable-5": {"kind": "llm",
+                "label": "Claude Fable 5 (Max-plan CLI shim, ceiling probe)",
+                "base_url": "http://127.0.0.1:8084/v1",
+                "model": "extractor"},
 }
 LADDER_ORDER = ["naive-rag", "floor", "gemma-e2b", "gemma-e4b",
                 "qwen3.5-4b", "granite-h-tiny", "lfm2-8b-a1b", "ornith-9b",
