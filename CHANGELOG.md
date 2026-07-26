@@ -6,6 +6,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-07-26 — two defects found by live verification)
+- **The retype pass now runs when there is no dream backlog.** It sat at the
+  dream tail, so a dream with nothing to consolidate returned early and never
+  drained the quarantine — exactly backwards, since the quarantine accumulates
+  when dreams are INFREQUENT. Same precedent as lesson synthesis on that path:
+  no new memories does not mean no pending work.
+- **A git branch is no longer offered as the concept a file implements.**
+  `file_concept_split` compares stems with separators and directory prefixes
+  stripped, so `terra_shim.py` matched the branch `feat/terra-shim` and the
+  queue suggested `implements` — but a branch is a VCS artifact, not a role,
+  and a prior review had ruled that exact pair distinct. Branch-shaped
+  counterparts are now rejected explicitly.
+
 ### Added (2026-07-26 — typed-relation retry over the quarantined edges)
 - **Quarantined untyped edges get a second, better-posed question.** The 0.45
   `related-to` quarantine works — a triage of 32 of them found *zero* worth

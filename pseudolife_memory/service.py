@@ -2672,11 +2672,18 @@ class MemoryService:
             outcome_inference = self.infer_outcomes_stage(extractor)
             lessons = self.synthesize_lessons(extractor)
             graph_insight = self._safe_refresh_graph_insight()
+            # Quarantined pairs may still be pending for the same reason
+            # lessons are: no new memories doesn't mean no pending work. The
+            # quarantine in fact accumulates when dreams are INFREQUENT, so
+            # skipping the retype here drained it exactly when it was least
+            # needed (live verification, 2026-07-26).
+            retyped = self.retype_quarantined_links(
+                extractor, limit=self.config.memory.dream.retype_quarantined_max)
             return {"pulled": 0, "claims": 0, "inserted": 0, "confirmed": 0,
                     "contested": 0, "superseded": 0, "relations": 0,
                     "cursor": pulled["cursor"], "lessons": lessons,
                     "outcome_inference": outcome_inference,
-                    "graph_insight": graph_insight}
+                    "graph_insight": graph_insight, "retyped": retyped}
         from pseudolife_memory.memory.cortex import _norm_key
         import time as _time
         traces_cfg = self.config.memory.traces

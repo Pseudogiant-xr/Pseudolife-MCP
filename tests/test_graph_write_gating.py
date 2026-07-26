@@ -404,6 +404,30 @@ def test_retype_rejects_a_pair_the_extractor_still_cannot_type(svc):
     assert rows == [("dream-low-confidence", "rejected")]
 
 
+def test_retype_runs_even_with_no_dream_backlog(svc):
+    # Live verification 2026-07-26: the retype sat at the dream tail, so a
+    # dream with nothing to consolidate returned early and never drained the
+    # quarantine — exactly backwards, since the quarantine accumulates when
+    # dreams are INFREQUENT. Same precedent as lesson synthesis on this path:
+    # no new memories, but pending work may still exist.
+    import time as _t
+    _quarantine_pair(svc, "nobacklog-a", "nobacklog-b")
+    svc.dream_commit(_t.time() + 60)       # cursor past everything: no backlog
+
+    class _Stub:
+        def extract(self, texts, vocab, known_facts=None):
+            return []
+        def extract_relations(self, texts, registry):
+            return []
+
+    out = svc.dream_run(_Stub())
+    assert out["pulled"] == 0
+    assert out["retyped"]["settled"] == 1
+    still = svc._storage.conn.execute(
+        "SELECT count(*) FROM edge_proposals WHERE status='pending'").fetchone()[0]
+    assert still == 0
+
+
 def test_retype_is_capped_and_survives_extractor_failure(svc):
     _quarantine_pair(svc, "retype-c1", "retype-d1")
     _quarantine_pair(svc, "retype-c2", "retype-d2")
