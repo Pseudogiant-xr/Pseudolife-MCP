@@ -6,6 +6,36 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-07-26 — cortex facts now carry their age; mid-session recall codified)
+- **`memory_search`'s `cortex` block now returns `asserted_at`,
+  `last_confirmed` (ISO-8601, to the second) and the human `age`.** The data
+  was already there — `service.cortex_search` has always returned those
+  fields — but the MCP tool projected them away, so every cortex fact
+  arrived undated and a stale one looked exactly as authoritative as a
+  fresh one. Not even `verbose=True` added a date.
+- **Why it matters.** The cortex is the layer an agent trusts most, and
+  supersession only fires within one `(entity, attribute)` slot — so the
+  *same* real fact recorded under a second entity name is never corrected
+  and never flagged `contested`. Observed 2026-07-26: a query for the
+  deployed extractor prompt returned
+  `extraction-prompt-system-prompt/version = "v2"` beside
+  `Sonnet sidecar/primary-extractor = "... (v1 prompt)"`, both
+  `contested: false`, ten days apart, undated — and an agent in another
+  session acted on v1. Second precision so two same-day writes to rival
+  slots are still orderable.
+- **The briefing now tells agents to recall more than once.** The
+  SessionStart hook and `examples/CLAUDE.memory.md` gained a *RECALL AGAIN
+  mid-session* list (user refers to work you weren't part of; before
+  proposing a design, via `memory_lesson_search` for `polarity:-`
+  dead-ends; before asserting a benchmark number, version or "current"
+  value; when starting in an untouched area) and an explicit **TRUST
+  ORDER**: memory tells you *why*, the repo tells you *what is*. When they
+  disagree, say so, trust the code, and correct the fact at its slot rather
+  than silently picking one.
+- Entity canonicalisation — the root cause, since post-hoc key merging is a
+  known dead end (23 true merges over 3,257 keys) — is deliberately left
+  for separate work.
+
 ### Fixed (2026-07-26 — two defects found by live verification)
 - **The retype pass now runs when there is no dream backlog.** It sat at the
   dream tail, so a dream with nothing to consolidate returned early and never

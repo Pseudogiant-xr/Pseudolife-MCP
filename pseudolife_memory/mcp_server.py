@@ -48,6 +48,7 @@ import atexit
 import signal
 import threading
 import time
+from datetime import datetime
 from typing import Any, Literal
 
 # Silence torch._dynamo's noisy fall-back warnings on systems without
@@ -224,6 +225,22 @@ def _compact_entries(result: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _iso_seconds(ts: float | None) -> str | None:
+    """Epoch seconds -> local ISO-8601 to the second, for in-context reading.
+
+    Second precision so two same-day writes to rival slots are orderable —
+    the case that matters is telling a stale fact from the write that should
+    have replaced it. Returns None for a missing/zero stamp rather than
+    inventing an epoch date.
+    """
+    if not ts:
+        return None
+    try:
+        return datetime.fromtimestamp(float(ts)).isoformat(timespec="seconds")
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
 @_tool(tier="minimal")
 def memory_search(
     query: str,
@@ -288,6 +305,18 @@ def memory_search(
                     "value": f["value"], "origin": f.get("origin", ""),
                     "confidence": f["confidence"], "score": f.get("score"),
                     "contested": f.get("contested", False),
+                    # Currency. The cortex is the layer an agent trusts most,
+                    # so a stale fact here is worse than a stale entry — and
+                    # supersession only fires within one (entity, attribute)
+                    # slot, so the SAME fact recorded under a second entity
+                    # name goes uncorrected and uncontested. Without a date
+                    # the two are indistinguishable; with one the reader can
+                    # tell which write is newer. (2026-07-26: a ten-day-old
+                    # "(v1 prompt)" fact sat beside a fresh "v2" fact, both
+                    # contested=False, and an agent picked v1.)
+                    "asserted_at": _iso_seconds(f.get("asserted_at")),
+                    "last_confirmed": _iso_seconds(f.get("last_confirmed")),
+                    "age": f.get("age"),
                     **(
                         {"contender_value": f.get("contender_value"),
                          "contender_origin": f.get("contender_origin", "")}
