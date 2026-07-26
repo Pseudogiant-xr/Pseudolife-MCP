@@ -6,6 +6,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-26 — typed-relation retry over the quarantined edges)
+- **Quarantined untyped edges get a second, better-posed question.** The 0.45
+  `related-to` quarantine works — a triage of 32 of them found *zero* worth
+  writing as-is — but ~44% named a REAL relationship that merely got the
+  wrong label (`publishes-to`, `implements`, `operates-on`), and they simply
+  accumulated. `retype_quarantined_links` re-asks the extractor for a TYPED
+  relation using only the notes where both entities co-occur
+  (`graph_consolidation.shared_mention_entries`). Focused evidence plus the
+  current prompt — which demands the most specific relation and forbids
+  `related-to` for co-mentions — makes this a genuinely different question
+  from the one that produced the quarantined edge, with no new prompt surface.
+- A typed answer files a **reviewable** `dream-retyped` proposal and settles
+  the untyped original; a retype is a second guess on already-suspect
+  material, so it never writes a live edge. No typed answer settles the
+  original too — that is exactly the co-mention noise the quarantine exists to
+  catch, and leaving it pending only regrows the queue. An extractor failure
+  settles nothing and never raises.
+- Runs at the dream tail, capped by `memory.dream.retype_quarantined_max`
+  (default 3, `0` disables). Self-limiting: the pass no-ops on an empty
+  quarantine, so a drained bank pays nothing.
+
 ### Fixed (2026-07-26 — graph hygiene round 3: four junk faucets closed at source)
 - **Flattened slot keys no longer mint dotted entities.** `cortex.vocab()`
   renders hints as `entity.attribute`, but the bare list read as a list of

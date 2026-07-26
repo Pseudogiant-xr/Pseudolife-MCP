@@ -347,6 +347,82 @@ def test_cross_project_untyped_relation_dropped(svc):
     assert n3 == 0 and _cross_count() == 1
 
 
+class _RetypeStub:
+    """Extractor stub whose relations call returns a fixed typed answer."""
+    def __init__(self, relations):
+        self._relations = relations
+        self.calls = 0
+
+    def extract_relations(self, texts, registry):
+        self.calls += 1
+        return [dict(r) for r in self._relations]
+
+
+def _quarantine_pair(svc, a, b, scope="proj-r"):
+    svc.stats()
+    with svc._lock:
+        svc._resolve_or_create_entity(a)
+        svc._resolve_or_create_entity(b)
+    svc.graph_assign_scope(a, scope)
+    svc.graph_assign_scope(b, scope)
+    svc.store(f"{a} and {b} appear together in this note", source="pseudolife-mcp")
+    svc._link_dream_relations([{"src": a, "relation": "correlates-with", "dst": b}])
+
+
+def test_retype_upgrades_a_quarantined_pair_to_a_typed_proposal(svc):
+    # 2026-07-26: 44% of quarantined untyped pairs name a REAL relationship
+    # that merely got the wrong label. A second pass over just the notes where
+    # both entities co-occur re-asks for a typed relation; a hit files a
+    # reviewable `dream-retyped` proposal and settles the untyped original.
+    _quarantine_pair(svc, "retype-tool", "retype-store")
+    stub = _RetypeStub([{"src": "retype-tool", "relation": "uses",
+                         "dst": "retype-store", "confidence": 0.7}])
+
+    out = svc.retype_quarantined_links(stub, limit=5)
+
+    assert out["retyped"] == 1 and out["settled"] == 1
+    rows = svc._storage.conn.execute(
+        "SELECT relation, source, status FROM edge_proposals ORDER BY id").fetchall()
+    # the original was stored as the resolved untyped fallback (`related-to`)
+    assert ("related-to", "dream-low-confidence", "rejected") in rows
+    assert ("uses", "dream-retyped", "pending") in rows
+    # a proposal, never a live edge — the retype is a second guess on
+    # already-suspect material
+    nb = svc.graph_neighborhood("retype-tool", depth=1)
+    assert not any("retype-store" in (e["src"], e["dst"]) for e in nb.get("edges", []))
+
+
+def test_retype_rejects_a_pair_the_extractor_still_cannot_type(svc):
+    # The other ~56%: genuine co-mention noise. Nothing typed comes back, so
+    # the quarantined proposal is settled as rejected and the queue drains.
+    _quarantine_pair(svc, "retype-x", "retype-y")
+    out = svc.retype_quarantined_links(_RetypeStub([]), limit=5)
+
+    assert out["retyped"] == 0 and out["settled"] == 1
+    rows = svc._storage.conn.execute(
+        "SELECT source, status FROM edge_proposals").fetchall()
+    assert rows == [("dream-low-confidence", "rejected")]
+
+
+def test_retype_is_capped_and_survives_extractor_failure(svc):
+    _quarantine_pair(svc, "retype-c1", "retype-d1")
+    _quarantine_pair(svc, "retype-c2", "retype-d2")
+
+    class _Boom:
+        def extract_relations(self, texts, registry):
+            raise RuntimeError("extractor down")
+
+    # a failing extractor must never settle anything or raise
+    assert svc.retype_quarantined_links(_Boom(), limit=5)["settled"] == 0
+    still = svc._storage.conn.execute(
+        "SELECT count(*) FROM edge_proposals WHERE status='pending'").fetchone()[0]
+    assert still == 2
+    # the cap bounds extractor calls per run
+    stub = _RetypeStub([])
+    assert svc.retype_quarantined_links(stub, limit=1)["settled"] == 1
+    assert stub.calls == 1
+
+
 def test_dream_untyped_low_confidence_edge_quarantined(svc):
     # 2026-07-19: untyped co-mention edges (related-to, conf 0.45) were the
     # dominant review-queue pollutant (~19/day straight into the live graph;

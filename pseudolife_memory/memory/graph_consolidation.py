@@ -125,6 +125,29 @@ def entity_context_vectors(entities: list[dict], entries: list[dict],
     return vectors, mentions
 
 
+def shared_mention_entries(entries: list[dict], a_display: str, b_display: str,
+                           limit: int = 4) -> list[str]:
+    """Texts of the entries naming BOTH entities, in order, capped at ``limit``.
+
+    The evidence a retype judgement needs: an untyped edge exists because two
+    names co-occurred, so "what relation actually holds?" is only answerable
+    from the notes where they co-occur — not from everything mentioning either
+    one. Token-subset matching mirrors :func:`entity_context_vectors`'
+    fallback scan."""
+    wa, wb = _token_set(a_display), _token_set(b_display)
+    if not wa or not wb:
+        return []
+    cap = max(0, int(limit))
+    out: list[str] = []
+    for e in entries:
+        toks = _token_set(e.get("text", ""))
+        if wa <= toks and wb <= toks:
+            out.append(e.get("text", ""))
+            if len(out) >= cap:
+                break
+    return out
+
+
 def candidate_pairs(vectors: dict[int, np.ndarray], edges: list[dict],
                     entities: list[dict], scope_map: dict[int, list[str]],
                     mentions: dict[int, frozenset[int]], *,

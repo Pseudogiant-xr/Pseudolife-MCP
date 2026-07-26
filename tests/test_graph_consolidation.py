@@ -301,6 +301,24 @@ def test_partition_candidates_keeps_bare_vs_path_when_both_sides_are_thin():
     assert len(merges) == 1 and links == []
 
 
+def test_shared_mention_entries_returns_only_entries_naming_both():
+    # Evidence for a retype judgement: the notes where the two entities
+    # actually co-occur, not everything mentioning either one.
+    entries = [
+        {"id": 1, "text": "mcp-publisher pushes the server to the MCP registry"},
+        {"id": 2, "text": "mcp-publisher was reinstalled at v1.8.0"},
+        {"id": 3, "text": "the MCP registry served 0.10.0 as latest"},
+    ]
+    got = gc.shared_mention_entries(entries, "mcp-publisher", "MCP registry", limit=5)
+    assert got == ["mcp-publisher pushes the server to the MCP registry"]
+    assert gc.shared_mention_entries(entries, "mcp-publisher", "nothing here", 5) == []
+
+
+def test_shared_mention_entries_respects_limit():
+    entries = [{"id": i, "text": f"alpha and beta note {i}"} for i in range(6)]
+    assert len(gc.shared_mention_entries(entries, "alpha", "beta", limit=2)) == 2
+
+
 def test_junk_entities_flags_slot_key_artifacts_against_known_entities():
     # 2026-07-26: `X.attribute` entities minted when an extractor flattens a
     # vocab slot key. Detected only when the PREFIX is itself a known entity,
