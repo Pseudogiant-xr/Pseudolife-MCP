@@ -104,11 +104,19 @@ def file_concept_split(a, b):
     suggestion is only a default (2026-07-26 curation review).
 
     Returns ``None`` unless exactly one side is code and the stems match, so
-    two source files (``test_shim.py`` / ``tests/test_shim.py``) and non-code
-    pairs (``README.md`` / ``README``) keep the ordinary merge action.
+    two source files (``test_shim.py`` / ``tests/test_shim.py``), non-code
+    pairs (``README.md`` / ``README``) and git branches (``terra_shim.py`` /
+    ``feat/terra-shim``) keep the ordinary merge action.
     """
+    from pseudolife_memory.memory.relation_quality import infer_type
+
     for f, c in ((a, b), (b, a)):
         if not _CODE_FILE_RE.search(str(f)) or _CODE_FILE_RE.search(str(c)):
+            continue
+        # A git branch is a VCS artifact, not a role a file realizes — and
+        # _stem_key drops the "feat/" prefix, so terra_shim.py would otherwise
+        # pair with feat/terra-shim (live verification, 2026-07-26).
+        if "/" in str(c) and infer_type(str(c)) == "concept":
             continue
         if _stem_key(_CODE_FILE_RE.sub("", str(f))) == _stem_key(c):
             return f, c

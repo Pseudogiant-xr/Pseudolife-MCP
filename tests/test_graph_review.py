@@ -73,6 +73,18 @@ def test_file_concept_detection_ignores_unrelated_and_two_file_pairs():
     assert gr.file_concept_split("README.md", "README") is None   # not code
 
 
+def test_file_concept_split_ignores_git_branches():
+    # Live verification 2026-07-26: `terra_shim.py` vs the branch
+    # `feat/terra-shim` was offered as relate/implements, but a branch is a VCS
+    # artifact, not a role a file realizes — a prior judge ruled that exact
+    # pair distinct. Stripping the branch prefix makes the stems match, so the
+    # branch counterpart has to be rejected explicitly.
+    assert gr.file_concept_split("terra_shim.py", "feat/terra-shim") is None
+    assert gr.file_concept_split("evals/terra_shim.py", "feat/terra-shim") is None
+    assert gr.file_concept_split("band.py", "fix/band") is None
+    assert gr.file_concept_split("band.py", "band") == ("band.py", "band")
+
+
 def test_test_artifacts_matches_known_patterns():
     ents = _ents("payments/payments-db", "pl-healthcheck-target", "pseudolife-mcp")
     arts = gr.test_artifacts(ents)
