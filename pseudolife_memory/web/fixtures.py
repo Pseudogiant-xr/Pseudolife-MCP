@@ -439,6 +439,11 @@ class FixtureService:
              "label": "deep-dream-graph-consolidation-design.md ↔ deep-dream-graph-consolidation.md",
              "entities": ["docs/superpowers/specs/2026-06-28-deep-dream-graph-consolidation-design.md",
                           "docs/superpowers/plans/2026-06-28-deep-dream-graph-consolidation.md"]},
+            # file/concept pair: exercises the Relate button (the live bank's
+            # own such pairs were curated away, so only fixtures cover it)
+            {"type": "duplicate", "severity": "warn", "action": "relate",
+             "suggested_relation": "implements", "score": 1.0,
+             "label": "band.py ↔ band", "entities": ["band.py", "band"]},
             {"type": "test_artifact", "severity": "warn", "action": "delete",
              "label": "2 test/smoke artifacts", "entities": ["payments-db", "pl-healthcheck-target"]},
             {"type": "dubious_edge", "severity": "warn", "action": "prune",
@@ -558,6 +563,10 @@ class FixtureService:
 
     def graph_bless_edge(self, src, relation, dst):
         return {"blessed": True, "src": src, "relation": relation, "dst": dst}
+
+    def graph_relate(self, src, relation, dst):
+        return {"src": src, "relation": relation, "dst": dst,
+                "confidence": 0.8, "warnings": []}
 
     def graph_dismiss_duplicate(self, a, b):
         return {"dismissed": True, "new": True, "a": a, "b": b}

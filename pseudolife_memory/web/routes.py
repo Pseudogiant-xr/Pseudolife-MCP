@@ -196,6 +196,9 @@ class ConsoleRoutes:
             _s(q, "entity"), limit=_i(q, "limit", 20)))
         p("/api/graph/assign-scope", lambda q, b: svc.graph_assign_scope(b["entity"], b["source"]))
         p("/api/graph/unrelate", lambda q, b: svc.graph_unrelate(b["src"], b["relation"], b["dst"]))
+        # Backs the duplicate finding's `relate` action: a file and the concept
+        # it implements are neither a merge nor an unrelated pair.
+        p("/api/graph/relate", lambda q, b: svc.graph_relate(b["src"], b["relation"], b["dst"]))
         p("/api/graph/bless-edge", lambda q, b: svc.graph_bless_edge(b["src"], b["relation"], b["dst"]))
         p("/api/graph/dismiss-duplicate", lambda q, b: svc.graph_dismiss_duplicate(b["a"], b["b"]))
         g("/api/curation/duplicates", lambda q, b: svc.curation_duplicates())

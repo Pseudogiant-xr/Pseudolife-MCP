@@ -209,6 +209,17 @@ def test_merge_route(svc):
     assert out["merged"] is True and out["into"] == "canonical"
 
 
+def test_relate_route(svc):
+    # Backs the duplicate finding's `relate` action (2026-07-26): a file and
+    # the concept it implements are neither a merge nor an unrelated pair, so
+    # the queue needs a way to record the edge instead of discarding the link.
+    r = ConsoleRoutes(svc)
+    out = r.dispatch("POST", "/api/graph/relate", {},
+                     {"src": "band.py", "relation": "implements", "dst": "band"})
+    assert out["src"] == "band.py" and out["relation"] == "implements"
+    assert out["dst"] == "band"
+
+
 def test_accept_reject_proposal_routes(svc):
     r = ConsoleRoutes(svc)
     assert r.dispatch("POST", "/api/graph/accept-proposal", {}, {"id": 1})["accepted"]
