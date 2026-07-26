@@ -2627,9 +2627,13 @@ class MemoryService:
                           else e["text"][:200] for e in entries)
         pairs: list[tuple[dict, Any]] = []      # (claim, source entry db_id)
         try:
+            from pseudolife_memory.memory.dream import unflatten_slot_key_claims
             extracted = (extractor.extract(texts, vocab,
                                            known_facts=known_facts)
                          if known_facts else extractor.extract(texts, vocab))
+            # Repair vocab slot keys the extractor flattened into the entity
+            # name before anything mints an entity from them (2026-07-26).
+            extracted = unflatten_slot_key_claims(extracted, vocab)
             for c in extracted:
                 idx = c.get("source")
                 if isinstance(idx, int) and 0 <= idx < len(entries):
@@ -3882,11 +3886,18 @@ class MemoryService:
             if not matches:
                 return
             deg = degree_counts(g["edges"])
+            facts = self._storage.entity_fact_counts()
             now = _t.time()
+
+            def _evidence(eid: int) -> int:
+                return deg.get(eid, 0) + facts.get(eid, 0)
+
             for m in matches[:3]:
-                # Present the fold lower-degree -> higher-degree.
+                # Present the fold thin -> evidence-bearing. Degree alone let a
+                # contentless node be the target and absorb a fact-rich one
+                # (2026-07-26); facts count as evidence too.
                 a, b = entity_id, m["entity_id"]
-                if deg.get(a, 0) > deg.get(b, 0):
+                if _evidence(a) > _evidence(b):
                     a, b = b, a
                 self._storage.insert_entity_proposal(
                     "merge", a, b, m["score"],
@@ -4726,6 +4737,7 @@ class MemoryService:
             dismissed = self._storage.dismissed_pairs()
             prop_keys = self._storage.entity_proposal_keys()
             pending_props = self._storage.pending_entity_proposals()
+            fact_counts = self._storage.entity_fact_counts()
             lesson_recs = self._curation_records("lesson", cfg.snippet_max_chars)
             world_recs = self._curation_records("world", cfg.snippet_max_chars)
         entities, edges = g["entities"], g["edges"]
@@ -4740,7 +4752,8 @@ class MemoryService:
             min_similarity=cfg.min_similarity, top_k=cfg.top_k_candidates,
             dismissed=dismissed, max_support_overlap=cfg.max_support_overlap)
         merge_cands, link_cands = gc.partition_candidates(
-            near, entities, edges, merge_min_similarity=cfg.merge_min_similarity)
+            near, entities, edges, merge_min_similarity=cfg.merge_min_similarity,
+            fact_counts=fact_counts)
         from pseudolife_memory.graph import norm_name as _nn
         known_norms = frozenset(
             {e["canonical"] for e in entities}

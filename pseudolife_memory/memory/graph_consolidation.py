@@ -229,6 +229,12 @@ _BARE_NUMBER = re.compile(r"^\d+$")
 _COUNT_PREFIX = re.compile(r"^\d+\s")                      # "236 memories"
 _BARE_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _DUMP_FILE = re.compile(r"\.sql(\.gz)?$", re.IGNORECASE)   # pg_dump artifacts
+# Trailing segment of a real filename/host, never a flattened slot attribute.
+_CODE_OR_DATA_EXT = re.compile(
+    r"^(py|js|mjs|ts|tsx|jsx|ps1|sh|bat|md|json|jsonl|ya?ml|toml|cfg|ini|txt|"
+    r"csv|html?|sql|gz|tgz|zip|exe|dll|gguf|pt|bin|vhdx|fx|cpp|cc|h|hpp|rs|go|"
+    r"rb|java|log|com|io|org|net|dev|internal|local|localdomain)$",
+    re.IGNORECASE)
 _IMAGE_TAG = re.compile(r":\d+\.\d+\.\d+")                 # 3-part ver; arXiv ids are 2-part
 _COMMAND_STRING = re.compile(                              # cmd word + >=2 more tokens
     r"^(docker|git|python|pip|curl|pwsh|npm|pytest)\s+\S+\s+\S", re.IGNORECASE)
@@ -412,11 +418,22 @@ def _name_contains(a: str, b: str) -> str | None:
 
 def partition_candidates(pairs: list[dict], entities: list[dict], edges: list[dict], *,
                          merge_min_similarity: float = 0.90,
+                         fact_counts: dict[int, int] | None = None,
                          ) -> tuple[list[dict], list[dict]]:
     """Split near-pairs into MERGE candidates (high sim + name-containment) and the
-    remaining LINK candidates. Merge fold direction: lower-degree into higher-degree
-    (tie folds higher id into lower id), matching exact_duplicate_pairs."""
+    remaining LINK candidates. Merge fold direction: the side with more evidence
+    absorbs the other, ranked by ``(degree, fact_count)`` (tie folds higher id
+    into lower id), matching exact_duplicate_pairs.
+
+    ``fact_counts`` matters because degree alone let a CONTENTLESS node (no
+    facts, no edges) win a 0-0 tie by id and swallow a richly-specified work
+    item — "Atlas graph cleanup" repeatedly pulled in real PRs that way
+    (2026-07-26). Evidence is counted as ``degree + facts`` so a fact-rich
+    node is not out-ranked by one stray edge; when BOTH sides are equally
+    thin the id tie-break stands, which keeps ordinary bare-vs-path proposals
+    (``update.ps1`` -> ``ops/update.ps1``) intact."""
     deg = degree_counts(edges)
+    facts = fact_counts or {}
     disp = _disp(entities)
     merges: list[dict] = []
     links: list[dict] = []
@@ -429,8 +446,9 @@ def partition_candidates(pairs: list[dict], entities: list[dict], edges: list[di
             links.append(p)
             continue
         u, v = p["src_id"], p["dst_id"]
-        du, dv = deg.get(u, 0), deg.get(v, 0)
-        if du > dv or (du == dv and u < v):
+        ru = (deg.get(u, 0) + facts.get(u, 0), deg.get(u, 0))
+        rv = (deg.get(v, 0) + facts.get(v, 0), deg.get(v, 0))
+        if ru > rv or (ru == rv and u < v):
             into, frm = u, v
         else:
             into, frm = v, u
@@ -466,6 +484,18 @@ def junk_entities(entities: list[dict], edges: list[dict], *,
                         and na in known_norms and nb in known_norms):
                     out.append({"entity_id": e["id"], "display": e["display"],
                                 "reason": "compound-artifact"})  # degree-agnostic
+                    continue
+            # Slot-key artifact: `X.attribute` minted when an extractor
+            # flattened a vocab key (see dream.unflatten_slot_key_claims,
+            # which stops new ones). Requires the PREFIX to be a known entity,
+            # so real dotted names survive — `llama.cpp` is flagged only if an
+            # entity `llama` exists, `host.docker.internal` never is.
+            head, dot, tail = d.rpartition(".")
+            if dot and head and tail and not _CODE_OR_DATA_EXT.match(tail):
+                nh = norm_name(head)
+                if nh and nh in known_norms and nh != norm_name(d):
+                    out.append({"entity_id": e["id"], "display": e["display"],
+                                "reason": "slot-key-artifact"})
                     continue
         if deg.get(e["id"], 0) > max_degree:
             continue

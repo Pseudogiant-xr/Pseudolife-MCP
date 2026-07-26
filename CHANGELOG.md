@@ -6,6 +6,43 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-07-26 — graph hygiene round 3: four junk faucets closed at source)
+- **Flattened slot keys no longer mint dotted entities.** `cortex.vocab()`
+  renders hints as `entity.attribute`, but the bare list read as a list of
+  *entity names*, so extractors periodically emitted
+  `{"entity": "0-9-0-release.deployment-status", "attribute": "value"}` —
+  minting a dotted entity duplicating a correctly-shaped fact. Three layers:
+  the vocab hint now states the shape explicitly; `unflatten_slot_key_claims`
+  repairs what still slips (split only when the attribute is literally
+  `value` AND the prefix is a known entity, so `llama.cpp` and
+  `host.docker.internal` survive); and `junk_entities` gains a
+  `slot-key-artifact` class for existing ones, likewise requiring the prefix
+  to be a known entity — the remaining dotted names in the bank
+  (`facts.id`, `cms.retrieve`, `np.asarray`) are legitimate code/schema
+  references and stay untouched.
+- **Lesson-minted nodes are excluded from duplicate and orphan findings.**
+  `unattributed()` already skipped entities whose every edge is a
+  prefers/avoids lesson relation; the predicate is now shared as
+  `lesson_only_ids` and applied to all three. These nodes are named
+  `<artifact> <aspect>`, so they share nearly every token with the artifact
+  they merely mention — dismissing a pair never stopped the next lesson from
+  minting another — and they are weakly connected by construction, which
+  inflated the orphan count with entries no action could ever resolve.
+- **A contentless entity can no longer be a merge target.** Fold direction
+  ranked on degree alone, so a node with no facts and no edges won a 0-0 tie
+  by id and absorbed a richly-specified work item ("Atlas graph cleanup"
+  repeatedly swallowed real PRs). Both proposal paths — deep-dream
+  `partition_candidates` and write-time dedup — now rank on `degree + facts`,
+  so a fact-rich node is not out-ranked by one stray edge. Equally-thin pairs
+  keep the id tie-break, leaving ordinary bare-vs-path proposals intact.
+- **Git branch names type as concepts.** `infer_type` returned `None` for
+  `feat/lme-v2-pilot`, and unknown types are deliberately neutral, so
+  "llama-server *runs-on* a git branch" scored a clean 0.70 and reached the
+  cross-project review queue. Branches now type like `master`/`main`, making
+  such pairs a hard type violation that is dropped at the source. The rule
+  runs after file-extension typing and uses singular prefixes only, so
+  `docs/guide/benchmarks.md` and `evals/ladder_sweep.py` stay files.
+
 ### Changed (2026-07-26 — gate baseline re-established at 10 replicates; default raised)
 ### Added (2026-07-26 — `relate` action for file/concept duplicate findings)
 - **The review queue can now record an edge instead of forcing merge-or-dismiss.**

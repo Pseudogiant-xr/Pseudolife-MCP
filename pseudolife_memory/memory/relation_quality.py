@@ -31,6 +31,12 @@ _CMD_PREFIXES = ("docker compose", "docker ", "git ", "pip ", "npm ", "curl ",
 _FILE_EXT = (".py", ".yaml", ".yml", ".json", ".md", ".txt", ".sql", ".ps1",
              ".sh", ".gguf", ".toml", ".ini", ".cfg", ".fx")
 _PERSON = {"user", "the user", "i", "me", "admin", "operator"}
+# Conventional git-flow branch prefixes. Deliberately singular where a plural
+# directory of the same stem exists in this repo (eval/ branch vs evals/ dir),
+# and "docs/"/"test/" are omitted for the same reason.
+_BRANCH_PREFIX = re.compile(
+    r"^(feat|feature|fix|hotfix|bugfix|chore|ci|build|perf|refactor|style|"
+    r"release|revert|eval|spike|exp)/.+")
 _RUNTIME = {"docker", "docker-desktop", "windows", "windows 11", "windows box",
             "windows host", "linux", "wsl", "host", "vm", "kubernetes", "k8s",
             "container", "4090", "gpu", "cpu", "dx11", "dx12"}
@@ -52,9 +58,17 @@ def infer_type(name: str) -> str | None:
     # NOTE: 'schema' / command-strings deliberately shadow later rules — e.g. 'schema.sql' types as concept (not file), 'docker-db' as runtime (not datastore). Intentional per the partial-lexicon design.
     if n.startswith("schema") or n in ("branch", "master", "main"):
         return "concept"
-    # file (by extension) before tool (identifier)
+    # file (by extension) before tool (identifier) — and before the branch rule
+    # below, so a directory-prefixed FILE ("docs/guide/benchmarks.md") is never
+    # mistaken for a branch.
     if n.endswith(_FILE_EXT):
         return "file"
+    # git branch — a concept like "master"/"main" above. Untyped branches let
+    # "llama-server runs-on feat/lme-v2-pilot" pass the type check as neutral
+    # and reach the cross-project review queue (2026-07-26). Singular prefixes
+    # only: "eval/" is a branch, "evals/" is this repo's directory.
+    if _BRANCH_PREFIX.match(n):
+        return "concept"
     if n in _PERSON:
         return "person"
     if n in _RUNTIME or n.startswith(("docker-", "windows")):

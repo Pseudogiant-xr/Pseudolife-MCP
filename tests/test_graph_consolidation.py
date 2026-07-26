@@ -263,6 +263,63 @@ def test_junk_entities_flags_artifacts_not_real():
     assert out == {1: "bare-number", 2: "status-word", 3: "too-short"}  # 4 real, 5 well-connected
 
 
+def test_partition_candidates_never_targets_a_contentless_entity():
+    # 2026-07-26: zero-fact/zero-degree nodes ("Atlas graph cleanup") acted as
+    # merge MAGNETS — degree alone decided the fold, so on a 0-0 degree tie the
+    # empty node won by id and swallowed a richly-specified work item. Rank by
+    # (degree, facts) so the evidence-bearing side is always the target.
+    ents = [{"id": 1, "canonical": "atlas-graph-cleanup", "display": "Atlas graph cleanup", "etype": None},
+            {"id": 2, "canonical": "atlas-graph-cleanup-pr18", "display": "Atlas graph cleanup PR18", "etype": None}]
+    pairs = [{"src_id": 1, "dst_id": 2, "src": "Atlas graph cleanup",
+              "dst": "Atlas graph cleanup PR18", "similarity": 0.97}]
+    merges, _ = gc.partition_candidates(pairs, ents, [], fact_counts={2: 6})
+    assert len(merges) == 1
+    assert merges[0]["into"] == "Atlas graph cleanup PR18"   # facts win the tie
+    assert merges[0]["from"] == "Atlas graph cleanup"
+
+
+def test_partition_candidates_facts_outrank_a_single_stray_edge():
+    # Evidence is degree + facts, so a fact-rich node is not out-ranked by a
+    # contentless one that happens to carry one stray edge.
+    ents = [{"id": 1, "canonical": "atlas-graph-cleanup", "display": "Atlas graph cleanup", "etype": None},
+            {"id": 2, "canonical": "atlas-graph-cleanup-pr18", "display": "Atlas graph cleanup PR18", "etype": None}]
+    pairs = [{"src_id": 1, "dst_id": 2, "src": "Atlas graph cleanup",
+              "dst": "Atlas graph cleanup PR18", "similarity": 0.97}]
+    edges = [_edge(10, 1, "related-to", 99, 0.45)]      # id 1: degree 1, 0 facts
+    merges, _ = gc.partition_candidates(pairs, ents, edges, fact_counts={2: 6})
+    assert merges[0]["into"] == "Atlas graph cleanup PR18"
+
+
+def test_partition_candidates_keeps_bare_vs_path_when_both_sides_are_thin():
+    # Regression guard for the ranking change: two evidence-free entities must
+    # still partition as a merge (the ordinary bare-name -> path-form case).
+    ents = [{"id": 1, "canonical": "update-ps1", "display": "update.ps1", "etype": None},
+            {"id": 2, "canonical": "ops-update-ps1", "display": "ops/update.ps1", "etype": None}]
+    pairs = [{"src_id": 1, "dst_id": 2, "src": "update.ps1",
+              "dst": "ops/update.ps1", "similarity": 0.99}]
+    merges, links = gc.partition_candidates(pairs, ents, [], fact_counts={})
+    assert len(merges) == 1 and links == []
+
+
+def test_junk_entities_flags_slot_key_artifacts_against_known_entities():
+    # 2026-07-26: `X.attribute` entities minted when an extractor flattens a
+    # vocab slot key. Detected only when the PREFIX is itself a known entity,
+    # so genuinely-dotted names survive: `llama.cpp` stays unless an entity
+    # called `llama` exists, and `host.docker.internal` is never touched.
+    ents = [
+        {"id": 1, "canonical": "0-9-0-release", "display": "0.9.0-release", "etype": None},
+        {"id": 2, "canonical": "0-9-0-release-bm25", "display": "0-9-0-release.bm25", "etype": None},
+        {"id": 3, "canonical": "llama-cpp", "display": "llama.cpp", "etype": None},
+        {"id": 4, "canonical": "host-docker-internal", "display": "host.docker.internal", "etype": None},
+        {"id": 5, "canonical": "daemon", "display": "daemon", "etype": None},
+    ]
+    known = frozenset({"0-9-0-release", "llama-cpp", "host-docker-internal", "daemon"})
+    out = {j["entity_id"]: j["reason"]
+           for j in gc.junk_entities(ents, [], max_degree=1, known_norms=known)}
+    assert out.get(2) == "slot-key-artifact"
+    assert 3 not in out and 4 not in out and 1 not in out and 5 not in out
+
+
 def test_is_concat_artifact_detects_relation_separators():
     for name in ["memory_recall<->recall.py", "schema v8 <-> schema 11",
                  "a ↔ b", "x -> y", "Phase 1 plan<->Phase 2 plan"]:

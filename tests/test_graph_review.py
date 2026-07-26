@@ -14,6 +14,38 @@ def test_duplicate_candidates_flags_near_identical_names():
     assert "postgres" not in dups[0]["label"]
 
 
+def test_lesson_only_ids_identifies_lesson_minted_nodes():
+    # A node whose EVERY edge is a lesson relation (prefers/avoids) is a
+    # memory_outcome task/approach node, not a graph entity.
+    edges = [{"src_id": 2, "dst_id": 9, "relation": "prefers"},
+             {"src_id": 3, "dst_id": 4, "relation": "uses"}]
+    ids = gr.lesson_only_ids(edges)
+    assert 2 in ids and 9 in ids
+    assert 3 not in ids and 4 not in ids
+    # residual tail: lesson-referenced entities whose lesson edges were pruned
+    assert 7 in gr.lesson_only_ids(edges, lesson_entity_ids=frozenset({7}))
+
+
+def test_duplicate_candidates_skips_lesson_only_entities():
+    # 2026-07-26: lesson-topic nodes shadow the real artifact they name
+    # ("ops/update.ps1 deploy verification" vs "ops/update.ps1"). unattributed()
+    # already excludes them; the duplicate analyzer must apply the SAME
+    # predicate or these pairs regenerate after every dismissal.
+    ents = _ents("ops/update.ps1", "ops/update.ps1 deploy verification")
+    assert gr.duplicate_candidates(ents) != []          # without the signal
+    assert gr.duplicate_candidates(ents, lesson_ids=frozenset({2})) == []
+
+
+def test_orphans_exclude_lesson_only_entities():
+    # Lesson nodes are weakly connected BY DESIGN (one prefers edge each), so
+    # counting them inflates the informational orphan finding.
+    ents = _ents("real-thing", "run a deploy and verify it")
+    edges = [{"src_id": 2, "dst_id": 99, "relation": "prefers"}]
+    assert "run a deploy and verify it" in gr.orphans(edges, ents)[0]["entities"]
+    filtered = gr.orphans(edges, ents, lesson_ids=frozenset({2}))
+    assert filtered[0]["entities"] == ["real-thing"]
+
+
 def test_file_concept_pair_offers_relate_not_merge():
     # 2026-07-26 curation review: a source file and the feature/role it
     # implements are NOT duplicates — the concept usually has independent

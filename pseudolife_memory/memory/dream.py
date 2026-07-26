@@ -123,7 +123,51 @@ _SYSTEM_PROMPT = (
 def _vocab_hint(vocab: list[str]) -> str:
     if not vocab:
         return ""
-    return "\n\nExisting slot keys (reuse if applicable): " + ", ".join(vocab[:60])
+    # Spell out the shape. These keys are "entity.attribute", but a bare list
+    # of them reads as a list of ENTITY names — so extractors periodically
+    # emitted {"entity": "0-9-0-release.deployment-status", "attribute":
+    # "value"}, minting a dotted entity that duplicates a correctly-shaped
+    # fact (2026-07-26). unflatten_slot_key_claims repairs what still slips.
+    return ("\n\nExisting slot keys, each written entity.attribute (reuse when "
+            'a note updates one — emit the part BEFORE the dot as "entity" and '
+            'the part AFTER it as "attribute"; never put a whole key in '
+            '"entity", and never use the literal "value" as an attribute): '
+            + ", ".join(vocab[:60]))
+
+
+def unflatten_slot_key_claims(claims: list, vocab: list[str]) -> list:
+    """Repair claims that flattened a vocab slot key into the entity name.
+
+    ``cortex.vocab()`` renders keys as ``entity.attribute`` where both halves
+    are already separator-collapsed, so a key holds EXACTLY ONE dot and the
+    split is unambiguous. An extractor "reusing" such a key sometimes copies
+    the whole string into ``entity`` and writes the literal ``"value"`` as the
+    attribute; the result is a dotted entity duplicating a correctly-shaped
+    fact (``0-9-0-release.deployment-status``, 2026-07-26).
+
+    Splits only when EVERY guard holds — the attribute is literally ``value``,
+    the entity contains a dot, and the prefix is a known entity (or the whole
+    string is a known key). Genuinely dotted entities (``llama.cpp``,
+    ``host.docker.internal``) therefore survive untouched. Pure; the caller
+    passes the same vocab it handed the extractor."""
+    from pseudolife_memory.memory.cortex import _norm_key
+
+    keys = {str(k) for k in (vocab or [])}
+    entities = {k.split(".", 1)[0] for k in keys if "." in k}
+    if not entities:
+        return claims
+    out = []
+    for c in claims:
+        head, dot, tail = str(c.get("entity", "")).rpartition(".")
+        if (dot and head and tail
+                and _norm_key(str(c.get("attribute", ""))) == "value"
+                and (_norm_key(head) in entities
+                     or f"{_norm_key(head)}.{_norm_key(tail)}" in keys)):
+            logger.debug("unflattened slot-key claim: %r -> %r . %r",
+                         c.get("entity"), head, tail)
+            c = {**c, "entity": head, "attribute": tail}
+        out.append(c)
+    return out
 
 
 _FACTS_HINT_HEAD = (
