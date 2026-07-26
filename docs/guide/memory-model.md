@@ -42,6 +42,19 @@ supersession-not-decay, currency-not-frequency** — one *current* value per
   value, origin="user")` asserts a fact at higher confidence; setting a new
   value at an existing slot supersedes the old (kept as audit history).
 
+Since 2026-07-25 **raw band entries follow the same slot rule.** When a
+stored memory and an earlier one assert different values — or opposite
+polarities — at the same normalised `(entity, attribute)` slot, the earlier
+entry is marked superseded. This is deterministic and does not consult
+embeddings, which matters because a value swap is a *minimal* edit: a real
+correction is often more embedding-similar than a harmless near-duplicate,
+so similarity alone is close to a coin flip for this judgment. It runs
+ahead of the similarity-gated heuristics (negation asymmetry, affirmative
+replacement, state transition), which still handle everything without
+slots. Slot extraction is deliberately precision-gated — about 0.6% of
+conversational turns yield one — so this path mostly serves deliberate,
+fact-shaped writes, and its reach grows with extraction quality.
+
 ## Provenance contenders — never silently overwrite a user fact
 
 Every cortex fact carries a provenance tier: **`user` > `action` >
