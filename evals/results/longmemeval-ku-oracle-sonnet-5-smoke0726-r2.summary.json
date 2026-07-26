@@ -1,6 +1,6 @@
 {
   "dataset": "oracle",
-  "extractor": "fable-5",
+  "extractor": "sonnet-5",
   "n": 78,
   "arms": {
     "rag": {
@@ -8,13 +8,13 @@
       "context_tokens": 1637.8
     },
     "cortex": {
-      "accuracy": 0.731,
-      "context_tokens": 228.9
+      "accuracy": 0.744,
+      "context_tokens": 195.2
     },
     "hybrid": {
-      "accuracy": 0.705,
-      "context_tokens": 1148.2
+      "accuracy": 0.795,
+      "context_tokens": 1114.4
     }
   },
-  "superseded_total": 295
+  "superseded_total": 344
 }
