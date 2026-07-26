@@ -1,0 +1,78 @@
+{
+  "n_replicates": 10,
+  "replicates": [
+    "arm1-gate",
+    "arm1-gate-r10",
+    "arm1-gate-r2",
+    "arm1-gate-r3",
+    "arm1-gate-r4",
+    "arm1-gate-r5",
+    "arm1-gate-r6",
+    "arm1-gate-r7",
+    "arm1-gate-r8",
+    "arm1-gate-r9"
+  ],
+  "n_questions": 78,
+  "arms": {
+    "rag": {
+      "accuracies": [
+        0.5641,
+        0.5641,
+        0.5513,
+        0.5769,
+        0.6026,
+        0.6026,
+        0.6026,
+        0.5641,
+        0.5897,
+        0.5385
+      ],
+      "mean": 0.57565,
+      "std": 0.02297613496168966
+    },
+    "cortex": {
+      "accuracies": [
+        0.7051,
+        0.7051,
+        0.6667,
+        0.6154,
+        0.641,
+        0.6667,
+        0.6538,
+        0.6538,
+        0.7179,
+        0.6667
+      ],
+      "mean": 0.6692199999999999,
+      "std": 0.031853930509261934
+    },
+    "hybrid": {
+      "accuracies": [
+        0.7821,
+        0.7692,
+        0.7692,
+        0.8077,
+        0.8077,
+        0.7949,
+        0.7692,
+        0.7692,
+        0.7692,
+        0.7692
+      ],
+      "mean": 0.78076,
+      "std": 0.016516200800695324
+    }
+  },
+  "source_files": [
+    "longmemeval-ku-oracle-e4b-ft-arm1-gate.jsonl",
+    "longmemeval-ku-oracle-e4b-ft-arm1-gate-r10.jsonl",
+    "longmemeval-ku-oracle-e4b-ft-arm1-gate-r2.jsonl",
+    "longmemeval-ku-oracle-e4b-ft-arm1-gate-r3.jsonl",
+    "longmemeval-ku-oracle-e4b-ft-arm1-gate-r4.jsonl",
+    "longmemeval-ku-oracle-e4b-ft-arm1-gate-r5.jsonl",
+    "longmemeval-ku-oracle-e4b-ft-arm1-gate-r6.jsonl",
+    "longmemeval-ku-oracle-e4b-ft-arm1-gate-r7.jsonl",
+    "longmemeval-ku-oracle-e4b-ft-arm1-gate-r8.jsonl",
+    "longmemeval-ku-oracle-e4b-ft-arm1-gate-r9.jsonl"
+  ]
+}
