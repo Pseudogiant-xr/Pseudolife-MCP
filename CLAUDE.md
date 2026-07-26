@@ -57,6 +57,13 @@ entries, a cached view of the graph, a memoized score):
   before commit (pinned replicated slice vs committed baseline; exit 1 =
   regression). Extraction/dream-path changes re-run the ladder instead —
   the gate deliberately does not cover them.
+- **A comparator defined as "current/production X" is resolved from the
+  deployed config** — grep `ops/` (launchers, compose, scheduled tasks) and
+  say where you read it — never from a memory record (dated at write time)
+  or from whichever variant has the most baseline artifacts. The 2026-07-26
+  extractor smoke nearly ran against the v1 prompt because the v1 baseline
+  existed and a 07-11 memory said "v1 deployed", while
+  `ops/install-shim-autostart.ps1` had defaulted to v2 since 07-21.
 
 ## Publishing a benchmark number
 
