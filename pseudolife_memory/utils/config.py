@@ -356,6 +356,13 @@ class DreamConfig:
     # review-queue pollutant (~19/day, dubious count 34 -> 120 in four days,
     # 2026-07-19). Typed clean edges (0.70) are unaffected. 0.0 disables.
     relation_quarantine_below: float = 0.5
+    # Per-dream cap on the retype pass: quarantined untyped pairs re-asked for
+    # a TYPED relation using only the notes where both entities co-occur. ~44%
+    # of them name a real relationship that merely got the wrong label, and
+    # without this the quarantine only accumulates. Self-limiting — the pass
+    # no-ops on an empty quarantine, so a drained bank pays nothing.
+    # 0 disables.
+    retype_quarantined_max: int = 3
     # Write-time dedup: when the dream mints a NEW entity whose name-token
     # Jaccard against an existing canonical/display/alias reaches this
     # threshold, a merge proposal is filed for review (never auto-folded).

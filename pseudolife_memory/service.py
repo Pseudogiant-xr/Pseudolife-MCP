@@ -1894,6 +1894,85 @@ class MemoryService:
             n += 1
         return n
 
+    def retype_quarantined_links(self, extractor, limit: int = 3) -> dict[str, Any]:
+        """Second pass over quarantined UNTYPED edges: re-ask the extractor for
+        a typed relation, using only the notes where both entities co-occur.
+
+        The quarantine holds ``related-to`` co-mention edges at 0.45. A triage
+        of 32 of them found 0 worth writing as-is, but ~44% named a REAL
+        relationship that merely got the wrong label (``publishes-to``,
+        ``implements``, ``operates-on``) — value that otherwise just
+        accumulates. Focused evidence plus the current prompt (which demands
+        the most specific relation and forbids ``related-to`` for co-mentions)
+        makes this a genuinely different question from the one that produced
+        the quarantined edge.
+
+        A typed answer files a REVIEWABLE ``dream-retyped`` proposal — never a
+        live edge, because a retype is a second guess on already-suspect
+        material — and settles the untyped original as rejected. No typed
+        answer settles the original too: that is the co-mention noise the
+        quarantine was built to catch, and leaving it pending only regrows the
+        queue. Extractor failure settles NOTHING and never raises (the pass is
+        best-effort, like lessons). Returns
+        ``{"considered", "retyped", "settled"}``."""
+        import time as _t
+        from pseudolife_memory.memory import graph_consolidation as gc
+        from pseudolife_memory.memory.relation_quality import edge_confidence
+        from pseudolife_memory import graph as G
+
+        rel_fn = getattr(extractor, "extract_relations", None)
+        cap = max(0, int(limit))
+        if rel_fn is None or not cap:
+            return {"considered": 0, "retyped": 0, "settled": 0}
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return {"considered": 0, "retyped": 0, "settled": 0}
+            pending = [p for p in self._storage.pending_proposals()
+                       if p.get("source") == "dream-low-confidence"][:cap]
+            if not pending:
+                return {"considered": 0, "retyped": 0, "settled": 0}
+            entries = self._storage.load_entries()
+            known = [(r["name"], r["description"])
+                     for r in self._graph.load_relations()
+                     if r["name"] not in ("prefers", "avoids")]
+            names = [r["name"] for r in self._graph.load_relations()
+                     if r["name"] not in ("prefers", "avoids")]
+        retyped = settled = 0
+        for p in pending:
+            texts = gc.shared_mention_entries(entries, p["src"], p["dst"])
+            if not texts:
+                continue                     # no evidence: leave it pending
+            try:                             # unlocked: extractor call
+                found = rel_fn(texts, known)
+            except Exception as exc:  # noqa: BLE001 — best-effort, never break
+                logger.warning("retype pass halted (%s); %d settled so far",
+                               exc, settled)
+                break
+            want = {G.norm_name(p["src"]), G.norm_name(p["dst"])}
+            typed = None
+            for r in found or []:
+                if {G.norm_name(str(r.get("src", ""))),
+                        G.norm_name(str(r.get("dst", "")))} != want:
+                    continue
+                resolved, _ = G.resolve_relation(names, str(r.get("relation", "")))
+                if resolved and resolved != "related-to":
+                    typed = (str(r.get("src")), resolved, str(r.get("dst")))
+                    break
+            with self._lock:
+                if typed:
+                    src_e = self._resolve_or_create_entity(typed[0])
+                    dst_e = self._resolve_or_create_entity(typed[2])
+                    conf = edge_confidence(typed[0], typed[1], typed[2])
+                    self._storage.insert_proposal(
+                        src_e["id"], typed[1], dst_e["id"], conf, None,
+                        f"retyped from related-to on {len(texts)} shared note(s)",
+                        "dream-retyped", _t.time())
+                    retyped += 1
+                self._storage.set_proposal_status(p["id"], "rejected")
+            settled += 1
+        return {"considered": len(pending), "retyped": retyped, "settled": settled}
+
     def _dream_extract_relations(self, extractor, texts: list[str],
                                  batch_sources: set[str] | None = None) -> int:
         """Gated, best-effort graph-from-text for one dream batch: run the LLM
@@ -2747,13 +2826,16 @@ class MemoryService:
         lessons = self.synthesize_lessons(extractor)
         graph_insight = self._safe_refresh_graph_insight()
         sources_attributed = self.graph_backfill_sources().get("attributed", 0)
+        # Drain a few quarantined untyped pairs per dream (no-op once empty).
+        retyped = self.retype_quarantined_links(
+            extractor, limit=self.config.memory.dream.retype_quarantined_max)
         return {"pulled": len(entries), "claims": sum(tally.values()),
                 "cursor": newest, "relations": relations_n, **tally,
                 "alias_candidates": alias_candidates,
                 "lessons": lessons, "outcome_inference": outcome_inference,
                 "graph_insight": graph_insight,
                 "traces": traces_n, "sources_attributed": sources_attributed,
-                "quarantined": quarantined}
+                "quarantined": quarantined, "retyped": retyped}
 
     def dream_run_auto(self, *, limit: int | None = None) -> dict[str, Any]:
         """dream_run with primary/fallback extractor selection (2026-07-11
