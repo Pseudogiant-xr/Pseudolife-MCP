@@ -6,6 +6,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-26 — gate baseline re-established at 10 replicates; default raised)
 ### Added (2026-07-26 — `relate` action for file/concept duplicate findings)
 - **The review queue can now record an edge instead of forcing merge-or-dismiss.**
   A duplicate finding whose two names are a source file and its own bare stem
@@ -28,33 +29,44 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed (2026-07-26 — regression-gate baseline re-established at 8 replicates)
 - **`evals/results/regression_gate.baseline.json` re-established on clean
-  `origin/master` (commit `959ecad`) with 8 replicates**, replacing the
+  `origin/master` (commit `959ecad`) with 10 replicates**, replacing the
   3-replicate baseline from 2026-07-18 that both master and the #38–#44
   stack failed.
 
   | arm | mean | std | margin |
   |---|---|---|---|
-  | rag | 0.5753 | 0.0232 | 0.0464 |
-  | cortex | 0.6651 | 0.0332 | 0.0663 |
-  | hybrid | 0.7820 | 0.0182 | 0.0363 |
+  | rag | 0.5757 | 0.0230 | 0.0460 |
+  | cortex | 0.6692 | 0.0319 | 0.0637 |
+  | hybrid | 0.7808 | 0.0165 | 0.0330 |
 
-- **The old number was the top of the range, not the centre.** Eight
-  replicates of the identical slice give cortex
-  `[0.6282, 0.6282, 0.6282, 0.6667, 0.6795, 0.6795, 0.7051, 0.7051]` —
-  the retired baseline's **0.7051 is the maximum, hit 2 times in 8**. A
-  baseline frozen at the best observed run makes every honest run
+- **`regression_gate.ps1` now defaults to `-Replicates 10`** (was 3).
+  Re-establishing alone would not have helped: the next run that forgot
+  the flag would have compared a noisy 3-replicate mean against it and
+  false-failed again.
+- **The old number sat near the top of the range, not the centre.** Across
+  **18 honest replicates** of the identical slice (two independent
+  establishes, n=8 then n=10): min 0.6154, mean 0.6674, max 0.7179 —
+  **13 of 18 fall below the retired 0.7051 and only 1 exceeds it**. A
+  baseline frozen near the best observed run makes every honest run
   afterwards look like a regression, which is exactly what happened.
+- The two establishes agree to within **0.004 on every arm** (cortex
+  0.6651 at n=8, 0.6692 at n=10) — the evidence that the estimate is now
+  stable rather than another lucky draw.
 - **A zero-variance baseline silently disables the gate's calibration.**
   `make_baseline` sets `margin = max(0.03, 2 x std)`, so the old 0.03 was
-  the floor showing through rather than a chosen value. With real variance
-  the margin now tracks the measured spread.
+  the floor showing through rather than a chosen value. Guarded now by
+  `tests/test_regression_gate_defaults.py`, which also pins the default
+  replicate count and that the baseline was established at ≥ that count.
 - Both earlier runs pass the new baseline on all three arms, including
   the **#38–#44 stack** — the gate obligation on those changes is
   discharged.
 - Cost, since the gate re-runs its replicate count every invocation:
-  ~3m05s per replicate, ~26 min for 8 (measured 28). At the old n=3 the
-  margin was ~1.2 standard errors of the difference — roughly a 1-in-5
-  false-fail rate.
+  ~3–3.75 min per replicate, **~32–37 min for 10** (measured 28 for 8, 37
+  for 10; the spread is host load). At the old n=3 the margin was ~1.2
+  standard errors of the difference — roughly a 1-in-5 false-fail rate.
+  Note the margin barely moves with N (it is `2 × std`, and std estimates
+  a spread that does not shrink); more replicates buy a better estimate of
+  the *mean* on both sides.
 
 ### Fixed (2026-07-26 — the regression gate's baseline is stale, not the code)
 - **`evals/regression_gate.ps1` fails on clean `origin/master`.** Cortex

@@ -13,12 +13,21 @@
 # contexts if banks are absent — reduced scope, loud warning); 2 judge
 # N replicates; 3 verdict vs baseline.
 #
-#   evals\regression_gate.ps1                # 3 replicates, gate verdict
-#   evals\regression_gate.ps1 -Replicates 1  # quick mode
+#   evals\regression_gate.ps1                # 10 replicates, gate verdict
+#   evals\regression_gate.ps1 -Replicates 1  # quick smoke, NOT a verdict
 #   evals\regression_gate.ps1 -Establish     # (re)write the baseline
 #
+# Replicates: the judge is an LLM and the arms are genuinely noisy (cortex
+# std ~0.033 on this slice), so the count decides whether the gate is
+# informative or just expensive noise. The old default of 3 put the margin
+# at ~1.2 standard errors of the difference — roughly a 1-in-5 false-fail
+# rate, which on 2026-07-26 failed twice running, once on clean master.
+# 10 costs ~3m05s per replicate (~32 min) and is the price of a verdict
+# you can act on. Establish the baseline at the same count: the comparison
+# is only like-for-like if both sides are measured the same way.
+#
 # Exit codes: 0 pass, 1 regression, 2 infrastructure (endpoint/rebuild).
-param([int]$Replicates = 3, [switch]$Establish)
+param([int]$Replicates = 10, [switch]$Establish)
 $ErrorActionPreference = "Continue"
 $repo = Split-Path -Parent $PSScriptRoot
 $py = Join-Path $repo ".venv\Scripts\python.exe"
