@@ -6,6 +6,44 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-25 — writes no longer rescan the bank for possession cues)
+- **Contradiction detection caches its gain/loss cue flags per entry.**
+  `detect_contradictions` runs over every entry of every band on every
+  write, and its state-transition path did four regex-list scans per
+  entry before consulting similarity. Profiling a saturated store put
+  **94%** of the time there — 1.58M regex searches across five stores —
+  against ~4% for the capacity-eviction path that was assumed to be the
+  cost. The cue check is that path's early exit, so for the overwhelming
+  majority of entries it *is* the work. `MemoryEntry.cue_flags` memoises
+  it (transient, never persisted, excluded from equality; sound because
+  `text` is never mutated after construction), and the new text's cues are
+  hoisted out of the loop.
+- Median store latency, real MiniLM embeddings and real conversation text
+  (`evals/bench_store_latency.py`, artifact
+  `evals/results/store-latency-by-bank-size.json`):
+
+  | resident entries | before | after |
+  |---|---|---|
+  | 500 | 224 ms | **4.3 ms** |
+  | 5,250 (summed capacity) | 1,763 ms | **11.2 ms** |
+  | 9,000 (over capacity) | 3,277 ms | **22.5 ms** |
+
+- Cached on the entry rather than in a process-wide LRU deliberately. Path
+  3 sweeps the whole bank per write — a cyclic scan, the pathological case
+  for LRU, which is 100% hit while the resident set fits and 0% the moment
+  it doesn't, with no gradient. An `lru_cache(maxsize=8192)` measured
+  identically up to 8,190 resident and then reverted to **1.01x** at
+  8,300. The resident set is not reliably bounded (`rebalance_bands`
+  leaves the deepest band over capacity rather than truncating at startup,
+  and the shipped preset invites raising `max_entries`), so a fixed size
+  would have been a cliff. Pinned by a test that would fail on any
+  bank-size-dependent warm cost.
+- Also rejected: gating the anchor scan on a minimum similarity floor.
+  Provably equivalent and worth 5.1x alone, but subsumed by the cue cache
+  — and it measured *slower* alongside a process-wide cache, because
+  scanning ~24% of the bank per store let resident texts age out. Recorded
+  at the call site so it isn't re-attempted blind.
+
 ### Fixed (2026-07-25 — restore paths ignored band capacity)
 - **`hydrate_cms`, `load()` and the legacy migration now rebalance once.**
   All three append straight to `band.entries`, bypassing `store()` and its

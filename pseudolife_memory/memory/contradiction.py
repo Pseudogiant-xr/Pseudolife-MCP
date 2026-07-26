@@ -275,6 +275,26 @@ def _has_gain_cue(text: str) -> bool:
     return _matches_any(POSSESSION_GAIN_PATTERNS, text)
 
 
+def _cues_for(entry: "MemoryEntry") -> tuple[bool, bool]:
+    """``(gain, loss)`` for an entry's text, computed once per entry.
+
+    Cached on the entry rather than in a process-wide LRU. Path 3 sweeps
+    every entry of every band on every write — a cyclic scan, which is the
+    pathological case for LRU: 100% hit while the resident set fits, and
+    0% the moment it doesn't, with no gradient in between. The resident
+    set is not reliably bounded (``rebalance_bands`` leaves the deepest
+    band over capacity rather than truncating a bank at startup, and the
+    shipped preset invites raising ``max_entries``), so a fixed cache size
+    would be a cliff. Per-entry, the warm cost is O(1) at any bank size and
+    the memory dies with the entry.
+    """
+    cues = entry.cue_flags
+    if cues is None:
+        cues = (_has_gain_cue(entry.text), _has_loss_cue(entry.text))
+        entry.cue_flags = cues
+    return cues
+
+
 # Third-person pronouns that can stand in for a previously-named referent.
 # A loss statement that uses one of these without its own anchor noun is
 # almost certainly referring back to something mentioned earlier.
@@ -337,7 +357,13 @@ def _looks_like_state_transition(text_a: str, text_b: str) -> bool:
     return _state_transition_anchor_kind(text_a, text_b) is not None
 
 
-def _state_transition_anchor_kind(text_a: str, text_b: str) -> str | None:
+def _state_transition_anchor_kind(
+    text_a: str,
+    text_b: str,
+    *,
+    a_cues: tuple[bool, bool] | None = None,
+    b_cues: tuple[bool, bool] | None = None,
+) -> str | None:
     """Return the *kind* of anchor that links two texts via gain/loss asymmetry.
 
     Tiered output (strongest first):
@@ -354,8 +380,10 @@ def _state_transition_anchor_kind(text_a: str, text_b: str) -> str | None:
     cosine-similarity floor — slot anchors are confident enough that a low
     floor still gives high precision.
     """
-    a_gain, a_loss = _has_gain_cue(text_a), _has_loss_cue(text_a)
-    b_gain, b_loss = _has_gain_cue(text_b), _has_loss_cue(text_b)
+    a_gain, a_loss = a_cues if a_cues is not None else (
+        _has_gain_cue(text_a), _has_loss_cue(text_a))
+    b_gain, b_loss = b_cues if b_cues is not None else (
+        _has_gain_cue(text_b), _has_loss_cue(text_b))
 
     # Need asymmetry: one side gain, the other side loss.
     if not ((a_gain and b_loss) or (b_gain and a_loss)):
@@ -384,6 +412,14 @@ _STATE_TRANSITION_FLOOR_BY_KIND: dict[str, float] = {
     "content": STATE_TRANSITION_SIM_THRESHOLD_CONTENT,
     "pronoun": STATE_TRANSITION_SIM_THRESHOLD_PRONOUN,
 }
+
+# Tried and rejected (2026-07-25): skipping the path-3 anchor scan when
+# ``sim < min(_STATE_TRANSITION_FLOOR_BY_KIND.values())``. Provably
+# equivalent, and worth 5.1x on its own against the unoptimised path — but
+# it is subsumed once the cues are cached per entry (:func:`_cues_for`),
+# and it measured *slower* alongside an earlier process-wide LRU because
+# scanning ~24% of the bank per store let resident texts age out of the
+# cache. Don't re-add it without re-measuring against the cue cache.
 
 
 def _looks_like_replacement(text_a: str, text_b: str) -> bool:
@@ -487,6 +523,9 @@ def detect_contradictions(
     # Cosine similarities
     sims = (embeddings @ query).tolist()
 
+    # Loop-invariant: the new text's cues are the same for every entry.
+    new_cues = (_has_gain_cue(new_text), _has_loss_cue(new_text))
+
     contradicted: list[MemoryEntry] = []
     for entry, sim in zip(existing_entries, sims):
         if entry.superseded_at is not None:
@@ -509,7 +548,9 @@ def detect_contradictions(
         # this tiering, real conversation pairs like
         # "I have a Ragdoll cat named Jacque" vs
         # "you no longer have Jacque" miss the uniform 0.35 floor by ~0.01.
-        anchor_kind = _state_transition_anchor_kind(new_text, entry.text)
+        anchor_kind = _state_transition_anchor_kind(
+            new_text, entry.text,
+            a_cues=new_cues, b_cues=_cues_for(entry))
         if anchor_kind is not None:
             floor = _STATE_TRANSITION_FLOOR_BY_KIND[anchor_kind]
             if sim >= floor:
