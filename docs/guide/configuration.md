@@ -39,19 +39,37 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   86400`, vs the 1h chat default) — Claude Code sessions are hours-to-
   days apart; with a 1h half-life the recency boost was effectively
   always zero. Halves per band depth as before (1d → 2d → 4d → …).
+  Note the depth ramp itself is **off by default since 2026-07-25** (see
+  below), so this setting only bites once you opt back in.
 - **MIRAS preset `continuum`** — the 8-tier `working / micro / instant /
   fast / medium / slow / archival / forever` continuum. Bands are plain
   cosine vector stores (v0.5); a band spec is capacity + consolidation
-  cadence + promotion thresholds + an eviction policy.
+  cadence + promotion thresholds + an eviction policy. Since 2026-07-25 a
+  band at capacity **demotes** its lowest-scoring entry to the next band
+  rather than deleting it; only overflow past `forever` is a real drop,
+  which makes the summed capacity (5,250) the actual bound. Previously a
+  full `working` band destroyed entries — and their storage rows — while
+  the deeper bands sat nearly empty, because promotion was the only other
+  way out and it requires `access_count >= N or surprise > threshold`.
 - **No NLI scorer** — the `cross-encoder/nli-deberta-v3-xsmall`
   contradiction model is ~278 MB and optional. The four-path detector
   works without it. Install with `pip install .[nli]` if you want it.
 - **Cross-encoder reranker off** — wired into the pipeline but disabled by
   default; enable globally (`memory.reranker.enabled = true`) or per-call
   (`memory_search(..., rerank=True)`). Details: [Retrieval](retrieval.md#cross-encoder-reranking).
-- **BM25 hybrid lexical pool off** — a pure-stdlib sparse-retrieval channel
-  that rescues exact-keyword queries; flip via `memory.bm25.enabled = true`
-  or per-call `bm25=True`. Details: [Retrieval](retrieval.md#bm25-hybrid-retrieval).
+- **BM25 hybrid lexical pool ON** (since 2026-07-25) — a pure-stdlib
+  sparse-retrieval channel that rescues exact-keyword queries. It shipped
+  disabled, which meant every eval measured dense-only retrieval; turn it
+  off with `memory.bm25.enabled = false` or per-call `bm25=False`.
+  Details: [Retrieval](retrieval.md#bm25-hybrid-retrieval).
+- **Depth-ramped recency boost off** (`memory.recency_boost_enabled =
+  false`, since 2026-07-25) — retrieval used to scale scores by a
+  `0.4 → 0.0` ramp over band depth, treating depth as a proxy for age.
+  Depth is set by promotion history, which without retrieval to accrue
+  access counts tracks *surprise*, not age — so the ramp could rank a
+  weaker match in `working` above a stronger match in a deeper band
+  (measured: up to 18 points on the LongMemEval naive-RAG arm). Set it
+  to `true` to restore the previous ranking.
 - **Abstention off** (`memory.search_confidence_floor = 0.0`) — set it
   above zero and `memory_search` returns `low_confidence: true` whenever
   the top match scores below the floor. Calibrated as a pair with

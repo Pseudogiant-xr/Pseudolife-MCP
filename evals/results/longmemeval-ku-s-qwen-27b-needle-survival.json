@@ -1,0 +1,520 @@
+{
+  "dataset": "s",
+  "extractor": "qwen-27b",
+  "n_questions": 72,
+  "turns_ingested": 35117,
+  "continuum_survivors": 24207,
+  "base_eviction_rate": 0.31067574109405705,
+  "needles_total": 144,
+  "needles_survived": 90,
+  "needle_eviction_rate": 0.375,
+  "needle_vs_base_ratio": 1.207046287809349,
+  "questions_losing_a_needle": 42,
+  "questions_losing_a_needle_frac": 0.5833333333333334,
+  "per_question": [
+    {
+      "question_id": "01493427",
+      "turns_ingested": 487,
+      "continuum_survivors": 324,
+      "needles": 2,
+      "needles_survived": 0
+    },
+    {
+      "question_id": "031748ae",
+      "turns_ingested": 494,
+      "continuum_survivors": 327,
+      "needles": 2,
+      "needles_survived": 0
+    },
+    {
+      "question_id": "06db6396",
+      "turns_ingested": 479,
+      "continuum_survivors": 328,
+      "needles": 2,
+      "needles_survived": 1
+    },
+    {
+      "question_id": "07741c44",
+      "turns_ingested": 513,
+      "continuum_survivors": 331,
+      "needles": 2,
+      "needles_survived": 1
+    },
+    {
+      "question_id": "07741c45",
+      "turns_ingested": 524,
+      "continuum_survivors": 341,
+      "needles": 2,
+      "needles_survived": 1
+    },
+    {
+      "question_id": "08e075c7",
+      "turns_ingested": 484,
+      "continuum_survivors": 314,
+      "needles": 2,
+      "needles_survived": 1
+    },
+    {
+      "question_id": "0977f2af",
+      "turns_ingested": 482,
+      "continuum_survivors": 325,
+      "needles": 2,
+      "needles_survived": 2
+    },
+    {
+      "question_id": "0ddfec37",
+      "turns_ingested": 481,
+      "continuum_survivors": 339,
+      "needles": 2,
+      "needles_survived": 2
+    },
+    {
+      "question_id": "0e4e4c46",
+      "turns_ingested": 481,
+      "continuum_survivors": 330,
+      "needles": 2,
+      "needles_survived": 1
+    },
+    {
+      "question_id": "0f05491a",
+      "turns_ingested": 489,
+      "continuum_survivors": 326,
+      "needles": 2,
+      "needles_survived": 1
+    },
+    {
+      "question_id": "10e09553",
+      "turns_ingested": 470,
+      "continuum_survivors": 350,
+      "needles": 2,
+      "needles_survived": 2
+    },
+    {
+      "question_id": "184da446",
+      "turns_ingested": 469,
+      "continuum_survivors": 317,
+      "needles": 2,
+      "needles_survived": 2
+    },
+    {
+      "question_id": "18bc8abd",
+      "turns_ingested": 436,
+      "continuum_survivors": 320,
+      "needles": 2,
+      "needles_survived": 1
+    },
+    {
+      "question_id": "1cea1afa",
+      "turns_ingested": 484,
+      "continuum_survivors": 336,
+      "needles": 2,
+      "needles_survived": 1
+    },
+    {
+      "question_id": "2133c1b5",
+      "turns_ingested": 521,
+      "continuum_survivors": 350,
+      "needles": 2,
+      "needles_survived": 2
+    },
+    {
+      "question_id": "22d2cb42",
+      "turns_ingested": 473,
+      "continuum_survivors": 342,
+      "needles": 1,
+      "needles_survived": 0
+    },
+    {
+      "question_id": "2698e78f",
+      "turns_ingested": 477,
+      "continuum_survivors": 336,
+      "needles": 2,
+      "needles_survived": 2
+    },
+    {
+      "question_id": "26bdc477",
+      "turns_ingested": 495,
+      "continuum_survivors": 340,
+      "needles": 2,
+      "needles_survived": 2
+    },
+    {
+      "question_id": "3ba21379",
+      "turns_ingested": 429,
+      "continuum_survivors": 325,
+      "needles": 2,
+      "needles_survived": 2
+    },
+    {
+      "question_id": "41698283",
+      "turns_ingested": 476,
+      "continuum_survivors": 355,
+      "needles": 2,
+      "needles_survived": 2
+    },
+    {
+      "question_id": "42ec0761",
+      "turns_ingested": 521,
+      "continuum_survivors": 359,
+      "needles": 2,
+      "needles_survived": 2
+    },
+    {
+      "question_id": "45dc21b6",
+      "turns_ingested": 485,
+      "continuum_survivors": 342,
+      "needles": 2,
+      "needles_survived": 1
+    },
+    {
+      "question_id": "4b24c848",
+      "turns_ingested": 514,
+      "continuum_survivors": 353,
+      "needles": 2,
+      "needles_survived": 0
+    },
+    {
+      "question_id": "4d6b87c8",
+      "turns_ingested": 516,
+      "continuum_survivors": 367,
+      "needles": 2,
+      "needles_survived": 1
+    },
+    {
+      "question_id": "50635ada",
+      "turns_ingested": 530,
+      "continuum_survivors": 356,
+      "needles": 2,
+      "needles_survived": 0
+    },
+    {
+      "question_id": "5831f84d",
+      "turns_ingested": 421,
+      "continuum_survivors": 323,
+      "needles": 2,
+      "needles_survived": 2
+    },
+    {
+      "question_id": "59524333",
+      "turns_ingested": 527,
+      "continuum_survivors": 315,
+      "needles": 2,
+      "needles_survived": 2
+    },
+    {
+      "question_id": "5a4f22c0",
+      "turns_ingested": 483,
+      "continuum_survivors": 349,
+      "needles": 2,
+      "needles_survived": 1
+    },
+    {
+      "question_id": "5c40ec5b",
+      "turns_ingested": 477,
+      "continuum_survivors": 342,
+      "needles": 2,
+      "needles_survived": 0
+    },
+    {
+      "question_id": "603deb26",
+      "turns_ingested": 472,
+      "continuum_survivors": 326,
+      "needles": 2,
+      "needles_survived": 1
+    },
+    {
+      "question_id": "6071bd76",
+      "turns_ingested": 482,
+      "continuum_survivors": 322,
+      "needles": 2,
+      "needles_survived": 2
+    },
+    {
+      "question_id": "618f13b2",
+      "turns_ingested": 506,
+      "continuum_survivors": 313,
+      "needles": 2,
+      "needles_survived": 1
+    },
+    {
+      "question_id": "69fee5aa",
+      "turns_ingested": 483,
+      "continuum_survivors": 328,
+      "needles": 2,
+      "needles_survived": 2
+    },
+    {
+      "question_id": "6a1eabeb",
+      "turns_ingested": 410,
+      "continuum_survivors": 314,
+      "needles": 2,
+      "needles_survived": 1
+    },
+    {
+      "question_id": "6a27ffc2",
+      "turns_ingested": 493,
+      "continuum_survivors": 329,
+      "needles": 2,
+      "needles_survived": 2
+    },
+    {
+      "question_id": "6aeb4375",
+      "turns_ingested": 465,
+      "continuum_survivors": 336,
+      "needles": 2,
+      "needles_survived": 0
+    },
+    {
+      "question_id": "71315a70",
+      "turns_ingested": 513,
+      "continuum_survivors": 353,
+      "needles": 2,
+      "needles_survived": 2
+    },
+    {
+      "question_id": "72e3ee87",
+      "turns_ingested": 496,
+      "continuum_survivors": 331,
+      "needles": 2,
+      "needles_survived": 2
+    },
+    {
+      "question_id": "7401057b",
+      "turns_ingested": 446,
+      "continuum_survivors": 317,
+      "needles": 2,
+      "needles_survived": 1
+    },
+    {
+      "question_id": "7a87bd0c",
+      "turns_ingested": 506,
+      "continuum_survivors": 332,
+      "needles": 2,
+      "needles_survived": 1
+    },
+    {
+      "question_id": "7e974930",
+      "turns_ingested": 502,
+      "continuum_survivors": 357,
+      "needles": 2,
+      "needles_survived": 2
+    },
+    {
+      "question_id": "830ce83f",
+      "turns_ingested": 509,
+      "continuum_survivors": 322,
+      "needles": 3,
+      "needles_survived": 3
+    },
+    {
+      "question_id": "852ce960",
+      "turns_ingested": 396,
+      "continuum_survivors": 317,
+      "needles": 2,
+      "needles_survived": 1
+    },
+    {
+      "question_id": "89941a93",
+      "turns_ingested": 522,
+      "continuum_survivors": 347,
+      "needles": 2,
+      "needles_survived": 1
+    },
+    {
+      "question_id": "89941a94",
+      "turns_ingested": 522,
+      "continuum_survivors": 348,
+      "needles": 2,
+      "needles_survived": 0
+    },
+    {
+      "question_id": "8fb83627",
+      "turns_ingested": 484,
+      "continuum_survivors": 337,
+      "needles": 3,
+      "needles_survived": 1
+    },
+    {
+      "question_id": "945e3d21",
+      "turns_ingested": 489,
+      "continuum_survivors": 342,
+      "needles": 2,
+      "needles_survived": 2
+    },
+    {
+      "question_id": "9bbe84a2",
+      "turns_ingested": 459,
+      "continuum_survivors": 342,
+      "needles": 2,
+      "needles_survived": 1
+    },
+    {
+      "question_id": "9ea5eabc",
+      "turns_ingested": 534,
+      "continuum_survivors": 349,
+      "needles": 2,
+      "needles_survived": 1
+    },
+    {
+      "question_id": "a1eacc2a",
+      "turns_ingested": 470,
+      "continuum_survivors": 329,
+      "needles": 2,
+      "needles_survived": 2
+    },
+    {
+      "question_id": "a2f3aa27",
+      "turns_ingested": 448,
+      "continuum_survivors": 331,
+      "needles": 2,
+      "needles_survived": 1
+    },
+    {
+      "question_id": "affe2881",
+      "turns_ingested": 481,
+      "continuum_survivors": 337,
+      "needles": 2,
+      "needles_survived": 2
+    },
+    {
+      "question_id": "b01defab",
+      "turns_ingested": 496,
+      "continuum_survivors": 328,
+      "needles": 2,
+      "needles_survived": 2
+    },
+    {
+      "question_id": "b6019101",
+      "turns_ingested": 510,
+      "continuum_survivors": 346,
+      "needles": 2,
+      "needles_survived": 1
+    },
+    {
+      "question_id": "ba61f0b9",
+      "turns_ingested": 453,
+      "continuum_survivors": 351,
+      "needles": 2,
+      "needles_survived": 1
+    },
+    {
+      "question_id": "c4ea545c",
+      "turns_ingested": 489,
+      "continuum_survivors": 338,
+      "needles": 2,
+      "needles_survived": 1
+    },
+    {
+      "question_id": "c6853660",
+      "turns_ingested": 472,
+      "continuum_survivors": 325,
+      "needles": 2,
+      "needles_survived": 2
+    },
+    {
+      "question_id": "c7dc5443",
+      "turns_ingested": 478,
+      "continuum_survivors": 329,
+      "needles": 2,
+      "needles_survived": 2
+    },
+    {
+      "question_id": "cc5ded98",
+      "turns_ingested": 493,
+      "continuum_survivors": 345,
+      "needles": 2,
+      "needles_survived": 2
+    },
+    {
+      "question_id": "ce6d2d27",
+      "turns_ingested": 517,
+      "continuum_survivors": 349,
+      "needles": 2,
+      "needles_survived": 1
+    },
+    {
+      "question_id": "cf22b7bf",
+      "turns_ingested": 547,
+      "continuum_survivors": 350,
+      "needles": 2,
+      "needles_survived": 0
+    },
+    {
+      "question_id": "d7c942c3",
+      "turns_ingested": 517,
+      "continuum_survivors": 342,
+      "needles": 2,
+      "needles_survived": 0
+    },
+    {
+      "question_id": "dad224aa",
+      "turns_ingested": 521,
+      "continuum_survivors": 351,
+      "needles": 2,
+      "needles_survived": 0
+    },
+    {
+      "question_id": "db467c8c",
+      "turns_ingested": 474,
+      "continuum_survivors": 331,
+      "needles": 2,
+      "needles_survived": 2
+    },
+    {
+      "question_id": "dfde3500",
+      "turns_ingested": 480,
+      "continuum_survivors": 333,
+      "needles": 2,
+      "needles_survived": 1
+    },
+    {
+      "question_id": "e493bb7c",
+      "turns_ingested": 506,
+      "continuum_survivors": 348,
+      "needles": 2,
+      "needles_survived": 1
+    },
+    {
+      "question_id": "e61a7584",
+      "turns_ingested": 495,
+      "continuum_survivors": 330,
+      "needles": 2,
+      "needles_survived": 0
+    },
+    {
+      "question_id": "e66b632c",
+      "turns_ingested": 506,
+      "continuum_survivors": 348,
+      "needles": 2,
+      "needles_survived": 1
+    },
+    {
+      "question_id": "eace081b",
+      "turns_ingested": 489,
+      "continuum_survivors": 342,
+      "needles": 1,
+      "needles_survived": 1
+    },
+    {
+      "question_id": "ed4ddc30",
+      "turns_ingested": 540,
+      "continuum_survivors": 335,
+      "needles": 2,
+      "needles_survived": 2
+    },
+    {
+      "question_id": "f685340e",
+      "turns_ingested": 424,
+      "continuum_survivors": 316,
+      "needles": 2,
+      "needles_survived": 1
+    },
+    {
+      "question_id": "f9e8c073",
+      "turns_ingested": 504,
+      "continuum_survivors": 349,
+      "needles": 2,
+      "needles_survived": 2
+    }
+  ]
+}

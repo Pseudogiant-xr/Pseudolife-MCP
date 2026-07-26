@@ -55,11 +55,19 @@ KNOBS: list[dict[str, Any]] = [
     {"path": "memory.top_k", "group": "Retrieval", "label": "Default top-k",
      "type": "int", "default": 8, "min": 1, "max": 50, "step": 1,
      "restart": False, "help": "Episodic retrieval slots across bands."},
+    {"path": "memory.recency_boost_enabled", "group": "Retrieval",
+     "label": "Depth recency boost", "type": "bool", "default": False,
+     "restart": False,
+     "help": "Scale scores by a 0.4->0.0 ramp over band depth. Off since "
+             "2026-07-25: depth tracks promotion history (i.e. surprise), "
+             "not age, so the ramp could rank a weaker shallow match above "
+             "a stronger deep one."},
     {"path": "memory.recency_base_half_life_s", "group": "Retrieval",
      "label": "Recency half-life (s)", "type": "float", "default": 86400.0,
      "min": 0.0, "max": 2592000.0, "step": 3600.0, "restart": False,
      "help": "Base recency half-life at band depth 0 (doubles per depth). "
-             "MCP build uses 1 day; chat used 1 hour."},
+             "MCP build uses 1 day; chat used 1 hour. Only bites when the "
+             "depth recency boost above is enabled."},
     {"path": "memory.show_superseded", "group": "Retrieval",
      "label": "Show superseded", "type": "bool", "default": False,
      "restart": False,
@@ -79,10 +87,11 @@ KNOBS: list[dict[str, Any]] = [
      "max": 100, "step": 1, "restart": True,
      "help": "How many candidates to rerank. Baked at init."},
     {"path": "memory.bm25.enabled", "group": "Reranker",
-     "label": "BM25 hybrid pool", "type": "bool", "default": False,
+     "label": "BM25 hybrid pool", "type": "bool", "default": True,
      "restart": False,
      "help": "Sparse lexical retrieval fused with dense — catches exact "
-             "tokens (function names, versions, error codes)."},
+             "tokens (function names, versions, error codes). On by "
+             "default since 2026-07-25."},
     {"path": "memory.bm25.weight", "group": "Reranker",
      "label": "BM25 fusion weight", "type": "float", "default": 0.3,
      "min": 0.0, "max": 1.0, "step": 0.05, "restart": False,

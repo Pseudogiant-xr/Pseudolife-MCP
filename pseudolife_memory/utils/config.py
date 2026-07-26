@@ -155,9 +155,13 @@ class BM25Config:
     little to latch onto — still surfaces the entry whose text
     contains the exact token.
 
-    Off by default. Enable globally via
-    ``memory.bm25.enabled = true`` in config, or pass ``bm25=True``
-    per call to ``memory_search``.
+    **On by default since 2026-07-25.** It shipped disabled, which meant
+    every eval measured dense-only retrieval through a 22M-parameter 2021
+    bi-encoder; an independent 2026 harness puts plain BM25 above every
+    dedicated agent-memory system on LongMemEval. Cost is ~20-50ms per
+    query at bank scale and no new dependency. Disable globally via
+    ``memory.bm25.enabled = false``, or pass ``bm25=False`` per call to
+    ``memory_search``.
 
     Score fusion
     ------------
@@ -174,7 +178,7 @@ class BM25Config:
     is intentionally below the typical dense hit so BM25-only matches
     don't displace strong semantic matches.
     """
-    enabled: bool = False
+    enabled: bool = True
     k1: float = 1.5
     b: float = 0.75
     weight: float = 0.3
@@ -613,6 +617,13 @@ class MemoryConfig:
     # Base recency half-life at band depth 0; doubles per depth.
     # 3600 (1h) suits chat; the MCP build sets 86400 (1 day).
     recency_base_half_life_s: float = 3600.0
+    # Depth-ramped recency boost on retrieval. OFF since 2026-07-25: the
+    # ramp treats band depth as a proxy for age, but depth is set by
+    # promotion history — which, without retrieval to accrue access counts,
+    # is driven by surprise rather than age. Measured cost of leaving it on:
+    # up to 18 points on the LongMemEval naive-RAG arm. Flip to True to
+    # restore the pre-2026-07-25 ranking.
+    recency_boost_enabled: bool = False
     memory_engine: str = "titans"  # "titans" or "hopfield"
     # v0.5 store gate is novelty-based (1 - max cos to existing entries). 0.0 =
     # permissive (store everything; novelty still scores eviction/promotion);
@@ -724,6 +735,7 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             show_superseded=mem_raw.get("show_superseded", False),
             search_confidence_floor=mem_raw.get("search_confidence_floor", 0.0),
             recency_base_half_life_s=mem_raw.get("recency_base_half_life_s", 3600.0),
+            recency_boost_enabled=mem_raw.get("recency_boost_enabled", False),
         )
         if "fast_bank" in mem_raw:
             config.memory.fast_bank = _dict_to_dataclass(MemoryBankConfig, mem_raw["fast_bank"])

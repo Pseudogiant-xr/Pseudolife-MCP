@@ -36,6 +36,7 @@ LME_V2 = RESULTS + "lme-v2-smoke-slice1.agg.json"
 LME_V2_FULL = RESULTS + "lme-v2-smoke-slice2.summary.json"
 LME_V2_FULL_COMPOSE = RESULTS + "lme-v2-smoke-slice2-compose.summary.json"
 WABL_SURVIVAL = RESULTS + "longmemeval-ku-s-qwen-27b-wabl-survival.json"
+NEEDLE_SURVIVAL = RESULTS + "longmemeval-ku-s-qwen-27b-needle-survival.json"
 
 
 def _wabl(tag: str) -> str:
@@ -91,6 +92,7 @@ def _delta(arm: str) -> Callable[[dict, dict], float]:
 
 BENCH = "docs/guide/benchmarks.md"
 READ_ME = "README.md"
+CHANGELOG = "CHANGELOG.md"
 
 # ── the local-ceiling table (README front door + guide) ───────────────────
 _CEILING_ROWS = [
@@ -219,6 +221,22 @@ CLAIMS.append(Claim(
     needle="capacity* evicts nothing",
     artifacts=(WABL_SURVIVAL,),
     value=lambda d: d["flat_loss_rate"], stated=0.0, places=3))
+
+# ── needle survival: does the 31.1% eviction discard the EVIDENCE? ────────
+# Justifies the overflow fix in the CHANGELOG. Survival rate alone can't
+# say whether eviction costs anything; the needle rate can.
+for _id, _needle, _get, _stated, _places in [
+    ("needle-eviction-rate", "(**37.5%",
+     lambda d: d["needle_eviction_rate"] * 100.0, 37.5, 1),
+    ("needle-base-rate", "evicted vs a 31.1% base rate**",
+     lambda d: d["base_eviction_rate"] * 100.0, 31.1, 1),
+    ("needle-questions-affected", "with 58% of questions losing at least",
+     lambda d: d["questions_losing_a_needle_frac"] * 100.0, 58, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_id, doc=CHANGELOG, needle=_needle,
+        artifacts=(NEEDLE_SURVIVAL,), value=_get,
+        stated=_stated, places=_places))
 
 # ── the full 74-question LongMemEval-V2 procedure category ───────────────
 for _arm, _needle, _ku, _compose in [

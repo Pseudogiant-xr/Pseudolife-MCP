@@ -32,7 +32,9 @@ import torch
 
 from pseudolife_memory.memory.cms import ContinuumMemorySystem
 from pseudolife_memory.memory.titans_memory import MemoryEntry
-from pseudolife_memory.utils.config import MemoryConfig
+from pseudolife_memory.utils.config import (
+    MemoryConfig, MIRASBandSpec, MIRASConfig,
+)
 
 
 def _fresh_cms() -> ContinuumMemorySystem:
@@ -64,20 +66,67 @@ def test_slot_pool_finds_entry_stored_after_index_already_built() -> None:
     assert "I have a Siamese cat named Miso" in _hit_texts(cms, "Miso")
 
 
-def test_slot_pool_excludes_evicted_entry() -> None:
-    cms = _fresh_cms()
-    cms.bands[0].max_entries = 1
-    # Pin Jacque to band[0] — the default preset promotes a fresh entry
-    # out of "working" on the very next store (surprise=1.0 on an empty
-    # band beats the 0.5 default threshold), which would leave band[0]
-    # empty and make the eviction below a no-op.
+def _pin_to_band0(cms: ContinuumMemorySystem) -> None:
+    """Stop band[0] promoting its contents away.
+
+    The default preset promotes a fresh entry out of ``working`` on the very
+    next store (surprise=1.0 on an empty band beats the 0.5 threshold),
+    which would leave band[0] empty and make a capacity eviction a no-op.
+    """
     cms.bands[0].promotion_surprise = 2.0
     cms.bands[0].promotion_access_count = 10**9
+
+
+def _two_band_cms(head_cap: int) -> ContinuumMemorySystem:
+    """Two bands, consolidation disabled — so capacity eviction is the ONLY
+    thing that can move an entry, and the only path that can invalidate the
+    index. With the default preset a cascading promotion fires on the same
+    tick and marks the index dirty anyway, which masks a missing eviction
+    hook (verified: the hook can be deleted and the test still passes)."""
+    cfg = MemoryConfig()
+    cfg.surprise_threshold = -1.0
+    cfg.miras = MIRASConfig(preset="custom", bands=[
+        MIRASBandSpec(name="head", max_entries=head_cap, update_interval=10**9,
+                      promotion_access_count=10**9, promotion_surprise=2.0),
+        MIRASBandSpec(name="tail", max_entries=10, update_interval=10**9,
+                      promotion_access_count=10**9, promotion_surprise=2.0),
+    ])
+    return ContinuumMemorySystem(cfg)
+
+
+def test_slot_pool_follows_a_demoted_entry_to_its_new_band() -> None:
+    """Capacity eviction demotes rather than destroys (2026-07-25), so the
+    entry stays findable — but band filtering keys on the band that
+    CONTAINS it, so the index must be rebuilt against its new home."""
+    cms = _two_band_cms(head_cap=1)
+    dim = cms.config.embedding_dim
+    jacque = "I have a Ragdoll cat named Jacque"
+    cms.store(jacque, torch.randn(dim), source="user")
+    _hit_texts(cms, "Jacque")  # force-build the index while Jacque is in head
+    cms.store("I have a bicycle named Rocket", torch.randn(dim), source="user")
+
+    # Demoted, not deleted: still in the store, and reachable under its new
+    # band. A stale index would answer under "head" and miss under "tail".
+    assert [e.text for e in cms.bands[1].entries] == [jacque]
+    assert jacque in _hit_texts(cms, "Jacque", band_filter={"tail"})
+    assert _hit_texts(cms, "Jacque", band_filter={"head"}) == set()
+
+
+def test_slot_pool_excludes_entry_evicted_from_the_deepest_band() -> None:
+    """Overflow past the LAST band is a real drop — total capacity is still
+    a bound — and the dropped entry must leave the index."""
+    cfg = MemoryConfig()
+    cfg.surprise_threshold = -1.0
+    cfg.miras = MIRASConfig(preset="custom", bands=[
+        MIRASBandSpec(name="only", max_entries=1, update_interval=10**9,
+                      promotion_access_count=10**9, promotion_surprise=2.0),
+    ])
+    cms = ContinuumMemorySystem(cfg)
     dim = cms.config.embedding_dim
     cms.store("I have a Ragdoll cat named Jacque", torch.randn(dim), source="user")
     _hit_texts(cms, "Jacque")  # force-build the index while Jacque is live
     cms.store("I have a bicycle named Rocket", torch.randn(dim), source="user")
-    # band[0].max_entries=1 forces the Jacque entry out on the second store.
+
     assert _hit_texts(cms, "Jacque") == set()
 
 
