@@ -312,12 +312,19 @@ re-extract):
 committed baseline (`evals/results/regression_gate.baseline.json`) —
 see the script header for scope and the `-Establish` flow.
 
-> **The committed baseline is stale and the gate is under-powered
-> (2026-07-26). Treat a cortex-arm failure as uninformative until it is
-> re-established.** Running the gate on clean `origin/master` fails it:
-> cortex **0.6709 ± 0.0370**, against a baseline of **0.7051**. The same
-> gate on the #38–#44 stack gives **0.6581 ± 0.0196** — a difference from
-> master of **0.0128**, well inside the noise.
+> **Re-established 2026-07-26 at 8 replicates (commit `959ecad`).** The
+> previous baseline was stale and the gate under-powered; both are fixed,
+> and the history is kept here because the failure mode is reusable.
+>
+> The old baseline claimed cortex **0.7051**. Eight honest replicates of
+> the same slice give **0.6651 ± 0.0332**, with the individual runs
+> `[0.6282, 0.6282, 0.6282, 0.6667, 0.6795, 0.6795, 0.7051, 0.7051]` —
+> **0.7051 is the *maximum* of the distribution, hit 2 times in 8.** The
+> old baseline had frozen the top of the range, so every honest run since
+> looked like a regression. It failed on clean `origin/master`
+> (cortex 0.6709 ± 0.0370) as readily as on the #38–#44 stack
+> (0.6581 ± 0.0196) — a difference between them of **0.0128**, well inside
+> the noise. Both pass the new baseline on all three arms.
 >
 > The noise floor is directly measurable here, because the gate copies the
 > **rag** arm's context verbatim: identical inputs, and the two runs differ
@@ -333,15 +340,35 @@ see the script header for scope and the `-Establish` flow.
 >   of the same slice below — **cortex 0.682 ± 0.017**. Both of today's
 >   3-replicate runs sit nearer that figure than the baseline does.
 >
-> The margin is also smaller than the spread it has to survive: 0.03
-> against a cortex std of 0.037 at n=3, i.e. ~1.4 standard errors, so the
-> gate fails a meaningful fraction of the time with no change at all.
-> Re-establishing it should use **more replicates and a margin derived from
-> the measured spread**, and — per the benchmark rules — be promoted
-> deliberately rather than as a side effect of a rerun.
+> The margin was also too tight for the spread it had to survive: 0.03
+> against a cortex std of 0.037 at n=3 is ~1.4 standard errors, so the gate
+> failed a meaningful fraction of runs with no change at all.
 >
-> Evidence: `regression_gate-2026-07-26-master-control.agg.json` (clean
-> master) and `regression_gate-2026-07-26-stack-38-44.agg.json`.
+> **What the new baseline is**, at 8 replicates:
+>
+> | arm | mean | std | margin |
+> |---|---|---|---|
+> | rag | 0.5753 | 0.0232 | 0.0464 |
+> | cortex | 0.6651 | 0.0332 | 0.0663 |
+> | hybrid | 0.7820 | 0.0182 | 0.0363 |
+>
+> The margin is not a constant: `make_baseline` uses
+> `max(0.03, 2 x std)`, so it tracks the measured spread. The old 0.03 was
+> the *floor* showing through, because that run's std was 0.0 — a baseline
+> with no variance silently disables the gate's own calibration.
+>
+> **Cost of the choice.** The gate re-runs its replicate count on every
+> invocation: ~3m05s per replicate, so 8 replicates is ~26 min per run
+> (measured: 28 min). Fewer replicates is cheaper but false-fails more —
+> at n=3 the margin was ~1.2 standard errors of the difference, roughly a
+> 1-in-5 false-fail rate. A ~0.066 cortex margin only catches regressions
+> larger than about six points; with a judge this noisy the lever for
+> catching smaller ones is more replicates, not a narrower margin.
+>
+> Evidence: `regression_gate-2026-07-26-establish-n8.agg.json` (the new
+> baseline), `regression_gate-2026-07-26-master-control.agg.json` (clean
+> master under the old baseline) and
+> `regression_gate-2026-07-26-stack-38-44.agg.json`.
 
 ### Findings — 2026-07-18 (first replicated comparison)
 

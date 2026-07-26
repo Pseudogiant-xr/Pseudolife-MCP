@@ -6,6 +6,36 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-26 — regression-gate baseline re-established at 8 replicates)
+- **`evals/results/regression_gate.baseline.json` re-established on clean
+  `origin/master` (commit `959ecad`) with 8 replicates**, replacing the
+  3-replicate baseline from 2026-07-18 that both master and the #38–#44
+  stack failed.
+
+  | arm | mean | std | margin |
+  |---|---|---|---|
+  | rag | 0.5753 | 0.0232 | 0.0464 |
+  | cortex | 0.6651 | 0.0332 | 0.0663 |
+  | hybrid | 0.7820 | 0.0182 | 0.0363 |
+
+- **The old number was the top of the range, not the centre.** Eight
+  replicates of the identical slice give cortex
+  `[0.6282, 0.6282, 0.6282, 0.6667, 0.6795, 0.6795, 0.7051, 0.7051]` —
+  the retired baseline's **0.7051 is the maximum, hit 2 times in 8**. A
+  baseline frozen at the best observed run makes every honest run
+  afterwards look like a regression, which is exactly what happened.
+- **A zero-variance baseline silently disables the gate's calibration.**
+  `make_baseline` sets `margin = max(0.03, 2 x std)`, so the old 0.03 was
+  the floor showing through rather than a chosen value. With real variance
+  the margin now tracks the measured spread.
+- Both earlier runs pass the new baseline on all three arms, including
+  the **#38–#44 stack** — the gate obligation on those changes is
+  discharged.
+- Cost, since the gate re-runs its replicate count every invocation:
+  ~3m05s per replicate, ~26 min for 8 (measured 28). At the old n=3 the
+  margin was ~1.2 standard errors of the difference — roughly a 1-in-5
+  false-fail rate.
+
 ### Fixed (2026-07-26 — the regression gate's baseline is stale, not the code)
 - **`evals/regression_gate.ps1` fails on clean `origin/master`.** Cortex
   **0.6709 ± 0.0370** against a committed baseline of **0.7051**. The
