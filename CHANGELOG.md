@@ -6,6 +6,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-07-25 — restore paths ignored band capacity)
+- **`hydrate_cms`, `load()` and the legacy migration now rebalance once.**
+  All three append straight to `band.entries`, bypassing `store()` and its
+  capacity check, and `hydrate_cms` additionally routes rows whose band no
+  longer exists into `bands[0]`. A preset rename could therefore pile the
+  whole bank into the 200-slot `working` band — and because every store
+  then evicts one entry and appends one, it never drained: the band stayed
+  full permanently with every store scanning all of it.
+  `ContinuumMemorySystem.rebalance_bands()` walks shallow → deep once,
+  spilling each band's lowest-scoring surplus into the next by the same
+  retention policy `_evict_one` uses. Measured on the shipped 8-band
+  preset: 5,250 rows all stamped with a dead band name seat correctly in
+  **0.30 s**, no band over capacity.
+- Harmless before 2026-07-25, when capacity eviction deleted and the
+  resident set stayed far below capacity (~212 rows against 5,250 on a
+  realistic corpus). Demote-on-evict pushed the resident set to the summed
+  capacity, which is what made this reachable.
+- **The deepest band may finish over capacity** when the bank holds more
+  rows than the preset seats. That is deliberate: startup is the wrong
+  place to destroy memories the user did not ask to lose. It is logged
+  with the count, and drains through the normal eviction path.
+- Known cost, not introduced here but now reached sooner: with every band
+  saturated, a store cascades an eviction through all eight, each scoring
+  its whole band — **~450 ms** at 5,250 resident against ~18 ms at 500.
+  The pre-fix pile-up measured ~330 ms but never converged. Reducing that
+  scan is tracked separately; a bank near capacity is the only place it
+  bites.
+
 ### Fixed (2026-07-25 — a failed band move could leave one entry in two bands)
 - **`_consolidate` now prunes the source band in a `finally`.** It moved
   entries in a loop but pruned only after finishing, so a raise partway

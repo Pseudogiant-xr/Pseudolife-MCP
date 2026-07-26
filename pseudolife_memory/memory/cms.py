@@ -28,6 +28,7 @@ outside the MIRAS spectrum (no gradient updates, documents not memories).
 
 from __future__ import annotations
 
+import heapq
 import logging
 import re
 import time
@@ -39,6 +40,7 @@ import torch
 
 from pseudolife_memory.memory.titans_memory import MemoryEntry, RetrievalResult
 from pseudolife_memory.memory.miras.band import MIRASBand, build_band
+from pseudolife_memory.memory.miras.retention import now_seconds
 from pseudolife_memory.memory.meta_filter import is_meta_statement
 from pseudolife_memory.memory.contradiction import detect_contradictions, decay_contradicted_entries
 from pseudolife_memory.memory.slots import extract_slots
@@ -1289,6 +1291,75 @@ class ContinuumMemorySystem:
     # Consolidation
     # ------------------------------------------------------------------
 
+    def rebalance_bands(self) -> int:
+        """Seat restored entries within per-band capacity. Returns moves.
+
+        The restore paths — :func:`hydrate_cms`, :meth:`load`, the legacy
+        migration — append straight to ``band.entries``, bypassing
+        ``store()`` and its capacity check. ``hydrate_cms`` also routes rows
+        whose band no longer exists into ``bands[0]``, so a preset rename
+        can pile the whole bank into the smallest band.
+
+        That was harmless while capacity eviction deleted (the resident set
+        stayed far below capacity). Since eviction started demoting
+        instead, the resident set reaches the summed capacity, and draining
+        an over-full head band costs one entry per subsequent ``store()``,
+        each scoring the whole band and cascading a DB write per hop.
+
+        Walks shallow → deep once, spilling each band's lowest-scoring
+        surplus into the next — O(n log n), and each entry moves at most
+        once per band. Deliberately moves the objects rather than going
+        through :meth:`_relocate`, whose ``store()`` would re-run eviction
+        scoring per entry and make this quadratic.
+
+        The deepest band is allowed to finish over capacity when the bank
+        holds more rows than the preset can seat. Startup is the wrong
+        place to destroy memories the user did not ask to lose; the excess
+        is logged and drains through the normal eviction path.
+        """
+        now = now_seconds()
+        moved = 0
+        for depth, band in enumerate(self.bands[:-1]):
+            overflow = band.size - band.max_entries
+            if overflow <= 0:
+                continue
+            destination = self.bands[depth + 1]
+            # Lowest-scoring first, by this band's own retention policy —
+            # the same ordering _evict_one would have used.
+            spill = heapq.nsmallest(
+                overflow, band.entries,
+                key=lambda e: band.retention.source_weighted_score(e, now))
+            spilled = {id(e) for e in spill}
+            band.entries = [e for e in band.entries if id(e) not in spilled]
+            band._dirty = True
+            for entry in spill:
+                entry.bank = destination.name
+                destination.entries.append(entry)
+                if self.storage is not None and entry.db_id is not None:
+                    try:
+                        self.storage.update_entry(
+                            entry.db_id, band=destination.name)
+                    except Exception as exc:  # noqa: BLE001
+                        # Cosmetic: the in-memory seating is what matters,
+                        # and a stale band column just re-spills identically
+                        # on the next hydrate.
+                        logger.warning("rebalance write-through failed: %s", exc)
+            destination._dirty = True
+            moved += overflow
+
+        deepest = self.bands[-1]
+        if deepest.size > deepest.max_entries:
+            logger.warning(
+                "band %r holds %d entries against a capacity of %d after "
+                "restore — the bank has more rows than this preset seats. "
+                "Left intact rather than truncated at startup; capacity "
+                "eviction will drain it.",
+                deepest.name, deepest.size, deepest.max_entries,
+            )
+        if moved:
+            self._slot_index_dirty = True
+        return moved
+
     def _relocate(self, entry: MemoryEntry, destination: MIRASBand) -> None:
         """Move ``entry`` into ``destination``, preserving its identity.
 
@@ -1530,6 +1601,9 @@ class ContinuumMemorySystem:
             legacy_path = directory / "memory_state.pt"
             if legacy_path.exists():
                 self._load_legacy_hopfield(legacy_path)
+                # The legacy migration dumps ``fast_bank`` into bands[0] and
+                # ``slow_bank`` into bands[-1] with no capacity check.
+                self.rebalance_bands()
             return
 
         # weights_only=True: the CMS snapshot is tensors + plain containers, so
@@ -1557,6 +1631,11 @@ class ContinuumMemorySystem:
                 "avoid corrupting state. Bands stay at their fresh-init weights.",
                 schema_version, state_path,
             )
+            return
+        # Both schema loaders replace band entries wholesale, bypassing the
+        # capacity check in ``store()``. A save made under a roomier preset
+        # therefore leaves bands over their current capacity.
+        self.rebalance_bands()
 
     def _load_schema_v1(self, state: dict) -> None:
         """v0.4.x layout: top-level ``instant`` / ``short_term`` / ``long_term``.
