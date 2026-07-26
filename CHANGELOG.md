@@ -6,6 +6,33 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-26 — embedder comparison on our own corpus)
+- **`evals/embedder_recall.py`** ranks every haystack turn of a
+  LongMemEval `s` question against the question text and reports recall@k
+  of the turns marked `has_answer`, plus an exact paired **McNemar** test
+  between backbones. Pure retrieval — no reader, no judge, CPU-only.
+- Result (150 questions, 74,183 turns, **299 gold turns**; artifact
+  `evals/results/embedder-recall-comparison.json`):
+
+  | backbone | R@5 | R@10 | R@20 | dim |
+  |---|---|---|---|---|
+  | `all-MiniLM-L6-v2` (shipped) | 0.408 | 0.572 | 0.756 | 384 |
+  | `BAAI/bge-base-en-v1.5` | **0.559** | **0.742** | **0.853** | 768 |
+
+  Paired: **+54/−9 at k=5** (p=6e-09), **+60/−9 at k=10** (p=2e-10),
+  **+34/−5 at k=20** (p=2e-06). A ~17-point gain at k=10, roughly 6 wins
+  per loss.
+- Costs, for the migration decision: ~10× CPU encode time (72 ms vs 7 ms
+  per text, un-tuned — an ONNX backend is already wired for MiniLM) and 2×
+  the stored vector width. `vector(384)` is declared in four tables, so
+  adopting it is a schema migration plus a re-embed of every row.
+- **A 30-question pilot was discarded as worthless, for two independent
+  reasons** worth recording: the machine was busy (invalidating the timing
+  column), and the first 30 questions in file order are far easier than the
+  corpus — R@5 0.806 there against 0.408 over 150. Near ceiling the two
+  backbones look identical; the whole difference was one document. Do not
+  take the head of this dataset as a sample.
+
 ### Fixed (2026-07-26 — the deploy scripts promised a rollback they hadn't made)
 - **`ops/update.ps1` and `ops/update.sh` only print a rollback command when
   the rollback tag actually exists.** Both computed `$rollback`
