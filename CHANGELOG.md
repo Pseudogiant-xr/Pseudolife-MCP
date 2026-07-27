@@ -36,6 +36,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   has NOT been performed** — this entry records the model decision and its
   evidence only.
 
+### Fixed (2026-07-27 — user-set entity kinds survive a model re-apply)
+- **`apply_entity_kinds` now locks `origin='user'` rows against the
+  artifact.** The classifier repeats its mistakes — the `miras-bands`
+  mislabel appeared in both gold replicates — so the first hand-correction
+  written to `entity_kinds` would have been silently reinstated by the next
+  re-apply, and the resulting `evergreen -> volatile` flip would not even
+  show in the downgrade section, because it looks like the normal
+  direction. User rows now win over a disagreeing artifact (reported in the
+  dry run), and are skipped on agreement too — re-upserting would churn
+  `origin` back to `model` and unlock the row for the run after.
+
+
 ### Added (2026-07-27 — freshness is inferred from the entity's kind; schema **v24**)
 - **`entity_kinds` (schema v24) stores one kind per entity** — `artifact`
   (frozen in time), `system` (live), `concept` (abstract) — and

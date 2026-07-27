@@ -81,6 +81,38 @@ def plan_updates(labels: dict[str, str], rows: list[tuple[str, str]],
     return out
 
 
+def merge_labels(
+    stored: dict[str, tuple[str, str]], artifact: dict[str, str],
+) -> tuple[dict[str, str], set[str], dict[str, tuple[str, str]]]:
+    """Overlay the artifact on the stored kinds, with user rows locked.
+
+    ``stored`` is ``{entity: (kind, origin)}``. Returns ``(labels,
+    user_locked, conflicts)`` where ``labels`` feeds ``plan_updates``,
+    ``user_locked`` is every entity whose stored origin is ``user`` (the
+    upsert must skip these even when the artifact AGREES -- re-upserting
+    would churn origin user->model and unlock the row for the next run),
+    and ``conflicts`` maps user-locked entities to ``(kept, rejected)``
+    where the artifact disagreed, for the dry-run report.
+
+    Why the lock exists: a human correction is the strongest signal in the
+    table, and the classifier repeats its mistakes -- the miras-bands
+    mislabel appeared in BOTH gold replicates. Without the lock the next
+    re-apply silently reinstates the error, and the resulting
+    evergreen->volatile flip never appears in the downgrade section
+    because it looks like the normal direction.
+    """
+    labels = {e: k for e, (k, _o) in stored.items()}
+    user_locked = {e for e, (_k, o) in stored.items() if o == "user"}
+    conflicts: dict[str, tuple[str, str]] = {}
+    for e, k in artifact.items():
+        if e in user_locked:
+            if k != stored[e][0]:
+                conflicts[e] = (stored[e][0], k)
+            continue
+        labels[e] = k
+    return labels, user_locked, conflicts
+
+
 def _require_entity_kinds_table(conn) -> None:
     """Fail clearly, before any query touches entity_kinds, if the bank
     predates schema v24 -- otherwise the overlay SELECT below dies with a
@@ -115,14 +147,16 @@ def main() -> None:
             "SELECT entity_norm, attribute_norm, freshness_class FROM facts "
             "WHERE status='current'").fetchall()}
 
-        stored = {r[0]: r[1] for r in conn.execute(
-            "SELECT entity_norm, kind FROM entity_kinds").fetchall()}
-        # The artifact is an OVERLAY, not the whole world. A re-run whose
-        # batch failed simply omits an entity (the classifier emits no label
-        # rather than guessing) -- without this merge that omission would
-        # revert a previously-correct kind to evergreen while entity_kinds
-        # still claimed otherwise, leaving the two disagreeing.
-        merged_labels = {**stored, **art["labels"]}
+        stored = {r[0]: (r[1], r[2]) for r in conn.execute(
+            "SELECT entity_norm, kind, origin FROM entity_kinds").fetchall()}
+        # The artifact is an OVERLAY, not the whole world (a re-run whose
+        # batch failed omits entities rather than guessing), and user-set
+        # rows are LOCKED against it -- see merge_labels' docstring.
+        merged_labels, user_locked, conflicts = merge_labels(stored, art["labels"])
+        if conflicts:
+            print(f"kept {len(conflicts)} user-set kind(s) the artifact disagreed with:")
+            for e, (kept, rejected) in sorted(conflicts.items()):
+                print(f"  {e}: kept {kept} (user), artifact said {rejected}")
 
         updates = plan_updates(merged_labels, rows, current)
         print(f"kinds={len(labels)} fact_updates={len(updates)}")
@@ -151,8 +185,12 @@ def main() -> None:
             # rewriting unchanged stored rows would churn decided_at for no
             # reason. The plan above uses merged_labels so a fact already
             # correctly classified in a prior run isn't reverted just
-            # because this run's artifact omits it.
+            # because this run's artifact omits it. User-locked rows are
+            # skipped even on agreement: re-upserting churns origin
+            # user->model, which would unlock the row for the next run.
             for e, k in labels.items():
+                if e in user_locked:
+                    continue
                 conn.execute(
                     "INSERT INTO entity_kinds "
                     "(entity_norm, kind, origin, confidence, decided_at) "
