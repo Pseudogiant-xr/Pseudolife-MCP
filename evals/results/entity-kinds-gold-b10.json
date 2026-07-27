@@ -1,0 +1,70 @@
+{
+  "model": "claude-fable-5",
+  "batch_size": 10,
+  "scoped": 40,
+  "rule_labelled": 14,
+  "model_labelled": 26,
+  "unlabelled": 0,
+  "failures": [],
+  "labels": {
+    "0-9-0-release": "artifact",
+    "2026-07-02-review-roadmap": "artifact",
+    "2026-07-11-known-facts-window": "artifact",
+    "2026-07-12-arm-1-registry-datagen-pilot": "artifact",
+    "2026-07-12-pseudo-life-mcp-perf-review": "artifact",
+    "2026-07-12-release-readiness-pass2": "artifact",
+    "2026-07-14-superseded-row-compaction": "artifact",
+    "2026-07-14-v2-release-audit": "artifact",
+    "2026-07-14-v2-release-audit-deploy": "artifact",
+    "2026-07-15-atlas-stage-3-deployment": "artifact",
+    "2026-07-19-graph-hygiene-r2": "artifact",
+    "2026-07-19-missed-work-audit": "artifact",
+    "commit-6b84ffe": "artifact",
+    "commit-eec67b1": "artifact",
+    "backup-015015": "artifact",
+    "atlas-stage-1": "artifact",
+    "atlas-stage-2-deployment": "artifact",
+    "atlas-pulse-calibration-fix": "artifact",
+    "band-ablation-replicates": "artifact",
+    "arm-1-registry-datagen-pilot": "artifact",
+    "daemon": "system",
+    "pseudolife-mcp": "system",
+    "pseudolife-mcp-daemon": "system",
+    "claude-code-pseudolife-mcp-daemon": "system",
+    "cortex-console-v2": "artifact",
+    "atlas-review-queue": "system",
+    "claude-plugin": "system",
+    "console-loop-health-tile": "system",
+    "atlas-store-curation-ui": "system",
+    "bank-session-state": "system",
+    "authhealthasgi": "system",
+    "extractor": "system",
+    "postgres": "system",
+    "cortex-console": "system",
+    "a-b-testing": "concept",
+    "a<->b-junk-rule": "concept",
+    "arxiv:nnnn-nnnnn-ids-and-dated-titles": "concept",
+    "container-failure-condition": "concept",
+    "miras-bands": "system",
+    "atlas-stages": "artifact"
+  },
+  "generated_at": "2026-07-27T11:13:33Z",
+  "accuracy": 0.925,
+  "errors": [
+    {
+      "entity": "cortex-console-v2",
+      "gold": "system",
+      "got": "artifact"
+    },
+    {
+      "entity": "miras-bands",
+      "gold": "concept",
+      "got": "system"
+    },
+    {
+      "entity": "atlas-stages",
+      "gold": "concept",
+      "got": "artifact"
+    }
+  ]
+}
