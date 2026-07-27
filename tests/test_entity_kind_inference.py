@@ -65,3 +65,14 @@ def test_empty_kind_map_preserves_v23_behaviour(svc):
     """Until entity_kinds is populated, nothing changes."""
     svc.cortex_write("daemon", "deploy-status", "green", support="action")
     assert svc.cortex_lookup("daemon", "deploy-status")["freshness_class"] == "evergreen"
+
+
+def test_entity_name_is_normalised_before_the_kind_lookup(svc):
+    """Kinds are keyed by the same normalised key slots use, so a fact written
+    as "Pseudolife Daemon" must find the kind stored as "pseudolife-daemon".
+    Without normalisation every non-canonical spelling silently falls back to
+    evergreen -- and nothing would go red."""
+    _kinds(svc, **{"pseudolife-daemon": "system"})
+    svc.cortex_write("Pseudolife Daemon", "deploy-status", "green", support="action")
+    assert svc.cortex_lookup("Pseudolife Daemon", "deploy-status")[
+        "freshness_class"] == "volatile"

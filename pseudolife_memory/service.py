@@ -1426,7 +1426,12 @@ class MemoryService:
 
     def _entity_kind_map(self) -> dict[str, str]:
         """entity_norm -> kind, cached. Order 1k rows and read on every fact
-        write, so it is loaded once; the apply step clears the cache."""
+        write, so it is loaded once -- and it stays cached for the life of
+        this process. The backfill (``evals/apply_entity_kinds.py``) runs
+        out-of-process, so it cannot reach this cache: a running daemon keeps
+        serving whatever map it loaded (typically empty) after a backfill,
+        silently resolving every write to ``evergreen`` until the daemon is
+        restarted."""
         if self._entity_kind_cache is None:
             self._entity_kind_cache = (
                 self._storage.load_entity_kinds() if self._storage else {})
