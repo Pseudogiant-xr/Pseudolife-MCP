@@ -1,0 +1,172 @@
+"""Apply an entity-kind artifact to the bank (human-gated).
+
+Two writes, both reversible: entity_kinds rows, and a recompute of
+facts.freshness_class through the SAME resolve_class the write path uses --
+one policy, not two implementations that drift.
+
+Reverting: `UPDATE facts SET freshness_class='evergreen'` restores the
+pre-run state wholesale, and dropping entity_kinds reverts the write path.
+BACK UP FIRST -- ops/backup.ps1.
+
+Usage:
+    python evals/apply_entity_kinds.py --artifact <path>            # dry run
+    python evals/apply_entity_kinds.py --artifact <path> --apply
+    docker restart pseudolife-mcp-daemon   # REQUIRED: see below
+
+The daemon caches the entity-kind map for the life of its process, and this
+script runs out-of-process, so an --apply does not reach a running daemon
+until it restarts. Until then, every new fact keeps resolving evergreen.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import time
+from pathlib import Path
+
+import psycopg
+
+DEFAULT_DSN = os.environ.get(
+    "PL_DSN", "postgresql://pseudolife:pseudolife@127.0.0.1:5433/pseudolife_memory")
+
+# Same single-copy rule as the classifier: load freshness.py by path so the
+# recompute uses the EXACT policy the write path uses. Two implementations
+# would drift, and the drift would be invisible -- the backfill would write
+# classes new writes never reproduce.
+def _load_freshness():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "_pl_freshness",
+        Path(__file__).resolve().parents[1]
+        / "pseudolife_memory" / "memory" / "freshness.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+_freshness = _load_freshness()
+
+
+def _resolve(kind: str | None, attribute_norm: str) -> str:
+    return _freshness.resolve_class(kind, attribute_norm)
+
+
+def plan_updates(labels: dict[str, str], rows: list[tuple[str, str]],
+                 current: dict[tuple[str, str], str] | None = None
+                 ) -> list[tuple[str, str, str]]:
+    """(entity, attribute, new_class) for every pair whose class changes.
+
+    Stored data cannot distinguish "explicitly set" from "defaulted", so a
+    blind recompute would clobber deliberate markings. Two guards:
+
+    - An entity absent from `labels` (unclassified -- e.g. a batch failure
+      emits no label rather than guessing) is never treated as evidence for
+      evergreen: a stored non-evergreen class survives untouched.
+    - A stored `slow` class is never touched at all, labelled or not --
+      resolve_class can only ever produce evergreen or volatile, so a `slow`
+      row is provably a deliberate human marking.
+    """
+    cur = current or {}
+    out = []
+    for e, a in rows:
+        stored = cur.get((e, a), "evergreen")
+        if stored == "slow":
+            continue
+        if labels.get(e) is None and stored != "evergreen":
+            continue
+        want = _resolve(labels.get(e), a)
+        if want != stored:
+            out.append((e, a, want))
+    return out
+
+
+def _require_entity_kinds_table(conn) -> None:
+    """Fail clearly, before any query touches entity_kinds, if the bank
+    predates schema v24 -- otherwise the overlay SELECT below dies with a
+    raw psycopg.errors.UndefinedTable, and it runs even in a dry run."""
+    exists = conn.execute(
+        "SELECT to_regclass('public.entity_kinds')").fetchone()[0]
+    if exists is None:
+        raise SystemExit(
+            "entity_kinds table not found -- this bank has not been "
+            "deployed with schema v24 yet (entity_kinds ships in v24; "
+            "the daemon's ensure_schema creates it on start). Deploy via "
+            "ops/update.ps1, then re-run this script.")
+
+
+def main() -> None:
+    p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    p.add_argument("--artifact", type=Path, required=True)
+    p.add_argument("--dsn", default=DEFAULT_DSN)
+    p.add_argument("--apply", action="store_true",
+                   help="Without this the run is a dry run and writes nothing.")
+    a = p.parse_args()
+
+    art = json.loads(a.artifact.read_text(encoding="utf-8"))
+    labels = art["labels"]
+
+    with psycopg.connect(a.dsn) as conn:
+        _require_entity_kinds_table(conn)
+        rows = [(r[0], r[1]) for r in conn.execute(
+            "SELECT entity_norm, attribute_norm FROM facts "
+            "WHERE status='current'").fetchall()]
+        current = {(r[0], r[1]): r[2] for r in conn.execute(
+            "SELECT entity_norm, attribute_norm, freshness_class FROM facts "
+            "WHERE status='current'").fetchall()}
+
+        stored = {r[0]: r[1] for r in conn.execute(
+            "SELECT entity_norm, kind FROM entity_kinds").fetchall()}
+        # The artifact is an OVERLAY, not the whole world. A re-run whose
+        # batch failed simply omits an entity (the classifier emits no label
+        # rather than guessing) -- without this merge that omission would
+        # revert a previously-correct kind to evergreen while entity_kinds
+        # still claimed otherwise, leaving the two disagreeing.
+        merged_labels = {**stored, **art["labels"]}
+
+        updates = plan_updates(merged_labels, rows, current)
+        print(f"kinds={len(labels)} fact_updates={len(updates)}")
+        for e, at, c in updates[:15]:
+            print(f"  {e} / {at} -> {c}")
+        if len(updates) > 15:
+            print(f"  ... {len(updates) - 15} more (see downgrades section "
+                  f"below for anything reverting to evergreen)")
+        # A downgrade (non-evergreen -> evergreen) is worth a human's eyes
+        # even though plan_updates now refuses to produce one from a merely
+        # unclassified entity -- it can still happen for a genuine
+        # reclassification, and it must never hide below the [:15] preview.
+        downgrades = [(e, at, c) for e, at, c in updates
+                      if c == "evergreen" and current.get((e, at), "evergreen") != "evergreen"]
+        if downgrades:
+            print(f"!! downgrades (review these): {len(downgrades)}")
+            for e, at, c in downgrades:
+                print(f"  {e} / {at}: {current.get((e, at))} -> {c}")
+        if not a.apply:
+            print("dry run -- nothing written. Re-run with --apply.")
+            return
+
+        now = time.time()
+        with conn.transaction():
+            # Upsert only the artifact's OWN labels, not the merged map --
+            # rewriting unchanged stored rows would churn decided_at for no
+            # reason. The plan above uses merged_labels so a fact already
+            # correctly classified in a prior run isn't reverted just
+            # because this run's artifact omits it.
+            for e, k in labels.items():
+                conn.execute(
+                    "INSERT INTO entity_kinds "
+                    "(entity_norm, kind, origin, confidence, decided_at) "
+                    "VALUES (%s,%s,'model',NULL,%s) "
+                    "ON CONFLICT (entity_norm) DO UPDATE SET "
+                    "kind=EXCLUDED.kind, origin=EXCLUDED.origin, "
+                    "decided_at=EXCLUDED.decided_at", (e, k, now))
+            for e, at, c in updates:
+                conn.execute(
+                    "UPDATE facts SET freshness_class=%s "
+                    "WHERE entity_norm=%s AND attribute_norm=%s AND status='current'",
+                    (c, e, at))
+    print(f"applied {len(labels)} kinds, {len(updates)} fact updates")
+
+
+if __name__ == "__main__":
+    main()

@@ -527,20 +527,19 @@ def memory_fact_set(
     origin: Literal["user", "action", "agent"] | None = None,
     confidence: float = 0.8,
     episode: str | None = None,
-    freshness_class: Literal["evergreen", "slow", "volatile"] = "evergreen",
+    freshness_class: Literal["auto", "evergreen", "slow", "volatile"] = "auto",
 ) -> dict[str, Any]:
-    """Assert a canonical fact NOW — insert, confirm, or correct a slot.
+    """Assert a canonical fact — insert, confirm, or correct a slot.
 
-    A new value at an existing slot supersedes the old (kept as history).
-    A conflicting write is parked as a contender (``action="contested"``,
+    A new value at an existing slot supersedes the old (history kept).
+    A conflicting write parks as a contender (``action="contested"``,
     winner under ``current``) — check with the human, settle via
     ``memory_fact_resolve``.
 
     Args:
-        origin: ``"user"`` / ``"action"`` / ``"agent"`` (default) — who
-            asserts it (``"user"`` = the human told you).
-        confidence: 0..1, default 0.8.
-        episode: Episode handle for attribution.
+        origin: ``"user"`` = human told you; else ``"action"``/``"agent"`` (default).
+        confidence: 0..1, default 0.8. episode: attribution handle.
+        freshness_class: ``"auto"`` infers decay from entity kind.
 
     Returns: ``{action: inserted|confirmed|superseded|contested, ...record}``.
     """

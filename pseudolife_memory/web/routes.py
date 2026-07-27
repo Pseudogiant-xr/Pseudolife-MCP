@@ -113,10 +113,14 @@ class ConsoleRoutes:
           lambda q, b: svc.cortex_contenders(_s(q, "entity"), _s(q, "attribute")))
         p("/api/facts/resolve", lambda q, b: svc.cortex_resolve(
             b["entity"], b["attribute"], bool(b.get("accept"))))
+        # freshness_class threaded through (v23): this is the documented
+        # fallback when an MCP client stringifies tool params, so a write here
+        # must be able to say the same things as the tool.
         p("/api/facts/set", lambda q, b: svc.cortex_write(
             b["entity"], b["attribute"], b["value"],
             confidence=float(b.get("confidence", 0.8)),
-            support=(b.get("origin") or "agent")))
+            support=(b.get("origin") or "agent"),
+            freshness_class=(b.get("freshness_class") or "auto")))
         p("/api/facts/forget", lambda q, b: svc.cortex_forget(
             b["entity"], b.get("attribute")))
 

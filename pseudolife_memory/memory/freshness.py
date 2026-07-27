@@ -15,6 +15,7 @@ daemon (ranking/return) and the provider (rendering) agree.
 """
 from __future__ import annotations
 
+import re as _re
 import time as _time
 
 DAY = 86400.0
@@ -70,6 +71,45 @@ def is_stale(freshness_class, retrieved_at, now=None) -> bool:
         return False
     now = _time.time() if now is None else float(now)
     return (now - float(retrieved_at if retrieved_at is not None else now)) > 2.0 * ttl
+
+
+# ── entity-kind -> freshness policy (schema v24) ──────────────────────────
+# Whether a fact rots is decided by what KIND of thing it is about. A release
+# is frozen in time, so "0-9-0-release / schema-version" is permanently true;
+# the daemon is live, so "daemon / schema-version" rots. Same attribute name,
+# opposite class -- the name cannot decide it, the entity's kind can.
+ENTITY_KINDS = ("artifact", "system", "concept")
+
+# EVENTS and measurements are permanently true -- only STATE rots. Checked
+# FIRST so "deployment-date" (when a deploy happened) does not inherit the
+# volatility of the "deployment" prefix. Without this exclusion the pattern
+# marks historical events as decaying, which is the harmful direction.
+_EVENT_ATTRIBUTE_RE = _re.compile(
+    r"(^|[-_])(date|at|hash|commit|count|score|id|size|duration)$")
+
+# Only consulted for `system` entities, and only after the event check.
+# Deliberately dumb and auditable: the entity kind already carries the load,
+# so this stays a short explicit list rather than anything clever.
+_VOLATILE_ATTRIBUTE_RE = _re.compile(
+    r"(^|[-_])(status|state|health|live|running|current|deployment|deployed|url)([-_]|$)"
+    r"|(^|[-_])version([-_]|$)"
+)
+
+
+def resolve_class(kind: str | None, attribute_norm: str) -> str:
+    """Freshness class for a fact, from its entity's kind and attribute name.
+
+    Unknown kinds return ``evergreen`` -- NOT ``volatile`` like
+    :func:`normalize_class`. That fallback is right for world facts, which rot
+    by default, and is the exact inversion of the intent here: an
+    unclassified personal fact must not quietly start decaying.
+    """
+    if (kind or "").strip().casefold() != "system":
+        return "evergreen"
+    attr = (attribute_norm or "").strip().casefold()
+    if _EVENT_ATTRIBUTE_RE.search(attr):        # events never rot
+        return "evergreen"
+    return "volatile" if _VOLATILE_ATTRIBUTE_RE.search(attr) else "evergreen"
 
 
 def describe_age(retrieved_at, now=None) -> str:

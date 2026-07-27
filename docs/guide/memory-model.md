@@ -54,22 +54,31 @@ a reader to assume the value is live:
   "currently deployed" fact last confirmed nine months ago is worth
   re-checking against the source before acting on it.
 - **`freshness_class` says how fast the slot rots** — `evergreen`
-  (the default; never decays), `slow` (~9 months), `volatile` (~3 weeks).
-  Non-evergreen facts report an `effective_confidence` that decays toward a
-  per-class floor with time since `last_confirmed`, and are flagged
-  `stale: true` past twice their TTL. Re-asserting the same value confirms
-  it and restores full confidence.
+  (never decays), `slow` (~9 months), `volatile` (~3 weeks). Non-evergreen
+  facts report an `effective_confidence` that decays toward a per-class
+  floor with time since `last_confirmed`, and are flagged `stale: true`
+  past twice their TTL. Re-asserting the same value confirms it and
+  restores full confidence.
 
-Set it at write time: `memory_fact_set("pseudolife-mcp",
-"extractor-prompt-version", "v2", freshness_class="volatile")`. The rule of
-thumb is that anything phrased as *what is currently deployed / running /
-assigned* is `volatile`; identities, decisions, and history are `evergreen`.
+Set it explicitly at write time: `memory_fact_set("pseudolife-mcp",
+"extractor-prompt-version", "v2", freshness_class="volatile")` — an
+explicit value always wins. Left unset (the default is the sentinel
+`"auto"`), the class is instead **inferred from the entity's kind**
+(schema v24, `entity_kinds`): a `system` entity (live, mutable — the sort
+of thing with a "currently deployed" answer) can resolve to `volatile`; an
+`artifact` (frozen at a point in time, like a tagged release) or a
+`concept` (abstract/definitional) always resolves `evergreen`, whatever
+the attribute name. `0-9-0-release / schema-version` is permanently true;
+`daemon / schema-version` rots — same attribute, opposite class, because
+the entities differ.
 
-The default is deliberately `evergreen` and not, as with world facts,
-`volatile`: personal cortex facts are mostly durable, and defaulting the
-other way would re-rank every existing bank on an assumption nothing has
-measured. Facts already in the bank before schema v23 read back as
-`evergreen`, so nothing changes until a slot is deliberately classified.
+An entity with no recorded kind — which is every entity until the offline
+classifier assigns one — resolves `evergreen`, not `volatile`: personal
+cortex facts are mostly durable, and defaulting the other way would
+re-rank every existing bank on an assumption nothing has measured. Facts
+already in the bank before schema v23, and any entity the classifier
+hasn't reached, read back exactly as before, so nothing changes until an
+entity is deliberately classified.
 
 Both fields are descriptive, not enforcement — a stale fact is still
 returned, marked. Nothing is auto-deleted or auto-superseded on age.

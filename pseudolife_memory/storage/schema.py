@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 23
+SCHEMA_META_VERSION = 24
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -127,6 +127,18 @@ CREATE UNIQUE INDEX IF NOT EXISTS entity_proposals_merge_uq ON entity_proposals
   (LEAST(entity_id, into_id), GREATEST(entity_id, into_id)) WHERE kind = 'merge';
 CREATE UNIQUE INDEX IF NOT EXISTS entity_proposals_junk_uq ON entity_proposals
   (entity_id) WHERE kind = 'junk';
+
+-- v24 (freshness policy input): one kind per entity_norm -- artifact |
+-- system | concept. Keyed on entity_norm, NOT entity_id: that is what
+-- cortex slots key on, a third of cortex entities have no graph node at
+-- all, and a graph merge would otherwise silently retarget the kind.
+CREATE TABLE IF NOT EXISTS entity_kinds (
+  entity_norm TEXT PRIMARY KEY,
+  kind        TEXT NOT NULL,
+  origin      TEXT NOT NULL,
+  confidence  REAL,
+  decided_at  DOUBLE PRECISION NOT NULL
+);
 
 -- v20 (2026-07-02 review fix 3): human-dismissed duplicate findings. The
 -- duplicate analyzer is stateless token-Jaccard, so its false positives
@@ -388,6 +400,16 @@ def ensure_schema(conn) -> dict:
         cur.execute(
             "ALTER TABLE facts ADD COLUMN IF NOT EXISTS freshness_class "
             "TEXT NOT NULL DEFAULT 'evergreen'"
+        )
+        # v24 additive: per-entity kind, the input to the freshness policy.
+        # Keyed on entity_norm (what cortex slots key on), not entity_id --
+        # a third of cortex entities have no graph node, and a graph merge
+        # would otherwise silently retarget the kind.
+        cur.execute(
+            "CREATE TABLE IF NOT EXISTS entity_kinds ("
+            "entity_norm TEXT PRIMARY KEY, kind TEXT NOT NULL, "
+            "origin TEXT NOT NULL, confidence REAL, "
+            "decided_at DOUBLE PRECISION NOT NULL)"
         )
         # v21 additive: durable, denormalized merge-decision audit (no FKs —
         # must outlive the entities and proposal rows it describes).

@@ -9,6 +9,7 @@ so these tests require torch installed and run under ``.venv``.
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 import yaml
@@ -557,6 +558,33 @@ def test_api_post_with_body_requires_json_content_type(svc):
                            (b"content-type", b"text/plain")],
                   body=b'{"entity":"e","attribute":"a","value":"v"}')
     assert st == 415
+
+
+def test_facts_set_threads_freshness_class(svc):
+    """The REST route is the documented fallback when an MCP client
+    stringifies tool params, so it must be able to assert everything the tool
+    can. Shipping v23 through the tool alone left this route silently pinning
+    every REST-written fact to the evergreen default."""
+    app = _app(svc)
+    st, body = _call(app, "POST", "/api/facts/set",
+                     headers=[(b"host", b"127.0.0.1"),
+                              (b"content-type", b"application/json")],
+                     body=b'{"entity":"srv","attribute":"deploy-status",'
+                          b'"value":"green","freshness_class":"volatile"}')
+    assert st == 200
+    assert json.loads(body)["freshness_class"] == "volatile"
+
+
+def test_facts_set_defaults_freshness_class_to_evergreen(svc):
+    """Omitting the field must not become volatile — the personal cortex
+    defaults durable, unlike the world cortex."""
+    app = _app(svc)
+    st, body = _call(app, "POST", "/api/facts/set",
+                     headers=[(b"host", b"127.0.0.1"),
+                              (b"content-type", b"application/json")],
+                     body=b'{"entity":"proj","attribute":"language","value":"python"}')
+    assert st == 200
+    assert json.loads(body)["freshness_class"] == "evergreen"
 
 
 def test_tokened_api_skips_host_gate(svc):
