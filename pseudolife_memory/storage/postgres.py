@@ -478,6 +478,32 @@ class PostgresStorage:
             out.append(d)
         return out
 
+    # ── entity kinds (schema v24) ───────────────────────────────────────
+
+    def load_entity_kinds(self) -> dict[str, str]:
+        """entity_norm -> kind. Small (order 1k rows); loaded once and cached
+        by the service, so a plain full read is right here."""
+        return {r[0]: r[1] for r in self.conn.execute(
+            "SELECT entity_norm, kind FROM entity_kinds").fetchall()}
+
+    def upsert_entity_kinds(self, rows: list[dict]) -> int:
+        if not rows:
+            return 0
+        with self._txn(), self.conn.cursor() as cur:
+            for r in rows:
+                cur.execute(
+                    "INSERT INTO entity_kinds "
+                    "(entity_norm, kind, origin, confidence, decided_at) "
+                    "VALUES (%s, %s, %s, %s, %s) "
+                    "ON CONFLICT (entity_norm) DO UPDATE SET "
+                    "kind=EXCLUDED.kind, origin=EXCLUDED.origin, "
+                    "confidence=EXCLUDED.confidence, "
+                    "decided_at=EXCLUDED.decided_at",
+                    (r["entity_norm"], r["kind"], r["origin"],
+                     r.get("confidence"), r["decided_at"]),
+                )
+        return len(rows)
+
     # ── world-knowledge cortex (schema v9; same snapshot pattern as facts) ──
 
     def replace_world_facts(self, rows: list[dict]) -> None:

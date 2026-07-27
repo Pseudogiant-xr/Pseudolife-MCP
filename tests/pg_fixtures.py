@@ -40,6 +40,9 @@ _ALL_TABLES = (
     "dismissed_pairs",
     # Deliberately FK-free (durable merge audit) — same leak class as above.
     "merge_decisions",
+    # Deliberately keyed on entity_norm, not entity_id (no FK) — same leak
+    # class as above.
+    "entity_kinds",
 )
 
 
