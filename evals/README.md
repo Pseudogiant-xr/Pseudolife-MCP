@@ -285,19 +285,54 @@ this table, not against leaderboards.
 
 ## Variance and replication
 
-Single runs of this bench are noisy: three runs of the identical
-sonnet-5-v1 config (same bank, byte-identical contexts, temperature 0)
-scored cortex 0.808 / 0.731 / 0.782 — a ~7.7 pp spread coming entirely
-from the answerer/judge side. Differences inside that band are not
-decisions. MemDelta (arXiv 2606.29914) documents the same failure across
-the field: identical aggregate scores can disagree on 16–66 % of items,
-and single-run memory-bench comparisons routinely measure judge noise.
+> **Root-caused 2026-07-27: most of the "judge noise" below was a server
+> bug, and it is fixed.** The spread came from the TurboQuant fork's fused
+> TBQ4_0 flash-attention KV cache, which is not bit-reproducible — identical
+> inputs flip ~7 % of verdicts. It is not MTP and not the prompt cache: both
+> were tested off and the spread remained (`judge_determinism_check.py`,
+> `results/judge-determinism-check.json`). The stock `llama-server` with
+> `--cache-type-k/v q8_0` reproduces exactly. `evals/qwen_server.ps1` now
+> serves that config by default to every harness; pass `-Fast` only for
+> throughput work whose output is never judged.
+>
+> Measured after the switch, the gate slice at n=4 replicates: **std 0.0000
+> on all three arms** (`regression_gate-2026-07-27-establish-q8-n4.agg.json`).
+> Historical means on this page were measured on the noisy server and are
+> **not comparable** to values measured on the reproducible one — the spread
+> is not centred on the deterministic value, and it shifts differently per
+> arm (on the gate slice: rag deterministic 0.6282 vs a noisy range topping
+> out at 0.6026; hybrid deterministic 0.7692 vs a noisy *minimum* of 0.7692).
+> Re-measure rather than reinterpret.
 
-Convention: any comparison used for a decision runs ≥3 answer-phase
-replicates per config and reports mean ± std; config-vs-config claims
-use the paired permutation test. Findings tables in this file are
-point-in-time snapshots — where a `.agg.json` exists next to a results
-file, the aggregate is authoritative.
+Historically, single runs of this bench looked irreducibly noisy: three runs
+of the identical sonnet-5-v1 config (same bank, byte-identical contexts,
+temperature 0) scored cortex 0.808 / 0.731 / 0.782 — a ~7.7 pp spread
+attributed at the time to the answerer/judge. MemDelta (arXiv 2606.29914)
+documents the same failure across the field: identical aggregate scores can
+disagree on 16–66 % of items, and single-run memory-bench comparisons
+routinely measure judge noise. The lesson generalises even though our
+instance had a fixable cause — before averaging noise away, check whether
+the serving stack is reproducible at all, because a control arm makes that
+free to measure.
+
+Convention, updated:
+
+- **Judge/answerer noise is now zero** on the reproducible config, so
+  replicates no longer estimate it. Keep **2** as a drift canary:
+  `replicate.py` prints a nondeterminism WARNING if replicates of
+  byte-identical contexts ever disagree, which means the run was served by
+  the fast fork.
+- **Question-sampling variance does not go away** and is the real limit on
+  small effects. A deterministic judge makes a measured difference *real*,
+  not *significant*: config-vs-config claims still need the paired
+  permutation test (`replicate.py compare`) or the paired McNemar test
+  (`analyze_extractor_comparison.py`), and an adequate question count.
+- **Carry a control arm whose input is identical across the configs being
+  compared** — `rag` contexts are extractor-independent, so any disagreement
+  there is measurement noise and bounds what the other arms can claim.
+
+Findings tables in this file are point-in-time snapshots — where a
+`.agg.json` exists next to a results file, the aggregate is authoritative.
 
 Workflow (contexts are persisted at extract time, so replicates never
 re-extract):
@@ -312,6 +347,18 @@ re-extract):
 committed baseline (`evals/results/regression_gate.baseline.json`) —
 see the script header for scope and the `-Establish` flow.
 
+> **SUPERSEDED 2026-07-27.** Everything in this block was measured on the
+> nondeterministic turboq server. The baseline was re-established on the
+> reproducible q8_0 config at commit `1f0f13a`: **rag 0.6282, cortex 0.7051,
+> hybrid 0.7692, std 0.0000 on every arm, margin 0.03 (the floor) on every
+> arm** — and the gate default went 10 → 2 replicates (~32 min → ~8 min)
+> because replicates no longer estimate anything, they only canary drift.
+> Note the margin *narrowed* (cortex 0.0637 → 0.03) while getting cheaper:
+> the noise was buying nothing but insensitivity. The analysis below is kept
+> because its reasoning about margins, false-fail rates and stale baselines
+> is sound and reusable — but do not treat its numbers as current, and note
+> its central diagnosis (that the spread was inherent judge noise) was wrong.
+>
 > **Re-established 2026-07-26 at 10 replicates (commit `959ecad`), and the
 > gate's default `-Replicates` raised 3 → 10.** The previous baseline was
 > stale and the gate under-powered; both are fixed, and the history is kept

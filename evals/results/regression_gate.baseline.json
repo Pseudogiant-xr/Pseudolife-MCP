@@ -1,22 +1,22 @@
 {
-  "established_at": "2026-07-26T16:08:50",
-  "commit": "959ecad",
-  "n_replicates": 10,
+  "established_at": "2026-07-27T15:33:49",
+  "commit": "1f0f13a",
+  "n_replicates": 7,
   "arms": {
     "rag": {
-      "mean": 0.57565,
-      "std": 0.02297613496168966,
-      "margin": 0.046
+      "mean": 0.6282,
+      "std": 0.0,
+      "margin": 0.03
     },
     "cortex": {
-      "mean": 0.6692199999999999,
-      "std": 0.031853930509261934,
-      "margin": 0.0637
+      "mean": 0.7051,
+      "std": 0.0,
+      "margin": 0.03
     },
     "hybrid": {
-      "mean": 0.78076,
-      "std": 0.016516200800695324,
-      "margin": 0.033
+      "mean": 0.7692,
+      "std": 0.0,
+      "margin": 0.03
     }
   }
 }

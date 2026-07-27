@@ -13,7 +13,6 @@ $repo = Split-Path -Parent $PSScriptRoot
 $py = Join-Path $repo ".venv\Scripts\python.exe"
 $bench = Join-Path $repo "evals\longmemeval_bench.py"
 $datagen = Join-Path $repo "evals\distill_datagen.py"
-$qwenDir = "$env:USERPROFILE\ClaudeCode\llama.ccp"
 $candidateGguf = Join-Path $repo "evals\models\Qwen3.5-4B-UD-Q4_K_XL.gguf"
 $env:PYTHONPATH = $repo
 $env:TORCHDYNAMO_DISABLE = "1"
@@ -29,35 +28,10 @@ function Wait-Endpoint($url, $seconds) {
     return $false
 }
 
-function Stop-Qwen {
-    Get-Process llama-server -ErrorAction SilentlyContinue |
-        Stop-Process -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 3
-}
-
-function Start-Qwen {
-    if (Wait-Endpoint "http://127.0.0.1:1234/v1/models" 5) { return $true }
-    Log "starting Qwen 27B server (log: $qwenDir\qwen-server.log)"
-    # archive the previous server log before the '>' redirect below truncates it
-    # (crash evidence: the GGML abort message lives in the tail of the old log)
-    $qlog = Join-Path $qwenDir 'qwen-server.log'
-    if (Test-Path $qlog) {
-        $qarch = Join-Path $qwenDir ('crash-logs\qwen-server-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-prelaunch.log')
-        New-Item -ItemType Directory -Force (Split-Path $qarch) | Out-Null
-        try { Move-Item $qlog $qarch -Force -ErrorAction Stop } catch { try { Copy-Item $qlog $qarch -Force } catch {} }
-    }
-    # Eval-run server env (full history in overnight_lme_v2.ps1): cache-ram=0
-    # because the prompt cache pins ~0.5 GiB of KV cells per cached prompt
-    # with zero hits on this hybrid model; ctx-checkpoints=0 because the
-    # per-request checkpoint churn leaks ~285 KV cells/request and crashed
-    # the server (0xC0000409) at ~350 requests. Verified by a 600-request
-    # soak 2026-07-25. Env vars, not bat edits: interactive use keeps both.
-    $env:LLAMA_ARG_CACHE_RAM = "0"
-    $env:LLAMA_ARG_CTX_CHECKPOINTS = "0"
-    Start-Process -FilePath cmd.exe -WorkingDirectory $qwenDir -WindowStyle Minimized `
-        -ArgumentList '/c', "`"$qwenDir\run-server-turboq.bat`" > qwen-server.log 2>&1"
-    return (Wait-Endpoint "http://127.0.0.1:1234/v1/models" 300)
-}
+# Start-Qwen / Stop-Qwen + the eval env protocol (cache-ram,
+# ctx-checkpoints) live in one place. Default is the REPRODUCIBLE q8_0
+# config; pass -Fast for throughput work whose output is never judged.
+. (Join-Path $PSScriptRoot "qwen_server.ps1")
 
 function Stop-Candidate {
     docker rm -f pseudolife-mcp-extractor-bench 2>$null | Out-Null
@@ -77,7 +51,11 @@ function Start-Candidate {
     return (Wait-Endpoint "http://127.0.0.1:8081/health" 300)
 }
 
-function Invoke-Step($label, $server, $exe, $stepArgs) {
+# $stopper is explicit (matching bench_diffusiongemma.ps1) rather than inferred
+# by comparing $server against ${function:Start-Qwen}: that identity check
+# silently picked the wrong stopper as soon as a caller passed a wrapper such
+# as { Start-Qwen -Fast }, which step D now does.
+function Invoke-Step($label, $server, $stopper, $exe, $stepArgs) {
     Log "=== $label ==="
     for ($try = 1; $try -le $maxRetries; $try++) {
         $ok = & $server
@@ -86,7 +64,7 @@ function Invoke-Step($label, $server, $exe, $stepArgs) {
             Select-String -NotMatch "Loading weights|FutureWarning|get_sentence"
         if ($LASTEXITCODE -eq 0) { Log "$label : done"; return $true }
         Log "$label : exited $LASTEXITCODE (try $try/$maxRetries) — restarting server"
-        if ($server -eq ${function:Start-Qwen}) { Stop-Qwen } else { Stop-Candidate }
+        & $stopper
         Start-Sleep -Seconds 10
     }
     Log "$label : GAVE UP after $maxRetries tries"
@@ -101,14 +79,16 @@ powercfg /change standby-timeout-ac 0
 try {
     # ── A: last bake-off extract ─────────────────────────────────────────
     Stop-Qwen
-    Invoke-Step "A qwen3.5-4b extract" ${function:Start-Candidate} $py `
+    Invoke-Step "A qwen3.5-4b extract" ${function:Start-Candidate} `
+        ${function:Stop-Candidate} $py `
         @($bench, "--dataset", "oracle", "--extractor", "qwen3.5-4b",
           "--phase", "extract")
 
     # ── B: judge all four candidates + reports ───────────────────────────
     Stop-Candidate
     foreach ($cand in @("qwen3.5-4b", "ornith-9b", "lfm2-8b-a1b", "granite-h-tiny")) {
-        Invoke-Step "B answer $cand" ${function:Start-Qwen} $py `
+        Invoke-Step "B answer $cand" ${function:Start-Qwen} `
+            ${function:Stop-Qwen} $py `
             @($bench, "--dataset", "oracle", "--extractor", $cand,
               "--phase", "answer")
     }
@@ -119,11 +99,19 @@ try {
     }
 
     # ── C: resume the s-dataset diagnostic run ───────────────────────────
-    Invoke-Step "C s/qwen-27b diag" ${function:Start-Qwen} $py `
+    # No --phase, so this is 'full': it JUDGES as well as extracts, hence the
+    # reproducible server despite qwen-27b extraction being 2.4x slower there.
+    Invoke-Step "C s/qwen-27b diag" ${function:Start-Qwen} `
+        ${function:Stop-Qwen} $py `
         @($bench, "--dataset", "s", "--extractor", "qwen-27b", "--tag", "diag")
 
     # ── D: teacher-labeling datagen (resumable) ──────────────────────────
-    Invoke-Step "D distill datagen" ${function:Start-Qwen} $py `
+    # -Fast: the output is SFT training data, never a graded number, and this
+    # is the long-generation shape where MTP actually pays — 13.8s vs 33.5s
+    # per extraction-shaped call (measured 2026-07-27), i.e. ~2.4x over 2000
+    # rows. Nothing downstream of here is judged on this server.
+    Invoke-Step "D distill datagen" { Start-Qwen -Fast } `
+        ${function:Stop-Qwen} $py `
         @($datagen, "--limit-rows", "2000")
 } finally {
     if ($oldStandby) {

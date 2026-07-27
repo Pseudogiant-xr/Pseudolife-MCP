@@ -13,21 +13,28 @@
 # contexts if banks are absent — reduced scope, loud warning); 2 judge
 # N replicates; 3 verdict vs baseline.
 #
-#   evals\regression_gate.ps1                # 10 replicates, gate verdict
-#   evals\regression_gate.ps1 -Replicates 1  # quick smoke, NOT a verdict
+#   evals\regression_gate.ps1                # 2 replicates, gate verdict
+#   evals\regression_gate.ps1 -Replicates 1  # single pass, no drift canary
 #   evals\regression_gate.ps1 -Establish     # (re)write the baseline
 #
-# Replicates: the judge is an LLM and the arms are genuinely noisy (cortex
-# std ~0.033 on this slice), so the count decides whether the gate is
-# informative or just expensive noise. The old default of 3 put the margin
-# at ~1.2 standard errors of the difference — roughly a 1-in-5 false-fail
-# rate, which on 2026-07-26 failed twice running, once on clean master.
-# 10 costs ~3m05s per replicate (~32 min) and is the price of a verdict
-# you can act on. Establish the baseline at the same count: the comparison
-# is only like-for-like if both sides are measured the same way.
+# Replicates: 2, and NOT because the judge is noisy — because it must not be.
+# Replicates re-judge byte-identical persisted contexts, so on the
+# reproducible server (qwen_server.ps1 default: stock llama-server + q8_0 KV)
+# every replicate scores exactly the same. Measured 2026-07-27 at n=4:
+# std 0.0000 on all three arms. The second replicate is therefore a CANARY,
+# not an estimator — if the two ever disagree, replicate.py prints a
+# nondeterminism WARNING and the run was served by the TurboQuant fork,
+# whose TBQ4_0 KV flips ~7% of verdicts on identical input.
+#
+# History: the default was 10 (~32 min) from 2026-07-26, sized to average
+# away a cortex std of ~0.033. That spread was the server, not the judge;
+# with it gone the gate costs ~8 min AND is more sensitive, because the
+# baseline margin (max(0.03, 2*std)) collapses to the 0.03 floor instead of
+# the 0.0637 the noise used to buy. Establish the baseline the same way you
+# check it — the comparison is only like-for-like if both sides are.
 #
 # Exit codes: 0 pass, 1 regression, 2 infrastructure (endpoint/rebuild).
-param([int]$Replicates = 10, [switch]$Establish)
+param([int]$Replicates = 2, [switch]$Establish)
 $ErrorActionPreference = "Continue"
 $repo = Split-Path -Parent $PSScriptRoot
 $py = Join-Path $repo ".venv\Scripts\python.exe"
@@ -35,48 +42,13 @@ $replicatePy = Join-Path $repo "evals\replicate.py"
 $rebuild = Join-Path $repo "evals\rebuild_contexts.py"
 $results = Join-Path $repo "evals\results"
 $banks = Join-Path $results "banks\oracle-e4b-ft-arm1"
-$qwenDir = "$env:USERPROFILE\ClaudeCode\llama.ccp"
 $env:PYTHONPATH = $repo
 
 function Log($msg) { Write-Host "$(Get-Date -Format 'HH:mm:ss') $msg" }
 
-function Wait-Endpoint($url, $seconds) {
-    for ($i = 0; $i -lt ($seconds / 5); $i++) {
-        try { Invoke-RestMethod -Uri $url -TimeoutSec 3 | Out-Null; return $true }
-        catch { Start-Sleep -Seconds 5 }
-    }
-    return $false
-}
-
-function Stop-Qwen {
-    Get-Process llama-server -ErrorAction SilentlyContinue |
-        Stop-Process -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 3
-}
-
-function Start-Qwen {
-    if (Wait-Endpoint "http://127.0.0.1:1234/v1/models" 5) { return $true }
-    Log "starting Qwen 27B server"
-    # archive the previous server log before the '>' redirect below truncates it
-    # (crash evidence: the GGML abort message lives in the tail of the old log)
-    $qlog = Join-Path $qwenDir 'qwen-server.log'
-    if (Test-Path $qlog) {
-        $qarch = Join-Path $qwenDir ('crash-logs\qwen-server-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-prelaunch.log')
-        New-Item -ItemType Directory -Force (Split-Path $qarch) | Out-Null
-        try { Move-Item $qlog $qarch -Force -ErrorAction Stop } catch { try { Copy-Item $qlog $qarch -Force } catch {} }
-    }
-    # Eval-run server env (full history in overnight_lme_v2.ps1): cache-ram=0
-    # because the prompt cache pins ~0.5 GiB of KV cells per cached prompt
-    # with zero hits on this hybrid model; ctx-checkpoints=0 because the
-    # per-request checkpoint churn leaks ~285 KV cells/request and crashed
-    # the server (0xC0000409) at ~350 requests. Verified by a 600-request
-    # soak 2026-07-25. Env vars, not bat edits: interactive use keeps both.
-    $env:LLAMA_ARG_CACHE_RAM = "0"
-    $env:LLAMA_ARG_CTX_CHECKPOINTS = "0"
-    Start-Process -FilePath cmd.exe -WorkingDirectory $qwenDir -WindowStyle Minimized `
-        -ArgumentList '/c', "`"$qwenDir\run-server-turboq.bat`" > qwen-server.log 2>&1"
-    return (Wait-Endpoint "http://127.0.0.1:1234/v1/models" 300)
-}
+# Start-Qwen / Stop-Qwen, including the eval env protocol. Default (no -Fast)
+# is the reproducible q8_0 config, which is mandatory here: this gate judges.
+. (Join-Path $PSScriptRoot "qwen_server.ps1")
 
 # -- Stage 0: cleanup ------------------------------------------------------
 Log "stage 0: clearing arm1-gate namespace"

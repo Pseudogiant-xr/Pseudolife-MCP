@@ -1,0 +1,20 @@
+{
+  "dataset": "oracle",
+  "extractor": "fable-5",
+  "n": 78,
+  "arms": {
+    "rag": {
+      "accuracy": 0.59,
+      "context_tokens": 1637.8
+    },
+    "cortex": {
+      "accuracy": 0.885,
+      "context_tokens": 228.9
+    },
+    "hybrid": {
+      "accuracy": 0.897,
+      "context_tokens": 1148.2
+    }
+  },
+  "superseded_total": 295
+}

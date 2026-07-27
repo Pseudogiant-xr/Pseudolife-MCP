@@ -64,6 +64,27 @@ entries, a cached view of the graph, a memoized score):
   extractor smoke nearly ran against the v1 prompt because the v1 baseline
   existed and a 07-11 memory said "v1 deployed", while
   `ops/install-shim-autostart.ps1` had defaulted to v2 since 07-21.
+- **Never hand-roll the GPU bench server launch — dot-source
+  `evals/qwen_server.ps1`** and call `Start-Qwen` (or `Start-Qwen -Fast`).
+  It owns the eval env protocol and the config choice, which is not a
+  preference: `run-server-turboq.bat`'s fused TBQ4_0 flash-attention KV is
+  not bit-reproducible (identical inputs flip ~7% of verdicts, ±0.05 accuracy
+  per arm; MTP off and prompt cache off both change nothing —
+  `evals/results/judge-determinism-check.json`), while the stock build with
+  `--cache-type-k/v q8_0` reproduces exactly. Default is reproducible; `-Fast`
+  is only for output that is never judged — it buys 2.4x on long-generation
+  work (13.8s vs 33.5s/call) and nothing at all on answer/judge calls
+  (0.5s/call either way). Both configs bind :1234, so "something answered the
+  probe" is not proof the right one is running; the helper checks and
+  replaces. A judged run whose replicates disagree has drifted onto the fast
+  server — `replicate.py` warns on exactly that.
+- **Every model-vs-model comparison carries a control arm whose input is
+  identical across the runs** — the LME `rag` arm is built from raw turns and
+  never touches the extractor, so any disagreement there is pure measurement
+  noise and bounds what the other arms can claim. Report it next to the
+  effect: a delta smaller than the control's spread is not a finding.
+  `evals/judge_determinism_check.py` measures the floor directly;
+  `evals/analyze_extractor_comparison.py` reports it beside each paired test.
 
 ## Publishing a benchmark number
 
