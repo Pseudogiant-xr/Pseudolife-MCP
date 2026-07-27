@@ -64,6 +64,22 @@ entries, a cached view of the graph, a memoized score):
   extractor smoke nearly ran against the v1 prompt because the v1 baseline
   existed and a 07-11 memory said "v1 deployed", while
   `ops/install-shim-autostart.ps1` had defaulted to v2 since 07-21.
+- **Judge/answerer runs that decide anything use the REPRODUCIBLE server
+  config**, not the fast one. `run-server-turboq.bat`'s fused TBQ4_0
+  flash-attention KV is not bit-reproducible: identical inputs give ~7% of
+  verdicts flipped and up to ±0.05 accuracy swing per arm on a re-run
+  (measured both ways 2026-07-27 — MTP off changes nothing, prompt cache off
+  changes nothing; `evals/results/judge-determinism-check.json`). Stock
+  `run-server.bat` with `--cache-type-k/v q8_0` reproduces exactly (rag
+  control: 7 cross-run disagreements → 0). Use turboq for throughput work
+  (extraction sweeps), the q8_0 stock build for anything judged.
+- **Every model-vs-model comparison carries a control arm whose input is
+  identical across the runs** — the LME `rag` arm is built from raw turns and
+  never touches the extractor, so any disagreement there is pure measurement
+  noise and bounds what the other arms can claim. Report it next to the
+  effect: a delta smaller than the control's spread is not a finding.
+  `evals/judge_determinism_check.py` measures the floor directly;
+  `evals/analyze_extractor_comparison.py` reports it beside each paired test.
 
 ## Publishing a benchmark number
 

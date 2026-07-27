@@ -1,0 +1,78 @@
+{
+  "extractor": "sonnet-5",
+  "configurations": {
+    "mtp-on": {
+      "n_questions": 78,
+      "inputs_identical": true,
+      "arms": {
+        "cortex": {
+          "accuracy_pass_a": 0.782,
+          "accuracy_pass_b": 0.769,
+          "accuracy_swing": 0.013,
+          "verdict_flips": 5,
+          "response_diffs": 17
+        },
+        "hybrid": {
+          "accuracy_pass_a": 0.859,
+          "accuracy_pass_b": 0.808,
+          "accuracy_swing": 0.051,
+          "verdict_flips": 6,
+          "response_diffs": 19
+        },
+        "rag": {
+          "accuracy_pass_a": 0.577,
+          "accuracy_pass_b": 0.564,
+          "accuracy_swing": 0.013,
+          "verdict_flips": 5,
+          "response_diffs": 23
+        }
+      },
+      "verdict_flip_rate": 0.0684,
+      "response_diff_rate": 0.2521,
+      "max_accuracy_swing": 0.051,
+      "tags": [
+        "detcheck-mtp-a",
+        "detcheck-mtp-b"
+      ]
+    },
+    "mtp-off": {
+      "n_questions": 78,
+      "inputs_identical": true,
+      "arms": {
+        "cortex": {
+          "accuracy_pass_a": 0.769,
+          "accuracy_pass_b": 0.808,
+          "accuracy_swing": 0.038,
+          "verdict_flips": 7,
+          "response_diffs": 13
+        },
+        "hybrid": {
+          "accuracy_pass_a": 0.808,
+          "accuracy_pass_b": 0.808,
+          "accuracy_swing": 0.0,
+          "verdict_flips": 6,
+          "response_diffs": 19
+        },
+        "rag": {
+          "accuracy_pass_a": 0.577,
+          "accuracy_pass_b": 0.59,
+          "accuracy_swing": 0.013,
+          "verdict_flips": 5,
+          "response_diffs": 16
+        }
+      },
+      "verdict_flip_rate": 0.0769,
+      "response_diff_rate": 0.2051,
+      "max_accuracy_swing": 0.038,
+      "tags": [
+        "detcheck-nomtp-a",
+        "detcheck-nomtp-b"
+      ]
+    }
+  },
+  "verdict": {
+    "reproducible": false,
+    "worst_accuracy_swing": 0.051,
+    "interpretation": "No benchmark delta smaller than worst_accuracy_swing is interpretable from a single pass; use paired replicates."
+  }
+}

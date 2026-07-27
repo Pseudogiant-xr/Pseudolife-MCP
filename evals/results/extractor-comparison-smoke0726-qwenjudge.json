@@ -1,0 +1,81 @@
+{
+  "tag": "smoke0726-qwenjudge",
+  "reference": "sonnet-5",
+  "n": 78,
+  "noise_floor_rag_control": {
+    "identical_rag_context": "78/78",
+    "any_run_disagreement": 7,
+    "pairwise_disagreement": {
+      "sonnet-5 vs opus-5": 4,
+      "sonnet-5 vs fable-5": 4,
+      "opus-5 vs fable-5": 6
+    },
+    "worst_pairwise": 6
+  },
+  "comparisons": {
+    "opus-5": {
+      "cortex": {
+        "accuracy": 0.859,
+        "reference_accuracy": 0.808,
+        "delta": 0.051,
+        "wins": 9,
+        "losses": 5,
+        "net": 4,
+        "p_mcnemar_exact": 0.424,
+        "exceeds_noise_floor": false
+      },
+      "hybrid": {
+        "accuracy": 0.897,
+        "reference_accuracy": 0.859,
+        "delta": 0.038,
+        "wins": 5,
+        "losses": 2,
+        "net": 3,
+        "p_mcnemar_exact": 0.4531,
+        "exceeds_noise_floor": false
+      },
+      "rag": {
+        "accuracy": 0.564,
+        "reference_accuracy": 0.564,
+        "delta": 0.0,
+        "wins": 2,
+        "losses": 2,
+        "net": 0,
+        "p_mcnemar_exact": 1.0,
+        "exceeds_noise_floor": false
+      }
+    },
+    "fable-5": {
+      "cortex": {
+        "accuracy": 0.885,
+        "reference_accuracy": 0.808,
+        "delta": 0.077,
+        "wins": 9,
+        "losses": 3,
+        "net": 6,
+        "p_mcnemar_exact": 0.146,
+        "exceeds_noise_floor": false
+      },
+      "hybrid": {
+        "accuracy": 0.897,
+        "reference_accuracy": 0.859,
+        "delta": 0.038,
+        "wins": 7,
+        "losses": 4,
+        "net": 3,
+        "p_mcnemar_exact": 0.5488,
+        "exceeds_noise_floor": false
+      },
+      "rag": {
+        "accuracy": 0.59,
+        "reference_accuracy": 0.564,
+        "delta": 0.026,
+        "wins": 3,
+        "losses": 1,
+        "net": 2,
+        "p_mcnemar_exact": 0.625,
+        "exceeds_noise_floor": false
+      }
+    }
+  }
+}
