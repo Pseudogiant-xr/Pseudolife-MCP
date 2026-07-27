@@ -18,8 +18,90 @@ correctly-dimensioned zero vectors for every call).
 """
 from __future__ import annotations
 
+import ast
+from pathlib import Path
+
 import pytest
 import torch
+
+_SERVICE_PY = Path(__file__).resolve().parent.parent / "pseudolife_memory" / "service.py"
+
+# Every (enclosing function, embedder method) pair behind a ``self._embedder.<method>(...)``
+# call in pseudolife_memory/service.py, per the call-site rule in this file's module
+# docstring. Built from the AST walk below (see task-3-report.md for the raw dump) and
+# verified against the spec review's counts: 23 raw call sites (9 encode_query, 14
+# encode_single/encode) collapse to 21 unique pairs here because cortex_write and
+# _propose_dream_alias_candidates each call the same method twice in the same function.
+#
+# A future call site -- e.g. a new graph_search(query) calling encode_single -- is a
+# pair not in this set, so test_embedder_call_site_inventory_pinned fails RED naming it,
+# until its author classifies it under the query/document rule and adds a row here.
+EMBEDDER_CALL_SITE_INVENTORY = frozenset({
+    ("_dream_hints", "encode_single"),
+    ("_promote_slots", "encode_single"),
+    ("_propose_dream_alias_candidates", "encode"),
+    ("_resolve_dream_slot", "encode_single"),
+    ("consolidate", "encode_query"),
+    ("consolidate", "encode_single"),
+    ("consolidation_candidates", "encode_query"),
+    ("cortex_candidates", "encode_single"),
+    ("cortex_dedup", "encode_single"),
+    ("cortex_search", "encode_query"),
+    ("cortex_write", "encode_single"),
+    ("lesson_search", "encode_query"),
+    ("lesson_write", "encode_single"),
+    ("search", "encode_query"),
+    ("search_documents", "encode_query"),
+    ("store", "encode_single"),
+    ("supersede", "encode_query"),
+    ("supersede", "encode_single"),
+    ("trace", "encode_query"),
+    ("world_search", "encode_query"),
+    ("world_write", "encode_single"),
+})
+
+
+def _collect_embedder_call_sites(source_path: Path) -> set[tuple[str, str]]:
+    """Parse ``source_path`` and collect every ``self._embedder.<method>(...)`` call
+    site as ``(enclosing function name, method name)``. Direct ``def``/``async def``
+    nesting only; a call outside any function reports ``"<module>"``."""
+    tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
+    sites: set[tuple[str, str]] = set()
+    func_stack: list[str] = []
+
+    class _Visitor(ast.NodeVisitor):
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+            func_stack.append(node.name)
+            self.generic_visit(node)
+            func_stack.pop()
+
+        visit_AsyncFunctionDef = visit_FunctionDef
+
+        def visit_Call(self, node: ast.Call) -> None:
+            f = node.func
+            if (
+                isinstance(f, ast.Attribute)
+                and isinstance(f.value, ast.Attribute)
+                and isinstance(f.value.value, ast.Name)
+                and f.value.value.id == "self"
+                and f.value.attr == "_embedder"
+            ):
+                sites.add((func_stack[-1] if func_stack else "<module>", f.attr))
+            self.generic_visit(node)
+
+    _Visitor().visit(tree)
+    return sites
+
+
+def test_embedder_call_site_inventory_pinned():
+    """AST guard scoped to pseudolife_memory/service.py ONLY -- it does not walk
+    reference_bank.py:124 or storage/migrate.py:73; extend ``_collect_embedder_call_sites``
+    callers to those files if this test should also cover them. A new
+    ``self._embedder.<method>()`` call in service.py is a (function, method) pair not
+    already in EMBEDDER_CALL_SITE_INVENTORY, so this fails RED naming the unclassified
+    site until its author adds a row there under the module docstring's query/document
+    rule -- the same forcing function the original 23-site enumeration applied."""
+    assert _collect_embedder_call_sites(_SERVICE_PY) == EMBEDDER_CALL_SITE_INVENTORY
 
 
 class RecordingEmbedder:
@@ -230,6 +312,22 @@ def test_lesson_write_claim_never_uses_encode_query(recording_service):
     svc.lesson_write("deploy", "rollback", "always tag before deploying")
 
     assert not embedder.any_query_calls()
+
+
+def test_cortex_candidates_never_uses_encode_query(recording_service):
+    """cortex_candidates() ranks nearby already-stored slots for an empty-slot
+    lookup -- a stored-to-stored comparison, not a user-facing retrieval probe,
+    so it stays document-side. The second of the two genuine judgment calls the
+    spec review flagged (the other is covered by
+    test_dream_and_dedup_paths_never_use_encode_query below)."""
+    svc, embedder = recording_service
+    svc.cortex_write("Widget", "color", "blue")
+    embedder.calls.clear()
+
+    svc.cortex_candidates("Widget", "color")
+
+    assert not embedder.any_query_calls()
+    assert "encode_single" in embedder.methods_for("Widget color")
 
 
 def test_dream_and_dedup_paths_never_use_encode_query(recording_service):

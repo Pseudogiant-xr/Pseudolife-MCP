@@ -34,6 +34,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   gate, recall `min_score` floors) are left unchanged — those absolute
   cosine distributions shift under a new backbone, but recalibrating
   them is out of scope for this change and is deferred to live data.
+- **Retrieval floors (the `min_score` 0.2/0.25 class) now gate a
+  prefixed-query-to-document cosine, not a doc-to-doc one** — now that
+  query-side call sites use `encode_query`'s instruction prefix
+  (Task 3), those thresholds' semantics shifted, not just their scale;
+  left unrecalibrated pending live data, per the bullet above.
+  `supersede()`'s embedding-fallback paraphrase probe is one of the
+  now-asymmetric comparisons, so it reads as somewhat more conservative
+  at the shipped default.
 
 ### Fixed (2026-07-28 — v25 review fix wave)
 - **The daemon image now bakes `Qwen/Qwen3-Embedding-0.6B`** — it
