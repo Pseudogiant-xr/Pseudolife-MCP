@@ -115,3 +115,39 @@ def test_precondition_fails_clearly_on_a_pre_v24_bank(pg_conn):
 
 def test_precondition_passes_when_entity_kinds_exists(pg_conn):
     A._require_entity_kinds_table(pg_conn)  # must not raise
+
+
+def test_user_set_kind_wins_over_a_disagreeing_artifact():
+    """A human correction must survive a model re-run. Fable mislabelled
+    miras-bands `system` consistently in BOTH gold replicates, so the next
+    re-apply WILL disagree with the correction -- and the resulting
+    evergreen->volatile flip would not even show in the downgrade section,
+    because it looks like the normal direction."""
+    stored = {"miras-bands": ("concept", "user"), "daemon": ("system", "model")}
+    artifact = {"miras-bands": "system", "daemon": "system"}
+    labels, user_locked, conflicts = A.merge_labels(stored, artifact)
+    assert labels["miras-bands"] == "concept"          # user kind kept
+    assert labels["daemon"] == "system"                # model rows still update
+    assert user_locked == {"miras-bands"}
+    assert conflicts == {"miras-bands": ("concept", "system")}
+
+
+def test_user_row_is_locked_even_when_the_artifact_agrees():
+    """Agreement must not relax the lock: upserting an agreeing label would
+    churn origin user->model, and the NEXT disagreeing run would then be
+    free to overwrite what is still, in truth, a human decision."""
+    stored = {"miras-bands": ("concept", "user")}
+    labels, user_locked, conflicts = A.merge_labels(
+        stored, {"miras-bands": "concept"})
+    assert labels["miras-bands"] == "concept"
+    assert user_locked == {"miras-bands"}
+    assert conflicts == {}
+
+
+def test_merge_labels_still_overlays_and_never_drops():
+    """The overlay semantics from the re-run fix are unchanged: stored rows
+    survive omission, artifact rows win for non-user entities."""
+    stored = {"daemon": ("system", "model"), "old-one": ("artifact", "model")}
+    labels, user_locked, conflicts = A.merge_labels(stored, {"daemon": "concept"})
+    assert labels == {"daemon": "concept", "old-one": "artifact"}
+    assert user_locked == set() and conflicts == {}
