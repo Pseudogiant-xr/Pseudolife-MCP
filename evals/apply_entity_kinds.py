@@ -55,14 +55,44 @@ def _resolve(kind: str | None, attribute_norm: str) -> str:
 def plan_updates(labels: dict[str, str], rows: list[tuple[str, str]],
                  current: dict[tuple[str, str], str] | None = None
                  ) -> list[tuple[str, str, str]]:
-    """(entity, attribute, new_class) for every pair whose class changes."""
+    """(entity, attribute, new_class) for every pair whose class changes.
+
+    Stored data cannot distinguish "explicitly set" from "defaulted", so a
+    blind recompute would clobber deliberate markings. Two guards:
+
+    - An entity absent from `labels` (unclassified -- e.g. a batch failure
+      emits no label rather than guessing) is never treated as evidence for
+      evergreen: a stored non-evergreen class survives untouched.
+    - A stored `slow` class is never touched at all, labelled or not --
+      resolve_class can only ever produce evergreen or volatile, so a `slow`
+      row is provably a deliberate human marking.
+    """
     cur = current or {}
     out = []
     for e, a in rows:
+        stored = cur.get((e, a), "evergreen")
+        if stored == "slow":
+            continue
+        if labels.get(e) is None and stored != "evergreen":
+            continue
         want = _resolve(labels.get(e), a)
-        if want != cur.get((e, a), "evergreen"):
+        if want != stored:
             out.append((e, a, want))
     return out
+
+
+def _require_entity_kinds_table(conn) -> None:
+    """Fail clearly, before any query touches entity_kinds, if the bank
+    predates schema v24 -- otherwise the overlay SELECT below dies with a
+    raw psycopg.errors.UndefinedTable, and it runs even in a dry run."""
+    exists = conn.execute(
+        "SELECT to_regclass('public.entity_kinds')").fetchone()[0]
+    if exists is None:
+        raise SystemExit(
+            "entity_kinds table not found -- this bank has not been "
+            "deployed with schema v24 yet (entity_kinds ships in v24; "
+            "the daemon's ensure_schema creates it on start). Deploy via "
+            "ops/update.ps1, then re-run this script.")
 
 
 def main() -> None:
@@ -77,6 +107,7 @@ def main() -> None:
     labels = art["labels"]
 
     with psycopg.connect(a.dsn) as conn:
+        _require_entity_kinds_table(conn)
         rows = [(r[0], r[1]) for r in conn.execute(
             "SELECT entity_norm, attribute_norm FROM facts "
             "WHERE status='current'").fetchall()]
@@ -97,6 +128,19 @@ def main() -> None:
         print(f"kinds={len(labels)} fact_updates={len(updates)}")
         for e, at, c in updates[:15]:
             print(f"  {e} / {at} -> {c}")
+        if len(updates) > 15:
+            print(f"  ... {len(updates) - 15} more (see downgrades section "
+                  f"below for anything reverting to evergreen)")
+        # A downgrade (non-evergreen -> evergreen) is worth a human's eyes
+        # even though plan_updates now refuses to produce one from a merely
+        # unclassified entity -- it can still happen for a genuine
+        # reclassification, and it must never hide below the [:15] preview.
+        downgrades = [(e, at, c) for e, at, c in updates
+                      if c == "evergreen" and current.get((e, at), "evergreen") != "evergreen"]
+        if downgrades:
+            print(f"!! downgrades (review these): {len(downgrades)}")
+            for e, at, c in downgrades:
+                print(f"  {e} / {at}: {current.get((e, at))} -> {c}")
         if not a.apply:
             print("dry run -- nothing written. Re-run with --apply.")
             return

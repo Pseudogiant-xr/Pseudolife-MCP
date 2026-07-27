@@ -6,8 +6,9 @@ Offline and one-time. Writes a JSON artifact and NEVER touches the database;
 Scoping is the dominant token lever, not batch size. An entity only matters if
 it carries at least one transient-looking attribute -- otherwise every one of
 its facts resolves evergreen whatever its kind. On the live bank that is
-2415 facts -> 1005 entities -> 264 decision-relevant -> 233 needing judgement,
-a 10.4x reduction before a single model call.
+2423 facts -> 265 scoped -> 33 rule-confident -> 232 needing judgement,
+a 10.4x reduction before a single model call (measured 2026-07-27; these
+counts drift as the bank grows -- reproduce with `--scope-only`).
 
 Batch 50. Larger batches degrade through lost-in-the-middle attention, label
 streaking (the model pattern-matches its own recent outputs), correlated
@@ -151,21 +152,38 @@ def main() -> None:
     p.add_argument("--model", default="claude-fable-5")
     p.add_argument("--batch-size", type=int, default=50)
     p.add_argument("--timeout", type=float, default=600.0)
-    p.add_argument("--out", type=Path, required=True)
+    p.add_argument("--out", type=Path, default=None)
     p.add_argument("--gold", type=Path, default=None,
                    help="Score against a gold set instead of classifying the bank.")
+    p.add_argument("--scope-only", action="store_true",
+                   help="Print facts/scoped/rule/model counts for the live "
+                        "bank and exit -- no model call, no shim needed. "
+                        "Reproduces the backfill's scoping numbers on demand.")
     a = p.parse_args()
+
+    if a.scope_only and a.gold:
+        p.error("--scope-only classifies the live bank; it is incompatible with --gold")
+    if not a.scope_only and a.out is None:
+        p.error("--out is required unless --scope-only is given")
 
     if a.gold:
         gold = json.loads(a.gold.read_text(encoding="utf-8"))
         names = [g["entity_norm"] for g in gold]
         truth = {g["entity_norm"]: g["kind"] for g in gold}
+        fact_count = None
     else:
         rows = _fetch_rows(a.dsn)
         names, truth = scope_entities(rows), {}
+        fact_count = len(rows)
 
     ruled = {n: k for n in names if (k := rule_kind(n))}
     ask = [n for n in names if n not in ruled]
+
+    if a.scope_only:
+        print(f"facts={fact_count} scoped={len(names)} rule={len(ruled)} "
+              f"model={len(ask)}")
+        return
+
     print(f"scoped={len(names)} rule={len(ruled)} model={len(ask)} "
           f"batch={a.batch_size}")
 

@@ -140,14 +140,18 @@ bank:
 
 | Stage | Items | Note |
 |---|---|---|
-| Naive: classify every fact | 2415 | |
-| Classify entities instead | 1005 | 2.4x reduction |
-| Only decision-relevant entities | 264 | 26.3% carry a transient attribute |
-| Minus rule-confident artifacts | **233** | dates / `pr-N` / `commit-*` / `release` |
+| Naive: classify every fact | 2423 | |
+| Only decision-relevant entities (scoped) | 265 | carry a transient attribute |
+| Rule-confident artifacts | 33 | dates / `pr-N` / `commit-*` / `release` |
+| Minus rule-confident → needs model | **232** | |
 
 **10.4x reduction before a single model call.** This dominates batch-size
 tuning: scoping saves 10x, batch size 20→100 saves ~4x on a base that is now
 tiny. Total job cost lands around $1–3 either way.
+
+Measured 2026-07-27 on the live bank; these counts drift as the bank grows.
+Reproduce on demand with `python evals/classify_entity_kinds.py --scope-only`
+(prints `facts=… scoped=… rule=… model=…`, no model call, no shim needed).
 
 ### Batch size
 
@@ -177,10 +181,11 @@ WRITE  fact(entity, attribute, value)
 READ   effective_confidence / stale  ← unchanged, shipped in v23
 
 BACKFILL (one-time, offline)
-   1005 entities → scope to 233 → batch 50 → Fable shim → artifact JSON
+   2423 facts → scope to 265 → 232 need judgement → batch 50 → Fable shim
+        → artifact JSON
         → gold-set gate (~40 hand-labelled, weighted to the ambiguous 20%)
         → apply → entity_kinds
-        → recompute freshness_class for 2415 facts via the SAME resolve_class
+        → recompute freshness_class for 2423 facts via the SAME resolve_class
 ```
 
 The backfill recomputes through the same `resolve_class` the write path uses —

@@ -2,13 +2,16 @@
 
 Scoping is the dominant token lever: an entity only matters if it carries a
 transient-looking attribute, because otherwise every one of its facts resolves
-evergreen whatever its kind. Measured on the live bank that is 2415 facts ->
-1005 entities -> 264 decision-relevant -> 233 needing model judgement.
+evergreen whatever its kind. Measured on the live bank that is 2423 facts ->
+265 scoped -> 33 rule-confident -> 232 needing model judgement (2026-07-27;
+reproduce with `--scope-only`).
 """
 from __future__ import annotations
 
 import json
 from pathlib import Path
+
+import pytest
 
 from evals import classify_entity_kinds as C
 
@@ -80,6 +83,44 @@ def test_harness_loads_the_one_canonical_policy_without_torch():
                 is (freshness.resolve_class("system", attr) == "volatile"))
     # Loaded standalone: the module object is NOT the package-imported one.
     assert C._freshness is not sys.modules.get("pseudolife_memory.memory.freshness")
+
+
+def test_scope_only_prints_counts_and_never_calls_the_model(monkeypatch, capsys):
+    """--scope-only must reproduce the backfill's scoping numbers on demand
+    (CLAUDE.md's rule that a published number must be backed) without a
+    model call or a shim, so it can run anywhere, anytime."""
+    rows = [("daemon", "deploy-status"), ("readme", "purpose"),
+            ("0-9-0-release", "schema-version")]
+    monkeypatch.setattr(C, "_fetch_rows", lambda dsn: rows)
+
+    def _no_model(*_a, **_k):
+        raise AssertionError("--scope-only must not call the model")
+    monkeypatch.setattr(C, "_ask", _no_model)
+    monkeypatch.setattr(
+        "sys.argv", ["classify_entity_kinds.py", "--scope-only"])
+
+    C.main()
+
+    out = capsys.readouterr().out
+    assert "facts=3" in out
+    assert "scoped=2" in out   # daemon + 0-9-0-release carry a transient attr
+    assert "rule=1" in out     # 0-9-0-release is rule-confident
+    assert "model=1" in out    # daemon still needs the model
+
+
+def test_scope_only_rejects_gold():
+    """--scope-only is about the live bank's scoping numbers; --gold scores
+    a fixed set instead, so the combination doesn't mean anything."""
+    import sys
+
+    argv = sys.argv
+    sys.argv = ["classify_entity_kinds.py", "--scope-only",
+                "--gold", "tests/fixtures/entity_kinds_gold.json"]
+    try:
+        with pytest.raises(SystemExit):
+            C.main()
+    finally:
+        sys.argv = argv
 
 
 def test_gold_set_is_well_formed_and_covers_the_ambiguous_class():

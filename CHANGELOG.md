@@ -20,9 +20,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `freshness_class` now defaults to the sentinel `"auto"`; explicit values are
   still honoured, and an empty kind map reproduces v23 behaviour exactly.
 - **Scoping, not batch size, is the token lever.** An entity only matters if it
-  carries a transient attribute: 2,415 facts → 1,005 entities → 264
-  decision-relevant → 233 needing model judgement, a 10.4× reduction before a
-  single call. Backfill runs at batch 50 over five calls. The backfill has
+  carries a transient attribute: 2,423 fact pairs → 265 scoped → 33
+  rule-confident → 232 needing model judgement, a 10.4× reduction before a
+  single call (measured 2026-07-27 on the live bank; these counts drift as
+  the bank grows — reproduce with `python evals/classify_entity_kinds.py
+  --scope-only`). Backfill runs at batch 50 over five calls. The backfill has
   **not** been run against the live bank — this ships the machinery only; an
   empty `entity_kinds` table resolves every fact to `evergreen`, so behaviour
   is unchanged until it is.

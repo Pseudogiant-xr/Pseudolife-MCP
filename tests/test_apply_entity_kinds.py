@@ -4,6 +4,7 @@ from __future__ import annotations
 import pytest
 
 from evals import apply_entity_kinds as A
+from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
 
 
 @pytest.mark.parametrize("attribute", [
@@ -65,6 +66,52 @@ def test_merged_labels_do_not_revert_an_entity_missing_from_a_rerun():
         ("daemon", "schema-version"): "volatile"}) == [
         ("console", "deploy-status", "volatile")]
 
-    # Without the merge, daemon would be reverted -- the bug this pins.
-    assert ("daemon", "schema-version", "evergreen") in A.plan_updates(
+    # Even without the merge, plan_updates' own unlabelled-entity guard (see
+    # test_unlabelled_entity_does_not_revert_a_deliberate_volatile) now
+    # refuses to revert daemon directly -- the merge remains needed to
+    # *propagate* a previously-known kind onto facts plan_updates hasn't
+    # recomputed yet, not to prevent this particular revert.
+    assert ("daemon", "schema-version", "evergreen") not in A.plan_updates(
         artifact, rows, current={("daemon", "schema-version"): "volatile"})
+
+
+def test_unlabelled_entity_does_not_revert_a_deliberate_volatile():
+    """A batch failure yields no label. "Unclassified" is not evidence for
+    evergreen -- reverting a deliberate marking changes data on a failure
+    path, which is exactly what this design forbids."""
+    rows = [("pseudolife-mcp", "deployed-schema-version")]
+    assert A.plan_updates({}, rows, current={
+        ("pseudolife-mcp", "deployed-schema-version"): "volatile"}) == []
+
+
+def test_stored_slow_is_never_touched():
+    """resolve_class can only emit evergreen or volatile, so a stored `slow`
+    is provably deliberate and must survive every apply."""
+    rows = [("proj", "release-cadence")]
+    assert A.plan_updates({"proj": "system"}, rows, current={
+        ("proj", "release-cadence"): "slow"}) == []
+    assert A.plan_updates({}, rows, current={
+        ("proj", "release-cadence"): "slow"}) == []
+
+
+def test_evergreen_to_volatile_flip_still_happens():
+    """The guard must not neuter the backfill's actual purpose."""
+    rows = [("daemon", "deploy-status")]
+    assert A.plan_updates({"daemon": "system"}, rows, current={
+        ("daemon", "deploy-status"): "evergreen"}) == [
+        ("daemon", "deploy-status", "volatile")]
+
+
+def test_precondition_fails_clearly_on_a_pre_v24_bank(pg_conn):
+    """entity_kinds ships in schema v24. A bank that hasn't been migrated
+    yet must get a named cause and remedy, not a raw UndefinedTable
+    traceback -- and this check must run before the dry-run SELECT that
+    would otherwise hit the missing table first."""
+    pg_conn.execute("DROP TABLE entity_kinds")
+    pg_conn.commit()
+    with pytest.raises(SystemExit, match="schema v24"):
+        A._require_entity_kinds_table(pg_conn)
+
+
+def test_precondition_passes_when_entity_kinds_exists(pg_conn):
+    A._require_entity_kinds_table(pg_conn)  # must not raise

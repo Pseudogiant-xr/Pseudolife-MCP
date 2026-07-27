@@ -4,7 +4,7 @@
 
 **Goal:** Infer a cortex fact's `freshness_class` from the *kind* of entity it is about, so stale transient facts age out while durable ones never decay.
 
-**Architecture:** A new `entity_kinds` table (schema v24) stores one kind per `entity_norm` — `artifact` (frozen in time), `system` (live), `concept` (abstract). A pure `resolve_class(kind, attribute_norm)` maps that plus the attribute name to a freshness class; only `system` entities can ever yield `volatile`. The write path looks the kind up and applies the rule — no model call. A one-time offline backfill classifies the 233 decision-relevant entities via the Fable shim, gated on a hand-labelled gold set.
+**Architecture:** A new `entity_kinds` table (schema v24) stores one kind per `entity_norm` — `artifact` (frozen in time), `system` (live), `concept` (abstract). A pure `resolve_class(kind, attribute_norm)` maps that plus the attribute name to a freshness class; only `system` entities can ever yield `volatile`. The write path looks the kind up and applies the rule — no model call. A one-time offline backfill classifies the 232 entities needing model judgement via the Fable shim, gated on a hand-labelled gold set.
 
 **Tech Stack:** Python 3.11, psycopg 3, Postgres 16 (+pgvector), pytest, the existing `evals/sonnet_shim.py` (OpenAI-compatible shim over `claude -p`).
 
@@ -586,8 +586,9 @@ Create `tests/test_classify_entity_kinds.py`:
 
 Scoping is the dominant token lever: an entity only matters if it carries a
 transient-looking attribute, because otherwise every one of its facts resolves
-evergreen whatever its kind. Measured on the live bank that is 2415 facts ->
-1005 entities -> 264 decision-relevant -> 233 needing model judgement.
+evergreen whatever its kind. Measured on the live bank that is 2423 facts ->
+265 scoped -> 33 rule-confident -> 232 needing model judgement (2026-07-27;
+reproduce with `--scope-only`).
 """
 from __future__ import annotations
 
@@ -694,8 +695,9 @@ Offline and one-time. Writes a JSON artifact and NEVER touches the database;
 Scoping is the dominant token lever, not batch size. An entity only matters if
 it carries at least one transient-looking attribute -- otherwise every one of
 its facts resolves evergreen whatever its kind. On the live bank that is
-2415 facts -> 1005 entities -> 264 decision-relevant -> 233 needing judgement,
-a 10.4x reduction before a single model call.
+2423 facts -> 265 scoped -> 33 rule-confident -> 232 needing judgement,
+a 10.4x reduction before a single model call (measured 2026-07-27; reproduce
+with `python evals/classify_entity_kinds.py --scope-only`).
 
 Batch 50. Larger batches degrade through lost-in-the-middle attention, label
 streaking (the model pattern-matches its own recent outputs), correlated
@@ -1148,9 +1150,11 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
   `freshness_class` now defaults to the sentinel `"auto"`; explicit values are
   still honoured, and an empty kind map reproduces v23 behaviour exactly.
 - **Scoping, not batch size, is the token lever.** An entity only matters if it
-  carries a transient attribute: 2,415 facts → 1,005 entities → 264
-  decision-relevant → 233 needing model judgement, a 10.4× reduction before a
-  single call. Backfill runs at batch 50 over five calls.
+  carries a transient attribute: 2,423 fact pairs → 265 scoped → 33
+  rule-confident → 232 needing model judgement, a 10.4× reduction before a
+  single call (measured 2026-07-27 on the live bank; these counts drift as
+  the bank grows — reproduce with `python evals/classify_entity_kinds.py
+  --scope-only`). Backfill runs at batch 50 over five calls.
 - Measured first: entity *aliasing* was the presumed root cause and is
   explicitly out of scope — on the live bank only ~4–6 of 74 lexical clusters
   are genuine aliases, reproducing the Stage 1.5 finding on real data.
