@@ -4,15 +4,15 @@
   "n": 78,
   "arms": {
     "rag": {
-      "accuracy": 0.487,
+      "accuracy": 0.5,
       "context_tokens": 1637.8
     },
     "cortex": {
-      "accuracy": 0.692,
+      "accuracy": 0.705,
       "context_tokens": 195.2
     },
     "hybrid": {
-      "accuracy": 0.667,
+      "accuracy": 0.821,
       "context_tokens": 1114.4
     }
   },
