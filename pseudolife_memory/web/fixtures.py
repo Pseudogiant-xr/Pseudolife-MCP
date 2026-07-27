@@ -170,9 +170,11 @@ class FixtureService:
             h["score"] = 0.6
         return {"entries": hits[:top_k]}
 
-    def cortex_write(self, entity, attribute, value, confidence=0.8, support="agent"):
+    def cortex_write(self, entity, attribute, value, confidence=0.8, support="agent",
+                     freshness_class="evergreen"):
         return {"action": "inserted", "entity": entity, "attribute": attribute,
-                "value": value, "origin": support, "confidence": confidence}
+                "value": value, "origin": support, "confidence": confidence,
+                "freshness_class": freshness_class}
 
     def cortex_resolve(self, entity, attribute, accept):
         return {"resolved": True, "accepted": accept,

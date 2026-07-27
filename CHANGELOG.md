@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-07-27 — `freshness_class` reaches the REST write path)
+- **`POST /api/facts/set` now threads `freshness_class`.** v23 threaded the new
+  field through the MCP tool and the service but not the REST route, whose
+  lambda passed only entity/attribute/value/confidence/support — so every fact
+  written through the Console or the REST fallback was silently pinned to
+  `evergreen`. That path is not incidental: it is the documented workaround for
+  MCP clients that stringify tool params. `FixtureService.cortex_write` gained
+  the same parameter to keep the Console fixture contract in step.
+- Two route-level regression tests pin both directions (explicit `volatile`
+  survives; omitted stays `evergreen`, never the world cortex's `volatile`).
+  RED-checked by removing the kwarg.
+
 ### Added (2026-07-27 — cortex facts can declare how fast they rot; schema **v23**)
 - **`memory_fact_set` gained `freshness_class`** — `evergreen` (default),
   `slow` (~9 months) or `volatile` (~3 weeks), stored on the fact and
