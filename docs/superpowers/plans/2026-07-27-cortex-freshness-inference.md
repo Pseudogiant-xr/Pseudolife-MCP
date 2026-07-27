@@ -1222,6 +1222,20 @@ pwsh -File ops/backup.ps1
 .venv/Scripts/python.exe evals/apply_entity_kinds.py --artifact evals/results/entity-kinds-live-20260727.json --apply
 ```
 
+- [ ] **Step 5b: Restart the daemon — REQUIRED, not optional**
+
+```bash
+docker restart pseudolife-mcp-daemon
+curl -s http://127.0.0.1:8765/health
+```
+
+The service caches the entity-kind map for the life of the process, and the
+apply above runs in a *separate* process. Without this restart the running
+daemon keeps its pre-backfill map — almost always empty — and every new fact
+resolves `evergreen` forever, so the feature is live in the database and inert
+in the daemon. Step 6's SQL would still pass, because the apply rewrote
+`facts.freshness_class` directly; only a write through the daemon exposes it.
+
 - [ ] **Step 6: Verify live**
 
 ```bash
@@ -1230,8 +1244,31 @@ docker exec pseudolife-mcp-postgres psql -U pseudolife -d pseudolife_memory -c "
 docker exec pseudolife-mcp-postgres psql -U pseudolife -d pseudolife_memory -c "SELECT entity_norm, attribute_norm, value, freshness_class FROM facts WHERE attribute_norm ~ 'schema.?version' AND status='current' ORDER BY entity_norm;"
 ```
 
-The last query is the acceptance check: `daemon / schema-version` must read
-`volatile` while `0-9-0-release / schema-version` reads `evergreen`.
+The last query is the acceptance check on stored data: `daemon / schema-version`
+must read `volatile` while `0-9-0-release / schema-version` reads `evergreen`.
+
+Then prove the **write path** is live too — the SQL above passes even when the
+daemon is ignoring the backfill, so this is the check that actually matters:
+
+```bash
+.venv/Scripts/python.exe - <<'PY'
+import asyncio, json
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
+async def main():
+    async with streamablehttp_client("http://127.0.0.1:8765/mcp") as (r, w, _):
+        async with ClientSession(r, w) as s:
+            await s.initialize()
+            res = await s.call_tool("memory_fact_set", {
+                "entity": "pseudolife-mcp", "attribute": "deploy-status",
+                "value": "green", "origin": "action"})   # note: no freshness_class
+            print(json.loads(res.content[0].text)["freshness_class"])
+asyncio.run(main())
+PY
+```
+
+Expected `volatile` — inferred, with no `freshness_class` passed. `evergreen`
+here means the daemon did not pick up the backfill: re-check Step 5b.
 
 - [ ] **Step 7: Commit the run artifacts**
 
