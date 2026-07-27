@@ -651,19 +651,19 @@ def test_parse_batch_drops_unknown_kinds_and_unrequested_entities():
     assert C.parse_batch(text, ["daemon", "ok-one"]) == {"ok-one": "concept"}
 
 
-@pytest.mark.parametrize("attribute", [
-    "deploy-status", "deployment-status", "schema-version", "current-branch",
-    "live-url", "build-state", "health-check-status", "running-model",
-    "deployment-date", "merge-date", "commit-hash", "cortex-score",
-    "language", "owner", "purpose", "asserted-at",
-])
-def test_offline_copy_of_the_policy_matches_freshness_exactly(attribute):
-    """The harness keeps its own copy of the pattern so it stays importable
-    without torch. That copy MUST agree with the package, or the backfill
-    writes classes the write path would never produce."""
+def test_harness_loads_the_one_canonical_policy_without_torch():
+    """The harness must use the SAME resolve_class as the write path, loaded
+    by file path because the package __init__ pulls torch. If this regresses
+    to a private copy, the backfill can write classes new writes would never
+    reproduce -- and the drift would be invisible."""
+    import sys
     from pseudolife_memory.memory import freshness
-    expected = freshness.resolve_class("system", attribute) == "volatile"
-    assert C._is_transient(attribute) is expected
+    assert C._freshness.resolve_class is not None
+    for attr in ("deploy-status", "deployment-date", "schema-version", "owner"):
+        assert (C._is_transient(attr)
+                is (freshness.resolve_class("system", attr) == "volatile"))
+    # Loaded standalone: the module object is NOT the package-imported one.
+    assert C._freshness is not sys.modules.get("pseudolife_memory.memory.freshness")
 
 
 def test_gold_set_is_well_formed_and_covers_the_ambiguous_class():
@@ -726,19 +726,28 @@ DEFAULT_DSN = os.environ.get(
     "PL_DSN", "postgresql://pseudolife:pseudolife@127.0.0.1:5433/pseudolife_memory")
 SHIM_URL = os.environ.get("PL_SHIM_URL", "http://127.0.0.1:8082/v1/chat/completions")
 
-# Mirrors freshness._EVENT_ATTRIBUTE_RE / _VOLATILE_ATTRIBUTE_RE. Kept as its
-# own copy so this offline harness stays importable without the package's
-# torch dependency. tests/test_classify_entity_kinds.py pins the two in step.
-_EVENT_ATTR = re.compile(r"(^|[-_])(date|at|hash|commit|count|score|id|size|duration)$")
-_TRANSIENT_ATTR = re.compile(
-    r"(^|[-_])(status|state|health|live|running|current|deployment|deployed)([-_]|$)"
-    r"|(^|[-_])version([-_]|$)"
-    r"|[-_](status|state|url)$")
+# The policy lives in exactly ONE place. freshness.py is pure stdlib by
+# design ("can be loaded by file path from the gateway venv"), so load it by
+# path rather than through the package: `pseudolife_memory.memory.__init__`
+# pulls torch, which this offline harness must not require. One copy means no
+# drift, and no parity test to keep two copies honest.
+def _load_freshness():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "_pl_freshness",
+        Path(__file__).resolve().parents[1]
+        / "pseudolife_memory" / "memory" / "freshness.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+_freshness = _load_freshness()
 
 
 def _is_transient(attribute_norm: str) -> bool:
-    a = (attribute_norm or "").casefold()
-    return not _EVENT_ATTR.search(a) and bool(_TRANSIENT_ATTR.search(a))
+    """True when a `system` entity's fact at this attribute would be volatile."""
+    return _freshness.resolve_class("system", attribute_norm) == "volatile"
 
 # Names that are frozen in time by construction -- no model needed.
 _RULE_ARTIFACT = re.compile(
@@ -949,9 +958,10 @@ from evals import apply_entity_kinds as A
     "live-url", "build-state", "deployment-date", "commit-hash", "language",
 ])
 @pytest.mark.parametrize("kind", ["system", "artifact", "concept", None])
-def test_apply_policy_matches_freshness_exactly(kind, attribute):
-    """The recompute MUST use the same policy as the write path, or applying
-    the backfill writes classes new writes would never reproduce."""
+def test_apply_uses_the_same_policy_as_the_write_path(kind, attribute):
+    """The recompute delegates to the one canonical resolve_class. If this
+    ever forks into a private copy, the backfill writes classes new writes
+    would never reproduce, and nothing would surface the divergence."""
     from pseudolife_memory.memory import freshness
     assert A._resolve(kind, attribute) == freshness.resolve_class(kind, attribute)
 
@@ -1004,7 +1014,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import time
 from pathlib import Path
 
@@ -1013,22 +1022,26 @@ import psycopg
 DEFAULT_DSN = os.environ.get(
     "PL_DSN", "postgresql://pseudolife:pseudolife@127.0.0.1:5433/pseudolife_memory")
 
-_EVENT_ATTR = re.compile(r"(^|[-_])(date|at|hash|commit|count|score|id|size|duration)$")
-_TRANSIENT_ATTR = re.compile(
-    r"(^|[-_])(status|state|health|live|running|current|deployment|deployed)([-_]|$)"
-    r"|(^|[-_])version([-_]|$)"
-    r"|[-_](status|state|url)$")
+# Same single-copy rule as the classifier: load freshness.py by path so the
+# recompute uses the EXACT policy the write path uses. Two implementations
+# would drift, and the drift would be invisible -- the backfill would write
+# classes new writes never reproduce.
+def _load_freshness():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "_pl_freshness",
+        Path(__file__).resolve().parents[1]
+        / "pseudolife_memory" / "memory" / "freshness.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+_freshness = _load_freshness()
 
 
 def _resolve(kind: str | None, attribute_norm: str) -> str:
-    """Must stay identical to freshness.resolve_class -- one policy, not two
-    that drift. tests/test_apply_entity_kinds.py pins them together."""
-    if (kind or "").strip().casefold() != "system":
-        return "evergreen"
-    a = (attribute_norm or "").casefold()
-    if _EVENT_ATTR.search(a):
-        return "evergreen"
-    return "volatile" if _TRANSIENT_ATTR.search(a) else "evergreen"
+    return _freshness.resolve_class(kind, attribute_norm)
 
 
 def plan_updates(labels: dict[str, str], rows: list[tuple[str, str]],
