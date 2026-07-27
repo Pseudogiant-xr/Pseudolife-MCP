@@ -176,6 +176,31 @@ def make_baseline(agg: dict, commit: str,
             "arms": arms}
 
 
+def nondeterminism_warnings(agg: dict) -> list[str]:
+    """Arms whose replicates disagreed — i.e. the judge server is not
+    reproducible.
+
+    Replicates re-judge byte-identical persisted contexts, so on the
+    reproducible server config (stock llama-server + q8_0 KV, see
+    evals/qwen_server.ps1) every replicate scores exactly the same and this
+    returns []. A non-zero spread means the run used the TurboQuant fork,
+    whose fused TBQ4_0 flash-attention KV flips ~7% of verdicts on identical
+    input. That does not merely add noise: it inflates every baseline margin
+    (`max(0.03, 2*std)`), so the gate quietly stops detecting the regressions
+    it exists to catch. Loud is the point — averaging it away is what hid it
+    for the ~2 weeks before 2026-07-27.
+    """
+    out = []
+    for arm, a in agg.get("arms", {}).items():
+        std = a.get("std")
+        if std:                      # None (n=1, no spread measurable) or 0.0
+            out.append(
+                f"{arm}: replicates disagree (std {std:.4f}, "
+                f"accuracies {a.get('accuracies')}) — judge server is not "
+                f"reproducible; expected the q8_0 config, not turboq")
+    return out
+
+
 def gate_verdict(agg: dict, baseline: dict) -> list[str]:
     failures = []
     for arm, b in baseline["arms"].items():
@@ -266,6 +291,8 @@ def cmd_gate_check(args) -> int:
     found = discover(args.dataset, args.extractor, args.tag,
                      args.results_dir)
     agg = aggregate({t: load_rows(p) for t, p in found.items()})
+    for w in nondeterminism_warnings(agg):
+        print(f"WARNING {w}")
     failures = gate_verdict(agg, baseline)
     if failures:
         print("REGRESSION GATE: FAIL")
@@ -283,6 +310,11 @@ def cmd_baseline(args) -> int:
     agg = aggregate({t: load_rows(p) for t, p in found.items()})
     if agg["n_replicates"] < 1:
         sys.exit("no judged replicates to establish a baseline from")
+    # A baseline measured on a nondeterministic server bakes that server's
+    # spread into every future margin, so warn at the point the number is
+    # frozen — not only when a later run is compared against it.
+    for w in nondeterminism_warnings(agg):
+        print(f"WARNING {w}")
     try:
         commit = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"], capture_output=True,

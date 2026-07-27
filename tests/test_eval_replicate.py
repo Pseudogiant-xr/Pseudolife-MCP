@@ -185,6 +185,23 @@ def test_gate_verdict():
     assert "cortex" in " ".join(failures)
 
 
+def test_nondeterminism_warnings_flag_a_drifted_server():
+    """Replicates re-judge byte-identical contexts, so on the reproducible
+    server config every replicate must score identically. Any spread means
+    the judge ran on a nondeterministic server (the TBQ4_0 fork), which
+    silently widens every margin — surface it instead of averaging it away."""
+    # std == 0 across replicates: the expected, reproducible case.
+    assert replicate.nondeterminism_warnings(_agg(0.70, std=0.0)) == []
+    # A single replicate cannot show spread; absence of evidence, not a pass.
+    assert replicate.nondeterminism_warnings(
+        {**_agg(0.70), "n_replicates": 1,
+         "arms": {a: {"accuracies": [0.70], "mean": 0.70, "std": None}
+                  for a in replicate.ARMS}}) == []
+    warnings = replicate.nondeterminism_warnings(_agg(0.70, std=0.02))
+    assert len(warnings) == len(replicate.ARMS)
+    assert "cortex" in " ".join(warnings)
+
+
 def _seed_base(tmp_path, tag="arm1", n_rows=3, extractor="e4b-ft"):
     rows = [_row(f"q{i}") for i in range(n_rows)]
     _write_jsonl(replicate.result_file("oracle", extractor, tag, tmp_path),

@@ -23,7 +23,6 @@ $abl = Join-Path $repo "evals\band_ablation.py"
 $bench = Join-Path $repo "evals\longmemeval_bench.py"
 $replicate = Join-Path $repo "evals\replicate.py"
 $results = Join-Path $repo "evals\results"
-$qwenDir = "$env:USERPROFILE\ClaudeCode\llama.ccp"
 $env:PYTHONPATH = $repo
 $env:TORCHDYNAMO_DISABLE = "1"
 $env:HF_HUB_OFFLINE = "1"
@@ -44,48 +43,10 @@ function Log($msg) {
     Add-Content -Path $ledger -Value $line
 }
 
-function Wait-Endpoint($url, $seconds) {
-    for ($i = 0; $i -lt ($seconds / 5); $i++) {
-        try {
-            Invoke-RestMethod -Uri $url -TimeoutSec 3 | Out-Null
-            return $true
-        } catch { Start-Sleep -Seconds 5 }
-    }
-    return $false
-}
-
-function Stop-Qwen {
-    Get-Process llama-server -ErrorAction SilentlyContinue |
-        Stop-Process -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 3
-}
-
-function Start-Qwen {
-    if (Wait-Endpoint "http://127.0.0.1:1234/v1/models" 5) { return $true }
-    Log "starting Qwen 27B server (log: $qwenDir\qwen-server.log)"
-    # archive the previous server log before the '>' redirect below truncates it
-    # (crash evidence: the GGML abort message lives in the tail of the old log)
-    $qlog = Join-Path $qwenDir 'qwen-server.log'
-    if (Test-Path $qlog) {
-        $qarch = Join-Path $qwenDir ('crash-logs\qwen-server-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-prelaunch.log')
-        New-Item -ItemType Directory -Force (Split-Path $qarch) | Out-Null
-        try { Move-Item $qlog $qarch -Force -ErrorAction Stop } catch { try { Copy-Item $qlog $qarch -Force } catch {} }
-    }
-    # Round 1 (2026-07-24), SUPERSEDED as a diagnosis: the prompt cache was
-    # blamed for the ~hourly crashes and disabled here. It was not the
-    # cause (see round 2 below) — the flag stays only because the cache is
-    # pure overhead for eval prompts this hybrid model always
-    # full-reprocesses. Env var, not a bat edit — interactive use needs it.
-    $env:LLAMA_ARG_CACHE_RAM = "0"
-    # Round 2 (2026-07-25): cache-ram=0 alone did not stop the crashes —
-    # the per-request checkpoint churn (149.6 MiB recurrent-state saves)
-    # leaks KV cells at ~350 requests per launch. Checkpoints buy nothing
-    # for eval workloads (hybrid model full-reprocesses anyway); disable.
-    $env:LLAMA_ARG_CTX_CHECKPOINTS = "0"
-    Start-Process -FilePath cmd.exe -WorkingDirectory $qwenDir -WindowStyle Minimized `
-        -ArgumentList '/c', "`"$qwenDir\run-server-turboq.bat`" > qwen-server.log 2>&1"
-    return (Wait-Endpoint "http://127.0.0.1:1234/v1/models" 300)
-}
+# Start-Qwen / Stop-Qwen + the eval env protocol (cache-ram,
+# ctx-checkpoints) live in one place. Default is the REPRODUCIBLE q8_0
+# config; pass -Fast for throughput work whose output is never judged.
+. (Join-Path $PSScriptRoot "qwen_server.ps1")
 
 # CPU steps have no server to babysit — plain retry on nonzero exit.
 function Invoke-Cpu($label, $stepArgs) {
