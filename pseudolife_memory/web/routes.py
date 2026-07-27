@@ -120,7 +120,7 @@ class ConsoleRoutes:
             b["entity"], b["attribute"], b["value"],
             confidence=float(b.get("confidence", 0.8)),
             support=(b.get("origin") or "agent"),
-            freshness_class=(b.get("freshness_class") or "evergreen")))
+            freshness_class=(b.get("freshness_class") or "auto")))
         p("/api/facts/forget", lambda q, b: svc.cortex_forget(
             b["entity"], b.get("attribute")))
 

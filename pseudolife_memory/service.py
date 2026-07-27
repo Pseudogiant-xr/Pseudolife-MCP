@@ -49,6 +49,7 @@ from pseudolife_memory.memory.consolidation import (
 )
 from pseudolife_memory.memory.context_builder import _relative_time
 from pseudolife_memory.memory.embedding import EmbeddingPipeline
+from pseudolife_memory.memory import freshness
 from pseudolife_memory.memory.reference_bank import ReferenceBank
 from pseudolife_memory.memory.reranker import CrossEncoderReranker
 from pseudolife_memory.memory.titans_memory import MemoryEntry, RetrievalResult
@@ -422,6 +423,10 @@ class MemoryService:
         # Postgres meta (loaded once in _ensure_init) when storage is up —
         # file-mode keeps this process-local only.
         self._active_session: tuple[str, float] | None = None
+        # entity_norm -> kind cache for freshness_class="auto" inference
+        # (schema v24). Loaded once from storage; None means "not loaded
+        # yet", distinct from an empty (but loaded) map.
+        self._entity_kind_cache: dict[str, str] | None = None
 
     _ACTIVE_SESSION_META_KEY = "active_session_pointer"
 
@@ -1419,6 +1424,14 @@ class MemoryService:
         self._save_cortex()
         return {"saved_to": self.config.memory.save_dir, "kind": kind}
 
+    def _entity_kind_map(self) -> dict[str, str]:
+        """entity_norm -> kind, cached. Order 1k rows and read on every fact
+        write, so it is loaded once; the apply step clears the cache."""
+        if self._entity_kind_cache is None:
+            self._entity_kind_cache = (
+                self._storage.load_entity_kinds() if self._storage else {})
+        return self._entity_kind_cache
+
     def cortex_write(
         self,
         entity: str,
@@ -1430,7 +1443,7 @@ class MemoryService:
         support: str | None = None,
         now: float | None = None,
         episode: str | None = None,
-        freshness_class: str = "evergreen",
+        freshness_class: str = "auto",
     ) -> dict[str, Any]:
         """Write / confirm / supersede a canonical fact at the
         ``(entity, attribute)`` slot. The claim is embedded through the same
@@ -1456,6 +1469,10 @@ class MemoryService:
         """
         with self._lock:
             self._ensure_init()
+            if freshness_class == "auto":
+                from pseudolife_memory.memory.cortex import _norm_key
+                freshness_class = freshness.resolve_class(
+                    self._entity_kind_map().get(_norm_key(entity)), _norm_key(attribute))
             assert self._embedder is not None and self._cortex is not None
             claim = f"{entity} {attribute} {value}".strip()
             emb = self._embedder.encode_single(claim)

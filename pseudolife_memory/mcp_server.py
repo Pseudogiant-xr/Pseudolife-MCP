@@ -527,7 +527,7 @@ def memory_fact_set(
     origin: Literal["user", "action", "agent"] | None = None,
     confidence: float = 0.8,
     episode: str | None = None,
-    freshness_class: Literal["evergreen", "slow", "volatile"] = "evergreen",
+    freshness_class: Literal["auto", "evergreen", "slow", "volatile"] = "auto",
 ) -> dict[str, Any]:
     """Assert a canonical fact NOW — insert, confirm, or correct a slot.
 
