@@ -11,7 +11,7 @@ import yaml
 
 @dataclass
 class EmbeddingConfig:
-    model_name: str = "all-MiniLM-L6-v2"
+    model_name: str = "Qwen/Qwen3-Embedding-0.6B"
     device: str = "cuda"
     batch_size: int = 64
     # "torch" (default) or "onnx" — onnxruntime via sentence-transformers'
@@ -27,7 +27,7 @@ class EmbeddingConfig:
     # LRU cache over (text, normalize) -> embedding. The daemon embeds the
     # same strings repeatedly (query text for search + slot ops, dedup
     # keys, warmup probes); repeats skip the model forward entirely.
-    # 0 disables. ~1.5 KB per entry at dim 384.
+    # 0 disables. ~4 KB per entry at dim 1024 (was ~1.5 KB at 384).
     cache_size: int = 1024
     # Instruction prefix prepended to QUERY-side text only (never to stored
     # documents) — see EmbeddingPipeline.encode_query. Default is the exact

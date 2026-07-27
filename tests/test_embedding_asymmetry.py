@@ -1,11 +1,11 @@
 """Asymmetric encode API (embedding-backbone-v25, Task 1).
 
-Qwen3-Embedding-0.6B (landing in a later task) is instruction-asymmetric:
-retrieval QUERIES carry a card-verbatim prefix, stored DOCUMENTS do not.
-This pins the pipeline-level API added ahead of that swap — MiniLM stays
-the default model here, so every test below must hold under a SYMMETRIC
-model too (that's the whole point of ``query_prefix`` being config-driven
-and empty-able).
+Qwen3-Embedding-0.6B (the default since Task 2's schema v25 swap) is
+instruction-asymmetric: retrieval QUERIES carry a card-verbatim prefix,
+stored DOCUMENTS do not. This pins the pipeline-level API using a stubbed
+model, so every test below must hold under a SYMMETRIC model too (that's
+the whole point of ``query_prefix`` being config-driven and empty-able,
+independent of which model is actually loaded).
 
 Contract pinned here:
 

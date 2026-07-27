@@ -47,7 +47,7 @@ def test_supersession_log_records_writer():
     import torch
 
     s = CortexStore()
-    e = torch.ones(384)
+    e = torch.ones(1024)
     s.write_fact(Slot("server", "port", "8080"), e, support="user",
                  now=1.0, hlc=(1000, 0), writer_id="alice", session_id="sess-A")
     s.write_fact(Slot("server", "port", "9090"), e, support="user",

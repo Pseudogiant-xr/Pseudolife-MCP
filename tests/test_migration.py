@@ -14,7 +14,7 @@ from pseudolife_memory.utils.config import MemoryConfig
 
 def _emb(seed: int) -> torch.Tensor:
     g = torch.Generator().manual_seed(seed)
-    v = torch.randn(384, generator=g)
+    v = torch.randn(1024, generator=g)
     return v / v.norm()
 
 

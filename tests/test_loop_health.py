@@ -13,7 +13,7 @@ from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
 
 NOW = 1_784_200_000.0
 DAY = 86_400.0
-ZERO_VEC = "[" + ",".join(["0"] * 384) + "]"
+ZERO_VEC = "[" + ",".join(["0"] * 1024) + "]"
 
 
 def _seed(conn):

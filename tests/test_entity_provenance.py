@@ -27,7 +27,7 @@ def _seed_entity_with_provenance(svc, *, band="forever", source="pseudolife"):
     st = svc._storage
     entry_id = st.insert_entry({
         "band": band, "text": "the daemon runs in docker",
-        "embedding": np.zeros(384, dtype=np.float32), "surprise": 0.5, "ts": 1234.0,
+        "embedding": np.zeros(1024, dtype=np.float32), "surprise": 0.5, "ts": 1234.0,
         "access_count": 0, "source": source, "superseded_at": None,
         "superseded_by_text": None, "last_logical_turn": None, "episode_id": None,
         "episode_title": None, "tags": [], "slots": [],

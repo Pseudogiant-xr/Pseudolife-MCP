@@ -30,7 +30,7 @@ _ENTRY_CARD_KEYS = {"id", "text", "source", "bank", "tags", "superseded",
 
 def _unit(seed: int) -> torch.Tensor:
     g = torch.Generator().manual_seed(seed)
-    return F.normalize(torch.randn(384, generator=g), dim=0)
+    return F.normalize(torch.randn(1024, generator=g), dim=0)
 
 
 def _real_trace() -> dict:

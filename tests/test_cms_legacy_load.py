@@ -13,13 +13,13 @@ from pseudolife_memory.utils.config import MemoryConfig
 
 def _emb(seed: int) -> torch.Tensor:
     g = torch.Generator().manual_seed(seed)
-    v = torch.randn(384, generator=g)
+    v = torch.randn(1024, generator=g)
     return v / v.norm()
 
 
 def test_band_load_ignores_legacy_weight_block():
     b = MIRASBand(
-        name="t", embedding_dim=384, retention=build_policy("balanced"),
+        name="t", embedding_dim=1024, retention=build_policy("balanced"),
         max_entries=100, update_interval=1, promotion_access_count=2,
         promotion_surprise=0.5, device="cpu",
     )
@@ -30,7 +30,7 @@ def test_band_load_ignores_legacy_weight_block():
         "update_count": 42,
         "axes": {"objective": "l2", "update_rule": "sgd_momentum"},
         "entries": [{
-            "text": "kept", "embedding": torch.ones(384), "surprise_score": 0.5,
+            "text": "kept", "embedding": torch.ones(1024), "surprise_score": 0.5,
             "timestamp": 1.0, "access_count": 0, "source": "t",
         }],
     }

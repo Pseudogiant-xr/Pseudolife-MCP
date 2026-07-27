@@ -6,6 +6,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-28 — embedding backbone swap; schema **v25**)
+- **Default embedding model is now `Qwen/Qwen3-Embedding-0.6B`** (was
+  `all-MiniLM-L6-v2`). Measured on the project's own LongMemEval-derived
+  corpus (150 questions, 74,183 haystack turns, 299 gold; PR #59
+  artifacts): R@10 0.809 vs bge-base-en-v1.5's 0.742 and shipped MiniLM's
+  0.572 (+81/-6 @5 vs MiniLM, p≈0). fp32 torch in-process, no GPU
+  sidecar: 2.4 GB RAM, ~82ms median / ~101ms p90 per query on CPU with
+  the project's existing sentence-transformers/transformers versions —
+  no dependency bump. Qwen3-Embedding is instruction-asymmetric
+  (`EmbeddingConfig.query_prefix`, `EmbeddingPipeline.encode_query` —
+  landed ahead of this swap); call-site query-prefix threading across
+  `service.py`'s ~23 encode sites is a follow-up, not part of this change.
+- **Schema v25: `entries`/`facts`/`world_facts`/`lessons.embedding` move
+  from `vector(384)` to `vector(1024)`.** `ensure_schema` stays
+  additive-only — a vector dimension change is not additive, so it now
+  REFUSES to start (before any DDL, naming `ops/migrate_embeddings.py`)
+  when a live bank's `entries.embedding` is dimensioned but not at 1024,
+  rather than half-migrating four tables at startup or writing
+  1024-d vectors into 384-d columns. The ONNX backend has no in-repo
+  export for Qwen3-0.6B, so the daemon runs the torch backend for it
+  (falls back cleanly, same fail-soft path as any other ONNX-unavailable
+  model); the ONNX machinery itself is unchanged and still used for
+  MiniLM-family models.
+- Threshold defaults calibrated on MiniLM cosine distributions
+  (`alias_candidate_min_cosine`, `curation_min_similarity`, surprise
+  gate, recall `min_score` floors) are left unchanged — those absolute
+  cosine distributions shift under a new backbone, but recalibrating
+  them is out of scope for this change and is deferred to live data.
+
 ### Added (2026-07-27 — freshness is inferred from the entity's kind; schema **v24**)
 - **`entity_kinds` (schema v24) stores one kind per entity** — `artifact`
   (frozen in time), `system` (live), `concept` (abstract) — and
