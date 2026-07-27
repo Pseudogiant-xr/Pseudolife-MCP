@@ -317,6 +317,16 @@ def memory_search(
                     "asserted_at": _iso_seconds(f.get("asserted_at")),
                     "last_confirmed": _iso_seconds(f.get("last_confirmed")),
                     "age": f.get("age"),
+                    # v23: only surfaced when the writer marked the fact
+                    # transient. Evergreen (the default) decays to nothing and
+                    # would just be noise on every durable fact.
+                    **(
+                        {"freshness_class": f.get("freshness_class"),
+                         "effective_confidence": f.get("effective_confidence"),
+                         "stale": f.get("stale", False)}
+                        if (f.get("freshness_class") or "evergreen") != "evergreen"
+                        else {}
+                    ),
                     **(
                         {"contender_value": f.get("contender_value"),
                          "contender_origin": f.get("contender_origin", "")}
@@ -517,6 +527,7 @@ def memory_fact_set(
     origin: Literal["user", "action", "agent"] | None = None,
     confidence: float = 0.8,
     episode: str | None = None,
+    freshness_class: Literal["evergreen", "slow", "volatile"] = "evergreen",
 ) -> dict[str, Any]:
     """Assert a canonical fact NOW — insert, confirm, or correct a slot.
 
@@ -536,6 +547,7 @@ def memory_fact_set(
     return service.cortex_write(
         entity, attribute, value,
         confidence=confidence, support=(origin or "agent"), episode=episode,
+        freshness_class=freshness_class,
     )
 
 

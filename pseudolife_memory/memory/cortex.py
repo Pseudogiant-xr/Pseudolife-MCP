@@ -35,6 +35,7 @@ import time
 
 import torch
 
+from pseudolife_memory.memory import freshness
 from pseudolife_memory.memory.slots import Slot
 
 # Version of the file-mode cortex *snapshot* format (``cortex_state.pt``) — bumped
@@ -55,6 +56,17 @@ def _norm_key(s: str) -> str:
     original-case ``entity``/``attribute`` for display and embedding."""
     s = _KEY_SEP_RE.sub("-", (s or "").strip().casefold())
     return s.strip("-")
+
+
+def _norm_freshness(c: str | None) -> str:
+    """Like :func:`freshness.normalize_class`, but unknown falls back to
+    *evergreen* rather than *volatile*.
+
+    The shared helper's fallback is right for world facts, which rot by
+    default, and wrong here: a typo'd or unrecognised class on a personal
+    fact must not quietly start it decaying (schema v23)."""
+    c = (c or "").strip().casefold()
+    return c if c in freshness.FRESHNESS_CLASSES else "evergreen"
 
 
 def _norm_value(s: str) -> str:
@@ -128,10 +140,35 @@ class CortexRecord:
     writer_id: str | None = None
     session_id: str | None = None
     version: int = 1
+    # v23 read-time currency, same curve as the world cortex. Default
+    # ``evergreen`` — deliberately NOT the world cortex's ``volatile`` —
+    # because personal facts are mostly durable; defaulting to volatile would
+    # silently re-rank an existing bank. Set ``volatile`` on facts about
+    # transient state (deployment status, what is "currently" running) so they
+    # lose trust as they age instead of reading as gospel forever.
+    freshness_class: str = "evergreen"
 
     @property
     def key(self) -> tuple[str, str]:
         return (_norm_key(self.entity), _norm_key(self.attribute))
+
+    def effective_confidence(self, now: float | None = None) -> float:
+        """Stored confidence scaled by age decay for this fact's class.
+
+        Anchored on ``last_confirmed``, not ``asserted_at``: re-confirming a
+        long-standing fact should restore its trust, otherwise something still
+        true reads as rotten purely for having been written a while ago.
+        """
+        return freshness.effective_confidence(
+            self.confidence, self.last_confirmed or self.asserted_at,
+            self.freshness_class, now,
+        )
+
+    def is_stale(self, now: float | None = None) -> bool:
+        """True past 2xTTL — a lead to re-verify, not truth. Never for evergreen."""
+        return freshness.is_stale(
+            self.freshness_class, self.last_confirmed or self.asserted_at, now,
+        )
 
     @property
     def origin(self) -> str:
@@ -202,6 +239,7 @@ class CortexStore:
         valid_time: float | None = None,
         writer_id: str | None = None,
         session_id: str | None = None,
+        freshness_class: str = "evergreen",
     ) -> WriteResult:
         t = time.time() if now is None else float(now)
         txt = t if tx_time is None else float(tx_time)
@@ -220,7 +258,7 @@ class CortexStore:
         if idx is None:
             return WriteResult("inserted", self._insert(
                 slot, emb, confidence, prov, t, support=sup,
-                slot_embedding=semb, **stamp))
+                slot_embedding=semb, freshness_class=freshness_class, **stamp))
 
         cur = self.records[idx]
         if _norm_value(cur.value) == _norm_value(slot.value):
@@ -260,7 +298,8 @@ class CortexStore:
             self._log(cur, slot.value, confidence, t, "supersede", "newer_wins",
                       writer_id=writer_id, session_id=session_id)
             new = self._insert(slot, emb, confidence, prov, t, supersedes=cur.value,
-                               support=sup, slot_embedding=semb, **stamp)
+                               support=sup, slot_embedding=semb,
+                               freshness_class=freshness_class, **stamp)
             return WriteResult("superseded", new)
 
         reason = "tier_downgrade" if not tier_ok else "below_confidence_margin"
@@ -287,6 +326,7 @@ class CortexStore:
         valid_time: float | None = None,
         writer_id: str | None = None,
         session_id: str | None = None,
+        freshness_class: str = "evergreen",
     ) -> CortexRecord:
         rec = CortexRecord(
             entity=slot.entity,
@@ -308,6 +348,7 @@ class CortexStore:
             hlc_logical=(hlc[1] if hlc else None),
             writer_id=writer_id,
             session_id=session_id,
+            freshness_class=_norm_freshness(freshness_class),
         )
         self.records.append(rec)
         self._current[rec.key] = len(self.records) - 1

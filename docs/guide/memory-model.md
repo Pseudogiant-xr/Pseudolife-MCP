@@ -42,6 +42,38 @@ supersession-not-decay, currency-not-frequency** — one *current* value per
   value, origin="user")` asserts a fact at higher confidence; setting a new
   value at an existing slot supersedes the old (kept as audit history).
 
+### How current is this fact?
+
+A cortex fact is the *last thing asserted* at a slot, which is not the same
+as a *true* thing now. Two fields make that gap visible rather than leaving
+a reader to assume the value is live:
+
+- **Every fact carries its dates.** Reads project `asserted_at` and
+  `last_confirmed` (ISO-8601, second resolution) plus a human `age`
+  (`"3d ago"`). A value with no other signal is still judgeable: a
+  "currently deployed" fact last confirmed nine months ago is worth
+  re-checking against the source before acting on it.
+- **`freshness_class` says how fast the slot rots** — `evergreen`
+  (the default; never decays), `slow` (~9 months), `volatile` (~3 weeks).
+  Non-evergreen facts report an `effective_confidence` that decays toward a
+  per-class floor with time since `last_confirmed`, and are flagged
+  `stale: true` past twice their TTL. Re-asserting the same value confirms
+  it and restores full confidence.
+
+Set it at write time: `memory_fact_set("pseudolife-mcp",
+"extractor-prompt-version", "v2", freshness_class="volatile")`. The rule of
+thumb is that anything phrased as *what is currently deployed / running /
+assigned* is `volatile`; identities, decisions, and history are `evergreen`.
+
+The default is deliberately `evergreen` and not, as with world facts,
+`volatile`: personal cortex facts are mostly durable, and defaulting the
+other way would re-rank every existing bank on an assumption nothing has
+measured. Facts already in the bank before schema v23 read back as
+`evergreen`, so nothing changes until a slot is deliberately classified.
+
+Both fields are descriptive, not enforcement — a stale fact is still
+returned, marked. Nothing is auto-deleted or auto-superseded on age.
+
 Since 2026-07-25 **raw band entries follow the same slot rule.** When a
 stored memory and an earlier one assert different values — or opposite
 polarities — at the same normalised `(entity, attribute)` slot, the earlier

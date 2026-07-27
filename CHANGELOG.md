@@ -6,6 +6,42 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-27 — cortex facts can declare how fast they rot; schema **v23**)
+- **`memory_fact_set` gained `freshness_class`** — `evergreen` (default),
+  `slow` (~9 months) or `volatile` (~3 weeks), stored on the fact and
+  projected on every read alongside a derived `effective_confidence` and a
+  boolean `stale` (past twice the TTL). Non-evergreen facts decay toward a
+  per-class floor with time since `last_confirmed`; re-asserting the same
+  value confirms the fact and restores full confidence. This reuses the
+  existing world-cortex freshness machinery (`memory/freshness.py`) rather
+  than adding a second decay model.
+- **The default is `evergreen`, deliberately not the world cortex's
+  `volatile`.** Personal facts are mostly durable — identities, decisions,
+  history — and defaulting the other way would silently re-rank every
+  existing bank on an assumption nothing here has measured. Rows written
+  before v23 read back as `evergreen`, so behaviour is unchanged until a
+  slot is classified on purpose.
+- **Scope, honestly.** This does *not* retroactively fix the 2026-07-26
+  v1/v2 extractor-prompt incident that motivated the currency work: the
+  misleading fact was ten days old against a 21-day TTL, so it would not
+  have been flagged `stale`, and its `effective_confidence` would barely
+  have moved. Visible dates (previous entry) were the load-bearing fix;
+  this is the complementary half that helps once a fact is *months* stale.
+  `tests/test_schema_v23.py` records that limit so a later reader does not
+  over-credit the feature.
+- Guide: [memory model → "How current is this fact?"](docs/guide/memory-model.md)
+  now documents both halves — the projected dates shipped in the previous
+  entry had no user-facing page, only a CHANGELOG record.
+- **Unknown classes fall back to `evergreen` here, not `volatile`.** The
+  shared `freshness.normalize_class` sends anything unrecognised to
+  `volatile`, which is correct for world facts and inverts the intent on the
+  personal cortex — a typo'd class would quietly start a durable fact
+  decaying. `cortex._norm_freshness` overrides just that fallback.
+- The tool docstring does **not** describe `freshness_class`: the `core`
+  tier's 9,500-char manifest budget had ~14 chars of headroom, and the
+  manifest is eager context in every session. The `Literal` type advertises
+  the three values; the guide carries the meaning.
+
 ### Fixed (2026-07-26 — cortex facts now carry their age; mid-session recall codified)
 - **`memory_search`'s `cortex` block now returns `asserted_at`,
   `last_confirmed` (ISO-8601, to the second) and the human `age`.** The data

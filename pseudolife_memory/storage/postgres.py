@@ -44,7 +44,7 @@ _FACT_COLS = (
     "polarity", "status", "confidence", "origin", "support", "provenance",
     "asserted_at", "last_confirmed", "supersedes_value",
     "superseded_by_value", "superseded_at", "embedding",
-    "entity_id", "object_entity_id",
+    "entity_id", "object_entity_id", "freshness_class",
 ) + _STAMP_COLS
 _FACT_JSONB = {"support", "provenance"}
 
@@ -346,6 +346,8 @@ class PostgresStorage:
                 v = Jsonb(v if v is not None else [])
             elif c == "version" and v is None:
                 v = 1            # NOT NULL DEFAULT 1; never insert explicit NULL
+            elif c == "freshness_class" and v is None:
+                v = "evergreen"  # v23; same NOT NULL DEFAULT rule as version
             values.append(v)
         if f.get("id") is not None:
             sets = ", ".join(f"{c} = %s" for c in _FACT_COLS)
@@ -377,6 +379,10 @@ class PostgresStorage:
                     v = Jsonb(v if v is not None else [])
                 elif c == "version" and v is None:
                     v = 1            # NOT NULL DEFAULT 1; never insert explicit NULL
+                elif c == "freshness_class" and v is None:
+                    # NOT NULL DEFAULT, but the default differs per store:
+                    # personal facts are durable, world facts rot.
+                    v = "volatile" if table == "world_facts" else "evergreen"
                 values.append(v)
             cur.execute(
                 f"INSERT INTO {table} ({', '.join(cols)}) "
