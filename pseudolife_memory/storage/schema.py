@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 22
+SCHEMA_META_VERSION = 23
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -160,7 +160,13 @@ CREATE TABLE IF NOT EXISTS facts (
   superseded_at DOUBLE PRECISION,
   embedding vector(384),
   entity_id BIGINT REFERENCES entities(id),
-  object_entity_id BIGINT REFERENCES entities(id)
+  object_entity_id BIGINT REFERENCES entities(id),
+  -- Read-time currency (schema v23), same curve as world_facts. Defaults to
+  -- 'evergreen' — NOT 'volatile' like world_facts — because personal facts
+  -- are mostly durable; defaulting to volatile would silently re-rank an
+  -- existing bank on an unmeasured assumption. A writer marks the transient
+  -- ones (deployment status, "current" version) and only those decay.
+  freshness_class TEXT NOT NULL DEFAULT 'evergreen'
 );
 CREATE INDEX IF NOT EXISTS facts_slot_idx
   ON facts (entity_norm, attribute_norm, status);
@@ -372,6 +378,16 @@ def ensure_schema(conn) -> dict:
         cur.execute(
             "ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS "
             "decided_at DOUBLE PRECISION"
+        )
+        # v23 additive: read-time currency on personal cortex facts, mirroring
+        # world_facts. DEFAULT 'evergreen', not world_facts' 'volatile' — an
+        # existing bank of durable project facts must not start decaying on an
+        # unmeasured assumption. Backfills every existing row as evergreen,
+        # i.e. exactly today's behaviour, so this migration is a no-op until a
+        # writer marks a fact transient.
+        cur.execute(
+            "ALTER TABLE facts ADD COLUMN IF NOT EXISTS freshness_class "
+            "TEXT NOT NULL DEFAULT 'evergreen'"
         )
         # v21 additive: durable, denormalized merge-decision audit (no FKs —
         # must outlive the entities and proposal rows it describes).

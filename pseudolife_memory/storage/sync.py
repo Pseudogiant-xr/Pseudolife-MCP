@@ -151,6 +151,9 @@ def _record_to_row(r: CortexRecord) -> dict[str, Any]:
         "embedding": r.embedding,
         "entity_id": None,          # linked by snapshot_cortex
         "object_entity_id": None,   # linked by snapshot_cortex
+        # v23; NOT NULL — coerce like the world path, never insert an
+        # explicit NULL into a NOT NULL DEFAULT column.
+        "freshness_class": r.freshness_class or "evergreen",
         **_stamp_to_row(r),
     }
 
@@ -238,6 +241,9 @@ def hydrate_cortex(cortex: CortexStore, storage) -> int:
             embedding=(torch.as_tensor(emb, dtype=torch.float32)
                        if emb is not None else None),
             support=set(row["support"] or []),
+            # v23; pre-v23 rows have no column -> evergreen, i.e. no decay,
+            # which is exactly how they behaved before the migration.
+            freshness_class=row.get("freshness_class") or "evergreen",
             **_stamp_from_row(row),
         ))
     cortex.supersession_log = list(storage.meta_get(_CORTEX_LOG_KEY, []) or [])

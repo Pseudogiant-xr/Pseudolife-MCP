@@ -138,6 +138,12 @@ def _cortex_record_to_dict(rec, relative_age: bool = True) -> dict[str, Any]:
         "provenance": sorted(rec.provenance),
         "asserted_at": rec.asserted_at,
         "last_confirmed": rec.last_confirmed,
+        # v23 read-time currency. ``effective_confidence`` is the age-decayed
+        # trust for this fact's class and equals ``confidence`` for evergreen
+        # (the default), so an unmarked bank reads exactly as it did before.
+        "freshness_class": rec.freshness_class,
+        "effective_confidence": round(float(rec.effective_confidence()), 4),
+        "stale": rec.is_stale(),
         "supersedes_value": rec.supersedes_value,
         "superseded_by_value": rec.superseded_by_value,
         "superseded_at": rec.superseded_at,
@@ -1424,6 +1430,7 @@ class MemoryService:
         support: str | None = None,
         now: float | None = None,
         episode: str | None = None,
+        freshness_class: str = "evergreen",
     ) -> dict[str, Any]:
         """Write / confirm / supersede a canonical fact at the
         ``(entity, attribute)`` slot. The claim is embedded through the same
@@ -1471,6 +1478,7 @@ class MemoryService:
                 hlc=self._hlc.tick(),
                 writer_id=writer_id,
                 session_id=session_id,
+                freshness_class=freshness_class,
             )
             self._ensure_subject_entity(entity)
             self._save_cortex()
