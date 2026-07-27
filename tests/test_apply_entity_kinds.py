@@ -49,3 +49,22 @@ def test_plan_skips_pairs_already_at_the_target_class():
     rows = [("daemon", "schema-version")]
     assert A.plan_updates(labels, rows,
                           current={("daemon", "schema-version"): "volatile"}) == []
+
+
+def test_merged_labels_do_not_revert_an_entity_missing_from_a_rerun():
+    """A re-run whose batch failed omits an entity rather than guessing. That
+    omission must not revert a previously-correct kind: the artifact is an
+    overlay on the stored kinds, not a replacement for them."""
+    stored = {"daemon": "system"}
+    artifact = {"console": "system"}          # daemon absent from this run
+    merged = {**stored, **artifact}
+    rows = [("daemon", "schema-version"), ("console", "deploy-status")]
+
+    # With the merge, daemon keeps volatile (already at target -> no update).
+    assert A.plan_updates(merged, rows, current={
+        ("daemon", "schema-version"): "volatile"}) == [
+        ("console", "deploy-status", "volatile")]
+
+    # Without the merge, daemon would be reverted -- the bug this pins.
+    assert ("daemon", "schema-version", "evergreen") in A.plan_updates(
+        artifact, rows, current={("daemon", "schema-version"): "volatile"})

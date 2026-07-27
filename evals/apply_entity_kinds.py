@@ -79,7 +79,16 @@ def main() -> None:
             "SELECT entity_norm, attribute_norm, freshness_class FROM facts "
             "WHERE status='current'").fetchall()}
 
-        updates = plan_updates(labels, rows, current)
+        stored = {r[0]: r[1] for r in conn.execute(
+            "SELECT entity_norm, kind FROM entity_kinds").fetchall()}
+        # The artifact is an OVERLAY, not the whole world. A re-run whose
+        # batch failed simply omits an entity (the classifier emits no label
+        # rather than guessing) -- without this merge that omission would
+        # revert a previously-correct kind to evergreen while entity_kinds
+        # still claimed otherwise, leaving the two disagreeing.
+        merged_labels = {**stored, **art["labels"]}
+
+        updates = plan_updates(merged_labels, rows, current)
         print(f"kinds={len(labels)} fact_updates={len(updates)}")
         for e, at, c in updates[:15]:
             print(f"  {e} / {at} -> {c}")
@@ -89,6 +98,11 @@ def main() -> None:
 
         now = time.time()
         with conn.transaction():
+            # Upsert only the artifact's OWN labels, not the merged map --
+            # rewriting unchanged stored rows would churn decided_at for no
+            # reason. The plan above uses merged_labels so a fact already
+            # correctly classified in a prior run isn't reverted just
+            # because this run's artifact omits it.
             for e, k in labels.items():
                 conn.execute(
                     "INSERT INTO entity_kinds "
