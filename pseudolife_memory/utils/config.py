@@ -29,6 +29,24 @@ class EmbeddingConfig:
     # keys, warmup probes); repeats skip the model forward entirely.
     # 0 disables. ~1.5 KB per entry at dim 384.
     cache_size: int = 1024
+    # Instruction prefix prepended to QUERY-side text only (never to stored
+    # documents) — see EmbeddingPipeline.encode_query. Default is the exact
+    # Qwen3-Embedding card string (embedding-backbone-v25); instruction-tuned
+    # embedders swing on wording, so this must match the card verbatim,
+    # including no space after "Query:". Empty string ("") restores
+    # symmetric behavior for models (like the current MiniLM default) that
+    # don't distinguish query/document sides.
+    query_prefix: str = (
+        "Instruct: Given a web search query, retrieve relevant passages "
+        "that answer the query\nQuery:"
+    )
+    # Caps the tokenizer's max sequence length on the loaded model. Ahead of
+    # the Qwen3-Embedding-0.6B swap (32k native context) — an unbounded
+    # input is a latency and RAM hazard; 512 matches the measured shootout
+    # configuration. Applied as a cap (min with whatever the model shipped
+    # with), never a raise: a model whose native default is already shorter
+    # is left alone.
+    max_seq_length: int = 512
 
 
 @dataclass
