@@ -1,0 +1,277 @@
+{
+  "questions": 150,
+  "haystack_turns": 74183,
+  "gold_turns": 299,
+  "max_seq_length": 512,
+  "batch_size": 32,
+  "arms": [
+    {
+      "arm": "all-MiniLM-L6-v2 (shipped)",
+      "model": "sentence-transformers/all-MiniLM-L6-v2",
+      "query_prefix": "",
+      "passage_prefix": "",
+      "device": "cuda:0",
+      "max_seq_length": 256,
+      "recall": {
+        "5": 0.4080267558528428,
+        "10": 0.5719063545150501,
+        "20": 0.7558528428093646
+      },
+      "hits": {
+        "5": 122,
+        "10": 171,
+        "20": 226
+      },
+      "encode_seconds": 28.6,
+      "dim": 384
+    },
+    {
+      "arm": "bge-base-en-v1.5",
+      "model": "BAAI/bge-base-en-v1.5",
+      "query_prefix": "",
+      "passage_prefix": "",
+      "device": "cuda:0",
+      "max_seq_length": 512,
+      "recall": {
+        "5": 0.5585284280936454,
+        "10": 0.7424749163879598,
+        "20": 0.8528428093645485
+      },
+      "hits": {
+        "5": 167,
+        "10": 222,
+        "20": 255
+      },
+      "encode_seconds": 140.4,
+      "dim": 768
+    },
+    {
+      "arm": "bge-base-en-v1.5 (query prefix)",
+      "model": "BAAI/bge-base-en-v1.5",
+      "query_prefix": "Represent this sentence for searching relevant passages: ",
+      "passage_prefix": "",
+      "device": "cuda:0",
+      "max_seq_length": 512,
+      "recall": {
+        "5": 0.5551839464882943,
+        "10": 0.7157190635451505,
+        "20": 0.8595317725752508
+      },
+      "hits": {
+        "5": 166,
+        "10": 214,
+        "20": 257
+      },
+      "encode_seconds": 147.6,
+      "dim": 768
+    },
+    {
+      "arm": "bge-large-en-v1.5 (query prefix)",
+      "model": "BAAI/bge-large-en-v1.5",
+      "query_prefix": "Represent this sentence for searching relevant passages: ",
+      "passage_prefix": "",
+      "device": "cuda:0",
+      "max_seq_length": 512,
+      "recall": {
+        "5": 0.5785953177257525,
+        "10": 0.7424749163879598,
+        "20": 0.8963210702341137
+      },
+      "hits": {
+        "5": 173,
+        "10": 222,
+        "20": 268
+      },
+      "encode_seconds": 426.9,
+      "dim": 1024
+    },
+    {
+      "arm": "Qwen3-Embedding-0.6B (instructed)",
+      "model": "Qwen/Qwen3-Embedding-0.6B",
+      "query_prefix": "Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery:",
+      "passage_prefix": "",
+      "device": "cuda:0",
+      "max_seq_length": 512,
+      "recall": {
+        "5": 0.6588628762541806,
+        "10": 0.8093645484949833,
+        "20": 0.9130434782608695
+      },
+      "hits": {
+        "5": 197,
+        "10": 242,
+        "20": 273
+      },
+      "encode_seconds": 362.9,
+      "dim": 1024
+    },
+    {
+      "arm": "granite-embedding-english-r2",
+      "model": "ibm-granite/granite-embedding-english-r2",
+      "query_prefix": "",
+      "passage_prefix": "",
+      "device": "cuda:0",
+      "max_seq_length": 512,
+      "recall": {
+        "5": 0.4882943143812709,
+        "10": 0.6622073578595318,
+        "20": 0.8093645484949833
+      },
+      "hits": {
+        "5": 146,
+        "10": 198,
+        "20": 242
+      },
+      "encode_seconds": 117.6,
+      "dim": 768
+    },
+    {
+      "arm": "snowflake-arctic-embed-l-v2.0 (query prefix)",
+      "model": "Snowflake/snowflake-arctic-embed-l-v2.0",
+      "query_prefix": "query: ",
+      "passage_prefix": "",
+      "device": "cuda:0",
+      "max_seq_length": 512,
+      "recall": {
+        "5": 0.5518394648829431,
+        "10": 0.7324414715719063,
+        "20": 0.822742474916388
+      },
+      "hits": {
+        "5": 165,
+        "10": 219,
+        "20": 246
+      },
+      "encode_seconds": 394.7,
+      "dim": 1024
+    }
+  ],
+  "mcnemar_vs_shipped": [
+    {
+      "arm": "bge-base-en-v1.5",
+      "k": 5,
+      "gained": 54,
+      "lost": 9,
+      "p_value": 6.108279451688681e-09
+    },
+    {
+      "arm": "bge-base-en-v1.5",
+      "k": 10,
+      "gained": 60,
+      "lost": 9,
+      "p_value": 2.2444496451277593e-10
+    },
+    {
+      "arm": "bge-base-en-v1.5",
+      "k": 20,
+      "gained": 34,
+      "lost": 5,
+      "p_value": 2.4299079086631536e-06
+    },
+    {
+      "arm": "bge-base-en-v1.5 (query prefix)",
+      "k": 5,
+      "gained": 54,
+      "lost": 10,
+      "p_value": 1.9964982237862146e-08
+    },
+    {
+      "arm": "bge-base-en-v1.5 (query prefix)",
+      "k": 10,
+      "gained": 51,
+      "lost": 8,
+      "p_value": 9.052391166525231e-09
+    },
+    {
+      "arm": "bge-base-en-v1.5 (query prefix)",
+      "k": 20,
+      "gained": 39,
+      "lost": 8,
+      "p_value": 5.539621596994948e-06
+    },
+    {
+      "arm": "bge-large-en-v1.5 (query prefix)",
+      "k": 5,
+      "gained": 65,
+      "lost": 14,
+      "p_value": 5.194941262584352e-09
+    },
+    {
+      "arm": "bge-large-en-v1.5 (query prefix)",
+      "k": 10,
+      "gained": 60,
+      "lost": 9,
+      "p_value": 2.2444496451277593e-10
+    },
+    {
+      "arm": "bge-large-en-v1.5 (query prefix)",
+      "k": 20,
+      "gained": 51,
+      "lost": 9,
+      "p_value": 3.085035609438902e-08
+    },
+    {
+      "arm": "Qwen3-Embedding-0.6B (instructed)",
+      "k": 5,
+      "gained": 81,
+      "lost": 6,
+      "p_value": 7.034485519207362e-18
+    },
+    {
+      "arm": "Qwen3-Embedding-0.6B (instructed)",
+      "k": 10,
+      "gained": 78,
+      "lost": 7,
+      "p_value": 2.7959374761947534e-16
+    },
+    {
+      "arm": "Qwen3-Embedding-0.6B (instructed)",
+      "k": 20,
+      "gained": 51,
+      "lost": 4,
+      "p_value": 2.0474233419776056e-11
+    },
+    {
+      "arm": "granite-embedding-english-r2",
+      "k": 5,
+      "gained": 39,
+      "lost": 15,
+      "p_value": 0.0014962588853935088
+    },
+    {
+      "arm": "granite-embedding-english-r2",
+      "k": 10,
+      "gained": 43,
+      "lost": 16,
+      "p_value": 0.0005843646280443461
+    },
+    {
+      "arm": "granite-embedding-english-r2",
+      "k": 20,
+      "gained": 25,
+      "lost": 9,
+      "p_value": 0.00904118549078703
+    },
+    {
+      "arm": "snowflake-arctic-embed-l-v2.0 (query prefix)",
+      "k": 5,
+      "gained": 50,
+      "lost": 7,
+      "p_value": 4.236709844063213e-09
+    },
+    {
+      "arm": "snowflake-arctic-embed-l-v2.0 (query prefix)",
+      "k": 10,
+      "gained": 59,
+      "lost": 11,
+      "p_value": 4.466174729063311e-09
+    },
+    {
+      "arm": "snowflake-arctic-embed-l-v2.0 (query prefix)",
+      "k": 20,
+      "gained": 32,
+      "lost": 12,
+      "p_value": 0.003657766827927844
+    }
+  ]
+}

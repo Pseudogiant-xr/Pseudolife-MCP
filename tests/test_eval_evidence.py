@@ -264,6 +264,52 @@ def _tracked() -> set[str]:
     return set(out.stdout.split())
 
 
+# ── the embedding-backbone shootout (CHANGELOG, 2026-07-28) ───────────────
+SHOOTOUT = RESULTS + "embedder-recall-shootout-20260727.json"
+QWEN_VS_BGE = RESULTS + "embedder-recall-qwen-vs-bge-20260728.json"
+QUANT = RESULTS + "embedder-recall-quant-shootout-20260728.json"
+
+
+def _arm_recall(label: str, k: int) -> Callable[[dict], float]:
+    """Exact-label match: several arms share prefixes (bge-base vs its
+    query-prefix variant), so prefix matching would silently pin the wrong
+    arm's number."""
+    return lambda d: next(a for a in d["arms"]
+                          if a["arm"] == label)["recall"][str(k)]
+
+
+def _mcnemar_p(label: str, k: int) -> Callable[[dict], float]:
+    return lambda d: next(t for t in d["mcnemar_vs_shipped"]
+                          if t["arm"] == label and t["k"] == k)["p_value"]
+
+
+for _id, _art, _label, _needle, _stated in [
+    ("embed-qwen3-r10", SHOOTOUT, "Qwen3-Embedding-0.6B (instructed)",
+     "Qwen3-Embedding-0.6B reaches R@10 **0.809** vs bge-base-en-v1.5 0.742",
+     0.809),
+    ("embed-bge-base-r10", SHOOTOUT, "bge-base-en-v1.5",
+     "Qwen3-Embedding-0.6B reaches R@10 **0.809** vs bge-base-en-v1.5 0.742",
+     0.742),
+    ("embed-q8-r10", QUANT, "Qwen3-Embedding-0.6B Q8_0 (gguf)",
+     "Q8_0 GGUF matches fp32 (R@10 0.806 vs 0.809", 0.806),
+    ("embed-fp32-anchor-r10", QUANT, "Qwen3-Embedding-0.6B (instructed)",
+     "Q8_0 GGUF matches fp32 (R@10 0.806 vs 0.809", 0.809),
+    ("embed-4b-q4-r10", QUANT,
+     "Qwen3-Embedding-4B Q4_K_M (gguf, native 2560d)",
+     "lands BELOW the fp32 0.6B (R@10 0.753", 0.753),
+]:
+    CLAIMS.append(Claim(
+        id=_id, doc=CHANGELOG, needle=_needle, artifacts=(_art,),
+        value=_arm_recall(_label, 10), stated=_stated, places=3))
+
+CLAIMS.append(Claim(
+    id="embed-qwen-vs-bge-p10", doc=CHANGELOG,
+    needle="+32/−12 at k=10, p=0.004",
+    artifacts=(QWEN_VS_BGE,),
+    value=_mcnemar_p("Qwen3-Embedding-0.6B (instructed)", 10),
+    stated=0.004, places=3))
+
+
 def test_every_published_number_names_a_committed_artifact():
     """A claim whose evidence is untracked cannot be checked by a reader.
 
