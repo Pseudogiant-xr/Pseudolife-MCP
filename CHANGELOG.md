@@ -6,6 +6,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-27 — freshness is inferred from the entity's kind; schema **v24**)
+- **`entity_kinds` (schema v24) stores one kind per entity** — `artifact`
+  (frozen in time), `system` (live), `concept` (abstract) — and
+  `freshness.resolve_class(kind, attribute)` turns that into a fact's
+  `freshness_class`. Only `system` entities can yield `volatile`, so the 282
+  facts about frozen artifacts are structurally protected from decaying.
+- **Why kind and not attribute name.** `0-9-0-release / schema-version` is
+  permanently true; `daemon / schema-version` rots. Same attribute, opposite
+  class — the name cannot decide it, the entity's kind can.
+- **No model call on the write path.** A new fact looks its entity's kind up in
+  a cached map and applies a pure function, because this runs on every dream.
+  `freshness_class` now defaults to the sentinel `"auto"`; explicit values are
+  still honoured, and an empty kind map reproduces v23 behaviour exactly.
+- **Scoping, not batch size, is the token lever.** An entity only matters if it
+  carries a transient attribute: 2,415 facts → 1,005 entities → 264
+  decision-relevant → 233 needing model judgement, a 10.4× reduction before a
+  single call. Backfill runs at batch 50 over five calls. The backfill has
+  **not** been run against the live bank — this ships the machinery only; an
+  empty `entity_kinds` table resolves every fact to `evergreen`, so behaviour
+  is unchanged until it is.
+- Measured first: entity *aliasing* was the presumed root cause and is
+  explicitly out of scope — on the live bank only ~4–6 of 74 lexical clusters
+  are genuine aliases, reproducing the Stage 1.5 finding on real data.
+
 ### Fixed (2026-07-27 — `freshness_class` reaches the REST write path)
 - **`POST /api/facts/set` now threads `freshness_class`.** v23 threaded the new
   field through the MCP tool and the service but not the REST route, whose

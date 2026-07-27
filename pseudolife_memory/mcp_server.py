@@ -533,14 +533,13 @@ def memory_fact_set(
 
     A new value at an existing slot supersedes the old (kept as history).
     A conflicting write is parked as a contender (``action="contested"``,
-    winner under ``current``) — check with the human, settle via
-    ``memory_fact_resolve``.
+    winner under ``current``); settle via ``memory_fact_resolve``.
 
     Args:
-        origin: ``"user"`` / ``"action"`` / ``"agent"`` (default) — who
-            asserts it (``"user"`` = the human told you).
-        confidence: 0..1, default 0.8.
-        episode: Episode handle for attribution.
+        origin: ``"user"``/``"action"``/``"agent"`` (default); ``"user"`` =
+            human told you.
+        confidence: 0..1, default 0.8. episode: attribution handle.
+        freshness_class: ``"auto"`` infers decay from the entity's kind.
 
     Returns: ``{action: inserted|confirmed|superseded|contested, ...record}``.
     """

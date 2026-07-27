@@ -47,26 +47,30 @@ def test_record_outcome_rejects_unknown_value_without_init() -> None:
 
 # ── schema enums: dispatch discoverable from the manifest ─────────────────
 
-_EXPECTED_ENUMS = {
-    "memory_dream": ("action", ["status", "pull", "commit", "run", "deep"]),
-    "memory_forget": ("scope", ["memory", "fact", "world", "lesson"]),
-    "memory_graph_review": (
-        "action",
+_EXPECTED_ENUMS = [
+    ("memory_dream", "action", ["status", "pull", "commit", "run", "deep"]),
+    ("memory_forget", "scope", ["memory", "fact", "world", "lesson"]),
+    (
+        "memory_graph_review", "action",
         ["list", "propose", "dismiss_pair", "accept_link", "reject_link",
          "accept_merge", "accept_junk", "reject_entity"],
     ),
-    "memory_outcome": ("outcome", ["success", "failure", "correction"]),
-    "memory_world_set": ("freshness_class", ["evergreen", "slow", "volatile"]),
-    "memory_store": ("origin", ["user", "action", "agent"]),
-    "memory_fact_set": ("origin", ["user", "action", "agent"]),
-}
+    ("memory_outcome", "outcome", ["success", "failure", "correction"]),
+    ("memory_world_set", "freshness_class", ["evergreen", "slow", "volatile"]),
+    ("memory_store", "origin", ["user", "action", "agent"]),
+    ("memory_fact_set", "origin", ["user", "action", "agent"]),
+    # "auto" is the schema-v24 sentinel meaning "infer from entity kind" — a
+    # Literal edit that silently drops it breaks the inferred-default contract.
+    ("memory_fact_set", "freshness_class",
+     ["auto", "evergreen", "slow", "volatile"]),
+]
 
 
 def test_enum_params_are_enums_in_the_input_schema(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("PSEUDOLIFE_MCP_TOOLSET", "full")
     mod = _reload(tmp_path, monkeypatch)
     tools = {t.name: t for t in asyncio.run(mod.mcp.list_tools())}
-    for tool_name, (param, values) in _EXPECTED_ENUMS.items():
+    for tool_name, param, values in _EXPECTED_ENUMS:
         schema = json.dumps(tools[tool_name].inputSchema["properties"][param])
         for v in values:
             assert f'"{v}"' in schema, (
