@@ -11,6 +11,11 @@ BACK UP FIRST -- ops/backup.ps1.
 Usage:
     python evals/apply_entity_kinds.py --artifact <path>            # dry run
     python evals/apply_entity_kinds.py --artifact <path> --apply
+    docker restart pseudolife-mcp-daemon   # REQUIRED: see below
+
+The daemon caches the entity-kind map for the life of its process, and this
+script runs out-of-process, so an --apply does not reach a running daemon
+until it restarts. Until then, every new fact keeps resolving evergreen.
 """
 from __future__ import annotations
 
