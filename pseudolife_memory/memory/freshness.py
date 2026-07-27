@@ -91,9 +91,8 @@ _EVENT_ATTRIBUTE_RE = _re.compile(
 # Deliberately dumb and auditable: the entity kind already carries the load,
 # so this stays a short explicit list rather than anything clever.
 _VOLATILE_ATTRIBUTE_RE = _re.compile(
-    r"(^|[-_])(status|state|health|live|running|current|deployment|deployed)([-_]|$)"
+    r"(^|[-_])(status|state|health|live|running|current|deployment|deployed|url)([-_]|$)"
     r"|(^|[-_])version([-_]|$)"
-    r"|[-_](status|state|url)$"
 )
 
 

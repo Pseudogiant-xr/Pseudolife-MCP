@@ -20,6 +20,7 @@ def test_the_motivating_pair_same_attribute_opposite_class():
 @pytest.mark.parametrize("attribute", [
     "deploy-status", "current-branch", "schema-version", "running-model",
     "health-check-status", "live-url", "build-state", "deployment-status",
+    "url", "status",
 ])
 def test_system_entities_yield_volatile_for_transient_attributes(attribute):
     assert freshness.resolve_class("system", attribute) == "volatile"
