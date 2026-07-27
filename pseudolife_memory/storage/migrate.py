@@ -13,8 +13,21 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
-def migrate_legacy(data_dir: str | Path, storage) -> dict:
+def migrate_legacy(data_dir: str | Path, storage, embedder) -> dict:
     """Import a legacy .pt bank into storage. Idempotent.
+
+    ``embedder`` is the service's own, already-constructed
+    :class:`~pseudolife_memory.memory.embedding.EmbeddingPipeline` (threaded
+    in, not re-instantiated — single-copy principle). Every real legacy .pt
+    bank in the wild predates the current build's embedder, so its stored
+    entry embeddings can be dimensioned for an older model (e.g. 384-d
+    MiniLM) than the live schema's vector columns (1024-d as of schema v25).
+    Inserting them verbatim raises a pgvector dimension error on every
+    boot's migration attempt (swallowed to a warning by the caller and
+    retried next boot — see ``MemoryService._ensure_init``). Any entry whose
+    stored embedding dim doesn't match ``embedder.embedding_dim`` is instead
+    re-embedded from its own stored TEXT through this pipeline before
+    insertion, so the migrated row always fits the live column.
 
     Returns ``{"migrated": bool, ...counts}``.
     """
@@ -30,7 +43,8 @@ def migrate_legacy(data_dir: str | Path, storage) -> dict:
 
     from pseudolife_memory.storage.sync import _record_to_row
 
-    entries = episodes = facts = 0
+    target_dim = embedder.embedding_dim
+    entries = episodes = facts = reembedded = 0
 
     if cms_path.exists():
         # weights_only=True: legacy CMS snapshot is tensors + plain containers;
@@ -49,10 +63,19 @@ def migrate_legacy(data_dir: str | Path, storage) -> dict:
             episodes += 1
         for band_name, band_state in (state.get("bands") or {}).items():
             for e in band_state.get("entries", []):
+                embedding = e["embedding"]
+                if len(embedding) != target_dim:
+                    # Legacy dim doesn't fit this build's vector column —
+                    # re-embed through the real pipeline rather than
+                    # inserting a wrong-shaped vector (which either raises
+                    # at the DB or, worse, would silently never match
+                    # anything at search time if the column allowed it).
+                    embedding = embedder.encode_single(e["text"])
+                    reembedded += 1
                 storage.insert_entry({
                     "band": band_name,
                     "text": e["text"],
-                    "embedding": e["embedding"],
+                    "embedding": embedding,
                     "surprise": float(e.get("surprise_score", 0.0)),
                     "ts": float(e.get("timestamp", 0.0)),
                     "access_count": int(e.get("access_count", 0)),
@@ -86,6 +109,6 @@ def migrate_legacy(data_dir: str | Path, storage) -> dict:
             p.rename(p.with_name(p.name + ".pre-v8.bak"))
 
     summary = {"migrated": True, "entries": entries,
-               "episodes": episodes, "facts": facts}
+               "episodes": episodes, "facts": facts, "reembedded": reembedded}
     logger.warning("legacy bank migrated to schema v8: %s", summary)
     return summary

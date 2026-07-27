@@ -175,6 +175,28 @@ def test_readme_schema_version_matches_code() -> None:
         f"configuration.md DSN row says v{dsn}, code says v{SCHEMA_META_VERSION}")
 
 
+def test_dockerfile_bakes_the_default_embedding_model() -> None:
+    """CRITICAL (2026-07-28 v25 review): the daemon image baked only
+    all-MiniLM-L6-v2 while ``EmbeddingConfig.model_name``'s default moved to
+    ``Qwen/Qwen3-Embedding-0.6B`` under ``HF_HUB_OFFLINE=1`` — a container
+    built from that state boots healthy (nothing touches the model until the
+    first tool call) and then throws ``OSError`` the moment a client calls
+    any memory tool, because the offline HF cache never has the new model.
+    Pin the Dockerfile bake to the code default so a future model swap can
+    never leave the two silently out of sync again."""
+    from pseudolife_memory.utils.config import EmbeddingConfig
+
+    default_model = EmbeddingConfig().model_name
+    dockerfile = (
+        Path(__file__).resolve().parents[1] / "ops" / "Dockerfile.daemon"
+    ).read_text(encoding="utf-8")
+    assert default_model in dockerfile, (
+        f"ops/Dockerfile.daemon does not bake the default embedding model "
+        f"({default_model!r}) — a container built from this image would "
+        f"boot healthy and OSError on the first tool call under "
+        f"HF_HUB_OFFLINE=1")
+
+
 def test_readme_carries_mcp_registry_marker() -> None:
     """The MCP registry validates PyPI ownership against this exact marker
     in the README (case-sensitive namespace — capital P). Losing it breaks

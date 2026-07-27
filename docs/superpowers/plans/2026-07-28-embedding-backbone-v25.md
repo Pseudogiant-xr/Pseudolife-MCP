@@ -56,7 +56,7 @@ Enumerate ALL ~23 encode call sites; classify each per the spec's rule into a ta
 - Create: `ops/migrate_embeddings.py`
 - Test: `tests/test_migrate_embeddings.py` (create, PG-backed)
 
-Per the spec: preflight (backup flag, daemon-unreachable check, row counts, dry-run default prints the plan and writes nothing); per-table transaction (drop vector indexes, drop NOT NULL on `entries`, ALTER TYPE ... USING NULL, re-embed via imported pipeline + the write paths' own text construction, restore constraints, rebuild HNSW); stamps meta version 25 last. Tests build a miniature 384-d bank in the test DB (ALTER columns down first), run the migration with a stub pipeline, assert dims/values/index/meta and that dry-run mutates nothing.
+Per the spec: preflight (backup flag, daemon-unreachable check, row counts, dry-run default prints the plan and writes nothing); per-table transaction (drop vector indexes IF present -- there is currently no `entries` HNSW index to rebuild: `ensure_schema` drops `entries_embedding_idx` unconditionally on every boot, and all similarity search happens in Python over the hydrated bands, not via a SQL vector query, so sequential scan is the status quo at this bank size and adding a real index is out of scope here; drop NOT NULL on `entries`, ALTER TYPE ... USING NULL, re-embed via imported pipeline + the write paths' own text construction, restore constraints); stamps meta version 25 last. Tests build a miniature 384-d bank in the test DB (ALTER columns down first), run the migration with a stub pipeline, assert dims/values/meta and that dry-run mutates nothing.
 
 ### Task 5: Docs + CHANGELOG
 

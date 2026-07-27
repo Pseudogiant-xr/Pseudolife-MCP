@@ -80,19 +80,24 @@ def test_fresh_install_with_no_entries_table_does_not_refuse():
 def test_refusal_fires_on_dim_mismatch_and_names_the_migration_script(pg_conn):
     from pseudolife_memory.storage.schema import ensure_schema
 
-    # Build the pre-v25 state: entries.embedding back at vector(384). The
-    # table is freshly truncated (0 rows) by the pg_conn fixture, so `USING
-    # NULL` needs nothing from existing data -- it's the safe cast regardless
-    # of row count, matching how a real narrowing ALTER would have to behave
-    # against a populated bank (a straight cast from vector(1024) to
-    # vector(384) is not defined).
-    pg_conn.execute("ALTER TABLE entries ALTER COLUMN embedding DROP NOT NULL")
-    pg_conn.execute(
-        "ALTER TABLE entries ALTER COLUMN embedding TYPE vector(384) USING NULL"
-    )
-    pg_conn.commit()
-
     try:
+        # Build the pre-v25 state: entries.embedding back at vector(384).
+        # The table is freshly truncated (0 rows) by the pg_conn fixture, so
+        # `USING NULL` needs nothing from existing data -- it's the safe
+        # cast regardless of row count, matching how a real narrowing ALTER
+        # would have to behave against a populated bank (a straight cast
+        # from vector(1024) to vector(384) is not defined). Both ALTERs run
+        # inside this try so the `finally` below still restores the
+        # vector(1024) NOT NULL shape even if setup fails partway (e.g. the
+        # DROP NOT NULL succeeds but the TYPE change doesn't) -- a mid-setup
+        # failure must never leak a nullable entries.embedding into the
+        # rest of the run.
+        pg_conn.execute("ALTER TABLE entries ALTER COLUMN embedding DROP NOT NULL")
+        pg_conn.execute(
+            "ALTER TABLE entries ALTER COLUMN embedding TYPE vector(384) USING NULL"
+        )
+        pg_conn.commit()
+
         with pytest.raises(RuntimeError) as exc_info:
             ensure_schema(pg_conn)
         msg = str(exc_info.value)

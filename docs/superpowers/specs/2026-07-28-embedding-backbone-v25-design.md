@@ -89,8 +89,14 @@ the empirical check that nothing breaks at the defaults.
 
 All four embedding columns become `vector(1024)`:
 `entries.embedding` (NOT NULL), `facts.embedding`, `world_facts.embedding`,
-`lessons.embedding`. 1024 < pgvector's 2000-dim HNSW cap; the
-`entries` HNSW index (`hnsw-index-entries-embedding-idx`) rebuilds.
+`lessons.embedding`. 1024 < pgvector's 2000-dim HNSW cap, so dimension is not
+a blocker if an index is ever added — but there is currently NO `entries`
+HNSW index to rebuild: `schema.py`'s `ensure_schema` has unconditionally
+dropped it (`DROP INDEX IF EXISTS entries_embedding_idx`) on every boot since
+the 2026-07-02 zombie sweep, because all similarity search happens in Python
+over the hydrated bands, not via a SQL vector query. Sequential scan is the
+status quo at this bank size; adding a real index is out of scope for this
+change.
 
 - `SCHEMA_SQL` (fresh installs): columns declared `vector(1024)` directly.
 - `ensure_schema` (existing installs): **additive-only stays the rule.**
@@ -115,12 +121,16 @@ Human-gated, dry-run by default, backup-first, same discipline as
    (`--backup-verified`); refuse if daemon is reachable on /health
    (it must be STOPPED — a live writer during re-embed corrupts);
    count rows per table and print the plan.
-2. Per table, in one transaction each: drop dependent vector indexes,
-   `ALTER COLUMN embedding TYPE vector(1024) USING NULL` (drop NOT NULL
-   on `entries` first, restore after), re-embed every row **through the
-   daemon's own `EmbeddingPipeline` and the SAME text-construction the
-   write paths use** (imported, not re-implemented — single-copy rule),
-   write vectors back, restore constraints, rebuild HNSW.
+2. Per table, in one transaction each: drop any dependent vector indexes
+   IF present (there is currently none — `ensure_schema` drops
+   `entries_embedding_idx` unconditionally on every boot; this step is
+   only a safety net for a future index, not something this migration
+   needs to recreate), `ALTER COLUMN embedding TYPE vector(1024) USING
+   NULL` (drop NOT NULL on `entries` first, restore after), re-embed every
+   row **through the daemon's own `EmbeddingPipeline` and the SAME
+   text-construction the write paths use** (imported, not re-implemented —
+   single-copy rule), write vectors back, restore constraints. No index to
+   rebuild — sequential scan is the status quo at this bank size.
 3. Stamp `SCHEMA_META_VERSION` 25 in meta. Print per-table counts.
 4. Rollback story: restore the pre-migration pg_dump + the pre-migration
    image tag. No in-place downgrade path — say so plainly in the script

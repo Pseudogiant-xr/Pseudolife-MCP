@@ -34,8 +34,9 @@ class EmbeddingConfig:
     # Qwen3-Embedding card string (embedding-backbone-v25); instruction-tuned
     # embedders swing on wording, so this must match the card verbatim,
     # including no space after "Query:". Empty string ("") restores
-    # symmetric behavior for models (like the current MiniLM default) that
-    # don't distinguish query/document sides.
+    # symmetric behavior for models (like all-MiniLM-L6-v2, the default
+    # before embedding-backbone-v25) that don't distinguish query/document
+    # sides.
     query_prefix: str = (
         "Instruct: Given a web search query, retrieve relevant passages "
         "that answer the query\nQuery:"

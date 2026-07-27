@@ -85,8 +85,9 @@ def _entry_to_dict(
 ) -> dict[str, Any]:
     """Serialise a :class:`MemoryEntry` for MCP transport.
 
-    The embedding tensor is dropped by default — it's a 384-float vector
-    that bloats the response and is meaningless to the LLM consumer.
+    The embedding tensor is dropped by default — it's a large float vector
+    (1024-d as of embedding-backbone-v25) that bloats the response and is
+    meaningless to the LLM consumer.
     Pass ``include_embedding=True`` only for debug tooling.
     """
     out: dict[str, Any] = {
@@ -413,6 +414,13 @@ class MemoryService:
         # Count of durable-save failures (cortex/world/lessons). Exposed via the
         # daemon /health probe so swallowed-then-surfaced saves are observable.
         self._persist_errors = 0
+        # Set by _ensure_init when storage construction refuses to start
+        # (schema v25's embedding-dim mismatch guard, schema.py's
+        # RuntimeError) -- exposed via /health so the daemon doesn't report
+        # "ok" on a bank every memory tool is about to fail against. The
+        # exception still propagates to the caller; this is purely for
+        # visibility.
+        self._init_refusal: str | None = None
         # Last extractor selection made by dream_run_auto (sonnet-sidecar-cutover,
         # 2026-07-11): {"which": "primary"|"fallback", "base_url": str | None,
         # "at": float} — surfaced via dream_status. None until a dream has run.
@@ -581,9 +589,15 @@ class MemoryService:
             config.memory.traces.retention_boost = 1.0
         # ONNX embedder whenever the optional extra is installed (the
         # daemon image bakes it): ~3x faster single-text encode on CPU
-        # with bit-identical embeddings (fp32 ONNX). Gated on the import
-        # so a plain pip install stays on torch and never logs the
-        # warn-and-fall-back path.
+        # with bit-identical embeddings (fp32 ONNX) -- true for MiniLM,
+        # which has a baked ONNX export. Qwen3-Embedding-0.6B (the default
+        # since embedding-backbone-v25) has NO in-repo ONNX export, so with
+        # the [onnx] extra installed this now fires the warn-and-fall-back
+        # path in EmbeddingPipeline on every construction (harmless -- it
+        # falls back to torch cleanly -- but no longer silent; expect it in
+        # the daemon log on every deploy that uses the Qwen default).
+        # A plain pip install (no [onnx] extra) still never takes this
+        # branch at all.
         if absent("embedding.backend") and _onnx_embedding_available():
             config.embedding.backend = "onnx"
 
@@ -593,7 +607,9 @@ class MemoryService:
         logger.info("MemoryService: initialising embedder + CMS (first call).")
         self._embedder = EmbeddingPipeline(self.config.embedding)
         # Make sure the embedder dim matches the configured memory dim —
-        # MiniLM-L6 is 384-d. Other embedders would need config tuning.
+        # Qwen3-Embedding-0.6B (the default since embedding-backbone-v25) is
+        # 1024-d; all-MiniLM-L6-v2 is 384-d. Whatever model is configured,
+        # this line keeps memory.embedding_dim honest without hand-tuning.
         self.config.memory.embedding_dim = self._embedder.embedding_dim
         try:
             self._reference = ReferenceBank(
@@ -619,7 +635,16 @@ class MemoryService:
         )
         if self._db_url:
             from pseudolife_memory.storage.postgres import PostgresStorage
-            self._storage = PostgresStorage(self._db_url)
+            try:
+                self._storage = PostgresStorage(self._db_url)
+            except RuntimeError as exc:
+                # schema.py's dim-mismatch refusal (schema v25) fires here —
+                # record it for /health, then let it propagate: this call
+                # (and every _ensure_init retry until the bank is migrated)
+                # must still fail loudly, not just silently degrade.
+                self._init_refusal = str(exc)
+                raise
+            self._init_refusal = None
             logger.info("storage: postgres (%s)",
                         self._db_url.rsplit("@", 1)[-1])
             # Invariant: unqualified tables MUST resolve to the real `public`
@@ -644,7 +669,9 @@ class MemoryService:
             from pseudolife_memory.storage import migrate as _migrate
             from pseudolife_memory.storage import sync as _sync
             try:
-                summary = _migrate.migrate_legacy(self.data_dir, self._storage)
+                summary = _migrate.migrate_legacy(
+                    self.data_dir, self._storage, self._embedder,
+                )
                 if summary.get("migrated"):
                     logger.warning("legacy .pt bank migrated: %s", summary)
             except Exception as exc:  # noqa: BLE001

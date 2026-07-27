@@ -35,6 +35,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   cosine distributions shift under a new backbone, but recalibrating
   them is out of scope for this change and is deferred to live data.
 
+### Fixed (2026-07-28 — v25 review fix wave)
+- **The daemon image now bakes `Qwen/Qwen3-Embedding-0.6B`** — it
+  previously baked only `all-MiniLM-L6-v2` while the default moved to
+  Qwen3 under `HF_HUB_OFFLINE=1`, so a container built from that state
+  booted healthy and then threw `OSError` on the first memory tool call.
+  A guard test pins the Dockerfile bake to `EmbeddingConfig.model_name`'s
+  default so the two can't drift apart again.
+- **Legacy `.pt` bank migration re-embeds on a dimension mismatch.**
+  `migrate_legacy` used to insert a legacy bank's stored entry embeddings
+  verbatim; a real legacy bank is 384-d (MiniLM-era) and now fails a
+  `vector(1024)` insert every boot (swallowed to a retried warning). It
+  now re-embeds any entry whose stored embedding doesn't match the live
+  pipeline's dimension, through that same `EmbeddingPipeline` instance.
+- **`/health` reports `init_refusal` + `status: "degraded"`** when
+  `MemoryService._ensure_init`'s storage construction hits schema v25's
+  dimension-mismatch refusal — previously invisible until the first tool
+  call, since the refusal fires lazily and `/health` doesn't construct
+  storage eagerly.
+
 ### Added (2026-07-27 — freshness is inferred from the entity's kind; schema **v24**)
 - **`entity_kinds` (schema v24) stores one kind per entity** — `artifact`
   (frozen in time), `system` (live), `concept` (abstract) — and
