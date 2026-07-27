@@ -6,6 +6,36 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-28 — embedding backbone decided on our corpus: Qwen3-Embedding-0.6B)
+- **Seven-arm fp32 shootout** on the LongMemEval slice (150 questions,
+  74,183 haystack turns, 299 gold;
+  `evals/results/embedder-recall-shootout-20260727.json`):
+  Qwen3-Embedding-0.6B reaches R@10 **0.809** vs bge-base-en-v1.5 0.742,
+  beating every arm at every k. Both anchors (MiniLM, bge-base) reproduced
+  the PR #44 artifact exactly. bge's card-recommended query prefix does not
+  help on this corpus; granite-r2 and arctic-l-v2 land below bge-base
+  despite higher leaderboard standings — leaderboard rank did not transfer,
+  twice.
+- **Direct paired test** (`embedder-recall-qwen-vs-bge-20260728.json`):
+  Qwen3 over bge-base +32/−12 at k=10, p=0.004; significant at every k.
+- **Quantization round** (`embedder-recall-quant-shootout-20260728.json`):
+  Q8_0 GGUF matches fp32 (R@10 0.806 vs 0.809, statistical noise) at a
+  quarter of the RAM (0.6 GB). Scale does not pay at Q4: the 4B at Q4_K_M
+  lands BELOW the fp32 0.6B (R@10 0.753, the round's only significant
+  delta — negative), and 8B-Q4 plus both Nemotron-3-Embed-1B forms are
+  statistical washes against the 0.6B at 4–8x its footprint. Matryoshka
+  truncation to 1024d measured free on both 4B and Nemotron.
+- Harness (`evals/embedder_recall.py`): candidate registry with
+  card-verbatim prefixes recorded per arm (instruction-tuned embedders
+  swing on exact wording), llama-server GGUF adapter (forced
+  `--pooling last`; cross-validated against fp32 at cosine 0.9987 before
+  any arm ran), Matryoshka-truncation arms, per-gold hit vectors persisted
+  for post-hoc pairwise tests, incremental artifact writes, 512-token cap
+  on every arm for fairness and VRAM safety.
+- **The backbone swap itself (schema v25, `vector(1024)`, full re-embed)
+  has NOT been performed** — this entry records the model decision and its
+  evidence only.
+
 ### Added (2026-07-27 — freshness is inferred from the entity's kind; schema **v24**)
 - **`entity_kinds` (schema v24) stores one kind per entity** — `artifact`
   (frozen in time), `system` (live), `concept` (abstract) — and
