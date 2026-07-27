@@ -125,8 +125,11 @@ passes `--model` through to `claude -p`). Writes a tagged JSON artifact and
 **4. Write-time hook** — in `cortex.write_fact`, when `freshness_class` is not
 explicitly passed: look up the kind, call `resolve_class`. Dictionary lookup.
 
-**5. Unknown-entity queue** — first sighting writes `evergreen` and records the
-entity for the next classification pass. Never blocks a write.
+**5. Unknown entities need no queue.** A first sighting resolves `evergreen`
+and the write proceeds — never blocked, never a model call. The classifier
+re-scopes the whole bank on each run, so genuinely new entities are picked up
+by the next pass for free. An explicit pending-queue table would be a second
+mechanism to keep correct for no gain.
 
 ## Scoping — the dominant token lever
 
