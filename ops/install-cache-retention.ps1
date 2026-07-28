@@ -9,8 +9,8 @@
 # this covers the other gap — stretches with no deploys at all, which is how
 # 51.87GB accumulated by 2026-07-28.
 param(
-    [int]$MaxAgeHours = 168,
-    [int]$MaxUsedSpaceGB = 20,
+    [ValidateRange(0, 876000)][int]$MaxAgeHours = 168,
+    [ValidateRange(0, 100000)][int]$MaxUsedSpaceGB = 20,
     [ValidateSet("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")]
     [string]$DayOfWeek = "Sunday",
     [string]$At = "03:00",
@@ -21,6 +21,10 @@ $ErrorActionPreference = "Stop"
 $taskName = "Pseudolife-MCP Docker cache retention"
 
 if ($Unregister) {
+    if (-not (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue)) {
+        Write-Host "'$taskName' is already not registered."
+        return
+    }
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
     Write-Host "Unregistered '$taskName'."
     return
@@ -31,7 +35,12 @@ if (-not (Test-Path $script)) { throw "not found: $script" }
 
 # Base64 -EncodedCommand, as ops\install-autostart.ps1 does: it survives the
 # quoting round-trip through Task Scheduler's single argument string.
-$inner = "& '$script' -MaxAgeHours $MaxAgeHours -MaxUsedSpaceGB $MaxUsedSpaceGB"
+# Escape embedded single quotes (PowerShell's quoting convention: '' inside
+# a single-quoted string) so a path like C:\Users\O'Brien\... doesn't break
+# the decoded command — which would fail silently until Task Scheduler
+# actually invokes it, unattended.
+$escapedScript = $script -replace "'", "''"
+$inner = "& '$escapedScript' -MaxAgeHours $MaxAgeHours -MaxUsedSpaceGB $MaxUsedSpaceGB"
 $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
 
 $action = New-ScheduledTaskAction -Execute "pwsh.exe" `
