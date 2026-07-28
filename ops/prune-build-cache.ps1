@@ -132,9 +132,13 @@ Write-Host ("==> Build-cache retention: {0} -> {1} (reclaimed {2})." -f `
 
 # fstrim returns freed blocks to the vhdx free list. It does NOT shrink the
 # host file — only an elevated offline compact does (ops\compact-docker-vhdx.ps1).
-# Windows/WSL only, and never fatal.
+# Windows/WSL only in effect, and never fatal. Gated on wsl being present
+# rather than on $IsWindows: only Windows hosts have wsl on PATH, the sh
+# port gates the same way (command -v wsl), and an OS gate is untestable —
+# the harness stubs wsl as a function, which Get-Command finds on any
+# platform, but $IsWindows cannot be stubbed (CI drives this script under
+# pwsh on Linux).
 if ($NoTrim) { return }
-if (-not $IsWindows) { return }
 if (-not (Get-Command wsl -ErrorAction SilentlyContinue)) {
     Write-Host "==> Build-cache retention: no wsl on PATH; skipping fstrim."
     return

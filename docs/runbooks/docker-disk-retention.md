@@ -137,8 +137,8 @@ so read the dry-run number as a floor, not a promise.
    backstop, and a weaker one than it sounds — see below, it can be a
    no-op while cache is still shared with a live image.
 3. `fstrim` of the WSL disk (`wsl -d docker-desktop -e sh -c "fstrim -v
-   /mnt/docker-desktop-disk"`) — Windows-only, skipped quietly (not a
-   failure) if not on Windows, if `wsl` isn't on `PATH`, or if the
+   /mnt/docker-desktop-disk"`) — Windows-only in effect, skipped quietly
+   (not a failure) if `wsl` isn't on `PATH` (the case on Linux/macOS), or if the
    `docker-desktop` distro isn't present. `-NoTrim` / `--no-trim` skips
    this step outright. A failed fstrim only warns; it never fails the run.
 

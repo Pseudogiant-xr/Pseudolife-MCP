@@ -134,7 +134,10 @@ Sequence:
    pass, not the ceiling, is the mechanism that actually reclaims space in
    the steady state; see the corrected reasoning in
    `docs/runbooks/docker-disk-retention.md`.
-4. **fstrim** — Windows only, and only when a `wsl -d docker-desktop -e sh
+4. **fstrim** — Windows-only in effect (gated on `wsl` being on `PATH`,
+   which only Windows hosts satisfy — not on an `$IsWindows` check, which
+   the test harness cannot stub and which made CI's pwsh-on-Linux runner
+   skip the step), and only when a `wsl -d docker-desktop -e sh
    -c true` probe exits 0, confirming the `docker-desktop` distro exists
    (`wsl -l -q` is not used for this: it returns UTF-16LE and is unsafe to
    parse from a shell script, so the code uses the exit-code probe
