@@ -14,6 +14,13 @@
 # The fstrim step is Windows/WSL-only; on Linux there is no vhdx and the
 # prune alone is the whole job.
 set -euo pipefail
+# Belt-and-braces: without this (bash >= 4.4 only), a failing command inside
+# a $(...) command substitution does not abort that substitution early —
+# it only affects the substitution's own exit status, which callers can
+# still discard. build_cache_bytes()/stale_estimate_bytes() are invoked via
+# $(...), so this alone would NOT be sufficient; the explicit exit-status
+# checks below are the real fix. This is defense in depth only.
+shopt -s inherit_errexit 2>/dev/null || true
 
 MAX_AGE_HOURS=168
 MAX_USED_SPACE_GB=20
@@ -34,6 +41,15 @@ for v in "$MAX_AGE_HOURS" "$MAX_USED_SPACE_GB"; do
         ''|*[!0-9]*) echo "--max-age-hours/--max-used-space-gb must be non-negative integers" >&2; exit 2 ;;
     esac
 done
+# Matches the ps1's [ValidateRange(0, 876000)] / [ValidateRange(0, 100000)].
+if [ "$MAX_AGE_HOURS" -gt 876000 ]; then
+    echo "--max-age-hours must be between 0 and 876000" >&2
+    exit 2
+fi
+if [ "$MAX_USED_SPACE_GB" -gt 100000 ]; then
+    echo "--max-used-space-gb must be between 0 and 100000" >&2
+    exit 2
+fi
 
 # docker humanizes with SI (1000-based) units and a lowercase k: "8.192kB".
 docker_size_to_bytes() {
@@ -55,7 +71,9 @@ docker_size_to_bytes() {
 }
 
 format_bytes() {
-    awk -v b="$1" 'BEGIN {
+    # LC_NUMERIC=C: matches the ps1's InvariantCulture formatting — without
+    # it, a comma-decimal locale makes awk's %.2f emit "12,45GB".
+    LC_NUMERIC=C awk -v b="$1" 'BEGIN {
         if (b >= 1000000000) printf "%.2fGB", b / 1000000000
         else if (b >= 1000000) printf "%.2fMB", b / 1000000
         else printf "%dB", b
@@ -63,15 +81,32 @@ format_bytes() {
 }
 
 build_cache_bytes() {
-    local row type size
+    local row type size out
+    # Capture via a plain command substitution (not process substitution)
+    # so `docker system df`'s own exit status is available directly — a
+    # `while ... < <(cmd)` process substitution discards it.
+    if ! out="$(docker system df --format '{{.Type}}|{{.Size}}')"; then
+        echo "docker system df failed" >&2
+        return 1
+    fi
     while IFS= read -r row; do
         type="${row%%|*}"
         size="${row#*|}"
         if [ "$type" = "Build Cache" ]; then
-            docker_size_to_bytes "$size"
+            # Explicit status check, NOT the trailing `return 0` alone:
+            # this call runs inside the $(...) that invokes
+            # build_cache_bytes at the call site, where `set -e` does not
+            # abort on a failing intermediate command (bash does not
+            # inherit errexit into command substitutions unless
+            # `inherit_errexit` is set). A bare `docker_size_to_bytes
+            # "$size"; return 0` would silently discard a parse failure.
+            if ! docker_size_to_bytes "$size"; then
+                echo "unparseable docker size: '$size'" >&2
+                return 1
+            fi
             return 0
         fi
-    done < <(docker system df --format '{{.Type}}|{{.Size}}')
+    done <<< "$out"
     echo "docker system df reported no Build Cache row" >&2
     return 1
 }
@@ -80,8 +115,14 @@ build_cache_bytes() {
 # CreatedAt precedes the cutoff. It is an ESTIMATE: BuildKit's own until=
 # filter considers last-used, and shared entries may not free fully.
 stale_estimate_bytes() {
-    local cutoff row created size total=0 when
+    local cutoff row created size total=0 when out bytes
     cutoff="$(date -u -d "-${MAX_AGE_HOURS} hours" +%s)"
+    # Plain command substitution (not process substitution) so
+    # `docker builder du`'s own exit status is available directly.
+    if ! out="$(docker builder du --format '{{.CreatedAt}}|{{.Size}}')"; then
+        echo "docker builder du failed" >&2
+        return 1
+    fi
     while IFS= read -r row; do
         [ -n "$row" ] || continue
         created="${row%%|*}"
@@ -91,9 +132,13 @@ stale_estimate_bytes() {
         created="$(printf '%s' "$created" | sed -E 's/\.[0-9]+//; s/ UTC$//')"
         when="$(date -u -d "$created" +%s 2>/dev/null || echo 0)"
         if [ "$when" -ne 0 ] && [ "$when" -lt "$cutoff" ]; then
-            total=$(( total + $(docker_size_to_bytes "$size") ))
+            if ! bytes="$(docker_size_to_bytes "$size")"; then
+                echo "unparseable docker size: '$size'" >&2
+                return 1
+            fi
+            total=$(( total + bytes ))
         fi
-    done < <(docker builder du --format '{{.CreatedAt}}|{{.Size}}')
+    done <<< "$out"
     printf '%d' "$total"
 }
 

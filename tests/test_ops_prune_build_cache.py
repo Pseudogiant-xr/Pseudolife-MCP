@@ -344,3 +344,24 @@ def test_absent_distro_skips_fstrim_without_failing(prune):
     proc, calls = prune(_fixture(distro=False))
     assert proc.returncode == 0, proc.stderr
     assert not any("fstrim" in c for c in calls)
+
+
+def test_unparseable_build_cache_size_fails_loudly(prune):
+    """2026-07-28 review finding: a malformed ``docker system df`` Build
+    Cache size must fail the run, not get silently swallowed into a
+    fabricated zero-byte report. The ``size=`` fixture field is passed
+    through verbatim to both stub drivers, so an unparseable value here
+    reproduces the same 'garbage-not-a-size' repro from the review without
+    needing any fixture/driver changes. Pins parity: the ps1 throws
+    'unparseable docker size' and exits non-zero; the bash port must match,
+    not print '0B' and exit 0."""
+    fx = _fixture(size="garbage-not-a-size")
+    proc, calls = prune(fx)
+    assert proc.returncode != 0, (
+        "must fail loudly on an unparseable docker size, not exit 0\n"
+        f"stdout: {proc.stdout!r}\nstderr: {proc.stderr!r}"
+    )
+    assert "reclaimed" not in proc.stdout, (
+        "must not report a fabricated reclaim figure after an unparseable size\n"
+        f"stdout: {proc.stdout!r}"
+    )
