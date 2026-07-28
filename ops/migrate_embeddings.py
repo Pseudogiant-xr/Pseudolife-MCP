@@ -355,12 +355,18 @@ def run(args: argparse.Namespace) -> int:
                   "in-place downgrade path.", file=sys.stderr)
             return 1
 
-        if _daemon_reachable(args.health_url):
-            print(f"\nREFUSING to apply: the daemon answers {args.health_url}. "
-                  "Stop it first — a live writer re-embedding underneath the "
-                  "daemon's own in-memory state corrupts the bank. Override "
-                  "--health-url only for tests against a throwaway server.",
-                  file=sys.stderr)
+        if args.assume_daemon_stopped:
+            print("\n--assume-daemon-stopped: SKIPPING the health probe on "
+                  "your word. If the daemon is actually running, this "
+                  "migration will corrupt its in-memory state.")
+        elif _daemon_reachable(args.health_url):
+            print(f"\nREFUSING to apply: the daemon answers {args.health_url} "
+                  "— or the port neither answered nor refused (on some hosts "
+                  "a CLOSED loopback port times out instead of refusing, "
+                  "which this gate deliberately reads as 'up': fail-safe). "
+                  "Stop the daemon (docker stop pseudolife-mcp-daemon), "
+                  "verify with 'docker ps', and if the probe still refuses, "
+                  "re-run with --assume-daemon-stopped.", file=sys.stderr)
             return 1
 
         # Only constructed once every refusal gate above has cleared --
@@ -403,6 +409,12 @@ def main() -> None:
                     help="commit the migration (default: dry-run report only)")
     ap.add_argument("--backup-verified", action="store_true",
                     help="required with --apply: confirms a fresh backup exists")
+    ap.add_argument("--assume-daemon-stopped", action="store_true",
+                    help="Skip the daemon health probe. Needed on hosts where "
+                         "a closed loopback port times out instead of "
+                         "refusing (the gate reads a timeout as 'daemon up', "
+                         "fail-safe) -- only after verifying with docker ps "
+                         "that the daemon is genuinely stopped.")
     ap.add_argument("--health-url", default=_DEFAULT_HEALTH_URL,
                     help="refuse --apply while this URL answers "
                          f"(default {_DEFAULT_HEALTH_URL}; override for tests)")

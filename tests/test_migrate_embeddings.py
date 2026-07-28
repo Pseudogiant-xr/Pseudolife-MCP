@@ -335,6 +335,36 @@ def test_apply_refuses_against_hung_daemon(v24_bank, pg_url, monkeypatch, hung_h
     assert _live_dim(v24_bank, "entries") == 384  # refused before any ALTER
 
 
+def test_assume_daemon_stopped_bypasses_only_the_health_gate(
+        v24_bank, pg_url, monkeypatch, hung_health_server):
+    """On this host a CLOSED loopback port times out instead of refusing, so
+    a genuinely-stopped daemon reads as 'up' and the fail-safe gate would
+    block the legitimate morning migration forever. The override must skip
+    exactly the health probe and nothing else — proven by omitting
+    --backup-verified: with the flag we must reach the BACKUP refusal, which
+    sits behind the health gate in no ordering, i.e. the run got past the
+    probe without migrating anything."""
+    code = _invoke(monkeypatch, pg_url, "--apply", "--assume-daemon-stopped",
+                   "--health-url", hung_health_server)
+    assert code == 1                                    # still refused...
+    assert _live_dim(v24_bank, "entries") == 384        # ...nothing written
+    # And WITH backup-verified the same hung probe no longer blocks: the run
+    # proceeds into the migration proper (entries ends at 1024).
+    code = _invoke(monkeypatch, pg_url, "--apply", "--backup-verified",
+                   "--assume-daemon-stopped", "--health-url", hung_health_server)
+    assert code == 0
+    assert _live_dim(v24_bank, "entries") == 1024
+
+
+def test_entries_is_last_in_the_migration_order():
+    """The daemon's dim guard checks entries ONLY (schema.py: one column as
+    sentinel). entries-last is the single ordering property that keeps every
+    partial state refusable; the crash test cannot see a reorder to the
+    middle positions (it always crashes after two tables), so the order is
+    pinned directly."""
+    assert migrate_embeddings._TABLES[-1] == "entries"
+
+
 # ---------------------------------------------------------------------------
 # IMPORTANT 2b: lock_timeout on the migration connection fails loudly
 # instead of queuing an ACCESS EXCLUSIVE ALTER behind a stray lock forever.
