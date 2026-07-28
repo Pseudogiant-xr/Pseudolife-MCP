@@ -97,10 +97,18 @@ bash port takes the `--kebab-case` equivalents, matching the
 
 Sequence:
 
-1. **Read cache size.** `docker system df --format json` emits one JSON object
-   per line; select `Type == "Build Cache"` and parse the human-formatted
-   `Size` string (e.g. `"51.87GB"`). A small size parser is needed;
-   `docker builder du` is the fallback source if the JSON shape shifts.
+1. **Read cache size.** `docker system df --format '{{.Type}}|{{.Size}}'`,
+   selecting the `Build Cache` row and parsing the human-formatted `Size`
+   string (e.g. `"51.87GB"`). A Go template rather than JSON, so the bash port
+   shares the contract without needing `jq`. Sizes are SI (1000-based) with a
+   lowercase `k` (`8.192kB`), so a small parser is needed.
+
+   **Dry-run estimate.** BuildKit has no `--dry-run`, so a dry run sums the
+   `Size` of entries from `docker builder du --format
+   '{{.CreatedAt}}|{{.Size}}'` whose `CreatedAt` precedes the cutoff. This is
+   an **estimate** and must be reported as one: BuildKit's own `until=` filter
+   considers last-used rather than created, and shared entries may not free
+   fully.
 2. **Age pass** — `docker builder prune --force --filter until=<MaxAgeHours>h`.
    Always runs. This is the normal policy: a week of cache is the useful
    window, and every entry found on 2026-07-28 was well past it.
@@ -219,7 +227,7 @@ still no observable reclaim. Four steps, each proving a different claim:
 | Step | Command | Proves |
 |---|---|---|
 | 1 | `-DryRun` (defaults) | Size reading is correct (12.45 GB) and the age pass plans **no** eviction — nothing is older than 168h. |
-| 2 | `-DryRun -MaxAgeHours 0` | The age filter is genuinely plumbed through: it plans to evict the full 12.45 GB. Still mutates nothing. |
+| 2 | `-DryRun -MaxAgeHours 0` | The age filter is genuinely plumbed through: the planned command carries `until=0h` and the reclaim estimate approaches the full 12.45 GB. Still mutates nothing. |
 | 3 | **Real run**, `-MaxUsedSpaceGB 8` | The ceiling pass reclaims for real — roughly 4.5 GB — while leaving ~8 GB of hot cache intact. This is the only step that mutates, and it is deliberately chosen to be observable *and* safe: the next build stays warm. |
 | 4 | `docker system df` after | Records the actual delta. |
 
