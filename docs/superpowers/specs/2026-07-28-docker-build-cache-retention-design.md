@@ -21,6 +21,7 @@ Measured on 2026-07-28:
 | Entries **active** (`docker system df`) | 0 — every entry was reclaimable |
 | Oldest entries | 5–6 weeks |
 | Regrowth window | ~52 GB in the 13 days since the 2026-07-14 trim |
+| Cache produced by **one** deploy (measured post-deploy, same day) | 12.45 GB across 17 entries |
 | `docker_data.vhdx` file size | 94.74 GB |
 | Internal usage after `builder prune -af` + `fstrim` | 49.3 GB (file unchanged at 94.74 GB) |
 | File size after elevated `Optimize-VHD -Mode Full` | 47.31 GB |
@@ -34,6 +35,15 @@ Two distinct failures compound:
    downtime, so it cannot be automated safely.
 
 Only (1) is automatable. This design fixes (1) and documents (2).
+
+**"Reclaimable" is not "useless."** Measured minutes after a deploy, all 17
+fresh entries reported as inactive under `docker system df` and the full
+12.45 GB as reclaimable under `docker builder du` — while being precisely the
+cache the *next* deploy would reuse. Reclaimability tracks "not pinned by a
+running build", not "not worth keeping". Any policy keyed on it (including a
+plain `-af`) therefore deletes hot cache and cold-starts the next build. This
+is the measured reason age is the primary filter here and size is only a
+backstop.
 
 ## 2. Why this is safe to automate
 
@@ -201,12 +211,26 @@ Also pinned:
 
 `docker system df` before and after, per the task's acceptance criterion.
 
-**Stated limitation.** Build cache is **0 B right now** — the 2026-07-28
-manual prune already emptied it. A live run today therefore reclaims nothing
-and cannot exercise the reclaim path end-to-end. Plan: seed the cache with one
-daemon rebuild, then run `-DryRun` (proving the no-op) followed by a real run,
-and record both `docker system df` readings. A single rebuild is cheap and is
-the only way to observe the numbers actually move.
+A deploy on 2026-07-28 repopulated the cache to 12.45 GB / 17 entries, so no
+seeding rebuild is needed. But it creates the opposite problem: **every entry
+is minutes old, so a default run correctly reclaims nothing.** Right behaviour,
+still no observable reclaim. Four steps, each proving a different claim:
+
+| Step | Command | Proves |
+|---|---|---|
+| 1 | `-DryRun` (defaults) | Size reading is correct (12.45 GB) and the age pass plans **no** eviction — nothing is older than 168h. |
+| 2 | `-DryRun -MaxAgeHours 0` | The age filter is genuinely plumbed through: it plans to evict the full 12.45 GB. Still mutates nothing. |
+| 3 | **Real run**, `-MaxUsedSpaceGB 8` | The ceiling pass reclaims for real — roughly 4.5 GB — while leaving ~8 GB of hot cache intact. This is the only step that mutates, and it is deliberately chosen to be observable *and* safe: the next build stays warm. |
+| 4 | `docker system df` after | Records the actual delta. |
+
+Deliberately **not** run live: a default-age real run (would be a no-op today)
+and any `-af`-equivalent (would cold-start the next deploy for no benefit).
+The exact CLI contract of every pass is pinned by the stubbed-`docker` tests
+in §6 instead, which is where command-level correctness belongs; the live run
+exists to confirm the numbers move on real infrastructure.
+
+The first *default-policy* reclaim will land on its own once these entries
+age past 168h — via whichever trigger fires first.
 
 ## 8. Shipping checklist (project CLAUDE.md)
 
