@@ -48,12 +48,24 @@ COPY pseudolife_memory /app/pseudolife_memory
 RUN pip install -c /app/requirements.lock.txt "/app[onnx]" \
     && pip install -U "setuptools==78.1.1"
 
-# 3) Bake the embedding model (~90 MB) into the image so cold start needs
-#    no network — kills the HF HEAD-check flakiness and the slow first run.
+# 3) Bake the embedding model(s) into the image so cold start needs no
+#    network — kills the HF HEAD-check flakiness and the slow first run.
 #    The image sets HF_HUB_OFFLINE=1 for runtime; override to 0 for just this
-#    step so the one-time download is allowed at build time. Loading with
-#    backend="onnx" caches onnx/model.onnx (+90 MB) on top of the torch
-#    weights — the runtime offline load resolves both from this cache.
+#    step so the one-time download is allowed at build time.
+#
+#    Qwen/Qwen3-Embedding-0.6B is EmbeddingConfig's default (schema v25) —
+#    MUST be baked or a container from this image boots healthy and then
+#    throws OSError under HF_HUB_OFFLINE=1 on the very first tool call
+#    (tests/test_release_ux.py pins this bake to the code default so the two
+#    can never drift apart again). Torch-only: there is no in-repo ONNX
+#    export for this model, so the daemon always runs the torch backend for
+#    it (fails soft to torch if 'onnx' is ever requested — see embedding.py).
+RUN HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 \
+    python -c "from sentence_transformers import SentenceTransformer; \
+SentenceTransformer('Qwen/Qwen3-Embedding-0.6B')"
+#    MiniLM stays baked too (both torch and onnx/model.onnx, +90 MB) — tests
+#    pin it as the symmetric regression model, and it is the one model that
+#    DOES exercise the ONNX backend.
 RUN HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 \
     python -c "from sentence_transformers import SentenceTransformer; \
 SentenceTransformer('all-MiniLM-L6-v2'); \

@@ -77,6 +77,16 @@ def run_one(n: int) -> float:
         def load_episodes(self):
             return []
 
+    # MemoryConfig() defaults embedding_dim to 384, matching the 384-d
+    # embeddings baked into the committed DUMPS corpus (real MiniLM
+    # embeddings from the LongMemEval `s` band replay). Production runs at
+    # 1024-d since embedding-backbone-v25 (Qwen3-Embedding-0.6B default),
+    # but this bench measures the write-path COST MODEL (detect_contradictions
+    # scanning every resident entry), which is dimension-independent in
+    # shape -- the legacy 384-d configuration stays internally consistent
+    # (config dim matches corpus dim) and is deliberately not bumped here;
+    # bumping it would require re-generating DUMPS at 1024-d for no change
+    # in what this bench is measuring.
     cms = ContinuumMemorySystem(MemoryConfig())
     hydrate_cms(cms, _Rows())
 

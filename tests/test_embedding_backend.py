@@ -139,7 +139,13 @@ def test_onnx_offline_resolves_local_snapshot_path(
     tree even when every file is cached, which raises under
     HF_HUB_OFFLINE=1 — the Docker daemon's runtime contract. In offline
     mode the pipeline must resolve the repo to its local snapshot
-    directory and pass THAT path, sidestepping the hub entirely."""
+    directory and pass THAT path, sidestepping the hub entirely.
+
+    Pinned to an explicit BARE model name (not the config default, which
+    is namespaced ``Qwen/...`` since schema v25 and so never enters the
+    bare-name branch below) — this is a regression guard on the
+    ``sentence-transformers/{name}`` expansion itself, independent of
+    which model ships as the default."""
     from pseudolife_memory.memory import embedding
 
     def _fake_snapshot(repo_id: str, local_files_only: bool = False) -> str:
@@ -152,7 +158,9 @@ def test_onnx_offline_resolves_local_snapshot_path(
     monkeypatch.setattr(embedding, "_hf_offline", lambda: True)
     monkeypatch.setattr(embedding, "_local_snapshot", _fake_snapshot)
 
-    pipe = _pipeline(EmbeddingConfig(device="cpu", backend="onnx"))
+    pipe = _pipeline(EmbeddingConfig(
+        device="cpu", backend="onnx", model_name="all-MiniLM-L6-v2",
+    ))
     assert pipe.backend == "onnx"
     assert captured[0].model_name == "/opt/hf/snapshots/deadbeef"
 
@@ -165,15 +173,23 @@ def test_onnx_offline_resolves_local_snapshot_path(
 def test_real_onnx_parity_with_torch() -> None:
     """The whole point of the switch: identical cosine geometry.
 
-    Loads the real MiniLM twice (torch + onnx). Skips when optimum isn't
-    installed or the ONNX weights aren't in the offline HF cache.
+    Loads the real MiniLM twice (torch + onnx). Pinned to MiniLM
+    explicitly (not the config default, Qwen/Qwen3-Embedding-0.6B since
+    schema v25, which has no in-repo ONNX export) — this is a non-default
+    regression test on ONNX/torch bit-parity for the one model that ships
+    the ONNX weights, not a claim about whatever the current default is.
+    Skips when optimum isn't installed or the ONNX weights aren't in the
+    offline HF cache.
     """
     pytest.importorskip("optimum")
     from pseudolife_memory.memory.embedding import EmbeddingPipeline
 
-    torch_pipe = _pipeline(EmbeddingConfig(device="cpu"))
+    minilm = EmbeddingConfig(device="cpu", model_name="all-MiniLM-L6-v2")
+    torch_pipe = _pipeline(minilm)
     try:
-        onnx_pipe = EmbeddingPipeline(EmbeddingConfig(device="cpu", backend="onnx"))
+        onnx_pipe = EmbeddingPipeline(EmbeddingConfig(
+            device="cpu", backend="onnx", model_name="all-MiniLM-L6-v2",
+        ))
     except Exception as exc:  # noqa: BLE001 — offline cache miss
         pytest.skip(f"onnx weights unavailable: {exc}")
     if onnx_pipe.backend != "onnx":

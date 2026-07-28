@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 24
+SCHEMA_META_VERSION = 25
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS entries (
   id BIGSERIAL PRIMARY KEY,
   band TEXT NOT NULL,
   text TEXT NOT NULL,
-  embedding vector(384) NOT NULL,
+  embedding vector(1024) NOT NULL,
   surprise REAL NOT NULL DEFAULT 0,
   ts DOUBLE PRECISION NOT NULL,
   access_count INTEGER NOT NULL DEFAULT 0,
@@ -170,7 +170,7 @@ CREATE TABLE IF NOT EXISTS facts (
   supersedes_value TEXT,
   superseded_by_value TEXT,
   superseded_at DOUBLE PRECISION,
-  embedding vector(384),
+  embedding vector(1024),
   entity_id BIGINT REFERENCES entities(id),
   object_entity_id BIGINT REFERENCES entities(id),
   -- Read-time currency (schema v23), same curve as world_facts. Defaults to
@@ -206,7 +206,7 @@ CREATE TABLE IF NOT EXISTS world_facts (
   supersedes_value TEXT,
   superseded_by_value TEXT,
   superseded_at DOUBLE PRECISION,
-  embedding vector(384),
+  embedding vector(1024),
   -- world provenance + freshness (spec 2026-06-13, D5 quote-not-page)
   source_url TEXT,
   source_quote TEXT,
@@ -246,7 +246,7 @@ CREATE TABLE IF NOT EXISTS lessons (
   supersedes_value TEXT,
   superseded_by_value TEXT,
   superseded_at DOUBLE PRECISION,
-  embedding vector(384),
+  embedding vector(1024),
   entity_id BIGINT REFERENCES entities(id),
   object_entity_id BIGINT REFERENCES entities(id)
 );
@@ -340,6 +340,66 @@ CREATE TABLE IF NOT EXISTS entity_sources (
 CREATE INDEX IF NOT EXISTS entity_sources_source_idx ON entity_sources (source);
 """
 
+# The dimension every embedding column is declared at (schema v25). Not
+# derived from EmbeddingConfig on purpose: ensure_schema must refuse based
+# on what THIS BUILD's schema.py demands, independent of whatever model a
+# caller happens to have configured.
+_EXPECTED_EMBEDDING_DIM = 1024
+
+
+def _refuse_on_embedding_dim_mismatch(cur) -> None:
+    """Refuse to start the write path if the live bank's embedding columns
+    were declared at a different dimension than this build's schema.
+
+    ``ensure_schema`` is additive-only — ``CREATE TABLE IF NOT EXISTS`` /
+    ``ADD COLUMN IF NOT EXISTS`` never touch an existing column's TYPE, and
+    that must stay true for dimension changes too: a pgvector dimension
+    change needs every existing row RE-EMBEDDED (a batch job through the
+    real ``EmbeddingPipeline``), not a DDL statement. Without this guard, a
+    daemon started against an old-dimensioned bank after a model swap would
+    either silently keep running against a bank that can never store a
+    correctly-shaped vector again, or — worse, if ``ensure_schema`` ever
+    grew an in-place ALTER — half-migrate the four embedding tables at
+    startup with no re-embedding, corrupting the bank. Refusing is the only
+    safe additive behaviour; the actual migration
+    (``ops/migrate_embeddings.py``) is a deliberate, human-gated,
+    backup-first step, never something the daemon does on its own at boot.
+
+    Checked on ``entries.embedding`` only — all four embedding columns move
+    together in lockstep (one model, one dimension), so one column is a
+    sufficient sentinel for the other three.
+
+    ``atttypmod`` on a pgvector column IS the declared dimension verbatim
+    (unlike e.g. ``varchar``, which offsets it) — confirmed against a live
+    server: ``vector(1024)`` reports ``atttypmod = 1024``. Resolved via
+    ``to_regclass`` rather than a bare ``'entries'::regclass`` cast so a
+    missing table (fresh install — nothing to refuse) returns zero rows
+    instead of raising.
+    """
+    cur.execute(
+        "SELECT atttypmod FROM pg_attribute "
+        "WHERE attrelid = to_regclass('public.entries') "
+        "AND attname = 'embedding' AND attnum > 0 AND NOT attisdropped"
+    )
+    row = cur.fetchone()
+    if row is None:
+        return  # fresh install: entries doesn't exist yet
+    live_dim = row[0]
+    if live_dim > 0 and live_dim != _EXPECTED_EMBEDDING_DIM:
+        raise RuntimeError(
+            f"Refusing to start: entries.embedding is vector({live_dim}) "
+            f"but this build's schema expects vector({_EXPECTED_EMBEDDING_DIM}). "
+            "ensure_schema is additive-only and will NOT alter vector "
+            "dimensions in place -- that would either half-migrate four "
+            f"tables at startup or write {_EXPECTED_EMBEDDING_DIM}-d vectors "
+            f"into a {live_dim}-d column, corrupting the bank. Run the "
+            "human-gated migration first: `python ops/migrate_embeddings.py` "
+            f"(backs up, requires the daemon stopped, re-embeds every row "
+            f"through the real embedder, and moves all four embedding "
+            f"columns from vector({live_dim}) to vector({_EXPECTED_EMBEDDING_DIM})). "
+            "Never run the daemon against a bank you have not migrated."
+        )
+
 
 def ensure_schema(conn) -> dict:
     """Create extensions + tables idempotently. Returns capability flags.
@@ -347,12 +407,20 @@ def ensure_schema(conn) -> dict:
     ``vector`` is required (raises if unavailable). Records
     ``schema_version`` in ``meta`` (upsert to the current value, so an
     upgraded bank reports its real version, not the first-init one).
+
+    Refuses outright (``RuntimeError``, before any DDL runs) if the live
+    bank's ``entries.embedding`` is already dimensioned but at a different
+    size than this build expects — see :func:`_refuse_on_embedding_dim_mismatch`.
     """
     # conn.transaction(): one atomic DDL transaction whether the caller's
     # connection is autocommit (the daemon's storage conn, H4) or classic
     # (test fixtures) — psycopg begins/commits for real on an idle
     # connection in either mode.
     with conn.transaction(), conn.cursor() as cur:
+        # Checked FIRST, before any DDL (including the lock/statement
+        # timeouts below) — a dim mismatch must abort before touching
+        # anything, not merely before the CREATE TABLE calls.
+        _refuse_on_embedding_dim_mismatch(cur)
         # Bound every DDL statement so a stray lock holder surfaces as an
         # error instead of an indefinite hang (the v0.1 lesson, applied to
         # the new storage layer). SET LOCAL: these guards are for THIS

@@ -30,7 +30,7 @@ def _lesson_row(entity="deploy engine to host", attribute="approach",
         "support": ["action"], "provenance": ["ep-1", "sig-3"],
         "asserted_at": 1000.0, "last_confirmed": 1000.0,
         "supersedes_value": None, "superseded_by_value": None, "superseded_at": None,
-        "embedding": (np.arange(384, dtype=np.float32) % 5) / 5.0,
+        "embedding": (np.arange(1024, dtype=np.float32) % 5) / 5.0,
         "entity_id": None, "object_entity_id": None,
     }
     r.update(over)

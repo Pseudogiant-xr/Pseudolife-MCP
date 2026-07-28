@@ -35,7 +35,7 @@ from pseudolife_memory.storage import schema
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
 
 DAY = 86400.0
-EMB = torch.zeros(384)   # facts.embedding is vector(384) — PG enforces it
+EMB = torch.zeros(1024)   # facts.embedding is vector(1024) — PG enforces it
 
 
 @pytest.fixture()
@@ -52,7 +52,7 @@ def svc(pg_conn, pg_url):  # noqa: F811
 
 
 def test_schema_version_is_23():
-    assert schema.SCHEMA_META_VERSION == 24
+    assert schema.SCHEMA_META_VERSION == 25
 
 
 def test_facts_table_declares_freshness_class():

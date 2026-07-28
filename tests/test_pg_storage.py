@@ -56,7 +56,7 @@ def _entry(text="a fact", band="working", **over):
     e = {
         "band": band,
         "text": text,
-        "embedding": (np.arange(384, dtype=np.float32) % 7) / 7.0,
+        "embedding": (np.arange(1024, dtype=np.float32) % 7) / 7.0,
         "surprise": 0.5,
         "ts": 1000.0,
         "access_count": 0,
@@ -149,7 +149,7 @@ def test_vector_column_roundtrip(pg_conn):
     from pseudolife_memory.storage.postgres import _embedding_out
 
     register_vector(pg_conn)
-    vec = np.arange(384, dtype=np.float32) / 384.0
+    vec = np.arange(1024, dtype=np.float32) / 1024.0
     pg_conn.execute(
         "INSERT INTO entries (band, text, embedding, ts) VALUES (%s, %s, %s, %s)",
         ("working", "vector probe", vec, 0.0),
@@ -259,7 +259,7 @@ def test_txn_rolls_back_compound_cursor_shape(storage):
         "origin": "action", "support": ["action"], "provenance": ["t"],
         "asserted_at": 1.0, "last_confirmed": 1.0, "supersedes_value": None,
         "superseded_by_value": None, "superseded_at": None,
-        "embedding": [0.0] * 5,   # wrong dim (schema expects 384) → INSERT raises
+        "embedding": [0.0] * 5,   # wrong dim (schema expects 1024) → INSERT raises
         "entity_id": None, "object_entity_id": None,
     }
     with pytest.raises(Exception):

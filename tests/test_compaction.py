@@ -16,7 +16,7 @@ from pseudolife_memory.memory.lessons import LessonStore
 from pseudolife_memory.memory.slots import Slot
 from pseudolife_memory.memory.world_cortex import WorldCortexStore
 
-EMB = torch.zeros(384)   # facts.embedding is vector(384) — PG enforces it
+EMB = torch.zeros(1024)   # facts.embedding is vector(1024) — PG enforces it
 T0 = 1_000_000.0
 DAY = 86400.0
 

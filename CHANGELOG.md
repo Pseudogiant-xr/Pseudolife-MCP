@@ -6,6 +6,104 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-28 — v25 embedding migration script)
+- **`ops/migrate_embeddings.py`** takes a live v24 bank (four
+  `vector(384)` embedding columns) to v25 (`vector(1024)`) offline: dry-
+  run by default (writes nothing without `--apply`), requires
+  `--backup-verified` to apply, and refuses to apply while the daemon
+  answers its health endpoint (a live writer re-embedding underneath the
+  daemon's own in-memory state would corrupt the bank). Each of
+  `entries`/`facts`/`world_facts`/`lessons` is migrated in its own
+  transaction — drop NOT NULL where present, `ALTER COLUMN embedding TYPE
+  vector(1024) USING NULL`, re-embed every row through the real
+  `EmbeddingPipeline` and the exact claim-text shape the write paths use
+  (`cortex_write`/`world_write`/`lesson_write`'s
+  `f"{entity} {attribute} {value}".strip()`; entries re-embed their
+  stored `text` verbatim), restore constraints — and creates no index
+  (there is none to rebuild; `ensure_schema` already drops
+  `entries_embedding_idx` unconditionally on every boot). Stamps
+  `meta.schema_version = 25` last, only after all four tables migrate
+  without error. This is the human-gated remedy for schema v25's
+  additive-only `ensure_schema` refusing to start against a v24-
+  dimensioned bank; running it against the live bank is a user-gated
+  morning step, not part of this change.
+
+### Changed (2026-07-28 — embedding backbone swap; schema **v25**)
+- **Default embedding model is now `Qwen/Qwen3-Embedding-0.6B`** (was
+  `all-MiniLM-L6-v2`). Measured on the project's own LongMemEval-derived
+  corpus (150 questions, 74,183 haystack turns, 299 gold; PR #59
+  artifacts): R@10 0.809 vs bge-base-en-v1.5's 0.742 and shipped MiniLM's
+  0.572 (+81/-6 @5 vs MiniLM, p≈0). fp32 torch in-process, no GPU
+  sidecar: 2.4 GB RAM, ~82ms median / ~101ms p90 per query on CPU with
+  the project's existing sentence-transformers/transformers versions —
+  no dependency bump. Qwen3-Embedding is instruction-asymmetric
+  (`EmbeddingConfig.query_prefix`, `EmbeddingPipeline.encode_query` —
+  landed ahead of this swap); every retrieval probe across
+  `service.py`'s 23 classified encode sites now goes through
+  `encode_query` (see the threading entry below).
+- **Schema v25: `entries`/`facts`/`world_facts`/`lessons.embedding` move
+  from `vector(384)` to `vector(1024)`.** `ensure_schema` stays
+  additive-only — a vector dimension change is not additive, so it now
+  REFUSES to start (before any DDL, naming `ops/migrate_embeddings.py`)
+  when a live bank's `entries.embedding` is dimensioned but not at 1024,
+  rather than half-migrating four tables at startup or writing
+  1024-d vectors into 384-d columns. The ONNX backend has no in-repo
+  export for Qwen3-0.6B, so the daemon runs the torch backend for it
+  (falls back cleanly, same fail-soft path as any other ONNX-unavailable
+  model); the ONNX machinery itself is unchanged and still used for
+  MiniLM-family models.
+- Threshold defaults calibrated on MiniLM cosine distributions
+  (`alias_candidate_min_cosine`, `curation_min_similarity`, surprise
+  gate, recall `min_score` floors) are left unchanged — those absolute
+  cosine distributions shift under a new backbone, but recalibrating
+  them is out of scope for this change and is deferred to live data.
+- **Retrieval floors (the `min_score` 0.2/0.25 class) now gate a
+  prefixed-query-to-document cosine, not a doc-to-doc one** — now that
+  query-side call sites use `encode_query`'s instruction prefix
+  (Task 3), those thresholds' semantics shifted, not just their scale;
+  left unrecalibrated pending live data, per the bullet above.
+  `supersede()`'s embedding-fallback paraphrase probe is one of the
+  now-asymmetric comparisons, so it reads as somewhat more conservative
+  at the shipped default.
+
+### Fixed (2026-07-28 — v25 review fix wave)
+- **The daemon image now bakes `Qwen/Qwen3-Embedding-0.6B`** — it
+  previously baked only `all-MiniLM-L6-v2` while the default moved to
+  Qwen3 under `HF_HUB_OFFLINE=1`, so a container built from that state
+  booted healthy and then threw `OSError` on the first memory tool call.
+  A guard test pins the Dockerfile bake to `EmbeddingConfig.model_name`'s
+  default so the two can't drift apart again.
+- **Legacy `.pt` bank migration re-embeds on a dimension mismatch.**
+  `migrate_legacy` used to insert a legacy bank's stored entry embeddings
+  verbatim; a real legacy bank is 384-d (MiniLM-era) and now fails a
+  `vector(1024)` insert every boot (swallowed to a retried warning). It
+  now re-embeds any entry whose stored embedding doesn't match the live
+  pipeline's dimension, through that same `EmbeddingPipeline` instance.
+- **`migrate_legacy`'s cortex-facts branch gets the same re-embed-on-
+  dim-mismatch treatment.** It previously inserted a legacy fact's stored
+  claim embedding verbatim via `replace_facts` — on a real (384-d) legacy
+  bank this raised AFTER the entries loop had already committed, so the
+  `.pre-v8.bak` rename was never reached and the idempotency guard
+  (`storage.load_entries() or storage.load_facts()`) then permanently
+  blocked every retry, losing the legacy facts for good. Now re-embeds
+  from each record's own `(entity, attribute, value)` claim text before
+  insertion, same as the entries branch.
+- **`ops/restore_from_pt.py` refuses on an embedding-dimension mismatch**
+  instead of inserting a snapshot's vectors verbatim. It restores a
+  same-era `.pt` snapshot into the live bank (disaster recovery, not a
+  migration tool), so a pre-v25 384-d `.bak` restored after the live bank
+  moved to `vector(1024)` previously either raised partway through the
+  entries loop (a partial, silent restore — each `insert_entry` commits
+  on its own) or risked corrupting a future batched insert path. It now
+  checks every stored embedding's length against the live bank's declared
+  dimension before writing anything, and exits 1 with nothing written on
+  any mismatch.
+- **`/health` reports `init_refusal` + `status: "degraded"`** when
+  `MemoryService._ensure_init`'s storage construction hits schema v25's
+  dimension-mismatch refusal — previously invisible until the first tool
+  call, since the refusal fires lazily and `/health` doesn't construct
+  storage eagerly.
+
 ### Added (2026-07-28 — embedding backbone decided on our corpus: Qwen3-Embedding-0.6B)
 - **Seven-arm fp32 shootout** on the LongMemEval slice (150 questions,
   74,183 haystack turns, 299 gold;
