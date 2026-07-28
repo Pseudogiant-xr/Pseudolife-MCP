@@ -500,7 +500,8 @@ def _assert_write_path_cosine_one(pipeline, text: str, stored_vec) -> None:
     same weights), not the one internal to the script under test."""
     from pseudolife_memory.storage.postgres import _embedding_out
 
-    query_vec = pipeline.encode_single(text)
+    doc_vec = pipeline.encode_single(text)
+    qry_vec = pipeline.encode_query(text)
     # Reuse the storage layer's own reader instead of np.asarray: pgvector
     # <0.5 hands psycopg reads back as numpy arrays, 0.5+ returns ``Vector``
     # objects that np.asarray raises TypeError on. The dependency is
@@ -508,15 +509,25 @@ def _assert_write_path_cosine_one(pipeline, text: str, stored_vec) -> None:
     # legitimately differ -- which is exactly how this test passed here and
     # failed on the runner. _embedding_out already encodes that lesson.
     stored = torch.from_numpy(_embedding_out(stored_vec))
-    cos = torch.dot(stored, query_vec).item()
-    # One-sided on purpose. An UPPER bound on a cosine is meaningless: two
-    # independently-computed unit vectors dot to 1.0 +/- float32 noise, and
-    # that noise is machine-dependent -- CI produced 1.00013, which a
-    # two-sided abs=1e-4 rejected for being *too* identical. The bound only
-    # has to separate document-side (~1.0) from an encode_query slip, which
-    # the review measured at 0.20-0.93 on these same rows; 0.999 sits three
-    # orders of magnitude clear of the noise and 0.07 clear of the signal.
-    assert cos > 0.999, f"cosine {cos} for text={text!r}"
+    cos_doc = torch.dot(stored, doc_vec).item()
+    cos_qry = torch.dot(stored, qry_vec).item()
+    # RELATIVE, because no absolute threshold is verifiable here. The
+    # migration encodes in batches and this verifier encodes singly; on
+    # this machine those agree to 1.000000, but on CI's BLAS/threading they
+    # drift ~2e-3 -- so a bound tuned locally is a bound tuned to one CPU
+    # (two CI failures learned that the hard way: 1.00013 rejected as "too
+    # identical", then 0.99797 as "not identical enough"). The claim this
+    # test actually makes is directional: the stored vector is the DOCUMENT
+    # encoding, not a query one. Measured doc-minus-query margins across
+    # these rows run 0.046-0.254, so 0.02 is comfortably inside the signal
+    # while immune to batch, machine, and model drift.
+    assert cos_doc > cos_qry + 0.02, (
+        f"stored vector looks query-side: cos_doc={cos_doc:.6f} "
+        f"cos_qry={cos_qry:.6f} for text={text!r}")
+    # And it really is that vector, not merely closer to it than to the
+    # query one -- catches a garbage/zero/stale vector that would satisfy
+    # the direction test vacuously.
+    assert cos_doc > 0.99, f"cos_doc {cos_doc:.6f} for text={text!r}"
 
 
 def test_apply_migrates_all_four_tables(v24_bank, pg_url, monkeypatch):
