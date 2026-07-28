@@ -6,6 +6,44 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-28 — Docker build-cache retention)
+- **`ops/prune-build-cache.ps1` / `.sh`** give the BuildKit cache a
+  retention policy: an age pass (`docker builder prune --force --filter
+  until=168h`, `-MaxAgeHours` / `--max-age-hours`), then a size-ceiling
+  pass (`--max-used-space`, default 20GB, `-MaxUsedSpaceGB` /
+  `--max-used-space-gb`) only if still over cap after the age pass, then a
+  Windows/WSL-only `fstrim` of the `docker-desktop` disk. `-DryRun` /
+  `--dry-run` reports an estimate and changes nothing; `-NoTrim` /
+  `--no-trim` runs the prune but skips fstrim. The sibling of the
+  2026-07-14 rollback-tag retention: one deploy produces ~12.45GB of cache
+  across 17 entries, and 51.87GB across 169 entries — all inactive, some
+  5-6 weeks old — had accumulated by 2026-07-28, with ~52GB regrowing in
+  the 13 days after the prior manual trim.
+- **`ops/update.ps1` / `.sh` prune after a healthy deploy**, via
+  `-KeepCacheHours` / `--keep-cache-hours` (default 168) and
+  `-NoCachePrune` / `--no-cache-prune`. Placement is load-bearing: before
+  the build it would delete the cache that build reuses, and on the
+  unhealthy path it would strip the cache a rollback rebuild needs (that
+  branch exits first, so retention is skipped for free). Non-fatal —
+  retention never fails a deploy that already succeeded.
+- **`ops/install-cache-retention.ps1`** registers a weekly Windows
+  Scheduled Task (`-DayOfWeek` / `-At`, default Sunday 03:00;
+  `-Unregister` removes it) for stretches with no deploys. Windows-only,
+  and must be registered from the permanent checkout, not a worktree — it
+  bakes its own directory into the registered command, so a worktree
+  registration breaks silently once that worktree is deleted. Re-run it
+  if the checkout ever moves.
+- **`ops/compact-docker-vhdx.ps1` + `docs/runbooks/docker-disk-retention.md`.**
+  `fstrim` frees space inside the VM but never shrinks the host `.vhdx`;
+  only an offline `Optimize-VHD -Mode Full` does, and that needs
+  elevation plus full Docker downtime, so it stays manual. The script
+  pre-flights `Optimize-VHD` availability (ships with the Hyper-V module;
+  absent on Windows Home) and rejects a non-file `-Path` before stopping
+  anything.
+- Scope guard: these scripts only ever call `docker builder prune`. Never
+  images, containers, `docker system prune`, or any volume command —
+  enforced by `tests/test_ops_prune_build_cache.py`, not by convention.
+
 ### Fixed (2026-07-28 — five `ops/*.sh` scripts were not executable in git)
 - **Executable bit restored on `ops/install-shim-autostart.sh`, `ops/install.sh`,
   `ops/preflight.sh`, `ops/prune-build-cache.sh`, `ops/prune-rollbacks.sh`** —

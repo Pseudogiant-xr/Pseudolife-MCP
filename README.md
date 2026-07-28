@@ -302,9 +302,11 @@ without touching Postgres or the extractor:
 It backs up the bank (`pg_dump` + a state-volume tar), tags a rollback
 image, rebuilds + recreates **only** the daemon, and waits for `/health`.
 It never runs `down -v`. (Host-process install: just restart the daemon —
-`pip install -e .` is editable.) Reclaim accumulated build cache now and
-then with `docker builder prune` (safe — it only touches build layers);
-never `docker system prune --volumes`, which deletes volumes.
+`pip install -e .` is editable.) Build cache is pruned automatically after
+every healthy deploy; see
+[Docker disk retention](docs/runbooks/docker-disk-retention.md) for the
+weekly Scheduled Task and the manual `.vhdx` compact. Never run
+`docker system prune --volumes`, which deletes volumes.
 
 ## Wire into your coding agent
 
