@@ -6,6 +6,77 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-28 — Docker build-cache retention)
+- **`ops/prune-build-cache.ps1` / `.sh`** give the BuildKit cache a
+  retention policy: an age pass (`docker builder prune --force --filter
+  until=168h`, `-MaxAgeHours` / `--max-age-hours`), then a size-ceiling
+  pass (`--max-used-space`, default 20GB, `-MaxUsedSpaceGB` /
+  `--max-used-space-gb`) only if still over cap after the age pass, then a
+  Windows/WSL-only `fstrim` of the `docker-desktop` disk. `-DryRun` /
+  `--dry-run` reports an estimate and changes nothing; `-NoTrim` /
+  `--no-trim` runs the prune but skips fstrim. The sibling of the
+  2026-07-14 rollback-tag retention: one deploy produces ~12.45GB of cache
+  across 17 entries, and 51.87GB across 169 entries — all inactive, some
+  5-6 weeks old — had accumulated by 2026-07-28, with ~52GB regrowing in
+  the 13 days after the prior manual trim.
+- **fstrim is invoked as `wsl -d docker-desktop -e sh -c "fstrim -v
+  /mnt/docker-desktop-disk"`, not as the bare `-e fstrim` target.** `wsl -d
+  <distro> -e <cmd>` fails to resolve `fstrim` when passed directly as the
+  `-e` target, even though `/sbin` (where `fstrim` lives) is on the
+  child's `PATH` (`execvpe(fstrim) failed: No such file or directory`);
+  `sh -c` works because the shell performs its own `PATH` lookup instead
+  of relying on wsl's relay to do it. Verified live to reclaim 207.2MiB.
+  Pinned by `tests/test_ops_prune_build_cache.py`.
+- **The size-ceiling pass is a weaker backstop than the age pass, not a
+  peer mechanism.** Measured 2026-07-28 against a 12.45GB / 17-entry
+  cache: `docker builder prune --force --max-used-space 8000000000`
+  reclaimed **0B**, because 14 of the 17 entries were `Shared=true` with
+  the live daemon image, and a build-cache prune cannot free layers an
+  existing image still holds — only the 3 unshared entries (3.314MB
+  total) were actually prunable. The ceiling pass can therefore be a
+  no-op during exactly the "heavy build week" it exists to cover; it only
+  starts reclaiming once that cache has unshared, i.e. after the images
+  holding it are removed (e.g. by `ops/prune-rollbacks.*`). The age pass
+  is the primary mechanism in the steady state.
+- **`ops/update.ps1` / `.sh` prune after a healthy deploy**, via
+  `-KeepCacheHours` / `--keep-cache-hours` (default 168) and
+  `-NoCachePrune` / `--no-cache-prune`. Placement is load-bearing: before
+  the build it would delete the cache that build reuses, and on the
+  unhealthy path it would strip the cache a rollback rebuild needs (that
+  branch exits first, so retention is skipped for free). Non-fatal —
+  retention never fails a deploy that already succeeded.
+- **`ops/install-cache-retention.ps1`** registers a weekly Windows
+  Scheduled Task (`-DayOfWeek` / `-At`, default Sunday 03:00;
+  `-Unregister` removes it) for stretches with no deploys. Windows-only,
+  and must be registered from the permanent checkout, not a worktree — it
+  bakes its own directory into the registered command, so a worktree
+  registration breaks silently once that worktree is deleted. Re-run it
+  if the checkout ever moves.
+- **`ops/compact-docker-vhdx.ps1` + `docs/runbooks/docker-disk-retention.md`.**
+  `fstrim` frees space inside the VM but never shrinks the host `.vhdx`;
+  only an offline `Optimize-VHD -Mode Full` does, and that needs
+  elevation plus full Docker downtime, so it stays manual. The script
+  pre-flights `Optimize-VHD` availability (ships with the Hyper-V module;
+  absent on Windows Home) and rejects a non-file `-Path` before stopping
+  anything.
+- Scope guard: these scripts only ever call `docker builder prune`. Never
+  images, containers, `docker system prune`, or any volume command —
+  enforced by `tests/test_ops_prune_build_cache.py`, not by convention.
+
+### Fixed (2026-07-28 — five `ops/*.sh` scripts were not executable in git)
+- **Executable bit restored on `ops/install-shim-autostart.sh`, `ops/install.sh`,
+  `ops/preflight.sh`, `ops/prune-build-cache.sh`, `ops/prune-rollbacks.sh`** —
+  all five were tracked as mode `100644`, which clones as non-executable on
+  Linux/macOS. `ops/update.sh` invokes `prune-rollbacks.sh` and
+  `prune-build-cache.sh` by bare path; both failures were swallowed by a
+  `WARNING`-and-continue wrapper, so rollback-tag retention has been a silent
+  no-op on every Linux/macOS deploy since `prune-rollbacks.sh` shipped
+  (commit `b47430de`, 2026-07-14). `ops/install.sh` being non-executable also
+  broke the documented quickstart (README.md and every translated
+  `docs/i18n/README.*.md` tell a fresh clone to run it directly).
+  `tests/test_ops_script_modes.py` guards the git index mode of every tracked
+  `ops/*.sh` file so this cannot regress silently again.
+
 ### Added (2026-07-28 — v25 embedding migration script)
 - **`ops/migrate_embeddings.py`** takes a live v24 bank (four
   `vector(384)` embedding columns) to v25 (`vector(1024)`) offline: dry-
@@ -144,7 +215,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   direction. User rows now win over a disagreeing artifact (reported in the
   dry run), and are skipped on agreement too — re-upserting would churn
   `origin` back to `model` and unlock the row for the run after.
-
 
 ### Added (2026-07-27 — freshness is inferred from the entity's kind; schema **v24**)
 - **`entity_kinds` (schema v24) stores one kind per entity** — `artifact`

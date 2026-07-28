@@ -6,6 +6,8 @@
 #   ops/update.sh --tag pre-x      # name the rollback image tag suffix
 #   ops/update.sh --no-backup      # skip the pg_dump (NOT recommended)
 #   ops/update.sh --keep-rollbacks 5  # rollback tags to retain (default 2)
+#   ops/update.sh --keep-cache-hours 24  # build cache to retain, hours (default 168)
+#   ops/update.sh --no-cache-prune    # skip build-cache retention entirely
 #
 # Rebuilds + recreates ONLY the daemon container (`--no-deps`), so Postgres and
 # the extractor are never touched. The bank lives in EXTERNAL volumes; this never
@@ -15,12 +17,16 @@ set -euo pipefail
 TAG=""
 NO_BACKUP=0
 KEEP_ROLLBACKS=2
+KEEP_CACHE_HOURS=168
+NO_CACHE_PRUNE=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --tag)            TAG="$2"; shift 2 ;;
         --no-backup)      NO_BACKUP=1; shift ;;
         --keep-rollbacks) KEEP_ROLLBACKS="$2"; shift 2 ;;
+        --keep-cache-hours) KEEP_CACHE_HOURS="$2"; shift 2 ;;
+        --no-cache-prune)   NO_CACHE_PRUNE=1; shift ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
@@ -115,4 +121,15 @@ else
     echo "WARNING: to roll back:" >&2
     print_rollback >&2
     exit 1
+fi
+
+# 5. Build-cache retention. Deliberately LAST, for two reasons: before the
+#    build it would delete the cache the build reuses (cold-starting every
+#    deploy), and on the unhealthy path above it would strip the cache an
+#    operator's rollback rebuild wants — that branch exits, so this is
+#    skipped for free. A retention hiccup must never fail a good deploy.
+if [ "$NO_CACHE_PRUNE" != "1" ]; then
+    if ! "$(dirname "$0")/prune-build-cache.sh" --max-age-hours "$KEEP_CACHE_HOURS"; then
+        echo "WARNING: build-cache retention failed (deploy already succeeded)." >&2
+    fi
 fi

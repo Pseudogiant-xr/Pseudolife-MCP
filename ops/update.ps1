@@ -7,6 +7,8 @@
 #   ops\update.ps1 -Tag pre-x      # name the rollback image tag suffix
 #   ops\update.ps1 -NoBackup       # skip the pg_dump (NOT recommended)
 #   ops\update.ps1 -KeepRollbacks 5  # rollback tags to retain (default 2)
+#   ops\update.ps1 -KeepCacheHours 24 # build cache to retain, hours (default 168)
+#   ops\update.ps1 -NoCachePrune     # skip build-cache retention entirely
 #
 # Rebuilds + recreates ONLY the daemon container (`--no-deps`), so Postgres and
 # the extractor are never touched. The bank lives in EXTERNAL volumes; this never
@@ -14,7 +16,9 @@
 param(
     [string]$Tag = "",
     [switch]$NoBackup,
-    [int]$KeepRollbacks = 2
+    [int]$KeepRollbacks = 2,
+    [int]$KeepCacheHours = 168,
+    [switch]$NoCachePrune
 )
 
 $ErrorActionPreference = "Stop"
@@ -109,4 +113,17 @@ if ($h) {
     Write-Warning "To roll back:"
     $rollbackLines | ForEach-Object { Write-Warning $_ }
     exit 1
+}
+
+# 5. Build-cache retention. Deliberately LAST, for two reasons: before the
+#    build it would delete the cache the build reuses (cold-starting every
+#    deploy), and on the unhealthy path above it would strip the cache an
+#    operator's rollback rebuild wants — that branch exits, so this is
+#    skipped for free. A retention hiccup must never fail a good deploy.
+if (-not $NoCachePrune) {
+    try {
+        & (Join-Path $PSScriptRoot "prune-build-cache.ps1") -MaxAgeHours $KeepCacheHours
+    } catch {
+        Write-Warning "Build-cache retention failed (deploy already succeeded): $_"
+    }
 }
