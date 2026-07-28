@@ -4,6 +4,11 @@ What the memory actually buys, measured. Part of the
 [user guide](../../README.md#documentation); the full methodology and every
 finding live in [`evals/README.md`](../../evals/README.md).
 
+Stored embeddings in a bank from before the schema-v25 embedding-backbone
+swap and one from after it are not comparable (different model, different
+dimension) — the score-level numbers below remain valid regardless, since
+they measure accuracy/recall, not raw vectors.
+
 ## LongMemEval — knowledge updates
 
 Measured on the **knowledge-update subset of

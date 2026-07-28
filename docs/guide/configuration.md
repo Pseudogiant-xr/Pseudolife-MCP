@@ -25,6 +25,22 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
 
 ## Built-in defaults (tuned for Claude's use case)
 
+- **Embedding backbone `Qwen/Qwen3-Embedding-0.6B`** (`EmbeddingConfig.model_name`,
+  default since schema v25) — fp32 torch, no GPU sidecar. It's
+  instruction-asymmetric: query-side text (search/recall probes) is encoded
+  with `EmbeddingConfig.query_prefix`'s instruction prefix via
+  `encode_query()`; everything stored (entries, fact/world/lesson claim
+  text, slot and entity-name embeddings) is encoded bare via `encode()` /
+  `encode_single()`. `query_prefix` defaults to the Qwen3-Embedding card's
+  exact instruction string — set it to `""` to restore symmetric behavior
+  for a model (like the previous default, `all-MiniLM-L6-v2`) that doesn't
+  distinguish query/document sides. `max_seq_length` caps the tokenizer at
+  512 tokens (a min-with-model-default cap, never a raise) regardless of
+  the model's native context window. See
+  [asymmetric query/document encoding](retrieval.md#asymmetric-query-and-document-encoding)
+  for what this changes about retrieval, and the
+  [schema version history](#schema-version-history) below for the v25
+  cutover itself.
 - **Surprise threshold `0.0`** — the v0.5 store gate measures *novelty*
   (`1 − max cos` to existing entries). Claude stores deliberately, so the
   gate stays permissive (store everything; novelty still drives
@@ -326,7 +342,10 @@ banks auto-migrate into Postgres. The one exception is v25 itself: a
 vector *dimension* change on an existing column is not additive, so
 `ensure_schema` refuses to start against a bank still dimensioned at
 v24 or earlier instead of attempting an in-place ALTER — run the
-human-gated `ops/migrate_embeddings.py` first. The milestones:
+human-gated `ops/migrate_embeddings.py` first. Full step-by-step operator
+procedure (backup, stop, dry-run, apply, deploy, verify, rollback):
+[the v25 migration runbook](../runbooks/embedding-v25-migration.md). The
+milestones:
 
 | Version | What it added |
 |---|---|
@@ -344,6 +363,6 @@ human-gated `ops/migrate_embeddings.py` first. The milestones:
 | v22 | `edges(dst_id)` index (dst-side graph lookups no longer sequential-scan) |
 | v23 | `facts.freshness_class` — read-time currency on personal cortex facts (evergreen default, so existing facts are unchanged; mark transient ones `volatile` and they decay and flag `stale`) |
 | v24 | `entity_kinds` (one `artifact`/`system`/`concept` kind per entity) — `freshness_class` now defaults to inferring from the entity's kind instead of a fixed default; only `system` entities can resolve `volatile`, and an empty table resolves everything to `evergreen`, so behaviour is unchanged until it is populated |
-| v25 | `entries`/`facts`/`world_facts`/`lessons.embedding` move from `vector(384)` to `vector(1024)` — default embedding backbone swaps to Qwen/Qwen3-Embedding-0.6B (measured R@10 0.809 vs shipped MiniLM's 0.572). `ensure_schema` refuses to start against an existing v24-dimensioned bank rather than attempting an in-place ALTER; migrate first with `ops/migrate_embeddings.py` |
+| v25 | `entries`/`facts`/`world_facts`/`lessons.embedding` move from `vector(384)` to `vector(1024)` — default embedding backbone swaps to Qwen/Qwen3-Embedding-0.6B (measured R@10 0.809 vs shipped MiniLM's 0.572). Qwen3-Embedding is instruction-asymmetric — see [asymmetric query/document encoding](retrieval.md#asymmetric-query-and-document-encoding) — so similarity-threshold semantics shift too. `ensure_schema` refuses to start against an existing v24-dimensioned bank rather than attempting an in-place ALTER; migrate first with `ops/migrate_embeddings.py` (dry-run by default; `--apply --backup-verified` to commit) |
 
 After running the entity-kind backfill (`evals/apply_entity_kinds.py --apply`), the daemon must be restarted for inference to take effect — it caches the entity-kind map for the life of its process.

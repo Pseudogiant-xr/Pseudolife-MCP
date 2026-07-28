@@ -247,10 +247,14 @@ knowledge graph walkable via `memory_graph` and multi-hop `memory_recall`
 
 The whole stack — Postgres **and** the memory daemon — runs in Docker.
 No host Python, no torch install, no version skew; the daemon image bakes
-in CPU-only torch and the `all-MiniLM-L6-v2` weights, so it runs
-identically on Windows / macOS / Linux. Requires only Docker; built once:
-~3 GB daemon image + ~0.6 GB Postgres + ~9 GB extractor sidecar (skip the
-sidecar entirely with the installer's `sonnet-only` mode).
+in CPU-only torch and the embedding weights — `Qwen/Qwen3-Embedding-0.6B`
+(the default retrieval backbone since schema v25) plus `all-MiniLM-L6-v2`
+(kept baked for the ONNX-parity test path) — so it runs identically on
+Windows / macOS / Linux. Requires only Docker; built once: ~4 GB daemon
+image (approximate — grew from ~3 GB baking in the Qwen3 weights
+alongside MiniLM; not yet re-measured against a real build) + ~0.6 GB
+Postgres + ~9 GB extractor sidecar (skip the sidecar entirely with the
+installer's `sonnet-only` mode).
 
 ```bash
 git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
@@ -549,7 +553,7 @@ renders the real frontend against canned data:
 | Episodes + tags | Session episodes daemon-owned, keyed by a resolved five-tier session identity; hook/shim eager-open or lazy-open + idle reaper + prune-empty + resume-after-reap; nested sub-episodes with subtree-expanded recall; multi-valued `tags=[...]` |
 | Session briefing | SessionStart hook injects unsure-graph + lessons + verified world facts + last-session recap (`pseudolife-mcp briefing`) |
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
-| Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); BM25 hybrid pool (`bm25=True`, stdlib only); ONNX embedding backend (`pip install .[onnx]` — ~3x faster CPU encode, bit-identical, auto-enabled when installed); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
+| Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); BM25 hybrid pool (`bm25=True`, stdlib only); ONNX embedding backend (`pip install .[onnx]` — ~3x faster CPU encode, bit-identical, auto-enabled when installed; the default Qwen3-Embedding-0.6B has no ONNX export and falls back to torch, so this currently only speeds up MiniLM-family models); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, graph visualiser, search/trace, config editor (read-mostly, token-gated like `/mcp`) |
 | Schema version | v25 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start; legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
 
@@ -560,8 +564,9 @@ version, storage backend, auth state, and `persist_errors` (non-zero means
 writes are failing to reach Postgres; check `docker logs
 pseudolife-mcp-daemon`).
 
-- **First build is slow / big.** The daemon image (~3 GB, several minutes to
-  build) bakes in CPU torch and the embedding model; the extractor sidecar
+- **First build is slow / big.** The daemon image (~4 GB approximate, several
+  minutes to build) bakes in CPU torch and the embedding weights (Qwen3-Embedding-0.6B
+  plus MiniLM); the extractor sidecar
   adds a ~5.3 GB model download on its first build. Every start after that is
   offline and fast — if a *rebuild* is re-downloading models, the Docker
   layer cache was pruned.

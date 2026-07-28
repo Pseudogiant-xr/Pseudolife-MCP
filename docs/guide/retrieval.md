@@ -4,6 +4,26 @@ How `memory_search` ranks, the optional reranker and BM25 channels,
 abstention, ranking-trace debugging, multi-hop `memory_recall`, and the
 knowledge graph it walks. Part of the [user guide](../../README.md#documentation).
 
+## Asymmetric query and document encoding
+
+Since schema v25, the default embedding backbone (`Qwen/Qwen3-Embedding-0.6B`)
+is instruction-asymmetric: `memory_search` and every other retrieval probe
+(cortex/world/lesson search, recall seed queries, dedup/curation probes)
+encode the query text with an instruction prefix (`EmbeddingConfig.query_prefix`)
+that stored documents never carry — entries, fact/world/lesson claim text,
+and slot/entity-name embeddings are all encoded bare. This is a real
+query-to-document asymmetry, not just a model swap: similarity thresholds
+calibrated on the previous symmetric model (`alias_candidate_min_cosine`,
+`curation_min_similarity`, the surprise gate, and the `min_score` 0.2/0.25
+recall floors covered below) now gate a prefixed-query-to-document cosine
+rather than a doc-to-doc one, so their semantics shifted, not just their
+scale — they're left unrecalibrated pending live data, and read as somewhat
+more conservative at the shipped defaults (`supersede()`'s embedding-fallback
+paraphrase probe is one of the now-asymmetric comparisons). See
+[Configuration](configuration.md#built-in-defaults-tuned-for-claudes-use-case)
+for the config fields and the [schema version history](configuration.md#schema-version-history)
+for the v25 cutover itself.
+
 ## Cross-encoder reranking
 
 ```
@@ -55,8 +75,8 @@ memory_search("process_chunk_v2")
 memory_search("ship blocker for v9.42.0")
 ```
 
-Dense MiniLM-L6 embeddings are great for *semantic* similarity but
-can underweight tokens with no real semantic neighbours — function
+Dense embeddings (Qwen3-Embedding-0.6B by default) are great for *semantic*
+similarity but can underweight tokens with no real semantic neighbours — function
 names, version strings, error codes, hex hashes. BM25 is the classic
 sparse-lexical scorer (Okapi BM25 with Lucene-style IDF) that weights
 tokens by inverse document frequency, so rare-but-exact tokens count
