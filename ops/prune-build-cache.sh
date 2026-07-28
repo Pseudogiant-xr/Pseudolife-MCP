@@ -119,9 +119,20 @@ build_cache_bytes() {
     return 1
 }
 
+# `date -u -d "-N hours"` / `date -u -d "<timestamp>"` are GNU coreutils
+# extensions — BSD/macOS `date` uses `-d` for something else entirely, so
+# on that platform this can't just be called and trusted. Detect once so
+# the dry-run estimate can say plainly that it is unavailable there,
+# instead of silently reporting a wrong number from a misparsed `-d`. Only
+# --dry-run reaches this; the real (mutating) path never calls `date`.
+is_gnu_date() {
+    date -u -d "1970-01-01 00:00:00" +%s >/dev/null 2>&1
+}
+
 # Dry-run only. BuildKit has no --dry-run, so this sums entries whose
 # CreatedAt precedes the cutoff. It is an ESTIMATE: BuildKit's own until=
 # filter considers last-used, and shared entries may not free fully.
+# Requires GNU date (see is_gnu_date) — callers must guard on that first.
 stale_estimate_bytes() {
     local cutoff row created size total=0 when out bytes
     cutoff="$(date -u -d "-${MAX_AGE_HOURS} hours" +%s)"
@@ -155,16 +166,24 @@ before="$(build_cache_bytes)"
 echo "==> Build-cache retention: $(format_bytes "$before") in cache (age policy ${MAX_AGE_HOURS}h, ceiling $(format_bytes "$cap_bytes"))."
 
 if [ "$DRY_RUN" = "1" ]; then
-    stale="$(stale_estimate_bytes)"
     echo "==> DRY RUN: nothing below is executed."
     echo "    age pass    : docker builder prune --force --filter until=${MAX_AGE_HOURS}h"
-    echo "                  estimated reclaim $(format_bytes "$stale")."
-    echo "                  (Estimate: sums CreatedAt; BuildKit's until= uses last-used,"
-    echo "                   and shared entries may not free fully.)"
-    if [ $(( before - stale )) -gt "$cap_bytes" ]; then
-        echo "    ceiling pass: docker builder prune --force --max-used-space $cap_bytes"
+    if is_gnu_date; then
+        stale="$(stale_estimate_bytes)"
+        echo "                  estimated reclaim $(format_bytes "$stale")."
+        echo "                  (Estimate: sums CreatedAt; BuildKit's until= uses last-used,"
+        echo "                   and shared entries may not free fully.)"
+        if [ $(( before - stale )) -gt "$cap_bytes" ]; then
+            echo "    ceiling pass: docker builder prune --force --max-used-space $cap_bytes"
+        else
+            echo "    ceiling pass: skipped (post-age size would be within the ceiling)."
+        fi
     else
-        echo "    ceiling pass: skipped (post-age size would be within the ceiling)."
+        echo "                  estimated reclaim: unavailable on this platform (the"
+        echo "                  CreatedAt cutoff comparison requires GNU date; this"
+        echo "                  system's date does not support GNU -d syntax)."
+        echo "    ceiling pass: unknown (depends on the age-pass estimate above, which"
+        echo "                  is unavailable on this platform)."
     fi
     if [ "$NO_TRIM" != "1" ]; then
         echo "    trim        : wsl -d docker-desktop -e sh -c \"fstrim -v /mnt/docker-desktop-disk\""
@@ -193,15 +212,17 @@ if ! command -v wsl > /dev/null 2>&1; then
     echo "==> Build-cache retention: no wsl on PATH; skipping fstrim."
     exit 0
 fi
-if ! wsl -d docker-desktop -e true 2>/dev/null; then
+if ! wsl -d docker-desktop -e sh -c true 2>/dev/null; then
     echo "==> Build-cache retention: no docker-desktop WSL distro; skipping fstrim."
     exit 0
 fi
-# `wsl -d <distro> -e <cmd>` resolves <cmd> with an effectively empty PATH
-# (measured: PATH=), and fstrim lives at /sbin/fstrim — so passing it as
-# the bare -e target always fails with "execvpe(fstrim) failed: No such
-# file or directory". `sh -c` establishes a usable PATH; verified live to
-# reclaim 207.2MiB.
+# `wsl -d <distro> -e <cmd>` fails to resolve fstrim when passed as the bare
+# -e target, even though /sbin (where fstrim lives) is on the child's PATH:
+# "execvpe(fstrim) failed: No such file or directory". An absolute path
+# (/sbin/fstrim) works, and so does `sh -c`, because the shell performs its
+# own PATH lookup rather than relying on wsl's relay to do it; verified live
+# to reclaim 207.2MiB. The distro probe above uses the same `sh -c` form for
+# consistency, since it is the same bare-`-e` resolution that fails here.
 if ! wsl -d docker-desktop -e sh -c "fstrim -v /mnt/docker-desktop-disk"; then
     echo "WARNING: fstrim failed (retention otherwise succeeded)." >&2
 fi

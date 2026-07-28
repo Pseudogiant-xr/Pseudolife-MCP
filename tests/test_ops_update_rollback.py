@@ -256,3 +256,97 @@ def test_update_sh_unhealthy_deploy_never_runs_build_cache_retention(tmp_path):
         f"system df' probe fired) — calls: {calls}\n"
         f"output:\n{proc.stdout}{proc.stderr}"
     )
+
+
+# --- The non-fatal wrapper itself: does a PRUNE FAILURE actually stay ------
+# --- non-fatal on an otherwise-healthy deploy? -----------------------------
+#
+# Spec Sec6 claims this is pinned; it wasn't. The tests above only prove
+# retention is *skipped* on the unhealthy path (a reachability property).
+# Neither they nor test_ops_prune_build_cache.py ever drive prune-build-
+# cache to actually FAIL while the deploy is otherwise healthy — which is
+# the one scenario the try/catch (ps1) / `if !` (sh) wrapper exists for.
+#
+# `docker system df` is prune-build-cache's own first call (Get-
+# BuildCacheBytes / build_cache_bytes) and is not used by anything else on
+# the healthy path (prune-rollbacks never issues it — see the comment
+# above), so failing only that call isolates the prune's own failure
+# without disturbing the rest of a healthy deploy.
+
+
+def test_build_cache_prune_failure_does_not_fail_a_healthy_deploy(tmp_path):
+    """A build-cache-retention failure must not fail a deploy that already
+    reported healthy. Stub `docker system df` to fail (LASTEXITCODE 1),
+    keep the health probe reporting 'ok', and assert update.ps1 still exits
+    0 with the non-fatal warning emitted — the try/catch's one job."""
+    driver = tmp_path / "driver_cachefail.ps1"
+    driver.write_text(
+        f"""
+function global:docker {{
+    $a = @($args | ForEach-Object {{ "$_" }})
+    if ($a[0] -eq "image" -and $a[1] -eq "inspect") {{
+        $global:LASTEXITCODE = 0
+        return "[]"
+    }}
+    if ($a[0] -eq "system" -and $a[1] -eq "df") {{
+        $global:LASTEXITCODE = 1
+        return
+    }}
+    $global:LASTEXITCODE = 0
+    return
+}}
+function global:Invoke-RestMethod {{ @{{ status = 'ok'; schema = 22; persist_errors = 0 }} }}
+& "{UPDATE_PS1}" -NoBackup -Tag unittest 2>&1 | ForEach-Object {{ "$_" }}
+""",
+        encoding="utf-8",
+    )
+    proc = subprocess.run(
+        [PWSH, "-NoProfile", "-File", str(driver)],
+        capture_output=True, text=True, timeout=180,
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, (
+        "a build-cache-retention failure must not fail an otherwise-"
+        f"healthy deploy:\n{out}")
+    assert "build-cache retention failed" in out.lower(), (
+        f"expected the non-fatal warning to be emitted:\n{out}")
+
+
+@pytest.mark.skipif(BASH is None, reason="bash not available")
+def test_update_sh_build_cache_prune_failure_does_not_fail_a_healthy_deploy(tmp_path):
+    """bash port: same proof, driving the real update.sh with `docker
+    system df` stubbed to fail and `curl` stubbed to report healthy."""
+    driver = tmp_path / "driver_cachefail.sh"
+    driver.write_text(
+        f'''#!/usr/bin/env bash
+set -u
+docker() {{
+    if [ "$1" = "image" ] && [ "$2" = "inspect" ]; then
+        return 0
+    fi
+    if [ "$1" = "system" ] && [ "$2" = "df" ]; then
+        return 1
+    fi
+    return 0
+}}
+curl() {{
+    echo '{{"status":"ok","schema":22,"persist_errors":0}}'
+    return 0
+}}
+export -f docker
+export -f curl
+bash "{UPDATE_SH.as_posix()}" --no-backup --tag unittest
+rc=$?
+exit $rc
+''',
+        encoding="utf-8", newline="\n")
+    proc = subprocess.run(
+        [BASH, str(driver)],
+        capture_output=True, text=True, timeout=180,
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, (
+        "a build-cache-retention failure must not fail an otherwise-"
+        f"healthy deploy:\n{out}")
+    assert "build-cache retention failed" in out.lower(), (
+        f"expected the non-fatal warning to be emitted:\n{out}")

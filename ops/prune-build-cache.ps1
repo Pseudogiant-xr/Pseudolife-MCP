@@ -139,16 +139,18 @@ if (-not (Get-Command wsl -ErrorAction SilentlyContinue)) {
     Write-Host "==> Build-cache retention: no wsl on PATH; skipping fstrim."
     return
 }
-wsl -d docker-desktop -e true 2>$null
+wsl -d docker-desktop -e sh -c true 2>$null
 if ($LASTEXITCODE -ne 0) {
     Write-Host "==> Build-cache retention: no docker-desktop WSL distro; skipping fstrim."
     return
 }
-# `wsl -d <distro> -e <cmd>` resolves <cmd> with an effectively empty PATH
-# (measured: PATH=), and fstrim lives at /sbin/fstrim — so passing it as
-# the bare -e target always fails with "execvpe(fstrim) failed: No such
-# file or directory". `sh -c` establishes a usable PATH; verified live to
-# reclaim 207.2MiB.
+# `wsl -d <distro> -e <cmd>` fails to resolve fstrim when passed as the bare
+# -e target, even though /sbin (where fstrim lives) is on the child's PATH:
+# "execvpe(fstrim) failed: No such file or directory". An absolute path
+# (/sbin/fstrim) works, and so does `sh -c`, because the shell performs its
+# own PATH lookup rather than relying on wsl's relay to do it; verified live
+# to reclaim 207.2MiB. The distro probe above uses the same `sh -c` form for
+# consistency, since it is the same bare-`-e` resolution that fails here.
 wsl -d docker-desktop -e sh -c "fstrim -v /mnt/docker-desktop-disk"
 if ($LASTEXITCODE -ne 0) {
     Write-Warning "fstrim failed (retention otherwise succeeded)."

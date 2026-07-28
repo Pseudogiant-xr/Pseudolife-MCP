@@ -19,6 +19,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   across 17 entries, and 51.87GB across 169 entries — all inactive, some
   5-6 weeks old — had accumulated by 2026-07-28, with ~52GB regrowing in
   the 13 days after the prior manual trim.
+- **fstrim is invoked as `wsl -d docker-desktop -e sh -c "fstrim -v
+  /mnt/docker-desktop-disk"`, not as the bare `-e fstrim` target.** `wsl -d
+  <distro> -e <cmd>` fails to resolve `fstrim` when passed directly as the
+  `-e` target, even though `/sbin` (where `fstrim` lives) is on the
+  child's `PATH` (`execvpe(fstrim) failed: No such file or directory`);
+  `sh -c` works because the shell performs its own `PATH` lookup instead
+  of relying on wsl's relay to do it. Verified live to reclaim 207.2MiB.
+  Pinned by `tests/test_ops_prune_build_cache.py`.
+- **The size-ceiling pass is a weaker backstop than the age pass, not a
+  peer mechanism.** Measured 2026-07-28 against a 12.45GB / 17-entry
+  cache: `docker builder prune --force --max-used-space 8000000000`
+  reclaimed **0B**, because 14 of the 17 entries were `Shared=true` with
+  the live daemon image, and a build-cache prune cannot free layers an
+  existing image still holds — only the 3 unshared entries (3.314MB
+  total) were actually prunable. The ceiling pass can therefore be a
+  no-op during exactly the "heavy build week" it exists to cover; it only
+  starts reclaiming once that cache has unshared, i.e. after the images
+  holding it are removed (e.g. by `ops/prune-rollbacks.*`). The age pass
+  is the primary mechanism in the steady state.
 - **`ops/update.ps1` / `.sh` prune after a healthy deploy**, via
   `-KeepCacheHours` / `--keep-cache-hours` (default 168) and
   `-NoCachePrune` / `--no-cache-prune`. Placement is load-bearing: before
@@ -57,30 +76,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `docs/i18n/README.*.md` tell a fresh clone to run it directly).
   `tests/test_ops_script_modes.py` guards the git index mode of every tracked
   `ops/*.sh` file so this cannot regress silently again.
-
-### Fixed (2026-07-28 — build-cache retention: fstrim never actually ran; ceiling-pass docs corrected)
-- **`wsl -d docker-desktop -e fstrim ...` had never worked.** `wsl -d
-  <distro> -e <cmd>` resolves `<cmd>` with an effectively empty `PATH`
-  (measured: `PATH=`), and `fstrim` lives at `/sbin/fstrim`, so the step
-  always failed (`execvpe(fstrim) failed: No such file or directory`) —
-  silently, since a failed fstrim only warns. Fixed in both
-  `ops/prune-build-cache.ps1` / `.sh` by wrapping the call in `sh -c`,
-  which establishes a usable `PATH`; the fixed form reclaimed 207.2MiB
-  live. Pinned by a new test in `tests/test_ops_prune_build_cache.py`
-  (confirmed RED against the old bare-`-e` form before the fix).
-- **Docs overstated the size-ceiling pass as a backstop.** Measured
-  2026-07-28 against a 12.45GB / 17-entry cache: `docker builder prune
-  --force --max-used-space 8000000000` (with `--reserved-space 0` too)
-  reclaimed **0B**, because 14 of the 17 entries were `Shared=true` with
-  the live daemon image, and pruning a build-cache record cannot free
-  layers an existing image still holds — only the 3 unshared entries
-  (3.314MB total) were actually prunable. The ceiling pass can therefore
-  be a no-op during exactly the "heavy build week" it was documented to
-  cover; it only starts working once that cache has unshared, i.e. after
-  the images holding it are removed. `docs/runbooks/docker-disk-retention.md`
-  and `docs/superpowers/specs/2026-07-28-docker-build-cache-retention-design.md`
-  are corrected: the age pass is the primary mechanism, the ceiling a
-  weaker backstop than previously described.
 
 ### Added (2026-07-27 — freshness is inferred from the entity's kind; schema **v24**)
 - **`entity_kinds` (schema v24) stores one kind per entity** — `artifact`
