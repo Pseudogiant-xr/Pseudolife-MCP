@@ -197,6 +197,34 @@ def test_dockerfile_bakes_the_default_embedding_model() -> None:
         f"HF_HUB_OFFLINE=1")
 
 
+def test_ci_warms_the_default_embedding_model() -> None:
+    """Same coupling as the Dockerfile guard above, same failure, different
+    surface — and this one shipped a red CI on PR #60 before it was caught.
+    CI warms an explicit model list, then runs the suite under
+    ``HF_HUB_OFFLINE=1``; when the default moved to Qwen3 the warm step
+    still fetched only MiniLM, so every embedder-touching test failed on a
+    cache the workflow itself had built. The cache KEY has to name it too:
+    an exact key hit restores the old cache and skips the save, so a stale
+    key re-downloads (or, offline, fails) forever."""
+    from pseudolife_memory.utils.config import EmbeddingConfig
+
+    default_model = EmbeddingConfig().model_name
+    ci = (Path(__file__).resolve().parents[1]
+          / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert default_model in ci, (
+        f".github/workflows/ci.yml never warms the default embedding model "
+        f"({default_model!r}) — the suite runs with HF_HUB_OFFLINE=1, so "
+        f"every test that constructs the embedder will fail on the runner")
+    # The cache key must move with the model list, or the restored cache
+    # silently predates it.
+    key_line = next(l for l in ci.splitlines() if l.strip().startswith("key:"))
+    slug = default_model.split("/")[-1].lower()
+    assert slug in key_line.lower(), (
+        f"the HF cache key {key_line.strip()!r} does not name "
+        f"{slug!r}; an exact hit on a stale key restores a cache without "
+        f"the current default and never saves a corrected one")
+
+
 def test_readme_carries_mcp_registry_marker() -> None:
     """The MCP registry validates PyPI ownership against this exact marker
     in the README (case-sensitive namespace — capital P). Losing it breaks

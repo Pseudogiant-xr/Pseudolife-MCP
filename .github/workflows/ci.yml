@@ -19,7 +19,10 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # v25 roughly doubled suite wall time (real Qwen3-0.6B CPU embeds
+    # replaced MiniLM's ONNX path: 238s -> ~437s locally), and a cold
+    # HF cache adds a ~1.2 GB download on top.
+    timeout-minutes: 50
 
     services:
       postgres:
@@ -60,10 +63,24 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/huggingface
-          key: hf-minilm-l6-v2
+          # Key names every model the warm step needs. Bump it whenever that
+          # list changes: an exact hit restores the OLD cache and skips the
+          # save, so a stale key silently re-downloads the new model on every
+          # run -- or, under HF_HUB_OFFLINE, fails the whole suite (v25).
+          key: hf-minilm-l6-v2-qwen3-embedding-0.6b
 
-      - name: Warm the embedder (downloads only on cache miss)
-        run: python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+      - name: Warm the embedders (downloads only on cache miss)
+        # BOTH are load-bearing: Qwen3-Embedding-0.6B is EmbeddingConfig's
+        # default since schema v25 (vector(1024)), and MiniLM is still pinned
+        # by the tests that guard the symmetric/ONNX paths. The suite then
+        # runs fully offline, so anything missing here is a hard failure.
+        run: |
+          python - <<'PY'
+          from sentence_transformers import SentenceTransformer
+          for repo in ("all-MiniLM-L6-v2", "Qwen/Qwen3-Embedding-0.6B"):
+              SentenceTransformer(repo)
+              print("warmed", repo, flush=True)
+          PY
 
       - name: Tests (offline + deterministic — the documented invocation)
         env:
