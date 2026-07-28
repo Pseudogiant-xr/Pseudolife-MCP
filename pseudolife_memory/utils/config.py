@@ -212,7 +212,7 @@ class BM25Config:
 class RerankerConfig:
     """Cross-encoder reranker over the merged retrieval pool (Tier B).
 
-    Bi-encoder retrieval (dense MiniLM-L6) is cheap but loses signal on
+    Bi-encoder retrieval (the dense default backbone) is cheap but loses signal on
     near-duplicates and ambiguous queries — a query and a relevant doc
     can have low cosine similarity while a less-relevant one wins on
     surface tokens. A cross-encoder attends over (query, candidate)

@@ -138,16 +138,28 @@ untouched). `-Tag pre-v25-embedding` names the rollback image tag `update.ps1`
 stamps on the *current* (pre-deploy) image before rebuilding — that tag is
 the rollback anchor referenced below.
 
-This is also where a failed or incomplete migration surfaces, loudly:
+A failed or incomplete migration surfaces here — but **not in
+`update.ps1`'s "Healthy" line, which you must not trust for this**.
 `ensure_schema`'s dimension guard
-(`_refuse_on_embedding_dim_mismatch`) refuses to let the daemon finish
-constructing storage against a bank whose `entries.embedding` isn't
-`vector(1024)`. If step 7 silently missed a table, the daemon does not boot
-healthy and serve half-migrated data — `update.ps1`'s own health wait fails
-and prints the rollback commands. A RuntimeError naming
-`ops/migrate_embeddings.py` and both dimensions in `docker logs
-pseudolife-mcp-daemon` means: stop here, do not retry blindly, re-check
-step 7's output first.
+(`_refuse_on_embedding_dim_mismatch`) refuses to let the daemon construct
+storage against a bank whose `entries.embedding` isn't `vector(1024)` —
+but that refusal fires in the WARMUP thread a few seconds after `/health`
+starts answering `ok`, and `update.ps1` breaks on the first `ok` it sees.
+Against a half-migrated bank, step 8 will very likely still print
+`==> Healthy`. So after update.ps1 finishes, ALWAYS run both of:
+
+```bash
+sleep 20 && curl -s http://127.0.0.1:8765/health
+```
+— must show `"status": "ok"` with **no `init_refusal` key**; `"degraded"`
+plus `init_refusal` means the guard fired. And:
+
+```bash
+docker logs pseudolife-mcp-daemon 2>&1 | grep -E "warmup init failed|Refusing to start"
+```
+— any hit means: stop here, do not retry blindly, re-check step 7's
+output first. Step 9's end-to-end `memory_search` is the true acceptance
+gate; this step only proves the container runs.
 
 ## Step 9 — verify live
 

@@ -38,8 +38,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the project's existing sentence-transformers/transformers versions —
   no dependency bump. Qwen3-Embedding is instruction-asymmetric
   (`EmbeddingConfig.query_prefix`, `EmbeddingPipeline.encode_query` —
-  landed ahead of this swap); call-site query-prefix threading across
-  `service.py`'s ~23 encode sites is a follow-up, not part of this change.
+  landed ahead of this swap); every retrieval probe across
+  `service.py`'s 23 classified encode sites now goes through
+  `encode_query` (see the threading entry below).
 - **Schema v25: `entries`/`facts`/`world_facts`/`lessons.embedding` move
   from `vector(384)` to `vector(1024)`.** `ensure_schema` stays
   additive-only — a vector dimension change is not additive, so it now
