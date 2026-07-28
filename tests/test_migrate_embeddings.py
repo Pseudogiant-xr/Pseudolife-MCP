@@ -498,8 +498,16 @@ def _assert_write_path_cosine_one(pipeline, text: str, stored_vec) -> None:
     two apart, this can. ``pipeline`` is a second, independently-built
     instance of the same real model the migration used (deterministic,
     same weights), not the one internal to the script under test."""
+    from pseudolife_memory.storage.postgres import _embedding_out
+
     query_vec = pipeline.encode_single(text)
-    stored = torch.from_numpy(np.asarray(stored_vec, dtype=np.float32))
+    # Reuse the storage layer's own reader instead of np.asarray: pgvector
+    # <0.5 hands psycopg reads back as numpy arrays, 0.5+ returns ``Vector``
+    # objects that np.asarray raises TypeError on. The dependency is
+    # unpinned (``pgvector>=0.3``), so a local venv and a fresh CI install
+    # legitimately differ -- which is exactly how this test passed here and
+    # failed on the runner. _embedding_out already encodes that lesson.
+    stored = torch.from_numpy(_embedding_out(stored_vec))
     cos = torch.dot(stored, query_vec).item()
     assert cos == pytest.approx(1.0, abs=1e-4), f"cosine {cos} for text={text!r}"
 
