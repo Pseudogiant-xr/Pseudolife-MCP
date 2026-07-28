@@ -46,7 +46,7 @@ def rebuild_fact_lines(bank: dict, emb, top_k: int, min_score: float) -> list[st
     texts = [f"{f['entity']} {f['attribute']} {f['value']}".strip()
              for f in facts]
     mat = emb.encode(texts)                            # (n, d), normalized
-    q = emb.encode_single(bank["question"])
+    q = emb.encode_query(bank["question"])
     sims = (mat @ q).tolist()
     ranked = sorted((i for i, s in enumerate(sims) if s >= min_score),
                     key=lambda i: sims[i], reverse=True)[:top_k]
