@@ -134,17 +134,23 @@ Sequence:
    pass, not the ceiling, is the mechanism that actually reclaims space in
    the steady state; see the corrected reasoning in
    `docs/runbooks/docker-disk-retention.md`.
-4. **fstrim** — Windows only, and only when `wsl -l -q` lists a
-   `docker-desktop` distro: `wsl -d docker-desktop -e sh -c "fstrim -v
+4. **fstrim** — Windows only, and only when a `wsl -d docker-desktop -e sh
+   -c true` probe exits 0, confirming the `docker-desktop` distro exists
+   (`wsl -l -q` is not used for this: it returns UTF-16LE and is unsafe to
+   parse from a shell script, so the code uses the exit-code probe
+   instead): `wsl -d docker-desktop -e sh -c "fstrim -v
    /mnt/docker-desktop-disk"`. **Measured 2026-07-28: the bare `-e fstrim`
-   form (without `sh -c`) never worked** — `wsl -d <distro> -e <cmd>`
-   resolves `<cmd>` with an effectively empty `PATH`, and `fstrim` lives at
-   `/sbin/fstrim`, so it always failed with `execvpe(fstrim) failed: No such
-   file or directory`, silently, since the step is non-fatal. `sh -c`
-   establishes a usable `PATH`; the corrected form reclaimed 207.2MiB live.
-   This returns freed blocks to the vhdx free list; it does **not** shrink
-   the host file. Its real value is making the later manual compact worth
-   running. On Linux there is no vhdx and the step is skipped entirely.
+   form (without `sh -c`) never worked** — `wsl -d <distro> -e <cmd>` fails
+   to resolve `fstrim` when passed as the bare `-e` target, even though
+   `/sbin` (where `fstrim` lives) is on the child's `PATH`
+   (`execvpe(fstrim) failed: No such file or directory`), silently, since
+   the step is non-fatal. An absolute path (`/sbin/fstrim`) works, and so
+   does `sh -c`, because the shell performs its own `PATH` lookup rather
+   than relying on wsl's relay to do it; the corrected form reclaimed
+   207.2MiB live. This returns freed blocks to the vhdx free list; it does
+   **not** shrink the host file. Its real value is making the later manual
+   compact worth running. On Linux there is no vhdx and the step is
+   skipped entirely.
 5. **Report** before / after / reclaimed.
 
 Verified present on this machine: distro `docker-desktop`, mount
@@ -168,6 +174,20 @@ The call becomes **step 5, after the health check**, for two reasons:
 Wrapped non-fatal (`try`/`catch` + warning in PowerShell, `if !` + warning in
 bash), exactly like the `prune-rollbacks` call at step 2b. A retention hiccup
 must never fail a deploy that otherwise succeeded.
+
+**Step ordering is load-bearing for the ceiling pass's own reasoning, and
+currently accidental.** `prune-rollbacks` runs at step 2b, *before* the
+build, retiring old rollback image tags; the build-cache age pass runs at
+step 5, *after* health. So by the time `until=168h` fires, the images that
+were pinning the >168h-old cache layers are already gone and that cache has
+unshared — which is why the sharing constraint documented in §5.1 step 3
+(a build-cache prune cannot free layers a live image still holds) does not
+neuter the age pass the way it neuters the ceiling pass. Neither script
+enforces this ordering explicitly; it holds only because `-KeepRollbacks`
+runs early and the cache prune runs late. A future change to
+`-KeepRollbacks` (e.g. keeping enough rollback tags to pin week-old cache)
+or to either script's step position could silently degrade the age pass
+back down to the ceiling pass's no-op behavior, with nothing to catch it.
 
 This hook is what ships retention to every user of the public repo, with no
 scheduled task to register.
@@ -266,10 +286,13 @@ not, and two real defects surfaced that no test had caught.**
   build-cache prune cannot free layers a live image still holds. Only the 3
   unshared `source.local` entries — 3.314 MB — were prunable. §5.1 step 3
   carries the full measurement and its consequence for the ceiling's value.
-- **The `fstrim` step had never worked.** `wsl -d <distro> -e <cmd>` resolves
-  with an effectively empty `PATH` and `fstrim` lives at `/sbin/fstrim`, so
-  the bare form always failed `execvpe(fstrim)`. Being non-fatal, it only
-  warned. The `sh -c` form reclaimed 207.2 MiB live on first correct run.
+- **The `fstrim` step had never worked.** `wsl -d <distro> -e <cmd>` fails to
+  resolve `fstrim` when passed as the bare `-e` target, even though `/sbin`
+  (where `fstrim` lives) is on the child's `PATH` — the bare form always
+  failed `execvpe(fstrim)`. Being non-fatal, it only warned. An absolute
+  path works, and so does `sh -c`, because the shell performs its own
+  `PATH` lookup rather than relying on wsl's relay to do it; the `sh -c`
+  form reclaimed 207.2 MiB live on first correct run.
 
 The lesson is the reason this section exists: **every layer of stubbed testing
 passed against both defects.** A stub cannot know that a real BuildKit refuses

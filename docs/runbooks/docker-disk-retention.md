@@ -19,8 +19,12 @@ automate aggressively.
 
 | Trigger | Script | Default policy |
 |---|---|---|
-| After every healthy deploy | `ops/update.ps1` / `.sh`, step 5 (last) | age 168h |
-| Weekly, if registered | Scheduled Task → `ops/prune-build-cache.ps1` | age 168h, 20GB ceiling |
+| After every healthy deploy | `ops/update.ps1` / `.sh`, step 5 (last) | age 168h, 20GB ceiling, fstrim |
+| Weekly, if registered | Scheduled Task → `ops/prune-build-cache.ps1` | age 168h, 20GB ceiling, fstrim |
+
+The deploy hook only passes `-MaxAgeHours`; `-MaxUsedSpaceGB` therefore
+takes its own default (20GB), so the two triggers enforce the identical
+ceiling, and both run `fstrim` (neither passes `-NoTrim`).
 
 ### The deploy hook
 
@@ -82,6 +86,21 @@ safe.
 This is currently the single most likely way this feature quietly stops
 working: nothing fails loudly if the registered task's target no longer
 exists, it just never runs again.
+
+**Check whether it's actually running:**
+
+```powershell
+Get-ScheduledTaskInfo -TaskName 'Pseudolife-MCP Docker cache retention'
+```
+
+- `LastTaskResult` of `0` means the last run exited cleanly. Anything else
+  means the script threw or exited non-zero on its last invocation.
+- `NextRunTime` being a real, upcoming date confirms the weekly trigger is
+  still registered and live — absent or stale means the task was
+  unregistered, or its target no longer exists (see above).
+- `LastRunTime` should be within the last week; right after a Sunday the
+  machine was off for, expect it shortly after the next boot instead,
+  courtesy of `StartWhenAvailable`.
 
 Windows-only — there is no cron/systemd-timer installer. On Linux/macOS
 the deploy hook (`ops/update.sh`) is the only automated trigger; run
@@ -157,6 +176,18 @@ ceiling**: aged cache becomes genuinely reclaimable as the images holding
 it are cleaned up (old rollback tags pruned by `ops/prune-rollbacks.*`),
 consistent with the original finding — 51.87GB across 169 entries, all
 inactive, some 5-6 weeks old, fully reclaimed by `docker builder prune -af`.
+
+**Why the age pass isn't neutered by the same sharing problem: step
+ordering, currently accidental.** `ops/prune-rollbacks.*` runs at
+`update.ps1`/`.sh` step 2b, *before* the build, retiring old rollback image
+tags; the build-cache age pass runs at step 5, *after* health. By the time
+`until=168h` fires, the images that were pinning the >168h-old cache
+layers are already gone and that cache has unshared. Neither script
+enforces this ordering explicitly — it holds only because rollback-tag
+retention runs early and cache retention runs late. A future change to
+`-KeepRollbacks` (keeping enough rollback tags to keep pinning week-old
+cache) or to either script's step position could silently degrade the age
+pass down to the ceiling pass's no-op behavior, with nothing to catch it.
 
 **What these scripts will never do:** touch images (that's
 `ops/prune-rollbacks.ps1` / `.sh`), touch containers, or run

@@ -10,6 +10,15 @@
 
 **Spec:** `docs/superpowers/specs/2026-07-28-docker-build-cache-retention-design.md`
 
+> **Superseded by live verification (2026-07-28):** two claims below did not
+> survive contact with the real machine and are corrected in the spec, not
+> here (this plan's body is left as originally written). (1) The bare
+> `wsl -d docker-desktop -e fstrim ...` form used throughout this plan never
+> actually worked — see spec §5.1 step 4 for the verified `sh -c` form and
+> why. (2) The size-ceiling pass ("Real run" step) does not reclaim "roughly
+> 4.5GB" as predicted below — it reclaimed 0B against a shared cache; see
+> spec §7 RESULT for the measurement.
+
 ## Global Constraints
 
 - **Never** emit `docker system prune`, `docker rmi`, `docker image rm`, or any `docker volume` command from any script in this plan. The only prune verb permitted is `docker builder prune`.
