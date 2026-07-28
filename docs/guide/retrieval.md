@@ -8,18 +8,20 @@ knowledge graph it walks. Part of the [user guide](../../README.md#documentation
 
 Since schema v25, the default embedding backbone (`Qwen/Qwen3-Embedding-0.6B`)
 is instruction-asymmetric: `memory_search` and every other retrieval probe
-(cortex/world/lesson search, recall seed queries, dedup/curation probes)
-encode the query text with an instruction prefix (`EmbeddingConfig.query_prefix`)
-that stored documents never carry — entries, fact/world/lesson claim text,
-and slot/entity-name embeddings are all encoded bare. This is a real
-query-to-document asymmetry, not just a model swap: similarity thresholds
-calibrated on the previous symmetric model (`alias_candidate_min_cosine`,
-`curation_min_similarity`, the surprise gate, and the `min_score` 0.2/0.25
-recall floors covered below) now gate a prefixed-query-to-document cosine
-rather than a doc-to-doc one, so their semantics shifted, not just their
-scale — they're left unrecalibrated pending live data, and read as somewhat
-more conservative at the shipped defaults (`supersede()`'s embedding-fallback
-paraphrase probe is one of the now-asymmetric comparisons). See
+(cortex/world/lesson search, recall seed queries) encode the query text with
+an instruction prefix (`EmbeddingConfig.query_prefix`) that stored documents
+never carry — entries, fact/world/lesson claim text, and slot/entity-name
+embeddings are all encoded bare, and every stored-to-stored comparison
+(dedup, curation, alias candidates, the surprise gate) stays bare on BOTH
+ends. Two distinct threshold effects follow, and they should not be
+conflated. The `min_score` 0.2/0.25 recall floors (and `supersede()`'s
+embedding-fallback paraphrase probe) now gate a prefixed-query-to-document
+cosine rather than a doc-to-doc one — their *semantics* shifted, not just
+their scale, and they read somewhat more conservative at the shipped
+defaults. By contrast, `alias_candidate_min_cosine`,
+`curation_min_similarity` and the surprise gate remain doc-to-doc
+comparisons whose cosine *distributions* merely shift with the new model.
+All are left unrecalibrated pending live data. See
 [Configuration](configuration.md#built-in-defaults-tuned-for-claudes-use-case)
 for the config fields and the [schema version history](configuration.md#schema-version-history)
 for the v25 cutover itself.

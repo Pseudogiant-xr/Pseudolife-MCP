@@ -30,7 +30,7 @@ docker exec pseudolife-mcp-daemon ls -la /data/chromadb
 
 ## Step 1 — merge the PR
 
-Land the branch on `master` first. `ops/update.ps1` (step 7 below) builds
+Land the branch on `master` first. `ops/update.ps1` (step 8 below) builds
 the daemon image from whatever `ops/Dockerfile.daemon` + `pyproject.toml`
 say on the branch it's run from — running it against an unmerged branch
 would deploy code nobody else can reproduce from `master`.
