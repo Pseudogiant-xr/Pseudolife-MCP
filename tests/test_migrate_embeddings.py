@@ -509,7 +509,14 @@ def _assert_write_path_cosine_one(pipeline, text: str, stored_vec) -> None:
     # failed on the runner. _embedding_out already encodes that lesson.
     stored = torch.from_numpy(_embedding_out(stored_vec))
     cos = torch.dot(stored, query_vec).item()
-    assert cos == pytest.approx(1.0, abs=1e-4), f"cosine {cos} for text={text!r}"
+    # One-sided on purpose. An UPPER bound on a cosine is meaningless: two
+    # independently-computed unit vectors dot to 1.0 +/- float32 noise, and
+    # that noise is machine-dependent -- CI produced 1.00013, which a
+    # two-sided abs=1e-4 rejected for being *too* identical. The bound only
+    # has to separate document-side (~1.0) from an encode_query slip, which
+    # the review measured at 0.20-0.93 on these same rows; 0.999 sits three
+    # orders of magnitude clear of the noise and 0.07 clear of the signal.
+    assert cos > 0.999, f"cosine {cos} for text={text!r}"
 
 
 def test_apply_migrates_all_four_tables(v24_bank, pg_url, monkeypatch):
