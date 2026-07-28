@@ -67,8 +67,7 @@ def _fixture(size="12.45GB", entries=None, distro=True, sizes=None):
     after the optional ceiling pass). The last value repeats once the
     sequence is exhausted, so a single-element list (the default, built
     from ``size``) reproduces the old static-fixture behaviour exactly.
-    Consumed by ``_run_ps1``'s stub today; the field is generic so a future
-    ``_run_sh`` stub can consume it too.
+    Consumed by both ``_run_ps1``'s and ``_run_sh``'s stubs.
     """
     if entries is None:
         now = datetime.now(timezone.utc)
@@ -149,7 +148,99 @@ function global:wsl {{
     return proc, calls
 
 
-@pytest.fixture(params=["ps1"])
+def _run_sh(tmp_path: Path, fixture: dict, *args: str):
+    fx_dir = tmp_path / "fx"
+    fx_dir.mkdir(exist_ok=True)
+    (fx_dir / "df_base.txt").write_text(
+        "".join(f"{t}|{s}\n" for t, s in fixture["df"]),
+        encoding="utf-8", newline="\n")
+    sizes = fixture["buildCacheSizes"]
+    (fx_dir / "sizes.txt").write_text(
+        "".join(f"{s}\n" for s in sizes),
+        encoding="utf-8", newline="\n")
+    (fx_dir / "df_idx").write_text("0", encoding="utf-8", newline="\n")
+    (fx_dir / "du.txt").write_text(
+        "".join(f"{e['created']}|{e['size']}\n" for e in fixture["du"]),
+        encoding="utf-8", newline="\n")
+    calls_log = tmp_path / "calls.log"
+    calls_log.write_text("", encoding="utf-8")
+    driver = tmp_path / "driver.sh"
+    driver.write_text(
+        f'''#!/usr/bin/env bash
+set -u
+export FX="{fx_dir.as_posix()}"
+export CALLS="{calls_log.as_posix()}"
+export DISTRO_OK={"1" if fixture["distro"] else "0"}
+export SIZES_COUNT={len(sizes)}
+docker() {{
+    echo "$*" >> "$CALLS"
+    if [ "$1" = "system" ] && [ "$2" = "df" ]; then
+        # Successive calls walk $FX/sizes.txt (last value repeats once
+        # exhausted) so tests can pin the before/after-age/after-ceiling
+        # measurements independently instead of one static figure. State
+        # lives in a file because each call to `docker system df` here runs
+        # inside its own process-substitution subshell, so a plain shell
+        # variable would not survive between calls.
+        idx=$(cat "$FX/df_idx")
+        useidx=$idx
+        if [ "$useidx" -ge "$SIZES_COUNT" ]; then
+            useidx=$((SIZES_COUNT - 1))
+        fi
+        echo $((idx + 1)) > "$FX/df_idx"
+        cat "$FX/df_base.txt"
+        line=$(sed -n "$((useidx + 1))p" "$FX/sizes.txt")
+        echo "Build Cache|$line"
+    elif [ "$1" = "builder" ] && [ "$2" = "du" ]; then
+        cat "$FX/du.txt"
+    elif [ "$1" = "builder" ] && [ "$2" = "prune" ]; then
+        echo "Total: 0B"
+    elif [ "$1" = "rmi" ]; then
+        # Forbidden verbs are deliberately PERMISSIVE here: the stub must
+        # not die on them (that would fail the run via proc.returncode
+        # before the FORBIDDEN loop in the test ever inspects calls.log).
+        # Logged above like every other call; the test's own loop is what
+        # must catch these, not this stub's strictness.
+        return 0
+    elif [ "$1" = "image" ] && [ "$2" = "rm" ]; then
+        return 0
+    elif [ "$1" = "system" ] && [ "$2" = "prune" ]; then
+        return 0
+    elif [ "$1" = "volume" ]; then
+        return 0
+    else
+        echo "unexpected docker call: $*" >&2
+        return 1
+    fi
+}}
+wsl() {{
+    echo "wsl $*" >> "$CALLS"
+    [ "$DISTRO_OK" = "1" ] || return 255
+    return 0
+}}
+export -f docker
+export -f wsl
+bash "{SH_SCRIPT.as_posix()}" "$@"
+''',
+        encoding="utf-8", newline="\n")
+    proc = subprocess.run(
+        [BASH, str(driver), *args],
+        capture_output=True, text=True, timeout=120,
+    )
+    calls = [ln for ln in calls_log.read_text(encoding="utf-8").splitlines()
+             if ln.strip()]
+    return proc, calls
+
+
+# PowerShell flag -> bash flag. One test body, two CLIs.
+_SH_FLAGS = {
+    "-MaxAgeHours": "--max-age-hours",
+    "-MaxUsedSpaceGB": "--max-used-space-gb",
+    "-DryRun": "--dry-run",
+    "-NoTrim": "--no-trim",
+}
+
+
+@pytest.fixture(params=["ps1", "sh"])
 def prune(request, tmp_path):
     """Run the retention script variant under test.
     Call as ``prune(fixture, "-DryRun")``; returns (proc, docker_calls)."""
@@ -164,7 +255,8 @@ def prune(request, tmp_path):
             pytest.skip("bash not available")
 
         def run(fixture, *args):
-            return _run_sh(tmp_path, fixture, *args)
+            translated = [_SH_FLAGS.get(a, a) for a in args]
+            return _run_sh(tmp_path, fixture, *translated)
     return run
 
 
