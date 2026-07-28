@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -50,16 +51,39 @@ BASH = _find_bash()
 FORBIDDEN = ("system prune", "rmi", "image rm", "volume")
 
 
-def _fixture(size="12.45GB", entries=None, distro=True):
-    """Default state: a fresh post-deploy cache, every entry minutes old."""
+def _docker_timestamp(when: datetime) -> str:
+    """Format like Docker/Go's ``time.Time`` string output:
+    ``2026-07-28 05:31:09.884805417 +0000 UTC`` (nanosecond fraction)."""
+    nanos = when.microsecond * 1000
+    return when.strftime("%Y-%m-%d %H:%M:%S.") + f"{nanos:09d} +0000 UTC"
+
+
+def _fixture(size="12.45GB", entries=None, distro=True, sizes=None):
+    """Default state: a fresh post-deploy cache, every entry minutes old.
+
+    ``sizes`` sequences the Build Cache figure returned by successive
+    ``docker system df`` calls within a single script run (the script calls
+    it up to three times: before the age pass, after the age pass, and
+    after the optional ceiling pass). The last value repeats once the
+    sequence is exhausted, so a single-element list (the default, built
+    from ``size``) reproduces the old static-fixture behaviour exactly.
+    Consumed by ``_run_ps1``'s stub today; the field is generic so a future
+    ``_run_sh`` stub can consume it too.
+    """
     if entries is None:
+        now = datetime.now(timezone.utc)
         entries = [
-            {"created": "2026-07-28 05:31:09.884805417 +0000 UTC", "size": "250B"},
-            {"created": "2026-07-28 05:31:09.786369487 +0000 UTC", "size": "8.192kB"},
+            {"created": _docker_timestamp(now - timedelta(minutes=3)),
+             "size": "250B"},
+            {"created": _docker_timestamp(now - timedelta(minutes=3, seconds=2)),
+             "size": "8.192kB"},
         ]
+    if sizes is None:
+        sizes = [size]
     return {
         "df": [("Images", "44.22GB"), ("Containers", "1.532MB"),
-               ("Local Volumes", "283.6MB"), ("Build Cache", size)],
+               ("Local Volumes", "283.6MB")],
+        "buildCacheSizes": list(sizes),
         "du": entries,
         "distro": distro,
     }
@@ -74,12 +98,21 @@ def _run_ps1(tmp_path: Path, fixture: dict, *args: str):
     driver.write_text(
         f'''
 $fx = Get-Content -Raw "{fx_path}" | ConvertFrom-Json
+$global:DfCallIndex = 0
 function global:docker {{
     $global:LASTEXITCODE = 0
     $a = @($args | ForEach-Object {{ "$_" }})
     Add-Content "{calls_log}" ($a -join ' ')
     if ($a[0] -eq "system" -and $a[1] -eq "df") {{
-        return @($fx.df | ForEach-Object {{ "$($_[0])|$($_[1])" }})
+        # Successive calls walk $fx.buildCacheSizes (last value repeats once
+        # exhausted) so tests can pin the before/after-age/after-ceiling
+        # measurements independently instead of one static figure.
+        $sizes = @($fx.buildCacheSizes)
+        $idx = [Math]::Min($global:DfCallIndex, $sizes.Count - 1)
+        $global:DfCallIndex++
+        $rows = @($fx.df | ForEach-Object {{ "$($_[0])|$($_[1])" }})
+        $rows += "Build Cache|$($sizes[$idx])"
+        return $rows
     }}
     if ($a[0] -eq "builder" -and $a[1] -eq "du") {{
         return @($fx.du | ForEach-Object {{ "$($_.created)|$($_.size)" }})
@@ -175,6 +208,20 @@ def test_ceiling_pass_fires_when_still_over_the_cap_after_the_age_pass(prune):
     proc, calls = prune(fx, "-MaxUsedSpaceGB", "8")
     assert proc.returncode == 0, proc.stderr
     assert any("--max-used-space 8000000000" in c for c in _prunes(calls)), calls
+
+
+def test_ceiling_pass_uses_the_post_age_measurement_not_the_stale_before(prune):
+    """The ceiling comparison must re-measure the cache AFTER the age pass,
+    not reuse the pre-age ``$before`` figure. Sequence the cache at 25GB
+    before the age pass and 15GB after it (both against the default 20GB
+    ceiling): the age pass alone already brought the cache under the cap,
+    so the ceiling pass must not fire. An implementation that compared the
+    stale $before (25GB, over the cap) instead of $afterAge (15GB, under
+    it) would wrongly fire the ceiling pass here."""
+    fx = _fixture(sizes=["25GB", "15GB", "15GB"])
+    proc, calls = prune(fx)
+    assert proc.returncode == 0, proc.stderr
+    assert not any("--max-used-space" in c for c in _prunes(calls)), calls
 
 
 def test_dry_run_mutates_nothing(prune):
