@@ -11,6 +11,14 @@
 # touches containers, and never runs `docker system prune` or any volume
 # command — the bank lives in the external ops_pseudolife_* volumes.
 #
+# Why age is the primary filter and size only a backstop: minutes after a
+# deploy, `docker builder du` reports the whole fresh cache as
+# "reclaimable", but most of it is cache shared with the live image and
+# can't free until that image is gone — `docker system df`'s RECLAIMABLE
+# (the honest, right-now number) was 3.314MB of a fresh 12.45GB cache. A
+# policy keyed on `docker builder du`'s reclaimability deletes hot cache
+# and cold-starts the next build.
+#
 # The fstrim step is Windows/WSL-only; on Linux there is no vhdx and the
 # prune alone is the whole job.
 set -euo pipefail
@@ -159,7 +167,7 @@ if [ "$DRY_RUN" = "1" ]; then
         echo "    ceiling pass: skipped (post-age size would be within the ceiling)."
     fi
     if [ "$NO_TRIM" != "1" ]; then
-        echo "    trim        : wsl -d docker-desktop -e fstrim -v /mnt/docker-desktop-disk"
+        echo "    trim        : wsl -d docker-desktop -e sh -c \"fstrim -v /mnt/docker-desktop-disk\""
     fi
     echo "==> DRY RUN complete: nothing was changed."
     exit 0
@@ -189,6 +197,11 @@ if ! wsl -d docker-desktop -e true 2>/dev/null; then
     echo "==> Build-cache retention: no docker-desktop WSL distro; skipping fstrim."
     exit 0
 fi
-if ! wsl -d docker-desktop -e fstrim -v /mnt/docker-desktop-disk; then
+# `wsl -d <distro> -e <cmd>` resolves <cmd> with an effectively empty PATH
+# (measured: PATH=), and fstrim lives at /sbin/fstrim — so passing it as
+# the bare -e target always fails with "execvpe(fstrim) failed: No such
+# file or directory". `sh -c` establishes a usable PATH; verified live to
+# reclaim 207.2MiB.
+if ! wsl -d docker-desktop -e sh -c "fstrim -v /mnt/docker-desktop-disk"; then
     echo "WARNING: fstrim failed (retention otherwise succeeded)." >&2
 fi

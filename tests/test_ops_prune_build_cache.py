@@ -346,6 +346,31 @@ def test_absent_distro_skips_fstrim_without_failing(prune):
     assert not any("fstrim" in c for c in calls)
 
 
+def test_fstrim_is_invoked_through_sh_c_not_as_the_bare_e_target(prune):
+    """2026-07-28 live-verification finding: ``wsl -d <distro> -e <cmd>``
+    resolves ``<cmd>`` with an effectively empty ``PATH`` (measured:
+    ``PATH=``), and ``fstrim`` lives at ``/sbin/fstrim`` — so passing it as
+    the bare ``-e`` target always failed
+    (``execvpe(fstrim) failed: No such file or directory``), silently,
+    because a failed fstrim only warns. ``wsl -d docker-desktop -e sh -c
+    "fstrim -v /mnt/docker-desktop-disk"`` is the verified-working form (it
+    reclaimed 207.2MiB live) because ``sh -c`` establishes a usable PATH.
+    Pins the working invocation shape; must NOT regress to the bare form."""
+    proc, calls = prune(_fixture())
+    assert proc.returncode == 0, proc.stderr
+    fstrim_calls = [c for c in calls if "fstrim" in c]
+    assert fstrim_calls, "expected a wsl fstrim call"
+    for c in fstrim_calls:
+        assert "-e sh -c" in c, (
+            f"fstrim must be invoked as `-e sh -c \"fstrim ...\"` for a "
+            f"usable PATH, not as the bare -e target: {c}"
+        )
+        assert "-e fstrim" not in c, (
+            f"fstrim passed as the bare -e target (empty PATH under "
+            f"wsl -e): {c}"
+        )
+
+
 def test_unparseable_build_cache_size_fails_loudly(prune):
     """2026-07-28 review finding: a malformed ``docker system df`` Build
     Cache size must fail the run, not get silently swallowed into a

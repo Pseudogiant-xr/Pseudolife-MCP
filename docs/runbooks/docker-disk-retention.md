@@ -114,10 +114,11 @@ so read the dry-run number as a floor, not a promise.
 **What runs, in order, on a real (non-dry-run) invocation:**
 1. Age pass — always: `docker builder prune --force --filter until=<N>h`.
 2. Ceiling pass — only if the cache is still over the size cap *after* the
-   age pass: `docker builder prune --force --max-used-space <cap>`. This
-   is a backstop for an unusually heavy build week and should rarely fire.
-3. `fstrim` of the WSL disk (`wsl -d docker-desktop -e fstrim -v
-   /mnt/docker-desktop-disk`) — Windows-only, skipped quietly (not a
+   age pass: `docker builder prune --force --max-used-space <cap>`. A
+   backstop, and a weaker one than it sounds — see below, it can be a
+   no-op while cache is still shared with a live image.
+3. `fstrim` of the WSL disk (`wsl -d docker-desktop -e sh -c "fstrim -v
+   /mnt/docker-desktop-disk"`) — Windows-only, skipped quietly (not a
    failure) if not on Windows, if `wsl` isn't on `PATH`, or if the
    `docker-desktop` distro isn't present. `-NoTrim` / `--no-trim` skips
    this step outright. A failed fstrim only warns; it never fails the run.
@@ -126,15 +127,36 @@ so read the dry-run number as a floor, not a promise.
 du` reports the whole fresh cache as reclaimable — reclaimable means "not
 pinned by a running build", not "not worth keeping". A policy keyed on
 that signal would delete hot cache and cold-start the very next build. The
-168h window keeps the week of cache that actually gets reused; the size
-ceiling only backstops an unusually heavy build week.
+168h window keeps the week of cache that actually gets reused.
 
-Note the two commands disagree, so read the right one. For the same fresh
-12.45GB cache measured 2026-07-28, `docker builder du` reported
-`Reclaimable: 12.45GB` while `docker system df`'s Build Cache row reported
-`RECLAIMABLE 3.314MB` (its `ACTIVE` count was 0). `docker system df` is
-the size-of-cache reading; `docker builder du` is the what-could-be-freed
-reading.
+**The size ceiling is a weaker backstop than it sounds — it cannot evict
+cache shared with a live image.** Measured 2026-07-28 against a 12.45GB /
+17-entry cache: `docker builder prune --force --max-used-space 8000000000`
+reclaimed **0 B**. Adding `--reserved-space 0` also reclaimed 0 B. Cause:
+14 of the 17 entries were `Shared=true` — shared with the live daemon
+image — and carried essentially all the bytes (8.739GB, 2.15GB, 1.159GB,
+348.5MB, …). Pruning a build-cache record cannot free layers a live image
+still holds. Only the 3 unshared (`source.local`) entries, totalling
+exactly 3.314MB, were actually prunable.
+
+That is why the two commands disagree, and which one to trust:
+
+- **`docker system df`'s `RECLAIMABLE`** (3.314MB in this measurement) is
+  what a prune would free *right now* — it already accounts for sharing.
+  This is the honest number.
+- **`docker builder du`'s `Reclaimable`** (12.45GB in this measurement)
+  counts every entry not pinned by a running build, including shared ones
+  that will not free while the image holding them still exists.
+
+**Consequence: in the "heavy build week" scenario the ceiling pass exists
+to cover, it may reclaim nothing at all**, because that week's cache is
+still shared with recent images. It only starts working once cache has
+become unshared — i.e. after the images that held those layers are
+removed. **The age pass is therefore the primary mechanism, not the
+ceiling**: aged cache becomes genuinely reclaimable as the images holding
+it are cleaned up (old rollback tags pruned by `ops/prune-rollbacks.*`),
+consistent with the original finding — 51.87GB across 169 entries, all
+inactive, some 5-6 weeks old, fully reclaimed by `docker builder prune -af`.
 
 **What these scripts will never do:** touch images (that's
 `ops/prune-rollbacks.ps1` / `.sh`), touch containers, or run

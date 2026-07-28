@@ -18,9 +18,11 @@
 #
 # Why age is the primary filter and size only a backstop: minutes after a
 # deploy, `docker builder du` reports the whole fresh 12.45GB as
-# "reclaimable" — reclaimable means "not pinned by a running build", NOT
-# "not worth keeping". A policy keyed on reclaimability deletes hot cache
-# and cold-starts the next build.
+# "reclaimable", but most of it is cache shared with the live image and
+# can't free until that image is gone — `docker system df`'s RECLAIMABLE
+# (the honest, right-now number) was 3.314MB of that same cache. A policy
+# keyed on `docker builder du`'s reclaimability deletes hot cache and
+# cold-starts the next build.
 param(
     [ValidateRange(0, 876000)][int]$MaxAgeHours = 168,
     [ValidateRange(0, 100000)][int]$MaxUsedSpaceGB = 20,
@@ -104,7 +106,7 @@ if ($DryRun) {
         Write-Host "    ceiling pass: skipped (post-age size would be within the ceiling)."
     }
     if (-not $NoTrim) {
-        Write-Host "    trim        : wsl -d docker-desktop -e fstrim -v /mnt/docker-desktop-disk"
+        Write-Host "    trim        : wsl -d docker-desktop -e sh -c `"fstrim -v /mnt/docker-desktop-disk`""
     }
     Write-Host "==> DRY RUN complete: nothing was changed."
     return
@@ -142,7 +144,12 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host "==> Build-cache retention: no docker-desktop WSL distro; skipping fstrim."
     return
 }
-wsl -d docker-desktop -e fstrim -v /mnt/docker-desktop-disk
+# `wsl -d <distro> -e <cmd>` resolves <cmd> with an effectively empty PATH
+# (measured: PATH=), and fstrim lives at /sbin/fstrim — so passing it as
+# the bare -e target always fails with "execvpe(fstrim) failed: No such
+# file or directory". `sh -c` establishes a usable PATH; verified live to
+# reclaim 207.2MiB.
+wsl -d docker-desktop -e sh -c "fstrim -v /mnt/docker-desktop-disk"
 if ($LASTEXITCODE -ne 0) {
     Write-Warning "fstrim failed (retention otherwise succeeded)."
 }

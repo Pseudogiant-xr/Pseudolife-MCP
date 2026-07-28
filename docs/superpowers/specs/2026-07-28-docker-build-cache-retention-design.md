@@ -116,12 +116,35 @@ Sequence:
    Runs **only** if the post-age size still exceeds the cap. Kept as a separate
    invocation rather than combined flags so each pass reports its own reclaim
    and the ceiling's rarity stays visible in the output.
+
+   **Measured 2026-07-28: this pass can be a complete no-op, and usually will
+   be, for exactly the scenario it exists to cover.** Against a 12.45GB /
+   17-entry cache produced by one deploy, `docker builder prune --force
+   --max-used-space 8000000000` (and with `--reserved-space 0` added)
+   reclaimed **0B**. Cause: 14 of the 17 entries were `Shared=true` with the
+   live daemon image — sharing means a build-cache prune cannot free those
+   layers while that image still exists — and carried essentially all the
+   bytes (8.739GB, 2.15GB, 1.159GB, 348.5MB, …). Only the 3 unshared
+   (`source.local`) entries, totalling exactly 3.314MB, were prunable; that
+   figure matches both `docker system df`'s `RECLAIMABLE` and `docker
+   builder du`'s `Private` size for the same cache. So in a "heavy build
+   week", the ceiling pass does nothing until the images holding that week's
+   cache are removed (e.g. by `ops/prune-rollbacks.*` retiring old rollback
+   tags) — at which point the cache unshares and becomes prunable. The age
+   pass, not the ceiling, is the mechanism that actually reclaims space in
+   the steady state; see the corrected reasoning in
+   `docs/runbooks/docker-disk-retention.md`.
 4. **fstrim** — Windows only, and only when `wsl -l -q` lists a
-   `docker-desktop` distro: `wsl -d docker-desktop -e fstrim -v
-   /mnt/docker-desktop-disk`. Non-fatal on any failure. This returns freed
-   blocks to the vhdx free list; it does **not** shrink the host file. Its
-   real value is making the later manual compact worth running. On Linux there
-   is no vhdx and the step is skipped entirely.
+   `docker-desktop` distro: `wsl -d docker-desktop -e sh -c "fstrim -v
+   /mnt/docker-desktop-disk"`. **Measured 2026-07-28: the bare `-e fstrim`
+   form (without `sh -c`) never worked** — `wsl -d <distro> -e <cmd>`
+   resolves `<cmd>` with an effectively empty `PATH`, and `fstrim` lives at
+   `/sbin/fstrim`, so it always failed with `execvpe(fstrim) failed: No such
+   file or directory`, silently, since the step is non-fatal. `sh -c`
+   establishes a usable `PATH`; the corrected form reclaimed 207.2MiB live.
+   This returns freed blocks to the vhdx free list; it does **not** shrink
+   the host file. Its real value is making the later manual compact worth
+   running. On Linux there is no vhdx and the step is skipped entirely.
 5. **Report** before / after / reclaimed.
 
 Verified present on this machine: distro `docker-desktop`, mount
@@ -263,3 +286,4 @@ age past 168h — via whichever trigger fires first.
 | A future edit reaches for `docker system prune` for convenience | The negative test forbids it at the script level, mutation-checked. |
 | `docker system df --format json` shape changes across Docker versions | Parser is isolated in one function; `docker builder du` is the documented fallback source. |
 | Scheduled task silently stops firing | Out of scope to monitor. The deploy hook is the independent second trigger, which is the reason for having both. |
+| **Ceiling pass reclaims nothing during a heavy build week** — measured 2026-07-28: `--max-used-space` against a 12.45GB/17-entry cache reclaimed 0B because 14 entries were `Shared=true` with the live image (only 3.314MB was unshared/prunable). | Accepted, and not a regression from the design's intent: the age pass was always meant to be primary. Documented in §5.1 and the runbook rather than mitigated in code — fixing it would mean pruning images, which is explicitly out of scope (§3) and owned by `ops/prune-rollbacks.*`. |
