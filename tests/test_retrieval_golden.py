@@ -11,8 +11,15 @@ scoring *drift* passes but a real regression (fusion weight typo, filter
 applied to the wrong pool, similarity math error) trips. If you improve
 ranking and a floor becomes slack-free, raise it — never delete it.
 
-Runs offline (HF_HUB_OFFLINE=1) on the cached MiniLM; no Postgres needed
-(file-mode CMS).
+Runs offline (HF_HUB_OFFLINE=1) on the cached default embedder; no
+Postgres needed (file-mode CMS). Floors were measured against
+all-MiniLM-L6-v2 (2026-07-02) and re-verified passing against
+Qwen/Qwen3-Embedding-0.6B after the schema v25 default swap — Qwen3
+measures higher recall on its own benchmark (see
+docs/superpowers/specs/2026-07-28-embedding-backbone-v25-design.md), so
+the existing slack-padded floors are not expected to need raising here,
+but the numbers below are the MiniLM baseline they were originally set
+against, not a live Qwen3 measurement.
 """
 
 from __future__ import annotations

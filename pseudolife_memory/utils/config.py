@@ -11,7 +11,7 @@ import yaml
 
 @dataclass
 class EmbeddingConfig:
-    model_name: str = "all-MiniLM-L6-v2"
+    model_name: str = "Qwen/Qwen3-Embedding-0.6B"
     device: str = "cuda"
     batch_size: int = 64
     # "torch" (default) or "onnx" — onnxruntime via sentence-transformers'
@@ -27,8 +27,27 @@ class EmbeddingConfig:
     # LRU cache over (text, normalize) -> embedding. The daemon embeds the
     # same strings repeatedly (query text for search + slot ops, dedup
     # keys, warmup probes); repeats skip the model forward entirely.
-    # 0 disables. ~1.5 KB per entry at dim 384.
+    # 0 disables. ~4 KB per entry at dim 1024 (was ~1.5 KB at 384).
     cache_size: int = 1024
+    # Instruction prefix prepended to QUERY-side text only (never to stored
+    # documents) — see EmbeddingPipeline.encode_query. Default is the exact
+    # Qwen3-Embedding card string (embedding-backbone-v25); instruction-tuned
+    # embedders swing on wording, so this must match the card verbatim,
+    # including no space after "Query:". Empty string ("") restores
+    # symmetric behavior for models (like all-MiniLM-L6-v2, the default
+    # before embedding-backbone-v25) that don't distinguish query/document
+    # sides.
+    query_prefix: str = (
+        "Instruct: Given a web search query, retrieve relevant passages "
+        "that answer the query\nQuery:"
+    )
+    # Caps the tokenizer's max sequence length on the loaded model. Ahead of
+    # the Qwen3-Embedding-0.6B swap (32k native context) — an unbounded
+    # input is a latency and RAM hazard; 512 matches the measured shootout
+    # configuration. Applied as a cap (min with whatever the model shipped
+    # with), never a raise: a model whose native default is already shorter
+    # is left alone.
+    max_seq_length: int = 512
 
 
 @dataclass
@@ -193,7 +212,7 @@ class BM25Config:
 class RerankerConfig:
     """Cross-encoder reranker over the merged retrieval pool (Tier B).
 
-    Bi-encoder retrieval (dense MiniLM-L6) is cheap but loses signal on
+    Bi-encoder retrieval (the dense default backbone) is cheap but loses signal on
     near-duplicates and ambiguous queries — a query and a relevant doc
     can have low cosine similarity while a less-relevant one wins on
     surface tokens. A cross-encoder attends over (query, candidate)

@@ -112,6 +112,17 @@ class EmbeddingPipeline:
                 config.model_name,
                 device=device,
             )
+        # Cap the tokenizer's max sequence length. Applies to both backends:
+        # SentenceTransformer.max_seq_length delegates to the underlying
+        # Transformer module regardless of which runtime (torch/onnx) does
+        # the forward pass, so one assignment covers both — there is no
+        # separate ONNX knob to hack around. A cap only (min with whatever
+        # the model shipped with), never a raise, so a model whose native
+        # default is already shorter than the configured cap is untouched.
+        existing_max_seq_len = getattr(self.model, "max_seq_length", None)
+        self.model.max_seq_length = min(
+            existing_max_seq_len or 512, config.max_seq_length,
+        )
         self._dim = self.model.get_sentence_embedding_dimension()
         # Positive confirmation of the active backend: the ONNX path fails
         # soft, so without this line a broken accelerator in the deployed
@@ -203,3 +214,19 @@ class EmbeddingPipeline:
     def encode_single(self, text: str, normalize: bool = True) -> torch.Tensor:
         """Encode a single text string. Returns shape (embedding_dim,)."""
         return self.encode(text, normalize=normalize).squeeze(0)
+
+    def encode_query(self, text: str, normalize: bool = True) -> torch.Tensor:
+        """Encode a retrieval QUERY (the asymmetric-model, query side).
+
+        Prepends ``config.query_prefix`` before encoding and delegates to
+        ``encode_single`` — so it flows through the exact same LRU cache as
+        document encodes, keyed on the PREFIXED text. That makes the
+        keyspace disjoint from document-side ``encode``/``encode_single``
+        calls of identical raw text (no second cache to keep in sync).
+
+        With ``query_prefix=""`` (a symmetric model, e.g. the current
+        MiniLM default) this is byte-identical to ``encode_single(text)``.
+
+        Returns shape (embedding_dim,).
+        """
+        return self.encode_single(self.config.query_prefix + text, normalize=normalize)

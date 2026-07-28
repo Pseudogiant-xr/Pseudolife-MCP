@@ -75,7 +75,7 @@ def main() -> int:
         texts = [f"{f['entity']} {f['attribute']} {f['value']}".strip()
                  for f in facts]
         mat = emb.encode(texts)                       # (n, d), normalized
-        q = emb.encode_single(b["question"])
+        q = emb.encode_query(b["question"])
         sims = (mat @ q).tolist()
         ans = _norm_text(b["answer"])
         gold = {i for i, f in enumerate(facts)

@@ -336,7 +336,7 @@ def cmd_replay(args) -> int:
         # (skipped dreams etc.), independent of the offline mirror.
         search_time = time.time()
         live = svc.search(q["question"], top_k=RAG_TOP_K).get("entries", [])
-        q_emb = svc._embedder.encode_single(q["question"])  # noqa: SLF001
+        q_emb = svc._embedder.encode_query(q["question"])  # noqa: SLF001
 
         payload = {
             "question_id": qid,

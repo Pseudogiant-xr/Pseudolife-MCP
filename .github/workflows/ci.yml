@@ -19,7 +19,10 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # v25 roughly doubled suite wall time (real Qwen3-0.6B CPU embeds
+    # replaced MiniLM's ONNX path: 238s -> ~437s locally), and a cold
+    # HF cache adds a ~1.2 GB download on top.
+    timeout-minutes: 50
 
     services:
       postgres:
@@ -56,14 +59,54 @@ jobs:
           pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.12.0"
           pip install -e .[dev]
 
-      - name: Cache HuggingFace models
-        uses: actions/cache@v4
+      # RESTORE and SAVE are split deliberately. Plain actions/cache only
+      # saves when the JOB succeeds, so a single failing test threw away a
+      # freshly downloaded ~1.4 GB and the next run re-downloaded it -- which
+      # is how this workflow earned an HTTP 429 from the Hub. Saving straight
+      # after the warm step means the models are cached even when the suite
+      # then goes red, so a red run costs one test fix, not another download.
+      - name: Restore HuggingFace cache
+        id: hf-cache
+        uses: actions/cache/restore@v4
         with:
           path: ~/.cache/huggingface
-          key: hf-minilm-l6-v2
+          # Key names every model the warm step needs. Bump it whenever that
+          # list changes: an exact hit restores the OLD cache, so a stale key
+          # silently re-downloads the new model on every run -- or, under
+          # HF_HUB_OFFLINE, fails the whole suite (v25).
+          key: hf-minilm-l6-v2-qwen3-embedding-0.6b
 
-      - name: Warm the embedder (downloads only on cache miss)
-        run: python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+      - name: Warm the embedders (downloads only on cache miss)
+        # BOTH are load-bearing: Qwen3-Embedding-0.6B is EmbeddingConfig's
+        # default since schema v25 (vector(1024)), and MiniLM is still pinned
+        # by the tests that guard the symmetric/ONNX paths. The suite then
+        # runs fully offline, so anything missing here is a hard failure.
+        # Retries because the Hub rate-limits unauthenticated runners (429)
+        # and a transient one should not cost the whole job.
+        run: |
+          for attempt in 1 2 3; do
+            if python - <<'PY'
+          from sentence_transformers import SentenceTransformer
+          for repo in ("all-MiniLM-L6-v2", "Qwen/Qwen3-Embedding-0.6B"):
+              SentenceTransformer(repo)
+              print("warmed", repo, flush=True)
+          PY
+            then
+              echo "warm ok on attempt $attempt"; exit 0
+            fi
+            echo "warm attempt $attempt failed; backing off"; sleep $((attempt * 60))
+          done
+          echo "::error::could not warm the embedders after 3 attempts (Hub rate limit?)"
+          exit 1
+
+      - name: Save HuggingFace cache
+        # `always()` so a red suite still banks the download; the cache-hit
+        # guard avoids a "cache already exists" warning on the warm path.
+        if: always() && steps.hf-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-minilm-l6-v2-qwen3-embedding-0.6b
 
       - name: Tests (offline + deterministic — the documented invocation)
         env:

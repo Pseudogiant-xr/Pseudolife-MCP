@@ -19,12 +19,12 @@ from pseudolife_memory.utils.config import MemoryConfig
 
 def _unit(seed: int) -> torch.Tensor:
     g = torch.Generator().manual_seed(seed)
-    return F.normalize(torch.randn(384, generator=g), dim=0)
+    return F.normalize(torch.randn(1024, generator=g), dim=0)
 
 
 def _band() -> MIRASBand:
     return MIRASBand(
-        name="t", embedding_dim=384, retention=build_policy("balanced"),
+        name="t", embedding_dim=1024, retention=build_policy("balanced"),
         max_entries=100, update_interval=1,
         promotion_access_count=2, promotion_surprise=0.5, device="cpu",
     )

@@ -28,9 +28,9 @@ from pseudolife_memory.memory.titans_memory import MemoryEntry
 
 
 def _pair(cos: float) -> tuple[torch.Tensor, torch.Tensor]:
-    a = np.zeros(384, dtype=np.float32)
+    a = np.zeros(1024, dtype=np.float32)
     a[0] = 1.0
-    b = np.zeros(384, dtype=np.float32)
+    b = np.zeros(1024, dtype=np.float32)
     b[0] = cos
     b[1] = float(np.sqrt(max(0.0, 1.0 - cos * cos)))
     return torch.from_numpy(a), torch.from_numpy(b)

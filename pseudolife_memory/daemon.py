@@ -35,6 +35,49 @@ _LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 # Cortex Console landed, leaving this wrapper dead code.)
 
 
+def _build_health_payload(svc, token_present: bool) -> dict:
+    """Compose the ``/health`` payload from a live ``MemoryService``.
+
+    Factored out of ``run_daemon`` so it's testable without a running
+    uvicorn/ASGI stack — it only reads attributes off ``svc``, never
+    constructs anything (storage stays lazily-unbuilt until the first real
+    tool call, exactly as before).
+    """
+    from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
+
+    payload = {
+        "status": "ok",
+        "schema": SCHEMA_META_VERSION,
+        "storage": "postgres" if getattr(svc, "_db_url", None) else "files",
+        "auth": token_present,
+        # Durable-save failures since start (see service.PersistenceError);
+        # >0 means writes succeeded in memory but a snapshot did not persist.
+        "persist_errors": getattr(svc, "_persist_errors", 0),
+    }
+    # Schema v25's dim-mismatch refusal is otherwise invisible here: it
+    # fires lazily on the first tool call, so a daemon whose every memory
+    # tool is dead would still report "ok" without this (2026-07-28 review).
+    init_refusal = getattr(svc, "_init_refusal", None)
+    if init_refusal:
+        payload["status"] = "degraded"
+        payload["init_refusal"] = init_refusal
+    # Honest DB liveness (2026-07-02 review fix): /health used to say
+    # "ok" while a restarted Postgres had every memory tool failing.
+    # ping() uses a dedicated short-lived connection so the probe can't
+    # interleave with the shared connection another thread is using.
+    # Before the first tool call storage is lazily unbuilt — that is
+    # still "ok" (nothing to probe yet).
+    storage = getattr(svc, "_storage", None)
+    if storage is not None and hasattr(storage, "ping"):
+        try:
+            storage.ping()
+            payload["db"] = "ok"
+        except Exception as exc:  # noqa: BLE001 — surface, don't raise
+            payload["status"] = "degraded"
+            payload["db"] = f"error: {exc}"
+    return payload
+
+
 def run_daemon(host: str | None = None, port: int | None = None) -> None:
     """Entry point for ``pseudolife-mcp serve``. Blocks until shutdown."""
     import uvicorn
@@ -75,33 +118,7 @@ def run_daemon(host: str | None = None, port: int | None = None) -> None:
             sys.exit(2)
 
     def _health() -> dict:
-        from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
-
-        svc = mcp_server.service
-        payload = {
-            "status": "ok",
-            "schema": SCHEMA_META_VERSION,
-            "storage": "postgres" if getattr(svc, "_db_url", None) else "files",
-            "auth": token is not None,
-            # Durable-save failures since start (see service.PersistenceError);
-            # >0 means writes succeeded in memory but a snapshot did not persist.
-            "persist_errors": getattr(svc, "_persist_errors", 0),
-        }
-        # Honest DB liveness (2026-07-02 review fix): /health used to say
-        # "ok" while a restarted Postgres had every memory tool failing.
-        # ping() uses a dedicated short-lived connection so the probe can't
-        # interleave with the shared connection another thread is using.
-        # Before the first tool call storage is lazily unbuilt — that is
-        # still "ok" (nothing to probe yet).
-        storage = getattr(svc, "_storage", None)
-        if storage is not None and hasattr(storage, "ping"):
-            try:
-                storage.ping()
-                payload["db"] = "ok"
-            except Exception as exc:  # noqa: BLE001 — surface, don't raise
-                payload["status"] = "degraded"
-                payload["db"] = f"error: {exc}"
-        return payload
+        return _build_health_payload(mcp_server.service, token is not None)
 
     mcp_server.start_background_durability()
     mcp_server.start_dream_sweep()
