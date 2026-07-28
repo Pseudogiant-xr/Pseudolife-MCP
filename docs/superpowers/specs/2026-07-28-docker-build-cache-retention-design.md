@@ -251,8 +251,30 @@ still no observable reclaim. Four steps, each proving a different claim:
 |---|---|---|
 | 1 | `-DryRun` (defaults) | Size reading is correct (12.45 GB) and the age pass plans **no** eviction — nothing is older than 168h. |
 | 2 | `-DryRun -MaxAgeHours 0` | The age filter is genuinely plumbed through: the planned command carries `until=0h` and the reclaim estimate approaches the full 12.45 GB. Still mutates nothing. |
-| 3 | **Real run**, `-MaxUsedSpaceGB 8` | The ceiling pass reclaims for real — roughly 4.5 GB — while leaving ~8 GB of hot cache intact. This is the only step that mutates, and it is deliberately chosen to be observable *and* safe: the next build stays warm. |
+| 3 | **Real run**, `-MaxUsedSpaceGB 8` | ~~The ceiling pass reclaims for real — roughly 4.5 GB — while leaving ~8 GB of hot cache intact.~~ **This prediction was wrong; see the RESULT below.** Still the only step that mutates. |
 | 4 | `docker system df` after | Records the actual delta. |
+
+**RESULT (run 2026-07-28) — steps 1, 2 and 4 held; step 3's prediction did
+not, and two real defects surfaced that no test had caught.**
+
+- Steps 1 and 2 passed exactly as designed: the default dry run read 12.45 GB
+  and estimated 0 B (nothing older than 168h); `-MaxAgeHours 0` carried
+  `until=0h` and estimated the full 12.45 GB. Neither mutated anything.
+- **Step 3 reclaimed 0 B, not ~4.5 GB.** The ceiling pass fired as designed
+  (`12.45GB still over the 8.00GB ceiling; enforcing`) and freed nothing.
+  14 of the 17 entries were `Shared=true` with the live daemon image, and a
+  build-cache prune cannot free layers a live image still holds. Only the 3
+  unshared `source.local` entries — 3.314 MB — were prunable. §5.1 step 3
+  carries the full measurement and its consequence for the ceiling's value.
+- **The `fstrim` step had never worked.** `wsl -d <distro> -e <cmd>` resolves
+  with an effectively empty `PATH` and `fstrim` lives at `/sbin/fstrim`, so
+  the bare form always failed `execvpe(fstrim)`. Being non-fatal, it only
+  warned. The `sh -c` form reclaimed 207.2 MiB live on first correct run.
+
+The lesson is the reason this section exists: **every layer of stubbed testing
+passed against both defects.** A stub cannot know that a real BuildKit refuses
+to evict shared layers, or that a real WSL exec has no `PATH`. Command-shape
+tests pin the command; only execution pins the behaviour.
 
 Deliberately **not** run live: a default-age real run (would be a no-op today)
 and any `-af`-equivalent (would cold-start the next deploy for no benefit).
