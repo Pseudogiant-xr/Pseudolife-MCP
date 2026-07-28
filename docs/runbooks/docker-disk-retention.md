@@ -122,12 +122,19 @@ so read the dry-run number as a floor, not a promise.
    `docker-desktop` distro isn't present. `-NoTrim` / `--no-trim` skips
    this step outright. A failed fstrim only warns; it never fails the run.
 
-**Why age and not "reclaimable".** Minutes after a deploy, `docker system
-df` reports the whole fresh cache as reclaimable — reclaimable means "not
+**Why age and not "reclaimable".** Minutes after a deploy, `docker builder
+du` reports the whole fresh cache as reclaimable — reclaimable means "not
 pinned by a running build", not "not worth keeping". A policy keyed on
 that signal would delete hot cache and cold-start the very next build. The
 168h window keeps the week of cache that actually gets reused; the size
 ceiling only backstops an unusually heavy build week.
+
+Note the two commands disagree, so read the right one. For the same fresh
+12.45GB cache measured 2026-07-28, `docker builder du` reported
+`Reclaimable: 12.45GB` while `docker system df`'s Build Cache row reported
+`RECLAIMABLE 3.314MB` (its `ACTIVE` count was 0). `docker system df` is
+the size-of-cache reading; `docker builder du` is the what-could-be-freed
+reading.
 
 **What these scripts will never do:** touch images (that's
 `ops/prune-rollbacks.ps1` / `.sh`), touch containers, or run
