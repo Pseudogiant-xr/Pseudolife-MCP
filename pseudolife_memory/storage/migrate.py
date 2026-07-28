@@ -3,6 +3,16 @@
 Runs once: only when the entries table is empty AND a legacy
 ``memory_state/cms_state.pt`` exists under the data dir. Sources are
 renamed ``*.pre-v8.bak`` afterwards — never deleted.
+
+Both the entries branch AND the cortex-facts branch re-embed any row whose
+stored embedding dim doesn't match the live schema's before inserting it
+(2026-07-28, embedding-backbone-v25 review escalation) — a real legacy
+bank always predates the current model/dimension for BOTH tables, and a
+verbatim insert into a differently-dimensioned vector column raises after
+entries has already committed, permanently blocking retry via the
+idempotency guard below (``storage.load_entries() or
+storage.load_facts()``) while the sources never get their ``.pre-v8.bak``
+rename — silent, permanent fact loss. See ``migrate_legacy``'s docstring.
 """
 
 from __future__ import annotations
@@ -20,14 +30,16 @@ def migrate_legacy(data_dir: str | Path, storage, embedder) -> dict:
     :class:`~pseudolife_memory.memory.embedding.EmbeddingPipeline` (threaded
     in, not re-instantiated — single-copy principle). Every real legacy .pt
     bank in the wild predates the current build's embedder, so its stored
-    entry embeddings can be dimensioned for an older model (e.g. 384-d
-    MiniLM) than the live schema's vector columns (1024-d as of schema v25).
-    Inserting them verbatim raises a pgvector dimension error on every
-    boot's migration attempt (swallowed to a warning by the caller and
-    retried next boot — see ``MemoryService._ensure_init``). Any entry whose
-    stored embedding dim doesn't match ``embedder.embedding_dim`` is instead
-    re-embedded from its own stored TEXT through this pipeline before
-    insertion, so the migrated row always fits the live column.
+    entry AND fact embeddings can be dimensioned for an older model (e.g.
+    384-d MiniLM) than the live schema's vector columns (1024-d as of
+    schema v25). Inserting them verbatim raises a pgvector dimension error
+    on every boot's migration attempt (swallowed to a warning by the caller
+    and retried next boot — see ``MemoryService._ensure_init``). Any entry
+    whose stored embedding dim doesn't match ``embedder.embedding_dim`` is
+    instead re-embedded from its own stored TEXT through this pipeline
+    before insertion; any cortex fact whose stored embedding dim doesn't
+    match is re-embedded from its own (entity, attribute, value) claim text
+    the same way — so every migrated row always fits the live column.
 
     Returns ``{"migrated": bool, ...counts}``.
     """
@@ -92,10 +104,34 @@ def migrate_legacy(data_dir: str | Path, storage, embedder) -> dict:
         storage.meta_set("migrated_interaction_count",
                          int(state.get("interaction_count", 0)))
 
+    reembedded_facts = 0
     if cortex_path.exists():
         from pseudolife_memory.memory.cortex import CortexStore
         cortex = CortexStore()
         cortex.load(cortex_path)
+        for r in cortex.records:
+            if r.embedding is not None and len(r.embedding) != target_dim:
+                # Same treatment as the entries branch above, and for the
+                # same reason: a legacy fact's stored claim embedding
+                # predates this build's model/dimension. Inserting it
+                # verbatim raises a pgvector dimension error INSIDE
+                # storage.replace_facts (a single-statement bulk insert),
+                # i.e. AFTER the entries loop above already committed --
+                # the `.pre-v8.bak` rename below is never reached, and the
+                # idempotency guard at the top of this function
+                # (`storage.load_entries() or storage.load_facts()`) then
+                # permanently blocks every retry because entries is now
+                # non-empty: the legacy facts are lost forever with no way
+                # to re-attempt the migration (2026-07-28 review
+                # escalation). Re-embed from the record's own
+                # (entity, attribute, value) using the EXACT claim-text
+                # shape ``MemoryService.cortex_write`` commits
+                # (service.py ~line 1509:
+                # ``f"{entity} {attribute} {value}".strip()``) so the row
+                # fits the live vector column before it is ever inserted.
+                claim = f"{r.entity} {r.attribute} {r.value}".strip()
+                r.embedding = embedder.encode_single(claim)
+                reembedded_facts += 1
         rows = [_record_to_row(r) for r in cortex.records]
         storage.replace_facts(rows)
         storage.meta_set("cortex_supersession_log", cortex.supersession_log[-200:])
@@ -109,6 +145,7 @@ def migrate_legacy(data_dir: str | Path, storage, embedder) -> dict:
             p.rename(p.with_name(p.name + ".pre-v8.bak"))
 
     summary = {"migrated": True, "entries": entries,
-               "episodes": episodes, "facts": facts, "reembedded": reembedded}
+               "episodes": episodes, "facts": facts, "reembedded": reembedded,
+               "reembedded_facts": reembedded_facts}
     logger.warning("legacy bank migrated to schema v8: %s", summary)
     return summary

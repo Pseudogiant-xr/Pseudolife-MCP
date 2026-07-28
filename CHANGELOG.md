@@ -6,6 +6,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-28 — v25 embedding migration script)
+- **`ops/migrate_embeddings.py`** takes a live v24 bank (four
+  `vector(384)` embedding columns) to v25 (`vector(1024)`) offline: dry-
+  run by default (writes nothing without `--apply`), requires
+  `--backup-verified` to apply, and refuses to apply while the daemon
+  answers its health endpoint (a live writer re-embedding underneath the
+  daemon's own in-memory state would corrupt the bank). Each of
+  `entries`/`facts`/`world_facts`/`lessons` is migrated in its own
+  transaction — drop NOT NULL where present, `ALTER COLUMN embedding TYPE
+  vector(1024) USING NULL`, re-embed every row through the real
+  `EmbeddingPipeline` and the exact claim-text shape the write paths use
+  (`cortex_write`/`world_write`/`lesson_write`'s
+  `f"{entity} {attribute} {value}".strip()`; entries re-embed their
+  stored `text` verbatim), restore constraints — and creates no index
+  (there is none to rebuild; `ensure_schema` already drops
+  `entries_embedding_idx` unconditionally on every boot). Stamps
+  `meta.schema_version = 25` last, only after all four tables migrate
+  without error. This is the human-gated remedy for schema v25's
+  additive-only `ensure_schema` refusing to start against a v24-
+  dimensioned bank; running it against the live bank is a user-gated
+  morning step, not part of this change.
+
 ### Changed (2026-07-28 — embedding backbone swap; schema **v25**)
 - **Default embedding model is now `Qwen/Qwen3-Embedding-0.6B`** (was
   `all-MiniLM-L6-v2`). Measured on the project's own LongMemEval-derived
@@ -56,6 +78,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `vector(1024)` insert every boot (swallowed to a retried warning). It
   now re-embeds any entry whose stored embedding doesn't match the live
   pipeline's dimension, through that same `EmbeddingPipeline` instance.
+- **`migrate_legacy`'s cortex-facts branch gets the same re-embed-on-
+  dim-mismatch treatment.** It previously inserted a legacy fact's stored
+  claim embedding verbatim via `replace_facts` — on a real (384-d) legacy
+  bank this raised AFTER the entries loop had already committed, so the
+  `.pre-v8.bak` rename was never reached and the idempotency guard
+  (`storage.load_entries() or storage.load_facts()`) then permanently
+  blocked every retry, losing the legacy facts for good. Now re-embeds
+  from each record's own `(entity, attribute, value)` claim text before
+  insertion, same as the entries branch.
+- **`ops/restore_from_pt.py` refuses on an embedding-dimension mismatch**
+  instead of inserting a snapshot's vectors verbatim. It restores a
+  same-era `.pt` snapshot into the live bank (disaster recovery, not a
+  migration tool), so a pre-v25 384-d `.bak` restored after the live bank
+  moved to `vector(1024)` previously either raised partway through the
+  entries loop (a partial, silent restore — each `insert_entry` commits
+  on its own) or risked corrupting a future batched insert path. It now
+  checks every stored embedding's length against the live bank's declared
+  dimension before writing anything, and exits 1 with nothing written on
+  any mismatch.
 - **`/health` reports `init_refusal` + `status: "degraded"`** when
   `MemoryService._ensure_init`'s storage construction hits schema v25's
   dimension-mismatch refusal — previously invisible until the first tool

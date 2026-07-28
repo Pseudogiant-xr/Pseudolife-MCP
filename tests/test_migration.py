@@ -20,7 +20,7 @@ def _emb(seed: int, dim: int = 384) -> torch.Tensor:
 
 class _FakeEmbedder:
     """Duck-types the two ``EmbeddingPipeline`` members ``migrate_legacy``
-    calls (``embedding_dim`` / ``encode_single``) -- real-model-free so this
+    calls (``embedding_dim`` / ``encode_single``) — real-model-free so this
     test exercises migrate.py's re-embed DECISION, not a real model's
     numeric output (``test_schema_v25.py::test_service_round_trip_at_dim_1024``
     already proves the real Qwen3 pipeline produces 1024-d vectors
@@ -37,12 +37,14 @@ class _FakeEmbedder:
 def _build_legacy_bank(data_dir):
     """Synthesize a v7 bank: entries + episode + supersession + cortex.
 
-    Entries embed at 384-d -- the only shape that exists in the wild (every
-    real legacy .pt bank predates schema v25's 1024-d/Qwen3 default). The
-    cortex fact embeds at the live 1024-d directly: cortex/fact re-embedding
-    on dim mismatch is a separate, not-yet-fixed gap (migrate_legacy only
-    repairs entries -- see its docstring), so this fixture doesn't exercise
-    it."""
+    BOTH entries and the cortex fact embed at legacy 384-d — the only
+    shape that exists in the wild (every real legacy .pt bank predates
+    schema v25's 1024-d/Qwen3 default for every table alike). Prior to the
+    2026-07-28 review escalation, migrate_legacy only repaired the entries
+    branch on a dim mismatch; the facts branch inserted verbatim and blew
+    up AFTER entries had already committed, permanently losing the facts
+    (the idempotency guard blocks every retry once entries is non-empty).
+    This fixture pins the fix: both branches must survive."""
     cms = ContinuumMemorySystem(MemoryConfig())
     cms.episodes.start("legacy session")
     cms.store("legacy fact alpha", _emb(1), source="legacy", tags=["old"])
@@ -57,7 +59,7 @@ def _build_legacy_bank(data_dir):
 
     cortex = CortexStore()
     cortex.write_fact(Slot("legacy-proj", "language", "rust"),
-                      _emb(3, dim=1024), confidence=0.9, support="user")
+                      _emb(3, dim=384), confidence=0.9, support="user")
     cortex.save(data_dir / "cortex_state.pt")
     return cms
 
@@ -77,9 +79,13 @@ def test_migration_roundtrip(pg_conn, pg_url, tmp_path):
         assert summary["entries"] == len(legacy_texts) == 2
         assert summary["episodes"] == 1 and summary["facts"] == 1
         # Both entries were stored at legacy 384-d and had to be re-embedded
-        # to fit the live vector(1024) column -- the exact bug this test
+        # to fit the live vector(1024) column — the exact bug this test
         # pins (a real bank in the wild is always 384-d, never 1024-d).
         assert summary["reembedded"] == 2
+        # The cortex fact was stored at legacy 384-d — same bug class as
+        # entries, now fixed. Pins the exact count (not just "> 0") so a
+        # regression that silently stops re-embedding facts fails loudly.
+        assert summary["reembedded_facts"] == 1
 
         rows = {r["text"]: r for r in storage.load_entries()}
         assert set(rows) == legacy_texts
@@ -93,6 +99,10 @@ def test_migration_roundtrip(pg_conn, pg_url, tmp_path):
         facts = storage.load_facts()
         assert len(facts) == 1 and facts[0]["value"] == "rust"
         assert facts[0]["origin"] == "user"
+        # The fact actually landed at the live dimension too — the whole
+        # point of the fix (a verbatim 384-d insert would have raised
+        # inside replace_facts, after entries already committed).
+        assert len(facts[0]["embedding"]) == 1024
 
         # Sources renamed, originals preserved as .pre-v8.bak.
         assert not (tmp_path / "memory_state" / "cms_state.pt").exists()
