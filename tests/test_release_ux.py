@@ -216,13 +216,20 @@ def test_ci_warms_the_default_embedding_model() -> None:
         f"({default_model!r}) — the suite runs with HF_HUB_OFFLINE=1, so "
         f"every test that constructs the embedder will fail on the runner")
     # The cache key must move with the model list, or the restored cache
-    # silently predates it.
-    key_line = next(l for l in ci.splitlines() if l.strip().startswith("key:"))
+    # silently predates it. EVERY key line (restore and save are separate
+    # steps) has to agree — a save keyed differently from the restore
+    # never gets hit again.
+    key_lines = [l for l in ci.splitlines() if l.strip().startswith("key:")]
     slug = default_model.split("/")[-1].lower()
-    assert slug in key_line.lower(), (
-        f"the HF cache key {key_line.strip()!r} does not name "
-        f"{slug!r}; an exact hit on a stale key restores a cache without "
-        f"the current default and never saves a corrected one")
+    assert key_lines, "no HF cache key found in ci.yml"
+    for key_line in key_lines:
+        assert slug in key_line.lower(), (
+            f"the HF cache key {key_line.strip()!r} does not name "
+            f"{slug!r}; an exact hit on a stale key restores a cache without "
+            f"the current default and never saves a corrected one")
+    assert len(set(l.strip() for l in key_lines)) == 1, (
+        f"restore/save cache keys disagree: {[l.strip() for l in key_lines]} "
+        f"— a save under a different key is never restored")
 
 
 def test_readme_carries_mcp_registry_marker() -> None:
