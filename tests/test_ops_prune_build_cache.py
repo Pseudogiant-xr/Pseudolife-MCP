@@ -85,6 +85,15 @@ function global:docker {{
         return @($fx.du | ForEach-Object {{ "$($_.created)|$($_.size)" }})
     }}
     if ($a[0] -eq "builder" -and $a[1] -eq "prune") {{ return "Total: 0B" }}
+    # Forbidden verbs are deliberately PERMISSIVE here: the stub must not die
+    # on them (that would fail the run via proc.returncode before the
+    # FORBIDDEN loop in the test ever inspects calls.log). Logged above via
+    # Add-Content like every other call; the test's own loop is what must
+    # catch these, not this stub's strictness.
+    if ($a[0] -eq "rmi") {{ return }}
+    if ($a[0] -eq "image" -and $a[1] -eq "rm") {{ return }}
+    if ($a[0] -eq "system" -and $a[1] -eq "prune") {{ return }}
+    if ($a[0] -eq "volume") {{ return }}
     throw "unexpected docker call: $($a -join ' ')"
 }}
 function global:wsl {{
