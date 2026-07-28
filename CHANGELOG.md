@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-07-28 — five `ops/*.sh` scripts were not executable in git)
+- **Executable bit restored on `ops/install-shim-autostart.sh`, `ops/install.sh`,
+  `ops/preflight.sh`, `ops/prune-build-cache.sh`, `ops/prune-rollbacks.sh`** —
+  all five were tracked as mode `100644`, which clones as non-executable on
+  Linux/macOS. `ops/update.sh` invokes `prune-rollbacks.sh` and
+  `prune-build-cache.sh` by bare path; both failures were swallowed by a
+  `WARNING`-and-continue wrapper, so rollback-tag retention has been a silent
+  no-op on every Linux/macOS deploy since `prune-rollbacks.sh` shipped
+  (commit `b47430de`, 2026-07-14). `ops/install.sh` being non-executable also
+  broke the documented quickstart (README.md and every translated
+  `docs/i18n/README.*.md` tell a fresh clone to run it directly).
+  `tests/test_ops_script_modes.py` guards the git index mode of every tracked
+  `ops/*.sh` file so this cannot regress silently again.
+
 ### Added (2026-07-27 — freshness is inferred from the entity's kind; schema **v24**)
 - **`entity_kinds` (schema v24) stores one kind per entity** — `artifact`
   (frozen in time), `system` (live), `concept` (abstract) — and
