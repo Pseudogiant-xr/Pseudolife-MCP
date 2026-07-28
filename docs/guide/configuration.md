@@ -73,9 +73,12 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   than the new preset seats, the deepest band is left over capacity and
   the count logged rather than truncated at startup — normal eviction
   drains it from there.
-- **No NLI scorer** — the `cross-encoder/nli-deberta-v3-xsmall`
-  contradiction model is ~278 MB and optional. The four-path detector
-  works without it. Install with `pip install .[nli]` if you want it.
+- **No NLI scorer.** The `cross-encoder/nli-deberta-v3-xsmall`
+  contradiction model (~278 MB) is an unwired seam, not a switch: the
+  `[nli]` extra and `memory.nli.*` exist for library callers who inject a
+  scorer themselves, and no daemon path constructs one. The four-path
+  detector — slot identity, negation asymmetry, affirmative replacement,
+  state transition — is what actually runs.
 - **Cross-encoder reranker off** — wired into the pipeline but disabled by
   default; enable globally (`memory.reranker.enabled = true`) or per-call
   (`memory_search(..., rerank=True)`). Details: [Retrieval](retrieval.md#cross-encoder-reranking).
@@ -123,6 +126,11 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   `related-to` co-mention edges (confidence 0.45); typed relations (0.70)
   write live as before. Set `0.0` to disable and restore write-live
   behavior.
+- **Quarantine retype on** (`memory.dream.retype_quarantined_max = 3`) —
+  per-dream cap on quarantined pairs re-offered to the extractor for
+  typing, shown only the notes where both entities co-occur; a typed
+  answer becomes a review proposal, never a live edge. Without it the
+  quarantine only accumulates. Set `0` to disable.
 
 ## Toolset tiers
 
@@ -366,3 +374,5 @@ milestones:
 | v25 | `entries`/`facts`/`world_facts`/`lessons.embedding` move from `vector(384)` to `vector(1024)` — default embedding backbone swaps to Qwen/Qwen3-Embedding-0.6B (measured R@10 0.809 vs shipped MiniLM's 0.572). Qwen3-Embedding is instruction-asymmetric — see [asymmetric query/document encoding](retrieval.md#asymmetric-query-and-document-encoding) — so similarity-threshold semantics shift too. `ensure_schema` refuses to start against an existing v24-dimensioned bank rather than attempting an in-place ALTER; migrate first with `ops/migrate_embeddings.py` (dry-run by default; `--apply --backup-verified` to commit) |
 
 After running the entity-kind backfill (`evals/apply_entity_kinds.py --apply`), the daemon must be restarted for inference to take effect — it caches the entity-kind map for the life of its process.
+
+A kind you set by hand is locked against later classifier runs — `evals/apply_entity_kinds.py --apply` overlays the model's labels onto the existing table rather than replacing it, so a deliberate marking is never reverted by a re-apply. The R@10 figures behind the v25 swap, and the rest of the shootout, are in [Benchmarks — embedding backbone](benchmarks.md#embedding-backbone--chosen-on-our-own-corpus).

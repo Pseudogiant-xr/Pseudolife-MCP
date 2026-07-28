@@ -6,6 +6,140 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-07-29 — a better retriever, and facts that admit their age
+
+The embedding backbone moved to `Qwen/Qwen3-Embedding-0.6B` at 1024
+dimensions (schema **v25**), chosen by a recall shootout on this project's
+own corpus rather than on a leaderboard: **R@10 0.572 → 0.809** over a
+74,183-turn haystack, with queries and documents now encoded asymmetrically.
+Alongside it, canonical facts stopped pretending to be timeless — every
+cortex fact carries `asserted_at` and a human `age`, and a `freshness_class`
+(schema v23) decays confidence and flags `stale`, inferred by default from
+the entity's kind (schema v24). A round of band-integrity fixes closes paths
+where overflow could destroy memories outright, and four sources of
+graph-review noise were closed at the write path instead of swept up after.
+
+**Upgrading requires one manual step.** The `vector(384)` → `vector(1024)`
+move is not additive: the daemon **refuses to start** against an
+older-dimensioned bank rather than half-migrating it. Back up, stop the
+daemon, and re-embed offline with `ops/migrate_embeddings.py` — see
+[the v25 migration runbook](docs/runbooks/embedding-v25-migration.md).
+
+### Added (2026-07-29 — the old serving stack was biased, not just noisy)
+- **The ceiling table re-measured on the reproducible server, and the control
+  arm moved further than either treatment arm.** `ceiling-v25` rebuilds the
+  published ceiling run's contexts from the same committed bank dumps under
+  current v25 knobs and re-judges on stock `llama-server` + `q8_0`
+  (`evals/results/longmemeval-ku-oracle-qwen-27b-ceiling-v25.agg.json`,
+  3 replicates, std 0.0000 on every arm):
+
+  | arm | v25 / q8_0 | published (v2 / TurboQuant) | Δ |
+  |---|---|---|---|
+  | naive RAG (**control**) | 0.6282 | 0.5667 ± 0.0167 | **+0.0615** |
+  | cortex facts only | 0.5897 | 0.5590 ± 0.0295 | +0.0307 |
+  | hybrid | 0.7308 | 0.7102 ± 0.0194 | +0.0206 |
+
+  `rebuild_contexts.py` copies the rag context **verbatim** — that arm's
+  input is byte-identical across the two runs — so its +0.0615 cannot be a
+  retrieval effect. It is the answerer/judge stack alone, and at 3.7× the old
+  measurement's own standard deviation it is a **systematic offset, not
+  variance**. That sharpens the 2026-07-27 finding: the TurboQuant fork's
+  fused TBQ4_0 KV was not merely flipping ~7% of verdicts at random, it was
+  scoring this slice about six points low.
+  All three replicates came back **byte-identical** (`sha256` prefix
+  `1a97bea2caa3e191d5ab7687c73546c9`) — not merely equal in score but
+  identical answer for answer and verdict for verdict, which is the strongest
+  available statement that the reproducible config is reproducible. Only the
+  base `.jsonl` is committed for that reason: the other two replicates are
+  the same bytes, and the aggregate already records all three accuracies.
+  **Consequence:** no number measured on the old stack is comparable to one
+  measured now, in either direction, and the gap is larger than most of the
+  effects these tables report. The deltas above are therefore *not* evidence
+  about v25 — the clean same-stack v25 comparison is the regression gate
+  below. The published tables are left as they stand pending a deliberate
+  promotion; `ceiling-v25` is committed as the tagged candidate.
+
+### Fixed (2026-07-29 — a sixth file was coupled to the "five-file version cut")
+- **`tests/test_ops_update_rollback.py` derives the daemon version from
+  `ops/docker-compose.yml` instead of hard-coding it.** The assertion pinned
+  the literal `pseudolife-daemon:0.10.0-unittest`, so it went red the moment
+  this release bumped the compose tag — the version cut presenting itself as
+  a regression in the rollback path, which is the one path you least want to
+  distrust while cutting a release. The update scripts already read that tag
+  from compose as the single source of truth; the test now reads it the same
+  way, and no longer needs touching on a cut.
+
+### Added (2026-07-29 — the v25 backbone finally ran the regression gate)
+- **The gate PASSES on the shipped v25 configuration**, measured against the
+  pinned oracle/`e4b-ft` arm1 slice and committed as
+  `evals/results/regression_gate-2026-07-29-v25-backbone-verify.agg.json`
+  (2 replicates, 78 questions, contexts rebuilt from banks with current
+  knobs). Deltas against the `1f0f13a` baseline:
+
+  | arm | v25 | baseline | Δ |
+  |---|---|---|---|
+  | naive RAG (control) | 0.6282 | 0.6282 | 0.0000 |
+  | cortex facts only | 0.6923 | 0.7051 | −0.0128 |
+  | hybrid | 0.7821 | 0.7692 | +0.0129 |
+
+  Both moved arms sit inside the 0.03 margin, and `std` is 0.0000 on all
+  three across both replicates — confirming the run was served by the
+  reproducible q8_0 config and not the fast build. The control arm is
+  *byte-identical*: it reads raw turns and never touches the retriever, so
+  its zero is what licenses reading the other two as real.
+  **Why this is a late entry:** the baseline was established 2026-07-27
+  (`1f0f13a`) and the backbone swap landed 2026-07-28 (`7d20443b`), so the
+  single most retrieval-affecting change in this release reached the release
+  gate without the retrieval gate ever having been run against it. On the
+  slice, a 1024-d backbone with R@10 0.809 buys nothing end-to-end over a
+  384-d one at 0.572 — better recall did not become better answers here,
+  which is worth knowing before reading the shootout as a product claim.
+
+### Fixed (2026-07-29 — the `relate` action suggested a relation no fresh bank could store)
+- **`implements` is now a builtin relation.** The file/concept review finding
+  added on 2026-07-26 proposes `<file> implements <concept>`, but `implements`
+  was never in `_BUILTIN_RELATIONS`, and the relation registry is a closed
+  vocabulary: `graph_relate` rejected it with `unknown_relation` and — because
+  `implements` matches no seeded name above `difflib`'s 0.5 cutoff — an
+  **empty** `suggestions` list, leaving the user no recovery hint. Seeding is
+  idempotent (`ON CONFLICT (name) DO NOTHING`), so existing banks pick it up
+  on the next daemon start.
+  **Why it survived review:** the relation had been hand-defined on the
+  development bank, so every manual test of the Atlas Relate button passed.
+  The feature was broken only on a *fresh* install — the one configuration
+  nobody had. That CHANGELOG entry even asserts "the `implements` relation
+  already described exactly this case", which was true of the live bank and
+  false of the shipped vocabulary. The regression test now resolves every
+  relation the review layer can suggest against `_BUILTIN_RELATIONS` rather
+  than against whatever the live registry has drifted to.
+
+### Added (2026-07-29 — the Arm-1 significance claim gets its artifact)
+- **`replicate.py compare` run for the Arm-1 vs baseline pair**, producing
+  `longmemeval-ku-oracle-e4b-ft-arm1-vs-baseline-{cortex,hybrid,rag}.compare.json`.
+  The published p-values reproduce exactly (cortex Δ+0.0795 p=0.16958; hybrid
+  Δ+0.0128 p=0.82862), so the table was accurate — it simply had no evidence
+  behind it, which is the failure `tests/test_eval_evidence.py` exists to
+  prevent. The **`rag` control arm** (Δ−0.0103, p=0.40586) is now published
+  beside them: its input is identical across both runs, so it bounds what the
+  other arms can claim.
+
+### Changed (2026-07-27 — the gate's spread was the serving stack, not the judge)
+- **`regression_gate.ps1` defaults to `-Replicates 2` again, and the baseline
+  is re-established at n=7 with std 0.0000 on every arm** (rag 0.6282,
+  cortex 0.7051, hybrid 0.7692). The ~0.03 cortex spread that justified
+  raising the default to 10 the previous day was the TurboQuant fork's fused
+  TBQ4_0 KV cache, not judge nondeterminism: it flips ~6.8–7.7% of verdicts
+  on byte-identical input (`evals/results/judge-determinism-check.json`),
+  while the stock `llama-server` with `--cache-type-k/v q8_0` reproduces
+  exactly. Replicates are therefore a drift canary, not an estimator — if two
+  disagree, the run was served by the wrong binary. The gate also got *more*
+  sensitive: the margin `max(0.03, 2*std)` collapses to the 0.03 floor
+  instead of the 0.0637 the noise used to buy.
+  **Why this entry is dated late:** the change shipped on 2026-07-27 and
+  `evals/README.md` retired the superseded numbers at their own site, but the
+  CHANGELOG was never updated, so `[Unreleased]` went on presenting the
+  10-replicate baseline as current for two days.
+
 ### Added (2026-07-28 — Docker build-cache retention)
 - **`ops/prune-build-cache.ps1` / `.sh`** give the BuildKit cache a
   retention policy: an age pass (`docker builder prune --force --filter
@@ -391,7 +525,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   runs after file-extension typing and uses singular prefixes only, so
   `docs/guide/benchmarks.md` and `evals/ladder_sweep.py` stay files.
 
-### Changed (2026-07-26 — gate baseline re-established at 10 replicates; default raised)
 ### Added (2026-07-26 — `relate` action for file/concept duplicate findings)
 - **The review queue can now record an edge instead of forcing merge-or-dismiss.**
   A duplicate finding whose two names are a source file and its own bare stem
@@ -412,11 +545,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`test_shim.py` / `tests/test_shim.py`) and non-code pairs (`README.md` /
   `README`) keep the ordinary merge action.
 
-### Changed (2026-07-26 — regression-gate baseline re-established at 8 replicates)
+### Changed (2026-07-26 — gate baseline re-established at 10 replicates; default raised)
+
+> **Superseded 2026-07-27.** Both the baseline and the raised default below
+> were undone once the ~0.03 spread they were sized to average away was
+> root-caused to the serving stack rather than the judge — see the
+> 2026-07-27 entry. The current baseline is n=7 at std 0.0000, and
+> `regression_gate.ps1` defaults to `-Replicates 2`. The numbers in this
+> entry are historical.
+
 - **`evals/results/regression_gate.baseline.json` re-established on clean
   `origin/master` (commit `959ecad`) with 10 replicates**, replacing the
   3-replicate baseline from 2026-07-18 that both master and the #38–#44
-  stack failed.
+  stack failed. (An 8-replicate baseline landed 45 minutes earlier the same
+  day and was replaced by this one before either shipped; this entry
+  originally carried that stale `8` in its title.)
 
   | arm | mean | std | margin |
   |---|---|---|---|

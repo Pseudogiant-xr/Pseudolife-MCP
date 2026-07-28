@@ -18,6 +18,13 @@ vetting any future extractor change.
 - Runs against a dedicated **`pseudolife_memory_bench`** database (created if
   missing, truncated before each ingest). The live bank
   (`pseudolife_memory`) is **never** touched.
+
+  > That guarantee is **per harness, not page-wide**. Most harnesses here use
+  > the bench DB or no DB at all; `capture_metrics.py` reads the live bank
+  > read-only; and `apply_entity_kinds.py` is the one harness in `evals/` that
+  > **writes** the live bank. See "Entity-kind classification" at the end of
+  > this page.
+
 - Forces **CPU** (`CUDA_VISIBLE_DEVICES=-1`) for the embedder so the host GPU
   is left alone. The LLM rungs run wherever their endpoint runs (sidecar on
   CPU, LAN models on their own GPUs).
@@ -27,20 +34,44 @@ vetting any future extractor change.
 
 ## Rungs
 
-| rung        | extractor                          | endpoint                     |
-|-------------|------------------------------------|------------------------------|
-| `naive-rag` | none — top-k vector search baseline| —                            |
-| `floor`     | deterministic regex (`RegexExtractor`) | — (in-process)           |
-| `gemma-e2b` | Gemma 4 E2B (Q4) CPU sidecar       | `http://127.0.0.1:8081/v1`   |
-| `gemma-e4b` | Gemma 4 E4B (Q4) CPU sidecar       | `http://127.0.0.1:8081/v1`   |
-| `qwen-a3b`  | Qwen3.6-35B-A3B (homelab 5800X3D)  | `$PSEUDOLIFE_BENCH_A3B_URL` (default `http://127.0.0.1:1236/v1`) |
-| `qwen-27b`  | Qwen3.6-27B (4090)                 | `$PSEUDOLIFE_BENCH_QWEN_URL` (default `http://127.0.0.1:1234/v1`) |
+`LADDER_ORDER` (`ladder_sweep.py`) is the sweep, in rung order — 14 rungs.
+`--list` prints the same set with live reachability; the table here is the
+authoritative copy only until the code changes, so read the code if they
+disagree.
 
-The cloud rung is intentionally omitted — this is a sovereign-only sweep.
+| rung             | extractor                                    | endpoint                     |
+|------------------|----------------------------------------------|------------------------------|
+| `naive-rag`      | none — top-k vector search baseline           | —                            |
+| `floor`          | deterministic regex (`RegexExtractor`)        | — (in-process)               |
+| `gemma-e2b`      | Gemma 4 E2B (Q4) CPU sidecar                  | `http://127.0.0.1:8081/v1`   |
+| `gemma-e4b`      | Gemma 4 E4B (Q4) CPU sidecar                  | `http://127.0.0.1:8081/v1`   |
+| `qwen3.5-4b`     | Qwen3.5-4B (sidecar-upgrade candidate)        | `http://127.0.0.1:8081/v1`   |
+| `granite-h-tiny` | Granite 4.0-H-Tiny 7B-A1B (candidate)         | `http://127.0.0.1:8081/v1`   |
+| `lfm2-8b-a1b`    | LFM2-8B-A1B (candidate)                       | `http://127.0.0.1:8081/v1`   |
+| `ornith-9b`      | Ornith-1.0-9B (candidate)                     | `http://127.0.0.1:8081/v1`   |
+| `diffusiongemma` | DiffusionGemma 26B-A4B (candidate)            | `http://127.0.0.1:8082/v1` (via `evals/dg_shim.py` — no llama-server support for diffusion archs) |
+| `gemma4-26b-qat` | Gemma 4 26B-A4B QAT-Q4_0 (candidate)          | `http://127.0.0.1:8081/v1`   |
+| `gemma-e4b-qat`  | Gemma 4 E4B QAT UD-Q4_K_XL (sidecar-swap candidate) | `http://127.0.0.1:8081/v1` |
+| `e4b-ft`         | **E4B QLoRA extractor fine-tune Q4_K_M — the shipped default** | `http://127.0.0.1:8081/v1` |
+| `qwen-a3b`       | Qwen3.6-35B-A3B (homelab 5800X3D)             | `$PSEUDOLIFE_BENCH_A3B_URL` (default `http://127.0.0.1:1236/v1`) |
+| `qwen-27b`       | Qwen3.6-27B (4090)                            | `$PSEUDOLIFE_BENCH_QWEN_URL` (default `http://127.0.0.1:1234/v1`) |
 
-`gemma-e2b` and `gemma-e4b` share the **same** `:8081` endpoint: the operator
-swaps the served GGUF between the two runs (see below). Run one, then the
-other.
+Three further rungs are **registered but deliberately outside `LADDER_ORDER`**,
+so the default sweep is sovereign-only. They are runnable — `--rung sonnet-5`
+etc. — and are ceiling probes, not candidates:
+
+| rung       | extractor                                        | endpoint                   |
+|------------|--------------------------------------------------|----------------------------|
+| `sonnet-5` | Claude Sonnet 5 (Max-plan CLI shim)               | `http://127.0.0.1:8082/v1` |
+| `opus-5`   | Claude Opus 5 (Max-plan CLI shim)                 | `http://127.0.0.1:8083/v1` |
+| `fable-5`  | Claude Fable 5 (Max-plan CLI shim)                | `http://127.0.0.1:8084/v1` |
+
+These three are served by `evals/sonnet_shim.py`, which shells out to the
+`claude` CLI — the only rungs that leave the machine. See "Everything runs
+locally" under the LongMemEval bench below for the same caveat.
+
+Every `:8081` rung shares that **one** endpoint: the operator swaps the served
+GGUF between runs (see below). Run one, then the next.
 
 ## Prerequisites
 
@@ -85,6 +116,23 @@ docker run -d --name pseudolife-mcp-extractor-bench -p 127.0.0.1:8081:8081 \
 `/v1` server such as llama.cpp or LM Studio). Confirm with
 `python evals/ladder_sweep.py --list`; unreachable rungs are skipped cleanly.
 
+**Never hand-roll the `:1234` Qwen-27B server.** Dot-source `evals/qwen_server.ps1`
+and let it pick the config:
+
+```powershell
+. .\evals\qwen_server.ps1
+if (-not (Start-Qwen))       { throw "server did not come up" }   # reproducible
+if (-not (Start-Qwen -Fast)) { throw "server did not come up" }   # throughput only
+```
+
+The default is the stock `llama-server` with `--cache-type-k/v q8_0`, which is
+bit-reproducible. `-Fast` is the TurboQuant+MTP fork, whose fused `tbq4_0`
+flash-attention KV is **not** — it flips ~7% of judged verdicts on identical
+input — so `-Fast` is only for output that is never judged (a bank, a raw
+generation). Both configs bind `:1234`, so "something answered the probe" is
+not proof the right one is running; the helper checks which config is up and
+replaces it.
+
 ## Running
 
 All commands from the repo root. `PYTHONPATH=.` lets the script import
@@ -111,6 +159,22 @@ PYTHONPATH=. python evals/ladder_sweep.py --report
 Each rung is its own process and writes its own `results/<rung>.json`, so the
 slow CPU/LAN rungs can run incrementally — kill and resume between rungs
 without losing finished ones. `--report` reads whatever is present.
+
+**Never overwrite a canonical result file — tag the rerun and promote it
+deliberately.** `resolve_out_path` enforces this: an untagged run may only
+*create* `results/<rung>.json`, never replace one, and it refuses **before**
+the (hours-long) run rather than after. A rerun goes to a sibling:
+
+```bash
+PYTHONPATH=. python evals/ladder_sweep.py --rung gemma-e2b --out-tag 2026-07-29-recheck
+# inspect, then promote by copying over the canonical file if it should win
+```
+
+This guard is not decoration. A 2026-07-21 rerun silently rewrote
+`results/sonnet-5.json` in place while also writing its own tagged file, and
+an earlier untagged rerun overwrote five of the six 2026-06-18 ladder
+artifacts — which is why the dated table further down no longer reproduces
+that sweep (see "Findings — 2026-06-18 sweep").
 
 > On Windows the per-rung temp dir may leak (ChromaDB keeps the SQLite handle
 > open for the life of the process); the harness ignores the cleanup error and
@@ -148,14 +212,22 @@ extractor — the cheapest model worth shipping as the default.
 
 The abstention sub-sweep (`--abstain`) sweeps a **2-D grid** of the cortex guard
 `guard_min_score ∈ {0.3, 0.5, 0.65, 0.75, 0.85}` × `search_confidence_floor ∈
-{0.0, 0.5, 0.65, 0.70, 0.75, 0.80}` (the floors bracket the embedder's actual
-score distribution — answerable max-scores 0.75–0.98, unanswerable 0.38–0.78;
-floors below ~0.5 never fire) and reports, per cell:
+{0.0, 0.5, 0.65, 0.70, 0.75, 0.80}` and reports, per cell:
 
 - **`abstain_recall_unanswerable`** ↑ — fraction of never-stated probes that
   correctly return `low_confidence=True`.
 - **`false_abstain_answerable`** ↓ — fraction of answerable questions wrongly
   flagged low-confidence.
+
+> **The floor values are stale as of the schema-v25 backbone swap (2026-07-28).**
+> They were chosen on 2026-06-18 to bracket MiniLM's measured score
+> distribution on this corpus (answerable max-scores 0.75–0.98, unanswerable
+> 0.38–0.78; floors below ~0.5 never fired). The v25 swap to
+> Qwen3-Embedding-0.6B did not merely rescale that distribution: `encode_query`
+> now prepends an instruction prefix, so these thresholds gate a
+> *prefixed-query-to-document* cosine — an asymmetric quantity the old numbers
+> never measured. Re-measure the distribution before reading anything into a
+> specific floor.
 
 Pick the `(guard, floor)` pair that maximises `abstain_recall` while keeping
 `false_abstain_answerable` at/near zero. The guard is the binding constraint:
@@ -178,8 +250,17 @@ off.
 
 The first **external** benchmark: the knowledge-update subset (78 questions)
 of [LongMemEval](https://arxiv.org/abs/2410.10813) — the ability the HLC
-supersession spine is built for. Everything runs **locally** (extractor,
-answerer, judge); nothing leaves the machine.
+supersession spine is built for.
+
+**Locality, precisely.** The default configuration runs entirely **locally** —
+extractor, answerer and judge are all served on this host or the LAN, and
+nothing leaves the machine. The exception is opt-in and explicit: the
+`sonnet-5` / `opus-5` / `fable-5` extractor rungs are cloud ceiling probes.
+They are served by `evals/sonnet_shim.py`, which shells out to the `claude`
+CLI, so **selecting one of those rungs sends the corpus turns to Anthropic**.
+They are never selected by default (they sit outside `LADDER_ORDER` and are
+not the default `--extractor`); you have to ask for them by name. The
+answerer and judge remain local in every configuration.
 
 ## Dataset
 
@@ -198,7 +279,7 @@ Three arms answer every question from the same ingested memory:
 | arm | context | measures |
 |-----|---------|----------|
 | `rag` | top-6 raw turns (vector search) | naive-RAG baseline — **never touches the extractor**, so it doubles as a cross-run control |
-| `cortex` | top-8 canonical facts, each with its supersession chain (`svc.history`) appended | the fact spine alone |
+| `cortex` | top-24 canonical facts at `min_score` 0.2 (`CORTEX_TOP_K` / `CORTEX_MIN_SCORE`), each with its supersession chain (`svc.history`) appended | the fact spine alone |
 | `hybrid` | facts + top-3 raw turns | the product posture |
 
 Model roles are split so extraction quality is the **only** variable:
@@ -210,10 +291,14 @@ Model roles are split so extraction quality is the **only** variable:
 - **Answerer + judge** (constant): Qwen3.6-27B for every run, LongMemEval's
   LLM-as-judge protocol. All calls request `temperature: 0`.
 
-Serving config for reproducibility: Qwen3.6-27B **Unsloth UD-Q4_K_XL**
-(~4.5bpw) on a llama.cpp MTP fork with 4.25-bit (`tbq4_0`) KV cache.
-Both quantizations trade some fidelity for fitting 24GB — treat the
-ceiling as "27B-class local", not "27B at BF16".
+Serving config: Qwen3.6-27B **Unsloth UD-Q4_K_XL** (~4.5bpw) on the **stock**
+`llama-server` with `--cache-type-k/v q8_0`, started via `Start-Qwen` from
+`evals/qwen_server.ps1`. That pairing is the reproducible one — byte-identical
+inputs give byte-identical outputs. Do **not** serve a judged run from the
+TurboQuant MTP fork with its 4.25-bit (`tbq4_0`) fused-attention KV: it is not
+bit-reproducible and flips ~7% of verdicts (see "Variance and replication"
+below). The weight quantization trades some fidelity for fitting 24GB — treat
+the ceiling as "27B-class local", not "27B at BF16".
 
 Ingestion mirrors the product cadence: turns are stored session-by-session
 in chronological order and the dream consolidates after each session.
@@ -224,6 +309,14 @@ runs. Every extract run also dumps the question's full fact bank (values +
 history chains) to `results/banks/` and stamps rows with
 `answer_in_current_fact` / `answer_in_history_only`, so a failure is
 attributable to never-extracted vs overwritten vs not-retrieved.
+
+Start the answerer/judge server through the helper first — every command below
+is judged, so it needs the reproducible config and must not be hand-rolled:
+
+```powershell
+. .\evals\qwen_server.ps1
+if (-not (Start-Qwen)) { throw "bench server did not come up" }
+```
 
 ```bash
 # full run, one extractor
@@ -244,12 +337,25 @@ is exact and needs no re-extraction (and no GPU).
 
 ## Findings — 2026-07-04
 
+> **SUPERSEDED — the headline oracle hybrid 0.705 in this table is retired,
+> twice over.** (1) It is **unreplicable**: the run predates per-question
+> context persistence, so its bank cannot be rebuilt. Its replicable sibling
+> `ceiling-v2` puts the qwen-27b class at hybrid **0.710 ± 0.019** — read
+> 0.705 as that band's edge, not as a measurement (see the 2026-07-19
+> addendum). (2) Every number in this table was measured on the
+> **nondeterministic TurboQuant server**, whose fused `tbq4_0` KV flips ~7% of
+> verdicts; values measured there are not comparable to values measured on the
+> reproducible q8_0 config, and the spread is not centred on the deterministic
+> value (see "Variance and replication"). Kept because the *shape* of the
+> result — hybrid > rag > cortex, and the flat rag control across extractors —
+> reproduced under replication. Do not quote the cells.
+
 Accuracy / context-tokens-per-question, 78 questions, judge = local
 Qwen3.6-27B:
 
 | dataset | extractor | rag (control) | cortex | hybrid |
 |---|---|---|---|---|
-| oracle | qwen-27b (ceiling) | 0.615 / 1638 | 0.564 / **59** | **0.705** / 979 |
+| oracle | qwen-27b (ceiling) | 0.615 / 1638 | 0.564 / **59** | ~~**0.705**~~ / 979 (retired — see above) |
 | oracle | gemma-e2b (floor) | 0.564 / 1638 | 0.192 / 112 | 0.474 / 1031 |
 | s | qwen-27b | 0.321 / 2056 | 0.205 / 27 | **0.372** / 1114 |
 | s | gemma-e2b | 0.346 / 2076 | 0.141 / 142 | 0.308 / 1229 |
@@ -271,11 +377,17 @@ Qwen3.6-27B:
   `results/longmemeval-ku-oracle.v1-nohistory.jsonl`.
 - **Abstention holds**: 6/6 abstention variants correct in the hybrid arm
   on both datasets.
-- **Known `_s` gap under diagnosis**: at `min_score 0.3`, 45/78 haystack
-  questions retrieve zero cortex facts (terse canonical fact strings score
-  low cosine against verbose questions) and supersession churn is ~10×
-  oracle's (970–1245 events). Both are being worked with the bank-dump
-  diagnostics + offline sweep.
+- **Known `_s` gap — the starvation half is FIXED (2026-07-06), the churn half
+  is still open.** As measured here, at `min_score 0.3` / `top_k 8`, 45/78
+  haystack questions retrieved **zero** cortex facts: terse canonical fact
+  strings score low cosine against verbose questions. `retrieval_sweep.py`
+  replayed the dumped banks offline and `rebuild_contexts.py` re-judged them,
+  and commit `6136d359` landed the fix — `top_k 8 → 24`, `min_score 0.3 →
+  0.2` (now `CORTEX_TOP_K` / `CORTEX_MIN_SCORE`), taking starvation **60% →
+  28%** at unchanged judged accuracy. 0.1 was tried and rejected: it serves
+  more gold facts but the extra weak ones dilute the context and the answerer
+  abstains on questions it previously got right. The **supersession churn**
+  (~10× oracle's, 970–1245 events) was *not* addressed and remains open.
 
 **Comparability caveat:** published LongMemEval numbers (TiMem 76.9%,
 EverMemOS 83% overall) use GPT-4o-class answerers/judges and all 500
@@ -295,13 +407,18 @@ this table, not against leaderboards.
 > serves that config by default to every harness; pass `-Fast` only for
 > throughput work whose output is never judged.
 >
-> Measured after the switch, the gate slice at n=4 replicates: **std 0.0000
-> on all three arms** (`regression_gate-2026-07-27-establish-q8-n4.agg.json`).
+> Measured after the switch, the gate slice at n=7 replicates spanning a
+> server restart: **std 0.0000 on all three arms**
+> (`regression_gate-2026-07-27-establish-q8-n7-crossrestart.agg.json` — rag
+> 0.6282, cortex 0.7051, hybrid 0.7692, identical on every replicate). The
+> cross-restart part matters: it rules out a warm process holding the result
+> steady.
+>
 > Historical means on this page were measured on the noisy server and are
 > **not comparable** to values measured on the reproducible one — the spread
 > is not centred on the deterministic value, and it shifts differently per
 > arm (on the gate slice: rag deterministic 0.6282 vs a noisy range topping
-> out at 0.6026; hybrid deterministic 0.7692 vs a noisy *minimum* of 0.7692).
+> out at 0.6154; hybrid deterministic 0.7692 vs a noisy *minimum* of 0.7692).
 > Re-measure rather than reinterpret.
 
 Historically, single runs of this bench looked irreducibly noisy: three runs
@@ -339,6 +456,8 @@ re-extract):
 
     python evals/replicate.py spawn --extractor e4b-ft --tag arm1 -n 4
     python evals/replicate.py run   --extractor e4b-ft --tag arm1
+    #  ^ `-n` belongs to `spawn` only — `spawn` creates the stripped replicate
+    #    files, `run` answers whatever is pending. `run … -n 5` exits 2.
     python evals/replicate.py agg   --extractor e4b-ft --tag arm1
     python evals/replicate.py compare --extractor e4b-ft --tag arm1 \
         --b-tag arm1-baseline --arm cortex
@@ -439,13 +558,31 @@ test over the 78 questions:
 | `e4b-ft` arm1-baseline | 0.585 ± 0.015 | 0.603 ± 0.013 | 0.749 ± 0.015 |
 | `qwen-27b` w0 | 0.579 ± 0.019 | 0.536 ± 0.025 | 0.695 ± 0.017 |
 
-- **Arm-1 verdict**: cortex delta +0.080 at paired **p = 0.17** (pre-registered
-  threshold 0.05) — *not confirmed*; hybrid delta +0.013 at p = 0.83. The
+- **Arm-1 verdict**: cortex delta +0.0795 at paired **p = 0.17** (pre-registered
+  threshold 0.05) — *not confirmed*; hybrid delta +0.0128 at p = 0.83. The
   original single-run "+0.102" deploy evidence was inflated by judge noise
   and question-level heterogeneity (the fine-tune fixes some questions,
   regresses others). The shipped default is flagged for revisit, not
   reverted — the point estimate is still positive and nothing here shows
   the fine-tune *hurting*.
+
+  Artifacts, all `arm1` vs `arm1-baseline`, 78 questions, 10 000 permutations,
+  seed 0 (`replicate.py compare`):
+
+  | arm | Δ | p | artifact |
+  |---|---|---|---|
+  | cortex | +0.0795 | 0.16958 | `longmemeval-ku-oracle-e4b-ft-arm1-vs-baseline-cortex.compare.json` |
+  | hybrid | +0.0128 | 0.82862 | `…-vs-baseline-hybrid.compare.json` |
+  | **rag (control)** | **−0.0103** | **0.40586** | `…-vs-baseline-rag.compare.json` |
+
+  The `rag` row is the **measurement floor**, and it is why the cortex result
+  is read as "not confirmed" rather than "small but real". Its contexts are
+  built from raw turns and never touch the extractor, so both sides of that
+  comparison are byte-identical input: the −0.0103 it nonetheless shows is
+  pure measurement noise. A claimed effect is only interesting once it clears
+  that spread — and at the time these were measured, the noise came from the
+  nondeterministic server (see "Variance and replication"), so the floor was
+  wide. Re-run on the reproducible config before revisiting the verdict.
 - **The untagged `qwen-27b` run (README's 0.705 hybrid) is unreplicable** —
   it predates per-question context persistence. Its nearest replicable
   sibling (`w0`, same knobs, different bank) puts the qwen-27b class at
@@ -458,7 +595,7 @@ test over the 78 questions:
 
 | config | rag | cortex | hybrid |
 |---|---|---|---|
-| `qwen-27b` ceiling-v2 (fresh oracle bank, context-persisted) | 0.567 ± 0.017 | 0.559 ± 0.030 | 0.710 ± 0.019 |
+| `qwen-27b` ceiling-v2 (fresh oracle bank, context-persisted) | 0.567 ± 0.017 | 0.559 ± 0.029 | 0.710 ± 0.019 |
 | `qwen-27b` `_s` haystack | 0.321 ± 0.027 | 0.195 ± 0.011 | 0.367 ± 0.015 |
 
 - The historical single-run headline (oracle hybrid 0.705, unreplicable
@@ -490,9 +627,12 @@ docker cp evals/lesson_synthesis_bench.py pseudolife-mcp-daemon:/tmp/lb.py
 docker exec pseudolife-mcp-daemon python /tmp/lb.py --target all
 ```
 
-The prime optimisation target is the shipped **Gemma 2B** sidecar (what an
-end-user runs); **Qwen3.6-27B** (4090) is the quality CEILING, not the target.
-The `_LESSON_SYSTEM_PROMPT` here is tuned, then ported to `memory/dream.py`.
+The prime optimisation target is the **shipped sidecar** — whatever
+`ops/Dockerfile.extractor` bakes, which since 2026-07-06 is an **E4B-class**
+model and currently the Gemma 4 E4B QLoRA fine-tune (`e4b-ft`), not the 2B the
+findings below were measured on. **Qwen3.6-27B** (4090) is the quality CEILING,
+not the target. The `_LESSON_SYSTEM_PROMPT` here is tuned, then ported to
+`memory/dream.py`.
 
 ## Findings — 2026-06-21
 
@@ -523,32 +663,54 @@ Gemma 2B (tuned prompt)       5/6       5/5     correction-polarity FIXED
   — better than the v1 live smoke suggested (that smoke's inversion was not
   systematic at temperature 0).
 
-## Findings — 2026-06-18 sweep
+## Findings — the ladder sweep (originally 2026-06-18)
+
+> **This table has been reconciled to the COMMITTED artifacts, and they are no
+> longer the 2026-06-18 files.** Five of the six canonical `results/*.json`
+> were overwritten in place by a later untagged rerun, before
+> `resolve_out_path`'s `--out-tag` guard existed — only `qwen-a3b.json` still
+> carries its original values. The rows below are therefore *the surviving
+> measurements*, not a single dated sweep; they mix run dates and every
+> LLM-rung number reflects the post-fix extractor path (see "Reasoning models
+> need thinking disabled", below, which was one of the things that changed
+> between them). Read them as "what the committed evidence says today". This
+> is the failure the `--out-tag` rule in "Running" exists to prevent.
 
 ```
-rung                           gold↑  stale↓   tok/q↓  extract s
-naive-RAG (baseline)             0.7     0.3     59.2        0.0
-deterministic floor              0.1     0.1      0.9        0.0
-Gemma 4 E2B (CPU sidecar)        0.9     0.1      2.3       17.4
-Gemma 4 E4B (CPU sidecar)        1.0     0.1      2.3       31.4
-Qwen3.6-35B-A3B (homelab CPU)    1.0     0.1      2.3       45.8
-Qwen3.6-27B (4090)               1.0     0.0      2.1        6.2
+rung                           gold↑  stale↓   tok/q↓  extract s   artifact
+naive-RAG (baseline)             0.7     0.3     58.3        0.0   naive-rag.json
+deterministic floor              0.1     0.1      0.9        0.1   floor.json
+Gemma 4 E2B (CPU sidecar)        1.0     0.0      1.4        6.7   gemma-e2b.json
+Gemma 4 E4B (CPU sidecar)        1.0     0.0      1.4       68.0   gemma-e4b.json
+Qwen3.6-35B-A3B (homelab CPU)    1.0     0.1      2.3       45.8   qwen-a3b.json  (original)
+Qwen3.6-27B (4090)               1.0     0.0      1.4        9.0   qwen-27b.json
 ```
 
 - **All four LLM rungs clear the gate.** Even the smallest CPU sidecar (Gemma 4
-  E2B) beats naive-RAG on every axis — gold 0.9, stale 0.1, **~25× fewer tokens
-  per query** (2.3 vs 59.2). **Minimum viable = Gemma 4 E2B.**
-- **Quality ceiling = Qwen3.6-27B**: the only rung that consistently named the
-  entity the same way across the `initial` and `update` turns, so the update
-  *superseded* the stale value (stale_leak → 0.0). The smaller models split
-  initial/update onto sibling slots (superseded=0), leaving one stale value
-  retrievable (stale_leak 0.1).
+  E2B) beats naive-RAG on every axis — gold 1.0, stale 0.0, **~40× fewer tokens
+  per query** (1.4 vs 58.3). **Minimum viable = Gemma 4 E2B.** This verdict is
+  the one thing the overwrite did not disturb: it held on the original files
+  and holds more strongly on these.
+- **Quality ceiling = Qwen3.6-27B** — on *quality per second*, not on the
+  headline metrics, which the surviving artifacts no longer separate: E2B, E4B
+  and 27B all land at gold 1.0 / stale 0.0 / 1.4 tok-q. The original sweep
+  distinguished them (27B alone reached stale_leak 0.0, because it was the only
+  rung that consistently named the entity the same way across the `initial` and
+  `update` turns, so the update *superseded* the stale value; the smaller models
+  split initial/update onto sibling slots, superseded=0, leaving one stale value
+  retrievable at stale_leak 0.1). **That distinction is now unbacked** — its
+  artifacts were the overwritten ones. `qwen-a3b`, the one original file, still
+  shows the split-slot signature at stale_leak 0.1.
 - **Reasoning models need thinking disabled for extraction.** Before the fix,
   Qwen3.6 spent its whole 4096-token budget on a `<think>` trace and returned
   empty content → silent regex-floor fallback (gold 0.1, 399s). Adding
   `chat_template_kwargs:{enable_thinking:false}` + tolerant JSON parsing (strip
   ```json fences) to `OpenAICompatExtractor` fixed it (homelab 399s→46s; and it
-  even sped up + improved Gemma E2B: 58s→17s, gold 0.8→0.9).
+  even sped up + improved Gemma E2B: 58s→17s, gold 0.8→0.9). Those E2B
+  before/after figures are from the **original 2026-06-18 run**, whose result
+  file was later overwritten; the committed `gemma-e2b.json` now reads 6.7s at
+  gold 1.0. Neither number contradicts the other — they are different runs —
+  but only the 6.7/1.0 pair has a committed artifact behind it.
 - **Abstention is cortex-guard-limited, not floor-limited.** `false_abstain` is
   0.0 at every floor (the cortex guard fully protects answerable queries);
   `abstain_recall` plateaus at 0.33 because any topically-adjacent cortex fact
@@ -927,3 +1089,140 @@ measures *partition-forced eviction vs none*, not one eviction policy vs
 another; testing the policy would need >5,250 turns/question. What is
 established: partitioning a fixed capacity into recency tiers discards
 entries an unpartitioned store of the same size keeps, and costs accuracy.
+
+---
+
+# Needle survival (`needle_survival.py`)
+
+The write-side ablation above establishes that the continuum evicts 31.1% of
+what it stores. Survival *rate* cannot say whether that costs anything:
+discarding 31% of filler is free, discarding the answer evidence is fatal.
+LongMemEval marks its evidence turns `has_answer`, so the eviction rate **on
+needles** is directly measurable and directly comparable to the base rate.
+
+It is not free. **Needles are evicted at 1.21× the base rate** — 37.5% vs
+31.1% — and **58% of questions lose at least one needle**. The mechanism is
+structural rather than incidental: eviction and promotion both rank on novelty
+(`1 - max cos`), and knowledge-update evidence is by construction a
+*restatement* of an attribute already mentioned, hence unsurprising, hence
+preferentially destroyed. This is the measurement that justifies the overflow
+fix in the CHANGELOG.
+
+Offline and CPU-only. It reads the band dumps written by `band_ablation.py
+replay` (gitignored — hundreds of MB of embeddings) and writes a small
+**tracked** JSON so the published numbers have committed evidence:
+
+```bash
+python evals/needle_survival.py --dataset s --extractor qwen-27b
+# -> evals/results/longmemeval-ku-s-qwen-27b-needle-survival.json
+```
+
+That artifact (72 questions, 35,117 turns ingested, 144 needles) is pinned by
+`tests/test_eval_evidence.py`, which re-derives 37.5 / 31.1 / 58 from it and
+fails if the prose and the file diverge.
+
+---
+
+# Embedding-backbone shootout (`embedder_recall.py`)
+
+The eval behind the **schema-v25 backbone swap**. Replacing the bi-encoder is a
+schema migration — the pgvector columns were declared `vector(384)` in four
+tables, every stored row must be re-embedded, and every committed artifact's
+embeddings stop being comparable — which is far too much to spend on a
+literature claim. So this measures the thing the swap is supposed to buy, on
+our own corpus: **recall@k of the turns LongMemEval marks `has_answer`**,
+ranking every haystack turn of a question by cosine to the question text. Pure
+retrieval; no reader, no judge, no DB. Runs on GPU when torch sees one — recall
+is device-independent, so bench on GPU and deploy on CPU.
+
+Candidates carry their **card-verbatim** query/passage prefixes. Instruction-
+tuned embedders swing on exact wording, so an arm run with the wrong (or no)
+prefix understates that model and the comparison stops being fair; the
+committed artifact records the prefix *strings*, not a bool, for that reason.
+The first `--arms` entry is the paired-McNemar baseline.
+
+```bash
+python evals/embedder_recall.py --questions 30            # quick smoke
+python evals/embedder_recall.py --arms minilm bge-base-prefix qwen3-0.6b \
+    --out evals/results/embedder-recall-<tag>.json
+```
+
+## Findings — 2026-07-27/28
+
+Seven-arm shootout, 150 questions, 74,183 haystack turns, 299 gold turns
+(`embedder-recall-shootout-20260727.json`):
+
+| arm | dim | R@10 |
+|---|---|---|
+| all-MiniLM-L6-v2 (shipped at the time) | 384 | 0.572 |
+| granite-embedding-english-r2 | 768 | 0.662 |
+| bge-base-en-v1.5 (query prefix) | 768 | 0.716 |
+| snowflake-arctic-embed-l-v2.0 (query prefix) | 1024 | 0.732 |
+| bge-base-en-v1.5 | 768 | 0.742 |
+| bge-large-en-v1.5 (query prefix) | 1024 | 0.742 |
+| **Qwen3-Embedding-0.6B (instructed)** | **1024** | **0.809** |
+
+The head-to-head against the runner-up, same corpus, paired McNemar
+(`embedder-recall-qwen-vs-bge-20260728.json`): Qwen3-Embedding-0.6B **gains 32
+questions and loses 12** against bge-base at k=10, **p = 0.0037**. The margin
+holds at the other cut-offs (k=5: +42/−12, p = 5.2e-05; k=20: +24/−6,
+p = 0.0014), which is what makes it a backbone choice rather than a k-tuning
+artifact.
+
+That is the swap that shipped: `vector(384)` → `vector(1024)`, and
+`encode_query` now prepends the model card's instruction prefix — which is why
+any threshold calibrated against the old symmetric MiniLM cosine (the
+abstention floors near the top of this page, for one) is stale rather than
+merely rescaled.
+
+---
+
+# Entity-kind classification (`classify_entity_kinds.py`, `apply_entity_kinds.py`)
+
+> **These two are the exception to this page's isolation guarantees.**
+> `classify_entity_kinds.py` **reads** the live bank (`pseudolife_memory`), and
+> `apply_entity_kinds.py` **writes** it — the only harness in `evals/` that
+> does. Everything else here uses `pseudolife_memory_bench`, reads read-only,
+> or touches no DB at all. **Back up first** (`ops/backup.ps1`).
+
+A one-time, human-gated pair that classifies cortex entities as
+`artifact | system | concept` (schema v24), so the freshness policy can tell an
+entity whose attributes genuinely go stale from one whose don't.
+
+**Step 1 — classify (never writes the DB).** Writes a JSON artifact and stops.
+Note the default judge is `claude-fable-5` served through the shim on
+`$PL_SHIM_URL` (`:8082`), so **the scoped entity names leave the machine**;
+`--scope-only` prints the funnel counts with no model call and no shim at all:
+
+```bash
+python evals/classify_entity_kinds.py --out evals/results/entity-kinds-<tag>.json
+python evals/classify_entity_kinds.py --scope-only     # just the funnel counts
+python evals/classify_entity_kinds.py --gold tests/fixtures/entity_kinds_gold.json
+```
+
+Scoping is the dominant token lever, not batch size: an entity only matters if
+it carries at least one transient-looking attribute, since otherwise every one
+of its facts resolves evergreen whatever its kind. On the live bank that was
+2423 facts → 265 scoped → 33 rule-confident → 232 needing model judgement, a
+**10.4×** reduction before a single model call (measured 2026-07-27; the counts
+drift as the bank grows — reproduce with `--scope-only`). Batch size is 50:
+larger batches degrade through lost-in-the-middle attention, label streaking,
+correlated failure on one malformed response, and no retry granularity, while
+batching at all helps because this is a *comparative* judgement.
+
+**Step 2 — apply (writes the live bank; human-gated).** Dry run by default:
+
+```bash
+python evals/apply_entity_kinds.py --artifact <path>            # dry run
+python evals/apply_entity_kinds.py --artifact <path> --apply
+docker restart pseudolife-mcp-daemon                            # REQUIRED
+```
+
+Two writes, both reversible: `entity_kinds` rows, and a recompute of
+`facts.freshness_class` through the **same** `resolve_class` the write path
+uses — one policy, not two implementations that drift. Reverting:
+`UPDATE facts SET freshness_class='evergreen'` restores the pre-run state
+wholesale, and dropping `entity_kinds` reverts the write path. The daemon
+restart is not optional: it caches the entity-kind map for the life of its
+process and this script runs out-of-process, so until it restarts every new
+fact keeps resolving evergreen.

@@ -21,9 +21,32 @@ The shipped configuration is deliberately conservative:
 - **Loopback by default.** The daemon and Postgres publish to `127.0.0.1`
   only; the extractor sidecar is never published to the host at all. The
   network boundary — not the default Postgres password — is the guard.
-- **Token-gated off loopback.** The daemon *refuses* to bind a non-loopback
-  host without `PSEUDOLIFE_MCP_TOKEN` set. The Cortex Console web UI is
-  gated by the same token.
+- **Token-gated off loopback.** A daemon run directly on a host *refuses* to
+  bind a non-loopback address without `PSEUDOLIFE_MCP_TOKEN` set — it logs
+  the refusal and exits.
+- **`PSEUDOLIFE_MCP_TRUST_BIND` is the documented exception to that, and the
+  shipped compose stack sets it.** In a container the daemon must bind
+  `0.0.0.0` to be reachable at all, so the flag is the operator's assertion
+  that the boundary is enforced *outside* the process — and in the shipped
+  stack it is: the container's port is published only to `127.0.0.1`. With
+  the flag set the daemon warns and continues instead of exiting. Do not set
+  it for a host-run daemon; there is nothing outside the process enforcing
+  the boundary there.
+- **The Cortex Console is two surfaces, gated differently.** The static SPA
+  shell (`/`, `/ui/*`) is open by design — it is code, no data. The data
+  endpoints (`/api/*`) sit behind the same bearer token as `/mcp` *when a
+  token is configured*. With no token set the token check passes
+  unconditionally, and what actually guards `/api` is a loopback
+  `Origin`/`Host` check: a non-loopback `Origin` (CSRF) or `Host` (DNS
+  rebinding) is rejected. That is a browser-facing guard, not
+  authentication — anything that can make a loopback-looking request to a
+  tokenless daemon can read the bank.
+- **`/health` is unauthenticated and verbose.** It is an open liveness probe
+  by design, and it reports more than "ok": schema version, storage backend,
+  whether a token is set, durable-save error count, and — when the daemon is
+  degraded — a startup-refusal message and the raw database error string,
+  which can carry DSN-shaped detail. Anyone who can reach the port reads all
+  of it. Fine on the loopback default; a reason not to publish the port.
 - **Postgres is never LAN-exposed.** Remote clients only ever reach the
   daemon.
 
@@ -89,7 +112,9 @@ about, e.g.:
   `ops/.env` if your setup differs).
 - Deployments that publish the daemon or Postgres beyond loopback *without*
   the token, contrary to the docs — the daemon already refuses the
-  footgun configuration it can detect.
+  footgun configuration it can detect. Setting `PSEUDOLIFE_MCP_TRUST_BIND`
+  on a host-run daemon deliberately waives that refusal; doing so and then
+  exposing the port is an operator choice, not a defect.
 - Resource exhaustion of your own local daemon by your own client.
 - The model *choosing* to store attacker-authored text it read (prompt
   injection against the agent) — that boundary belongs to the model/host;
