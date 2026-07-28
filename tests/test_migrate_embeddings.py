@@ -25,21 +25,35 @@ not a mock that can't tell the difference.
 from __future__ import annotations
 
 import http.server
+import socket
 import sys
 import threading
 from pathlib import Path
 
 import numpy as np
+import psycopg
 import pytest
+import torch
 from pgvector.psycopg import register_vector
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ops"))
 import migrate_embeddings  # noqa: E402
 
+from pseudolife_memory.storage.schema import _refuse_on_embedding_dim_mismatch  # noqa: E402
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
 
 _NOW = 1_700_000_000.0
-_UNREACHABLE_HEALTH_URL = "http://127.0.0.1:1/health"
+# RFC 2606 reserved .invalid TLD -- guaranteed to never resolve, so this
+# fails FAST via a DNS lookup error (socket.gaierror, immediate), not a TCP
+# probe. Deliberately NOT "http://127.0.0.1:<unused port>/health": confirmed
+# on this host (2026-07-28) that an unanswered loopback connection attempt
+# TIMES OUT rather than refusing immediately (some local firewall/AV
+# swallows the RST) -- and with the IMPORTANT-2a fix in
+# ops/migrate_embeddings.py (a health-probe timeout now reads as UP, not
+# absent, because a hung-but-listening daemon is still a live writer), that
+# would make this constant simulate a HUNG daemon instead of an ABSENT one,
+# which is the opposite of what every test below needs it to mean.
+_UNREACHABLE_HEALTH_URL = "http://pseudolife-migrate-embeddings-test.invalid/health"
 
 
 def _vec(seed: int, dim: int = 384) -> np.ndarray:
@@ -84,6 +98,18 @@ def _restore_to_v25(pg_conn) -> None:  # noqa: F811
     first version: the failed ``SET NOT NULL`` silently rolled back the
     widening ALTERs too, leaving the bank at 384 for the next test."""
     pg_conn.rollback()  # drop any open transaction/lock from a failed assertion
+    # Idempotent, unconditional: the main apply test (MINOR 5) now sets
+    # entries.embedding NOT NULL before invoking the migration, to match
+    # production shape. If that test aborts before migrate_table ever runs
+    # (e.g. an earlier assertion fails, or -- as happened once during this
+    # fix wave -- a health-gate regression made --apply refuse early), NOT
+    # NULL is still active with real, non-null data underneath it, and the
+    # widening ALTER below (``USING NULL``, which nulls every row) would
+    # otherwise raise a constraint violation the surrounding code doesn't
+    # catch. Dropping it first is always safe (a no-op if already dropped)
+    # and the ``SET NOT NULL`` at the bottom re-applies it whenever the
+    # data actually supports it.
+    pg_conn.execute("ALTER TABLE entries ALTER COLUMN embedding DROP NOT NULL")
     dim = pg_conn.execute(
         "SELECT atttypmod FROM pg_attribute WHERE attrelid = "
         "to_regclass('public.entries') AND attname = 'embedding' "
@@ -210,6 +236,54 @@ def health_server():
         thread.join(timeout=5)
 
 
+class _HungHealthServer:
+    """A TCP listener that accepts connections and never answers -- the
+    technique for proving IMPORTANT 2a: a hung-but-listening daemon must
+    read as UP (``_daemon_reachable`` returns True), not absent. Distinct
+    from ``_HealthHandler``/``health_server`` above, which answers promptly
+    with a real 200."""
+
+    def __init__(self) -> None:
+        self._listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._listener.bind(("127.0.0.1", 0))
+        self._listener.listen(5)
+        self.port = self._listener.getsockname()[1]
+        self._stop = threading.Event()
+        self._accepted: list[socket.socket] = []
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+        self._thread.start()
+
+    def _serve(self) -> None:
+        self._listener.settimeout(0.2)
+        while not self._stop.is_set():
+            try:
+                conn, _ = self._listener.accept()
+            except socket.timeout:
+                continue
+            except OSError:
+                return
+            self._accepted.append(conn)  # held open, never written to or closed
+
+    def close(self) -> None:
+        self._stop.set()
+        self._thread.join(timeout=5)
+        for conn in self._accepted:
+            try:
+                conn.close()
+            except OSError:
+                pass
+        self._listener.close()
+
+
+@pytest.fixture()
+def hung_health_server():
+    server = _HungHealthServer()
+    try:
+        yield f"http://127.0.0.1:{server.port}/health"
+    finally:
+        server.close()
+
+
 # ---------------------------------------------------------------------------
 # Dry run: prints the plan, mutates nothing, regardless of flags.
 # ---------------------------------------------------------------------------
@@ -246,12 +320,173 @@ def test_apply_while_daemon_reachable_refuses(v24_bank, pg_url, monkeypatch, hea
 
 
 # ---------------------------------------------------------------------------
+# IMPORTANT 2a: a hung-but-listening daemon reads as UP, not absent.
+# ---------------------------------------------------------------------------
+
+
+def test_daemon_reachable_treats_hung_socket_as_up(hung_health_server):
+    assert migrate_embeddings._daemon_reachable(hung_health_server, timeout=1.0) is True
+
+
+def test_apply_refuses_against_hung_daemon(v24_bank, pg_url, monkeypatch, hung_health_server):
+    code = _invoke(monkeypatch, pg_url, "--apply", "--backup-verified",
+                    "--health-url", hung_health_server)
+    assert code == 1
+    assert _live_dim(v24_bank, "entries") == 384  # refused before any ALTER
+
+
+# ---------------------------------------------------------------------------
+# IMPORTANT 2b: lock_timeout on the migration connection fails loudly
+# instead of queuing an ACCESS EXCLUSIVE ALTER behind a stray lock forever.
+# ---------------------------------------------------------------------------
+
+
+def test_lock_timeout_fires_on_queued_alter(v24_bank, pg_url):
+    """A real competing transaction holding a lock on ``facts`` (the first
+    table in migration order) makes the ALTER fail fast via lock_timeout
+    instead of hanging. Uses a short override (1s) so the test doesn't pay
+    the real 10s default."""
+    pg_conn = v24_bank
+    pg_conn.commit()  # release any read locks left open by fixture setup
+
+    blocker = psycopg.connect(pg_url)
+    blocker.execute("LOCK TABLE facts IN ACCESS EXCLUSIVE MODE")
+    conn = psycopg.connect(pg_url, autocommit=True)
+    try:
+        conn.execute("SET search_path TO public")
+        migrate_embeddings._apply_lock_timeout(conn, "1s")
+        register_vector(conn)
+        with pytest.raises(psycopg.errors.LockNotAvailable):
+            migrate_embeddings.migrate_table(conn, None, "facts")
+    finally:
+        conn.close()
+        blocker.rollback()
+        blocker.close()
+
+
+def test_apply_lock_timeout_prints_actionable_message(v24_bank, pg_url, monkeypatch, capsys):
+    def _boom(conn, pipeline, table):
+        raise psycopg.errors.LockNotAvailable(
+            "simulated: canceling statement due to lock timeout"
+        )
+
+    monkeypatch.setattr(migrate_embeddings, "migrate_table", _boom)
+    code = _invoke(monkeypatch, pg_url, "--apply", "--backup-verified",
+                    "--health-url", _UNREACHABLE_HEALTH_URL)
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "lock" in err.lower()
+    assert "stop" in err.lower()
+    assert _live_dim(v24_bank, "entries") == 384  # nothing written
+
+
+# ---------------------------------------------------------------------------
+# IMPORTANT 1: entries migrates LAST -- a crash partway through must leave
+# the daemon's dimension sentinel (entries.embedding) armed, and a clean
+# re-run must complete and stamp v25.
+# ---------------------------------------------------------------------------
+
+
+def test_apply_crash_after_two_tables_keeps_entries_armed_then_resumes(
+    v24_bank, pg_url, monkeypatch
+):
+    """Watched RED: against the pre-fix entries-first ``_TABLES`` order,
+    assertion (b) below fails, because entries would be one of the first
+    two tables migrated (already vector(1024), not 384) by the time the
+    crash fires -- the exact bug IMPORTANT 1 fixes."""
+    pg_conn = v24_bank
+
+    # The v24_bank fixture's own setup calls ensure_schema, which stamps
+    # meta.schema_version at THIS build's version (25) before the columns
+    # are narrowed to a synthetic v24 shape -- not what a genuine
+    # pre-migration bank would show. Pin it back to 24 so "meta still 24"
+    # below means what it says.
+    pg_conn.execute("UPDATE meta SET value = '24'::jsonb WHERE key = 'schema_version'")
+    pg_conn.commit()
+
+    real_migrate_table = migrate_embeddings.migrate_table
+    calls = {"n": 0}
+
+    def _crash_after_two(conn, pipeline, table):
+        if calls["n"] == 2:
+            raise RuntimeError("simulated crash mid-migration")
+        calls["n"] += 1
+        return real_migrate_table(conn, pipeline, table)
+
+    monkeypatch.setattr(migrate_embeddings, "migrate_table", _crash_after_two)
+    monkeypatch.setattr(sys, "argv", [
+        "migrate_embeddings.py", "--dsn", pg_url, "--apply", "--backup-verified",
+        "--health-url", _UNREACHABLE_HEALTH_URL,
+    ])
+
+    # main() calls sys.exit(run(args)) -- run(args) raises here instead of
+    # returning, so sys.exit() is never reached and the exception
+    # propagates straight out of main(). Unlike _invoke(), this is NOT a
+    # SystemExit.
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        migrate_embeddings.main()
+
+    # (a) meta untouched: stamp_schema_version is the last line of the
+    # apply loop and never ran.
+    meta = pg_conn.execute(
+        "SELECT value FROM meta WHERE key = 'schema_version'"
+    ).fetchone()
+    assert meta[0] == 24
+    pg_conn.commit()
+
+    # (b) entries still 384 -- the sentinel is armed, so the daemon's own
+    # startup guard refuses to boot against this partial bank.
+    assert _live_dim(pg_conn, "entries") == 384
+    pg_conn.commit()
+    with pg_conn.cursor() as cur:
+        with pytest.raises(RuntimeError, match="Refusing to start"):
+            _refuse_on_embedding_dim_mismatch(cur)
+    pg_conn.commit()  # release the read lock before the resumed run below
+
+    # (c) re-run (crash removed) completes and stamps v25.
+    monkeypatch.setattr(migrate_embeddings, "migrate_table", real_migrate_table)
+    code = _invoke(monkeypatch, pg_url, "--apply", "--backup-verified",
+                    "--health-url", _UNREACHABLE_HEALTH_URL)
+    assert code == 0
+    for table in ("entries", "facts", "world_facts", "lessons"):
+        assert _live_dim(pg_conn, table) == 1024, table
+    meta = pg_conn.execute(
+        "SELECT value FROM meta WHERE key = 'schema_version'"
+    ).fetchone()
+    assert meta[0] == 25
+
+
+# ---------------------------------------------------------------------------
 # The real thing: --apply with both gates cleared migrates all four tables.
 # ---------------------------------------------------------------------------
 
 
+def _assert_write_path_cosine_one(pipeline, text: str, stored_vec) -> None:
+    """cos(stored, freshly re-encoded) ~= 1.0. The review measured
+    document-side re-encodes at 1.000000 and query-side (an ``encode_query``
+    slip) at 0.20-0.93 on the same rows -- a dims-only check can't tell the
+    two apart, this can. ``pipeline`` is a second, independently-built
+    instance of the same real model the migration used (deterministic,
+    same weights), not the one internal to the script under test."""
+    query_vec = pipeline.encode_single(text)
+    stored = torch.from_numpy(np.asarray(stored_vec, dtype=np.float32))
+    cos = torch.dot(stored, query_vec).item()
+    assert cos == pytest.approx(1.0, abs=1e-4), f"cosine {cos} for text={text!r}"
+
+
 def test_apply_migrates_all_four_tables(v24_bank, pg_url, monkeypatch):
     pg_conn = v24_bank
+    # Keep entries.embedding NOT NULL going into the migration -- the
+    # production shape (schema.py declares it NOT NULL). The shared
+    # v24_bank fixture drops it while entries is still empty (harmless for
+    # every OTHER test here), which means without this line, THIS test --
+    # the one real-pipeline test that actually runs migrate_table's own
+    # "DROP NOT NULL" step against live data -- never proved that step is
+    # necessary. Safe to restore here: every seeded row already carries a
+    # real, non-null embedding.
+    pg_conn.execute("ALTER TABLE entries ALTER COLUMN embedding SET NOT NULL")
+    pg_conn.commit()
+
     before_text = {r[0]: r[1] for r in pg_conn.execute(
         "SELECT id, text FROM entries ORDER BY id").fetchall()}
     before_fact = pg_conn.execute(
@@ -301,3 +536,20 @@ def test_apply_migrates_all_four_tables(v24_bank, pg_url, monkeypatch):
         "SELECT value FROM meta WHERE key = 'schema_version'"
     ).fetchone()
     assert meta[0] == 25
+
+    # Write-path fidelity, at least one row per table (MINOR 4): the real
+    # pipeline test above spent its cost without collecting this evidence
+    # until now.
+    verify_pipeline = migrate_embeddings._build_pipeline()
+
+    entries_row = pg_conn.execute(
+        "SELECT text, embedding FROM entries ORDER BY id LIMIT 1"
+    ).fetchone()
+    _assert_write_path_cosine_one(verify_pipeline, entries_row[0], entries_row[1])
+
+    for table in ("facts", "world_facts", "lessons"):
+        row = pg_conn.execute(
+            f"SELECT entity, attribute, value, embedding FROM {table} LIMIT 1"  # noqa: S608
+        ).fetchone()
+        claim_text = migrate_embeddings._claim_text(row[0], row[1], row[2])
+        _assert_write_path_cosine_one(verify_pipeline, claim_text, row[3])

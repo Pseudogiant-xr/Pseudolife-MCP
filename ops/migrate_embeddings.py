@@ -31,19 +31,32 @@ SAFETY
   (default ``http://127.0.0.1:8765/health``, override with
   ``--health-url`` — tests point this at a throwaway local server). A
   live writer re-embedding underneath the daemon's own in-memory state
-  would corrupt the bank; the daemon must be stopped first.
-* Each of the four tables (``entries``, ``facts``, ``world_facts``,
-  ``lessons``) is migrated in its OWN transaction: drop NOT NULL where
-  present (``entries`` only — the other three columns are already
-  nullable), ``ALTER COLUMN embedding TYPE vector(1024) USING NULL``
-  (a straight cast from vector(384) to vector(1024) is not defined, so
-  the old values are discarded as part of the type change and every row
-  is re-embedded immediately after, inside the same transaction), restore
-  NOT NULL on ``entries``. No vector index is created or rebuilt — there
-  is currently none: ``ensure_schema`` drops ``entries_embedding_idx``
-  unconditionally on every boot (2026-07-02 zombie sweep) because all
-  similarity search happens in Python over the hydrated bands, not via a
-  SQL vector query.
+  would corrupt the bank; the daemon must be stopped first. A probe that
+  TIMES OUT counts as "answers" too — a socket that accepts the connection
+  but never responds is a daemon that is up, just hung, not one that is
+  absent (see ``_daemon_reachable``).
+* The migration connection sets ``lock_timeout`` (``_LOCK_TIMEOUT``, 10s):
+  if something is still holding an open transaction against one of these
+  tables despite the health check above, the ``ALTER`` fails loudly with
+  ``LockNotAvailable`` instead of queuing behind it forever. Already-
+  migrated tables stay committed; re-run after clearing the blocker.
+* Migration order is ``facts, world_facts, lessons, entries`` — ENTRIES
+  LAST, deliberately (see ``_TABLES``): the daemon's dimension guard
+  checks only ``entries.embedding``, so entries must be the last column to
+  change dimension for that guard to keep refusing through every partial
+  state a crash could leave behind.
+* Each of the four tables is migrated in its OWN transaction: drop NOT
+  NULL where present (``entries`` only — the other three columns are
+  already nullable), ``ALTER COLUMN embedding TYPE vector(1024) USING
+  NULL`` (a straight cast from vector(384) to vector(1024) is not defined,
+  so the old values are discarded as part of the type change and every row
+  is re-embedded immediately after, inside the same transaction, fetched
+  AFTER the ALTER so the ACCESS EXCLUSIVE lock rules out a row sneaking in
+  between fetch and cast), restore NOT NULL on ``entries``. No vector index
+  is created or rebuilt — there is currently none: ``ensure_schema`` drops
+  ``entries_embedding_idx`` unconditionally on every boot (2026-07-02
+  zombie sweep) because all similarity search happens in Python over the
+  hydrated bands, not via a SQL vector query.
 * ``SCHEMA_META_VERSION`` (25) is stamped in ``meta`` LAST, only after all
   four tables have migrated without error — a bank that failed partway
   through must not claim to be on schema v25.
@@ -104,12 +117,30 @@ from pseudolife_memory.utils.config import EmbeddingConfig
 _DEFAULT_DSN = "postgresql://pseudolife:pseudolife@127.0.0.1:5433/pseudolife_memory"
 _DEFAULT_HEALTH_URL = "http://127.0.0.1:8765/health"
 
-# The four embedding-carrying tables, in migration order. Order doesn't
-# matter functionally (each is its own transaction, none reference another
-# table's embedding column), but entries first mirrors the write paths'
-# rough write frequency (most churny table first, so a failure surfaces
-# early rather than after the smaller tables already committed).
-_TABLES = ("entries", "facts", "world_facts", "lessons")
+# The four embedding-carrying tables, in migration order. ENTRIES MUST BE
+# LAST. The daemon's dimension guard
+# (schema.py::_refuse_on_embedding_dim_mismatch) checks entries.embedding
+# ONLY -- "one column is a sufficient sentinel... all four move in
+# lockstep" is that guard's premise, and the premise only holds while
+# entries is the LAST column to change dimension. Each table below is its
+# own transaction (see migrate_table), so a crash partway through this
+# script is the normal case to design for, not an edge case: migrating
+# entries first would leave a partial bank where entries already reports
+# vector(1024) while facts/world_facts/lessons are still vector(384) -- the
+# guard checks entries, sees the target dimension, and PASSES, so a
+# restarted daemon boots healthy and then throws on the very first cortex
+# read/write against a still-384 table. With entries last, every partial
+# state (crash after 0, 1, 2, or 3 tables) leaves entries un-migrated, so
+# the guard keeps refusing to boot until the migration actually finishes --
+# the sentinel stays armed through every partial state.
+_TABLES = ("facts", "world_facts", "lessons", "entries")
+
+# SET on the migration connection so a queued ACCESS EXCLUSIVE ALTER fails
+# loudly instead of blocking the world behind a hung daemon's locks (see
+# _daemon_reachable and the LockNotAvailable handling in run()). Its own
+# name/constant so tests can pass a short override without waiting out the
+# real one.
+_LOCK_TIMEOUT = "10s"
 
 
 def _live_dim(conn, table: str) -> int | None:
@@ -149,16 +180,31 @@ def print_plan(plan: dict[str, dict], target_dim: int) -> None:
 
 
 def _daemon_reachable(health_url: str, timeout: float = 2.0) -> bool:
-    """True iff something answers ``health_url`` at all — any HTTP status
-    counts (an unhealthy-but-listening daemon is still a live writer).
-    Connection refused / timeout / DNS failure means nothing is listening,
-    which is the only condition under which ``--apply`` may proceed."""
+    """True iff something answers ``health_url`` OR the probe times out —
+    any HTTP status counts (an unhealthy-but-listening daemon is still a
+    live writer), and so does a hang: a socket that accepts the TCP
+    connection but never answers is a daemon that is UP, just stuck, and
+    treating that as "absent" is the failure mode this function exists to
+    avoid (a --apply that proceeds would then queue its ACCESS EXCLUSIVE
+    ALTER behind the hung daemon's locks — see ``_LOCK_TIMEOUT`` for the
+    backstop if this check is ever bypassed). Only connection refused / DNS
+    failure — nothing listening at all — clears this gate.
+
+    Checked BEFORE the ``URLError``/``OSError`` handlers below: urllib wraps
+    a connect- or read-timeout in ``URLError(reason=TimeoutError(...))`` on
+    every platform observed so far, but the bare ``TimeoutError`` branch is
+    kept as defense in case a future stdlib/platform lets it escape
+    unwrapped."""
     try:
         urllib.request.urlopen(health_url, timeout=timeout)  # noqa: S310 — fixed localhost health probe, not user-controlled
         return True
     except urllib.error.HTTPError:
         return True  # the server answered, just with a non-2xx status
-    except urllib.error.URLError:
+    except TimeoutError:
+        return True  # accepted the connection, never answered -- UP, not absent
+    except urllib.error.URLError as exc:
+        if isinstance(exc.reason, TimeoutError):
+            return True  # same case, wrapped
         return False
     except OSError:
         return False
@@ -205,10 +251,18 @@ def migrate_table(conn, pipeline: EmbeddingPipeline, table: str) -> dict:
     (discarding old values — USING NULL), re-embed every row DOCUMENT-side
     through the real pipeline (``encode`` — never ``encode_query``: these
     are stored vectors, not retrieval probes), write the vectors back,
-    restore NOT NULL (entries only). Creates no index."""
-    rows = _fetch_rows(conn, table)
-    texts = [_row_text(table, r) for r in rows]
+    restore NOT NULL (entries only). Creates no index.
 
+    The row fetch happens AFTER the ALTER, inside this same transaction —
+    not before it. The ALTER takes an ACCESS EXCLUSIVE lock, which blocks
+    concurrent inserts into ``table`` for the rest of this transaction, so
+    a fetch taken right after it is a snapshot of exactly the rows the
+    ``USING NULL`` cast just nulled: nothing can have been inserted in
+    between. Fetching before the transaction (the original bug) left a
+    window where a row inserted after the fetch but before the ALTER got
+    silently nulled by ``USING NULL`` and was never in the fetched set, so
+    it was never re-embedded.
+    """
     with conn.transaction():
         if table == "entries":
             conn.execute("ALTER TABLE entries ALTER COLUMN embedding DROP NOT NULL")
@@ -216,6 +270,8 @@ def migrate_table(conn, pipeline: EmbeddingPipeline, table: str) -> dict:
             f"ALTER TABLE {table} ALTER COLUMN embedding "  # noqa: S608
             f"TYPE vector({TARGET_DIM}) USING NULL"
         )
+        rows = _fetch_rows(conn, table)
+        texts = [_row_text(table, r) for r in rows]
         if texts:
             vectors = pipeline.encode(texts, normalize=True)
             with conn.cursor() as cur:
@@ -249,6 +305,18 @@ def _build_pipeline() -> EmbeddingPipeline:
     return EmbeddingPipeline(cfg)
 
 
+def _apply_lock_timeout(conn, timeout: str = _LOCK_TIMEOUT) -> None:
+    """SET lock_timeout on the migration connection: an ACCESS EXCLUSIVE
+    ALTER queued behind another session's open transaction on the same
+    table (a hung-but-listening daemon that slipped past ``_daemon_reachable``,
+    or any other stray client) fails loudly with ``psycopg.errors.
+    LockNotAvailable`` instead of blocking indefinitely. ``timeout`` is a
+    parameter (not just the module constant inlined) so tests can pass a
+    short override and prove the mechanism without waiting out the real
+    default."""
+    conn.execute(f"SET lock_timeout = '{timeout}'")  # noqa: S608 — fixed literal / test override, not user input
+
+
 def run(args: argparse.Namespace) -> int:
     # Autocommit + explicit conn.transaction() blocks, mirroring
     # PostgresStorage._connect()/_txn() (storage/postgres.py) — plain
@@ -260,6 +328,7 @@ def run(args: argparse.Namespace) -> int:
     # default ("$user", public) search_path, which would otherwise resolve
     # this script's bare table names to the wrong schema.
     conn.execute("SET search_path TO public")
+    _apply_lock_timeout(conn)
     register_vector(conn)
     try:
         plan = build_plan(conn)
@@ -303,11 +372,21 @@ def run(args: argparse.Namespace) -> int:
         print(f"\nAPPLY — migrating {len(pending)} table(s): "
               f"{', '.join(pending)}\n")
         t0 = time.monotonic()
-        for table in pending:
-            result = migrate_table(conn, pipeline, table)
-            print(f"  {table:12s}  {result['rows']:6d} rows re-embedded "
-                  f"-> vector({TARGET_DIM})")
-        stamp_schema_version(conn, SCHEMA_META_VERSION)
+        try:
+            for table in pending:
+                result = migrate_table(conn, pipeline, table)
+                print(f"  {table:12s}  {result['rows']:6d} rows re-embedded "
+                      f"-> vector({TARGET_DIM})")
+            stamp_schema_version(conn, SCHEMA_META_VERSION)
+        except psycopg.errors.LockNotAvailable:
+            print(
+                "\nREFUSING: timed out waiting for a lock "
+                f"(lock_timeout={_LOCK_TIMEOUT}) while migrating. Something "
+                "else is holding an open transaction against these tables "
+                "-- stop the daemon (and any other client with an open "
+                "transaction) and re-run; already-migrated tables are "
+                "committed and will be skipped.", file=sys.stderr)
+            return 1
         elapsed = time.monotonic() - t0
         print(f"\nDone in {elapsed:.1f}s. meta.schema_version stamped "
               f"{SCHEMA_META_VERSION}.")
