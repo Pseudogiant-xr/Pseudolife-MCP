@@ -365,3 +365,43 @@ def test_unparseable_build_cache_size_fails_loudly(prune):
         "must not report a fabricated reclaim figure after an unparseable size\n"
         f"stdout: {proc.stdout!r}"
     )
+
+
+def test_update_ps1_wires_cache_retention_in():
+    """update.ps1 must expose -KeepCacheHours / -NoCachePrune and call the
+    primitive. Retention must not abort a deploy that otherwise succeeded."""
+    text = UPDATE_PS1.read_text(encoding="utf-8")
+    assert "KeepCacheHours" in text
+    assert "NoCachePrune" in text
+    assert "prune-build-cache.ps1" in text
+    assert "$KeepCacheHours = 168" in text
+
+
+def test_update_sh_wires_cache_retention_in():
+    text = UPDATE_SH.read_text(encoding="utf-8")
+    assert "--keep-cache-hours" in text
+    assert "--no-cache-prune" in text
+    assert "prune-build-cache.sh" in text
+    assert "KEEP_CACHE_HOURS=168" in text
+
+
+def test_cache_prune_runs_after_the_health_check_not_beside_prune_rollbacks():
+    """Placement is load-bearing, in both directions:
+
+    * Before the build it would delete the cache that build reuses, making
+      every deploy a cold build.
+    * On the unhealthy path it would strip the cache an operator's rollback
+      rebuild needs — exactly when a slow build hurts most. The unhealthy
+      branch exits, so being after the health block skips it for free.
+    """
+    ps1 = UPDATE_PS1.read_text(encoding="utf-8")
+    assert ps1.index("prune-build-cache.ps1") > ps1.index("Waiting for the daemon"), \
+        "cache prune must come after the health check"
+    assert ps1.index("prune-build-cache.ps1") > ps1.index("--build pseudolife-daemon"), \
+        "cache prune must come after the build"
+    assert ps1.index("prune-rollbacks.ps1") < ps1.index("--build pseudolife-daemon"), \
+        "rollback retention still belongs before the build"
+
+    sh = UPDATE_SH.read_text(encoding="utf-8")
+    assert sh.index("prune-build-cache.sh") > sh.index("Waiting for the daemon")
+    assert sh.index("prune-build-cache.sh") > sh.index("--build pseudolife-daemon")
