@@ -1,0 +1,31 @@
+# Dependabot configuration.
+#
+# This file exists for its `ignore` rules, which apply to Dependabot's
+# grouped SECURITY updates (the only kind this repo has ever received —
+# there was no dependabot.yml before this file, so scheduled version
+# updates were never enabled). `open-pull-requests-limit: 0` keeps it
+# that way: no scheduled version-update PRs, security updates unchanged
+# except where ignored below.
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/ops"
+    schedule:
+      interval: "weekly"
+    # Ignore-only: do not open scheduled version-update PRs.
+    open-pull-requests-limit: 0
+    ignore:
+      # setuptools is HELD below 82 by torch's own metadata: the pinned
+      # torch 2.12.0 declares `setuptools<82`, and because a pip
+      # constraint file cannot be negotiated, a lockfile setuptools pin
+      # above that ceiling makes pip discard the pinned CPU torch and
+      # re-resolve from PyPI — whose linux torch wheel is the CUDA build
+      # (~4 GB of nvidia-* wheels in a CPU-only image). Exactly this
+      # shipped silently from a Dependabot bump to 83.0.0 (17b97180,
+      # 2026-07-24) until 2026-07-29. CI now fails such a bump
+      # (tests/test_daemon_image_is_cpu_only.py names the conflict), and
+      # this rule stops the PR from being re-proposed at all. Lift it
+      # only when bumping torch past the ceiling in the same change —
+      # see the coupling note in ops/requirements.lock.txt.
+      - dependency-name: "setuptools"
+        versions: [">=82"]

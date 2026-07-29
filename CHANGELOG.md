@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-29 — Dependabot told not to re-break the CPU-only image)
+
+- **`.github/dependabot.yml`, ignore-only: `setuptools >=82` will not be
+  proposed again.** The pinned torch 2.12.0 itself requires `setuptools<82`,
+  so a lockfile bump past that ceiling makes pip discard the pinned CPU torch
+  and pull PyPI's CUDA build — the silent 4 GB regression fixed earlier
+  today. CI already rejects such a bump with the conflict named; this stops
+  the PR from being re-proposed at all. `open-pull-requests-limit: 0` keeps
+  scheduled version updates disabled (they never ran before this file
+  existed); security updates continue except where ignored. Lift the rule
+  only when bumping torch past its ceiling in the same change.
+
 ### Fixed (2026-07-29 — the test suite peaked at ~50 GB and could kill its own run)
 
 - **The suite loads each distinct embedding model once per session: peak
