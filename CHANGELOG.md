@@ -25,6 +25,25 @@ older-dimensioned bank rather than half-migrating it. Back up, stop the
 daemon, and re-embed offline with `ops/migrate_embeddings.py` — see
 [the v25 migration runbook](docs/runbooks/embedding-v25-migration.md).
 
+### Fixed (2026-07-29 — `mcp 2.0.0` broke every fresh install the day it shipped)
+- **The `mcp` dependency is upper-bounded to `<2`.** `pyproject.toml` asked
+  for `mcp>=1.0.0` with no ceiling, so the moment the SDK published 2.0.0 a
+  clean `pip install` resolved to it — and 2.0.0 relocated
+  `mcp.server.fastmcp`, which `pseudolife_memory/mcp_server.py` imports at
+  module scope. The failure is at import, so it takes out the server, not
+  merely a test. `ops/requirements.lock.txt` has always pinned a 1.x
+  (currently `1.28.1`, verified importing `fastmcp` in the running
+  container); this makes the source distribution agree with the image
+  instead of quietly resolving somewhere else.
+  **Why it surfaced here:** nothing in this release touched dependencies.
+  Master's last CI run was green five hours earlier on the same tree — the
+  release branch simply had the misfortune to be the first build after the
+  upstream major. A local venv pinned at `1.27.2` could never have caught
+  it; only an unpinned resolve does, which is exactly what a user gets.
+  Supporting 2.x is a real migration (the SDK is used across `fastmcp`,
+  `lowlevel`, `client.session`, `streamable_http` and `stdio_server`), not a
+  version bump, and is deliberately not attempted here.
+
 ### Added (2026-07-29 — the old serving stack was biased, not just noisy)
 - **The ceiling table re-measured on the reproducible server, and the control
   arm moved further than either treatment arm.** `ceiling-v25` rebuilds the
