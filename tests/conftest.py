@@ -57,6 +57,72 @@ if TYPE_CHECKING:
     from pseudolife_memory.service import MemoryService
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    """Load each distinct embedding model once per session, not per module.
+
+    ``warm_service`` is module-scoped, and every ``MemoryService`` builds its
+    own ``EmbeddingPipeline`` -> its own ``SentenceTransformer``. Under the
+    schema-v25 default (Qwen3-Embedding-0.6B, 2.52 GB resident apiece) the
+    full suite peaked at ~49.5 GB private commit and killed a run on a 64 GB
+    host (2026-07-29) — dropped services sit in reference cycles, and even
+    collected ones don't return their arenas to the OS.
+
+    Memoize the model LOAD only, never the ``EmbeddingPipeline``: each
+    pipeline keeps its own encode LRU and dim state, so nothing crosses a
+    test boundary. The weights are read-only at inference — with one
+    exception: ``EmbeddingPipeline.__init__`` caps ``model.max_seq_length``
+    in place, reading the *current* value as the floor, so two configs with
+    different caps on one shared model would ratchet it down permanently.
+    The memoization key is the full construction signature, so a different
+    cap (or model, device, backend...) loads its own instance. Pinned by
+    ``tests/test_shared_embedding_weights.py``.
+
+    Measured effect on the full suite (1792 tests, 2026-07-29): peak
+    49.5 GB -> 5.39 GB, runtime 13:23 -> 6:44, with four distinct loads —
+    Qwen3, MiniLM torch, MiniLM ONNX, plus the guard test's
+    deliberately-capped ~90 MB MiniLM.
+    """
+    from pseudolife_memory.memory import embedding as embedding_module
+    from pseudolife_memory.utils.config import EmbeddingConfig
+
+    real_load = embedding_module.SentenceTransformer
+    loaded: dict[tuple, object] = {}
+    # __init__ mutates max_seq_length post-construction (the ratchet above),
+    # but it is not a constructor argument — fold the *config* cap into the
+    # key via a contextvar-free side channel: EmbeddingPipeline sets the cap
+    # to min(model default, config.max_seq_length), so keying on the config
+    # value that will be applied keeps differently-capped pipelines apart.
+    default_cap = EmbeddingConfig.max_seq_length
+
+    def _shared_load(*args, **kwargs):  # noqa: ANN002, ANN003 — passthrough
+        cap = _shared_load.next_cap if _shared_load.next_cap is not None \
+            else default_cap
+        key = (
+            args,
+            tuple(sorted((k, repr(v)) for k, v in kwargs.items())),
+            cap,
+        )
+        if key not in loaded:
+            loaded[key] = real_load(*args, **kwargs)
+        return loaded[key]
+
+    _shared_load.next_cap = None
+
+    real_pipeline_init = embedding_module.EmbeddingPipeline.__init__
+
+    def _capturing_init(self, config):  # noqa: ANN001 — mirrors the real sig
+        _shared_load.next_cap = getattr(
+            config, "max_seq_length", default_cap,
+        )
+        try:
+            real_pipeline_init(self, config)
+        finally:
+            _shared_load.next_cap = None
+
+    embedding_module.SentenceTransformer = _shared_load
+    embedding_module.EmbeddingPipeline.__init__ = _capturing_init
+
+
 @pytest.fixture(scope="module")
 def warm_service(tmp_path_factory: pytest.TempPathFactory) -> MemoryService:
     """One service per test module — embedder stays warm, data dir

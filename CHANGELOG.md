@@ -6,6 +6,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-07-29 — the test suite peaked at ~50 GB and could kill its own run)
+
+- **The suite loads each distinct embedding model once per session: peak
+  private commit ~49.5 GB → 5.39 GB, runtime 13:23 → 6:44** (full suite, 1792
+  tests, measured 2026-07-29 with the fix and its guard tests in the tree). `warm_service` is module-scoped and every `MemoryService` built its
+  own `SentenceTransformer`; under the schema-v25 default
+  (`Qwen/Qwen3-Embedding-0.6B`, measured **2.52 GB resident apiece**, ~26×
+  the MiniLM it replaced) that was ~90 loads per run — enough to crash the
+  suite outright on a 64 GB host, which it did once on 2026-07-29. Dropping a
+  service frees nothing (reference cycles), and even a full `gc.collect()`
+  returned only a quarter of the memory (the allocator keeps its arenas), so
+  the footprint was a one-way ratchet.
+- `tests/conftest.py` now memoizes the **model load** — deliberately not the
+  `EmbeddingPipeline`, so every pipeline keeps its own encode LRU and dim
+  state and nothing crosses a test boundary. One piece of state that separate
+  instances provided implicitly survives by design:
+  `EmbeddingPipeline.__init__` caps `model.max_seq_length` *in place*,
+  reading the current value as its floor, so a shared model would ratchet the
+  cap down permanently across configs. The memoization key therefore includes
+  the config's cap; differently-capped pipelines get their own model. Pinned
+  by `tests/test_shared_embedding_weights.py`, whose hazard test was verified
+  load-bearing (removing the cap from the key turns it red). Production is
+  untouched — the daemon builds one service per process.
+
 ### Fixed (2026-07-29 — the CPU-only image had been shipping CUDA for five days)
 
 - **The daemon image is CPU-only again: 12.6 GB → 5.03 GB, a 7.57 GB (60%)
