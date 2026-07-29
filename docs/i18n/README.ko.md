@@ -1,8 +1,8 @@
-<!-- i18n-sync: v5 -->
+<!-- i18n-sync: v6 -->
 
 # Pseudolife-MCP
 
-[영어 원본 README](../../README.md)와 동기화됨 — synced: v5 (2026-07-19)
+[영어 원본 README](../../README.md)와 동기화됨 — synced: v6 (2026-07-29)
 
 **Claude Code, Codex, 그리고 그 밖의 MCP 클라이언트를 위한 영구적인 장기 메모리.**
 
@@ -71,9 +71,8 @@ codex mcp add pseudolife-memory --url http://127.0.0.1:8765/mcp
 
 ## 동작 방식
 
-에이전트는 작업하면서 한 번에 하나씩 주장(claim)을 저장하며(`memory_store`,
-`memory_fact_set`), 노벨티 게이트가 적용된 저장소(novelty-gated store)가 거의
-중복된 항목을 걸러냅니다. 세션 사이에는 **드림(dream)**이 스트림을 정규화된
+에이전트는 작업하면서 한 번에 하나씩 주장(claim)을 저장합니다(`memory_store`,
+`memory_fact_set`). 세션 사이에는 **드림(dream)**이 스트림을 정규화된
 사실, 그래프 관계, 절차적 교훈으로 압축합니다. 매 세션 시작 시 브리핑이 메모리가 확신하지
 못하는 부분, 과거 작업에서 얻은 교훈, 그리고 지난번에 멈춘 지점을 주입합니다.
 검색(retrieval)은 메모리 밴드에 대한 의미 기반 검색과 정규화된 사실 저장소를

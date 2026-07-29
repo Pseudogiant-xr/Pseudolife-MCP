@@ -1,4 +1,4 @@
-<!-- i18n-source: v5 (2026-07-19) — canonical English text for the translated
+<!-- i18n-source: v6 (2026-07-29) — canonical English text for the translated
      front doors in this directory. Translators: keep every fenced code block
      byte-identical (commands are never translated); keep "Pseudolife-MCP",
      "Claude Code", "Codex", "MCP", "Cortex Console", and tool names like
@@ -81,7 +81,7 @@ at `http://127.0.0.1:8765/ui/`.
 ## How it works
 
 The agent stores one claim at a time as it works (`memory_store`,
-`memory_fact_set`); a novelty-gated store drops near-duplicates. Between
+`memory_fact_set`). Between
 sessions, the **dream** distils the stream into canonical facts, graph
 relations, and procedural lessons. At every session start, a briefing
 injects what the memory is unsure about, lessons from past work, and where

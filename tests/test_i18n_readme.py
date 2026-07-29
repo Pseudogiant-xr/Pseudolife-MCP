@@ -51,6 +51,21 @@ def test_translation_synced_and_commands_identical(lang):
         f"{p.name}: fenced code blocks differ from README.source.md — "
         "commands must never be translated or edited per-language")
 
+    # The version a READER sees must agree with the one the machine sees.
+    # Each translation states its sync version twice: the HTML comment above,
+    # and a human-readable line near the top ("synced: v6 (2026-07-29)",
+    # "已同步:v6 …", "同期バージョン: v6 …"). Only the comment was pinned, so
+    # on the v5 -> v6 bump the visible line silently kept saying v5 — a
+    # contradiction shown to every non-English reader and invisible to this
+    # file. The phrasing differs per language; the `vN (YYYY-MM-DD)` stamp
+    # does not, so match on that rather than on any one translation's wording.
+    stamp = re.search(r"<!-- i18n-source: (v\d+ \(\d{4}-\d{2}-\d{2}\))",
+                      src_text).group(1)
+    assert stamp in text, (
+        f"{p.name}: the human-readable sync line disagrees with "
+        f"<!-- i18n-sync: {version} --> — it should read {stamp!r}. Bump both, "
+        "or a reader is told a different version than the guard enforces.")
+
     # every reader can find the canonical English docs
     assert "../../README.md" in text
 
