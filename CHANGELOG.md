@@ -6,6 +6,36 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-29 — supersede-at-discovery affordances)
+- **Aged, stale, or contested facts now carry a ready-made `correct_with`
+  call on the MCP read surface.** `memory_search` (cortex block),
+  `memory_fact_get`, and `memory_world_search` attach the exact
+  `memory_fact_set(...)` / `memory_world_set(...)` invocation for the
+  fact's slot, and the response carries a one-line `correction_note`
+  stating the norm: if the fact contradicts observed reality, run the
+  correction at discovery — re-assert the same value to confirm it.
+  Motivation: a session recalled a world fact describing work as pending
+  that had shipped 11 days earlier, reported the contradiction in prose,
+  and left the record standing (2026-07-29); the briefing instruction
+  alone demonstrably does not produce supersede-at-discovery, so the
+  affordance moves to the moment of recall, where correcting costs a
+  copy-paste instead of a recalled procedure.
+- **`freshness.needs_correction_nudge`** gates the affordance at **TTL/3**
+  (volatile ≈ 7 days, slow ≈ 90 days, evergreen never) — deliberately
+  ahead of the 2×TTL `stale` flag, which the 11-day-old incident fact had
+  not yet reached. Stale and contested facts are flagged regardless of
+  age. Pinned by `tests/test_correction_affordance.py`. The tool
+  docstrings deliberately do not describe the field — the core manifest
+  budget is at capacity, and the in-band `correction_note` teaches it at
+  the moment it applies.
+- **TRUST ORDER briefing sharpened** (both `session_hook.py` and its
+  byte-pinned twin `examples/CLAUDE.memory.md`): recall results mark
+  aged/contested facts with `correct_with`; correcting is part of
+  discovering, not a follow-up. Session-end reflection (detecting
+  recalled-but-contradicted facts at episode close) was evaluated and
+  deferred — the observed failure mode stores nothing for the daemon to
+  detect; see `docs/superpowers/specs/2026-07-29-supersede-at-discovery-design.md`.
+
 ## [0.11.0] - 2026-07-29 — a better retriever, and facts that admit their age
 
 The embedding backbone moved to `Qwen/Qwen3-Embedding-0.6B` at 1024

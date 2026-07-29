@@ -241,6 +241,51 @@ def _iso_seconds(ts: float | None) -> str | None:
         return None
 
 
+# ── Supersede-at-discovery affordances (2026-07-29) ──────────────────────
+# A recalled fact an agent notices is wrong must get CORRECTED, not just
+# narrated (outcome signal 327: a contradiction was reported in prose and
+# the record left standing for the next session to re-believe). The
+# briefing's TRUST ORDER instruction alone does not produce the behavior,
+# so the affordance sits here, at the moment of recall: aged/stale/
+# contested facts carry the exact correction call for their slot, and the
+# response states the norm once. Gate: freshness.needs_correction_nudge
+# (TTL/3 — the stale flag at 2×TTL fires too late for the incident shape).
+
+CORRECTION_NOTE = (
+    "Facts flagged correct_with above are aged or contested. If one "
+    "contradicts what you observe, run its correction call NOW with the "
+    "verified value (re-assert the same value if it checks out) — noticing "
+    "without writing leaves the error for the next session.")
+
+
+def _cortex_correct_with(f: dict[str, Any]) -> str | None:
+    """The copy-paste correction call for a cortex fact, or None when the
+    fact is fresh enough (or durable enough) not to warrant one."""
+    from pseudolife_memory.memory.freshness import needs_correction_nudge
+    aged = needs_correction_nudge(
+        f.get("freshness_class") or "evergreen",
+        f.get("last_confirmed") or f.get("asserted_at"))
+    if not (f.get("contested") or f.get("stale") or aged):
+        return None
+    return (f"memory_fact_set(entity={f['entity']!r}, "
+            f"attribute={f['attribute']!r}, "
+            f"value=<the verified current value>)")
+
+
+def _world_correct_with(e: dict[str, Any]) -> str | None:
+    """Same affordance for a world fact — corrections route to
+    ``memory_world_set`` and carry a citation."""
+    from pseudolife_memory.memory.freshness import needs_correction_nudge
+    aged = needs_correction_nudge(
+        e.get("freshness_class") or "volatile",
+        e.get("last_confirmed") or e.get("retrieved_at") or e.get("asserted_at"))
+    if not (e.get("stale") or aged):
+        return None
+    return (f"memory_world_set(entity={e['entity']!r}, "
+            f"attribute={e['attribute']!r}, "
+            f"value=<the verified current value>, source_url=<citation>)")
+
+
 @_tool(tier="minimal")
 def memory_search(
     query: str,
@@ -332,9 +377,17 @@ def memory_search(
                          "contender_origin": f.get("contender_origin", "")}
                         if f.get("contested") else {}
                     ),
+                    # Supersede-at-discovery: aged/stale/contested facts
+                    # carry their exact correction call (see CORRECTION_NOTE).
+                    **(
+                        {"correct_with": cw}
+                        if (cw := _cortex_correct_with(f)) else {}
+                    ),
                 }
                 for f in facts
             ]
+            if any("correct_with" in c for c in result["cortex"]):
+                result["correction_note"] = CORRECTION_NOTE
             fact_vals = [f.get("value", "") for f in facts]
             kept = [
                 e for e in result.get("entries", [])
@@ -508,6 +561,14 @@ def memory_fact_get(entity: str, attribute: str) -> dict[str, Any]:
     }
     if out["record"] is None and not out["contenders"]:
         out["candidates"] = service.cortex_candidates(entity, attribute)
+    # Supersede-at-discovery: an aged/stale record carries its exact
+    # correction call, and the response states the norm once.
+    if out["record"] is not None:
+        cw = _cortex_correct_with(
+            {**out["record"], "contested": bool(out["contenders"])})
+        if cw:
+            out["record"]["correct_with"] = cw
+            out["correction_note"] = CORRECTION_NOTE
     # Graph join: when the subject has a graph node, surface its id +
     # aliases so callers can pivot into memory_graph.
     ref = service.entity_ref(entity)
@@ -630,6 +691,17 @@ def memory_world_search(query: str, top_k: int = 5,
     Returns: ``{count, entries}``.
     """
     result = service.world_search(query, top_k=top_k, min_score=0.0)
+    # Supersede-at-discovery: aged/stale facts carry their exact correction
+    # call, and the response states the norm once (attached before
+    # compaction so both projections keep it).
+    flagged = False
+    for e in result.get("entries", []):
+        cw = _world_correct_with(e)
+        if cw:
+            e["correct_with"] = cw
+            flagged = True
+    if flagged:
+        result["correction_note"] = CORRECTION_NOTE
     if not verbose:
         result["entries"] = [_compact_world(e) for e in result.get("entries", [])]
     return result
@@ -637,7 +709,8 @@ def memory_world_search(query: str, top_k: int = 5,
 
 def _compact_world(e: dict[str, Any]) -> dict[str, Any]:
     out = {k: e[k] for k in ("entity", "attribute", "value",
-                             "effective_confidence", "stale", "score")
+                             "effective_confidence", "stale", "score",
+                             "correct_with")
            if k in e}
     if e.get("source_url"):
         out["source_url"] = e["source_url"]

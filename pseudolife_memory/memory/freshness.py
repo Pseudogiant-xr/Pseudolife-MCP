@@ -63,6 +63,21 @@ def effective_confidence(stored, retrieved_at, freshness_class, now=None) -> flo
     return max(0.0, min(1.0, float(stored) * decay_factor(freshness_class, age)))
 
 
+def needs_correction_nudge(freshness_class, anchor_ts, now=None) -> bool:
+    """True when a transient fact is old enough that recall should carry a
+    copy-paste correction affordance (``correct_with`` on the MCP read
+    surface). Fires at TTL/3 — volatile ~7d, slow ~90d — well before the
+    2×TTL ``stale`` flag: the 2026-07-29 incident fact was volatile and 11
+    days old, not yet stale, so a stale-only gate would have missed it.
+    Evergreen facts never nudge (a durable fact carrying a weekly "still
+    true?" tag would be pure noise)."""
+    ttl = _TTL[normalize_class(freshness_class)]
+    if ttl is None or anchor_ts is None:
+        return False
+    now = _time.time() if now is None else float(now)
+    return (now - float(anchor_ts)) > ttl / 3.0
+
+
 def is_stale(freshness_class, retrieved_at, now=None) -> bool:
     """True once a fact is past 2×TTL — 'a lead, not truth; re-verify'. Evergreen
     facts are never stale."""
