@@ -89,3 +89,6 @@ include = ["pseudolife_memory*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+markers = [
+    "slow: needs external infrastructure (a built docker image); skips itself when absent",
+]

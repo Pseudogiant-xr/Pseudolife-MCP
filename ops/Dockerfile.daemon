@@ -32,16 +32,33 @@ WORKDIR /app
 RUN apt-get update && apt-get -y upgrade && rm -rf /var/lib/apt/lists/*
 
 # 1) CPU-only torch first, PINNED for reproducibility, from PyTorch's CPU wheel
-#    index. Installing it up front means the constrained install below sees torch
-#    already satisfied and never pulls the multi-GB CUDA build from PyPI. Pinning
-#    (vs >=) makes a rebuild reproduce the validated build instead of drifting.
+#    index — the '+cpu' build exists only there; PyPI serves the CUDA build
+#    under the same name and version. Pinning (vs >=) makes a rebuild reproduce
+#    the validated build instead of drifting.
+#
+#    Installing it up front is NECESSARY but NOT SUFFICIENT. This step used to
+#    claim that a pre-installed torch meant the constrained install below "never
+#    pulls the multi-GB CUDA build from PyPI". That was false from 2026-07-24 to
+#    2026-07-29: pip reported torch already satisfied, then backtracked off it
+#    anyway and shipped 2.13.0+cu130 with ~4 GB of nvidia-*/triton wheels in
+#    every image built in that window. A constraint file cannot be negotiated,
+#    so when the lock's setuptools pin (83.0.0, via Dependabot) crossed torch
+#    2.12.0's own setuptools<82 ceiling, pip resolved the conflict by discarding
+#    the pinned torch — not the setuptools pin — and walked forward to a torch
+#    with no ceiling. What actually holds torch to the CPU build is the pin in
+#    the lockfile applied as a constraint in step 2. Keep both.
 RUN pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.12.0"
 
 # 2) The package + its remaining deps, PINNED to the captured lockfile so a
-#    rebuild reproduces the known-good set (no silent dependency drift). torch is
-#    already satisfied above (and intentionally absent from the lock); pypdf
-#    floats to latest (the PyPDF2->pypdf security migration). setuptools is then
-#    forced to a patched release (CVE-2025-47273).
+#    rebuild reproduces the known-good set (no silent dependency drift). The
+#    lock pins torch==2.12.0+cpu, which the step above already satisfies: the
+#    constraint is what stops pip re-resolving it. Because that exact version
+#    exists only on the CPU index (not on PyPI), a future dependency that
+#    genuinely needs a newer torch fails this build LOUDLY rather than quietly
+#    swapping in a CUDA wheel — bump step 1 and the lock together when it does.
+#    pypdf floats to latest (the PyPDF2->pypdf security migration). setuptools
+#    is a patched release (CVE-2025-47273) that is also below torch's ceiling;
+#    it now matches the lock, so the line below is a belt-and-braces no-op.
 COPY pyproject.toml README.md /app/
 COPY ops/requirements.lock.txt /app/requirements.lock.txt
 COPY pseudolife_memory /app/pseudolife_memory
