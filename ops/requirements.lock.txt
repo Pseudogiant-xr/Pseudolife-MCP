@@ -1,3 +1,22 @@
+# torch is pinned to the CPU build and MUST stay that way (2026-07-29). The
+# daemon is a CPU-only service — the image sets CUDA_VISIBLE_DEVICES=-1 and
+# there is no GPU code path — but PyPI's linux torch wheel is the CUDA build,
+# which drags in ~4 GB of nvidia-*/cuda-*/triton wheels. The '+cpu' local
+# version only exists on PyTorch's own index, which ops/Dockerfile.daemon
+# installs from BEFORE applying this file as a constraint; the pin here is
+# what stops pip re-resolving torch out from under that install.
+#
+#   *** setuptools and torch are COUPLED. Bump them together or not at all. ***
+#
+# torch 2.12.0 requires setuptools<82. A Dependabot bump to setuptools==83.0.0
+# (17b97180, 2026-07-24) crossed that ceiling, and because a constraint file
+# cannot be negotiated, pip resolved the conflict by discarding the pinned CPU
+# torch and walking forward to 2.13.0 (no setuptools ceiling) — silently
+# shipping the CUDA build in every image built between then and 2026-07-29.
+# Nothing in the dependency graph requires torch > 2.12.0; the pull was a
+# ceiling collision, not a raised floor. tests/test_daemon_image_is_cpu_only.py
+# now fails on exactly this, so a future bump cannot land the same way.
+#
 # Security holds (Dependabot triage, 2026-07-16) — carry these notes forward
 # when regenerating this file from pip freeze:
 # - chromadb 1.5.9 is the latest release; CVE-2026-45829 (critical, pre-auth
@@ -100,7 +119,9 @@ safetensors==0.8.0
 scikit-learn==1.9.0
 scipy==1.18.0
 sentence-transformers==5.6.0
-setuptools==83.0.0
+# HELD <82 by torch 2.12.0's own requirement — see the coupling note in the
+# header. Raising this silently swaps the image's CPU torch for the CUDA build.
+setuptools==78.1.1
 shellingham==1.5.4
 six==1.17.0
 sse-starlette==3.4.5
@@ -109,6 +130,7 @@ sympy==1.14.0
 tenacity==9.1.4
 threadpoolctl==3.6.0
 tokenizers==0.22.2
+torch==2.12.0+cpu
 tqdm==4.68.3
 transformers==4.57.6
 typer==0.25.1

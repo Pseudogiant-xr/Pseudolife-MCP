@@ -250,10 +250,13 @@ No host Python, no torch install, no version skew; the daemon image bakes
 in CPU-only torch and the embedding weights — `Qwen/Qwen3-Embedding-0.6B`
 (the default retrieval backbone since schema v25) plus `all-MiniLM-L6-v2`
 (kept baked for the ONNX-parity test path) — so it runs identically on
-Windows / macOS / Linux. Requires only Docker; built once: ~12.6 GB daemon
-image (measured 2026-07-28 on the deployed build; ~10.4 GB before the Qwen3
-weights were baked in alongside MiniLM) + ~0.6 GB Postgres + ~9 GB extractor
-sidecar (skip the sidecar entirely with the installer's `sonnet-only` mode).
+Windows / macOS / Linux. Requires only Docker; built once: ~5.0 GB daemon
+image (measured 2026-07-29 on the deployed build) + ~0.6 GB Postgres + ~9 GB
+extractor sidecar (skip the sidecar entirely with the installer's
+`sonnet-only` mode). The ~12.6 GB and ~10.4 GB figures published before
+2026-07-29 are retired: both were inflated by a CUDA torch build that a
+dependency-resolution bug pulled into the image (see the CHANGELOG); the
+daemon has always been CPU-only.
 
 ```bash
 git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
@@ -593,7 +596,7 @@ version, storage backend, auth state, and `persist_errors` (non-zero means
 writes are failing to reach Postgres; check `docker logs
 pseudolife-mcp-daemon`).
 
-- **First build is slow / big.** The daemon image (~12.6 GB, several
+- **First build is slow / big.** The daemon image (~5.0 GB, several
   minutes to build) bakes in CPU torch and the embedding weights (Qwen3-Embedding-0.6B
   plus MiniLM); the extractor sidecar
   adds a ~5.3 GB model download on its first build. Every start after that is

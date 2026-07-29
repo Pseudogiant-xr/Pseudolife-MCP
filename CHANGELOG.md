@@ -6,6 +6,52 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-07-29 — the CPU-only image had been shipping CUDA for five days)
+
+- **The daemon image is CPU-only again: 12.6 GB → 5.03 GB, a 7.57 GB (60%)
+  saving.** Every image built between 2026-07-24 and 2026-07-29 shipped
+  `torch 2.13.0+cu130` and 19 `nvidia-*` / `cuda-*` / `triton` distributions —
+  a full CUDA runtime inside a service that sets `CUDA_VISIBLE_DEVICES=-1`
+  and has no GPU code path. Verified on the deployed build: the container now
+  reports `torch 2.12.0+cpu`, `torch.version.cuda = None`, and zero CUDA
+  distributions.
+
+  **Root cause — a dependency *ceiling*, not a raised floor.** Nothing in the
+  graph requires torch newer than the pinned 2.12.0 (the highest declared
+  floors are extras-only, at `>=2.2`/`>=2.4`). The trigger ran the other way:
+  `torch 2.12.0` itself requires `setuptools<82`, and a Dependabot bump
+  (`17b97180`, 2026-07-24) moved `ops/requirements.lock.txt` to
+  `setuptools==83.0.0`. A pip constraint file cannot be negotiated, so pip
+  reported `Requirement already satisfied: torch>=2.1.0 ... (2.12.0+cpu)`,
+  then backtracked *off* the pinned CPU torch — discarding it rather than the
+  setuptools pin — and walked forward to 2.13.0, which declares no setuptools
+  ceiling. PyPI's default linux torch wheel is the CUDA build, so ~4 GB of
+  CUDA arrived with it. The constraint that poisoned the resolution never even
+  reached the image: the Dockerfile forces setuptools back to 78.1.1 on the
+  next line.
+
+- **`ops/requirements.lock.txt` now pins `torch==2.12.0+cpu`** and holds
+  `setuptools` at 78.1.1 (below torch's ceiling, and the CVE-2025-47273 patched
+  release the image already shipped). torch used to be deliberately *absent*
+  from the lock on the theory that installing it first made it unnecessary —
+  which left the single largest dependency in the image unpinned. Because the
+  `+cpu` local version exists only on PyTorch's own index, a future dependency
+  that genuinely needs a newer torch now fails the build loudly
+  (`ResolutionImpossible`, naming the conflict) instead of quietly swapping in
+  a CUDA wheel.
+
+- **The `ops/Dockerfile.daemon` comment asserting the opposite is corrected.**
+  It claimed the up-front CPU install meant the constrained install "never
+  pulls the multi-GB CUDA build from PyPI" — false for the whole window above.
+
+- **Guard added** (`tests/test_daemon_image_is_cpu_only.py`): the lockfile must
+  pin a `+cpu` torch and carry no CUDA distributions; the Dockerfile, the
+  lockfile, and CI must not drift apart on the torch version; and the lockfile's
+  `setuptools` pin must satisfy the pinned torch's own ceiling — the last of
+  which fails on exactly the Dependabot bump that caused this. A `slow`-marked
+  test asserts it end-to-end against the built image, skipping when Docker or
+  the image is absent.
+
 ### Added (2026-07-29 — supersede-at-discovery affordances)
 - **Aged, stale, or contested facts now carry a ready-made `correct_with`
   call on the MCP read surface.** `memory_search` (cortex block),
