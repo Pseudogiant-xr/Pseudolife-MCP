@@ -71,7 +71,12 @@ before relying on one; a fact marked `stale: true` is a lead, not truth —
 re-verify before acting on it. When memory and the code disagree, say so
 out loud, trust the code, and correct the memory (`memory_fact_set` at the
 same slot) rather than silently picking one — a stale fact nobody corrects
-is one the next session will believe too.
+is one the next session will believe too. Recall results mark
+aged/contested facts with a ready-made `correct_with` call: run it the
+moment you notice the mismatch, filling in the verified value (re-assert
+the same value if it checks out), then log
+`memory_outcome(..., "correction")`. Correcting is part of discovering —
+a contradiction you only narrate is work left undone.
 
 CAPTURE — as durable things arise (one claim per call):
 - Name the session EARLY: `memory_session_title("<project> - <topic>")`.
