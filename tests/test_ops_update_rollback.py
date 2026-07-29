@@ -19,6 +19,7 @@ command lookup), so the script's own branching is what's under test.
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -98,11 +99,29 @@ def test_no_rollback_image_says_so_and_offers_a_real_path(tmp_path):
         "no rebuild-from-git fallback offered:\n" + out)
 
 
+def _compose_daemon_version() -> str:
+    """The daemon image tag compose declares — the single source of truth the
+    update scripts read.
+
+    Derived, not hard-coded: this assertion used to pin a literal version and
+    so went red on every release cut, making the version bump look like a
+    regression in the rollback path. That is a sixth file coupled to the
+    "five-file version cut", and the one nobody lists.
+    """
+    text = (Path(__file__).resolve().parents[1]
+            / "ops" / "docker-compose.yml").read_text(encoding="utf-8")
+    m = re.search(r"^\s*image:\s*pseudolife-daemon:(\S+)\s*$",
+                  text, re.MULTILINE)
+    assert m, "no `image: pseudolife-daemon:<tag>` line in ops/docker-compose.yml"
+    return m.group(1)
+
+
 def test_rollback_image_present_still_prints_the_tag_command(tmp_path):
     """The working case must keep working."""
     out = _run_update(tmp_path, image_exists=True)
 
-    assert "docker tag pseudolife-daemon:0.10.0-unittest" in out, out
+    version = _compose_daemon_version()
+    assert f"docker tag pseudolife-daemon:{version}-unittest" in out, out
 
 
 def test_unhealthy_deploy_without_a_rollback_image_is_honest(tmp_path):

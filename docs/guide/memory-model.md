@@ -62,7 +62,10 @@ a reader to assume the value is live:
 
 Set it explicitly at write time: `memory_fact_set("pseudolife-mcp",
 "extractor-prompt-version", "v2", freshness_class="volatile")` — an
-explicit value always wins. Left unset (the default is the sentinel
+explicit value always wins, and since v23 `POST /api/facts/set` threads it
+too, so the Console and the REST fallback (the documented workaround for
+clients that stringify MCP list params) no longer pin every fact they
+write to `evergreen`. Left unset (the default is the sentinel
 `"auto"`), the class is instead **inferred from the entity's kind**
 (schema v24, `entity_kinds`): a `system` entity (live, mutable — the sort
 of thing with a "currently deployed" answer) can resolve to `volatile`; an
@@ -71,6 +74,15 @@ of thing with a "currently deployed" answer) can resolve to `volatile`; an
 the attribute name. `0-9-0-release / schema-version` is permanently true;
 `daemon / schema-version` rots — same attribute, opposite class, because
 the entities differ.
+
+The attribute still gets a vote, but only on a `system` entity and only in
+one direction: a short, deliberately dumb list of state-shaped names
+(`status`, `state`, `health`, `live`, `running`, `current`,
+`deployment`/`deployed`, `url`, `version`) resolves `volatile`, everything
+else stays `evergreen`, and event-shaped names (`…-date`, `…-at`,
+`…-hash`, `…-commit`, `…-count`) are forced `evergreen` first, so a
+recorded deployment *date* never inherits the volatility of the deployment
+it describes.
 
 An entity with no recorded kind — which is every entity until the offline
 classifier assigns one — resolves `evergreen`, not `volatile`: personal

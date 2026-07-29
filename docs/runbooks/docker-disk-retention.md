@@ -93,14 +93,37 @@ exists, it just never runs again.
 Get-ScheduledTaskInfo -TaskName 'Pseudolife-MCP Docker cache retention'
 ```
 
-- `LastTaskResult` of `0` means the last run exited cleanly. Anything else
-  means the script threw or exited non-zero on its last invocation.
-- `NextRunTime` being a real, upcoming date confirms the weekly trigger is
-  still registered and live — absent or stale means the task was
-  unregistered, or its target no longer exists (see above).
-- `LastRunTime` should be within the last week; right after a Sunday the
-  machine was off for, expect it shortly after the next boot instead,
-  courtesy of `StartWhenAvailable`.
+- `LastTaskResult` of `0` means the last run exited cleanly.
+- `LastTaskResult` of **`267011`** (`0x41303`, `SCHED_S_TASK_HAS_NOT_RUN`) is
+  **not a failure** — it means the task has never run yet, which is the normal
+  state between registration and the first Sunday. It ships alongside a
+  `LastRunTime` of `30/11/1999` (Task Scheduler's "never") and a
+  `NumberOfMissedRuns` of `0`. Don't chase this as a phantom failure; if the
+  task was registered this week, this is exactly what you should see.
+- Any *other* non-zero `LastTaskResult`, paired with a real `LastRunTime`,
+  means the script threw or exited non-zero on that invocation.
+- `LastRunTime` should be within the last week once the task has run at all;
+  right after a Sunday the machine was off for, expect it shortly after the
+  next boot instead, courtesy of `StartWhenAvailable`.
+
+**`NextRunTime` cannot detect the failure this section exists for.** It is
+computed from the trigger alone, so a task whose action points at a deleted
+worktree still reports a healthy, upcoming `NextRunTime` every week while
+never doing anything. To actually check the registration is live, verify the
+baked-in script path still exists:
+
+```powershell
+$t = Get-ScheduledTask -TaskName 'Pseudolife-MCP Docker cache retention'
+$cmd = [Text.Encoding]::Unicode.GetString(
+    [Convert]::FromBase64String(($t.Actions[0].Arguments -split '-EncodedCommand ')[-1]))
+$path = ([regex]::Match($cmd, "'([^']+\.ps1)'")).Groups[1].Value
+"target: $path"
+"exists: $(Test-Path $path)"
+```
+
+`exists: False` — or a `target:` under a worktree path — means re-run
+`ops\install-cache-retention.ps1` from the permanent checkout. That is the
+check to run; `NextRunTime` only tells you a trigger exists.
 
 Windows-only — there is no cron/systemd-timer installer. On Linux/macOS
 the deploy hook (`ops/update.sh`) is the only automated trigger; run
@@ -191,10 +214,26 @@ pass down to the ceiling pass's no-op behavior, with nothing to catch it.
 
 **What these scripts will never do:** touch images (that's
 `ops/prune-rollbacks.ps1` / `.sh`), touch containers, or run
-`docker system prune` or any volume command — enforced by
-`tests/test_ops_prune_build_cache.py`, not by convention alone. Never run
-`docker system prune --volumes` on this host: the bank lives in the
-external `ops_pseudolife_data` and `ops_pseudolife_pgdata` volumes.
+`docker system prune` or any volume command. All four are **enforced**, not
+just intended: `tests/test_ops_prune_build_cache.py` fails the run outright if
+`system prune`, `rmi` / `image rm`, any `volume` verb, or any container verb
+(`container`, `docker rm` / `stop` / `kill`) reaches its docker stub. The
+container verbs were added to that list on 2026-07-29 — until then this
+guarantee was documented but unguarded, so treat a pre-that-date branch as
+convention only.
+
+Never run `docker system prune --volumes` on this host: the bank lives in
+external volumes that a volume prune would take with it. On a default install
+those are `pseudolife-mcp-bank` (the Postgres data — the bank itself) and
+`pseudolife-mcp-state` (daemon state: ChromaDB, cortex/graph snapshots), per
+`ops/docker-compose.yml`. Installs predating the rename override both names
+via `PSEUDOLIFE_BANK_VOLUME` / `PSEUDOLIFE_STATE_VOLUME` in the gitignored
+`ops/.env`, so check there before assuming the shipped names are what your
+host actually uses:
+
+```powershell
+docker volume ls --filter name=pseudolife
+```
 
 ## 2. The .vhdx never shrinks (MANUAL — needs elevation + full downtime)
 

@@ -1,5 +1,29 @@
 # Overnight run — band write-side ablation + LME-V2 slice2
 
+> ## COMPLETED 2026-07-25 — DO NOT RE-RUN
+>
+> **This run finished and shipped.** Both threads completed and every artifact
+> is committed on `master` (commit `7cab1d83`, "evals: publish the write-side
+> band result + make the V2 reanswer path resumable", PR #36). Re-running it
+> costs ~13 hours and produces nothing new.
+>
+> Where the results live:
+>
+> - **Thread A** — all 8 paired comparisons:
+>   `evals/results/longmemeval-ku-s-qwen-27b-wabl-{iso,sys}-{wall,hist}-{rag,hybrid}.compare.json`,
+>   plus the per-band survival artifact
+>   `evals/results/longmemeval-ku-s-qwen-27b-wabl-survival.json`. Every number
+>   published from them is pinned by `tests/test_eval_evidence.py`.
+> - **Thread B** — the full 74-question slice:
+>   `evals/results/lme-v2-smoke-slice2.jsonl` (74 rows) and its
+>   `.summary.json`, plus the `-compose` reanswer variant.
+> - **The published claims** — `docs/guide/benchmarks.md`.
+>
+> Everything below is retained as the **procedure record**: how the run was
+> launched, supervised and settled, and what the crash root-cause
+> investigation concluded. It is the reference for launching a *similar*
+> run, not an instruction to launch this one.
+
 Prepared 2026-07-24. Two independent threads sharing one night: the GPU
 runs the LongMemEval-V2 procedure-slice expansion while the CPU runs the
 band write-side replays. Everything is resumable; a crash costs minutes.
@@ -12,8 +36,11 @@ its verdict ("the continuum earns nothing on ranking") left one defence
 standing: the write side. This run tests it. Flat-INGEST (one band at the
 continuum's total capacity, 5,250) vs the stock 8-band ingest on the
 full-haystack `s` dataset — the only corpus with real eviction pressure
-(probe, 2026-07-24: ~468 turns stored → ~339 survive the continuum,
-~28% evicted; the `oracle` corpus stores ~23/question and never evicts,
+(pre-run probe, 2026-07-24: ~468 turns stored → ~339 survive the continuum,
+~28% evicted — **superseded by the run's own measurement, `continuum_loss_rate`
+= 0.3114 (31.1%) over 78 questions in
+`evals/results/longmemeval-ku-s-qwen-27b-wabl-survival.json`**; quote that,
+not the probe. The `oracle` corpus stores ~23/question and never evicts,
 which is why the write side was untestable there). Comparisons:
 
 - `wabl-flat-M` vs `abl-flat-M` — write-side isolation (identical flat

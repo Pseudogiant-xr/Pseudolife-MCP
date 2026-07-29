@@ -23,9 +23,9 @@ the intelligence; this server is its memory on disk.
 
 What you get:
 
-- **Associative memory that ages like memory should** — an 8-band recency
-  continuum from `working` to `forever`, ranked by cosine similarity, with
-  contradiction detection and supersession.
+- **Associative memory that ages like memory should** — an 8-band
+  continuum from `working` to `forever`, ranked by hybrid dense-plus-lexical
+  similarity, with contradiction detection and supersession.
 - **Canonical facts, not vibes** — one *current* value per `entity.attribute`
   slot; corrections supersede rather than silently overwrite, and the full
   version history survives.
@@ -122,8 +122,8 @@ weights for retrieval, and the optional CPU extractor sidecar that
 consolidates memories into facts while you sleep.)
 
 It layers several complementary stores: the **associative continuum** (an
-8-tier recency-tiered embedding store, working → forever, ranked by cosine
-similarity with novelty-gated storage, contradiction detection, and
+8-tier embedding store, working → forever, ranked by cosine similarity fused
+with a BM25 lexical pool (on by default), with contradiction detection and
 supersession); the **cortex** (slot-keyed canonical facts — one *current*
 value per `entity.attribute` — with provenance tiers and contender parking
 instead of silent overwrites); a typed **knowledge graph** over those facts
@@ -169,14 +169,14 @@ is agent context every session, so it stays lean.
 | Tool | Purpose |
 |------|---------|
 | `memory_store(text, source?, tags?, origin?, episode?)` | Remember one durable fact / decision / observation (canonical facts reach the cortex via the dream pass or `memory_fact_set`) |
-| `memory_search(query, top_k?, filters..., rerank?, bm25?, explain?, verbose?)` | Associative retrieval; canonical `cortex` facts surface ahead of recall hits; `explain=True` attaches a ranking trace |
+| `memory_search(query, top_k?, filters..., rerank?, bm25?, explain?, verbose?)` | Associative retrieval; canonical `cortex` facts surface ahead of recall hits, each dated (`asserted_at` / `last_confirmed` / human `age`, plus `stale` when it has rotted); `explain=True` attaches a ranking trace |
 | `memory_recent(n?, sources?, episodes?, tags?, verbose?)` | Newest stores, timestamp-ordered (debug + session catch-up) |
 | `memory_supersede(old_text, new_text)` | Explicit correction — mark a memory obsolete, keep it as history |
 | `memory_forget(scope, ...)` | Hard-delete from one store: `memory` (by text/substring/source/episode/tag), `fact`, `world`, or `lesson` (by entity/attribute) |
 | `memory_stats()` | Per-band sizes, hit rates, totals |
 | `memory_get(entry_id)` / `memory_reinforce(entry_id)` | Dereference a memory id to its full episode (+ `consolidated_into`); reinforce it after finding it useful |
 | `memory_fact_get(entity, attribute)` | The one CURRENT canonical value at a slot (+ parked contenders); on an empty slot returns ranked `candidates` (same-entity, then similar slots) |
-| `memory_fact_set(entity, attribute, value, origin?, confidence?, episode?)` | Assert a canonical fact deliberately (insert / confirm / supersede / contest) |
+| `memory_fact_set(entity, attribute, value, origin?, confidence?, episode?, freshness_class?)` | Assert a canonical fact deliberately (insert / confirm / supersede / contest); `freshness_class` (`auto` default) says how fast the slot rots — `auto` infers it from the entity's kind |
 | `memory_fact_resolve(entity, attribute, accept)` | Settle a contested slot — adopt (`true`) or discard (`false`) the contender |
 | `memory_history(entity, attribute?)` | With `attribute`: version timeline at a slot, with writer/temporal stamps. Without: the entity's causal chain — dated fact/entry/edge/lesson events ("what led to X") |
 | `memory_world_set(entity, attribute, value, source_url?, ...)` | Assert a cited WORLD fact (external knowledge; age-decayed trust by freshness class) |
@@ -184,7 +184,7 @@ is agent context every session, so it stays lean.
 | `memory_outcome(task, outcome, about?, detail?, polarity?, episode?)` | Record a procedural outcome signal (`success`/`failure`/`correction`); the dream distils signals into lessons |
 | `memory_lesson_search(query, top_k?, verbose?)` | Recall learned lessons for the task at hand — heed `polarity` `-` dead-ends; `re_verify` flags lessons whose subject facts changed since |
 | `memory_dream(action, limit?, cursor?, apply?, snippets?)` | Drive the dream: `status` / `pull` / `commit` / `run` (server-side extractor) / `deep` (full-corpus graph consolidation; dry-run unless `apply`, which snapshots the graph tables first; `snippets=false` omits candidate evidence; responses carry evidence-enriched `merge_proposals` for near-duplicate triage) |
-| `memory_graph_review(action, proposal_id?, proposals?, scope?, src?, dst?)` | Work the review queue: `list` / `propose` / `dismiss_pair` / `accept_link` / `reject_link` / `accept_merge` / `accept_junk` / `reject_entity` (merge/entity decisions are audit-stamped `decided_by=agent` over MCP, `human` via Console) |
+| `memory_graph_review(action, proposal_id?, proposals?, scope?, src?, dst?)` | Work the review queue: `list` / `propose` / `dismiss_pair` / `dismiss_slot_pair` / `accept_link` / `reject_link` / `accept_merge` / `accept_junk` / `reject_entity` (merge/entity decisions are audit-stamped `decided_by=agent` over MCP, `human` via Console) |
 | `memory_session_title(title)` | Name THIS session's auto-opened episode (default titles are generic) |
 | `memory_episode_start(title, hint?)` / `memory_episode_end()` | Open/close a nested sub-episode for a substantial task; entries stored while open carry its id |
 | `memory_episode_summary(id)` | Stats + tag/source distribution + recent entries within an episode |
@@ -250,11 +250,10 @@ No host Python, no torch install, no version skew; the daemon image bakes
 in CPU-only torch and the embedding weights — `Qwen/Qwen3-Embedding-0.6B`
 (the default retrieval backbone since schema v25) plus `all-MiniLM-L6-v2`
 (kept baked for the ONNX-parity test path) — so it runs identically on
-Windows / macOS / Linux. Requires only Docker; built once: ~4 GB daemon
-image (approximate — grew from ~3 GB baking in the Qwen3 weights
-alongside MiniLM; not yet re-measured against a real build) + ~0.6 GB
-Postgres + ~9 GB extractor sidecar (skip the sidecar entirely with the
-installer's `sonnet-only` mode).
+Windows / macOS / Linux. Requires only Docker; built once: ~12.6 GB daemon
+image (measured 2026-07-28 on the deployed build; ~10.4 GB before the Qwen3
+weights were baked in alongside MiniLM) + ~0.6 GB Postgres + ~9 GB extractor
+sidecar (skip the sidecar entirely with the installer's `sonnet-only` mode).
 
 ```bash
 git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
@@ -275,7 +274,8 @@ docker compose -f ops/docker-compose.yml up -d --build
 
 > **Windows:** Docker Desktop's WSL2 VM claims up to ~50% of host RAM by
 > default; the stack needs ~6–7 GB under dream load with the default sidecar
-> (~1 GB in `sonnet-only` mode) — cap the VM via `ops/wslconfig.example`
+> (~2 GB in `sonnet-only` mode — the Qwen3 embedding backbone is the bulk of
+> it) — cap the VM via `ops/wslconfig.example`
 > (see [Troubleshooting](#troubleshooting)).
 
 The daemon serves MCP at `http://127.0.0.1:8765/mcp` and restarts with
@@ -304,13 +304,29 @@ without touching Postgres or the extractor:
 ```
 
 It backs up the bank (`pg_dump` + a state-volume tar), tags a rollback
-image, rebuilds + recreates **only** the daemon, and waits for `/health`.
+image (when a previous one exists — it says so loudly when there isn't),
+rebuilds + recreates **only** the daemon, and waits for `/health`.
 It never runs `down -v`. (Host-process install: just restart the daemon —
 `pip install -e .` is editable.) Build cache is pruned automatically after
 every healthy deploy; see
 [Docker disk retention](docs/runbooks/docker-disk-retention.md) for the
 weekly Scheduled Task and the manual `.vhdx` compact. Never run
 `docker system prune --volumes`, which deletes volumes.
+
+> **Upgrading an existing bank to 0.11.0 (schema v25) needs one manual step.**
+> The default embedding backbone changed to `Qwen/Qwen3-Embedding-0.6B` and every
+> embedding column moved from `vector(384)` to `vector(1024)` — not an additive
+> migration. The daemon **refuses to start** against an older-dimensioned bank
+> (`/health` reports `status: "degraded"` with `init_refusal`) rather than
+> half-migrating it. Back up, stop the daemon, then re-embed offline:
+>
+> ```bash
+> python ops/migrate_embeddings.py                            # dry run (default — writes nothing)
+> python ops/migrate_embeddings.py --apply --backup-verified  # commit
+> ```
+>
+> Full procedure, including the health check that confirms it took:
+> [the v25 migration runbook](docs/runbooks/embedding-v25-migration.md).
 
 ## Wire into your coding agent
 
@@ -503,19 +519,27 @@ privacy/cost trade-offs: [Dreaming](docs/guide/dreaming.md).
 On the knowledge-update subset of
 [LongMemEval](https://arxiv.org/abs/2410.10813) (oracle variant,
 local-ceiling extractor; 5 replicates, mean ± std), the consolidated-facts
-posture beats naive RAG by ~14 points while reading ~60% of the context:
+posture beats naive RAG by ~14 points while reading ~64% of the context:
 
 | arm | accuracy (mean ± std) | context tokens/question |
 |-----|----------------------|------------------------|
 | naive RAG (top-6 turns) | 0.567 ± 0.017 | 1638 |
-| cortex facts only | 0.559 ± 0.029 | **~60** |
+| cortex facts only | 0.559 ± 0.029 | **~124** |
 | **hybrid (facts + top-3 turns)** | **0.710 ± 0.019** | ~1000 |
 
-The fact spine alone matches RAG's accuracy on **under 4% of its token
+The fact spine alone matches RAG's accuracy on **under 8% of its token
 budget** — and the shipped E4B fine-tune's replicated hybrid
 (0.762 ± 0.027) beats this 27B-class ceiling. Setup, caveats, and the evidence that extraction quality is the dominant
 factor: [Benchmarks](docs/guide/benchmarks.md); full methodology:
 [`evals/README.md`](evals/README.md).
+
+Retrieval itself was re-measured on the same corpus before the v25 backbone
+swap (150 questions, 74,183 haystack turns, 299 gold turns; pure recall — no
+reader, no judge): `Qwen/Qwen3-Embedding-0.6B` reaches **R@10 0.809** against
+`bge-base-en-v1.5`'s 0.742 and the previously-shipped `all-MiniLM-L6-v2`'s
+0.572, and beats bge-base head-to-head **+32/−12 at k=10 (p=0.004)**.
+Artifacts: [`embedder-recall-shootout-20260727.json`](evals/results/embedder-recall-shootout-20260727.json),
+[`embedder-recall-qwen-vs-bge-20260728.json`](evals/results/embedder-recall-qwen-vs-bge-20260728.json).
 
 ## Cortex Console (web UI)
 
@@ -527,8 +551,10 @@ seeing and steering the memory a human otherwise can't observe:
 gauges), **Cortex** (canonical facts with provenance, version-history
 timelines, inline Accept/Discard for contested slots), **World / Lessons /
 Episodes**, **Stream** (live search with rerank/BM25 toggles and a
-ranking-trace debugger), **Graph** (interactive force-directed visualiser),
-and **Console** (every safe `config.yaml` scalar with live-vs-restart
+ranking-trace debugger), **Graph** (interactive force-directed visualiser, with a review drawer that
+can Accept/Reject merges or — for a source file and its own bare concept,
+`band.py` ↔ `band` — record an `implements` edge instead of forcing
+merge-or-dismiss), and **Console** (every safe `config.yaml` scalar with live-vs-restart
 badges, diff-preview, and atomic save).
 
 **Auth** mirrors `/mcp`: `/ui` (static shell) and `/health` are open; `/api/*`
@@ -545,9 +571,10 @@ renders the real frontend against canned data:
 |---|---|
 | Transport | Streamable-HTTP MCP daemon (`/mcp`); stdio shim is the installer default (per-session identity) — HTTP remains for single-session setups |
 | Storage | Postgres 16 + pgvector (source of truth); ChromaDB for the reference bank |
-| Associative continuum | 8-tier cosine MIRAS bands, novelty-gated storage, contradiction detection, supersession |
+| Associative continuum | 8-tier MIRAS bands; hybrid dense + BM25 ranking (BM25 on by default); contradiction detection and supersession, including a deterministic slot-identity path that fires regardless of embedding similarity |
 | Canonical-fact cortex | Single-writer: LLM dream pass + `memory_fact_*` (regex auto-promote opt-in, default off) |
 | Provenance contenders | Tier-rank guard `user > action > agent`; `memory_fact_resolve` |
+| Fact currency | Every cortex fact is dated (`asserted_at` / `age`); `freshness_class` (`evergreen` / `slow` / `volatile`) decays `effective_confidence` and flags `stale`. Left `auto`, the class is inferred from the entity's kind (schema v24 `entity_kinds`) — only `system` entities can rot; artifacts and concepts stay evergreen |
 | Knowledge graph | Typed entities/edges, closed relation vocab, on-read closure (Postgres + NetworkX, no AGE/Cypher) |
 | World cortex | `memory_world_*` — cited external facts + age-decayed freshness (manual ingest) |
 | Procedural memory | `memory_outcome` (signals) → dream-synthesised lessons via `memory_lesson_search`; `prefers`/`avoids` graph edges; single-writer |
@@ -555,9 +582,9 @@ renders the real frontend against canned data:
 | Episodes + tags | Session episodes daemon-owned, keyed by a resolved five-tier session identity; hook/shim eager-open or lazy-open + idle reaper + prune-empty + resume-after-reap; nested sub-episodes with subtree-expanded recall; multi-valued `tags=[...]` |
 | Session briefing | SessionStart hook injects unsure-graph + lessons + verified world facts + last-session recap (`pseudolife-mcp briefing`) |
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
-| Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); BM25 hybrid pool (`bm25=True`, stdlib only); ONNX embedding backend (`pip install .[onnx]` — ~3x faster CPU encode, bit-identical, auto-enabled when installed; the default Qwen3-Embedding-0.6B has no ONNX export and falls back to torch, so this currently only speeds up MiniLM-family models); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
+| Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); ONNX embedding backend (`pip install .[onnx]` — ~3x faster CPU encode, bit-identical, auto-enabled when installed; the default Qwen3-Embedding-0.6B has no ONNX export and falls back to torch, so this currently only speeds up MiniLM-family models); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, graph visualiser, search/trace, config editor (read-mostly, token-gated like `/mcp`) |
-| Schema version | v25 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start; legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
+| Schema version | v25 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25 itself**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
 
 ## Troubleshooting
 
@@ -566,7 +593,7 @@ version, storage backend, auth state, and `persist_errors` (non-zero means
 writes are failing to reach Postgres; check `docker logs
 pseudolife-mcp-daemon`).
 
-- **First build is slow / big.** The daemon image (~4 GB approximate, several
+- **First build is slow / big.** The daemon image (~12.6 GB, several
   minutes to build) bakes in CPU torch and the embedding weights (Qwen3-Embedding-0.6B
   plus MiniLM); the extractor sidecar
   adds a ~5.3 GB model download on its first build. Every start after that is
@@ -587,8 +614,9 @@ pseudolife-mcp-daemon`).
   `codex mcp list` should show
   `pseudolife-memory` ✓ connected. If not, re-check the URL
   (`http://127.0.0.1:8765/mcp` — the `/mcp` path matters) and the bearer
-  header when a token is set. A first call after a cold start loads the
-  embedder (a few seconds, once per daemon start).
+  header when a token is set. The daemon preloads the embedder on a warmup
+  thread at start (~5–10 s); a very early first call can race it and take a
+  few seconds.
 
 ## Uninstall
 

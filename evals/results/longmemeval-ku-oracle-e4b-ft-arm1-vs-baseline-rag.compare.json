@@ -1,0 +1,14 @@
+{
+  "delta": -0.0103,
+  "p_value": 0.40586,
+  "n_questions": 78,
+  "arm": "rag",
+  "a": "e4b-ft/arm1",
+  "b": "e4b-ft/arm1-baseline",
+  "a_mean": 0.57434,
+  "a_std": 0.005724334022399427,
+  "b_mean": 0.5846,
+  "b_std": 0.01462497863246302,
+  "permutations": 10000,
+  "seed": 0
+}

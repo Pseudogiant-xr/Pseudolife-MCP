@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pseudolife-mcp"
-version = "0.10.0"
+version = "0.11.0"
 description = "Pseudolife persistent long-term memory for MCP-compatible coding agents"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -19,7 +19,14 @@ dependencies = [
     "numpy>=1.24.0",
     "pyyaml>=6.0",
     "chromadb>=0.5.0",
-    "mcp>=1.0.0",
+    # Upper-bounded 2026-07-29: mcp 2.0.0 relocated `mcp.server.fastmcp`,
+    # which `pseudolife_memory/mcp_server.py` imports at module scope, so an
+    # unbounded pin made every fresh install fail at import. The lockfile has
+    # always pinned a 1.x (currently 1.28.1); this makes the source
+    # distribution agree with it. Lifting the bound is a real migration —
+    # the SDK is used across fastmcp, lowlevel, client.session,
+    # streamable_http and stdio_server — not a version bump.
+    "mcp>=1.0.0,<2",
     "pypdf>=4.0",
     "psycopg[binary]>=3.1",
     "pgvector>=0.3",

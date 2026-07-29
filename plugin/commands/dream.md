@@ -54,7 +54,22 @@ reviewed proposals:
      src=..., dst=...)` so the pair never re-proposes.
    - **Unsure**: leave pending for the Atlas queue. Do not guess; scopes that
      don't overlap are a strong distinct signal.
-5. Triage the returned `lesson_duplicates` / `world_duplicates` (cross-key
+5. Triage the junk verdict — over-extraction artifacts the analyzer wants
+   pruned. The dry-run reports them as `would_junk`
+   (`{entity, reason, already_proposed}`); apply reports a `junk_proposed`
+   count and files them in the review queue, where
+   `memory_graph_review(action="list")` surfaces a `junk_candidate` finding
+   whose `entities` carry the `id` you need. Judge by the `reason`:
+   - **Artifact** (`concat-artifact`, `list-artifact`, `compound-artifact`,
+     `bare-number`, `status-word` …): `memory_graph_review(
+     action="accept_junk", proposal_id=...)`. This DELETES the entity — the
+     step-2 snapshot is the only undo.
+   - **A real thing that merely looks thin** — short, weakly-connected names
+     are often legitimate ("Go", "uv"):
+     `memory_graph_review(action="reject_entity", proposal_id=...)`.
+   - **Unsure**: leave it pending for the Atlas queue. Deletion is the one
+     irreversible verdict in this flow.
+6. Triage the returned `lesson_duplicates` / `world_duplicates` (cross-key
    near-duplicate slots in the lesson / world stores; listing-only — the
    dream never deletes them). Judge from the per-side values:
    - **Duplicate**: keep the better-keyed slot and drop the other via
@@ -64,8 +79,8 @@ reviewed proposals:
      store="lesson"|"world", src=<a_key>, dst=<b_key>)` so the pair
      never re-lists.
    - **Unsure**: leave listed. Do not guess.
-6. Report: superseded / merged / proposed / dismissed counts, merges you
+7. Report: superseded / merged / proposed / dismissed counts, merges you
    applied or rejected (they appear under "recent merge decisions" in Atlas),
-   lesson/world pairs settled, and the snapshot filename. Link proposals
-   still need a human verdict
+   junk entities deleted or kept, lesson/world pairs settled, and the
+   snapshot filename. Link proposals still need a human verdict
    (`accept_link` / `reject_link` or Atlas).
