@@ -6,6 +6,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-07-29 — the translated front doors claimed a gate that does not exist)
+- **i18n source bumped to v6; all five translations re-synced.** The source
+  said "a novelty-gated store drops near-duplicates", which is false at the
+  shipped default: `surprise_threshold` is `0.0`
+  (`pseudolife_memory/utils/config.py:657`, forced for the daemon build at
+  `service.py:573-574`), so the gate never fires and nothing is dropped. The
+  equivalent claim was corrected in the English README during the 0.11.0
+  currency pass; the translated front doors were deliberately left at v5 that
+  cycle, and this closes them out. The clause is removed rather than
+  reworded — the surrounding sentence is about *what the agent stores*, and
+  the gate is not part of that story at the shipped default.
+- **The guard now pins the version a reader sees, not just the one the
+  machine sees.** Each translation declares its sync version twice: the
+  `<!-- i18n-sync: vN -->` comment, and a human-readable line near the top
+  (`synced: v6 (2026-07-29)`, `已同步:v6 …`, `同期バージョン: v6 …`). Only the
+  comment was pinned, so bumping it alone left every non-English reader
+  looking at "v5" while the guard enforced v6. `tests/test_i18n_readme.py`
+  now requires the source's `vN (YYYY-MM-DD)` stamp to appear in each
+  translation — matched on the stamp rather than any one language's phrasing.
+
+
 ### Added (2026-07-29 — Dependabot told not to re-break the CPU-only image)
 
 - **`.github/dependabot.yml`, ignore-only: `setuptools >=82` will not be
