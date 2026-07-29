@@ -126,8 +126,10 @@ the LongMemEval numbers below. The win is speed, not recall: in the
 replicated LongMemEval-KU comparison
 ([`evals/README.md`](../../evals/README.md), 2026-07-18) the bundled
 fine-tune outscores the generic 27B class end-to-end (hybrid 0.762 ± 0.027
-vs the 27B ceiling's 0.710 ± 0.019 — point estimates from separate runs,
-not a paired test), so point at a bigger *generic* model for faster
+vs the 27B ceiling's 0.710 ± 0.019 — a same-stack comparison on the
+since-retired TurboQuant server; point estimates from separate runs, not a
+paired test, and not comparable to the ceiling's re-based 0.731), so point
+at a bigger *generic* model for faster
 dreams, not better answers. Two ways to switch:
 
 *From the Console (no restart):* the **Extractor** panel in the Cortex
