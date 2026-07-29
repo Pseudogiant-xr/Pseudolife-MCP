@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -622,13 +623,17 @@ def test_memory_lesson_search_compact_keeps_re_verify(monkeypatch) -> None:
     assert e["re_verify_reason"] == "facts changed"
 
 
+# Timestamps are FRESH so no correct_with affordance attaches — this fixture
+# pins the compact projection keys, not the supersede-at-discovery gate
+# (that lives in test_correction_affordance.py).
 _FULL_WORLD = {
     "entity": "fastmcp", "attribute": "latest version", "value": "2.3",
     "polarity": "+", "status": "current", "confidence": 0.85,
     "effective_confidence": 0.81, "stale": False, "origin": "web",
     "freshness_class": "volatile", "source_url": "https://example.com/x",
-    "source_quote": "fastmcp 2.3 released", "retrieved_at": 1.0,
-    "asserted_at": 1.0, "last_confirmed": 2.0, "supersedes_value": None,
+    "source_quote": "fastmcp 2.3 released", "retrieved_at": time.time(),
+    "asserted_at": time.time(), "last_confirmed": time.time(),
+    "supersedes_value": None,
     "superseded_by_value": None, "superseded_at": None, "score": 0.7,
 }
 

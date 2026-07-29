@@ -114,8 +114,12 @@ block is 4186 chars of a 9500 shared cap; the addition is ~370 chars.
   single source of truth for the threshold.
 - `pseudolife_memory/mcp_server.py`: module constant `CORRECTION_NOTE`;
   per-fact template builders; wiring into the three tool responses
-  (`_compact_world` keep-list gains `correct_with`); one-line docstring
-  mentions so the tool docs teach the field.
+  (`_compact_world` keep-list gains `correct_with`). Deliberately **no**
+  docstring mentions: the core tool-manifest budget sits at 9480 of 9500
+  chars (`test_tool_consolidation.py::test_descriptions_fit_tier_budgets`),
+  and the field is self-teaching in-band — `correction_note` states the
+  norm in the same response, which is also cheaper than eager docstring
+  context on every session.
 - `pseudolife_memory/web/session_hook.py` + `examples/CLAUDE.memory.md`:
   the TRUST ORDER addition, byte-identical.
 - Tests: `tests/test_freshness.py` (gate unit tests),
