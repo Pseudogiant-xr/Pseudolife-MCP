@@ -87,6 +87,10 @@ _BUILTIN_RELATIONS = (
     ("uses", "src makes use of dst", False, None),
     ("configures", "src sets configuration for dst", False, None),
     ("stores-data-in", "src persists its data in dst", False, None),
+    # Curation review (2026-07-26) proposes this for a source file paired with
+    # its own bare stem, so it has to be seeded: an unregistered suggestion is
+    # rejected by `graph_relate` with an empty `suggestions` list.
+    ("implements", "src (a source file) realizes concept/role dst", False, None),
     ("related-to", "untyped catch-all association", False, None),
     # Procedural / outcome memory (schema v10): a task-type entity prefers/avoids
     # the tool/source a lesson is about. Untyped like the other builtins.

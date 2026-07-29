@@ -29,9 +29,29 @@ graph tables to `data_dir/graph_snapshots/graph-<stamp>.json` (the `snapshot`
 field in the response; newest `memory.deep_dream.snapshot_keep` files kept) and
 refuses with `snapshot_failed` if the dump can't be written. A full
 `pwsh ops/backup.ps1` on the host remains good practice before big passes, but
-the in-daemon snapshot is now the enforced floor. Apply then re-scores +
-(when `memory.deep_dream.auto_apply_safe`, default `True`) supersedes
-violations and merges exact dups. Supersede-not-delete — reversible.
+the in-daemon snapshot is now the enforced floor.
+
+Apply then re-scores agent edges and — **unless you have set
+`memory.deep_dream.auto_apply_safe: false`, it defaults to `True`, so this
+happens automatically and unreviewed** — supersedes violating edges and merges
+exact-duplicate entities. Those two halves are NOT equally reversible:
+
+- **Supersession is reversible.** It is an `UPDATE edges SET superseded_at`
+  (`storage/postgres.py::supersede_edge`); the row survives and an explicit
+  human re-assertion revives it.
+- **An exact-duplicate merge is a delete, and is not reversible from inside
+  the daemon.** After re-pointing edges, fact/lesson refs, aliases and sources
+  onto the survivor, `merge_entity` runs `DELETE FROM entities` on the
+  folded-away entity, and the FK CASCADE takes that entity's leftover aliases,
+  sources, community rows and edges with it. Nothing anywhere in the daemon
+  reads a `graph_snapshots/*.json` file back in — the snapshot path only
+  writes and prunes. Treat the snapshot as a forensic record of what the graph
+  looked like beforehand, not as a restore path. Rolling back a bad merge
+  means `ops/restore.ps1` from a backup.
+
+Set `memory.deep_dream.auto_apply_safe: false` if you want the merges to
+require a verdict instead. The review-queue proposals (`merge_proposed`,
+`junk_proposed`) are populated either way — that half is non-destructive.
 
 ## 3. Step C — settle candidates (this session)
 Judge each `candidate` from its `src_snippets`/`dst_snippets` (dispatch
@@ -45,14 +65,32 @@ subagents for large batches — reuse the
   stops resurfacing and frees its top-k slot.
 - **Unsure** → leave for Atlas; don't guess.
 
-## 3b. Step C — triage near-duplicate merges (this session)
-Judge each `merge_proposals` item from its per-side snippets/scopes:
+## 3b. Step C — triage entity proposals (this session)
+
+**Near-duplicate merges.** Judge each `merge_proposals` item from its per-side
+snippets/scopes:
 - **Same referent** → `memory_graph_review(action="accept_merge",
-  proposal_id=...)` — applies immediately (snapshot from step 2 is the undo),
-  logged to the recent-merges audit as `decided_by=agent`.
+  proposal_id=...)` — applies immediately and irreversibly (it deletes the
+  `from` entity, per step 2); logged to the recent-merges audit as
+  `decided_by=agent`.
 - **Distinct** → `memory_graph_review(action="reject_entity", proposal_id=...)`
   plus `dismiss_pair` so the pair never re-proposes.
 - **Unsure** → leave pending; disjoint `scopes` is a strong distinct signal.
+
+**Junk entities.** The dream also proposes over-extraction artifacts for
+deletion — `would_junk` in the dry run, counted as `junk_proposed` on apply.
+These are never auto-applied (the `auto_apply_safe` path covers supersessions
+and exact-duplicate merges only), so they sit pending until someone votes.
+`merge_proposals` does NOT carry them: get their `proposal_id`s from
+`memory_graph_review(action="list")`, where they appear as `kind: "junk"`.
+- **Genuinely junk** (extraction noise: a fragment, a mis-parsed span, an
+  entity with no real referent) → `memory_graph_review(action="accept_junk",
+  proposal_id=...)`. This is a **hard delete of the entity**, with the same
+  CASCADE and the same non-reversibility as a merge — read the reason and the
+  display name before accepting, and prefer leaving it pending when unsure.
+- **A real entity** → `memory_graph_review(action="reject_entity",
+  proposal_id=...)` — keeps the entity and closes the proposal.
+- **Unsure** → leave pending; it costs nothing but a queue slot.
 
 ## 3c. Step C — settle lesson/world duplicate listings (this session)
 Judge each `lesson_duplicates` / `world_duplicates` pair from the values shown

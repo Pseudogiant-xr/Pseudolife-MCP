@@ -62,6 +62,36 @@ def test_file_concept_pair_offers_relate_not_merge():
     assert f["entities"] == ["band.py", "band"]
 
 
+def test_suggested_relations_resolve_against_the_builtin_vocabulary():
+    # A `relate` finding is only actionable if the relation it suggests is in
+    # the CLOSED registry a fresh bank ships with: `graph_relate` rejects an
+    # unregistered name outright (`unknown_relation`), and `resolve_relation`
+    # fuzzy-matches too tightly to rescue a miss -- "implements" scores no
+    # builtin above the 0.5 cutoff, so the suggestion comes back with an EMPTY
+    # `suggestions` list and the user gets no recovery hint at all. A bank that
+    # happens to have the relation hand-defined hides this completely, which is
+    # why the pinned-suggestion test above is not enough: assert against the
+    # seed vocabulary, not against whatever the live registry has drifted to.
+    from pseudolife_memory import graph as G
+    from pseudolife_memory.storage.postgres import _BUILTIN_RELATIONS
+
+    # `resolve_relation` takes the registry as a list of NAMES -- the same
+    # `list(registry)` (dict keys) that `service.graph_relate` passes it.
+    seeded = [name for name, _desc, _trans, _inv in _BUILTIN_RELATIONS]
+    suggested = {
+        f["suggested_relation"]
+        for f in gr.duplicate_candidates(_ents("band", "band.py"))
+        if "suggested_relation" in f
+    }
+    assert suggested, "the file/concept finding must suggest a relation"
+    for relation in sorted(suggested):
+        resolved, _suggestions = G.resolve_relation(seeded, relation)
+        assert resolved is not None, (
+            f"review suggests {relation!r}, which a fresh bank cannot store: "
+            "add it to _BUILTIN_RELATIONS or suggest a seeded relation"
+        )
+
+
 def test_file_concept_detection_ignores_unrelated_and_two_file_pairs():
     # Only a file paired with ITS OWN bare stem qualifies. Two source files,
     # or a file next to an unrelated concept, keep the ordinary merge action.

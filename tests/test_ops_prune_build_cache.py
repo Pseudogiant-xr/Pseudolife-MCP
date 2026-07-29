@@ -48,7 +48,22 @@ def _find_bash() -> str | None:
 BASH = _find_bash()
 
 # Forbidden verbs. Any of these reaching the stub fails the run outright.
-FORBIDDEN = ("system prune", "rmi", "image rm", "volume")
+#
+# Matched as a PREFIX of the logged call, which is the argv joined by spaces
+# with no leading "docker" — every entry here is therefore the first token(s)
+# of a docker invocation. Substring matching would be wrong twice over: it
+# would never fire on a "docker rm" written with the binary name, and bare
+# "rm" is a substring of "--format", so `docker system df --format ...`
+# would fail the guard.
+#
+# The container verbs were added 2026-07-29. This module's own docstring and
+# docs/runbooks/docker-disk-retention.md both claimed containers were
+# protected, but no container verb was ever on this list, so the claim was
+# decoration. Build-cache retention has no business stopping or removing a
+# container — the one it would kill is the daemon serving the deploy that
+# just invoked it.
+FORBIDDEN = ("system prune", "rmi", "image rm", "volume",
+             "container", "rm ", "stop ", "kill ")
 
 
 def _docker_timestamp(when: datetime) -> str:
@@ -272,7 +287,8 @@ def test_never_issues_a_forbidden_docker_verb(prune):
     assert proc.returncode == 0, proc.stderr
     for call in calls:
         for verb in FORBIDDEN:
-            assert verb not in call, f"forbidden docker verb in: {call}"
+            assert not call.startswith(verb), (
+                f"forbidden docker verb in: {call}")
 
 
 def test_age_pass_always_runs_with_the_default_window(prune):

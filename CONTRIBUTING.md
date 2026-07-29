@@ -32,12 +32,19 @@ concurrent runs never terminate each other — and no live bank is ever touched.
 
 ## Running the tests
 
-The documented invocation is offline + deterministic (the embedder must
-already be cached; first run without the env vars will download it):
+The documented invocation is offline + deterministic — both embedders must
+already be in the HuggingFace cache:
 
 ```bash
 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -m pytest -q
 ```
+
+Two models are load-bearing, and a missing one is a hard failure under those
+env vars: `Qwen/Qwen3-Embedding-0.6B` (the default since schema v25) and
+`all-MiniLM-L6-v2` (still pinned by the tests that guard the symmetric/ONNX
+paths). A first run *without* the offline vars downloads both — budget about
+1.2 GB. Budget for a slow suite too: real CPU embeds put a warm local run at
+~437s, up from 238s on the pre-v25 ONNX path.
 
 All tests must pass. CI runs exactly this on every PR. If you add behavior,
 add a test; if you fix a bug, add the test that would have caught it.
@@ -63,8 +70,40 @@ from hard experience:
 - User-visible changes get a line in `CHANGELOG.md` under `[Unreleased]`.
 - Match the surrounding code's style and comment density. Comments explain
   *why*, not *what*.
-- Schema changes bump the schema version and must migrate additively
-  (`ADD COLUMN IF NOT EXISTS` on daemon start — see existing migrations).
+- Schema changes bump the schema version — see [Schema bumps](#schema-bumps)
+  below for the migration rule and the files that move together.
+
+## Schema bumps
+
+`ensure_schema` is additive-only: `CREATE TABLE IF NOT EXISTS` and
+`ADD COLUMN IF NOT EXISTS`, never an in-place `ALTER` of an existing column's
+type. That isn't a style preference — a daemon that half-migrates a live bank
+at boot can neither finish nor undo it.
+
+A change that *can't* be expressed additively doesn't get an exception. It
+ships two things instead:
+
+- a **startup refusal** — the daemon detects the mismatch and stops rather
+  than write into a bank it can no longer write correctly (see
+  `_refuse_on_embedding_dim_mismatch` in
+  `pseudolife_memory/storage/schema.py`, added for the v25 embedding-dimension
+  change);
+- a **human-gated script under `ops/`** that does the real migration offline —
+  backup first, daemon stopped (`ops/migrate_embeddings.py` re-embeds every
+  row before moving the columns).
+
+Never a silent half-migration at boot.
+
+A bump also touches five places, and they land in the same change or
+`tests/test_release_ux.py` goes red:
+
+- `SCHEMA_META_VERSION` in `pseudolife_memory/storage/schema.py`;
+- the capabilities table in `README.md`;
+- the DSN row *and* the schema version-history table in
+  `docs/guide/configuration.md`;
+- a new `tests/test_schema_vNN.py` pinning what the bump added (the existing
+  `test_schema_v*.py` files show the shape);
+- a `CHANGELOG.md` entry that names `vNN`.
 
 ## Licensing of contributions
 

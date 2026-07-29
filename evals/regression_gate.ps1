@@ -20,8 +20,9 @@
 # Replicates: 2, and NOT because the judge is noisy — because it must not be.
 # Replicates re-judge byte-identical persisted contexts, so on the
 # reproducible server (qwen_server.ps1 default: stock llama-server + q8_0 KV)
-# every replicate scores exactly the same. Measured 2026-07-27 at n=4:
-# std 0.0000 on all three arms. The second replicate is therefore a CANARY,
+# every replicate scores exactly the same. Measured 2026-07-27 at n=7,
+# spanning a server restart: std 0.0000 on all three arms
+# (evals/results/regression_gate-2026-07-27-establish-q8-n7-crossrestart.agg.json). The second replicate is therefore a CANARY,
 # not an estimator — if the two ever disagree, replicate.py prints a
 # nondeterminism WARNING and the run was served by the TurboQuant fork,
 # whose TBQ4_0 KV flips ~7% of verdicts on identical input.

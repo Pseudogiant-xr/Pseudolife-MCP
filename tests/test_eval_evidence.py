@@ -37,6 +37,16 @@ LME_V2_FULL = RESULTS + "lme-v2-smoke-slice2.summary.json"
 LME_V2_FULL_COMPOSE = RESULTS + "lme-v2-smoke-slice2-compose.summary.json"
 WABL_SURVIVAL = RESULTS + "longmemeval-ku-s-qwen-27b-wabl-survival.json"
 NEEDLE_SURVIVAL = RESULTS + "longmemeval-ku-s-qwen-27b-needle-survival.json"
+# The ceiling run's per-arm CONTEXT TOKENS live in the summary, not the agg.
+CEILING_SUMMARY = (RESULTS +
+                   "longmemeval-ku-oracle-qwen-27b-ceiling-v2.summary.json")
+SHOOTOUT = RESULTS + "embedder-recall-shootout-20260727.json"
+
+
+def _arm1_cmp(arm: str) -> str:
+    """Arm-1 vs its pre-fine-tune baseline, per arm (2026-07-29)."""
+    return (f"{RESULTS}longmemeval-ku-oracle-e4b-ft-arm1-vs-baseline-"
+            f"{arm}.compare.json")
 
 
 def _wabl(tag: str) -> str:
@@ -127,6 +137,110 @@ for _arm, _needle, _a_mean, _b_mean in [
     CLAIMS.append(Claim(
         id=f"arm1-baseline-{_arm}", doc=BENCH, needle=_needle,
         artifacts=(ARM1_BASE,), value=_mean(_arm), stated=_b_mean, places=3))
+
+# ── the ceiling table's TOKEN column ─────────────────────────────────────
+# Added 2026-07-29. The accuracy column was pinned from the start; the token
+# column never was, and it silently kept the numbers from a superseded run
+# when the accuracies were re-pointed at ceiling-v2 on 2026-07-19. The cortex
+# cell read "~60" against an artifact saying 124.1 for ten days, and the two
+# percentages derived from it ("under 4%", "~60% of the context") were wrong
+# in the README and on this page. A column nobody pins is a column that drifts.
+for _arm, _needle, _tokens in [
+    ("rag", "| naive RAG (top-6 turns) | 0.567 ± 0.017 | 1638 |", 1638),
+    ("cortex", "| cortex facts only | 0.559 ± 0.029 | **~124** |", 124),
+    ("hybrid",
+     "| **hybrid (facts + top-3 turns)** | **0.710 ± 0.019** | ~1043 |", 1043),
+]:
+    CLAIMS.append(Claim(
+        id=f"ceiling-tokens-{_arm}", doc=BENCH, needle=_needle,
+        artifacts=(CEILING_SUMMARY,),
+        value=(lambda a: lambda d: d["arms"][a]["context_tokens"])(_arm),
+        stated=_tokens, places=0))
+
+# ── the Arm-1 table's p-values ───────────────────────────────────────────
+# Added 2026-07-29, with the artifacts they had always lacked. The means were
+# pinned; the p-values were not, and no comparison file existed at all — a
+# significance claim resting on an aggregate of means, which is precisely what
+# the "a p-value needs its own artifact" rule forbids. Generating them showed
+# the published values were correct to the decimal; the defect was evidentiary,
+# not numerical. The `rag` row is the control arm and bounds the other two.
+for _arm, _needle, _p in [
+    ("rag", "| naive RAG (control) | 0.574 ± 0.006 | 0.585 ± 0.015 | 0.41 |",
+     0.41),
+    ("cortex",
+     "| cortex facts only | 0.682 ± 0.017 | 0.603 ± 0.013 | **0.17** |", 0.17),
+    ("hybrid", "| hybrid | 0.762 ± 0.027 | 0.749 ± 0.015 | 0.83 |", 0.83),
+]:
+    CLAIMS.append(Claim(
+        id=f"arm1-pvalue-{_arm}", doc=BENCH, needle=_needle,
+        artifacts=(_arm1_cmp(_arm),),
+        value=lambda d: d["p_value"], stated=_p, places=2))
+
+# ── the embedding-backbone shootout (schema v25's justification) ─────────
+# Added 2026-07-29 with the section itself. This is the largest measured
+# retrieval win in the 0.11.0 release and it reached the docs unpinned.
+for _arm_key, _needle, _r10 in [
+    ("all-MiniLM-L6-v2 (shipped)",
+     "| all-MiniLM-L6-v2 (previous default) | 384 | 0.572 |", 0.572),
+    ("bge-base-en-v1.5", "| bge-base-en-v1.5 | 768 | 0.742 |", 0.742),
+    ("Qwen3-Embedding-0.6B (instructed)",
+     "| **Qwen3-Embedding-0.6B (instructed)** | **1024** | **0.809** |",
+     0.809),
+]:
+    CLAIMS.append(Claim(
+        id=f"embed-r10-{_arm_key.split()[0]}", doc=BENCH, needle=_needle,
+        artifacts=(SHOOTOUT,),
+        value=(lambda k: lambda d: next(
+            a["recall"]["10"] for a in d["arms"] if a["arm"] == k))(_arm_key),
+        stated=_r10, places=3))
+
+# ── the cross-stack offset measured by ceiling-v25 (2026-07-29) ──────────
+# The load-bearing number here is the CONTROL arm's, because rebuild_contexts
+# copies the rag context verbatim: identical input, so its movement is the
+# serving stack and nothing else. Pinned because it is the number that says
+# every other number on the page is stack-relative.
+CEILING_V25 = RESULTS + "longmemeval-ku-oracle-qwen-27b-ceiling-v25.agg.json"
+for _arm, _needle, _v25 in [
+    ("rag", "| naive RAG (**control**) | 0.6282 | 0.5667 ± 0.0167 | **+0.0615** |",
+     0.6282),
+    ("cortex", "| cortex facts only | 0.5897 | 0.5590 ± 0.0295 | +0.0307 |",
+     0.5897),
+    ("hybrid", "| hybrid | 0.7308 | 0.7102 ± 0.0194 | +0.0206 |", 0.7308),
+]:
+    CLAIMS.append(Claim(
+        id=f"ceiling-v25-{_arm}", doc=CHANGELOG, needle=_needle,
+        artifacts=(CEILING_V25,), value=_mean(_arm), stated=_v25, places=4))
+    # The published side of each row, from the run it supersedes.
+    CLAIMS.append(Claim(
+        id=f"ceiling-v25-{_arm}-published", doc=CHANGELOG, needle=_needle,
+        artifacts=(CEILING,), value=_mean(_arm),
+        stated={"rag": 0.5667, "cortex": 0.5590, "hybrid": 0.7102}[_arm],
+        places=4))
+
+# ── the v25 backbone's regression-gate verification (2026-07-29) ─────────
+# The gate's own `*-gate.agg.json` namespace is gitignored and cleared at the
+# start of every run, so a PASS there proves nothing to a later reader. This
+# pins the promoted copy instead — the "tag the run and promote deliberately"
+# half of the same rule that keeps canonical results from being overwritten.
+GATE_V25 = RESULTS + "regression_gate-2026-07-29-v25-backbone-verify.agg.json"
+for _arm, _needle, _gate_mean in [
+    ("rag", "| naive RAG (control) | 0.6282 | 0.6282 | 0.0000 |", 0.6282),
+    ("cortex", "| cortex facts only | 0.6923 | 0.7051 | −0.0128 |", 0.6923),
+    ("hybrid", "| hybrid | 0.7821 | 0.7692 | +0.0129 |", 0.7821),
+]:
+    CLAIMS.append(Claim(
+        id=f"gate-v25-{_arm}", doc=CHANGELOG, needle=_needle,
+        artifacts=(GATE_V25,), value=_mean(_arm),
+        stated=_gate_mean, places=4))
+    # std 0.0000 is the load-bearing half of "served by the reproducible
+    # config": a non-zero std here means the run drifted onto the fast build
+    # and the deltas above cannot be read as real.
+    CLAIMS.append(Claim(
+        id=f"gate-v25-{_arm}-std", doc=CHANGELOG,
+        needle="`std` is 0.0000 on all\n  three across both replicates",
+        artifacts=(GATE_V25,),
+        value=(lambda a: lambda d: d["arms"][a]["std"])(_arm),
+        stated=0.0, places=4))
 
 # ── the LongMemEval-V2 procedure slice ───────────────────────────────────
 for _arm, _needle, _ku, _compose in [

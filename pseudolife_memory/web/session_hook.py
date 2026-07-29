@@ -50,6 +50,9 @@ RECALL — at the start of any task:
 - Results are compact (`{id, text, source, tags, score}`). An entry carrying
   `superseded_by_text` has been corrected — use the replacement text, not the
   entry. Pass `verbose=true` only when debugging retrieval.
+- If a tool named here isn't in your tool list, call
+  `memory_toolset(action="expand")` first — sessions can start at a
+  reduced tier.
 
 RECALL AGAIN mid-session — once at the start is not enough. Search when:
 - the user refers to work you weren't part of ("last time…", "in another
@@ -64,10 +67,11 @@ TRUST ORDER — memory tells you WHY; the repo tells you WHAT IS.
 For anything live (deployed version, config, what's running), read the
 config/code and say where you read it. A memory records what was true when
 it was WRITTEN: cortex facts now carry `asserted_at` / `age`, so check them
-before relying on one. When memory and the code disagree, say so out loud,
-trust the code, and correct the memory (`memory_fact_set` at the same slot)
-rather than silently picking one — a stale fact nobody corrects is one the
-next session will believe too.
+before relying on one; a fact marked `stale: true` is a lead, not truth —
+re-verify before acting on it. When memory and the code disagree, say so
+out loud, trust the code, and correct the memory (`memory_fact_set` at the
+same slot) rather than silently picking one — a stale fact nobody corrects
+is one the next session will believe too.
 
 CAPTURE — as durable things arise (one claim per call):
 - Name the session EARLY: `memory_session_title("<project> - <topic>")`.
@@ -82,19 +86,19 @@ CAPTURE — as durable things arise (one claim per call):
 - Open a named sub-episode with `memory_episode_start(title)` for a big
   multi-step task; `memory_episode_end` pops back.
 - Route verbose status/progress/logs under `source="status"` — searchable,
-  but excluded from dream extraction so they don't pollute the graph.
+  but excluded from fact/graph extraction so they don't pollute the graph.
 - Never store secrets: no tokens, API keys, passwords, or credentials.
 
 REFLECT — at task end, or the moment an outcome lands:
 - `memory_outcome(task, outcome, about=, detail=)` whenever something WORKED
   (`success`), was a dead-end (`failure`), or the user corrected you
-  (`correction`). These signals are the only feeder for procedural LESSONS —
+  (`correction`). These signals are the primary feeder for procedural LESSONS —
   the dream distils them into the do/avoid guidance surfaced at your next
   session start. Logging outcomes is how you stop repeating mistakes.
 
 Be judicious — one claim per call; skip fleeting chatter (the surprise gate
 drops near-duplicates; `stored=false` is not an error). The first memory call
-of a session may lag a few seconds (one-time warmup).
+of a session may lag while the embedding model loads (one-time warmup).
 
 If this session has NO `memory_*` tools, the MCP transport isn't registered
 (this briefing arrives via a hook, a separate channel) — tell the user to run

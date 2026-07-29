@@ -19,7 +19,7 @@ required** if you'd rather not run one:
 
 | Tier | How it runs | Needs | Quality |
 |------|-------------|-------|---------|
-| **0 — baseline** | `memory_dream(action="run")` (regex floor) — headless, on-box, free | nothing | weak (`X is Y`, `key: value`, port/version) |
+| **0 — none** | no extractor configured — the dream still runs, prunes and advances its cursor, but writes no canonical facts | nothing | none (single-writer cortex: `memory_fact_set` is your only writer) |
 | **1 — agent-driven** | the **agent itself** is the gateway: the `/dream` command | the agent you already run | highest |
 | **2 — shipped default** | daemon auto-sweep calls an OpenAI-compatible endpoint — the bundled sidecar out of the box, or any endpoint you point it at | nothing (sidecar) / one base-URL + key + model | high; free if local |
 
@@ -30,9 +30,11 @@ writes them with `memory_fact_set`, and commits the cursor. To run it on a
 cadence instead of by hand, point a scheduled agent/cron job at the same
 prompt.
 
-**Tier 0 — zero-config.** Call `memory_dream(action="run")` (or schedule
-it) for a fully headless pass with the deterministic regex floor — no LLM,
-nothing leaves the machine.
+**Tier 0 — no extractor.** With no endpoint configured the cortex has no
+automatic writer: `memory_dream(action="run")` still drains the backlog,
+prunes outcome signals and advances the cursor, but extracts no facts, and
+the daemon logs a startup warning. Populate the cortex with deliberate
+`memory_fact_set` calls, or configure tier 1 or 2.
 
 ## Tier 2 — headless auto-sweep
 
@@ -54,7 +56,10 @@ configured extractor. Under the single-writer cortex a *successful* pass
 that finds no canonical facts writes nothing and advances the cursor; a
 **failed** call (timeout, network, malformed output) instead **holds the
 cursor**, so those memories are retried next sweep rather than skipped —
-there is no regex fallback either way. The extractor timeout defaults to
+up to three times. A batch that keeps failing is re-run entry by entry,
+the individual offenders are quarantined, and the cursor advances past
+them, so one unparseable memory cannot stall consolidation indefinitely.
+There is no regex fallback either way. The extractor timeout defaults to
 **240s** in code; the Docker stack ships **480s**
 (`PSEUDOLIFE_DREAM_TIMEOUT_SECONDS` in the compose file) because the
 default E4B sidecar generates at ~12–15 tok/s on CPU, so a full
@@ -107,7 +112,7 @@ the daemon logs a startup warning. Reasoning models work too — the
 extractor disables their `<think>` trace so they return structured output
 instead of an empty budget. The `evals/` extractor-ladder benchmark is how
 the default was chosen (even the smallest bake, Gemma 4 E2B, beats
-naive-RAG at ~25× fewer tokens/query); see
+naive-RAG at ~40× fewer tokens/query); see
 [`evals/README.md`](../../evals/README.md).
 
 ## Upgrading the extractor — bigger local models
@@ -115,12 +120,15 @@ naive-RAG at ~25× fewer tokens/query); see
 If you have a GPU (or a beefier box on your LAN), any OpenAI-compatible
 server can replace the sidecar — the ladder measured a Qwen3.6-27B on a
 single RTX 4090 at the ladder ceiling (gold 1.0 / stale-leak 0.0) while
-extracting ~5× faster than the CPU sidecar. The win is speed, not recall:
-in the replicated LongMemEval-KU comparison
+extracting ~5× faster than the CPU sidecar — a bar the shipped bakes now
+also clear, so the ladder no longer separates them; the separation is in
+the LongMemEval numbers below. The win is speed, not recall: in the
+replicated LongMemEval-KU comparison
 ([`evals/README.md`](../../evals/README.md), 2026-07-18) the bundled
 fine-tune outscores the generic 27B class end-to-end (hybrid 0.762 ± 0.027
-vs 0.695 ± 0.017), so point at a bigger *generic* model for faster dreams,
-not better answers. Two ways to switch:
+vs the 27B ceiling's 0.710 ± 0.019 — point estimates from separate runs,
+not a paired test), so point at a bigger *generic* model for faster
+dreams, not better answers. Two ways to switch:
 
 *From the Console (no restart):* the **Extractor** panel in the Cortex
 Console's config view edits the endpoint, model, timeout, and token budget
@@ -213,10 +221,14 @@ What gets consolidated and when is configurable under `memory.dream`
 The auto-sweep (Tier 2) fires when:
 
 ```
-backlog ≥ min_batch (8)   OR   (backlog ≥ 1 AND idle ≥ idle_seconds (600s))
+backlog ≥ min_batch (8)
+  OR  (backlog ≥ 1 AND idle ≥ idle_seconds (600s))
+  OR  an episode is awaiting outcome inference
 ```
 
-polled every `sweep_interval_seconds` (600s). It runs **only in the
+`idle` is time since the newest band entry, not since the last request — a
+session that only *reads* stays quiescent. Polled every
+`sweep_interval_seconds` (600s). It runs **only in the
 daemon** — the embedded stdio mode never sweeps. There is **no turn-based
 trigger** (the cortex does not "dream every N turns"), by design:
 consolidating mid-session would distil half-formed, still-changing state
@@ -246,7 +258,7 @@ edges, hard type-violation edges queued for supersession, exact-duplicate
 entity pairs queued for merging, and semantic link *candidates* across
 sessions (each with truncated context snippets; items the apply path would
 dedupe are flagged `already_proposed`). Adding `apply=True` first dumps the
-five graph tables to a JSON undo file under `data_dir/graph_snapshots/`
+five graph tables to a JSON forensic record under `data_dir/graph_snapshots/`
 (refusing with `snapshot_failed` if it can't), then commits the safe
 self-clean (re-score + supersede violations + merge exact dups) and returns
 `candidates` for review. The agent then drives Step C in the same session
@@ -258,6 +270,41 @@ reaches live edges — and record clearly-distinct pairs with
 `memory_graph_review(action="dismiss_pair")` so they stop resurfacing. See
 [the deep-dream runbook](../runbooks/deep-dream.md) for the operator
 procedure.
+
+A duplicate finding whose two names are a source file and its own bare stem
+(`band.py` ↔ `band`) now arrives with `action: "relate"` and a
+`suggested_relation` (`implements`) instead of forcing merge-or-dismiss:
+the concept usually has identity the file does not, and several files can
+realize one role, so merging asserts something false and dismissing throws
+a real relationship away. Settle it with
+`memory_graph_relate(<file>, "implements", <concept>)` followed by
+`memory_graph_review(action="dismiss_pair", ...)` — or one Relate button in
+the Atlas review drawer, which does both.
+
+**Draining the quarantine.** Quarantined edges are almost all untyped
+`related-to` co-mentions, and about half of them name a real relationship
+that merely got the wrong label. Each dream therefore re-asks the extractor
+to *type* up to `memory.dream.retype_quarantined_max` quarantined pairs
+(default `3`), showing it only the notes where both entities co-occur. A
+pair that comes back with a real relation is filed as a fresh review
+proposal — a retype is a second guess on suspect material, so it never
+writes a live edge — and the untyped original is rejected either way, so
+the queue drains instead of accumulating. The pass runs even on a dream
+with no backlog (the quarantine grows fastest when dreams are rare),
+no-ops on an empty quarantine, and reports
+`retyped: {considered, retyped, settled}` from `memory_dream(action="run")`.
+Set `0` to disable.
+
+**What no longer reaches the graph.** Four sources of review-queue noise
+were closed at the write path rather than cleaned up afterwards: dotted
+pseudo-entities minted when an extractor read a flattened
+`entity.attribute` vocabulary hint as a name; the `<artifact> <aspect>`
+nodes `memory_outcome` mints, which shared nearly every token with the
+artifact they mentioned and so dominated the duplicate and orphan
+findings; merge proposals pointing *at* a contentless entity, now that
+fold direction ranks on facts as well as degree; and edges to git branch
+names, which typed as unknown — and therefore as neutral — and sailed past
+the confidence floor.
 
 ## Consolidation workflow (agent-driven dedup)
 
