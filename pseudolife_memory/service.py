@@ -1850,6 +1850,15 @@ class MemoryService:
                         "members": [_cortex_record_to_dict(m) for m in all_members],
                         "score": round(float(score), 4) if score is not None else 0.0,
                         "contested": False,
+                        # F5 (Task 6 review): a set entry carried no
+                        # timestamp at all, so mcp_server.py's cortex-first
+                        # block (`_iso_seconds(f.get("last_confirmed"))`)
+                        # always rendered no date for it. The most recent
+                        # membership change is the meaningful "how current
+                        # is this" signal for a set — max over all current
+                        # members, not just the ones that ranked.
+                        "last_confirmed": max(
+                            (m.last_confirmed for m in all_members), default=None),
                     })
             return {"count": len(entries), "entries": entries}
 
@@ -1857,7 +1866,16 @@ class MemoryService:
         """Fuse dense cortex hits with a lexical pool over composed fact
         text. Mirrors the turn pool's fusion (memory/bm25.py): boost facts
         in both pools, inject lexical-only facts at ``weight * norm``.
-        Called under ``self._lock`` with the store initialised."""
+        Called under ``self._lock`` with the store initialised.
+
+        Keyed by ``id(record)``, NOT ``record.key`` (the slot identity):
+        a set-valued slot can have many current members sharing one slot
+        key, and fusion must stay genuinely per-record (Task 6 review
+        finding F1) — keying by slot key collapsed every member of a slot
+        onto whichever one the lexical-score dict comprehension happened
+        to keep last, so the rest silently inherited its score and could
+        never be lexical-only-injected on their own. Set-level grouping
+        happens strictly AFTER this call, in ``cortex_search``."""
         from types import SimpleNamespace
 
         from pseudolife_memory.memory.bm25 import BM25Index, normalize_scores
@@ -1871,18 +1889,18 @@ class MemoryService:
             return hits
         idx = BM25Index(docs, k1=cfg.k1, b=cfg.b)
         norm_hits = normalize_scores(idx.score(query, top_k=cfg.top_n))
-        lex = {d.record.key: (d.record, s) for d, s in norm_hits
+        lex = {id(d.record): (d.record, s) for d, s in norm_hits
                if s >= cfg.min_score}
         fused = []
         seen = set()
         for r, s in hits:
-            boost = lex.get(r.key)
+            boost = lex.get(id(r))
             if boost is not None:
                 s = s + cfg.weight * boost[1]
             fused.append((r, s))
-            seen.add(r.key)
-        for key, (r, s) in lex.items():
-            if key not in seen:
+            seen.add(id(r))
+        for rid, (r, s) in lex.items():
+            if rid not in seen:
                 fused.append((r, cfg.weight * s))
         fused.sort(key=lambda rs: rs[1], reverse=True)
         return fused[: max(0, int(top_k))]

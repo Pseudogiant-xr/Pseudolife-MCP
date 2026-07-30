@@ -45,14 +45,16 @@ def test_scalar_fact_line_dedups_repeat_of_current_value_from_garnish():
 
 def test_set_fact_line_uses_composed_value_verbatim():
     f = {"entity": "user", "attribute": "bikes owned", "kind": "set",
-         "value": "road bike; gravel bike (2 members)"}
+         "value": "road bike; gravel bike (2 members)",
+         "members": [{"value": "road bike"}, {"value": "gravel bike"}]}
     assert (_compose_fact_line(f, [])
             == "user — bikes owned: road bike; gravel bike (2 members)")
 
 
 def test_set_fact_line_garnishes_former_members_oldest_first():
     f = {"entity": "user", "attribute": "bikes owned", "kind": "set",
-         "value": "gravel bike (1 members)"}
+         "value": "gravel bike (1 members)",
+         "members": [{"value": "gravel bike"}]}
     versions = [
         {"value": "road bike", "event": "added", "at": 1.0},
         {"value": "gravel bike", "event": "added", "at": 2.0},
@@ -65,7 +67,8 @@ def test_set_fact_line_garnishes_former_members_oldest_first():
 
 def test_set_fact_line_no_garnish_when_nothing_removed():
     f = {"entity": "user", "attribute": "bikes owned", "kind": "set",
-         "value": "road bike (1 members)"}
+         "value": "road bike (1 members)",
+         "members": [{"value": "road bike"}]}
     versions = [{"value": "road bike", "event": "added", "at": 1.0}]
     assert (_compose_fact_line(f, versions)
             == "user — bikes owned: road bike (1 members)")
@@ -73,7 +76,8 @@ def test_set_fact_line_no_garnish_when_nothing_removed():
 
 def test_set_fact_line_multiple_removed_members_ordered_by_versions():
     f = {"entity": "user", "attribute": "tags", "kind": "set",
-         "value": "beta (1 members)"}
+         "value": "beta (1 members)",
+         "members": [{"value": "beta"}]}
     versions = [
         {"value": "alpha", "event": "added", "at": 1.0},
         {"value": "beta", "event": "added", "at": 2.0},
@@ -84,3 +88,44 @@ def test_set_fact_line_multiple_removed_members_ordered_by_versions():
     got = _compose_fact_line(f, versions)
     assert got == ("user — tags: beta (1 members)  "
                    "(former members: alpha -> gamma)")
+
+
+def test_set_fact_line_omits_removed_member_that_is_currently_re_added():
+    """F3 (Task 6 review): remove-then-re-add leaves a "removed" event for
+    the value AND a fresh current member carrying it (re-adding mints a
+    new row rather than resurrecting the old one). The garnish must not
+    call a CURRENTLY-current member "former" — filtered against
+    ``f["members"]``, normalised so a re-add under different casing still
+    matches."""
+    f = {"entity": "user", "attribute": "bikes owned", "kind": "set",
+         "value": "Road Bike; gravel bike (2 members)",
+         "members": [{"value": "Road Bike"}, {"value": "gravel bike"}]}
+    versions = [
+        {"value": "road bike", "event": "added", "at": 1.0},
+        {"value": "road bike", "event": "removed", "at": 2.0},
+        {"value": "gravel bike", "event": "added", "at": 3.0},
+        {"value": "Road Bike", "event": "added", "at": 4.0},   # re-add
+    ]
+    got = _compose_fact_line(f, versions)
+    # "road bike" was removed, but it (as "Road Bike") is currently a
+    # member again -- no "former members" garnish should appear at all.
+    assert got == "user — bikes owned: Road Bike; gravel bike (2 members)"
+    assert "former members" not in got
+
+
+def test_set_fact_line_still_garnishes_other_removed_members_when_one_is_readded():
+    """Companion to the above: a re-added member is dropped from the
+    garnish, but an UNRELATED removed member (never re-added) still shows."""
+    f = {"entity": "user", "attribute": "bikes owned", "kind": "set",
+         "value": "road bike (1 members)",
+         "members": [{"value": "road bike"}]}
+    versions = [
+        {"value": "gravel bike", "event": "added", "at": 1.0},
+        {"value": "road bike", "event": "added", "at": 2.0},
+        {"value": "gravel bike", "event": "removed", "at": 3.0},
+        {"value": "road bike", "event": "removed", "at": 4.0},
+        {"value": "road bike", "event": "added", "at": 5.0},   # re-add
+    ]
+    got = _compose_fact_line(f, versions)
+    assert got == ("user — bikes owned: road bike (1 members)  "
+                   "(former members: gravel bike)")

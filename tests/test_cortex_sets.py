@@ -728,6 +728,12 @@ def test_cortex_search_groups_set_slot_into_one_entry(tmp_service_dir):
     assert e["score"] == 1.0                      # max over the members that ranked
     assert e["contested"] is False
     assert [m["value"] for m in e["members"]] == ["road bike", "gravel bike"]
+    # F5 (Task 6 review): a set entry must carry SOME currency signal —
+    # max last_confirmed over the full current membership — so the
+    # mcp_server cortex-first block has a real date to render instead of
+    # silently going blank for every set slot.
+    assert "last_confirmed" in e
+    assert e["last_confirmed"] == max(m["last_confirmed"] for m in e["members"])
 
 
 def test_cortex_search_set_entry_orders_by_score_not_insertion(tmp_service_dir):

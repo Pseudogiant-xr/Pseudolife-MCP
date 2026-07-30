@@ -303,8 +303,18 @@ def _compose_fact_line(f: dict, versions: list[dict]) -> str:
     line = (f"{f.get('entity', '')} — {f.get('attribute', '')}: "
             f"{f.get('value', '')}")
     if f.get("kind") == "set":
+        # A remove-then-re-add leaves a "removed" event for the value AND a
+        # current member carrying it (re-adding mints a fresh current row
+        # rather than resurrecting the old one — CortexStore.add_member),
+        # so filter "removed" events against the CURRENT membership
+        # (normalised — casefold/strip, matching the store's own dedup
+        # norm) — otherwise a currently-current member gets mislabeled
+        # "former" (Task 6 review finding F3).
+        current_norm = {(m.get("value") or "").strip().casefold()
+                         for m in f.get("members", [])}
         removed = [v.get("value", "") for v in versions
-                   if v.get("event") == "removed" and v.get("value")]
+                   if v.get("event") == "removed" and v.get("value")
+                   and (v.get("value") or "").strip().casefold() not in current_norm]
         if removed:
             line += "  (former members: " + " -> ".join(removed) + ")"
         return line
