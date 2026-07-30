@@ -521,18 +521,21 @@ privacy/cost trade-offs: [Dreaming](docs/guide/dreaming.md).
 
 On the knowledge-update subset of
 [LongMemEval](https://arxiv.org/abs/2410.10813) (oracle variant,
-local-ceiling extractor; 5 replicates, mean ± std), the consolidated-facts
-posture beats naive RAG by ~14 points while reading ~64% of the context:
+local-ceiling extractor; 3 replicates on the reproducible serving stack,
+byte-identical — std 0.0000), the consolidated-facts posture beats naive
+RAG by ~10 points while reading ~67% of the context:
 
-| arm | accuracy (mean ± std) | context tokens/question |
-|-----|----------------------|------------------------|
-| naive RAG (top-6 turns) | 0.567 ± 0.017 | 1638 |
-| cortex facts only | 0.559 ± 0.029 | **~124** |
-| **hybrid (facts + top-3 turns)** | **0.710 ± 0.019** | ~1000 |
+| arm | accuracy | context tokens/question |
+|-----|----------|------------------------|
+| naive RAG (top-6 turns) | 0.628 | 1638 |
+| cortex facts only | 0.590 | **~182** |
+| **hybrid (facts + top-3 turns)** | **0.731** | ~1102 |
 
-The fact spine alone matches RAG's accuracy on **under 8% of its token
+The fact spine alone trails RAG by only ~4 points on **~11% of its token
 budget** — and the shipped E4B fine-tune's replicated hybrid
-(0.762 ± 0.027) beats this 27B-class ceiling. Setup, caveats, and the evidence that extraction quality is the dominant
+(0.762 ± 0.027) beat this ceiling in their one same-stack comparison
+(both measured on the since-retired TurboQuant server, where the ceiling
+read 0.710 ± 0.019). Setup, caveats, and the evidence that extraction quality is the dominant
 factor: [Benchmarks](docs/guide/benchmarks.md); full methodology:
 [`evals/README.md`](evals/README.md).
 

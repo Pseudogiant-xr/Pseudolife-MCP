@@ -100,12 +100,50 @@ def discover(dataset: str, extractor: str, tag: str = "",
     return found
 
 
+# ── cascade (derived commit-gated arm) ────────────────────────────────────
+# Never persisted to rows: computed from the rag + cortex arms every judged
+# run already carries, so old artifacts report it retroactively.
+CASCADE_ARM = "cascade"
+
+
+def cortex_commits(row: dict) -> bool:
+    """True when the cortex arm committed to an answer (did not abstain).
+
+    The answer prompt's abstention string is exactly "I don't know"; match
+    tolerantly (case, typographic apostrophe) since models vary the surface.
+    """
+    resp = str(row.get("cortex_response", "")).lower().replace("’", "'")
+    return "don't know" not in resp
+
+
+def cascade_correct(row: dict) -> bool:
+    """Commit-gated cascade: serve the cortex answer when the cortex arm
+    commits, fall back to the rag answer when it abstains. The gate uses
+    only the response text — correctness is never consulted for routing."""
+    arm = "cortex" if cortex_commits(row) else "rag"
+    return bool(row[f"{arm}_correct"])
+
+
+def cascade_context_tokens(row: dict) -> int:
+    """The cascade always pays the cortex context; rag only on fallback."""
+    tokens = int(row["cortex_context_tokens"])
+    if not cortex_commits(row):
+        tokens += int(row["rag_context_tokens"])
+    return tokens
+
+
 # ── statistics ────────────────────────────────────────────────────────────
+def arm_correct(row: dict, arm: str) -> bool:
+    if arm == CASCADE_ARM:
+        return cascade_correct(row)
+    return bool(row[f"{arm}_correct"])
+
+
 def accuracy(rows: list[dict], arm: str) -> float | None:
     judged = [r for r in rows if is_judged(r)]
     if not judged:
         return None
-    return sum(bool(r[f"{arm}_correct"]) for r in judged) / len(judged)
+    return sum(arm_correct(r, arm) for r in judged) / len(judged)
 
 
 def aggregate(rows_by_tag: dict[str, list[dict]]) -> dict:
@@ -118,7 +156,7 @@ def aggregate(rows_by_tag: dict[str, list[dict]]) -> dict:
         "n_questions": len(judged[tags[0]]) if tags else 0,
         "arms": {},
     }
-    for arm in ARMS:
+    for arm in ARMS + (CASCADE_ARM,):
         accs = [round(accuracy(judged[t], arm), 4) for t in tags]
         out["arms"][arm] = {
             "accuracies": accs,
@@ -139,7 +177,7 @@ def question_rates(rows_by_tag: dict[str, list[dict]],
         qid_sets.append({r["question_id"] for r in rows})
         for r in rows:
             per_q.setdefault(r["question_id"], []).append(
-                bool(r[f"{arm}_correct"]))
+                arm_correct(r, arm))
     if len({frozenset(s) for s in qid_sets}) > 1:
         raise ValueError("question sets differ between replicates")
     return {q: statistics.fmean(v) for q, v in per_q.items()}
@@ -390,7 +428,7 @@ def cmd_agg(args) -> int:
     print(f"\n{args.dataset} / {label} — {agg['n_replicates']} replicates, "
           f"{agg['n_questions']} questions")
     print(f"{'arm':<10}{'mean':>8}{'std':>8}  accuracies")
-    for arm in ARMS:
+    for arm in ARMS + (CASCADE_ARM,):
         a = agg["arms"][arm]
         std = f"{a['std']:.4f}" if a["std"] is not None else "-"
         print(f"{arm:<10}{a['mean']:>8.4f}{std:>8}  {a['accuracies']}")
@@ -433,7 +471,7 @@ def main(argv: list[str] | None = None) -> int:
     _common(p)
     p.add_argument("--b-extractor", default=None)
     p.add_argument("--b-tag", default="")
-    p.add_argument("--arm", choices=ARMS, default="cortex")
+    p.add_argument("--arm", choices=ARMS + (CASCADE_ARM,), default="cortex")
     p.add_argument("--permutations", type=int, default=10000)
     p.add_argument("--seed", type=int, default=0)
     # Any comparison whose p-value gets published needs an artifact behind

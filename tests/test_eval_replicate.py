@@ -449,3 +449,77 @@ def test_cli_compare_mismatched_questions_exits_cleanly(tmp_path):
                         "--b-tag", "arm1-baseline",
                         "--results-dir", str(tmp_path)])
     assert "question sets" in str(e.value)
+
+
+# ── cascade (derived commit-gated arm) ────────────────────────────────────
+def _cascade_row(qid: str, cortex_resp: str, cortex_ok: bool,
+                 rag_ok: bool) -> dict:
+    row = _row(qid)
+    row["cortex_response"] = cortex_resp
+    row["cortex_correct"] = cortex_ok
+    row["rag_correct"] = rag_ok
+    return row
+
+
+def test_cortex_commits_detects_abstention():
+    assert replicate.cortex_commits(_cascade_row("q", "Paris.", True, True))
+    assert not replicate.cortex_commits(
+        _cascade_row("q", "I don't know.", False, True))
+    # case- and typographic-apostrophe-tolerant (models emit U+2019)
+    assert not replicate.cortex_commits(
+        _cascade_row("q", "I DON\u2019T KNOW", False, True))
+
+
+def test_cascade_correct_commit_gating():
+    # cortex commits -> its verdict decides; rag is ignored either way
+    assert replicate.cascade_correct(
+        _cascade_row("q", "Paris.", True, False)) is True
+    assert replicate.cascade_correct(
+        _cascade_row("q", "Chicago.", False, True)) is False
+    # cortex abstains -> rag verdict decides
+    assert replicate.cascade_correct(
+        _cascade_row("q", "I don't know.", False, True)) is True
+    assert replicate.cascade_correct(
+        _cascade_row("q", "I don't know.", False, False)) is False
+
+
+def test_cascade_context_tokens_pays_rag_only_on_fallback():
+    committed = _cascade_row("q", "42", True, True)
+    committed["cortex_context_tokens"] = 60
+    committed["rag_context_tokens"] = 1000
+    assert replicate.cascade_context_tokens(committed) == 60
+    fell_back = _cascade_row("q", "I don't know.", False, True)
+    fell_back["cortex_context_tokens"] = 60
+    fell_back["rag_context_tokens"] = 1000
+    assert replicate.cascade_context_tokens(fell_back) == 1060
+
+
+def test_aggregate_and_question_rates_include_cascade():
+    rows = [
+        _cascade_row("q0", "yes", True, False),           # commit, right
+        _cascade_row("q1", "I don't know.", False, True),   # fallback, right
+        _cascade_row("q2", "wrong", False, True),         # commit, wrong
+        _cascade_row("q3", "I don't know.", False, False),  # fallback, wrong
+    ]
+    agg = replicate.aggregate({"t": rows})
+    assert agg["arms"]["cascade"]["accuracies"] == [0.5]
+    rates = replicate.question_rates({"t": rows}, "cascade")
+    assert rates == {"q0": 1.0, "q1": 1.0, "q2": 0.0, "q3": 0.0}
+
+
+def test_cli_compare_accepts_cascade_arm(tmp_path, capsys):
+    a = [_cascade_row("q0", "yes", True, False),
+         _cascade_row("q1", "I don't know.", False, False)]
+    b = [_cascade_row("q0", "I don't know.", False, False),
+         _cascade_row("q1", "I don't know.", False, False)]
+    for tag, rows in [("arm1", a), ("arm1-r2", a),
+                      ("arm1-base", b), ("arm1-base-r2", b)]:
+        _write_jsonl(replicate.result_file("oracle", "e4b-ft", tag,
+                                           tmp_path), rows)
+    assert replicate.main(["compare", "--extractor", "e4b-ft",
+                           "--tag", "arm1", "--b-tag", "arm1-base",
+                           "--arm", "cascade",
+                           "--results-dir", str(tmp_path)]) == 0
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert out["arm"] == "cascade"
+    assert out["delta"] == pytest.approx(0.5)   # a: 1/2 vs b: 0/2

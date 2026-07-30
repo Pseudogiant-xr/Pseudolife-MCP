@@ -566,10 +566,15 @@ class MemoryConfig:
     top_k: int = 8       # episodic retrieval slots across bands
     ref_top_k: int = 3   # max reference bank results injected alongside memories
     save_dir: str = "./memory_state"
-    # When False (default), entries marked superseded by the contradiction
-    # pipeline are hidden from retrieval so the LLM sees only current facts.
-    # Flip to True for debugging or historical inspection.
-    show_superseded: bool = False
+    # When False (default, since v0.7.3), entries marked superseded by the
+    # contradiction pipeline stay retrievable — merely downranked — so the
+    # agent can narrate the historical sequence ("you used to have X, then
+    # you said Y"). Flip to True to restore the v0.7.2 hard filter, which
+    # hides them. Hiding is lossy: it caused the cat-category retrieval
+    # failure (see cms.retrieve) and superseded rows carry knowledge-update
+    # recall, so prefer the default outside of debugging.
+    # Replaced the no-op ``show_superseded`` field on 2026-07-30.
+    hide_superseded: bool = False
     # Abstention: when the top search score is below this floor, memory_search
     # returns low_confidence=True so the agent declines instead of using weak
     # distractor hits. 0.0 = off (only an empty result is low-confidence).
@@ -657,7 +662,7 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             top_k=mem_raw.get("top_k", 8),
             ref_top_k=mem_raw.get("ref_top_k", 3),
             save_dir=mem_raw.get("save_dir", "./memory_state"),
-            show_superseded=mem_raw.get("show_superseded", False),
+            hide_superseded=mem_raw.get("hide_superseded", False),
             search_confidence_floor=mem_raw.get("search_confidence_floor", 0.0),
             recency_base_half_life_s=mem_raw.get("recency_base_half_life_s", 3600.0),
             recency_boost_enabled=mem_raw.get("recency_boost_enabled", False),

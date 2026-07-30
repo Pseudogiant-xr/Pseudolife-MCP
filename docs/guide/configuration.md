@@ -95,6 +95,15 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   weaker match in `working` above a stronger match in a deeper band
   (measured: up to 18 points on the LongMemEval naive-RAG arm). Set it
   to `true` to restore the previous ranking.
+- **Superseded entries stay visible** (`memory.hide_superseded = false`,
+  since v0.7.3) — an entry the contradiction pipeline marked superseded
+  is still retrievable, downranked ×0.55 so current facts outrank their
+  own history. That is what lets the agent say "you used to have X, then
+  you said Y". Set it to `true` to restore the pre-v0.7.3 hard filter;
+  that filter is why a category query once missed the only entry naming
+  the category, and it costs knowledge-update recall, so treat it as a
+  debug/audit switch. Before 2026-07-30 this knob was mis-registered as
+  `memory.show_superseded` and did nothing.
 - **Abstention off** (`memory.search_confidence_floor = 0.0`) — set it
   above zero and `memory_search` returns `low_confidence: true` whenever
   the top match scores below the floor. Calibrated as a pair with

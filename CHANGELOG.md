@@ -76,6 +76,81 @@ the three REST endpoints, which had no caller in the console or anywhere else.
   orphaned `evals/lme_v2_check1_client.py`, superseded by
   `evals/lme_v2_check_fixd.py`.
 
+### Added (2026-07-30 — the eval harness reports the commit-gated cascade)
+- **`cascade` derived metric across the LongMemEval tooling.** Every judged
+  run already answers the `cortex` and `rag` arms, and per-question analysis
+  of the `ceiling-e2e` artifacts showed the cortex arm's *commitment* (not
+  abstaining) is a strong correctness signal — commit precision 46/46 on the
+  oracle slice, 0.76±0.05 on the `_s` haystacks. The commit-gated cascade
+  (serve the cortex answer when it commits, fall back to rag on "I don't
+  know") beat both naive RAG and the concatenation hybrid in all 8 existing
+  runs examined (oracle: 0.936 vs 0.859/0.833; `_s`: 0.428±0.023 vs
+  0.321/0.367), so the harness now derives it everywhere: bench `--report`
+  summaries, `replicate.py agg`, and `replicate.py compare --arm cascade`.
+  Pure post-processing — no new answer calls, nothing persisted per-row, old
+  JSONLs report it retroactively. The derivation lives in `replicate.py`
+  (import-light) and the bench imports it; covered by
+  `tests/test_eval_replicate.py`.
+
+### Fixed (2026-07-30 — a console switch that changed nothing, and the escape hatch it hid)
+
+- **`memory.show_superseded` retired; the real gate is now reachable as
+  `memory.hide_superseded`.** The console knob was a no-op in both
+  directions: `cms.retrieve` deliberately ignores `show_superseded`
+  (hard-filtering on supersession is what made a category query miss the
+  only entry naming the category), and the gate it *does* read —
+  `hide_superseded` — was never a declared `MemoryConfig` field, so
+  `load_config` dropped it from YAML and the console could not set it
+  either. The affordance documented in `cms.py` ("set
+  `config.hide_superseded = True` to restore the v0.7.2 filter") was
+  therefore reachable only by hand-assigning an attribute in Python.
+  `hide_superseded: bool = False` is now declared, parsed from
+  `memory.hide_superseded`, and registered as the console knob "Hide
+  superseded"; the dead field and its knob are gone. Old config files
+  carrying `memory.show_superseded` still load — the retired key is
+  ignored, which is exactly what it already did.
+- **Default retrieval behaviour is unchanged**: superseded entries stay
+  visible, downranked ×0.55, in both the dense and BM25 pools. That is
+  deliberate — they carry knowledge-update recall (LongMemEval KU) and are
+  what lets an answer describe a fact's history. Hiding them is a
+  debug/audit switch, now documented as such in
+  [`docs/guide/retrieval.md`](docs/guide/retrieval.md) and the defaults
+  list in [`docs/guide/configuration.md`](docs/guide/configuration.md).
+  `tests/test_superseded_visibility.py` pins the default, the gate in both
+  pools, the YAML parse, legacy-key tolerance, and the console-knob-to-gate
+  path end to end.
+
+### Changed (2026-07-30 — the ceiling table promoted onto the reproducible stack)
+
+- **The published local-ceiling table (README front door + benchmarks guide)
+  now shows `ceiling-v25`** — the 2026-07-29 re-judge of the same contexts on
+  stock `llama-server` + `q8_0` (3 byte-identical replicates, std 0.0000) —
+  in place of the v2 / TurboQuant figures, which move to a marked
+  **Superseded** block in the guide. This is the promotion the 0.11.0 entry
+  left pending. It is not a cell swap: the old stack was scoring the
+  verbatim-input control arm ~6 points low, so four narrative claims
+  measured against that control change with the cells —
+  - hybrid's margin over naive RAG: ~14 points → **~10 points**
+    (0.7308 vs 0.6282);
+  - "the fact spine alone matches RAG's accuracy" → cortex **trails RAG by
+    ~4 points** (0.5897 vs 0.6282);
+  - cortex's share of RAG's token budget: "under 8%" → **~11%**
+    (182.5 / 1637.8 tokens);
+  - hybrid's context share: ~64% → **~67%** (1101.8 / 1637.8).
+  Two things remain held fixed by the context rebuild and are stated under
+  the table: **extraction** (the 2026-07-19 bank dumps) and **raw-turn
+  selection** (the pre-v25 retriever picked the turns; BM25 is never
+  exercised) — only the cortex fact ranking runs under the v25 backbone.
+  The E4B-vs-ceiling sentence is re-scoped to the same-stack comparison it
+  always was (0.762 ± 0.027 vs 0.710 ± 0.019, both on the TurboQuant fork);
+  no cross-stack claim is made against the promoted 0.7308.
+  Evidence rows in `tests/test_eval_evidence.py` are repointed in the same
+  change: `ceiling-*` accuracy and token rows now check the `ceiling-v25`
+  artifacts, new `ceiling-hist-*` rows pin the retained historical block to
+  the v2 artifacts, and the README's token column is pinned for the first
+  time — unguarded, its hybrid cell had silently drifted to "~1000" against
+  an artifact saying 1043.3.
+
 ### Fixed (2026-07-29 — the translated front doors claimed a gate that does not exist)
 - **i18n source bumped to v6; all five translations re-synced.** The source
   said "a novelty-gated store drops near-duplicates", which is false at the
@@ -95,7 +170,6 @@ the three REST endpoints, which had no caller in the console or anywhere else.
   looking at "v5" while the guard enforced v6. `tests/test_i18n_readme.py`
   now requires the source's `vN (YYYY-MM-DD)` stamp to appear in each
   translation — matched on the stamp rather than any one language's phrasing.
-
 
 ### Added (2026-07-29 — Dependabot told not to re-break the CPU-only image)
 
@@ -280,6 +354,8 @@ daemon, and re-embed offline with `ops/migrate_embeddings.py` — see
   about v25 — the clean same-stack v25 comparison is the regression gate
   below. The published tables are left as they stand pending a deliberate
   promotion; `ceiling-v25` is committed as the tagged candidate.
+  *[Superseded 2026-07-30: the promotion has landed — the README and guide
+  tables now publish `ceiling-v25`; see Unreleased.]*
 
 ### Fixed (2026-07-29 — a sixth file was coupled to the "five-file version cut")
 - **`tests/test_ops_update_rollback.py` derives the daemon version from

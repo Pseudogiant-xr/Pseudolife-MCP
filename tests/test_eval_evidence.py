@@ -40,6 +40,9 @@ NEEDLE_SURVIVAL = RESULTS + "longmemeval-ku-s-qwen-27b-needle-survival.json"
 # The ceiling run's per-arm CONTEXT TOKENS live in the summary, not the agg.
 CEILING_SUMMARY = (RESULTS +
                    "longmemeval-ku-oracle-qwen-27b-ceiling-v2.summary.json")
+CEILING_V25 = RESULTS + "longmemeval-ku-oracle-qwen-27b-ceiling-v25.agg.json"
+CEILING_V25_SUMMARY = (
+    RESULTS + "longmemeval-ku-oracle-qwen-27b-ceiling-v25.summary.json")
 SHOOTOUT = RESULTS + "embedder-recall-shootout-20260727.json"
 
 
@@ -105,23 +108,29 @@ READ_ME = "README.md"
 CHANGELOG = "CHANGELOG.md"
 
 # ── the local-ceiling table (README front door + guide) ───────────────────
+# Re-based 2026-07-30 onto ceiling-v25 (reproducible q8_0 server). Its std
+# is 0.0000 by construction — byte-identical replicates — so the docs
+# publish plain accuracies plus a "std 0.0000" determinism sentence, which
+# is pinned per-arm below in place of a ± column.
 _CEILING_ROWS = [
-    ("rag", "| naive RAG (top-6 turns) | 0.567 ± 0.017 |", 0.567, 0.017),
-    ("cortex", "| cortex facts only | 0.559 ± 0.029 |", 0.559, 0.029),
+    ("rag", "| naive RAG (top-6 turns) | 0.628 | 1638 |", 0.628),
+    ("cortex", "| cortex facts only | 0.590 | **~182** |", 0.590),
     ("hybrid",
-     "| **hybrid (facts + top-3 turns)** | **0.710 ± 0.019** |", 0.710, 0.019),
+     "| **hybrid (facts + top-3 turns)** | **0.731** | ~1102 |", 0.731),
 ]
 
 CLAIMS: list[Claim] = []
 
 for _doc, _slug in ((READ_ME, "readme"), (BENCH, "guide")):
-    for _arm, _needle, _mean_v, _std_v in _CEILING_ROWS:
+    for _arm, _needle, _mean_v in _CEILING_ROWS:
         CLAIMS.append(Claim(
             id=f"ceiling-{_slug}-{_arm}-mean", doc=_doc, needle=_needle,
-            artifacts=(CEILING,), value=_mean(_arm), stated=_mean_v, places=3))
+            artifacts=(CEILING_V25,), value=_mean(_arm), stated=_mean_v,
+            places=3))
         CLAIMS.append(Claim(
-            id=f"ceiling-{_slug}-{_arm}-std", doc=_doc, needle=_needle,
-            artifacts=(CEILING,), value=_std(_arm), stated=_std_v, places=3))
+            id=f"ceiling-{_slug}-{_arm}-std", doc=_doc, needle="std 0.0000",
+            artifacts=(CEILING_V25,), value=_std(_arm), stated=0.0,
+            places=4))
 
 # ── the replicated Arm-1 vs baseline table ───────────────────────────────
 for _arm, _needle, _a_mean, _b_mean in [
@@ -145,14 +154,43 @@ for _arm, _needle, _a_mean, _b_mean in [
 # cell read "~60" against an artifact saying 124.1 for ten days, and the two
 # percentages derived from it ("under 4%", "~60% of the context") were wrong
 # in the README and on this page. A column nobody pins is a column that drifts.
-for _arm, _needle, _tokens in [
-    ("rag", "| naive RAG (top-6 turns) | 0.567 ± 0.017 | 1638 |", 1638),
-    ("cortex", "| cortex facts only | 0.559 ± 0.029 | **~124** |", 124),
+# 2026-07-30: repointed at ceiling-v25 with the promotion, and now pinned in
+# the README too — its hybrid cell had drifted to "~1000" against an artifact
+# saying 1043.3, because only the guide copy was guarded.
+for _doc, _slug in ((READ_ME, "readme"), (BENCH, "guide")):
+    for _arm, _needle, _tokens in [
+        ("rag", "| naive RAG (top-6 turns) | 0.628 | 1638 |", 1638),
+        ("cortex", "| cortex facts only | 0.590 | **~182** |", 182),
+        ("hybrid",
+         "| **hybrid (facts + top-3 turns)** | **0.731** | ~1102 |", 1102),
+    ]:
+        CLAIMS.append(Claim(
+            id=f"ceiling-tokens-{_slug}-{_arm}", doc=_doc, needle=_needle,
+            artifacts=(CEILING_V25_SUMMARY,),
+            value=(lambda a: lambda d: d["arms"][a]["context_tokens"])(_arm),
+            stated=_tokens, places=0))
+
+# ── the superseded v2 / TurboQuant table, retained in the guide ──────────
+# House rule: retire numbers at the old site, don't delete them. The
+# historical block under the promoted table keeps the v2 figures a reader
+# will still meet, pinned to the same artifacts as when they were current.
+for _arm, _needle, _mean_v, _std_v, _tokens in [
+    ("rag", "| naive RAG (top-6 turns) | 0.567 ± 0.017 | 1638 |",
+     0.567, 0.017, 1638),
+    ("cortex", "| cortex facts only | 0.559 ± 0.029 | **~124** |",
+     0.559, 0.029, 124),
     ("hybrid",
-     "| **hybrid (facts + top-3 turns)** | **0.710 ± 0.019** | ~1043 |", 1043),
+     "| **hybrid (facts + top-3 turns)** | **0.710 ± 0.019** | ~1043 |",
+     0.710, 0.019, 1043),
 ]:
     CLAIMS.append(Claim(
-        id=f"ceiling-tokens-{_arm}", doc=BENCH, needle=_needle,
+        id=f"ceiling-hist-{_arm}-mean", doc=BENCH, needle=_needle,
+        artifacts=(CEILING,), value=_mean(_arm), stated=_mean_v, places=3))
+    CLAIMS.append(Claim(
+        id=f"ceiling-hist-{_arm}-std", doc=BENCH, needle=_needle,
+        artifacts=(CEILING,), value=_std(_arm), stated=_std_v, places=3))
+    CLAIMS.append(Claim(
+        id=f"ceiling-hist-tokens-{_arm}", doc=BENCH, needle=_needle,
         artifacts=(CEILING_SUMMARY,),
         value=(lambda a: lambda d: d["arms"][a]["context_tokens"])(_arm),
         stated=_tokens, places=0))
@@ -199,7 +237,6 @@ for _arm_key, _needle, _r10 in [
 # copies the rag context verbatim: identical input, so its movement is the
 # serving stack and nothing else. Pinned because it is the number that says
 # every other number on the page is stack-relative.
-CEILING_V25 = RESULTS + "longmemeval-ku-oracle-qwen-27b-ceiling-v25.agg.json"
 for _arm, _needle, _v25 in [
     ("rag", "| naive RAG (**control**) | 0.6282 | 0.5667 ± 0.0167 | **+0.0615** |",
      0.6282),

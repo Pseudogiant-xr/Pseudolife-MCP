@@ -83,8 +83,8 @@ def test_write_config_rejects_bad_input(svc, patch):
 
 
 def test_write_config_bool_coercion(svc):
-    config_io.write_config(svc, {"memory.show_superseded": "true"})
-    assert svc.config.memory.show_superseded is True
+    config_io.write_config(svc, {"memory.hide_superseded": "true"})
+    assert svc.config.memory.hide_superseded is True
 
 
 def test_write_config_extractor_panel_roundtrip(svc):

@@ -132,6 +132,27 @@ sweep recommends `guard_min_score = 0.65` + `search_confidence_floor = 0.70`
 for an abstention-on deployment (doubles abstention recall at zero
 false-abstain).
 
+## Superseded entries
+
+An entry the contradiction pipeline marked superseded is **still
+retrieved**, with its score multiplied by `0.55`. Current values therefore
+outrank their own history without the history disappearing, which is what
+lets an answer read "you used to have X, then you changed it to Y".
+
+```yaml
+memory:
+  hide_superseded: true   # restore the pre-v0.7.3 hard filter
+```
+
+The filter is opt-in for a reason: hard-dropping superseded entries once
+made a category query miss the only entry that named the category (the
+entry had been superseded on an unrelated detail), and superseded rows
+carry knowledge-update recall on LongMemEval. Use it for debugging and
+audit, not as a deployment default. When on, it applies to both pools —
+including BM25-only injections, which otherwise bypass the dense pool's
+filters. `explain=True` reports dropped entries with
+`drop_reason: "superseded"`.
+
 ## Debugging a retrieval miss
 
 ```

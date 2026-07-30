@@ -588,10 +588,8 @@ class ContinuumMemorySystem:
         # their historical equivalents so abstention questions about
         # current state don't get drowned in old context.
         #
-        # Set ``config.hide_superseded = True`` to restore the v0.7.2
-        # filter behaviour. The opposite-named config field
-        # ``show_superseded`` (legacy v0.6 name, default False) is
-        # honoured as a no-op for backwards-compatible config files.
+        # Set ``memory.hide_superseded = True`` to restore the v0.7.2
+        # filter behaviour.
         SUPERSEDED_SCORE_MULT = 0.55
 
         def _source_mult(entry: MemoryEntry) -> float:
@@ -601,13 +599,14 @@ class ContinuumMemorySystem:
         ref_k = getattr(self.config, "ref_top_k", 3)
 
         # v0.7.3: superseded entries are included in retrieval by
-        # default. Set ``config.hide_superseded = True`` to restore
-        # the v0.7.2-and-earlier filter behaviour. The legacy
-        # ``show_superseded`` config field (default False) is
-        # deliberately ignored — its semantics were the cause of the
-        # cat-Jacque category-query failure, where the only entry
-        # mentioning the category word was hard-filtered after a
-        # later supersession event.
+        # default. ``memory.hide_superseded`` (config field + console
+        # knob, default False) restores the v0.7.2-and-earlier filter.
+        # Hiding is the behaviour that caused the cat-Jacque
+        # category-query failure, where the only entry mentioning the
+        # category word was hard-filtered after a later supersession
+        # event — so it is opt-in, for debugging and audit.
+        # ``getattr`` (not an attribute read) because library callers
+        # and eval harnesses pass config objects predating the field.
         hide_superseded = bool(getattr(self.config, "hide_superseded", False))
 
         def _keep(entry: MemoryEntry) -> bool:
