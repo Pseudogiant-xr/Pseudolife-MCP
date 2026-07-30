@@ -48,6 +48,11 @@ E2E = RESULTS + "longmemeval-ku-oracle-qwen-27b-ceiling-e2e.agg.json"
 E2E_SUMMARY = (
     RESULTS + "longmemeval-ku-oracle-qwen-27b-ceiling-e2e.summary.json")
 CASC_CONF = RESULTS + "casc-q8-confirmation.json"
+BM25_AB = RESULTS + "bm25-ab-confirmation.json"
+BM25_GATE = (RESULTS +
+             "regression_gate-2026-07-30-cortex-bm25-enabled.agg.json")
+V25_VERIFY = (RESULTS +
+              "regression_gate-2026-07-29-v25-backbone-verify.agg.json")
 
 
 def _arm1_cmp(arm: str) -> str:
@@ -515,6 +520,32 @@ CLAIMS.append(Claim(
     artifacts=(QWEN_VS_BGE,),
     value=_mcnemar_p("Qwen3-Embedding-0.6B (instructed)", 10),
     stated=0.004, places=3))
+
+
+# ── the cortex-BM25 opt-in decision (2026-07-30) ─────────────────────────
+# The channel ships OFF because a pre-registered A/B measured no benefit;
+# the CHANGELOG states the flat numbers and the gate cost, so both sides
+# are pinned. The "before" gate cortex value comes from the committed
+# 2026-07-29 v25-verify promotion (same slice, channel absent); the
+# "after" from a promoted copy of the gate run with the channel enabled
+# (the live gate namespace is gitignored and cleared per run).
+for _cid, _artifact, _needle, _val, _stated in [
+    ("bm25-ab-cortex-off", BM25_AB, "0.1795 both",
+     lambda d: d["off"]["cortex"], 0.1795),
+    ("bm25-ab-cortex-on", BM25_AB, "0.1795 both",
+     lambda d: d["on"]["cortex"], 0.1795),
+    ("bm25-ab-cascade-off", BM25_AB, "0.4231 both",
+     lambda d: d["off"]["cascade"], 0.4231),
+    ("bm25-ab-cascade-on", BM25_AB, "0.4231 both",
+     lambda d: d["on"]["cascade"], 0.4231),
+    ("bm25-gate-cortex-before", V25_VERIFY, "0.6923 → 0.6795",
+     _mean("cortex"), 0.6923),
+    ("bm25-gate-cortex-after", BM25_GATE, "0.6923 → 0.6795",
+     _mean("cortex"), 0.6795),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(_artifact,),
+        value=_val, stated=_stated, places=4))
 
 
 def test_every_published_number_names_a_committed_artifact():

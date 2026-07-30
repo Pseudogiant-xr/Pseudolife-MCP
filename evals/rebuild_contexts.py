@@ -39,7 +39,18 @@ from longmemeval_bench import (  # noqa: E402
 _HYBRID_SPLIT = "\n\nRelevant memories:\n"
 
 
-def rebuild_fact_lines(bank: dict, emb, top_k: int, min_score: float) -> list[str]:
+def rebuild_fact_lines(bank: dict, emb, top_k: int, min_score: float,
+                       bm25: bool = False) -> list[str]:
+    """Rank a dumped fact bank the way ``service.cortex_search`` would.
+
+    Kept in lockstep with the service fusion by
+    ``tests/test_cortex_bm25.py::test_rebuild_fact_ranking_matches_service_fusion``
+    — the 2026-07-30 gate run passed the cortex-BM25 channel without
+    executing it because this function had its own dense-only ranking.
+    ``bm25=False`` mirrors the shipped ``BM25Config.cortex_enabled``
+    default (the 2026-07-30 A/B measured no end-to-end benefit); lexical
+    hits gate on the normalised ``bm25.min_score``, not the dense floor.
+    """
     facts = bank["facts"]
     if not facts:
         return []
@@ -50,6 +61,24 @@ def rebuild_fact_lines(bank: dict, emb, top_k: int, min_score: float) -> list[st
     sims = (mat @ q).tolist()
     ranked = sorted((i for i, s in enumerate(sims) if s >= min_score),
                     key=lambda i: sims[i], reverse=True)[:top_k]
+    if bm25:
+        from types import SimpleNamespace
+
+        from pseudolife_memory.memory.bm25 import (BM25Index,
+                                                   normalize_scores)
+        from pseudolife_memory.utils.config import BM25Config
+        cfg = BM25Config()
+        idx = BM25Index([SimpleNamespace(text=t, i=i)
+                         for i, t in enumerate(texts)],
+                        k1=cfg.k1, b=cfg.b)
+        norm = normalize_scores(idx.score(bank["question"], top_k=cfg.top_n))
+        lex = {d.i: s for d, s in norm if s >= cfg.min_score}
+        fused = [(i, sims[i] + cfg.weight * lex.get(i, 0.0)) for i in ranked]
+        seen = set(ranked)
+        fused += [(i, cfg.weight * s) for i, s in lex.items()
+                  if i not in seen]
+        fused.sort(key=lambda t: t[1], reverse=True)
+        ranked = [i for i, _ in fused[:top_k]]
     lines = []
     for i in ranked:
         f = facts[i]
@@ -73,6 +102,9 @@ def main() -> int:
                     help="tag for the rebuilt JSONL")
     ap.add_argument("--top-k", type=int, default=CORTEX_TOP_K)
     ap.add_argument("--min-score", type=float, default=CORTEX_MIN_SCORE)
+    ap.add_argument("--bm25", action="store_true",
+                    help="opt into BM25 fact fusion (shipped default is "
+                         "dense-only, matching bm25.cortex_enabled=False)")
     args = ap.parse_args()
 
     src = out_file(args.dataset, args.extractor, args.src_tag)
@@ -91,7 +123,9 @@ def main() -> int:
         bank_path = banks / f"{row['question_id']}.json.gz"
         with gzip.open(bank_path, "rt", encoding="utf-8") as fh:
             bank = json.load(fh)
-        fact_lines = rebuild_fact_lines(bank, emb, args.top_k, args.min_score)
+        fact_lines = rebuild_fact_lines(bank, emb, args.top_k,
+                                        args.min_score,
+                                        bm25=args.bm25)
         raw_block = row["contexts"]["hybrid"].split(_HYBRID_SPLIT, 1)[-1]
         row["contexts"]["cortex"] = "\n".join(fact_lines)
         row["contexts"]["hybrid"] = ("Known facts:\n" + "\n".join(fact_lines)
