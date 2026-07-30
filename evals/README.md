@@ -340,7 +340,10 @@ is exact and needs no re-extraction (and no GPU).
 > **SUPERSEDED — the headline oracle hybrid 0.705 in this table is retired,
 > twice over.** (1) It is **unreplicable**: the run predates per-question
 > context persistence, so its bank cannot be rebuilt. Its replicable sibling
-> `ceiling-v2` puts the qwen-27b class at hybrid **0.710 ± 0.019** — read
+> `ceiling-v2` puts the qwen-27b class at hybrid **0.710 ± 0.019** on the
+> same TurboQuant stack (itself re-based 2026-07-29 on the reproducible
+> server to 0.7308 — `ceiling-v25`, the figure the front-door tables now
+> publish) — read
 > 0.705 as that band's edge, not as a measurement (see the 2026-07-19
 > addendum). (2) Every number in this table was measured on the
 > **nondeterministic TurboQuant server**, whose fused `tbq4_0` KV flips ~7% of
@@ -605,7 +608,14 @@ test over the 78 questions:
   replication (0.367 ± 0.015). The tight low cortex band (0.195 ± 0.011)
   is the starvation signature — the known `_s` weak spot.
 - Cross-model: the shipped E4B v2 fine-tune's hybrid (0.762 ± 0.027)
-  beats the 27B ceiling's (0.710 ± 0.019) on this subset.
+  beats the 27B ceiling's (0.710 ± 0.019) on this subset — a same-stack
+  (TurboQuant) comparison, valid only within that stack.
+- **2026-07-30:** the ceiling-v2 row above is superseded as a published
+  number — `ceiling-v25` re-judged the same contexts on the reproducible
+  q8_0 server (rag 0.6282 / cortex 0.5897 / hybrid 0.7308; 3
+  byte-identical replicates, std 0.0000) and is what the README and guide
+  tables now show. The v2 figures remain the same-stack baseline for
+  everything else measured on the TurboQuant fork.
 
 ---
 
