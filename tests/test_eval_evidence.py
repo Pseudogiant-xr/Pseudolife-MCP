@@ -44,6 +44,10 @@ CEILING_V25 = RESULTS + "longmemeval-ku-oracle-qwen-27b-ceiling-v25.agg.json"
 CEILING_V25_SUMMARY = (
     RESULTS + "longmemeval-ku-oracle-qwen-27b-ceiling-v25.summary.json")
 SHOOTOUT = RESULTS + "embedder-recall-shootout-20260727.json"
+E2E = RESULTS + "longmemeval-ku-oracle-qwen-27b-ceiling-e2e.agg.json"
+E2E_SUMMARY = (
+    RESULTS + "longmemeval-ku-oracle-qwen-27b-ceiling-e2e.summary.json")
+CASC_CONF = RESULTS + "casc-q8-confirmation.json"
 
 
 def _arm1_cmp(arm: str) -> str:
@@ -121,7 +125,10 @@ _CEILING_ROWS = [
 
 CLAIMS: list[Claim] = []
 
-for _doc, _slug in ((READ_ME, "readme"), (BENCH, "guide")):
+# 2026-07-30: the README's copy of this table was replaced by the
+# end-to-end table (rows below) — the guide keeps the held-fixed rebuild,
+# so these rows are guide-only now.
+for _doc, _slug in ((BENCH, "guide"),):
     for _arm, _needle, _mean_v in _CEILING_ROWS:
         CLAIMS.append(Claim(
             id=f"ceiling-{_slug}-{_arm}-mean", doc=_doc, needle=_needle,
@@ -131,6 +138,53 @@ for _doc, _slug in ((READ_ME, "readme"), (BENCH, "guide")):
             id=f"ceiling-{_slug}-{_arm}-std", doc=_doc, needle="std 0.0000",
             artifacts=(CEILING_V25,), value=_std(_arm), stated=0.0,
             places=4))
+
+# ── the end-to-end run on the current stack + the commit-gated cascade ───
+# Added 2026-07-30. Fresh qwen-27b extraction under the v25 backbone with
+# BM25-on turn retrieval, reproducible q8_0 serving (3 byte-identical
+# replicates). Not comparable per-arm to ceiling-v25 above, which holds
+# extraction and turn selection at the 2026-07-19 configuration. The
+# cascade arm is DERIVED (replicate.cascade_correct) from the judged
+# rag/cortex arms — same artifacts, no fourth answered arm.
+_E2E_ROWS = [
+    ("rag", "| naive RAG (top-6 turns) | 0.859 | ~1237 |", 0.859, 1237),
+    ("cortex", "| cortex facts only | 0.667 | **~259** |", 0.667, 259),
+    ("hybrid", "| hybrid (facts + top-3 turns) | 0.833 | ~920 |",
+     0.833, 920),
+    ("cascade", "| **commit-gated cascade** | **0.936** | ~702 |",
+     0.936, 702),
+]
+for _doc, _slug in ((READ_ME, "readme"), (BENCH, "guide")):
+    for _arm, _needle, _mean_v, _tokens in _E2E_ROWS:
+        CLAIMS.append(Claim(
+            id=f"e2e-{_slug}-{_arm}-mean", doc=_doc, needle=_needle,
+            artifacts=(E2E,), value=_mean(_arm), stated=_mean_v, places=3))
+        CLAIMS.append(Claim(
+            id=f"e2e-tokens-{_slug}-{_arm}", doc=_doc, needle=_needle,
+            artifacts=(E2E_SUMMARY,),
+            value=(lambda a: lambda d: d["arms"][a]["context_tokens"])(_arm),
+            stated=_tokens, places=0))
+
+# ── the cascade's full-haystack confirmation (pre-registered) ────────────
+# The oracle table above is the friendly slice; this pins the _s-haystack
+# run that makes the cascade-beats-RAG claim decision-grade. The p-value
+# has its own artifact per the house rule; commit precision is pinned
+# because the cascade's mechanism claim rests on it.
+for _cid, _needle, _val, _stated in [
+    ("casc-s-cascade-mean", "0.462 vs 0.346",
+     lambda d: d["arm_means"]["cascade"], 0.462),
+    ("casc-s-rag-mean", "0.462 vs 0.346",
+     lambda d: d["arm_means"]["rag"], 0.346),
+    ("casc-s-delta", "+0.115",
+     lambda d: d["paired_permutation"]["cascade_vs_rag"]["delta"], 0.115),
+    ("casc-s-p", "p = 0.011",
+     lambda d: d["paired_permutation"]["cascade_vs_rag"]["p_value"], 0.011),
+    ("casc-s-precision", "commit precision 0.714",
+     lambda d: d["commit_precision"], 0.714),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=BENCH, needle=_needle, artifacts=(CASC_CONF,),
+        value=_val, stated=_stated, places=3))
 
 # ── the replicated Arm-1 vs baseline table ───────────────────────────────
 for _arm, _needle, _a_mean, _b_mean in [
@@ -154,10 +208,12 @@ for _arm, _needle, _a_mean, _b_mean in [
 # cell read "~60" against an artifact saying 124.1 for ten days, and the two
 # percentages derived from it ("under 4%", "~60% of the context") were wrong
 # in the README and on this page. A column nobody pins is a column that drifts.
-# 2026-07-30: repointed at ceiling-v25 with the promotion, and now pinned in
+# 2026-07-30: repointed at ceiling-v25 with the promotion, and pinned in
 # the README too — its hybrid cell had drifted to "~1000" against an artifact
-# saying 1043.3, because only the guide copy was guarded.
-for _doc, _slug in ((READ_ME, "readme"), (BENCH, "guide")):
+# saying 1043.3, because only the guide copy was guarded. Later that day the
+# README's copy of the table was replaced by the end-to-end table (its own
+# rows above), so these are guide-only again.
+for _doc, _slug in ((BENCH, "guide"),):
     for _arm, _needle, _tokens in [
         ("rag", "| naive RAG (top-6 turns) | 0.628 | 1638 |", 1638),
         ("cortex", "| cortex facts only | 0.590 | **~182** |", 182),

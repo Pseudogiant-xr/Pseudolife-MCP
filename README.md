@@ -519,24 +519,31 @@ privacy/cost trade-offs: [Dreaming](docs/guide/dreaming.md).
 
 ## Benchmarks
 
-On the knowledge-update subset of
-[LongMemEval](https://arxiv.org/abs/2410.10813) (oracle variant,
-local-ceiling extractor; 3 replicates on the reproducible serving stack,
-byte-identical — std 0.0000), the consolidated-facts posture beats naive
-RAG by ~10 points while reading ~67% of the context:
+Measured **end to end on the current shipped stack** — fresh local-ceiling
+extraction under the v25 embedding backbone, BM25-on turn retrieval,
+reproducible serving (3 byte-identical replicates — std 0.0000) — on the
+knowledge-update subset of
+[LongMemEval](https://arxiv.org/abs/2410.10813) (oracle variant):
 
 | arm | accuracy | context tokens/question |
 |-----|----------|------------------------|
-| naive RAG (top-6 turns) | 0.628 | 1638 |
-| cortex facts only | 0.590 | **~182** |
-| **hybrid (facts + top-3 turns)** | **0.731** | ~1102 |
+| naive RAG (top-6 turns) | 0.859 | ~1237 |
+| cortex facts only | 0.667 | **~259** |
+| hybrid (facts + top-3 turns) | 0.833 | ~920 |
+| **commit-gated cascade** | **0.936** | ~702 |
 
-The fact spine alone trails RAG by only ~4 points on **~11% of its token
-budget** — and the shipped E4B fine-tune's replicated hybrid
-(0.762 ± 0.027) beat this ceiling in their one same-stack comparison
-(both measured on the since-retired TurboQuant server, where the ceiling
-read 0.710 ± 0.019). Setup, caveats, and the evidence that extraction quality is the dominant
-factor: [Benchmarks](docs/guide/benchmarks.md); full methodology:
+The **cascade** is a serving policy, not a fourth pipeline: answer from
+the consolidated facts when that channel *commits*, fall back to raw-turn
+RAG when it abstains. It beats naive RAG by ~8 points while reading ~57%
+of the context, and the margin survives the full ~50-session haystacks —
+0.462 vs 0.346, a pre-registered paired test at p = 0.011
+([details](docs/guide/benchmarks.md)). Read honestly: with the v25
+retriever, raw-turn selection improved enough that the *concatenation*
+hybrid no longer beats naive RAG on this slice — sequencing the channels
+is what restores the fact spine's edge. The fact spine alone reaches
+0.667 on ~21% of RAG's token budget. Setup, caveats, and the evidence
+that extraction quality is the dominant factor:
+[Benchmarks](docs/guide/benchmarks.md); full methodology:
 [`evals/README.md`](evals/README.md).
 
 Retrieval itself was re-measured on the same corpus before the v25 backbone

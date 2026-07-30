@@ -1,0 +1,52 @@
+{
+  "n_replicates": 3,
+  "replicates": [
+    "ceiling-e2e",
+    "ceiling-e2e-r2",
+    "ceiling-e2e-r3"
+  ],
+  "n_questions": 78,
+  "arms": {
+    "rag": {
+      "accuracies": [
+        0.859,
+        0.859,
+        0.859
+      ],
+      "mean": 0.859,
+      "std": 0.0
+    },
+    "cortex": {
+      "accuracies": [
+        0.6667,
+        0.6667,
+        0.6667
+      ],
+      "mean": 0.6667,
+      "std": 0.0
+    },
+    "hybrid": {
+      "accuracies": [
+        0.8333,
+        0.8333,
+        0.8333
+      ],
+      "mean": 0.8333,
+      "std": 0.0
+    },
+    "cascade": {
+      "accuracies": [
+        0.9359,
+        0.9359,
+        0.9359
+      ],
+      "mean": 0.9358999999999998,
+      "std": 0.0
+    }
+  },
+  "source_files": [
+    "longmemeval-ku-oracle-qwen-27b-ceiling-e2e.jsonl",
+    "longmemeval-ku-oracle-qwen-27b-ceiling-e2e-r2.jsonl",
+    "longmemeval-ku-oracle-qwen-27b-ceiling-e2e-r3.jsonl"
+  ]
+}
