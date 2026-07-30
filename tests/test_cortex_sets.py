@@ -113,9 +113,13 @@ def test_member_cap_drops_beyond_100(store, emb):
     assert r.action == "member_capped"
     assert len(store.members("user", "tags")) == 100
     # Item 6: the capped result carries the OFFENDING value, not an unrelated
-    # existing member, and is not itself a persisted record.
+    # existing member, and is not itself a persisted record. Identity check
+    # (`is not`), not `==` — CortexRecord's dataclass __eq__ would walk into
+    # comparing embedding tensors if enough of the leading fields happened to
+    # match, and `tensor == tensor` on a multi-element tensor raises
+    # (ambiguous truth value), not returns False.
     assert r.record.value == "tag-overflow"
-    assert r.record not in store.records
+    assert all(r.record is not x for x in store.records)
     # A rejected add must not schedule a slot rewrite — nothing changed.
     assert ("user", "tags") not in store.dirty_slots
 
@@ -168,15 +172,17 @@ def test_add_member_never_contests(store, emb):
 # --- Fix wave (coordinator review) -----------------------------------------
 
 def test_scalar_to_member_conversion_preserves_polarity(store, emb):
-    """Item 1: the scalar->member conversion built a bare ``Slot(...)`` with
-    no polarity, so a negated fact ("no longer have a road bike") silently
-    re-minted as an affirmative member. The converted member must carry the
-    original scalar's polarity."""
+    """Item 1 (bug) + item 8 (docstring pin): the scalar->member conversion
+    built a bare ``Slot(...)`` with no polarity, so a negated fact ("no
+    longer have a road bike") silently re-minted as an affirmative member —
+    fixed to carry the original scalar's polarity through. Also pins that
+    polarity is preserved verbatim (never interpreted) on a PLAIN negated
+    add_member, not just on the converted one."""
     store.write_fact(Slot("user", "bikes owned", "road bike", "-"), emb("road bike"))
-    store.add_member(Slot("user", "bikes owned", "gravel bike"), emb("gravel bike"))
-    converted = next(m for m in store.members("user", "bikes owned")
-                     if m.value == "road bike")
-    assert converted.polarity == "-"
+    store.add_member(Slot("user", "bikes owned", "gravel bike", "-"), emb("gravel bike"))
+    members = {m.value: m for m in store.members("user", "bikes owned")}
+    assert members["road bike"].polarity == "-"     # converted scalar
+    assert members["gravel bike"].polarity == "-"    # plain negated add_member
 
 
 def test_write_fact_rejects_scalar_write_on_set_slot(store, emb):
@@ -233,6 +239,12 @@ def test_dedup_siblings_rebuild_preserves_member_index(store, emb):
     members = store.members("user", "bikes owned")
     assert [m.value for m in members] == ["road bike"]
     assert members[0].status == "current"
+    # If the post-apply rebuild regressed to only handling scalars (e.g.
+    # dropped the kind-aware split and routed the member row into
+    # self._current instead of self._members), the member would wrongly
+    # become lookup()-able as a scalar. This is the assertion that actually
+    # goes red on that regression — the checks above alone cannot catch it.
+    assert store.lookup("user", "bikes owned") is None
 
 
 def test_reindex_current_keeps_members_demotes_duplicate_scalars(store):
@@ -267,6 +279,27 @@ def test_reindex_current_keeps_members_demotes_duplicate_scalars(store):
     assert len(current_scalars) == 1
     assert current_scalars[0].value == "workstation"   # most-recently-confirmed kept
     assert [r.status for r in scalars].count("superseded") == 1
+
+
+def test_all_removed_set_slot_reverts_to_scalar(store, emb):
+    """Controller ruling (re-review item 1): a set slot with zero current
+    members (all removed) reverts to scalar life. add_member -> remove_member
+    leaves the slot with no current members, so write_fact's guard (which
+    checks only CURRENT members) permits a fresh scalar write there;
+    slot_kind() then reports "scalar" (self._current wins, checked first);
+    lookup() returns the new scalar; members() is empty; the removed member
+    row survives only as audit (include_removed=True)."""
+    store.add_member(Slot("user", "bikes owned", "road bike"), emb("road bike"))
+    store.remove_member("user", "bikes owned", "road bike")
+
+    r = store.write_fact(Slot("user", "bikes owned", "hybrid bike"), emb("hybrid bike"))
+    assert r.action == "inserted"
+
+    assert store.slot_kind("user", "bikes owned") == "scalar"
+    assert store.lookup("user", "bikes owned").value == "hybrid bike"
+    assert store.members("user", "bikes owned") == []
+    audit = store.members("user", "bikes owned", include_removed=True)
+    assert [m.value for m in audit] == ["road bike"]
 
 
 def test_member_visible_in_current_records_and_search(store, emb):

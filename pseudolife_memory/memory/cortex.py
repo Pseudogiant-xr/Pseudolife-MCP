@@ -631,18 +631,28 @@ class CortexStore:
         return [self.records[i] for i in self._members.get(key, [])]
 
     def slot_kind(self, entity: str, attribute: str) -> str | None:
-        """``"set"`` if the slot has (or ever had) member rows, ``"scalar"``
-        if it holds a current scalar record, else ``None``. A slot that once
-        held members and now has zero live ones still reads ``"set"`` — the
-        scalar->member conversion is one-way, so an all-removed set slot must
-        not silently read as available for a scalar write."""
+        """``"scalar"`` if the slot holds a current scalar record,
+        ``"set"`` if it has current members (or historical member rows and
+        no current scalar), else ``None``.
+
+        Conversion is one-way *while members are current*: once ALL members
+        at a slot are removed, the slot reverts to scalar life —
+        :meth:`write_fact` may write a fresh scalar there (its guard checks
+        for CURRENT members only), and once it does, ``_current`` wins the
+        check here and this reports ``"scalar"`` again. The removed member
+        rows are never deleted; they remain as audit
+        (``members(..., include_removed=True)``), just no longer reflected
+        in ``slot_kind``. Consult ``_current`` FIRST so a slot's most recent
+        write always wins the answer, rather than a stale historical
+        member row perpetually pinning it to ``"set"``.
+        """
         key = (_norm_key(entity), _norm_key(attribute))
+        if key in self._current:
+            return "scalar"
         if self._members.get(key) or any(
             r.key == key and r.kind == "member" for r in self.records
         ):
             return "set"
-        if key in self._current:
-            return "scalar"
         return None
 
     # ------------------------------------------------------------------
