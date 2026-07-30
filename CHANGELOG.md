@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-30 — the eval harness reports the commit-gated cascade)
+- **`cascade` derived metric across the LongMemEval tooling.** Every judged
+  run already answers the `cortex` and `rag` arms, and per-question analysis
+  of the `ceiling-e2e` artifacts showed the cortex arm's *commitment* (not
+  abstaining) is a strong correctness signal — commit precision 46/46 on the
+  oracle slice, 0.76±0.05 on the `_s` haystacks. The commit-gated cascade
+  (serve the cortex answer when it commits, fall back to rag on "I don't
+  know") beat both naive RAG and the concatenation hybrid in all 8 existing
+  runs examined (oracle: 0.936 vs 0.859/0.833; `_s`: 0.428±0.023 vs
+  0.321/0.367), so the harness now derives it everywhere: bench `--report`
+  summaries, `replicate.py agg`, and `replicate.py compare --arm cascade`.
+  Pure post-processing — no new answer calls, nothing persisted per-row, old
+  JSONLs report it retroactively. The derivation lives in `replicate.py`
+  (import-light) and the bench imports it; covered by
+  `tests/test_eval_replicate.py`.
+
 ### Fixed (2026-07-30 — a console switch that changed nothing, and the escape hatch it hid)
 
 - **`memory.show_superseded` retired; the real gate is now reachable as

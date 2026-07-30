@@ -282,6 +282,17 @@ Three arms answer every question from the same ingested memory:
 | `cortex` | top-24 canonical facts at `min_score` 0.2 (`CORTEX_TOP_K` / `CORTEX_MIN_SCORE`), each with its supersession chain (`svc.history`) appended | the fact spine alone |
 | `hybrid` | facts + top-3 raw turns | the product posture |
 
+A fourth line, `cascade`, is **derived** from the judged `cortex` and `rag`
+arms (no extra answer calls, never persisted per-row): the cortex answer is
+served when that arm commits, with fallback to the rag answer when it says
+"I don't know". Summaries (`--report`), `replicate.py agg`, and
+`replicate.py compare --arm cascade` all report it, including retroactively
+on old JSONLs. Motivation: on the 2026-07-30 `ceiling-e2e` run the cortex
+arm's commit precision was 46/46, making the commit signal a strong router —
+cascade 0.936 vs rag 0.859 at ~57% of the tokens (out-of-sample check on the
+five `_s` Phase-A replicates: cascade 0.428±0.023 vs hybrid 0.367±0.015 vs
+rag 0.321±0.027, commit precision 0.76±0.05).
+
 Model roles are split so extraction quality is the **only** variable:
 
 - **Extractor** (varies): `gemma-e2b` (the smallest ladder-verified sidecar
