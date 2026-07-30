@@ -24,10 +24,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `evals/prompts/sonnet_extractor_v1.md` / `v2.md` mirrors) gained a short
   "collection membership" instruction block with one add and one remove
   example, phrased to keep `op` off plain value updates (a new job, a moved
-  city stay scalar supersedes). Covered by four new cases in `tests/test_dream.py`
-  (op-add lands a member, op-remove removes one, a no-op claim on a
-  member-holding slot is dropped with the store unchanged, a malformed op
-  falls back to scalar with a warning).
+  city stay scalar supersedes). `svc.set_add` gained an optional
+  `confidence: float = 0.7` keyword (forwarded to `add_member`, which
+  already accepted it) so the dream `op:"add"` path threads a claim's
+  confidence through exactly like its scalar sibling instead of silently
+  discarding it. Fixed a review-caught bug (pre-fix, never deployed): the
+  per-slot `has_trace` "already formed this slot" guard is keyed by
+  `(slot, source entry)` with no member value, so it must gate scalar claims
+  ONLY — applied unconditionally, a SECOND `op:"add"` for the same slot from
+  the same source entry (two collection items named in one note) read as
+  "already formed" and was silently dropped after the first member landed.
+  A `member_invalid`/`member_capped` result now `continue`s before the
+  trace-write + reinforcement-bump block (nothing was actually stored, so
+  nothing should be traced — combined with the guard above, tracing a
+  never-stored member could also mask a later legitimate add). A dropped
+  scalar-on-set-slot claim now also increments `tally["dropped_set_slot"]`
+  so `dream_run`'s result surfaces the count, not just the log line. Covered
+  by seven cases in `tests/test_dream.py` (op-add lands a member, op-remove
+  removes one, a no-op claim on a member-holding slot is dropped with the
+  store unchanged and `dropped_set_slot` incremented, a malformed op falls
+  back to scalar with a warning, two `op:"add"` claims sharing one source
+  entry both land, `op:"add"` confidence reaches the stored member, and a
+  `member_invalid` result skips the trace write).
 
 ### Changed (2026-07-31 — set-valued slots surface as one entry per slot, not one per member)
 - **`cortex_search` groups a set-valued slot's current members into a single

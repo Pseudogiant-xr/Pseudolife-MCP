@@ -1566,6 +1566,7 @@ class MemoryService:
         member: str,
         provenance: list[str] | None = None,
         origin: str | None = None,
+        confidence: float = 0.7,
     ) -> dict[str, Any]:
         """Add (or confirm) a member of the set-valued ``(entity, attribute)``
         slot. A scalar already occupying the slot converts to a set one-way
@@ -1589,6 +1590,7 @@ class MemoryService:
             res = self._cortex.add_member(
                 Slot(entity, attribute, member),
                 emb,
+                confidence=confidence,
                 provenance=provenance or (),
                 support=origin,
                 hlc=self._hlc.tick(),
@@ -3096,7 +3098,16 @@ class MemoryService:
                 ent_norm = _norm_key(ent)
                 if ent_norm not in known_entities and ent_norm not in new_entities:
                     new_entities[ent_norm] = ent
-                if (traces_cfg.enabled and src_id is not None
+                # The has_trace guard is keyed by (slot, source entry) only —
+                # it has no member value to key on, so it must never gate a
+                # member op: a second op:"add" for the SAME slot from the
+                # SAME source entry (e.g. two collection items in one note)
+                # would otherwise read as "already formed this slot" and be
+                # silently dropped after the first member. Member ops are
+                # already idempotent on their own retry (re-add ->
+                # member_confirmed, re-remove -> member_not_found) — that is
+                # the property this guard exists to protect for scalars.
+                if (op is None and traces_cfg.enabled and src_id is not None
                         and self._storage is not None):
                     with self._lock:
                         already = self._storage.has_trace(
@@ -3108,14 +3119,18 @@ class MemoryService:
                         # the confirm path ratchets confidence.
                         continue
                 if op == "add":
-                    res = self.set_add(ent, attr, c["value"],
-                                       origin=c.get("origin", "agent"))
+                    res = self.set_add(
+                        ent, attr, c["value"],
+                        confidence=float(c.get("confidence", 0.55)),
+                        origin=c.get("origin", "agent"))
                     if res["action"] == "member_invalid":
-                        logger.info("dream: member add rejected (invalid "
-                                   "value) for %s.%s", ent, attr)
+                        logger.info(
+                            "dream: member add rejected (invalid value) "
+                            "for %s.%s", ent, attr)
                     elif res["action"] == "member_capped":
-                        logger.warning("dream: member add rejected (cap "
-                                       "reached) for %s.%s", ent, attr)
+                        logger.warning(
+                            "dream: member add rejected (cap reached) "
+                            "for %s.%s", ent, attr)
                 elif op == "remove":
                     res = self.set_remove(ent, attr, c["value"])
                 else:
@@ -3131,12 +3146,20 @@ class MemoryService:
                             # dropped, not routed or crashed — explicit set
                             # ops (op field or memory_set_add/_remove) are the
                             # only way to touch a set slot.
+                            tally["dropped_set_slot"] = tally.get(
+                                "dropped_set_slot", 0) + 1
                             logger.info(
                                 "dropped scalar claim for set slot %s.%s",
                                 ent, attr)
                             continue
                         raise
                 tally[res["action"]] = tally.get(res["action"], 0) + 1
+                if res["action"] in ("member_invalid", "member_capped"):
+                    # Nothing was actually stored — a trace/reinforcement
+                    # bump here would link a source entry to a slot it never
+                    # populated, and (combined with the has_trace guard
+                    # above) could mask a later legitimate write.
+                    continue
                 if (traces_cfg.enabled and src_id is not None
                         and self._storage is not None):
                     # Serialize trace writes on the shared psycopg connection:
