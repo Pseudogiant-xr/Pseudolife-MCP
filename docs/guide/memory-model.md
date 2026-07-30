@@ -108,6 +108,94 @@ slots. Slot extraction is deliberately precision-gated — about 0.6% of
 conversational turns yield one — so this path mostly serves deliberate,
 fact-shaped writes, and its reach grows with extraction quality.
 
+## Set-valued slots (schema v26)
+
+A cortex slot is scalar by default — one *current* value, corrected by
+supersession. Some facts aren't a single current value at all: restaurants
+you've tried, bikes you own, PRs pending review. Forcing a collection through
+the scalar model destroys information — the second `memory_fact_set` call
+supersedes the first, so "tried: Ramen-ya" then "tried: Pho Anh" leaves only
+Pho Anh current. A **set-valued slot** holds many members concurrently
+current instead of one.
+
+- **Use a set** when the fact is naturally plural and members are added and
+  retracted independently of each other — tags, memberships, an inventory,
+  a pending-items list.
+- **Keep scalar supersession** when there is one true value that changes over
+  time (a job title, a deployed version, a phone number) — the existing
+  `memory_fact_set` behaviour, unchanged.
+
+### Lifecycle
+
+`memory_set_add(entity, attribute, member)` adds a member or, if the same
+value (exact match or near-duplicate by embedding) is already current,
+*confirms* it — bumping `last_confirmed` and, if higher, confidence, rather
+than inserting a duplicate. `memory_set_remove(entity, attribute, member)`
+retracts one current member. Neither call touches any other member of the
+slot. As with scalar supersession, nothing is hard-deleted: a removed member's
+row survives with `status: "removed"`, so re-adding the same value later is a
+fresh add, not an undo, and the full history (added, confirmed, removed,
+re-added) stays inspectable via `memory_history` / the store's
+`members(..., include_removed=True)` audit view.
+
+Members are never *contested* — there is no provenance-tier dispute path for
+a set the way there is for a scalar (see [Provenance
+contenders](#provenance-contenders--never-silently-overwrite-a-user-fact)
+below). A second value landing on an already-populated set slot is just a
+second member, not a conflict to resolve. A set slot also caps at 100
+concurrent members; further adds beyond the cap are dropped
+(`"member_capped"`) rather than silently applied or queued.
+
+### Conversion rules
+
+Conversion between scalar and set is deliberately **one-way in both
+directions of the story**:
+
+- **Scalar → set**: the first `memory_set_add` call against a slot that
+  currently holds a scalar value converts it. The scalar row is superseded
+  (kept as audit history, same as any other supersession) and reinserted as
+  the set's first member. From that point, `memory_fact_set` against the
+  same slot raises an actionable error naming `memory_set_add` /
+  `memory_set_remove` instead of the store's own `add_member`/`remove_member`
+  vocabulary — there is no path back to scalar while any member is current.
+- **Set → scalar**: only once *every* member has been removed. With no
+  current record of either kind at the slot, `memory_fact_set`'s own guard
+  (which checks for current members, not history) allows a fresh scalar
+  write there. This is a byproduct of removing the last member, not a
+  dedicated "revert" call — and the removed member rows stay as audit, they
+  just no longer make the slot read as a set.
+
+### Reading a set slot
+
+`memory_fact_get(entity, attribute)` returns the scalar shape
+(`{record, contenders}`) for a scalar slot, but a set-valued slot returns a
+different shape instead: `{kind: "set", entity, attribute, members: [...],
+removed: [...]}`. **`members: []` (every member removed) reads as EMPTY** —
+the same signal a scalar miss gives a caller — not as "found, zero members."
+
+`memory_search` and `cortex_search` surface a set slot's whole current
+membership as **one entry**, not one hit per member: `{"kind": "set",
+"value": "m1; m2 (2 members)", "members": [...], "score": <top member's
+score>, "contested": false, ...}`. The composed value lists whichever members
+individually ranked highest first, then any current member that didn't rank
+on its own — so the full membership is always visible even when the query
+only matched one member by name. A set entry carries `last_confirmed`,
+`asserted_at`, and `age`, all anchored to the most recent add/confirm
+activity across its members — **removing a member never moves these dates**.
+It carries no `freshness_class` at all (it renders as `evergreen`, same as
+any unclassified scalar); age-based decay is a scalar-only affordance in v1.
+
+### Dream extraction
+
+A dream claim may carry `"op": "add" | "remove"` to target set membership
+instead of the scalar supersede path. `op` is for membership changes only —
+a plain value update ("moved to Seattle") is still an ordinary scalar claim
+with no `op`. A scalar claim (no `op`) landing on a slot that already holds
+current members is dropped and logged, not routed or silently applied — the
+only way to touch a set slot is an explicit `op` or the two MCP tools
+themselves. A malformed `op` value degrades to the scalar path with a
+warning rather than failing the dream.
+
 ## Provenance contenders — never silently overwrite a user fact
 
 Every cortex fact carries a provenance tier: **`user` > `action` >

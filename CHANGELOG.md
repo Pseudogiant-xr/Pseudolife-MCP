@@ -74,7 +74,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   anchor — max `tx_time or asserted_at` over current members, the same
   priority `_cortex_record_to_dict` uses for a scalar's `"age"`) so
   `mcp_server.py`'s cortex-first block has real dates to render instead of
-  going blank for every set slot. Fixed a latent crash the new set-entry
+  going blank for every set slot. Accepted v1 scope: a set entry carries no
+  `"freshness_class"` at all (it renders `evergreen` — the class-resolution
+  helpers default an absent class that way, same as any unclassified scalar),
+  and the anchor backing `last_confirmed`/`asserted_at`/`age` only advances on
+  add/confirm activity — `remove_member` stamps `superseded_at` on the
+  removed row but never touches those three fields, so removing a member
+  never moves the slot's displayed dates. Fixed a latent crash the new set-entry
   shape would otherwise have caused: `mcp_server.py`'s `memory_search` cortex-first
   block indexed a fact's `"confidence"` directly, which a grouped set entry
   doesn't carry — now `.get`. Fixed a review-caught bug in
@@ -113,6 +119,65 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   rather than as a found record. Covered by `tests/test_mcp_server.py` and
   the Postgres persistence leg in
   `tests/test_cortex_sets.py::test_set_add_remove_survive_pg_hydration_through_the_service`.
+
+### Added (2026-07-30 — cortex slots can hold a set: member-per-record add/remove lifecycle)
+- **A cortex `(entity, attribute)` slot can now hold either one scalar value
+  (unchanged) or a set of concurrently-current members** —
+  `CortexStore.add_member` / `remove_member` / `members` / `slot_kind`
+  (`pseudolife_memory/memory/cortex.py`), the mechanics the rest of this
+  branch (the MCP tools, the dream `op` field, one-entry-per-slot serving —
+  see the entries above and below) is built on. Reuses the scalar
+  supersession spine rather than a parallel storage model: a member is a
+  `CortexRecord` with `kind="member"` whose `status` cycles `current` ->
+  `removed` exactly like a scalar's `current` -> `superseded`, nothing is
+  ever hard-deleted, and every add/remove is logged to the same
+  `supersession_log` the scalar path writes to.
+  - **Add/confirm, never contest.** Unlike `write_fact`, members have no
+    provenance-tier dispute path — there is no such thing as a "contested"
+    member. A value that dedups (exact normalised match, or cosine >=
+    `MEMBER_DEDUP_COSINE` (0.9) against a current member) confirms the
+    existing member (bumps `last_confirmed` and, if higher, confidence)
+    instead of duplicating; anything else inserts a new current member, up to
+    `MAX_CURRENT_MEMBERS` (100) — beyond the cap, further adds are dropped
+    (`"member_capped"`) rather than queued or silently applied. A value that
+    normalises to empty is rejected outright (`"member_invalid"`): Postgres
+    unique indexes treat NULLs as distinct, so an empty-normalised member row
+    would silently bypass the per-slot uniqueness constraint on persistence.
+  - **Conversion is one-way in both directions of the story.** A scalar
+    already at a slot converts to a set the first time `add_member` targets
+    it — the scalar row is superseded (kept as audit history) and
+    re-inserted as the slot's first member; there is no path back to scalar
+    while any member is current. Once every member has been removed, the
+    slot holds no current record of either kind, so `write_fact`'s own guard
+    (which checks for CURRENT members only) lets a fresh scalar land there —
+    the slot "reverts" to scalar life as a byproduct of removing the last
+    member, not a dedicated revert call, and the removed member rows stay as
+    audit (`members(..., include_removed=True)`), just no longer reflected in
+    `slot_kind`.
+  - **The v19 duplicate-healing pass on daemon start is now scoped to
+    `kind = 'scalar'`** (`pseudolife_memory/storage/schema.py`,
+    `ensure_schema`). The pre-existing healing UPDATE (schema v19) partitions
+    `facts` rows by `(entity_norm, attribute_norm)` and demotes all but the
+    newest `current` row to `superseded`, run unconditionally on every daemon
+    start; without the added `AND kind = 'scalar'` predicate it would
+    partition member rows the same way and silently demote all but the
+    newest member on a slot to `superseded` on every restart.
+    `world_facts`/`lessons` healing and the `facts/contested` pass are
+    untouched — neither has a `kind` column or a member concept. TDD-verified
+    against the pre-fix loop:
+    `tests/test_schema_v26.py::test_ensure_schema_healing_is_kind_aware` seeds
+    two current `kind='member'` rows on one slot alongside a genuine
+    duplicate current `kind='scalar'` pair on another, confirms one member
+    was wrongly demoted pre-fix, and both survive post-fix while the scalar
+    duplicate still heals to exactly one current row.
+  - `slot.polarity` is accepted and preserved verbatim on an added/converted
+    member in v1 — it is NOT interpreted. A negated add does not implicitly
+    route to `remove_member`; a caller that means "no longer" calls
+    `remove_member` itself.
+  - Covered by `tests/test_cortex_sets.py` (add, confirm-by-norm,
+    confirm-by-cosine, cap, invalid-value rejection, one-way scalar
+    conversion, all-removed reverts to scalar, polarity passthrough) and
+    `tests/test_schema_v26.py`.
 
 ### Changed (2026-07-30 — schema v26: set-valued cortex slots, columns + index split)
 - **`facts.kind` (`scalar` | `member`, default `scalar`) and `facts.value_norm`
