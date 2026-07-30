@@ -22,6 +22,7 @@ dedup.
 """
 from __future__ import annotations
 
+import tempfile
 import zlib
 
 import pytest
@@ -34,6 +35,7 @@ from pseudolife_memory.memory.cortex import (
     MEMBER_DEDUP_COSINE,
 )
 from pseudolife_memory.memory.slots import Slot
+from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
 
 
 def _unit_for(text: str, dim: int = 64) -> torch.Tensor:
@@ -311,3 +313,163 @@ def test_member_visible_in_current_records_and_search(store, emb):
     assert r.record in store.current_records()
     hits = store.search(emb("road bike"), top_k=5)
     assert any(rec.value == "road bike" for rec, _score in hits)
+
+
+# --- Task 3: persistence roundtrip (kind / value_norm survive save+load) ---
+#
+# The traced failure (Task 2 review, highest-consequence known risk): if
+# ``kind`` is missing from either the torch save/load roundtrip or the PG
+# column list/hydrator, member rows hydrate as kind="scalar", status="current"
+# — _reindex_current then demotes all but one per slot, and that demotion's
+# dirty_slots write PERSISTS the destruction back to Postgres. A 100-member
+# set becomes a 1-value scalar across one daemon restart with no error. Both
+# halves of that coupling get a dedicated, red-able test below.
+
+def test_kind_survives_torch_roundtrip(store, emb, tmp_path):
+    """The file-mode half of the coupling: CortexStore.save()/load() (the
+    torch.save round-trip co-located with cms_state.pt) must not lose
+    ``kind``. Red if save() omits it from the state dict or load() doesn't
+    pass it back into CortexRecord — both members would then hydrate as
+    kind="scalar", and _reindex_current's duplicate-scalar healing would
+    demote one of them to superseded."""
+    store.add_member(Slot("user", "tags", "alpha"), emb("alpha"))
+    store.add_member(Slot("user", "tags", "beta"), emb("beta"))
+    store.write_fact(Slot("user", "city", "Sydney"), emb("Sydney"))
+
+    path = tmp_path / "cortex_state.pt"
+    store.save(path)
+
+    fresh = CortexStore()
+    fresh.load(path)
+
+    assert fresh.slot_kind("user", "tags") == "set"
+    members = {m.value: m for m in fresh.members("user", "tags")}
+    assert set(members) == {"alpha", "beta"}
+    assert all(m.kind == "member" and m.status == "current"
+              for m in members.values())
+    assert fresh.slot_kind("user", "city") == "scalar"
+    scalar = fresh.lookup("user", "city")
+    assert scalar.kind == "scalar" and scalar.value == "Sydney"
+
+
+@pytest.fixture()
+def store_with_pg(pg_conn, pg_url):  # noqa: F811
+    """A bare CortexStore paired with a ``reload_store()`` closure that
+    write-throughs its dirty slots to Postgres and hydrates a brand new
+    CortexStore from the facts table — the persistence-fixture idiom used by
+    ``tests/test_schema_v23.py::test_freshness_class_survives_a_write_read_round_trip``,
+    generalised so callers don't need a full MemoryService."""
+    from pseudolife_memory.storage import sync
+    from pseudolife_memory.storage.postgres import PostgresStorage
+
+    storage = PostgresStorage(pg_url)
+    store = CortexStore()
+
+    def reload_store() -> CortexStore:
+        sync.sync_cortex_slots(store, storage)
+        fresh = CortexStore()
+        sync.hydrate_cortex(fresh, storage)
+        return fresh
+
+    yield store, reload_store
+    storage.close()
+
+
+def test_store_roundtrip_preserves_kind(store_with_pg, emb):
+    """This task's RED: the store-level persistence roundtrip through
+    Postgres. ``kind`` must appear in ``_FACT_COLS`` and be threaded through
+    ``upsert_fact``/``_record_to_row``/``hydrate_cortex`` for a member to
+    survive a fresh hydration as a member at all."""
+    store, reload_store = store_with_pg
+    store.add_member(Slot("user", "tags", "alpha"), emb("alpha", dim=1024))
+    fresh = reload_store()
+    assert fresh.slot_kind("user", "tags") == "set"
+    assert [m.value for m in fresh.members("user", "tags")] == ["alpha"]
+
+
+@pytest.fixture()
+def svc(pg_conn, pg_url):  # noqa: F811
+    """Same idiom as ``tests/test_schema_v23.py``'s ``svc`` fixture — a real
+    MemoryService against the bench Postgres, torn down after the test."""
+    from pseudolife_memory.service import MemoryService
+
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
+        s = MemoryService(data_dir=d, database_url=pg_url)
+        try:
+            yield s
+        finally:
+            if s._storage is not None:
+                s._storage.close()
+
+
+def test_kind_survives_pg_hydration(svc):
+    """The Postgres half of the coupling, at the storage layer directly
+    (not yet through the service API — svc.set_add/set_remove are Task 4).
+    Writes 2 members on one slot + 1 scalar on another straight through
+    ``CortexStore``, persists via ``svc.save()`` (PG mode + explicit save ->
+    ``sync.snapshot_cortex``'s full-resync path), and hydrates a FRESH
+    CortexStore from the facts table — exercising ``_FACT_COLS``,
+    ``upsert_fact``'s NOT NULL guard, ``_record_to_row``, and
+    ``hydrate_cortex`` together.
+
+    Also pins the Task 1 review finding this task's brief calls out
+    explicitly: a persisted member row's ``value_norm`` must be non-NULL,
+    since Postgres treats NULL as distinct in a unique index and a NULL
+    ``value_norm`` would silently bypass ``facts_member_current_uq``.
+    """
+    import torch
+
+    from pseudolife_memory.memory.cortex import CortexStore
+    from pseudolife_memory.memory.slots import Slot
+    from pseudolife_memory.storage import sync
+
+    EMB = torch.zeros(1024)
+
+    svc._ensure_init()
+    svc._cortex.add_member(Slot("user", "tags", "alpha"), EMB)
+    svc._cortex.add_member(Slot("user", "tags", "beta"), EMB)
+    svc._cortex.write_fact(Slot("user", "city", "Sydney"), EMB)
+    svc.save()
+
+    rows = svc._storage.load_facts()
+    member_rows = [r for r in rows if r["kind"] == "member"]
+    scalar_rows = [r for r in rows if r["kind"] == "scalar"]
+    assert len(member_rows) == 2
+    assert len(scalar_rows) == 1
+    # Task 1's per-slot member-uniqueness index depends on this.
+    assert all(r["value_norm"] for r in member_rows)
+    assert all(r["value_norm"] is None for r in scalar_rows)
+
+    fresh = CortexStore()
+    sync.hydrate_cortex(fresh, svc._storage)
+
+    assert fresh.slot_kind("user", "tags") == "set"
+    members = fresh.members("user", "tags")
+    assert sorted(m.value for m in members) == ["alpha", "beta"]
+    assert all(m.status == "current" and m.kind == "member" for m in members)
+
+    scalar = fresh.lookup("user", "city")
+    assert scalar is not None and scalar.kind == "scalar" and scalar.value == "Sydney"
+
+
+@pytest.mark.skip(reason="needs Task 4's MemoryService.set_add/set_remove")
+def test_members_survive_restart(tmp_service_dir):
+    """Service-level restart test — written now per the brief, unskipped in
+    Task 4 once ``svc.set_add``/``svc.set_remove`` exist."""
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_service_dir)
+    svc.set_add("user", "bikes owned", "road bike")
+    svc.set_add("user", "bikes owned", "gravel bike")
+    svc.set_remove("user", "bikes owned", "road bike")
+    svc.save()
+    svc2 = MemoryService(data_dir=tmp_service_dir)
+    got = svc2.cortex_lookup("user", "bikes owned")
+    assert got["kind"] == "set"
+    assert [m["value"] for m in got["members"]] == ["gravel bike"]
+    assert [m["value"] for m in got["removed"]] == ["road bike"]
+
+
+@pytest.fixture()
+def tmp_service_dir(tmp_path):
+    return str(tmp_path)

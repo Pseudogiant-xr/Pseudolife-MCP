@@ -129,7 +129,7 @@ def episode_row(ep: Episode) -> dict[str, Any]:
 # ── cortex ───────────────────────────────────────────────────────────────
 
 def _record_to_row(r: CortexRecord) -> dict[str, Any]:
-    from pseudolife_memory.memory.cortex import _norm_key
+    from pseudolife_memory.memory.cortex import _norm_key, _norm_value
 
     return {
         "entity": r.entity,
@@ -154,6 +154,12 @@ def _record_to_row(r: CortexRecord) -> dict[str, Any]:
         # v23; NOT NULL — coerce like the world path, never insert an
         # explicit NULL into a NOT NULL DEFAULT column.
         "freshness_class": r.freshness_class or "evergreen",
+        # v26 (set-valued slots); NOT NULL — same coercion rule as above.
+        "kind": r.kind or "scalar",
+        # Member dedup identity for the per-slot unique index — NULL on
+        # scalar rows (Task 1: a NULL here would bypass the member-current
+        # uniqueness constraint, since Postgres treats NULL as distinct).
+        "value_norm": _norm_value(r.value) if r.kind == "member" else None,
         **_stamp_to_row(r),
     }
 
@@ -244,6 +250,14 @@ def hydrate_cortex(cortex: CortexStore, storage) -> int:
             # v23; pre-v23 rows have no column -> evergreen, i.e. no decay,
             # which is exactly how they behaved before the migration.
             freshness_class=row.get("freshness_class") or "evergreen",
+            # v26; pre-v26 rows have no column -> scalar, matching their
+            # only possible identity before set-valued slots existed. This
+            # is the load-bearing half of the kind roundtrip: a member row
+            # hydrating with kind defaulted to "scalar" is exactly the
+            # traced failure (Task 2 review) — _reindex_current's
+            # duplicate-scalar healing demotes every member but one, and
+            # persists that demotion straight back to Postgres.
+            kind=row.get("kind") or "scalar",
             **_stamp_from_row(row),
         ))
     cortex.supersession_log = list(storage.meta_get(_CORTEX_LOG_KEY, []) or [])

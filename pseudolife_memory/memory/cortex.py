@@ -1058,6 +1058,12 @@ class CortexStore:
                     "polarity": r.polarity,
                     "confidence": r.confidence,
                     "status": r.status,
+                    # v26 (set-valued slots): "scalar" | "member". Omitting
+                    # this from the snapshot dict is the file-mode half of
+                    # the traced failure (Task 2 review) — every member
+                    # would reload as kind="scalar" and _reindex_current's
+                    # duplicate-scalar healing would demote all but one.
+                    "kind": r.kind,
                     "provenance": sorted(r.provenance),
                     "asserted_at": r.asserted_at,
                     "last_confirmed": r.last_confirmed,
@@ -1099,6 +1105,7 @@ class CortexStore:
                 polarity=d.get("polarity", "+"),
                 confidence=d.get("confidence", 0.7),
                 status=d.get("status", "current"),
+                kind=d.get("kind", "scalar"),
                 provenance=set(d.get("provenance", [])),
                 asserted_at=d.get("asserted_at", 0.0),
                 last_confirmed=d.get("last_confirmed", 0.0),
