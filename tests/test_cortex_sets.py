@@ -452,7 +452,6 @@ def test_kind_survives_pg_hydration(svc):
     assert scalar is not None and scalar.kind == "scalar" and scalar.value == "Sydney"
 
 
-@pytest.mark.skip(reason="needs Task 4's MemoryService.set_add/set_remove")
 def test_members_survive_restart(tmp_service_dir):
     """Service-level restart test — written now per the brief, unskipped in
     Task 4 once ``svc.set_add``/``svc.set_remove`` exist."""
@@ -473,3 +472,146 @@ def test_members_survive_restart(tmp_service_dir):
 @pytest.fixture()
 def tmp_service_dir(tmp_path):
     return str(tmp_path)
+
+
+# --- Task 4: service surface --------------------------------------------
+
+
+def test_set_add_returns_documented_shape(tmp_service_dir):
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_service_dir)
+    out = svc.set_add("user", "bikes owned", "road bike")
+    assert out == {
+        "action": "member_added",
+        "entity": "user",
+        "attribute": "bikes owned",
+        "member": "road bike",
+        "members_count": 1,
+    }
+    out2 = svc.set_add("user", "bikes owned", "Road Bike")   # dedup -> confirm
+    assert out2["action"] == "member_confirmed"
+    assert out2["members_count"] == 1
+
+
+def test_set_remove_returns_documented_shape(tmp_service_dir):
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_service_dir)
+    svc.set_add("user", "bikes owned", "road bike")
+    out = svc.set_remove("user", "bikes owned", "road bike")
+    assert out == {
+        "action": "member_removed",
+        "entity": "user",
+        "attribute": "bikes owned",
+        "member": "road bike",
+        "members_count": 0,
+    }
+    missing = svc.set_remove("user", "bikes owned", "unicycle")
+    assert missing["action"] == "member_not_found"
+
+
+def test_cortex_write_rejects_scalar_write_on_set_slot_with_actionable_message(
+        tmp_service_dir):
+    """Item 2 (tool-boundary mapping): cortex_write must translate the
+    store's ValueError into a message naming the set tools, not the store's
+    own add_member/remove_member names."""
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_service_dir)
+    svc.set_add("user", "bikes owned", "road bike")
+    with pytest.raises(ValueError, match="memory_set_add"):
+        svc.cortex_write("user", "bikes owned", "hybrid bike")
+
+
+def test_promote_slots_skips_set_slot_and_logs_info(tmp_service_dir, caplog):
+    """Item 1 (extraction-path routing): a scalar candidate for a slot that
+    already holds a set must not raise out of the auto-promote loop, must
+    not mutate the set, and must be logged at INFO naming the slot (not
+    silently dropped at debug like an unrelated write failure)."""
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_service_dir)
+    svc.set_add("user", "database", "postgres")
+    before = sorted(m["value"] for m in svc.cortex_lookup("user", "database")["members"])
+
+    with caplog.at_level("INFO", logger="pseudolife_memory.service"):
+        svc.config.memory.cortex.auto_promote = True
+        out = svc.store("my database is mysql", source="conversation")
+
+    assert out["cortex_promoted"] == 0
+    after = sorted(m["value"] for m in svc.cortex_lookup("user", "database")["members"])
+    assert after == before
+    assert any(
+        "slot holds a set" in rec.message and "user.database" in rec.message
+        for rec in caplog.records
+    )
+
+
+def test_cortex_lookup_on_set_slot(tmp_service_dir):
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_service_dir)
+    svc.set_add("user", "bikes owned", "road bike")
+    svc.set_add("user", "bikes owned", "gravel bike")
+    svc.set_remove("user", "bikes owned", "road bike")
+    got = svc.cortex_lookup("user", "bikes owned")
+    assert got["kind"] == "set"
+    assert got["entity"] == "user" and got["attribute"] == "bikes owned"
+    assert [m["value"] for m in got["members"]] == ["gravel bike"]
+    assert [m["value"] for m in got["removed"]] == ["road bike"]
+
+
+def test_history_on_set_slot_is_time_ordered(tmp_service_dir):
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_service_dir)
+    svc.set_add("user", "bikes owned", "road bike")
+    svc.set_add("user", "bikes owned", "gravel bike")
+    svc.set_remove("user", "bikes owned", "road bike")
+    got = svc.history("user", "bikes owned")
+    assert got["kind"] == "set"
+    events = [(v["value"], v["event"]) for v in got["versions"]]
+    # road bike added, gravel bike added, road bike removed — time-ordered.
+    assert events == [
+        ("road bike", "added"),
+        ("gravel bike", "added"),
+        ("road bike", "removed"),
+    ]
+    ats = [v["at"] for v in got["versions"]]
+    assert ats == sorted(ats)
+
+
+def test_resolve_refuses_when_slot_converted_to_set(store, emb):
+    """Item 3 (resolve() bypass): a contender parked on a scalar slot before
+    the slot converts to a set must not be promotable/retirable through
+    resolve() afterwards — that would bypass write_fact's scalar/set
+    exclusivity guard. Refused, members untouched."""
+    store.write_fact(Slot("user", "bikes owned", "road bike"), emb("road bike"),
+                      support="user")
+    store.write_fact(Slot("user", "bikes owned", "gravel bike"), emb("gravel bike"),
+                      support="agent")   # weaker tier -> parked as contender
+    assert [c.value for c in store.contenders_for("user", "bikes owned")] == ["gravel bike"]
+
+    store.add_member(Slot("user", "bikes owned", "hybrid bike"), emb("hybrid bike"))
+    assert store.slot_kind("user", "bikes owned") == "set"
+    before = sorted(m.value for m in store.members("user", "bikes owned"))
+
+    r = store.resolve("user", "bikes owned", accept=True)
+    assert r.action == "refused"
+
+    after = sorted(m.value for m in store.members("user", "bikes owned"))
+    assert after == before
+    assert [c.value for c in store.contenders_for("user", "bikes owned")] == ["gravel bike"]
+
+
+def test_cortex_resolve_service_reports_slot_holds_set(tmp_service_dir):
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_service_dir)
+    svc.cortex_write("user", "bikes owned", "road bike", support="user")
+    svc.cortex_write("user", "bikes owned", "gravel bike", support="agent")
+    svc.set_add("user", "bikes owned", "hybrid bike")
+    res = svc.cortex_resolve("user", "bikes owned", accept=True)
+    assert res == {"resolved": False, "reason": "slot_holds_set",
+                    "entity": "user", "attribute": "bikes owned"}

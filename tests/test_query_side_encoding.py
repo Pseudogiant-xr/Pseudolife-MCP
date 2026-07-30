@@ -33,6 +33,10 @@ _SERVICE_PY = Path(__file__).resolve().parent.parent / "pseudolife_memory" / "se
 # encode_single/encode) collapse to 21 unique pairs here because cortex_write and
 # _propose_dream_alias_candidates each call the same method twice in the same function.
 #
+# Task 4 (set-valued slots) added ("set_add", "encode_single") -- set_add embeds the
+# member text through the same document-side composition cortex_write uses, so it
+# joins cortex_write's classification rather than getting its own rule.
+#
 # A future call site -- e.g. a new graph_search(query) calling encode_single -- is a
 # pair not in this set, so test_embedder_call_site_inventory_pinned fails RED naming it,
 # until its author classifies it under the query/document rule and adds a row here.
@@ -52,6 +56,7 @@ EMBEDDER_CALL_SITE_INVENTORY = frozenset({
     ("lesson_write", "encode_single"),
     ("search", "encode_query"),
     ("search_documents", "encode_query"),
+    ("set_add", "encode_single"),
     ("store", "encode_single"),
     ("supersede", "encode_query"),
     ("supersede", "encode_single"),

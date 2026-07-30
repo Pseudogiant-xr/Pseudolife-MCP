@@ -725,9 +725,19 @@ class CortexStore:
         """Resolve the active contender at a slot. ``accept=True`` promotes it to
         current (old current -> superseded; contender stamped user-confirmed);
         ``accept=False`` retires it (current untouched). Returns a ``WriteResult``
-        or ``None`` when there is no active contender."""
+        or ``None`` when there is no active contender.
+
+        Service-adjacent routing guard (Task 4): if the slot was converted to
+        a set (:meth:`add_member`) after this contender was parked against the
+        scalar it used to hold, the contender's original ``cur`` no longer
+        exists in ``self._current`` — promoting it here would silently
+        register a second current record for the key (bypassing the
+        write_fact scalar/set exclusivity guard) instead of routing through
+        :meth:`add_member`/:meth:`remove_member` like every other write to a
+        set slot. Refused (``WriteResult("refused", contender)``) without
+        touching any state; nothing is marked dirty.
+        """
         key = (_norm_key(entity), _norm_key(attribute))
-        self.dirty_slots.add(key)
         t = time.time() if now is None else float(now)
         c_idx = next(
             (i for i, r in enumerate(self.records)
@@ -737,6 +747,9 @@ class CortexStore:
         if c_idx is None:
             return None
         contender = self.records[c_idx]
+        if self._members.get(key):
+            return WriteResult("refused", contender)
+        self.dirty_slots.add(key)
         cur_idx = self._current.get(key)
         cur = self.records[cur_idx] if cur_idx is not None else None
         if accept:

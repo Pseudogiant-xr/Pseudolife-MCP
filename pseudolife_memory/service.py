@@ -876,6 +876,19 @@ class MemoryService:
                 )
                 self._ensure_subject_entity(s.entity, propose_dupes=True)
                 written += 1
+            except ValueError as exc:
+                if "holds a set" in str(exc):
+                    # Task 4 spec: the extractor rule for a set-valued slot is
+                    # logged-and-dropped, not auto-routed to add_member —
+                    # explicit set ops come via memory_set_add/memory_set_remove
+                    # (or the op field, Task 7). Caught specifically (before the
+                    # catch-all below) so this doesn't collapse into the same
+                    # debug-level silence as an unrelated write failure.
+                    logger.info(
+                        "scalar auto-promote skipped: slot holds a set: %s.%s",
+                        s.entity, s.attribute)
+                else:
+                    logger.debug("cortex auto-promote skipped (%s): %s", claim, exc)
             except Exception as exc:  # noqa: BLE001
                 logger.debug("cortex auto-promote skipped (%s): %s", claim, exc)
         return written
@@ -1504,19 +1517,29 @@ class MemoryService:
                 _, header_session, _ = resolve_writer_detailed(self._writer_id)
                 if not header_session:
                     session_id = resolved[1]
-            res = self._cortex.write_fact(
-                Slot(entity, attribute, value),
-                emb,
-                slot_embedding=slot_emb,
-                confidence=confidence,
-                provenance=provenance or (),
-                support=support,
-                now=now,
-                hlc=self._hlc.tick(),
-                writer_id=writer_id,
-                session_id=session_id,
-                freshness_class=freshness_class,
-            )
+            try:
+                res = self._cortex.write_fact(
+                    Slot(entity, attribute, value),
+                    emb,
+                    slot_embedding=slot_emb,
+                    confidence=confidence,
+                    provenance=provenance or (),
+                    support=support,
+                    now=now,
+                    hlc=self._hlc.tick(),
+                    writer_id=writer_id,
+                    session_id=session_id,
+                    freshness_class=freshness_class,
+                )
+            except ValueError as exc:
+                if "holds a set" in str(exc):
+                    # Tool-boundary mapping (Task 4): the store's message names
+                    # its own API (add_member/remove_member); memory_fact_set
+                    # callers need the MCP tool names instead.
+                    raise ValueError(
+                        "slot holds a set; use memory_set_add / memory_set_remove"
+                    ) from exc
+                raise
             self._ensure_subject_entity(entity)
             self._save_cortex()
             # Auto-tag a user correction: a user-tier write that REPLACED an older
@@ -1535,6 +1558,73 @@ class MemoryService:
                 out["episode_warning"] = "unknown or closed episode handle"
             return out
 
+    def set_add(
+        self,
+        entity: str,
+        attribute: str,
+        member: str,
+        provenance: list[str] | None = None,
+        origin: str | None = None,
+    ) -> dict[str, Any]:
+        """Add (or confirm) a member of the set-valued ``(entity, attribute)``
+        slot. A scalar already occupying the slot converts to a set one-way
+        (see :meth:`pseudolife_memory.memory.cortex.CortexStore.add_member`).
+
+        The member text is embedded through the same composition scalar
+        writes use (``"{entity} {attribute} {member}"``) so set membership
+        shares the cortex embedding space with everything else. Persists via
+        the same per-slot write-through path ``cortex_write`` uses.
+
+        Returns ``{"action", "entity", "attribute", "member", "members_count"}``
+        — ``action`` is one of ``"member_added"``, ``"member_confirmed"``,
+        ``"member_capped"``, or ``"member_invalid"`` (see ``add_member``).
+        """
+        with self._lock:
+            self._ensure_init()
+            assert self._embedder is not None and self._cortex is not None
+            claim = f"{entity} {attribute} {member}".strip()
+            emb = self._embedder.encode_single(claim)
+            writer_id, session_id = self._resolve_writer()
+            res = self._cortex.add_member(
+                Slot(entity, attribute, member),
+                emb,
+                provenance=provenance or (),
+                support=origin,
+                hlc=self._hlc.tick(),
+                writer_id=writer_id,
+                session_id=session_id,
+            )
+            self._ensure_subject_entity(entity)
+            self._save_cortex()
+            return {
+                "action": res.action,
+                "entity": entity,
+                "attribute": attribute,
+                "member": member,
+                "members_count": len(self._cortex.members(entity, attribute)),
+            }
+
+    def set_remove(self, entity: str, attribute: str, member: str) -> dict[str, Any]:
+        """Retract one current member of a set-valued slot (audit row kept,
+        ``status`` -> ``"removed"``). Persists via the same per-slot
+        write-through path ``cortex_write`` uses.
+
+        Returns ``{"action", "entity", "attribute", "member", "members_count"}``
+        — ``action`` is ``"member_removed"`` or ``"member_not_found"``.
+        """
+        with self._lock:
+            self._ensure_init()
+            assert self._cortex is not None
+            res = self._cortex.remove_member(entity, attribute, member)
+            self._save_cortex()
+            return {
+                "action": res.action,
+                "entity": entity,
+                "attribute": attribute,
+                "member": member,
+                "members_count": len(self._cortex.members(entity, attribute)),
+            }
+
     def cortex_lookup(self, entity: str, attribute: str) -> dict[str, Any] | None:
         """Exact slot lookup — the one ``current`` fact, or ``None``.
 
@@ -1542,19 +1632,43 @@ class MemoryService:
         the graph's ``entity_aliases`` (Postgres) and the canonical name is
         retried, so a fact stored under e.g. ``dev-box`` surfaces regardless of
         which alias (``4090``) the caller queried — honouring the contract that
-        every fact lookup resolves aliases first."""
+        every fact lookup resolves aliases first.
+
+        A set-valued slot has no single ``current`` record to return, so it
+        takes a different shape: ``{"kind": "set", "entity", "attribute",
+        "members": [...], "removed": [...]}`` (current members / removed
+        audit rows). Checked only on a scalar miss, same alias-resolved name,
+        so a set slot under an alias is still found."""
         with self._lock:
             self._ensure_init()
             assert self._cortex is not None
             rec = self._cortex.lookup(entity, attribute)
+            canon = None
             if rec is None and self._storage is not None:
                 from pseudolife_memory.graph import norm_name
                 node = self._storage.find_entity(norm_name(entity))
                 if node is not None:
-                    canon = node.get("canonical")
-                    if canon and norm_name(canon) != norm_name(entity):
+                    c = node.get("canonical")
+                    if c and norm_name(c) != norm_name(entity):
+                        canon = c
                         rec = self._cortex.lookup(canon, attribute)
             if rec is None:
+                ra = self.config.time.relative_age
+                for name in (entity, canon):
+                    if name and self._cortex.slot_kind(name, attribute) == "set":
+                        members = self._cortex.members(name, attribute)
+                        removed = [
+                            r for r in self._cortex.members(
+                                name, attribute, include_removed=True)
+                            if r.status == "removed"
+                        ]
+                        return {
+                            "kind": "set", "entity": name, "attribute": attribute,
+                            "members": [_cortex_record_to_dict(r, relative_age=ra)
+                                        for r in members],
+                            "removed": [_cortex_record_to_dict(r, relative_age=ra)
+                                        for r in removed],
+                        }
                 return None
             d = _cortex_record_to_dict(rec, relative_age=self.config.time.relative_age)
             if self._storage is not None:
@@ -1611,13 +1725,20 @@ class MemoryService:
     def cortex_resolve(self, entity: str, attribute: str, accept: bool) -> dict[str, Any]:
         """Promote (accept) or retire (reject) the active contender at a slot.
         Persists. Returns ``{"resolved": False, "reason": "no_contender"}`` when
-        there is nothing parked to resolve."""
+        there is nothing parked to resolve, and ``{"resolved": False,
+        "reason": "slot_holds_set"}`` when the slot was converted to a set
+        (``memory_set_add``) after the contender was parked against the
+        scalar it used to hold — resolve it via ``memory_set_add`` /
+        ``memory_set_remove`` instead."""
         with self._lock:
             self._ensure_init()
             assert self._cortex is not None
             res = self._cortex.resolve(entity, attribute, accept)
             if res is None:
                 return {"resolved": False, "reason": "no_contender",
+                        "entity": entity, "attribute": attribute}
+            if res.action == "refused":
+                return {"resolved": False, "reason": "slot_holds_set",
                         "entity": entity, "attribute": attribute}
             self._save_cortex()
             cur = self._cortex.lookup(entity, attribute)
@@ -2402,10 +2523,31 @@ class MemoryService:
         """The version timeline at a ``(entity, attribute)`` slot — current +
         superseded records, oldest→newest by tx_time, each attributed
         (writer_id / session_id) with its temporal stamp. The agent's "how did
-        this fact change, and who changed it?" view (v0.4 T8)."""
+        this fact change, and who changed it?" view (v0.4 T8).
+
+        A set-valued slot has no single supersession chain — each member has
+        its own add/remove lifecycle — so it takes a flatter shape instead:
+        ``{"kind": "set", "entity", "attribute", "versions": [{"value",
+        "event": "added"|"removed", "at"}, ...]}``, time-ordered across all
+        members. A still-current member contributes one ``"added"`` event; a
+        removed member contributes both its original ``"added"`` and the
+        later ``"removed"``."""
         with self._lock:
             self._ensure_init()
             assert self._cortex is not None
+            if self._cortex.slot_kind(entity, attribute) == "set":
+                versions: list[dict[str, Any]] = []
+                for r in self._cortex.members(entity, attribute, include_removed=True):
+                    versions.append(
+                        {"value": r.value, "event": "added", "at": r.asserted_at})
+                    if r.status == "removed" and r.superseded_at is not None:
+                        versions.append(
+                            {"value": r.value, "event": "removed", "at": r.superseded_at})
+                versions.sort(key=lambda v: (v["at"] or 0))
+                return {
+                    "kind": "set", "entity": entity, "attribute": attribute,
+                    "count": len(versions), "versions": versions,
+                }
             ra = self.config.time.relative_age
             recs = self._cortex.records_for(entity, attribute)
             recs = sorted(recs, key=lambda r: (r.tx_time or r.asserted_at))
