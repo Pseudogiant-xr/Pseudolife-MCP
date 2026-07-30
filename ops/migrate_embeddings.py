@@ -57,9 +57,11 @@ SAFETY
   ``entries_embedding_idx`` unconditionally on every boot (2026-07-02
   zombie sweep) because all similarity search happens in Python over the
   hydrated bands, not via a SQL vector query.
-* ``SCHEMA_META_VERSION`` (25) is stamped in ``meta`` LAST, only after all
-  four tables have migrated without error — a bank that failed partway
-  through must not claim to be on schema v25.
+* ``SCHEMA_META_VERSION`` (the live constant -- this script always stamps
+  whatever the current build's value is, not a value fixed at the time this
+  migration was written for v25) is stamped in ``meta`` LAST, only after
+  all four tables have migrated without error — a bank that failed partway
+  through must not claim to be on the current schema version.
 
 SLOT EMBEDDINGS — NOT MIGRATED, AND NOT MISSED
 ------------------------------------------------

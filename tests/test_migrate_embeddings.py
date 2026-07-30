@@ -39,10 +39,7 @@ from pgvector.psycopg import register_vector
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ops"))
 import migrate_embeddings  # noqa: E402
 
-from pseudolife_memory.storage.schema import (  # noqa: E402
-    SCHEMA_META_VERSION,
-    _refuse_on_embedding_dim_mismatch,
-)
+from pseudolife_memory.storage.schema import _refuse_on_embedding_dim_mismatch  # noqa: E402
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
 
 _NOW = 1_700_000_000.0
@@ -476,9 +473,7 @@ def test_apply_crash_after_two_tables_keeps_entries_armed_then_resumes(
             _refuse_on_embedding_dim_mismatch(cur)
     pg_conn.commit()  # release the read lock before the resumed run below
 
-    # (c) re-run (crash removed) completes and stamps the current schema
-    # version (v26 — SCHEMA_META_VERSION moved on since this migration was
-    # first written for v25; the assertion below tracks the live constant).
+    # (c) re-run (crash removed) completes and stamps v26.
     monkeypatch.setattr(migrate_embeddings, "migrate_table", real_migrate_table)
     code = _invoke(monkeypatch, pg_url, "--apply", "--backup-verified",
                     "--health-url", _UNREACHABLE_HEALTH_URL)
@@ -488,7 +483,9 @@ def test_apply_crash_after_two_tables_keeps_entries_armed_then_resumes(
     meta = pg_conn.execute(
         "SELECT value FROM meta WHERE key = 'schema_version'"
     ).fetchone()
-    assert meta[0] == SCHEMA_META_VERSION
+    # Literal pin, bump alongside SCHEMA_META_VERSION -- see the other
+    # tests/test_schema_vNN.py files for the same convention.
+    assert meta[0] == 26
 
 
 # ---------------------------------------------------------------------------
@@ -589,14 +586,16 @@ def test_apply_migrates_all_four_tables(v24_bank, pg_url, monkeypatch):
     ).fetchone()
     assert idx is None
 
-    # meta.schema_version stamped with the current SCHEMA_META_VERSION,
-    # last, only on full success. The jsonb cast of the bare digits parses
-    # as a JSON number (not a JSON string) — matches schema.py's own stamp
-    # exactly, same cast, same param shape (str(SCHEMA_META_VERSION)).
+    # meta.schema_version stamped 26, last, only on full success. The
+    # jsonb cast of the bare digits "26" parses as the JSON number 26
+    # (not a JSON string) — matches schema.py's own stamp exactly, same
+    # cast, same param shape (str(SCHEMA_META_VERSION)).
+    # Literal pin, bump alongside SCHEMA_META_VERSION -- see the other
+    # tests/test_schema_vNN.py files for the same convention.
     meta = pg_conn.execute(
         "SELECT value FROM meta WHERE key = 'schema_version'"
     ).fetchone()
-    assert meta[0] == SCHEMA_META_VERSION
+    assert meta[0] == 26
 
     # Write-path fidelity, at least one row per table (MINOR 4): the real
     # pipeline test above spent its cost without collecting this evidence

@@ -107,3 +107,48 @@ def test_member_current_uniqueness_still_rejects_same_value_twice(pg_conn):
             assert False, "duplicate current member (same value_norm) must be rejected"
         except psycopg.errors.UniqueViolation:
             pg_conn.rollback()
+
+
+def test_ensure_schema_healing_is_kind_aware(pg_conn):
+    """The v19 duplicate-healing pass (facts/current) runs on EVERY
+    ensure_schema call, i.e. every daemon start. Without a kind-aware
+    predicate it would partition member rows by the same
+    (entity_norm, attribute_norm) as scalar rows and demote all but the
+    newest member on a slot to 'superseded' on every restart -- silently
+    destroying a set-valued slot's membership over time. Seeds two current
+    MEMBER rows (distinct value_norm) on one slot, and a genuine duplicate
+    current SCALAR pair on another slot, then re-runs ensure_schema:
+    the members must both survive; the scalar duplicate must still heal to
+    exactly one 'current' row (the newest), same as pre-v26 behaviour."""
+    from pseudolife_memory.storage.schema import ensure_schema
+
+    # Two legitimately distinct current members on the same slot -- not a
+    # duplicate, this is the whole point of the member split.
+    _insert_fact(pg_conn, entity="proj", attribute="tags", value="alpha",
+                 kind="member", value_norm="alpha")
+    _insert_fact(pg_conn, entity="proj", attribute="tags", value="beta",
+                 kind="member", value_norm="beta")
+
+    # A genuine scalar duplicate on a different slot -- bypass the scalar
+    # unique index the fixture's own ensure_schema already built, exactly
+    # like test_slot_persistence.py's pre-existing healing test does.
+    pg_conn.execute("DROP INDEX IF EXISTS facts_slot_current_scalar_uq")
+    _insert_fact(pg_conn, entity="proj", attribute="lang", value="older",
+                 kind="scalar")
+    _insert_fact(pg_conn, entity="proj", attribute="lang", value="newer",
+                 kind="scalar")
+    pg_conn.commit()
+
+    ensure_schema(pg_conn)
+
+    member_rows = {r[0] for r in pg_conn.execute(
+        "SELECT value FROM facts WHERE entity_norm = 'proj' "
+        "AND attribute_norm = 'tags' AND status = 'current'").fetchall()}
+    assert member_rows == {"alpha", "beta"}, (
+        "kind-aware healing must leave BOTH current members untouched")
+
+    scalar_rows = {r[0]: r[1] for r in pg_conn.execute(
+        "SELECT value, status FROM facts WHERE entity_norm = 'proj' "
+        "AND attribute_norm = 'lang'").fetchall()}
+    assert scalar_rows["newer"] == "current"
+    assert scalar_rows["older"] == "superseded"

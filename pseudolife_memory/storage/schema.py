@@ -540,8 +540,21 @@ def ensure_schema(conn) -> dict:
         # most recently confirmed, demote the rest — mirroring
         # CortexStore._reindex_current), then add the partial unique indexes.
         # Both steps are cheap no-ops on a clean bank.
-        for table, status in (("facts", "current"), ("facts", "contested"),
-                              ("world_facts", "current"), ("lessons", "current")):
+        # v26: the facts/current pass gets an extra "AND kind = 'scalar'"
+        # predicate -- without it, this healing UPDATE runs on EVERY
+        # ensure_schema call (every daemon start), and once a later task
+        # writes set-valued members it would partition member rows by the
+        # same (entity_norm, attribute_norm) as scalar rows and silently
+        # demote all but the newest member on a slot to 'superseded' on
+        # every restart. Scoping the healing pass to kind='scalar' leaves
+        # 'current' member rows untouched; only genuine scalar duplicates
+        # (the case this loop exists for) get healed.
+        for table, status, extra_where in (
+            ("facts", "current", " AND kind = 'scalar'"),
+            ("facts", "contested", ""),
+            ("world_facts", "current", ""),
+            ("lessons", "current", ""),
+        ):
             cur.execute(
                 f"""
                 UPDATE {table} SET status = 'superseded',
@@ -552,7 +565,7 @@ def ensure_schema(conn) -> dict:
                     SELECT id, ROW_NUMBER() OVER (
                       PARTITION BY entity_norm, attribute_norm
                       ORDER BY last_confirmed DESC, id DESC) AS rn
-                    FROM {table} WHERE status = %s) d
+                    FROM {table} WHERE status = %s{extra_where}) d
                   WHERE d.rn > 1)
                 """,
                 (status,),
