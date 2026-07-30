@@ -29,10 +29,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`tests/test_longmemeval_bench_fact_lines.py`). `_cortex_record_to_dict`
   now includes `"kind"` on every fact dict (`cortex_lookup`, `cortex_dump`,
   `cortex_search` scalar entries). A set entry also now carries
-  `"last_confirmed"` (max over its current members) so `mcp_server.py`'s
-  cortex-first block has a real date to render instead of going blank for
-  every set slot. Fixed a latent crash the new set-entry shape would
-  otherwise have caused: `mcp_server.py`'s `memory_search` cortex-first
+  `"last_confirmed"`, `"asserted_at"`, and `"age"` (all backed by the same
+  anchor — max `tx_time or asserted_at` over current members, the same
+  priority `_cortex_record_to_dict` uses for a scalar's `"age"`) so
+  `mcp_server.py`'s cortex-first block has real dates to render instead of
+  going blank for every set slot. Fixed a latent crash the new set-entry
+  shape would otherwise have caused: `mcp_server.py`'s `memory_search` cortex-first
   block indexed a fact's `"confidence"` directly, which a grouped set entry
   doesn't carry — now `.get`. Fixed a review-caught bug in
   `_cortex_bm25_fuse` itself: it keyed its lexical pool by `record.key`
@@ -49,8 +51,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   inclusion, no-entry-when-nothing-ranks, mixed scalar+set, last_confirmed),
   `tests/test_cortex_bm25.py::test_rebuild_fact_ranking_matches_service_fusion_set_slot`
   (a deliberately engineered order-divergence scenario, confirmed red
-  against the pre-fix keying), `tests/test_lme_v2_smoke_fact_lines.py`, and
-  `tests/test_longmemeval_bench_fact_lines.py`'s remove-then-re-add cases.
+  against the pre-fix keying), `tests/test_lme_v2_smoke_fact_lines.py`,
+  `tests/test_longmemeval_bench_fact_lines.py`'s remove-then-re-add cases,
+  and `tests/test_cortex_fact_currency.py`'s set-slot case (the pre-existing
+  currency guard's fixtures were scalar-only and structurally blind to
+  whether a set entry carries a date at all).
 
 ### Added (2026-07-31 — MCP tools for set-valued cortex slots)
 - **`memory_set_add` / `memory_set_remove`** expose the Task 2–4 member

@@ -734,6 +734,18 @@ def test_cortex_search_groups_set_slot_into_one_entry(tmp_service_dir):
     # silently going blank for every set slot.
     assert "last_confirmed" in e
     assert e["last_confirmed"] == max(m["last_confirmed"] for m in e["members"])
+    # Re-review: asserted_at + age were still missing entirely. Both are
+    # backed by the same anchor -- max(tx_time or asserted_at) over the
+    # full current membership, the same priority _cortex_record_to_dict
+    # uses for a scalar's "age" (tx_time preferred over asserted_at).
+    # "asserted_at" is the raw float, exactly how _cortex_record_to_dict
+    # renders a scalar's own "asserted_at" (no ISO formatting at this
+    # layer -- mcp_server._iso_seconds does that downstream).
+    want_anchor = max(
+        (m["tx_time"] or m["asserted_at"]) for m in e["members"])
+    assert e["asserted_at"] == want_anchor
+    assert isinstance(e["asserted_at"], float)
+    assert e["age"], "set entry must carry a human-readable age"
 
 
 def test_cortex_search_set_entry_orders_by_score_not_insertion(tmp_service_dir):

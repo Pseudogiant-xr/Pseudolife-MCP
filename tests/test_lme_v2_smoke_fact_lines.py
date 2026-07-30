@@ -32,7 +32,13 @@ class _StubService:
         return {"entries": [
             {"kind": "set", "entity": "user", "attribute": "bikes owned",
              "value": "gravel bike (1 members)", "score": 0.9,
-             "contested": False},
+             "contested": False,
+             # Production shape (Task 6 re-review nit): a real
+             # cortex_search set entry always carries "members" — without
+             # it, _compose_fact_line's F3 removed-vs-current filter is
+             # silently a no-op here (empty default), so this stub's
+             # coverage of that filter was only accidental.
+             "members": [{"value": "gravel bike"}]},
         ]}
 
     def history(self, entity, attribute):

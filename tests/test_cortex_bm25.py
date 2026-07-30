@@ -199,6 +199,16 @@ def test_rebuild_fact_ranking_matches_service_fusion_set_slot():
 
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
         svc = MemoryService(data_dir=d)
+        # One unrelated scalar in the corpus (nit, re-review): the isolated
+        # 3-member-only universe above proved the order-divergence fix in
+        # the tightest possible reproduction, but never exercised the
+        # grouped entry's position AMONG scalars — restore one so the
+        # grouping/lockstep logic is proven against a mixed corpus too, not
+        # just a set-slot vacuum. Scores nowhere near this query (verified:
+        # 0.0 dense/lexical), so it must NOT appear in the results — the
+        # assertion below pins that the set entry still lands as the sole,
+        # first-position entry despite scalar competition existing.
+        svc.cortex_write("payments-db", "host", "10.0.0.7", provenance=["seed"])
         svc.set_add("user", "bikes owned", "road bike SNRRR555")
         svc.set_add("user", "bikes owned", "gravel bike SNGGG111")
         svc.set_add("user", "bikes owned", "hybrid bike SNHHH999")
@@ -207,12 +217,18 @@ def test_rebuild_fact_ranking_matches_service_fusion_set_slot():
                                          bm25=True)["entries"]
         set_entries = [e for e in want_entries if e.get("kind") == "set"]
         assert set_entries, "the set slot should have ranked for this query"
+        assert want_entries[0]["kind"] == "set", (
+            "the grouped set entry must be pinned at position 0 even with "
+            "an (excluded) scalar in the corpus")
         # The full line each path SHOULD serve — entity, attribute, and the
         # (for a set) score-ordered composed value — not just the entity.
         want_lines = [f"{e['entity']} — {e['attribute']}: {e['value']}"
                       for e in want_entries]
 
         facts = [
+            {"entity": "payments-db", "attribute": "host", "value": "10.0.0.7",
+             "history": ["10.0.0.7"]},
+        ] + [
             {"entity": "user", "attribute": "bikes owned", "value": member,
              "kind": "member"}
             for member in ("road bike SNRRR555", "gravel bike SNGGG111",
@@ -224,6 +240,8 @@ def test_rebuild_fact_ranking_matches_service_fusion_set_slot():
             top_k=6, min_score=0.7, bm25=True)
 
     assert got_lines == want_lines, f"rebuild={got_lines} service={want_lines}"
+    assert len(want_lines) == 1, (
+        "the unrelated scalar filler must not have cleared the floor")
     # Pin the known-CORRECT order directly (not just live==offline
     # agreement) — a blind spot a cross-comparison alone cannot catch is
     # both paths being wrong in the same way.

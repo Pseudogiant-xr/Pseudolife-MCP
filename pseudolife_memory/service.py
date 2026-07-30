@@ -1842,6 +1842,22 @@ class MemoryService:
                                      if id(r) in id_to_idx]
                     value, score = compose_set_value(
                         [m.value for m in all_members], ranked_pairs)
+                    # F5/re-review (Task 6 review): a set entry carried no
+                    # timestamp at all, so mcp_server.py's cortex-first
+                    # block (`_iso_seconds(f.get(...))` / `f.get("age")`)
+                    # always rendered blank for it. One shared "anchor" —
+                    # the most recent per-member activity, same
+                    # tx_time-preferred-over-asserted_at priority
+                    # `_cortex_record_to_dict` uses for a scalar's "age" —
+                    # backs both "asserted_at" (raw float, exactly how
+                    # `_cortex_record_to_dict` renders a scalar's
+                    # "asserted_at": no ISO formatting at this layer, that
+                    # happens downstream in mcp_server._iso_seconds) and
+                    # "age" (the human string, via the same _relative_time
+                    # helper `_cortex_record_to_dict` uses).
+                    anchor = max(
+                        ((m.tx_time or m.asserted_at) for m in all_members),
+                        default=None)
                     entries.append({
                         "kind": "set",
                         "entity": entity,
@@ -1850,15 +1866,10 @@ class MemoryService:
                         "members": [_cortex_record_to_dict(m) for m in all_members],
                         "score": round(float(score), 4) if score is not None else 0.0,
                         "contested": False,
-                        # F5 (Task 6 review): a set entry carried no
-                        # timestamp at all, so mcp_server.py's cortex-first
-                        # block (`_iso_seconds(f.get("last_confirmed"))`)
-                        # always rendered no date for it. The most recent
-                        # membership change is the meaningful "how current
-                        # is this" signal for a set — max over all current
-                        # members, not just the ones that ranked.
                         "last_confirmed": max(
                             (m.last_confirmed for m in all_members), default=None),
+                        "asserted_at": anchor,
+                        "age": _relative_time(anchor) if anchor else None,
                     })
             return {"count": len(entries), "entries": entries}
 
