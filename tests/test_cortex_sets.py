@@ -28,6 +28,7 @@ import pytest
 import torch
 
 from pseudolife_memory.memory.cortex import (
+    CortexRecord,
     CortexStore,
     MAX_CURRENT_MEMBERS,
     MEMBER_DEDUP_COSINE,
@@ -62,6 +63,10 @@ def test_add_member_creates_set_slot(store, emb):
     assert r.action == "member_added" and r.record.kind == "member"
     assert store.slot_kind("user", "bikes owned") == "set"
     assert [m.value for m in store.members("user", "bikes owned")] == ["road bike"]
+    # Item 7: _insert_member stamps tx_time/valid_time like _insert does —
+    # a member row must not be a temporal blind spot.
+    assert r.record.tx_time is not None
+    assert r.record.valid_time is not None
 
 
 def test_add_member_dedup_confirms_not_duplicates(store, emb):
@@ -103,9 +108,16 @@ def test_member_add_converts_scalar_slot_with_audit(store, emb):
 def test_member_cap_drops_beyond_100(store, emb):
     for i in range(100):
         store.add_member(Slot("user", "tags", f"tag-{i:03d}"), emb(f"tag-{i:03d}"))
+    store.dirty_slots.clear()
     r = store.add_member(Slot("user", "tags", "tag-overflow"), emb("tag-overflow"))
     assert r.action == "member_capped"
     assert len(store.members("user", "tags")) == 100
+    # Item 6: the capped result carries the OFFENDING value, not an unrelated
+    # existing member, and is not itself a persisted record.
+    assert r.record.value == "tag-overflow"
+    assert r.record not in store.records
+    # A rejected add must not schedule a slot rewrite — nothing changed.
+    assert ("user", "tags") not in store.dirty_slots
 
 
 def test_removed_member_can_rejoin(store, emb):
@@ -151,3 +163,118 @@ def test_add_member_never_contests(store, emb):
     assert len(members) == 2
     assert all(m.status == "current" for m in members)
     assert store.contenders_for("user", "bikes owned") == []
+
+
+# --- Fix wave (coordinator review) -----------------------------------------
+
+def test_scalar_to_member_conversion_preserves_polarity(store, emb):
+    """Item 1: the scalar->member conversion built a bare ``Slot(...)`` with
+    no polarity, so a negated fact ("no longer have a road bike") silently
+    re-minted as an affirmative member. The converted member must carry the
+    original scalar's polarity."""
+    store.write_fact(Slot("user", "bikes owned", "road bike", "-"), emb("road bike"))
+    store.add_member(Slot("user", "bikes owned", "gravel bike"), emb("gravel bike"))
+    converted = next(m for m in store.members("user", "bikes owned")
+                     if m.value == "road bike")
+    assert converted.polarity == "-"
+
+
+def test_write_fact_rejects_scalar_write_on_set_slot(store, emb):
+    """Item 2: once a slot holds current members, write_fact must not insert
+    a parallel current scalar at the same key — the slot models are mutually
+    exclusive. Callers (the service layer) are expected to catch this and
+    route through add_member/remove_member instead."""
+    store.add_member(Slot("user", "bikes owned", "road bike"), emb("road bike"))
+    with pytest.raises(ValueError, match="holds a set"):
+        store.write_fact(Slot("user", "bikes owned", "hybrid bike"), emb("hybrid bike"))
+    # The rejected write must not have mutated anything.
+    assert [m.value for m in store.members("user", "bikes owned")] == ["road bike"]
+
+
+def test_write_fact_converted_slot_also_rejects_scalar(store, emb):
+    """Same guard on the conversion path: a slot that used to be a scalar and
+    was converted to a set must reject a subsequent scalar write too."""
+    store.write_fact(Slot("user", "bikes owned", "road bike"), emb("road bike"))
+    store.add_member(Slot("user", "bikes owned", "gravel bike"), emb("gravel bike"))
+    with pytest.raises(ValueError, match="holds a set"):
+        store.write_fact(Slot("user", "bikes owned", "hybrid bike"), emb("hybrid bike"))
+
+
+def test_forget_entity_clears_members_index_other_slot_survives(store, emb):
+    """Item 3(a): forget() rebuilds self._members from scratch — a purged
+    entity's members must disappear (members() empty, slot_kind None) while
+    an unrelated entity's members survive untouched."""
+    store.add_member(Slot("user", "bikes owned", "road bike"), emb("road bike"))
+    store.add_member(Slot("other", "tags", "keep"), emb("keep"))
+    removed = store.forget("user")
+    assert removed >= 1
+    assert store.members("user", "bikes owned") == []
+    assert store.slot_kind("user", "bikes owned") is None
+    assert [m.value for m in store.members("other", "tags")] == ["keep"]
+
+
+def test_dedup_siblings_rebuild_preserves_member_index(store, emb):
+    """Item 3(b): dedup_siblings' post-apply rebuild of self._current must
+    not lose an unrelated slot's current members. Two scalar slots share an
+    (injected) slot_embedding and merge; a member row elsewhere must survive
+    the rebuild with its current status and index entry intact. Pure
+    in-memory (injected embeddings, like every other cortex test) — no
+    Postgres/embedder needed, so this path IS reachable at unit-test level."""
+    shared = emb("shared-slot-embedding")
+    store.write_fact(Slot("proj", "server-ip", "10.0.0.1"), emb("val-a"),
+                     support="user", now=1.0, slot_embedding=shared)
+    store.write_fact(Slot("proj", "box-ip", "10.0.0.1"), emb("val-b"),
+                     support="agent", now=2.0, slot_embedding=shared)
+    store.add_member(Slot("user", "bikes owned", "road bike"), emb("road bike"))
+
+    report = store.dedup_siblings(threshold=0.99, apply=True)
+    assert len(report) == 1                      # the two ip slots merged
+
+    members = store.members("user", "bikes owned")
+    assert [m.value for m in members] == ["road bike"]
+    assert members[0].status == "current"
+
+
+def test_reindex_current_keeps_members_demotes_duplicate_scalars(store):
+    """Item 3(c): the guard between Task 3 and silent persisted destruction.
+    _reindex_current() (called by load()) must NOT apply the scalar
+    duplicate-demotion healing to member rows — two current members sharing
+    a slot are the normal, valid state, not a legacy collision. Records are
+    appended raw (bypassing add_member/write_fact) to simulate what a
+    deserializer hands it."""
+    store.records.append(CortexRecord(
+        entity="user", attribute="bikes owned", value="road bike",
+        kind="member", status="current", asserted_at=1.0, last_confirmed=1.0))
+    store.records.append(CortexRecord(
+        entity="user", attribute="bikes owned", value="gravel bike",
+        kind="member", status="current", asserted_at=2.0, last_confirmed=2.0))
+    # Legacy pre-normalisation scalar collision at a different slot.
+    store.records.append(CortexRecord(
+        entity="NEBULA-SERPENT", attribute="type", value="server",
+        status="current", asserted_at=1.0, last_confirmed=1.0))
+    store.records.append(CortexRecord(
+        entity="nebula-serpent", attribute="type", value="workstation",
+        status="current", asserted_at=2.0, last_confirmed=2.0))
+
+    store._reindex_current()
+
+    members = store.members("user", "bikes owned")
+    assert sorted(m.value for m in members) == ["gravel bike", "road bike"]
+    assert all(m.status == "current" for m in members)
+
+    scalars = [r for r in store.records if r.key == ("nebula-serpent", "type")]
+    current_scalars = [r for r in scalars if r.status == "current"]
+    assert len(current_scalars) == 1
+    assert current_scalars[0].value == "workstation"   # most-recently-confirmed kept
+    assert [r.status for r in scalars].count("superseded") == 1
+
+
+def test_member_visible_in_current_records_and_search(store, emb):
+    """Item 4: pin the binding requirement directly — a member is not a
+    second-class citizen of the read paths. It must show up both in
+    current_records() (the dump/introspection path) and in a cosine search
+    for its own value."""
+    r = store.add_member(Slot("user", "bikes owned", "road bike"), emb("road bike"))
+    assert r.record in store.current_records()
+    hits = store.search(emb("road bike"), top_k=5)
+    assert any(rec.value == "road bike" for rec, _score in hits)

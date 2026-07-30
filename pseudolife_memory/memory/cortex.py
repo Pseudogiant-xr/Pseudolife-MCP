@@ -235,7 +235,11 @@ class CortexStore:
         self._current: dict[tuple[str, str], int] = {}
         # slot key -> indices into ``records`` of the *current* member rows
         # (insertion order), for set-valued slots. A key never appears in
-        # both ``_current`` and ``_members`` at once — see ``add_member``.
+        # both ``_current`` and ``_members`` at once: ``add_member``
+        # converts a scalar occupying the slot to a member (one-way), and
+        # ``write_fact`` actively enforces the reverse — it raises
+        # ValueError when ``self._members.get(key)`` is non-empty, rather
+        # than silently inserting a parallel current scalar.
         self._members: dict[tuple[str, str], list[int]] = {}
         # Slots mutated since the last storage sync (2026-07-02 P1 per-slot
         # persistence). Every mutation path MUST mark the slot(s) it touches;
@@ -272,6 +276,23 @@ class CortexStore:
         session_id: str | None = None,
         freshness_class: str = "evergreen",
     ) -> WriteResult:
+        """Write a scalar fact at ``(slot.entity, slot.attribute)`` — the
+        canonical insert/confirm/supersede/contest path (see the module
+        docstring).
+
+        Raises ``ValueError`` if the slot currently holds set members (a
+        prior :meth:`add_member` populated or converted it): scalar writes
+        and set membership are mutually exclusive at one slot, and this
+        store does not silently pick a resolution. Callers — the service
+        layer, in particular — are expected to catch this and route the
+        write through :meth:`add_member`/:meth:`remove_member` instead.
+        """
+        key = (_norm_key(slot.entity), _norm_key(slot.attribute))
+        if self._members.get(key):
+            raise ValueError(
+                "slot holds a set; use add_member/remove_member — scalar "
+                "writes are rejected"
+            )
         t = time.time() if now is None else float(now)
         txt = t if tx_time is None else float(tx_time)
         vt = txt if valid_time is None else float(valid_time)
@@ -282,7 +303,6 @@ class CortexStore:
         emb = embedding.detach().to("cpu", torch.float32).clone()
         semb = (slot_embedding.detach().to("cpu", torch.float32).clone()
                 if slot_embedding is not None else None)
-        key = (_norm_key(slot.entity), _norm_key(slot.attribute))
         self.dirty_slots.add(key)
 
         idx = self._current.get(key)
@@ -460,19 +480,27 @@ class CortexStore:
         treat NULLs as distinct, so a member row with an empty/NULL
         normalised value would silently bypass the per-slot uniqueness
         constraint on persistence (Task 1 review finding).
+
+        ``slot.polarity`` (e.g. ``"-"`` for a negated add) is accepted and
+        preserved verbatim on the inserted/converted member in v1 — it is
+        NOT interpreted. Routing a negated add to an implicit
+        :meth:`remove_member` call is explicitly out of scope here; callers
+        that mean "no longer" must call ``remove_member`` themselves.
         """
         t = time.time() if now is None else float(now)
         key = (_norm_key(slot.entity), _norm_key(slot.attribute))
         if not _norm_value(slot.value):
+            # Rejected before touching any state — no dirty_slots write, no
+            # slot rewrite scheduled for an add that never happened.
             return WriteResult("member_invalid", CortexRecord(
                 entity=slot.entity, attribute=slot.attribute, value=slot.value,
                 kind="member",
             ))
         emb = embedding.detach().to("cpu", torch.float32).clone()
-        self.dirty_slots.add(key)
         # Scalar at this slot -> one-way conversion (spec rule 1).
         idx = self._current.get(key)
         if idx is not None:
+            self.dirty_slots.add(key)
             cur = self.records[idx]
             cur.status = "superseded"
             cur.superseded_at = t
@@ -481,7 +509,8 @@ class CortexStore:
             self._log(cur, slot.value, confidence, t, "convert_to_set",
                       "member_add_to_scalar", writer_id=writer_id,
                       session_id=session_id)
-            self._insert_member(Slot(cur.entity, cur.attribute, cur.value),
+            self._insert_member(Slot(cur.entity, cur.attribute, cur.value,
+                                     cur.polarity),
                                 cur.embedding, cur.confidence,
                                 set(cur.provenance), cur.asserted_at,
                                 hlc=hlc, writer_id=cur.writer_id,
@@ -494,15 +523,26 @@ class CortexStore:
                         / ((m.embedding.norm() * emb.norm()) + 1e-12)) \
                 if m.embedding is not None else 0.0
             if same_norm or cos >= MEMBER_DEDUP_COSINE:
+                self.dirty_slots.add(key)
                 m.last_confirmed = t
                 m.provenance |= {p for p in provenance if p}
                 m.confidence = min(1.0, max(m.confidence, float(confidence)))
                 return WriteResult("member_confirmed", m)
         if len(members) >= MAX_CURRENT_MEMBERS:
-            self._log(members[-1], slot.value, confidence, t, "member_capped",
+            # Rejected: return an unpersisted record carrying the OFFENDING
+            # value (never an unrelated existing member), and log it against
+            # itself so old_value/new_value both read as the rejected value
+            # rather than pointing at an unrelated member — nothing was
+            # actually superseded. No dirty_slots write: nothing changed.
+            rejected = CortexRecord(
+                entity=slot.entity, attribute=slot.attribute, value=slot.value,
+                kind="member", confidence=float(confidence),
+            )
+            self._log(rejected, slot.value, confidence, t, "member_capped",
                       "max_current_members", writer_id=writer_id,
                       session_id=session_id)
-            return WriteResult("member_capped", members[-1])
+            return WriteResult("member_capped", rejected)
+        self.dirty_slots.add(key)
         rec = self._insert_member(slot, emb, confidence,
                                   {p for p in provenance if p}, t, hlc=hlc,
                                   writer_id=writer_id, session_id=session_id,
@@ -538,6 +578,8 @@ class CortexStore:
             last_confirmed=t,
             embedding=emb,
             support={support} if support else set(),
+            tx_time=t,
+            valid_time=t,
             hlc_phys=(hlc[0] if hlc else None),
             hlc_logical=(hlc[1] if hlc else None),
             writer_id=writer_id,
