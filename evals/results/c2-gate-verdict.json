@@ -1,0 +1,99 @@
+{
+  "preregistration": "memory 2026-07-31 C2 gate battery (recorded pre-run)",
+  "branch": "feat/set-valued-slots",
+  "head_at_gates": "3c4aefe2",
+  "serving_stack": {
+    "kv": "q8_0/q8_0",
+    "identity_check": "process inspection per run; PIDs in gates-phase logs"
+  },
+  "gates": {
+    "ladder_e4b_ft": {
+      "gold_recoverable": 1.0,
+      "stale_leak": 0.0,
+      "verdict": "PASS",
+      "artifact": "evals/results/e4b-ft-c2.json"
+    },
+    "ladder_qwen_27b": {
+      "gold_recoverable": 1.0,
+      "stale_leak": 0.0,
+      "verdict": "PASS",
+      "artifact": "evals/results/qwen-27b-c2.json"
+    },
+    "window_echo": {
+      "claims": 5,
+      "echoes": 0,
+      "verdict": "PASS"
+    },
+    "regression_gate": {
+      "verdict": "PASS",
+      "baseline_commit": "1f0f13a"
+    },
+    "ku_e2e_paired": {
+      "verdict": "FAIL",
+      "control": "committed ceiling-e2e (2026-07-30, pre-C2 code+prompt, same extractor+stack)",
+      "arms_c2e2e": {
+        "rag": 0.859,
+        "cortex": 0.628,
+        "hybrid": 0.808,
+        "cascade": 0.808
+      },
+      "arms_control": {
+        "rag": 0.859,
+        "cortex": 0.667,
+        "hybrid": 0.833,
+        "cascade": 0.936
+      },
+      "paired_permutation_10k_seed0": {
+        "rag": {
+          "delta": 0.0,
+          "p": 1.0,
+          "note": "verdicts byte-identical \u2014 control held"
+        },
+        "cortex": {
+          "delta": -0.0385,
+          "p": 0.7
+        },
+        "hybrid": {
+          "delta": -0.0256,
+          "p": 0.77
+        },
+        "cascade": {
+          "delta": -0.1282,
+          "p": 0.013
+        }
+      },
+      "count_class_cortex": {
+        "control": 35,
+        "c2e2e": 31,
+        "n": 48,
+        "criterion": "delta>0",
+        "met": false
+      },
+      "commit_stats": {
+        "control": {
+          "rate": 0.59,
+          "precision": 1.0
+        },
+        "c2e2e": {
+          "rate": 0.731,
+          "precision": 0.772
+        }
+      }
+    }
+  },
+  "root_cause": {
+    "member_facts_in_all_78_banks": 0,
+    "finding": "the extractor NEVER emitted an op claim; the sets machinery was inert in the bench. Measured deltas are the prompt block's side-effect on scalar extraction plus cross-run extraction nondeterminism (no extraction-variance baseline exists for the control). The bench apply path was verified op-aware (svc.dream_run).",
+    "probe": {
+      "method": "direct OpenAICompatExtractor call against the reproducible server, production _SYSTEM_PROMPT (op block asserted present), three blatant membership notes",
+      "claims_with_op": 0,
+      "claims_total": 4,
+      "pathology_demonstrated": [
+        "two same-slot scalar claims (user.pending tasks) \u2014 second supersedes first under scalar semantics, destroying a member",
+        "'bikes owned: road bike' emitted as a positive scalar for a bike the note says was SOLD (should be op:remove)"
+      ],
+      "conclusion": "prompt-adoption failure at the ceiling extractor; the probe also demonstrates the exact data-destroying pathology the feature exists to fix"
+    }
+  },
+  "scope_note": "The product surface (store, tools, service, serving) passed all unit/integration gates and is untouched by this failure \u2014 it was never exercised by the bench because no op claims formed."
+}
