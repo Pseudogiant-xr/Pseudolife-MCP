@@ -615,3 +615,38 @@ def test_cortex_resolve_service_reports_slot_holds_set(tmp_service_dir):
     res = svc.cortex_resolve("user", "bikes owned", accept=True)
     assert res == {"resolved": False, "reason": "slot_holds_set",
                     "entity": "user", "attribute": "bikes owned"}
+
+
+# --- Task 5 review carry: the untested PG durability leg ------------------
+
+
+def test_set_add_remove_survive_pg_hydration_through_the_service(svc, pg_url):  # noqa: F811
+    """Task 4's PG coverage (``test_kind_survives_pg_hydration`` above) calls
+    ``svc._cortex.add_member`` directly and rehydrates a bare ``CortexStore``
+    — it never exercises ``svc.set_add``/``svc.set_remove`` themselves, so
+    the per-slot write-through those methods actually take on every write
+    (``_save_cortex`` -> ``sync.sync_cortex_slots`` ->
+    ``PostgresStorage.replace_slot_facts`` -> ``_txn``) — the exact path a
+    live ``memory_set_add``/``memory_set_remove`` MCP call uses — stayed
+    untested. Close that gap: two adds + one remove THROUGH THE SERVICE API
+    (each call persists on its own; no explicit ``svc.save()``), then
+    rehydrate a brand-new ``MemoryService`` against the same database and
+    read the slot back."""
+    import tempfile
+
+    from pseudolife_memory.service import MemoryService
+
+    svc.set_add("user", "bikes owned", "road bike")
+    svc.set_add("user", "bikes owned", "gravel bike")
+    svc.set_remove("user", "bikes owned", "road bike")
+
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
+        fresh = MemoryService(data_dir=d, database_url=pg_url)
+        try:
+            got = fresh.cortex_lookup("user", "bikes owned")
+            assert got["kind"] == "set"
+            assert [m["value"] for m in got["members"]] == ["gravel bike"]
+            assert [m["value"] for m in got["removed"]] == ["road bike"]
+        finally:
+            if fresh._storage is not None:
+                fresh._storage.close()

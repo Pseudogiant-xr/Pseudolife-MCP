@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-31 — MCP tools for set-valued cortex slots)
+- **`memory_set_add` / `memory_set_remove`** expose the Task 2–4 member
+  model on the MCP surface — add/confirm or retract one member of a
+  set-valued `(entity, attribute)` slot (many concurrent values, e.g.
+  tags, rather than one canonical NOW value). A scalar already at the slot
+  converts to a set one-way the first time `memory_set_add` targets it;
+  `memory_fact_set` against a slot already converted to a set now raises an
+  actionable error naming these two tools instead of the store's own
+  `add_member`/`remove_member` vocabulary. Both are minimal tier, alongside
+  `memory_fact_set`. Reads still go through `memory_fact_get`, which now
+  returns `{kind: "set", members, removed}` for a set slot and treats
+  `members: []` (every member removed) as empty — same as a scalar miss —
+  rather than as a found record. Covered by `tests/test_mcp_server.py` and
+  the Postgres persistence leg in
+  `tests/test_cortex_sets.py::test_set_add_remove_survive_pg_hydration_through_the_service`.
+
 ### Changed (2026-07-30 — schema v26: set-valued cortex slots, columns + index split)
 - **`facts.kind` (`scalar` | `member`, default `scalar`) and `facts.value_norm`
   columns added**, and the per-slot current-uniqueness constraint splits by
