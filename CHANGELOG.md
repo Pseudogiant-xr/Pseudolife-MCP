@@ -6,6 +6,37 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-30 — the ceiling table promoted onto the reproducible stack)
+
+- **The published local-ceiling table (README front door + benchmarks guide)
+  now shows `ceiling-v25`** — the 2026-07-29 re-judge of the same contexts on
+  stock `llama-server` + `q8_0` (3 byte-identical replicates, std 0.0000) —
+  in place of the v2 / TurboQuant figures, which move to a marked
+  **Superseded** block in the guide. This is the promotion the 0.11.0 entry
+  left pending. It is not a cell swap: the old stack was scoring the
+  verbatim-input control arm ~6 points low, so four narrative claims
+  measured against that control change with the cells —
+  - hybrid's margin over naive RAG: ~14 points → **~10 points**
+    (0.7308 vs 0.6282);
+  - "the fact spine alone matches RAG's accuracy" → cortex **trails RAG by
+    ~4 points** (0.5897 vs 0.6282);
+  - cortex's share of RAG's token budget: "under 8%" → **~11%**
+    (182.5 / 1637.8 tokens);
+  - hybrid's context share: ~64% → **~67%** (1101.8 / 1637.8).
+  Two things remain held fixed by the context rebuild and are stated under
+  the table: **extraction** (the 2026-07-19 bank dumps) and **raw-turn
+  selection** (the pre-v25 retriever picked the turns; BM25 is never
+  exercised) — only the cortex fact ranking runs under the v25 backbone.
+  The E4B-vs-ceiling sentence is re-scoped to the same-stack comparison it
+  always was (0.762 ± 0.027 vs 0.710 ± 0.019, both on the TurboQuant fork);
+  no cross-stack claim is made against the promoted 0.7308.
+  Evidence rows in `tests/test_eval_evidence.py` are repointed in the same
+  change: `ceiling-*` accuracy and token rows now check the `ceiling-v25`
+  artifacts, new `ceiling-hist-*` rows pin the retained historical block to
+  the v2 artifacts, and the README's token column is pinned for the first
+  time — unguarded, its hybrid cell had silently drifted to "~1000" against
+  an artifact saying 1043.3.
+
 ### Fixed (2026-07-29 — the translated front doors claimed a gate that does not exist)
 - **i18n source bumped to v6; all five translations re-synced.** The source
   said "a novelty-gated store drops near-duplicates", which is false at the
@@ -25,7 +56,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   looking at "v5" while the guard enforced v6. `tests/test_i18n_readme.py`
   now requires the source's `vN (YYYY-MM-DD)` stamp to appear in each
   translation — matched on the stamp rather than any one language's phrasing.
-
 
 ### Added (2026-07-29 — Dependabot told not to re-break the CPU-only image)
 
@@ -210,6 +240,8 @@ daemon, and re-embed offline with `ops/migrate_embeddings.py` — see
   about v25 — the clean same-stack v25 comparison is the regression gate
   below. The published tables are left as they stand pending a deliberate
   promotion; `ceiling-v25` is committed as the tagged candidate.
+  *[Superseded 2026-07-30: the promotion has landed — the README and guide
+  tables now publish `ceiling-v25`; see Unreleased.]*
 
 ### Fixed (2026-07-29 — a sixth file was coupled to the "five-file version cut")
 - **`tests/test_ops_update_rollback.py` derives the daemon version from

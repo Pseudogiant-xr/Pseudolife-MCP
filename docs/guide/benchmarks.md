@@ -4,13 +4,17 @@ What the memory actually buys, measured. Part of the
 [user guide](../../README.md#documentation); the full methodology and every
 finding live in [`evals/README.md`](../../evals/README.md).
 
-Every number on this page was measured on the **pre-v25 stack**: the 384-d
-MiniLM backbone, with the BM25 hybrid pool off. Both defaults have since
-changed — the backbone swapped at schema v25 and BM25 flipped on 2026-07-25
-— and the arms that read raw turns (naive RAG, hybrid) *select* those turns
-with the retriever that changed, whose measured R@10 moved 0.572 → 0.809.
-Read what follows as historical measurements of the design, not as what the
-shipped configuration scores today.
+Nearly every number on this page was measured on the **pre-v25 stack**: the
+384-d MiniLM backbone, with the BM25 hybrid pool off. Both defaults have
+since changed — the backbone swapped at schema v25 and BM25 flipped on
+2026-07-25 — and the arms that read raw turns (naive RAG, hybrid) *select*
+those turns with the retriever that changed, whose measured R@10 moved
+0.572 → 0.809. The exception is the headline ceiling table below, re-judged
+2026-07-29 on the current reproducible server with its fact ranking under
+the v25 backbone — though even there extraction and raw-turn selection are
+held at the pre-v25 run (see the note under the table). Read the rest as
+historical measurements of the design, not as what the shipped
+configuration scores today.
 
 ## LongMemEval — knowledge updates
 
@@ -21,8 +25,10 @@ for. Everything local: extraction, answering, and LLM-as-judge grading all
 run on the author's own hardware (judge = Qwen3.6-27B at temperature 0),
 so compare *within* the table, not against GPT-4o-judged leaderboards.
 
-> **Reading the numbers.** Accuracies below are single-run point
-> estimates unless marked mean ± std, and they were measured on a stack
+> **Reading the numbers.** Except for the ceiling table directly below
+> (re-judged 2026-07-29 on the reproducible stock server), accuracies on
+> this page are single-run point estimates unless marked mean ± std, and
+> they were measured on a stack
 > that **was not bit-reproducible**. Repeated runs of an *identical*
 > config varied by several points (observed spread: ~7.7 pp on the cortex
 > arm at n=78); that was long attributed to answerer/judge noise, and
@@ -39,32 +45,52 @@ so compare *within* the table, not against GPT-4o-judged leaderboards.
 > — see [Variance and replication](../../evals/README.md#variance-and-replication).
 
 On the oracle variant (evidence sessions only), with the local-ceiling
-extractor (5 replicates, 2026-07-19 context-persisted bank):
+extractor (`ceiling-v25`: 3 replicates on the reproducible stock server,
+byte-identical — std 0.0000; contexts rebuilt from the 2026-07-19
+context-persisted bank dumps):
+
+| arm | accuracy | context tokens/question |
+|-----|----------|------------------------|
+| naive RAG (top-6 turns) | 0.628 | 1638 |
+| cortex facts only | 0.590 | **~182** |
+| **hybrid (facts + top-3 turns)** | **0.731** | ~1102 |
+
+The consolidated-facts posture beats naive RAG by ~10 points while
+reading **~67%** of the context — and the fact spine alone trails RAG by
+only ~4 points on **~11% of its token budget**. Notably, the shipped E4B
+fine-tune's replicated hybrid (0.762 ± 0.027, table below) beat this
+ceiling's own-stack figure (0.710 ± 0.019, superseded table below) in the
+one comparison that is valid — same stack, both on the TurboQuant fork —
+so on knowledge updates the specialised small extractor at least keeps
+pace with generic bigger models. No cross-stack comparison against the
+0.731 above is made.
+
+> **Why this table was re-based (2026-07-29).** Its previous published
+> numbers (superseded table below) were judged on the TurboQuant fork.
+> Re-judging the *same* contexts on the reproducible stock server moved
+> the naive-RAG arm **+0.0615** — and that arm's context is copied
+> **verbatim** by `rebuild_contexts.py`, so on byte-identical input the
+> move is the answerer/judge stack alone. At 3.7× the old measurement's
+> own rag std that is a systematic offset, not variance: the old stack was
+> scoring this slice about six points low, and headline claims measured
+> against a mis-scored control were never really established. Two things
+> are still held fixed by the rebuild: **extraction** (the 2026-07-19
+> banks) and **raw-turn selection** (the pre-v25 retriever picked the
+> turns; BM25 is not exercised) — only the cortex fact ranking runs under
+> the v25 backbone. Compare numbers only within a stack; across stacks,
+> re-measure. Artifact:
+> `evals/results/longmemeval-ku-oracle-qwen-27b-ceiling-v25.agg.json`.
+
+**Superseded — the v2 / TurboQuant measurement** (5 replicates,
+2026-07-19 context-persisted bank; judged on the nondeterministic fork,
+~6 points low on the control arm — retained for the record, not
+comparable to the table above):
 
 | arm | accuracy (mean ± std) | context tokens/question |
 |-----|----------------------|------------------------|
 | naive RAG (top-6 turns) | 0.567 ± 0.017 | 1638 |
 | cortex facts only | 0.559 ± 0.029 | **~124** |
 | **hybrid (facts + top-3 turns)** | **0.710 ± 0.019** | ~1043 |
-
-The consolidated-facts posture beats naive RAG by ~14 points while
-reading **~64%** of the context — and the fact spine alone matches RAG's
-accuracy on **under 8% of its token budget**. Notably, the shipped E4B
-fine-tune's replicated hybrid (0.762 ± 0.027, table below) beats this
-27B ceiling — on knowledge updates, the specialised small extractor
-outperforms generic bigger models.
-
-> **These three numbers are stack-relative, and now measurably so.** The
-> table above was judged on the TurboQuant fork. Re-judging the *same*
-> contexts on the reproducible stock server (`ceiling-v25`, 3 replicates,
-> std 0.0000) gives rag **0.6282**, cortex **0.5897**, hybrid **0.7308** —
-> and the rag arm's context is copied **verbatim** by
-> `rebuild_contexts.py`, so its **+0.0615** is the serving stack alone, on
-> byte-identical input. At 3.7× this table's own rag std that is a
-> systematic offset, not variance, and it is larger than most effects
-> reported on this page. Compare numbers only within a stack; across stacks,
-> re-measure. Artifact:
-> `evals/results/longmemeval-ku-oracle-qwen-27b-ceiling-v25.agg.json`.
 
 ## Replicated results (2026-07-18)
 
@@ -96,7 +122,9 @@ confirmed*, and the hybrid arm shows no measurable benefit at all. The
 earlier single-run "+0.102" comparison overstated the effect. (The
 ceiling table above was renumbered 2026-07-19 from a fresh
 context-persisted 5-replicate run — its historical single-run
-predecessor, hybrid 0.705, landed inside the replicated band.)
+predecessor, hybrid 0.705, landed inside the replicated band — and
+re-based 2026-07-29 onto the reproducible server, hybrid 0.731, with
+the superseded TurboQuant figures retained above.)
 
 ## LongMemEval-V2 — agent trajectories and procedures
 
