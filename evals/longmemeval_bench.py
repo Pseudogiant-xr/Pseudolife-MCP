@@ -9,6 +9,10 @@ answer through three retrieval arms and judge with an LLM:
   * ``cortex`` — consolidated cortex facts + their supersession chains
   * ``hybrid`` — cortex facts + a small top-k of raw turns (the agent's view)
 
+Summaries additionally derive a ``cascade`` line from the judged rag/cortex
+arms (cortex answer when that arm commits, rag fallback on abstention) — a
+serving-policy metric, not a fourth answered arm; see ``replicate.py``.
+
 Model roles: the EXTRACTOR is the experiment variable (``--extractor``,
 floor = the shipped Gemma 4 E2B weights, ceiling = Qwen3.6-27B); the ANSWERER
 and JUDGE are always the Qwen endpoint so runs stay comparable. The rag arm
@@ -58,6 +62,7 @@ os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 from ladder_sweep import approx_tokens, build_service, probe  # noqa: E402
+from replicate import cascade_correct, cascade_context_tokens  # noqa: E402
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
@@ -413,9 +418,17 @@ def report(dataset: str, extractor_name: str, tag: str = "") -> None:
     print(f"{'arm':<10}{'accuracy':>10}{'ctx tok/q':>12}")
     summary = {"dataset": dataset, "extractor": extractor_name, "n": n,
                "arms": {}}
-    for arm in ARMS:
-        acc = sum(r[f"{arm}_correct"] for r in rows) / n
-        tok = sum(r[f"{arm}_context_tokens"] for r in rows) / n
+    for arm in ARMS + ("cascade",):
+        if arm == "cascade":
+            # Derived commit-gated cascade — cortex answer when that arm
+            # commits, rag fallback on abstention. Computed from the judged
+            # arms above; never persisted per-row, so old JSONLs report it
+            # retroactively on --report.
+            acc = sum(cascade_correct(r) for r in rows) / n
+            tok = sum(cascade_context_tokens(r) for r in rows) / n
+        else:
+            acc = sum(r[f"{arm}_correct"] for r in rows) / n
+            tok = sum(r[f"{arm}_context_tokens"] for r in rows) / n
         summary["arms"][arm] = {"accuracy": round(acc, 3),
                                 "context_tokens": round(tok, 1)}
         print(f"{arm:<10}{acc:>10.3f}{tok:>12.1f}")
