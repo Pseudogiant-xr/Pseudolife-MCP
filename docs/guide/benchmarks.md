@@ -44,6 +44,50 @@ so compare *within* the table, not against GPT-4o-judged leaderboards.
 > reinterpret; decision-grade comparisons use replicates and a paired test
 > — see [Variance and replication](../../evals/README.md#variance-and-replication).
 
+## End to end on the current stack — and the commit-gated cascade (2026-07-30)
+
+The freshest measurement runs the **whole current pipeline** — fresh
+qwen-27b extraction under the v25 embedding backbone, BM25-on turn
+retrieval, reproducible q8_0 serving (`ceiling-e2e`: 3 byte-identical
+replicates — std 0.0000). Oracle variant, 78 questions:
+
+| arm | accuracy | context tokens/question |
+|-----|----------|------------------------|
+| naive RAG (top-6 turns) | 0.859 | ~1237 |
+| cortex facts only | 0.667 | **~259** |
+| hybrid (facts + top-3 turns) | 0.833 | ~920 |
+| **commit-gated cascade** | **0.936** | ~702 |
+
+Two findings, stated plainly. First, the v25 retriever + BM25 lifted
+raw-turn selection so much (R@10 0.572 → 0.809) that the **concatenation
+hybrid no longer beats naive RAG on this slice** — mixing facts and turns
+in one prompt costs stale-fact overrides and extra abstentions. Second,
+the channels remain strongly complementary (their per-question union is
+0.949), and the **commit-gated cascade** captures almost all of it: serve
+the cortex answer when that channel *commits*, fall back to RAG when it
+says "I don't know". Routing uses only the response text — correctness is
+never consulted — so the policy is deployable as-is. The cascade is a
+*derived* metric (`replicate.py cascade_correct`) over the judged
+rag/cortex arms: same artifacts, no fourth answered arm.
+
+**Full-haystack confirmation (pre-registered).** On the `_s` haystacks
+(~50 sessions/question, tag `casc-q8`, reproducible server verified by
+process inspection), the cascade scores **0.462 vs 0.346** for naive RAG —
+delta **+0.115** at **p = 0.011** (paired permutation, 10,000 draws,
+seed 0) — with **commit precision 0.714** on a 14/78 commit rate. Honest
+scoping: the margin over the concatenation hybrid there (+0.064) is
+directional only (p = 0.18), so the decision-grade claim is
+cascade-vs-RAG; and the commit rate is low — raising it is the current
+retrieval workstream. Artifacts:
+`evals/results/longmemeval-ku-oracle-qwen-27b-ceiling-e2e.agg.json`,
+`evals/results/casc-q8-confirmation.json`.
+
+This table is **not comparable per-arm** to the held-fixed table below:
+it re-ran extraction and turn selection on the current stack, while the
+table below deliberately holds both at the 2026-07-19 configuration.
+
+## The held-fixed rebuild (`ceiling-v25`)
+
 On the oracle variant (evidence sessions only), with the local-ceiling
 extractor (`ceiling-v25`: 3 replicates on the reproducible stock server,
 byte-identical — std 0.0000; contexts rebuilt from the 2026-07-19
@@ -55,9 +99,15 @@ context-persisted bank dumps):
 | cortex facts only | 0.590 | **~182** |
 | **hybrid (facts + top-3 turns)** | **0.731** | ~1102 |
 
-The consolidated-facts posture beats naive RAG by ~10 points while
-reading **~67%** of the context — and the fact spine alone trails RAG by
-only ~4 points on **~11% of its token budget**. Notably, the shipped E4B
+Within this held-fixed frame the consolidated-facts posture beats naive
+RAG by ~10 points while reading **~67%** of the context — and the fact
+spine alone trails RAG by only ~4 points on **~11% of its token budget**.
+**Retired as a headline (2026-07-30):** on the current end-to-end stack
+(section above) the concatenation hybrid's margin over naive RAG does not
+survive the v25 retrieval upgrade; the commit-gated cascade is the
+posture that beats RAG there. This table remains valid for what it
+isolates — the serving-stack offset and cortex fact ranking under v25
+with 2026-07-19 extraction and turn selection. Notably, the shipped E4B
 fine-tune's replicated hybrid (0.762 ± 0.027, table below) beat this
 ceiling's own-stack figure (0.710 ± 0.019, superseded table below) in the
 one comparison that is valid — same stack, both on the TurboQuant fork —

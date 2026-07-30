@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-30 — front door re-based to the end-to-end run; cascade published)
+- **The README benchmark table now shows the fresh end-to-end measurement**
+  (`ceiling-e2e`: fresh qwen-27b extraction under the v25 backbone, BM25-on
+  turn retrieval, reproducible q8_0 serving, 3 byte-identical replicates) —
+  rag 0.859 / cortex 0.667 / hybrid 0.833 / **cascade 0.936** — replacing
+  the held-fixed `ceiling-v25` table, which stays in the benchmarks guide
+  with its narrative re-scoped: the concatenation hybrid's "~10 points over
+  naive RAG" does not survive the v25 retrieval upgrade end to end, and is
+  marked retired as a headline at that site. The published posture is now
+  the **commit-gated cascade**, with its pre-registered full-haystack
+  confirmation (cascade 0.462 vs rag 0.346, paired permutation p = 0.011,
+  commit precision 0.714) published alongside. All ten evidence artifacts
+  are committed in the same change (`ceiling-e2e` jsonl/summary ×3 + agg,
+  `casc-q8` jsonl/summary, `casc-q8-confirmation.json`) and pinned by new
+  rows in `tests/test_eval_evidence.py`; the honest limits — the vs-hybrid
+  margin on `_s` is directional only (p = 0.18), and the 14/78 commit rate
+  is the open retrieval workstream — are stated in the guide next to the
+  claim.
+
 ### Removed (2026-07-30 — dead-code sweep, verified zero production call sites)
 
 Every item below was confirmed unreachable before deletion: a whole-tree grep

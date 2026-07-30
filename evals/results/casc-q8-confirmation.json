@@ -1,0 +1,41 @@
+{
+  "preregistration": "memory 2026-07-30 casc-q8 (amended: n_replicates 3->2->1; server identity verified by process inspection instead of replicate agreement)",
+  "dataset": "s",
+  "extractor": "qwen-27b",
+  "tag": "casc-q8",
+  "n_questions": 78,
+  "serving_stack": {
+    "exe": "llama-server.exe (stock llama.cpp build; local path withheld)",
+    "kv": "q8_0/q8_0",
+    "pid": 72324,
+    "process_started": "2026-07-30T16:15:44",
+    "identity_check": "PID continuous across the full answer window; stock build path + q8_0 KV flags read from Win32_Process CommandLine"
+  },
+  "arm_means": {
+    "rag": 0.3462,
+    "cortex": 0.2051,
+    "hybrid": 0.3974,
+    "cascade": 0.4615
+  },
+  "commit_rate": 0.1795,
+  "commit_precision": 0.7143,
+  "paired_permutation": {
+    "cascade_vs_rag": {
+      "delta": 0.1154,
+      "p_value": 0.0112,
+      "n_questions": 78
+    },
+    "cascade_vs_hybrid": {
+      "delta": 0.0641,
+      "p_value": 0.18378,
+      "n_questions": 78
+    }
+  },
+  "criteria": {
+    "cascade_gt_rag": true,
+    "cascade_gt_hybrid": true,
+    "perm_p_vs_rag_lt_0.05": true,
+    "commit_precision_ge_0.7": true
+  },
+  "verdict": "PASS"
+}
