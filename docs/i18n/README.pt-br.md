@@ -1,8 +1,8 @@
-<!-- i18n-sync: v5 -->
+<!-- i18n-sync: v6 -->
 
 # Pseudolife-MCP
 
-[README original em inglês](../../README.md) — sincronizado: v5 (2026-07-19)
+[README original em inglês](../../README.md) — sincronizado: v6 (2026-07-29)
 
 **Memória de longo prazo persistente para Claude Code, Codex e outros clientes MCP.**
 
@@ -79,9 +79,8 @@ memória. Navegue por tudo no Cortex Console em `http://127.0.0.1:8765/ui/`.
 ## Como funciona
 
 O agente armazena uma afirmação de cada vez enquanto trabalha
-(`memory_store`, `memory_fact_set`); um armazenamento com filtro de
-novidade descarta quase-duplicatas. Entre sessões, o **sonho** destila o fluxo em fatos
-canônicos, relações de grafo e lições procedurais. No início de cada
+(`memory_store`, `memory_fact_set`). Entre sessões, o **sonho** destila o
+fluxo em fatos canônicos, relações de grafo e lições procedurais. No início de cada
 sessão, um briefing injeta o que a memória tem incerteza, lições de
 trabalhos anteriores e onde você parou. A recuperação combina busca
 semântica sobre as bandas de memória com o repositório de fatos
