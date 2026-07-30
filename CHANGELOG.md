@@ -6,6 +6,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-07-30 — a console switch that changed nothing, and the escape hatch it hid)
+
+- **`memory.show_superseded` retired; the real gate is now reachable as
+  `memory.hide_superseded`.** The console knob was a no-op in both
+  directions: `cms.retrieve` deliberately ignores `show_superseded`
+  (hard-filtering on supersession is what made a category query miss the
+  only entry naming the category), and the gate it *does* read —
+  `hide_superseded` — was never a declared `MemoryConfig` field, so
+  `load_config` dropped it from YAML and the console could not set it
+  either. The affordance documented in `cms.py` ("set
+  `config.hide_superseded = True` to restore the v0.7.2 filter") was
+  therefore reachable only by hand-assigning an attribute in Python.
+  `hide_superseded: bool = False` is now declared, parsed from
+  `memory.hide_superseded`, and registered as the console knob "Hide
+  superseded"; the dead field and its knob are gone. Old config files
+  carrying `memory.show_superseded` still load — the retired key is
+  ignored, which is exactly what it already did.
+- **Default retrieval behaviour is unchanged**: superseded entries stay
+  visible, downranked ×0.55, in both the dense and BM25 pools. That is
+  deliberate — they carry knowledge-update recall (LongMemEval KU) and are
+  what lets an answer describe a fact's history. Hiding them is a
+  debug/audit switch, now documented as such in
+  [`docs/guide/retrieval.md`](docs/guide/retrieval.md) and the defaults
+  list in [`docs/guide/configuration.md`](docs/guide/configuration.md).
+  `tests/test_superseded_visibility.py` pins the default, the gate in both
+  pools, the YAML parse, legacy-key tolerance, and the console-knob-to-gate
+  path end to end.
+
 ### Changed (2026-07-30 — the ceiling table promoted onto the reproducible stack)
 
 - **The published local-ceiling table (README front door + benchmarks guide)

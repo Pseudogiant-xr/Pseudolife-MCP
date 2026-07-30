@@ -68,10 +68,13 @@ KNOBS: list[dict[str, Any]] = [
      "help": "Base recency half-life at band depth 0 (doubles per depth). "
              "MCP build uses 1 day; chat used 1 hour. Only bites when the "
              "depth recency boost above is enabled."},
-    {"path": "memory.show_superseded", "group": "Retrieval",
-     "label": "Show superseded", "type": "bool", "default": False,
+    {"path": "memory.hide_superseded", "group": "Retrieval",
+     "label": "Hide superseded", "type": "bool", "default": False,
      "restart": False,
-     "help": "Surface entries flagged superseded in retrieval (debug/audit)."},
+     "help": "Drop entries flagged superseded from retrieval entirely "
+             "(the pre-v0.7.3 filter). Off by default: they surface "
+             "downranked so the agent can describe what a fact used to be. "
+             "Hiding costs knowledge-update recall — debug/audit only."},
     # ── Reranker / BM25 ────────────────────────────────────────────────────
     {"path": "memory.reranker.enabled", "group": "Reranker",
      "label": "Cross-encoder reranker", "type": "bool", "default": False,
