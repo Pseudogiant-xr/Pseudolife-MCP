@@ -136,8 +136,6 @@ class EmbeddingPipeline:
         self._cache_size = max(0, int(getattr(config, "cache_size", 0) or 0))
         self._cache: OrderedDict[tuple[str, bool], torch.Tensor] = OrderedDict()
         self._cache_lock = threading.Lock()
-        self.cache_hits = 0
-        self.cache_misses = 0
 
     @property
     def embedding_dim(self) -> int:
@@ -175,11 +173,9 @@ class EmbeddingPipeline:
                     cached = self._cache.get(key)
                     if cached is None:
                         misses.append(i)
-                        self.cache_misses += 1
                     else:
                         self._cache.move_to_end(key)
                         rows[i] = cached
-                        self.cache_hits += 1
         else:
             misses = list(range(len(texts)))
 

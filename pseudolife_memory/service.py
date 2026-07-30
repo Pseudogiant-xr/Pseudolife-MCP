@@ -40,8 +40,6 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 
-import torch
-
 from pseudolife_memory.memory.cms import ContinuumMemorySystem
 from pseudolife_memory.memory.consolidation import (
     Cluster,
@@ -52,20 +50,13 @@ from pseudolife_memory.memory.embedding import EmbeddingPipeline
 from pseudolife_memory.memory import freshness
 from pseudolife_memory.memory.reference_bank import ReferenceBank
 from pseudolife_memory.memory.reranker import CrossEncoderReranker
-from pseudolife_memory.memory.titans_memory import MemoryEntry, RetrievalResult
+from pseudolife_memory.memory.titans_memory import MemoryEntry
 from pseudolife_memory.memory.cortex import CortexStore
 from pseudolife_memory.memory.slots import Slot
 from pseudolife_memory.session_title import (
     GENERIC_TITLE_RE, derive_session_title)
 from pseudolife_memory.writer_context import resolve_writer_detailed
-from pseudolife_memory.utils.config import (
-    AppConfig,
-    ContextConfig,
-    EmbeddingConfig,
-    MemoryConfig,
-    ReferenceConfig,
-    load_config,
-)
+from pseudolife_memory.utils.config import AppConfig, load_config
 
 logger = logging.getLogger(__name__)
 
@@ -404,7 +395,6 @@ class MemoryService:
         self._hlc = HybridLogicalClock()  # write ordering authority (memory/hlc.py)
         # Default writer identity; the daemon overrides per-connection (v0.4 T4).
         self._writer_id = os.environ.get("PSEUDOLIFE_WRITER_ID") or "unknown"
-        self._last_user_query: str | None = None
         self._last_saved_fingerprint = None
         # Poison-pill guard for the dream: consecutive extraction-failure
         # counts per entry (db_id). In-memory only — a daemon restart resets
@@ -690,8 +680,9 @@ class MemoryService:
                 logger.warning("CMS load skipped: %s", exc)
 
         # (ContrastiveUpdater / ContextBuilder were constructed here for the
-        # legacy chat product but never called on any daemon path — removed
-        # in the 2026-07-02 zombie sweep; the modules remain for library use.)
+        # legacy chat product but never called on any daemon path — the
+        # construction went in the 2026-07-02 zombie sweep, the classes
+        # themselves in the 2026-07-30 dead-code sweep.)
 
         # Cortex — sibling slot-keyed canonical-fact store (schema v7).
         # Co-persisted next to memory_state; deliberately outside the
@@ -975,9 +966,6 @@ class MemoryService:
                 rerank=rerank,
                 bm25=bm25,
             )
-            # Stash the query so memory_supersede / contrastive flows have
-            # something to anchor against on the next call.
-            self._last_user_query = query
             from pseudolife_memory.memory.abstain import low_confidence
             return {
                 "query": query,
@@ -2537,17 +2525,6 @@ class MemoryService:
                 ],
             }
 
-    def extract_slots_regex(self, texts: list[str]) -> dict[str, Any]:
-        """Deterministic no-LLM claim-extraction floor (delegates to
-        ``RegexExtractor`` so the regex implementation lives in exactly one
-        place). The gateway dream uses this when the active model yields nothing
-        usable."""
-        from pseudolife_memory.memory.dream import RegexExtractor
-        claims = RegexExtractor().extract(list(texts or []), vocab=[])
-        return {"claims": [{"entity": c["entity"], "attribute": c["attribute"],
-                            "value": c["value"], "confidence": c["confidence"]}
-                           for c in claims]}
-
     def dream_commit(self, cursor: float) -> dict[str, Any]:
         """Advance the dream cursor (monotonic) and persist it with the cortex."""
         with self._lock:
@@ -2630,16 +2607,6 @@ class MemoryService:
             logger.warning("dream hint build failed (%s); using alphabetical "
                            "vocab, no facts window", exc)
             return self.cortex_vocab(vocab_limit).get("slots", []), []
-
-    def _dream_vocab(self, texts: list[str], limit: int = 120) -> list[str]:
-        """Relevance-ranked slot keys for the dream vocab hint: embed the
-        batch text and rank current slots by value-free slot-embedding cosine
-        (see ``CortexStore.vocab_ranked``). The prompt hint shows ~60 keys;
-        on a large bank the alphabetical head rarely contains the keys the
-        batch actually updates, so the extractor mints paraphrase variants
-        instead of superseding. Never raises — falls back to the alphabetical
-        list on any failure. (Vocab half of :meth:`_dream_hints`.)"""
-        return self._dream_hints(texts, vocab_limit=limit)[0]
 
     # Post-pass caps: screen at most this many freshly-minted entities per
     # cycle, one best-match proposal each — the queue stays reviewable.

@@ -22,8 +22,9 @@ Four detection paths are combined:
      a cat named Jacque") and the other describes a loss of that state
      ("I gave him away", "the cat died", "I sold it"). Fires when the two
      texts share at least one anchor token (a named entity, quoted value,
-     or content noun) and the cosine similarity is at least
-     ``STATE_TRANSITION_SIM_THRESHOLD`` = 0.35 — low, because state-change
+     or content noun) and the cosine similarity clears the floor for that
+     anchor's strength tier (``STATE_TRANSITION_SIM_THRESHOLD_SLOT`` = 0.15,
+     ``..._CONTENT`` / ``..._PRONOUN`` = 0.35) — low, because state-change
      statements are often terse and semantically distant from the original
      affirmation.
 
@@ -74,9 +75,6 @@ REPLACEMENT_TOKEN_OVERLAP_THRESHOLD = 0.50
 STATE_TRANSITION_SIM_THRESHOLD_SLOT = 0.15
 STATE_TRANSITION_SIM_THRESHOLD_CONTENT = 0.35
 STATE_TRANSITION_SIM_THRESHOLD_PRONOUN = 0.35
-# Backwards-compatible legacy threshold name. Callers/tests still reading
-# this get the most conservative floor.
-STATE_TRANSITION_SIM_THRESHOLD = STATE_TRANSITION_SIM_THRESHOLD_CONTENT
 # Minimum cosine similarity for a candidate to be sent to the NLI scorer.
 # Low enough to catch "upgraded to 5090" (no shared anchor) but high enough
 # to exclude truly unrelated entries.
@@ -199,8 +197,7 @@ def _slot_values(text: str) -> set[str]:
 
 
 # Cues that indicate the speaker has LOST possession / a relationship /
-# a state they previously had. Exported so context_builder.py can reuse
-# the list for conflict clustering without duplicating patterns.
+# a state they previously had.
 #
 # Most "V X away/out" patterns use ``.{0,40}`` between the verb and the
 # particle so phrasal forms like "gave the cat away" match alongside
@@ -348,22 +345,15 @@ def _has_pronoun_referent(text: str) -> bool:
     return bool(_REFERENT_PRONOUN_RE.search(text))
 
 
-def _shared_anchor(text_a: str, text_b: str) -> bool:
-    """Do two texts share a specific anchor — a named entity or content noun?
-
-    An anchor is either:
-      - a slot-value token (capitalised name, number, quoted string), or
-      - any shared non-stopword content token.
-
-    This is deliberately loose: even a single shared content word is enough
-    to tie a state-change statement ("I sold the car") to a specific prior
-    fact ("I have a blue car").
-    """
-    return _shared_anchor_kind(text_a, text_b) is not None
-
-
 def _shared_anchor_kind(text_a: str, text_b: str) -> str | None:
-    """Strength-tier version of :func:`_shared_anchor`.
+    """Do two texts share a specific anchor, and how strong is it?
+
+    An anchor is a slot-value token (capitalised name, number, quoted
+    string) or any shared non-stopword content token. Deliberately loose:
+    even a single shared content word is enough to tie a state-change
+    statement ("I sold the car") to a specific prior fact ("I have a blue
+    car") — the strength tier is what decides how much cosine similarity
+    the pair must then clear.
 
     Returns:
         * ``"slot"`` if the two texts share a slot-value token (a named
@@ -529,10 +519,10 @@ def detect_contradictions(
        :data:`REPLACEMENT_SIM_THRESHOLD` AND the texts share a topic frame
        (content-token Jaccard ≥ :data:`REPLACEMENT_TOKEN_OVERLAP_THRESHOLD`)
        but differ on at least one slot-value token.
-    3. **State-transition path** — cosine similarity ≥
-       :data:`STATE_TRANSITION_SIM_THRESHOLD` AND one text affirms possession
-       while the other reports a loss of that state, against a shared anchor
-       token (named entity or content noun).
+    3. **State-transition path** — cosine similarity ≥ the anchor-tier floor
+       picked by :func:`_state_transition_anchor_kind` AND one text affirms
+       possession while the other reports a loss of that state, against a
+       shared anchor token (named entity or content noun).
     4. **NLI path** (when *nli_scorer* is provided and available) — entries
        not flagged by paths 1–3, not superseded, cosine ≥ :data:`NLI_SIM_FLOOR`
        are scored in a single batched call. The top ``nli_candidate_cap``

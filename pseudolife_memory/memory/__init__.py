@@ -6,14 +6,12 @@ server so Claude can use the bank as a persistent cross-session memory.
 """
 
 from pseudolife_memory.memory.cms import ContinuumMemorySystem, SCHEMA_VERSION
-from pseudolife_memory.memory.context_builder import ContextBuilder
 from pseudolife_memory.memory.embedding import EmbeddingPipeline
 from pseudolife_memory.memory.reference_bank import ReferenceBank
 from pseudolife_memory.memory.titans_memory import MemoryEntry, RetrievalResult
 
 __all__ = [
     "ContinuumMemorySystem",
-    "ContextBuilder",
     "EmbeddingPipeline",
     "MemoryEntry",
     "ReferenceBank",

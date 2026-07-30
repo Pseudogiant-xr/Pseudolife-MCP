@@ -1,1 +1,1 @@
-"""Shared config + chunking utilities."""
+"""Shared config + IO utilities."""

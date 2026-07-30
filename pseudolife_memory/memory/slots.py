@@ -24,17 +24,14 @@ Output shape
     Slot(entity="Jacque", attribute="gender",   value="male")    # from "him"
     Slot(entity="Jacque", attribute="owned",    value="False")   # from "gave away"
 
-The CMS attaches these to ``MemoryEntry.slots`` (schema v4 additive).
-At retrieval time, slots across all surfaced entries are merged into a
-single fact sheet per entity and injected into the LLM context as a
-small structured block — see :func:`merge_slots_view`.
+The CMS attaches these to ``MemoryEntry.slots`` (schema v4 additive) and
+indexes them for slot-anchored retrieval and contradiction detection.
 """
 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
-from typing import Iterable
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
@@ -309,52 +306,3 @@ def extract_slots(
             slots.append(s)
 
     return slots
-
-
-def merge_slots_view(slot_lists: Iterable[Iterable[Slot]]) -> dict[str, dict[str, str]]:
-    """Merge slots from multiple entries into a per-entity fact sheet.
-
-    Later entries override earlier ones on the same ``(entity, attribute)``
-    key — so a "gender: female" from a v0.4.x assistant restatement gets
-    overridden by a v0.6 user "him" assertion, and the final ``owned``
-    flag reflects the most-recent state.
-
-    Negation polarity (``polarity="-"``) wins: ``owned`` flips to
-    ``False`` when any loss slot exists for the entity.
-    """
-    view: dict[str, dict[str, str]] = {}
-    for slots in slot_lists:
-        for s in slots:
-            ent = view.setdefault(s.entity, {})
-            if s.polarity == "-":
-                # Loss / negation always wins over a prior affirmation.
-                ent[s.attribute] = f"NOT {s.value}" if s.value else "False"
-            else:
-                ent[s.attribute] = s.value
-    return view
-
-
-def format_slots_for_context(
-    view: dict[str, dict[str, str]],
-    *,
-    max_entities: int = 8,
-) -> str:
-    """Format the merged view as a compact block for LLM-context injection.
-
-    Layout (markdown-y but token-cheap)::
-
-        Known facts:
-        - Jacque: type=cat, breed=Ragdoll, gender=male, owned=False
-        - my Subaru WRX: type=car, color=blue
-
-    Caps at ``max_entities`` (sorted by attribute count, descending) to
-    avoid blowing the prompt budget when the user has hundreds of memories.
-    """
-    if not view:
-        return ""
-    items = sorted(view.items(), key=lambda kv: -len(kv[1]))[:max_entities]
-    lines = ["Known facts:"]
-    for ent, attrs in items:
-        parts = ", ".join(f"{k}={v}" for k, v in sorted(attrs.items()))
-        lines.append(f"- {ent}: {parts}")
-    return "\n".join(lines)

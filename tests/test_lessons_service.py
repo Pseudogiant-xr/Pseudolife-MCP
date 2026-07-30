@@ -181,7 +181,6 @@ def test_cortex_write_valid_time_defaults_to_tx_time(svc):
 
 
 def test_lesson_forget(svc):
-    svc.synthesize_lessons(StubExtractor([_lesson()])) if False else None
     svc.record_outcome("t", "success", about="x")
     svc.synthesize_lessons(StubExtractor([_lesson(task="t", about="x")]))
     assert svc.lessons_dump()["count"] == 1

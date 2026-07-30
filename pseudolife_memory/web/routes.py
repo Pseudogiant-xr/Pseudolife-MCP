@@ -101,7 +101,8 @@ class ConsoleRoutes:
         svc = self.svc
 
         # ---- health / stats / overview ----
-        g("/api/health", lambda q, b: self._health())
+        # Liveness lives at the top-level ``/health`` (web/api.py); the
+        # ``_health()`` payload here rides inside ``/api/overview``.
         g("/api/stats", lambda q, b: svc.stats())
         g("/api/overview", lambda q, b: self._overview())
 
@@ -109,8 +110,6 @@ class ConsoleRoutes:
         g("/api/facts", lambda q, b: self._facts(_i(q, "limit", 500)))
         g("/api/facts/history",
           lambda q, b: svc.history(_s(q, "entity"), _s(q, "attribute")))
-        g("/api/facts/contenders",
-          lambda q, b: svc.cortex_contenders(_s(q, "entity"), _s(q, "attribute")))
         p("/api/facts/resolve", lambda q, b: svc.cortex_resolve(
             b["entity"], b["attribute"], bool(b.get("accept"))))
         # freshness_class threaded through (v23): this is the documented
@@ -177,7 +176,6 @@ class ConsoleRoutes:
 
         # ---- facets ----
         g("/api/sources", lambda q, b: svc.list_sources())
-        g("/api/tags", lambda q, b: svc.list_tags())
 
         # ---- graph ----
         g("/api/graph", lambda q, b: svc.graph_neighborhood(

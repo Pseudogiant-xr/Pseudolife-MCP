@@ -134,7 +134,7 @@ class PostgresStorage:
     def __init__(self, dsn: str) -> None:
         self.dsn = dsn
         self._conn = self._connect()
-        self.capabilities = ensure_schema(self._conn)
+        ensure_schema(self._conn)
         register_vector(self._conn)
         self._seed_relations()
 

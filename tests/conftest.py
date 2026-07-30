@@ -149,5 +149,4 @@ def pristine_service(warm_service: MemoryService) -> MemoryService:
             warm_service._reference.clear()
         except Exception:  # noqa: BLE001 — chromadb may complain on empty.
             pass
-    warm_service._last_user_query = None
     return warm_service

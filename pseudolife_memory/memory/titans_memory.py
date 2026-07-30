@@ -32,10 +32,11 @@ class MemoryEntry:
     current facts (see ``ContinuumMemorySystem.retrieve``).
 
     ``last_logical_turn`` is stamped by the CMS at store time when a
-    logical turn is open (see :meth:`ContinuumMemorySystem.begin_logical_turn`).
-    Used by the ``min_logical_turn=`` retrieval filter for "what changed
-    this session" queries.  ``None`` for entries created outside a logical
-    turn (v0.5.x chat flow falls into this case).
+    logical turn is open, and read by the ``min_logical_turn=`` retrieval
+    filter for "what changed this session" queries. ``None`` for entries
+    created outside a logical turn — which, since the turn-opening methods
+    were removed as uncalled (see ``_in_logical_turn`` in ``cms.py``), is
+    currently every entry.
 
     ``superseded_by_text`` (schema v5, v0.7.6) records the text of the
     memory that triggered this entry's supersession — populated by
