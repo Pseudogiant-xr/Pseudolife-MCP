@@ -650,3 +650,31 @@ def test_set_add_remove_survive_pg_hydration_through_the_service(svc, pg_url):  
         finally:
             if fresh._storage is not None:
                 fresh._storage.close()
+
+
+def test_set_add_alone_survives_pg_hydration_through_the_service(svc, pg_url):  # noqa: F811
+    """Review finding on the test above: it calls set_add TWICE then
+    set_remove ONCE, so it does not actually pin set_add's own
+    ``_save_cortex()`` call — ``dirty_slots`` is slot-keyed, not
+    call-keyed, so the later set_remove's flush would carry an earlier
+    set_add's dirty mark along for free even if set_add never called
+    ``_save_cortex`` itself (verified empirically: commenting out just
+    set_add's ``_save_cortex()`` left the test above green). Pin set_add's
+    own write-through in isolation: ONE add, no other write of any kind on
+    this service, then rehydrate a fresh service and assert the member
+    survived."""
+    import tempfile
+
+    from pseudolife_memory.service import MemoryService
+
+    svc.set_add("user", "bikes owned", "road bike")
+
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
+        fresh = MemoryService(data_dir=d, database_url=pg_url)
+        try:
+            got = fresh.cortex_lookup("user", "bikes owned")
+            assert got is not None and got["kind"] == "set"
+            assert [m["value"] for m in got["members"]] == ["road bike"]
+        finally:
+            if fresh._storage is not None:
+                fresh._storage.close()
