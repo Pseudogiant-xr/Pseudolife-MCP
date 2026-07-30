@@ -568,8 +568,6 @@ def _load_results() -> dict[str, dict]:
 def report() -> None:
     res = _load_results()
     naive = res.get("naive-rag")
-    cols = ("gold_recoverable", "stale_leak", "tokens_per_query",
-            "search_latency_ms", "extract_seconds")
     hdr = f"{'rung':<28}{'gold↑':>8}{'stale↓':>8}{'tok/q↓':>9}{'lat ms':>8}{'extract s':>11}  status"
     print("\n" + hdr)
     print("-" * len(hdr))

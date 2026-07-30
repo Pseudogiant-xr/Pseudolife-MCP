@@ -51,42 +51,6 @@ class EmbeddingConfig:
 
 
 @dataclass
-class MemoryBankConfig:
-    max_patterns: int = 5000
-    beta: float = 4.0
-    consolidation_interval: int = 1  # 1 = every interaction (fast bank default)
-
-
-@dataclass
-class TitansConfig:
-    """Legacy flat TITANS configuration (v0.4.x).
-
-    Kept around so existing ``config.yaml`` files with a ``memory.titans``
-    block keep loading. New code should construct a :class:`MIRASConfig`
-    instead — when ``preset = "titans"``, the resulting band specs
-    reproduce these defaults exactly.
-    """
-    # Instant bank (updated every message)
-    instant_hidden_dim: int = 512
-    instant_max_entries: int = 2000
-    instant_lr: float = 0.01
-
-    # Short-term bank (updated every N messages)
-    short_term_hidden_dim: int = 512
-    short_term_max_entries: int = 5000
-    short_term_lr: float = 0.001
-    short_term_interval: int = 5
-
-    # Long-term bank (updated every M messages)
-    long_term_hidden_dim: int = 768
-    long_term_max_entries: int = 10000
-    long_term_lr: float = 0.0001
-    long_term_interval: int = 20
-
-    weight_decay: float = 0.001
-
-
-@dataclass
 class MIRASBandSpec:
     """Per-band configuration along the four MIRAS axes plus capacity / cadence.
 
@@ -255,47 +219,6 @@ class RerankerConfig:
 
 
 @dataclass
-class ContrastiveConfig:
-    """Contrastive retrieval objective (Slice F, v0.7.6).
-
-    When the user signals dissatisfaction with a recall ("no, that's
-    wrong", "are you sure", "I never said that"), suppress the top-1
-    retrieval against the *previous* user query and apply a small
-    negated gradient step to the owning band so similar patterns rank
-    lower in future retrieval.
-
-    Cost: one extra retrieval + one negated gradient step per fire.
-    Disabled by default off → on makes the system actively learn from
-    negative feedback; verify behaviour with the audit log
-    (``source="correction"`` markers in ``/api/memory/search``) before
-    relying on it in production.
-    """
-    enabled: bool = True
-    min_target_score: float = 0.35
-    scale: float = 0.1
-    max_targets_per_signal: int = 1  # only the top-1 in v0.7.6
-
-
-@dataclass
-class ReflectionConfig:
-    """Periodic reflection / dreaming (Slice D, v0.7.6).
-
-    Every ``reflect_every_n_interactions`` stores, sample the most recent
-    ``reflect_window`` user-sourced memories and ask the LLM to distil
-    them into 1-3 short factual sentences. Stored via the CMS pipeline
-    with ``source="reflection"``.
-
-    Cost: one extra LLM call per N stores, max_tokens-bounded, runs on
-    a daemon thread so chat latency is unaffected.
-    """
-    enabled: bool = True
-    reflect_every_n_interactions: int = 50
-    reflect_window: int = 30
-    max_tokens: int = 200
-    timeout_seconds: float = 10.0
-
-
-@dataclass
 class DreamConfig:
     """Dream pass — MIRAS→cortex consolidation (pluggable extractor).
 
@@ -363,7 +286,6 @@ class DreamConfig:
     # are dream-inferred, so a modest confidence below explicit graph_relate (0.8)
     # and lessons (0.7).
     extract_relations: bool = True
-    relation_confidence: float = 0.6  # legacy default; superseded by edge_confidence()
     # Edges scoring below this at link time are dropped. Hard type-violations
     # score 0.1125-0.175 (relation_quality.edge_confidence), so 0.2 auto-drops
     # them at the source instead of leaving them for deep-dream cleanup.
@@ -594,18 +516,10 @@ class RecallConfig:
 @dataclass
 class MemoryConfig:
     embedding_dim: int = 384
-    # Legacy Hopfield config (kept for fallback)
-    fast_bank: MemoryBankConfig = field(default_factory=lambda: MemoryBankConfig(
-        max_patterns=5000, beta=4.0, consolidation_interval=1,
-    ))
-    slow_bank: MemoryBankConfig = field(default_factory=lambda: MemoryBankConfig(
-        max_patterns=10000, beta=2.0, consolidation_interval=10,
-    ))
-    # Legacy flat TITANS config — kept for backwards compat (v0.4.x YAML still loads).
-    titans: TitansConfig = field(default_factory=TitansConfig)
-    # MIRAS (v0.5+) — preset-driven per-band specification. Default ``titans``
-    # preset reproduces ``TitansConfig`` defaults bit-for-bit so behaviour is
-    # unchanged for anyone who doesn't opt into a different preset.
+    # MIRAS (v0.5+) — preset-driven per-band specification. The default
+    # ``titans`` preset reproduces the v0.4.x flat TITANS band defaults
+    # bit-for-bit, so behaviour is unchanged for anyone who doesn't opt into
+    # a different preset.
     miras: MIRASConfig = field(default_factory=MIRASConfig)
     # Reference bank (RAG via ChromaDB)
     reference: ReferenceConfig = field(default_factory=ReferenceConfig)
@@ -615,15 +529,10 @@ class MemoryConfig:
     bm25: BM25Config = field(default_factory=BM25Config)
     # Cross-encoder reranker over the merged retrieval pool (Tier B).
     reranker: RerankerConfig = field(default_factory=RerankerConfig)
-    # HyDE-lite query expansion (Slice E, v0.7.6).
-    # Periodic reflection / dreaming (Slice D, v0.7.6).
-    reflection: ReflectionConfig = field(default_factory=ReflectionConfig)
     # Dream pass — MIRAS→cortex consolidation (pluggable extractor).
     dream: DreamConfig = field(default_factory=DreamConfig)
     # Manual full-corpus graph consolidation (deep dream, Phase-2 'C').
     deep_dream: DeepDreamConfig = field(default_factory=DeepDreamConfig)
-    # Contrastive retrieval objective (Slice F, v0.7.6).
-    contrastive: ContrastiveConfig = field(default_factory=ContrastiveConfig)
     # Cortex — sibling slot-keyed canonical-fact store (schema v7).
     cortex: CortexConfig = field(default_factory=CortexConfig)
     # Procedural / outcome memory — lessons store (schema v10).
@@ -650,7 +559,6 @@ class MemoryConfig:
     # up to 18 points on the LongMemEval naive-RAG arm. Flip to True to
     # restore the pre-2026-07-25 ranking.
     recency_boost_enabled: bool = False
-    memory_engine: str = "titans"  # "titans" or "hopfield"
     # v0.5 store gate is novelty-based (1 - max cos to existing entries). 0.0 =
     # permissive (store everything; novelty still scores eviction/promotion);
     # raise to dedup near-duplicate stores.
@@ -677,13 +585,6 @@ class MemoryConfig:
 @dataclass
 class ContextConfig:
     max_memory_tokens: int = 2000
-    history_length: int = 10
-
-
-@dataclass
-class ChunkingConfig:
-    chunk_size: int = 512
-    chunk_overlap: int = 64
 
 
 @dataclass
@@ -716,7 +617,6 @@ class AppConfig:
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     context: ContextConfig = field(default_factory=ContextConfig)
-    chunking: ChunkingConfig = field(default_factory=ChunkingConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)
     time: TimeConfig = field(default_factory=TimeConfig)
 
@@ -758,7 +658,6 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
         mem_raw = raw["memory"]
         config.memory = MemoryConfig(
             embedding_dim=mem_raw.get("embedding_dim", 384),
-            memory_engine=mem_raw.get("memory_engine", "titans"),
             surprise_threshold=mem_raw.get("surprise_threshold", 0.3),
             top_k=mem_raw.get("top_k", 8),
             ref_top_k=mem_raw.get("ref_top_k", 3),
@@ -768,12 +667,6 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             recency_base_half_life_s=mem_raw.get("recency_base_half_life_s", 3600.0),
             recency_boost_enabled=mem_raw.get("recency_boost_enabled", False),
         )
-        if "fast_bank" in mem_raw:
-            config.memory.fast_bank = _dict_to_dataclass(MemoryBankConfig, mem_raw["fast_bank"])
-        if "slow_bank" in mem_raw:
-            config.memory.slow_bank = _dict_to_dataclass(MemoryBankConfig, mem_raw["slow_bank"])
-        if "titans" in mem_raw:
-            config.memory.titans = _dict_to_dataclass(TitansConfig, mem_raw["titans"])
         if "miras" in mem_raw:
             miras_raw = mem_raw["miras"]
             # ``bands`` is a list of dicts → list of :class:`MIRASBandSpec`.
@@ -796,14 +689,6 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
         if "reranker" in mem_raw:
             config.memory.reranker = _dict_to_dataclass(
                 RerankerConfig, mem_raw["reranker"],
-            )
-        if "reflection" in mem_raw:
-            config.memory.reflection = _dict_to_dataclass(
-                ReflectionConfig, mem_raw["reflection"],
-            )
-        if "contrastive" in mem_raw:
-            config.memory.contrastive = _dict_to_dataclass(
-                ContrastiveConfig, mem_raw["contrastive"],
             )
         if "cortex" in mem_raw:
             config.memory.cortex = _dict_to_dataclass(CortexConfig, mem_raw["cortex"])
@@ -841,8 +726,6 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             )
     if "context" in raw:
         config.context = _dict_to_dataclass(ContextConfig, raw["context"])
-    if "chunking" in raw:
-        config.chunking = _dict_to_dataclass(ChunkingConfig, raw["chunking"])
     if "storage" in raw:
         config.storage = _dict_to_dataclass(StorageConfig, raw["storage"])
     if "time" in raw:

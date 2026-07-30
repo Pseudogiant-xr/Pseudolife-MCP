@@ -237,23 +237,6 @@ class ReferenceBank:
         docs = sorted(source_map.values(), key=lambda d: d["uploaded_at"], reverse=True)
         return docs
 
-    def delete_document(self, source: str) -> bool:
-        """Delete all chunks from a specific source document."""
-        if self._collection.count() == 0:
-            return False
-
-        # Find IDs with matching source
-        all_data = self._collection.get(include=["metadatas"])
-        ids_to_delete = []
-        for id_, meta in zip(all_data["ids"], all_data["metadatas"] or []):
-            if meta.get("source") == source:
-                ids_to_delete.append(id_)
-
-        if ids_to_delete:
-            self._collection.delete(ids=ids_to_delete)
-            return True
-        return False
-
     def clear(self) -> None:
         """Delete all entries from the collection."""
         if self._collection.count() > 0:

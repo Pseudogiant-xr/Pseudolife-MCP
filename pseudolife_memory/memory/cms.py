@@ -156,8 +156,8 @@ class ContinuumMemorySystem:
 
         # ── Construct the N-band chain from the MIRAS config ──────────────────
         # The default ``titans`` preset produces 3 bands with the same shapes
-        # as the v0.4.x ``TitansConfig`` defaults, so behaviour is unchanged
-        # for users who don't opt into a different preset.
+        # as the v0.4.x flat TITANS defaults, so behaviour is unchanged for
+        # users who don't opt into a different preset.
         _retention_boost = getattr(getattr(config, "traces", None),
                                    "retention_boost", 0.0)
         self.bands: list[MIRASBand] = [
@@ -190,15 +190,20 @@ class ContinuumMemorySystem:
         self._interaction_count = 0
 
         # Logical-turn counter — separate from ``_interaction_count`` (which
-        # ticks per :meth:`store`) so agentic deployments that emit many
+        # ticks per :meth:`store`) so an agentic deployment that emits many
         # bookkeeping stores per logical turn (tool_call + tool_result +
-        # llm_thinking + agent_action per agent step) don't blow through six
-        # tiers of consolidation in a single user-facing turn.  When the
-        # caller wraps each logical turn in
-        # :meth:`begin_logical_turn` / :meth:`end_logical_turn`,
-        # consolidation runs only on logical boundaries.  When the caller
-        # doesn't (e.g. v0.5.x chat flow), the original per-store
-        # consolidation in :meth:`store` keeps working unchanged.
+        # llm_thinking + agent_action per agent step) could consolidate on
+        # logical boundaries instead of blowing through six tiers in one
+        # user-facing turn.
+        #
+        # DORMANT since the 2026-07-30 dead-code sweep: the
+        # ``begin_logical_turn`` / ``end_logical_turn`` methods that opened a
+        # turn had no callers and were removed, so nothing sets the flag and
+        # the counter never advances. The rest of the seam is deliberately
+        # intact — ``logical_turn_count`` rides the persisted state (pinned by
+        # tests/test_schema_v6.py), ``last_logical_turn`` is a live column in
+        # storage/schema.py, and ``retrieve(min_logical_turn=...)`` still
+        # filters on it. Re-adding the two setters re-activates the feature.
         self._logical_turn_count = 0
         self._in_logical_turn = False
 
@@ -430,41 +435,13 @@ class ContinuumMemorySystem:
         self._interaction_count += 1
 
         # ── Walk the promotion chain (band[i] → band[i+1]) ────────────────────
-        # When the caller has wrapped the agent step in
-        # :meth:`begin_logical_turn` / :meth:`end_logical_turn`, defer the
-        # consolidation to ``end_logical_turn`` so an agentic step that emits
-        # many bookkeeping stores doesn't blow through six tiers in one go.
-        # Otherwise fall back to the v0.5.x per-store consolidation cadence so
-        # the chat flow that doesn't know about logical turns keeps working.
+        # Per-store consolidation cadence. The logical-turn branch is dormant
+        # (see ``_in_logical_turn`` in __init__): with no way to open a turn,
+        # this guard is always taken.
         if not self._in_logical_turn:
             self._consolidate_eligible(self._interaction_count)
 
         return True, overall_surprise
-
-    # ------------------------------------------------------------------
-    # Logical-turn API — agentic-friendly consolidation cadence
-    # ------------------------------------------------------------------
-
-    def begin_logical_turn(self) -> None:
-        """Mark the start of a logical turn (one user message / agent step).
-
-        While a logical turn is open, :meth:`store` defers consolidation —
-        an agent doing 30 tool calls within one user turn shouldn't trigger
-        consolidation 30 times. Pair every call to ``begin_logical_turn``
-        with one to :meth:`end_logical_turn`.
-        """
-        self._in_logical_turn = True
-
-    def end_logical_turn(self) -> None:
-        """Close the logical turn and run any eligible consolidations.
-
-        Promotion eligibility is keyed off the *logical-turn* counter so
-        each destination band fires every ``update_interval`` logical turns,
-        not every ``update_interval`` raw stores.
-        """
-        self._logical_turn_count += 1
-        self._consolidate_eligible(self._logical_turn_count)
-        self._in_logical_turn = False
 
     def _consolidate_eligible(self, counter: int) -> None:
         """Walk the promotion chain, firing each tier whose interval is hit."""
@@ -1225,29 +1202,6 @@ class ContinuumMemorySystem:
         candidates.sort(key=lambda x: x[1], reverse=True)
         return candidates[:k]
 
-    def slot_view_for_entries(
-        self, entries: "list[MemoryEntry]",
-    ) -> "dict[str, dict[str, str]]":
-        """Merge slot triples from a list of entries into a per-entity view.
-
-        Used by the context builder at chat time to inject a structured
-        fact sheet alongside the prose-retrieved memories. Newer entries
-        override older ones on the same ``(entity, attribute)``; loss /
-        negation polarity wins.
-        """
-        from pseudolife_memory.memory.slots import Slot, merge_slots_view  # noqa: PLC0415
-
-        # Sort by timestamp ascending so later entries override earlier
-        # ones during the merge.
-        ordered = sorted(entries, key=lambda e: e.timestamp)
-        slot_lists: list[list[Slot]] = []
-        for e in ordered:
-            slot_lists.append([
-                Slot(entity=t[0], attribute=t[1], value=t[2], polarity=t[3])
-                for t in (e.slots or [])
-            ])
-        return merge_slots_view(slot_lists)
-
     # ------------------------------------------------------------------
     # In-memory sync helpers
     # ------------------------------------------------------------------
@@ -1933,41 +1887,6 @@ class ContinuumMemorySystem:
             result["reference_bank_size"] = 0
             result["reference_document_count"] = 0
         return result
-
-    def introspection(self) -> dict:
-        """Detailed introspection data for visualisation."""
-        bank_health = {}
-        for band in self.bands:
-            history = self._surprise_history.get(band.name, [])
-            avg_surprise = sum(history) / len(history) if history else 0.0
-            bank_health[band.name] = {
-                "avg_surprise": round(avg_surprise, 3),
-                "entry_count": band.size,
-                "surprise_ema": round(band.surprise_ema, 3),
-            }
-
-        timeline = []
-        for band in self.bands:
-            recent = sorted(band.entries, key=lambda e: e.timestamp, reverse=True)[:20]
-            for entry in recent:
-                timeline.append({
-                    "text_preview": entry.text[:80] + ("..." if len(entry.text) > 80 else ""),
-                    "bank": band.name,
-                    "surprise": round(entry.surprise_score, 3),
-                    "timestamp": entry.timestamp,
-                    "source": entry.source,
-                })
-        timeline.sort(key=lambda x: x["timestamp"], reverse=True)
-        timeline = timeline[:50]
-
-        return {
-            "surprise_history": self._surprise_history,
-            "bank_health": bank_health,
-            "consolidation_events": self._consolidation_events[-20:],
-            "memory_timeline": timeline,
-            "interaction_count": self._interaction_count,
-            "preset": self.config.miras.preset,
-        }
 
 
 def _recency_weight(timestamp: float, half_life: float = 3600.0) -> float:

@@ -9,34 +9,17 @@ existing PostgresStorage edge methods + the NetworkX derivation in
 """
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Any
 
 from pseudolife_memory.graph import build_subgraph
 
 
-class GraphStore(Protocol):
-    def upsert_edge(self, src_id: int, relation: str, dst_id: int, *,
-                    confidence: float = 0.8, origin: str | None = None,
-                    revive: bool = True) -> dict: ...
-
-    def supersede_edge(self, src_id: int, relation: str, dst_id: int) -> bool: ...
-
-    def bless_edge(self, src_id: int, relation: str, dst_id: int, *,
-                   confidence: float = 0.8) -> bool: ...
-
-    def load_relations(self) -> list[dict]: ...
-
-    def upsert_relation(self, name: str, description: str, *,
-                        src_type: str | None = None, dst_type: str | None = None,
-                        transitive: bool = False,
-                        inverse_of: str | None = None) -> None: ...
-
-    def subgraph(self, root_id: int, *, depth: int = 1,
-                 to_id: int | None = None) -> dict: ...
-
-
 class PostgresNetworkxGraphStore:
-    """Default GraphStore: Postgres edge tables + NetworkX derive-on-read."""
+    """Default GraphStore: Postgres edge tables + NetworkX derive-on-read.
+
+    The port's contract is behavioural, not a Protocol: ``tests/test_graph_store.py``
+    is backend-agnostic and any future backend must pass it unchanged.
+    """
 
     def __init__(self, storage) -> None:
         self._st = storage

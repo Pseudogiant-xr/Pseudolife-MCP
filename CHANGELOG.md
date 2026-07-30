@@ -6,6 +6,76 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Removed (2026-07-30 — dead-code sweep, verified zero production call sites)
+
+Every item below was confirmed unreachable before deletion: a whole-tree grep
+per symbol (code, tests, evals, ops, docs, and the console's static JS), on top
+of the mechanical pass that surfaced it. Nothing here changes behaviour except
+the three REST endpoints, which had no caller in the console or anywhere else.
+
+- **Three unused REST endpoints, `pseudolife_memory/web/routes.py`.**
+  `GET /api/health` (a duplicate of the top-level `/health` liveness probe in
+  `web/api.py`; the same `_health()` payload still rides inside
+  `/api/overview`), `GET /api/tags`, and `GET /api/facts/contenders`. No
+  reference in `pseudolife_memory/web/static/`, no test, no ops script — the
+  console reads tags via `/api/overview` and contenders via the
+  `memory_fact_get` MCP tool. The service methods behind two of them stay
+  (`list_tags` backs `/api/overview`; `cortex_contenders` backs
+  `mcp_server.py`); only the route registrations are gone.
+- **`pseudolife_memory/utils/chunking.py` deleted** — `sliding_window_chunks`
+  / `sentence_chunks` / `TextChunk` had no importer anywhere. The chunker the
+  reference bank actually uses is `reference_bank._chunk_text`;
+  `ReferenceConfig.chunk_size` / `chunk_overlap` feed *that* and are untouched.
+- **`ContextBuilder` + `SYSTEM_PROMPT_TEMPLATE` and their private helpers
+  removed from `memory/context_builder.py`** (with the `memory/__init__.py`
+  re-export that was their only reference). Desktop-app legacy: the MCP server
+  returns raw entries and the client builds its own context. `_relative_time`
+  survives — `service.py` stamps cortex records with it.
+- **Five config dataclasses and their loader wiring, `utils/config.py`** —
+  `MemoryBankConfig` (`memory.fast_bank` / `slow_bank`), `TitansConfig`
+  (`memory.titans`), `ContrastiveConfig` (`memory.contrastive`),
+  `ReflectionConfig` (`memory.reflection`), `ChunkingConfig`
+  (`AppConfig.chunking`); plus the scalars `MemoryConfig.memory_engine`,
+  `DreamConfig.relation_confidence` (its own comment already said
+  `edge_confidence()` superseded it), and `ContextConfig.history_length`.
+  **Not a breaking config change:** `_dict_to_dataclass` filters to known
+  field names and `load_config` reads each section through an explicit
+  `if "x" in raw` gate, so unknown keys have always been ignored rather than
+  rejected. Verified by loading a v0.4.x-era `config.yaml` carrying every
+  removed section: it parses with no error and the live keys beside them are
+  still honoured. `TitansConfig`'s docstring claimed it existed to keep such
+  files loading; that was never what made them load.
+- **Uncalled methods.** `ContinuumMemorySystem.begin_logical_turn` /
+  `end_logical_turn` / `slot_view_for_entries` / `introspection` (`memory/cms.py`);
+  `MemoryService.extract_slots_regex` (the gateway dream calls `RegexExtractor`
+  directly) and `MemoryService._dream_vocab` (a one-line wrapper over
+  `_dream_hints`); `ReferenceBank.delete_document`; `slots.format_slots_for_context`
+  and `slots.merge_slots_view` (the latter orphaned by `slot_view_for_entries`
+  going); `contradiction._shared_anchor` (a thin wrapper over
+  `_shared_anchor_kind`) and the `STATE_TRANSITION_SIM_THRESHOLD` back-compat
+  alias, whose three tier-specific floors are what the code reads.
+  **Note:** removing the two `*_logical_turn` methods leaves the rest of that
+  seam dormant but intact — `last_logical_turn` is still a live column in
+  `storage/schema.py` and `retrieve(min_logical_turn=...)` still filters on
+  it, so re-adding the two setters re-activates the feature. `cms.py` now says
+  so at `_in_logical_turn`.
+- **`GraphStore` Protocol removed from `memory/graph_store.py`** — nothing
+  annotated against it; the port's real contract is the backend-agnostic suite
+  in `tests/test_graph_store.py`, which `PostgresNetworkxGraphStore` (alive,
+  constructed in `service.py`) still passes.
+- **Write-only attributes.** `EmbeddingPipeline.cache_hits` / `cache_misses`
+  (incremented on every cache probe, never read — the counters were not
+  reported anywhere), `MemoryService._last_user_query`, and
+  `PostgresStorage.capabilities` (`ensure_schema` is still called for its side
+  effect; only the unread assignment is gone).
+- **Unused imports and residue.** `torch`, `RetrievalResult`, and four config
+  classes in `service.py`; `dataclasses.field` in `episodes.py` / `slots.py` /
+  `world_cortex.py`; `sys` / `time` / `teacher_extract` / `MIRASBand` across
+  four `evals/` scripts; a dead `cols` local in `evals/ladder_sweep.py`; an
+  `... if False else None` no-op in `tests/test_lessons_service.py`; and the
+  orphaned `evals/lme_v2_check1_client.py`, superseded by
+  `evals/lme_v2_check_fixd.py`.
+
 ### Added (2026-07-30 — the eval harness reports the commit-gated cascade)
 - **`cascade` derived metric across the LongMemEval tooling.** Every judged
   run already answers the `cortex` and `rag` arms, and per-question analysis
@@ -1644,6 +1714,13 @@ either channel alone in every replicate).
   claim but is **not** dead — `service.py` imports its `_relative_time`
   helper and `pseudolife_memory/memory/__init__.py` re-exports
   `ContextBuilder` — so it was kept.
+  **Superseded 2026-07-30** (see the `[Unreleased]` dead-code sweep): both
+  claims in the two paragraphs above were wrong or have since lapsed.
+  `ContrastiveConfig` had **no** consumers — deleting `contrastive.py` took
+  the last one, and nothing re-read the config dataclass; it is now removed.
+  `ContextBuilder` was kept on the strength of a re-export that was itself
+  the only reference — the class is now removed and only `_relative_time`
+  survives in `context_builder.py`.
 - **`pseudolife_memory/memory/miras/retention.py` docstrings corrected** —
   the module and factory docstrings described `weight_decay` as "gradient
   shrinkage of the memory weights" applied during an update step that no

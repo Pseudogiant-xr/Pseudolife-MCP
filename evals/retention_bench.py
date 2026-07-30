@@ -27,7 +27,7 @@ from pathlib import Path
 import torch
 
 import pseudolife_memory.memory.miras.band as bandmod
-from pseudolife_memory.memory.miras.band import MIRASBand, build_band
+from pseudolife_memory.memory.miras.band import build_band
 from pseudolife_memory.utils.config import MIRASBandSpec
 
 DIM = 8

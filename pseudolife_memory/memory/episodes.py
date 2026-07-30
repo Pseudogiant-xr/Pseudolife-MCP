@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from typing import Any
 
 from pseudolife_memory.memory.titans_memory import MemoryEntry

@@ -41,7 +41,7 @@ os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 from pseudolife_memory.memory.cortex import _norm_key             # noqa: E402
 from pseudolife_memory.memory.dream import _SYSTEM_PROMPT, _vocab_hint  # noqa: E402
 from distill_datagen import (                                     # noqa: E402
-    VOCAB_MAX, _parse_date, teacher_extract, validate_claims,
+    VOCAB_MAX, _parse_date, validate_claims,
 )
 
 DATA_DIR = Path(__file__).resolve().parent / "data"

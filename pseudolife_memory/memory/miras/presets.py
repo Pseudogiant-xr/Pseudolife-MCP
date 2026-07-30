@@ -47,9 +47,10 @@ def continuum_bands() -> list["MIRASBandSpec"]:
     facts. ~5K total capacity — right-sized 2026-06-27 from a 44K over-provisioned
     layout: a personal bank accrues ~10/day, so this engages eviction/curation in
     ~1yr (the ``slow`` band) instead of ~decades. Raise it for high-volume /
-    multi-agent deployments (or set ``preset: custom``). Pairs with
-    :meth:`ContinuumMemorySystem.begin_logical_turn` so consolidation fires per
-    agent step, not per raw store.
+    multi-agent deployments (or set ``preset: custom``). Designed to pair with
+    the CMS logical-turn cadence so consolidation fires per agent step rather
+    than per raw store — that seam is dormant (see ``_in_logical_turn`` in
+    ``cms.py``), so today consolidation runs per store.
     """
     return [
         _spec(name="working", max_entries=200, update_interval=1,
