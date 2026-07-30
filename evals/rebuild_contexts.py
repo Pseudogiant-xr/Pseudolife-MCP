@@ -50,10 +50,22 @@ def rebuild_fact_lines(bank: dict, emb, top_k: int, min_score: float,
     ``bm25=False`` mirrors the shipped ``BM25Config.cortex_enabled``
     default (the 2026-07-30 A/B measured no end-to-end benefit); lexical
     hits gate on the normalised ``bm25.min_score``, not the dense floor.
+
+    Task 6: a fact dict may carry an optional ``"kind"`` — ``"member"``
+    marks one row of a set-valued slot; absent (every bank dumped before
+    this change) means scalar, so a legacy bank ranks and composes lines
+    exactly as before. Member rows that rank get grouped into ONE line per
+    slot post-ranking (mirroring ``service.cortex_search``'s post-fusion
+    grouping) via the shared :func:`compose_set_value` — the dumped bank
+    only ever contains CURRENT facts (``cortex_dump``), so the "full
+    membership" a group composes over is exactly the member rows present
+    in ``facts``, same as the live store's ``members()``.
     """
     facts = bank["facts"]
     if not facts:
         return []
+    from pseudolife_memory.memory.cortex import _norm_key, compose_set_value
+
     texts = [f"{f['entity']} {f['attribute']} {f['value']}".strip()
              for f in facts]
     mat = emb.encode(texts)                            # (n, d), normalized
@@ -61,6 +73,7 @@ def rebuild_fact_lines(bank: dict, emb, top_k: int, min_score: float,
     sims = (mat @ q).tolist()
     ranked = sorted((i for i, s in enumerate(sims) if s >= min_score),
                     key=lambda i: sims[i], reverse=True)[:top_k]
+    score_map = {i: sims[i] for i in range(len(sims))}
     if bm25:
         from types import SimpleNamespace
 
@@ -78,17 +91,57 @@ def rebuild_fact_lines(bank: dict, emb, top_k: int, min_score: float,
         fused += [(i, cfg.weight * s) for i, s in lex.items()
                   if i not in seen]
         fused.sort(key=lambda t: t[1], reverse=True)
-        ranked = [i for i, _ in fused[:top_k]]
-    lines = []
+        fused = fused[:top_k]
+        ranked = [i for i, _ in fused]
+        score_map = dict(fused)
+
+    # Full current membership per slot, in original (insertion) order —
+    # ``cortex_dump`` sorts its rows by (entity, attribute) but that sort is
+    # stable, so member rows of one slot keep their relative order.
+    member_idx: dict[tuple[str, str], list[int]] = {}
+    for i, f in enumerate(facts):
+        if f.get("kind") == "member":
+            key = (_norm_key(f.get("entity", "")), _norm_key(f.get("attribute", "")))
+            member_idx.setdefault(key, []).append(i)
+
+    groups: dict[tuple[str, str], dict] = {}
+    order: list[tuple[str, object]] = []
     for i in ranked:
         f = facts[i]
-        line = (f"{f.get('entity', '')} — {f.get('attribute', '')}: "
-                f"{f.get('value', '')}")
-        older = [v for v in (f.get("history") or [])[:-1]
-                 if v and v != f.get("value")]
-        if older:
-            line += "  (earlier values, oldest first: " + " -> ".join(older) + ")"
-        lines.append(line)
+        if f.get("kind") == "member":
+            key = (_norm_key(f.get("entity", "")), _norm_key(f.get("attribute", "")))
+            grp = groups.get(key)
+            if grp is None:
+                grp = {"entity": f.get("entity", ""), "attribute": f.get("attribute", ""),
+                       "ranked": []}
+                groups[key] = grp
+                order.append(("set", key))
+            grp["ranked"].append((i, score_map.get(i, 0.0)))
+        else:
+            order.append(("scalar", i))
+
+    lines = []
+    for tag, payload in order:
+        if tag == "scalar":
+            i = payload
+            f = facts[i]
+            line = (f"{f.get('entity', '')} — {f.get('attribute', '')}: "
+                    f"{f.get('value', '')}")
+            older = [v for v in (f.get("history") or [])[:-1]
+                     if v and v != f.get("value")]
+            if older:
+                line += "  (earlier values, oldest first: " + " -> ".join(older) + ")"
+            lines.append(line)
+        else:
+            key = payload
+            grp = groups[key]
+            idxs = member_idx.get(key, [])
+            values = [facts[i].get("value", "") for i in idxs]
+            pos_of = {global_i: pos for pos, global_i in enumerate(idxs)}
+            ranked_pairs = [(pos_of[gi], sc) for gi, sc in grp["ranked"]
+                            if gi in pos_of]
+            value, _score = compose_set_value(values, ranked_pairs)
+            lines.append(f"{grp['entity']} — {grp['attribute']}: {value}")
     return lines
 
 

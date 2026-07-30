@@ -348,7 +348,11 @@ def memory_search(
                 {
                     "entity": f["entity"], "attribute": f["attribute"],
                     "value": f["value"], "origin": f.get("origin", ""),
-                    "confidence": f["confidence"], "score": f.get("score"),
+                    # Task 6: a grouped set-slot entry has no scalar
+                    # ``confidence`` (it summarises many current members,
+                    # each with its own) — ``.get`` degrades to ``None``
+                    # rather than KeyError-ing the whole search.
+                    "confidence": f.get("confidence"), "score": f.get("score"),
                     "contested": f.get("contested", False),
                     # Currency. The cortex is the layer an agent trusts most,
                     # so a stale fact here is worse than a stale entry — and

@@ -101,6 +101,40 @@ MEMBER_DEDUP_COSINE = 0.9
 MAX_CURRENT_MEMBERS = 100
 
 
+def compose_set_value(
+    member_values: list[str], ranked: list[tuple[int, float]],
+) -> tuple[str, float | None]:
+    """Compose the one-entry-per-slot serving line for a set-valued slot
+    (Task 6). ``member_values`` is the FULL current membership of the slot,
+    in insertion order; ``ranked`` pairs an index into that list with the
+    score the member earned wherever it individually ranked (dense search,
+    or dense+BM25 fusion). Members that ranked come first, score-descending;
+    any current member that did not individually rank is appended after —
+    the slot still surfaces its whole membership, not just the fraction that
+    happened to score above the caller's floor.
+
+    Returns ``(value_string, max_score)`` — ``value_string`` is
+    ``"m1; m2; m3 (3 members)"``; ``max_score`` is the highest score among
+    ``ranked`` (``None`` if ``ranked`` is empty, which should not happen in
+    practice since grouping only starts once at least one member ranks).
+
+    Shared verbatim by ``service.cortex_search`` (live path, ``CortexRecord``
+    objects) and ``evals/rebuild_contexts.rebuild_fact_lines`` (offline
+    replay over a dumped bank's dicts) so the composed line is identical
+    between the two by construction, not by two independent
+    implementations staying in sync — the failure mode
+    ``tests/test_cortex_bm25.py::test_rebuild_fact_ranking_matches_service_fusion``
+    exists to catch."""
+    ranked_sorted = sorted(ranked, key=lambda p: p[1], reverse=True)
+    ranked_idx = [i for i, _ in ranked_sorted]
+    ranked_set = set(ranked_idx)
+    ordered = [member_values[i] for i in ranked_idx] + [
+        v for i, v in enumerate(member_values) if i not in ranked_set]
+    value = "; ".join(ordered) + f" ({len(member_values)} members)"
+    score = ranked_sorted[0][1] if ranked_sorted else None
+    return value, score
+
+
 def _norm_support(s: str | None) -> str | None:
     s = (s or "").strip().casefold()
     return s if s in SUPPORT_PRECEDENCE else None

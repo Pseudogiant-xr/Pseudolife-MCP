@@ -125,6 +125,7 @@ def _cortex_record_to_dict(rec, relative_age: bool = True) -> dict[str, Any]:
         "value": rec.value,
         "polarity": rec.polarity,
         "status": rec.status,
+        "kind": rec.kind,
         "confidence": round(float(rec.confidence), 4),
         "origin": rec.origin,
         "support": sorted(rec.support),
@@ -1788,21 +1789,68 @@ class MemoryService:
                           and getattr(bm25_cfg, "cortex_enabled", False)))
             if bm25_enabled and bm25_cfg is not None and query:
                 hits = self._cortex_bm25_fuse(query, hits, bm25_cfg, top_k)
-            entries = []
+            # Set-valued slots (Task 6): every member of a set is a distinct
+            # ``current`` record, so it ranks in ``hits`` on its own — left
+            # alone, a slot with N members would surface as N separate
+            # entries. Group AFTER fusion (fusion stays per-record, exactly
+            # as it ran above) by folding each member hit into its slot,
+            # keyed on first occurrence: ``hits`` is already score-descending
+            # (both ``search`` and ``_cortex_bm25_fuse`` sort before
+            # returning), so the first member of a slot encountered here
+            # already carries that slot's max score, and the group's
+            # position in the final ordering is exactly where that top
+            # member would have sorted.
+            groups: dict[tuple[str, str], dict[str, Any]] = {}
+            order: list[tuple[str, Any]] = []
             for r, s in hits:
-                d = {**_cortex_record_to_dict(r), "score": round(float(s), 4)}
-                conts = self._cortex.contenders_for(r.entity, r.attribute)
-                if conts:
-                    d["contested"] = True
-                    d["contender_value"] = conts[0].value
-                    d["contender_origin"] = conts[0].origin
+                if r.kind == "member":
+                    key = r.key
+                    grp = groups.get(key)
+                    if grp is None:
+                        grp = {"entity": r.entity, "attribute": r.attribute,
+                               "ranked": []}
+                        groups[key] = grp
+                        order.append(("set", key))
+                    grp["ranked"].append((r, s))
                 else:
-                    d["contested"] = False
-                if self._storage is not None:
-                    from pseudolife_memory.memory.cortex import _norm_key
-                    d["source_entries"] = self._storage.traces_for_slot(
-                        _norm_key(r.entity), _norm_key(r.attribute))
-                entries.append(d)
+                    order.append(("scalar", (r, s)))
+            entries = []
+            for tag, payload in order:
+                if tag == "scalar":
+                    r, s = payload
+                    d = {**_cortex_record_to_dict(r), "score": round(float(s), 4)}
+                    conts = self._cortex.contenders_for(r.entity, r.attribute)
+                    if conts:
+                        d["contested"] = True
+                        d["contender_value"] = conts[0].value
+                        d["contender_origin"] = conts[0].origin
+                    else:
+                        d["contested"] = False
+                    if self._storage is not None:
+                        from pseudolife_memory.memory.cortex import _norm_key
+                        d["source_entries"] = self._storage.traces_for_slot(
+                            _norm_key(r.entity), _norm_key(r.attribute))
+                    entries.append(d)
+                else:
+                    from pseudolife_memory.memory.cortex import compose_set_value
+                    key = payload
+                    grp = groups[key]
+                    entity, attribute = grp["entity"], grp["attribute"]
+                    all_members = self._cortex.members(entity, attribute)
+                    id_to_idx = {id(m): i for i, m in enumerate(all_members)}
+                    ranked_pairs = [(id_to_idx[id(r)], s) for r, s in grp["ranked"]
+                                     if id(r) in id_to_idx]
+                    value, score = compose_set_value(
+                        [m.value for m in all_members], ranked_pairs)
+                    entries.append({
+                        "kind": "set",
+                        "entity": entity,
+                        "attribute": attribute,
+                        "value": value,
+                        "members": [_cortex_record_to_dict(m) for m in all_members],
+                        "score": round(float(score), 4) if score is not None else 0.0,
+                        "contested": False,
+                    })
             return {"count": len(entries), "entries": entries}
 
     def _cortex_bm25_fuse(self, query, hits, cfg, top_k):

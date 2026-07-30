@@ -678,3 +678,123 @@ def test_set_add_alone_survives_pg_hydration_through_the_service(svc, pg_url):  
         finally:
             if fresh._storage is not None:
                 fresh._storage.close()
+
+
+# --- Task 6: serving — one entry per set slot ------------------------------
+#
+# Today each member of a set-valued slot surfaces as its OWN entry in
+# cortex_search (it is a plain current record, so the dense/BM25 pool ranks
+# it exactly like a scalar fact). These tests pin the grouping: a set slot
+# must collapse to exactly ONE entry, ranked by its best-scoring member, with
+# a composed value string that names the WHOLE current membership (not just
+# whichever members happened to individually clear the score floor).
+#
+# Embeddings are injected directly (bypassing the real embedder, and
+# ``svc.set_add``'s own embedding call) so ranking is deterministic: two
+# orthogonal unit vectors for the two members, and ``encode_query`` stubbed
+# to hand back one of them verbatim — cosine 1.0 for the named member, 0.0
+# for the other, with no dependence on how the real sentence-transformer
+# happens to score "road bike" against "gravel bike".
+
+def _service_with_deterministic_embedder(tmp_service_dir):
+    import torch
+
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_service_dir)
+    svc._ensure_init()
+    dim = svc._embedder.encode_single("probe").shape[0]
+    v1 = torch.zeros(dim)
+    v1[0] = 1.0
+    v2 = torch.zeros(dim)
+    v2[1] = 1.0
+    return svc, v1, v2
+
+
+def test_cortex_search_groups_set_slot_into_one_entry(tmp_service_dir):
+    from pseudolife_memory.memory.slots import Slot
+
+    svc, v1, v2 = _service_with_deterministic_embedder(tmp_service_dir)
+    svc._cortex.add_member(Slot("user", "bikes owned", "road bike"), v1)
+    svc._cortex.add_member(Slot("user", "bikes owned", "gravel bike"), v2)
+    svc._embedder.encode_query = lambda text, normalize=True: v1.clone()
+
+    entries = svc.cortex_search("road bike", top_k=5, min_score=0.0)["entries"]
+    assert len(entries) == 1                     # ONE entry, not one per member
+    e = entries[0]
+    assert e["kind"] == "set"
+    assert e["entity"] == "user" and e["attribute"] == "bikes owned"
+    assert e["value"] == "road bike; gravel bike (2 members)"
+    assert e["score"] == 1.0                      # max over the members that ranked
+    assert e["contested"] is False
+    assert [m["value"] for m in e["members"]] == ["road bike", "gravel bike"]
+
+
+def test_cortex_search_set_entry_orders_by_score_not_insertion(tmp_service_dir):
+    """Insertion order was road bike then gravel bike; the query names gravel
+    bike, so the composed value must lead with gravel bike (score-descending,
+    the order members "emerged from fusion") even though it was added
+    second."""
+    from pseudolife_memory.memory.slots import Slot
+
+    svc, v1, v2 = _service_with_deterministic_embedder(tmp_service_dir)
+    svc._cortex.add_member(Slot("user", "bikes owned", "road bike"), v1)
+    svc._cortex.add_member(Slot("user", "bikes owned", "gravel bike"), v2)
+    svc._embedder.encode_query = lambda text, normalize=True: v2.clone()
+
+    entries = svc.cortex_search("gravel bike", top_k=5, min_score=0.0)["entries"]
+    assert len(entries) == 1
+    assert entries[0]["value"] == "gravel bike; road bike (2 members)"
+    assert entries[0]["score"] == 1.0
+
+
+def test_cortex_search_set_entry_lists_unranked_current_members(tmp_service_dir):
+    """A min_score floor that only "road bike" clears must not shrink the
+    composed value to just that member — the slot's full current membership
+    (fetched independently of what made it into the ranked hit list) is
+    always shown, per the brief."""
+    from pseudolife_memory.memory.slots import Slot
+
+    svc, v1, v2 = _service_with_deterministic_embedder(tmp_service_dir)
+    svc._cortex.add_member(Slot("user", "bikes owned", "road bike"), v1)
+    svc._cortex.add_member(Slot("user", "bikes owned", "gravel bike"), v2)
+    svc._embedder.encode_query = lambda text, normalize=True: v1.clone()
+
+    # gravel bike is orthogonal to the query -> cosine 0.0, below the floor.
+    entries = svc.cortex_search("road bike", top_k=5, min_score=0.5)["entries"]
+    assert len(entries) == 1
+    assert entries[0]["value"] == "road bike; gravel bike (2 members)"
+    assert entries[0]["score"] == 1.0
+
+
+def test_cortex_search_no_set_entry_when_no_member_ranks(tmp_service_dir):
+    """If every member of a slot scores below the floor, the slot must not
+    appear at all — grouping only starts once at least one member ranks."""
+    from pseudolife_memory.memory.slots import Slot
+
+    svc, v1, v2 = _service_with_deterministic_embedder(tmp_service_dir)
+    svc._cortex.add_member(Slot("user", "bikes owned", "road bike"), v1)
+    svc._cortex.add_member(Slot("user", "bikes owned", "gravel bike"), v2)
+    import torch
+    svc._embedder.encode_query = lambda text, normalize=True: torch.zeros_like(v1)
+
+    entries = svc.cortex_search("unrelated", top_k=5, min_score=0.5)["entries"]
+    assert entries == []
+
+
+def test_cortex_search_mixed_scalar_and_set_entries(tmp_service_dir):
+    """Scalar facts and a set-slot entry can co-exist in one result list; the
+    scalar path is untouched (still carries contested/source_entries shape)."""
+    svc, v1, v2 = _service_with_deterministic_embedder(tmp_service_dir)
+    from pseudolife_memory.memory.slots import Slot
+
+    svc._cortex.add_member(Slot("user", "bikes owned", "road bike"), v1)
+    svc._cortex.write_fact(Slot("user", "city", "Sydney"), v2)
+    svc._embedder.encode_query = lambda text, normalize=True: (v1 + v2) / 2
+
+    entries = svc.cortex_search("bikes and city", top_k=5, min_score=0.0)["entries"]
+    kinds = {e.get("kind") for e in entries}
+    assert "set" in kinds
+    scalar = next(e for e in entries if e.get("kind") != "set")
+    assert scalar["value"] == "Sydney"
+    assert scalar["contested"] is False

@@ -6,6 +6,36 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-31 — set-valued slots surface as one entry per slot, not one per member)
+- **`cortex_search` groups a set-valued slot's current members into a single
+  entry** instead of surfacing each member as its own hit: `{"kind": "set",
+  "entity", "attribute", "value": "m1; m2 (2 members)", "members": [...],
+  "score": <max member score>, "contested": false}`. Grouping runs AFTER the
+  BM25 fusion pass (fusion itself stays per-record) and always shows the
+  slot's FULL current membership — score-descending for members that
+  individually ranked, then any current member that didn't — not just
+  whichever members cleared the caller's score floor. `evals/rebuild_contexts.py`'s
+  `rebuild_fact_lines` composes the identical value string offline via the
+  new shared `pseudolife_memory.memory.cortex.compose_set_value` helper;
+  bank fact dicts gain an optional `"kind"` (`"member"` marks one row of a
+  set — absent means scalar), so a bank dumped before this change rebuilds
+  byte-identically (pinned against a committed fixture,
+  `tests/fixtures/rebuild_fact_lines_legacy_bank.json.gz`). `evals/longmemeval_bench.py`'s
+  `build_contexts` composes a set entry's line from its already-composed
+  `value` and garnishes it with "former members" (removed members, oldest
+  first) pulled from the set-shaped `history()`, mirroring the scalar
+  "earlier values" idiom; the composition is factored into
+  `_compose_fact_line` for offline unit testing
+  (`tests/test_longmemeval_bench_fact_lines.py`). `_cortex_record_to_dict`
+  now includes `"kind"` on every fact dict (`cortex_lookup`, `cortex_dump`,
+  `cortex_search` scalar entries). Fixed a latent crash the new set-entry
+  shape would otherwise have caused: `mcp_server.py`'s `memory_search`
+  cortex-first block indexed a fact's `"confidence"` directly, which a
+  grouped set entry doesn't carry — now `.get`. Covered by
+  `tests/test_cortex_sets.py` (grouping, score-ordering, unranked-member
+  inclusion, no-entry-when-nothing-ranks, mixed scalar+set) and
+  `tests/test_cortex_bm25.py::test_rebuild_fact_ranking_matches_service_fusion_set_slot`.
+
 ### Added (2026-07-31 — MCP tools for set-valued cortex slots)
 - **`memory_set_add` / `memory_set_remove`** expose the Task 2–4 member
   model on the MCP surface — add/confirm or retract one member of a
