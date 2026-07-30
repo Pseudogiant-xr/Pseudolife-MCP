@@ -251,6 +251,62 @@ def test_rebuild_fact_ranking_matches_service_fusion_set_slot():
     ], want_lines
 
 
+def test_rebuild_fact_ranking_matches_service_fusion_set_slot_mixed_corpus():
+    """Companion to the engineered-order-divergence scenario above
+    (coordinator follow-up after Task 6 approval): that test deliberately
+    isolates a 3-member-only universe at ``min_score=0.7`` to force the F1
+    order-divergence reproduction, which trades away coverage of the set
+    entry's position AMONG OTHER RANKED SCALARS — the ORIGINAL shape of
+    this lockstep case, before it was narrowed for that reproduction.
+
+    Restores it: the standard ``_seed`` corpus (5 filler facts + one
+    identifier-style ticket fact) plus the same 3-bike set, queried at
+    ``min_score=0.1`` (the shipped default) with ``bm25=True``. Verified
+    empirically this yields 4 mixed entries on both paths — the grouped
+    set entry at position 0, three scalars trailing it — so the lockstep
+    equality here is doing real work interleaving a "kind": "set" entry
+    among "kind"-less scalar entries, not just comparing two
+    single-entry lists."""
+    import sys as _sys
+    from pathlib import Path as _Path
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[1] / "evals"))
+    from rebuild_contexts import rebuild_fact_lines
+
+    query = "what bikes does the user own"
+
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
+        svc = MemoryService(data_dir=d)
+        _seed(svc)
+        svc.set_add("user", "bikes owned", "road bike")
+        svc.set_add("user", "bikes owned", "gravel bike")
+        svc.set_add("user", "bikes owned", "hybrid bike")
+
+        want_entries = svc.cortex_search(query, top_k=6, min_score=0.1,
+                                         bm25=True)["entries"]
+        assert len(want_entries) == 4, want_entries
+        assert want_entries[0]["kind"] == "set", (
+            "the grouped set entry must rank at position 0")
+        want_lines = [f"{e['entity']} — {e['attribute']}: {e['value']}"
+                      for e in want_entries]
+
+        facts = [
+            {"entity": e, "attribute": a, "value": v, "history": [v]}
+            for e, a, v in _FILLER
+        ] + [{"entity": "ticket PRB052840832", "attribute": "workflow",
+              "value": "Knowledge Search; Problems; Private Task",
+              "history": ["Knowledge Search; Problems; Private Task"]}] + [
+            {"entity": "user", "attribute": "bikes owned", "value": member,
+             "kind": "member"}
+            for member in ("road bike", "gravel bike", "hybrid bike")
+        ]
+        emb = svc._embedder
+        got_lines = rebuild_fact_lines(
+            {"facts": facts, "question": query}, emb,
+            top_k=6, min_score=0.1, bm25=True)
+
+    assert got_lines == want_lines, f"rebuild={got_lines} service={want_lines}"
+
+
 def test_rebuild_fact_lines_legacy_bank_byte_identical():
     """Hard regression requirement (Task 6): a bank dumped before set slots
     existed carries no ``"kind"`` key on any fact — rebuild_fact_lines must
