@@ -184,7 +184,7 @@ def test_ensure_schema_demotes_preexisting_duplicate_current(pg_conn):
     demote the rest — mirroring CortexStore._reindex_current."""
     from pseudolife_memory.storage.schema import ensure_schema
 
-    pg_conn.execute("DROP INDEX IF EXISTS facts_slot_current_uq")
+    pg_conn.execute("DROP INDEX IF EXISTS facts_slot_current_scalar_uq")
     pg_conn.execute(
         "INSERT INTO facts (entity, attribute, entity_norm, attribute_norm, "
         "value, polarity, status, confidence, asserted_at, last_confirmed) "

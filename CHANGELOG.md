@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-30 — schema v26: set-valued cortex slots, columns + index split)
+- **`facts.kind` (`scalar` | `member`, default `scalar`) and `facts.value_norm`
+  columns added**, and the per-slot current-uniqueness constraint splits by
+  kind: `facts_slot_current_scalar_uq` (`entity_norm`, `attribute_norm`) keeps
+  the existing one-live-row-per-slot invariant for scalar facts,
+  `facts_member_current_uq` (`entity_norm`, `attribute_norm`, `value_norm`)
+  allows several members to be concurrently current on the same slot. The
+  old unscoped `facts_slot_current_uq` index is dropped. Additive/idempotent
+  migration; every existing fact defaults to `kind='scalar'` and continues
+  to dedupe exactly as before — internal groundwork for set-valued cortex
+  slots, no reader/writer behavior change in this change.
+
 ### Added (2026-07-30 — cortex fact retrieval gains an opt-in BM25 lexical channel)
 - **`cortex_search` can now fuse a BM25 lexical pool with dense cosine** —
   per-call `bm25=True` or `memory.bm25.cortex_enabled = true` — mirroring

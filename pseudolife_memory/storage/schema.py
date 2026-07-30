@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 25
+SCHEMA_META_VERSION = 26
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -178,7 +178,16 @@ CREATE TABLE IF NOT EXISTS facts (
   -- are mostly durable; defaulting to volatile would silently re-rank an
   -- existing bank on an unmeasured assumption. A writer marks the transient
   -- ones (deployment status, "current" version) and only those decay.
-  freshness_class TEXT NOT NULL DEFAULT 'evergreen'
+  freshness_class TEXT NOT NULL DEFAULT 'evergreen',
+  -- v26 (set-valued slots): 'scalar' | 'member'. Partitions the
+  -- current-uniqueness constraint below -- a scalar slot keeps its old
+  -- one-live-row-per-(entity,attribute) invariant, a member slot instead
+  -- dedupes per (entity,attribute,VALUE) so several members can be
+  -- concurrently current on the same slot.
+  kind TEXT NOT NULL DEFAULT 'scalar',
+  -- v26: the member identity the member index dedupes on. NULL on scalar
+  -- rows (not part of their uniqueness key).
+  value_norm TEXT
 );
 CREATE INDEX IF NOT EXISTS facts_slot_idx
   ON facts (entity_norm, attribute_norm, status);
@@ -469,6 +478,19 @@ def ensure_schema(conn) -> dict:
             "ALTER TABLE facts ADD COLUMN IF NOT EXISTS freshness_class "
             "TEXT NOT NULL DEFAULT 'evergreen'"
         )
+        # v26 additive: set-valued slots. kind partitions the
+        # current-uniqueness constraint; value_norm is the member identity
+        # the member index dedupes on (NULL on scalar rows). The two
+        # partial unique indexes (scalar-scoped + member-scoped) are NOT
+        # created here -- they go in below, after the v19 duplicate-healing
+        # loop, so a bank carrying pre-existing duplicate 'current' rows is
+        # healed before either unique index is (re)built against it.
+        cur.execute(
+            "ALTER TABLE facts ADD COLUMN IF NOT EXISTS kind "
+            "TEXT NOT NULL DEFAULT 'scalar'")
+        cur.execute(
+            "ALTER TABLE facts ADD COLUMN IF NOT EXISTS value_norm TEXT")
+        cur.execute("DROP INDEX IF EXISTS facts_slot_current_uq")
         # v24 additive: per-entity kind, the input to the freshness policy.
         # Keyed on entity_norm (what cortex slots key on), not entity_id --
         # a third of cortex entities have no graph node, and a graph merge
@@ -535,9 +557,24 @@ def ensure_schema(conn) -> dict:
                 """,
                 (status,),
             )
+        # v26: scalar-scoped -- facts_slot_current_uq (unscoped) is dropped
+        # in the v26 additive block above; recreating it here under the old
+        # name would undo that drop on every idempotent re-run. Built AFTER
+        # the healing loop above, not in the v26 additive block, so a bank
+        # with pre-existing duplicate 'current' rows is demoted to one
+        # live row per slot before this unique index is (re)built against
+        # it -- building it earlier would fail outright on such a bank.
         cur.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS facts_slot_current_uq "
-            "ON facts (entity_norm, attribute_norm) WHERE status = 'current'"
+            "CREATE UNIQUE INDEX IF NOT EXISTS facts_slot_current_scalar_uq "
+            "ON facts (entity_norm, attribute_norm) "
+            "WHERE status = 'current' AND kind = 'scalar'"
+        )
+        # v26 member-scoped current-uniqueness -- same ordering rationale:
+        # after healing, alongside its scalar sibling.
+        cur.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS facts_member_current_uq "
+            "ON facts (entity_norm, attribute_norm, value_norm) "
+            "WHERE status = 'current' AND kind = 'member'"
         )
         cur.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS facts_slot_contested_uq "
