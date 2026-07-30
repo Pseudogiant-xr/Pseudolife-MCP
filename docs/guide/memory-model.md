@@ -194,7 +194,10 @@ with no `op`. A scalar claim (no `op`) landing on a slot that already holds
 current members is dropped and logged, not routed or silently applied — the
 only way to touch a set slot is an explicit `op` or the two MCP tools
 themselves. A malformed `op` value degrades to the scalar path with a
-warning rather than failing the dream.
+warning rather than failing the dream. The ceiling extractor does not yet
+adopt the `op` field under the v1 prompt block — the pre-registered e2e
+gate failed with zero member facts formed; evidence at
+`evals/results/c2-gate-verdict.json`.
 
 ## Provenance contenders — never silently overwrite a user fact
 

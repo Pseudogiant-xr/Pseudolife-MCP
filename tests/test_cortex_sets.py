@@ -187,6 +187,22 @@ def test_scalar_to_member_conversion_preserves_polarity(store, emb):
     assert members["gravel bike"].polarity == "-"    # plain negated add_member
 
 
+def test_scalar_to_member_conversion_preserves_provenance(store, emb):
+    """F3 (review-caught): the scalar->member conversion's ``_insert_member``
+    call carried no ``support`` kwarg, so a scalar written with e.g.
+    user-tier support silently re-minted as a member with NO support at all
+    (``origin == ""``) — the provenance tier was lost on conversion. Fixed
+    to pass the scalar's ``origin`` through (``None`` when it has none, so
+    an unsupported scalar still converts to an unsupported member rather
+    than fabricating a tier)."""
+    store.write_fact(Slot("user", "bikes owned", "road bike"), emb("road bike"),
+                     support="user")
+    store.add_member(Slot("user", "bikes owned", "gravel bike"), emb("gravel bike"))
+    members = {m.value: m for m in store.members("user", "bikes owned")}
+    assert members["road bike"].support == {"user"}
+    assert members["road bike"].origin == "user"
+
+
 def test_write_fact_rejects_scalar_write_on_set_slot(store, emb):
     """Item 2: once a slot holds current members, write_fact must not insert
     a parallel current scalar at the same key — the slot models are mutually
@@ -247,6 +263,49 @@ def test_dedup_siblings_rebuild_preserves_member_index(store, emb):
     # become lookup()-able as a scalar. This is the assertion that actually
     # goes red on that regression — the checks above alone cannot catch it.
     assert store.lookup("user", "bikes owned") is None
+
+
+def test_dedup_siblings_excludes_members(store, emb):
+    """F1 (bank-corrupting, review-caught): on a hydrated bank, member records
+    carry ``slot_embedding=None`` (``add_member``/``_insert_member`` never set
+    one). The ``cortex_dedup`` backfill loop used to give EVERY current
+    record missing a slot embedding — scalars AND members alike — the
+    identical value-free ``f"{entity} {attribute}"`` embedding. Since all
+    members of one slot share the same ``(entity, attribute)``, that made
+    them cosine-identical to each other, and ``dedup_siblings`` then
+    clustered and superseded all but one — silently destroying the set.
+
+    Simulated here at the ``CortexStore`` level (no service/embedder
+    needed): three members are minted, then given an identical injected
+    ``slot_embedding`` exactly as the backfill would. ``dedup_siblings``
+    must exclude ``kind == "member"`` records from its candidate pool, so
+    all three stay current — while a genuinely-paraphrased SCALAR pair with
+    near-identical slot embeddings still merges as before."""
+    store.add_member(Slot("user", "tags", "alpha"), emb("alpha"))
+    store.add_member(Slot("user", "tags", "beta"), emb("beta"))
+    store.add_member(Slot("user", "tags", "gamma"), emb("gamma"))
+    shared_member_emb = emb("user tags")
+    for m in store.members("user", "tags"):
+        m.slot_embedding = shared_member_emb
+
+    shared_scalar_emb = emb("shared-scalar-slot")
+    store.write_fact(Slot("proj", "server-ip", "10.0.0.1"), emb("val-a"),
+                     support="user", now=1.0, slot_embedding=shared_scalar_emb)
+    store.write_fact(Slot("proj", "box-ip", "10.0.0.1"), emb("val-b"),
+                     support="agent", now=2.0, slot_embedding=shared_scalar_emb)
+
+    report = store.dedup_siblings(threshold=0.99, apply=True)
+
+    assert len(report) == 1                          # only the scalar pair merged
+    members = store.members("user", "tags")
+    assert len(members) == 3
+    assert all(m.status == "current" for m in members)
+    # Exactly one of the two paraphrased scalar slots remains current —
+    # the merge that should still happen.
+    survivors = [r for r in store.current_records()
+                 if r.kind != "member" and r.key in
+                 {("proj", "server-ip"), ("proj", "box-ip")}]
+    assert len(survivors) == 1
 
 
 def test_reindex_current_keeps_members_demotes_duplicate_scalars(store):
@@ -415,18 +474,25 @@ def test_kind_survives_pg_hydration(svc):
     Also pins the Task 1 review finding this task's brief calls out
     explicitly: a persisted member row's ``value_norm`` must be non-NULL,
     since Postgres treats NULL as distinct in a unique index and a NULL
-    ``value_norm`` would silently bypass ``facts_member_current_uq``.
+    ``value_norm`` would silently bypass ``facts_member_current_uq``. F5
+    (review-caught): non-NULL alone doesn't pin the CONTENT — a row could
+    persist any non-null junk and the assertion would still pass. The
+    "alpha" member is written as ``" Alpha "`` (leading/trailing space,
+    mixed case) so the persisted ``value_norm`` is checked against
+    :func:`pseudolife_memory.memory.cortex._norm_value` applied to the
+    ORIGINAL text, not merely re-derived from the already-normalised value
+    stored in the record.
     """
     import torch
 
-    from pseudolife_memory.memory.cortex import CortexStore
+    from pseudolife_memory.memory.cortex import CortexStore, _norm_value
     from pseudolife_memory.memory.slots import Slot
     from pseudolife_memory.storage import sync
 
     EMB = torch.zeros(1024)
 
     svc._ensure_init()
-    svc._cortex.add_member(Slot("user", "tags", "alpha"), EMB)
+    svc._cortex.add_member(Slot("user", "tags", " Alpha "), EMB)
     svc._cortex.add_member(Slot("user", "tags", "beta"), EMB)
     svc._cortex.write_fact(Slot("user", "city", "Sydney"), EMB)
     svc.save()
@@ -436,16 +502,20 @@ def test_kind_survives_pg_hydration(svc):
     scalar_rows = [r for r in rows if r["kind"] == "scalar"]
     assert len(member_rows) == 2
     assert len(scalar_rows) == 1
-    # Task 1's per-slot member-uniqueness index depends on this.
+    # Task 1's per-slot member-uniqueness index depends on this being non-NULL...
     assert all(r["value_norm"] for r in member_rows)
     assert all(r["value_norm"] is None for r in scalar_rows)
+    # ...and F5 pins the actual CONTENT, not just non-NULLness.
+    by_value = {r["value"]: r for r in member_rows}
+    assert by_value[" Alpha "]["value_norm"] == _norm_value(" Alpha ") == "alpha"
+    assert by_value["beta"]["value_norm"] == _norm_value("beta") == "beta"
 
     fresh = CortexStore()
     sync.hydrate_cortex(fresh, svc._storage)
 
     assert fresh.slot_kind("user", "tags") == "set"
     members = fresh.members("user", "tags")
-    assert sorted(m.value for m in members) == ["alpha", "beta"]
+    assert sorted(m.value for m in members) == [" Alpha ", "beta"]  # verbatim, not normalised
     assert all(m.status == "current" and m.kind == "member" for m in members)
 
     scalar = fresh.lookup("user", "city")

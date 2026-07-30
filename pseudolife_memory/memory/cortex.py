@@ -548,7 +548,8 @@ class CortexStore:
                                 cur.embedding, cur.confidence,
                                 set(cur.provenance), cur.asserted_at,
                                 hlc=hlc, writer_id=cur.writer_id,
-                                session_id=cur.session_id)
+                                session_id=cur.session_id,
+                                support=cur.origin or None)
         # Dedup against current members: exact norm OR cosine >= threshold.
         members = self.members(slot.entity, slot.attribute)
         for m in members:
@@ -1022,8 +1023,16 @@ class CortexStore:
         tier, then most-recent) and retire the rest (``status`` -> ``superseded``;
         audit trail kept). Returns a report of ``{"canonical", "retired"}`` per
         merged cluster; only mutates when ``apply`` is True. Records without a
-        ``slot_embedding`` are skipped — backfill first (the service does)."""
-        cands = [r for r in self.current_records() if r.slot_embedding is not None]
+        ``slot_embedding`` are skipped — backfill first (the service does).
+        ``kind == "member"`` records are excluded outright (schema v26,
+        bank-corrupting fix): members never carry a ``slot_embedding`` of
+        their own, so a caller that backfilled one (the value-free
+        ``f"{entity} {attribute}"`` embedding, same for every member of a
+        slot) would make every member of that slot cosine-identical to its
+        siblings and this method would cluster and supersede all but one —
+        silently destroying the set."""
+        cands = [r for r in self.current_records()
+                 if r.slot_embedding is not None and r.kind != "member"]
         if len(cands) < 2:
             return []
         mat = torch.stack([r.slot_embedding.reshape(-1) for r in cands])

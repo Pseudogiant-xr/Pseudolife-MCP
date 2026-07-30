@@ -2821,8 +2821,17 @@ class MemoryService:
     def cortex_dedup(self, threshold: float = 0.90, dry_run: bool = True) -> dict[str, Any]:
         """One-time, reviewed cleanup of paraphrase sibling slots left by past
         regex auto-promotes. Dry-run by default (reports, writes nothing). Reuses
-        the value-free slot embedding, backfilling any current record missing one.
-        Ops-only (see ``ops/dedup_cortex.py``) — back up the bank before applying.
+        the value-free slot embedding, backfilling any SCALAR current record
+        missing one. Ops-only (see ``ops/dedup_cortex.py``) — back up the bank
+        before applying.
+
+        ``kind == "member"`` records are skipped by the backfill (bank-
+        corrupting fix): they never carry their own ``slot_embedding``, and
+        giving every member of a slot the identical value-free
+        ``f"{entity} {attribute}"`` embedding would make ``dedup_siblings``
+        treat them as paraphrase siblings of EACH OTHER and supersede all
+        but one, destroying the set. ``dedup_siblings`` also excludes
+        members outright as a second, independent guard.
 
         Returns ``{"dry_run", "threshold", "clusters", "merged"}`` where
         ``clusters`` is a list of ``{"canonical", "retired"}`` and ``merged`` is
@@ -2831,6 +2840,8 @@ class MemoryService:
             self._ensure_init()
             assert self._cortex is not None and self._embedder is not None
             for r in self._cortex.current_records():
+                if r.kind == "member":
+                    continue
                 if r.slot_embedding is None:
                     r.slot_embedding = self._embedder.encode_single(
                         f"{r.entity} {r.attribute}".strip())

@@ -45,7 +45,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   store unchanged and `dropped_set_slot` incremented, a malformed op falls
   back to scalar with a warning, two `op:"add"` claims sharing one source
   entry both land, `op:"add"` confidence reaches the stored member, and a
-  `member_invalid` result skips the trace write).
+  `member_invalid` result skips the trace write). The ceiling extractor does
+  not yet adopt the `op` field under the v1 prompt block — the pre-registered
+  e2e gate failed with zero member facts formed; evidence at
+  `evals/results/c2-gate-verdict.json`.
 
 ### Changed (2026-07-31 — set-valued slots surface as one entry per slot, not one per member)
 - **`cortex_search` groups a set-valued slot's current members into a single
