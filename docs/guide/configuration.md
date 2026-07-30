@@ -85,7 +85,10 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
 - **BM25 hybrid lexical pool ON** (since 2026-07-25) — a pure-stdlib
   sparse-retrieval channel that rescues exact-keyword queries. It shipped
   disabled, which meant every eval measured dense-only retrieval; turn it
-  off with `memory.bm25.enabled = false` or per-call `bm25=False`.
+  off with `memory.bm25.enabled = false` or per-call `bm25=False`. The
+  cortex-fact analogue exists but ships **opt-in**
+  (`memory.bm25.cortex_enabled = false` by default — a pre-registered A/B
+  measured no end-to-end benefit on facts).
   Details: [Retrieval](retrieval.md#bm25-hybrid-retrieval).
 - **Depth-ramped recency boost off** (`memory.recency_boost_enabled =
   false`, since 2026-07-25) — retrieval used to scale scores by a

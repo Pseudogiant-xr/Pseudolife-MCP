@@ -170,6 +170,14 @@ class BM25Config:
     # injected into the result pool. Keeps high-frequency-but-irrelevant
     # docs from polluting recall.
     min_score: float = 0.1
+    # Cortex fact retrieval has its own lexical switch, OFF by default:
+    # the pre-registered 2026-07-30 _s A/B (evals/results/
+    # bm25-ab-confirmation.json) found the fusion changed 56/78 served
+    # fact contexts with zero accuracy or commit-rate movement, and cost
+    # ~1 question on the oracle gate slice — the capability is kept for
+    # identifier-heavy corpora (opt in here or per-call `bm25=True` on
+    # `cortex_search`) but does not ship on.
+    cortex_enabled: bool = False
 
 
 @dataclass

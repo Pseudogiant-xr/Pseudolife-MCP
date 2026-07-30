@@ -1631,16 +1631,42 @@ class MemoryService:
 
     def cortex_search(
         self, query: str, top_k: int = 5, min_score: float = 0.0,
+        bm25: bool | None = None,
     ) -> dict[str, Any]:
         """Fuzzy search over ``current`` canonical facts only. Each entry is
         flagged ``"contested": bool`` and, when true, carries
         ``"contender_value"`` / ``"contender_origin"`` for the parked rival, so a
-        discrepancy is visible during normal recall."""
+        discrepancy is visible during normal recall.
+
+        ``bm25`` is the same tri-state override as ``memory_search``, but
+        facts read their own default (``memory.bm25.cortex_enabled``,
+        ships **off** — the 2026-07-30 pre-registered A/B measured no
+        end-to-end benefit): a lexical pool over the
+        composed fact text (``entity — attribute: value``) is fused with
+        the dense cosine hits exactly as the turn pool does it —
+        ``score + weight * normalized_bm25`` for facts in both pools,
+        ``weight * normalized_bm25`` for lexical-only facts. Lexical hits
+        are gated by the *normalised* ``bm25.min_score``, deliberately NOT
+        by the caller's dense ``min_score`` floor: a fact the embedder
+        scores below the floor must still be servable when the query names
+        it exactly (the dense-only channel starved identifier-style
+        queries — the 2026-07-30 ceiling-e2e diagnosis).
+        """
         with self._lock:
             self._ensure_init()
             assert self._embedder is not None and self._cortex is not None
             emb = self._embedder.encode_query(query)
             hits = self._cortex.search(emb, top_k=top_k, min_score=min_score)
+            bm25_cfg = getattr(self.config.memory, "bm25", None)
+            # Facts read their own switch (`cortex_enabled`, ships False —
+            # the 2026-07-30 A/B showed no end-to-end benefit), NOT the
+            # turn pool's `enabled`.
+            bm25_enabled = (
+                bm25 if bm25 is not None
+                else bool(bm25_cfg
+                          and getattr(bm25_cfg, "cortex_enabled", False)))
+            if bm25_enabled and bm25_cfg is not None and query:
+                hits = self._cortex_bm25_fuse(query, hits, bm25_cfg, top_k)
             entries = []
             for r, s in hits:
                 d = {**_cortex_record_to_dict(r), "score": round(float(s), 4)}
@@ -1657,6 +1683,40 @@ class MemoryService:
                         _norm_key(r.entity), _norm_key(r.attribute))
                 entries.append(d)
             return {"count": len(entries), "entries": entries}
+
+    def _cortex_bm25_fuse(self, query, hits, cfg, top_k):
+        """Fuse dense cortex hits with a lexical pool over composed fact
+        text. Mirrors the turn pool's fusion (memory/bm25.py): boost facts
+        in both pools, inject lexical-only facts at ``weight * norm``.
+        Called under ``self._lock`` with the store initialised."""
+        from types import SimpleNamespace
+
+        from pseudolife_memory.memory.bm25 import BM25Index, normalize_scores
+
+        docs = [
+            SimpleNamespace(
+                text=f"{r.entity} — {r.attribute}: {r.value}", record=r)
+            for r in self._cortex.current_records()
+        ]
+        if not docs:
+            return hits
+        idx = BM25Index(docs, k1=cfg.k1, b=cfg.b)
+        norm_hits = normalize_scores(idx.score(query, top_k=cfg.top_n))
+        lex = {d.record.key: (d.record, s) for d, s in norm_hits
+               if s >= cfg.min_score}
+        fused = []
+        seen = set()
+        for r, s in hits:
+            boost = lex.get(r.key)
+            if boost is not None:
+                s = s + cfg.weight * boost[1]
+            fused.append((r, s))
+            seen.add(r.key)
+        for key, (r, s) in lex.items():
+            if key not in seen:
+                fused.append((r, cfg.weight * s))
+        fused.sort(key=lambda rs: rs[1], reverse=True)
+        return fused[: max(0, int(top_k))]
 
     def cortex_stats(self) -> dict[str, Any]:
         """Cortex sizes: total / current / superseded / slots."""

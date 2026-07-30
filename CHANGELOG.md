@@ -6,6 +6,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-30 — cortex fact retrieval gains an opt-in BM25 lexical channel)
+- **`cortex_search` can now fuse a BM25 lexical pool with dense cosine** —
+  per-call `bm25=True` or `memory.bm25.cortex_enabled = true` — mirroring
+  the turn pool's fusion exactly over each current fact's composed
+  `entity — attribute: value` text, with lexical hits gated by the
+  normalised `bm25.min_score` rather than the caller's dense floor. It
+  ships **off**, and the reason is a measurement, not a mood: the
+  pre-registered `_s` A/B (`evals/results/bm25-ab-confirmation.json`,
+  same banks rebuilt dense-only vs fused, reproducible q8_0 server, rag
+  arm byte-identical across arms as control) found the fusion changed
+  56/78 served fact contexts with **zero movement** in cortex accuracy
+  (0.1795 both), cascade (0.4231 both) or commit rate (16 → 15), while
+  the oracle regression-gate slice paid ~1 question (cortex
+  0.6923 → 0.6795). Lexical gaps in fact retrieval are real; answer-level
+  failures trace to fact coverage, so the default stays honest.
+  Covered by `tests/test_cortex_bm25.py`.
+- **`evals/rebuild_contexts.py` is now in ranking lockstep with the
+  service** (`--bm25` opt-in flag). The first regression-gate run of the
+  channel exposed why: the rebuild had its own dense-only ranking, so the
+  gate "passed" code it never executed — the cortex arm came back
+  byte-identical to baseline. The fusion now lives in both paths and
+  `test_rebuild_fact_ranking_matches_service_fusion` pins them together;
+  a fusion change that lands in only one place goes red.
+
 ### Changed (2026-07-30 — front door re-based to the end-to-end run; cascade published)
 - **The README benchmark table now shows the fresh end-to-end measurement**
   (`ceiling-e2e`: fresh qwen-27b extraction under the v25 backbone, BM25-on

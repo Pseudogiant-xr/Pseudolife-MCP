@@ -1,0 +1,48 @@
+{
+  "preregistration": "memory 2026-07-30 cortex-BM25 _s A/B",
+  "source_banks": "s-qwen-27b-diag (rebuilt OFF/ON via lockstep-tested rebuild_contexts.py)",
+  "serving_stack": {
+    "kv": "q8_0/q8_0",
+    "pid": 28644,
+    "identity_check": "stock build, PID continuous 18:11:08 through both arms"
+  },
+  "off": {
+    "rag": 0.3462,
+    "cortex": 0.1795,
+    "hybrid": 0.3462,
+    "cascade": 0.4231,
+    "commit_rate": 0.2051,
+    "commit_precision": 0.5,
+    "commits": 16,
+    "commit_correct": 8
+  },
+  "on": {
+    "rag": 0.3462,
+    "cortex": 0.1795,
+    "hybrid": 0.359,
+    "cascade": 0.4231,
+    "commit_rate": 0.1923,
+    "commit_precision": 0.5333,
+    "commits": 15,
+    "commit_correct": 8
+  },
+  "paired_permutation": {
+    "cascade_on_vs_off": {
+      "delta": 0.0,
+      "p_value": 1.0,
+      "n_questions": 78
+    },
+    "cortex_on_vs_off": {
+      "delta": 0.0,
+      "p_value": 1.0,
+      "n_questions": 78
+    }
+  },
+  "criteria": {
+    "commit_rate_up": false,
+    "commit_precision_ge_0.7": false,
+    "cascade_on_ge_off": true,
+    "rag_control_identical": true
+  },
+  "verdict": "FAIL"
+}

@@ -94,6 +94,25 @@ found enter at `weight * normalized_bm25` (intentionally below a
 typical dense hit so semantic recall still drives ordering). The
 tokenizer keeps underscored identifiers and dotted version strings
 whole, lowercases everything, and filters a tiny stop list.
+
+Since 2026-07-30 the same channel is also *available* for **cortex fact
+retrieval** (`cortex_search`), but ships **opt-in**
+(`memory.bm25.cortex_enabled = false`, or per-call `bm25=True`) — unlike
+the turn pool. The pre-registered A/B that decided this
+(`evals/results/bm25-ab-confirmation.json`, `_s` haystacks, reproducible
+server, rag arm as byte-identical control): the fusion changed 56/78
+served fact contexts yet moved **nothing end to end** — cortex accuracy
+0.179 and cascade 0.423 in both arms — and cost ~1 question on the
+oracle regression-gate slice. Lexical gaps in fact retrieval are real
+but the abstentions trace to fact *coverage*, not ranking, so the
+default stays honest to the measurement. When enabled, the fusion is
+identical to the turn pool's over each fact's composed
+`entity — attribute: value` text, with one deliberate difference:
+lexical fact hits gate on the normalised `bm25.min_score`, *not* the
+caller's dense `min_score` floor, so an exact-name query can rescue a
+fact the embedder under-scores (useful on identifier-heavy corpora —
+agent-trajectory content is where this channel earned its keep in the
+LME-V2 smoke).
 Configure globally with:
 
 ```yaml
