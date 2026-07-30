@@ -6,6 +6,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-31 — dream extractor claims carry an `op` for set membership)
+- **A dream claim may now carry `"op": "add" | "remove"`** to target the
+  set-member model instead of the scalar supersede path — a claim without
+  `op` is bit-identical to today (`MemoryService.dream_run`'s claim-apply
+  loop, `pseudolife_memory/service.py`). `op:"add"` routes through
+  `svc.set_add`; `op:"remove"` through `svc.set_remove` (both own their own
+  embedding + persistence, same as every other set-slot entry point).
+  `member_invalid`/`member_capped` results are logged (info/warning
+  respectively) and the dream continues. A scalar claim (no `op`) landing on
+  a slot that already holds current members is dropped and logged at INFO
+  (`"dropped scalar claim for set slot %s.%s"`, mirroring the existing
+  auto-promote guard) rather than crashing the dream or silently overwriting
+  the set. A malformed `op` value (anything but `"add"`/`"remove"`) degrades
+  to the scalar path with a warning naming the value — never a hard failure
+  mid-dream. The extraction prompt (`_SYSTEM_PROMPT` in `dream.py`, and the
+  `evals/prompts/sonnet_extractor_v1.md` / `v2.md` mirrors) gained a short
+  "collection membership" instruction block with one add and one remove
+  example, phrased to keep `op` off plain value updates (a new job, a moved
+  city stay scalar supersedes). Covered by four new cases in `tests/test_dream.py`
+  (op-add lands a member, op-remove removes one, a no-op claim on a
+  member-holding slot is dropped with the store unchanged, a malformed op
+  falls back to scalar with a warning).
+
 ### Changed (2026-07-31 — set-valued slots surface as one entry per slot, not one per member)
 - **`cortex_search` groups a set-valued slot's current members into a single
   entry** instead of surfacing each member as its own hit: `{"kind": "set",

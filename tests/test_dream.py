@@ -426,6 +426,68 @@ def test_dream_threshold_off_forks_sibling(svc):
     assert b is not None and "db-prod-2" in b["value"]   # separate sibling slot
 
 
+# ── claim-level op (Task 7): set membership ──────────────────────────────
+
+def test_dream_run_op_add_lands_member(svc):
+    svc.store("added Rosa's Diner to the restaurants tried list", source="notes")
+    out = svc.dream_run(_StubExtractor([{
+        "entity": "user", "attribute": "restaurants tried", "value": "Rosa's Diner",
+        "confidence": 0.8, "origin": "agent", "op": "add"}]))
+    assert out["member_added"] == 1
+    got = svc.cortex_lookup("user", "restaurants tried")
+    assert got is not None and got["kind"] == "set"
+    assert [m["value"] for m in got["members"]] == ["Rosa's Diner"]
+
+
+def test_dream_run_op_remove_removes_member(svc):
+    svc.set_add("user", "restaurants tried", "Rosa's Diner")
+    svc.store("no longer counting Rosa's Diner as tried", source="notes")
+    out = svc.dream_run(_StubExtractor([{
+        "entity": "user", "attribute": "restaurants tried", "value": "Rosa's Diner",
+        "confidence": 0.8, "origin": "agent", "op": "remove"}]))
+    assert out["member_removed"] == 1
+    got = svc.cortex_lookup("user", "restaurants tried")
+    assert got is not None
+    assert got["members"] == []
+    assert [m["value"] for m in got["removed"]] == ["Rosa's Diner"]
+
+
+def test_dream_run_scalar_claim_dropped_on_set_slot(svc, caplog):
+    """Spec rule 2: an extractor scalar claim (no op) targeting a slot that
+    holds current members must be dropped, not crash the dream and not
+    silently convert/overwrite the set."""
+    svc.set_add("user", "restaurants tried", "Rosa's Diner")
+    before = sorted(m["value"] for m in
+                    svc.cortex_lookup("user", "restaurants tried")["members"])
+    svc.store("the restaurant tried is Rosa's Diner v2", source="notes")
+    with caplog.at_level("INFO", logger="pseudolife_memory.service"):
+        out = svc.dream_run(_StubExtractor([{
+            "entity": "user", "attribute": "restaurants tried",
+            "value": "Rosa's Diner v2", "confidence": 0.8, "origin": "agent"}]))
+    after = sorted(m["value"] for m in
+                   svc.cortex_lookup("user", "restaurants tried")["members"])
+    assert after == before                        # store unchanged
+    assert out.get("inserted", 0) == 0 and out.get("confirmed", 0) == 0
+    assert any(
+        "dropped scalar claim for set slot" in rec.message
+        and "user.restaurants tried" in rec.message for rec in caplog.records)
+
+
+def test_dream_run_malformed_op_falls_back_to_scalar_with_warning(svc, caplog):
+    """A malformed op value must not crash the dream — it degrades to the
+    scalar path (bit-identical to no op) with a warning naming the value."""
+    svc.store("the team mascot is a fox", source="notes")
+    with caplog.at_level("WARNING", logger="pseudolife_memory.service"):
+        out = svc.dream_run(_StubExtractor([{
+            "entity": "team", "attribute": "mascot", "value": "fox",
+            "confidence": 0.8, "origin": "agent", "op": "update"}]))
+    assert out["inserted"] == 1
+    got = svc.cortex_lookup("team", "mascot")
+    assert got is not None and got["value"] == "fox"
+    assert any("malformed op" in rec.message and "update" in rec.message
+               for rec in caplog.records)
+
+
 def test_dream_with_noop_extractor_writes_nothing(svc):
     from pseudolife_memory.memory.dream import NoOpExtractor
     svc.config.memory.cortex.auto_promote = False   # no store-path promotion either

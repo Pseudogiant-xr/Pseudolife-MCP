@@ -116,6 +116,17 @@ _SYSTEM_PROMPT = (
     '{"entity":"releases","attribute":"documented requirement",'
     '"value":"signed tag (per release runbook)","confidence":0.8,'
     '"source":2}]}\n'
+    "When a note adds or removes an item from a COLLECTION the user "
+    'maintains (restaurants tried, bikes owned, pending tasks), add an '
+    '"op":"add" or "op":"remove" field to that claim instead of a plain '
+    "supersede. op is ONLY for collection membership — a value that simply "
+    "changed (a new job, a moved city) stays a plain claim with no op. "
+    "Example. Notes: [3] tried Rosa's Diner tonight. [4] sold the road bike, "
+    'no longer biking to work. Output: {"claims":['
+    '{"entity":"user","attribute":"restaurants tried","value":"Rosa\'s '
+    'Diner","op":"add","confidence":0.8,"source":3},'
+    '{"entity":"user","attribute":"bikes owned","value":"road bike",'
+    '"op":"remove","confidence":0.8,"source":4}]}\n'
     'Return {"claims":[]} if nothing qualifies.'
 )
 

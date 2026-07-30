@@ -3084,6 +3084,15 @@ class MemoryService:
         try:
             for c, src_id in pairs:
                 ent, attr = self._resolve_dream_slot(c["entity"], c["attribute"])
+                # Claim-level op (Task 7): "add"/"remove" route to the member
+                # model; anything else (absent, or a value the extractor got
+                # wrong) degrades to the scalar path — never crash mid-dream.
+                op = c.get("op")
+                if op not in (None, "add", "remove"):
+                    logger.warning(
+                        "dream: malformed op %r on claim for %s.%s; "
+                        "treating as scalar", op, ent, attr)
+                    op = None
                 ent_norm = _norm_key(ent)
                 if ent_norm not in known_entities and ent_norm not in new_entities:
                     new_entities[ent_norm] = ent
@@ -3098,10 +3107,35 @@ class MemoryService:
                         # re-dream must be a no-op, not a confirmation —
                         # the confirm path ratchets confidence.
                         continue
-                res = self.cortex_write(
-                    ent, attr, c["value"],
-                    confidence=float(c.get("confidence", 0.55)),
-                    support=c.get("origin", "agent"))
+                if op == "add":
+                    res = self.set_add(ent, attr, c["value"],
+                                       origin=c.get("origin", "agent"))
+                    if res["action"] == "member_invalid":
+                        logger.info("dream: member add rejected (invalid "
+                                   "value) for %s.%s", ent, attr)
+                    elif res["action"] == "member_capped":
+                        logger.warning("dream: member add rejected (cap "
+                                       "reached) for %s.%s", ent, attr)
+                elif op == "remove":
+                    res = self.set_remove(ent, attr, c["value"])
+                else:
+                    try:
+                        res = self.cortex_write(
+                            ent, attr, c["value"],
+                            confidence=float(c.get("confidence", 0.55)),
+                            support=c.get("origin", "agent"))
+                    except ValueError as exc:
+                        if "holds a set" in str(exc):
+                            # Spec rule 2: a scalar claim (no op) landing on a
+                            # slot that already holds current members is
+                            # dropped, not routed or crashed — explicit set
+                            # ops (op field or memory_set_add/_remove) are the
+                            # only way to touch a set slot.
+                            logger.info(
+                                "dropped scalar claim for set slot %s.%s",
+                                ent, attr)
+                            continue
+                        raise
                 tally[res["action"]] = tally.get(res["action"], 0) + 1
                 if (traces_cfg.enabled and src_id is not None
                         and self._storage is not None):
