@@ -71,6 +71,22 @@ BATTERY: list[tuple[str, dict[str, str | None]]] = [
      {"portland": None}),
     ("user: Bumped the deploy target from staging to prod-eu.",
      {"prod-eu": None}),
+    # Count-update decoys — the mechanism the c2op-guard gate measured
+    # (count/total updates re-routed into op:"add", freezing the total;
+    # evals/results/c2op-guard-verdict.json). A running total that moved
+    # must land as a PLAIN claim carrying the new number, never op:"add".
+    ("user: Spotted a Northern Flicker today — that brings me to 32 "
+     "different bird species seen at my local park, up from 27.",
+     {"32": None}),
+    ("user: My Instagram just crossed 1300 followers, up from 1250 last "
+     "month.",
+     {"1300": None}),
+    ("user: Watched three more Crash Course videos this week, so that's 15 "
+     "in the past few weeks total.",
+     {"15": None}),
+    ("user: Added two shows tonight, which makes 25 titles on my to-watch "
+     "list now.",
+     {"25": None}),
 ]
 
 # ── prompt variants ───────────────────────────────────────────────────────
@@ -138,6 +154,77 @@ VARIANTS: dict[str, str] = {
         '"value":"prod-eu","confidence":0.9,"source":1},'
         '{"entity":"user","attribute":"restaurants tried",'
         '"value":"Rosa\'s Diner","op":"add","confidence":0.8,"source":1},'),
+
+    # v0 block + count exclusion — the targeted fix for the mechanism the
+    # c2op-guard gate isolated: under v0 the extractor re-routes count/total
+    # UPDATES into op:"add" member claims, freezing the stated total at its
+    # first value. The rule names counts as never-members and shows the
+    # count-update shape as a worked example.
+    "v3-count-exclusion": _BASE.replace(
+        'Return {"claims":[]} if nothing qualifies.',
+        _V0_FAILED_BLOCK +
+        "COUNTS, TOTALS, AND QUANTITIES ARE NEVER MEMBERS: when a note "
+        "states or updates how many of something the user has (a running "
+        "count, a total, a follower number, a quantity), emit a plain claim "
+        'whose value is the NEW number, with no "op" field — even when the '
+        "note also mentions the item that changed the count. Example. "
+        "Notes: [5] saw a Northern Flicker today, that makes 32 species at "
+        'the park now. Output: {"claims":[{"entity":"user","attribute":'
+        '"bird species seen at park","value":"32","confidence":0.9,'
+        '"source":5}]}\n'
+        'Return {"claims":[]} if nothing qualifies.'),
+
+    # v3 recovered 5/7 frozen-total banks in targeted extraction but its
+    # THIRD standalone example object induced multi-object JSON output
+    # (Extra-data parse retries). v4 carries the same rule sentence with the
+    # count-update case folded INTO the v0 block's existing example — same
+    # object count as v0, no new output shape shown.
+    "v4-count-exclusion-integrated": _BASE.replace(
+        'Return {"claims":[]} if nothing qualifies.',
+        _V0_FAILED_BLOCK.replace(
+            "a value that simply "
+            "changed (a new job, a moved city) stays a plain claim with no "
+            "op. ",
+            "a value that simply "
+            "changed (a new job, a moved city) stays a plain claim with no "
+            "op. COUNTS, TOTALS, AND QUANTITIES ARE NEVER MEMBERS: when a "
+            "note states or updates how many of something the user has (a "
+            "running count, a total, a follower number), emit a plain claim "
+            'whose value is the NEW number, with no "op" field — even when '
+            "the note also names the item that changed the count. ",
+        ).replace(
+            "[4] sold the road bike, "
+            "no longer biking to work. ",
+            "[4] sold the road bike, "
+            "no longer biking to work. [5] saw a Northern Flicker today, "
+            "that makes 32 species at the park for me now. ",
+        ).replace(
+            '{"entity":"user","attribute":"bikes owned","value":"road bike",'
+            '"op":"remove","confidence":0.8,"source":4}]}\n',
+            '{"entity":"user","attribute":"bikes owned","value":"road bike",'
+            '"op":"remove","confidence":0.8,"source":4},'
+            '{"entity":"user","attribute":"bird species seen at park",'
+            '"value":"32","confidence":0.9,"source":5}]}\n',
+        ) + 'Return {"claims":[]} if nothing qualifies.'),
+
+    # v3's dedicated example drove its recovery (5/7 frozen-total banks vs
+    # v4's 4/7) but its standalone Output block induced multi-object JSON.
+    # v5 keeps the dedicated count example, rendered as a single claim
+    # object inside the one claims array — no second Output block shown.
+    "v5-count-exclusion-claim-example": _BASE.replace(
+        'Return {"claims":[]} if nothing qualifies.',
+        _V0_FAILED_BLOCK +
+        "COUNTS, TOTALS, AND QUANTITIES ARE NEVER MEMBERS: when a note "
+        "states or updates how many of something the user has (a running "
+        "count, a total, a follower number, a quantity), emit a plain claim "
+        'whose value is the NEW number, with no "op" field — even when the '
+        "note also names the item that changed the count. For example, the "
+        "note [5] saw a Northern Flicker today, that makes 32 species at "
+        "the park now — yields the single claim "
+        '{"entity":"user","attribute":"bird species seen at park",'
+        '"value":"32","confidence":0.9,"source":5} inside the one claims '
+        'array, and NO "op":"add" claim for Northern Flicker.\n'
+        'Return {"claims":[]} if nothing qualifies.'),
 }
 
 

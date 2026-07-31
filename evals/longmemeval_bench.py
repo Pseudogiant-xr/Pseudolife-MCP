@@ -383,7 +383,8 @@ def _make_extractor(ex_url: str, system_prompt_file: str | None):
 
 def run_extract(dataset: str, limit: int | None, extractor_name: str,
                 do_answer: bool, tag: str = "", window: int = 0,
-                system_prompt_file: str | None = None) -> None:
+                system_prompt_file: str | None = None,
+                qids: str | None = None) -> None:
     ex_url = EXTRACTORS[extractor_name]
     if not probe(ex_url):
         sys.exit(f"no extractor server at {ex_url} — start it first")
@@ -394,6 +395,12 @@ def run_extract(dataset: str, limit: int | None, extractor_name: str,
     questions = load_questions(dataset)
     if limit:
         questions = questions[:limit]
+    if qids:
+        keep = {s.strip() for s in qids.split(",") if s.strip()}
+        questions = [q for q in questions if q["question_id"] in keep]
+        missing = keep - {q["question_id"] for q in questions}
+        if missing:
+            sys.exit(f"unknown question_ids: {sorted(missing)}")
     out_path = out_file(dataset, extractor_name, tag)
     done = {r["question_id"] for r in load_rows(out_path)}
     print(f"{len(questions)} knowledge-update questions, extractor="
@@ -509,6 +516,9 @@ def main() -> int:
     ap.add_argument("--window", type=int, default=0,
                     help="known-facts window size for the dream pass "
                          "(0 = off; use 20 for the window arm — spec 2026-07-10)")
+    ap.add_argument("--qids", default=None,
+                    help="comma-separated question_ids to run (targeted "
+                         "extraction / bank forensics; composes with --tag)")
     args = ap.parse_args()
     if args.report:
         report(args.dataset, args.extractor, args.tag)
@@ -519,7 +529,8 @@ def main() -> int:
         run_extract(args.dataset, args.limit, args.extractor,
                     do_answer=(args.phase == "full"), tag=args.tag,
                     window=args.window,
-                    system_prompt_file=args.system_prompt_file)
+                    system_prompt_file=args.system_prompt_file,
+                    qids=args.qids)
     if args.phase != "extract":
         report(args.dataset, args.extractor, args.tag)
     return 0

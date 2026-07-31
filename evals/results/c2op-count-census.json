@@ -1,0 +1,562 @@
+{
+  "control": "ceiling-e2e",
+  "op": "c2op-e2e",
+  "losses": {
+    "cortex": [
+      "01493427",
+      "031748ae",
+      "0e4e4c46",
+      "22d2cb42",
+      "41698283",
+      "45dc21b6",
+      "4d6b87c8",
+      "5831f84d",
+      "5a4f22c0",
+      "7e974930",
+      "89941a93",
+      "89941a94",
+      "a2f3aa27",
+      "affe2881",
+      "e493bb7c",
+      "f685340e_abs"
+    ],
+    "cascade": [
+      "184da446",
+      "41698283",
+      "42ec0761",
+      "45dc21b6",
+      "4d6b87c8",
+      "5831f84d",
+      "69fee5aa",
+      "6aeb4375",
+      "89941a93",
+      "a2f3aa27",
+      "affe2881",
+      "b01defab",
+      "e493bb7c"
+    ]
+  },
+  "gains": {
+    "cortex": [
+      "08e075c7",
+      "0977f2af",
+      "3ba21379",
+      "4b24c848",
+      "50635ada",
+      "59524333",
+      "618f13b2",
+      "9bbe84a2",
+      "9ea5eabc",
+      "d7c942c3",
+      "db467c8c"
+    ],
+    "cascade": [
+      "0977f2af",
+      "50635ada"
+    ]
+  },
+  "lost": [
+    {
+      "qid": "01493427",
+      "question": "How many new postcards have I added to my collection since I started collecting again?",
+      "gold": "25",
+      "gold_numeric": true,
+      "gold_in_control_current": true,
+      "gold_in_op_current": false,
+      "op_numeric_members": [
+        "user/postcards owned=1920s Paris Postcard (PC001)",
+        "user/postcards owned=Vintage Beach Scene (PC002)",
+        "user/postcards owned=Eiffel Tower at Night (PC003)",
+        "user/postcards owned=14 additional postcards (details unspecified)",
+        "user/postcards-owned=8"
+      ],
+      "op_member_count": 5,
+      "class": "frozen-total (rule-recoverable)",
+      "lost_arms": [
+        "cortex"
+      ]
+    },
+    {
+      "qid": "031748ae",
+      "question": "How many engineers do I lead when I just started my new role as Senior Software Engineer? How many engineers d",
+      "gold": "When you just started your new role as Senior Software Engineer, you led 4 engineers. Now, you lead 5 engineers",
+      "gold_numeric": true,
+      "gold_in_control_current": true,
+      "gold_in_op_current": true,
+      "op_numeric_members": [],
+      "op_member_count": 0,
+      "class": "gold present both banks (loss is retrieval/answer-side)",
+      "lost_arms": [
+        "cortex"
+      ]
+    },
+    {
+      "qid": "0e4e4c46",
+      "question": "What is my current highest score in Ticket to Ride?",
+      "gold": "132 points",
+      "gold_numeric": true,
+      "gold_in_control_current": true,
+      "gold_in_op_current": true,
+      "op_numeric_members": [],
+      "op_member_count": 2,
+      "class": "gold present both banks (loss is retrieval/answer-side)",
+      "lost_arms": [
+        "cortex"
+      ]
+    },
+    {
+      "qid": "184da446",
+      "question": "How many pages of 'A Short History of Nearly Everything' have I read so far?",
+      "gold": "220",
+      "gold_numeric": true,
+      "gold_in_control_current": false,
+      "gold_in_op_current": false,
+      "op_numeric_members": [],
+      "op_member_count": 3,
+      "class": "gold absent from control too (extraction miss both)",
+      "lost_arms": [
+        "cascade"
+      ]
+    },
+    {
+      "qid": "22d2cb42",
+      "question": "Where did I get my guitar serviced?",
+      "gold": "The music shop on Main St.",
+      "gold_numeric": false,
+      "gold_in_control_current": null,
+      "gold_in_op_current": null,
+      "op_numeric_members": [],
+      "op_member_count": 1,
+      "class": "non-numeric gold (rule out of scope)",
+      "lost_arms": [
+        "cortex"
+      ]
+    },
+    {
+      "qid": "41698283",
+      "question": "What type of camera lens did I purchase most recently?",
+      "gold": "a 70-200mm zoom lens",
+      "gold_numeric": true,
+      "gold_in_control_current": true,
+      "gold_in_op_current": false,
+      "op_numeric_members": [
+        "user/camera bag options considered=Lowepro ProTactic 450 AW",
+        "user/camera bag options considered=Think Tank Urban Disguise 40L",
+        "user/lens owned=50mm prime lens",
+        "user/lens owned=18-55mm kit lens",
+        "user/tripod options considered=Gitzo GT3543LS Systematic Series 3 Carbon Fiber Tripod",
+        "user/tripod options considered=Really Right Stuff TVC-34L Tripod",
+        "user/tripod options considered=Manfrotto MT057CXPRO4 Carbon Fiber Tripod"
+      ],
+      "op_member_count": 7,
+      "class": "frozen-total (rule-recoverable)",
+      "lost_arms": [
+        "cortex",
+        "cascade"
+      ]
+    },
+    {
+      "qid": "42ec0761",
+      "question": "Do I have a spare screwdriver for opening up my laptop?",
+      "gold": "Yes",
+      "gold_numeric": false,
+      "gold_in_control_current": null,
+      "gold_in_op_current": null,
+      "op_numeric_members": [],
+      "op_member_count": 3,
+      "class": "non-numeric gold (rule out of scope)",
+      "lost_arms": [
+        "cascade"
+      ]
+    },
+    {
+      "qid": "45dc21b6",
+      "question": "How many of Emma's recipes have I tried out?",
+      "gold": "3",
+      "gold_numeric": true,
+      "gold_in_control_current": true,
+      "gold_in_op_current": false,
+      "op_numeric_members": [],
+      "op_member_count": 8,
+      "class": "frozen-total (rule-recoverable)",
+      "lost_arms": [
+        "cortex",
+        "cascade"
+      ]
+    },
+    {
+      "qid": "4d6b87c8",
+      "question": "How many titles are currently on my to-watch list?",
+      "gold": "25",
+      "gold_numeric": true,
+      "gold_in_control_current": true,
+      "gold_in_op_current": false,
+      "op_numeric_members": [],
+      "op_member_count": 8,
+      "class": "frozen-total (rule-recoverable)",
+      "lost_arms": [
+        "cortex",
+        "cascade"
+      ]
+    },
+    {
+      "qid": "5831f84d",
+      "question": "How many Crash Course videos have I watched in the past few weeks?",
+      "gold": "15",
+      "gold_numeric": true,
+      "gold_in_control_current": true,
+      "gold_in_op_current": false,
+      "op_numeric_members": [
+        "user/educational activities=watched 12 Crash Course videos"
+      ],
+      "op_member_count": 8,
+      "class": "frozen-total (rule-recoverable)",
+      "lost_arms": [
+        "cortex",
+        "cascade"
+      ]
+    },
+    {
+      "qid": "5a4f22c0",
+      "question": "What company is Rachel, an old colleague from my previous company, currently working at?",
+      "gold": "TechCorp",
+      "gold_numeric": false,
+      "gold_in_control_current": null,
+      "gold_in_op_current": null,
+      "op_numeric_members": [],
+      "op_member_count": 2,
+      "class": "non-numeric gold (rule out of scope)",
+      "lost_arms": [
+        "cortex"
+      ]
+    },
+    {
+      "qid": "69fee5aa",
+      "question": "How many pre-1920 American coins do I have in my collection?",
+      "gold": "38",
+      "gold_numeric": true,
+      "gold_in_control_current": false,
+      "gold_in_op_current": false,
+      "op_numeric_members": [
+        "user/cameras owned=1940s-era Leica IIIa",
+        "user/cameras owned=1960s-era Nikon F",
+        "user/coins owned=1913 Liberty Head nickel",
+        "user/coins-owned=1915-S Barber quarter",
+        "user/coins-owned=1972 doubled die cent"
+      ],
+      "op_member_count": 5,
+      "class": "gold absent from control too (extraction miss both)",
+      "lost_arms": [
+        "cascade"
+      ]
+    },
+    {
+      "qid": "6aeb4375",
+      "question": "How many Korean restaurants have I tried in my city?",
+      "gold": "four",
+      "gold_numeric": true,
+      "gold_in_control_current": false,
+      "gold_in_op_current": false,
+      "op_numeric_members": [],
+      "op_member_count": 3,
+      "class": "gold absent from control too (extraction miss both)",
+      "lost_arms": [
+        "cascade"
+      ]
+    },
+    {
+      "qid": "7e974930",
+      "question": "How much did I earn at the Downtown Farmers Market on my most recent visit?",
+      "gold": "$420",
+      "gold_numeric": true,
+      "gold_in_control_current": true,
+      "gold_in_op_current": true,
+      "op_numeric_members": [
+        "user's business/market/event participation=March 18th, Downtown Farmers Market, $220",
+        "user's business/market/event participation=March 25th, Arts and Crafts Fair, $85",
+        "user's business/market/event participation=April 1st, Earth Day Market, $25",
+        "user's business/market/event participation=May 6th, Downtown Farmers Market, $350",
+        "user's business/market/event participation=May 13th, Mother's Day Market, $200",
+        "user's business/market/event participation=May 20th, Foodie Festival, $400"
+      ],
+      "op_member_count": 6,
+      "class": "gold present both banks (loss is retrieval/answer-side)",
+      "lost_arms": [
+        "cortex"
+      ]
+    },
+    {
+      "qid": "89941a93",
+      "question": "How many bikes do I currently own?",
+      "gold": "4",
+      "gold_numeric": true,
+      "gold_in_control_current": true,
+      "gold_in_op_current": true,
+      "op_numeric_members": [],
+      "op_member_count": 2,
+      "class": "gold present both banks (loss is retrieval/answer-side)",
+      "lost_arms": [
+        "cortex",
+        "cascade"
+      ]
+    },
+    {
+      "qid": "89941a94",
+      "question": "Before I purchased the gravel bike, do I have other bikes in addition to my mountain bike and my commuter bike",
+      "gold": "Yes. (You have a road bike too.)",
+      "gold_numeric": false,
+      "gold_in_control_current": null,
+      "gold_in_op_current": null,
+      "op_numeric_members": [],
+      "op_member_count": 2,
+      "class": "non-numeric gold (rule out of scope)",
+      "lost_arms": [
+        "cortex"
+      ]
+    },
+    {
+      "qid": "a2f3aa27",
+      "question": "How many followers do I have on Instagram now?",
+      "gold": 1300,
+      "gold_numeric": true,
+      "gold_in_control_current": true,
+      "gold_in_op_current": false,
+      "op_numeric_members": [],
+      "op_member_count": 1,
+      "class": "frozen-total (rule-recoverable)",
+      "lost_arms": [
+        "cortex",
+        "cascade"
+      ]
+    },
+    {
+      "qid": "affe2881",
+      "question": "How many different species of birds have I seen in my local park?",
+      "gold": "32",
+      "gold_numeric": true,
+      "gold_in_control_current": true,
+      "gold_in_op_current": false,
+      "op_numeric_members": [
+        "user/bird species spotted in local park=27"
+      ],
+      "op_member_count": 2,
+      "class": "frozen-total (rule-recoverable)",
+      "lost_arms": [
+        "cortex",
+        "cascade"
+      ]
+    },
+    {
+      "qid": "b01defab",
+      "question": "Did I finish reading 'The Nightingale' by Kristin Hannah?",
+      "gold": "Yes",
+      "gold_numeric": false,
+      "gold_in_control_current": null,
+      "gold_in_op_current": null,
+      "op_numeric_members": [],
+      "op_member_count": 5,
+      "class": "non-numeric gold (rule out of scope)",
+      "lost_arms": [
+        "cascade"
+      ]
+    },
+    {
+      "qid": "e493bb7c",
+      "question": "Where is the painting 'Ethereal Dreams' by Emma Taylor currently hanging?",
+      "gold": "in my bedroom",
+      "gold_numeric": false,
+      "gold_in_control_current": null,
+      "gold_in_op_current": null,
+      "op_numeric_members": [],
+      "op_member_count": 0,
+      "class": "non-numeric gold (rule out of scope)",
+      "lost_arms": [
+        "cortex",
+        "cascade"
+      ]
+    },
+    {
+      "qid": "f685340e_abs",
+      "question": "How often do I play table tennis with my friends at the local park?",
+      "gold": "The information provided is not enough. You mentioned playing tennis but not table tennis.",
+      "gold_numeric": false,
+      "gold_in_control_current": null,
+      "gold_in_op_current": null,
+      "op_numeric_members": [],
+      "op_member_count": 0,
+      "class": "non-numeric gold (rule out of scope)",
+      "lost_arms": [
+        "cortex"
+      ]
+    }
+  ],
+  "gain_risk": [
+    {
+      "qid": "08e075c7",
+      "question": "How long have I been using my Fitbit Charge 3?",
+      "gold": "9 months",
+      "gold_numeric": true,
+      "gold_in_control_current": true,
+      "gold_in_op_current": true,
+      "op_numeric_members": [],
+      "op_member_count": 0,
+      "class": "gold present both banks (loss is retrieval/answer-side)",
+      "gained_arms": [
+        "cortex"
+      ]
+    },
+    {
+      "qid": "0977f2af",
+      "question": "What new kitchen gadget did I invest in before getting the Air Fryer?",
+      "gold": "Instant Pot",
+      "gold_numeric": false,
+      "gold_in_control_current": null,
+      "gold_in_op_current": null,
+      "op_numeric_members": [],
+      "op_member_count": 0,
+      "class": "non-numeric gold (rule out of scope)",
+      "gained_arms": [
+        "cortex",
+        "cascade"
+      ]
+    },
+    {
+      "qid": "3ba21379",
+      "question": "What type of vehicle model am I currently working on?",
+      "gold": "Ford F-150 pickup truck",
+      "gold_numeric": true,
+      "gold_in_control_current": false,
+      "gold_in_op_current": true,
+      "op_numeric_members": [],
+      "op_member_count": 0,
+      "class": "gold absent from control too (extraction miss both)",
+      "gained_arms": [
+        "cortex"
+      ]
+    },
+    {
+      "qid": "4b24c848",
+      "question": "How many tops have I bought from H&M so far?",
+      "gold": "five",
+      "gold_numeric": true,
+      "gold_in_control_current": false,
+      "gold_in_op_current": true,
+      "op_numeric_members": [],
+      "op_member_count": 1,
+      "class": "gold absent from control too (extraction miss both)",
+      "gained_arms": [
+        "cortex"
+      ]
+    },
+    {
+      "qid": "50635ada",
+      "question": "What was my previous frequent flyer status on United Airlines before I got the current status?",
+      "gold": "Premier Silver",
+      "gold_numeric": false,
+      "gold_in_control_current": null,
+      "gold_in_op_current": null,
+      "op_numeric_members": [],
+      "op_member_count": 0,
+      "class": "non-numeric gold (rule out of scope)",
+      "gained_arms": [
+        "cortex",
+        "cascade"
+      ]
+    },
+    {
+      "qid": "59524333",
+      "question": "What time do I usually go to the gym?",
+      "gold": "6:00 pm",
+      "gold_numeric": true,
+      "gold_in_control_current": false,
+      "gold_in_op_current": true,
+      "op_numeric_members": [],
+      "op_member_count": 0,
+      "class": "gold absent from control too (extraction miss both)",
+      "gained_arms": [
+        "cortex"
+      ]
+    },
+    {
+      "qid": "618f13b2",
+      "question": "How many times have I worn my new black Converse Chuck Taylor All Star sneakers?",
+      "gold": "six",
+      "gold_numeric": true,
+      "gold_in_control_current": false,
+      "gold_in_op_current": true,
+      "op_numeric_members": [],
+      "op_member_count": 5,
+      "class": "gold absent from control too (extraction miss both)",
+      "gained_arms": [
+        "cortex"
+      ]
+    },
+    {
+      "qid": "9bbe84a2",
+      "question": "What was my previous goal for my Apex Legends level before I updated my goal?",
+      "gold": "level 100",
+      "gold_numeric": true,
+      "gold_in_control_current": false,
+      "gold_in_op_current": false,
+      "op_numeric_members": [],
+      "op_member_count": 0,
+      "class": "gold absent from control too (extraction miss both)",
+      "gained_arms": [
+        "cortex"
+      ]
+    },
+    {
+      "qid": "9ea5eabc",
+      "question": "Where did I go on my most recent family trip?",
+      "gold": "Paris",
+      "gold_numeric": false,
+      "gold_in_control_current": null,
+      "gold_in_op_current": null,
+      "op_numeric_members": [],
+      "op_member_count": 0,
+      "class": "non-numeric gold (rule out of scope)",
+      "gained_arms": [
+        "cortex"
+      ]
+    },
+    {
+      "qid": "d7c942c3",
+      "question": "Is my mom using the same grocery list method as me?",
+      "gold": "Yes.",
+      "gold_numeric": false,
+      "gold_in_control_current": null,
+      "gold_in_op_current": null,
+      "op_numeric_members": [],
+      "op_member_count": 0,
+      "class": "non-numeric gold (rule out of scope)",
+      "gained_arms": [
+        "cortex"
+      ]
+    },
+    {
+      "qid": "db467c8c",
+      "question": "How long have my parents been staying with me in the US?",
+      "gold": "nine months",
+      "gold_numeric": true,
+      "gold_in_control_current": false,
+      "gold_in_op_current": true,
+      "op_numeric_members": [],
+      "op_member_count": 0,
+      "class": "gold absent from control too (extraction miss both)",
+      "gained_arms": [
+        "cortex"
+      ]
+    }
+  ],
+  "summary": {
+    "lost_by_class": {
+      "frozen-total (rule-recoverable)": 7,
+      "gold present both banks (loss is retrieval/answer-side)": 4,
+      "gold absent from control too (extraction miss both)": 3,
+      "non-numeric gold (rule out of scope)": 7
+    },
+    "recoverable_cascade": 6,
+    "recoverable_cortex": 7,
+    "gains_with_numeric_members": 0
+  }
+}
