@@ -33,6 +33,7 @@ from pseudolife_memory.memory.cortex import (
     CortexStore,
     MAX_CURRENT_MEMBERS,
     MEMBER_DEDUP_COSINE,
+    _is_aggregate_value,
 )
 from pseudolife_memory.memory.slots import Slot
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
@@ -58,6 +59,17 @@ def emb():
 def test_module_constants():
     assert MEMBER_DEDUP_COSINE == 0.9
     assert MAX_CURRENT_MEMBERS == 100
+
+
+def test_is_aggregate_value_detection():
+    hits = ["32", "27 species", "$1,500", "+3", "-5", "3.5 kg", "3rd place",
+            "  42  ", "€200", "£15"]
+    misses = ["gravel bike", "Rosa's Diner", "prod-eu", "", "   ",
+              "thirty-two", "iPhone 15", None]
+    for v in hits:
+        assert _is_aggregate_value(v), f"should match: {v!r}"
+    for v in misses:
+        assert not _is_aggregate_value(v), f"should not match: {v!r}"
 
 
 def test_add_member_creates_set_slot(store, emb):

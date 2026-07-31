@@ -74,6 +74,17 @@ def _norm_value(s: str) -> str:
     return (s or "").strip().casefold()
 
 
+# Number-led values ("32", "27 species", "$1,500") — the class the C2-op gate
+# measured being destroyed by scalar->set conversion (evals/results/
+# c2op-gate-verdict.json). Currency sign then optional sign then a digit.
+_AGGREGATE_VALUE_RE = re.compile(r"^[$€£]?[+-]?\d")
+
+
+def _is_aggregate_value(value: str) -> bool:
+    """True when a scalar value reads as a number-led quantity."""
+    return bool(_AGGREGATE_VALUE_RE.match((value or "").strip()))
+
+
 # Provenance-of-kind: which tier asserted a fact. Precedence high → low. A fact
 # the user stated outranks one the agent merely *did*, which outranks one the
 # agent only *said*. ``origin`` returns the strongest tier in a record's
