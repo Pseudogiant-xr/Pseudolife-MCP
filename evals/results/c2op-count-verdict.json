@@ -136,7 +136,7 @@
     "cortex +0.090 / hybrid +0.077 over control are nominal (p 0.23 / 0.11) — report as 'costs nothing, may help', not as a win."
   ],
   "followups": [
-    "Sidecar adoption probe: DONE same night — see sidecar_validation (5/7 recovery on e4b-ft, zero parse failures). The full e2e ladder rung run remains the pre-deploy formality if the hold is reversed.",
+    "Ladder rung validation: DONE same night — see ladder_rung_validation (identical gates). Shipping now waits only on the explicit hold-reversal decision.",
     "01493427-style derived-sum totals stay unrecoverable by prompt rules (the total is never stated); only arithmetic at answer time or set-count rendering could close it.",
     "LME-V2 trajectories remain the natural testbed for genuinely membership-enumerating content."
   ],
@@ -150,5 +150,11 @@
       "detail": "recovers 01493427 (derived-sum postcards, 25) which qwen-27b itself missed; misses a2f3aa27 (1300) and 6aeb4375 (four); 45dc21b6's hit is a member value carrying the count ('3 recipes from Emma')"
     },
     "reading": "the deployed small extractor adopts op AND obeys the count exclusion at rates matching the ceiling extractor on this slice — the sidecar-adoption gate named in `decision` is satisfied at probe level. A full e2e ladder rung run remains the pre-deploy formality if the hold is reversed."
+  },
+  "ladder_rung_validation": {
+    "date": "2026-08-01 (same night)",
+    "runs": "ladder_sweep --rung e4b-ft paired: shipped prompt (e4b-ft-base0801.json) vs v5 (e4b-ft-v50801.json), same code, fresh consolidation each",
+    "result": "IDENTICAL on the gates: gold_recoverable 1.0 -> 1.0, stale_leak 0.0 -> 0.0, claims 16 -> 16 (inserted 16 -> 16), tokens_per_query 7.3 -> 8.9",
+    "reading": "the pre-deploy formality named in `decision` is satisfied — v5 does not perturb the sidecar's extraction-quality gates. The remaining gate on shipping is purely the user's reversal of the option-B hold."
   }
 }
