@@ -56,3 +56,27 @@ def test_cortex_dedup_canonical_prefers_user_tier(svc):
     svc.cortex_dedup(threshold=0.85, dry_run=False)
     cur = svc._cortex.current_records()
     assert len(cur) == 1 and cur[0].value == "db-user"     # user tier wins
+
+
+def test_cortex_dedup_backfill_skips_members(svc):
+    """F1 (bank-corrupting, review-caught): the backfill loop must not give
+    member records a slot embedding. All members of one slot share the same
+    ``(entity, attribute)``, so backfilling the value-free
+    ``f"{entity} {attribute}"`` embedding onto every member would make them
+    cosine-IDENTICAL to each other; ``dedup_siblings`` would then cluster
+    and supersede all but one, silently destroying the set. Members must
+    come out of ``cortex_dedup`` untouched (no ``slot_embedding`` set) and
+    all still current. Member values are deliberately semantically distinct
+    (not "alpha"/"beta"/"gamma", whose real embeddings run above
+    ``MEMBER_DEDUP_COSINE`` and would confirm-merge at insertion regardless
+    of this bug) so a failure here can only be the backfill-loop defect."""
+    svc.set_add("user", "tags", "mountain biking")
+    svc.set_add("user", "tags", "competitive chess")
+    svc.set_add("user", "tags", "watercolor painting")
+
+    svc.cortex_dedup(threshold=0.85, dry_run=False)
+
+    members = svc._cortex.members("user", "tags")
+    assert len(members) == 3, [m.value for m in members]
+    assert all(m.status == "current" for m in members)
+    assert all(m.slot_embedding is None for m in members)

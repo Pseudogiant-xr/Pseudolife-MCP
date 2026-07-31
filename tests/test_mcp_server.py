@@ -71,6 +71,8 @@ def test_all_tools_registered() -> None:
         "memory_fact_get",
         "memory_fact_set",
         "memory_fact_resolve",
+        "memory_set_add",
+        "memory_set_remove",
         "memory_history",
         # World cortex + lessons.
         "memory_world_set",
@@ -172,8 +174,9 @@ def test_get_neighbors_tool_is_gone() -> None:
 
 
 _EXPECTED_MINIMAL = sorted([
-    # The 7-tool eager surface for minimal-tier clients (Claude Desktop).
+    # The 9-tool eager surface for minimal-tier clients (Claude Desktop).
     "memory_store", "memory_search", "memory_fact_get", "memory_fact_set",
+    "memory_set_add", "memory_set_remove",
     "memory_outcome", "memory_session_title", "memory_toolset",
 ])
 
@@ -279,6 +282,84 @@ def test_memory_fact_set_get_forget_via_mcp_dispatch(tmp_path: Path, monkeypatch
     forget = _invoke("memory_forget", {"scope": "fact", "entity": "project"})
     assert forget["removed"] == 1
     assert _invoke("memory_fact_get", {"entity": "project", "attribute": "language"})["record"] is None
+
+
+def test_memory_set_add_remove_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:
+    """Task 5: the MCP call-through for the set tools — store two members,
+    confirm one, remove one, and read the set back via memory_fact_get."""
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
+    import importlib
+    import pseudolife_memory.mcp_server as mod
+    importlib.reload(mod)
+
+    added = _invoke("memory_set_add",
+                    {"entity": "project", "attribute": "tags", "member": "rust"})
+    assert added["action"] == "member_added"
+    assert added["members_count"] == 1
+    confirmed = _invoke("memory_set_add",
+                        {"entity": "project", "attribute": "tags", "member": "rust"})
+    assert confirmed["action"] == "member_confirmed"
+    _invoke("memory_set_add",
+           {"entity": "project", "attribute": "tags", "member": "python"})
+
+    got = _invoke("memory_fact_get", {"entity": "Project", "attribute": "tags"})
+    assert got["record"]["kind"] == "set"
+    assert {m["value"] for m in got["record"]["members"]} == {"rust", "python"}
+
+    removed = _invoke("memory_set_remove",
+                      {"entity": "project", "attribute": "tags", "member": "rust"})
+    assert removed["action"] == "member_removed"
+    assert removed["members_count"] == 1
+
+    still_missing = _invoke("memory_set_remove",
+                            {"entity": "project", "attribute": "tags", "member": "rust"})
+    assert still_missing["action"] == "member_not_found"
+
+
+def test_memory_fact_set_on_a_set_slot_maps_to_the_set_tools(
+        tmp_path: Path, monkeypatch) -> None:
+    """A scalar write against a slot already converted to a set must not
+    leak the store's own add_member/remove_member vocabulary at the MCP
+    boundary — service.cortex_write remaps it to name memory_set_add /
+    memory_set_remove (Task 4), and the generic async-offload wrapper turns
+    the ValueError into this surface's uniform {error, message} shape."""
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
+    import importlib
+    import pseudolife_memory.mcp_server as mod
+    importlib.reload(mod)
+
+    _invoke("memory_set_add",
+           {"entity": "project", "attribute": "tags", "member": "rust"})
+    out = _invoke("memory_fact_set",
+                 {"entity": "project", "attribute": "tags", "value": "go"})
+    assert out["error"] == "ValueError"
+    assert out["message"] == (
+        "slot holds a set; use memory_set_add / memory_set_remove")
+
+
+def test_memory_fact_get_on_a_fully_emptied_set_slot_reads_as_empty(
+        tmp_path: Path, monkeypatch) -> None:
+    """Task 5 review finding: cortex_lookup's set shape stays a truthy dict
+    ({"kind": "set", "members": [], "removed": [...]}) even after every
+    member is removed — members: [] IS the empty-slot signal. memory_fact_get
+    must route that through the same empty-slot paths as a scalar miss
+    (candidates populated, no spurious correct_with)."""
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
+    import importlib
+    import pseudolife_memory.mcp_server as mod
+    importlib.reload(mod)
+
+    _invoke("memory_set_add",
+           {"entity": "project", "attribute": "tags", "member": "rust"})
+    _invoke("memory_set_remove",
+           {"entity": "project", "attribute": "tags", "member": "rust"})
+
+    got = _invoke("memory_fact_get", {"entity": "project", "attribute": "tags"})
+    assert got["record"]["kind"] == "set"
+    assert got["record"]["members"] == []
+    assert len(got["record"]["removed"]) == 1
+    assert "correct_with" not in got["record"]
+    assert "candidates" in got
 
 
 def test_store_auto_promotes_and_search_surfaces_cortex(tmp_path: Path, monkeypatch) -> None:

@@ -7,7 +7,8 @@ row at a dirty slot and reinserts the in-memory survivors, so marking a
 purged slot dirty IS the delete path — no separate SQL).
 
 Policy (uniform across the three stores): per slot, pool the non-live
-records (status ``superseded`` or ``retired``), keep the newest
+records (status ``superseded``, ``retired``, or — CortexStore's
+set-valued-slot members only, schema v26 — ``removed``), keep the newest
 ``keep_per_slot`` unconditionally, and purge the rest only when their
 ``superseded_at`` is older than ``min_age_days``. ``current`` and
 ``contested`` records are never touched; entries and edges are out of
@@ -17,7 +18,7 @@ from __future__ import annotations
 
 import time
 
-_NON_LIVE = ("superseded", "retired")
+_NON_LIVE = ("superseded", "retired", "removed")
 
 
 def compact_store(store, *, keep_per_slot: int, min_age_days: float,

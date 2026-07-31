@@ -348,7 +348,11 @@ def memory_search(
                 {
                     "entity": f["entity"], "attribute": f["attribute"],
                     "value": f["value"], "origin": f.get("origin", ""),
-                    "confidence": f["confidence"], "score": f.get("score"),
+                    # Task 6: a grouped set-slot entry has no scalar
+                    # ``confidence`` (it summarises many current members,
+                    # each with its own) — ``.get`` degrades to ``None``
+                    # rather than KeyError-ing the whole search.
+                    "confidence": f.get("confidence"), "score": f.get("score"),
                     "contested": f.get("contested", False),
                     # Currency. The cortex is the layer an agent trusts most,
                     # so a stale fact here is worse than a stale entry — and
@@ -548,26 +552,35 @@ def memory_reinforce(entry_id: int) -> dict[str, Any]:
 def memory_fact_get(entity: str, attribute: str) -> dict[str, Any]:
     """Look up the one CURRENT value at an ``(entity, attribute)`` slot.
     One value per slot, case/separator-insensitive. A null record means
-    EMPTY, not unknown — ``memory_search`` still finds context.
+    EMPTY, not unknown — ``memory_search`` still finds context. A
+    set-valued slot returns ``{kind: "set", members, removed}`` instead —
+    ``members: []`` means EMPTY too.
 
     Returns: ``{record | null, contenders}`` (+ ``entity_ref`` when the
     entity has a graph node). Non-empty ``contenders`` = unsettled
     conflict (see ``memory_fact_resolve``); on an empty slot,
     ``candidates`` lists nearby slots — ranked leads, not answers.
     """
+    rec = service.cortex_lookup(entity, attribute)
     out = {
-        "record": service.cortex_lookup(entity, attribute),
+        "record": rec,
         "contenders": service.cortex_contenders(entity, attribute)["contenders"],
     }
-    if out["record"] is None and not out["contenders"]:
+    # A fully-emptied set slot (every member removed) still comes back as a
+    # truthy {"kind": "set", "members": [], "removed": [...]} dict —
+    # "members": [] IS the empty-slot signal (Task 5 review finding).
+    # Route it through the same empty-slot paths as a scalar miss instead
+    # of letting it read as a found record.
+    is_empty_set = isinstance(rec, dict) and rec.get("kind") == "set" and not rec.get("members")
+    if (rec is None or is_empty_set) and not out["contenders"]:
         out["candidates"] = service.cortex_candidates(entity, attribute)
     # Supersede-at-discovery: an aged/stale record carries its exact
     # correction call, and the response states the norm once.
-    if out["record"] is not None:
+    if rec is not None and not is_empty_set:
         cw = _cortex_correct_with(
-            {**out["record"], "contested": bool(out["contenders"])})
+            {**rec, "contested": bool(out["contenders"])})
         if cw:
-            out["record"]["correct_with"] = cw
+            rec["correct_with"] = cw
             out["correction_note"] = CORRECTION_NOTE
     # Graph join: when the subject has a graph node, surface its id +
     # aliases so callers can pivot into memory_graph.
@@ -609,6 +622,27 @@ def memory_fact_set(
         confidence=confidence, support=(origin or "agent"), episode=episode,
         freshness_class=freshness_class,
     )
+
+
+@_tool(tier="minimal")
+def memory_set_add(entity: str, attribute: str, member: str) -> dict[str, Any]:
+    """Add/confirm a member of a set-valued slot (many concurrent values,
+    not one NOW value). A scalar there converts to a set on first call —
+    one-way. Read with memory_fact_get.
+
+    Returns: {action, entity, attribute, member, members_count}.
+    """
+    return service.set_add(entity, attribute, member)
+
+
+@_tool(tier="minimal")
+def memory_set_remove(entity: str, attribute: str, member: str) -> dict[str, Any]:
+    """Retract one current set member (audit row kept). Read with
+    memory_fact_get.
+
+    Returns: {action, entity, attribute, member, members_count}.
+    """
+    return service.set_remove(entity, attribute, member)
 
 
 @_tool(tier="core")

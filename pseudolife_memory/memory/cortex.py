@@ -86,6 +86,54 @@ SUPPORT_PRECEDENCE = ("user", "action", "agent")
 # for the daemon's whole uptime — same growth class as superseded rows.
 SUPERSESSION_LOG_CAP = 200
 
+# Set-valued slots (v1, schema v26). A slot holds either one scalar current
+# record OR many "member" current records — never both; a scalar occupying a
+# slot converts one-way to a member the first time add_member targets it.
+# MEMBER_DEDUP_COSINE: a member add whose normalised value doesn't exact-match
+# an existing member still confirms (not duplicates) when its embedding is
+# this close to an existing member's — same paraphrase-collapse idea as
+# dedup_siblings, at member granularity.
+MEMBER_DEDUP_COSINE = 0.9
+# MAX_CURRENT_MEMBERS: hard cap on live members per slot — an unbounded set
+# slot is an unbounded-growth foot-gun (dream extraction retried against a
+# noisy transcript could mint hundreds of near-duplicate "tags"). Beyond the
+# cap, further adds are dropped (action "member_capped"), not queued.
+MAX_CURRENT_MEMBERS = 100
+
+
+def compose_set_value(
+    member_values: list[str], ranked: list[tuple[int, float]],
+) -> tuple[str, float | None]:
+    """Compose the one-entry-per-slot serving line for a set-valued slot
+    (Task 6). ``member_values`` is the FULL current membership of the slot,
+    in insertion order; ``ranked`` pairs an index into that list with the
+    score the member earned wherever it individually ranked (dense search,
+    or dense+BM25 fusion). Members that ranked come first, score-descending;
+    any current member that did not individually rank is appended after —
+    the slot still surfaces its whole membership, not just the fraction that
+    happened to score above the caller's floor.
+
+    Returns ``(value_string, max_score)`` — ``value_string`` is
+    ``"m1; m2; m3 (3 members)"``; ``max_score`` is the highest score among
+    ``ranked`` (``None`` if ``ranked`` is empty, which should not happen in
+    practice since grouping only starts once at least one member ranks).
+
+    Shared verbatim by ``service.cortex_search`` (live path, ``CortexRecord``
+    objects) and ``evals/rebuild_contexts.rebuild_fact_lines`` (offline
+    replay over a dumped bank's dicts) so the composed line is identical
+    between the two by construction, not by two independent
+    implementations staying in sync — the failure mode
+    ``tests/test_cortex_bm25.py::test_rebuild_fact_ranking_matches_service_fusion``
+    exists to catch."""
+    ranked_sorted = sorted(ranked, key=lambda p: p[1], reverse=True)
+    ranked_idx = [i for i, _ in ranked_sorted]
+    ranked_set = set(ranked_idx)
+    ordered = [member_values[i] for i in ranked_idx] + [
+        v for i, v in enumerate(member_values) if i not in ranked_set]
+    value = "; ".join(ordered) + f" ({len(member_values)} members)"
+    score = ranked_sorted[0][1] if ranked_sorted else None
+    return value, score
+
 
 def _norm_support(s: str | None) -> str | None:
     s = (s or "").strip().casefold()
@@ -106,9 +154,17 @@ def _rank(origin: str | None) -> int:
 class CortexRecord:
     """One canonical fact at a slot, with lifecycle + provenance.
 
-    ``status`` is ``current`` | ``superseded`` | ``retired``. Superseded records
-    are never deleted — they are the audit trail / revert path. ``provenance``
-    is the set of episode ids the claim was extracted or confirmed from.
+    ``status`` is ``current`` | ``superseded`` | ``retired`` | ``contested`` |
+    ``removed``. Superseded/removed records are never deleted — they are the
+    audit trail / revert path. ``removed`` is member-only (schema v26): a
+    member the user retracted, timestamped via the existing
+    ``superseded_at`` field (no separate "removed_at"). ``provenance`` is the
+    set of episode ids the claim was extracted or confirmed from.
+
+    ``kind`` distinguishes the two slot models sharing this dataclass:
+    ``"scalar"`` (the original one-current-record-per-slot fact) or
+    ``"member"`` (one of possibly many current records at a set-valued slot,
+    see :meth:`CortexStore.add_member`).
     """
 
     entity: str
@@ -117,6 +173,7 @@ class CortexRecord:
     polarity: str = "+"
     confidence: float = 0.7
     status: str = "current"
+    kind: str = "scalar"  # "scalar" | "member"
     provenance: set[str] = field(default_factory=set)
     asserted_at: float = 0.0
     last_confirmed: float = 0.0
@@ -181,9 +238,13 @@ class CortexRecord:
 
 @dataclass
 class WriteResult:
-    """Outcome of :meth:`CortexStore.write_fact`."""
+    """Outcome of :meth:`CortexStore.write_fact` / the member-model writes."""
 
-    action: str  # "inserted" | "confirmed" | "superseded" | "contested"
+    action: str
+    # write_fact: "inserted" | "confirmed" | "superseded" | "contested"
+    # add_member: "member_added" | "member_confirmed" | "member_capped" |
+    #             "member_invalid"
+    # remove_member: "member_removed" | "member_not_found"
     record: CortexRecord
 
 
@@ -206,6 +267,14 @@ class CortexStore:
         self.records: list[CortexRecord] = []
         # slot key -> index into ``records`` of the *current* record.
         self._current: dict[tuple[str, str], int] = {}
+        # slot key -> indices into ``records`` of the *current* member rows
+        # (insertion order), for set-valued slots. A key never appears in
+        # both ``_current`` and ``_members`` at once: ``add_member``
+        # converts a scalar occupying the slot to a member (one-way), and
+        # ``write_fact`` actively enforces the reverse — it raises
+        # ValueError when ``self._members.get(key)`` is non-empty, rather
+        # than silently inserting a parallel current scalar.
+        self._members: dict[tuple[str, str], list[int]] = {}
         # Slots mutated since the last storage sync (2026-07-02 P1 per-slot
         # persistence). Every mutation path MUST mark the slot(s) it touches;
         # sync_cortex_slots persists exactly these and clears the set on
@@ -241,6 +310,23 @@ class CortexStore:
         session_id: str | None = None,
         freshness_class: str = "evergreen",
     ) -> WriteResult:
+        """Write a scalar fact at ``(slot.entity, slot.attribute)`` — the
+        canonical insert/confirm/supersede/contest path (see the module
+        docstring).
+
+        Raises ``ValueError`` if the slot currently holds set members (a
+        prior :meth:`add_member` populated or converted it): scalar writes
+        and set membership are mutually exclusive at one slot, and this
+        store does not silently pick a resolution. Callers — the service
+        layer, in particular — are expected to catch this and route the
+        write through :meth:`add_member`/:meth:`remove_member` instead.
+        """
+        key = (_norm_key(slot.entity), _norm_key(slot.attribute))
+        if self._members.get(key):
+            raise ValueError(
+                "slot holds a set; use add_member/remove_member — scalar "
+                "writes are rejected"
+            )
         t = time.time() if now is None else float(now)
         txt = t if tx_time is None else float(tx_time)
         vt = txt if valid_time is None else float(valid_time)
@@ -251,7 +337,6 @@ class CortexStore:
         emb = embedding.detach().to("cpu", torch.float32).clone()
         semb = (slot_embedding.detach().to("cpu", torch.float32).clone()
                 if slot_embedding is not None else None)
-        key = (_norm_key(slot.entity), _norm_key(slot.attribute))
         self.dirty_slots.add(key)
 
         idx = self._current.get(key)
@@ -393,6 +478,219 @@ class CortexStore:
             del self.supersession_log[:-SUPERSESSION_LOG_CAP]
 
     # ------------------------------------------------------------------
+    # Set-valued slots — member add/remove/read (schema v26)
+    # ------------------------------------------------------------------
+
+    def add_member(
+        self,
+        slot: Slot,
+        embedding: torch.Tensor,
+        *,
+        confidence: float = 0.7,
+        provenance: Iterable[str] = (),
+        support: str | None = None,
+        now: float | None = None,
+        hlc: tuple[int, int] | None = None,
+        writer_id: str | None = None,
+        session_id: str | None = None,
+    ) -> WriteResult:
+        """Add (or confirm) a member of the set-valued slot ``(slot.entity,
+        slot.attribute)``.
+
+        Unlike :meth:`write_fact`, members are never contested; conflicting
+        adds either confirm an existing member or insert a new one — there is
+        no contender path for members (v1 decision; a differing value at an
+        already-populated set slot is simply a second current member, not a
+        dispute to resolve). Dedup is exact normalised-value match OR cosine
+        similarity >= ``MEMBER_DEDUP_COSINE`` against an existing current
+        member. A scalar record already occupying the slot is converted
+        one-way to a member first (the scalar row survives as an
+        audit-visible superseded record; there is no path back to scalar).
+        Beyond ``MAX_CURRENT_MEMBERS`` current members, further adds are
+        dropped (``"member_capped"``).
+
+        A value that normalises to empty is rejected outright
+        (``"member_invalid"``) rather than stored: Postgres unique indexes
+        treat NULLs as distinct, so a member row with an empty/NULL
+        normalised value would silently bypass the per-slot uniqueness
+        constraint on persistence (Task 1 review finding).
+
+        ``slot.polarity`` (e.g. ``"-"`` for a negated add) is accepted and
+        preserved verbatim on the inserted/converted member in v1 — it is
+        NOT interpreted. Routing a negated add to an implicit
+        :meth:`remove_member` call is explicitly out of scope here; callers
+        that mean "no longer" must call ``remove_member`` themselves.
+        """
+        t = time.time() if now is None else float(now)
+        key = (_norm_key(slot.entity), _norm_key(slot.attribute))
+        if not _norm_value(slot.value):
+            # Rejected before touching any state — no dirty_slots write, no
+            # slot rewrite scheduled for an add that never happened.
+            return WriteResult("member_invalid", CortexRecord(
+                entity=slot.entity, attribute=slot.attribute, value=slot.value,
+                kind="member",
+            ))
+        emb = embedding.detach().to("cpu", torch.float32).clone()
+        # Scalar at this slot -> one-way conversion (spec rule 1).
+        idx = self._current.get(key)
+        if idx is not None:
+            self.dirty_slots.add(key)
+            cur = self.records[idx]
+            cur.status = "superseded"
+            cur.superseded_at = t
+            cur.superseded_by_value = "(converted to set)"
+            del self._current[key]
+            self._log(cur, slot.value, confidence, t, "convert_to_set",
+                      "member_add_to_scalar", writer_id=writer_id,
+                      session_id=session_id)
+            self._insert_member(Slot(cur.entity, cur.attribute, cur.value,
+                                     cur.polarity),
+                                cur.embedding, cur.confidence,
+                                set(cur.provenance), cur.asserted_at,
+                                hlc=hlc, writer_id=cur.writer_id,
+                                session_id=cur.session_id,
+                                support=cur.origin or None)
+        # Dedup against current members: exact norm OR cosine >= threshold.
+        members = self.members(slot.entity, slot.attribute)
+        for m in members:
+            same_norm = _norm_value(m.value) == _norm_value(slot.value)
+            cos = float((m.embedding.reshape(-1) @ emb.reshape(-1))
+                        / ((m.embedding.norm() * emb.norm()) + 1e-12)) \
+                if m.embedding is not None else 0.0
+            if same_norm or cos >= MEMBER_DEDUP_COSINE:
+                self.dirty_slots.add(key)
+                m.last_confirmed = t
+                m.provenance |= {p for p in provenance if p}
+                m.confidence = min(1.0, max(m.confidence, float(confidence)))
+                return WriteResult("member_confirmed", m)
+        if len(members) >= MAX_CURRENT_MEMBERS:
+            # Rejected: return an unpersisted record carrying the OFFENDING
+            # value (never an unrelated existing member), and log it against
+            # itself so old_value/new_value both read as the rejected value
+            # rather than pointing at an unrelated member — nothing was
+            # actually superseded. No dirty_slots write: nothing changed.
+            rejected = CortexRecord(
+                entity=slot.entity, attribute=slot.attribute, value=slot.value,
+                kind="member", confidence=float(confidence),
+            )
+            self._log(rejected, slot.value, confidence, t, "member_capped",
+                      "max_current_members", writer_id=writer_id,
+                      session_id=session_id)
+            return WriteResult("member_capped", rejected)
+        self.dirty_slots.add(key)
+        rec = self._insert_member(slot, emb, confidence,
+                                  {p for p in provenance if p}, t, hlc=hlc,
+                                  writer_id=writer_id, session_id=session_id,
+                                  support=support)
+        return WriteResult("member_added", rec)
+
+    def _insert_member(
+        self,
+        slot: Slot,
+        emb: torch.Tensor | None,
+        confidence: float,
+        prov: set[str],
+        t: float,
+        hlc: tuple[int, int] | None = None,
+        writer_id: str | None = None,
+        session_id: str | None = None,
+        support: str | None = None,
+        freshness_class: str = "evergreen",
+    ) -> CortexRecord:
+        """Append one current member row and register it in ``self._members``.
+        Mirrors :meth:`_insert` but never touches ``self._current`` — many of
+        these can coexist at the same key."""
+        rec = CortexRecord(
+            entity=slot.entity,
+            attribute=slot.attribute,
+            value=slot.value,
+            polarity=getattr(slot, "polarity", "+"),
+            kind="member",
+            confidence=float(confidence),
+            status="current",
+            provenance=set(prov),
+            asserted_at=t,
+            last_confirmed=t,
+            embedding=emb,
+            support={support} if support else set(),
+            tx_time=t,
+            valid_time=t,
+            hlc_phys=(hlc[0] if hlc else None),
+            hlc_logical=(hlc[1] if hlc else None),
+            writer_id=writer_id,
+            session_id=session_id,
+            freshness_class=_norm_freshness(freshness_class),
+        )
+        self.records.append(rec)
+        self._members.setdefault(rec.key, []).append(len(self.records) - 1)
+        return rec
+
+    def remove_member(
+        self, entity: str, attribute: str, member: str, *,
+        now: float | None = None,
+    ) -> WriteResult:
+        """Retract one current member by normalised-value match. The row is
+        kept (``status`` -> ``"removed"``, ``superseded_at`` stamped) as the
+        audit trail, same idiom as scalar supersession — never hard-deleted.
+        Returns ``"member_not_found"`` (record not persisted anywhere) when no
+        current member at the slot matches."""
+        t = time.time() if now is None else float(now)
+        key = (_norm_key(entity), _norm_key(attribute))
+        nv = _norm_value(member)
+        idxs = self._members.get(key, [])
+        pos = next(
+            (p for p, i in enumerate(idxs) if _norm_value(self.records[i].value) == nv),
+            None,
+        )
+        if pos is None:
+            return WriteResult("member_not_found", CortexRecord(
+                entity=entity, attribute=attribute, value=member, kind="member",
+            ))
+        self.dirty_slots.add(key)
+        idx = idxs.pop(pos)
+        rec = self.records[idx]
+        rec.status = "removed"
+        rec.superseded_at = t
+        self._log(rec, member, rec.confidence, t, "member_removed", "user_removed")
+        return WriteResult("member_removed", rec)
+
+    def members(
+        self, entity: str, attribute: str, include_removed: bool = False,
+    ) -> list[CortexRecord]:
+        """Members of a set-valued slot. Current only by default (insertion
+        order); ``include_removed=True`` also returns removed member rows
+        (audit view), in overall record order."""
+        key = (_norm_key(entity), _norm_key(attribute))
+        if include_removed:
+            return [r for r in self.records if r.key == key and r.kind == "member"]
+        return [self.records[i] for i in self._members.get(key, [])]
+
+    def slot_kind(self, entity: str, attribute: str) -> str | None:
+        """``"scalar"`` if the slot holds a current scalar record,
+        ``"set"`` if it has current members (or historical member rows and
+        no current scalar), else ``None``.
+
+        Conversion is one-way *while members are current*: once ALL members
+        at a slot are removed, the slot reverts to scalar life —
+        :meth:`write_fact` may write a fresh scalar there (its guard checks
+        for CURRENT members only), and once it does, ``_current`` wins the
+        check here and this reports ``"scalar"`` again. The removed member
+        rows are never deleted; they remain as audit
+        (``members(..., include_removed=True)``), just no longer reflected
+        in ``slot_kind``. Consult ``_current`` FIRST so a slot's most recent
+        write always wins the answer, rather than a stale historical
+        member row perpetually pinning it to ``"set"``.
+        """
+        key = (_norm_key(entity), _norm_key(attribute))
+        if key in self._current:
+            return "scalar"
+        if self._members.get(key) or any(
+            r.key == key and r.kind == "member" for r in self.records
+        ):
+            return "set"
+        return None
+
+    # ------------------------------------------------------------------
     # Contenders — a conflicting write that may not supersede is parked here
     # ------------------------------------------------------------------
 
@@ -462,9 +760,19 @@ class CortexStore:
         """Resolve the active contender at a slot. ``accept=True`` promotes it to
         current (old current -> superseded; contender stamped user-confirmed);
         ``accept=False`` retires it (current untouched). Returns a ``WriteResult``
-        or ``None`` when there is no active contender."""
+        or ``None`` when there is no active contender.
+
+        Service-adjacent routing guard (Task 4): if the slot was converted to
+        a set (:meth:`add_member`) after this contender was parked against the
+        scalar it used to hold, the contender's original ``cur`` no longer
+        exists in ``self._current`` — promoting it here would silently
+        register a second current record for the key (bypassing the
+        write_fact scalar/set exclusivity guard) instead of routing through
+        :meth:`add_member`/:meth:`remove_member` like every other write to a
+        set slot. Refused (``WriteResult("refused", contender)``) without
+        touching any state; nothing is marked dirty.
+        """
         key = (_norm_key(entity), _norm_key(attribute))
-        self.dirty_slots.add(key)
         t = time.time() if now is None else float(now)
         c_idx = next(
             (i for i, r in enumerate(self.records)
@@ -474,6 +782,9 @@ class CortexStore:
         if c_idx is None:
             return None
         contender = self.records[c_idx]
+        if self._members.get(key):
+            return WriteResult("refused", contender)
+        self.dirty_slots.add(key)
         cur_idx = self._current.get(key)
         cur = self.records[cur_idx] if cur_idx is not None else None
         if accept:
@@ -608,8 +919,13 @@ class CortexStore:
         if removed:
             self.records = keep
             self._current = {}
+            self._members = {}
             for i, r in enumerate(self.records):
-                if r.status == "current":
+                if r.status != "current":
+                    continue
+                if r.kind == "member":
+                    self._members.setdefault(r.key, []).append(i)
+                else:
                     self._current[r.key] = i
         return removed
 
@@ -707,8 +1023,16 @@ class CortexStore:
         tier, then most-recent) and retire the rest (``status`` -> ``superseded``;
         audit trail kept). Returns a report of ``{"canonical", "retired"}`` per
         merged cluster; only mutates when ``apply`` is True. Records without a
-        ``slot_embedding`` are skipped — backfill first (the service does)."""
-        cands = [r for r in self.current_records() if r.slot_embedding is not None]
+        ``slot_embedding`` are skipped — backfill first (the service does).
+        ``kind == "member"`` records are excluded outright (schema v26,
+        bank-corrupting fix): members never carry a ``slot_embedding`` of
+        their own, so a caller that backfilled one (the value-free
+        ``f"{entity} {attribute}"`` embedding, same for every member of a
+        slot) would make every member of that slot cosine-identical to its
+        siblings and this method would cluster and supersede all but one —
+        silently destroying the set."""
+        cands = [r for r in self.current_records()
+                 if r.slot_embedding is not None and r.kind != "member"]
         if len(cands) < 2:
             return []
         mat = torch.stack([r.slot_embedding.reshape(-1) for r in cands])
@@ -759,8 +1083,13 @@ class CortexStore:
 
         if apply and changed:
             self._current = {}
+            self._members = {}
             for i, r in enumerate(self.records):
-                if r.status == "current":
+                if r.status != "current":
+                    continue
+                if r.kind == "member":
+                    self._members.setdefault(r.key, []).append(i)
+                else:
                     self._current[r.key] = i
         return report
 
@@ -785,6 +1114,12 @@ class CortexStore:
                     "polarity": r.polarity,
                     "confidence": r.confidence,
                     "status": r.status,
+                    # v26 (set-valued slots): "scalar" | "member". Omitting
+                    # this from the snapshot dict is the file-mode half of
+                    # the traced failure (Task 2 review) — every member
+                    # would reload as kind="scalar" and _reindex_current's
+                    # duplicate-scalar healing would demote all but one.
+                    "kind": r.kind,
                     "provenance": sorted(r.provenance),
                     "asserted_at": r.asserted_at,
                     "last_confirmed": r.last_confirmed,
@@ -826,6 +1161,7 @@ class CortexStore:
                 polarity=d.get("polarity", "+"),
                 confidence=d.get("confidence", 0.7),
                 status=d.get("status", "current"),
+                kind=d.get("kind", "scalar"),
                 provenance=set(d.get("provenance", [])),
                 asserted_at=d.get("asserted_at", 0.0),
                 last_confirmed=d.get("last_confirmed", 0.0),
@@ -840,12 +1176,17 @@ class CortexStore:
         self._reindex_current()
 
     def _reindex_current(self) -> None:
-        """Rebuild the slot -> current index and self-heal the one-record-per-status
-        invariants. If two records share a normalised slot at the same LIVE status
+        """Rebuild the slot -> current index (and the slot -> members index)
+        and self-heal the one-record-per-status invariant for SCALARS. If two
+        scalar records share a normalised slot at the same LIVE status
         (``current`` or ``contested``) — e.g. legacy facts written before key
         normalisation, like ``NEBULA-SERPENT`` vs ``nebula-serpent`` — keep the
-        most-recently-confirmed and demote the rest to ``superseded``."""
+        most-recently-confirmed and demote the rest to ``superseded``. Member
+        rows (``kind="member"``) are exempt from that healing: many current
+        members legitimately share a slot, so they are simply collected into
+        ``self._members`` in record order, never demoted."""
         self._current = {}
+        self._members = {}
         seen_contested: dict[tuple[str, str], int] = {}
 
         def _demote(keep: int, drop: int) -> None:
@@ -857,7 +1198,9 @@ class CortexStore:
             self.dirty_slots.add(loser.key)   # persist load-time healing
 
         for i, rec in enumerate(self.records):
-            if rec.status == "current":
+            if rec.status == "current" and rec.kind == "member":
+                self._members.setdefault(rec.key, []).append(i)
+            elif rec.status == "current":
                 prev = self._current.get(rec.key)
                 if prev is None:
                     self._current[rec.key] = i

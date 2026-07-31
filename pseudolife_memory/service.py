@@ -125,6 +125,7 @@ def _cortex_record_to_dict(rec, relative_age: bool = True) -> dict[str, Any]:
         "value": rec.value,
         "polarity": rec.polarity,
         "status": rec.status,
+        "kind": rec.kind,
         "confidence": round(float(rec.confidence), 4),
         "origin": rec.origin,
         "support": sorted(rec.support),
@@ -876,6 +877,19 @@ class MemoryService:
                 )
                 self._ensure_subject_entity(s.entity, propose_dupes=True)
                 written += 1
+            except ValueError as exc:
+                if "holds a set" in str(exc):
+                    # Task 4 spec: the extractor rule for a set-valued slot is
+                    # logged-and-dropped, not auto-routed to add_member —
+                    # explicit set ops come via memory_set_add/memory_set_remove
+                    # (or the op field, Task 7). Caught specifically (before the
+                    # catch-all below) so this doesn't collapse into the same
+                    # debug-level silence as an unrelated write failure.
+                    logger.info(
+                        "scalar auto-promote skipped: slot holds a set: %s.%s",
+                        s.entity, s.attribute)
+                else:
+                    logger.debug("cortex auto-promote skipped (%s): %s", claim, exc)
             except Exception as exc:  # noqa: BLE001
                 logger.debug("cortex auto-promote skipped (%s): %s", claim, exc)
         return written
@@ -1504,19 +1518,29 @@ class MemoryService:
                 _, header_session, _ = resolve_writer_detailed(self._writer_id)
                 if not header_session:
                     session_id = resolved[1]
-            res = self._cortex.write_fact(
-                Slot(entity, attribute, value),
-                emb,
-                slot_embedding=slot_emb,
-                confidence=confidence,
-                provenance=provenance or (),
-                support=support,
-                now=now,
-                hlc=self._hlc.tick(),
-                writer_id=writer_id,
-                session_id=session_id,
-                freshness_class=freshness_class,
-            )
+            try:
+                res = self._cortex.write_fact(
+                    Slot(entity, attribute, value),
+                    emb,
+                    slot_embedding=slot_emb,
+                    confidence=confidence,
+                    provenance=provenance or (),
+                    support=support,
+                    now=now,
+                    hlc=self._hlc.tick(),
+                    writer_id=writer_id,
+                    session_id=session_id,
+                    freshness_class=freshness_class,
+                )
+            except ValueError as exc:
+                if "holds a set" in str(exc):
+                    # Tool-boundary mapping (Task 4): the store's message names
+                    # its own API (add_member/remove_member); memory_fact_set
+                    # callers need the MCP tool names instead.
+                    raise ValueError(
+                        "slot holds a set; use memory_set_add / memory_set_remove"
+                    ) from exc
+                raise
             self._ensure_subject_entity(entity)
             self._save_cortex()
             # Auto-tag a user correction: a user-tier write that REPLACED an older
@@ -1535,6 +1559,75 @@ class MemoryService:
                 out["episode_warning"] = "unknown or closed episode handle"
             return out
 
+    def set_add(
+        self,
+        entity: str,
+        attribute: str,
+        member: str,
+        provenance: list[str] | None = None,
+        origin: str | None = None,
+        confidence: float = 0.7,
+    ) -> dict[str, Any]:
+        """Add (or confirm) a member of the set-valued ``(entity, attribute)``
+        slot. A scalar already occupying the slot converts to a set one-way
+        (see :meth:`pseudolife_memory.memory.cortex.CortexStore.add_member`).
+
+        The member text is embedded through the same composition scalar
+        writes use (``"{entity} {attribute} {member}"``) so set membership
+        shares the cortex embedding space with everything else. Persists via
+        the same per-slot write-through path ``cortex_write`` uses.
+
+        Returns ``{"action", "entity", "attribute", "member", "members_count"}``
+        — ``action`` is one of ``"member_added"``, ``"member_confirmed"``,
+        ``"member_capped"``, or ``"member_invalid"`` (see ``add_member``).
+        """
+        with self._lock:
+            self._ensure_init()
+            assert self._embedder is not None and self._cortex is not None
+            claim = f"{entity} {attribute} {member}".strip()
+            emb = self._embedder.encode_single(claim)
+            writer_id, session_id = self._resolve_writer()
+            res = self._cortex.add_member(
+                Slot(entity, attribute, member),
+                emb,
+                confidence=confidence,
+                provenance=provenance or (),
+                support=origin,
+                hlc=self._hlc.tick(),
+                writer_id=writer_id,
+                session_id=session_id,
+            )
+            self._ensure_subject_entity(entity)
+            self._save_cortex()
+            return {
+                "action": res.action,
+                "entity": entity,
+                "attribute": attribute,
+                "member": member,
+                "members_count": len(self._cortex.members(entity, attribute)),
+            }
+
+    def set_remove(self, entity: str, attribute: str, member: str) -> dict[str, Any]:
+        """Retract one current member of a set-valued slot (audit row kept,
+        ``status`` -> ``"removed"``). Persists via the same per-slot
+        write-through path ``cortex_write`` uses.
+
+        Returns ``{"action", "entity", "attribute", "member", "members_count"}``
+        — ``action`` is ``"member_removed"`` or ``"member_not_found"``.
+        """
+        with self._lock:
+            self._ensure_init()
+            assert self._cortex is not None
+            res = self._cortex.remove_member(entity, attribute, member)
+            self._save_cortex()
+            return {
+                "action": res.action,
+                "entity": entity,
+                "attribute": attribute,
+                "member": member,
+                "members_count": len(self._cortex.members(entity, attribute)),
+            }
+
     def cortex_lookup(self, entity: str, attribute: str) -> dict[str, Any] | None:
         """Exact slot lookup — the one ``current`` fact, or ``None``.
 
@@ -1542,19 +1635,43 @@ class MemoryService:
         the graph's ``entity_aliases`` (Postgres) and the canonical name is
         retried, so a fact stored under e.g. ``dev-box`` surfaces regardless of
         which alias (``4090``) the caller queried — honouring the contract that
-        every fact lookup resolves aliases first."""
+        every fact lookup resolves aliases first.
+
+        A set-valued slot has no single ``current`` record to return, so it
+        takes a different shape: ``{"kind": "set", "entity", "attribute",
+        "members": [...], "removed": [...]}`` (current members / removed
+        audit rows). Checked only on a scalar miss, same alias-resolved name,
+        so a set slot under an alias is still found."""
         with self._lock:
             self._ensure_init()
             assert self._cortex is not None
             rec = self._cortex.lookup(entity, attribute)
+            canon = None
             if rec is None and self._storage is not None:
                 from pseudolife_memory.graph import norm_name
                 node = self._storage.find_entity(norm_name(entity))
                 if node is not None:
-                    canon = node.get("canonical")
-                    if canon and norm_name(canon) != norm_name(entity):
+                    c = node.get("canonical")
+                    if c and norm_name(c) != norm_name(entity):
+                        canon = c
                         rec = self._cortex.lookup(canon, attribute)
             if rec is None:
+                ra = self.config.time.relative_age
+                for name in (entity, canon):
+                    if name and self._cortex.slot_kind(name, attribute) == "set":
+                        members = self._cortex.members(name, attribute)
+                        removed = [
+                            r for r in self._cortex.members(
+                                name, attribute, include_removed=True)
+                            if r.status == "removed"
+                        ]
+                        return {
+                            "kind": "set", "entity": name, "attribute": attribute,
+                            "members": [_cortex_record_to_dict(r, relative_age=ra)
+                                        for r in members],
+                            "removed": [_cortex_record_to_dict(r, relative_age=ra)
+                                        for r in removed],
+                        }
                 return None
             d = _cortex_record_to_dict(rec, relative_age=self.config.time.relative_age)
             if self._storage is not None:
@@ -1611,13 +1728,20 @@ class MemoryService:
     def cortex_resolve(self, entity: str, attribute: str, accept: bool) -> dict[str, Any]:
         """Promote (accept) or retire (reject) the active contender at a slot.
         Persists. Returns ``{"resolved": False, "reason": "no_contender"}`` when
-        there is nothing parked to resolve."""
+        there is nothing parked to resolve, and ``{"resolved": False,
+        "reason": "slot_holds_set"}`` when the slot was converted to a set
+        (``memory_set_add``) after the contender was parked against the
+        scalar it used to hold — resolve it via ``memory_set_add`` /
+        ``memory_set_remove`` instead."""
         with self._lock:
             self._ensure_init()
             assert self._cortex is not None
             res = self._cortex.resolve(entity, attribute, accept)
             if res is None:
                 return {"resolved": False, "reason": "no_contender",
+                        "entity": entity, "attribute": attribute}
+            if res.action == "refused":
+                return {"resolved": False, "reason": "slot_holds_set",
                         "entity": entity, "attribute": attribute}
             self._save_cortex()
             cur = self._cortex.lookup(entity, attribute)
@@ -1667,28 +1791,104 @@ class MemoryService:
                           and getattr(bm25_cfg, "cortex_enabled", False)))
             if bm25_enabled and bm25_cfg is not None and query:
                 hits = self._cortex_bm25_fuse(query, hits, bm25_cfg, top_k)
-            entries = []
+            # Set-valued slots (Task 6): every member of a set is a distinct
+            # ``current`` record, so it ranks in ``hits`` on its own — left
+            # alone, a slot with N members would surface as N separate
+            # entries. Group AFTER fusion (fusion stays per-record, exactly
+            # as it ran above) by folding each member hit into its slot,
+            # keyed on first occurrence: ``hits`` is already score-descending
+            # (both ``search`` and ``_cortex_bm25_fuse`` sort before
+            # returning), so the first member of a slot encountered here
+            # already carries that slot's max score, and the group's
+            # position in the final ordering is exactly where that top
+            # member would have sorted.
+            groups: dict[tuple[str, str], dict[str, Any]] = {}
+            order: list[tuple[str, Any]] = []
             for r, s in hits:
-                d = {**_cortex_record_to_dict(r), "score": round(float(s), 4)}
-                conts = self._cortex.contenders_for(r.entity, r.attribute)
-                if conts:
-                    d["contested"] = True
-                    d["contender_value"] = conts[0].value
-                    d["contender_origin"] = conts[0].origin
+                if r.kind == "member":
+                    key = r.key
+                    grp = groups.get(key)
+                    if grp is None:
+                        grp = {"entity": r.entity, "attribute": r.attribute,
+                               "ranked": []}
+                        groups[key] = grp
+                        order.append(("set", key))
+                    grp["ranked"].append((r, s))
                 else:
-                    d["contested"] = False
-                if self._storage is not None:
-                    from pseudolife_memory.memory.cortex import _norm_key
-                    d["source_entries"] = self._storage.traces_for_slot(
-                        _norm_key(r.entity), _norm_key(r.attribute))
-                entries.append(d)
+                    order.append(("scalar", (r, s)))
+            entries = []
+            for tag, payload in order:
+                if tag == "scalar":
+                    r, s = payload
+                    d = {**_cortex_record_to_dict(r), "score": round(float(s), 4)}
+                    conts = self._cortex.contenders_for(r.entity, r.attribute)
+                    if conts:
+                        d["contested"] = True
+                        d["contender_value"] = conts[0].value
+                        d["contender_origin"] = conts[0].origin
+                    else:
+                        d["contested"] = False
+                    if self._storage is not None:
+                        from pseudolife_memory.memory.cortex import _norm_key
+                        d["source_entries"] = self._storage.traces_for_slot(
+                            _norm_key(r.entity), _norm_key(r.attribute))
+                    entries.append(d)
+                else:
+                    from pseudolife_memory.memory.cortex import compose_set_value
+                    key = payload
+                    grp = groups[key]
+                    entity, attribute = grp["entity"], grp["attribute"]
+                    all_members = self._cortex.members(entity, attribute)
+                    id_to_idx = {id(m): i for i, m in enumerate(all_members)}
+                    ranked_pairs = [(id_to_idx[id(r)], s) for r, s in grp["ranked"]
+                                     if id(r) in id_to_idx]
+                    value, score = compose_set_value(
+                        [m.value for m in all_members], ranked_pairs)
+                    # F5/re-review (Task 6 review): a set entry carried no
+                    # timestamp at all, so mcp_server.py's cortex-first
+                    # block (`_iso_seconds(f.get(...))` / `f.get("age")`)
+                    # always rendered blank for it. One shared "anchor" —
+                    # the most recent per-member activity, same
+                    # tx_time-preferred-over-asserted_at priority
+                    # `_cortex_record_to_dict` uses for a scalar's "age" —
+                    # backs both "asserted_at" (raw float, exactly how
+                    # `_cortex_record_to_dict` renders a scalar's
+                    # "asserted_at": no ISO formatting at this layer, that
+                    # happens downstream in mcp_server._iso_seconds) and
+                    # "age" (the human string, via the same _relative_time
+                    # helper `_cortex_record_to_dict` uses).
+                    anchor = max(
+                        ((m.tx_time or m.asserted_at) for m in all_members),
+                        default=None)
+                    entries.append({
+                        "kind": "set",
+                        "entity": entity,
+                        "attribute": attribute,
+                        "value": value,
+                        "members": [_cortex_record_to_dict(m) for m in all_members],
+                        "score": round(float(score), 4) if score is not None else 0.0,
+                        "contested": False,
+                        "last_confirmed": max(
+                            (m.last_confirmed for m in all_members), default=None),
+                        "asserted_at": anchor,
+                        "age": _relative_time(anchor) if anchor else None,
+                    })
             return {"count": len(entries), "entries": entries}
 
     def _cortex_bm25_fuse(self, query, hits, cfg, top_k):
         """Fuse dense cortex hits with a lexical pool over composed fact
         text. Mirrors the turn pool's fusion (memory/bm25.py): boost facts
         in both pools, inject lexical-only facts at ``weight * norm``.
-        Called under ``self._lock`` with the store initialised."""
+        Called under ``self._lock`` with the store initialised.
+
+        Keyed by ``id(record)``, NOT ``record.key`` (the slot identity):
+        a set-valued slot can have many current members sharing one slot
+        key, and fusion must stay genuinely per-record (Task 6 review
+        finding F1) — keying by slot key collapsed every member of a slot
+        onto whichever one the lexical-score dict comprehension happened
+        to keep last, so the rest silently inherited its score and could
+        never be lexical-only-injected on their own. Set-level grouping
+        happens strictly AFTER this call, in ``cortex_search``."""
         from types import SimpleNamespace
 
         from pseudolife_memory.memory.bm25 import BM25Index, normalize_scores
@@ -1702,18 +1902,18 @@ class MemoryService:
             return hits
         idx = BM25Index(docs, k1=cfg.k1, b=cfg.b)
         norm_hits = normalize_scores(idx.score(query, top_k=cfg.top_n))
-        lex = {d.record.key: (d.record, s) for d, s in norm_hits
+        lex = {id(d.record): (d.record, s) for d, s in norm_hits
                if s >= cfg.min_score}
         fused = []
         seen = set()
         for r, s in hits:
-            boost = lex.get(r.key)
+            boost = lex.get(id(r))
             if boost is not None:
                 s = s + cfg.weight * boost[1]
             fused.append((r, s))
-            seen.add(r.key)
-        for key, (r, s) in lex.items():
-            if key not in seen:
+            seen.add(id(r))
+        for rid, (r, s) in lex.items():
+            if rid not in seen:
                 fused.append((r, cfg.weight * s))
         fused.sort(key=lambda rs: rs[1], reverse=True)
         return fused[: max(0, int(top_k))]
@@ -2402,10 +2602,31 @@ class MemoryService:
         """The version timeline at a ``(entity, attribute)`` slot — current +
         superseded records, oldest→newest by tx_time, each attributed
         (writer_id / session_id) with its temporal stamp. The agent's "how did
-        this fact change, and who changed it?" view (v0.4 T8)."""
+        this fact change, and who changed it?" view (v0.4 T8).
+
+        A set-valued slot has no single supersession chain — each member has
+        its own add/remove lifecycle — so it takes a flatter shape instead:
+        ``{"kind": "set", "entity", "attribute", "versions": [{"value",
+        "event": "added"|"removed", "at"}, ...]}``, time-ordered across all
+        members. A still-current member contributes one ``"added"`` event; a
+        removed member contributes both its original ``"added"`` and the
+        later ``"removed"``."""
         with self._lock:
             self._ensure_init()
             assert self._cortex is not None
+            if self._cortex.slot_kind(entity, attribute) == "set":
+                versions: list[dict[str, Any]] = []
+                for r in self._cortex.members(entity, attribute, include_removed=True):
+                    versions.append(
+                        {"value": r.value, "event": "added", "at": r.asserted_at})
+                    if r.status == "removed" and r.superseded_at is not None:
+                        versions.append(
+                            {"value": r.value, "event": "removed", "at": r.superseded_at})
+                versions.sort(key=lambda v: (v["at"] or 0))
+                return {
+                    "kind": "set", "entity": entity, "attribute": attribute,
+                    "count": len(versions), "versions": versions,
+                }
             ra = self.config.time.relative_age
             recs = self._cortex.records_for(entity, attribute)
             recs = sorted(recs, key=lambda r: (r.tx_time or r.asserted_at))
@@ -2600,8 +2821,17 @@ class MemoryService:
     def cortex_dedup(self, threshold: float = 0.90, dry_run: bool = True) -> dict[str, Any]:
         """One-time, reviewed cleanup of paraphrase sibling slots left by past
         regex auto-promotes. Dry-run by default (reports, writes nothing). Reuses
-        the value-free slot embedding, backfilling any current record missing one.
-        Ops-only (see ``ops/dedup_cortex.py``) — back up the bank before applying.
+        the value-free slot embedding, backfilling any SCALAR current record
+        missing one. Ops-only (see ``ops/dedup_cortex.py``) — back up the bank
+        before applying.
+
+        ``kind == "member"`` records are skipped by the backfill (bank-
+        corrupting fix): they never carry their own ``slot_embedding``, and
+        giving every member of a slot the identical value-free
+        ``f"{entity} {attribute}"`` embedding would make ``dedup_siblings``
+        treat them as paraphrase siblings of EACH OTHER and supersede all
+        but one, destroying the set. ``dedup_siblings`` also excludes
+        members outright as a second, independent guard.
 
         Returns ``{"dry_run", "threshold", "clusters", "merged"}`` where
         ``clusters`` is a list of ``{"canonical", "retired"}`` and ``merged`` is
@@ -2610,6 +2840,8 @@ class MemoryService:
             self._ensure_init()
             assert self._cortex is not None and self._embedder is not None
             for r in self._cortex.current_records():
+                if r.kind == "member":
+                    continue
                 if r.slot_embedding is None:
                     r.slot_embedding = self._embedder.encode_single(
                         f"{r.entity} {r.attribute}".strip())
@@ -2865,10 +3097,28 @@ class MemoryService:
         try:
             for c, src_id in pairs:
                 ent, attr = self._resolve_dream_slot(c["entity"], c["attribute"])
+                # Claim-level op (Task 7): "add"/"remove" route to the member
+                # model; anything else (absent, or a value the extractor got
+                # wrong) degrades to the scalar path — never crash mid-dream.
+                op = c.get("op")
+                if op not in (None, "add", "remove"):
+                    logger.warning(
+                        "dream: malformed op %r on claim for %s.%s; "
+                        "treating as scalar", op, ent, attr)
+                    op = None
                 ent_norm = _norm_key(ent)
                 if ent_norm not in known_entities and ent_norm not in new_entities:
                     new_entities[ent_norm] = ent
-                if (traces_cfg.enabled and src_id is not None
+                # The has_trace guard is keyed by (slot, source entry) only —
+                # it has no member value to key on, so it must never gate a
+                # member op: a second op:"add" for the SAME slot from the
+                # SAME source entry (e.g. two collection items in one note)
+                # would otherwise read as "already formed this slot" and be
+                # silently dropped after the first member. Member ops are
+                # already idempotent on their own retry (re-add ->
+                # member_confirmed, re-remove -> member_not_found) — that is
+                # the property this guard exists to protect for scalars.
+                if (op is None and traces_cfg.enabled and src_id is not None
                         and self._storage is not None):
                     with self._lock:
                         already = self._storage.has_trace(
@@ -2879,11 +3129,48 @@ class MemoryService:
                         # re-dream must be a no-op, not a confirmation —
                         # the confirm path ratchets confidence.
                         continue
-                res = self.cortex_write(
-                    ent, attr, c["value"],
-                    confidence=float(c.get("confidence", 0.55)),
-                    support=c.get("origin", "agent"))
+                if op == "add":
+                    res = self.set_add(
+                        ent, attr, c["value"],
+                        confidence=float(c.get("confidence", 0.55)),
+                        origin=c.get("origin", "agent"))
+                    if res["action"] == "member_invalid":
+                        logger.info(
+                            "dream: member add rejected (invalid value) "
+                            "for %s.%s", ent, attr)
+                    elif res["action"] == "member_capped":
+                        logger.warning(
+                            "dream: member add rejected (cap reached) "
+                            "for %s.%s", ent, attr)
+                elif op == "remove":
+                    res = self.set_remove(ent, attr, c["value"])
+                else:
+                    try:
+                        res = self.cortex_write(
+                            ent, attr, c["value"],
+                            confidence=float(c.get("confidence", 0.55)),
+                            support=c.get("origin", "agent"))
+                    except ValueError as exc:
+                        if "holds a set" in str(exc):
+                            # Spec rule 2: a scalar claim (no op) landing on a
+                            # slot that already holds current members is
+                            # dropped, not routed or crashed — explicit set
+                            # ops (op field or memory_set_add/_remove) are the
+                            # only way to touch a set slot.
+                            tally["dropped_set_slot"] = tally.get(
+                                "dropped_set_slot", 0) + 1
+                            logger.info(
+                                "dropped scalar claim for set slot %s.%s",
+                                ent, attr)
+                            continue
+                        raise
                 tally[res["action"]] = tally.get(res["action"], 0) + 1
+                if res["action"] in ("member_invalid", "member_capped"):
+                    # Nothing was actually stored — a trace/reinforcement
+                    # bump here would link a source entry to a slot it never
+                    # populated, and (combined with the has_trace guard
+                    # above) could mask a later legitimate write.
+                    continue
                 if (traces_cfg.enabled and src_id is not None
                         and self._storage is not None):
                     # Serialize trace writes on the shared psycopg connection:

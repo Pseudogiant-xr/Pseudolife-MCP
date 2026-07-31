@@ -571,7 +571,7 @@ def build_contexts_v2(svc, question: str,
     extracted" vs "extracted but ranked out" is distinguishable post-hoc.
     Returns (contexts, cortex_dump)."""
     from longmemeval_bench import (CORTEX_MIN_SCORE, CORTEX_TOP_K,
-                                   HYBRID_TOP_K, RAG_TOP_K)
+                                   HYBRID_TOP_K, RAG_TOP_K, _compose_fact_line)
 
     raw = svc.search(question, top_k=RAG_TOP_K,
                      bm25=(True if retrv.get("bm25") else None),
@@ -605,18 +605,12 @@ def build_contexts_v2(svc, question: str,
 
     fact_lines = []
     for f in cortex:
-        line = (f"{f.get('entity', '')} — {f.get('attribute', '')}: "
-                f"{f.get('value', '')}")
         try:
             versions = svc.history(f.get("entity", ""),
                                    f.get("attribute", "")).get("versions", [])
-            older = [v.get("value", "") for v in versions[:-1]
-                     if v.get("value") and v.get("value") != f.get("value")]
-            if older:
-                line += "  (earlier values, oldest first: " + " -> ".join(older) + ")"
         except Exception:  # noqa: BLE001 — history is garnish, never fatal
-            pass
-        fact_lines.append(line)
+            versions = []
+        fact_lines.append(_compose_fact_line(f, versions))
     contexts = {
         "rag": "\n\n".join(raw_texts),
         "cortex": "\n".join(fact_lines),

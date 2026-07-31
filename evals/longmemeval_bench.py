@@ -284,6 +284,47 @@ def ingest_and_dream(svc, extractor, q: dict, ex_url: str) -> dict:
     return tally
 
 
+def _compose_fact_line(f: dict, versions: list[dict]) -> str:
+    """One served fact line: ``entity — attribute: value``, plus garnish.
+
+    Scalar facts (no ``"kind"``, or ``"kind" != "set"``) show earlier
+    (superseded) values, oldest first — the existing "earlier values"
+    idiom. Set-slot facts (``f["kind"] == "set"``) already carry their
+    composed current membership in ``value`` (``cortex_search`` groups a
+    set slot into one entry, Task 6); the garnish for a set instead lists
+    formerly-current members pulled from the set-shaped ``history()``
+    ``"removed"`` events, oldest first — "former members", not "earlier
+    values", since a set has no single supersession chain to walk.
+
+    Pure and GPU-free: ``versions`` is whatever the caller already fetched
+    from ``svc.history(...)["versions"]`` (or ``[]`` on failure/miss), so
+    this composes offline and is unit-testable without a service or model.
+    """
+    line = (f"{f.get('entity', '')} — {f.get('attribute', '')}: "
+            f"{f.get('value', '')}")
+    if f.get("kind") == "set":
+        # A remove-then-re-add leaves a "removed" event for the value AND a
+        # current member carrying it (re-adding mints a fresh current row
+        # rather than resurrecting the old one — CortexStore.add_member),
+        # so filter "removed" events against the CURRENT membership
+        # (normalised — casefold/strip, matching the store's own dedup
+        # norm) — otherwise a currently-current member gets mislabeled
+        # "former" (Task 6 review finding F3).
+        current_norm = {(m.get("value") or "").strip().casefold()
+                         for m in f.get("members", [])}
+        removed = [v.get("value", "") for v in versions
+                   if v.get("event") == "removed" and v.get("value")
+                   and (v.get("value") or "").strip().casefold() not in current_norm]
+        if removed:
+            line += "  (former members: " + " -> ".join(removed) + ")"
+        return line
+    older = [v.get("value", "") for v in versions[:-1]
+             if v.get("value") and v.get("value") != f.get("value")]
+    if older:
+        line += "  (earlier values, oldest first: " + " -> ".join(older) + ")"
+    return line
+
+
 def build_contexts(svc, question: str) -> dict[str, str]:
     raw = svc.search(question, top_k=RAG_TOP_K).get("entries", [])
     raw_texts = [e.get("text", "") for e in raw]
@@ -295,18 +336,12 @@ def build_contexts(svc, question: str) -> dict[str, str]:
     # capability here, so the context must surface it.
     fact_lines = []
     for f in cortex:
-        line = (f"{f.get('entity', '')} — {f.get('attribute', '')}: "
-                f"{f.get('value', '')}")
         try:
             versions = svc.history(f.get("entity", ""),
                                    f.get("attribute", "")).get("versions", [])
-            older = [v.get("value", "") for v in versions[:-1]
-                     if v.get("value") and v.get("value") != f.get("value")]
-            if older:
-                line += "  (earlier values, oldest first: " + " -> ".join(older) + ")"
         except Exception:  # noqa: BLE001 — history is garnish, never fatal
-            pass
-        fact_lines.append(line)
+            versions = []
+        fact_lines.append(_compose_fact_line(f, versions))
     return {
         "rag": "\n\n".join(raw_texts),
         "cortex": "\n".join(fact_lines),

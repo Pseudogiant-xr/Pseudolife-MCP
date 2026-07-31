@@ -6,6 +6,197 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-07-31 — dream extractor claims carry an `op` for set membership)
+- **A dream claim may now carry `"op": "add" | "remove"`** to target the
+  set-member model instead of the scalar supersede path — a claim without
+  `op` is bit-identical to today (`MemoryService.dream_run`'s claim-apply
+  loop, `pseudolife_memory/service.py`). `op:"add"` routes through
+  `svc.set_add`; `op:"remove"` through `svc.set_remove` (both own their own
+  embedding + persistence, same as every other set-slot entry point).
+  `member_invalid`/`member_capped` results are logged (info/warning
+  respectively) and the dream continues. A scalar claim (no `op`) landing on
+  a slot that already holds current members is dropped and logged at INFO
+  (`"dropped scalar claim for set slot %s.%s"`, mirroring the existing
+  auto-promote guard) rather than crashing the dream or silently overwriting
+  the set. A malformed `op` value (anything but `"add"`/`"remove"`) degrades
+  to the scalar path with a warning naming the value — never a hard failure
+  mid-dream. The extraction prompt (`_SYSTEM_PROMPT` in `dream.py`, and the
+  `evals/prompts/sonnet_extractor_v1.md` / `v2.md` mirrors) gained a short
+  "collection membership" instruction block with one add and one remove
+  example, phrased to keep `op` off plain value updates (a new job, a moved
+  city stay scalar supersedes). `svc.set_add` gained an optional
+  `confidence: float = 0.7` keyword (forwarded to `add_member`, which
+  already accepted it) so the dream `op:"add"` path threads a claim's
+  confidence through exactly like its scalar sibling instead of silently
+  discarding it. Fixed a review-caught bug (pre-fix, never deployed): the
+  per-slot `has_trace` "already formed this slot" guard is keyed by
+  `(slot, source entry)` with no member value, so it must gate scalar claims
+  ONLY — applied unconditionally, a SECOND `op:"add"` for the same slot from
+  the same source entry (two collection items named in one note) read as
+  "already formed" and was silently dropped after the first member landed.
+  A `member_invalid`/`member_capped` result now `continue`s before the
+  trace-write + reinforcement-bump block (nothing was actually stored, so
+  nothing should be traced — combined with the guard above, tracing a
+  never-stored member could also mask a later legitimate add). A dropped
+  scalar-on-set-slot claim now also increments `tally["dropped_set_slot"]`
+  so `dream_run`'s result surfaces the count, not just the log line. Covered
+  by seven cases in `tests/test_dream.py` (op-add lands a member, op-remove
+  removes one, a no-op claim on a member-holding slot is dropped with the
+  store unchanged and `dropped_set_slot` incremented, a malformed op falls
+  back to scalar with a warning, two `op:"add"` claims sharing one source
+  entry both land, `op:"add"` confidence reaches the stored member, and a
+  `member_invalid` result skips the trace write). The extraction prompt
+  deliberately does NOT solicit `op`: the pre-registered e2e gate showed the
+  ceiling extractor never adopts the field from a prompt block (zero member
+  facts across 78 banks; direct probe 0/4) while the block itself shifted
+  scalar extraction behaviour — so the prompt is held measurement-clean and
+  the MCP set tools are the sole set writers until an extractor demonstrably
+  emits `op`. Evidence: `evals/results/c2-gate-verdict.json`.
+
+### Changed (2026-07-31 — set-valued slots surface as one entry per slot, not one per member)
+- **`cortex_search` groups a set-valued slot's current members into a single
+  entry** instead of surfacing each member as its own hit: `{"kind": "set",
+  "entity", "attribute", "value": "m1; m2 (2 members)", "members": [...],
+  "score": <max member score>, "contested": false}`. Grouping runs AFTER the
+  BM25 fusion pass (fusion itself stays per-record) and always shows the
+  slot's FULL current membership — score-descending for members that
+  individually ranked, then any current member that didn't — not just
+  whichever members cleared the caller's score floor. `evals/rebuild_contexts.py`'s
+  `rebuild_fact_lines` composes the identical value string offline via the
+  new shared `pseudolife_memory.memory.cortex.compose_set_value` helper;
+  bank fact dicts gain an optional `"kind"` (`"member"` marks one row of a
+  set — absent means scalar), so a bank dumped before this change rebuilds
+  byte-identically (pinned against a committed fixture,
+  `tests/fixtures/rebuild_fact_lines_legacy_bank.json.gz`). `evals/longmemeval_bench.py`'s
+  `build_contexts` composes a set entry's line from its already-composed
+  `value` and garnishes it with "former members" (removed members, oldest
+  first) pulled from the set-shaped `history()`, mirroring the scalar
+  "earlier values" idiom; the composition is factored into
+  `_compose_fact_line` for offline unit testing
+  (`tests/test_longmemeval_bench_fact_lines.py`). `_cortex_record_to_dict`
+  now includes `"kind"` on every fact dict (`cortex_lookup`, `cortex_dump`,
+  `cortex_search` scalar entries). A set entry also now carries
+  `"last_confirmed"`, `"asserted_at"`, and `"age"` (all backed by the same
+  anchor — max `tx_time or asserted_at` over current members, the same
+  priority `_cortex_record_to_dict` uses for a scalar's `"age"`) so
+  `mcp_server.py`'s cortex-first block has real dates to render instead of
+  going blank for every set slot. Accepted v1 scope: a set entry carries no
+  `"freshness_class"` at all (it renders `evergreen` — the class-resolution
+  helpers default an absent class that way, same as any unclassified scalar),
+  and the anchor backing `last_confirmed`/`asserted_at`/`age` only advances on
+  add/confirm activity — `remove_member` stamps `superseded_at` on the
+  removed row but never touches those three fields, so removing a member
+  never moves the slot's displayed dates. Fixed a latent crash the new set-entry
+  shape would otherwise have caused: `mcp_server.py`'s `memory_search` cortex-first
+  block indexed a fact's `"confidence"` directly, which a grouped set entry
+  doesn't carry — now `.get`. Fixed a review-caught bug in
+  `_cortex_bm25_fuse` itself: it keyed its lexical pool by `record.key`
+  (the SLOT identity) rather than the record, so every member of a set
+  shared one BM25 score and the lexical-only-injection path could only
+  ever inject one member per slot — now keyed by `id(record)`, genuinely
+  per-record. `evals/lme_v2_smoke.py`'s `build_contexts_v2` hand-rolled the
+  same fact-line loop `longmemeval_bench.build_contexts` used to have
+  (mislabeling a set's current members as superseded "earlier values");
+  routed through the shared `_compose_fact_line` instead. That helper also
+  no longer lists a member as "former" in the removed-members garnish if a
+  remove-then-re-add currently has it back in the set. Covered by
+  `tests/test_cortex_sets.py` (grouping, score-ordering, unranked-member
+  inclusion, no-entry-when-nothing-ranks, mixed scalar+set, last_confirmed),
+  `tests/test_cortex_bm25.py::test_rebuild_fact_ranking_matches_service_fusion_set_slot`
+  (a deliberately engineered order-divergence scenario, confirmed red
+  against the pre-fix keying), `tests/test_lme_v2_smoke_fact_lines.py`,
+  `tests/test_longmemeval_bench_fact_lines.py`'s remove-then-re-add cases,
+  and `tests/test_cortex_fact_currency.py`'s set-slot case (the pre-existing
+  currency guard's fixtures were scalar-only and structurally blind to
+  whether a set entry carries a date at all).
+
+### Added (2026-07-31 — MCP tools for set-valued cortex slots)
+- **`memory_set_add` / `memory_set_remove`** expose the Task 2–4 member
+  model on the MCP surface — add/confirm or retract one member of a
+  set-valued `(entity, attribute)` slot (many concurrent values, e.g.
+  tags, rather than one canonical NOW value). A scalar already at the slot
+  converts to a set one-way the first time `memory_set_add` targets it;
+  `memory_fact_set` against a slot already converted to a set now raises an
+  actionable error naming these two tools instead of the store's own
+  `add_member`/`remove_member` vocabulary. Both are minimal tier, alongside
+  `memory_fact_set`. Reads still go through `memory_fact_get`, which now
+  returns `{kind: "set", members, removed}` for a set slot and treats
+  `members: []` (every member removed) as empty — same as a scalar miss —
+  rather than as a found record. Covered by `tests/test_mcp_server.py` and
+  the Postgres persistence leg in
+  `tests/test_cortex_sets.py::test_set_add_remove_survive_pg_hydration_through_the_service`.
+
+### Added (2026-07-30 — cortex slots can hold a set: member-per-record add/remove lifecycle)
+- **A cortex `(entity, attribute)` slot can now hold either one scalar value
+  (unchanged) or a set of concurrently-current members** —
+  `CortexStore.add_member` / `remove_member` / `members` / `slot_kind`
+  (`pseudolife_memory/memory/cortex.py`), the mechanics the rest of this
+  branch (the MCP tools, the dream `op` field, one-entry-per-slot serving —
+  see the entries above and below) is built on. Reuses the scalar
+  supersession spine rather than a parallel storage model: a member is a
+  `CortexRecord` with `kind="member"` whose `status` cycles `current` ->
+  `removed` exactly like a scalar's `current` -> `superseded`, nothing is
+  ever hard-deleted, and every add/remove is logged to the same
+  `supersession_log` the scalar path writes to.
+  - **Add/confirm, never contest.** Unlike `write_fact`, members have no
+    provenance-tier dispute path — there is no such thing as a "contested"
+    member. A value that dedups (exact normalised match, or cosine >=
+    `MEMBER_DEDUP_COSINE` (0.9) against a current member) confirms the
+    existing member (bumps `last_confirmed` and, if higher, confidence)
+    instead of duplicating; anything else inserts a new current member, up to
+    `MAX_CURRENT_MEMBERS` (100) — beyond the cap, further adds are dropped
+    (`"member_capped"`) rather than queued or silently applied. A value that
+    normalises to empty is rejected outright (`"member_invalid"`): Postgres
+    unique indexes treat NULLs as distinct, so an empty-normalised member row
+    would silently bypass the per-slot uniqueness constraint on persistence.
+  - **Conversion is one-way in both directions of the story.** A scalar
+    already at a slot converts to a set the first time `add_member` targets
+    it — the scalar row is superseded (kept as audit history) and
+    re-inserted as the slot's first member; there is no path back to scalar
+    while any member is current. Once every member has been removed, the
+    slot holds no current record of either kind, so `write_fact`'s own guard
+    (which checks for CURRENT members only) lets a fresh scalar land there —
+    the slot "reverts" to scalar life as a byproduct of removing the last
+    member, not a dedicated revert call, and the removed member rows stay as
+    audit (`members(..., include_removed=True)`), just no longer reflected in
+    `slot_kind`.
+  - **The v19 duplicate-healing pass on daemon start is now scoped to
+    `kind = 'scalar'`** (`pseudolife_memory/storage/schema.py`,
+    `ensure_schema`). The pre-existing healing UPDATE (schema v19) partitions
+    `facts` rows by `(entity_norm, attribute_norm)` and demotes all but the
+    newest `current` row to `superseded`, run unconditionally on every daemon
+    start; without the added `AND kind = 'scalar'` predicate it would
+    partition member rows the same way and silently demote all but the
+    newest member on a slot to `superseded` on every restart.
+    `world_facts`/`lessons` healing and the `facts/contested` pass are
+    untouched — neither has a `kind` column or a member concept. TDD-verified
+    against the pre-fix loop:
+    `tests/test_schema_v26.py::test_ensure_schema_healing_is_kind_aware` seeds
+    two current `kind='member'` rows on one slot alongside a genuine
+    duplicate current `kind='scalar'` pair on another, confirms one member
+    was wrongly demoted pre-fix, and both survive post-fix while the scalar
+    duplicate still heals to exactly one current row.
+  - `slot.polarity` is accepted and preserved verbatim on an added/converted
+    member in v1 — it is NOT interpreted. A negated add does not implicitly
+    route to `remove_member`; a caller that means "no longer" calls
+    `remove_member` itself.
+  - Covered by `tests/test_cortex_sets.py` (add, confirm-by-norm,
+    confirm-by-cosine, cap, invalid-value rejection, one-way scalar
+    conversion, all-removed reverts to scalar, polarity passthrough) and
+    `tests/test_schema_v26.py`.
+
+### Changed (2026-07-30 — schema v26: set-valued cortex slots, columns + index split)
+- **`facts.kind` (`scalar` | `member`, default `scalar`) and `facts.value_norm`
+  columns added**, and the per-slot current-uniqueness constraint splits by
+  kind: `facts_slot_current_scalar_uq` (`entity_norm`, `attribute_norm`) keeps
+  the existing one-live-row-per-slot invariant for scalar facts,
+  `facts_member_current_uq` (`entity_norm`, `attribute_norm`, `value_norm`)
+  allows several members to be concurrently current on the same slot. The
+  old unscoped `facts_slot_current_uq` index is dropped. Additive/idempotent
+  migration; every existing fact defaults to `kind='scalar'` and continues
+  to dedupe exactly as before — internal groundwork for set-valued cortex
+  slots, no reader/writer behavior change in this change.
+
 ### Added (2026-07-30 — cortex fact retrieval gains an opt-in BM25 lexical channel)
 - **`cortex_search` can now fuse a BM25 lexical pool with dense cosine** —
   per-call `bm25=True` or `memory.bm25.cortex_enabled = true` — mirroring

@@ -149,3 +149,220 @@ def test_rebuild_fact_ranking_matches_service_fusion():
             top_k=4, min_score=0.2, bm25=True)
         got = [ln.split(" — ")[0] for ln in lines]
     assert got == want, f"rebuild={got} service={want}"
+
+
+def test_rebuild_fact_ranking_matches_service_fusion_set_slot():
+    """Task 6 extension of the lockstep guard above: a set-valued slot must
+    collapse to ONE grouped entry identically on both paths. The bank's
+    member facts carry ``"kind": "member"`` (what ``svc.cortex_dump()`` now
+    emits for every current member row); the live side is seeded through
+    ``svc.set_add`` so both paths embed the exact same
+    ``f"{entity} {attribute} {value}"`` text.
+
+    Asserts FULL composed-line equality, not just entity ordering + an
+    unordered "all members present" check — a weaker assertion stayed
+    green across a real live/offline divergence (review finding F1) and
+    also stayed green on an earlier, less pointed choice of members/query
+    for THIS test (member order happened to coincide with insertion order
+    either way, so a naive full-line compare didn't red either). This
+    scenario is deliberately engineered to force order-level divergence:
+
+    At ``min_score=0.7`` only "hybrid bike" clears the DENSE floor; "gravel
+    bike" and "road bike" both fall below it and can only enter the ranked
+    pool through BM25 lexical-only injection — and they share ONE slot key.
+    Their real BM25 raw scores (query repeats each member's code a
+    different number of times: 3x / 2x / 1x) are genuinely different
+    (verified empirically: hybrid=2.94, gravel=1.96, road=0.98), so the
+    correct composed order is hybrid, gravel, road (score-descending).
+
+    ``_cortex_bm25_fuse`` used to key its lexical-score dict by
+    ``record.key`` (the SLOT identity, shared by gravel/road): since BM25
+    hits are processed in score-descending order, the dict comprehension's
+    "last write wins" semantics kept the LOWEST-scoring of the two
+    (road) and silently evicted gravel — which then never entered the
+    ranked hit list at all, falling to the composed value's unranked
+    tail instead of its correct rank-2 position. Confirmed RED against the
+    unfixed code (stashing the ``id(record)``-keying fix and rerunning this
+    exact scenario): the live service produced ``hybrid bike SNHHH999;
+    road bike SNRRR555; gravel bike SNGGG111 (3 members)`` — gravel bike
+    demoted to last — while the offline rebuild path (whose OWN bm25 fusion
+    was always keyed by fact index, never by slot) kept computing the
+    correct ``hybrid; gravel; road`` order, so ``got_lines != want_lines``
+    failed exactly as this test intends."""
+    import sys as _sys
+    from pathlib import Path as _Path
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[1] / "evals"))
+    from rebuild_contexts import rebuild_fact_lines
+
+    query = ("recommend the best option for a beginner cyclist SNHHH999 "
+             "SNHHH999 SNHHH999 SNGGG111 SNGGG111 SNRRR555")
+
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
+        svc = MemoryService(data_dir=d)
+        # One unrelated scalar in the corpus (nit, re-review): the isolated
+        # 3-member-only universe above proved the order-divergence fix in
+        # the tightest possible reproduction, but never exercised the
+        # grouped entry's position AMONG scalars — restore one so the
+        # grouping/lockstep logic is proven against a mixed corpus too, not
+        # just a set-slot vacuum. Scores nowhere near this query (verified:
+        # 0.0 dense/lexical), so it must NOT appear in the results — the
+        # assertion below pins that the set entry still lands as the sole,
+        # first-position entry despite scalar competition existing.
+        svc.cortex_write("payments-db", "host", "10.0.0.7", provenance=["seed"])
+        svc.set_add("user", "bikes owned", "road bike SNRRR555")
+        svc.set_add("user", "bikes owned", "gravel bike SNGGG111")
+        svc.set_add("user", "bikes owned", "hybrid bike SNHHH999")
+
+        want_entries = svc.cortex_search(query, top_k=6, min_score=0.7,
+                                         bm25=True)["entries"]
+        set_entries = [e for e in want_entries if e.get("kind") == "set"]
+        assert set_entries, "the set slot should have ranked for this query"
+        assert want_entries[0]["kind"] == "set", (
+            "the grouped set entry must be pinned at position 0 even with "
+            "an (excluded) scalar in the corpus")
+        # The full line each path SHOULD serve — entity, attribute, and the
+        # (for a set) score-ordered composed value — not just the entity.
+        want_lines = [f"{e['entity']} — {e['attribute']}: {e['value']}"
+                      for e in want_entries]
+
+        facts = [
+            {"entity": "payments-db", "attribute": "host", "value": "10.0.0.7",
+             "history": ["10.0.0.7"]},
+        ] + [
+            {"entity": "user", "attribute": "bikes owned", "value": member,
+             "kind": "member"}
+            for member in ("road bike SNRRR555", "gravel bike SNGGG111",
+                            "hybrid bike SNHHH999")
+        ]
+        emb = svc._embedder
+        got_lines = rebuild_fact_lines(
+            {"facts": facts, "question": query}, emb,
+            top_k=6, min_score=0.7, bm25=True)
+
+    assert got_lines == want_lines, f"rebuild={got_lines} service={want_lines}"
+    assert len(want_lines) == 1, (
+        "the unrelated scalar filler must not have cleared the floor")
+    # Pin the known-CORRECT order directly (not just live==offline
+    # agreement) — a blind spot a cross-comparison alone cannot catch is
+    # both paths being wrong in the same way.
+    assert want_lines == [
+        "user — bikes owned: hybrid bike SNHHH999; gravel bike SNGGG111; "
+        "road bike SNRRR555 (3 members)"
+    ], want_lines
+
+
+def test_rebuild_fact_ranking_matches_service_fusion_set_slot_mixed_corpus():
+    """Companion to the engineered-order-divergence scenario above
+    (coordinator follow-up after Task 6 approval): that test deliberately
+    isolates a 3-member-only universe at ``min_score=0.7`` to force the F1
+    order-divergence reproduction, which trades away coverage of the set
+    entry's position AMONG OTHER RANKED SCALARS — the ORIGINAL shape of
+    this lockstep case, before it was narrowed for that reproduction.
+
+    Restores it: the standard ``_seed`` corpus (5 filler facts + one
+    identifier-style ticket fact) plus the same 3-bike set, queried at
+    ``min_score=0.1`` (the shipped default) with ``bm25=True``. Verified
+    empirically this yields 4 mixed entries on both paths — the grouped
+    set entry at position 0, three scalars trailing it — so the lockstep
+    equality here is doing real work interleaving a "kind": "set" entry
+    among "kind"-less scalar entries, not just comparing two
+    single-entry lists."""
+    import sys as _sys
+    from pathlib import Path as _Path
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[1] / "evals"))
+    from rebuild_contexts import rebuild_fact_lines
+
+    query = "what bikes does the user own"
+
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
+        svc = MemoryService(data_dir=d)
+        _seed(svc)
+        svc.set_add("user", "bikes owned", "road bike")
+        svc.set_add("user", "bikes owned", "gravel bike")
+        svc.set_add("user", "bikes owned", "hybrid bike")
+
+        want_entries = svc.cortex_search(query, top_k=6, min_score=0.1,
+                                         bm25=True)["entries"]
+        assert len(want_entries) == 4, want_entries
+        assert want_entries[0]["kind"] == "set", (
+            "the grouped set entry must rank at position 0")
+        want_lines = [f"{e['entity']} — {e['attribute']}: {e['value']}"
+                      for e in want_entries]
+
+        facts = [
+            {"entity": e, "attribute": a, "value": v, "history": [v]}
+            for e, a, v in _FILLER
+        ] + [{"entity": "ticket PRB052840832", "attribute": "workflow",
+              "value": "Knowledge Search; Problems; Private Task",
+              "history": ["Knowledge Search; Problems; Private Task"]}] + [
+            {"entity": "user", "attribute": "bikes owned", "value": member,
+             "kind": "member"}
+            for member in ("road bike", "gravel bike", "hybrid bike")
+        ]
+        emb = svc._embedder
+        got_lines = rebuild_fact_lines(
+            {"facts": facts, "question": query}, emb,
+            top_k=6, min_score=0.1, bm25=True)
+
+    assert got_lines == want_lines, f"rebuild={got_lines} service={want_lines}"
+
+
+def test_rebuild_fact_lines_legacy_bank_byte_identical():
+    """Hard regression requirement (Task 6): a bank dumped before set slots
+    existed carries no ``"kind"`` key on any fact — rebuild_fact_lines must
+    treat every one of them as scalar and rebuild BYTE-IDENTICALLY to
+    before the set-grouping branch was added. Pinned against a real dumped
+    bank (a small, synthetic-persona LongMemEval fixture — no real user
+    data — committed at ``tests/fixtures/rebuild_fact_lines_legacy_bank.json.gz``
+    since ``evals/results/banks/`` itself is gitignored and would not
+    survive a fresh checkout). Chosen specifically because one of its
+    facts (``crash-course-videos-completed``, ``history: ["12", "15"]``)
+    has a genuine 2-value supersession chain — the earlier version of this
+    fixture had every fact at ``history`` length 1, so the "earlier
+    values, oldest first" garnish branch (``older = versions[:-1]...``) was
+    never actually exercised by this regression test at all (review
+    finding F4).
+
+    The expected lines below are honestly regenerated, not hand-preserved
+    from before this fixture swap: captured by running THIS task's
+    ``rebuild_fact_lines`` (i.e. current code, scalar branch byte-for-byte
+    unchanged by the set-grouping addition) against this exact fixture —
+    the scalar branch is untouched by Task 6, so this is equivalent to
+    running the pre-set-feature code, just without needing to check out an
+    earlier commit to prove it."""
+    import gzip
+    import json
+    from pathlib import Path as _Path
+
+    import sys as _sys
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[1] / "evals"))
+    from rebuild_contexts import rebuild_fact_lines
+
+    bank_path = (_Path(__file__).resolve().parent / "fixtures"
+                / "rebuild_fact_lines_legacy_bank.json.gz")
+    with gzip.open(bank_path, "rt", encoding="utf-8") as fh:
+        bank = json.load(fh)
+    assert all("kind" not in f for f in bank["facts"]), (
+        "fixture must model a legacy (pre-Task-6) bank dump")
+    assert any(len(f.get("history") or []) >= 2 for f in bank["facts"]), (
+        "fixture must exercise the earlier-values garnish branch")
+
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
+        svc = MemoryService(data_dir=d)
+        svc._ensure_init()
+        emb = svc._embedder
+
+    lines = rebuild_fact_lines(bank, emb, top_k=8, min_score=0.0, bm25=False)
+    assert lines == [
+        "user — crash-course-videos-completed: 15  "
+        "(earlier values, oldest first: 12)",
+        "user — Python programming course status: completed on edX",
+        "user — current podcast interest: How I Built This",
+        "user — AWS certification goal: AWS Certified Cloud Practitioner",
+        "user — AWS project status: planned",
+    ]
+    # No line carries the set-grouping's "(N members)" marker — the
+    # grouping branch never fired for this all-scalar bank.
+    assert not any("members)" in ln for ln in lines)
+    # ...and the earlier-values garnish DID fire, for exactly one fact.
+    assert sum("earlier values" in ln for ln in lines) == 1

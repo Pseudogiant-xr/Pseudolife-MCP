@@ -53,15 +53,39 @@ def _fact(entity, attribute, value, *, age_days):
     }
 
 
+def _set_fact(entity, attribute, value, *, age_days, members):
+    """The set-slot shape ``cortex_search`` produces (Task 6 re-review):
+    ``asserted_at``/``last_confirmed``/``age`` are all backed by the same
+    anchor (max ``tx_time or asserted_at`` over current members) rather
+    than one canonical record's own stamp. Kept here as a HAND-authored
+    shape (this file never calls the real service — every test stubs
+    ``cortex_search`` — so it deliberately mirrors the production dict,
+    not the other way round)."""
+    ts = time.time() - age_days * 86400.0
+    return {
+        "kind": "set", "entity": entity, "attribute": attribute,
+        "value": value, "members": members, "score": 0.6,
+        "contested": False,
+        "asserted_at": ts, "last_confirmed": ts, "age": f"{age_days}d ago",
+    }
+
+
 @pytest.fixture()
 def two_versions(tmp_path, monkeypatch):
     """The real 2026-07-26 shape: same underlying fact, two entity names,
-    ten days apart, neither contested."""
+    ten days apart, neither contested. Also carries a set-slot entry
+    (review finding: the pre-existing fixtures here were scalar-only, so
+    the currency guard below was structurally blind to whether a set
+    entry carries asserted_at/age at all — ``cortex_search`` did not add
+    them until this same review round)."""
     mod = _reload_mcp_filemode(tmp_path, monkeypatch)
     facts = [
         _fact("extraction-prompt-system-prompt", "version", "v2", age_days=1),
         _fact("Sonnet sidecar", "primary-extractor", "shim (v1 prompt)",
               age_days=11),
+        _set_fact("user", "bikes owned",
+                  "road bike; gravel bike (2 members)", age_days=5,
+                  members=[{"value": "road bike"}, {"value": "gravel bike"}]),
     ]
     monkeypatch.setattr(mod.service, "search", lambda **kw: {
         "query": kw.get("query", ""), "count": 0, "entries": [],

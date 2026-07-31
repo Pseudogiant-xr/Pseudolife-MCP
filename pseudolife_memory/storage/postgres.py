@@ -45,6 +45,12 @@ _FACT_COLS = (
     "asserted_at", "last_confirmed", "supersedes_value",
     "superseded_by_value", "superseded_at", "embedding",
     "entity_id", "object_entity_id", "freshness_class",
+    # v26 (set-valued slots): kind partitions the current-uniqueness
+    # constraint (scalar vs member) — omitting it from an insert defaults
+    # every row to 'scalar' and member rows collide on
+    # facts_slot_current_scalar_uq instead of landing in the member index.
+    # value_norm is the member dedup identity; NULL on scalar rows.
+    "kind", "value_norm",
 ) + _STAMP_COLS
 _FACT_JSONB = {"support", "provenance"}
 
@@ -352,6 +358,8 @@ class PostgresStorage:
                 v = 1            # NOT NULL DEFAULT 1; never insert explicit NULL
             elif c == "freshness_class" and v is None:
                 v = "evergreen"  # v23; same NOT NULL DEFAULT rule as version
+            elif c == "kind" and v is None:
+                v = "scalar"     # v26; same NOT NULL DEFAULT rule as version
             values.append(v)
         if f.get("id") is not None:
             sets = ", ".join(f"{c} = %s" for c in _FACT_COLS)
@@ -387,6 +395,8 @@ class PostgresStorage:
                     # NOT NULL DEFAULT, but the default differs per store:
                     # personal facts are durable, world facts rot.
                     v = "volatile" if table == "world_facts" else "evergreen"
+                elif c == "kind" and v is None:
+                    v = "scalar"  # v26; NOT NULL DEFAULT — facts table only
                 values.append(v)
             cur.execute(
                 f"INSERT INTO {table} ({', '.join(cols)}) "

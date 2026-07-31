@@ -174,6 +174,23 @@ def test_lesson_store_compaction():
     assert ("deploy", "pitfall") in ls.dirty_slots
 
 
+# ── member status (schema v26 set-valued slots) ─────────────────────────
+
+def test_removed_member_is_compaction_eligible():
+    """'removed' (member retraction) is a non-live status that ages out like
+    superseded/retired — it must not be invisible to compaction just because
+    it's member-only. Current members stay untouched."""
+    s = CortexStore()
+    s.add_member(Slot("user", "tags", "keep-me"), EMB, now=T0)
+    s.add_member(Slot("user", "tags", "gone"), EMB, now=T0 + 10)
+    s.remove_member("user", "tags", "gone", now=T0 + 20)
+    n = compact_store(s, keep_per_slot=0, min_age_days=0.0, now=T0 + 10 * DAY)
+    assert n == 1
+    vals = sorted(r.value for r in s.records if r.key == ("user", "tags"))
+    assert vals == ["keep-me"]
+    assert [m.value for m in s.members("user", "tags")] == ["keep-me"]
+
+
 # ── supersession_log cap (same growth class) ────────────────────────────
 
 def test_supersession_log_capped_in_memory():

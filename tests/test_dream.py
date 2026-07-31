@@ -426,6 +426,116 @@ def test_dream_threshold_off_forks_sibling(svc):
     assert b is not None and "db-prod-2" in b["value"]   # separate sibling slot
 
 
+# ── claim-level op (Task 7): set membership ──────────────────────────────
+
+def test_dream_run_op_add_lands_member(svc):
+    svc.store("added Rosa's Diner to the restaurants tried list", source="notes")
+    out = svc.dream_run(_StubExtractor([{
+        "entity": "user", "attribute": "restaurants tried", "value": "Rosa's Diner",
+        "confidence": 0.8, "origin": "agent", "op": "add"}]))
+    assert out["member_added"] == 1
+    got = svc.cortex_lookup("user", "restaurants tried")
+    assert got is not None and got["kind"] == "set"
+    assert [m["value"] for m in got["members"]] == ["Rosa's Diner"]
+
+
+def test_dream_run_op_remove_removes_member(svc):
+    svc.set_add("user", "restaurants tried", "Rosa's Diner")
+    svc.store("no longer counting Rosa's Diner as tried", source="notes")
+    out = svc.dream_run(_StubExtractor([{
+        "entity": "user", "attribute": "restaurants tried", "value": "Rosa's Diner",
+        "confidence": 0.8, "origin": "agent", "op": "remove"}]))
+    assert out["member_removed"] == 1
+    got = svc.cortex_lookup("user", "restaurants tried")
+    assert got is not None
+    assert got["members"] == []
+    assert [m["value"] for m in got["removed"]] == ["Rosa's Diner"]
+
+
+def test_dream_run_scalar_claim_dropped_on_set_slot(svc, caplog):
+    """Spec rule 2: an extractor scalar claim (no op) targeting a slot that
+    holds current members must be dropped, not crash the dream and not
+    silently convert/overwrite the set."""
+    svc.set_add("user", "restaurants tried", "Rosa's Diner")
+    before = sorted(m["value"] for m in
+                    svc.cortex_lookup("user", "restaurants tried")["members"])
+    svc.store("the restaurant tried is Rosa's Diner v2", source="notes")
+    with caplog.at_level("INFO", logger="pseudolife_memory.service"):
+        out = svc.dream_run(_StubExtractor([{
+            "entity": "user", "attribute": "restaurants tried",
+            "value": "Rosa's Diner v2", "confidence": 0.8, "origin": "agent"}]))
+    after = sorted(m["value"] for m in
+                   svc.cortex_lookup("user", "restaurants tried")["members"])
+    assert after == before                        # store unchanged
+    assert out.get("inserted", 0) == 0 and out.get("confirmed", 0) == 0
+    assert out["dropped_set_slot"] == 1
+    assert any(
+        "dropped scalar claim for set slot" in rec.message
+        and "user.restaurants tried" in rec.message for rec in caplog.records)
+
+
+def test_dream_run_malformed_op_falls_back_to_scalar_with_warning(svc, caplog):
+    """A malformed op value must not crash the dream — it degrades to the
+    scalar path (bit-identical to no op) with a warning naming the value."""
+    svc.store("the team mascot is a fox", source="notes")
+    with caplog.at_level("WARNING", logger="pseudolife_memory.service"):
+        out = svc.dream_run(_StubExtractor([{
+            "entity": "team", "attribute": "mascot", "value": "fox",
+            "confidence": 0.8, "origin": "agent", "op": "update"}]))
+    assert out["inserted"] == 1
+    got = svc.cortex_lookup("team", "mascot")
+    assert got is not None and got["value"] == "fox"
+    assert any("malformed op" in rec.message and "update" in rec.message
+               for rec in caplog.records)
+
+
+def test_dream_run_multi_member_add_from_one_entry_lands_both(svc):
+    """F1 regression: the has_trace guard is keyed by (slot, source entry)
+    with no member value, so it must not fire for member ops — else a
+    SECOND op:"add" for the same slot from the same source entry reads as
+    "already formed this slot" and is silently dropped (member ops are
+    idempotent on retry themselves: re-add -> member_confirmed, re-remove ->
+    member_not_found, which is the property the guard exists to protect for
+    scalars)."""
+    svc.store("tried Rosa's Diner and also Luigi's this week", source="notes")
+    out = svc.dream_run(_StubExtractor([
+        {"entity": "user", "attribute": "restaurants tried", "value": "Rosa's Diner",
+         "confidence": 0.8, "origin": "agent", "op": "add"},
+        {"entity": "user", "attribute": "restaurants tried", "value": "Luigi's",
+         "confidence": 0.8, "origin": "agent", "op": "add"},
+    ]))
+    assert out["member_added"] == 2
+    got = svc.cortex_lookup("user", "restaurants tried")
+    assert sorted(m["value"] for m in got["members"]) == ["Luigi's", "Rosa's Diner"]
+
+
+def test_dream_run_op_add_threads_confidence(svc):
+    """F2: an op:"add" claim's confidence must reach the stored member, same
+    as the scalar sibling path (confidence=float(c.get("confidence", 0.55)))
+    — the extraction prompt solicits confidence on op claims, so the apply
+    path must not silently discard it."""
+    svc.store("tried Rosa's Diner, very sure about this one", source="notes")
+    svc.dream_run(_StubExtractor([{
+        "entity": "user", "attribute": "restaurants tried", "value": "Rosa's Diner",
+        "confidence": 0.95, "origin": "agent", "op": "add"}]))
+    got = svc.cortex_lookup("user", "restaurants tried")
+    member = next(m for m in got["members"] if m["value"] == "Rosa's Diner")
+    assert member["confidence"] == 0.95
+
+
+def test_dream_run_member_invalid_skips_trace_and_reinforcement(svc):
+    """F3: a member_invalid result must never reach the trace-write +
+    reinforcement-bump block — it would trace a member that was never
+    stored, and (combined with F1's bug) mask the slot from a later,
+    legitimate add of the same source entry."""
+    svc.store("tried to log an empty item in bikes owned", source="notes")
+    out = svc.dream_run(_StubExtractor([{
+        "entity": "user", "attribute": "bikes owned", "value": "   ",
+        "confidence": 0.8, "origin": "agent", "op": "add"}]))
+    assert out["member_invalid"] == 1
+    assert out["traces"] == 0
+
+
 def test_dream_with_noop_extractor_writes_nothing(svc):
     from pseudolife_memory.memory.dream import NoOpExtractor
     svc.config.memory.cortex.auto_promote = False   # no store-path promotion either

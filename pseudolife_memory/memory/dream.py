@@ -118,6 +118,14 @@ _SYSTEM_PROMPT = (
     '"source":2}]}\n'
     'Return {"claims":[]} if nothing qualifies.'
 )
+# The claim-apply loop understands an optional "op":"add"|"remove" field for
+# set-valued slots, but the prompt deliberately does NOT solicit it: the
+# 2026-07-31 pre-registered e2e gate showed the ceiling extractor never
+# adopts the field from a prompt block (0 op claims across 78 banks and a
+# direct probe) while the block itself shifted scalar extraction behaviour
+# (evals/results/c2-gate-verdict.json). Until an extractor demonstrably
+# emits op (prompt-format iteration or distill-time training), the MCP set
+# tools are the sole set writers and this prompt stays measurement-clean.
 
 
 def _vocab_hint(vocab: list[str]) -> str:
