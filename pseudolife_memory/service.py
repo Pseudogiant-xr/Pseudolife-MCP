@@ -1570,7 +1570,11 @@ class MemoryService:
     ) -> dict[str, Any]:
         """Add (or confirm) a member of the set-valued ``(entity, attribute)``
         slot. A scalar already occupying the slot converts to a set one-way
-        (see :meth:`pseudolife_memory.memory.cortex.CortexStore.add_member`).
+        — UNLESS that scalar is a number-led aggregate value ("32",
+        "$1,500"), in which case it is protected instead: the add is parked
+        as a contender (or confirms the scalar, if the member equals it) so
+        the stated total survives (see
+        :meth:`pseudolife_memory.memory.cortex.CortexStore.add_member`).
 
         The member text is embedded through the same composition scalar
         writes use (``"{entity} {attribute} {member}"``) so set membership
@@ -1579,7 +1583,10 @@ class MemoryService:
 
         Returns ``{"action", "entity", "attribute", "member", "members_count"}``
         — ``action`` is one of ``"member_added"``, ``"member_confirmed"``,
-        ``"member_capped"``, or ``"member_invalid"`` (see ``add_member``).
+        ``"member_capped"``, ``"member_invalid"``, ``"contested"`` (the
+        aggregate-conversion guard parked the add as a contender), or
+        ``"confirmed"`` (the member equalled the protected scalar) — see
+        ``add_member``.
         """
         with self._lock:
             self._ensure_init()
@@ -3142,6 +3149,10 @@ class MemoryService:
                         logger.warning(
                             "dream: member add rejected (cap reached) "
                             "for %s.%s", ent, attr)
+                    elif res["action"] == "contested":
+                        logger.info(
+                            "dream: member add parked by aggregate guard "
+                            "for %s.%s", ent, attr)
                 elif op == "remove":
                     res = self.set_remove(ent, attr, c["value"])
                 else:
@@ -3165,11 +3176,16 @@ class MemoryService:
                             continue
                         raise
                 tally[res["action"]] = tally.get(res["action"], 0) + 1
-                if res["action"] in ("member_invalid", "member_capped"):
+                if res["action"] in ("member_invalid", "member_capped", "contested"):
                     # Nothing was actually stored — a trace/reinforcement
                     # bump here would link a source entry to a slot it never
                     # populated, and (combined with the has_trace guard
-                    # above) could mask a later legitimate write.
+                    # above) could mask a later legitimate write. "contested"
+                    # covers both the aggregate-conversion guard's blocked
+                    # add (review finding: it left a stray trace that then
+                    # silently suppressed a later same-entry scalar claim via
+                    # the has_trace guard) and a plain weaker-tier scalar
+                    # conflict — neither changes the slot's current value.
                     continue
                 if (traces_cfg.enabled and src_id is not None
                         and self._storage is not None):

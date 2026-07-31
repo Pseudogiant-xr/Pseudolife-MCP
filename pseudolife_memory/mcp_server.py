@@ -628,7 +628,9 @@ def memory_fact_set(
 def memory_set_add(entity: str, attribute: str, member: str) -> dict[str, Any]:
     """Add/confirm a member of a set-valued slot (many concurrent values,
     not one NOW value). A scalar there converts to a set on first call —
-    one-way. Read with memory_fact_get.
+    one-way — except number-led scalars ("32", "$1,500"), which are
+    protected: the add parks as a contender (action="contested", settle
+    via memory_fact_resolve). Read with memory_fact_get.
 
     Returns: {action, entity, attribute, member, members_count}.
     """

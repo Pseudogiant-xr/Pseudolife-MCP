@@ -536,6 +536,71 @@ def test_dream_run_member_invalid_skips_trace_and_reinforcement(svc):
     assert out["traces"] == 0
 
 
+def test_dream_run_scalar_conflict_skips_trace_and_reinforcement(svc):
+    """Regression pin (review minor 1): the trace-skip tuple in
+    dream_run's claim-apply loop (`pseudolife_memory/service.py` ~line
+    3175) was deliberately broadened to cover EVERY `action="contested"`
+    result, not just the aggregate-conversion guard's blocked add — a
+    plain weaker-tier scalar conflict from write_fact's own tier guard
+    (`CortexStore.write_fact`, `tier_ok = ... _rank(sup) >= _rank(cur.origin)`)
+    is "contested" too and never populated the slot, so it must not reach
+    the trace-write + reinforcement-bump block either. True RED is not
+    obtainable here — this behavior already ships (the "contested" branch
+    predates this feature); this is a regression pin for the broadened
+    skip, not a TDD RED for new behavior.
+
+    Seed the slot at user tier (rank 3), then have dream_run apply a
+    lower-tier ("agent", rank 1) scalar claim with a DIFFERENT value on
+    the same slot: tier_ok is False, so write_fact parks it as a
+    contender (action="contested") and the current user-tier value is
+    untouched."""
+    svc.cortex_write("project", "language", "go", support="user")
+    svc.store("someone floated that the language might be rust", source="notes")
+    db_id = svc.dream_pull()["entries"][-1]["db_id"]
+    before = svc._storage.get_entry(db_id)["reinforcements"]
+    out = svc.dream_run(_StubExtractor([{
+        "entity": "project", "attribute": "language", "value": "rust",
+        "confidence": 0.8, "origin": "agent"}]))
+    assert out["contested"] == 1
+    assert out["traces"] == 0
+    after = svc._storage.get_entry(db_id)["reinforcements"]
+    assert after == before                    # no reinforcement bump either
+    assert svc.cortex_lookup("project", "language")["value"] == "go"
+
+
+def test_dream_run_blocked_aggregate_add_skips_trace_scalar_claim_not_suppressed(svc):
+    """Review finding (FIX 2): an op:"add" claim that the aggregate-conversion
+    guard parks as a contender (action "contested") did not populate the
+    slot — like member_invalid/member_capped, it must not reach the
+    trace-write + reinforcement-bump block. Before the fix, the erroneous
+    trace it left behind would then silently suppress a SECOND, same-entry
+    scalar claim for the same slot via the has_trace guard (which only
+    guards op=None claims): both claims share one source entry here so the
+    ordering bug is directly observable in a single dream_run call."""
+    svc.store("count is 27 birds total", source="notes")
+    svc.dream_run(_StubExtractor([{
+        "entity": "user", "attribute": "birds", "value": "27",
+        "confidence": 0.8, "origin": "agent"}]))
+    assert svc.cortex_lookup("user", "birds")["value"] == "27"
+
+    svc.store("saw a new bird and the total stayed 27", source="notes")
+    out = svc.dream_run(_StubExtractor([
+        {"entity": "user", "attribute": "birds", "value": "Northern Flicker",
+         "confidence": 0.8, "origin": "agent", "op": "add"},
+        {"entity": "user", "attribute": "birds", "value": "27",
+         "confidence": 0.8, "origin": "agent"},
+    ]))
+    # Under the bug: claim 1 (contested) wrongly writes a trace, so claim 2
+    # (op=None, same slot+entry) trips the has_trace guard and is silently
+    # dropped before ever reaching cortex_write — claims=1, confirmed=0.
+    # Fixed: claim 1 writes no trace, claim 2 is processed and confirms.
+    assert out["claims"] == 2
+    assert out["contested"] == 1
+    assert out["confirmed"] == 1
+    assert out["traces"] == 1          # exactly one trace — for the confirm, not the block
+    assert svc.cortex_lookup("user", "birds")["value"] == "27"
+
+
 def test_dream_with_noop_extractor_writes_nothing(svc):
     from pseudolife_memory.memory.dream import NoOpExtractor
     svc.config.memory.cortex.auto_promote = False   # no store-path promotion either

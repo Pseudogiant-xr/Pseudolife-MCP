@@ -9,6 +9,11 @@ no path back from set to scalar).
 
 Dedup at a set slot is confirm-or-insert, never contest: see
 ``CortexStore.add_member``'s docstring for the v1 decision this pins down.
+One exception: an add against a slot whose current scalar is a number-led
+aggregate value ("32", "$1,500") is protected — the guard parks the add as
+a scalar contender (or confirms the scalar, if the add repeats its value)
+instead of converting the slot to a set. See the aggregate-conversion-guard
+cases below.
 
 Embeddings are injected the same way ``tests/test_cortex.py`` does — a
 deterministic unit vector per input, so these run without a
@@ -33,6 +38,7 @@ from pseudolife_memory.memory.cortex import (
     CortexStore,
     MAX_CURRENT_MEMBERS,
     MEMBER_DEDUP_COSINE,
+    _is_aggregate_value,
 )
 from pseudolife_memory.memory.slots import Slot
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
@@ -58,6 +64,17 @@ def emb():
 def test_module_constants():
     assert MEMBER_DEDUP_COSINE == 0.9
     assert MAX_CURRENT_MEMBERS == 100
+
+
+def test_is_aggregate_value_detection():
+    hits = ["32", "27 species", "$1,500", "+3", "-5", "3.5 kg", "3rd place",
+            "  42  ", "€200", "£15"]
+    misses = ["gravel bike", "Rosa's Diner", "prod-eu", "", "   ",
+              "thirty-two", "iPhone 15", None]
+    for v in hits:
+        assert _is_aggregate_value(v), f"should match: {v!r}"
+    for v in misses:
+        assert not _is_aggregate_value(v), f"should not match: {v!r}"
 
 
 def test_add_member_creates_set_slot(store, emb):
@@ -105,6 +122,144 @@ def test_member_add_converts_scalar_slot_with_audit(store, emb):
     audit = [x for x in store.records
              if x.status == "superseded" and x.superseded_by_value == "(converted to set)"]
     assert len(audit) == 1
+
+
+def test_member_add_on_aggregate_scalar_parks_contender(store, emb):
+    store.write_fact(Slot("user", "birds", "27"), emb("27"))
+    store.dirty_slots.clear()
+    r = store.add_member(Slot("user", "birds", "Northern Flicker"),
+                         emb("Northern Flicker"))
+    assert r.action == "contested"
+    assert r.record.status == "contested"
+    assert r.record.value == "Northern Flicker"
+    # Scalar survives, canonical; no set forms.
+    assert store.slot_kind("user", "birds") == "scalar"
+    assert store.members("user", "birds") == []
+    cur = store.records[store._current[("user", "birds")]]
+    assert cur.value == "27" and cur.status == "current"
+    # Contender must persist: the guard schedules the slot rewrite itself
+    # (_contend relies on its caller for dirty_slots, as write_fact does).
+    assert ("user", "birds") in store.dirty_slots
+    # Audit reason is the guard's own, not a tier reason.
+    assert store.supersession_log[-1]["reason"] == "member_add_blocked_aggregate"
+
+
+@pytest.mark.parametrize("total", ["27 species", "$1,500", "3.5 kg"])
+def test_guard_covers_unit_and_currency_totals(store, emb, total):
+    store.write_fact(Slot("user", "stat", total), emb(total))
+    r = store.add_member(Slot("user", "stat", "Blue Jay"), emb("Blue Jay"))
+    assert r.action == "contested"
+    assert store.slot_kind("user", "stat") == "scalar"
+
+
+def test_guard_applies_with_protect_provenance_off(emb):
+    """Regression pin (final branch review): the aggregate-conversion guard
+    in ``add_member`` must fire regardless of ``protect_provenance`` — it is
+    a stated-total protection, not a provenance-tier decision (see
+    docs/guide/memory-model.md, "The guard applies unconditionally —
+    regardless of memory.cortex.protect_provenance"). ``protect_provenance``
+    only gates write_fact's tier-based contest logic (cortex.py ~line 391);
+    the guard checked here is a separate, unconditional branch
+    (``_is_aggregate_value(cur.value)`` in ``add_member``), so a store built
+    with the flag OFF must still park the add rather than converting the
+    slot to a set.
+
+    Watched RED: flipping the expected action from "contested" to
+    "member_added" makes this fail (confirmed manually, then restored) —
+    the guard is not gated by protect_provenance's default-True value.
+    """
+    store = CortexStore(protect_provenance=False)
+    store.write_fact(Slot("user", "birds", "27"), emb("27"))
+    store.dirty_slots.clear()
+
+    r = store.add_member(Slot("user", "birds", "Northern Flicker"),
+                         emb("Northern Flicker"))
+
+    assert r.action == "contested"
+    assert r.record.status == "contested"
+    assert r.record.value == "Northern Flicker"
+    assert store.slot_kind("user", "birds") == "scalar"
+    assert store.members("user", "birds") == []
+    cur = store.records[store._current[("user", "birds")]]
+    assert cur.value == "27" and cur.status == "current"
+
+
+def test_same_value_add_on_aggregate_scalar_confirms_not_contests(store, emb):
+    """Review finding (FIX 1): re-asserting the SAME value that already
+    occupies an aggregate scalar slot via add_member must confirm the
+    scalar, not mint a contender identical to itself. Mirrors write_fact's
+    own confirm branch (same value -> reinforce, never duplicate)."""
+    store.write_fact(Slot("user", "birds", "27"), emb("27"), confidence=0.5)
+    store.dirty_slots.clear()
+    cur = store.records[store._current[("user", "birds")]]
+    before = cur.confidence
+
+    r = store.add_member(Slot("user", "birds", "27"), emb("27"))
+
+    assert r.action == "confirmed"
+    assert r.record is cur
+    assert r.record.status == "current"
+    assert store.contenders_for("user", "birds") == []
+    assert r.record.confidence > before
+    assert ("user", "birds") in store.dirty_slots
+
+
+def test_second_blocked_add_supersedes_prior_contender(store, emb):
+    store.write_fact(Slot("user", "birds", "27"), emb("27"))
+    store.add_member(Slot("user", "birds", "Northern Flicker"),
+                     emb("Northern Flicker"))
+    r = store.add_member(Slot("user", "birds", "Blue Jay"), emb("Blue Jay"))
+    assert r.action == "contested"
+    assert [c.value for c in store.contenders_for("user", "birds")] == ["Blue Jay"]
+    # The displaced contender stays in the audit trail as superseded.
+    gone = [x for x in store.records
+            if x.value == "Northern Flicker" and x.status == "superseded"]
+    assert len(gone) == 1
+
+
+def test_repeated_blocked_add_confirms_contender(store, emb):
+    store.write_fact(Slot("user", "birds", "27"), emb("27"))
+    first = store.add_member(Slot("user", "birds", "Northern Flicker"),
+                             emb("Northern Flicker")).record
+    before = first.confidence
+    r = store.add_member(Slot("user", "birds", "Northern Flicker"),
+                         emb("Northern Flicker"))
+    assert r.action == "contested" and r.record is first
+    assert r.record.confidence > before   # reinforce_rate makes strict increase available
+    assert len(store.contenders_for("user", "birds")) == 1
+
+
+def test_resolve_accept_promotes_blocked_member_to_scalar(store, emb):
+    store.write_fact(Slot("user", "birds", "27"), emb("27"))
+    store.add_member(Slot("user", "birds", "Northern Flicker"),
+                     emb("Northern Flicker"))
+    r = store.resolve("user", "birds", accept=True)
+    assert r.action == "superseded"
+    assert store.slot_kind("user", "birds") == "scalar"
+    cur = store.records[store._current[("user", "birds")]]
+    assert cur.value == "Northern Flicker"
+
+
+def test_resolve_reject_keeps_aggregate_scalar(store, emb):
+    store.write_fact(Slot("user", "birds", "27"), emb("27"))
+    store.add_member(Slot("user", "birds", "Northern Flicker"),
+                     emb("Northern Flicker"))
+    r = store.resolve("user", "birds", accept=False)
+    assert r.action == "contested"
+    cur = store.records[store._current[("user", "birds")]]
+    assert cur.value == "27" and cur.status == "current"
+    assert store.contenders_for("user", "birds") == []
+
+
+def test_empty_member_value_on_aggregate_slot_still_invalid(store, emb):
+    # Regression pin: today's rejection-before-conversion ordering must
+    # survive the aggregate guard too — an empty/blank member value is
+    # rejected outright regardless of what occupies the slot, so this
+    # passes both before and after the guard lands.
+    store.write_fact(Slot("user", "birds", "27"), emb("27"))
+    r = store.add_member(Slot("user", "birds", "   "), emb("blank"))
+    assert r.action == "member_invalid"
+    assert store.contenders_for("user", "birds") == []
 
 
 def test_member_cap_drops_beyond_100(store, emb):
@@ -444,6 +599,25 @@ def test_store_roundtrip_preserves_kind(store_with_pg, emb):
     fresh = reload_store()
     assert fresh.slot_kind("user", "tags") == "set"
     assert [m.value for m in fresh.members("user", "tags")] == ["alpha"]
+
+
+def test_blocked_aggregate_contender_survives_pg_roundtrip(store_with_pg, emb):
+    """Regression pin: the guard's contender must survive persistence with
+    status and kind intact — a hydration that dropped either would resurrect
+    the destructive conversion on the next daemon restart."""
+    store, reload_store = store_with_pg
+    store.write_fact(Slot("user", "birds", "27"), emb("27", dim=1024))
+    r = store.add_member(Slot("user", "birds", "Northern Flicker"),
+                         emb("Northern Flicker", dim=1024))
+    assert r.action == "contested"
+    fresh = reload_store()
+    assert fresh.slot_kind("user", "birds") == "scalar"
+    assert fresh.members("user", "birds") == []
+    cur = fresh.records[fresh._current[("user", "birds")]]
+    assert cur.value == "27" and cur.status == "current"
+    conts = fresh.contenders_for("user", "birds")
+    assert [c.value for c in conts] == ["Northern Flicker"]
+    assert conts[0].kind == "scalar"
 
 
 @pytest.fixture()

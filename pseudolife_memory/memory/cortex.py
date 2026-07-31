@@ -74,6 +74,17 @@ def _norm_value(s: str) -> str:
     return (s or "").strip().casefold()
 
 
+# Number-led values ("32", "27 species", "$1,500") — the class the C2-op gate
+# measured being destroyed by scalar->set conversion (evals/results/
+# c2op-gate-verdict.json). Currency sign then optional sign then a digit.
+_AGGREGATE_VALUE_RE = re.compile(r"^[$€£]?[+-]?\d")
+
+
+def _is_aggregate_value(value: str) -> bool:
+    """True when a scalar value reads as a number-led quantity."""
+    return bool(_AGGREGATE_VALUE_RE.match((value or "").strip()))
+
+
 # Provenance-of-kind: which tier asserted a fact. Precedence high → low. A fact
 # the user stated outranks one the agent merely *did*, which outranks one the
 # agent only *said*. ``origin`` returns the strongest tier in a record's
@@ -243,7 +254,9 @@ class WriteResult:
     action: str
     # write_fact: "inserted" | "confirmed" | "superseded" | "contested"
     # add_member: "member_added" | "member_confirmed" | "member_capped" |
-    #             "member_invalid"
+    #             "member_invalid" | "contested" (aggregate-conversion guard
+    #             parked the add as a contender) | "confirmed" (the add
+    #             equalled the protected aggregate scalar)
     # remove_member: "member_removed" | "member_not_found"
     record: CortexRecord
 
@@ -506,6 +519,16 @@ class CortexStore:
         member. A scalar record already occupying the slot is converted
         one-way to a member first (the scalar row survives as an
         audit-visible superseded record; there is no path back to scalar).
+        Exception: when the current scalar is a number-led aggregate value
+        (``_is_aggregate_value``), the slot is NOT converted; the incoming
+        member is parked as a contender (reason
+        ``member_add_blocked_aggregate``) and the total stays canonical.
+        ``resolve(accept=True)`` remains the explicit path to overwrite it.
+        If the incoming value is the SAME as the current scalar (normalised),
+        it confirms the scalar instead (``"confirmed"``, mirroring
+        :meth:`write_fact`'s own confirm branch — confidence/provenance/
+        support only; tx_time/hlc/writer are not advanced) rather than
+        parking a contender identical to itself.
         Beyond ``MAX_CURRENT_MEMBERS`` current members, further adds are
         dropped (``"member_capped"``).
 
@@ -531,11 +554,40 @@ class CortexStore:
                 kind="member",
             ))
         emb = embedding.detach().to("cpu", torch.float32).clone()
-        # Scalar at this slot -> one-way conversion (spec rule 1).
+        # Scalar at this slot -> one-way conversion (spec rule 1), UNLESS the
+        # scalar is a number-led aggregate ("total species: 32"): converting
+        # destroys a stated total that no enumeration of members recovers
+        # (measured: evals/results/c2op-gate-verdict.json). Park the incoming
+        # member as a contender instead — auditable, and resolve(accept=True)
+        # remains the explicit human path to overwrite the total.
         idx = self._current.get(key)
         if idx is not None:
-            self.dirty_slots.add(key)
             cur = self.records[idx]
+            if _is_aggregate_value(cur.value):
+                self.dirty_slots.add(key)
+                if _norm_value(slot.value) == _norm_value(cur.value):
+                    # The same total re-asserted through add_member -> confirm
+                    # the scalar, never park a contender identical to itself
+                    # (review finding). Mirrors write_fact's own confirm branch
+                    # (~line 360); tx_time/hlc are deliberately left untouched,
+                    # consistent with this guarded path already dropping hlc
+                    # on the contender branch below.
+                    cur.last_confirmed = t
+                    cur.provenance |= {p for p in provenance if p}
+                    sup = _norm_support(support)
+                    if sup:
+                        cur.support.add(sup)
+                    cur.confidence = min(
+                        1.0, max(self._reinforce(cur.confidence), float(confidence)))
+                    return WriteResult("confirmed", cur)
+                return self._contend(cur, slot, emb, confidence,
+                                     {p for p in provenance if p}, t,
+                                     _norm_support(support),
+                                     "member_add_blocked_aggregate",
+                                     cur.slot_embedding,
+                                     writer_id=writer_id,
+                                     session_id=session_id)
+            self.dirty_slots.add(key)
             cur.status = "superseded"
             cur.superseded_at = t
             cur.superseded_by_value = "(converted to set)"

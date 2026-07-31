@@ -565,6 +565,24 @@ CLAIMS.append(Claim(
     stated=0.006, places=3))
 
 
+C2OP_GUARD = RESULTS + "c2op-guard-verdict.json"
+# ── the aggregate-conversion-guard gate (2026-08-01) ─────────────────────
+# The CHANGELOG states that the guarded re-run flipped no verdicts and left
+# the cascade regression vs control unchanged; both numbers pin to the
+# guard verdict artifact.
+CLAIMS.append(Claim(
+    id="c2op-guard-flips", doc=CHANGELOG, needle="0/78 flips",
+    artifacts=(C2OP_GUARD,),
+    value=lambda d: d["paired"]["vs_c2op_e2e"]["all_arms"]["flips"],
+    stated=0, places=0))
+CLAIMS.append(Claim(
+    id="c2op-guard-cascade-p", doc=CHANGELOG,
+    needle="still −0.141 at p = 0.006 vs the op-less control",
+    artifacts=(C2OP_GUARD,),
+    value=lambda d: d["paired"]["vs_ceiling_control"]["cascade"]["p"],
+    stated=0.006, places=3))
+
+
 def test_every_published_number_names_a_committed_artifact():
     """A claim whose evidence is untracked cannot be checked by a reader.
 
