@@ -31,6 +31,12 @@ class Claim(_ClaimRequired, total=False):
     # per-claim source attribution (slot->episode traces). Absent when the
     # model didn't cite a note (or cited one out of range).
     source: int
+    # Set-membership operation ("add" | "remove"). Absent = scalar supersede.
+    # Any other model-emitted value (incl. "set") normalises to absent HERE,
+    # at the parse boundary — the 2026-07-31 correction: this field being
+    # missing from the parse whitelist silently disabled the whole dream-op
+    # path while the model emitted it correctly (c2-gate-verdict.json).
+    op: str
 
 
 class LessonClaim(TypedDict):
@@ -118,14 +124,16 @@ _SYSTEM_PROMPT = (
     '"source":2}]}\n'
     'Return {"claims":[]} if nothing qualifies.'
 )
-# The claim-apply loop understands an optional "op":"add"|"remove" field for
-# set-valued slots, but the prompt deliberately does NOT solicit it: the
-# 2026-07-31 pre-registered e2e gate showed the ceiling extractor never
-# adopts the field from a prompt block (0 op claims across 78 banks and a
-# direct probe) while the block itself shifted scalar extraction behaviour
-# (evals/results/c2-gate-verdict.json). Until an extractor demonstrably
-# emits op (prompt-format iteration or distill-time training), the MCP set
-# tools are the sole set writers and this prompt stays measurement-clean.
+# The op prompt block is deliberately absent. The model adopts op cleanly
+# (probes 7/7 after the parse fix), but the definitive paired gate
+# (evals/results/c2op-gate-verdict.json, variance baseline per-question
+# identical to control) showed the block's net effect is negative on
+# KU-oracle: the model applies op:'add' to stated-total/aggregate slots
+# and the one-way scalar->set conversion destroys the total the answer
+# needs (cascade -0.141, p=0.006; losses concentrated on set-forming
+# questions while non-set questions improved). Until the conversion
+# guard for aggregate scalars exists, the MCP set tools are the set
+# writers and the extraction prompt stays without op.
 
 
 def _vocab_hint(vocab: list[str]) -> str:
@@ -419,6 +427,8 @@ class OpenAICompatExtractor:
                 conf = 0.7
             claim = Claim(entity=entity, attribute=attribute, value=value,
                           confidence=conf, origin="agent")
+            if c.get("op") in ("add", "remove"):
+                claim["op"] = c["op"]
             try:
                 idx = int(c.get("source")) - 1     # 1-based in the prompt
             except (TypeError, ValueError):

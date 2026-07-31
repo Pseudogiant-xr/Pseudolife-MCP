@@ -1,0 +1,95 @@
+{
+  "preregistration": "memory 2026-07-31 C2-op DEFINITIVE gate",
+  "branch": "feat/extractor-op-adoption",
+  "runs": {
+    "c2op_e2e": {
+      "rag": 0.859,
+      "cortex": 0.603,
+      "hybrid": 0.808,
+      "cascade": 0.795
+    },
+    "var_base": {
+      "rag": 0.859,
+      "cortex": 0.667,
+      "hybrid": 0.833,
+      "cascade": 0.936,
+      "note": "PER-QUESTION identical to the committed ceiling-e2e control on all three arms (78/78 each) \u2014 extraction on the reproducible q8_0 stack is fully deterministic; every c2op delta is attributable to the op feature."
+    },
+    "control": "committed ceiling-e2e (2026-07-30)"
+  },
+  "gates": {
+    "ladder_e4b": {
+      "gold": 1.0,
+      "stale": 0.0,
+      "verdict": "PASS"
+    },
+    "ladder_qwen": {
+      "gold": 1.0,
+      "stale": 0.0,
+      "verdict": "PASS"
+    },
+    "window_echo": {
+      "verdict": "PASS"
+    },
+    "e2e": {
+      "verdict": "FAIL",
+      "member_facts": 118,
+      "banks_with_sets": 33,
+      "paired_vs_control": {
+        "rag": {
+          "delta": 0.0,
+          "p": 1.0,
+          "identical": true
+        },
+        "cortex": {
+          "delta": -0.0641,
+          "p": 0.434
+        },
+        "hybrid": {
+          "delta": -0.0256,
+          "p": 0.796
+        },
+        "cascade": {
+          "delta": -0.141,
+          "p": 0.0062
+        }
+      },
+      "count_class_cortex": {
+        "control": 35,
+        "var_base": 35,
+        "c2op": 29,
+        "n": 48
+      },
+      "commit": {
+        "control": {
+          "rate": "46/78",
+          "precision": 1.0
+        },
+        "c2op": {
+          "rate": "56/78",
+          "precision": 0.75
+        }
+      }
+    }
+  },
+  "mechanism": {
+    "split": {
+      "cortex_on_33_set_forming_questions": {
+        "wins": 2,
+        "losses": 13
+      },
+      "cortex_on_45_non_set_questions": {
+        "wins": 9,
+        "losses": 3
+      }
+    },
+    "finding": "The op block itself IMPROVES scalar extraction on non-set questions. The damage is concentrated where sets form: the model applies op:'add' to AGGREGATE/COUNT slots and the one-way scalar->set conversion destroys the stated-total scalar the KU benchmark answers count questions with (e.g. 'total species: 32' becomes 'bird species spotted: 27; Northern Flicker (2 members)'). LongMemEval-KU states totals in-conversation and rarely enumerates full memberships, so extraction-driven sets structurally mismatch this question class; a single spurious member-add converts and destroys a good scalar.",
+    "followups": [
+      "conversion guard: member-add targeting a slot whose current scalar is numeric/aggregate parks as contender instead of converting",
+      "prompt rule: op never applies to counts/totals/quantities",
+      "evaluate extraction-driven sets on membership-ENUMERATING content (LME-V2 trajectories) rather than stated-total chat"
+    ]
+  },
+  "decision": "Block held again \u2014 same posture as the merged option B, now on corrected, fully-attributed grounds. The parse fix ships (required for the MCP tools' future and any op-emitting student; dormant without the block). Product surface unaffected throughout.",
+  "history_note": "Supersedes the mechanism in c2-gate-verdict.json's correction: adoption was real, parse was fixed, and this run measured the feature actually firing."
+}

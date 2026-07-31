@@ -1,0 +1,142 @@
+{
+  "tag": "q8-fixedparse",
+  "battery_notes": 9,
+  "variants": {
+    "v0-appended-block": {
+      "adoption": 1.0,
+      "decoy_ok": 1.0,
+      "adopt_frac": "7/7",
+      "decoy_frac": "3/3",
+      "per_note": [
+        {
+          "note": 0,
+          "claims": [
+            {
+              "entity": "user",
+              "attribute": "restaurants tried",
+              "value": "Seoul Garden",
+              "confidence": 0.9,
+              "origin": "agent",
+              "op": "add",
+              "source": 0
+            }
+          ]
+        },
+        {
+          "note": 1,
+          "claims": [
+            {
+              "entity": "user",
+              "attribute": "bikes owned",
+              "value": "gravel bike",
+              "confidence": 0.9,
+              "origin": "agent",
+              "op": "add",
+              "source": 0
+            }
+          ]
+        },
+        {
+          "note": 2,
+          "claims": [
+            {
+              "entity": "user",
+              "attribute": "weekend list",
+              "value": "fix the fence",
+              "confidence": 0.9,
+              "origin": "agent",
+              "op": "add",
+              "source": 0
+            },
+            {
+              "entity": "user",
+              "attribute": "weekend list",
+              "value": "clean gutters",
+              "confidence": 0.9,
+              "origin": "agent",
+              "op": "add",
+              "source": 0
+            }
+          ]
+        },
+        {
+          "note": 3,
+          "claims": [
+            {
+              "entity": "user",
+              "attribute": "books read this year",
+              "value": "The Nightingale",
+              "confidence": 0.9,
+              "origin": "agent",
+              "op": "add"
+            }
+          ]
+        },
+        {
+          "note": 4,
+          "claims": [
+            {
+              "entity": "user",
+              "attribute": "bikes owned",
+              "value": "road bike",
+              "confidence": 0.9,
+              "origin": "agent",
+              "op": "remove"
+            }
+          ]
+        },
+        {
+          "note": 5,
+          "claims": [
+            {
+              "entity": "user",
+              "attribute": "weekend tasks",
+              "value": "clean gutters",
+              "confidence": 0.9,
+              "origin": "agent",
+              "op": "remove",
+              "source": 0
+            }
+          ]
+        },
+        {
+          "note": 6,
+          "claims": [
+            {
+              "entity": "user",
+              "attribute": "current employer",
+              "value": "Meridian Labs",
+              "confidence": 0.9,
+              "origin": "agent"
+            }
+          ]
+        },
+        {
+          "note": 7,
+          "claims": [
+            {
+              "entity": "user",
+              "attribute": "residence",
+              "value": "Portland",
+              "confidence": 0.9,
+              "origin": "agent"
+            }
+          ]
+        },
+        {
+          "note": 8,
+          "claims": [
+            {
+              "entity": "deploy target",
+              "attribute": "environment",
+              "value": "prod-eu",
+              "confidence": 0.9,
+              "origin": "agent",
+              "source": 0
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
