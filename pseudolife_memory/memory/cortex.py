@@ -526,8 +526,9 @@ class CortexStore:
         ``resolve(accept=True)`` remains the explicit path to overwrite it.
         If the incoming value is the SAME as the current scalar (normalised),
         it confirms the scalar instead (``"confirmed"``, mirroring
-        :meth:`write_fact`'s own confirm branch) rather than parking a
-        contender identical to itself.
+        :meth:`write_fact`'s own confirm branch — confidence/provenance/
+        support only; tx_time/hlc/writer are not advanced) rather than
+        parking a contender identical to itself.
         Beyond ``MAX_CURRENT_MEMBERS`` current members, further adds are
         dropped (``"member_capped"``).
 

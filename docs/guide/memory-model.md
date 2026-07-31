@@ -226,8 +226,12 @@ with a deterministic extraction-variance baseline showed the prompt
 block nets negative on knowledge-update content: the model applies
 `op:"add"` to stated totals and the scalar→set conversion destroys them
 (`evals/results/c2op-gate-verdict.json`). The MCP set tools are the set
-writers; the dream `op` path is tested capability held pending a prompt fix
-— the aggregate-conversion guard itself (see [Conversion
+writers; the dream `op` path is tested capability held pending the gate
+re-measurement with this conversion guard active (the guard should remove
+the destructive-conversion failure mode the gate measured; a prompt rule
+telling the extractor to avoid `op:"add"` on stated totals is a reserve arm
+only if that re-measurement still fails) — the aggregate-conversion guard
+itself (see [Conversion
 rules](#conversion-rules) above) already protects any `op:"add"` that does
 land on a stated-total scalar, whether via a live `memory_set_add` call or
 the dream path once re-enabled.
@@ -254,7 +258,10 @@ This catches the case where the agent *decides* to update something and the
 human only said "yes/proceed": the discrepancy surfaces (at the write, in
 search, and in `memory_fact_get`) so the agent can check in rather than
 overwrite. Set `memory.cortex.protect_provenance: false` in `config.yaml`
-to disable and restore pure newer-wins.
+to disable and restore pure newer-wins — for scalar-vs-scalar conflicts;
+the aggregate conversion guard's contender parking (see [Conversion
+rules](#conversion-rules) above) applies regardless of this setting, since
+protecting a stated total isn't a provenance-tier concern.
 
 ## World knowledge — the world cortex (schema v9)
 

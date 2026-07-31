@@ -536,6 +536,38 @@ def test_dream_run_member_invalid_skips_trace_and_reinforcement(svc):
     assert out["traces"] == 0
 
 
+def test_dream_run_scalar_conflict_skips_trace_and_reinforcement(svc):
+    """Regression pin (review minor 1): the trace-skip tuple in
+    dream_run's claim-apply loop (`pseudolife_memory/service.py` ~line
+    3175) was deliberately broadened to cover EVERY `action="contested"`
+    result, not just the aggregate-conversion guard's blocked add — a
+    plain weaker-tier scalar conflict from write_fact's own tier guard
+    (`CortexStore.write_fact`, `tier_ok = ... _rank(sup) >= _rank(cur.origin)`)
+    is "contested" too and never populated the slot, so it must not reach
+    the trace-write + reinforcement-bump block either. True RED is not
+    obtainable here — this behavior already ships (the "contested" branch
+    predates this feature); this is a regression pin for the broadened
+    skip, not a TDD RED for new behavior.
+
+    Seed the slot at user tier (rank 3), then have dream_run apply a
+    lower-tier ("agent", rank 1) scalar claim with a DIFFERENT value on
+    the same slot: tier_ok is False, so write_fact parks it as a
+    contender (action="contested") and the current user-tier value is
+    untouched."""
+    svc.cortex_write("project", "language", "go", support="user")
+    svc.store("someone floated that the language might be rust", source="notes")
+    db_id = svc.dream_pull()["entries"][-1]["db_id"]
+    before = svc._storage.get_entry(db_id)["reinforcements"]
+    out = svc.dream_run(_StubExtractor([{
+        "entity": "project", "attribute": "language", "value": "rust",
+        "confidence": 0.8, "origin": "agent"}]))
+    assert out["contested"] == 1
+    assert out["traces"] == 0
+    after = svc._storage.get_entry(db_id)["reinforcements"]
+    assert after == before                    # no reinforcement bump either
+    assert svc.cortex_lookup("project", "language")["value"] == "go"
+
+
 def test_dream_run_blocked_aggregate_add_skips_trace_scalar_claim_not_suppressed(svc):
     """Review finding (FIX 2): an op:"add" claim that the aggregate-conversion
     guard parks as a contender (action "contested") did not populate the

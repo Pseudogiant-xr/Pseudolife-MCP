@@ -26,7 +26,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   skips `action="contested"` results, the same way it already skips
   `member_invalid`/`member_capped` — a blocked add never populated the slot,
   so tracing it could silently suppress a later, legitimate scalar claim for
-  the same slot and source entry via the `has_trace` guard.
+  the same slot and source entry via the `has_trace` guard. The skip is
+  action-keyed, not guard-keyed: a plain weaker-tier scalar conflict (a
+  dream claim landing "contested" via `write_fact`'s own tier guard, a path
+  that predates this feature) also no longer writes a trace or reinforcement
+  bump — a contested write never populated the slot either, so the trace it
+  used to leave asserted a false provenance link and could suppress a later
+  legitimate claim the same way.
 
 ### Added (2026-07-31 — dream extractor claims carry an `op` for set membership)
 - **A dream claim may now carry `"op": "add" | "remove"`** to target the
