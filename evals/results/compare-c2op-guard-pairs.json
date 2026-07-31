@@ -1,0 +1,50 @@
+{
+  "rag_vs_ceiling-e2e": {
+    "delta": 0.0,
+    "p_value": 1.0,
+    "n_questions": 78,
+    "flips": 0
+  },
+  "cortex_vs_ceiling-e2e": {
+    "delta": -0.0641,
+    "p_value": 0.43376,
+    "n_questions": 78,
+    "flips": 27
+  },
+  "hybrid_vs_ceiling-e2e": {
+    "delta": -0.0256,
+    "p_value": 0.79572,
+    "n_questions": 78,
+    "flips": 14
+  },
+  "cascade_vs_ceiling-e2e": {
+    "delta": -0.141,
+    "p_value": 0.0062,
+    "n_questions": 78,
+    "flips": 15
+  },
+  "rag_vs_c2op-e2e": {
+    "delta": 0.0,
+    "p_value": 1.0,
+    "n_questions": 78,
+    "flips": 0
+  },
+  "cortex_vs_c2op-e2e": {
+    "delta": 0.0,
+    "p_value": 1.0,
+    "n_questions": 78,
+    "flips": 0
+  },
+  "hybrid_vs_c2op-e2e": {
+    "delta": 0.0,
+    "p_value": 1.0,
+    "n_questions": 78,
+    "flips": 0
+  },
+  "cascade_vs_c2op-e2e": {
+    "delta": 0.0,
+    "p_value": 1.0,
+    "n_questions": 78,
+    "flips": 0
+  }
+}

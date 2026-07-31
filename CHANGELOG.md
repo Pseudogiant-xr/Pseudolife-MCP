@@ -32,7 +32,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that predates this feature) also no longer writes a trace or reinforcement
   bump — a contested write never populated the slot either, so the trace it
   used to leave asserted a false provenance link and could suppress a later
-  legitimate claim the same way.
+  legitimate claim the same way. **Gate result (2026-08-01,
+  `evals/results/c2op-guard-verdict.json`):** re-running the KU-oracle e2e
+  with the op prompt restored and the guard active came back per-question
+  identical to the guard-less op run on every arm (0/78 flips), leaving
+  cascade still −0.141 at p = 0.006 vs the op-less control. The guard fired
+  correctly (3 banks reshaped; the same-value confirm observed end-to-end)
+  but conversion destruction turns out to be the visible wreckage, not the
+  causal path: under the op prompt the extractor re-routes later count
+  updates into member-adds, so the stated total freezes at its first value
+  — a clean-but-stale scalar answers no better than a mangled one. The op
+  prompt block therefore stays held per the pre-registered rule; the guard
+  ships regardless, as bank hygiene and protection for live
+  `memory_set_add` writes. The targeted fix for the measured mechanism is
+  the reserve prompt rule (`op` never applies to counts/totals), a future
+  arm.
 
 ### Added (2026-07-31 — dream extractor claims carry an `op` for set membership)
 - **A dream claim may now carry `"op": "add" | "remove"`** to target the
@@ -86,8 +100,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   to stated-total/aggregate slots and the one-way scalar→set conversion
   destroys the total the answer needs; losses concentrate on set-forming
   questions while non-set questions improve. The block is therefore held
-  again — the MCP set tools are the set writers — until a conversion
-  guard for aggregate scalars exists. Evidence:
+  again — the MCP set tools are the set writers. (The conversion guard was
+  subsequently built and gated: it holds the bank shape but does not
+  recover the lost totals — see the aggregate-conversion-guard entry
+  above.) Evidence:
   `evals/results/c2op-gate-verdict.json`.
 
 ### Changed (2026-07-31 — set-valued slots surface as one entry per slot, not one per member)

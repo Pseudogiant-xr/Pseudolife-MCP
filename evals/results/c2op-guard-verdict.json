@@ -1,0 +1,49 @@
+{
+  "preregistration": "memory 2026-07-31 aggregate-conversion-guard gate (stored before server start)",
+  "branch": "feat/aggregate-conversion-guard",
+  "code": "e81b4349",
+  "run": {
+    "tag": "c2op-guard",
+    "command": "longmemeval_bench.py --dataset oracle --extractor qwen-27b --tag c2op-guard --system-prompt-file evals/prompts/ku_op_prompt_v0.txt",
+    "server": "reproducible q8_0 via Start-Qwen, process command line verified",
+    "arms": {"rag": 0.859, "cortex": 0.603, "hybrid": 0.808, "cascade": 0.795},
+    "wall_minutes": 47
+  },
+  "paired": {
+    "note": "paired permutation 10k draws seed 0; artifact compare-c2op-guard-pairs.json",
+    "vs_c2op_e2e": {
+      "all_arms": {"delta": 0.0, "flips": 0, "p": 1.0},
+      "reading": "PER-QUESTION IDENTICAL on every arm (0/78 flips) despite the guard changing 3 banks — the blocked conversions altered bank shape, not verdicts."
+    },
+    "vs_ceiling_control": {
+      "rag": {"delta": 0.0, "p": 1.0},
+      "cortex": {"delta": -0.0641, "p": 0.434},
+      "hybrid": {"delta": -0.0256, "p": 0.796},
+      "cascade": {"delta": -0.141, "p": 0.0062}
+    }
+  },
+  "guard_census": {
+    "member_facts": {"c2op": 118, "guard": 112},
+    "banks_with_sets": {"c2op": 33, "guard": 31},
+    "current_scalars": {"c2op": 509, "guard": 512},
+    "guarded_slots": "~3 slot identities across 3 banks (record-level diff shows 5 rows; two pairs are one slot under _norm_key space/hyphen collapse)",
+    "same_value_confirm_observed": "0ddfec37_abs: member add of '15' onto scalar '15' confirmed the scalar instead of minting a member — the review-added branch firing in the wild",
+    "prereg_expectation_miss": "pre-registration expected member facts 'far below 118/33'; actual 112/31. The guard's premise covered a minority of set formation."
+  },
+  "mechanism": {
+    "case_study_affe2881": {
+      "gold": "32",
+      "control_cortex": "correct — op-less extraction superseded the count scalar 27 -> 32",
+      "c2op_cortex": "wrong — slot mangled to '27; Northern Flicker (2 members)'",
+      "guard_cortex": "wrong — guard preserved a clean scalar, but it is the STALE 27; the 27->32 update was never emitted as a scalar claim under the op prompt"
+    },
+    "finding": "The dominant KU damage from the op block is EXTRACTION-SIDE: the model re-routes subsequent count/total updates into op:'add' member claims instead of scalar supersessions, so the total freezes at its first value. Apply-time conversion destruction (the c2op verdict's emphasis, and this guard's target) is real but minor (~3 slots) and flipped zero verdicts; blocking conversion preserves bank hygiene but cannot recover updates that never arrived as scalars.",
+    "revises": "c2op-gate-verdict.json's mechanism emphasis: 'a single spurious member-add converts and destroys a good scalar' described the visible wreckage, not the causal path. The counterfactual (this run) separates the two."
+  },
+  "decision": "Pre-registered rule fires: cascade significantly below control (-0.141, p=0.0062) -> op prompt block STAYS HELD; the guard ships regardless (bank hygiene + live memory_set_add protection, demonstrated working end-to-end including the same-value confirm). Third consecutive gate, third distinct root cause, same posture.",
+  "followups": [
+    "The reserve prompt rule ('op never applies to counts/totals/quantities') is now the TARGETED arm: it addresses the measured extraction-side re-routing directly, where this guard could not.",
+    "Evaluate extraction-driven sets on membership-enumerating content (LME-V2 trajectories) where totals are not the answer key.",
+    "Parked contenders are invisible in dump_bank output (current+history only) — extend the dump if contender-level bench forensics are ever needed."
+  ]
+}
