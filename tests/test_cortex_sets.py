@@ -569,6 +569,25 @@ def test_store_roundtrip_preserves_kind(store_with_pg, emb):
     assert [m.value for m in fresh.members("user", "tags")] == ["alpha"]
 
 
+def test_blocked_aggregate_contender_survives_pg_roundtrip(store_with_pg, emb):
+    """Regression pin: the guard's contender must survive persistence with
+    status and kind intact — a hydration that dropped either would resurrect
+    the destructive conversion on the next daemon restart."""
+    store, reload_store = store_with_pg
+    store.write_fact(Slot("user", "birds", "27"), emb("27", dim=1024))
+    r = store.add_member(Slot("user", "birds", "Northern Flicker"),
+                         emb("Northern Flicker", dim=1024))
+    assert r.action == "contested"
+    fresh = reload_store()
+    assert fresh.slot_kind("user", "birds") == "scalar"
+    assert fresh.members("user", "birds") == []
+    cur = fresh.records[fresh._current[("user", "birds")]]
+    assert cur.value == "27" and cur.status == "current"
+    conts = fresh.contenders_for("user", "birds")
+    assert [c.value for c in conts] == ["Northern Flicker"]
+    assert conts[0].kind == "scalar"
+
+
 @pytest.fixture()
 def svc(pg_conn, pg_url):  # noqa: F811
     """Same idiom as ``tests/test_schema_v23.py``'s ``svc`` fixture — a real
