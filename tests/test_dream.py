@@ -1015,3 +1015,31 @@ def test_dream_run_window_on_empty_cortex_omits_kwarg(svc):
         "entity": "fresh", "attribute": "topic", "value": "noted",
         "confidence": 0.8, "origin": "agent"}]))     # has no known_facts param
     assert out["inserted"] + out["confirmed"] >= 1   # did not blow up
+
+
+def test_openai_extractor_carries_op_through_parse():
+    """The C2 e2e gate 'failed' because extract() rebuilt claims with a
+    fixed field whitelist and silently STRIPPED the model's op field — the
+    op-aware apply loop downstream never saw it, remove-intents landed as
+    positive scalar facts, and the miss was attributed to the model
+    (corrected 2026-07-31; raw probes show clean adoption). This pins the
+    parse layer: op survives when valid, anything else is absent."""
+    from pseudolife_memory.memory.dream import OpenAICompatExtractor
+
+    payload = _chat_payload([
+        {"entity": "user", "attribute": "restaurants tried",
+         "value": "Seoul Garden", "op": "add", "confidence": 0.9, "source": 1},
+        {"entity": "user", "attribute": "bikes owned",
+         "value": "road bike", "op": "remove", "confidence": 0.9, "source": 1},
+        {"entity": "user", "attribute": "location",
+         "value": "Portland", "op": "set", "confidence": 0.9, "source": 1},
+        {"entity": "user", "attribute": "job",
+         "value": "Meridian", "op": "banana", "confidence": 0.9, "source": 1},
+        {"entity": "user", "attribute": "city",
+         "value": "Austin", "confidence": 0.9, "source": 1},
+    ])
+    with _stub_server(lambda: (200, payload)) as base_url:
+        claims = OpenAICompatExtractor(base_url, "m").extract(["note"], [])
+    ops = [c.get("op") for c in claims]
+    # add/remove survive; "set", junk, and absent all normalise to absent.
+    assert ops == ["add", "remove", None, None, None]

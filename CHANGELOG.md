@@ -45,13 +45,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   store unchanged and `dropped_set_slot` incremented, a malformed op falls
   back to scalar with a warning, two `op:"add"` claims sharing one source
   entry both land, `op:"add"` confidence reaches the stored member, and a
-  `member_invalid` result skips the trace write). The extraction prompt
-  deliberately does NOT solicit `op`: the pre-registered e2e gate showed the
-  ceiling extractor never adopts the field from a prompt block (zero member
-  facts across 78 banks; direct probe 0/4) while the block itself shifted
-  scalar extraction behaviour — so the prompt is held measurement-clean and
-  the MCP set tools are the sole set writers until an extractor demonstrably
-  emits `op`. Evidence: `evals/results/c2-gate-verdict.json`.
+  `member_invalid` result skips the trace write). CORRECTED 2026-07-31:
+  the C2 gate's "extractor never adopts op" root cause was wrong — the
+  model emitted `op` correctly all along and `extract()`'s parse whitelist
+  silently stripped it, so remove-intents landed as positive scalar facts
+  (the real source of the measured e2e degradation). With `op` carried
+  through the parse (pinned by
+  `test_openai_extractor_carries_op_through_parse`), probes show 7/7
+  adoption with clean decoy discipline on the reproducible server, and the
+  prompt block is restored. Evidence: `evals/results/c2-gate-verdict.json`
+  (amended with the correction), `evals/results/op-probe-q8-fixedparse.json`.
 
 ### Changed (2026-07-31 — set-valued slots surface as one entry per slot, not one per member)
 - **`cortex_search` groups a set-valued slot's current members into a single

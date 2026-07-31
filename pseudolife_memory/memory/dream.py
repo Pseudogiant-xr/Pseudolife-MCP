@@ -31,6 +31,12 @@ class Claim(_ClaimRequired, total=False):
     # per-claim source attribution (slot->episode traces). Absent when the
     # model didn't cite a note (or cited one out of range).
     source: int
+    # Set-membership operation ("add" | "remove"). Absent = scalar supersede.
+    # Any other model-emitted value (incl. "set") normalises to absent HERE,
+    # at the parse boundary — the 2026-07-31 correction: this field being
+    # missing from the parse whitelist silently disabled the whole dream-op
+    # path while the model emitted it correctly (c2-gate-verdict.json).
+    op: str
 
 
 class LessonClaim(TypedDict):
@@ -116,16 +122,24 @@ _SYSTEM_PROMPT = (
     '{"entity":"releases","attribute":"documented requirement",'
     '"value":"signed tag (per release runbook)","confidence":0.8,'
     '"source":2}]}\n'
+    "When a note adds or removes an item from a COLLECTION the user "
+    'maintains (restaurants tried, bikes owned, pending tasks), add an '
+    '"op":"add" or "op":"remove" field to that claim instead of a plain '
+    "supersede. op is ONLY for collection membership — a value that simply "
+    "changed (a new job, a moved city) stays a plain claim with no op. "
+    "Example. Notes: [3] tried Rosa's Diner tonight. [4] sold the road bike, "
+    'no longer biking to work. Output: {"claims":['
+    '{"entity":"user","attribute":"restaurants tried","value":"Rosa\'s '
+    'Diner","op":"add","confidence":0.8,"source":3},'
+    '{"entity":"user","attribute":"bikes owned","value":"road bike",'
+    '"op":"remove","confidence":0.8,"source":4}]}\n'
     'Return {"claims":[]} if nothing qualifies.'
 )
-# The claim-apply loop understands an optional "op":"add"|"remove" field for
-# set-valued slots, but the prompt deliberately does NOT solicit it: the
-# 2026-07-31 pre-registered e2e gate showed the ceiling extractor never
-# adopts the field from a prompt block (0 op claims across 78 banks and a
-# direct probe) while the block itself shifted scalar extraction behaviour
-# (evals/results/c2-gate-verdict.json). Until an extractor demonstrably
-# emits op (prompt-format iteration or distill-time training), the MCP set
-# tools are the sole set writers and this prompt stays measurement-clean.
+# The op block above was briefly held out (2026-07-31 option B) on the
+# belief the extractor never adopts it; corrected the same day — extract()
+# was stripping the field the model emitted correctly (parse whitelist).
+# With op carried through the parse, raw+parsed probes show 7/7 adoption
+# and clean decoy discipline (evals/results/op-probe-q8-fixedparse.json).
 
 
 def _vocab_hint(vocab: list[str]) -> str:
@@ -419,6 +433,8 @@ class OpenAICompatExtractor:
                 conf = 0.7
             claim = Claim(entity=entity, attribute=attribute, value=value,
                           confidence=conf, origin="agent")
+            if c.get("op") in ("add", "remove"):
+                claim["op"] = c["op"]
             try:
                 idx = int(c.get("source")) - 1     # 1-based in the prompt
             except (TypeError, ValueError):

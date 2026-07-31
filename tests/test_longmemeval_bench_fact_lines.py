@@ -129,3 +129,18 @@ def test_set_fact_line_still_garnishes_other_removed_members_when_one_is_readded
     got = _compose_fact_line(f, versions)
     assert got == ("user — bikes owned: road bike (1 members)  "
                    "(former members: gravel bike)")
+
+
+def test_make_extractor_threads_system_prompt_file(tmp_path):
+    """--system-prompt-file makes prompt-variant runs first-class (the
+    extraction-variance baseline runs the control prompt through the
+    identical code path). Absent file -> the shipped prompt, untouched."""
+    from longmemeval_bench import _make_extractor
+    from pseudolife_memory.memory.dream import _SYSTEM_PROMPT
+
+    default = _make_extractor("http://127.0.0.1:9/v1", None)
+    assert default.system_prompt == _SYSTEM_PROMPT
+    p = tmp_path / "variant.txt"
+    p.write_text("consolidate notes THE VARIANT WAY", encoding="utf-8")
+    variant = _make_extractor("http://127.0.0.1:9/v1", str(p))
+    assert variant.system_prompt == "consolidate notes THE VARIANT WAY"

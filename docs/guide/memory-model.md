@@ -194,13 +194,11 @@ with no `op`. A scalar claim (no `op`) landing on a slot that already holds
 current members is dropped and logged, not routed or silently applied — the
 only way to touch a set slot is an explicit `op` or the two MCP tools
 themselves. A malformed `op` value degrades to the scalar path with a
-warning rather than failing the dream. The shipped extraction prompt
-deliberately does not solicit `op` — a pre-registered gate showed the
-ceiling extractor never adopts it from a prompt block while the block
-shifted scalar extraction behaviour — so today the two MCP tools are the
-sole set writers, and the dream `op` path is dormant capability for a
-future extractor that demonstrably emits it. Evidence:
-`evals/results/c2-gate-verdict.json`.
+warning rather than failing the dream. The dream is a live set writer:
+the extraction prompt solicits `op` for collection membership, and probes
+show clean adoption by the ceiling extractor (an earlier "never adopts"
+finding was a parse-layer bug, corrected 2026-07-31 — see
+`evals/results/c2-gate-verdict.json`, amended).
 
 ## Provenance contenders — never silently overwrite a user fact
 

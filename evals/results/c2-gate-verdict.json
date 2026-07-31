@@ -95,5 +95,15 @@
       "conclusion": "prompt-adoption failure at the ceiling extractor; the probe also demonstrates the exact data-destroying pathology the feature exists to fix"
     }
   },
-  "scope_note": "The product surface (store, tools, service, serving) passed all unit/integration gates and is untouched by this failure \u2014 it was never exercised by the bench because no op claims formed."
+  "scope_note": "The product surface (store, tools, service, serving) passed all unit/integration gates and is untouched by this failure \u2014 it was never exercised by the bench because no op claims formed.",
+  "root_cause_correction_2026_07_31": {
+    "superseded_claim": "prompt-adoption failure at the ceiling extractor",
+    "actual_cause": "OpenAICompatExtractor.extract() rebuilt claims with a fixed field whitelist and stripped the op field the model emitted correctly; the op-aware apply loop never saw it. Both the e2e run and the original direct probe read post-parse claims, so the miss was misattributed to the model. With the block present and op stripped, remove-intents landed as positive scalar facts and multi-member adds became successive supersessions \u2014 the measured degradation is that corruption, not prompt noise.",
+    "evidence": [
+      "evals/results/op-probe-fast.json (0/7 through the broken parse)",
+      "evals/results/op-probe-fast-fixedparse.json (7/7 v0 post-fix)",
+      "evals/results/op-probe-q8-fixedparse.json (7/7 reproducible config)"
+    ],
+    "fix": "Claim.op parsed through with add/remove validation; test_openai_extractor_carries_op_through_parse"
+  }
 }

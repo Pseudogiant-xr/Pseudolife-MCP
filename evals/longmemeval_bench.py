@@ -368,8 +368,22 @@ def answer_and_judge(row: dict) -> dict:
     return row
 
 
+def _make_extractor(ex_url: str, system_prompt_file: str | None):
+    """The bench extractor, optionally with a prompt-variant override.
+    ``--system-prompt-file`` makes prompt A/B runs first-class — the
+    extraction-variance baseline runs the control prompt through the
+    identical code path instead of a code flip."""
+    from pseudolife_memory.memory.dream import OpenAICompatExtractor
+    system_prompt = (Path(system_prompt_file).read_text(encoding="utf-8")
+                     if system_prompt_file else None)
+    return OpenAICompatExtractor(ex_url, "bench", max_tokens=4096,
+                                 timeout_seconds=600.0,
+                                 system_prompt=system_prompt)
+
+
 def run_extract(dataset: str, limit: int | None, extractor_name: str,
-                do_answer: bool, tag: str = "", window: int = 0) -> None:
+                do_answer: bool, tag: str = "", window: int = 0,
+                system_prompt_file: str | None = None) -> None:
     ex_url = EXTRACTORS[extractor_name]
     if not probe(ex_url):
         sys.exit(f"no extractor server at {ex_url} — start it first")
@@ -393,8 +407,7 @@ def run_extract(dataset: str, limit: int | None, extractor_name: str,
         svc = build_service(tmp)                      # fresh, truncated bench DB
         svc.config.memory.dream.extract_relations = False   # facts only
         svc.config.memory.dream.known_facts_window = window
-        extractor = OpenAICompatExtractor(ex_url, "bench", max_tokens=4096,
-                                          timeout_seconds=600.0)
+        extractor = _make_extractor(ex_url, system_prompt_file)
         tally = ingest_and_dream(svc, extractor, q, ex_url)
         contexts = build_contexts(svc, q["question"])
         facts = dump_bank(svc, q, bank_dir(dataset, extractor_name, tag)
@@ -490,6 +503,9 @@ def main() -> int:
     ap.add_argument("--tag", default="",
                     help="namespace suffix for output files/banks "
                          "(e.g. 'diag' — keeps experiment runs apart)")
+    ap.add_argument("--system-prompt-file", default=None,
+                    help="override the extraction system prompt from a file "
+                         "(prompt-variant / variance-baseline runs)")
     ap.add_argument("--window", type=int, default=0,
                     help="known-facts window size for the dream pass "
                          "(0 = off; use 20 for the window arm — spec 2026-07-10)")
@@ -502,7 +518,8 @@ def main() -> int:
     else:
         run_extract(args.dataset, args.limit, args.extractor,
                     do_answer=(args.phase == "full"), tag=args.tag,
-                    window=args.window)
+                    window=args.window,
+                    system_prompt_file=args.system_prompt_file)
     if args.phase != "extract":
         report(args.dataset, args.extractor, args.tag)
     return 0
