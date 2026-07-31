@@ -272,7 +272,10 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # Bumped for Task 5 (memory_set_add / memory_set_remove, both minimal
     # tier, so their descriptions count against core/full too) — the prior
     # caps (4500/9500/15500) left only a few dozen chars of headroom.
-    budgets = {"minimal": 4600, "core": 10050, "full": 16050}
+    # Bumped again 2026-07-31: memory_set_add's description gained the
+    # aggregate-conversion-guard contract (number-led scalars park as a
+    # contender instead of converting), already trimmed to its minimum.
+    budgets = {"minimal": 4800, "core": 10250, "full": 16250}
     for tier, cap in budgets.items():
         total = sum(sizes[n] for n in mod._visible_tool_names(tier))
         assert total <= cap, f"{tier} manifest {total} chars exceeds {cap}"
