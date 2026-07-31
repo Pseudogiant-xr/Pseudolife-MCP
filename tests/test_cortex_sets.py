@@ -152,6 +152,38 @@ def test_guard_covers_unit_and_currency_totals(store, emb, total):
     assert store.slot_kind("user", "stat") == "scalar"
 
 
+def test_guard_applies_with_protect_provenance_off(emb):
+    """Regression pin (final branch review): the aggregate-conversion guard
+    in ``add_member`` must fire regardless of ``protect_provenance`` — it is
+    a stated-total protection, not a provenance-tier decision (see
+    docs/guide/memory-model.md, "The guard applies unconditionally —
+    regardless of memory.cortex.protect_provenance"). ``protect_provenance``
+    only gates write_fact's tier-based contest logic (cortex.py ~line 391);
+    the guard checked here is a separate, unconditional branch
+    (``_is_aggregate_value(cur.value)`` in ``add_member``), so a store built
+    with the flag OFF must still park the add rather than converting the
+    slot to a set.
+
+    Watched RED: flipping the expected action from "contested" to
+    "member_added" makes this fail (confirmed manually, then restored) —
+    the guard is not gated by protect_provenance's default-True value.
+    """
+    store = CortexStore(protect_provenance=False)
+    store.write_fact(Slot("user", "birds", "27"), emb("27"))
+    store.dirty_slots.clear()
+
+    r = store.add_member(Slot("user", "birds", "Northern Flicker"),
+                         emb("Northern Flicker"))
+
+    assert r.action == "contested"
+    assert r.record.status == "contested"
+    assert r.record.value == "Northern Flicker"
+    assert store.slot_kind("user", "birds") == "scalar"
+    assert store.members("user", "birds") == []
+    cur = store.records[store._current[("user", "birds")]]
+    assert cur.value == "27" and cur.status == "current"
+
+
 def test_same_value_add_on_aggregate_scalar_confirms_not_contests(store, emb):
     """Review finding (FIX 1): re-asserting the SAME value that already
     occupies an aggregate scalar slot via add_member must confirm the

@@ -3149,6 +3149,10 @@ class MemoryService:
                         logger.warning(
                             "dream: member add rejected (cap reached) "
                             "for %s.%s", ent, attr)
+                    elif res["action"] == "contested":
+                        logger.info(
+                            "dream: member add parked by aggregate guard "
+                            "for %s.%s", ent, attr)
                 elif op == "remove":
                     res = self.set_remove(ent, attr, c["value"])
                 else:

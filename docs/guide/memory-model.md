@@ -170,9 +170,10 @@ directions of the story**:
   just no longer make the slot read as a set.
 
 The scalar → set conversion carries one guard: if the current scalar is a
-**number-led aggregate value** — a value that starts with a digit, an
-optional leading `+`/`-` sign, or one of the currency symbols `$` `€` `£`
-("32", "27 species", "$1,500") — `memory_set_add` does not convert it.
+**number-led aggregate value** — a value with an optional leading currency
+symbol (`$` `€` `£`), then an optional leading `+`/`-` sign, then a required
+digit (`^[$€£]?[+-]?\d`; e.g. "32", "27 species", "$1,500") —
+`memory_set_add` does not convert it.
 Converting would destroy a stated total that no enumeration of members
 recovers, which is exactly what a paired eval gate measured as a
 net-negative effect on knowledge-update questions
