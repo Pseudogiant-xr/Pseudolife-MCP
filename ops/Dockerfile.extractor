@@ -1,7 +1,9 @@
 # Optional CPU llama.cpp server exposing an OpenAI-compatible API for the dream
 # extractor. The default GGUF is BAKED IN (via a throwaway download stage) so
-# the stack is batteries-included: `docker compose --profile extractor up`
-# needs no manual model step and works offline after the build.
+# the stack is batteries-included: `docker compose -f ops/docker-compose.yml
+# up -d` starts it with the stack (the installer's sonnet-only mode writes a
+# gitignored profiles override to disable it), no manual model step, offline
+# after the build.
 #
 # Default = the bespoke Pseudolife extractor fine-tune (Gemma 4 E4B QLoRA,
 # registry-datagen v2, Q4_K_M ~5.3GB) — beats the prior fine-tune on the

@@ -80,7 +80,7 @@ services:
       dockerfile: ops/Dockerfile.daemon
     # Keep this tag in step with the package version in pyproject.toml; the
     # update scripts read it from here (single source of truth for deploys).
-    image: pseudolife-daemon:0.11.0
+    image: pseudolife-daemon:0.12.0
     container_name: pseudolife-mcp-daemon
     restart: unless-stopped
     logging: *default-logging
@@ -110,9 +110,9 @@ services:
       PSEUDOLIFE_MCP_TRUST_BIND: "1"
       # Writer identity stamped on every canonical write (schema v11).
       PSEUDOLIFE_WRITER_ID: ${PSEUDOLIFE_WRITER_ID:-mcp-client}
-      # Default toolset tier: "minimal" (7 tools: recall/capture loop + the
-      # memory_toolset gate), "core" (20: + graph/recall/world/lessons/docs/
-      # episodes), or "full" (all 33). Since 2026-07-11 this sets per-session
+      # Default toolset tier: "minimal" (9 tools: recall/capture loop incl.
+      # the set-slot pair + the memory_toolset gate), "core" (22: + graph/
+      # recall/world/lessons/docs/episodes), or "full" (all 35). Since 2026-07-11 this sets per-session
       # VISIBILITY, not registration — hidden tools stay callable, and any
       # session can step its own tier up/down via memory_toolset. Shipped
       # default: core.

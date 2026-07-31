@@ -48,6 +48,10 @@ reliably — without the agent having to remember:
      `{"closed": null, "reason": "no owned open session"}`. The idle
      reaper is separate: it closes any root idle past the threshold,
      using each root's own key — that's its job, not a guard bypass.
+   - **The stdio shim** (the installer default) opens the episode eagerly
+     at connect with a title derived from the working directory, and
+     closes it when the client disconnects — so shim sessions get named
+     episodes without any hook.
    - **Direct-HTTP / sessionless clients** (no shim, no hook, no explicit
      handle) still get episodes: the daemon **lazily opens** one on the
      first store of a new session (so empty sessions never leave a husk)

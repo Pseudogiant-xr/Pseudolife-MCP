@@ -665,8 +665,12 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
     if "memory" in raw:
         mem_raw = raw["memory"]
         config.memory = MemoryConfig(
+            # Fallbacks here must mirror the dataclass defaults (pinned by
+            # test_yaml_memory_block_omitted_keys_keep_dataclass_defaults):
+            # a divergent literal means a config.yaml that has a memory:
+            # block but omits the key runs a different value than no file.
             embedding_dim=mem_raw.get("embedding_dim", 384),
-            surprise_threshold=mem_raw.get("surprise_threshold", 0.3),
+            surprise_threshold=mem_raw.get("surprise_threshold", 0.0),
             top_k=mem_raw.get("top_k", 8),
             ref_top_k=mem_raw.get("ref_top_k", 3),
             save_dir=mem_raw.get("save_dir", "./memory_state"),

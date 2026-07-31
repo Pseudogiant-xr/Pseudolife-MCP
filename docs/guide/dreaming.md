@@ -7,7 +7,11 @@ consolidation workflow. Part of the [user guide](../../README.md#documentation).
 
 A **dream** distils the recent associative stream (MIRAS) into canonical
 cortex facts: pull unconsolidated memories → extract
-`(entity, attribute, value)` → `memory_fact_set` → advance a monotonic
+`(entity, attribute, value)` claims (a claim may also carry
+`op: "add"|"remove"` to target a [set-valued
+slot](memory-model.md#set-valued-slots), though the shipped extraction
+prompt deliberately does not request ops — tools are the sole set
+writers, a measured hold) → `memory_fact_set` → advance a monotonic
 cursor so each memory is processed once. Because it keys on the **cursor**,
 not on "sessions", returning to an old session later just appends more
 tail — nothing is reprocessed, and there is no "session finished" event to

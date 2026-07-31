@@ -10,7 +10,8 @@ Alongside the associative continuum (the 8 MIRAS bands) sits the
 **cortex**: a slot-keyed canonical-fact store. Where the continuum is
 similarity-ranked and decaying, the cortex is **identity-not-similarity,
 supersession-not-decay, currency-not-frequency** — one *current* value per
-`(entity, attribute)` slot, retrievable out of the context window.
+`(entity, attribute)` slot (or a member set, for [set-valued
+slots](#set-valued-slots)), retrievable out of the context window.
 
 - **Single-writer capture.** The LLM **dream** pass (the extractor sidecar)
   is the sole *automatic* writer of canonical facts, plus deliberate
@@ -94,6 +95,13 @@ entity is deliberately classified.
 
 Both fields are descriptive, not enforcement — a stale fact is still
 returned, marked. Nothing is auto-deleted or auto-superseded on age.
+The read surface does nudge, though: once a fact has aged past a third
+of its TTL (or sits contested), `memory_search`, `memory_fact_get`, and
+`memory_world_search` attach a ready-made `correct_with` call to it — a
+filled-in `memory_fact_set(...)` the reading agent can run the moment it
+verifies the value, re-asserting or correcting at the same slot. The
+`stale: true` flag is the louder, later signal (twice the TTL);
+`correct_with` fires earlier so drift gets fixed at first contact.
 
 Since 2026-07-25 **raw band entries follow the same slot rule.** When a
 stored memory and an earlier one assert different values — or opposite

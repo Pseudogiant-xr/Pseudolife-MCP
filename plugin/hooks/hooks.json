@@ -1,5 +1,5 @@
 {
-  "description": "Pseudolife-MCP session-start context: memory-loop instructions + briefing from the daemon",
+  "description": "Pseudolife-MCP session hooks: start-of-session memory briefing + end-of-session episode close",
   "hooks": {
     "SessionStart": [
       {

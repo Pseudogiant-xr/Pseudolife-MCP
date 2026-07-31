@@ -1247,3 +1247,27 @@ wholesale, and dropping `entity_kinds` reverts the write path. The daemon
 restart is not optional: it caches the entity-kind map for the life of its
 process and this script runs out-of-process, so until it restarts every new
 fact keeps resolving evergreen.
+
+## Findings — 2026-07-31/08-01 (the extractor-op saga: three gates and a pass)
+
+Whether the extraction prompt should ask for claim-level `op`
+(`"add"`/`"remove"`, targeting set-valued slots) took four pre-registered
+KU-oracle e2e runs to answer. Artifacts, in order:
+
+| run | verdict artifact | outcome |
+|---|---|---|
+| op block, first attempt | `c2-gate-verdict.json` | feature inert (0/78 adoption — a parse bug, fixed in `1eb0e2c6`) |
+| op block, firing | `c2op-gate-verdict.json` | cascade −0.141 (p = 0.006) vs the op-less control → **block held** |
+| op block + apply-time aggregate guard | `c2op-guard-verdict.json` | 0/78 flips — damage is extraction-side (count updates re-routed to member-adds), not apply-side |
+| op block + count-exclusion rule (`ku_op_prompt_v5.txt`) | `c2op-count-verdict.json` | cascade back to exactly the control (delta 0.0, p = 1.0); count-class recovered; sets still form |
+
+Supporting pieces: `op_probe.py` (prompt-format battery; count-update
+decoys added 2026-08-01), `analyze_frozen_totals.py` + `c2op-count-census.json`
+(the CPU forecast that sized the final arm before any GPU), and the
+`--qids` bench flag (targeted per-question extraction, which turned
+prompt-wording iteration from 47-minute e2e cycles into 6-minute probes).
+The extraction-variance baseline (`var-base`, per-question identical to
+its control) makes all these paired comparisons exact on the reproducible
+q8_0 server. The shipped extraction prompt still carries **no** op block:
+v5 is the shipping candidate, pending a ladder rung run and an explicit
+reversal of the hold decision.

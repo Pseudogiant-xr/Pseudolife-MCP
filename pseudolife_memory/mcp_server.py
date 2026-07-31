@@ -2,7 +2,7 @@
 
 Built on the FastMCP decorator API from the official ``mcp`` Python SDK.
 Each ``@_tool()`` becomes a JSON-RPC tool. The surface (consolidated
-2026-07-02, 55 → 32 tools) spans the associative stream (``memory_store`` /
+2026-07-02, 55 → 32 tools; 35 as of v26's set-slot pair) spans the associative stream (``memory_store`` /
 ``memory_search`` / ``memory_recent``), the canonical-fact cortex
 (``memory_fact_*`` / ``memory_history``), the world cortex
 (``memory_world_*``), procedural lessons (``memory_outcome`` /

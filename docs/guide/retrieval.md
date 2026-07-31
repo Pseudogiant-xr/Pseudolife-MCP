@@ -106,8 +106,10 @@ served fact contexts yet moved **nothing end to end** — cortex accuracy
 oracle regression-gate slice. Lexical gaps in fact retrieval are real
 but the abstentions trace to fact *coverage*, not ranking, so the
 default stays honest to the measurement. When enabled, the fusion is
-identical to the turn pool's over each fact's composed
-`entity — attribute: value` text, with one deliberate difference:
+identical to the turn pool's, run over each fact record's composed
+`entity — attribute: value` text — per member record for set-valued
+slots, so an exact member name can rank on its own; grouping into one
+set entry happens after fusion — with one deliberate difference:
 lexical fact hits gate on the normalised `bm25.min_score`, *not* the
 caller's dense `min_score` floor, so an exact-name query can rescue a
 fact the embedder under-scores (useful on identifier-heavy corpora —
