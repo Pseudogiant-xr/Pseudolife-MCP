@@ -6,6 +6,42 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-01 — count-exclusion op prompt: the reserve rule measured, and it works)
+- **The reserve prompt rule named by the guard verdict — `op` never applies
+  to counts/totals/quantities — was built and gated, and it repairs the op
+  block's measured KU damage** (`evals/results/c2op-count-verdict.json`).
+  The arm (`evals/prompts/ku_op_prompt_v5.txt`, byte-pinned to
+  `op_probe.VARIANTS["v5-count-exclusion-claim-example"]`) appends the v0 op
+  block plus a COUNTS-ARE-NEVER-MEMBERS rule with a single-claim worked
+  example. On the KU-oracle e2e (78 questions, reproducible q8_0 server):
+  cascade lands exactly at the op-less control (delta 0.0, p = 1.0) — the
+  pre-registered ship condition — while cortex (+0.090) and hybrid (+0.077)
+  sit nominally above control (n.s.); against the un-ruled op prompt the
+  cascade recovers +0.141 at p = 0.004 over the un-ruled op prompt, cortex
+  +0.154 (p = 0.008), hybrid +0.103 (p = 0.019). Count-class damage
+  reverses (cortex digit-gold 24 → 32, control 31); 5 of the 7 frozen-total
+  questions from the census (`evals/results/c2op-count-census.json`)
+  recover their gold as a current scalar, and genuine sets still form
+  (75 member facts across 22 banks; one bank holds the recovered count-25
+  scalar alongside 9 legitimate to-watch members). Wording was selected by
+  targeted 7-question extraction probes (`--qids`, below): v3's standalone
+  example object induced multi-object JSON parse retries, v4's integrated
+  example was parse-clean but recovered one fewer; v5 keeps the dedicated
+  example rendered as a single claim object — 5/7 recovery, zero parse
+  failures. **The op prompt block remains held in the shipped extractor**:
+  this verdict makes v5 the shipping *candidate*, gated on validating rule
+  adoption on the deployed small extractor (qwen-27b adoption does not
+  prove the sidecar's) and on an explicit reversal of the option-B hold
+  decision. One anomaly recorded for future bank comparisons: every
+  op-block prompt variant extracts roughly half the current scalars of the
+  op-less prompt (442–512 vs 1003) with no measured e2e cost.
+- **`longmemeval_bench.py --qids`** runs a named comma-separated subset of
+  questions (targeted extraction / bank forensics; composes with `--tag`),
+  and **`evals/analyze_frozen_totals.py`** classifies an op run's losses by
+  the frozen-total signature against a control run's banks — the CPU
+  forecast that sized this arm before any GPU was spent
+  (7 of 21 lost questions rule-recoverable, 0 gain-side questions at risk).
+
 ### Changed (2026-07-31 — aggregate conversion guard: `add_member` no longer overwrites a stated total)
 - **`CortexStore.add_member` no longer converts a scalar slot to a set when
   the current scalar is a number-led aggregate value** (`_is_aggregate_value`:
@@ -45,8 +81,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   prompt block therefore stays held per the pre-registered rule; the guard
   ships regardless, as bank hygiene and protection for live
   `memory_set_add` writes. The targeted fix for the measured mechanism is
-  the reserve prompt rule (`op` never applies to counts/totals), a future
-  arm.
+  the reserve prompt rule (`op` never applies to counts/totals) — since
+  built and gated, and it recovers the loss; see the count-exclusion entry
+  above.
 
 ### Added (2026-07-31 — dream extractor claims carry an `op` for set membership)
 - **A dream claim may now carry `"op": "add" | "remove"`** to target the

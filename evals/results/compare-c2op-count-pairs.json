@@ -1,0 +1,336 @@
+{
+  "n": 78,
+  "arms": {
+    "rag": 0.859,
+    "cortex": 0.7564,
+    "hybrid": 0.9103,
+    "cascade": 0.9359
+  },
+  "paired": {
+    "vs_control": {
+      "rag": {
+        "delta": 0.0,
+        "p": 1.0,
+        "wins": 0,
+        "losses": 0,
+        "win_qids": [],
+        "loss_qids": []
+      },
+      "cortex": {
+        "delta": 0.0897,
+        "p": 0.22938,
+        "wins": 16,
+        "losses": 9,
+        "win_qids": [
+          "07741c45",
+          "08e075c7",
+          "0977f2af",
+          "184da446",
+          "3ba21379",
+          "4b24c848",
+          "50635ada",
+          "59524333",
+          "6aeb4375",
+          "7401057b",
+          "830ce83f",
+          "9bbe84a2",
+          "9ea5eabc",
+          "d7c942c3",
+          "db467c8c",
+          "f685340e"
+        ],
+        "loss_qids": [
+          "01493427",
+          "22d2cb42",
+          "45dc21b6",
+          "5a4f22c0",
+          "7e974930",
+          "89941a94",
+          "cf22b7bf",
+          "dfde3500",
+          "e493bb7c"
+        ]
+      },
+      "hybrid": {
+        "delta": 0.0769,
+        "p": 0.11019,
+        "wins": 8,
+        "losses": 2,
+        "win_qids": [
+          "07741c44",
+          "50635ada",
+          "6aeb4375",
+          "7401057b",
+          "830ce83f",
+          "89941a94",
+          "9bbe84a2",
+          "9ea5eabc"
+        ],
+        "loss_qids": [
+          "69fee5aa",
+          "eace081b"
+        ]
+      },
+      "cascade": {
+        "delta": 0.0,
+        "p": 1.0,
+        "wins": 4,
+        "losses": 4,
+        "win_qids": [
+          "07741c45",
+          "0977f2af",
+          "50635ada",
+          "f685340e"
+        ],
+        "loss_qids": [
+          "01493427",
+          "42ec0761",
+          "69fee5aa",
+          "b01defab"
+        ]
+      }
+    },
+    "vs_c2op": {
+      "rag": {
+        "delta": 0.0,
+        "p": 1.0,
+        "wins": 0,
+        "losses": 0,
+        "win_qids": [],
+        "loss_qids": []
+      },
+      "cortex": {
+        "delta": 0.1538,
+        "p": 0.0078,
+        "wins": 15,
+        "losses": 3,
+        "win_qids": [
+          "031748ae",
+          "07741c45",
+          "0e4e4c46",
+          "184da446",
+          "41698283",
+          "4d6b87c8",
+          "5831f84d",
+          "6aeb4375",
+          "7401057b",
+          "830ce83f",
+          "89941a93",
+          "a2f3aa27",
+          "affe2881",
+          "f685340e",
+          "f685340e_abs"
+        ],
+        "loss_qids": [
+          "618f13b2",
+          "cf22b7bf",
+          "dfde3500"
+        ]
+      },
+      "hybrid": {
+        "delta": 0.1026,
+        "p": 0.019,
+        "wins": 9,
+        "losses": 1,
+        "win_qids": [
+          "41698283",
+          "4d6b87c8",
+          "6aeb4375",
+          "7401057b",
+          "830ce83f",
+          "89941a93",
+          "a2f3aa27",
+          "affe2881",
+          "f685340e_abs"
+        ],
+        "loss_qids": [
+          "618f13b2"
+        ]
+      },
+      "cascade": {
+        "delta": 0.141,
+        "p": 0.0038,
+        "wins": 12,
+        "losses": 1,
+        "win_qids": [
+          "07741c45",
+          "184da446",
+          "41698283",
+          "45dc21b6",
+          "4d6b87c8",
+          "5831f84d",
+          "6aeb4375",
+          "89941a93",
+          "a2f3aa27",
+          "affe2881",
+          "e493bb7c",
+          "f685340e"
+        ],
+        "loss_qids": [
+          "01493427"
+        ]
+      }
+    }
+  },
+  "count_class": {
+    "digit_gold": {
+      "n": 39,
+      "rag_gate": 34,
+      "rag_control": 34,
+      "rag_c2op": 34,
+      "cortex_gate": 32,
+      "cortex_control": 31,
+      "cortex_c2op": 24,
+      "hybrid_gate": 38,
+      "hybrid_control": 38,
+      "hybrid_c2op": 33,
+      "cascade_gate": 37,
+      "cascade_control": 39,
+      "cascade_c2op": 30
+    },
+    "spelled_gold": {
+      "n": 12,
+      "rag_gate": 11,
+      "rag_control": 11,
+      "rag_c2op": 11,
+      "cortex_gate": 10,
+      "cortex_control": 6,
+      "cortex_c2op": 9,
+      "hybrid_gate": 11,
+      "hybrid_control": 9,
+      "hybrid_c2op": 10,
+      "cascade_gate": 12,
+      "cascade_control": 12,
+      "cascade_c2op": 11
+    }
+  },
+  "frozen_recovery": {
+    "affe2881": {
+      "gold": "32",
+      "gold_in_current": true,
+      "members": 0,
+      "cortex": {
+        "gate": true,
+        "control": true,
+        "c2op": false
+      },
+      "cascade": {
+        "gate": true,
+        "control": true,
+        "c2op": false
+      }
+    },
+    "a2f3aa27": {
+      "gold": "1300",
+      "gold_in_current": true,
+      "members": 0,
+      "cortex": {
+        "gate": true,
+        "control": true,
+        "c2op": false
+      },
+      "cascade": {
+        "gate": true,
+        "control": true,
+        "c2op": false
+      }
+    },
+    "4d6b87c8": {
+      "gold": "25",
+      "gold_in_current": true,
+      "members": 9,
+      "cortex": {
+        "gate": true,
+        "control": true,
+        "c2op": false
+      },
+      "cascade": {
+        "gate": true,
+        "control": true,
+        "c2op": false
+      }
+    },
+    "45dc21b6": {
+      "gold": "3",
+      "gold_in_current": false,
+      "members": 6,
+      "cortex": {
+        "gate": false,
+        "control": true,
+        "c2op": false
+      },
+      "cascade": {
+        "gate": true,
+        "control": true,
+        "c2op": false
+      }
+    },
+    "5831f84d": {
+      "gold": "15",
+      "gold_in_current": true,
+      "members": 1,
+      "cortex": {
+        "gate": true,
+        "control": true,
+        "c2op": false
+      },
+      "cascade": {
+        "gate": true,
+        "control": true,
+        "c2op": false
+      }
+    },
+    "01493427": {
+      "gold": "25",
+      "gold_in_current": false,
+      "members": 0,
+      "cortex": {
+        "gate": false,
+        "control": true,
+        "c2op": false
+      },
+      "cascade": {
+        "gate": false,
+        "control": true,
+        "c2op": true
+      }
+    },
+    "6aeb4375": {
+      "gold": "four",
+      "gold_in_current": true,
+      "members": 0,
+      "cortex": {
+        "gate": true,
+        "control": false,
+        "c2op": false
+      },
+      "cascade": {
+        "gate": true,
+        "control": true,
+        "c2op": false
+      }
+    }
+  },
+  "member_census": {
+    "gate": {
+      "member_facts": 75,
+      "banks_with_sets": 22,
+      "current_scalars": 442
+    },
+    "c2op-e2e": {
+      "member_facts": 118,
+      "banks_with_sets": 33,
+      "current_scalars": 509
+    },
+    "c2op-guard": {
+      "member_facts": 112,
+      "banks_with_sets": 31,
+      "current_scalars": 512
+    },
+    "ceiling-e2e": {
+      "member_facts": 0,
+      "banks_with_sets": 0,
+      "current_scalars": 1003
+    }
+  }
+}
