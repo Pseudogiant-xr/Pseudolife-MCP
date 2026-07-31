@@ -37,16 +37,6 @@ it exactly. Within one batch, the same property always gets the same entity
 and attribute. Prefer short, generic attribute names ("employer", "location",
 "dose") over descriptive sentences.
 
-COLLECTION MEMBERSHIP. When a note adds or removes an item from a collection
-the user maintains (restaurants tried, bikes owned, pending tasks), add an
-"op":"add" or "op":"remove" field to that claim. op is ONLY for membership —
-a value that simply changed (a new job, a moved city) stays a plain claim
-with no op. Example: [5] tried Rosa's Diner tonight. [6] sold the road bike.
-Output: {"claims":[{"entity":"user","attribute":"restaurants tried",
-"value":"Rosa's Diner","op":"add","confidence":0.8,"source":5},
-{"entity":"user","attribute":"bikes owned","value":"road bike",
-"op":"remove","confidence":0.8,"source":6}]}
-
 Precision still binds:
 - One slot per real fact; skip narrative, opinions, meta-chat about the
   conversation itself, and values that a later note already superseded.

@@ -116,19 +116,16 @@ _SYSTEM_PROMPT = (
     '{"entity":"releases","attribute":"documented requirement",'
     '"value":"signed tag (per release runbook)","confidence":0.8,'
     '"source":2}]}\n'
-    "When a note adds or removes an item from a COLLECTION the user "
-    'maintains (restaurants tried, bikes owned, pending tasks), add an '
-    '"op":"add" or "op":"remove" field to that claim instead of a plain '
-    "supersede. op is ONLY for collection membership — a value that simply "
-    "changed (a new job, a moved city) stays a plain claim with no op. "
-    "Example. Notes: [3] tried Rosa's Diner tonight. [4] sold the road bike, "
-    'no longer biking to work. Output: {"claims":['
-    '{"entity":"user","attribute":"restaurants tried","value":"Rosa\'s '
-    'Diner","op":"add","confidence":0.8,"source":3},'
-    '{"entity":"user","attribute":"bikes owned","value":"road bike",'
-    '"op":"remove","confidence":0.8,"source":4}]}\n'
     'Return {"claims":[]} if nothing qualifies.'
 )
+# The claim-apply loop understands an optional "op":"add"|"remove" field for
+# set-valued slots, but the prompt deliberately does NOT solicit it: the
+# 2026-07-31 pre-registered e2e gate showed the ceiling extractor never
+# adopts the field from a prompt block (0 op claims across 78 banks and a
+# direct probe) while the block itself shifted scalar extraction behaviour
+# (evals/results/c2-gate-verdict.json). Until an extractor demonstrably
+# emits op (prompt-format iteration or distill-time training), the MCP set
+# tools are the sole set writers and this prompt stays measurement-clean.
 
 
 def _vocab_hint(vocab: list[str]) -> str:
