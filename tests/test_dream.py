@@ -536,6 +536,39 @@ def test_dream_run_member_invalid_skips_trace_and_reinforcement(svc):
     assert out["traces"] == 0
 
 
+def test_dream_run_blocked_aggregate_add_skips_trace_scalar_claim_not_suppressed(svc):
+    """Review finding (FIX 2): an op:"add" claim that the aggregate-conversion
+    guard parks as a contender (action "contested") did not populate the
+    slot — like member_invalid/member_capped, it must not reach the
+    trace-write + reinforcement-bump block. Before the fix, the erroneous
+    trace it left behind would then silently suppress a SECOND, same-entry
+    scalar claim for the same slot via the has_trace guard (which only
+    guards op=None claims): both claims share one source entry here so the
+    ordering bug is directly observable in a single dream_run call."""
+    svc.store("count is 27 birds total", source="notes")
+    svc.dream_run(_StubExtractor([{
+        "entity": "user", "attribute": "birds", "value": "27",
+        "confidence": 0.8, "origin": "agent"}]))
+    assert svc.cortex_lookup("user", "birds")["value"] == "27"
+
+    svc.store("saw a new bird and the total stayed 27", source="notes")
+    out = svc.dream_run(_StubExtractor([
+        {"entity": "user", "attribute": "birds", "value": "Northern Flicker",
+         "confidence": 0.8, "origin": "agent", "op": "add"},
+        {"entity": "user", "attribute": "birds", "value": "27",
+         "confidence": 0.8, "origin": "agent"},
+    ]))
+    # Under the bug: claim 1 (contested) wrongly writes a trace, so claim 2
+    # (op=None, same slot+entry) trips the has_trace guard and is silently
+    # dropped before ever reaching cortex_write — claims=1, confirmed=0.
+    # Fixed: claim 1 writes no trace, claim 2 is processed and confirms.
+    assert out["claims"] == 2
+    assert out["contested"] == 1
+    assert out["confirmed"] == 1
+    assert out["traces"] == 1          # exactly one trace — for the confirm, not the block
+    assert svc.cortex_lookup("user", "birds")["value"] == "27"
+
+
 def test_dream_with_noop_extractor_writes_nothing(svc):
     from pseudolife_memory.memory.dream import NoOpExtractor
     svc.config.memory.cortex.auto_promote = False   # no store-path promotion either

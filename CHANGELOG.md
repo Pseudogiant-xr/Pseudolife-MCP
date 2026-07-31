@@ -14,11 +14,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `"member_add_blocked_aggregate"`), and the scalar stays canonical. Prior
   behaviour destroyed the stated total on the first spurious membership op,
   which the gate verdict measured as a net-negative KU-oracle effect
-  (`evals/results/c2op-gate-verdict.json`, cited above). `resolve(entity,
-  attribute, accept=True)` remains the explicit human path to overwrite the
-  total with the accumulated member value; `accept=False` leaves the total
-  untouched. Non-aggregate scalars (e.g. `"road bike"`) are unaffected and
-  still convert one-way to a set on the first `add_member`, as before.
+  (`evals/results/c2op-gate-verdict.json`, full verdict cited below).
+  `resolve(entity, attribute, accept=True)` remains the explicit human path
+  to overwrite the total with the accumulated member value; `accept=False`
+  leaves the total untouched. Non-aggregate scalars (e.g. `"road bike"`) are
+  unaffected and still convert one-way to a set on the first `add_member`,
+  as before. **Review fix:** an add whose value already equals the current
+  scalar now confirms it (`action="confirmed"`, mirroring `write_fact`'s own
+  confirm branch) instead of parking a contender identical to itself. The
+  dream claim-apply loop's trace-write + reinforcement-bump block now also
+  skips `action="contested"` results, the same way it already skips
+  `member_invalid`/`member_capped` — a blocked add never populated the slot,
+  so tracing it could silently suppress a later, legitimate scalar claim for
+  the same slot and source entry via the `has_trace` guard.
 
 ### Added (2026-07-31 — dream extractor claims carry an `op` for set membership)
 - **A dream claim may now carry `"op": "add" | "remove"`** to target the

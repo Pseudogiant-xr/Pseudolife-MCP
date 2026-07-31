@@ -9,6 +9,11 @@ no path back from set to scalar).
 
 Dedup at a set slot is confirm-or-insert, never contest: see
 ``CortexStore.add_member``'s docstring for the v1 decision this pins down.
+One exception: an add against a slot whose current scalar is a number-led
+aggregate value ("32", "$1,500") is protected — the guard parks the add as
+a scalar contender (or confirms the scalar, if the add repeats its value)
+instead of converting the slot to a set. See the aggregate-conversion-guard
+cases below.
 
 Embeddings are injected the same way ``tests/test_cortex.py`` does — a
 deterministic unit vector per input, so these run without a
@@ -147,6 +152,26 @@ def test_guard_covers_unit_and_currency_totals(store, emb, total):
     assert store.slot_kind("user", "stat") == "scalar"
 
 
+def test_same_value_add_on_aggregate_scalar_confirms_not_contests(store, emb):
+    """Review finding (FIX 1): re-asserting the SAME value that already
+    occupies an aggregate scalar slot via add_member must confirm the
+    scalar, not mint a contender identical to itself. Mirrors write_fact's
+    own confirm branch (same value -> reinforce, never duplicate)."""
+    store.write_fact(Slot("user", "birds", "27"), emb("27"), confidence=0.5)
+    store.dirty_slots.clear()
+    cur = store.records[store._current[("user", "birds")]]
+    before = cur.confidence
+
+    r = store.add_member(Slot("user", "birds", "27"), emb("27"))
+
+    assert r.action == "confirmed"
+    assert r.record is cur
+    assert r.record.status == "current"
+    assert store.contenders_for("user", "birds") == []
+    assert r.record.confidence > before
+    assert ("user", "birds") in store.dirty_slots
+
+
 def test_second_blocked_add_supersedes_prior_contender(store, emb):
     store.write_fact(Slot("user", "birds", "27"), emb("27"))
     store.add_member(Slot("user", "birds", "Northern Flicker"),
@@ -168,7 +193,7 @@ def test_repeated_blocked_add_confirms_contender(store, emb):
     r = store.add_member(Slot("user", "birds", "Northern Flicker"),
                          emb("Northern Flicker"))
     assert r.action == "contested" and r.record is first
-    assert r.record.confidence >= before
+    assert r.record.confidence > before   # reinforce_rate makes strict increase available
     assert len(store.contenders_for("user", "birds")) == 1
 
 

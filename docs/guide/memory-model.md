@@ -142,9 +142,13 @@ Members are never *contested* — there is no provenance-tier dispute path for
 a set the way there is for a scalar (see [Provenance
 contenders](#provenance-contenders--never-silently-overwrite-a-user-fact)
 below). A second value landing on an already-populated set slot is just a
-second member, not a conflict to resolve. A set slot also caps at 100
-concurrent members; further adds beyond the cap are dropped
-(`"member_capped"`) rather than silently applied or queued.
+second member, not a conflict to resolve. (The one exception: an *add*
+against a slot that still holds a protected aggregate scalar — see
+[Conversion rules](#conversion-rules) below — parks as a scalar contender.
+Once a slot has actually converted to a set, this still holds: members
+themselves are never contested.) A set slot also caps at 100 concurrent
+members; further adds beyond the cap are dropped (`"member_capped"`) rather
+than silently applied or queued.
 
 ### Conversion rules
 
@@ -166,16 +170,21 @@ directions of the story**:
   just no longer make the slot read as a set.
 
 The scalar → set conversion carries one guard: if the current scalar is a
-**number-led aggregate value** — a value that starts with a digit, optional
-sign, or currency symbol ("32", "27 species", "$1,500") — `memory_set_add`
-does not convert it. Converting would destroy a stated total that no
-enumeration of members recovers, which is exactly what a paired eval gate
-measured as a net-negative effect on knowledge-update questions
+**number-led aggregate value** — a value that starts with a digit, an
+optional leading `+`/`-` sign, or one of the currency symbols `$` `€` `£`
+("32", "27 species", "$1,500") — `memory_set_add` does not convert it.
+Converting would destroy a stated total that no enumeration of members
+recovers, which is exactly what a paired eval gate measured as a
+net-negative effect on knowledge-update questions
 (`evals/results/c2op-gate-verdict.json`). Instead the incoming member is
 parked as a contender against the scalar (audit reason
 `member_add_blocked_aggregate`), the same provenance-contender machinery
 described below; the scalar stays current, and `memory_fact_resolve(...,
-accept=True)` remains the explicit human path to overwrite the total.
+accept=True)` remains the explicit human path to overwrite the total. If
+the incoming member equals the current scalar, it confirms the scalar
+instead of parking a contender identical to itself. The guard applies
+unconditionally — regardless of `memory.cortex.protect_provenance` —
+because protecting a stated total isn't a provenance-tier concern.
 Accepted v1 limitation: on content that enumerates members after stating a
 count ("I own 3 bikes" then "picked up a gravel bike"), the guard likewise
 suppresses set formation and leaves the latest add sitting as a contender —
@@ -217,8 +226,11 @@ with a deterministic extraction-variance baseline showed the prompt
 block nets negative on knowledge-update content: the model applies
 `op:"add"` to stated totals and the scalar→set conversion destroys them
 (`evals/results/c2op-gate-verdict.json`). The MCP set tools are the set
-writers; the dream `op` path is tested capability awaiting a conversion
-guard for aggregate scalars.
+writers; the dream `op` path is tested capability held pending a prompt fix
+— the aggregate-conversion guard itself (see [Conversion
+rules](#conversion-rules) above) already protects any `op:"add"` that does
+land on a stated-total scalar, whether via a live `memory_set_add` call or
+the dream path once re-enabled.
 
 ## Provenance contenders — never silently overwrite a user fact
 

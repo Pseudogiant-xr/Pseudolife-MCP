@@ -76,8 +76,15 @@ Consequences, all inherited from tested machinery:
   the prior contender (last-writer-visible, earlier ones remain in the
   audit trail as superseded).
 - Callers need no changes: the dream apply loop and `memory_set_add` both
-  receive the established `"contested"` `WriteResult` status. Member ops
-  write no traces, so the trace guard is untouched.
+  receive the established `"contested"` `WriteResult` status. (Review
+  finding: the dream claim-apply loop's trace-write + reinforcement-bump
+  block had to be taught to skip `"contested"` too, the same way it already
+  skips `member_invalid`/`member_capped` — a blocked add never populates
+  the slot, so tracing it could silently suppress a later, legitimate claim
+  for the same slot and source entry via the `has_trace` guard.)
+- An add whose value equals the current aggregate scalar (normalised)
+  confirms it (`WriteResult("confirmed", cur)`, mirroring `write_fact`'s own
+  confirm branch) rather than parking a contender identical to itself.
 
 Ordering within `add_member`: the empty-value rejection
 (`"member_invalid"`) stays first; the guard runs at the conversion branch;

@@ -254,7 +254,9 @@ class WriteResult:
     action: str
     # write_fact: "inserted" | "confirmed" | "superseded" | "contested"
     # add_member: "member_added" | "member_confirmed" | "member_capped" |
-    #             "member_invalid"
+    #             "member_invalid" | "contested" (aggregate-conversion guard
+    #             parked the add as a contender) | "confirmed" (the add
+    #             equalled the protected aggregate scalar)
     # remove_member: "member_removed" | "member_not_found"
     record: CortexRecord
 
@@ -522,6 +524,10 @@ class CortexStore:
         member is parked as a contender (reason
         ``member_add_blocked_aggregate``) and the total stays canonical.
         ``resolve(accept=True)`` remains the explicit path to overwrite it.
+        If the incoming value is the SAME as the current scalar (normalised),
+        it confirms the scalar instead (``"confirmed"``, mirroring
+        :meth:`write_fact`'s own confirm branch) rather than parking a
+        contender identical to itself.
         Beyond ``MAX_CURRENT_MEMBERS`` current members, further adds are
         dropped (``"member_capped"``).
 
@@ -558,6 +564,21 @@ class CortexStore:
             cur = self.records[idx]
             if _is_aggregate_value(cur.value):
                 self.dirty_slots.add(key)
+                if _norm_value(slot.value) == _norm_value(cur.value):
+                    # The same total re-asserted through add_member -> confirm
+                    # the scalar, never park a contender identical to itself
+                    # (review finding). Mirrors write_fact's own confirm branch
+                    # (~line 360); tx_time/hlc are deliberately left untouched,
+                    # consistent with this guarded path already dropping hlc
+                    # on the contender branch below.
+                    cur.last_confirmed = t
+                    cur.provenance |= {p for p in provenance if p}
+                    sup = _norm_support(support)
+                    if sup:
+                        cur.support.add(sup)
+                    cur.confidence = min(
+                        1.0, max(self._reinforce(cur.confidence), float(confidence)))
+                    return WriteResult("confirmed", cur)
                 return self._contend(cur, slot, emb, confidence,
                                      {p for p in provenance if p}, t,
                                      _norm_support(support),
