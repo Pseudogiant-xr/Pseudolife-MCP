@@ -517,6 +517,11 @@ class CortexStore:
         member. A scalar record already occupying the slot is converted
         one-way to a member first (the scalar row survives as an
         audit-visible superseded record; there is no path back to scalar).
+        Exception: when the current scalar is a number-led aggregate value
+        (``_is_aggregate_value``), the slot is NOT converted; the incoming
+        member is parked as a contender (reason
+        ``member_add_blocked_aggregate``) and the total stays canonical.
+        ``resolve(accept=True)`` remains the explicit path to overwrite it.
         Beyond ``MAX_CURRENT_MEMBERS`` current members, further adds are
         dropped (``"member_capped"``).
 
@@ -542,11 +547,25 @@ class CortexStore:
                 kind="member",
             ))
         emb = embedding.detach().to("cpu", torch.float32).clone()
-        # Scalar at this slot -> one-way conversion (spec rule 1).
+        # Scalar at this slot -> one-way conversion (spec rule 1), UNLESS the
+        # scalar is a number-led aggregate ("total species: 32"): converting
+        # destroys a stated total that no enumeration of members recovers
+        # (measured: evals/results/c2op-gate-verdict.json). Park the incoming
+        # member as a contender instead — auditable, and resolve(accept=True)
+        # remains the explicit human path to overwrite the total.
         idx = self._current.get(key)
         if idx is not None:
-            self.dirty_slots.add(key)
             cur = self.records[idx]
+            if _is_aggregate_value(cur.value):
+                self.dirty_slots.add(key)
+                return self._contend(cur, slot, emb, confidence,
+                                     {p for p in provenance if p}, t,
+                                     _norm_support(support),
+                                     "member_add_blocked_aggregate",
+                                     cur.slot_embedding,
+                                     writer_id=writer_id,
+                                     session_id=session_id)
+            self.dirty_slots.add(key)
             cur.status = "superseded"
             cur.superseded_at = t
             cur.superseded_by_value = "(converted to set)"

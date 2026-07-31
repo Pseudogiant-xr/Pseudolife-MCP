@@ -165,6 +165,23 @@ directions of the story**:
   dedicated "revert" call — and the removed member rows stay as audit, they
   just no longer make the slot read as a set.
 
+The scalar → set conversion carries one guard: if the current scalar is a
+**number-led aggregate value** — a value that starts with a digit, optional
+sign, or currency symbol ("32", "27 species", "$1,500") — `memory_set_add`
+does not convert it. Converting would destroy a stated total that no
+enumeration of members recovers, which is exactly what a paired eval gate
+measured as a net-negative effect on knowledge-update questions
+(`evals/results/c2op-gate-verdict.json`). Instead the incoming member is
+parked as a contender against the scalar (audit reason
+`member_add_blocked_aggregate`), the same provenance-contender machinery
+described below; the scalar stays current, and `memory_fact_resolve(...,
+accept=True)` remains the explicit human path to overwrite the total.
+Accepted v1 limitation: on content that enumerates members after stating a
+count ("I own 3 bikes" then "picked up a gravel bike"), the guard likewise
+suppresses set formation and leaves the latest add sitting as a contender —
+correct for stated-total content, a measured trade-off for enumerating
+content.
+
 ### Reading a set slot
 
 `memory_fact_get(entity, attribute)` returns the scalar shape

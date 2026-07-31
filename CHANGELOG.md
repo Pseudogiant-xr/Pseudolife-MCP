@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-07-31 — aggregate conversion guard: `add_member` no longer overwrites a stated total)
+- **`CortexStore.add_member` no longer converts a scalar slot to a set when
+  the current scalar is a number-led aggregate value** (`_is_aggregate_value`:
+  `"32"`, `"27 species"`, `"$1,500"`) — the member is instead parked as a
+  contender via the existing `_contend` machinery (audit reason
+  `"member_add_blocked_aggregate"`), and the scalar stays canonical. Prior
+  behaviour destroyed the stated total on the first spurious membership op,
+  which the gate verdict measured as a net-negative KU-oracle effect
+  (`evals/results/c2op-gate-verdict.json`, cited above). `resolve(entity,
+  attribute, accept=True)` remains the explicit human path to overwrite the
+  total with the accumulated member value; `accept=False` leaves the total
+  untouched. Non-aggregate scalars (e.g. `"road bike"`) are unaffected and
+  still convert one-way to a set on the first `add_member`, as before.
+
 ### Added (2026-07-31 — dream extractor claims carry an `op` for set membership)
 - **A dream claim may now carry `"op": "add" | "remove"`** to target the
   set-member model instead of the scalar supersede path — a claim without

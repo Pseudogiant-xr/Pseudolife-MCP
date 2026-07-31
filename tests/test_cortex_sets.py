@@ -119,6 +119,92 @@ def test_member_add_converts_scalar_slot_with_audit(store, emb):
     assert len(audit) == 1
 
 
+def test_member_add_on_aggregate_scalar_parks_contender(store, emb):
+    store.write_fact(Slot("user", "birds", "27"), emb("27"))
+    store.dirty_slots.clear()
+    r = store.add_member(Slot("user", "birds", "Northern Flicker"),
+                         emb("Northern Flicker"))
+    assert r.action == "contested"
+    assert r.record.status == "contested"
+    assert r.record.value == "Northern Flicker"
+    # Scalar survives, canonical; no set forms.
+    assert store.slot_kind("user", "birds") == "scalar"
+    assert store.members("user", "birds") == []
+    cur = store.records[store._current[("user", "birds")]]
+    assert cur.value == "27" and cur.status == "current"
+    # Contender must persist: the guard schedules the slot rewrite itself
+    # (_contend relies on its caller for dirty_slots, as write_fact does).
+    assert ("user", "birds") in store.dirty_slots
+    # Audit reason is the guard's own, not a tier reason.
+    assert store.supersession_log[-1]["reason"] == "member_add_blocked_aggregate"
+
+
+@pytest.mark.parametrize("total", ["27 species", "$1,500", "3.5 kg"])
+def test_guard_covers_unit_and_currency_totals(store, emb, total):
+    store.write_fact(Slot("user", "stat", total), emb(total))
+    r = store.add_member(Slot("user", "stat", "Blue Jay"), emb("Blue Jay"))
+    assert r.action == "contested"
+    assert store.slot_kind("user", "stat") == "scalar"
+
+
+def test_second_blocked_add_supersedes_prior_contender(store, emb):
+    store.write_fact(Slot("user", "birds", "27"), emb("27"))
+    store.add_member(Slot("user", "birds", "Northern Flicker"),
+                     emb("Northern Flicker"))
+    r = store.add_member(Slot("user", "birds", "Blue Jay"), emb("Blue Jay"))
+    assert r.action == "contested"
+    assert [c.value for c in store.contenders_for("user", "birds")] == ["Blue Jay"]
+    # The displaced contender stays in the audit trail as superseded.
+    gone = [x for x in store.records
+            if x.value == "Northern Flicker" and x.status == "superseded"]
+    assert len(gone) == 1
+
+
+def test_repeated_blocked_add_confirms_contender(store, emb):
+    store.write_fact(Slot("user", "birds", "27"), emb("27"))
+    first = store.add_member(Slot("user", "birds", "Northern Flicker"),
+                             emb("Northern Flicker")).record
+    before = first.confidence
+    r = store.add_member(Slot("user", "birds", "Northern Flicker"),
+                         emb("Northern Flicker"))
+    assert r.action == "contested" and r.record is first
+    assert r.record.confidence >= before
+    assert len(store.contenders_for("user", "birds")) == 1
+
+
+def test_resolve_accept_promotes_blocked_member_to_scalar(store, emb):
+    store.write_fact(Slot("user", "birds", "27"), emb("27"))
+    store.add_member(Slot("user", "birds", "Northern Flicker"),
+                     emb("Northern Flicker"))
+    r = store.resolve("user", "birds", accept=True)
+    assert r.action == "superseded"
+    assert store.slot_kind("user", "birds") == "scalar"
+    cur = store.records[store._current[("user", "birds")]]
+    assert cur.value == "Northern Flicker"
+
+
+def test_resolve_reject_keeps_aggregate_scalar(store, emb):
+    store.write_fact(Slot("user", "birds", "27"), emb("27"))
+    store.add_member(Slot("user", "birds", "Northern Flicker"),
+                     emb("Northern Flicker"))
+    r = store.resolve("user", "birds", accept=False)
+    assert r.action == "contested"
+    cur = store.records[store._current[("user", "birds")]]
+    assert cur.value == "27" and cur.status == "current"
+    assert store.contenders_for("user", "birds") == []
+
+
+def test_empty_member_value_on_aggregate_slot_still_invalid(store, emb):
+    # Regression pin: today's rejection-before-conversion ordering must
+    # survive the aggregate guard too — an empty/blank member value is
+    # rejected outright regardless of what occupies the slot, so this
+    # passes both before and after the guard lands.
+    store.write_fact(Slot("user", "birds", "27"), emb("27"))
+    r = store.add_member(Slot("user", "birds", "   "), emb("blank"))
+    assert r.action == "member_invalid"
+    assert store.contenders_for("user", "birds") == []
+
+
 def test_member_cap_drops_beyond_100(store, emb):
     for i in range(100):
         store.add_member(Slot("user", "tags", f"tag-{i:03d}"), emb(f"tag-{i:03d}"))

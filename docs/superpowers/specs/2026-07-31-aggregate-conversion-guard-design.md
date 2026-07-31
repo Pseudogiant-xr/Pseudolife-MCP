@@ -9,7 +9,7 @@
 The definitive C2-op gate measured why the extractor op prompt block nets
 negative on LongMemEval-KU despite improving scalar extraction on non-set
 questions: the model applies `op:"add"` to aggregate/count slots, and
-`CortexBank.add_member`'s unconditional one-way scalar→set conversion
+`CortexStore.add_member`'s unconditional one-way scalar→set conversion
 destroys the stated-total scalar those questions are answered with
 (`"total species: 32"` → a set of enumerated members that never sums back).
 One spurious member-add is enough; there is no path back to scalar.
