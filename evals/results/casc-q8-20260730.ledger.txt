@@ -1,0 +1,11 @@
+16:16:47 launch-verified casc-q8 judged=3/78 (task bf58hdlk2, reproducible q8_0 server)
+16:19:35 FAILURE WinError10055 (client socket exhaustion) at judged=61/78, server UP — relaunching (lossless resume)
+16:19:43 resume-verified judged=63/78 (task b4deqam0j)
+16:20:33 replicate-1 COMPLETE judged=78/78
+16:21:03 r2 launch-verified judged=5/78 (task b3h979fgg)
+16:24:04 r2 CANCELLED — server identity proven directly (PID 72324, stock llama-server.exe, q8_0 KV flags, started 16:15:44, continuous through the run window); partial r2 files deleted
+18:11:29 A/B launch: bm25off then bm25on answer phases (server PID check follows)
+18:11:44 A/B launch-verified bm25off judged=4/78 (task bh15di0ss)
+18:15:25 FAILURE WinError5 atomic-replace race at bm25off 57/78 (monitoring grep held the file) — relaunching, monitoring switched to stat
+18:15:53 resume-verified via size delta (task b0lpa312g)
+18:21:27 A/B COMPLETE both 78/78 — verdict FAIL (no benefit; artifact bm25-ab-confirmation.json)

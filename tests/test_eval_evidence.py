@@ -548,6 +548,23 @@ for _cid, _artifact, _needle, _val, _stated in [
         value=_val, stated=_stated, places=4))
 
 
+C2OP = RESULTS + "c2op-gate-verdict.json"
+# ── the C2-op definitive gate (2026-07-31) ───────────────────────────────
+# The CHANGELOG states the cascade regression that justified holding the
+# op prompt block; both the delta and its p-value are pinned to the
+# committed verdict artifact (a p-value needs its own artifact).
+CLAIMS.append(Claim(
+    id="c2op-cascade-delta", doc=CHANGELOG, needle="cascade −0.141 at p = 0.006",
+    artifacts=(C2OP,),
+    value=lambda d: d["gates"]["e2e"]["paired_vs_control"]["cascade"]["delta"],
+    stated=-0.141, places=3))
+CLAIMS.append(Claim(
+    id="c2op-cascade-p", doc=CHANGELOG, needle="cascade −0.141 at p = 0.006",
+    artifacts=(C2OP,),
+    value=lambda d: d["gates"]["e2e"]["paired_vs_control"]["cascade"]["p"],
+    stated=0.006, places=3))
+
+
 def test_every_published_number_names_a_committed_artifact():
     """A claim whose evidence is untracked cannot be checked by a reader.
 

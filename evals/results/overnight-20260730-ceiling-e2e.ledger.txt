@@ -1,0 +1,16 @@
+# Overnight ledger — ceiling-e2e fresh end-to-end run (2026-07-30)
+# Fresh extract + answer + judge, oracle/qwen-27b, current master stack
+# (v25 backbone, BM25 on), reproducible q8_0 server (config verified by
+# command-line discriminator, not port probe). Bench DB: fresh
+# pseudolife_memory_bench_v25 (old bench DB was pre-v25 vector(384);
+# left in place — needs a one-time drop or migrate, see morning report).
+# One line per heartbeat: time | phase | rows-done/78 | delta since last
+03:39 | LAUNCH-1 FAILED in 20s: schema refusal, bench DB vector(384) vs build 1024 (caught by 2-min launch verification)
+03:43 | LAUNCH-2 OK: bench-db=pseudolife_memory_bench_v25 created at vector(1024); server=reproducible
+03:47 | extract | 1/78 rows, first bank dump written | launch verified affirmatively
+04:07 | CRASH: WinError 10055 (socket buffer/port exhaustion) during a judge call at row 41; host state healthy on inspection (259 conns, 44 TimeWait, full port range) — transient spike
+04:09 | RELAUNCH-3 OK: resumed at 40/78; row 41 confirmed written | +40 rows since launch
+04:31 | full phase COMPLETE, exit 0: 78/78 | rag 0.859/1236.9tok, cortex 0.667/258.7tok, hybrid 0.833/920.0tok — rag BEATS hybrid on fresh stack (single run)
+04:32 | replicates r2+r3 spawned and running (answer/judge re-run, reproducible server) | first rows confirmed
+04:38 | replicates COMPLETE exit 0; agg written | rag 0.8590, cortex 0.6667, hybrid 0.8333 — std 0.0000 all arms (reproducible config confirmed)
+04:39 | DONE. Artifacts: ceiling-e2e{,-r2,-r3}.jsonl + .summary.json + .agg.json + banks/ (all untracked — commit is a morning decision with its claim). Headline finding: fresh-stack naive RAG (0.859) BEATS hybrid (0.833); no docs touched.

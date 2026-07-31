@@ -45,16 +45,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   store unchanged and `dropped_set_slot` incremented, a malformed op falls
   back to scalar with a warning, two `op:"add"` claims sharing one source
   entry both land, `op:"add"` confidence reaches the stored member, and a
-  `member_invalid` result skips the trace write). CORRECTED 2026-07-31:
-  the C2 gate's "extractor never adopts op" root cause was wrong — the
-  model emitted `op` correctly all along and `extract()`'s parse whitelist
-  silently stripped it, so remove-intents landed as positive scalar facts
-  (the real source of the measured e2e degradation). With `op` carried
-  through the parse (pinned by
-  `test_openai_extractor_carries_op_through_parse`), probes show 7/7
-  adoption with clean decoy discipline on the reproducible server, and the
-  prompt block is restored. Evidence: `evals/results/c2-gate-verdict.json`
-  (amended with the correction), `evals/results/op-probe-q8-fixedparse.json`.
+  `member_invalid` result skips the trace write). The full story, two
+  corrections deep: (1) the C2 gate's "extractor never adopts op" root
+  cause was wrong — the model emitted `op` correctly and `extract()`'s
+  parse whitelist silently stripped it (fixed; pinned by
+  `test_openai_extractor_carries_op_through_parse`; probes 7/7 adoption,
+  `op-probe-q8-fixedparse.json`). (2) With the parse fixed and the block
+  restored, the definitive paired gate — whose extraction-variance
+  baseline came back per-question identical to the control, so every
+  delta is attributable — showed the block's net effect is NEGATIVE on
+  KU-oracle (cascade −0.141 at p = 0.006): the model applies `op:"add"`
+  to stated-total/aggregate slots and the one-way scalar→set conversion
+  destroys the total the answer needs; losses concentrate on set-forming
+  questions while non-set questions improve. The block is therefore held
+  again — the MCP set tools are the set writers — until a conversion
+  guard for aggregate scalars exists. Evidence:
+  `evals/results/c2op-gate-verdict.json`.
 
 ### Changed (2026-07-31 — set-valued slots surface as one entry per slot, not one per member)
 - **`cortex_search` groups a set-valued slot's current members into a single

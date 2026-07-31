@@ -122,24 +122,18 @@ _SYSTEM_PROMPT = (
     '{"entity":"releases","attribute":"documented requirement",'
     '"value":"signed tag (per release runbook)","confidence":0.8,'
     '"source":2}]}\n'
-    "When a note adds or removes an item from a COLLECTION the user "
-    'maintains (restaurants tried, bikes owned, pending tasks), add an '
-    '"op":"add" or "op":"remove" field to that claim instead of a plain '
-    "supersede. op is ONLY for collection membership — a value that simply "
-    "changed (a new job, a moved city) stays a plain claim with no op. "
-    "Example. Notes: [3] tried Rosa's Diner tonight. [4] sold the road bike, "
-    'no longer biking to work. Output: {"claims":['
-    '{"entity":"user","attribute":"restaurants tried","value":"Rosa\'s '
-    'Diner","op":"add","confidence":0.8,"source":3},'
-    '{"entity":"user","attribute":"bikes owned","value":"road bike",'
-    '"op":"remove","confidence":0.8,"source":4}]}\n'
     'Return {"claims":[]} if nothing qualifies.'
 )
-# The op block above was briefly held out (2026-07-31 option B) on the
-# belief the extractor never adopts it; corrected the same day — extract()
-# was stripping the field the model emitted correctly (parse whitelist).
-# With op carried through the parse, raw+parsed probes show 7/7 adoption
-# and clean decoy discipline (evals/results/op-probe-q8-fixedparse.json).
+# The op prompt block is deliberately absent. The model adopts op cleanly
+# (probes 7/7 after the parse fix), but the definitive paired gate
+# (evals/results/c2op-gate-verdict.json, variance baseline per-question
+# identical to control) showed the block's net effect is negative on
+# KU-oracle: the model applies op:'add' to stated-total/aggregate slots
+# and the one-way scalar->set conversion destroys the total the answer
+# needs (cascade -0.141, p=0.006; losses concentrated on set-forming
+# questions while non-set questions improved). Until the conversion
+# guard for aggregate scalars exists, the MCP set tools are the set
+# writers and the extraction prompt stays without op.
 
 
 def _vocab_hint(vocab: list[str]) -> str:
