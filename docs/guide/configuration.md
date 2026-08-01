@@ -153,6 +153,12 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   typing, shown only the notes where both entities co-occur; a typed
   answer becomes a review proposal, never a live edge. Without it the
   quarantine only accumulates. Set `0` to disable.
+- **Dream-run journal retention** (`memory.dream.runs_keep = 50`) — the
+  newest N dream-run rows and their pre-image journals (schema v27)
+  survive; older ones are pruned on the sweep tick beside superseded-row
+  compaction. The journal is what `memory_dream(action="rollback")`
+  replays, so this bounds how far back a pass stays revertible — see
+  [Dream runs — audit and rollback](dreaming.md#dream-runs--audit-and-rollback-schema-v27).
 
 ## Toolset tiers
 
