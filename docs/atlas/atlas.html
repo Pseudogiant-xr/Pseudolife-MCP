@@ -1,0 +1,779 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>PseudoLife-MCP · System Atlas</title>
+<style>
+  :root {
+    --bg: #f4f6f8;
+    --panel: #ffffff;
+    --panel2: #eef1f4;
+    --ink: #1b2530;
+    --ink-2: #4a5866;
+    --ink-3: #7c8894;
+    --line: #d5dbe1;
+    --accent: #0d9d88;
+    --accent-soft: rgba(13,157,136,.14);
+    --edge: #9aa6b1;
+    --edge-dim: #ccd3d9;
+    --halo: #f4f6f8;
+    --sel: #0d9d88;
+    --danger: #c4485e;
+    --mono: "Cascadia Code", "JetBrains Mono", Consolas, "SF Mono", monospace;
+    --ui: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b1016;
+      --panel: #121a23;
+      --panel2: #0e151d;
+      --ink: #dbe5ee;
+      --ink-2: #93a3b2;
+      --ink-3: #5d6c7a;
+      --line: #223040;
+      --accent: #2fd3b5;
+      --accent-soft: rgba(47,211,181,.13);
+      --edge: #46586a;
+      --edge-dim: #26333f;
+      --halo: #0b1016;
+      --sel: #2fd3b5;
+      --danger: #e06c85;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0b1016; --panel: #121a23; --panel2: #0e151d; --ink: #dbe5ee; --ink-2: #93a3b2;
+    --ink-3: #5d6c7a; --line: #223040; --accent: #2fd3b5; --accent-soft: rgba(47,211,181,.13);
+    --edge: #46586a; --edge-dim: #26333f; --halo: #0b1016; --sel: #2fd3b5; --danger: #e06c85;
+  }
+  :root[data-theme="light"] {
+    --bg: #f4f6f8; --panel: #ffffff; --panel2: #eef1f4; --ink: #1b2530; --ink-2: #4a5866;
+    --ink-3: #7c8894; --line: #d5dbe1; --accent: #0d9d88; --accent-soft: rgba(13,157,136,.14);
+    --edge: #9aa6b1; --edge-dim: #ccd3d9; --halo: #f4f6f8; --sel: #0d9d88; --danger: #c4485e;
+  }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--ui); font-size: 14px; overflow: hidden;
+  }
+  #app { display: flex; flex-direction: column; height: 100vh; }
+
+  /* ---------- top bar ---------- */
+  #topbar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--line);
+    z-index: 5;
+  }
+  #topbar h1 { font-size: 15px; margin: 0; font-weight: 650; letter-spacing: .01em; white-space: nowrap; }
+  #topbar h1 .mono { font-family: var(--mono); color: var(--accent); }
+  .chip {
+    font-family: var(--mono); font-size: 10.5px; color: var(--ink-2);
+    border: 1px solid var(--line); border-radius: 4px; padding: 2px 7px; white-space: nowrap;
+  }
+  #search {
+    flex: 0 1 210px; min-width: 130px; background: var(--panel2); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px;
+    font-family: var(--mono); font-size: 12px; outline: none;
+  }
+  #search:focus { border-color: var(--accent); }
+  .flowchips { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
+  .flowchips .lbl { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); margin-right: 2px; }
+  .fchip {
+    cursor: pointer; user-select: none; font-size: 11.5px; padding: 3px 10px;
+    border-radius: 999px; border: 1px solid var(--line); color: var(--ink-2); background: transparent;
+    font-family: var(--ui);
+  }
+  .fchip:hover { border-color: var(--accent); color: var(--ink); }
+  .fchip.on { background: var(--accent-soft); border-color: var(--accent); color: var(--ink); font-weight: 600; }
+  .btn {
+    cursor: pointer; font-size: 12px; padding: 4px 10px; border-radius: 6px;
+    border: 1px solid var(--line); background: var(--panel2); color: var(--ink-2); font-family: var(--ui);
+  }
+  .btn:hover { color: var(--ink); border-color: var(--accent); }
+  .btn.primary { background: var(--accent-soft); border-color: var(--accent); color: var(--ink); }
+  .btn.armed { background: var(--accent); color: var(--halo); border-color: var(--accent); }
+  .spacer { flex: 1; }
+
+  /* ---------- main split ---------- */
+  #main { display: flex; flex: 1; min-height: 0; }
+  #canvaswrap { flex: 1; position: relative; min-width: 0; }
+  svg#canvas { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+  svg#canvas.panning { cursor: grabbing; }
+  svg#canvas.connect { cursor: crosshair; }
+
+  /* nodes */
+  .node { cursor: pointer; }
+  .node rect.body {
+    fill: var(--panel); stroke-width: 1.2; rx: 7;
+    transition: filter .12s ease;
+  }
+  .node:hover rect.body { filter: brightness(1.08); }
+  .node.selected rect.body { stroke-width: 2.4; }
+  .node text.t { font-family: var(--mono); font-size: 12px; font-weight: 700; fill: var(--ink); }
+  .node text.s { font-family: var(--ui); font-size: 10.3px; fill: var(--ink-2); }
+  .node circle.dot { r: 3.5; }
+  .node.dim { opacity: .18; }
+  .node.hit rect.body { stroke-width: 2.2; }
+
+  /* groups */
+  .grp rect { fill-opacity: .05; stroke-opacity: .45; stroke-width: 1; rx: 14; stroke-dasharray: none; }
+  .grp text {
+    font-family: var(--ui); font-size: 11px; font-weight: 700;
+    letter-spacing: .14em; text-transform: uppercase; opacity: .85;
+  }
+  .grp.dim { opacity: .25; }
+
+  /* edges */
+  .edge path.wire { fill: none; stroke: var(--edge); stroke-width: 1.4; }
+  .edge path.hitzone { fill: none; stroke: transparent; stroke-width: 12; cursor: pointer; }
+  .edge.k-control path.wire { stroke-width: 1.1; opacity: .75; }
+  .edge.k-deploy path.wire { stroke-dasharray: 7 5; }
+  .edge.k-dev path.wire { stroke-dasharray: 3 4; opacity: .8; }
+  .edge.k-legacy path.wire { stroke-dasharray: 2 5; opacity: .65; }
+  .edge.k-alt path.wire { stroke-dasharray: 2 4; }
+  .edge text.elabel {
+    font-family: var(--mono); font-size: 9.3px; fill: var(--ink-2);
+    paint-order: stroke; stroke: var(--halo); stroke-width: 3px;
+    opacity: 0; pointer-events: none;
+  }
+  .edge:hover text.elabel, .edge.labeled text.elabel, .edge.selected text.elabel { opacity: 1; }
+  .edge:hover path.wire { stroke: var(--accent); stroke-width: 2; }
+  .edge.selected path.wire { stroke: var(--sel); stroke-width: 2.2; }
+  .edge.dim { opacity: .1; }
+  .edge.flow-on path.wire {
+    stroke: var(--accent); stroke-width: 2.4; stroke-dasharray: 9 6;
+    animation: march 1.1s linear infinite;
+  }
+  .edge.flow-on text.elabel { opacity: 1; fill: var(--ink); }
+  @keyframes march { to { stroke-dashoffset: -30; } }
+  @media (prefers-reduced-motion: reduce) { .edge.flow-on path.wire { animation: none; } }
+  .stepbadge circle { fill: var(--accent); }
+  .stepbadge text { font-family: var(--mono); font-size: 10px; font-weight: 700; fill: var(--halo); text-anchor: middle; }
+
+  /* legend */
+  #legend {
+    position: absolute; left: 12px; bottom: 12px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 10px; padding: 10px 13px;
+    font-size: 11px; color: var(--ink-2); max-width: 240px; box-shadow: 0 4px 18px rgba(0,0,0,.18);
+  }
+  #legend .row { display: flex; align-items: center; gap: 7px; margin: 3px 0; }
+  #legend .sw { width: 11px; height: 11px; border-radius: 3px; flex: none; }
+  #legend .ln { width: 22px; height: 0; border-top: 2px solid var(--edge); flex: none; }
+  #legend .ln.dash { border-top-style: dashed; }
+  #legend .ln.dot { border-top-style: dotted; }
+  #legend summary { cursor: pointer; font-weight: 600; color: var(--ink); font-size: 11.5px; }
+  #hint {
+    position: absolute; right: 12px; bottom: 12px; font-size: 10.5px; color: var(--ink-3);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 5px 10px;
+  }
+  #zoomctl { position: absolute; right: 12px; top: 12px; display: flex; flex-direction: column; gap: 4px; }
+  #zoomctl .btn { width: 30px; text-align: center; padding: 4px 0; font-size: 14px; }
+
+  /* ---------- inspector ---------- */
+  #inspector {
+    width: 330px; flex: none; background: var(--panel); border-left: 1px solid var(--line);
+    overflow-y: auto; padding: 14px 16px; box-sizing: border-box;
+  }
+  #inspector h2 { font-size: 13px; margin: 0 0 3px; font-family: var(--mono); }
+  #inspector .gtag {
+    display: inline-block; font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+    padding: 2px 8px; border-radius: 999px; margin-bottom: 8px; font-weight: 700;
+  }
+  #inspector .path {
+    font-family: var(--mono); font-size: 10.5px; color: var(--accent);
+    word-break: break-all; background: var(--panel2); padding: 4px 7px; border-radius: 5px;
+    margin: 6px 0 10px; display: inline-block;
+  }
+  #inspector ul { margin: 6px 0 12px; padding-left: 17px; }
+  #inspector li { margin: 5px 0; font-size: 12.3px; line-height: 1.45; color: var(--ink-2); }
+  #inspector li::marker { color: var(--accent); }
+  #inspector .sub { color: var(--ink-2); font-size: 12px; margin-bottom: 2px; }
+  #inspector label { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: .09em; color: var(--ink-3); margin: 10px 0 3px; }
+  #inspector input[type=text], #inspector textarea, #inspector select {
+    width: 100%; box-sizing: border-box; background: var(--panel2); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px;
+    font-family: var(--mono); font-size: 11.5px; outline: none; resize: vertical;
+  }
+  #inspector input:focus, #inspector textarea:focus { border-color: var(--accent); }
+  #inspector .btnrow { display: flex; gap: 7px; margin-top: 12px; flex-wrap: wrap; }
+  #inspector .btn.danger { color: var(--danger); border-color: var(--danger); background: transparent; }
+  #inspector .notes {
+    background: var(--accent-soft); border-radius: 7px; padding: 8px 10px; font-size: 12px;
+    color: var(--ink); margin: 8px 0; white-space: pre-wrap; line-height: 1.45;
+  }
+  #inspector .connlist { font-size: 11.3px; }
+  #inspector .connlist div { padding: 3px 0; border-bottom: 1px dashed var(--line); cursor: pointer; color: var(--ink-2); }
+  #inspector .connlist div:hover { color: var(--ink); }
+  #inspector .connlist .arrow { color: var(--accent); font-family: var(--mono); }
+  #inspector .about p { font-size: 12.4px; line-height: 1.55; color: var(--ink-2); }
+  #inspector .about .stat { font-family: var(--mono); color: var(--ink); }
+  #inspector .flowdesc { font-size: 12px; color: var(--ink-2); line-height: 1.5; margin-top: 4px; }
+  ::-webkit-scrollbar { width: 9px; height: 9px; }
+  ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 5px; }
+  @media (max-width: 900px) { #inspector { width: 260px; } }
+</style>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+</head>
+<body>
+<div id="app">
+  <div id="topbar">
+    <h1>PseudoLife-MCP <span style="color:var(--ink-3)">·</span> <span class="mono">System Atlas</span></h1>
+    <span class="chip" id="chipVersion"></span>
+    <span class="chip" id="chipSchema"></span>
+    <span class="chip" id="chipVerified" title="Verified against the working tree on this date"></span>
+    <div class="flowchips" id="flowchips"><span class="lbl">Flows</span></div>
+    <div class="spacer"></div>
+    <input id="search" type="text" placeholder="search nodes…  (Esc clears)" />
+    <button class="btn" id="btnAddNode" title="Add a new node">+ node</button>
+    <button class="btn" id="btnAddEdge" title="Click a source node, then a target node">+ edge</button>
+    <button class="btn" id="btnLabels" title="Toggle all edge labels">labels</button>
+    <button class="btn" id="btnExport" title="Download the atlas as JSON">export</button>
+    <button class="btn" id="btnImport" title="Load an atlas JSON file">import</button>
+    <button class="btn" id="btnFit" title="Fit the whole diagram">fit</button>
+    <button class="btn" id="btnReset" title="Discard local edits, restore the source atlas">reset</button>
+    <input id="importFile" type="file" accept="application/json" style="display:none" />
+  </div>
+  <div id="main">
+    <div id="canvaswrap">
+      <svg id="canvas">
+        <defs>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--edge)"></path>
+          </marker>
+          <marker id="arrHot" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--accent)"></path>
+          </marker>
+        </defs>
+        <g id="world">
+          <g id="gGroups"></g>
+          <g id="gEdges"></g>
+          <g id="gNodes"></g>
+          <g id="gOverlay"></g>
+        </g>
+      </svg>
+      <div id="zoomctl">
+        <button class="btn" id="zin">+</button>
+        <button class="btn" id="zout">−</button>
+      </div>
+      <details id="legend" open>
+        <summary>Legend</summary>
+        <div id="legendBody"></div>
+        <div class="row" style="margin-top:7px"><span class="ln"></span> data / call flow</div>
+        <div class="row"><span class="ln" style="border-top-width:1px;opacity:.7"></span> control / wiring</div>
+        <div class="row"><span class="ln dash"></span> deploy lifecycle</div>
+        <div class="row"><span class="ln dot"></span> dev-only / legacy / optional</div>
+      </details>
+      <div id="hint">drag canvas to pan · wheel to zoom · drag nodes to rearrange · click to inspect</div>
+    </div>
+    <div id="inspector"></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+let GROUPS, BASE_NODES, BASE_EDGES, FLOWS, META;
+
+fetch("atlas.json")
+  .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+  .then(A => {
+    GROUPS = A.groups; BASE_NODES = A.nodes; BASE_EDGES = A.edges;
+    FLOWS = A.flows; META = A.meta;
+    document.getElementById("chipVersion").textContent = "v" + META.version;
+    document.getElementById("chipSchema").textContent = "schema v" + META.schema;
+    document.getElementById("chipVerified").textContent = "verified " + META.verified;
+    bootAtlas();
+  })
+  .catch(err => {
+    document.getElementById("inspector").innerHTML =
+      "<div class='about'><h2>Couldn't load atlas.json</h2><p>" + err +
+      "</p><p>Browsers block fetch() from file:// — serve this folder over " +
+      "HTTP instead:</p><p><code>python -m http.server 8899</code> in " +
+      "docs/atlas/, then open <code>http://127.0.0.1:8899/atlas.html</code>" +
+      "</p></div>";
+  });
+
+function bootAtlas() {
+const NODE_W = 215, NODE_H = 64, GPAD = 26;
+const STORE_KEY = "plAtlas.v1";
+
+/* ====================================================== STATE ==== */
+function baseState() {
+  return { nodes: JSON.parse(JSON.stringify(BASE_NODES)), edges: JSON.parse(JSON.stringify(BASE_EDGES)) };
+}
+let state;
+try {
+  const raw = localStorage.getItem(STORE_KEY);
+  state = raw ? JSON.parse(raw) : baseState();
+  if (!state.nodes || !state.edges) state = baseState();
+} catch (e) { state = baseState(); }
+
+let view = { tx: 0, ty: 0, s: 1 };
+let sel = null;              // {type:'node'|'edge', id}
+let activeFlow = null;
+let connectFrom = null;      // node id when in connect mode
+let connectMode = false;
+let labelsAll = false;
+let searchTerm = "";
+
+const nodeById = () => Object.fromEntries(state.nodes.map(n => [n.id, n]));
+const ekey = e => e.f + ">" + e.t;
+
+function save() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) {}
+}
+
+/* ====================================================== SVG ==== */
+const SVGNS = "http://www.w3.org/2000/svg";
+const svg = document.getElementById("canvas");
+const world = document.getElementById("world");
+const gGroups = document.getElementById("gGroups");
+const gEdges = document.getElementById("gEdges");
+const gNodes = document.getElementById("gNodes");
+const gOverlay = document.getElementById("gOverlay");
+
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(SVGNS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function applyView() {
+  world.setAttribute("transform", `translate(${view.tx},${view.ty}) scale(${view.s})`);
+}
+function toWorld(cx, cy) { return { x: (cx - view.tx) / view.s, y: (cy - view.ty) / view.s }; }
+
+function edgePath(a, b) {
+  const ac = { x: a.x + NODE_W / 2, y: a.y + NODE_H / 2 };
+  const bc = { x: b.x + NODE_W / 2, y: b.y + NODE_H / 2 };
+  const dx = bc.x - ac.x, dy = bc.y - ac.y;
+  let p1, p2, c1, c2;
+  if (Math.abs(dx) > Math.abs(dy)) {
+    p1 = { x: dx > 0 ? a.x + NODE_W : a.x, y: ac.y };
+    p2 = { x: dx > 0 ? b.x : b.x + NODE_W, y: bc.y };
+    const k = Math.min(150, Math.max(45, Math.abs(dx) * .42));
+    c1 = { x: p1.x + (dx > 0 ? k : -k), y: p1.y };
+    c2 = { x: p2.x + (dx > 0 ? -k : k), y: p2.y };
+  } else {
+    p1 = { x: ac.x, y: dy > 0 ? a.y + NODE_H : a.y };
+    p2 = { x: bc.x, y: dy > 0 ? b.y : b.y + NODE_H };
+    const k = Math.min(150, Math.max(45, Math.abs(dy) * .42));
+    c1 = { x: p1.x, y: p1.y + (dy > 0 ? k : -k) };
+    c2 = { x: p2.x, y: p2.y + (dy > 0 ? -k : k) };
+  }
+  const mid = {
+    x: (p1.x + 3 * c1.x + 3 * c2.x + p2.x) / 8,
+    y: (p1.y + 3 * c1.y + 3 * c2.y + p2.y) / 8
+  };
+  return { d: `M ${p1.x} ${p1.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${p2.x} ${p2.y}`, mid };
+}
+
+function groupBounds() {
+  const b = {};
+  for (const n of state.nodes) {
+    const g = b[n.g] || (b[n.g] = { x1: 1e9, y1: 1e9, x2: -1e9, y2: -1e9 });
+    g.x1 = Math.min(g.x1, n.x); g.y1 = Math.min(g.y1, n.y);
+    g.x2 = Math.max(g.x2, n.x + NODE_W); g.y2 = Math.max(g.y2, n.y + NODE_H);
+  }
+  return b;
+}
+
+function matches(n, term) {
+  if (!term) return false;
+  const hay = (n.t + " " + (n.s || "") + " " + (n.p || "") + " " + (n.d || []).join(" ") + " " + (n.notes || "")).toLowerCase();
+  return hay.includes(term);
+}
+
+function render() {
+  gGroups.innerHTML = ""; gEdges.innerHTML = ""; gNodes.innerHTML = ""; gOverlay.innerHTML = "";
+  const byId = nodeById();
+  const term = searchTerm.trim().toLowerCase();
+  const hitSet = term ? new Set(state.nodes.filter(n => matches(n, term)).map(n => n.id)) : null;
+  const flowSet = activeFlow ? new Set(FLOWS[activeFlow].seq) : null;
+  const flowNodes = flowSet ? new Set([...flowSet].flatMap(k => k.split(">"))) : null;
+
+  /* groups */
+  const gb = groupBounds();
+  for (const gid in gb) {
+    const meta = GROUPS[gid] || GROUPS.custom;
+    const b = gb[gid];
+    const grp = el("g", { class: "grp" + ((flowNodes || hitSet) ? " dim" : "") }, gGroups);
+    el("rect", {
+      x: b.x1 - GPAD, y: b.y1 - GPAD - 8, width: b.x2 - b.x1 + GPAD * 2, height: b.y2 - b.y1 + GPAD * 2 + 8,
+      rx: 14, fill: meta.hue, stroke: meta.hue
+    }, grp);
+    const t = el("text", { x: b.x1 - GPAD + 12, y: b.y1 - GPAD + 10, fill: meta.hue }, grp);
+    t.textContent = meta.label;
+  }
+
+  /* edges */
+  for (const e of state.edges) {
+    const a = byId[e.f], b = byId[e.t];
+    if (!a || !b) continue;
+    const key = ekey(e);
+    const { d, mid } = edgePath(a, b);
+    let cls = "edge k-" + (e.k || "data");
+    const inFlow = flowSet && flowSet.has(key);
+    if (inFlow) cls += " flow-on";
+    else if (flowSet) cls += " dim";
+    if (hitSet && !(hitSet.has(e.f) && hitSet.has(e.t))) cls += " dim";
+    if (sel && sel.type === "edge" && sel.id === key) cls += " selected";
+    if (sel && sel.type === "node" && (sel.id === e.f || sel.id === e.t)) cls += " labeled";
+    if (labelsAll) cls += " labeled";
+    const ge = el("g", { class: cls, "data-key": key }, gEdges);
+    el("path", { class: "wire", d, "marker-end": inFlow || (sel && sel.type === "edge" && sel.id === key) ? "url(#arrHot)" : "url(#arr)" }, ge);
+    el("path", { class: "hitzone", d }, ge);
+    if (e.l) {
+      const tx = el("text", { class: "elabel", x: mid.x, y: mid.y - 5, "text-anchor": "middle" }, ge);
+      tx.textContent = e.l;
+    }
+    ge.addEventListener("pointerdown", ev => { ev.stopPropagation(); });
+    ge.addEventListener("click", ev => { ev.stopPropagation(); select({ type: "edge", id: key }); });
+  }
+
+  /* flow step badges */
+  if (flowSet) {
+    FLOWS[activeFlow].seq.forEach((key, i) => {
+      const [f, t] = key.split(">");
+      const a = byId[f], b = byId[t];
+      if (!a || !b) return;
+      const { mid } = edgePath(a, b);
+      const bg = el("g", { class: "stepbadge" }, gOverlay);
+      el("circle", { cx: mid.x, cy: mid.y + 12, r: 9 }, bg);
+      const tx = el("text", { x: mid.x, y: mid.y + 15.5 }, bg);
+      tx.textContent = String(i + 1);
+    });
+  }
+
+  /* nodes */
+  for (const n of state.nodes) {
+    const meta = GROUPS[n.g] || GROUPS.custom;
+    let cls = "node";
+    if (sel && sel.type === "node" && sel.id === n.id) cls += " selected";
+    if (hitSet) cls += hitSet.has(n.id) ? " hit" : " dim";
+    if (flowNodes && !flowNodes.has(n.id)) cls += " dim";
+    const gn = el("g", { class: cls, transform: `translate(${n.x},${n.y})`, "data-id": n.id }, gNodes);
+    el("rect", { class: "body", width: NODE_W, height: NODE_H, rx: 7, stroke: meta.hue,
+      style: `fill: color-mix(in srgb, ${meta.hue} 7%, var(--panel))` }, gn);
+    el("circle", { class: "dot", cx: 14, cy: 24, fill: meta.hue }, gn);
+    const t1 = el("text", { class: "t", x: 25, y: 28 }, gn); t1.textContent = n.t;
+    const t2 = el("text", { class: "s", x: 25, y: 46 }, gn); t2.textContent = n.s || "";
+    if (n.notes) { const nd = el("circle", { cx: NODE_W - 12, cy: 12, r: 4, fill: "var(--accent)" }, gn); nd.append(); }
+    attachNodeEvents(gn, n);
+  }
+}
+
+/* node drag + click */
+function attachNodeEvents(gn, n) {
+  let drag = null;
+  gn.addEventListener("pointerdown", ev => {
+    ev.stopPropagation();
+    if (connectMode) return;
+    const w = toWorld(ev.clientX, ev.clientY);
+    drag = { dx: w.x - n.x, dy: w.y - n.y, moved: false };
+    gn.setPointerCapture(ev.pointerId);
+  });
+  gn.addEventListener("pointermove", ev => {
+    if (!drag) return;
+    const w = toWorld(ev.clientX, ev.clientY);
+    const nx = Math.round(w.x - drag.dx), ny = Math.round(w.y - drag.dy);
+    if (!drag.moved && (Math.abs(nx - n.x) + Math.abs(ny - n.y)) < 3) return;
+    drag.moved = true;
+    n.x = nx; n.y = ny;
+    render();
+  });
+  gn.addEventListener("pointerup", ev => {
+    if (drag && drag.moved) save();
+    drag = null;
+  });
+  gn.addEventListener("click", ev => {
+    ev.stopPropagation();
+    if (connectMode) {
+      if (!connectFrom) {
+        connectFrom = n.id;
+        document.getElementById("btnAddEdge").textContent = "target?";
+      } else if (connectFrom !== n.id) {
+        const e = { f: connectFrom, t: n.id, l: "", k: "data" };
+        if (!state.edges.some(x => ekey(x) === ekey(e))) state.edges.push(e);
+        save();
+        exitConnect();
+        select({ type: "edge", id: ekey(e) }, true);
+        return;
+      }
+      render();
+      return;
+    }
+    select({ type: "node", id: n.id });
+  });
+}
+
+/* ============================================== PAN / ZOOM ==== */
+let pan = null;
+svg.addEventListener("pointerdown", ev => {
+  if (ev.target.closest(".node") || ev.target.closest(".edge")) return;
+  pan = { x: ev.clientX, y: ev.clientY, tx: view.tx, ty: view.ty };
+  svg.classList.add("panning");
+  svg.setPointerCapture(ev.pointerId);
+});
+svg.addEventListener("pointermove", ev => {
+  if (!pan) return;
+  view.tx = pan.tx + (ev.clientX - pan.x);
+  view.ty = pan.ty + (ev.clientY - pan.y);
+  applyView();
+});
+svg.addEventListener("pointerup", () => { pan = null; svg.classList.remove("panning"); });
+svg.addEventListener("click", ev => {
+  if (ev.target.closest(".node") || ev.target.closest(".edge")) return;
+  if (connectMode) { exitConnect(); return; }
+  select(null);
+});
+svg.addEventListener("wheel", ev => {
+  ev.preventDefault();
+  const factor = ev.deltaY < 0 ? 1.12 : 1 / 1.12;
+  zoomAt(ev.clientX, ev.clientY, factor);
+}, { passive: false });
+
+function zoomAt(cx, cy, factor) {
+  const ns = Math.min(2.5, Math.max(0.12, view.s * factor));
+  const w = toWorld(cx, cy);
+  view.tx = cx - w.x * ns;
+  view.ty = cy - w.y * ns;
+  view.s = ns;
+  applyView();
+}
+document.getElementById("zin").onclick = () => { const r = svg.getBoundingClientRect(); zoomAt(r.width / 2, r.height / 2, 1.25); };
+document.getElementById("zout").onclick = () => { const r = svg.getBoundingClientRect(); zoomAt(r.width / 2, r.height / 2, 1 / 1.25); };
+
+let fitTries = 0;
+function fit() {
+  const r = svg.getBoundingClientRect();
+  if ((r.width < 50 || r.height < 50) && fitTries < 80) {
+    // layout not ready yet (hidden pane / pre-paint) — retry, never bake a zero scale
+    fitTries++; setTimeout(fit, 120); return;
+  }
+  fitTries = 0;
+  let x1 = 1e9, y1 = 1e9, x2 = -1e9, y2 = -1e9;
+  for (const n of state.nodes) {
+    x1 = Math.min(x1, n.x); y1 = Math.min(y1, n.y);
+    x2 = Math.max(x2, n.x + NODE_W); y2 = Math.max(y2, n.y + NODE_H);
+  }
+  x1 -= 50; y1 -= 60; x2 += 50; y2 += 50;
+  const s = Math.min(r.width / (x2 - x1), r.height / (y2 - y1));
+  view.s = Math.min(1.2, Math.max(0.12, s));
+  view.tx = (r.width - (x2 - x1) * view.s) / 2 - x1 * view.s;
+  view.ty = (r.height - (y2 - y1) * view.s) / 2 - y1 * view.s;
+  applyView();
+}
+document.getElementById("btnFit").onclick = fit;
+
+/* ============================================== INSPECTOR ==== */
+const insp = document.getElementById("inspector");
+function esc(s) { return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+
+function select(s, edit) {
+  sel = s;
+  render();
+  renderInspector(edit);
+}
+
+function renderInspector(edit) {
+  if (!sel) { renderAbout(); return; }
+  if (sel.type === "node") {
+    const n = nodeById()[sel.id];
+    if (!n) { sel = null; renderAbout(); return; }
+    const meta = GROUPS[n.g] || GROUPS.custom;
+    if (edit) { renderNodeEdit(n); return; }
+    const conns = state.edges.filter(e => e.f === n.id || e.t === n.id);
+    insp.innerHTML = `
+      <span class="gtag" style="background:color-mix(in srgb, ${meta.hue} 18%, transparent); color:${meta.hue}">${esc(meta.label)}</span>
+      <h2>${esc(n.t)}</h2>
+      <div class="sub">${esc(n.s || "")}</div>
+      ${n.p ? `<span class="path">${esc(n.p)}</span>` : ""}
+      <ul>${(n.d || []).map(x => `<li>${esc(x)}</li>`).join("")}</ul>
+      ${n.notes ? `<label>your notes</label><div class="notes">${esc(n.notes)}</div>` : ""}
+      <label>connections (${conns.length})</label>
+      <div class="connlist">${conns.map(e => {
+        const other = e.f === n.id ? e.t : e.f;
+        const dir = e.f === n.id ? "→" : "←";
+        const on = nodeById()[other];
+        return `<div data-ek="${esc(ekey(e))}"><span class="arrow">${dir}</span> ${esc(on ? on.t : other)}${e.l ? ` <span style="color:var(--ink-3)">· ${esc(e.l)}</span>` : ""}</div>`;
+      }).join("")}</div>
+      <div class="btnrow">
+        <button class="btn primary" id="iEdit">Edit</button>
+        <button class="btn danger" id="iDel">Delete node</button>
+      </div>`;
+    insp.querySelector("#iEdit").onclick = () => renderNodeEdit(n);
+    insp.querySelector("#iDel").onclick = () => {
+      if (!confirm(`Delete node "${n.t}" and its edges? (reset restores the source atlas)`)) return;
+      state.nodes = state.nodes.filter(x => x.id !== n.id);
+      state.edges = state.edges.filter(e => e.f !== n.id && e.t !== n.id);
+      save(); select(null);
+    };
+    insp.querySelectorAll(".connlist div").forEach(d => {
+      d.onclick = () => select({ type: "edge", id: d.dataset.ek });
+    });
+  } else {
+    const e = state.edges.find(x => ekey(x) === sel.id);
+    if (!e) { sel = null; renderAbout(); return; }
+    const byId = nodeById();
+    insp.innerHTML = `
+      <span class="gtag" style="background:var(--accent-soft); color:var(--accent)">edge</span>
+      <h2>${esc(byId[e.f]?.t || e.f)} <span style="color:var(--accent)">→</span> ${esc(byId[e.t]?.t || e.t)}</h2>
+      <label>label</label><input type="text" id="eLabel" value="${esc(e.l || "")}" />
+      <label>kind</label>
+      <select id="eKind">
+        ${["data","control","deploy","dev","legacy","alt"].map(k => `<option value="${k}" ${e.k === k ? "selected" : ""}>${k}</option>`).join("")}
+      </select>
+      <div class="btnrow">
+        <button class="btn primary" id="eSave">Save</button>
+        <button class="btn danger" id="eDel">Delete edge</button>
+      </div>`;
+    insp.querySelector("#eSave").onclick = () => {
+      e.l = insp.querySelector("#eLabel").value;
+      e.k = insp.querySelector("#eKind").value;
+      save(); select({ type: "edge", id: ekey(e) });
+    };
+    insp.querySelector("#eDel").onclick = () => {
+      state.edges = state.edges.filter(x => ekey(x) !== ekey(e));
+      save(); select(null);
+    };
+  }
+}
+
+function renderNodeEdit(n) {
+  const meta = GROUPS[n.g] || GROUPS.custom;
+  insp.innerHTML = `
+    <span class="gtag" style="background:color-mix(in srgb, ${meta.hue} 18%, transparent); color:${meta.hue}">editing</span>
+    <label>title</label><input type="text" id="nT" value="${esc(n.t)}" />
+    <label>subtitle</label><input type="text" id="nS" value="${esc(n.s || "")}" />
+    <label>path</label><input type="text" id="nP" value="${esc(n.p || "")}" />
+    <label>group</label>
+    <select id="nG">${Object.keys(GROUPS).map(g => `<option value="${g}" ${n.g === g ? "selected" : ""}>${GROUPS[g].label}</option>`).join("")}</select>
+    <label>details — one per line</label>
+    <textarea id="nD" rows="8">${esc((n.d || []).join("\n"))}</textarea>
+    <label>your notes</label>
+    <textarea id="nN" rows="4" placeholder="annotations, TODOs, open questions…">${esc(n.notes || "")}</textarea>
+    <div class="btnrow">
+      <button class="btn primary" id="nSave">Save</button>
+      <button class="btn" id="nCancel">Cancel</button>
+    </div>`;
+  insp.querySelector("#nSave").onclick = () => {
+    n.t = insp.querySelector("#nT").value;
+    n.s = insp.querySelector("#nS").value;
+    n.p = insp.querySelector("#nP").value;
+    n.g = insp.querySelector("#nG").value;
+    n.d = insp.querySelector("#nD").value.split("\n").map(x => x.trim()).filter(Boolean);
+    n.notes = insp.querySelector("#nN").value.trim();
+    save(); select({ type: "node", id: n.id });
+  };
+  insp.querySelector("#nCancel").onclick = () => select({ type: "node", id: n.id });
+}
+
+function renderAbout() {
+  const flowRows = Object.keys(FLOWS).map(k =>
+    `<div style="margin:7px 0"><b style="font-family:var(--mono);font-size:12px;color:var(--accent)">${FLOWS[k].name}</b><div class="flowdesc">${FLOWS[k].desc}</div></div>`).join("");
+  insp.innerHTML = `
+    <div class="about">
+      <h2 style="font-size:15px">System Atlas</h2>
+      <p><span class="stat">${state.nodes.length}</span> components · <span class="stat">${state.edges.length}</span> edges · <span class="stat">11</span> subsystems. Built from a four-way deep read of the codebase (engine, transport, storage/ops, evals) and verified against the working tree on ${META.verified} (v${META.version}, schema v${META.schema}).</p>
+      <p><b>Read it left to right:</b> MCP clients enter through the stdio shim (or direct HTTP) into the daemon on <span class="stat">:8765</span>, whose single MemoryService orchestrates the 8-band continuum, three canonical stores, the graph, and the dream cycle — all persisting to Postgres + pgvector on <span class="stat">:5433</span> behind two external volumes.</p>
+      <p><b>Editing:</b> drag nodes, click → Edit to rewrite any card or add notes (dot marks annotated nodes), + node / + edge to extend, export/import JSON. Edits live in your browser's localStorage — reset restores the source atlas.</p>
+      <label>flows — click a chip above to trace</label>
+      ${flowRows}
+    </div>`;
+}
+
+/* ============================================== TOP BAR ==== */
+const flowchips = document.getElementById("flowchips");
+for (const k in FLOWS) {
+  const b = document.createElement("button");
+  b.className = "fchip"; b.textContent = FLOWS[k].name; b.dataset.flow = k;
+  b.onclick = () => {
+    activeFlow = activeFlow === k ? null : k;
+    document.querySelectorAll(".fchip").forEach(c => c.classList.toggle("on", c.dataset.flow === activeFlow));
+    render();
+    if (activeFlow && !sel) renderAbout();
+  };
+  flowchips.appendChild(b);
+}
+
+const searchBox = document.getElementById("search");
+searchBox.addEventListener("input", () => { searchTerm = searchBox.value; render(); });
+document.addEventListener("keydown", ev => {
+  if (ev.key === "Escape") {
+    if (connectMode) { exitConnect(); return; }
+    if (searchTerm) { searchTerm = ""; searchBox.value = ""; render(); return; }
+    if (activeFlow) { activeFlow = null; document.querySelectorAll(".fchip").forEach(c => c.classList.remove("on")); render(); return; }
+    select(null);
+  }
+});
+
+document.getElementById("btnAddNode").onclick = () => {
+  const r = svg.getBoundingClientRect();
+  const c = toWorld(r.width / 2, r.height / 2);
+  let i = 1; while (state.nodes.some(n => n.id === "custom" + i)) i++;
+  const n = { id: "custom" + i, g: "custom", x: Math.round(c.x - NODE_W / 2), y: Math.round(c.y - NODE_H / 2), t: "New node", s: "", p: "", d: [] };
+  state.nodes.push(n);
+  save(); sel = { type: "node", id: n.id }; render(); renderNodeEdit(n);
+};
+
+const btnAddEdge = document.getElementById("btnAddEdge");
+btnAddEdge.onclick = () => { connectMode ? exitConnect() : enterConnect(); };
+function enterConnect() {
+  connectMode = true; connectFrom = null;
+  btnAddEdge.textContent = "source?"; btnAddEdge.classList.add("armed");
+  svg.classList.add("connect");
+}
+function exitConnect() {
+  connectMode = false; connectFrom = null;
+  btnAddEdge.textContent = "+ edge"; btnAddEdge.classList.remove("armed");
+  svg.classList.remove("connect");
+}
+
+document.getElementById("btnLabels").onclick = function () {
+  labelsAll = !labelsAll;
+  this.classList.toggle("primary", labelsAll);
+  render();
+};
+
+document.getElementById("btnExport").onclick = () => {
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "pseudolife-atlas.json";
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+document.getElementById("btnImport").onclick = () => document.getElementById("importFile").click();
+document.getElementById("importFile").addEventListener("change", function () {
+  const f = this.files[0]; if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    try {
+      const parsed = JSON.parse(rd.result);
+      if (!Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) throw new Error("bad shape");
+      state = parsed; save(); select(null); fit();
+    } catch (e) { alert("Import failed: not a valid atlas JSON (" + e.message + ")"); }
+  };
+  rd.readAsText(f);
+  this.value = "";
+});
+document.getElementById("btnReset").onclick = () => {
+  if (!confirm("Discard all local edits and restore the source atlas?")) return;
+  localStorage.removeItem(STORE_KEY);
+  state = baseState();
+  select(null); fit();
+};
+
+/* legend body */
+const lb = document.getElementById("legendBody");
+lb.innerHTML = Object.keys(GROUPS).filter(g => g !== "custom").map(g =>
+  `<div class="row"><span class="sw" style="background:${GROUPS[g].hue}"></span>${GROUPS[g].label}</div>`).join("");
+
+/* boot */
+render();
+renderAbout();
+fit();
+window.addEventListener("resize", () => { /* keep current view; user can hit fit */ });
+}
+</script>
+</body>
+</html>

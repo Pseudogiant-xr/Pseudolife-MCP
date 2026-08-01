@@ -1,0 +1,1781 @@
+{
+ "meta": {
+  "title": "PseudoLife-MCP System Atlas",
+  "version": "0.12.0",
+  "schema": 26,
+  "verified": "2026-08-01"
+ },
+ "groups": {
+  "clients": {
+   "label": "MCP clients",
+   "hue": "#5a9fe3"
+  },
+  "plugin": {
+   "label": "Claude Code plugin",
+   "hue": "#7c9cc9"
+  },
+  "transport": {
+   "label": "Transport / CLI",
+   "hue": "#3fbdd8"
+  },
+  "daemon": {
+   "label": "Daemon HTTP surface",
+   "hue": "#2fc9ae"
+  },
+  "engine": {
+   "label": "Memory engine",
+   "hue": "#57c07a"
+  },
+  "dream": {
+   "label": "Dream / graph",
+   "hue": "#a184f0"
+  },
+  "sidecar": {
+   "label": "Extractor LLMs",
+   "hue": "#c584d8"
+  },
+  "storage": {
+   "label": "Storage",
+   "hue": "#e0708d"
+  },
+  "ops": {
+   "label": "Ops lifecycle",
+   "hue": "#dfa14e"
+  },
+  "evals": {
+   "label": "Evals & training",
+   "hue": "#8b98a8"
+  },
+  "release": {
+   "label": "Release surfaces",
+   "hue": "#b0988a"
+  },
+  "custom": {
+   "label": "Custom",
+   "hue": "#999999"
+  }
+ },
+ "nodes": [
+  {
+   "id": "cc",
+   "g": "clients",
+   "x": 40,
+   "y": 120,
+   "t": "Claude Code",
+   "s": "MCP client · stdio shim by default",
+   "p": "",
+   "d": [
+    "Launches pseudolife-mcp as a per-session stdio subprocess",
+    "Alternative: direct HTTP transport straight to /mcp",
+    "SessionStart hook injects the memory briefing"
+   ]
+  },
+  {
+   "id": "codex",
+   "g": "clients",
+   "x": 40,
+   "y": 215,
+   "t": "Codex CLI",
+   "s": "MCP client · same shim path",
+   "p": "",
+   "d": [
+    "Wired by ops/install --client codex",
+    "Hook lives in ~/.codex/hooks.json"
+   ]
+  },
+  {
+   "id": "desktop",
+   "g": "clients",
+   "x": 40,
+   "y": 310,
+   "t": "Claude Desktop",
+   "s": "stdio-only MCP client",
+   "p": "",
+   "d": [
+    "Any client without streamable-HTTP support goes through the shim"
+   ]
+  },
+  {
+   "id": "browser",
+   "g": "clients",
+   "x": 40,
+   "y": 430,
+   "t": "Browser",
+   "s": "Cortex Console user",
+   "p": "",
+   "d": [
+    "Talks only to /ui/* and /api/*",
+    "Bearer token kept in localStorage (pl_token); 401 → token modal"
+   ]
+  },
+  {
+   "id": "plugin",
+   "g": "plugin",
+   "x": 40,
+   "y": 600,
+   "t": "plugin/",
+   "s": "hooks + commands · NO MCP server",
+   "p": "plugin/.claude-plugin/plugin.json",
+   "d": [
+    "Deliberately bundles no MCP server (avoids duplicate tool namespaces)",
+    "Version pinned to pyproject by test_plugin_packaging",
+    "Served straight from master via marketplace.json — no publish step"
+   ]
+  },
+  {
+   "id": "hookstart",
+   "g": "plugin",
+   "x": 40,
+   "y": 695,
+   "t": "session-start.sh",
+   "s": "SessionStart hook · bash + curl",
+   "p": "plugin/hooks/",
+   "d": [
+    "GET /api/hook/session-start → stdout becomes session context",
+    "Fail-open: daemon down → friendly fallback, still exit 0",
+    "Payload capped at 9,500 chars (client caps stdout at 10k)"
+   ]
+  },
+  {
+   "id": "hookend",
+   "g": "plugin",
+   "x": 40,
+   "y": 790,
+   "t": "session-end.sh",
+   "s": "SessionEnd hook",
+   "p": "plugin/hooks/",
+   "d": [
+    "POST /api/hook/session-end closes the session episode",
+    "Ownership-guarded: only clears the active-session pointer it owns"
+   ]
+  },
+  {
+   "id": "cmds",
+   "g": "plugin",
+   "x": 40,
+   "y": 885,
+   "t": "/dream · /memory-status",
+   "s": "slash commands",
+   "p": "plugin/commands/",
+   "d": [
+    "/dream: agent-led consolidation via memory_dream (+ deep mode)",
+    "/memory-status: /health + memory_stats + console pointer"
+   ]
+  },
+  {
+   "id": "shim",
+   "g": "transport",
+   "x": 330,
+   "y": 150,
+   "t": "stdio shim",
+   "s": "per-session proxy · stateless",
+   "p": "pseudolife_memory/shim.py",
+   "d": [
+    "Fresh upstream HTTP connection PER TOOL CALL — dodges idle-connection reaping that used to hang post-pause calls",
+    "Probes /health; spawns `pseudolife-mcp serve` detached if daemon absent",
+    "Mints session_uid → X-PL-Session header; episode start/end bracket the process lifetime",
+    "Re-emits tools/list_changed downstream after memory_toolset tier changes"
+   ]
+  },
+  {
+   "id": "cli",
+   "g": "transport",
+   "x": 330,
+   "y": 260,
+   "t": "cli.py",
+   "s": "pseudolife-mcp entry · torch-free",
+   "p": "pseudolife_memory/cli.py",
+   "d": [
+    "(no arg) → shim · serve → daemon · embedded → legacy v0.1 stdio",
+    "briefing / episode-start / episode-end subcommands",
+    "Heavy imports deferred into serve/embedded branches — shim start is near-instant"
+   ]
+  },
+  {
+   "id": "briefingcli",
+   "g": "transport",
+   "x": 330,
+   "y": 370,
+   "t": "briefing_cli.py",
+   "s": "manual / Codex hook path",
+   "p": "pseudolife_memory/briefing_cli.py",
+   "d": [
+    "GET /api/briefing → markdown or hookSpecificOutput JSON",
+    "Never auto-starts the daemon; prints nothing on any failure",
+    "Wired by ops/install-hook for non-plugin installs"
+   ]
+  },
+  {
+   "id": "episodecli",
+   "g": "transport",
+   "x": 330,
+   "y": 465,
+   "t": "episode_cli.py",
+   "s": "legacy hook helper (obsolete)",
+   "p": "pseudolife_memory/episode_cli.py",
+   "d": [
+    "Superseded by daemon-owned session episodes (2026-06-30)",
+    "install-hook strips it from old installs; still shipped for compat"
+   ]
+  },
+  {
+   "id": "daemon",
+   "g": "daemon",
+   "x": 760,
+   "y": 40,
+   "t": "daemon.py",
+   "s": "uvicorn · 127.0.0.1:8765",
+   "p": "pseudolife_memory/daemon.py",
+   "d": [
+    "Refuses non-loopback bind without token (exit 2) unless TRUST_BIND=1",
+    "Starts durability autosave, dream sweep, idle-session reaper",
+    "/health does a LIVE db ping on a dedicated connection",
+    "Reports status: degraded + init_refusal when the engine can't init (v25)"
+   ]
+  },
+  {
+   "id": "api",
+   "g": "daemon",
+   "x": 660,
+   "y": 160,
+   "t": "web/api.py",
+   "s": "ASGI composition + auth gate",
+   "p": "pseudolife_memory/web/api.py",
+   "d": [
+    "Route order: /health → /ui → /api/hook/* → /api/* → /mcp",
+    "Bearer token; tokenless = loopback Origin/Host guard (CSRF / DNS-rebind)",
+    "POST must be exactly application/json (forces CORS preflight)",
+    "Sync service calls always via run_in_executor — never blocks the loop"
+   ]
+  },
+  {
+   "id": "mcpsrv",
+   "g": "daemon",
+   "x": 940,
+   "y": 160,
+   "t": "mcp_server.py",
+   "s": "FastMCP · 35 tools",
+   "p": "pseudolife_memory/mcp_server.py",
+   "d": [
+    "Every tool is a thin tier-tagged wrapper over MemoryService",
+    "_async_offload: tool bodies run on worker threads",
+    "tools/list filtered per session tier; hidden tools stay callable server-side"
+   ]
+  },
+  {
+   "id": "tiers",
+   "g": "daemon",
+   "x": 1200,
+   "y": 160,
+   "t": "toolset_tiers.py",
+   "s": "minimal ⊂ core ⊂ full",
+   "p": "pseudolife_memory/toolset_tiers.py",
+   "d": [
+    "Resolution: session override → writer map → env default (core)",
+    "12h-TTL session overrides; visibility is a token lever, NOT security",
+    "core = 21 of 35 tools; minimal = 8; auth is the bearer token"
+   ]
+  },
+  {
+   "id": "writer",
+   "g": "daemon",
+   "x": 1200,
+   "y": 260,
+   "t": "writer_context.py",
+   "s": "who-wrote-this chokepoint",
+   "p": "pseudolife_memory/writer_context.py",
+   "d": [
+    "X-PL-Writer / X-PL-Session → hook pointer → legacy mcp-session-id",
+    "mcp-session-id removed from MCP spec 2026-07-28 — fallback only"
+   ]
+  },
+  {
+   "id": "routes",
+   "g": "daemon",
+   "x": 660,
+   "y": 270,
+   "t": "web/routes.py",
+   "s": "REST dispatch table",
+   "p": "pseudolife_memory/web/routes.py",
+   "d": [
+    "Hand-enumerated (method,path) → handler; NO generic tool proxy",
+    "/api/overview = one-round-trip dashboard aggregate",
+    "Serves the /api/briefing fast-path used by briefing_cli"
+   ]
+  },
+  {
+   "id": "sessionhook",
+   "g": "daemon",
+   "x": 920,
+   "y": 270,
+   "t": "web/session_hook.py",
+   "s": "hook payload + identity tier 3",
+   "p": "pseudolife_memory/web/session_hook.py",
+   "d": [
+    "MEMORY_LOOP_BLOCK ≡ examples/CLAUDE.memory.md (guard-tested byte-identity)",
+    "Authorized: registers active session + prepends the episode handle",
+    "Unauthorized callers get byte-identical public output — no identity minting"
+   ]
+  },
+  {
+   "id": "consoleui",
+   "g": "daemon",
+   "x": 660,
+   "y": 380,
+   "t": "Cortex Console SPA",
+   "s": "vanilla JS · /ui/",
+   "p": "pseudolife_memory/web/static/",
+   "d": [
+    "Panels: Observatory · Cortex · World · Lessons · Stream · Recall · Graph (3D galaxy) · Insight · Episodes · Console",
+    "Hash-routed, REST-only; 401 anywhere → token modal",
+    "Dev harness: web/devserver.py on :8770 against FixtureService"
+   ]
+  },
+  {
+   "id": "configio",
+   "g": "daemon",
+   "x": 920,
+   "y": 380,
+   "t": "web/config_io.py",
+   "s": "config knobs whitelist",
+   "p": "pseudolife_memory/web/config_io.py",
+   "d": [
+    "~35 scalar knobs only — never structural fields",
+    "Atomic merge into config.yaml (.bak first) + live in-process mutate",
+    "restart-flagged knobs persist only"
+   ]
+  },
+  {
+   "id": "service",
+   "g": "engine",
+   "x": 900,
+   "y": 560,
+   "t": "service.py · MemoryService",
+   "s": "one instance · coarse lock",
+   "p": "pseudolife_memory/service.py",
+   "d": [
+    "Owns CMS, cortex, world, lessons, graph, refbank, episodes (~5,100 lines)",
+    "_resolve_writer: X-PL-Session → hook pointer (6h TTL) → legacy header",
+    "PersistenceError counter surfaces save failures via /health",
+    "No LLM inside — deterministic Python; the dream is the only LLM path"
+   ]
+  },
+  {
+   "id": "embed",
+   "g": "engine",
+   "x": 640,
+   "y": 690,
+   "t": "embedding.py",
+   "s": "Qwen3-Embedding-0.6B · 1024-d",
+   "p": "pseudolife_memory/memory/embedding.py",
+   "d": [
+    "sentence-transformers; torch or ONNX backend with auto-fallback",
+    "Thread-safe LRU cache; weights baked into the image (HF_HUB_OFFLINE)",
+    "Swapped from MiniLM 384-d in schema v25 after a seven-arm shootout"
+   ]
+  },
+  {
+   "id": "cms",
+   "g": "engine",
+   "x": 900,
+   "y": 690,
+   "t": "cms.py · Continuum (CMS)",
+   "s": "band orchestrator · 5-pool retrieval",
+   "p": "pseudolife_memory/memory/cms.py",
+   "d": [
+    "store(): band[0] + promotion walk on logical-turn cadence",
+    "retrieve(): neural + slot-index + BM25 + reference + rerank pools",
+    "retrieve_with_trace() powers the memory_trace diagnostics tool",
+    "Write-through to Postgres; .pt fallback schema v6 with migration"
+   ]
+  },
+  {
+   "id": "bands",
+   "g": "engine",
+   "x": 900,
+   "y": 800,
+   "t": "miras/ · 8-band continuum",
+   "s": "working → forever · cosine",
+   "p": "pseudolife_memory/memory/miras/",
+   "d": [
+    "Plain cosine stores + novelty surprise gate (neural MLP removed v0.5)",
+    "Geometric update_interval 1→1000 drives promotion cadence; ~5K total capacity",
+    "Retention policies: balanced / recency / surprise + reinforcement boost"
+   ]
+  },
+  {
+   "id": "bm25",
+   "g": "engine",
+   "x": 640,
+   "y": 800,
+   "t": "bm25.py",
+   "s": "lexical fusion pool (opt-in)",
+   "p": "pseudolife_memory/memory/bm25.py",
+   "d": [
+    "Pure-stdlib Okapi BM25, rebuilt per query",
+    "Min-max normalized, weighted-sum fused with dense scores"
+   ]
+  },
+  {
+   "id": "slotsN",
+   "g": "engine",
+   "x": 640,
+   "y": 910,
+   "t": "slots.py + slot index",
+   "s": "deterministic fact extraction",
+   "p": "pseudolife_memory/memory/slots.py",
+   "d": [
+    "Regex-only entity/attribute/value slots on every entry",
+    "Inverted slot-token index — belt-and-suspenders when embeddings miss",
+    "Feeds _promote_slots → cortex (the no-LLM precision floor)"
+   ]
+  },
+  {
+   "id": "reranker",
+   "g": "engine",
+   "x": 640,
+   "y": 1020,
+   "t": "reranker.py",
+   "s": "cross-encoder rerank (opt)",
+   "p": "pseudolife_memory/memory/reranker.py",
+   "d": [
+    "ms-marco-MiniLM-L-6-v2, lazy-loaded, fail-soft",
+    "fuse(): weighted sum with bi-encoder (0.7); margin-gate skip"
+   ]
+  },
+  {
+   "id": "refbank",
+   "g": "engine",
+   "x": 640,
+   "y": 1130,
+   "t": "reference_bank.py",
+   "s": "document RAG tier",
+   "p": "pseudolife_memory/memory/reference_bank.py",
+   "d": [
+    "ChromaDB-backed; chunked via utils/chunking",
+    "Capped pool — never displaces neural memories",
+    "document_parser: PDF (pypdfium2) / HTML / text"
+   ]
+  },
+  {
+   "id": "contradiction",
+   "g": "engine",
+   "x": 1160,
+   "y": 690,
+   "t": "contradiction.py",
+   "s": "5-path detector · pre-gate",
+   "p": "pseudolife_memory/memory/contradiction.py",
+   "d": [
+    "Slot-identity path first (v0.10) — deterministic, embedding-free, shares cortex normalisation",
+    "Then negation / replacement / state-transition / NLI paths",
+    "Runs BEFORE the surprise gate so near-duplicate corrections always land",
+    "Hits decay + stamp superseded_at / superseded_by_text"
+   ]
+  },
+  {
+   "id": "nliN",
+   "g": "engine",
+   "x": 1160,
+   "y": 800,
+   "t": "nli.py",
+   "s": "NLI scorer (optional)",
+   "p": "pseudolife_memory/memory/nli.py",
+   "d": [
+    "nli-deberta-v3-xsmall, offline-enforced, fail-soft"
+   ]
+  },
+  {
+   "id": "hlcN",
+   "g": "engine",
+   "x": 1160,
+   "y": 910,
+   "t": "hlc.py",
+   "s": "hybrid logical clock",
+   "p": "pseudolife_memory/memory/hlc.py",
+   "d": [
+    "(phys_ms, logical) monotonic stamp — immune to NTP wall-clock steps",
+    "Supersession-order authority for all three canonical stores",
+    "Wired for future multi-writer OCC (dormant today)"
+   ]
+  },
+  {
+   "id": "episodes",
+   "g": "engine",
+   "x": 900,
+   "y": 910,
+   "t": "episodes.py",
+   "s": "session-scoped episode tree",
+   "p": "pseudolife_memory/memory/episodes.py",
+   "d": [
+    "open_leaf_for(session_key): concurrent sessions never clobber each other",
+    "Daemon-owned lazy open; the idle reaper closes / prunes-if-empty",
+    "stamp() fills episode_id / title on every stored entry"
+   ]
+  },
+  {
+   "id": "briefingN",
+   "g": "engine",
+   "x": 900,
+   "y": 1020,
+   "t": "briefing.py",
+   "s": "session-start markdown",
+   "p": "pseudolife_memory/memory/briefing.py",
+   "d": [
+    "Pure assembly — no LLM, no torch",
+    "Unsure-abouts + avoid-first lessons + fresh world facts + last-episode recap"
+   ]
+  },
+  {
+   "id": "recallN",
+   "g": "engine",
+   "x": 900,
+   "y": 1130,
+   "t": "recall.py",
+   "s": "MemCoT iterative loop",
+   "p": "pseudolife_memory/memory/recall.py",
+   "d": [
+    "Seed entities → depth-1 graph expansion per hop, re-query each hop",
+    "Hub-gating avoids degree blowup; Mechanical or LLM controllers",
+    "Promoted from an evals harness into the memory_recall tool"
+   ]
+  },
+  {
+   "id": "cortexN",
+   "g": "engine",
+   "x": 1420,
+   "y": 620,
+   "t": "cortex.py · CortexStore",
+   "s": "canonical personal facts",
+   "p": "pseudolife_memory/memory/cortex.py",
+   "d": [
+    "(entity, attribute) → ONE current value; supersede, never overwrite",
+    "Provenance tiers user > action > agent, + contender parking on conflict",
+    "dedup_siblings: paraphrase-cluster merge via union-find",
+    "Per-fact freshness_class (v23) · set-valued slots (v26) · asserted_at/age on recall",
+    "Aggregate-total guard on member adds; cortex_search groups sets, opt-in BM25 fusion ships off (0.12)"
+   ]
+  },
+  {
+   "id": "worldN",
+   "g": "engine",
+   "x": 1420,
+   "y": 730,
+   "t": "world_cortex.py",
+   "s": "external facts · cited",
+   "p": "pseudolife_memory/memory/world_cortex.py",
+   "d": [
+    "source_url + source_quote provenance on every record",
+    "freshness_class: evergreen / slow / volatile",
+    "Physically separate table — blast-radius isolation from personal cortex"
+   ]
+  },
+  {
+   "id": "lessonsN",
+   "g": "engine",
+   "x": 1420,
+   "y": 840,
+   "t": "lessons.py",
+   "s": "procedural do / avoid memory",
+   "p": "pseudolife_memory/memory/lessons.py",
+   "d": [
+    "Keyed (task-type, aspect); polarity + / −",
+    "Single-author: only the dream pass writes lessons",
+    "Fed by memory_outcome signals (append-only outcome_signals log)"
+   ]
+  },
+  {
+   "id": "freshnessN",
+   "g": "engine",
+   "x": 1420,
+   "y": 950,
+   "t": "freshness.py",
+   "s": "decay curves",
+   "p": "pseudolife_memory/memory/freshness.py",
+   "d": [
+    "effective_confidence() + is_stale() (> 2× TTL)",
+    "Single source of truth shared by ranking and display"
+   ]
+  },
+  {
+   "id": "compactionN",
+   "g": "engine",
+   "x": 1420,
+   "y": 1060,
+   "t": "compaction.py",
+   "s": "superseded-row GC",
+   "p": "pseudolife_memory/memory/compaction.py",
+   "d": [
+    "Duck-typed over cortex / world / lessons",
+    "Keeps newest per slot past min_age; rides EVERY sweep tick"
+   ]
+  },
+  {
+   "id": "configN",
+   "g": "engine",
+   "x": 1160,
+   "y": 1130,
+   "t": "utils/config.py",
+   "s": "AppConfig tree · YAML",
+   "p": "pseudolife_memory/utils/config.py",
+   "d": [
+    "~20 sub-configs; unknown YAML keys ignored",
+    "DSN resolved in service.py from PSEUDOLIFE_MCP_DATABASE_URL",
+    "No DSN → legacy file mode (.pt + ChromaDB under data_dir)"
+   ]
+  },
+  {
+   "id": "dream",
+   "g": "dream",
+   "x": 900,
+   "y": 1290,
+   "t": "dream.py",
+   "s": "extractor abstraction + sweep",
+   "p": "pseudolife_memory/memory/dream.py",
+   "d": [
+    "OpenAICompatExtractor: claims · lessons · relations · outcomes (stdlib urllib)",
+    "ExtractorError holds the cursor (outage) vs empty [] advances (genuine)",
+    "Batch retry ×3 → per-entry quarantine (poison-pill isolation)",
+    "run_sweep_once: compaction every tick; dream on backlog + quiescence",
+    "Claim op:add/remove routes to set members; the op prompt block itself stays held (measured KU-negative)"
+   ]
+  },
+  {
+   "id": "gcons",
+   "g": "dream",
+   "x": 900,
+   "y": 1400,
+   "t": "graph_consolidation.py",
+   "s": "deep dream · DB-free logic",
+   "p": "pseudolife_memory/memory/graph_consolidation.py",
+   "d": [
+    "Step A self-clean: rescore edges, hard violations, exact duplicates",
+    "Step B semantic candidates from mention-centroid vectors",
+    "junk_name_reason write-gate blocks garbage entity names"
+   ]
+  },
+  {
+   "id": "graphN",
+   "g": "dream",
+   "x": 1160,
+   "y": 1290,
+   "t": "graph.py",
+   "s": "NetworkX · derive-on-read",
+   "p": "pseudolife_memory/graph.py",
+   "d": [
+    "Closed relation vocabulary + fuzzy suggestions on miss",
+    "Transitive + inverse edges computed per read — never materialized"
+   ]
+  },
+  {
+   "id": "graphstore",
+   "g": "dream",
+   "x": 1160,
+   "y": 1400,
+   "t": "graph_store.py",
+   "s": "GraphStore over Postgres",
+   "p": "pseudolife_memory/memory/graph_store.py",
+   "d": [
+    "Writes to entities / edges tables; reads via graph.build_subgraph"
+   ]
+  },
+  {
+   "id": "relq",
+   "g": "dream",
+   "x": 1160,
+   "y": 1510,
+   "t": "relation_quality.py",
+   "s": "typing + edge confidence",
+   "p": "pseudolife_memory/memory/relation_quality.py",
+   "d": [
+    "infer_type: service / datastore / file / tool / person / concept…",
+    "edge_confidence 0.70 clean / 0.45 related-to / 0.175 violation",
+    "Shared by live writes AND the deep-dream self-clean pass"
+   ]
+  },
+  {
+   "id": "insight",
+   "g": "dream",
+   "x": 1420,
+   "y": 1290,
+   "t": "graph_insight.py",
+   "s": "communities · digest",
+   "p": "pseudolife_memory/memory/graph_insight.py",
+   "d": [
+    "Louvain (optional Leiden) + god nodes + surprising connections",
+    "build_digest → the session-start “unsure about” block"
+   ]
+  },
+  {
+   "id": "greview",
+   "g": "dream",
+   "x": 1420,
+   "y": 1400,
+   "t": "graph_review.py",
+   "s": "Atlas hygiene analyzer",
+   "p": "pseudolife_memory/memory/graph_review.py",
+   "d": [
+    "EXTRACTED / AMBIGUOUS / INFERRED provenance tags",
+    "Duplicates, orphans, dubious edges, test artifacts — read-only"
+   ]
+  },
+  {
+   "id": "extractor",
+   "g": "sidecar",
+   "x": 600,
+   "y": 1290,
+   "t": "extractor sidecar",
+   "s": "llama.cpp · Gemma-4 E4B QLoRA",
+   "p": "ops/Dockerfile.extractor",
+   "d": [
+    "OpenAI-compatible :8081 — compose-internal only, no host port",
+    "~5.3 GB Q4_K_M GGUF baked at build; --jinja --parallel 1",
+    "Swap weights via gitignored compose override — no rebuild",
+    "Disabled entirely in sonnet-only installs (profiles: disabled)"
+   ]
+  },
+  {
+   "id": "sonnet",
+   "g": "sidecar",
+   "x": 600,
+   "y": 1400,
+   "t": "Sonnet shim",
+   "s": "host · 127.0.0.1:8082",
+   "p": "evals/sonnet_shim.py",
+   "d": [
+    "Wraps the Max-plan claude CLI as an OpenAI-compatible endpoint",
+    "Task Scheduler AtLogOn autostart (install-shim-autostart)",
+    "Primary extractor in sonnet / sonnet-fallback modes"
+   ]
+  },
+  {
+   "id": "pgstorage",
+   "g": "storage",
+   "x": 1760,
+   "y": 620,
+   "t": "storage/postgres.py",
+   "s": "single-writer backend",
+   "p": "pseudolife_memory/storage/postgres.py",
+   "d": [
+    "One psycopg conn: autocommit reads + explicit _txn() writes",
+    "_txn COMMITTED check — no phantom RETURNING ids on a dead conn",
+    "Heal-on-next-use reconnect; ping() on a dedicated conn for /health"
+   ]
+  },
+  {
+   "id": "schemaN",
+   "g": "storage",
+   "x": 1760,
+   "y": 730,
+   "t": "storage/schema.py",
+   "s": "DDL · SCHEMA_META_VERSION 26",
+   "p": "pseudolife_memory/storage/schema.py",
+   "d": [
+    "pgvector required; Apache AGE fully removed",
+    "entries(vector 1024) · facts · world_facts · lessons · entities/edges · episodes · memory_traces · communities · outcome_signals · entity_kinds",
+    "Additive migrations: v23 fact freshness_class · v24 entity_kinds · v25 1024-d re-embed · v26 set-valued slots",
+    "One-current-row-per-slot partial unique indexes"
+   ]
+  },
+  {
+   "id": "syncN",
+   "g": "storage",
+   "x": 1760,
+   "y": 840,
+   "t": "storage/sync.py",
+   "s": "row ⇄ dataclass layer",
+   "p": "pseudolife_memory/storage/sync.py",
+   "d": [
+    "hydrate_* on startup; dirty-slot incremental sync per write",
+    "snapshot_* full rewrite for explicit save / flush / restore",
+    "Auto-links cortex subjects to graph entities"
+   ]
+  },
+  {
+   "id": "migrateN",
+   "g": "storage",
+   "x": 1760,
+   "y": 950,
+   "t": "storage/migrate.py",
+   "s": "legacy .pt import",
+   "p": "pseudolife_memory/storage/migrate.py",
+   "d": [
+    "Empty-bank-only, idempotent; weights_only=True (CWE-502 guard)",
+    "Renames sources *.pre-v8.bak — never deletes"
+   ]
+  },
+  {
+   "id": "pgN",
+   "g": "storage",
+   "x": 1760,
+   "y": 1090,
+   "t": "Postgres 16 + pgvector",
+   "s": "container · 127.0.0.1:5433 → 5432",
+   "p": "ops/Dockerfile.pg",
+   "d": [
+    "db pseudolife_memory, user pseudolife; host port 5433 dodges native PG",
+    "pg_isready healthcheck gates daemon start (depends_on healthy)",
+    "Similarity is computed in Python — no HNSW index by design"
+   ]
+  },
+  {
+   "id": "volbank",
+   "g": "storage",
+   "x": 1760,
+   "y": 1200,
+   "t": "vol · pseudolife-mcp-bank",
+   "s": "EXTERNAL volume · pg data",
+   "p": "ops/docker-compose.yml",
+   "d": [
+    "Pre-created, external: survives docker compose down -v",
+    "The 2026-06-11 bank-wipe incident is why this is external"
+   ]
+  },
+  {
+   "id": "volstate",
+   "g": "storage",
+   "x": 1760,
+   "y": 1310,
+   "t": "vol · pseudolife-mcp-state",
+   "s": "EXTERNAL volume · daemon /data",
+   "p": "ops/docker-compose.yml",
+   "d": [
+    "config.yaml, ChromaDB docs, snapshots, backups",
+    "Tarred by backup.ps1 alongside the pg_dump"
+   ]
+  },
+  {
+   "id": "chromaN",
+   "g": "storage",
+   "x": 1760,
+   "y": 1420,
+   "t": "ChromaDB",
+   "s": "reference-bank vectors",
+   "p": "(inside state volume)",
+   "d": [
+    "Persistent local vector store for the document RAG tier"
+   ]
+  },
+  {
+   "id": "install",
+   "g": "ops",
+   "x": 40,
+   "y": 1700,
+   "t": "install.ps1 / .sh",
+   "s": "one-shot idempotent installer",
+   "p": "ops/",
+   "d": [
+    "preflight → extractor mode → volumes → managed .env block",
+    "compose up --build → hooks → MCP registration → /health poll",
+    "Modes: sidecar / sonnet-fallback / sonnet-only (~9 GB lighter)"
+   ]
+  },
+  {
+   "id": "preflight",
+   "g": "ops",
+   "x": 300,
+   "y": 1700,
+   "t": "preflight",
+   "s": "read-only doctor",
+   "p": "ops/preflight.ps1",
+   "d": [
+    "Docker, Compose v2, ports 8765/5433, git, python3, client CLI",
+    "One exact fix line per failure; changes nothing"
+   ]
+  },
+  {
+   "id": "installhook",
+   "g": "ops",
+   "x": 560,
+   "y": 1700,
+   "t": "install-hook",
+   "s": "SessionStart hook wiring",
+   "p": "ops/install-hook.ps1",
+   "d": [
+    "Adds `pseudolife-mcp briefing --hook-json` to settings.json / hooks.json",
+    "Backs up the settings file first; strips obsolete episode hooks"
+   ]
+  },
+  {
+   "id": "shimauto",
+   "g": "ops",
+   "x": 820,
+   "y": 1700,
+   "t": "install-shim-autostart",
+   "s": "Sonnet shim task",
+   "p": "ops/install-shim-autostart.ps1",
+   "d": [
+    "Task Scheduler AtLogOn, console-less detached launch"
+   ]
+  },
+  {
+   "id": "update",
+   "g": "ops",
+   "x": 1080,
+   "y": 1700,
+   "t": "update.ps1 / .sh",
+   "s": "safe daemon-only redeploy",
+   "p": "ops/update.ps1",
+   "d": [
+    "backup → rollback tag <tag>-pre-update-<ts> → prune (keep 2)",
+    "compose up -d --no-deps --build pseudolife-daemon ONLY",
+    "Health poll; prints the exact rollback one-liner",
+    "Prunes the BuildKit cache after a healthy deploy (0.11 retention pass)"
+   ]
+  },
+  {
+   "id": "backup",
+   "g": "ops",
+   "x": 1340,
+   "y": 1700,
+   "t": "backup.ps1 / .sh",
+   "s": "pg_dump + state tar",
+   "p": "ops/backup.ps1",
+   "d": [
+    "gzip -9 in-container → data/backups/; 7-day rotation",
+    "Optional off-disk mirror with independent retention"
+   ]
+  },
+  {
+   "id": "restore",
+   "g": "ops",
+   "x": 1600,
+   "y": 1700,
+   "t": "restore.ps1 / .sh",
+   "s": "rehearsal-first restore",
+   "p": "ops/restore.ps1",
+   "d": [
+    "Default: scratch-DB rehearsal + row-count diff — zero writes",
+    "-Apply: safety dump → stop daemon → drop / create → restore → health"
+   ]
+  },
+  {
+   "id": "compose",
+   "g": "ops",
+   "x": 1860,
+   "y": 1700,
+   "t": "docker-compose.yml",
+   "s": "project pseudolife-mcp · 3 services",
+   "p": "ops/docker-compose.yml",
+   "d": [
+    "pg (5433→5432) · daemon (8765) · extractor (internal 8081)",
+    "Daemon depends_on pg healthy; extractor deliberately NOT depended on",
+    "TRUST_BIND=1 is safe: compose publishes loopback-only — the port publish is the security boundary",
+    "Override file: swap extractor GGUF or disable the sidecar (profiles)"
+   ]
+  },
+  {
+   "id": "ladder",
+   "g": "evals",
+   "x": 40,
+   "y": 1120,
+   "t": "ladder_sweep.py",
+   "s": "extractor ladder",
+   "p": "evals/ladder_sweep.py",
+   "d": [
+    "naive-rag → regex floor → e2b → e4b → qwen rungs",
+    "Isolated pseudolife_memory_bench DB — never the live bank",
+    "Picked the shipped guard / confidence-floor defaults"
+   ]
+  },
+  {
+   "id": "lme",
+   "g": "evals",
+   "x": 40,
+   "y": 1215,
+   "t": "LongMemEval bench",
+   "s": "flagship external eval",
+   "p": "evals/longmemeval_bench.py",
+   "d": [
+    "78-question knowledge-update subset; rag / cortex / hybrid arms + derived commit-gated cascade (0.12)",
+    "replicate.py: variance-aware — judge noise ≈ 7.7pp spread on single runs",
+    "Resumable JSONL + full bank dumps → offline retrieval sweeps"
+   ]
+  },
+  {
+   "id": "gate",
+   "g": "evals",
+   "x": 40,
+   "y": 1310,
+   "t": "regression_gate.ps1",
+   "s": "pre-commit retrieval gate",
+   "p": "evals/regression_gate.ps1",
+   "d": [
+    "Pinned replicated slice (10 replicates since 0.11) vs committed baseline; exit 1 = regression",
+    "Local + GPU — deliberately NOT wired into CI",
+    "Does not cover extraction: re-run the ladder for dream-path changes"
+   ]
+  },
+  {
+   "id": "distill",
+   "g": "evals",
+   "x": 40,
+   "y": 1405,
+   "t": "distillation pipeline",
+   "s": "teacher → QLoRA E4B",
+   "p": "evals/distill_*.py",
+   "d": [
+    "Imports the LIVE production prompt from dream.py — no drift possible",
+    "Sonnet / Qwen-27B teachers → clean → train → merge → GGUF",
+    "Output is the shipped extractor image — the one eval→prod build artifact"
+   ]
+  },
+  {
+   "id": "benches",
+   "g": "evals",
+   "x": 40,
+   "y": 1500,
+   "t": "subsystem benches",
+   "s": "lesson · relation · memcot · retention…",
+   "p": "evals/",
+   "d": [
+    "Each isolates one subsystem to settle a design decision",
+    "memcot_bench was promoted into the memory_recall tool",
+    "embedder_recall.py picked the v25 Qwen3 backbone (seven-arm shootout)",
+    "Overnight PS1 watchdogs sequence multi-hour unattended runs"
+   ]
+  },
+  {
+   "id": "pypi",
+   "g": "release",
+   "x": 1760,
+   "y": 60,
+   "t": "pyproject → PyPI",
+   "s": "pseudolife-mcp on PyPI",
+   "p": "pyproject.toml",
+   "d": [
+    "Console script pseudolife-mcp = pseudolife_memory.cli:main",
+    "Wheel ships the Console static assets; extras: nli / rerank / pdf / onnx"
+   ]
+  },
+  {
+   "id": "registry",
+   "g": "release",
+   "x": 1760,
+   "y": 155,
+   "t": "server.json",
+   "s": "MCP registry manifest",
+   "p": "server.json",
+   "d": [
+    "io.github.Pseudogiant-xr/pseudolife-mcp (namespace is case-sensitive)",
+    "Resolves to the PyPI package, stdio transport; version must match pyproject"
+   ]
+  },
+  {
+   "id": "market",
+   "g": "release",
+   "x": 1760,
+   "y": 250,
+   "t": "marketplace.json",
+   "s": "plugin marketplace",
+   "p": ".claude-plugin/marketplace.json",
+   "d": [
+    "Serves plugin/ straight from master — no publish step"
+   ]
+  },
+  {
+   "id": "ciN",
+   "g": "release",
+   "x": 1760,
+   "y": 345,
+   "t": "ci.yml",
+   "s": "GitHub Actions test suite",
+   "p": ".github/workflows/ci.yml",
+   "d": [
+    "~760 tests vs a real pgvector pg16 service; offline, CPU torch",
+    "Separate from evals/ — those never run in CI"
+   ]
+  },
+  {
+   "id": "relN",
+   "g": "release",
+   "x": 1760,
+   "y": 440,
+   "t": "release.yml",
+   "s": "PyPI Trusted Publishing",
+   "p": ".github/workflows/release.yml",
+   "d": [
+    "Tag == pyproject guard; OIDC, human-approved pypi environment"
+   ]
+  }
+ ],
+ "edges": [
+  {
+   "f": "cc",
+   "t": "shim",
+   "l": "stdio JSON-RPC",
+   "k": "data"
+  },
+  {
+   "f": "codex",
+   "t": "shim",
+   "l": "stdio",
+   "k": "data"
+  },
+  {
+   "f": "desktop",
+   "t": "shim",
+   "l": "stdio",
+   "k": "data"
+  },
+  {
+   "f": "cc",
+   "t": "api",
+   "l": "direct HTTP /mcp (optional)",
+   "k": "alt"
+  },
+  {
+   "f": "browser",
+   "t": "api",
+   "l": "/ui + /api · token or loopback gate",
+   "k": "data"
+  },
+  {
+   "f": "plugin",
+   "t": "hookstart",
+   "l": "registers",
+   "k": "control"
+  },
+  {
+   "f": "plugin",
+   "t": "hookend",
+   "l": "registers",
+   "k": "control"
+  },
+  {
+   "f": "plugin",
+   "t": "cmds",
+   "l": "provides",
+   "k": "control"
+  },
+  {
+   "f": "cmds",
+   "t": "mcpsrv",
+   "l": "drives memory_dream · memory_stats…",
+   "k": "data"
+  },
+  {
+   "f": "hookstart",
+   "t": "api",
+   "l": "GET /api/hook/session-start",
+   "k": "data"
+  },
+  {
+   "f": "hookend",
+   "t": "api",
+   "l": "POST /api/hook/session-end",
+   "k": "data"
+  },
+  {
+   "f": "briefingcli",
+   "t": "api",
+   "l": "GET /api/briefing",
+   "k": "data"
+  },
+  {
+   "f": "episodecli",
+   "t": "api",
+   "l": "legacy episode REST",
+   "k": "legacy"
+  },
+  {
+   "f": "cli",
+   "t": "shim",
+   "l": "(default mode)",
+   "k": "control"
+  },
+  {
+   "f": "cli",
+   "t": "daemon",
+   "l": "serve",
+   "k": "control"
+  },
+  {
+   "f": "shim",
+   "t": "api",
+   "l": "/mcp · fresh conn per call · X-PL-Session",
+   "k": "data"
+  },
+  {
+   "f": "shim",
+   "t": "daemon",
+   "l": "/health probe · spawn if down",
+   "k": "control"
+  },
+  {
+   "f": "daemon",
+   "t": "api",
+   "l": "composes ASGI app",
+   "k": "control"
+  },
+  {
+   "f": "daemon",
+   "t": "mcpsrv",
+   "l": "loops: durability · dream sweep · reaper",
+   "k": "control"
+  },
+  {
+   "f": "api",
+   "t": "mcpsrv",
+   "l": "forward /mcp",
+   "k": "data"
+  },
+  {
+   "f": "api",
+   "t": "routes",
+   "l": "/api/*",
+   "k": "data"
+  },
+  {
+   "f": "api",
+   "t": "sessionhook",
+   "l": "/api/hook/*",
+   "k": "data"
+  },
+  {
+   "f": "api",
+   "t": "consoleui",
+   "l": "serves /ui/ static",
+   "k": "data"
+  },
+  {
+   "f": "mcpsrv",
+   "t": "tiers",
+   "l": "tools/list filter",
+   "k": "control"
+  },
+  {
+   "f": "mcpsrv",
+   "t": "writer",
+   "l": "identity resolve",
+   "k": "control"
+  },
+  {
+   "f": "mcpsrv",
+   "t": "service",
+   "l": "35 tools → service.*",
+   "k": "data"
+  },
+  {
+   "f": "routes",
+   "t": "service",
+   "l": "REST → service.*",
+   "k": "data"
+  },
+  {
+   "f": "routes",
+   "t": "configio",
+   "l": "config get / patch",
+   "k": "data"
+  },
+  {
+   "f": "sessionhook",
+   "t": "service",
+   "l": "episode + active session + briefing",
+   "k": "data"
+  },
+  {
+   "f": "service",
+   "t": "embed",
+   "l": "encode",
+   "k": "data"
+  },
+  {
+   "f": "service",
+   "t": "cms",
+   "l": "store / retrieve",
+   "k": "data"
+  },
+  {
+   "f": "service",
+   "t": "cortexN",
+   "l": "_promote_slots · cortex_write",
+   "k": "data"
+  },
+  {
+   "f": "service",
+   "t": "worldN",
+   "l": "world_set (cited)",
+   "k": "data"
+  },
+  {
+   "f": "service",
+   "t": "lessonsN",
+   "l": "outcome signals",
+   "k": "data"
+  },
+  {
+   "f": "service",
+   "t": "episodes",
+   "l": "stamp · session leaf",
+   "k": "data"
+  },
+  {
+   "f": "service",
+   "t": "briefingN",
+   "l": "format_briefing",
+   "k": "data"
+  },
+  {
+   "f": "service",
+   "t": "recallN",
+   "l": "memory_recall",
+   "k": "data"
+  },
+  {
+   "f": "service",
+   "t": "refbank",
+   "l": "document ingest / search",
+   "k": "data"
+  },
+  {
+   "f": "service",
+   "t": "dream",
+   "l": "dream_run · sweep tick",
+   "k": "data"
+  },
+  {
+   "f": "service",
+   "t": "insight",
+   "l": "digest refresh",
+   "k": "data"
+  },
+  {
+   "f": "cms",
+   "t": "bands",
+   "l": "band[0] + promotion walk",
+   "k": "data"
+  },
+  {
+   "f": "cms",
+   "t": "contradiction",
+   "l": "pre-gate detection",
+   "k": "data"
+  },
+  {
+   "f": "cms",
+   "t": "bm25",
+   "l": "lexical pool",
+   "k": "data"
+  },
+  {
+   "f": "cms",
+   "t": "slotsN",
+   "l": "slot pool + index",
+   "k": "data"
+  },
+  {
+   "f": "cms",
+   "t": "reranker",
+   "l": "top-N rerank",
+   "k": "data"
+  },
+  {
+   "f": "cms",
+   "t": "pgstorage",
+   "l": "write-through entries",
+   "k": "data"
+  },
+  {
+   "f": "cms",
+   "t": "syncN",
+   "l": "hydrate at startup",
+   "k": "control"
+  },
+  {
+   "f": "contradiction",
+   "t": "nliN",
+   "l": "optional 4th path",
+   "k": "alt"
+  },
+  {
+   "f": "cortexN",
+   "t": "hlcN",
+   "l": "HLC tie-break",
+   "k": "control"
+  },
+  {
+   "f": "cortexN",
+   "t": "syncN",
+   "l": "dirty-slot sync",
+   "k": "data"
+  },
+  {
+   "f": "worldN",
+   "t": "syncN",
+   "l": "dirty-slot sync",
+   "k": "data"
+  },
+  {
+   "f": "lessonsN",
+   "t": "syncN",
+   "l": "dirty-slot sync",
+   "k": "data"
+  },
+  {
+   "f": "worldN",
+   "t": "freshnessN",
+   "l": "decay at read",
+   "k": "data"
+  },
+  {
+   "f": "lessonsN",
+   "t": "briefingN",
+   "l": "avoid-first lessons",
+   "k": "data"
+  },
+  {
+   "f": "compactionN",
+   "t": "cortexN",
+   "l": "superseded GC",
+   "k": "data"
+  },
+  {
+   "f": "recallN",
+   "t": "graphstore",
+   "l": "hop expansion",
+   "k": "data"
+  },
+  {
+   "f": "refbank",
+   "t": "chromaN",
+   "l": "vectors",
+   "k": "data"
+  },
+  {
+   "f": "insight",
+   "t": "briefingN",
+   "l": "unsure-about digest",
+   "k": "data"
+  },
+  {
+   "f": "insight",
+   "t": "graphstore",
+   "l": "communities persist",
+   "k": "data"
+  },
+  {
+   "f": "dream",
+   "t": "extractor",
+   "l": "POST /v1/chat/completions (fallback)",
+   "k": "data"
+  },
+  {
+   "f": "dream",
+   "t": "sonnet",
+   "l": "primary · host.docker.internal:8082",
+   "k": "data"
+  },
+  {
+   "f": "dream",
+   "t": "cortexN",
+   "l": "claims → facts",
+   "k": "data"
+  },
+  {
+   "f": "dream",
+   "t": "lessonsN",
+   "l": "lessons + inferred outcomes",
+   "k": "data"
+  },
+  {
+   "f": "dream",
+   "t": "graphstore",
+   "l": "relations → edges",
+   "k": "data"
+  },
+  {
+   "f": "dream",
+   "t": "gcons",
+   "l": "deep-dream steps",
+   "k": "data"
+  },
+  {
+   "f": "gcons",
+   "t": "graphstore",
+   "l": "merge / link proposals",
+   "k": "data"
+  },
+  {
+   "f": "greview",
+   "t": "graphstore",
+   "l": "hygiene report (read-only)",
+   "k": "control"
+  },
+  {
+   "f": "relq",
+   "t": "gcons",
+   "l": "edge confidence",
+   "k": "control"
+  },
+  {
+   "f": "graphstore",
+   "t": "graphN",
+   "l": "derive-on-read",
+   "k": "data"
+  },
+  {
+   "f": "graphstore",
+   "t": "pgstorage",
+   "l": "entities / edges",
+   "k": "data"
+  },
+  {
+   "f": "syncN",
+   "t": "pgstorage",
+   "l": "row ⇄ dataclass",
+   "k": "data"
+  },
+  {
+   "f": "pgstorage",
+   "t": "schemaN",
+   "l": "ensure_schema at start",
+   "k": "control"
+  },
+  {
+   "f": "pgstorage",
+   "t": "pgN",
+   "l": "DSN pseudolife-pg:5432",
+   "k": "data"
+  },
+  {
+   "f": "migrateN",
+   "t": "pgstorage",
+   "l": ".pt import (empty bank only)",
+   "k": "legacy"
+  },
+  {
+   "f": "pgN",
+   "t": "volbank",
+   "l": "data dir",
+   "k": "data"
+  },
+  {
+   "f": "chromaN",
+   "t": "volstate",
+   "l": "persisted in /data",
+   "k": "data"
+  },
+  {
+   "f": "daemon",
+   "t": "volstate",
+   "l": "/data · config · snapshots",
+   "k": "control"
+  },
+  {
+   "f": "configN",
+   "t": "service",
+   "l": "AppConfig",
+   "k": "control"
+  },
+  {
+   "f": "compose",
+   "t": "pgN",
+   "l": "runs",
+   "k": "deploy"
+  },
+  {
+   "f": "compose",
+   "t": "daemon",
+   "l": "runs · depends_on pg healthy",
+   "k": "deploy"
+  },
+  {
+   "f": "compose",
+   "t": "extractor",
+   "l": "runs (no depends_on)",
+   "k": "deploy"
+  },
+  {
+   "f": "install",
+   "t": "preflight",
+   "l": "step 1",
+   "k": "deploy"
+  },
+  {
+   "f": "install",
+   "t": "compose",
+   "l": "up -d --build",
+   "k": "deploy"
+  },
+  {
+   "f": "install",
+   "t": "installhook",
+   "l": "hook wiring",
+   "k": "deploy"
+  },
+  {
+   "f": "install",
+   "t": "shimauto",
+   "l": "autostart",
+   "k": "deploy"
+  },
+  {
+   "f": "installhook",
+   "t": "briefingcli",
+   "l": "wires settings.json hook",
+   "k": "deploy"
+  },
+  {
+   "f": "shimauto",
+   "t": "sonnet",
+   "l": "AtLogOn task",
+   "k": "deploy"
+  },
+  {
+   "f": "update",
+   "t": "backup",
+   "l": "backup first",
+   "k": "deploy"
+  },
+  {
+   "f": "update",
+   "t": "compose",
+   "l": "--no-deps rebuild daemon",
+   "k": "deploy"
+  },
+  {
+   "f": "restore",
+   "t": "backup",
+   "l": "safety dump first",
+   "k": "deploy"
+  },
+  {
+   "f": "backup",
+   "t": "pgN",
+   "l": "pg_dump in-container",
+   "k": "deploy"
+  },
+  {
+   "f": "distill",
+   "t": "extractor",
+   "l": "fine-tuned GGUF baked into image",
+   "k": "dev"
+  },
+  {
+   "f": "gate",
+   "t": "lme",
+   "l": "3-stage gate vs baseline",
+   "k": "dev"
+  },
+  {
+   "f": "lme",
+   "t": "service",
+   "l": "drives library vs bench DB",
+   "k": "dev"
+  },
+  {
+   "f": "ladder",
+   "t": "dream",
+   "l": "same extractor path / prompts",
+   "k": "dev"
+  },
+  {
+   "f": "market",
+   "t": "plugin",
+   "l": "serves plugin/",
+   "k": "control"
+  },
+  {
+   "f": "registry",
+   "t": "pypi",
+   "l": "resolves package",
+   "k": "control"
+  },
+  {
+   "f": "relN",
+   "t": "pypi",
+   "l": "OIDC publish",
+   "k": "deploy"
+  }
+ ],
+ "flows": {
+  "store": {
+   "name": "store",
+   "desc": "memory_store: Claude Code → shim → /mcp → MemoryService → embed → CMS (contradiction check BEFORE the surprise gate) → band[0] + slot index → regex slot promotion into the cortex → write-through to Postgres.",
+   "seq": [
+    "cc>shim",
+    "shim>api",
+    "api>mcpsrv",
+    "mcpsrv>service",
+    "service>embed",
+    "service>cms",
+    "cms>contradiction",
+    "cms>bands",
+    "cms>slotsN",
+    "service>cortexN",
+    "cms>pgstorage"
+   ]
+  },
+  "recall": {
+   "name": "search / recall",
+   "desc": "memory_search & memory_recall: query embedded, then a 5-pool merge — neural bands + slot index + optional BM25 + reference bank + optional cross-encoder rerank. memory_recall wraps it in an iterative graph-hop loop.",
+   "seq": [
+    "cc>shim",
+    "shim>api",
+    "api>mcpsrv",
+    "mcpsrv>service",
+    "service>embed",
+    "service>cms",
+    "cms>bm25",
+    "cms>slotsN",
+    "cms>reranker",
+    "service>refbank",
+    "service>recallN",
+    "recallN>graphstore"
+   ]
+  },
+  "dream": {
+   "name": "dream",
+   "desc": "The consolidation cycle: daemon sweep tick → compaction always, dream on backlog + quiescence → extractor LLM (Sonnet shim primary / sidecar fallback) → claims to cortex, lessons, relations to graph → insight digest refresh.",
+   "seq": [
+    "daemon>mcpsrv",
+    "mcpsrv>service",
+    "service>dream",
+    "dream>sonnet",
+    "dream>extractor",
+    "dream>cortexN",
+    "dream>lessonsN",
+    "dream>graphstore",
+    "service>insight",
+    "compactionN>cortexN"
+   ]
+  },
+  "briefing": {
+   "name": "briefing",
+   "desc": "SessionStart: plugin hook curls /api/hook/session-start → identity tier-3 registration + episode handle → briefing markdown assembled from graph digest, avoid-first lessons, fresh world facts, and the last episode recap.",
+   "seq": [
+    "hookstart>api",
+    "api>sessionhook",
+    "sessionhook>service",
+    "service>episodes",
+    "service>briefingN",
+    "insight>briefingN",
+    "lessonsN>briefingN",
+    "worldN>freshnessN"
+   ]
+  },
+  "console": {
+   "name": "console",
+   "desc": "Cortex Console: browser loads the SPA from /ui/, then REST-only calls through the auth gate into the hand-enumerated route table — no generic tool proxy exists for the browser surface.",
+   "seq": [
+    "browser>api",
+    "api>consoleui",
+    "api>routes",
+    "routes>service",
+    "routes>configio"
+   ]
+  },
+  "deploy": {
+   "name": "deploy",
+   "desc": "Lifecycle: install (preflight → compose up → hooks). Updates are daemon-only: backup → rollback tag → --no-deps rebuild → health poll. The distilled E4B model is the one eval artifact baked into a shipped image.",
+   "seq": [
+    "install>preflight",
+    "install>compose",
+    "update>backup",
+    "update>compose",
+    "compose>daemon",
+    "distill>extractor"
+   ]
+  }
+ }
+}
