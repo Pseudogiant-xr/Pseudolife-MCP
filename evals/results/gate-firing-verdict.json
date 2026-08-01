@@ -1,0 +1,75 @@
+{
+  "verdict": "gate-firing-at-scale",
+  "date": "2026-08-02",
+  "question": "How often does the literal-faithfulness gate fire on real extractions at scale, and does the batch-scope default hold up against the stricter source-only scope?",
+  "context": "The gate shipped default `log` because it never fired on any measured bench arm (evals/results/literal-fidelity-verdict.json): every bench corpus was small and saturated. This run measures firing rates over LongMemEval non-KU haystack sessions in the production note shape, with every claim checked under both corpus scopes. KU haystack sessions are excluded (same guard as distill_datagen) so every KU eval stays clean.",
+  "code": {
+    "probe": "evals/gate_firing_probe.py",
+    "commit": "fc3e303e",
+    "gate_helpers": "pseudolife_memory/memory/dream.py hard_literals/literal_violations (shipped, schema-v27 master a6c2c3c7)"
+  },
+  "commands": [
+    "PYTHONPATH=. python evals/gate_firing_probe.py --out-tag arm1 --limit-sessions 400",
+    "PYTHONPATH=. python evals/gate_firing_probe.py --extractor-url http://127.0.0.1:1234/v1 --model teacher --out-tag qwen-27b --limit-sessions 150"
+  ],
+  "server_note": "Unjudged probe: fast (TurboQuant) server config acceptable for the 27B teacher arm per evals/qwen_server.ps1 policy; the arm1 arm ran against the deployed sidecar GGUF at :8081. No verdict here depends on bit-reproducibility.",
+  "results": {
+    "arm1_deployed_sidecar": {
+      "artifact": "evals/results/gate-firing-arm1.json",
+      "sessions": 399,
+      "claims": 1125,
+      "claims_with_gateable_literals": 249,
+      "flagged_batch": 12,
+      "flagged_batch_share_of_gateable": 0.0482,
+      "flagged_source_only": 29,
+      "source_only_share_of_gateable": 0.1165
+    },
+    "qwen_27b_teacher": {
+      "artifact": "evals/results/gate-firing-qwen-27b.json",
+      "sessions": 147,
+      "claims": 994,
+      "claims_with_gateable_literals": 241,
+      "flagged_batch": 5,
+      "flagged_batch_share_of_gateable": 0.0207,
+      "flagged_source_only": 8,
+      "source_only_share_of_gateable": 0.0332
+    }
+  },
+  "flag_triage": {
+    "method": "All 17 batch-scope flags across both arms inspected by hand against the recorded violation tokens.",
+    "normalization_gaps": {
+      "count": 15,
+      "classes": {
+        "tilde_approximation": ["~1", "~2", "~2", "~3", "~4", "~1", "~2"],
+        "hyphenated_range_or_compound": ["3-tier", "1-3", "3-week", "0-100", "0-4294967295"],
+        "plus_suffix": ["2+", "3+"],
+        "hyphenated_unit_vs_bare_digit": ["66 (vs '66-acre'; bare digits get no substring match by design)"],
+        "self_referential_note_index": ["12 ('see note 12' cites the claim's own source numbering)"]
+      },
+      "note": "These are the gate's tokenizer failing to normalize the extractor's legitimate re-formatting ('about two weeks' -> '~2 weeks', '1 to 3' -> '1-3'), not fabricated values."
+    },
+    "genuinely_suspicious": {
+      "count": 2,
+      "cases": [
+        "'10' in a 3-tier taxonomy claim (sharegpt_Qga4bRp_0) — plausibly a derived category count never stated as one number",
+        "'11000' in a program-budget claim (sharegpt_rKxzzvF_0) — $11,000 total summed from stated line items; the derived-sum class the design doc predicted"
+      ]
+    }
+  },
+  "findings": [
+    "The batch-scope default is empirically vindicated: strict source-only scope would drop 2.4x (arm1) to 1.6x (qwen) MORE claims than batch scope, and the batch flags themselves are ~88% normalization gaps.",
+    "Firing rate tracks extractor quality in the expected direction (teacher 2.1% vs distilled sidecar 4.8% of gateable claims), consistent with the gate detecting real re-formatting/derivation pressure rather than uniform noise.",
+    "True fabrication rate under batch scope is at most 2/490 gateable claims (~0.4%) across both arms; both suspicious cases are derived aggregates, not invented literals."
+  ],
+  "decision": {
+    "default_mode": "log (unchanged)",
+    "default_scope": "batch (unchanged, now evidence-backed)",
+    "enforce": "NOT enabled. At current normalization coverage, enforce would drop ~4.8% of the sidecar's gateable claims, of which ~5 in 6 are legitimate. Precondition for reconsidering enforce: extend _norm_literal to handle tilde approximations (~N), plus-suffixes (N+), and hyphenated compounds/ranges (A-B vs 'A to B' / 'N-unit'), then re-run this probe and require the batch firing rate to be dominated by the derived-aggregate class."
+  },
+  "caveats": [
+    "arm1 here is the DEPLOYED sidecar GGUF (per the live compose override), not the 2026-07-06 ladder rung GGUF — firing rates are not attributable to the historical rung.",
+    "Sonnet is the primary production extractor; both probed extractors are the local sidecar path. Sonnet firing rates are unmeasured.",
+    "Session counts differ per arm (399 vs 147) because the teacher arm is ~3x slower per session; shares-of-gateable are the comparable quantity.",
+    "One arm1 and three qwen sessions failed JSON parsing and are excluded from all denominators (recorded in each artifact's `failures`)."
+  ]
+}
