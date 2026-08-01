@@ -8,14 +8,16 @@ exactly; they exist because each one was violated at least once.
 1. **CHANGELOG.md entry under `[Unreleased]`** — every behavior, schema, or
    perf change gets one, in the existing dated-subsection style. Docs-only and
    test-only changes are exempt.
-2. **Schema bumps** touch four places together: `SCHEMA_META_VERSION` in
+2. **Schema bumps** touch five places together: `SCHEMA_META_VERSION` in
    `pseudolife_memory/storage/schema.py`, the doc mentions (README
    capabilities table + the DSN row and version-history table in
    `docs/guide/configuration.md` — pinned by `tests/test_release_ux.py`),
    the version-pin tests (`test_schema_v13.py`, `test_schema_v16.py`,
    `test_temporal_stamp.py`, plus a new `test_schema_vNN.py` for the
-   addition itself), and a CHANGELOG mention of `vNN` (pinned by
-   `test_release_ux.py`).
+   addition itself), a CHANGELOG mention of `vNN` (pinned by
+   `test_release_ux.py`), and `docs/atlas/atlas.json` `meta.schema`
+   (pinned by `tests/test_atlas_currency.py` — re-verify the affected
+   storage cards, don't just renumber).
 3. **Full suite before commit** — `HF_HUB_OFFLINE=1 python -m pytest tests/`
    with the bench Postgres up (127.0.0.1:5433); PG-backed tests skip silently
    without it, which is not a pass.

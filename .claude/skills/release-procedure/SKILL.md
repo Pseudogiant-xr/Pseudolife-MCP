@@ -1,6 +1,6 @@
 ---
 name: release-procedure
-description: Use when cutting a release or publishing anything to a public surface — GitHub release, PyPI, the MCP registry, or the Claude Code plugin marketplace. Covers the docs currency pass, the five-file version cut, build/inspect, the Trusted Publishing + registry automation, and verification.
+description: Use when cutting a release or publishing anything to a public surface — GitHub release, PyPI, the MCP registry, or the Claude Code plugin marketplace. Covers the docs currency pass, the six-file version cut, build/inspect, the Trusted Publishing + registry automation, and verification.
 ---
 
 # Release / publish procedure (four public surfaces)
@@ -50,13 +50,16 @@ all serve from this repo; a release touches them in this order (first done
    docs/runbooks, ops/.env.example comments. The README is the PyPI
    description, so its fixes only reach PyPI at the next version.
 
-1. **Version cut touches five files together**: the CHANGELOG (`## [N.N.N]`
+1. **Version cut touches six files together**: the CHANGELOG (`## [N.N.N]`
    header over `[Unreleased]` — one fragile line; the tag↔section guard test
    exists because an adjacent edit once deleted it silently), `pyproject.toml`,
    the compose daemon image tag, **both** version fields in `server.json`,
-   and `plugin/.claude-plugin/plugin.json` (pinned to pyproject by
+   `plugin/.claude-plugin/plugin.json` (pinned to pyproject by
    `tests/test_plugin_packaging.py`; the plugin marketplace serves from
-   this repo, so bumping it is also what ships plugin updates).
+   this repo, so bumping it is also what ships plugin updates), and
+   `docs/atlas/atlas.json` `meta` (pinned by `tests/test_atlas_currency.py`;
+   re-verify the map's claims, don't just renumber it — update
+   `meta.verified` to the date you actually checked).
    Tag `vN.N.N` at the exact commit the artifacts build from.
 2. **Build + inspect before upload**: `python -m build`, `twine check dist/*`,
    then open the wheel — Console static assets present (33 files under
