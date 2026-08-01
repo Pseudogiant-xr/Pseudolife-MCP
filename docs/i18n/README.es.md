@@ -1,8 +1,8 @@
-<!-- i18n-sync: v6 -->
+<!-- i18n-sync: v7 -->
 
 # Pseudolife-MCP
 
-> Traducción del [README](../../README.md) canónico — sincronizado: v6 (2026-07-29)
+> Traducción del [README](../../README.md) canónico — sincronizado: v7 (2026-08-01)
 
 **Memoria persistente a largo plazo para Claude Code, Codex y otros clientes MCP.**
 
@@ -18,8 +18,9 @@ Lo que obtienes:
   con detección de contradicciones y sustitución: las correcciones
   reemplazan las respuestas antiguas en lugar de acumularse junto a ellas.
 - **Hechos canónicos, no intuiciones** — un único valor *actual* por cada
-  slot `entity.attribute`; las correcciones sustituyen en lugar de
-  sobrescribir en silencio, y se conserva el historial completo de
+  slot `entity.attribute` (o un conjunto de miembros, para los slots que
+  contienen muchos valores simultáneos); las correcciones sustituyen en
+  lugar de sobrescribir en silencio, y se conserva el historial completo de
   versiones.
 - **Sueños** — mientras estás fuera, un extractor consolida el flujo de
   memoria en hechos canónicos y un grafo de conocimiento.

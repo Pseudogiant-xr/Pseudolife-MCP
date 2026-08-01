@@ -35,3 +35,19 @@ def test_yaml_overrides(tmp_path):
     cfg = load_config(p)
     assert cfg.memory.recency_base_half_life_s == 86400
     assert cfg.memory.meta_filter.enabled is False
+
+
+def test_yaml_memory_block_omitted_keys_keep_dataclass_defaults(tmp_path):
+    """The loader hand-rolls MemoryConfig with literal fallbacks; each one
+    must mirror the dataclass default, or a config.yaml that has a memory:
+    block but omits a key silently runs a different value than a config
+    with no file at all. Found live 2026-08-01: the surprise_threshold
+    fallback said 0.3 while the dataclass (and the docs) say 0.0."""
+    p = tmp_path / "config.yaml"
+    p.write_text("memory:\n  top_k: 8\n")
+    loaded = load_config(p).memory
+    defaults = MemoryConfig()
+    for field in ("embedding_dim", "surprise_threshold", "top_k",
+                  "ref_top_k", "save_dir", "hide_superseded",
+                  "search_confidence_floor", "recency_base_half_life_s"):
+        assert getattr(loaded, field) == getattr(defaults, field), field

@@ -1,8 +1,8 @@
-<!-- i18n-sync: v6 -->
+<!-- i18n-sync: v7 -->
 
 # Pseudolife-MCP
 
-[README original em inglês](../../README.md) — sincronizado: v6 (2026-07-29)
+[README original em inglês](../../README.md) — sincronizado: v7 (2026-08-01)
 
 **Memória de longo prazo persistente para Claude Code, Codex e outros clientes MCP.**
 
@@ -18,8 +18,10 @@ O que você ganha:
   com detecção de contradição e supersessão: correções substituem
   respostas antigas em vez de se acumularem ao lado delas.
 - **Fatos canônicos, não achismos** — um valor *atual* por slot
-  `entity.attribute`; correções fazem supersessão em vez de sobrescrever
-  silenciosamente, e o histórico completo de versões é preservado.
+  `entity.attribute` (ou um conjunto de membros, para slots que armazenam
+  muitos valores simultâneos); correções fazem supersessão em vez de
+  sobrescrever silenciosamente, e o histórico completo de versões é
+  preservado.
 - **Sonhos** — enquanto você está fora, um extrator consolida o fluxo de
   memória em fatos canônicos e em um grafo de conhecimento.
 - **Lições do próprio trabalho** — sucessos, becos sem saída e suas

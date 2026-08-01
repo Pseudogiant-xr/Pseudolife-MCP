@@ -336,3 +336,35 @@ def test_every_release_tag_has_a_changelog_section() -> None:
     assert missing == [], (
         f"release tags without a '## [N.N.N]' CHANGELOG section: {missing} "
         f"— a later edit likely overwrote the header line")
+
+
+def test_docs_tool_tier_counts_match_code() -> None:
+    """Every prose site stating the per-tier tool counts must match the
+    registered surface. The three literals went stale silently when the
+    set-slot pair landed (7/20/33 vs the real 9/22/35) because only the
+    code side was pinned — this closes the doc side of the class."""
+    import pseudolife_memory.mcp_server as srv
+
+    ranks = {"minimal": 0, "core": 1, "full": 2}
+    counts = {
+        tier: sum(1 for t in srv._TOOL_TIERS.values()
+                  if ranks[t] <= ranks[tier])
+        for tier in ranks
+    }
+    sites = [
+        _README,
+        _DOCS_GUIDE / "configuration.md",
+        _README.parent / "ops" / ".env.example",
+        _README.parent / "ops" / "docker-compose.yml",
+    ]
+    pat = re.compile(
+        r"[\"`']?minimal[\"`']?\s*\((\d+)[^)]*\).*?"
+        r"[\"`']?core[\"`']?\s*\((\d+).*?"
+        r"[\"`']?full[\"`']?\s*\(\D*(\d+)\)", re.S)
+    for site in sites:
+        text = site.read_text(encoding="utf-8")
+        m = pat.search(text)
+        assert m, f"{site.name}: expected a minimal/core/full tier-count triple"
+        got = tuple(int(g) for g in m.groups())
+        want = (counts["minimal"], counts["core"], counts["full"])
+        assert got == want, f"{site.name} states tiers {got}, code has {want}"

@@ -18,7 +18,8 @@ RECALL — at the start of any task:
   heed `polarity:-` dead-ends.
 - `memory_fact_get(entity, attribute)` for one canonical value. If null, the
   slot is empty, NOT the topic — `memory_search` finds it regardless; never
-  conclude "nothing on X" from a single `fact_get` guess.
+  conclude "nothing on X" from a single `fact_get` guess. A set-valued slot
+  returns `{kind: "set", members, removed}` instead of one value.
 - `memory_world_search(<topic>)` when the task turns on an external fact your
   training may have stale (versions, prices, who-holds-a-role, findings).
 - `memory_recall(<question>)` when the answer needs multi-hop chaining across
@@ -61,6 +62,11 @@ CAPTURE — as durable things arise (one claim per call):
   search can scope its results.
 - `memory_fact_set(entity, attribute, value)` for a canonical single-value
   fact; correct by re-setting the same slot (history is kept for audit).
+- `memory_set_add(entity, attribute, member)` / `memory_set_remove` when a
+  slot holds MANY concurrent values (bikes owned, pending tasks) — the first
+  add converts a scalar slot one-way; `memory_fact_set` on a set slot
+  errors and tells you so. Number-led scalars ("32", "$1,500") are
+  protected: an add there parks as a contender instead of converting.
 - `memory_world_set(entity, attribute, value, source_url=, source_quote=)`
   for any EXTERNAL fact you verified via web/docs — route research findings
   here (cited), not into plain `memory_store`.

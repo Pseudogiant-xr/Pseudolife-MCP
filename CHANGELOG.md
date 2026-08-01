@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-08-01 — set-valued memory, and the measurements that earned it
+
+### Fixed (2026-08-01 — YAML loader ran the surprise gate at 0.3 when the key was omitted)
+- **A `config.yaml` with a `memory:` block but no `surprise_threshold` key
+  silently ran the store gate at 0.3 instead of the documented (and
+  dataclass-default) permissive 0.0** — the loader's hand-rolled fallback
+  literal had drifted from the dataclass. The fallback now mirrors the
+  default, and a guard test pins every hand-rolled fallback in that block
+  against the dataclass so the class of drift stays closed
+  (`test_yaml_memory_block_omitted_keys_keep_dataclass_defaults`). Found
+  during the 0.12.0 docs currency pass; deployments whose config file
+  omits the key will store near-duplicate entries again (the documented
+  behavior — the surprise gate remains available by setting the key).
+
 ### Added (2026-08-01 — count-exclusion op prompt: the reserve rule measured, and it works)
 - **The reserve prompt rule named by the guard verdict — `op` never applies
   to counts/totals/quantities — was built and gated, and it repairs the op

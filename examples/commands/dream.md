@@ -13,10 +13,15 @@ Run a dream pass over the Pseudolife-MCP bank:
    facts as `(entity, attribute, value)`. Skip narrative, in-progress work, and
    superseded states. Reuse existing slot keys where they fit.
 4. Write each with `memory_fact_set` (origin `user` only for things the human
-   stated; otherwise `agent`).
+   stated; otherwise `agent`). If the fact is a MEMBER of a set the user
+   maintains (bikes owned, pending tasks), use `memory_set_add` /
+   `memory_set_remove` instead — `memory_fact_set` on a set-valued slot
+   errors and names the right tool.
 5. Call `memory_dream(action="commit", cursor=<newest timestamp from the pull>)`.
-6. Report inserted / confirmed / contested counts. Surface any `contested`
-   results to the user — those are conflicts to settle, not silent overwrites.
+6. Report inserted / confirmed / contested / member-add counts. Surface any
+   `contested` results to the user — those are conflicts to settle, not
+   silent overwrites (an add onto a number-led scalar parks as a contender
+   by design; `member_capped` means the 100-member cap was hit).
 
 ## Deep mode (`/dream deep`)
 

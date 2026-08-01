@@ -1,4 +1,4 @@
-<!-- i18n-source: v6 (2026-07-29) — canonical English text for the translated
+<!-- i18n-source: v7 (2026-08-01) — canonical English text for the translated
      front doors in this directory. Translators: keep every fenced code block
      byte-identical (commands are never translated); keep "Pseudolife-MCP",
      "Claude Code", "Codex", "MCP", "Cortex Console", and tool names like
@@ -23,7 +23,8 @@ What you get:
   supersession: corrections replace old answers instead of piling up
   beside them.
 - **Canonical facts, not vibes** — one *current* value per
-  `entity.attribute` slot; corrections supersede rather than silently
+  `entity.attribute` slot (or a member set, for slots that hold many
+  concurrent values); corrections supersede rather than silently
   overwrite, and the full version history survives.
 - **Dreams** — while you're away, an extractor consolidates the memory
   stream into canonical facts and a knowledge graph.

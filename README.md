@@ -27,7 +27,8 @@ What you get:
   continuum from `working` to `forever`, ranked by hybrid dense-plus-lexical
   similarity, with contradiction detection and supersession.
 - **Canonical facts, not vibes** — one *current* value per `entity.attribute`
-  slot; corrections supersede rather than silently overwrite, and the full
+  slot (or a member set, for slots that hold many concurrent values);
+  corrections supersede rather than silently overwrite, and the full
   version history survives.
 - **Dreams** — a bundled extractor (or Claude Sonnet via your Max plan)
   consolidates the memory stream into facts and a knowledge graph while
@@ -125,8 +126,8 @@ It layers several complementary stores: the **associative continuum** (an
 8-tier embedding store, working → forever, ranked by cosine similarity fused
 with a BM25 lexical pool (on by default), with contradiction detection and
 supersession); the **cortex** (slot-keyed canonical facts — one *current*
-value per `entity.attribute` — with provenance tiers and contender parking
-instead of silent overwrites); a typed **knowledge graph** over those facts
+value per `entity.attribute`, or a member set for set-valued slots — with
+provenance tiers and contender parking instead of silent overwrites); a typed **knowledge graph** over those facts
 with a closed relation vocabulary and on-read inference; the **world
 cortex** (durable *cited* facts about external reality, age-decayed trust);
 **procedural lessons** learned from the agent's own work; and a ChromaDB
@@ -160,8 +161,8 @@ Plus [`evals/README.md`](evals/README.md) (full benchmark methodology) and
 
 ## Tools exposed
 
-The surface was consolidated 2026-07-02 (55 → 32 tools; now 33 with
-`memory_toolset`): lifecycle families became verb-dispatched tools
+The surface was consolidated 2026-07-02 (55 → 32 tools; now 35 with
+`memory_toolset` and the set-slot pair): lifecycle families became verb-dispatched tools
 (`memory_dream`, `memory_forget`, `memory_graph_review`), and
 dump/introspection views moved to the Cortex Console (REST) — the manifest
 is agent context every session, so it stays lean.
@@ -175,7 +176,7 @@ is agent context every session, so it stays lean.
 | `memory_forget(scope, ...)` | Hard-delete from one store: `memory` (by text/substring/source/episode/tag), `fact`, `world`, or `lesson` (by entity/attribute) |
 | `memory_stats()` | Per-band sizes, hit rates, totals |
 | `memory_get(entry_id)` / `memory_reinforce(entry_id)` | Dereference a memory id to its full episode (+ `consolidated_into`); reinforce it after finding it useful |
-| `memory_fact_get(entity, attribute)` | The one CURRENT canonical value at a slot (+ parked contenders); on an empty slot returns ranked `candidates` (same-entity, then similar slots) |
+| `memory_fact_get(entity, attribute)` | The one CURRENT canonical value at a slot (+ parked contenders); on an empty slot returns ranked `candidates` (same-entity, then similar slots); aged/contested facts carry a ready-made `correct_with` call (as do `memory_search` / `memory_world_search` hits) |
 | `memory_fact_set(entity, attribute, value, origin?, confidence?, episode?, freshness_class?)` | Assert a canonical fact deliberately (insert / confirm / supersede / contest); `freshness_class` (`auto` default) says how fast the slot rots — `auto` infers it from the entity's kind |
 | `memory_fact_resolve(entity, attribute, accept)` | Settle a contested slot — adopt (`true`) or discard (`false`) the contender |
 | `memory_set_add(entity, attribute, member)` / `memory_set_remove(entity, attribute, member)` | Add/confirm or retract one member of a set-valued slot (many concurrent values, e.g. tags — not one NOW value); a scalar there converts to a set one-way on first `memory_set_add`, except a number-led aggregate scalar ("32", "$1,500"), which is protected — the add parks as a contender instead. Read with `memory_fact_get`, which returns `{kind: "set", members, removed}` for these slots |
@@ -208,8 +209,8 @@ payloads are agent context on every retrieval); pass `verbose=true` for full
 metadata. Full-table dumps and topology views live in the **Cortex Console**
 (`/api/*`) and the `pseudolife-mcp briefing` CLI.
 
-**Toolset tiers.** Three visibility tiers — `minimal` (7 tools), `core`
-(20, the shipped default), `full` (33) — filtered per session at
+**Toolset tiers.** Three visibility tiers — `minimal` (9 tools), `core`
+(22, the shipped default), `full` (35) — filtered per session at
 `tools/list`; a session steps its own tier up or down with `memory_toolset`
 before calling a hidden tool. Defaults, per-client mapping, and weak-model
 deployments:
@@ -230,7 +231,7 @@ needed for concurrent sessions) **or** directly over **HTTP** (simpler for
 a single session):
 
 ```
-Claude session A ─┐  HTTP (recommended)
+Claude session A ─┐  stdio shim (installer default) or HTTP
 Claude session B ─┼───────────────────► pseudolife-mcp daemon ─► Postgres (Docker)
 LAN agent ────────┘  or stdio shim         (single writer)        pgvector
                      (per session)         host proc OR Docker
@@ -285,7 +286,8 @@ docker compose -f ops/docker-compose.yml up -d --build
 The daemon serves MCP at `http://127.0.0.1:8765/mcp` and restarts with
 Docker — no logon task needed. First build downloads the model into the
 image (once); every container start after that is offline and fast. Wire
-Claude Code in over **HTTP** (below). Where the data actually lives, and
+Claude Code in via the stdio shim (installer default) or directly over
+HTTP (both below). Where the data actually lives, and
 how to back it up:
 [Configuration — data layout](docs/guide/configuration.md#data-layout).
 
@@ -587,6 +589,7 @@ renders the real frontend against canned data:
 | Storage | Postgres 16 + pgvector (source of truth); ChromaDB for the reference bank |
 | Associative continuum | 8-tier MIRAS bands; hybrid dense + BM25 ranking (BM25 on by default); contradiction detection and supersession, including a deterministic slot-identity path that fires regardless of embedding similarity |
 | Canonical-fact cortex | Single-writer: LLM dream pass + `memory_fact_*` (regex auto-promote opt-in, default off) |
+| Set-valued slots | `memory_set_add` / `memory_set_remove` for many-current-value slots; one-way scalar→set conversion, aggregate scalars guarded (park as contender) |
 | Provenance contenders | Tier-rank guard `user > action > agent`; `memory_fact_resolve` |
 | Fact currency | Every cortex fact is dated (`asserted_at` / `age`); `freshness_class` (`evergreen` / `slow` / `volatile`) decays `effective_confidence` and flags `stale`. Left `auto`, the class is inferred from the entity's kind (schema v24 `entity_kinds`) — only `system` entities can rot; artifacts and concepts stay evergreen |
 | Knowledge graph | Typed entities/edges, closed relation vocab, on-read closure (Postgres + NetworkX, no AGE/Cypher) |

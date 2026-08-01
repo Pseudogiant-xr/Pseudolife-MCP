@@ -146,9 +146,10 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
 
 ## Toolset tiers
 
-Three visibility tiers — `minimal` (7 tools: the recall/capture loop + the
-gate), `core` (20: + graph/recall, world facts, lessons, documents,
-episodes), `full` (33) — filtered per session at `tools/list`. The filter is
+Three visibility tiers — `minimal` (9 tools: the recall/capture loop, the
+set-slot pair, the gate), `core` (22: + graph/recall, world facts, lessons,
+documents, episodes, stats, `memory_get`, `memory_fact_resolve`),
+`full` (35) — filtered per session at `tools/list`. The filter is
 visibility, not auth (the bearer token is the security boundary) — but
 Claude clients gate calls against their own tool list, so in practice a
 session expands its tier before calling a hidden tool. Defaults:
@@ -170,7 +171,9 @@ small model can misuse.
 
 Runs Postgres in Docker but the daemon on host Python. Use this if you
 want to hack on the daemon or run the embedder on a local GPU. Requires
-Python 3.10+, Docker Desktop, and ~600 MB of disk.
+Python 3.10+, Docker Desktop, and roughly 2 GB of disk — the
+Qwen3-Embedding-0.6B weights (~1.2 GB) download on first run, on top of
+CPU torch and the Python environment.
 
 ```powershell
 git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
