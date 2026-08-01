@@ -1,0 +1,135 @@
+{
+  "probe": "gate-firing",
+  "extractor_url": "http://127.0.0.1:1234/v1",
+  "model": "teacher",
+  "max_tokens": 2048,
+  "dataset": "longmemeval_s_cleaned (non-KU haystack sessions)",
+  "sessions": 147,
+  "failures": 3,
+  "claims": 994,
+  "claims_cited": 994,
+  "claims_with_gateable_literals": 241,
+  "flagged_batch": 5,
+  "flagged_source_only": 8,
+  "flagged_batch_share_of_gateable": 0.0207,
+  "source_only_share_of_gateable": 0.0332,
+  "examples": [
+    {
+      "session": "sharegpt_ETJwE0s_0",
+      "slot": "compression fixture.threaded rod specification",
+      "value": "Grade 5 steel, 1/4 inch threaded rod, 4 rods (one at each corner)",
+      "violations_batch": [],
+      "violations_source_only": [
+        "4"
+      ]
+    },
+    {
+      "session": "ultrachat_287130",
+      "slot": "rap music.origin",
+      "value": "1970s, marginalized urban areas such as the South Bronx in New York City, rooted in African American and Latino communities",
+      "violations_batch": [],
+      "violations_source_only": [
+        "1970s"
+      ]
+    },
+    {
+      "session": "ultrachat_360972",
+      "slot": "Shiretoko Peninsula.recommended precautions",
+      "value": "Stay on designated trails, do not disturb environment, do not feed/approach wildlife, carry bear spray, hike in groups of 3+, check with rangers/weather, wear appropriate clothing/footwear, carry wate",
+      "violations_batch": [
+        "3+"
+      ],
+      "violations_source_only": []
+    },
+    {
+      "session": "e4cb6c56",
+      "slot": "black Adidas sneakers.times worn",
+      "value": "3",
+      "violations_batch": [],
+      "violations_source_only": [
+        "3"
+      ]
+    },
+    {
+      "session": "10857212_2",
+      "slot": "user.upcoming trip duration",
+      "value": "4 days",
+      "violations_batch": [],
+      "violations_source_only": [
+        "4"
+      ]
+    },
+    {
+      "session": "10857212_2",
+      "slot": "user.past trip duration",
+      "value": "5 days",
+      "violations_batch": [],
+      "violations_source_only": [
+        "5"
+      ]
+    },
+    {
+      "session": "sharegpt_rKxzzvF_0",
+      "slot": "Mentoring for Foreign Students program.budget",
+      "value": "$11,000 total ($5,000 recruitment/training, $1,000 materials, $2,000 marketing, $3,000 staff support)",
+      "violations_batch": [
+        "11000"
+      ],
+      "violations_source_only": []
+    },
+    {
+      "session": "c694fe7b_1",
+      "slot": "Certified Data Scientist (CDS) by DASCA.recommended prerequisites",
+      "value": "Bachelor's degree in quantitative field, 2+ years experience, strong programming skills",
+      "violations_batch": [
+        "2+"
+      ],
+      "violations_source_only": []
+    },
+    {
+      "session": "0781daa1_1",
+      "slot": "user.audiobooks finished",
+      "value": "3",
+      "violations_batch": [],
+      "violations_source_only": [
+        "3"
+      ]
+    },
+    {
+      "session": "0781daa1_1",
+      "slot": "user.bus pass replacements in past month",
+      "value": "2",
+      "violations_batch": [],
+      "violations_source_only": [
+        "2"
+      ]
+    },
+    {
+      "session": "98012b1d_2",
+      "slot": "Dallas Arboretum and Botanical Garden.size",
+      "value": "66 acres",
+      "violations_batch": [
+        "66"
+      ],
+      "violations_source_only": []
+    },
+    {
+      "session": "sharegpt_aQ4TU1X_24",
+      "slot": "Extension of Time article topics.list of 30 topics with personas and search phrases",
+      "value": "See note 12 for full table including topics like 'Common reasons for disputing a notification of an extension of time' (Homeowners), 'What to do when a building work is overrunning the building period",
+      "violations_batch": [
+        "12"
+      ],
+      "violations_source_only": []
+    },
+    {
+      "session": "ultrachat_384134",
+      "slot": "co-publishing agreement.typical income split",
+      "value": "equal split (50/50) between songwriter and publisher",
+      "violations_batch": [],
+      "violations_source_only": [
+        "50/50"
+      ]
+    }
+  ]
+}
