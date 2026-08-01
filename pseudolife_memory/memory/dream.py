@@ -226,43 +226,71 @@ _DATE_LIKE_RE = re.compile(
     re.IGNORECASE)
 _ORDINAL_RE = re.compile(r"^(\d+)(?:st|nd|rd|th)$")
 _STRIP_PUNCT = ".,;:!?()[]{}<>\"'`#*"
+# Single-word spelled numbers a note may use where the extractor writes the
+# digit ("three week break" -> "3-week"). Compound forms ("twenty-five")
+# arrive as hyphen parts and compose from these entries.
+_SPELLED_NUMBERS = {
+    "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
+    "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
+    "ten": "10", "eleven": "11", "twelve": "12", "thirteen": "13",
+    "fourteen": "14", "fifteen": "15", "sixteen": "16", "seventeen": "17",
+    "eighteen": "18", "nineteen": "19", "twenty": "20", "thirty": "30",
+    "forty": "40", "fifty": "50", "sixty": "60", "seventy": "70",
+    "eighty": "80", "ninety": "90", "hundred": "100", "thousand": "1000",
+}
 
 
 def _norm_literal(token: str) -> str:
     """Normalize one token for literal matching: casefold, shed surrounding
-    punctuation, currency/percent marks, thousands separators, a leading
-    ``v`` on a version, and ordinal suffixes."""
+    punctuation, currency/percent/approx marks, a trailing ``+`` (``2+`` =
+    "2 or more"), thousands separators, a leading ``v`` on a version, and
+    ordinal suffixes."""
     t = token.casefold().strip(_STRIP_PUNCT)
-    t = t.lstrip("$€£").rstrip("%")
+    t = t.lstrip("$€£~").rstrip("%+")
     t = t.replace(",", "").replace("_", "")
     if len(t) > 1 and t[0] == "v" and t[1].isdigit():
         t = t[1:]
     return _ORDINAL_RE.sub(r"\1", t)
 
 
-def _literal_tokens(text: str, *, mask_dates: bool) -> list[str]:
+def _literal_tokens(text: str, *, mask_dates: bool,
+                    exempt_approx: bool = False) -> list[str]:
     src = _DATE_LIKE_RE.sub(" ", text) if mask_dates else text
     out = []
     for raw in src.split():
+        if (exempt_approx
+                and raw.casefold().strip(_STRIP_PUNCT).startswith("~")):
+            # A value the extractor itself marks approximate ("~3 months")
+            # is not a hard literal — same rationale as the date exemption.
+            continue
         t = _norm_literal(raw)
-        if t and any(ch.isdigit() for ch in t):
+        if not t:
+            continue
+        if "-" in t.strip("-"):
+            # Internal hyphen: ranges ("1-3" ~ "1 to 3") and unit compounds
+            # ("3-week", "66-acre") gate on their digit-bearing parts.
+            out.extend(p for p in t.split("-")
+                       if any(ch.isdigit() for ch in p))
+        elif any(ch.isdigit() for ch in t):
             out.append(t)
     return out
 
 
 def hard_literals(value: str) -> list[str]:
     """The gateable literals in a claim value: normalized digit-bearing
-    tokens outside date-like spans. Empty means the gate has nothing to
-    check for this claim."""
-    return _literal_tokens(value or "", mask_dates=True)
+    tokens outside date-like spans, excluding extractor-marked
+    approximations. Empty means the gate has nothing to check."""
+    return _literal_tokens(value or "", mask_dates=True, exempt_approx=True)
 
 
 def literal_violations(value: str, corpus: str) -> list[str]:
     """Gateable literals in ``value`` that ``corpus`` (source note text)
     does not back. Empty corpus abstains. A token passes on exact
     normalized match, numeric equality (``08`` ↔ ``8``, ``3.20`` ↔ ``3.2``),
-    or — for identifier-like tokens only, never bare numbers — a
-    bidirectional substring match (``pr-81`` ↔ ``81``)."""
+    a spelled corpus form (``three week`` backs ``3-week``), or — for
+    identifier-like tokens only, never bare numbers — a bidirectional
+    substring match (``pr-81`` ↔ ``81``). Hyphenated ranges/compounds gate
+    per digit part; ``~``-marked approximations are exempt."""
     if not (corpus or "").strip():
         return []
     gateable = hard_literals(value)
@@ -271,6 +299,12 @@ def literal_violations(value: str, corpus: str) -> list[str]:
     # The corpus is evidence, not a claim — leave dates unmasked so their
     # digit parts can still back a token; extra tokens only fail open.
     corpus_tokens = set(_literal_tokens(corpus, mask_dates=False))
+    # Spelled numbers back their digit forms ("three week" backs "3-week"):
+    # exact single-word matches only — "hundreds" does not back 100.
+    for raw in corpus.split():
+        for word in raw.casefold().strip(_STRIP_PUNCT).split("-"):
+            if word in _SPELLED_NUMBERS:
+                corpus_tokens.add(_SPELLED_NUMBERS[word])
     bad = []
     for tok in gateable:
         if tok in corpus_tokens:

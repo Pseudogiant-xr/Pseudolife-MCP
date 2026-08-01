@@ -112,11 +112,18 @@ identifier is counted (`literal_flagged` in dream results) under the
 default `memory.dream.literal_gate = "log"`, or dropped under `"enforce"`.
 The corpus is the whole batch's note union by default — derived sums and
 cross-note values are measured false-drop classes under per-note gating.
-`enforce` is deliberately opt-in: across every measured corpus the gate
-never fired, so enforcement is unproven exactly where it would matter
-(`evals/results/literal-fidelity-verdict.json`). A companion prompt rule
-mandating verbatim literals was built, measured, and **held** — it
-significantly degraded the KU cascade (same verdict artifact).
+The matcher normalizes the re-formattings extractors legitimately produce:
+spelled numbers back digits ("three week" backs "3-week"), hyphenated
+ranges and unit compounds gate per digit part ("1-3" ↔ "1 to 3",
+"66-acre" ↔ "66 acres"), `N+` minimums match their base number, and
+`~`-marked approximations are exempt like dates — classes triaged from the
+at-scale firing probe (`evals/results/gate-firing-verdict.json`, where 15
+of 17 batch-scope flags were normalization gaps, not fabrications).
+`enforce` is deliberately opt-in pending a re-probe under this matcher
+(`evals/results/literal-fidelity-verdict.json` has the original decision).
+A companion prompt rule mandating verbatim literals was built, measured,
+and **held** — it significantly degraded the KU cascade (same verdict
+artifact).
 
 ## The CPU extractor sidecar (batteries-included default)
 

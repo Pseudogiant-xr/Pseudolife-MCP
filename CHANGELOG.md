@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-08-02 — literal gate learns the extractors' re-formattings)
+- **The literal-faithfulness matcher now normalizes the three
+  legitimate-reformatting classes the at-scale firing probe surfaced**
+  (`evals/results/gate-firing-verdict.json`: 15 of 17 batch-scope flags
+  were normalization gaps): spelled corpus numbers back digit tokens,
+  hyphenated ranges/unit compounds gate per digit part, `N+` minimums
+  match their base number, and `~`-marked approximations are exempt like
+  dates. Fabricated-number detection is unchanged — a range with one
+  unbacked endpoint still flags that endpoint.
+
 ### Added (2026-08-01 — every dream pass is now an auditable, reversible run (schema v27))
 - **Schema v27: `dream_runs` + `dream_run_slots` — each dream pass that
   produces claims records a run row (cursor movement, tallies, lifecycle
