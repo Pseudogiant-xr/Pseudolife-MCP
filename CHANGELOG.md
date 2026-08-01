@@ -6,6 +6,39 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-01 — literal-faithfulness gate ships; the verbatim-literals prompt is held on measured grounds)
+- **Dream claims now pass a deterministic literal-faithfulness gate**
+  (`memory.dream.literal_gate`, default `log`): digit-bearing tokens in a
+  claim's value (outside date-like spans, which are exempt by design) must
+  appear in the source notes — fabricated numbers/identifiers are counted
+  (`log`) or dropped (`enforce`, opt-in). The corpus is the whole pull's
+  note union by default (`literal_gate_scope = "batch"`): derived sums and
+  cross-note values are measured false-drop classes under per-note gating
+  (c2op-count-verdict qid 01493427). Counters surface as
+  `literal_flagged` / `literal_dropped` in dream results. `enforce` stays
+  opt-in deliberately: across every measured arm the gate never fired
+  (the extractors fabricate no gateable literals on the bench corpora),
+  so its safety where it *does* fire is unmeasured
+  (`evals/results/literal-fidelity-verdict.json`).
+- **The KEEP-LITERALS-VERBATIM prompt block (v6) does NOT ship** — the
+  pre-registered KU gate failed: cascade -0.090 (p = 0.037), 1 win /
+  8 losses against the shipped v5 arm with the rag control at delta 0.000
+  exactly, and the digit-gold class it was meant to protect regressed
+  0.949 -> 0.872 (n = 39). In 7 of 8 cascade losses a previously-correct
+  cortex answer went wrong — general extraction degradation, the count-
+  block lesson repeated. `evals/prompts/ku_op_prompt_v6.txt` stays
+  committed as a measured, pinned, unshipped variant
+  (`test_op_prompt_artifact.py`); the shipped `_SYSTEM_PROMPT` remains
+  byte-pinned to v5. Full chain + per-qid mechanism breakdown:
+  `evals/results/literal-fidelity-verdict.json`,
+  `evals/results/compare-c2v6-literal-pairs.json`.
+- **`evals/compare_arms.py`** — committed producer for the
+  `compare-*-pairs.json` paired-permutation artifacts (all four arms incl.
+  the derived cascade, win/loss qids, seed-deterministic; refuses to
+  overwrite). The earlier pairs artifacts had no committed producer.
+  `ladder_sweep.py` gains `--literal-gate off|log|enforce` and records the
+  gate counters in rung artifacts.
+
 ### Changed (2026-08-01 — the extractor op prompt ships: hold reversed on measured grounds)
 - **The shipped extraction prompt (`dream.py::_SYSTEM_PROMPT`) now solicits
   claim-level `op` for set membership, paired with the counts-are-never-

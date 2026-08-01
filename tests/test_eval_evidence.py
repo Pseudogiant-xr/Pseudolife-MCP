@@ -602,6 +602,31 @@ CLAIMS.append(Claim(
     stated=0.004, places=3))
 
 
+LIT_CMP = RESULTS + "compare-c2v6-literal-pairs.json"
+# ── the literal-fidelity negative result (2026-08-01) ────────────────────
+# The CHANGELOG states the v6 prompt's pre-registered KU gate failed:
+# cascade delta and p pin to the committed pairs artifact; the rag control
+# at exactly zero is what makes the delta a finding rather than noise.
+CLAIMS.append(Claim(
+    id="lit-v6-cascade-delta", doc=CHANGELOG,
+    needle="cascade -0.090 (p = 0.037)",
+    artifacts=(LIT_CMP,),
+    value=lambda d: d["paired"]["a_vs_b"]["cascade"]["delta"],
+    stated=-0.090, places=3))
+CLAIMS.append(Claim(
+    id="lit-v6-cascade-p", doc=CHANGELOG,
+    needle="cascade -0.090 (p = 0.037)",
+    artifacts=(LIT_CMP,),
+    value=lambda d: d["paired"]["a_vs_b"]["cascade"]["p"],
+    stated=0.037, places=3))
+CLAIMS.append(Claim(
+    id="lit-v6-rag-control", doc=CHANGELOG,
+    needle="the rag control at delta 0.000",
+    artifacts=(LIT_CMP,),
+    value=lambda d: d["paired"]["a_vs_b"]["rag"]["delta"],
+    stated=0.0, places=3))
+
+
 def test_every_published_number_names_a_committed_artifact():
     """A claim whose evidence is untracked cannot be checked by a reader.
 

@@ -1,0 +1,96 @@
+{
+  "n": 78,
+  "dropped_a": 0,
+  "dropped_b": 0,
+  "draws": 10000,
+  "seed": 0,
+  "a": {
+    "file": "evals/results/longmemeval-ku-oracle-qwen-27b-c2v6-literal.jsonl",
+    "arms": {
+      "rag": 0.859,
+      "cortex": 0.7051,
+      "hybrid": 0.8846,
+      "cascade": 0.8462
+    }
+  },
+  "b": {
+    "file": "evals/results/longmemeval-ku-oracle-qwen-27b-c2op-count.jsonl",
+    "arms": {
+      "rag": 0.859,
+      "cortex": 0.7564,
+      "hybrid": 0.9103,
+      "cascade": 0.9359
+    }
+  },
+  "paired": {
+    "a_vs_b": {
+      "rag": {
+        "delta": 0.0,
+        "p": 1.0,
+        "wins": 0,
+        "losses": 0,
+        "win_qids": [],
+        "loss_qids": []
+      },
+      "cortex": {
+        "delta": -0.0513,
+        "p": 0.3829,
+        "wins": 4,
+        "losses": 8,
+        "win_qids": [
+          "45dc21b6",
+          "5a4f22c0",
+          "618f13b2",
+          "7e974930"
+        ],
+        "loss_qids": [
+          "07741c45",
+          "0977f2af",
+          "0e4e4c46",
+          "41698283",
+          "4d6b87c8",
+          "6aeb4375",
+          "852ce960",
+          "f685340e"
+        ]
+      },
+      "hybrid": {
+        "delta": -0.0256,
+        "p": 0.7201,
+        "wins": 3,
+        "losses": 5,
+        "win_qids": [
+          "618f13b2",
+          "69fee5aa",
+          "eace081b"
+        ],
+        "loss_qids": [
+          "0977f2af",
+          "2133c1b5_abs",
+          "4d6b87c8",
+          "6aeb4375",
+          "f685340e_abs"
+        ]
+      },
+      "cascade": {
+        "delta": -0.0897,
+        "p": 0.0366,
+        "wins": 1,
+        "losses": 8,
+        "win_qids": [
+          "42ec0761"
+        ],
+        "loss_qids": [
+          "07741c45",
+          "0977f2af",
+          "41698283",
+          "4d6b87c8",
+          "6aeb4375",
+          "852ce960",
+          "e493bb7c",
+          "f685340e"
+        ]
+      }
+    }
+  }
+}

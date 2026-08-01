@@ -1108,3 +1108,142 @@ def test_openai_extractor_carries_op_through_parse():
     ops = [c.get("op") for c in claims]
     # add/remove survive; "set", junk, and absent all normalise to absent.
     assert ops == ["add", "remove", None, None, None]
+
+
+# ── literal-faithfulness gate (2026-08-02 design) ────────────────────────
+
+class _CitingStub:
+    """Fixed claims with explicit source indices (drives the gate path)."""
+    def __init__(self, claims):
+        self._claims = claims
+
+    def extract(self, texts, vocab, known_facts=None):
+        return [dict(c) for c in self._claims]
+
+
+def test_literal_gate_enforce_drops_fabricated_number(svc):
+    svc.config.memory.dream.literal_gate = "enforce"
+    svc.store("saw a flicker at the park, that makes 32 species now",
+              source="notes")
+    out = svc.dream_run(_CitingStub([{
+        "entity": "user", "attribute": "park species count",
+        "value": "41", "confidence": 0.9, "origin": "agent", "source": 0}]))
+    assert out["literal_flagged"] == 1 and out["literal_dropped"] == 1
+    assert svc.cortex_lookup("user", "park species count") is None
+
+
+def test_literal_gate_log_mode_writes_but_counts(svc):
+    svc.config.memory.dream.literal_gate = "log"   # shipped default, explicit
+    svc.store("saw a flicker at the park, that makes 32 species now",
+              source="notes")
+    out = svc.dream_run(_CitingStub([{
+        "entity": "user", "attribute": "park species count",
+        "value": "41", "confidence": 0.9, "origin": "agent", "source": 0}]))
+    assert out["literal_flagged"] == 1 and out["literal_dropped"] == 0
+    got = svc.cortex_lookup("user", "park species count")
+    assert got is not None and got["value"] == "41"
+
+
+def test_literal_gate_off_writes_and_counts_nothing(svc):
+    svc.config.memory.dream.literal_gate = "off"
+    svc.store("saw a flicker at the park, that makes 32 species now",
+              source="notes")
+    out = svc.dream_run(_CitingStub([{
+        "entity": "user", "attribute": "park species count",
+        "value": "41", "confidence": 0.9, "origin": "agent", "source": 0}]))
+    assert out["literal_flagged"] == 0 and out["literal_dropped"] == 0
+    assert svc.cortex_lookup("user", "park species count") is not None
+
+
+def test_literal_gate_supported_literal_passes(svc):
+    svc.config.memory.dream.literal_gate = "enforce"
+    svc.store("saw a flicker at the park, that makes 32 species now",
+              source="notes")
+    out = svc.dream_run(_CitingStub([{
+        "entity": "user", "attribute": "park species count",
+        "value": "32", "confidence": 0.9, "origin": "agent", "source": 0}]))
+    assert out["literal_flagged"] == 0 and out["literal_dropped"] == 0
+    got = svc.cortex_lookup("user", "park species count")
+    assert got is not None and got["value"] == "32"
+
+
+def test_literal_gate_skips_claim_without_src_id(svc):
+    # A multi-entry batch with an uncited claim resolves no src_id; the gate
+    # abstains rather than guessing which note to check against.
+    svc.config.memory.dream.literal_gate = "enforce"
+    svc.store("first unrelated observation about the garden", source="notes")
+    svc.store("second unrelated observation about the weather", source="notes")
+    out = svc.dream_run(_CitingStub([{
+        "entity": "user", "attribute": "unverifiable count",
+        "value": "41", "confidence": 0.9, "origin": "agent"}]))
+    assert out["literal_dropped"] == 0
+    assert svc.cortex_lookup("user", "unverifiable count") is not None
+
+
+def test_literal_gate_batch_scope_accepts_cross_note_literal(svc):
+    # The claim's correct value comes from note A while source cites note B —
+    # the batched call exists precisely so both are seen together
+    # (regression pin for the finding-#5 false-drop class).
+    svc.config.memory.dream.literal_gate = "enforce"
+    assert svc.config.memory.dream.literal_gate_scope == "batch"  # default
+    svc.store("the port count rose to 27 this week", source="notes")
+    svc.store("the port audit wrapped up today", source="notes")
+    pulled = svc.dream_pull(limit=10)["entries"]
+    cited = next(i for i, e in enumerate(pulled) if "audit" in e["text"])
+    out = svc.dream_run(_CitingStub([{
+        "entity": "ports", "attribute": "count",
+        "value": "27", "confidence": 0.9, "origin": "agent",
+        "source": cited}]))
+    assert out["literal_flagged"] == 0 and out["literal_dropped"] == 0
+    got = svc.cortex_lookup("ports", "count")
+    assert got is not None and got["value"] == "27"
+
+
+def test_literal_gate_source_scope_drops_cross_note_literal(svc):
+    svc.config.memory.dream.literal_gate = "enforce"
+    svc.config.memory.dream.literal_gate_scope = "source"
+    svc.store("the port count rose to 27 this week", source="notes")
+    svc.store("the port audit wrapped up today", source="notes")
+    pulled = svc.dream_pull(limit=10)["entries"]
+    cited = next(i for i, e in enumerate(pulled) if "audit" in e["text"])
+    out = svc.dream_run(_CitingStub([{
+        "entity": "ports", "attribute": "count",
+        "value": "27", "confidence": 0.9, "origin": "agent",
+        "source": cited}]))
+    assert out["literal_flagged"] == 1 and out["literal_dropped"] == 1
+    assert svc.cortex_lookup("ports", "count") is None
+
+
+def test_literal_gate_gates_member_ops(svc):
+    svc.config.memory.dream.literal_gate = "enforce"
+    svc.store("tried the new diner downtown tonight", source="notes")
+    out = svc.dream_run(_CitingStub([{
+        "entity": "user", "attribute": "restaurants tried",
+        "value": "Diner 419", "confidence": 0.8, "origin": "agent",
+        "op": "add", "source": 0}]))
+    assert out["literal_flagged"] == 1 and out["literal_dropped"] == 1
+    assert svc.cortex_lookup("user", "restaurants tried") is None
+
+
+def test_literal_gate_applies_on_isolation_path(svc):
+    # A poison batch degrades to per-entry isolated extraction after the
+    # retry budget; claims produced there must be gated identically.
+    svc.config.memory.dream.literal_gate = "enforce"
+
+    class _PoisonBatch:
+        def extract(self, texts, vocab, known_facts=None):
+            if len(texts) > 1:
+                raise RuntimeError("poison batch")
+            return [{"entity": "user", "attribute": "isolated count",
+                     "value": "99", "confidence": 0.9, "origin": "agent",
+                     "source": 0}]
+
+    svc.store("counted 12 boxes in the garage", source="notes")
+    svc.store("moved the boxes to the attic", source="notes")
+    ex = _PoisonBatch()
+    for _ in range(2):                       # burn the batch retry budget
+        held = svc.dream_run(ex)
+        assert held.get("extractor_failed") is True
+    out = svc.dream_run(ex)                  # isolation pass
+    assert out["literal_dropped"] >= 1
+    assert svc.cortex_lookup("user", "isolated count") is None

@@ -23,6 +23,13 @@ def test_count_exclusion_prompt_file_matches_probe_construction():
     assert path.read_text(encoding="utf-8") == op_probe.VARIANTS["v5-count-exclusion-claim-example"]
 
 
+def test_literal_fidelity_prompt_file_matches_probe_construction():
+    """Same pin for the literal-fidelity arm's prompt (v6: v5 + the
+    keep-literals-verbatim rule with a single-claim worked example)."""
+    path = Path(__file__).resolve().parents[1] / "evals" / "prompts" / "ku_op_prompt_v6.txt"
+    assert path.read_text(encoding="utf-8") == op_probe.VARIANTS["v6-literal-fidelity"]
+
+
 def test_shipped_prompt_is_the_measured_v5_artifact():
     """The hold-reversal ship (2026-08-01): the live extraction prompt must
     be byte-identical to the artifact the count-exclusion gate measured
