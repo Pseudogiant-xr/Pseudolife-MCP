@@ -229,21 +229,20 @@ with no `op`. A scalar claim (no `op`) landing on a slot that already holds
 current members is dropped and logged, not routed or silently applied — the
 only way to touch a set slot is an explicit `op` or the two MCP tools
 themselves. A malformed `op` value degrades to the scalar path with a
-warning rather than failing the dream. Today the extraction prompt does
-not solicit `op` — the extractor adopts it cleanly, but a paired gate
-with a deterministic extraction-variance baseline showed the prompt
-block nets negative on knowledge-update content: the model applies
-`op:"add"` to stated totals and the scalar→set conversion destroys them
-(`evals/results/c2op-gate-verdict.json`). The MCP set tools are the set
-writers; the dream `op` path is tested capability held pending the gate
-re-measurement with this conversion guard active (the guard should remove
-the destructive-conversion failure mode the gate measured; a prompt rule
-telling the extractor to avoid `op:"add"` on stated totals is a reserve arm
-only if that re-measurement still fails) — the aggregate-conversion guard
-itself (see [Conversion
-rules](#conversion-rules) above) already protects any `op:"add"` that does
-land on a stated-total scalar, whether via a live `memory_set_add` call or
-the dream path once re-enabled.
+warning rather than failing the dream. **Since 2026-08-01 the shipped
+extraction prompt solicits `op`**, paired with a counts-are-never-members
+rule: the bare op block measured net-negative on knowledge-update content
+(the model re-routed count *updates* into `op:"add"` claims, freezing
+stated totals — `evals/results/c2op-gate-verdict.json`), and the count
+rule is what repaired it — the gated run landed the commit-gated cascade
+exactly at the op-less control while genuine sets still formed
+(`evals/results/c2op-count-verdict.json`, with sidecar-adoption and
+ladder-rung validation in the same artifact). The shipped prompt is
+byte-pinned to the measured artifact (`evals/prompts/ku_op_prompt_v5.txt`).
+The aggregate-conversion guard (see [Conversion rules](#conversion-rules)
+above) remains the apply-time backstop: an `op:"add"` that does land on a
+stated-total scalar parks as a contender rather than converting, whether
+it came from a live `memory_set_add` call or a dream claim.
 
 ## Provenance contenders — never silently overwrite a user fact
 

@@ -40,8 +40,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from pseudolife_memory.memory.dream import (  # noqa: E402
-    OpenAICompatExtractor, _SYSTEM_PROMPT)
+from pseudolife_memory.memory.dream import OpenAICompatExtractor  # noqa: E402
 
 # ── note battery ──────────────────────────────────────────────────────────
 # (text, expected) — expected maps a value-substring to the op it must
@@ -90,7 +89,13 @@ BATTERY: list[tuple[str, dict[str, str | None]]] = [
 ]
 
 # ── prompt variants ───────────────────────────────────────────────────────
-_BASE = _SYSTEM_PROMPT  # shipped, measurement-clean, no op mention
+# The variant constructions build on the OP-LESS control prompt — which was
+# the shipped prompt until the 2026-08-01 hold reversal put the v5 block into
+# dream._SYSTEM_PROMPT. Anchoring on the committed control file keeps every
+# VARIANTS entry byte-identical to what its gate measured (pinned by
+# test_op_prompt_artifact.py) regardless of what ships.
+_BASE = (Path(__file__).parent / "prompts"
+         / "ku_control_prompt_opless.txt").read_text(encoding="utf-8")
 
 _V0_FAILED_BLOCK = (
     "When a note adds or removes an item from a COLLECTION the user "

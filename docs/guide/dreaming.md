@@ -9,9 +9,10 @@ A **dream** distils the recent associative stream (MIRAS) into canonical
 cortex facts: pull unconsolidated memories → extract
 `(entity, attribute, value)` claims (a claim may also carry
 `op: "add"|"remove"` to target a [set-valued
-slot](memory-model.md#set-valued-slots), though the shipped extraction
-prompt deliberately does not request ops — tools are the sole set
-writers, a measured hold) → `memory_fact_set` → advance a monotonic
+slot](memory-model.md#set-valued-slots) — solicited by the shipped prompt
+since 2026-08-01, paired with a counts-are-never-members rule; see the
+[memory model](memory-model.md#dream-extraction) for the measurement
+story) → `memory_fact_set` → advance a monotonic
 cursor so each memory is processed once. Because it keys on the **cursor**,
 not on "sessions", returning to an old session later just appends more
 tail — nothing is reprocessed, and there is no "session finished" event to

@@ -21,3 +21,14 @@ def test_count_exclusion_prompt_file_matches_probe_construction():
     counts-are-never-members rule with a single-claim worked example)."""
     path = Path(__file__).resolve().parents[1] / "evals" / "prompts" / "ku_op_prompt_v5.txt"
     assert path.read_text(encoding="utf-8") == op_probe.VARIANTS["v5-count-exclusion-claim-example"]
+
+
+def test_shipped_prompt_is_the_measured_v5_artifact():
+    """The hold-reversal ship (2026-08-01): the live extraction prompt must
+    be byte-identical to the artifact the count-exclusion gate measured
+    (cascade at the op-less control, sidecar + ladder validated). Any drift
+    between what runs and what was measured re-opens the gap all four
+    verdict artifacts exist to close."""
+    from pseudolife_memory.memory.dream import _SYSTEM_PROMPT
+    path = Path(__file__).resolve().parents[1] / "evals" / "prompts" / "ku_op_prompt_v5.txt"
+    assert _SYSTEM_PROMPT == path.read_text(encoding="utf-8")

@@ -122,18 +122,38 @@ _SYSTEM_PROMPT = (
     '{"entity":"releases","attribute":"documented requirement",'
     '"value":"signed tag (per release runbook)","confidence":0.8,'
     '"source":2}]}\n'
+    "When a note adds or removes an item from a COLLECTION the user "
+    'maintains (restaurants tried, bikes owned, pending tasks), add an '
+    '"op":"add" or "op":"remove" field to that claim instead of a plain '
+    "supersede. op is ONLY for collection membership — a value that simply "
+    "changed (a new job, a moved city) stays a plain claim with no op. "
+    "Example. Notes: [3] tried Rosa's Diner tonight. [4] sold the road bike, "
+    'no longer biking to work. Output: {"claims":['
+    '{"entity":"user","attribute":"restaurants tried","value":"Rosa\'s '
+    'Diner","op":"add","confidence":0.8,"source":3},'
+    '{"entity":"user","attribute":"bikes owned","value":"road bike",'
+    '"op":"remove","confidence":0.8,"source":4}]}\n'
+    "COUNTS, TOTALS, AND QUANTITIES ARE NEVER MEMBERS: when a note "
+    "states or updates how many of something the user has (a running "
+    "count, a total, a follower number, a quantity), emit a plain claim "
+    'whose value is the NEW number, with no "op" field — even when the '
+    "note also names the item that changed the count. For example, the "
+    "note [5] saw a Northern Flicker today, that makes 32 species at "
+    "the park now — yields the single claim "
+    '{"entity":"user","attribute":"bird species seen at park",'
+    '"value":"32","confidence":0.9,"source":5} inside the one claims '
+    'array, and NO "op":"add" claim for Northern Flicker.\n'
     'Return {"claims":[]} if nothing qualifies.'
 )
-# The op prompt block is deliberately absent. The model adopts op cleanly
-# (probes 7/7 after the parse fix), but the definitive paired gate
-# (evals/results/c2op-gate-verdict.json, variance baseline per-question
-# identical to control) showed the block's net effect is negative on
-# KU-oracle: the model applies op:'add' to stated-total/aggregate slots
-# and the one-way scalar->set conversion destroys the total the answer
-# needs (cascade -0.141, p=0.006; losses concentrated on set-forming
-# questions while non-set questions improved). Until the conversion
-# guard for aggregate scalars exists, the MCP set tools are the set
-# writers and the extraction prompt stays without op.
+# The op block + count-exclusion rule shipped 2026-08-01 (hold reversed by
+# maintainer decision after the count-exclusion gate). This prompt must stay
+# byte-identical to the measured artifact evals/prompts/ku_op_prompt_v5.txt
+# (pinned by test_op_prompt_artifact.py): the v0 op block alone measured
+# net-negative on KU-oracle (count updates re-routed into member-adds froze
+# stated totals; c2op-gate-verdict.json), and the count rule is what repaired
+# it (cascade back to the op-less control, sidecar + ladder validated;
+# c2op-count-verdict.json). Edit the prompt only through a new measured
+# artifact + gate.
 
 
 def _vocab_hint(vocab: list[str]) -> str:
