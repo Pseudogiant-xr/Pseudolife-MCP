@@ -1,0 +1,19 @@
+{
+  "rung": "sonnet-5",
+  "label": "Claude Sonnet 5 (Max-plan CLI shim, ceiling probe)",
+  "kind": "llm",
+  "extract_seconds": 44.3,
+  "consolidation": {
+    "pulled": 26,
+    "claims": 17,
+    "inserted": 17,
+    "superseded": 0,
+    "literal_flagged": 0,
+    "literal_dropped": 0
+  },
+  "gold_recoverable": 1.0,
+  "stale_leak": 0.0,
+  "tokens_per_query": 13.1,
+  "search_latency_ms": 87.3,
+  "status": "ok"
+}
