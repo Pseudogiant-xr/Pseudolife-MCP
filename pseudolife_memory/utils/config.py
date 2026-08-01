@@ -333,6 +333,18 @@ class DreamConfig:
     # 0 (default) = off — the extractor request is byte-identical to before.
     # Working value when enabled: 20.
     known_facts_window: int = 0
+    # Literal-faithfulness gate (2026-08-02 design doc): digit-bearing
+    # tokens in a dream claim's value (outside date-like spans) must appear
+    # in the source notes, or the claim is flagged ("log") or dropped
+    # ("enforce"). "off" disables. The shipped default is set by the
+    # literal-fidelity ladder evidence (evals/results/literal-fidelity-
+    # verdict.json), not by preference.
+    literal_gate: str = "log"            # "off" | "log" | "enforce"
+    # What counts as the source corpus: "batch" (union of the pull's note
+    # texts — the default; derived sums and cross-note values are measured
+    # false-drop classes under per-note gating) or "source" (only the note
+    # the claim cites).
+    literal_gate_scope: str = "batch"    # "batch" | "source"
 
 
 @dataclass

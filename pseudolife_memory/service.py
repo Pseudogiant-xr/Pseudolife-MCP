@@ -3004,19 +3004,28 @@ class MemoryService:
                 extractor, limit=self.config.memory.dream.retype_quarantined_max)
             return {"pulled": 0, "claims": 0, "inserted": 0, "confirmed": 0,
                     "contested": 0, "superseded": 0, "relations": 0,
+                    "literal_flagged": 0, "literal_dropped": 0,
                     "cursor": pulled["cursor"], "lessons": lessons,
                     "outcome_inference": outcome_inference,
                     "graph_insight": graph_insight, "retyped": retyped}
         from pseudolife_memory.memory.cortex import _norm_key
+        from pseudolife_memory.memory.dream import literal_violations
         import time as _time
         traces_cfg = self.config.memory.traces
-        kf_n = int(self.config.memory.dream.known_facts_window or 0)
+        dream_cfg = self.config.memory.dream
+        kf_n = int(dream_cfg.known_facts_window or 0)
         vocab, known_facts = self._dream_hints(
             [e["text"] for e in entries], facts_limit=kf_n)
         tally = {"inserted": 0, "confirmed": 0, "contested": 0, "superseded": 0}
         traces_n = 0
         max_batch_failures = 3
         quarantined = 0
+        # Literal-faithfulness gate (2026-08-02 design doc): counters live
+        # OUTSIDE tally — tally is summed into the reported claim count.
+        gate_mode = dream_cfg.literal_gate
+        gate_scope = dream_cfg.literal_gate_scope
+        literal_flagged = 0
+        literal_dropped = 0
 
         def _held(reason: str, exc: Exception) -> dict[str, Any]:
             logger.warning("dream %s (%s); cursor NOT advanced, will retry "
@@ -3024,6 +3033,8 @@ class MemoryService:
             return {"pulled": len(entries), "claims": 0, "inserted": 0,
                     "confirmed": 0, "contested": 0, "superseded": 0, "relations": 0,
                     "cursor": self._cortex.dream_cursor, "extractor_failed": True,
+                    "literal_flagged": literal_flagged,
+                    "literal_dropped": literal_dropped,
                     "lessons": {"signals": 0, "lessons": 0}}
 
         # ONE batched call for the whole pull: the model must see a fact's
@@ -3032,6 +3043,12 @@ class MemoryService:
         # per-entry restructure cost stale_leak 0.0 -> 0.8 on the ladder).
         # Per-claim attribution travels back via the claim's "source" index.
         texts = [e["text"] for e in entries]
+        # Gate corpora: the batch union is the default scope — derived sums
+        # and cross-note values are measured false-drop classes under
+        # per-note gating (design doc; c2op-count-verdict qid 01493427).
+        src_text = {e["db_id"]: e["text"] for e in entries
+                    if e.get("db_id") is not None}
+        batch_text = "\n".join(texts)
         batch_key = tuple(e.get("db_id") if e.get("db_id") is not None
                           else e["text"][:200] for e in entries)
         pairs: list[tuple[dict, Any]] = []      # (claim, source entry db_id)
@@ -3116,6 +3133,24 @@ class MemoryService:
                 ent_norm = _norm_key(ent)
                 if ent_norm not in known_entities and ent_norm not in new_entities:
                     new_entities[ent_norm] = ent
+                # Literal-faithfulness gate: digit-bearing tokens in the
+                # value (outside date-like spans) must appear in the source
+                # corpus. Uncited claims skip the gate — abstain, don't
+                # guess. Runs before the has_trace guard so a dropped claim
+                # never leaves a trace.
+                if gate_mode != "off" and src_id is not None:
+                    corpus = (batch_text if gate_scope == "batch"
+                              else src_text.get(src_id, ""))
+                    bad = literal_violations(c["value"], corpus)
+                    if bad:
+                        literal_flagged += 1
+                        logger.info(
+                            "dream: unsupported literal(s) %s in claim "
+                            "%s.%s = %r%s", bad, ent, attr, c["value"],
+                            " (dropped)" if gate_mode == "enforce" else "")
+                        if gate_mode == "enforce":
+                            literal_dropped += 1
+                            continue
                 # The has_trace guard is keyed by (slot, source entry) only —
                 # it has no member value to key on, so it must never gate a
                 # member op: a second op:"add" for the SAME slot from the
@@ -3228,6 +3263,8 @@ class MemoryService:
                 "alias_candidates": alias_candidates,
                 "lessons": lessons, "outcome_inference": outcome_inference,
                 "graph_insight": graph_insight,
+                "literal_flagged": literal_flagged,
+                "literal_dropped": literal_dropped,
                 "traces": traces_n, "sources_attributed": sources_attributed,
                 "quarantined": quarantined, "retyped": retyped}
 

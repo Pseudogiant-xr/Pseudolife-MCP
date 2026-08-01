@@ -111,6 +111,34 @@ _V0_FAILED_BLOCK = (
     '"op":"remove","confidence":0.8,"source":4}]}\n'
 )
 
+# The v5 count rule, shared verbatim by every variant that carries it so a
+# later variant cannot drift from what the count gate measured.
+_V5_COUNT_BLOCK = (
+    "COUNTS, TOTALS, AND QUANTITIES ARE NEVER MEMBERS: when a note "
+    "states or updates how many of something the user has (a running "
+    "count, a total, a follower number, a quantity), emit a plain claim "
+    'whose value is the NEW number, with no "op" field — even when the '
+    "note also names the item that changed the count. For example, the "
+    "note [5] saw a Northern Flicker today, that makes 32 species at "
+    "the park now — yields the single claim "
+    '{"entity":"user","attribute":"bird species seen at park",'
+    '"value":"32","confidence":0.9,"source":5} inside the one claims '
+    'array, and NO "op":"add" claim for Northern Flicker.\n'
+)
+
+# The literal-fidelity rule (2026-08-02 design: consolidation must keep
+# exact dates/numbers/versions/identifiers verbatim, not round or reword).
+_LITERAL_BLOCK = (
+    "KEEP LITERALS VERBATIM: when a fact's value contains a date, a "
+    "number, a version, or an identifier, copy it EXACTLY as the note "
+    "writes it — never round it, re-format it, or leave it out. For "
+    "example, the note [6] the security audit is due 2026-09-30 — "
+    "yields the single claim "
+    '{"entity":"security audit","attribute":"due date",'
+    '"value":"2026-09-30","confidence":0.9,"source":6} inside the one '
+    'claims array, not "end of September".\n'
+)
+
 VARIANTS: dict[str, str] = {
     # The block that failed the C2 gate — the control arm of this probe.
     "v0-appended-block": _BASE.replace(
@@ -218,18 +246,18 @@ VARIANTS: dict[str, str] = {
     # object inside the one claims array — no second Output block shown.
     "v5-count-exclusion-claim-example": _BASE.replace(
         'Return {"claims":[]} if nothing qualifies.',
-        _V0_FAILED_BLOCK +
-        "COUNTS, TOTALS, AND QUANTITIES ARE NEVER MEMBERS: when a note "
-        "states or updates how many of something the user has (a running "
-        "count, a total, a follower number, a quantity), emit a plain claim "
-        'whose value is the NEW number, with no "op" field — even when the '
-        "note also names the item that changed the count. For example, the "
-        "note [5] saw a Northern Flicker today, that makes 32 species at "
-        "the park now — yields the single claim "
-        '{"entity":"user","attribute":"bird species seen at park",'
-        '"value":"32","confidence":0.9,"source":5} inside the one claims '
-        'array, and NO "op":"add" claim for Northern Flicker.\n'
-        'Return {"claims":[]} if nothing qualifies.'),
+        _V0_FAILED_BLOCK + _V5_COUNT_BLOCK
+        + 'Return {"claims":[]} if nothing qualifies.'),
+
+    # v5 + the keep-literals-verbatim rule (dates, numbers, versions,
+    # identifiers copied exactly from the note). Same rhetorical shape as
+    # the count rule — one sentence plus one single-claim inline example,
+    # no second Output block (the v3->v5 lesson), no mention of "op", and
+    # "quantity" left to the count rule so the two never compete.
+    "v6-literal-fidelity": _BASE.replace(
+        'Return {"claims":[]} if nothing qualifies.',
+        _V0_FAILED_BLOCK + _V5_COUNT_BLOCK + _LITERAL_BLOCK
+        + 'Return {"claims":[]} if nothing qualifies.'),
 }
 
 

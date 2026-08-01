@@ -13,6 +13,7 @@ never selected automatically (the store-path auto-promote and the old
 from __future__ import annotations
 
 import logging
+import re
 from typing import Protocol, TypedDict
 
 logger = logging.getLogger(__name__)
@@ -204,6 +205,93 @@ def unflatten_slot_key_claims(claims: list, vocab: list[str]) -> list:
             c = {**c, "entity": head, "attribute": tail}
         out.append(c)
     return out
+
+
+# ── literal-faithfulness gate (2026-08-02 design doc) ────────────────────
+# Date-like spans are exempt from gating: format variance ("2026-08-01" vs
+# "August 1, 2026") makes digit matching unsafe, and the prompt's
+# KEEP-LITERALS rule owns dates. The gate owns fabricated numbers,
+# versions, and identifiers. Masking only ever removes tokens from the
+# gateable set, so an over-broad date pattern fails open, never drops.
+_MONTHS = "jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec"
+_DATE_LIKE_RE = re.compile(
+    r"\b\d{4}-\d{2}-\d{2}\b"                        # 2026-09-30
+    r"|\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b"           # 9/30/26, 30-09-2026
+    r"|\b\d{4}[/-]\d{1,2}[/-]\d{1,2}\b"             # 2026/9/30
+    r"|\b\d{1,2}-[a-z]{3}-\d{2,4}\b"                # 30-Sep-2026
+    rf"|\b(?:{_MONTHS})[a-z]*\.?\s+"                # September 30(, 2026)
+    r"(?:\d{1,2}(?:st|nd|rd|th)?(?:,?\s+\d{4})?|\d{4})\b"
+    rf"|\b\d{{1,2}}(?:st|nd|rd|th)?\s+(?:of\s+)?"   # 30(th) (of) September
+    rf"(?:{_MONTHS})[a-z]*\.?(?:,?\s+\d{{4}})?\b",
+    re.IGNORECASE)
+_ORDINAL_RE = re.compile(r"^(\d+)(?:st|nd|rd|th)$")
+_STRIP_PUNCT = ".,;:!?()[]{}<>\"'`#*"
+
+
+def _norm_literal(token: str) -> str:
+    """Normalize one token for literal matching: casefold, shed surrounding
+    punctuation, currency/percent marks, thousands separators, a leading
+    ``v`` on a version, and ordinal suffixes."""
+    t = token.casefold().strip(_STRIP_PUNCT)
+    t = t.lstrip("$€£").rstrip("%")
+    t = t.replace(",", "").replace("_", "")
+    if len(t) > 1 and t[0] == "v" and t[1].isdigit():
+        t = t[1:]
+    return _ORDINAL_RE.sub(r"\1", t)
+
+
+def _literal_tokens(text: str, *, mask_dates: bool) -> list[str]:
+    src = _DATE_LIKE_RE.sub(" ", text) if mask_dates else text
+    out = []
+    for raw in src.split():
+        t = _norm_literal(raw)
+        if t and any(ch.isdigit() for ch in t):
+            out.append(t)
+    return out
+
+
+def hard_literals(value: str) -> list[str]:
+    """The gateable literals in a claim value: normalized digit-bearing
+    tokens outside date-like spans. Empty means the gate has nothing to
+    check for this claim."""
+    return _literal_tokens(value or "", mask_dates=True)
+
+
+def literal_violations(value: str, corpus: str) -> list[str]:
+    """Gateable literals in ``value`` that ``corpus`` (source note text)
+    does not back. Empty corpus abstains. A token passes on exact
+    normalized match, numeric equality (``08`` ↔ ``8``, ``3.20`` ↔ ``3.2``),
+    or — for identifier-like tokens only, never bare numbers — a
+    bidirectional substring match (``pr-81`` ↔ ``81``)."""
+    if not (corpus or "").strip():
+        return []
+    gateable = hard_literals(value)
+    if not gateable:
+        return []
+    # The corpus is evidence, not a claim — leave dates unmasked so their
+    # digit parts can still back a token; extra tokens only fail open.
+    corpus_tokens = set(_literal_tokens(corpus, mask_dates=False))
+    bad = []
+    for tok in gateable:
+        if tok in corpus_tokens:
+            continue
+        try:
+            num = float(tok)
+        except ValueError:
+            num = None
+        for ct in corpus_tokens:
+            if num is not None:
+                try:
+                    if float(ct) == num:
+                        break
+                except ValueError:
+                    pass
+            if (not tok.isdigit() and len(tok) >= 2 and len(ct) >= 2
+                    and (tok in ct or ct in tok)):
+                break
+        else:
+            bad.append(tok)
+    return bad
 
 
 _FACTS_HINT_HEAD = (
