@@ -36,30 +36,33 @@ rollback would need is actively deleted in steady state.
 
 ## Schema v27 (additive)
 
-- `dream_runs`: one row per dream pass that pulled entries — id, started/finished, cursor
-  before/after, pulled/claims counts, `tallies` JSONB (full tally + literal-gate counters +
-  quarantined), `status` (`running | committed | held | failed | rolled_back`), extractor,
-  writer_id, rolled_back_at.
+- `dream_runs`: one row per dream pass that had claims to write — id, started/finished,
+  cursor before/after, pulled/claims counts, `tallies` JSONB (full tally + literal-gate
+  counters + quarantined), `status` (`running | committed | failed | rolled_back`),
+  extractor, writer_id, rolled_back_at.
 - `dream_run_slots`: the pre-image journal — run_id FK **ON DELETE CASCADE**, seq, display
   entity/attribute plus norms, kind (scalar|member), op, prev_kind/prev_value/prev_status/
   prev_confidence/prev_support (`prev_status` NULL = slot or member did not exist),
   new_value, the write's actual returned `action`, src_entry_id (**no FK** — entries are
   evictable, and the `memory_traces` FK is the origin of the reflush-stall class), at.
 
-Run-row lifecycle: zero-pull sweeps write **no row** (a row per quiet tick would burn the
-retention window); the row is created lazily once claims exist. Extractor failure → `held`
-(provably wrote nothing). A claim-write exception — including the `_dream_reflush_stale`
-healed path — → **`failed`** (partial writes landed; this is what makes the rollback
-precondition decidable). Success → `committed`, stamped immediately after `dream_commit`,
-*before* the relations/lessons block (a relations failure must not mislabel a run whose
-cortex writes and cursor advance really happened). A process death leaves `running`;
-`prune_dream_runs` flips `running` rows older than 24 h to `failed`.
+Run-row lifecycle: a row exists **only when the pass had claims to write** (non-empty
+`pairs`) — zero-pull sweeps, extractor failures/outages, and empty extractions leave no row.
+This is deliberate: an outage retries every sweep tick, and a row per retry would burn the
+newest-N retention window on passes that provably wrote nothing; for the rollback
+precondition, *no row* and *wrote nothing* are equivalent. Statuses are therefore
+`running | committed | failed | rolled_back` (no `held` status). A claim-write exception —
+including the `_dream_reflush_stale` healed path — → **`failed`** (partial writes landed;
+this is what makes the rollback precondition decidable). Success → `committed`, stamped
+immediately after `dream_commit`, *before* the relations/lessons block (a relations failure
+must not mislabel a run whose cortex writes and cursor advance really happened). A process
+death leaves `running`; `prune_dream_runs` flips `running` rows older than 24 h to `failed`.
 
 ## Rollback contract
 
 `memory_dream(action="rollback")` reverts the **latest committed run only**, and only when
-every newer run is `held` or `rolled_back` (a newer `failed`/`running` run means unjournaled
-uncertainty — refuse). Reversal walks the journal in reverse seq through the normal service
+no newer run is `failed` or `running` (either means unjournaled or partial uncertainty —
+refuse). Reversal walks the journal in reverse seq through the normal service
 write paths (supersede-back preserves audit; nothing is deleted):
 
 | journaled | reversal |

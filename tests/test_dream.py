@@ -284,6 +284,12 @@ class _FakeService:
         # Mirrors MemoryService.compact_superseded (runs on every sweep tick).
         return {"facts": 0, "world_facts": 0, "lessons": 0, "total": 0}
 
+    def prune_dream_runs(self):
+        # Mirrors MemoryService.prune_dream_runs (v27 journal retention,
+        # also every sweep tick).
+        self.pruned = getattr(self, "pruned", 0) + 1
+        return 2
+
     def dream_run(self, extractor):
         self.ran = True
         return {"pulled": 1, "claims": 1, "inserted": 1, "confirmed": 0,
@@ -315,6 +321,20 @@ def test_run_sweep_once_fires():
     svc = _FakeService(would_fire=True)
     out = run_sweep_once(svc)
     assert out["fired"] is True and out["inserted"] == 1 and svc.ran
+
+
+def test_run_sweep_once_prunes_dream_runs():
+    """v27 journal retention rides every sweep tick beside compaction —
+    including ticks where no dream fires (a quiet bank must still prune)."""
+    from pseudolife_memory.memory.dream import run_sweep_once
+
+    quiet = _FakeService(would_fire=False)
+    out = run_sweep_once(quiet)
+    assert out["runs_pruned"] == 2 and quiet.pruned == 1
+
+    firing = _FakeService(would_fire=True)
+    out = run_sweep_once(firing)
+    assert out["runs_pruned"] == 2 and firing.pruned == 1
 
 
 # ── driver / status (PG-backed; real embedder) ───────────────────────────

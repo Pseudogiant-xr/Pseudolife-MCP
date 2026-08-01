@@ -8,8 +8,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added (2026-08-01 — every dream pass is now an auditable, reversible run (schema v27))
 - **Schema v27: `dream_runs` + `dream_run_slots` — each dream pass that
-  pulls entries records a run row (cursor movement, tallies, lifecycle
-  status `running|committed|held|failed|rolled_back`) and a per-claim
+  produces claims records a run row (cursor movement, tallies, lifecycle
+  status `running|committed|failed|rolled_back`) and a per-claim
   pre-image journal of what every touched slot held before the write.**
   The journal lives outside the facts supersession chain on purpose:
   superseded-row compaction purges that chain in steady state, so it was

@@ -2570,6 +2570,18 @@ class MemoryService:
                         _norm_key(d["entity"]), _norm_key(d["attribute"]))
             return {"count": len(rows), "entries": rows}
 
+    def prune_dream_runs(self) -> int:
+        """Retention for the v27 dream-run journal: keep the newest
+        ``memory.dream.runs_keep`` runs (CASCADE removes their journals) and
+        flip stale ``running`` rows to ``failed``. Sweep-tick maintenance
+        beside :meth:`compact_superseded`; safe to call any time. Returns
+        the number of pruned runs (0 in file mode)."""
+        if self._storage is None:
+            return 0
+        with self._lock:
+            return self._storage.prune_dream_runs(
+                int(self.config.memory.dream.runs_keep))
+
     def compact_superseded(self) -> dict[str, Any]:
         """Purge old superseded/retired versions from the three canonical
         stores (spec 2026-07-14): per slot keep the newest
@@ -3008,7 +3020,8 @@ class MemoryService:
                     "cursor": pulled["cursor"], "lessons": lessons,
                     "outcome_inference": outcome_inference,
                     "graph_insight": graph_insight, "retyped": retyped}
-        from pseudolife_memory.memory.cortex import _norm_key
+        from pseudolife_memory.memory.cortex import (_TIER_RANK, _norm_key,
+                                                     _norm_value)
         from pseudolife_memory.memory.dream import literal_violations
         import time as _time
         traces_cfg = self.config.memory.traces
@@ -3118,6 +3131,38 @@ class MemoryService:
             known_entities = {r.key[0] for r in self._cortex.records
                               if r.status == "current"}
         new_entities: dict[str, str] = {}    # norm -> display, first seen
+        # Dream-run audit (schema v27): a run row exists only when the pass
+        # has claims to write — outages, zero-claim batches, and retries
+        # leave no row (a row per quiet tick would burn the newest-N
+        # retention window on passes that provably wrote nothing).
+        run_id = None
+        run_seq = 0
+        if pairs and self._storage is not None:
+            with self._lock:
+                run_id = self._storage.start_dream_run(
+                    _time.time(), self._cortex.dream_cursor, len(entries),
+                    extractor=(getattr(extractor, "model", None)
+                               or type(extractor).__name__))
+
+        def _finish_run(status: str, cursor_after: float | None) -> None:
+            # Bookkeeping must never break a dream (or mask the exception
+            # that got us here — the failed path IS the broken-connection
+            # path _dream_reflush_stale exists for).
+            if run_id is None:
+                return
+            try:
+                with self._lock:
+                    self._storage.finish_dream_run(
+                        run_id, status=status, finished_at=_time.time(),
+                        cursor_after=cursor_after,
+                        claims=sum(tally.values()),
+                        tallies={**tally,
+                                 "literal_flagged": literal_flagged,
+                                 "literal_dropped": literal_dropped,
+                                 "quarantined": quarantined})
+            except Exception as exc2:  # noqa: BLE001
+                logger.warning("dream: run-row finish failed (%s)", exc2)
+
         try:
             for c, src_id in pairs:
                 ent, attr = self._resolve_dream_slot(c["entity"], c["attribute"])
@@ -3171,6 +3216,36 @@ class MemoryService:
                         # re-dream must be a no-op, not a confirmation —
                         # the confirm path ratchets confidence.
                         continue
+                # Pre-image capture (v27 journal): O(1) reads under a short
+                # lock, released before the write — the lock is
+                # non-reentrant and cortex_write/set_add lock internally
+                # (the same hazard the trace-write comment below documents).
+                # Snapshot FIELDS, not the record: supersede/remove mutate
+                # the old CortexRecord in place, so a held reference would
+                # read the post-write status when the journal row is built.
+                prev_kind = None
+                prev = None      # (value, status, confidence, support) tuple
+                if run_id is not None:
+                    with self._lock:
+                        cur_rec = self._cortex.lookup(ent, attr)
+                        mem_recs = self._cortex.members(ent, attr)
+                        if cur_rec is not None:
+                            prev_kind = "scalar"
+                        elif mem_recs:
+                            prev_kind = "set"
+                        if op is None:
+                            prev_rec = cur_rec
+                        else:
+                            want = _norm_value(c["value"])
+                            prev_rec = next(
+                                (m for m in mem_recs
+                                 if _norm_value(m.value) == want), None)
+                        if prev_rec is not None:
+                            prev = (prev_rec.value, prev_rec.status,
+                                    prev_rec.confidence,
+                                    max(prev_rec.support,
+                                        key=lambda t: _TIER_RANK.get(t, 0))
+                                    if prev_rec.support else None)
                 if op == "add":
                     res = self.set_add(
                         ent, attr, c["value"],
@@ -3211,6 +3286,33 @@ class MemoryService:
                             continue
                         raise
                 tally[res["action"]] = tally.get(res["action"], 0) + 1
+                # Journal the write with its ACTUAL returned action —
+                # immediately, per claim (crash-durable; a buffered journal
+                # would lose exactly the rows whose writes already landed).
+                # Actions that stored nothing at all are not journaled;
+                # "contested" IS (a contender row persisted, and rollback
+                # has a reversal for it).
+                if (run_id is not None and res["action"] not in
+                        ("member_invalid", "member_capped",
+                         "member_not_found")):
+                    journal_row = {
+                        "seq": run_seq, "entity": ent, "attribute": attr,
+                        "entity_norm": _norm_key(ent),
+                        "attribute_norm": _norm_key(attr),
+                        "kind": "member" if op else "scalar",
+                        "op": op,
+                        "prev_kind": prev_kind,
+                        "prev_value": prev[0] if prev else None,
+                        "prev_status": prev[1] if prev else None,
+                        "prev_confidence": prev[2] if prev else None,
+                        "prev_support": prev[3] if prev else None,
+                        "new_value": c["value"],
+                        "action": res["action"],
+                        "src_entry_id": src_id,
+                        "at": _time.time()}
+                    with self._lock:
+                        self._storage.add_dream_run_slot(run_id, journal_row)
+                    run_seq += 1
                 if res["action"] in ("member_invalid", "member_capped", "contested"):
                     # Nothing was actually stored — a trace/reinforcement
                     # bump here would link a source entry to a slot it never
@@ -3237,6 +3339,10 @@ class MemoryService:
                                 self._cms.bump_entry_reinforcements(src_id, 1)
                             traces_n += 1
         except Exception as exc:  # noqa: BLE001 — a write failure must hold the cursor too
+            # Partial writes may have landed and are journaled — record
+            # `failed` (NOT a silent absence) so rollback can refuse to
+            # reach past this run's unjournaled uncertainty.
+            _finish_run("failed", None)
             healed = self._dream_reflush_stale(entries)
             if healed:
                 return _held(f"claim write failed ({healed} stale entry id(s) "
@@ -3244,6 +3350,10 @@ class MemoryService:
             return _held("claim write failed", exc)
         newest = max(e["timestamp"] for e in entries)
         self.dream_commit(newest)
+        # Stamp `committed` HERE — before relations/lessons/graph — so a
+        # failure in that bookkeeping block cannot mislabel a run whose
+        # cortex writes and cursor advance really did happen.
+        _finish_run("committed", newest)
         relations_n = self._dream_extract_relations(
             extractor, texts,
             batch_sources={e["source"] for e in entries if e.get("source")})

@@ -946,12 +946,16 @@ def run_sweep_once(service) -> dict:
     if not cfg.enabled:
         return {"fired": False, "reason": "disabled"}
     # Superseded-row compaction rides every tick (spec 2026-07-14) — it must
-    # run even when no dream fires, or a quiet bank never compacts.
+    # run even when no dream fires, or a quiet bank never compacts. The v27
+    # dream-run journal retention rides the same tick for the same reason.
     compacted = service.compact_superseded().get("total", 0)
+    runs_pruned = service.prune_dream_runs()
     status = service.dream_status()
     if not status["would_fire"]:
         return {"fired": False, "reason": "below_threshold",
-                "backlog": status["backlog"], "compacted": compacted}
+                "backlog": status["backlog"], "compacted": compacted,
+                "runs_pruned": runs_pruned}
     result = service.dream_run_auto()
     logger.info("dream sweep fired: %s", result)
-    return {"fired": True, "compacted": compacted, **result}
+    return {"fired": True, "compacted": compacted,
+            "runs_pruned": runs_pruned, **result}
