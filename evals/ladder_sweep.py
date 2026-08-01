@@ -335,6 +335,8 @@ def build_service(tmp_dir: Path):
     # of the shipped default (which is now also False).
     svc.config.memory.cortex.auto_promote = False
     svc.config.memory.dream.known_facts_window = WINDOW
+    if LITERAL_GATE is not None:
+        svc.config.memory.dream.literal_gate = LITERAL_GATE
     return svc
 
 
@@ -349,6 +351,7 @@ def ingest(svc) -> None:
 
 
 SYSTEM_PROMPT_FILE: str | None = None   # --system-prompt-file override
+LITERAL_GATE: str | None = None         # --literal-gate override (None = shipped default)
 
 
 def make_extractor(rung: dict):
@@ -372,7 +375,8 @@ def make_extractor(rung: dict):
 
 def consolidate(svc, extractor) -> tuple[float, dict]:
     t0 = time.perf_counter()
-    tally = {"pulled": 0, "claims": 0, "inserted": 0, "superseded": 0}
+    tally = {"pulled": 0, "claims": 0, "inserted": 0, "superseded": 0,
+             "literal_flagged": 0, "literal_dropped": 0}
     while True:
         res = svc.dream_run(extractor, limit=100)
         for k in tally:
@@ -679,6 +683,11 @@ def build_parser() -> argparse.ArgumentParser:
                     help="override the extraction system prompt from a file "
                          "(prompt-variant runs; pair with --out-tag so the "
                          "canonical rung result stays shipped-prompt only)")
+    ap.add_argument("--literal-gate", choices=("off", "log", "enforce"),
+                    default=None,
+                    help="override memory.dream.literal_gate for every "
+                         "service built by this run (gate-mode variant runs; "
+                         "pair with --out-tag)")
     return ap
 
 
@@ -692,12 +701,16 @@ def main(argv: list[str] | None = None) -> int:
         pass
 
     args = build_parser().parse_args(argv)
-    global WINDOW, SYSTEM_PROMPT_FILE
+    global WINDOW, SYSTEM_PROMPT_FILE, LITERAL_GATE
     WINDOW = args.window
     SYSTEM_PROMPT_FILE = args.system_prompt_file
+    LITERAL_GATE = args.literal_gate
     if SYSTEM_PROMPT_FILE and not args.out_tag:
         sys.exit("--system-prompt-file requires --out-tag: a prompt-variant "
                  "run must not overwrite a canonical rung result")
+    if LITERAL_GATE is not None and not args.out_tag:
+        sys.exit("--literal-gate requires --out-tag: a gate-variant run "
+                 "must not overwrite a canonical rung result")
 
     if args.list:
         for n in LADDER_ORDER:
