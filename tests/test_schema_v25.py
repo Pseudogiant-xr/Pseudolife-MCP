@@ -29,7 +29,7 @@ _EMBEDDING_TABLES = ("entries", "facts", "world_facts", "lessons")
 
 
 def test_schema_version_is_25():
-    assert schema.SCHEMA_META_VERSION == 26
+    assert schema.SCHEMA_META_VERSION == 27
 
 
 def test_all_four_embedding_columns_report_dim_1024(pg_conn):

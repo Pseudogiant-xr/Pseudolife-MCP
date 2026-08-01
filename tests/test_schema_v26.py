@@ -31,7 +31,7 @@ def _insert_fact(conn, *, entity, attribute, value, kind="scalar",
 
 
 def test_meta_version_is_26():
-    assert SCHEMA_META_VERSION == 26
+    assert SCHEMA_META_VERSION == 27
 
 
 def test_facts_has_kind_and_value_norm(pg_conn):

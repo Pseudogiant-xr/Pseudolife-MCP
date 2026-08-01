@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 26
+SCHEMA_META_VERSION = 27
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -518,6 +518,64 @@ def ensure_schema(conn) -> dict:
             )
             """
         )
+        # v27 additive: dream-run audit + pre-image journal (design doc
+        # docs/superpowers/specs/2026-08-01-dream-run-journal-design.md).
+        # dream_runs = one row per dream pass that pulled entries;
+        # dream_run_slots = the per-claim pre-image journal rollback
+        # replays, CASCADE so pruning a run removes its journal. Both live
+        # outside the facts supersession chain on purpose: compaction purges
+        # superseded rows, so the chain is not durable enough to revert
+        # from. src_entry_id carries NO FK — entries are evictable, and the
+        # memory_traces FK is the origin of the reflush-stall class.
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS dream_runs (
+              id BIGSERIAL PRIMARY KEY,
+              started_at DOUBLE PRECISION NOT NULL,
+              finished_at DOUBLE PRECISION,
+              cursor_before DOUBLE PRECISION NOT NULL,
+              cursor_after DOUBLE PRECISION,
+              pulled INTEGER NOT NULL DEFAULT 0,
+              claims INTEGER NOT NULL DEFAULT 0,
+              tallies JSONB NOT NULL DEFAULT '{}',
+              status TEXT NOT NULL DEFAULT 'running',
+              extractor TEXT,
+              writer_id TEXT,
+              rolled_back_at DOUBLE PRECISION
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS dream_runs_started_idx "
+            "ON dream_runs (started_at DESC)")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS dream_run_slots (
+              id BIGSERIAL PRIMARY KEY,
+              run_id BIGINT NOT NULL REFERENCES dream_runs(id)
+                ON DELETE CASCADE,
+              seq INTEGER NOT NULL,
+              entity TEXT NOT NULL,
+              attribute TEXT NOT NULL,
+              entity_norm TEXT NOT NULL,
+              attribute_norm TEXT NOT NULL,
+              kind TEXT NOT NULL,
+              op TEXT,
+              prev_kind TEXT,
+              prev_value TEXT,
+              prev_status TEXT,
+              prev_confidence REAL,
+              prev_support TEXT,
+              new_value TEXT,
+              action TEXT NOT NULL,
+              src_entry_id BIGINT,
+              at DOUBLE PRECISION NOT NULL
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS dream_run_slots_run_idx "
+            "ON dream_run_slots (run_id, seq)")
         # One-time upgrade: drop the old episode FK only when it's actually
         # present. Guarding avoids taking an ACCESS EXCLUSIVE lock on every
         # init (which could block behind any open transaction on entries).
