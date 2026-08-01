@@ -1,0 +1,65 @@
+{
+  "verdict": "v6 prompt HELD (fails its pre-registered KU gate); literal gate SHIPS with default log + batch scope; enforce stays opt-in (no firing evidence)",
+  "date": "2026-08-01",
+  "preregistration": {
+    "doc": "docs/superpowers/specs/2026-08-02-literal-fidelity-design.md",
+    "rules": [
+      "op-probe: v6 op adoption and count-decoy must both hold 7/7 (else stop the line)",
+      "KU gate: v6 ships iff cascade is not significantly below the v5 arm AND the digit-gold class does not regress; nonzero rag delta invalidates the run",
+      "gate default: enforce ships as default iff gold_recoverable non-inferior to log"
+    ]
+  },
+  "code": {
+    "op_probe_and_ku_phase": "e002df41 (feat/dream-literal-fidelity HEAD: gate + ladder flag; no v27 journal)",
+    "ladder_phase": "de2193b7 (feat/dream-run-journal HEAD: superset adding the v27 run journal — constant across all four arms, cancels in every within-chain comparison)",
+    "note": "per-process module load times determine attribution; the chain checkout moved between phases"
+  },
+  "commands": {
+    "op_probe": "PYTHONPATH=. python evals/op_probe.py --tag v6-literal --variants v5-count-exclusion-claim-example,v6-literal-fidelity  (Start-Qwen -Fast; unjudged)",
+    "ku": "python evals/longmemeval_bench.py --dataset oracle --extractor qwen-27b --tag c2v6-literal --system-prompt-file evals/prompts/ku_op_prompt_v6.txt  (Start-Qwen reproducible q8_0)",
+    "compare": "python evals/compare_arms.py --a c2v6-literal --b c2op-count --out-tag c2v6-literal",
+    "ladder": "python evals/ladder_sweep.py --rung e4b-ft --system-prompt-file <v5|v6> --literal-gate <off|log|enforce> --out-tag lit-*"
+  },
+  "results": {
+    "op_probe": {
+      "artifact": "evals/results/op-probe-v6-literal.json",
+      "v5": {"adoption": "7/7", "decoy_ok": "7/7"},
+      "v6": {"adoption": "7/7", "decoy_ok": "7/7"},
+      "reading": "the literal block does not perturb op routing — rule 1 PASSES"
+    },
+    "ku_v6_vs_v5": {
+      "artifacts": [
+        "evals/results/longmemeval-ku-oracle-qwen-27b-c2v6-literal.jsonl",
+        "evals/results/longmemeval-ku-oracle-qwen-27b-c2op-count.jsonl",
+        "evals/results/compare-c2v6-literal-pairs.json"
+      ],
+      "n": 78,
+      "control": {"rag_delta": 0.0, "rag_p": 1.0, "reading": "zero measurement noise; deltas are real"},
+      "cascade": {"v6": 0.846, "v5": 0.936, "delta": -0.0897, "p": 0.0366, "wins": 1, "losses": 8},
+      "cortex": {"v6": 0.705, "v5": 0.756, "delta": -0.0513, "p": 0.3829},
+      "hybrid": {"v6": 0.885, "v5": 0.910, "delta": -0.0256, "p": 0.7201},
+      "digit_gold_class": {"n": 39, "cascade_v6": 0.872, "cascade_v5": 0.949, "cortex_v6": 0.769, "cortex_v5": 0.821},
+      "mechanism": "in 7 of 8 cascade losses the v5 cortex answer was CORRECT and became wrong under v6 (4 wrong commits, 3 new abstentions); losses span digit and non-digit golds — general extraction degradation, not a digit-class artifact. 4 cortex wins are v5-abstentions that v6 commits correctly, but they do not offset the losses.",
+      "reading": "cascade significantly below v5 AND digit-gold class regresses — rule 2 FAILS on both prongs; v6 does not ship"
+    },
+    "ladder_e4b_ft": {
+      "artifacts": [
+        "evals/results/e4b-ft-lit-base.json",
+        "evals/results/e4b-ft-lit-v6.json",
+        "evals/results/e4b-ft-lit-v6-log.json",
+        "evals/results/e4b-ft-lit-v6-enforce.json"
+      ],
+      "all_arms": {"gold_recoverable": 1.0, "stale_leak": 0.0, "literal_flagged": 0, "literal_dropped": 0},
+      "reading": "the corpus is saturated for this rung (no v5/v6 discrimination) and the gate never fires — the e4b-ft extractor fabricates no gateable literals here. enforce is non-inferior to log only VACUOUSLY, which is not evidence it is safe where it fires; rule 3 is therefore not satisfied in spirit and the default stays log. The KU harness does not record the gate counters, so the qwen-27b firing rate is UNRECORDED, not zero."
+    }
+  },
+  "decisions": [
+    "dream.py _SYSTEM_PROMPT stays v5 (byte-pinned to ku_op_prompt_v5.txt); ku_op_prompt_v6.txt remains committed as a measured, pinned, UNSHIPPED variant — do not re-attempt a verbatim-literals prompt block without a new mechanism hypothesis for the observed extraction degradation",
+    "DreamConfig.literal_gate ships default 'log' (observe + count; counters surface in dream results and, with the v27 journal, in dream_runs.tallies), literal_gate_scope 'batch'; 'enforce' is opt-in until live/log evidence shows the gate firing on real fabrications without derived-sum false drops"
+  ],
+  "caveats": [
+    "single KU run per arm (the reproducible server is bit-deterministic, and the rag control's exact-zero delta confirms; no replicate variance to report)",
+    "ladder corpus saturation means the sidecar ladder cannot currently discriminate prompt variants at this rung; a harder corpus would be needed for that",
+    "the v6 loss mechanism (verbatim-copy mandate degrading consolidation) is inferred from the per-qid flip pattern, not causally isolated"
+  ]
+}

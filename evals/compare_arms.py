@@ -38,7 +38,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from replicate import cascade_correct  # noqa: E402
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
+REPO_ROOT = Path(__file__).resolve().parents[1]
 ARMS = ("rag", "cortex", "hybrid", "cascade")
+
+
+def _repo_rel(path: Path) -> str:
+    """Repo-relative POSIX form for artifacts — absolute paths embed the
+    machine's home directory, which the tracked tree must never carry
+    (test_release_ux::test_tracked_tree_carries_no_maintainer_identifiers)."""
+    p = Path(path).resolve()
+    try:
+        return p.relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        return p.name
 
 
 def _load_rows(path: Path) -> dict[str, dict]:
@@ -87,8 +99,8 @@ def compare(a_file: Path, b_file: Path, *, draws: int = 10_000,
         "dropped_b": len(b_rows) - n,
         "draws": draws,
         "seed": seed,
-        "a": {"file": str(a_file), "arms": {}},
-        "b": {"file": str(b_file), "arms": {}},
+        "a": {"file": _repo_rel(a_file), "arms": {}},
+        "b": {"file": _repo_rel(b_file), "arms": {}},
         "paired": {"a_vs_b": {}},
     }
     for arm in ARMS:

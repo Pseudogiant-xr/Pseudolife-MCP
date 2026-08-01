@@ -105,6 +105,19 @@ The Sonnet override prompt (`evals/prompts/sonnet_extractor_v2.md`, used
 when you run the shim below) carries the same three, tuned for a larger
 model.
 
+**Literal-faithfulness gate.** After extraction, every claim's digit-bearing
+tokens (dates exempt — format variance makes digit matching unsafe there)
+are checked against the pull's source notes: a fabricated number or
+identifier is counted (`literal_flagged` in dream results) under the
+default `memory.dream.literal_gate = "log"`, or dropped under `"enforce"`.
+The corpus is the whole batch's note union by default — derived sums and
+cross-note values are measured false-drop classes under per-note gating.
+`enforce` is deliberately opt-in: across every measured corpus the gate
+never fired, so enforcement is unproven exactly where it would matter
+(`evals/results/literal-fidelity-verdict.json`). A companion prompt rule
+mandating verbatim literals was built, measured, and **held** — it
+significantly degraded the KU cascade (same verdict artifact).
+
 ## The CPU extractor sidecar (batteries-included default)
 
 The stack ships a llama.cpp sidecar with a model baked in (the bespoke

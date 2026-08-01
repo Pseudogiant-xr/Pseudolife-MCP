@@ -34,6 +34,10 @@ def test_identical_runs_have_zero_delta_p_one(tmp_path):
     b = _write(tmp_path / "b.jsonl", rows)
     out = compare_arms.compare(a, b, draws=1000, seed=0)
     assert out["n"] == 8
+    # Artifact hygiene: never an absolute path (home dirs are maintainer
+    # identifiers the tracked tree must not carry) — outside-repo inputs
+    # fall back to the bare filename.
+    assert out["a"]["file"] == "a.jsonl" and out["b"]["file"] == "b.jsonl"
     for arm in ("rag", "cortex", "hybrid", "cascade"):
         pa = out["paired"]["a_vs_b"][arm]
         assert pa["delta"] == 0.0 and pa["p"] == 1.0

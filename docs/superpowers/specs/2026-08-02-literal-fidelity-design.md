@@ -1,7 +1,10 @@
 # Dream literal fidelity — design
 
 **Date:** 2026-08-02
-**Status:** approved approach (two layers: prompt mandate + deterministic faithfulness gate)
+**Status:** MEASURED (2026-08-01 chain): Layer 2 (gate) ships, default `log`; Layer 1 (v6
+prompt) is **held** — it failed pre-registered ship rule 2 (cascade −0.090, p = 0.037, and
+the digit-gold class regressed 0.949 → 0.872). Verdict:
+`evals/results/literal-fidelity-verdict.json`.
 **Follow-up to:** `evals/results/c2op-count-verdict.json` (v5 ship), external findings on
 consolidation detail loss (arXiv:2607.21503 "validated compaction", arXiv:2607.19359
 "compression residuals", arXiv:2605.12978 consolidation-degradation result)

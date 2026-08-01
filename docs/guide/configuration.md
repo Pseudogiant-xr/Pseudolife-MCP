@@ -138,6 +138,16 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   `related-to` co-mention edges (confidence 0.45); typed relations (0.70)
   write live as before. Set `0.0` to disable and restore write-live
   behavior.
+- **Literal-faithfulness gate on, observational** (`memory.dream.literal_gate
+  = "log"`, `memory.dream.literal_gate_scope = "batch"`) — digit-bearing
+  tokens in a dream claim's value (date-like spans exempt) must appear in
+  the pull's source notes; violations are counted (`literal_flagged` in
+  dream results) but not dropped. `"enforce"` drops them and is opt-in: on
+  every measured corpus the gate never fired, so enforcement is unproven
+  where it matters (`evals/results/literal-fidelity-verdict.json`). The
+  batch-union corpus default exists because derived sums and cross-note
+  values are measured false-drop classes under per-note (`"source"`)
+  gating. `"off"` disables.
 - **Quarantine retype on** (`memory.dream.retype_quarantined_max = 3`) —
   per-dream cap on quarantined pairs re-offered to the extractor for
   typing, shown only the notes where both entities co-occur; a typed
