@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-08-01 — the extractor op prompt ships: hold reversed on measured grounds)
+- **The shipped extraction prompt (`dream.py::_SYSTEM_PROMPT`) now solicits
+  claim-level `op` for set membership, paired with the counts-are-never-
+  members rule** — the option-B hold (2026-07-31) is reversed by maintainer
+  decision on the strength of the count-exclusion gate: cascade exactly at
+  the op-less control (delta 0.0, p = 1.0), count-class damage reversed,
+  sidecar adoption and ladder-rung gates identical
+  (`evals/results/c2op-count-verdict.json`). The prompt is byte-pinned to
+  the measured artifact (`evals/prompts/ku_op_prompt_v5.txt`,
+  `test_op_prompt_artifact.py`) so what runs is exactly what was measured;
+  `op_probe`'s variant constructions re-anchor on the committed op-less
+  control file so every historical gate artifact stays byte-identical to
+  what its gate ran. Both Sonnet extractor mirrors
+  (`sonnet_extractor_v1.md` / `v2.md`) regain the membership block from the
+  pre-hold state plus the count-exclusion rule in the same style. Dreams
+  can now form set-valued slots from conversation; the aggregate-conversion
+  guard remains the apply-time backstop for any `op:"add"` landing on a
+  stated total.
+
 ## [0.12.0] - 2026-08-01 — set-valued memory, and the measurements that earned it
 
 ### Fixed (2026-08-01 — YAML loader ran the surprise gate at 0.3 when the key was omitted)

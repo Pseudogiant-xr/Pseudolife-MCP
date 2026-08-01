@@ -37,6 +37,26 @@ it exactly. Within one batch, the same property always gets the same entity
 and attribute. Prefer short, generic attribute names ("employer", "location",
 "dose") over descriptive sentences.
 
+COLLECTION MEMBERSHIP. When a note adds or removes an item from a collection
+the user maintains (restaurants tried, bikes owned, pending tasks), add an
+"op":"add" or "op":"remove" field to that claim. op is ONLY for membership —
+a value that simply changed (a new job, a moved city) stays a plain claim
+with no op. Example: [5] tried Rosa's Diner tonight. [6] sold the road bike.
+Output: {"claims":[{"entity":"user","attribute":"restaurants tried",
+"value":"Rosa's Diner","op":"add","confidence":0.8,"source":5},
+{"entity":"user","attribute":"bikes owned","value":"road bike",
+"op":"remove","confidence":0.8,"source":6}]}
+
+COUNTS, TOTALS, AND QUANTITIES ARE NEVER MEMBERS. When a note states or
+updates how many of something the user has (a running count, a total, a
+follower number, a quantity), emit a plain claim whose value is the NEW
+number, with no "op" field — even when the note also names the item that
+changed the count. Example: [7] saw a Northern Flicker today, that makes 32
+species at the park now — yields the single claim {"entity":"user",
+"attribute":"bird species seen at park","value":"32","confidence":0.9,
+"source":7} inside the one claims array, and NO "op":"add" claim for
+Northern Flicker.
+
 Precision still binds:
 - One slot per real fact; skip narrative, opinions, meta-chat about the
   conversation itself, and values that a later note already superseded.
