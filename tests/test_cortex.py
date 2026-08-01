@@ -617,3 +617,36 @@ def test_candidates_for_excludes_queried_slot_and_caps():
     got = s.candidates_for("srv", "attr0")
     assert len(got) == 5  # top_k cap
     assert all(c["attribute"] != "attr0" for c in got)
+
+
+# ── retire_current (v27 rollback primitive) ──────────────────────────────
+
+def test_retire_current_makes_slot_read_absent_but_keeps_audit_row():
+    s = CortexStore()
+    s.write_fact(Slot("team", "mascot", "fox"), _unit(1), now=100.0)
+    res = s.retire_current("team", "mascot", now=200.0)
+    assert res is not None and res.action == "retired"
+    assert s.lookup("team", "mascot") is None
+    assert s.slot_kind("team", "mascot") is None
+    rows = s.records_for("team", "mascot")
+    assert len(rows) == 1
+    assert rows[0].status == "retired" and rows[0].superseded_at == 200.0
+    assert ("team", "mascot") in s.dirty_slots
+
+
+def test_retire_current_then_write_fact_inserts_cleanly():
+    s = CortexStore()
+    s.write_fact(Slot("team", "mascot", "fox"), _unit(1), now=100.0)
+    s.retire_current("team", "mascot", now=200.0)
+    r = s.write_fact(Slot("team", "mascot", "owl"), _unit(2), now=300.0)
+    assert r.action == "inserted"
+    assert s.lookup("team", "mascot").value == "owl"
+
+
+def test_retire_current_returns_none_when_no_current_scalar():
+    s = CortexStore()
+    assert s.retire_current("team", "mascot") is None
+    # A set-valued slot is unwound member-by-member, never retired wholesale.
+    s.add_member(Slot("user", "tags", "alpha"), _unit(3), now=100.0)
+    assert s.retire_current("user", "tags") is None
+    assert [m.value for m in s.members("user", "tags")] == ["alpha"]

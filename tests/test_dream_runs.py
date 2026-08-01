@@ -221,3 +221,193 @@ def test_runs_listing_is_compact(svc):
     assert {"id", "started_at", "finished_at", "cursor_before",
             "cursor_after", "pulled", "claims", "tallies", "status",
             "extractor"} <= set(run)
+
+
+# ── rollback ─────────────────────────────────────────────────────────────
+
+def test_rollback_restores_prev_scalar_via_supersede(svc):
+    svc.store("the mascot is a fox", source="notes")
+    svc.dream_run(_Stub([_scalar("team", "mascot", "fox")]))
+    svc.store("the mascot changed to an owl", source="notes")
+    svc.dream_run(_Stub([_scalar("team", "mascot", "owl")]))
+    out = svc.dream_rollback()
+    assert out.get("error") is None, out
+    assert out["reverted"] == 1
+    cur = svc.cortex_lookup("team", "mascot")
+    assert cur is not None and cur["value"] == "fox"
+    # History preserved, not rewritten: original -> dream -> revert.
+    rows = svc._cortex.records_for("team", "mascot")
+    assert len(rows) >= 3
+    assert _runs(svc)[0]["status"] == "rolled_back"
+
+
+def test_rollback_retires_inserted_slot(svc):
+    svc.store("the mascot is a fox", source="notes")
+    svc.dream_run(_Stub([_scalar("team", "mascot", "fox")]))
+    out = svc.dream_rollback()
+    assert out["reverted"] == 1
+    assert svc.cortex_lookup("team", "mascot") is None
+    rows = svc._cortex.records_for("team", "mascot")
+    assert len(rows) == 1 and rows[0].status == "retired"
+
+
+def test_rollback_forces_contested_revert(svc):
+    # Seed a low-confidence prior, let the dream supersede it with high
+    # confidence; the revert's re-write of the low-confidence prev would
+    # normally park as a contender — rollback is explicit authority, so it
+    # must still win the slot back.
+    svc.cortex_write("team", "mascot", "fox", confidence=0.3, support="agent")
+    svc.store("the mascot changed to an owl", source="notes")
+    svc.dream_run(_Stub([_scalar("team", "mascot", "owl", confidence=0.95)]))
+    out = svc.dream_rollback()
+    assert out.get("error") is None, out
+    cur = svc.cortex_lookup("team", "mascot")
+    assert cur is not None and cur["value"] == "fox"
+
+
+def test_rollback_removes_added_member(svc):
+    svc.set_add("user", "restaurants tried", "Old Haunt")
+    svc.store("tried Rosa's Diner tonight", source="notes")
+    svc.dream_run(_Stub([_scalar("user", "restaurants tried", "Rosa's Diner",
+                                 op="add")]))
+    out = svc.dream_rollback()
+    assert out["reverted"] == 1
+    got = svc.cortex_lookup("user", "restaurants tried")
+    assert [m["value"] for m in got["members"]] == ["Old Haunt"]
+
+
+def test_rollback_readds_removed_member(svc):
+    svc.set_add("user", "restaurants tried", "Rosa's Diner")
+    svc.store("scratch Rosa's Diner off the list", source="notes")
+    svc.dream_run(_Stub([_scalar("user", "restaurants tried", "Rosa's Diner",
+                                 op="remove")]))
+    out = svc.dream_rollback()
+    assert out["reverted"] == 1
+    got = svc.cortex_lookup("user", "restaurants tried")
+    assert [m["value"] for m in got["members"]] == ["Rosa's Diner"]
+
+
+def test_rollback_unwinds_scalar_to_set_conversion(svc):
+    svc.cortex_write("team", "mascot", "fox", confidence=0.9, support="user")
+    svc.store("adding an owl to the mascots", source="notes")
+    svc.dream_run(_Stub([_scalar("team", "mascot", "owl", op="add")]))
+    # Conversion happened: the scalar became a member alongside owl.
+    assert svc.cortex_lookup("team", "mascot")["kind"] == "set"
+    out = svc.dream_rollback()
+    assert out.get("error") is None, out
+    cur = svc.cortex_lookup("team", "mascot")
+    assert cur is not None and cur.get("kind") != "set", cur
+    assert cur["value"] == "fox"
+
+
+def test_rollback_keeps_set_when_other_members_arrived(svc):
+    svc.cortex_write("team", "mascot", "fox", confidence=0.9, support="user")
+    svc.store("adding an owl to the mascots", source="notes")
+    svc.dream_run(_Stub([_scalar("team", "mascot", "owl", op="add")]))
+    # A member the run did NOT add arrives afterwards.
+    svc.set_add("team", "mascot", "crow")
+    out = svc.dream_rollback()
+    assert out["partial"] == 1
+    got = svc.cortex_lookup("team", "mascot")
+    values = {m["value"] for m in got["members"]}
+    assert "owl" not in values and "crow" in values and "fox" in values
+
+
+def test_rollback_is_refused_twice(svc):
+    svc.store("the mascot is a fox", source="notes")
+    svc.dream_run(_Stub([_scalar("team", "mascot", "fox")]))
+    assert svc.dream_rollback().get("error") is None
+    again = svc.dream_rollback()
+    assert again.get("error") == "no_committed_run"
+
+
+def test_rollback_refused_when_newer_failed_run_exists(svc, monkeypatch):
+    svc.store("the mascot is a fox", source="notes")
+    svc.dream_run(_Stub([_scalar("team", "mascot", "fox")]))
+    # Newer failed run: a write that blows up mid-loop.
+    svc.store("alpha is 1", source="notes")
+
+    def boom(*a, **kw):
+        raise RuntimeError("write blew up")
+
+    monkeypatch.setattr(svc, "cortex_write", boom)
+    svc.dream_run(_Stub([_scalar("proj", "alpha", "1")]))
+    monkeypatch.undo()
+    out = svc.dream_rollback()
+    assert out.get("error") == "newer_unjournaled_runs"
+
+
+def test_rollback_with_stale_run_id_refused(svc):
+    svc.store("the mascot is a fox", source="notes")
+    svc.dream_run(_Stub([_scalar("team", "mascot", "fox")]))
+    out = svc.dream_rollback(run_id=99999)
+    assert out.get("error") == "stale_run_id"
+    assert out["latest"] == _runs(svc)[0]["id"]
+
+
+def test_rollback_keeps_traces_and_cursor(svc):
+    from pseudolife_memory.memory.cortex import _norm_key
+
+    svc.store("the mascot is a fox", source="notes")
+    svc.dream_run(_Stub([_scalar("team", "mascot", "fox")]))
+    cursor_before = svc._cortex.dream_cursor
+    src_id = _journal(svc, _runs(svc)[0]["id"])[0]["src_entry_id"]
+    svc.dream_rollback()
+    assert svc._cortex.dream_cursor == cursor_before
+    assert svc._storage.has_trace(
+        _norm_key("team"), _norm_key("mascot"), src_id)
+
+
+def test_rollback_requires_postgres(tmp_path):
+    from pseudolife_memory.service import MemoryService
+
+    s = MemoryService(data_dir=tmp_path)          # file mode, no PG
+    assert s.dream_rollback().get("error") == "requires_postgres"
+
+
+# ── memory_history as_of (per-slot point-in-time read) ───────────────────
+
+def test_history_as_of_filters_versions(svc):
+    import time as _t
+
+    svc.cortex_write("team", "mascot", "fox", confidence=0.9, support="user")
+    _t.sleep(0.02)
+    mid = _t.time()
+    _t.sleep(0.02)
+    svc.cortex_write("team", "mascot", "owl", confidence=0.9, support="user")
+
+    full = svc.history("team", "mascot")
+    assert full["count"] == 2 and "as_of" not in full
+
+    at_mid = svc.history("team", "mascot", as_of=mid)
+    assert at_mid["count"] == 1
+    assert at_mid["versions"][0]["value"] == "fox"
+    assert at_mid["as_of"] == mid
+
+    later = svc.history("team", "mascot", as_of=_t.time())
+    assert later["count"] == 2
+
+
+def test_history_as_of_accepts_iso_string(svc):
+    from datetime import datetime, timedelta
+
+    svc.cortex_write("team", "mascot", "fox", confidence=0.9, support="user")
+    tomorrow = (datetime.now() + timedelta(days=1)).isoformat()
+    out = svc.history("team", "mascot", as_of=tomorrow)
+    assert out["count"] == 1
+    yesterday = (datetime.now() - timedelta(days=1)).isoformat()
+    out = svc.history("team", "mascot", as_of=yesterday)
+    assert out["count"] == 0
+
+
+def test_history_as_of_set_slot(svc):
+    import time as _t
+
+    svc.set_add("user", "tags", "alpha")
+    _t.sleep(0.02)
+    mid = _t.time()
+    _t.sleep(0.02)
+    svc.set_add("user", "tags", "beta")
+    out = svc.history("user", "tags", as_of=mid)
+    assert out["kind"] == "set"
+    assert [v["value"] for v in out["versions"]] == ["alpha"]
