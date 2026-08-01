@@ -1,0 +1,160 @@
+{
+  "preregistration": "memory 2026-08-01 c2op-count arm (stored before gate launch); ceiling forecast committed as evals/results/c2op-count-census.json",
+  "branch": "feat/op-count-rule",
+  "code": "735167f4",
+  "run": {
+    "tag": "c2op-count",
+    "command": "longmemeval_bench.py --dataset oracle --extractor qwen-27b --tag c2op-count --system-prompt-file evals/prompts/ku_op_prompt_v5.txt",
+    "prompt": "ku_op_prompt_v5.txt = v0 op block + COUNTS/TOTALS/QUANTITIES-ARE-NEVER-MEMBERS rule with a single-claim worked example (op_probe VARIANTS['v5-count-exclusion-claim-example'], byte-pinned by test_op_prompt_artifact.py). Chosen over v3 (same recovery, but a standalone example Output block induced multi-object JSON parse retries) and v4 (parse-clean but 4/7 recovery) by targeted 7-question extraction probes.",
+    "server": "reproducible q8_0 via Start-Qwen, process command line verified",
+    "arms": {
+      "rag": 0.859,
+      "cortex": 0.756,
+      "hybrid": 0.91,
+      "cascade": 0.936
+    }
+  },
+  "paired": {
+    "note": "paired permutation 10k draws seed 0; full artifact compare-c2op-count-pairs.json",
+    "vs_opless_control": {
+      "rag": {
+        "delta": 0.0,
+        "p": 1.0,
+        "reading": "0/78 flips — extraction-determinism control holds"
+      },
+      "cortex": {
+        "delta": 0.0897,
+        "p": 0.2294,
+        "wins": 16,
+        "losses": 9
+      },
+      "hybrid": {
+        "delta": 0.0769,
+        "p": 0.1102,
+        "wins": 8,
+        "losses": 2
+      },
+      "cascade": {
+        "delta": 0.0,
+        "p": 1.0,
+        "wins": 4,
+        "losses": 4,
+        "reading": "cascade lands EXACTLY at the op-less control's 0.936 — the pre-registered ship condition (not significantly below control) is met with room to spare"
+      }
+    },
+    "vs_c2op_e2e": {
+      "cortex": {
+        "delta": 0.1538,
+        "p": 0.0078,
+        "wins": 15,
+        "losses": 3
+      },
+      "hybrid": {
+        "delta": 0.1026,
+        "p": 0.019,
+        "wins": 9,
+        "losses": 1
+      },
+      "cascade": {
+        "delta": 0.141,
+        "p": 0.0038,
+        "wins": 12,
+        "losses": 1,
+        "reading": "the count-exclusion rule repairs essentially all of the op block's measured KU damage"
+      }
+    }
+  },
+  "count_class": {
+    "digit_gold_n39": {
+      "cortex": {
+        "gate": 32,
+        "control": 31,
+        "c2op": 24
+      },
+      "hybrid": {
+        "gate": 38,
+        "control": 38,
+        "c2op": 33
+      },
+      "cascade": {
+        "gate": 37,
+        "control": 39,
+        "c2op": 30
+      }
+    },
+    "spelled_gold_n12": {
+      "cortex": {
+        "gate": 10,
+        "control": 6,
+        "c2op": 9
+      },
+      "cascade": {
+        "gate": 12,
+        "control": 12,
+        "c2op": 11
+      }
+    },
+    "reading": "count-class damage reversed: cortex digit-gold 24 -> 32 (control 31); spelled-gold cortex 10 vs control 6."
+  },
+  "frozen_total_recovery": {
+    "recovered_5_of_7": [
+      "affe2881",
+      "a2f3aa27",
+      "4d6b87c8",
+      "5831f84d",
+      "6aeb4375"
+    ],
+    "still_lost": {
+      "01493427": "derived-sum (25 = itemized additions never stated as one total); the only cascade loss among the seven",
+      "45dc21b6": "cortex still member-routes Emma's recipes, but cascade recovers via the rag fallback"
+    },
+    "note": "4d6b87c8 recovers the count-25 scalar WITH 9 genuine to-watch member facts alongside — the coexistence the feature was built for"
+  },
+  "member_census": {
+    "gate": {
+      "member_facts": 75,
+      "banks_with_sets": 22,
+      "current_scalars": 442
+    },
+    "c2op": {
+      "member_facts": 118,
+      "banks_with_sets": 33,
+      "current_scalars": 509
+    },
+    "opless_control": {
+      "member_facts": 0,
+      "banks_with_sets": 0,
+      "current_scalars": 1003
+    },
+    "reading": "sets still form under the rule (75 members / 22 banks); the delta vs c2op (118/33) is dominated by the spurious count-members the rule removed.",
+    "anomaly_noted": "every op-block variant extracts roughly HALF the current scalars of the op-less prompt (442-512 vs 1003) — the appended block makes extraction broadly more conservative. E2e accuracy shows no cost (cascade equal, cortex/hybrid nominally above control), but the effect is real and should be remembered when comparing bank sizes across prompts."
+  },
+  "decision": "Pre-registered rule (a) fires: cascade is NOT below the op-less control (delta 0.0, p 1.0) and count-class recovers. ku_op_prompt_v5's rule text becomes the SHIPPING-CANDIDATE op prompt. Shipping is gated on (1) the extraction ladder / shipped-sidecar validation (qwen-27b adoption does not prove the deployed small extractor adopts the rule — prime-target principle) and (2) the user's explicit reversal of the option-B hold decision. Neither is pre-empted by this verdict.",
+  "caveats": [
+    "Wording was iterated on the 7 frozen-total questions before the full run (v3/v4/v5 probes) — mild selection risk, mitigated by the full-78 pre-registered readouts and the untouched rag control.",
+    "Single run; extraction on this stack is deterministic (var-base finding), so replicates add nothing on identical config.",
+    "cortex +0.090 / hybrid +0.077 over control are nominal (p 0.23 / 0.11) — report as 'costs nothing, may help', not as a win."
+  ],
+  "followups": [
+    "Ladder rung validation: DONE same night — see ladder_rung_validation (identical gates). Shipping now waits only on the explicit hold-reversal decision.",
+    "01493427-style derived-sum totals stay unrecoverable by prompt rules (the total is never stated); only arithmetic at answer time or set-count rendering could close it.",
+    "LME-V2 trajectories remain the natural testbed for genuinely membership-enumerating content."
+  ],
+  "sidecar_validation": {
+    "date": "2026-08-01 (same night, follow-up to the qwen-27b gate)",
+    "model": "e4b-ft (deployed sidecar student), llama.cpp CUDA container on :8081, gate_e4b_ft.ps1 pattern",
+    "battery": "op_probe tag e4b-count-excl: v0 adoption 7/7 decoy 6/7 (one count decoy took an op — the damage pattern in miniature); v5 adoption 7/7 decoy 7/7",
+    "targeted_extraction": {
+      "tag": "e4b-count-probe",
+      "recovered": "5/7 frozen-total golds as current values, zero parse failures",
+      "detail": "recovers 01493427 (derived-sum postcards, 25) which qwen-27b itself missed; misses a2f3aa27 (1300) and 6aeb4375 (four); 45dc21b6's hit is a member value carrying the count ('3 recipes from Emma')"
+    },
+    "reading": "the deployed small extractor adopts op AND obeys the count exclusion at rates matching the ceiling extractor on this slice — the sidecar-adoption gate named in `decision` is satisfied at probe level. A full e2e ladder rung run remains the pre-deploy formality if the hold is reversed."
+  },
+  "ladder_rung_validation": {
+    "date": "2026-08-01 (same night)",
+    "runs": "ladder_sweep --rung e4b-ft paired: shipped prompt (e4b-ft-base0801.json) vs v5 (e4b-ft-v50801.json), same code, fresh consolidation each",
+    "result": "IDENTICAL on the gates: gold_recoverable 1.0 -> 1.0, stale_leak 0.0 -> 0.0, claims 16 -> 16 (inserted 16 -> 16), tokens_per_query 7.3 -> 8.9",
+    "reading": "the pre-deploy formality named in `decision` is satisfied — v5 does not perturb the sidecar's extraction-quality gates. The remaining gate on shipping is purely the user's reversal of the option-B hold."
+  }
+}

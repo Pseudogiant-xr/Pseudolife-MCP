@@ -348,6 +348,9 @@ def ingest(svc) -> None:
         svc.store(p["update"], source="bench")
 
 
+SYSTEM_PROMPT_FILE: str | None = None   # --system-prompt-file override
+
+
 def make_extractor(rung: dict):
     if rung["kind"] == "floor":
         from pseudolife_memory.memory.dream import RegexExtractor
@@ -357,9 +360,13 @@ def make_extractor(rung: dict):
     # trace before the JSON) and run on CPU, so allow room and time. This is the
     # extractor's best-case quality; the shipped default (1024) is documented as
     # the floor for reasoning models.
+    system_prompt = None
+    if SYSTEM_PROMPT_FILE:
+        system_prompt = Path(SYSTEM_PROMPT_FILE).read_text(encoding="utf-8")
     return OpenAICompatExtractor(
         rung["base_url"], rung["model"],
         max_tokens=4096, timeout_seconds=600.0,
+        system_prompt=system_prompt,
     )
 
 
@@ -668,6 +675,10 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--out-tag", default=None,
                     help="write results/<name>-<TAG>.json instead of the "
                          "canonical file (required to rerun an existing one)")
+    ap.add_argument("--system-prompt-file", default=None,
+                    help="override the extraction system prompt from a file "
+                         "(prompt-variant runs; pair with --out-tag so the "
+                         "canonical rung result stays shipped-prompt only)")
     return ap
 
 
@@ -681,8 +692,12 @@ def main(argv: list[str] | None = None) -> int:
         pass
 
     args = build_parser().parse_args(argv)
-    global WINDOW
+    global WINDOW, SYSTEM_PROMPT_FILE
     WINDOW = args.window
+    SYSTEM_PROMPT_FILE = args.system_prompt_file
+    if SYSTEM_PROMPT_FILE and not args.out_tag:
+        sys.exit("--system-prompt-file requires --out-tag: a prompt-variant "
+                 "run must not overwrite a canonical rung result")
 
     if args.list:
         for n in LADDER_ORDER:

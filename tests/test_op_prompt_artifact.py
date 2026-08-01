@@ -14,3 +14,10 @@ import op_probe  # noqa: E402
 def test_op_prompt_file_matches_probe_construction():
     path = Path(__file__).resolve().parents[1] / "evals" / "prompts" / "ku_op_prompt_v0.txt"
     assert path.read_text(encoding="utf-8") == op_probe.VARIANTS["v0-appended-block"]
+
+
+def test_count_exclusion_prompt_file_matches_probe_construction():
+    """Same pin for the count-exclusion arm's prompt (v5: v0 block + the
+    counts-are-never-members rule with a single-claim worked example)."""
+    path = Path(__file__).resolve().parents[1] / "evals" / "prompts" / "ku_op_prompt_v5.txt"
+    assert path.read_text(encoding="utf-8") == op_probe.VARIANTS["v5-count-exclusion-claim-example"]

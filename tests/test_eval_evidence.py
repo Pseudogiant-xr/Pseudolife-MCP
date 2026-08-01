@@ -583,6 +583,25 @@ CLAIMS.append(Claim(
     stated=0.006, places=3))
 
 
+C2OP_COUNT = RESULTS + "c2op-count-verdict.json"
+# ── the count-exclusion op-prompt gate (2026-08-01) ──────────────────────
+# The CHANGELOG states that under the count-exclusion rule the cascade lands
+# exactly at the op-less control and the rule repairs the op block's damage;
+# both pin to the count-arm verdict artifact.
+CLAIMS.append(Claim(
+    id="c2op-count-cascade-vs-control", doc=CHANGELOG,
+    needle="cascade lands exactly at the op-less control (delta 0.0, p = 1.0)",
+    artifacts=(C2OP_COUNT,),
+    value=lambda d: d["paired"]["vs_opless_control"]["cascade"]["delta"],
+    stated=0.0, places=3))
+CLAIMS.append(Claim(
+    id="c2op-count-cascade-vs-c2op", doc=CHANGELOG,
+    needle="+0.141 at p = 0.004 over the un-ruled op prompt",
+    artifacts=(C2OP_COUNT,),
+    value=lambda d: d["paired"]["vs_c2op_e2e"]["cascade"]["p"],
+    stated=0.004, places=3))
+
+
 def test_every_published_number_names_a_committed_artifact():
     """A claim whose evidence is untracked cannot be checked by a reader.
 
