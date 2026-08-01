@@ -268,6 +268,39 @@ tokens you already pay for (a scheduled daily dream is small but non-zero).
 Tier 2 with a *cloud* endpoint sends memory text off-box — a local model
 (e.g. Ollama) keeps it on-machine.
 
+## Dream runs — audit and rollback (schema v27)
+
+Every dream pass that produces claims records a **run row** and a per-claim
+**pre-image journal** — what each touched slot held before the write. The
+journal lives outside the facts supersession chain on purpose: superseded-row
+compaction purges that chain in steady state, so it was never durable enough
+to revert from. Passes that write nothing (outages, zero-claim batches)
+leave no row.
+
+- `memory_dream(action="runs")` lists recent passes: id, cursor movement,
+  tallies (including the literal-gate counters), and lifecycle status
+  (`running | committed | failed | rolled_back`). A `failed` run means a
+  claim write blew up mid-pass — partial writes are journaled and the
+  cursor was held.
+- `memory_dream(action="rollback")` reverts the **latest committed** pass by
+  replaying its journal in reverse through the normal write paths — a
+  superseded value is superseded back (history preserved, nothing deleted),
+  a dream-inserted slot is retired, member adds/removes are mirrored.
+  Rollback covers fact writes only (not relations/lessons/graph), keeps the
+  source traces, and never rewinds the dream cursor. It refuses when a newer
+  run is `failed`/`running` (unjournaled uncertainty) and on double
+  rollback. Both actions are full-tier tools — expand with
+  `memory_toolset(action="expand")` from a core-tier session.
+- `memory_history(entity, attribute, as_of=...)` answers "what did this slot
+  say on date X?" from the version chain (ISO or epoch). Compaction keeps
+  only the newest few non-live versions past ~30 days, so a very old
+  `as_of` may return an incomplete chain.
+
+Retention: the newest `memory.dream.runs_keep` (default 50) runs survive;
+older rows and their journals are pruned on the sweep tick beside
+superseded-row compaction. Design doc:
+`docs/superpowers/specs/2026-08-01-dream-run-journal-design.md`.
+
 ## Deep dream — full-corpus graph consolidation
 
 The incremental dream (tiers above) is window-local: it distils only the

@@ -8,7 +8,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v26). Unset → v0.1 file-only mode. |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v27). Unset → v0.1 file-only mode. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). |
 | `PSEUDOLIFE_MCP_HOST` / `_PORT` | `127.0.0.1` / `8765` | Daemon bind address. |
 | `PSEUDOLIFE_MCP_TOKEN` | _(unset)_ | Bearer token; **required** to bind a non-loopback host. |
@@ -153,6 +153,12 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   typing, shown only the notes where both entities co-occur; a typed
   answer becomes a review proposal, never a live edge. Without it the
   quarantine only accumulates. Set `0` to disable.
+- **Dream-run journal retention** (`memory.dream.runs_keep = 50`) — the
+  newest N dream-run rows and their pre-image journals (schema v27)
+  survive; older ones are pruned on the sweep tick beside superseded-row
+  compaction. The journal is what `memory_dream(action="rollback")`
+  replays, so this bounds how far back a pass stays revertible — see
+  [Dream runs — audit and rollback](dreaming.md#dream-runs--audit-and-rollback-schema-v27).
 
 ## Toolset tiers
 
@@ -369,7 +375,7 @@ current state).
 
 ## Schema version history
 
-The current Postgres meta version is **v26**; migrations are additive
+The current Postgres meta version is **v27**; migrations are additive
 `ADD COLUMN IF NOT EXISTS` on daemon start, and legacy file-mode `.pt`
 banks auto-migrate into Postgres. The one exception is v25 itself: a
 vector *dimension* change on an existing column is not additive, so
@@ -398,6 +404,7 @@ milestones:
 | v24 | `entity_kinds` (one `artifact`/`system`/`concept` kind per entity) — `freshness_class` now defaults to inferring from the entity's kind instead of a fixed default; only `system` entities can resolve `volatile`, and an empty table resolves everything to `evergreen`, so behaviour is unchanged until it is populated |
 | v25 | `entries`/`facts`/`world_facts`/`lessons.embedding` move from `vector(384)` to `vector(1024)` — default embedding backbone swaps to Qwen/Qwen3-Embedding-0.6B (measured R@10 0.809 vs shipped MiniLM's 0.572). Qwen3-Embedding is instruction-asymmetric — see [asymmetric query/document encoding](retrieval.md#asymmetric-query-and-document-encoding) — so similarity-threshold semantics shift too. `ensure_schema` refuses to start against an existing v24-dimensioned bank rather than attempting an in-place ALTER; migrate first with `ops/migrate_embeddings.py` (dry-run by default; `--apply --backup-verified` to commit) |
 | v26 | `facts.kind` (`scalar` \| `member`) and `facts.value_norm` — set-valued cortex slots (many concurrently-current members per `(entity, attribute)`, not one NOW value). The per-slot current-uniqueness constraint splits by kind (`facts_slot_current_scalar_uq` keeps one live scalar row per slot; `facts_member_current_uq` allows several current members on the same slot); the daemon-start duplicate-healing pass is scoped to `kind = 'scalar'` so it never demotes member rows. Additive/idempotent; every existing fact defaults to `kind='scalar'` and dedupes exactly as before. See [Set-valued slots](memory-model.md#set-valued-slots-schema-v26) |
+| v27 | `dream_runs` + `dream_run_slots` — every dream pass that pulls entries records a run row (cursor movement, tallies, lifecycle status) and a per-claim pre-image journal (what each slot held before the write, `NULL` = slot absent). The journal is what `memory_dream(action="rollback")` replays, and it survives superseded-row compaction by construction (own tables, own newest-N retention via `memory.dream.runs_keep`). `dream_run_slots.src_entry_id` deliberately carries no FK — entries are evictable. Additive/idempotent |
 
 After running the entity-kind backfill (`evals/apply_entity_kinds.py --apply`), the daemon must be restarted for inference to take effect — it caches the entity-kind map for the life of its process.
 

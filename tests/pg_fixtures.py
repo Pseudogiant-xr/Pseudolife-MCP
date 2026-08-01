@@ -43,6 +43,9 @@ _ALL_TABLES = (
     # Deliberately keyed on entity_norm, not entity_id (no FK) — same leak
     # class as above.
     "entity_kinds",
+    # No FK from any table above — its own CASCADE covers dream_run_slots,
+    # but nothing reaches dream_runs itself; same leak class as above.
+    "dream_runs",
 )
 
 

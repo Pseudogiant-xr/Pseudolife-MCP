@@ -661,10 +661,13 @@ def memory_fact_resolve(entity: str, attribute: str, accept: bool) -> dict[str, 
 
 
 @_tool()
-def memory_history(entity: str, attribute: str | None = None) -> dict[str, Any]:
-    """With ``attribute``: change history of that canonical fact slot — every
-    version, oldest→newest, each with its writer/session, transaction time,
-    valid time, and age ("what did this used to be? who set it?").
+def memory_history(entity: str, attribute: str | None = None,
+                   as_of: str | float | None = None) -> dict[str, Any]:
+    """With ``attribute``: change history of that canonical fact slot —
+    every version, oldest→newest, each with writer/session, tx/valid time,
+    and age ("what did this used to be? who set it?"). ``as_of`` (ISO or
+    epoch): only versions written by then (compaction thins chains past
+    ~30d).
 
     Without ``attribute``: the entity's causal CHAIN — dated
     fact/entry/edge/lesson events merged oldest→newest ("what led to X?").
@@ -674,7 +677,7 @@ def memory_history(entity: str, attribute: str | None = None) -> dict[str, Any]:
     """
     if attribute is None:
         return service.chain(entity)
-    return service.history(entity, attribute)
+    return service.history(entity, attribute, as_of=as_of)
 
 
 # ── World cortex + lessons ────────────────────────────────────────────────
@@ -858,29 +861,32 @@ def memory_forget(
 
 @_tool()
 def memory_dream(
-    action: Literal["status", "pull", "commit", "run", "deep"],
+    action: Literal["status", "pull", "commit", "run", "deep", "runs",
+                    "rollback"],
     limit: int | None = None,
     cursor: float | None = None,
     apply: bool = False,
     snippets: bool = True,
+    run_id: int | None = None,
 ) -> dict[str, Any]:
     """Drive the dream — consolidation of recent memories into canonical
     facts and graph structure.
 
     Actions:
         ``status``: backlog + whether a sweep would fire. Read-only.
-        ``pull``: unconsolidated memories (oldest-first, up to ``limit``)
-            — read them, write slot-shaped facts via ``memory_fact_set``,
-            then commit.
-        ``commit``: advance the dream cursor to ``cursor`` (newest
-            timestamp from the pull).
-        ``run``: one server-side dream with the configured extractor
-            (loop until ``pulled=0`` to drain).
-        ``deep``: full-corpus graph consolidation. Dry-run by default;
-            ``apply=true`` snapshots the graph tables first (refuses if it
-            can't). Settle returned candidates via ``memory_graph_review``;
-            ``snippets=false`` omits evidence. Also lists lesson/world
-            duplicate slots for hand curation (never auto-deleted).
+        ``pull``: unconsolidated memories (oldest-first, up to ``limit``);
+            write facts via ``memory_fact_set``, then ``commit`` with the
+            newest pulled timestamp as ``cursor``.
+        ``run``: a server-side dream with the configured extractor
+            (loop to drain).
+        ``deep``: full-corpus graph consolidation, dry-run unless
+            ``apply=true`` (snapshots graph tables first; refuses if it
+            can't). Settle candidates via ``memory_graph_review``;
+            ``snippets=false`` omits evidence; duplicate lesson/world
+            slots listed for hand curation.
+        ``runs``: recent dream passes (cursor delta, tallies, status).
+        ``rollback``: revert the newest committed pass from its journal
+            (facts only; traces + cursor kept). ``run_id`` optional.
 
     Returns: per-action dict; ``{error}`` on a bad action or missing cursor.
     """
@@ -896,8 +902,13 @@ def memory_dream(
         return service.dream_run_auto(limit=limit)
     if action == "deep":
         return service.deep_dream(apply=apply, include_snippets=snippets)
+    if action == "runs":
+        return service.dream_runs(limit=limit or 10)
+    if action == "rollback":
+        return service.dream_rollback(run_id=run_id)
     return {"error": "unknown_action",
-            "actions": ["status", "pull", "commit", "run", "deep"]}
+            "actions": ["status", "pull", "commit", "run", "deep", "runs",
+                        "rollback"]}
 
 
 @_tool()
@@ -918,10 +929,10 @@ def memory_graph_review(
     Actions:
         ``list``: pending findings/proposals (optional ``scope`` filter).
         ``propose``: submit link proposals ``[{src, relation, dst,
-            similarity?, rationale?}]`` — stored for review, never written
-            directly.
-        ``dismiss_pair``: mark ``src``/``dst`` as genuinely distinct — the
-            pair stops resurfacing as a duplicate candidate.
+            similarity?, rationale?}]`` — stored for review, never
+            written directly.
+        ``dismiss_pair``: mark ``src``/``dst`` genuinely distinct (stops
+            resurfacing).
         ``dismiss_slot_pair``: same for lesson/world duplicate listings
             (``store``; ``src``/``dst`` = listed "entity|attribute" keys).
         ``accept_link`` / ``reject_link``: settle an edge proposal by

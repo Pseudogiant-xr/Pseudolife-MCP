@@ -345,6 +345,11 @@ class DreamConfig:
     # false-drop classes under per-note gating) or "source" (only the note
     # the claim cites).
     literal_gate_scope: str = "batch"    # "batch" | "source"
+    # Dream-run audit retention (schema v27): the newest N run rows (and,
+    # via CASCADE, their pre-image journals) survive; older ones are pruned
+    # during the sweep beside superseded-row compaction. The journal is the
+    # rollback source, so this bounds how far back a pass stays revertible.
+    runs_keep: int = 50
 
 
 @dataclass

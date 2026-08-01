@@ -6,6 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-01 — every dream pass is now an auditable, reversible run (schema v27))
+- **Schema v27: `dream_runs` + `dream_run_slots` — each dream pass that
+  produces claims records a run row (cursor movement, tallies, lifecycle
+  status `running|committed|failed|rolled_back`) and a per-claim
+  pre-image journal of what every touched slot held before the write.**
+  The journal lives outside the facts supersession chain on purpose:
+  superseded-row compaction purges that chain in steady state, so it was
+  never durable enough to revert from. `memory_dream(action="runs")` lists
+  recent passes; `memory_dream(action="rollback")` reverts the latest
+  committed pass by replaying its journal in reverse through the normal
+  write paths (supersede-back — nothing is deleted; a reverted insert is
+  retired via the new `CortexStore.retire_current`). Rollback keeps
+  source traces and does not rewind the dream cursor (design doc:
+  `docs/superpowers/specs/2026-08-01-dream-run-journal-design.md`).
+  Journal retention is newest-N runs (`memory.dream.runs_keep`, default
+  50), pruned during the sweep beside superseded-row compaction.
+  `memory_history` gains `as_of` (ISO or epoch) for point-in-time reads of
+  a slot's version chain, with the compaction-window limitation documented
+  at the tool.
+
 ### Added (2026-08-01 — literal-faithfulness gate ships; the verbatim-literals prompt is held on measured grounds)
 - **Dream claims now pass a deterministic literal-faithfulness gate**
   (`memory.dream.literal_gate`, default `log`): digit-bearing tokens in a

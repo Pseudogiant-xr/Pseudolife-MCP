@@ -706,6 +706,31 @@ class CortexStore:
         self._log(rec, member, rec.confidence, t, "member_removed", "user_removed")
         return WriteResult("member_removed", rec)
 
+    def retire_current(
+        self, entity: str, attribute: str, *, now: float | None = None,
+    ) -> WriteResult | None:
+        """Retire the current SCALAR at a slot (``status`` -> ``"retired"``,
+        audit row kept) so the slot reads as absent again — the reverse of
+        an ``inserted`` write, used by dream-run rollback (schema v27).
+        ``forget`` cannot serve here (it hard-deletes the slot's whole
+        history) and ``resolve`` only touches contenders. Returns ``None``
+        when no current scalar exists; never touches members — a set slot
+        is unwound member-by-member via :meth:`remove_member`."""
+        t = time.time() if now is None else float(now)
+        key = (_norm_key(entity), _norm_key(attribute))
+        idx = self._current.get(key)
+        if idx is None:
+            return None
+        rec = self.records[idx]
+        if rec.status != "current" or rec.kind != "scalar":
+            return None
+        rec.status = "retired"
+        rec.superseded_at = t
+        del self._current[key]
+        self.dirty_slots.add(key)
+        self._log(rec, rec.value, rec.confidence, t, "retired", "rollback")
+        return WriteResult("retired", rec)
+
     def members(
         self, entity: str, attribute: str, include_removed: bool = False,
     ) -> list[CortexRecord]:

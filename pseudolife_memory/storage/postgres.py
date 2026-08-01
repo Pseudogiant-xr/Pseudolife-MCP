@@ -976,6 +976,105 @@ class PostgresStorage:
             ).fetchone()
         return row is not None
 
+    # ── dream-run audit + pre-image journal (schema v27) ─────────────────
+    _DREAM_RUN_COLS = ("id", "started_at", "finished_at", "cursor_before",
+                       "cursor_after", "pulled", "claims", "tallies",
+                       "status", "extractor", "writer_id", "rolled_back_at")
+    _DREAM_SLOT_COLS = ("id", "run_id", "seq", "entity", "attribute",
+                        "entity_norm", "attribute_norm", "kind", "op",
+                        "prev_kind", "prev_value", "prev_status",
+                        "prev_confidence", "prev_support", "new_value",
+                        "action", "src_entry_id", "at")
+
+    def start_dream_run(self, started_at: float, cursor_before: float,
+                        pulled: int, extractor: str | None = None,
+                        writer_id: str | None = None) -> int:
+        with self._txn():
+            row = self.conn.execute(
+                "INSERT INTO dream_runs (started_at, cursor_before, pulled, "
+                "status, extractor, writer_id) "
+                "VALUES (%s, %s, %s, 'running', %s, %s) RETURNING id",
+                (started_at, cursor_before, pulled, extractor, writer_id),
+            ).fetchone()
+        return int(row[0])
+
+    def finish_dream_run(self, run_id: int, *, status: str,
+                         finished_at: float, cursor_after: float | None,
+                         claims: int, tallies: dict) -> None:
+        with self._txn():
+            self.conn.execute(
+                "UPDATE dream_runs SET status=%s, finished_at=%s, "
+                "cursor_after=%s, claims=%s, tallies=%s WHERE id=%s",
+                (status, finished_at, cursor_after, claims,
+                 Jsonb(tallies), run_id))
+
+    def add_dream_run_slot(self, run_id: int, row: dict) -> None:
+        """One pre-image journal row, written immediately after its claim's
+        write lands (crash-durable, mirroring add_trace's per-claim
+        pattern) — a buffered journal would lose exactly the rows whose
+        writes already committed."""
+        with self._txn():
+            self.conn.execute(
+                "INSERT INTO dream_run_slots (run_id, seq, entity, "
+                "attribute, entity_norm, attribute_norm, kind, op, "
+                "prev_kind, prev_value, prev_status, prev_confidence, "
+                "prev_support, new_value, action, src_entry_id, at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+                "%s, %s, %s, %s, %s)",
+                (run_id, row["seq"], row["entity"], row["attribute"],
+                 row["entity_norm"], row["attribute_norm"], row["kind"],
+                 row.get("op"), row.get("prev_kind"), row.get("prev_value"),
+                 row.get("prev_status"), row.get("prev_confidence"),
+                 row.get("prev_support"), row.get("new_value"),
+                 row["action"], row.get("src_entry_id"), row["at"]))
+
+    def recent_dream_runs(self, limit: int = 10) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            f"SELECT {', '.join(self._DREAM_RUN_COLS)} FROM dream_runs "
+            "ORDER BY id DESC LIMIT %s", (limit,)).fetchall()
+        return [dict(zip(self._DREAM_RUN_COLS, r)) for r in rows]
+
+    def dream_run_journal(self, run_id: int) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            f"SELECT {', '.join(self._DREAM_SLOT_COLS)} FROM dream_run_slots "
+            "WHERE run_id = %s ORDER BY seq", (run_id,)).fetchall()
+        return [dict(zip(self._DREAM_SLOT_COLS, r)) for r in rows]
+
+    def latest_committed_dream_run(self) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            f"SELECT {', '.join(self._DREAM_RUN_COLS)} FROM dream_runs "
+            "WHERE status = 'committed' ORDER BY id DESC LIMIT 1").fetchone()
+        return dict(zip(self._DREAM_RUN_COLS, row)) if row else None
+
+    def dream_runs_newer_than(self, run_id: int) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            f"SELECT {', '.join(self._DREAM_RUN_COLS)} FROM dream_runs "
+            "WHERE id > %s ORDER BY id", (run_id,)).fetchall()
+        return [dict(zip(self._DREAM_RUN_COLS, r)) for r in rows]
+
+    def mark_dream_run_rolled_back(self, run_id: int, at: float) -> None:
+        with self._txn():
+            self.conn.execute(
+                "UPDATE dream_runs SET status='rolled_back', "
+                "rolled_back_at=%s WHERE id=%s", (at, run_id))
+
+    def prune_dream_runs(self, keep: int, *,
+                         stale_running_seconds: float = 86400.0) -> int:
+        """Keep the newest ``keep`` runs (CASCADE removes their journals).
+        Also flips ``running`` rows older than ``stale_running_seconds`` to
+        ``failed`` — a process death mid-loop leaves ``running`` forever,
+        and rollback must be able to refuse it honestly."""
+        with self._txn():
+            self.conn.execute(
+                "UPDATE dream_runs SET status='failed' "
+                "WHERE status='running' AND started_at < %s",
+                (time.time() - stale_running_seconds,))
+            cur = self.conn.execute(
+                "DELETE FROM dream_runs WHERE id NOT IN "
+                "(SELECT id FROM dream_runs ORDER BY id DESC LIMIT %s)",
+                (max(0, int(keep)),))
+        return cur.rowcount
+
     def set_edge_confidence(self, edge_id: int, confidence: float) -> None:
         with self._txn():
             self.conn.execute("UPDATE edges SET confidence = %s WHERE id = %s",

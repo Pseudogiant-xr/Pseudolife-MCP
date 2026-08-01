@@ -2570,6 +2570,18 @@ class MemoryService:
                         _norm_key(d["entity"]), _norm_key(d["attribute"]))
             return {"count": len(rows), "entries": rows}
 
+    def prune_dream_runs(self) -> int:
+        """Retention for the v27 dream-run journal: keep the newest
+        ``memory.dream.runs_keep`` runs (CASCADE removes their journals) and
+        flip stale ``running`` rows to ``failed``. Sweep-tick maintenance
+        beside :meth:`compact_superseded`; safe to call any time. Returns
+        the number of pruned runs (0 in file mode)."""
+        if self._storage is None:
+            return 0
+        with self._lock:
+            return self._storage.prune_dream_runs(
+                int(self.config.memory.dream.runs_keep))
+
     def compact_superseded(self) -> dict[str, Any]:
         """Purge old superseded/retired versions from the three canonical
         stores (spec 2026-07-14): per slot keep the newest
@@ -2605,11 +2617,44 @@ class MemoryService:
                 logger.info("compaction purged %s", out)
             return out
 
-    def history(self, entity: str, attribute: str) -> dict[str, Any]:
+    def dream_runs(self, limit: int = 10) -> dict[str, Any]:
+        """Recent v27 dream-run rows, newest first (compact: None-valued
+        bookkeeping fields dropped per row)."""
+        if self._storage is None:
+            return {"error": "requires_postgres"}
+        with self._lock:
+            self._ensure_init()
+            runs = self._storage.recent_dream_runs(limit=limit)
+        return {"count": len(runs),
+                "runs": [{k: v for k, v in r.items() if v is not None}
+                         for r in runs]}
+
+    @staticmethod
+    def _parse_as_of(as_of: str | float | None) -> float | None:
+        """ISO datetime or epoch seconds → epoch seconds (None passes
+        through). A naive ISO string is read in local time."""
+        if as_of is None:
+            return None
+        try:
+            return float(as_of)
+        except (TypeError, ValueError):
+            pass
+        from datetime import datetime
+        return datetime.fromisoformat(str(as_of)).timestamp()
+
+    def history(self, entity: str, attribute: str,
+                as_of: str | float | None = None) -> dict[str, Any]:
         """The version timeline at a ``(entity, attribute)`` slot — current +
         superseded records, oldest→newest by tx_time, each attributed
         (writer_id / session_id) with its temporal stamp. The agent's "how did
         this fact change, and who changed it?" view (v0.4 T8).
+
+        ``as_of`` (ISO or epoch) filters to versions whose transaction time
+        is at or before that instant — a per-slot point-in-time read. Honest
+        limitation: superseded-row compaction keeps only the newest
+        ``memory.compaction.keep_per_slot`` non-live versions past
+        ``min_age_days``, so an ``as_of`` older than that window may return
+        an incomplete chain.
 
         A set-valued slot has no single supersession chain — each member has
         its own add/remove lifecycle — so it takes a flatter shape instead:
@@ -2618,6 +2663,7 @@ class MemoryService:
         members. A still-current member contributes one ``"added"`` event; a
         removed member contributes both its original ``"added"`` and the
         later ``"removed"``."""
+        cutoff = self._parse_as_of(as_of)
         with self._lock:
             self._ensure_init()
             assert self._cortex is not None
@@ -2629,19 +2675,30 @@ class MemoryService:
                     if r.status == "removed" and r.superseded_at is not None:
                         versions.append(
                             {"value": r.value, "event": "removed", "at": r.superseded_at})
+                if cutoff is not None:
+                    versions = [v for v in versions if (v["at"] or 0) <= cutoff]
                 versions.sort(key=lambda v: (v["at"] or 0))
-                return {
+                out = {
                     "kind": "set", "entity": entity, "attribute": attribute,
                     "count": len(versions), "versions": versions,
                 }
+                if cutoff is not None:
+                    out["as_of"] = cutoff
+                return out
             ra = self.config.time.relative_age
             recs = self._cortex.records_for(entity, attribute)
+            if cutoff is not None:
+                recs = [r for r in recs
+                        if (r.tx_time or r.asserted_at) <= cutoff]
             recs = sorted(recs, key=lambda r: (r.tx_time or r.asserted_at))
-            return {
+            out = {
                 "entity": entity, "attribute": attribute, "count": len(recs),
                 "versions": [_cortex_record_to_dict(r, relative_age=ra)
                              for r in recs],
             }
+            if cutoff is not None:
+                out["as_of"] = cutoff
+            return out
 
     def chain(self, entity: str, limit: int = 20) -> dict[str, Any]:
         """Causal chain — "what led to X": dated events about an entity,
@@ -3008,7 +3065,8 @@ class MemoryService:
                     "cursor": pulled["cursor"], "lessons": lessons,
                     "outcome_inference": outcome_inference,
                     "graph_insight": graph_insight, "retyped": retyped}
-        from pseudolife_memory.memory.cortex import _norm_key
+        from pseudolife_memory.memory.cortex import (_TIER_RANK, _norm_key,
+                                                     _norm_value)
         from pseudolife_memory.memory.dream import literal_violations
         import time as _time
         traces_cfg = self.config.memory.traces
@@ -3118,6 +3176,38 @@ class MemoryService:
             known_entities = {r.key[0] for r in self._cortex.records
                               if r.status == "current"}
         new_entities: dict[str, str] = {}    # norm -> display, first seen
+        # Dream-run audit (schema v27): a run row exists only when the pass
+        # has claims to write — outages, zero-claim batches, and retries
+        # leave no row (a row per quiet tick would burn the newest-N
+        # retention window on passes that provably wrote nothing).
+        run_id = None
+        run_seq = 0
+        if pairs and self._storage is not None:
+            with self._lock:
+                run_id = self._storage.start_dream_run(
+                    _time.time(), self._cortex.dream_cursor, len(entries),
+                    extractor=(getattr(extractor, "model", None)
+                               or type(extractor).__name__))
+
+        def _finish_run(status: str, cursor_after: float | None) -> None:
+            # Bookkeeping must never break a dream (or mask the exception
+            # that got us here — the failed path IS the broken-connection
+            # path _dream_reflush_stale exists for).
+            if run_id is None:
+                return
+            try:
+                with self._lock:
+                    self._storage.finish_dream_run(
+                        run_id, status=status, finished_at=_time.time(),
+                        cursor_after=cursor_after,
+                        claims=sum(tally.values()),
+                        tallies={**tally,
+                                 "literal_flagged": literal_flagged,
+                                 "literal_dropped": literal_dropped,
+                                 "quarantined": quarantined})
+            except Exception as exc2:  # noqa: BLE001
+                logger.warning("dream: run-row finish failed (%s)", exc2)
+
         try:
             for c, src_id in pairs:
                 ent, attr = self._resolve_dream_slot(c["entity"], c["attribute"])
@@ -3171,6 +3261,42 @@ class MemoryService:
                         # re-dream must be a no-op, not a confirmation —
                         # the confirm path ratchets confidence.
                         continue
+                # Pre-image capture (v27 journal): O(1) reads under a short
+                # lock, released before the write — the lock is
+                # non-reentrant and cortex_write/set_add lock internally
+                # (the same hazard the trace-write comment below documents).
+                # Snapshot FIELDS, not the record: supersede/remove mutate
+                # the old CortexRecord in place, so a held reference would
+                # read the post-write status when the journal row is built.
+                prev_kind = None
+                prev = None      # (value, status, confidence, support) tuple
+                if run_id is not None:
+                    with self._lock:
+                        cur_rec = self._cortex.lookup(ent, attr)
+                        mem_recs = self._cortex.members(ent, attr)
+                        if cur_rec is not None:
+                            prev_kind = "scalar"
+                        elif mem_recs:
+                            prev_kind = "set"
+                        if op is None:
+                            prev_rec = cur_rec
+                        else:
+                            want = _norm_value(c["value"])
+                            prev_rec = next(
+                                (m for m in mem_recs
+                                 if _norm_value(m.value) == want), None)
+                            if prev_rec is None and op == "add":
+                                # A member-add over a current scalar CONVERTS
+                                # the slot (one-way); journal the scalar's
+                                # fields — the conversion unwind on rollback
+                                # needs its value, and no member matches.
+                                prev_rec = cur_rec
+                        if prev_rec is not None:
+                            prev = (prev_rec.value, prev_rec.status,
+                                    prev_rec.confidence,
+                                    max(prev_rec.support,
+                                        key=lambda t: _TIER_RANK.get(t, 0))
+                                    if prev_rec.support else None)
                 if op == "add":
                     res = self.set_add(
                         ent, attr, c["value"],
@@ -3211,6 +3337,33 @@ class MemoryService:
                             continue
                         raise
                 tally[res["action"]] = tally.get(res["action"], 0) + 1
+                # Journal the write with its ACTUAL returned action —
+                # immediately, per claim (crash-durable; a buffered journal
+                # would lose exactly the rows whose writes already landed).
+                # Actions that stored nothing at all are not journaled;
+                # "contested" IS (a contender row persisted, and rollback
+                # has a reversal for it).
+                if (run_id is not None and res["action"] not in
+                        ("member_invalid", "member_capped",
+                         "member_not_found")):
+                    journal_row = {
+                        "seq": run_seq, "entity": ent, "attribute": attr,
+                        "entity_norm": _norm_key(ent),
+                        "attribute_norm": _norm_key(attr),
+                        "kind": "member" if op else "scalar",
+                        "op": op,
+                        "prev_kind": prev_kind,
+                        "prev_value": prev[0] if prev else None,
+                        "prev_status": prev[1] if prev else None,
+                        "prev_confidence": prev[2] if prev else None,
+                        "prev_support": prev[3] if prev else None,
+                        "new_value": c["value"],
+                        "action": res["action"],
+                        "src_entry_id": src_id,
+                        "at": _time.time()}
+                    with self._lock:
+                        self._storage.add_dream_run_slot(run_id, journal_row)
+                    run_seq += 1
                 if res["action"] in ("member_invalid", "member_capped", "contested"):
                     # Nothing was actually stored — a trace/reinforcement
                     # bump here would link a source entry to a slot it never
@@ -3237,6 +3390,10 @@ class MemoryService:
                                 self._cms.bump_entry_reinforcements(src_id, 1)
                             traces_n += 1
         except Exception as exc:  # noqa: BLE001 — a write failure must hold the cursor too
+            # Partial writes may have landed and are journaled — record
+            # `failed` (NOT a silent absence) so rollback can refuse to
+            # reach past this run's unjournaled uncertainty.
+            _finish_run("failed", None)
             healed = self._dream_reflush_stale(entries)
             if healed:
                 return _held(f"claim write failed ({healed} stale entry id(s) "
@@ -3244,6 +3401,10 @@ class MemoryService:
             return _held("claim write failed", exc)
         newest = max(e["timestamp"] for e in entries)
         self.dream_commit(newest)
+        # Stamp `committed` HERE — before relations/lessons/graph — so a
+        # failure in that bookkeeping block cannot mislabel a run whose
+        # cortex writes and cursor advance really did happen.
+        _finish_run("committed", newest)
         relations_n = self._dream_extract_relations(
             extractor, texts,
             batch_sources={e["source"] for e in entries if e.get("source")})
@@ -3267,6 +3428,129 @@ class MemoryService:
                 "literal_dropped": literal_dropped,
                 "traces": traces_n, "sources_attributed": sources_attributed,
                 "quarantined": quarantined, "retyped": retyped}
+
+    def dream_rollback(self, run_id: int | None = None) -> dict[str, Any]:
+        """Revert the latest committed dream pass by replaying its v27
+        pre-image journal in reverse through the normal write paths
+        (supersede-back — nothing is deleted). Refused when a newer run is
+        ``failed``/``running`` (unjournaled or partial uncertainty), when
+        ``run_id`` names anything but the latest committed run, and in file
+        mode. Keeps source traces and does NOT rewind the dream cursor
+        (design doc 2026-08-01: has_trace gates scalars but never member
+        ops, so a rewind would re-add reverted members while suppressing
+        reverted scalars)."""
+        from pseudolife_memory.memory.cortex import _norm_value
+        import time as _time
+
+        if self._storage is None:
+            return {"error": "requires_postgres"}
+        with self._lock:
+            self._ensure_init()
+            target = self._storage.latest_committed_dream_run()
+        if target is None:
+            return {"error": "no_committed_run"}
+        if run_id is not None and run_id != target["id"]:
+            return {"error": "stale_run_id", "latest": target["id"]}
+        with self._lock:
+            newer = self._storage.dream_runs_newer_than(target["id"])
+        blocking = [r for r in newer if r["status"] in ("failed", "running")]
+        if blocking:
+            return {"error": "newer_unjournaled_runs",
+                    "runs": [{"id": r["id"], "status": r["status"]}
+                             for r in blocking]}
+        with self._lock:
+            journal = self._storage.dream_run_journal(target["id"])
+
+        counts = {"reverted": 0, "skipped": 0, "partial": 0}
+        details: list[dict[str, Any]] = []
+
+        def _rewrite_prev(row: dict) -> str:
+            res = self.cortex_write(
+                row["entity"], row["attribute"], row["prev_value"],
+                confidence=float(row["prev_confidence"] or 0.55),
+                support=row["prev_support"] or "agent")
+            if res["action"] == "contested":
+                # Rollback is explicit authority: a low-confidence prev
+                # must still win the slot back (the same path resolve
+                # exists for).
+                self.cortex_resolve(row["entity"], row["attribute"],
+                                    accept=True)
+            cur = self.cortex_lookup(row["entity"], row["attribute"])
+            if cur and _norm_value(cur.get("value", "")) == _norm_value(
+                    row["prev_value"]):
+                return "reverted"
+            return "partial:value_not_restored"
+
+        for row in reversed(journal):
+            action = row["action"]
+            outcome = "skipped:no_reversal"
+            try:
+                if action == "contested":
+                    cands = self._cortex.contenders_for(
+                        row["entity"], row["attribute"])
+                    if any(_norm_value(c.value) == _norm_value(
+                            row["new_value"] or "") for c in cands):
+                        self.cortex_resolve(row["entity"], row["attribute"],
+                                            accept=False)
+                        outcome = "reverted"
+                    else:
+                        outcome = "skipped:superseded_by_later"
+                elif row["kind"] == "scalar":
+                    if action == "inserted" and row["prev_status"] is None:
+                        with self._lock:
+                            res = self._cortex.retire_current(
+                                row["entity"], row["attribute"])
+                        outcome = ("reverted" if res is not None
+                                   else "skipped:already_gone")
+                    elif action == "superseded":
+                        outcome = _rewrite_prev(row)
+                    elif action == "confirmed":
+                        # Only confidence/last_confirmed moved; unwinding
+                        # that is not expressible through the write path.
+                        outcome = "skipped:confirmed"
+                else:  # member
+                    if action == "member_added":
+                        self.set_remove(row["entity"], row["attribute"],
+                                        row["new_value"])
+                        outcome = "reverted"
+                        if (row["prev_kind"] == "scalar"
+                                and row["prev_value"]):
+                            with self._lock:
+                                mems = self._cortex.members(
+                                    row["entity"], row["attribute"])
+                            survivors = [_norm_value(m.value) for m in mems]
+                            if survivors == [_norm_value(row["prev_value"])]:
+                                # Sole survivor is the converted scalar —
+                                # unwind the one-way scalar->set conversion.
+                                self.set_remove(row["entity"],
+                                                row["attribute"],
+                                                row["prev_value"])
+                                outcome = _rewrite_prev(row)
+                            else:
+                                outcome = "partial:set_retained"
+                    elif action == "member_removed":
+                        self.set_add(
+                            row["entity"], row["attribute"],
+                            row["prev_value"],
+                            confidence=float(row["prev_confidence"] or 0.55),
+                            origin=row["prev_support"] or "agent")
+                        outcome = "reverted"
+                    elif action == "member_confirmed":
+                        outcome = "skipped:confirmed"
+            except Exception as exc:  # noqa: BLE001 — keep unwinding
+                logger.warning("rollback: reversal failed at seq %s (%s)",
+                               row["seq"], exc)
+                outcome = f"partial:error:{type(exc).__name__}"
+            bucket = outcome.split(":", 1)[0]
+            counts[bucket] = counts.get(bucket, 0) + 1
+            details.append({"seq": row["seq"], "entity": row["entity"],
+                            "attribute": row["attribute"],
+                            "action": action, "outcome": outcome})
+        with self._lock:
+            self._save_cortex()
+            self._storage.mark_dream_run_rolled_back(
+                target["id"], _time.time())
+        return {"run_id": target["id"], **counts, "details": details}
 
     def dream_run_auto(self, *, limit: int | None = None) -> dict[str, Any]:
         """dream_run with primary/fallback extractor selection (2026-07-11
