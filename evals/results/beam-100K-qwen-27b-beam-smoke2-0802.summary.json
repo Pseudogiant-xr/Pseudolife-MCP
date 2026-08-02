@@ -1,0 +1,84 @@
+{
+  "benchmark": "BEAM",
+  "tier": "100K",
+  "extractor": "qwen-27b",
+  "n_questions": 20,
+  "n_chats": 1,
+  "scoring_note": "paper-faithful float mean; _intfaithful mirrors upstream int() flooring of 0.5",
+  "arms": {
+    "rag": {
+      "score": 0.5358,
+      "score_intfaithful": 0.5258
+    },
+    "cortex": {
+      "score": 0.3125,
+      "score_intfaithful": 0.3075
+    },
+    "hybrid": {
+      "score": 0.57,
+      "score_intfaithful": 0.53
+    }
+  },
+  "types": {
+    "abstention": {
+      "n": 2,
+      "rag": 0.5,
+      "cortex": 0.5,
+      "hybrid": 0.5
+    },
+    "contradiction_resolution": {
+      "n": 2,
+      "rag": 0.125,
+      "cortex": 0.125,
+      "hybrid": 0.125
+    },
+    "event_ordering": {
+      "n": 2,
+      "rag": 0.4334,
+      "cortex": 0.1,
+      "hybrid": 0.1
+    },
+    "information_extraction": {
+      "n": 2,
+      "rag": 0.5,
+      "cortex": 0.0,
+      "hybrid": 1.0
+    },
+    "instruction_following": {
+      "n": 2,
+      "rag": 0.5,
+      "cortex": 0.5,
+      "hybrid": 0.75
+    },
+    "knowledge_update": {
+      "n": 2,
+      "rag": 1.0,
+      "cortex": 0.5,
+      "hybrid": 1.0
+    },
+    "multi_session_reasoning": {
+      "n": 2,
+      "rag": 0.5,
+      "cortex": 0.25,
+      "hybrid": 0.375
+    },
+    "preference_following": {
+      "n": 2,
+      "rag": 1.0,
+      "cortex": 1.0,
+      "hybrid": 1.0
+    },
+    "summarization": {
+      "n": 2,
+      "rag": 0.3,
+      "cortex": 0.15,
+      "hybrid": 0.35
+    },
+    "temporal_reasoning": {
+      "n": 2,
+      "rag": 0.5,
+      "cortex": 0.0,
+      "hybrid": 0.5
+    }
+  }
+}
