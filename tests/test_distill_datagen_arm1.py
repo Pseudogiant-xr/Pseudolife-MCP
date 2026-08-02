@@ -51,7 +51,7 @@ def test_update_registry_keeps_distinct_keys_apart():
 
 def test_teacher_system_starts_with_system_prompt():
     # required for the shim's prefix-substitution contract
-    # (evals/sonnet_shim.py::ClaudeCli.chat checks system.startswith(_SYSTEM_PROMPT))
+    # (evals/claude_shim.py::ClaudeCli.chat checks system.startswith(_SYSTEM_PROMPT))
     system = _teacher_system(["miso.species"], {("miso", "species"): "cat"})
     assert system.startswith(_SYSTEM_PROMPT)
     assert "miso.species" in system                        # vocab hint present

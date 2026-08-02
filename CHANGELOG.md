@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-08-02 — literal gate enforces by default; the CLI shim is model-agnostic)
+- **`memory.dream.literal_gate` default is now `"enforce"`** — unbacked
+  digit literals in dream claims are dropped, not just counted. Decided by
+  the post-matcher probe re-runs (`evals/results/gate-firing-normfix-verdict.json`):
+  remaining flags are dominated by genuinely unbacked literals (derived
+  aggregates, imported world knowledge) at 1.3–1.7% of gateable claims.
+  `"log"` restores the old observe-only behavior.
+- **`evals/sonnet_shim.py` is now `evals/claude_shim.py`** — it has
+  served any Claude model via `--model` since 2026-07-26, and the deployed
+  extractor is no longer Sonnet. `ops/install-shim-autostart.ps1` gains a
+  `-Model` parameter (default `claude-opus-5`, per the same-harness
+  dreamer comparison in `evals/results/dreamer-choice-verdict.json`:
+  cortex 0.885 vs 0.821, 5/0 paired), registers the task as
+  "Pseudolife Claude Shim", and cleans up the legacy task name.
+
 ### Changed (2026-08-02 — literal gate learns the extractors' re-formattings)
 - **The literal-faithfulness matcher now normalizes the three
   legitimate-reformatting classes the at-scale firing probe surfaced**

@@ -336,10 +336,14 @@ class DreamConfig:
     # Literal-faithfulness gate (2026-08-02 design doc): digit-bearing
     # tokens in a dream claim's value (outside date-like spans) must appear
     # in the source notes, or the claim is flagged ("log") or dropped
-    # ("enforce"). "off" disables. The shipped default is set by the
-    # literal-fidelity ladder evidence (evals/results/literal-fidelity-
-    # verdict.json), not by preference.
-    literal_gate: str = "log"            # "off" | "log" | "enforce"
+    # ("enforce"). "off" disables. The shipped default is set by measured
+    # evidence, not preference: "enforce" since 2026-08-02 — after the
+    # matcher learned the legitimate re-formatting classes, the at-scale
+    # probes fire almost exclusively on genuinely unbacked literals
+    # (derived aggregates, imported world knowledge) at 1.3-1.7% of
+    # gateable claims (evals/results/gate-firing-normfix-verdict.json;
+    # original decision trail in literal-fidelity-verdict.json).
+    literal_gate: str = "enforce"        # "off" | "log" | "enforce"
     # What counts as the source corpus: "batch" (union of the pull's note
     # texts — the default; derived sums and cross-note values are measured
     # false-drop classes under per-note gating) or "source" (only the note

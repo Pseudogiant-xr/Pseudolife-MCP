@@ -108,8 +108,9 @@ model.
 **Literal-faithfulness gate.** After extraction, every claim's digit-bearing
 tokens (dates exempt — format variance makes digit matching unsafe there)
 are checked against the pull's source notes: a fabricated number or
-identifier is counted (`literal_flagged` in dream results) under the
-default `memory.dream.literal_gate = "log"`, or dropped under `"enforce"`.
+identifier is dropped and counted under the default
+`memory.dream.literal_gate = "enforce"` (since 2026-08-02), or merely
+counted under `"log"`.
 The corpus is the whole batch's note union by default — derived sums and
 cross-note values are measured false-drop classes under per-note gating.
 The matcher normalizes the re-formattings extractors legitimately produce:
@@ -119,8 +120,11 @@ ranges and unit compounds gate per digit part ("1-3" ↔ "1 to 3",
 `~`-marked approximations are exempt like dates — classes triaged from the
 at-scale firing probe (`evals/results/gate-firing-verdict.json`, where 15
 of 17 batch-scope flags were normalization gaps, not fabrications).
-`enforce` is deliberately opt-in pending a re-probe under this matcher
-(`evals/results/literal-fidelity-verdict.json` has the original decision).
+The post-matcher re-probe left the survivors dominated by genuinely
+unbacked literals — derived aggregates and imported world knowledge — at
+1.3–1.7% of gateable claims, which is what made enforcement the default
+(`evals/results/gate-firing-normfix-verdict.json`;
+`literal-fidelity-verdict.json` has the original opt-in decision).
 A companion prompt rule mandating verbatim literals was built, measured,
 and **held** — it significantly degraded the KU cascade (same verdict
 artifact).
@@ -209,7 +213,7 @@ installer does all of this in one go —
 sidecar entirely; `ops\install.ps1 -Extractor ...` on Windows). The manual
 steps:
 
-1. Register the CLI shim (`evals/sonnet_shim.py`) to start automatically —
+1. Register the CLI shim (`evals/claude_shim.py`) to start automatically —
    requires a logged-in `claude` CLI:
    - Windows: `ops\install-shim-autostart.ps1` (Task Scheduler, at logon,
      `127.0.0.1:8082`).

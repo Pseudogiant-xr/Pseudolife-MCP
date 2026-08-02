@@ -24,7 +24,7 @@ Notes:
 Endpoints: POST /v1/chat/completions, GET /health, GET /v1/models.
 
 Usage:
-    python evals/sonnet_shim.py [--port 8082] [--model claude-sonnet-5]
+    python evals/claude_shim.py [--port 8082] [--model claude-sonnet-5]
         [--cli PATH] [--call-timeout 300]
 """
 from __future__ import annotations
@@ -106,7 +106,7 @@ class ClaudeCli:
         m = _FENCE_RE.match(reply)
         if m:
             reply = m.group(1).strip()
-        print(f"sonnet_shim: call {n} ok "
+        print(f"claude_shim: call {n} ok "
               f"({time.monotonic() - t0:.1f}s, {len(reply)} chars)",
               flush=True)
         return reply
@@ -201,7 +201,7 @@ def make_handler(cli: ClaudeCli):
                               "total_tokens": 0},
                 })
             except Exception as e:  # noqa: BLE001 - surface anything as a 500
-                print(f"sonnet_shim: request failed: {e}", file=sys.stderr,
+                print(f"claude_shim: request failed: {e}", file=sys.stderr,
                       flush=True)
                 self._json(500, {"error": str(e)})
 
@@ -237,16 +237,16 @@ def main():
     if args.system_prompt_file:
         raw = args.system_prompt_file.read_text(encoding="utf-8")
         override = raw.split("\n---\n", 1)[-1].strip()
-        print(f"sonnet_shim: system prompt override from "
+        print(f"claude_shim: system prompt override from "
               f"{args.system_prompt_file} ({len(override)} chars)", flush=True)
     cli = ClaudeCli(args.cli, args.model, args.call_timeout,
                     system_override=override)
     # Warm the health cache before serving: the only blocking health path is
     # an empty cache, and this guarantees no request ever hits it.
     ok, detail = cli.health()
-    print(f"sonnet_shim: health warm -> {'ok' if ok else detail}", flush=True)
+    print(f"claude_shim: health warm -> {'ok' if ok else detail}", flush=True)
     srv = ThreadingHTTPServer((args.host, args.port), make_handler(cli))
-    print(f"sonnet_shim: serving {args.model} on "
+    print(f"claude_shim: serving {args.model} on "
           f"http://{args.host}:{args.port}/v1", flush=True)
     srv.serve_forever()
 

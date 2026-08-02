@@ -1,4 +1,4 @@
-"""sonnet_shim /health must reflect real CLI usability (a logged-out CLI
+"""claude_shim /health must reflect real CLI usability (a logged-out CLI
 answers 503 so the daemon's fallback probe sees primary-down)."""
 
 from __future__ import annotations
@@ -10,9 +10,9 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location(
-    "sonnet_shim", REPO / "evals" / "sonnet_shim.py")
+    "claude_shim", REPO / "evals" / "claude_shim.py")
 shim = importlib.util.module_from_spec(spec)
-sys.modules["sonnet_shim"] = shim
+sys.modules["claude_shim"] = shim
 spec.loader.exec_module(shim)
 
 

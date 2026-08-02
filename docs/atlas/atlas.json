@@ -740,7 +740,7 @@
    "y": 1400,
    "t": "Sonnet shim",
    "s": "host · 127.0.0.1:8082",
-   "p": "evals/sonnet_shim.py",
+   "p": "evals/claude_shim.py",
    "d": [
     "Wraps the Max-plan claude CLI as an OpenAI-compatible endpoint",
     "Task Scheduler AtLogOn autostart (install-shim-autostart)",

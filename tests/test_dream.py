@@ -696,6 +696,10 @@ def test_dream_extracts_batch_in_one_call(svc):
 def test_dream_attributes_claims_by_source(svc):
     """Claims carry a 0-based 'source' index into the batch; traces must link
     each fact to the entry it actually came from (the point of eec67b1)."""
+    # Stub values are not present in the stub notes; pin the literal
+    # gate to observe-only so this test keeps exercising its own
+    # concern under the "enforce" default (2026-08-02).
+    svc.config.memory.dream.literal_gate = "log"
     svc.config.memory.cortex.auto_promote = False
     svc.store("first: alpha-svc port fact", source="notes")
     svc.store("second: beta-svc host fact", source="notes")
@@ -756,6 +760,10 @@ def test_batch_retry_does_not_ratchet_confidence(svc):
     mid-batch failure, or a rewound cursor) must be a no-op on the slot,
     not a confirmation — the pre-fix behavior ratcheted agent guesses
     toward 1.0 on every 600s sweep while consolidation was stalled."""
+    # Stub values are not present in the stub notes; pin the literal
+    # gate to observe-only so this test keeps exercising its own
+    # concern under the "enforce" default (2026-08-02).
+    svc.config.memory.dream.literal_gate = "log"
     svc.config.memory.cortex.auto_promote = False
     svc.store("relay speaks on some port", source="notes")
 

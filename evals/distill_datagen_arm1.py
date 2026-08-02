@@ -1,7 +1,7 @@
 """Arm-1 registry-datagen: Sonnet-5 + v1-prompt teacher via the live shim.
 
 Direct extension of `distill_datagen.py` (the original Qwen HTTP pipeline),
-pointed at `evals/sonnet_shim.py` instead of a local Qwen server, with one
+pointed at `evals/claude_shim.py` instead of a local Qwen server, with one
 addition: a per-chain **key registry** shown to the teacher only, forcing
 reuse of established `entity.attribute` keys and re-statement of
 carried-forward facts instead of the model rewording the same fact into a
@@ -11,7 +11,7 @@ patching it post-hoc).
 
 Asymmetric prompt split (same principle as Stage 1.5 Arm B): the teacher
 call gets `_SYSTEM_PROMPT + _vocab_hint(...) + _registry_hint(...)`; the
-shim (evals/sonnet_shim.py) swaps the `_SYSTEM_PROMPT` prefix for the v1
+shim (evals/claude_shim.py) swaps the `_SYSTEM_PROMPT` prefix for the v1
 prompt and forwards the rest untouched. The STORED training row keeps
 `_SYSTEM_PROMPT + _vocab_hint(...)` only — no registry block — so the
 student learns key-reuse as a trained-in prior and never sees a registry

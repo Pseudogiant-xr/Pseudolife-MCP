@@ -1,20 +1,23 @@
 #Requires -Version 7
-# Register the Sonnet extractor shim to start at logon (Windows Task Scheduler).
-# (Install under pwsh 7 — the ternary below needs it; the scheduled task itself
-# runs fine under powershell.exe 5.1.)
+# Register the Claude extractor shim to start at logon (Windows Task
+# Scheduler). (Install under pwsh 7 — the ternary below needs it; the
+# scheduled task itself runs fine under powershell.exe 5.1.)
 #
-#   ops\install-shim-autostart.ps1              # default port 8082, v2 prompt
-#   ops\install-shim-autostart.ps1 -Port 8082 -PromptFile evals\prompts\sonnet_extractor_v2.md
+#   ops\install-shim-autostart.ps1              # default port 8082, v2 prompt, opus
+#   ops\install-shim-autostart.ps1 -Model claude-sonnet-5   # pick the served model
 #
 # The shim wraps the Max-plan `claude` CLI as an OpenAI-compatible endpoint on
 # 127.0.0.1 for the daemon's dream pass (primary extractor; the in-stack E4B
 # container is the fallback — see docs/superpowers/specs/
 # 2026-07-11-sonnet-sidecar-cutover-design.md). Requires a logged-in CLI.
+# -Model default is claude-opus-5 per the 2026-08-02 same-harness comparison
+# (evals/results/dreamer-choice-verdict.json: cortex 0.885 vs 0.821, 5/0).
 param(
     [string]$PythonExe = "",
     [int]$Port = 8082,
+    [string]$Model = "claude-opus-5",
     [string]$PromptFile = "evals\prompts\sonnet_extractor_v2.md",
-    [string]$LogFile = "$env:USERPROFILE\.pseudolife-mcp\sonnet-shim.log"
+    [string]$LogFile = "$env:USERPROFILE\.pseudolife-mcpnthropic-shim.log"
 )
 
 $ErrorActionPreference = "Stop"
@@ -28,7 +31,8 @@ $promptPath = Join-Path $repo $PromptFile
 if (-not (Test-Path $promptPath)) { throw "prompt file not found: $promptPath" }
 New-Item -ItemType Directory -Force (Split-Path -Parent $LogFile) | Out-Null
 
-$taskName = "Pseudolife Sonnet Shim"
+$taskName = "Pseudolife Claude Shim"
+$legacyTaskName = "Pseudolife Sonnet Shim"   # pre-rename installs
 # -WindowStyle Hidden only hides a console window it still allocates — on
 # Windows 11 with Windows Terminal set as the default terminal app, WT
 # intercepts that console-allocation moment and opens a visible (blank)
@@ -48,8 +52,8 @@ $taskName = "Pseudolife Sonnet Shim"
 # MORE than one quoted segment (e.g. a quoted exe path AND a quoted script
 # arg) unless the whole thing is wrapped in one extra redundant pair of
 # quotes (a documented `cmd /?` workaround) — hence the doubled `""` below.
-$innerCmd = "`"$PythonExe`" `"$repo\evals\sonnet_shim.py`" --port $Port " +
-            "--system-prompt-file `"$promptPath`""
+$innerCmd = "`"$PythonExe`" `"$repo\evalsnthropic_shim.py`" --port $Port " +
+            "--model $Model --system-prompt-file `"$promptPath`""
 $cmdArgs = "/c `"$innerCmd >> `"`"$LogFile`"`" 2>&1`""
 $inner = @"
 `$psi = New-Object System.Diagnostics.ProcessStartInfo
@@ -70,18 +74,19 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
     -RestartInterval (New-TimeSpan -Minutes 1)
 
 Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+Unregister-ScheduledTask -TaskName $legacyTaskName -Confirm:$false -ErrorAction SilentlyContinue
 # CIM cmdlet errors here do NOT reliably terminate even under
 # $ErrorActionPreference = "Stop" (observed live: an unelevated run printed
 # "Access is denied" and fell through to the success message). Force it, and
 # verify the task actually exists before claiming success.
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
-    -Settings $settings -Description "Sonnet extractor CLI shim (dream pass primary; E4B sidecar is fallback)" `
+    -Settings $settings -Description "Claude extractor CLI shim (dream pass primary; E4B sidecar is fallback)" `
     -ErrorAction Stop | Out-Null
 if (-not (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue)) {
     throw "task '$taskName' was not registered (run from an ELEVATED pwsh)"
 }
 Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
-Write-Host "Registered + started '$taskName' (port $Port, log $LogFile)."
+Write-Host "Registered + started '$taskName' ($Model, port $Port, log $LogFile)."
 Write-Host "Cutover env for the daemon (.env or compose override):"
 Write-Host "  PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:$Port/v1"
 Write-Host "  PSEUDOLIFE_DREAM_MODEL=extractor"
