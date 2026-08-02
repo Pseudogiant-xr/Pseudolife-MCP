@@ -162,15 +162,15 @@ Write-Host "==> docker compose up -d --build (first build downloads images - gra
 docker compose @compose up -d --build
 if ($LASTEXITCODE -ne 0) { throw "compose up failed" }
 
-# -- 7. Sonnet shim autostart (Sonnet modes) --------------------------------------
+# -- 7. Claude shim autostart (Sonnet modes) --------------------------------------
 if ($Extractor -ne "sidecar") {
-    Write-Host "==> Registering the Sonnet shim autostart (Task Scheduler; needs an ELEVATED pwsh)..."
+    Write-Host "==> Registering the Claude shim autostart (Task Scheduler; needs an ELEVATED pwsh)..."
     try {
         & (Join-Path $PSScriptRoot "install-shim-autostart.ps1") -Port $ShimPort
     } catch {
         Write-Warning "Shim autostart registration failed (usually elevation): $_"
         Write-Host "  Re-run later from an admin pwsh: ops\install-shim-autostart.ps1 -Port $ShimPort"
-        Write-Host "  Or start it manually: python evals\sonnet_shim.py --port $ShimPort --system-prompt-file evals\prompts\sonnet_extractor_v2.md"
+        Write-Host "  Or start it manually: python evals\claude_shim.py --port $ShimPort --system-prompt-file evals\prompts\sonnet_extractor_v2.md"
     }
 }
 

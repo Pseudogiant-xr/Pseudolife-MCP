@@ -1,0 +1,275 @@
+{
+  "probe": "gate-firing",
+  "extractor_url": "http://127.0.0.1:8081/v1",
+  "model": "extractor",
+  "max_tokens": 2048,
+  "dataset": "longmemeval_s_cleaned (non-KU haystack sessions)",
+  "sessions": 399,
+  "failures": 1,
+  "claims": 1125,
+  "claims_cited": 1125,
+  "claims_with_gateable_literals": 239,
+  "flagged_batch": 4,
+  "flagged_source_only": 23,
+  "flagged_batch_share_of_gateable": 0.0167,
+  "source_only_share_of_gateable": 0.0962,
+  "examples": [
+    {
+      "session": "sharegpt_KjF70Iy_23",
+      "slot": "user.chiang mai trip itinerary",
+      "value": "4-day itinerary developed for Chiang Mai, including private driver transfers, timed activities, estimated costs, and recommended restaurants/stops for each day",
+      "violations_batch": [],
+      "violations_source_only": [
+        "4"
+      ]
+    },
+    {
+      "session": "answer_530960c1",
+      "slot": "user.housing assistance eligibility",
+      "value": "not eligible for government assistance programs (e.g., Section 8)",
+      "violations_batch": [],
+      "violations_source_only": [
+        "8"
+      ]
+    },
+    {
+      "session": "answer_530960c1",
+      "slot": "user.housing search focus neighborhood",
+      "value": "[Neighborhood 1] (described as relatively affordable, safe, family-friendly, 10-15 min bus ride from city center, $700-800/month for 1-bedroom)",
+      "violations_batch": [],
+      "violations_source_only": [
+        "10",
+        "15",
+        "700",
+        "800/month"
+      ]
+    },
+    {
+      "session": "752a01fe_3",
+      "slot": "user.movie marathon plan",
+      "value": "Watching Marvel movies in chronological order: Captain America: The First Avenger followed by The Avengers (2012)",
+      "violations_batch": [],
+      "violations_source_only": [
+        "2012"
+      ]
+    },
+    {
+      "session": "4951c0b9_1",
+      "slot": "user.book club planned",
+      "value": "The 7 1/2 Deaths of Evelyn Hardcastle",
+      "violations_batch": [],
+      "violations_source_only": [
+        "7",
+        "1/2"
+      ]
+    },
+    {
+      "session": "54df03d4_4",
+      "slot": "user.selected watch model",
+      "value": "Seiko 5 Sports SRAD733J1 (Japanese-made 4R36J1 movement)",
+      "violations_batch": [],
+      "violations_source_only": [
+        "5",
+        "4r36j1"
+      ]
+    },
+    {
+      "session": "54df03d4_4",
+      "slot": "user.watch purchase decision",
+      "value": "decided to purchase the Seiko 5 Sports SRAD733J1 model",
+      "violations_batch": [],
+      "violations_source_only": [
+        "5"
+      ]
+    },
+    {
+      "session": "0781daa1_1",
+      "slot": "user.bus pass replacement count",
+      "value": "2 times in the past month",
+      "violations_batch": [],
+      "violations_source_only": [
+        "2"
+      ]
+    },
+    {
+      "session": "sharegpt_Qga4bRp_0",
+      "slot": "clothing company taxonomy.structure",
+      "value": "3-tier taxonomy with 5 Tier 1 categories (Men's, Women's, Unisex, Children's, Infant's) and 10 subcategories each (Tier 2), totaling 50 subcategories",
+      "violations_batch": [
+        "10"
+      ],
+      "violations_source_only": []
+    },
+    {
+      "session": "answer_35c9798c_2",
+      "slot": "user.gift-giving budget",
+      "value": "Annualized gift-giving expense estimate: $1,438 (based on $297/3 months * 4 + $250 Christmas estimate)",
+      "violations_batch": [],
+      "violations_source_only": [
+        "297/3",
+        "4"
+      ]
+    },
+    {
+      "session": "3c53154d_1",
+      "slot": "user.kitchen light bulbs",
+      "value": "yellowish, making space feel dark/dingy; plans to replace with brighter, whiter bulbs (3500K-5000K)",
+      "violations_batch": [],
+      "violations_source_only": [
+        "3500k",
+        "5000k"
+      ]
+    },
+    {
+      "session": "sharegpt_5cxEGva_147",
+      "slot": "NetSuite Suitelet script.functionality",
+      "value": "Searches for Sales Orders by number using SuiteScript 2.0, displaying results in a sublist with pagination (page size 10, handled via 'page' query parameter)",
+      "violations_batch": [],
+      "violations_source_only": [
+        "2.0"
+      ]
+    },
+    {
+      "session": "be1c6872",
+      "slot": "user.immigration consultation plan",
+      "value": "Consult an immigration attorney to determine best visa option (K-3/K-4 vs B2) for aunt",
+      "violations_batch": [],
+      "violations_source_only": [
+        "3/k",
+        "4",
+        "b2"
+      ]
+    },
+    {
+      "session": "150756fc_2",
+      "slot": "user.jazz album acquired",
+      "value": "Miles Davis: Blue Moods (1962)",
+      "violations_batch": [],
+      "violations_source_only": [
+        "1962"
+      ]
+    },
+    {
+      "session": "de1f4aec_2",
+      "slot": "user.gift purchased",
+      "value": "wine and cheese gift basket (budget $25-$30) for neighbor who did yard work, purchased from a new local wine shop",
+      "violations_batch": [],
+      "violations_source_only": [
+        "25",
+        "$30"
+      ]
+    },
+    {
+      "session": "ultrachat_136505",
+      "slot": "King's College London.property acquisition",
+      "value": "Acquired and refurbished the former Southwark Council office building at 161-165, Borough High Street, now called Bush House, used as a teaching and learning facility",
+      "violations_batch": [
+        "161"
+      ],
+      "violations_source_only": []
+    },
+    {
+      "session": "203a48bb_1",
+      "slot": "user.barnes & noble membership status",
+      "value": "kept membership due to a $10 reward for spending $50 within two weeks, to buy a new book",
+      "violations_batch": [],
+      "violations_source_only": [
+        "50"
+      ]
+    },
+    {
+      "session": "sharegpt_zvmX9pX_25",
+      "slot": "Midjourney bot.chaos parameter",
+      "value": "Use --chaos or --c parameter (0-100) to influence variation in initial image grids. Default is 0.",
+      "violations_batch": [
+        "100"
+      ],
+      "violations_source_only": []
+    },
+    {
+      "session": "sharegpt_zvmX9pX_25",
+      "slot": "Midjourney bot.seed parameter",
+      "value": "Use --seed or --sameseed to set a starting visual noise field (0-4294967295). --seed only influences the initial grid; --sameseed applies the same noise field across all images in the grid. Model V4 a",
+      "violations_batch": [
+        "4294967295"
+      ],
+      "violations_source_only": []
+    },
+    {
+      "session": "sharegpt_4Wjx3pH_0",
+      "slot": "user.essay written",
+      "value": "A 1000-1250 word two-topic essay comparing Flagstaff, Arizona and Kaneohe, Hawaii, written from the perspective of a first-year college student",
+      "violations_batch": [],
+      "violations_source_only": [
+        "1000",
+        "1250"
+      ]
+    },
+    {
+      "session": "39358a85_2",
+      "slot": "user.fitbit screen protector plan",
+      "value": "considering an official Fitbit screen protector for the Charge 4",
+      "violations_batch": [],
+      "violations_source_only": [
+        "4"
+      ]
+    },
+    {
+      "session": "answer_d03098f9",
+      "slot": "user.wallet case consideration",
+      "value": "OtterBox wallet case for iPhone 13 Pro",
+      "violations_batch": [],
+      "violations_source_only": [
+        "13"
+      ]
+    },
+    {
+      "session": "sharegpt_oLlUxYj_40",
+      "slot": "user.academic project",
+      "value": "Developed a binary search algorithm and led a group of 5 students on a CPS125 Digital Computation and Programming project",
+      "violations_batch": [],
+      "violations_source_only": [
+        "5",
+        "cps125"
+      ]
+    },
+    {
+      "session": "sharegpt_oLlUxYj_40",
+      "slot": "user.academic course",
+      "value": "Completed CS50 Series Course by Harvard University (2021), learning Java and Python",
+      "violations_batch": [],
+      "violations_source_only": [
+        "cs50",
+        "2021"
+      ]
+    },
+    {
+      "session": "sharegpt_oLlUxYj_40",
+      "slot": "user.academic project",
+      "value": "Developed a merge sort algorithm with C during winter 2022 semester",
+      "violations_batch": [],
+      "violations_source_only": [
+        "2022"
+      ]
+    },
+    {
+      "session": "6c172949_1",
+      "slot": "user.volunteer activity planned",
+      "value": "Volunteering at the Oakwood Hills Food Bank during the resort stay (Monday or Wednesday morning, 9:00 AM - 12:00 PM)",
+      "violations_batch": [],
+      "violations_source_only": [
+        "9:00",
+        "12:00"
+      ]
+    },
+    {
+      "session": "f31033c0_2",
+      "slot": "user.model kit",
+      "value": "1/48 scale F-16 model",
+      "violations_batch": [],
+      "violations_source_only": [
+        "1/48"
+      ]
+    }
+  ]
+}

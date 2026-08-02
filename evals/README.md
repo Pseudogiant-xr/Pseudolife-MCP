@@ -66,7 +66,7 @@ etc. — and are ceiling probes, not candidates:
 | `opus-5`   | Claude Opus 5 (Max-plan CLI shim)                 | `http://127.0.0.1:8083/v1` |
 | `fable-5`  | Claude Fable 5 (Max-plan CLI shim)                | `http://127.0.0.1:8084/v1` |
 
-These three are served by `evals/sonnet_shim.py`, which shells out to the
+These three are served by `evals/claude_shim.py`, which shells out to the
 `claude` CLI — the only rungs that leave the machine. See "Everything runs
 locally" under the LongMemEval bench below for the same caveat.
 
@@ -256,7 +256,7 @@ supersession spine is built for.
 extractor, answerer and judge are all served on this host or the LAN, and
 nothing leaves the machine. The exception is opt-in and explicit: the
 `sonnet-5` / `opus-5` / `fable-5` extractor rungs are cloud ceiling probes.
-They are served by `evals/sonnet_shim.py`, which shells out to the `claude`
+They are served by `evals/claude_shim.py`, which shells out to the `claude`
 CLI, so **selecting one of those rungs sends the corpus turns to Anthropic**.
 They are never selected by default (they sit outside `LADDER_ORDER` and are
 not the default `--extractor`); you have to ask for them by name. The

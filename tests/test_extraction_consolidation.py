@@ -35,6 +35,10 @@ def test_consolidation_inserts_then_supersedes_via_stub_extractor(pg_conn, pg_ur
         return _Stub()
 
     svc = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    # Stub values are not present in the stub notes; pin the literal
+    # gate to observe-only so this test keeps exercising its own
+    # concern under the "enforce" default (2026-08-02).
+    svc.config.memory.dream.literal_gate = "log"
 
     def drain(extractor):
         while svc.dream_run(extractor, limit=100)["pulled"]:

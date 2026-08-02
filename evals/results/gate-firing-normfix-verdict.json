@@ -1,0 +1,34 @@
+{
+  "verdict": "gate-firing-normfix",
+  "date": "2026-08-02",
+  "question": "Did the extended normalizer (commit 7d881194: spelled-number backing, hyphen-part gating, N+ strip, ~-exemption) collapse the batch-scope flags to genuine fabrication classes, per the precondition preregistered in gate-firing-verdict.json?",
+  "runs": {
+    "arm1": "evals/results/gate-firing-arm1-normfix.json",
+    "qwen_27b": "evals/results/gate-firing-qwen-27b-normfix.json",
+    "originals": ["evals/results/gate-firing-arm1.json", "evals/results/gate-firing-qwen-27b.json"]
+  },
+  "results": {
+    "arm1": {"flagged_batch": 4, "was": 12, "share_of_gateable": 0.017, "source_only": 23, "was_source_only": 29},
+    "qwen_27b": {"flagged_batch": 3, "was": 5, "share_of_gateable": 0.013, "source_only": 2, "was_source_only": 8}
+  },
+  "remaining_flag_triage": {
+    "genuine_catches": [
+      "'10' derived taxonomy category count (sharegpt_Qga4bRp_0) — derived aggregate",
+      "'11000' summed budget total (sharegpt_rKxzzvF_0) — derived aggregate",
+      "'4294967295' Midjourney seed max (sharegpt_zvmX9pX_25) — extractor imported the uint32 maximum from world knowledge the notes never state; the sharpest catch of the probe",
+      "'161' building number (ultrachat_136505) — address literal not present in the notes",
+      "'100' chaos parameter upper bound (sharegpt_zvmX9pX_25) — bound not stated in the note"
+    ],
+    "residual_normalization_gaps": [
+      "'3x' multiplicity suffix vs 'three times' (qwen, wudhu sequence — 4 tokens in one claim): an Nx-strip would close it; NOT preregistered, recorded not chased",
+      "'65'/'18' temperature range endpoints (qwen, orchids) — corpus likely phrases the range in words; same family as spelled-range approximation"
+    ]
+  },
+  "precondition_evaluation": "SUBSTANTIALLY MET for the sidecar arm (4-5 of 5 remaining arm1 flags are genuine unbacked literals) and partially for the teacher arm (1 of 3 genuine, 2 residual gaps in one unusual claim shape). Firing rates are now 1.3-1.7% of gateable claims, dominated by derived aggregates and imported world knowledge — exactly the classes enforce exists to drop.",
+  "decision": "enforce is now DEFENSIBLE but NOT flipped: turning it on drops ~1-2 legitimate claims per 1000 (residual gap classes) to block ~4-5 genuinely unbacked literals per 1000. That trade, and whether it should ride a config default versus per-deployment opt-in, is an operator decision — deliberately not made autonomously. If adopted, the pre-registered ladder ship rule from literal-fidelity-verdict.json still applies (enforce ships as default only if gold_recoverable is non-inferior to log on the ladder).",
+  "caveats": [
+    "Both probes unjudged (fast/stock servers per policy); session counts match the originals (399/~148).",
+    "Sonnet — the primary production extractor — remains unmeasured on this probe.",
+    "qwen arm session count differs by 1 from the original (148 vs 147; one previously-failing session parsed this time), so per-claim counts shift slightly; shares-of-gateable are the comparable quantity."
+  ]
+}

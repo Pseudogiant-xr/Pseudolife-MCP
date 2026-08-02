@@ -24,7 +24,7 @@ Notes:
 Endpoints: POST /v1/chat/completions, GET /health, GET /v1/models.
 
 Usage:
-    python evals/sonnet_shim.py [--port 8082] [--model claude-sonnet-5]
+    python evals/claude_shim.py [--port 8082] [--model claude-sonnet-5]
         [--cli PATH] [--call-timeout 300]
 """
 from __future__ import annotations
@@ -54,6 +54,17 @@ _FENCE_RE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL)
 _MAX_ARGV_SYSTEM = 24000
 
 
+def resolve_model(requested: str | None, default: str) -> str:
+    """Per-request model override (2026-08-02): a request naming a concrete
+    Claude model wins over the launch default, so the daemon's Console
+    Extractor panel can switch the dreamer model live without a shim
+    restart. Anything else — the compose default "extractor", "bench",
+    empty — keeps the launch default, preserving existing deploys."""
+    if requested and requested.startswith("claude-"):
+        return requested
+    return default
+
+
 class ClaudeCli:
     """One ``claude -p`` subprocess per call, serialized."""
 
@@ -70,14 +81,14 @@ class ClaudeCli:
         self._health_at = 0.0
         self._health_refreshing = False
 
-    def chat(self, system: str, user: str) -> str:
+    def chat(self, system: str, user: str, model: str | None = None) -> str:
         if self.system_override and system.startswith(_SYSTEM_PROMPT):
             # Swap the claims-extraction prompt prefix for the variant,
             # PRESERVING whatever the harness appended after it (vocab hint
             # etc.). Other prompts (relations, lessons) pass through
             # untouched — the override targets claims extraction only.
             system = self.system_override + system[len(_SYSTEM_PROMPT):]
-        cmd = [str(self.cli), "-p", "--model", self.model,
+        cmd = [str(self.cli), "-p", "--model", model or self.model,
                "--output-format", "json",
                "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
                "--tools", ""]
@@ -106,7 +117,7 @@ class ClaudeCli:
         m = _FENCE_RE.match(reply)
         if m:
             reply = m.group(1).strip()
-        print(f"sonnet_shim: call {n} ok "
+        print(f"claude_shim: call {n} ok "
               f"({time.monotonic() - t0:.1f}s, {len(reply)} chars)",
               flush=True)
         return reply
@@ -167,9 +178,10 @@ def make_handler(cli: ClaudeCli):
                     self._json(503, {"status": "cli_error", "detail": detail})
             elif self.path in ("/v1/models", "/models"):
                 self._json(200, {"object": "list", "data": [
-                    {"id": cli.model, "object": "model"},
-                    {"id": "extractor", "object": "model"},
-                    {"id": "bench", "object": "model"}]})
+                    {"id": m, "object": "model"}
+                    for m in dict.fromkeys([
+                        cli.model, "claude-opus-5", "claude-sonnet-5",
+                        "claude-haiku-4-5", "extractor", "bench"])]})
             else:
                 self._json(404, {"error": "not found"})
 
@@ -187,11 +199,12 @@ def make_handler(cli: ClaudeCli):
                 user = "\n\n".join(m.get("content", "") for m in msgs
                                    if m.get("role") != "system"
                                    and m.get("content"))
-                reply = cli.chat(system, user)
+                model = resolve_model(req.get("model"), cli.model)
+                reply = cli.chat(system, user, model=model)
                 self._json(200, {
-                    "id": f"sonnet-shim-{int(time.time() * 1000)}",
+                    "id": f"claude-shim-{int(time.time() * 1000)}",
                     "object": "chat.completion",
-                    "model": cli.model,
+                    "model": model,
                     "choices": [{
                         "index": 0,
                         "message": {"role": "assistant", "content": reply},
@@ -201,7 +214,7 @@ def make_handler(cli: ClaudeCli):
                               "total_tokens": 0},
                 })
             except Exception as e:  # noqa: BLE001 - surface anything as a 500
-                print(f"sonnet_shim: request failed: {e}", file=sys.stderr,
+                print(f"claude_shim: request failed: {e}", file=sys.stderr,
                       flush=True)
                 self._json(500, {"error": str(e)})
 
@@ -237,16 +250,16 @@ def main():
     if args.system_prompt_file:
         raw = args.system_prompt_file.read_text(encoding="utf-8")
         override = raw.split("\n---\n", 1)[-1].strip()
-        print(f"sonnet_shim: system prompt override from "
+        print(f"claude_shim: system prompt override from "
               f"{args.system_prompt_file} ({len(override)} chars)", flush=True)
     cli = ClaudeCli(args.cli, args.model, args.call_timeout,
                     system_override=override)
     # Warm the health cache before serving: the only blocking health path is
     # an empty cache, and this guarantees no request ever hits it.
     ok, detail = cli.health()
-    print(f"sonnet_shim: health warm -> {'ok' if ok else detail}", flush=True)
+    print(f"claude_shim: health warm -> {'ok' if ok else detail}", flush=True)
     srv = ThreadingHTTPServer((args.host, args.port), make_handler(cli))
-    print(f"sonnet_shim: serving {args.model} on "
+    print(f"claude_shim: serving {args.model} on "
           f"http://{args.host}:{args.port}/v1", flush=True)
     srv.serve_forever()
 

@@ -1,6 +1,7 @@
 {
   "verdict": "gate-firing-at-scale",
   "date": "2026-08-02",
+  "followup": "The normalizer extension this verdict preconditioned shipped same-day (commit 7d881194) and was re-probed: see gate-firing-normfix-verdict.json (flags collapsed 12->4 / 5->3, now dominated by genuine unbacked literals; enforce defensible, left as operator decision). The firing rates below are the PRE-extension numbers.",
   "question": "How often does the literal-faithfulness gate fire on real extractions at scale, and does the batch-scope default hold up against the stricter source-only scope?",
   "context": "The gate shipped default `log` because it never fired on any measured bench arm (evals/results/literal-fidelity-verdict.json): every bench corpus was small and saturated. This run measures firing rates over LongMemEval non-KU haystack sessions in the production note shape, with every claim checked under both corpus scopes. KU haystack sessions are excluded (same guard as distill_datagen) so every KU eval stays clean.",
   "code": {

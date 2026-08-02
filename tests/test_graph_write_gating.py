@@ -150,7 +150,7 @@ def test_variant_conflict_blocks_cross_model_pairs():
 def test_variant_conflict_allows_same_or_absent_variants():
     assert not variant_conflict("Gemma 4 E4B", "gemma-4-E4B-it base")
     assert not variant_conflict("update.ps1", "ops/update.ps1")
-    assert not variant_conflict("Sonnet shim", "evals/sonnet_shim.py")
+    assert not variant_conflict("Claude shim", "evals/claude_shim.py")
     # underscore vs hyphen quant forms are the SAME token (norm_name folds _ to -)
     assert not variant_conflict("UD-Q4_K_XL quant", "ud-q4-k-xl quant")
     # Q4 alone (quarter label) is NOT a variant token — it needs _K suffix

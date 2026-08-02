@@ -108,15 +108,26 @@ model.
 **Literal-faithfulness gate.** After extraction, every claim's digit-bearing
 tokens (dates exempt — format variance makes digit matching unsafe there)
 are checked against the pull's source notes: a fabricated number or
-identifier is counted (`literal_flagged` in dream results) under the
-default `memory.dream.literal_gate = "log"`, or dropped under `"enforce"`.
+identifier is dropped and counted under the default
+`memory.dream.literal_gate = "enforce"` (since 2026-08-02), or merely
+counted under `"log"`.
 The corpus is the whole batch's note union by default — derived sums and
 cross-note values are measured false-drop classes under per-note gating.
-`enforce` is deliberately opt-in: across every measured corpus the gate
-never fired, so enforcement is unproven exactly where it would matter
-(`evals/results/literal-fidelity-verdict.json`). A companion prompt rule
-mandating verbatim literals was built, measured, and **held** — it
-significantly degraded the KU cascade (same verdict artifact).
+The matcher normalizes the re-formattings extractors legitimately produce:
+spelled numbers back digits ("three week" backs "3-week"), hyphenated
+ranges and unit compounds gate per digit part ("1-3" ↔ "1 to 3",
+"66-acre" ↔ "66 acres"), `N+` minimums match their base number, and
+`~`-marked approximations are exempt like dates — classes triaged from the
+at-scale firing probe (`evals/results/gate-firing-verdict.json`, where 15
+of 17 batch-scope flags were normalization gaps, not fabrications).
+The post-matcher re-probe left the survivors dominated by genuinely
+unbacked literals — derived aggregates and imported world knowledge — at
+1.3–1.7% of gateable claims, which is what made enforcement the default
+(`evals/results/gate-firing-normfix-verdict.json`;
+`literal-fidelity-verdict.json` has the original opt-in decision).
+A companion prompt rule mandating verbatim literals was built, measured,
+and **held** — it significantly degraded the KU cascade (same verdict
+artifact).
 
 ## The CPU extractor sidecar (batteries-included default)
 
@@ -193,19 +204,25 @@ stdio mode), the `$env:` variables above apply directly and `localhost`
 URLs work as-is. A local or LAN model keeps all memory text on your
 network; the same env triple pointed at a hosted endpoint does not.
 
-## Sonnet primary with local fallback
+## Claude primary with local fallback
 
-With a Claude Max plan, the dream pass can use Claude Sonnet as its primary
+With a Claude Max plan, the dream pass can use a Claude model as its primary
 extractor and keep the bundled local sidecar as an automatic fallback. The
 installer does all of this in one go —
 `ops/install.sh --extractor sonnet-fallback` (or `sonnet-only` to skip the
 sidecar entirely; `ops\install.ps1 -Extractor ...` on Windows). The manual
 steps:
 
-1. Register the CLI shim (`evals/sonnet_shim.py`) to start automatically —
+1. Register the CLI shim (`evals/claude_shim.py`) to start automatically —
    requires a logged-in `claude` CLI:
    - Windows: `ops\install-shim-autostart.ps1` (Task Scheduler, at logon,
-     `127.0.0.1:8082`).
+     `127.0.0.1:8082`; `-Model` picks the served default —
+     `claude-opus-5` since the 2026-08-02 dreamer comparison).
+   The shim also honors a concrete `claude-*` model named per request, so
+   the Console's Extractor panel (settings source = config, model =
+   `claude-sonnet-5` / `claude-opus-5` / `claude-haiku-4-5`) switches the
+   dreamer model live — no shim restart; alias names like the compose
+   default `extractor` keep the launch model.
    - Linux: `ops/install-shim-autostart.sh` (systemd `--user` unit; binds
      the docker bridge IP so the daemon container can reach it —
      `host-gateway` routes container→host traffic to the bridge, where a

@@ -107,7 +107,7 @@ RUNGS: dict[str, dict] = {
                "base_url": "http://127.0.0.1:8081/v1",
                "model": "extractor"},
     # Cloud ceiling probe (2026-07-11, user-requested): Claude via the Max-plan
-    # CLI, served by evals/sonnet_shim.py. Deliberately NOT in LADDER_ORDER —
+    # CLI, served by evals/claude_shim.py. Deliberately NOT in LADDER_ORDER —
     # the default sweep stays sovereign-only; run with --rung sonnet-5.
     "sonnet-5": {"kind": "llm",
                  "label": "Claude Sonnet 5 (Max-plan CLI shim, ceiling probe)",

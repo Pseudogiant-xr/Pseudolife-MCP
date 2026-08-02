@@ -89,10 +89,10 @@ EXTRACTORS = {
     # evals/dg_shim.py, which wraps the patched llama-diffusion-cli.
     "diffusiongemma": "http://127.0.0.1:8082/v1",
     "gemma4-26b-qat": "http://127.0.0.1:8081/v1",
-    # Claude Sonnet 5 ceiling probe (2026-07-11): served by evals/sonnet_shim.py
+    # Claude Sonnet 5 ceiling probe (2026-07-11): served by evals/claude_shim.py
     # wrapping the Max-plan claude CLI (same :8082 shim-swap slot as dg).
     "sonnet-5": "http://127.0.0.1:8082/v1",
-    # Smarter-teacher comparators (2026-07-26): sonnet_shim.py --model
+    # Smarter-teacher comparators (2026-07-26): claude_shim.py --model
     # claude-opus-5 / claude-fable-5 on dedicated ports (:8082 stays the
     # production sonnet shim).
     "opus-5": "http://127.0.0.1:8083/v1",
