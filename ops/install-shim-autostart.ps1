@@ -17,7 +17,7 @@ param(
     [int]$Port = 8082,
     [string]$Model = "claude-opus-5",
     [string]$PromptFile = "evals\prompts\sonnet_extractor_v2.md",
-    [string]$LogFile = "$env:USERPROFILE\.pseudolife-mcpnthropic-shim.log"
+    [string]$LogFile = "$env:USERPROFILE\.pseudolife-mcp\claude-shim.log"
 )
 
 $ErrorActionPreference = "Stop"
@@ -52,7 +52,7 @@ $legacyTaskName = "Pseudolife Sonnet Shim"   # pre-rename installs
 # MORE than one quoted segment (e.g. a quoted exe path AND a quoted script
 # arg) unless the whole thing is wrapped in one extra redundant pair of
 # quotes (a documented `cmd /?` workaround) — hence the doubled `""` below.
-$innerCmd = "`"$PythonExe`" `"$repo\evalsnthropic_shim.py`" --port $Port " +
+$innerCmd = "`"$PythonExe`" `"$repo\evals\claude_shim.py`" --port $Port " +
             "--model $Model --system-prompt-file `"$promptPath`""
 $cmdArgs = "/c `"$innerCmd >> `"`"$LogFile`"`" 2>&1`""
 $inner = @"

@@ -299,6 +299,35 @@ def test_tracked_tree_carries_no_maintainer_identifiers() -> None:
     assert hits == [], f"maintainer identifiers in tracked files: {hits}"
 
 
+def test_tracked_tree_carries_no_stray_control_bytes() -> None:
+    """A scripted 2026-08-02 rename edit wrote literal BEL (0x07) bytes into
+    ``ops/install-shim-autostart.ps1`` — a ``\\a`` escape in a non-raw Python
+    replacement string — which mangled the shim script path so the logon task
+    launched a nonexistent file. The corruption was invisible: consoles
+    swallow BEL when printing, and substring greps fail across it. Ban raw C0
+    control bytes (except tab/LF/CR) from every tracked text file; files
+    containing NUL are treated as binary and skipped."""
+    allowed = {0x09, 0x0A, 0x0D}
+    repo = Path(__file__).resolve().parents[1]
+    try:
+        proc = subprocess.run(["git", "ls-files"], cwd=repo, check=True,
+                              capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        pytest.skip("not a git checkout")
+    hits = []
+    for rel in proc.stdout.splitlines():
+        try:
+            data = (repo / rel).read_bytes()
+        except OSError:
+            continue
+        if b"\x00" in data:
+            continue
+        bad = sorted({b for b in data if b < 0x20 and b not in allowed})
+        if bad:
+            hits.append((rel, [hex(b) for b in bad]))
+    assert hits == [], f"stray control bytes in tracked files: {hits}"
+
+
 def test_changelog_mentions_current_schema_version() -> None:
     """A schema bump must be chronicled: v22 initially shipped with no
     CHANGELOG entry (2026-07-12), caught only in post-deploy review. Every
