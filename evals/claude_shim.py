@@ -54,6 +54,17 @@ _FENCE_RE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL)
 _MAX_ARGV_SYSTEM = 24000
 
 
+def resolve_model(requested: str | None, default: str) -> str:
+    """Per-request model override (2026-08-02): a request naming a concrete
+    Claude model wins over the launch default, so the daemon's Console
+    Extractor panel can switch the dreamer model live without a shim
+    restart. Anything else — the compose default "extractor", "bench",
+    empty — keeps the launch default, preserving existing deploys."""
+    if requested and requested.startswith("claude-"):
+        return requested
+    return default
+
+
 class ClaudeCli:
     """One ``claude -p`` subprocess per call, serialized."""
 
@@ -70,14 +81,14 @@ class ClaudeCli:
         self._health_at = 0.0
         self._health_refreshing = False
 
-    def chat(self, system: str, user: str) -> str:
+    def chat(self, system: str, user: str, model: str | None = None) -> str:
         if self.system_override and system.startswith(_SYSTEM_PROMPT):
             # Swap the claims-extraction prompt prefix for the variant,
             # PRESERVING whatever the harness appended after it (vocab hint
             # etc.). Other prompts (relations, lessons) pass through
             # untouched — the override targets claims extraction only.
             system = self.system_override + system[len(_SYSTEM_PROMPT):]
-        cmd = [str(self.cli), "-p", "--model", self.model,
+        cmd = [str(self.cli), "-p", "--model", model or self.model,
                "--output-format", "json",
                "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
                "--tools", ""]
@@ -167,9 +178,10 @@ def make_handler(cli: ClaudeCli):
                     self._json(503, {"status": "cli_error", "detail": detail})
             elif self.path in ("/v1/models", "/models"):
                 self._json(200, {"object": "list", "data": [
-                    {"id": cli.model, "object": "model"},
-                    {"id": "extractor", "object": "model"},
-                    {"id": "bench", "object": "model"}]})
+                    {"id": m, "object": "model"}
+                    for m in dict.fromkeys([
+                        cli.model, "claude-opus-5", "claude-sonnet-5",
+                        "claude-haiku-4-5", "extractor", "bench"])]})
             else:
                 self._json(404, {"error": "not found"})
 
@@ -187,11 +199,12 @@ def make_handler(cli: ClaudeCli):
                 user = "\n\n".join(m.get("content", "") for m in msgs
                                    if m.get("role") != "system"
                                    and m.get("content"))
-                reply = cli.chat(system, user)
+                model = resolve_model(req.get("model"), cli.model)
+                reply = cli.chat(system, user, model=model)
                 self._json(200, {
-                    "id": f"sonnet-shim-{int(time.time() * 1000)}",
+                    "id": f"claude-shim-{int(time.time() * 1000)}",
                     "object": "chat.completion",
-                    "model": cli.model,
+                    "model": model,
                     "choices": [{
                         "index": 0,
                         "message": {"role": "assistant", "content": reply},

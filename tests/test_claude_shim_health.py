@@ -87,3 +87,40 @@ def test_health_stale_cache_served_while_revalidating(monkeypatch):
         time.sleep(0.02)
     assert cli.health()[0] is False
     assert calls["n"] == 1                   # exactly one refresh, no stampede
+
+
+# ── per-request model override (2026-08-02 dashboard switcher) ─────────────
+
+
+def test_resolve_model_claude_name_wins():
+    assert shim.resolve_model("claude-sonnet-5", "claude-opus-5") == "claude-sonnet-5"
+    assert shim.resolve_model("claude-haiku-4-5", "claude-opus-5") == "claude-haiku-4-5"
+
+
+def test_resolve_model_aliases_keep_launch_default():
+    # The compose default PSEUDOLIFE_DREAM_MODEL=extractor and the bench
+    # alias must keep hitting the launch-time model, not error.
+    assert shim.resolve_model("extractor", "claude-opus-5") == "claude-opus-5"
+    assert shim.resolve_model("bench", "claude-opus-5") == "claude-opus-5"
+    assert shim.resolve_model(None, "claude-opus-5") == "claude-opus-5"
+    assert shim.resolve_model("", "claude-opus-5") == "claude-opus-5"
+
+
+def test_chat_passes_override_model_to_cli(monkeypatch):
+    captured = {}
+
+    def fake_run(cmd, **kw):
+        captured["model"] = cmd[cmd.index("--model") + 1]
+
+        class R:
+            returncode = 0
+            stdout = b'{"result": "ok"}'
+            stderr = b""
+        return R()
+
+    monkeypatch.setattr(shim.subprocess, "run", fake_run)
+    cli = shim.ClaudeCli(Path("claude.exe"), "claude-opus-5", 30.0)
+    cli.chat("sys", "user", model="claude-sonnet-5")
+    assert captured["model"] == "claude-sonnet-5"
+    cli.chat("sys", "user")
+    assert captured["model"] == "claude-opus-5"

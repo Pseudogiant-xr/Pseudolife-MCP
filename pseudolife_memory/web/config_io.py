@@ -176,20 +176,26 @@ KNOBS: list[dict[str, Any]] = [
     {"path": "memory.dream.extractor_base_url", "group": "Extractor",
      "label": "Endpoint base URL", "type": "string", "format": "url",
      "default": None, "restart": False,
-     "suggestions": ["http://pseudolife-extractor:8081/v1",
+     "suggestions": ["http://host.docker.internal:8082/v1",
+                     "http://pseudolife-extractor:8081/v1",
                      "http://host.docker.internal:1234/v1",
                      "http://host.docker.internal:11434/v1",
                      "http://127.0.0.1:8081/v1"],
      "help": "OpenAI-compatible /v1 endpoint. From inside the container the "
-             "host machine is host.docker.internal (sidecar = "
-             "pseudolife-extractor:8081; LM Studio = :1234; Ollama = :11434). "
-             "Effective only when settings source = config."},
+             "host machine is host.docker.internal (Claude CLI shim = :8082; "
+             "sidecar = pseudolife-extractor:8081; LM Studio = :1234; "
+             "Ollama = :11434). Effective only when settings source = "
+             "config."},
     {"path": "memory.dream.extractor_model", "group": "Extractor",
      "label": "Model name", "type": "string", "default": None, "restart": False,
-     "suggestions": ["extractor"],
+     "suggestions": ["extractor", "claude-opus-5", "claude-sonnet-5",
+                     "claude-haiku-4-5"],
      "help": "Model id the endpoint expects (the bundled sidecar serves "
              "\"extractor\"; LM Studio/Ollama use their loaded-model names). "
-             "Effective only when settings source = config."},
+             "Against the Claude CLI shim (:8082) a claude-* name switches "
+             "the served model per request — pick the dreamer here without "
+             "restarting anything. Effective only when settings source = "
+             "config."},
     {"path": "memory.dream.extractor_timeout_seconds", "group": "Extractor",
      "label": "Call timeout (s)", "type": "float", "default": 240.0,
      "min": 10.0, "max": 3600.0, "step": 10.0, "restart": False,

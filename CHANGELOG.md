@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-02 — switch the dreamer model from the Console)
+- **The Claude CLI shim honors a per-request `claude-*` model**, so the
+  Console's existing Extractor panel becomes a live dreamer-model switcher:
+  set settings source = config, endpoint = the shim, and pick
+  `claude-opus-5` / `claude-sonnet-5` / `claude-haiku-4-5` in the model
+  field — the next dream uses it, no restarts. Alias model names (the
+  compose default `extractor`, `bench`) keep the shim's launch model, so
+  existing env-driven deploys are unaffected. Knob suggestions updated
+  accordingly.
+
 ### Changed (2026-08-02 — literal gate enforces by default; the CLI shim is model-agnostic)
 - **`memory.dream.literal_gate` default is now `"enforce"`** — unbacked
   digit literals in dream claims are dropped, not just counted. Decided by

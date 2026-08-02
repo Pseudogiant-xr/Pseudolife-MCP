@@ -204,9 +204,9 @@ stdio mode), the `$env:` variables above apply directly and `localhost`
 URLs work as-is. A local or LAN model keeps all memory text on your
 network; the same env triple pointed at a hosted endpoint does not.
 
-## Sonnet primary with local fallback
+## Claude primary with local fallback
 
-With a Claude Max plan, the dream pass can use Claude Sonnet as its primary
+With a Claude Max plan, the dream pass can use a Claude model as its primary
 extractor and keep the bundled local sidecar as an automatic fallback. The
 installer does all of this in one go —
 `ops/install.sh --extractor sonnet-fallback` (or `sonnet-only` to skip the
@@ -216,7 +216,13 @@ steps:
 1. Register the CLI shim (`evals/claude_shim.py`) to start automatically —
    requires a logged-in `claude` CLI:
    - Windows: `ops\install-shim-autostart.ps1` (Task Scheduler, at logon,
-     `127.0.0.1:8082`).
+     `127.0.0.1:8082`; `-Model` picks the served default —
+     `claude-opus-5` since the 2026-08-02 dreamer comparison).
+   The shim also honors a concrete `claude-*` model named per request, so
+   the Console's Extractor panel (settings source = config, model =
+   `claude-sonnet-5` / `claude-opus-5` / `claude-haiku-4-5`) switches the
+   dreamer model live — no shim restart; alias names like the compose
+   default `extractor` keep the launch model.
    - Linux: `ops/install-shim-autostart.sh` (systemd `--user` unit; binds
      the docker bridge IP so the daemon container can reach it —
      `host-gateway` routes container→host traffic to the bridge, where a
