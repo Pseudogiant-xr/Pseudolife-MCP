@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-08-03 — shim autostart pointed at a nonexistent script)
+- **`ops/install-shim-autostart.ps1` registered a logon task that could never
+  start the shim**: a scripted rename edit had written literal BEL (0x07)
+  bytes into the script path (`evals<BEL>nthropic_shim.py`) and the default
+  log path — invisible in consoles, immune to substring greps. The paths now
+  read `evals\claude_shim.py` and `~\.pseudolife-mcp\claude-shim.log`, and a
+  new guard test bans stray C0 control bytes from every tracked text file so
+  this class of corruption cannot land silently again.
+
 ### Added (2026-08-02 — LongMemEval beyond the knowledge-update slice)
 - **`evals/longmemeval_bench.py` gains `--types`** (comma list or `all`;
   default `knowledge-update` with byte-identical artifact names): the other
