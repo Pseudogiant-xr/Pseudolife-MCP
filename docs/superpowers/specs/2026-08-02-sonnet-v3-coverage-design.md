@@ -82,6 +82,27 @@ regressing precision (stale leak / supersession discipline).
    improves but stays below, the swap question stays open (Sonnet vs Opus)
    and this run becomes its new Sonnet arm.
 
+## Amendment (2026-08-02, after the v3 run, before the v2 rebuild's results)
+
+Gate 3's rag tripwire fired: the v3 run's rag arm scored 0.859 (1237 ctx
+tokens) vs the smoke0726 baseline's 0.564 (1638 ctx tokens) — far beyond
+the ~6-flip noise floor, with the contexts themselves differing. Cause
+identified in git history: the 2026-07-27+ serving changes (per-record BM25
+fusion `a9a17c27`, set-slot surfacing `026439a6`, cascade metric
+`3bd7ad18`) altered retrieval for every arm. The smoke0726 baseline is from
+a different harness era and the cross-era pairing is void, exactly as the
+rule intended.
+
+Remedy: rebuild the v2 arm under the current harness (plain
+`--extractor sonnet-5`, tag `sonnetv2-0802` — the shim's launch-time prefix
+override supplies v2). All gate-3 rules now evaluate v3 against
+`sonnetv2-0802`; the supersession rule becomes "within 20% of the
+same-harness v2 count" (the 344 was also cross-era). The abstention-flip
+rule is additionally checked against the same-harness v2 run's failures.
+This amendment is written after the v3 numbers were seen (cortex 0.821,
+hybrid 0.923, cascade 0.885, 192 supersessions, 7/13 autopsied flips vs
+the old baseline) but before any v2-rebuild result exists.
+
 ## Non-goals
 
 - Answering-layer fixes (2 autopsied losses have the fact banked; separate

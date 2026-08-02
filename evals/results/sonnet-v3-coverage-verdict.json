@@ -1,0 +1,39 @@
+{
+  "verdict": "sonnet-v3-coverage",
+  "date": "2026-08-02",
+  "decision": "HOLD — v3 does not ship; sonnet_extractor_v2.md remains the production shim prompt",
+  "preregistration": "docs/superpowers/specs/2026-08-02-sonnet-v3-coverage-design.md (including the same-day amendment re-baselining to the same-harness v2 rebuild)",
+  "runs": {
+    "v3_candidate": "evals/results/longmemeval-ku-oracle-sonnet-5-sonnetv3-0802.jsonl",
+    "v2_same_harness_baseline": "evals/results/longmemeval-ku-oracle-sonnet-5-sonnetv2-0802.jsonl",
+    "paired_comparison": "evals/results/compare-sonnetv3-vs-v2-0802-pairs.json",
+    "ladder_conformance": "evals/results/sonnet-5-sonnetv3-0802.json (gold 1.0, stale_leak 0.0)"
+  },
+  "protocol_note": "The original smoke0726 baseline was invalidated by its own preregistered tripwire: rag control 0.564 (1638 ctx tokens) there vs 0.859 (1237) now — the 2026-07-27+ serving changes (per-record BM25 fusion a9a17c27, set-slot surfacing 026439a6) moved every arm. All rules were re-evaluated against a same-harness v2 rebuild. In the valid pairing the rag arms are IDENTICAL with 0/0 discordant verdicts — byte-identical contexts through the reproducible Qwen server.",
+  "results": {
+    "cortex": {"v3": 0.821, "v2": 0.821, "delta": 0.0, "wins_losses": "4/4", "p": 1.0},
+    "hybrid": {"v3": 0.923, "v2": 0.962, "delta": -0.038, "wins_losses": "1/4", "p": 0.383},
+    "cascade": {"v3": 0.885, "v2": 0.897, "delta": -0.013, "wins_losses": "3/4", "p": 1.0},
+    "rag_control": {"v3": 0.859, "v2": 0.859, "discordant": 0},
+    "superseded_total": {"v3": 192, "v2": 220, "delta_pct": -12.7},
+    "mean_bank_facts": {"v3": 12.3, "v2": 10.8},
+    "cortex_abstentions": {"v3": 15, "v2": 15}
+  },
+  "ship_rules_evaluation": {
+    "paired_cortex_net_positive": "FAIL — net zero (4 wins, 4 losses)",
+    "abstention_class_flips_gte_4": "FAIL — of the 7 autopsied July losses still failing under same-harness v2, v3 fixes 2 (e493bb7c, 07741c45) while breaking 4 previously-correct questions (e66b632c, f685340e, 7401057b, a2f3aa27)",
+    "supersessions_within_20pct": "pass (-12.7%)",
+    "rag_control_within_noise": "pass (identical, 0 flips)",
+    "ladder_stale_leak_zero": "pass"
+  },
+  "findings": [
+    "The dominant finding is not about v3: the 2026-07-27+ serving-layer changes had already cured 6 of the 13 July abstention losses with the v2 prompt unchanged — the coverage gap the autopsy attributed to extraction was substantially a RETRIEVAL gap, now closed.",
+    "Same-harness sonnet v2 current standing: cortex 0.821, hybrid 0.962, cascade 0.897, rag 0.859 — materially above the July-era records (0.808/0.859); prior cross-era comparisons (including opus 0.859 and fable 0.885 cortex) are stale as comparators.",
+    "v3's extra facts (mean bank 12.3 vs 10.8) buy nothing net: abstention count is unchanged at 15, and the added material trends the hybrid arm DOWN (1/4 W/L) — consistent with context dilution.",
+    "The 2026-08-01 lesson reproduces exactly: an innocuous-looking coverage mandate regressed as much as it fixed. The preregistered gate did its job twice (cross-era tripwire, then the hold)."
+  ],
+  "open_questions": [
+    "Sonnet-vs-Opus dreamer choice is now unmeasured on the current harness — the July opus 0.859 is cross-era. A same-harness opus arm (v2 prompt, shim :8083) is the decisive next run.",
+    "The 7 remaining autopsied failures under v2 (6a1eabeb, 0ddfec37, 07741c44, eace081b, dfde3500 + the 2 v3 fixes) are candidates for answering-layer work, not extraction."
+  ]
+}
