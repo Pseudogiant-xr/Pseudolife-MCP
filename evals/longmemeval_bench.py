@@ -136,6 +136,21 @@ _JUDGE_SYSTEM = (
     "grade yes only if the response abstains (e.g. says it doesn't know)."
 )
 
+# Non-KU question types get the same judge minus the update-specific clause
+# (its "the question asks about updated knowledge" framing is wrong for the
+# other five LongMemEval types). KU rows — and rows from files predating the
+# --types extension, which carry no question_type — keep _JUDGE_SYSTEM
+# verbatim so canonical results re-judge byte-identically.
+_JUDGE_SYSTEM_GENERIC = (
+    "You grade a model response against a correct answer. Reply with exactly "
+    "one word: yes or no.\n"
+    "- yes if the response contains or is equivalent to the correct answer.\n"
+    "- no if the response gives a different value or omits the required "
+    "information.\n"
+    "- If the correct answer indicates the information was never mentioned, "
+    "grade yes only if the response abstains (e.g. says it doesn't know)."
+)
+
 
 def _chat(system: str, user: str, *, max_tokens: int = 256,
           timeout: float = 600.0) -> str:
@@ -166,19 +181,61 @@ def _parse_date(raw: str) -> datetime:
     return datetime.min
 
 
-def load_questions(dataset: str) -> list[dict]:
+# Question-type machinery (2026-08-02 --types extension, design doc
+# docs/superpowers/specs/2026-08-02-lme-types-extension-design.md). The
+# default stays the KU slice with byte-identical artifact names; the other
+# five types add 422 questions for statistical power + LME-500
+# comparability.
+ALL_TYPES = ("knowledge-update", "multi-session", "temporal-reasoning",
+             "single-session-user", "single-session-assistant",
+             "single-session-preference")
+_TYPE_SLUGS = {"knowledge-update": "ku", "multi-session": "ms",
+               "temporal-reasoning": "tr", "single-session-user": "ssu",
+               "single-session-assistant": "ssa",
+               "single-session-preference": "ssp"}
+DEFAULT_TYPES = ("knowledge-update",)
+
+
+def parse_types(spec: str) -> tuple[str, ...]:
+    if not spec or spec == "knowledge-update":
+        return DEFAULT_TYPES
+    if spec == "all":
+        return ALL_TYPES
+    types = tuple(s.strip() for s in spec.split(",") if s.strip())
+    unknown = [t for t in types if t not in ALL_TYPES]
+    if unknown:
+        raise SystemExit(f"unknown question types {unknown}; "
+                         f"valid: {', '.join(ALL_TYPES)} or 'all'")
+    return types
+
+
+def types_slug(types: tuple[str, ...]) -> str:
+    """Artifact-name component: 'ku' for the default (existing filenames
+    stay byte-identical), 'all' for the full set, joined codes otherwise."""
+    if tuple(types) == DEFAULT_TYPES:
+        return "ku"
+    if set(types) == set(ALL_TYPES):
+        return "all"
+    return "-".join(_TYPE_SLUGS[t] for t in types)
+
+
+def load_questions(dataset: str,
+                   types: tuple[str, ...] = DEFAULT_TYPES) -> list[dict]:
     data = json.loads(DATASETS[dataset].read_text(encoding="utf-8"))
-    return [q for q in data if q["question_type"] == "knowledge-update"]
+    return [q for q in data if q["question_type"] in types]
 
 
-def out_file(dataset: str, extractor: str, tag: str = "") -> Path:
+def out_file(dataset: str, extractor: str, tag: str = "",
+             slug: str = "ku") -> Path:
     suffix = f"-{tag}" if tag else ""
-    return RESULTS_DIR / f"longmemeval-ku-{dataset}-{extractor}{suffix}.jsonl"
+    return RESULTS_DIR / f"longmemeval-{slug}-{dataset}-{extractor}{suffix}.jsonl"
 
 
-def bank_dir(dataset: str, extractor: str, tag: str = "") -> Path:
+def bank_dir(dataset: str, extractor: str, tag: str = "",
+             slug: str = "ku") -> Path:
     suffix = f"-{tag}" if tag else ""
-    return RESULTS_DIR / "banks" / f"{dataset}-{extractor}{suffix}"
+    prefix = "" if slug == "ku" else f"{slug}-"     # existing bank dirs keep their names
+    return RESULTS_DIR / "banks" / f"{prefix}{dataset}-{extractor}{suffix}"
 
 
 def _norm_text(s) -> str:
@@ -353,12 +410,17 @@ def build_contexts(svc, question: str) -> dict[str, str]:
 
 def answer_and_judge(row: dict) -> dict:
     """Fill the answer/judge fields on a row from its persisted contexts."""
+    # Missing question_type (pre---types files) falls back to the KU judge
+    # so canonical artifacts re-judge byte-identically.
+    judge_system = (_JUDGE_SYSTEM
+                    if row.get("question_type", "knowledge-update")
+                    == "knowledge-update" else _JUDGE_SYSTEM_GENERIC)
     for arm in ARMS:
         ctx = row["contexts"].get(arm, "")
         prompt = (f"Question date: {row['question_date']}\n"
                   f"Question: {row['question']}\n\nMemory context:\n{ctx or '(empty)'}")
         response = _chat(_ANSWER_SYSTEM, prompt)
-        verdict = _chat(_JUDGE_SYSTEM, (
+        verdict = _chat(judge_system, (
             f"Question: {row['question']}\n"
             f"Correct answer: {row['answer']}\n"
             f"Model response: {response}"), max_tokens=8)
@@ -384,7 +446,8 @@ def _make_extractor(ex_url: str, system_prompt_file: str | None):
 def run_extract(dataset: str, limit: int | None, extractor_name: str,
                 do_answer: bool, tag: str = "", window: int = 0,
                 system_prompt_file: str | None = None,
-                qids: str | None = None) -> None:
+                qids: str | None = None,
+                types: tuple[str, ...] = DEFAULT_TYPES) -> None:
     ex_url = EXTRACTORS[extractor_name]
     if not probe(ex_url):
         sys.exit(f"no extractor server at {ex_url} — start it first")
@@ -392,7 +455,8 @@ def run_extract(dataset: str, limit: int | None, extractor_name: str,
         sys.exit(f"no answer/judge server at {QWEN_URL} — start it first")
     from pseudolife_memory.memory.dream import OpenAICompatExtractor
 
-    questions = load_questions(dataset)
+    slug = types_slug(types)
+    questions = load_questions(dataset, types)
     if limit:
         questions = questions[:limit]
     if qids:
@@ -401,9 +465,9 @@ def run_extract(dataset: str, limit: int | None, extractor_name: str,
         missing = keep - {q["question_id"] for q in questions}
         if missing:
             sys.exit(f"unknown question_ids: {sorted(missing)}")
-    out_path = out_file(dataset, extractor_name, tag)
+    out_path = out_file(dataset, extractor_name, tag, slug)
     done = {r["question_id"] for r in load_rows(out_path)}
-    print(f"{len(questions)} knowledge-update questions, extractor="
+    print(f"{len(questions)} questions [{slug}], extractor="
           f"{extractor_name} ({len(done)} already done, resuming)", flush=True)
 
     for i, q in enumerate(questions):
@@ -417,12 +481,14 @@ def run_extract(dataset: str, limit: int | None, extractor_name: str,
         extractor = _make_extractor(ex_url, system_prompt_file)
         tally = ingest_and_dream(svc, extractor, q, ex_url)
         contexts = build_contexts(svc, q["question"])
-        facts = dump_bank(svc, q, bank_dir(dataset, extractor_name, tag)
+        facts = dump_bank(svc, q, bank_dir(dataset, extractor_name, tag,
+                                           slug)
                           / f"{q['question_id']}.json.gz")
         svc.flush()
         row = {
             "question_id": q["question_id"],
             "question": q["question"],
+            "question_type": q["question_type"],
             "answer": q["answer"],
             "question_date": q["question_date"],
             "abstention": q["question_id"].endswith("_abs"),
@@ -446,10 +512,11 @@ def run_extract(dataset: str, limit: int | None, extractor_name: str,
               f"{tally['superseded']} superseded)", flush=True)
 
 
-def run_answer(dataset: str, extractor_name: str, tag: str = "") -> None:
+def run_answer(dataset: str, extractor_name: str, tag: str = "",
+               types: tuple[str, ...] = DEFAULT_TYPES) -> None:
     if not probe(QWEN_URL):
         sys.exit(f"no answer/judge server at {QWEN_URL} — start it first")
-    out_path = out_file(dataset, extractor_name, tag)
+    out_path = out_file(dataset, extractor_name, tag, types_slug(types))
     rows = load_rows(out_path)
     pending = [r for r in rows if "rag_correct" not in r]
     print(f"answer phase: {len(pending)} of {len(rows)} rows pending", flush=True)
@@ -461,8 +528,9 @@ def run_answer(dataset: str, extractor_name: str, tag: str = "") -> None:
         print(f"[{i + 1}/{len(pending)}] {row['question_id']}  {marks}", flush=True)
 
 
-def report(dataset: str, extractor_name: str, tag: str = "") -> None:
-    out_path = out_file(dataset, extractor_name, tag)
+def report(dataset: str, extractor_name: str, tag: str = "",
+           types: tuple[str, ...] = DEFAULT_TYPES) -> None:
+    out_path = out_file(dataset, extractor_name, tag, types_slug(types))
     rows = [r for r in load_rows(out_path) if "rag_correct" in r]
     if not rows:
         sys.exit(f"no judged results in {out_path}")
@@ -490,6 +558,26 @@ def report(dataset: str, extractor_name: str, tag: str = "") -> None:
     sup = sum(r["consolidation"]["superseded"] for r in rows)
     print(f"supersessions across runs: {sup}")
     summary["superseded_total"] = sup
+    # Per-type breakdown, only when the run spans more than one type.
+    by_type: dict[str, list[dict]] = {}
+    for r in rows:
+        by_type.setdefault(r.get("question_type", "knowledge-update"),
+                           []).append(r)
+    if len(by_type) > 1:
+        summary["types"] = {}
+        for qt, trows in sorted(by_type.items()):
+            tn = len(trows)
+            summary["types"][qt] = {
+                "n": tn,
+                "arms": {arm: round(
+                    sum(r[f"{arm}_correct"] for r in trows) / tn, 3)
+                    for arm in ARMS},
+                "cascade": round(
+                    sum(cascade_correct(r) for r in trows) / tn, 3),
+            }
+            print(f"  {qt:<28} n={tn:<4} " + " ".join(
+                f"{arm}={summary['types'][qt]['arms'][arm]:.3f}"
+                for arm in ARMS))
     # NOT with_suffix: extractor names contain dots (qwen3.5-4b), which
     # pathlib would treat as a suffix and truncate.
     out_path.with_name(
@@ -519,20 +607,25 @@ def main() -> int:
     ap.add_argument("--qids", default=None,
                     help="comma-separated question_ids to run (targeted "
                          "extraction / bank forensics; composes with --tag)")
+    ap.add_argument("--types", default="knowledge-update",
+                    help="question types: comma list or 'all' (default "
+                         "knowledge-update — canonical filenames unchanged; "
+                         "other selections get a type-slug artifact prefix)")
     args = ap.parse_args()
+    types = parse_types(args.types)
     if args.report:
-        report(args.dataset, args.extractor, args.tag)
+        report(args.dataset, args.extractor, args.tag, types)
         return 0
     if args.phase == "answer":
-        run_answer(args.dataset, args.extractor, args.tag)
+        run_answer(args.dataset, args.extractor, args.tag, types)
     else:
         run_extract(args.dataset, args.limit, args.extractor,
                     do_answer=(args.phase == "full"), tag=args.tag,
                     window=args.window,
                     system_prompt_file=args.system_prompt_file,
-                    qids=args.qids)
+                    qids=args.qids, types=types)
     if args.phase != "extract":
-        report(args.dataset, args.extractor, args.tag)
+        report(args.dataset, args.extractor, args.tag, types)
     return 0
 
 
