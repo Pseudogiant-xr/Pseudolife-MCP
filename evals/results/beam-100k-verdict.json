@@ -1,0 +1,46 @@
+{
+  "verdict": "BEAM 100K tier measured end-to-end through the local-reproducible adapter (design path A); hybrid tracks rag overall while cortex-only lags badly outside abstention — the per-ability breakdown, not the headline, is the finding",
+  "date": "2026-08-03",
+  "preregistration": "docs/superpowers/specs/2026-08-02-beam-adapter-design.md",
+  "run": {
+    "command": "python evals/beam_adapter.py --beam-root <beam-checkout> --tier 100K --extractor qwen-27b --out-tag beam100k-qwen-0802",
+    "chats": 20,
+    "questions": 400,
+    "extractor": "qwen-27b (dream pass, v5 op prompt, drain-until-empty per batch)",
+    "answer_judge": "qwen3.6-27b on the reproducible q8_0 server (evals/qwen_server.ps1 Start-Qwen; never -Fast for judged output)",
+    "artifacts": [
+      "evals/results/beam-100K-qwen-27b-beam100k-qwen-0802.jsonl",
+      "evals/results/beam-100K-qwen-27b-beam100k-qwen-0802.summary.json"
+    ],
+    "note": "run spanned two sessions (rows 1-240 on 2026-08-02, rows 241-400 overnight 2026-08-03 after a user GPU pause; resumable-by-row worked as designed). Rows 241-400 ran on a user-applied GPU curve (950mV / 2670MHz / +1000 mem); in-run canaries clean (0 judge failures, throughput on trend, coherent output)."
+  },
+  "results_float_mean": {
+    "rag": 0.4808,
+    "cortex": 0.2566,
+    "hybrid": 0.4633
+  },
+  "results_intfaithful": {
+    "rag": 0.4693,
+    "cortex": 0.2466,
+    "hybrid": 0.4486,
+    "note": "upstream BEAM code int()-floors per-rubric-item scores (0.5 -> 0); both scorings recorded per row, divergence documented rather than silently fixed"
+  },
+  "per_ability_highlights": {
+    "cortex_wins": {"abstention": {"cortex": 0.95, "rag": 0.75, "note": "small curated fact context abstains correctly where raw-turn context invites confabulation"}},
+    "weakest_hybrid": {
+      "event_ordering": 0.1313,
+      "summarization": 0.2446,
+      "contradiction_resolution": 0.2781,
+      "note": "all three need cross-batch aggregation or ordering that per-fact consolidation discards"
+    },
+    "strongest_hybrid": {"preference_following": 0.7125, "abstention": 0.725, "information_extraction": 0.5958}
+  },
+  "cross_bench_convergence": "The companion LongMemEval all-types run (longmemeval-all-oracle-qwen-27b-alltypes-0803) shows the same shape: hybrid excels on canonical-fact types (knowledge-update 0.910, single-session-user 0.957, single-session-assistant 0.964) and falls below the raw-turns rag control exactly where aggregation across sessions or time is required (multi-session 0.383 vs rag 0.504; temporal-reasoning 0.534 vs 0.526; single-session-preference 0.600 vs 0.800). Two independent benchmarks agree: the system's gap is cross-session aggregation/ordering, not fact fidelity.",
+  "caveats": [
+    "NOT comparable to published BEAM numbers (Mem0, Hindsight, etc.): those use a GPT-4o judge; this run judges with local qwen3.6-27b for reproducibility. Cross-system comparison requires re-judging with the paper's judge, a deliberate open decision.",
+    "Single replicate; no significance claims. The rag arm is the identical-input control across future reruns.",
+    "qwen-27b extractor arm only; the production dreamer (claude-opus-5 via shim) arm is future work and would cost API tokens.",
+    "100K tier only (20 chats); 500K/1M/10M tiers unmeasured."
+  ],
+  "decision": "Adapter and artifacts committed; BEAM joins the harness set. Next leverage item per both benches: aggregation-aware recall (event ordering / multi-session synthesis), not further extractor fidelity work."
+}

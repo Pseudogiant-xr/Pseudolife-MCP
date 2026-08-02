@@ -1,0 +1,80 @@
+{
+  "dataset": "oracle",
+  "extractor": "qwen-27b",
+  "n": 500,
+  "arms": {
+    "rag": {
+      "accuracy": 0.688,
+      "context_tokens": 1209.7
+    },
+    "cortex": {
+      "accuracy": 0.416,
+      "context_tokens": 158.2
+    },
+    "hybrid": {
+      "accuracy": 0.664,
+      "context_tokens": 842.1
+    },
+    "cascade": {
+      "accuracy": 0.69,
+      "context_tokens": 882.6
+    }
+  },
+  "superseded_total": 948,
+  "types": {
+    "knowledge-update": {
+      "n": 78,
+      "arms": {
+        "rag": 0.859,
+        "cortex": 0.756,
+        "hybrid": 0.91
+      },
+      "cascade": 0.936
+    },
+    "multi-session": {
+      "n": 133,
+      "arms": {
+        "rag": 0.504,
+        "cortex": 0.211,
+        "hybrid": 0.383
+      },
+      "cascade": 0.474
+    },
+    "single-session-assistant": {
+      "n": 56,
+      "arms": {
+        "rag": 0.911,
+        "cortex": 0.571,
+        "hybrid": 0.964
+      },
+      "cascade": 0.929
+    },
+    "single-session-preference": {
+      "n": 30,
+      "arms": {
+        "rag": 0.8,
+        "cortex": 0.733,
+        "hybrid": 0.6
+      },
+      "cascade": 0.7
+    },
+    "single-session-user": {
+      "n": 70,
+      "arms": {
+        "rag": 0.929,
+        "cortex": 0.671,
+        "hybrid": 0.957
+      },
+      "cascade": 0.943
+    },
+    "temporal-reasoning": {
+      "n": 133,
+      "arms": {
+        "rag": 0.526,
+        "cortex": 0.15,
+        "hybrid": 0.534
+      },
+      "cascade": 0.526
+    }
+  }
+}
