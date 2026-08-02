@@ -8,6 +8,13 @@
 #
 #   *** setuptools and torch are COUPLED. Bump them together or not at all. ***
 #
+# 2026-08-02: torch 2.12.0+cpu -> 2.13.0+cpu and setuptools 78.1.1 -> 83.0.0
+# bumped TOGETHER for Dependabot alerts #6/#7 (setuptools MANIFEST.in
+# exclusion bypass; torch.jit.script memory corruption). torch 2.13.0 has
+# no setuptools ceiling, so the 78.1.1 hold below is history, kept for the
+# lesson. Dockerfile.daemon's pre-install pin bumped in the same change;
+# tests/test_daemon_image_is_cpu_only.py still guards the CUDA-pull trap.
+#
 # torch 2.12.0 requires setuptools<82. A Dependabot bump to setuptools==83.0.0
 # (17b97180, 2026-07-24) crossed that ceiling, and because a constraint file
 # cannot be negotiated, pip resolved the conflict by discarding the pinned CPU
@@ -121,7 +128,7 @@ scipy==1.18.0
 sentence-transformers==5.6.0
 # HELD <82 by torch 2.12.0's own requirement — see the coupling note in the
 # header. Raising this silently swaps the image's CPU torch for the CUDA build.
-setuptools==78.1.1
+setuptools==83.0.0
 shellingham==1.5.4
 six==1.17.0
 sse-starlette==3.4.5
@@ -130,7 +137,7 @@ sympy==1.14.0
 tenacity==9.1.4
 threadpoolctl==3.6.0
 tokenizers==0.22.2
-torch==2.12.0+cpu
+torch==2.13.0+cpu
 tqdm==4.68.3
 transformers==4.57.6
 typer==0.25.1

@@ -47,7 +47,7 @@ RUN apt-get update && apt-get -y upgrade && rm -rf /var/lib/apt/lists/*
 #    the pinned torch — not the setuptools pin — and walked forward to a torch
 #    with no ceiling. What actually holds torch to the CPU build is the pin in
 #    the lockfile applied as a constraint in step 2. Keep both.
-RUN pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.12.0"
+RUN pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.13.0"
 
 # 2) The package + its remaining deps, PINNED to the captured lockfile so a
 #    rebuild reproduces the known-good set (no silent dependency drift). The
@@ -57,13 +57,15 @@ RUN pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.12.0"
 #    genuinely needs a newer torch fails this build LOUDLY rather than quietly
 #    swapping in a CUDA wheel — bump step 1 and the lock together when it does.
 #    pypdf floats to latest (the PyPDF2->pypdf security migration). setuptools
-#    is a patched release (CVE-2025-47273) that is also below torch's ceiling;
-#    it now matches the lock, so the line below is a belt-and-braces no-op.
+#    83.0.0 patches the MANIFEST.in exclusion bypass (Dependabot #6,
+#    2026-08-02); torch 2.13.0 has no setuptools ceiling, so the old <82
+#    coupling constraint no longer binds. It matches the lock, so the line
+#    below is a belt-and-braces no-op.
 COPY pyproject.toml README.md /app/
 COPY ops/requirements.lock.txt /app/requirements.lock.txt
 COPY pseudolife_memory /app/pseudolife_memory
 RUN pip install -c /app/requirements.lock.txt "/app[onnx]" \
-    && pip install -U "setuptools==78.1.1"
+    && pip install -U "setuptools==83.0.0"
 
 # 3) Bake the embedding model(s) into the image so cold start needs no
 #    network — kills the HF HEAD-check flakiness and the slow first run.
