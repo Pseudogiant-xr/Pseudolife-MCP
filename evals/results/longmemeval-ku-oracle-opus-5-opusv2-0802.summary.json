@@ -1,0 +1,24 @@
+{
+  "dataset": "oracle",
+  "extractor": "opus-5",
+  "n": 78,
+  "arms": {
+    "rag": {
+      "accuracy": 0.859,
+      "context_tokens": 1236.9
+    },
+    "cortex": {
+      "accuracy": 0.885,
+      "context_tokens": 363.5
+    },
+    "hybrid": {
+      "accuracy": 0.962,
+      "context_tokens": 1025.0
+    },
+    "cascade": {
+      "accuracy": 0.923,
+      "context_tokens": 517.8
+    }
+  },
+  "superseded_total": 283
+}

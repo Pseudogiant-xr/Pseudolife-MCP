@@ -1,0 +1,31 @@
+{
+  "verdict": "dreamer-choice-sonnet-vs-opus",
+  "date": "2026-08-02",
+  "question": "Which cloud model should run the production dream extractor shim: Sonnet 5 (incumbent) or Opus 5? (Fable 5 excluded as a candidate on cost — user decision 2026-08-02 — its July numbers remain analysis evidence only.)",
+  "context": "The July full-78 comparison left this open: direction favored bigger models in every view but nothing was significant, and the 2026-07-27+ serving changes (BM25 fusion, set-slot surfacing) later staled every July number as a comparator. Both arms here are fresh same-harness runs: identical bench code, identical v2 prompt via the same shim override mechanism, identical reproducible Qwen answerer+judge.",
+  "runs": {
+    "opus": "evals/results/longmemeval-ku-oracle-opus-5-opusv2-0802.jsonl",
+    "sonnet": "evals/results/longmemeval-ku-oracle-sonnet-5-sonnetv2-0802.jsonl",
+    "paired_comparison": "evals/results/compare-opus-vs-sonnet-0802-pairs.json"
+  },
+  "results": {
+    "rag_control": {"opus": 0.859, "sonnet": 0.859, "discordant": 0, "note": "byte-identical contexts, zero flips — comparison is clean"},
+    "cortex": {"opus": 0.885, "sonnet": 0.821, "delta": 0.064, "wins_losses": "5/0", "p_permutation": 0.063},
+    "hybrid": {"opus": 0.962, "sonnet": 0.962, "delta": 0.0, "wins_losses": "1/1"},
+    "cascade": {"opus": 0.923, "sonnet": 0.897, "delta": 0.026, "wins_losses": "3/1", "p_permutation": 0.615},
+    "superseded_total": {"opus": 283, "sonnet": 220},
+    "cortex_context_tokens": {"opus": 363.5, "sonnet": 194.8}
+  },
+  "reading": [
+    "Opus wins the cortex arm 5/0 paired — no question flips the other way — at p=0.063 (permutation; the exact one-sided sign probability of 5/0 is 0.031). This replicates the July direction on the first methodologically clean pairing.",
+    "The hybrid arm shows zero difference: raw-turn context rescues Sonnet's cortex misses, so the gap matters exactly in proportion to how much production leans on pure-cortex recall.",
+    "Opus supersedes 29% more (283 vs 220) with richer banks — the gain is update discipline plus coverage, not spam; but cortex answer contexts cost ~1.9x tokens.",
+    "n=78 is the KU pool's ceiling; a definitive p<0.05 needs the LME-500 harness extension (tracked). 5/0 with a dead-flat control is nonetheless the strongest evidence yet."
+  ],
+  "recommendation": "Evidence favors swapping the shim to claude-opus-5 if the per-dream Max-plan cost is acceptable; the swap is a one-line launcher change (ops/install-shim-autostart.ps1 model arg) and trivially reversible. Deployment deliberately NOT executed — cost is the user's call. If cost matters more than the last 6 points of pure-cortex accuracy, staying on Sonnet is defensible: hybrid (the production-realistic arm) is identical.",
+  "caveats": [
+    "Answerer/judge is the local reproducible Qwen 27B; absolute numbers are not comparable to GPT-4o-judged external publications.",
+    "KU-oracle measures the supersession-heavy slice; other question types unmeasured (LME-500 extension pending).",
+    "Opus arm ran once; the 0/0 rag control bounds harness noise at zero for this pairing, but extractor-side run-to-run variance of the shim itself is unmeasured."
+  ]
+}
