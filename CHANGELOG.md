@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-02 — LongMemEval beyond the knowledge-update slice)
+- **`evals/longmemeval_bench.py` gains `--types`** (comma list or `all`;
+  default `knowledge-update` with byte-identical artifact names): the other
+  five LongMemEval question types add 422 questions for statistical power
+  and LME-500 comparability. Non-KU rows use a generic judge variant that
+  drops only the KU-specific update clause (abstention and equivalence
+  clauses verbatim); rows without a `question_type` — every pre-extension
+  artifact — re-judge byte-identically under the KU prompt. Extended runs
+  get a type-slug artifact prefix and a per-type summary breakdown.
+
 ### Added (2026-08-02 — switch the dreamer model from the Console)
 - **The Claude CLI shim honors a per-request `claude-*` model**, so the
   Console's existing Extractor panel becomes a live dreamer-model switcher:
