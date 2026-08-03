@@ -1,0 +1,70 @@
+{
+  "n": 234,
+  "dropped_a": 266,
+  "dropped_b": 266,
+  "draws": 10000,
+  "seed": 0,
+  "a": {
+    "file": "evals/results/longmemeval-all-oracle-qwen-27b-aggp1-variants-0803.jsonl",
+    "arms": {
+      "hybrid_all": 0.8077
+    }
+  },
+  "b": {
+    "file": "evals/results/longmemeval-all-oracle-qwen-27b-aggp1-variants-0803.jsonl",
+    "arms": {
+      "hybrid": 0.8974
+    }
+  },
+  "paired": {
+    "a_vs_b": {
+      "hybrid_all_vs_hybrid": {
+        "delta": -0.0897,
+        "p": 0.0002,
+        "wins": 5,
+        "losses": 26,
+        "win_qids": [
+          "0edc2aef",
+          "1faac195",
+          "54026fce",
+          "a89d7624",
+          "e493bb7c"
+        ],
+        "loss_qids": [
+          "001be529",
+          "01493427",
+          "031748ae",
+          "1568498a",
+          "15745da0",
+          "2133c1b5",
+          "22d2cb42",
+          "26bdc477",
+          "38146c39",
+          "3e321797",
+          "41698283",
+          "5a4f22c0",
+          "5c40ec5b",
+          "778164c6",
+          "852ce960",
+          "95228167",
+          "9ea5eabc",
+          "b01defab",
+          "b6025781",
+          "caf03d32",
+          "caf9ead2",
+          "cf22b7bf",
+          "d596882b",
+          "db467c8c",
+          "dfde3500",
+          "e9327a54"
+        ]
+      }
+    }
+  },
+  "types": [
+    "knowledge-update",
+    "single-session-assistant",
+    "single-session-preference",
+    "single-session-user"
+  ]
+}

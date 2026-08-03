@@ -6,7 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Added (2026-08-03 — within-run variant gates for Phase 1)
+### Measured (2026-08-04 — aggregation-aware recall Phase 1 fails its gates; defaults unchanged)
+- **All four Phase 1 retrieval knobs fail their preregistered gates** on the
+  500-question within-run variants run (tag `aggp1-variants-0803`; verdict
+  and per-knob compare artifacts in
+  `evals/results/agg-recall-phase1-verdict.json`). On the weak types the
+  knobs target (multi-session + temporal-reasoning, n=266, paired
+  permutation vs the same-run vanilla hybrid): contiguity delta -0.147
+  (p 0.00000), timeline -0.011 (p 0.70120), enum rendering -0.071
+  (p 0.00030), all-three-combined -0.177 (p 0.00000). Timeline also
+  regresses the strong non-inferiority set (-0.038, p 0.00340, 0 wins /
+  9 losses). Every knob stays default-off — production behavior is
+  unchanged. Validity: the cross-run rag control against `alltypes-0803`
+  is exactly zero (0 flips over 500 questions), and all four vanilla arms
+  reproduce that independent run exactly despite a fresh extraction. The
+  controlled negative supports the design doc's Phase 2 hypothesis: the
+  weak-type answer material is never extracted into the bank, so no
+  retrieval-side change can surface it — events need to be stored as
+  first-class records.
 - **`evals/longmemeval_bench.py --variants`** builds five hybrid context
   variants per question from the same live service (vanilla, +contiguity,
   +timeline, +enumerated facts, all three), each answered and judged in

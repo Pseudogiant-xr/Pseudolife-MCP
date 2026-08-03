@@ -1,0 +1,59 @@
+{
+  "n": 234,
+  "dropped_a": 266,
+  "dropped_b": 266,
+  "draws": 10000,
+  "seed": 0,
+  "a": {
+    "file": "evals/results/longmemeval-all-oracle-qwen-27b-aggp1-variants-0803.jsonl",
+    "arms": {
+      "hybrid_ctg": 0.8632
+    }
+  },
+  "b": {
+    "file": "evals/results/longmemeval-all-oracle-qwen-27b-aggp1-variants-0803.jsonl",
+    "arms": {
+      "hybrid": 0.8974
+    }
+  },
+  "paired": {
+    "a_vs_b": {
+      "hybrid_ctg_vs_hybrid": {
+        "delta": -0.0342,
+        "p": 0.1139,
+        "wins": 6,
+        "losses": 14,
+        "win_qids": [
+          "0edc2aef",
+          "1faac195",
+          "54026fce",
+          "a89d7624",
+          "e493bb7c",
+          "fca70973"
+        ],
+        "loss_qids": [
+          "01493427",
+          "09d032c9",
+          "1568498a",
+          "1c0ddc50",
+          "22d2cb42",
+          "26bdc477",
+          "38146c39",
+          "5a4f22c0",
+          "778164c6",
+          "95228167",
+          "b01defab",
+          "b6025781",
+          "caf03d32",
+          "dfde3500"
+        ]
+      }
+    }
+  },
+  "types": [
+    "knowledge-update",
+    "single-session-assistant",
+    "single-session-preference",
+    "single-session-user"
+  ]
+}
