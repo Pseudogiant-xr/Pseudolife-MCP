@@ -627,6 +627,47 @@ CLAIMS.append(Claim(
     stated=0.0, places=3))
 
 
+AGGP1 = RESULTS + "compare-aggp1-{}-pairs.json"
+# ── the aggregation-aware-recall Phase 1 negative result (2026-08-04) ────
+# The CHANGELOG states all four retrieval knobs failed their preregistered
+# gates; each per-knob delta and p pins to its committed within-run pairs
+# artifact, and the cross-run rag control at exactly zero is what licenses
+# reading the deltas as knob effects rather than noise.
+def _aggp1(pair_key: str) -> Callable[[dict], dict]:
+    return lambda d: d["paired"]["a_vs_b"][pair_key]
+
+
+for _knob, _set, _needle, _delta_v, _p_v in [
+    ("ctg", "weak", "contiguity delta -0.147", -0.147, 0.00000),
+    ("tl", "weak",
+     "(p 0.00000), timeline -0.011 (p 0.70120), enum rendering -0.071",
+     -0.011, 0.70120),
+    ("enum", "weak",
+     "(p 0.00000), timeline -0.011 (p 0.70120), enum rendering -0.071",
+     -0.071, 0.00030),
+    ("all", "weak",
+     "(p 0.00030), all-three-combined -0.177 (p 0.00000). Timeline also",
+     -0.177, 0.00000),
+    ("tl", "strong", "(-0.038, p 0.00340, 0 wins /", -0.038, 0.00340),
+]:
+    _pair = _aggp1(f"hybrid_{_knob}_vs_hybrid")
+    CLAIMS.append(Claim(
+        id=f"aggp1-{_knob}-{_set}-delta", doc=CHANGELOG, needle=_needle,
+        artifacts=(AGGP1.format(f"{_knob}-{_set}"),),
+        value=lambda d, g=_pair: g(d)["delta"], stated=_delta_v, places=3))
+    CLAIMS.append(Claim(
+        id=f"aggp1-{_knob}-{_set}-p", doc=CHANGELOG, needle=_needle,
+        artifacts=(AGGP1.format(f"{_knob}-{_set}"),),
+        value=lambda d, g=_pair: g(d)["p"], stated=_p_v, places=5))
+
+CLAIMS.append(Claim(
+    id="aggp1-rag-control", doc=CHANGELOG,
+    needle="is exactly zero (0 flips over 500 questions)",
+    artifacts=(AGGP1.format("rag-control"),),
+    value=lambda d: d["paired"]["a_vs_b"]["rag_vs_rag"]["delta"],
+    stated=0.0, places=4))
+
+
 def test_every_published_number_names_a_committed_artifact():
     """A claim whose evidence is untracked cannot be checked by a reader.
 

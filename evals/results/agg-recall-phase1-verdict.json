@@ -1,0 +1,64 @@
+{
+  "verdict": "Phase 1 FAILS its preregistered gates: all four retrieval-side knobs (contiguity expansion, timeline channel, enumerable fact rendering, combined) score at or below the vanilla hybrid baseline on the exact weak types they were built to fix. Knobs stay default-off; no production change. The result strengthens the Phase 2 (chronicle store) hypothesis: the weak-type answer material is not in the bank to retrieve, reorder, or re-render.",
+  "date": "2026-08-04",
+  "preregistration": "docs/superpowers/specs/2026-08-03-aggregation-aware-recall-design.md (Phase 1 gates + 2026-08-03 within-run-variants amendment)",
+  "run": {
+    "command": "python evals/longmemeval_bench.py --dataset oracle --extractor qwen-27b --types all --variants --tag aggp1-variants-0803 (preceded by a 12-question --variants smoke, tag aggp1-smoke-0803, validated before the full run launched)",
+    "questions": 500,
+    "arms_judged": ["rag", "cortex", "hybrid", "hybrid_ctg", "hybrid_tl", "hybrid_enum", "hybrid_all"],
+    "design": "one extraction, five hybrid context variants per question built from the same live service (identical bank; deltas are knob-only, paired within-question). hybrid_ctg = contiguity_neighbors=1; hybrid_tl = timeline channel; hybrid_enum = enumerated fact rendering over vanilla retrieval; hybrid_all = all three.",
+    "answer_judge": "qwen3.6-27b on the reproducible q8_0 server (evals/qwen_server.ps1 Start-Qwen; never -Fast for judged output)",
+    "artifacts": [
+      "evals/results/longmemeval-all-oracle-qwen-27b-aggp1-variants-0803.jsonl",
+      "evals/results/longmemeval-all-oracle-qwen-27b-aggp1-variants-0803.summary.json",
+      "evals/results/longmemeval-all-oracle-qwen-27b-aggp1-smoke-0803.jsonl",
+      "evals/results/longmemeval-all-oracle-qwen-27b-aggp1-smoke-0803.summary.json",
+      "evals/results/compare-aggp1-ctg-weak-pairs.json",
+      "evals/results/compare-aggp1-ctg-strong-pairs.json",
+      "evals/results/compare-aggp1-tl-weak-pairs.json",
+      "evals/results/compare-aggp1-tl-strong-pairs.json",
+      "evals/results/compare-aggp1-enum-weak-pairs.json",
+      "evals/results/compare-aggp1-enum-strong-pairs.json",
+      "evals/results/compare-aggp1-all-weak-pairs.json",
+      "evals/results/compare-aggp1-all-strong-pairs.json",
+      "evals/results/compare-aggp1-rag-control-pairs.json"
+    ]
+  },
+  "controls": {
+    "within_run": "the rag arm and the vanilla hybrid memory texts come from one pinned service call (contiguity_neighbors=0, timeline=False), so every variant delta is knob-only by construction",
+    "cross_run_rag_tripwire": "rag vs rag against the independent alltypes-0803 run: delta 0.000, 0 wins / 0 losses over all 500 shared questions (compare-aggp1-rag-control-pairs.json) — zero measurement noise on the reproducible server",
+    "vanilla_arm_reproduction": "all four vanilla arms reproduce the alltypes-0803 run EXACTLY despite a fresh extraction: rag 0.688, cortex 0.416, hybrid 0.664, cascade 0.690 in both runs — extraction, retrieval, and judging are fully deterministic end-to-end"
+  },
+  "gates": {
+    "weak_gate": {
+      "definition": "variant vs same-run hybrid on multi-session + temporal-reasoning (n=266), paired sign-flip permutation, 10k draws, seed 0; ship requires improvement with p < 0.05",
+      "hybrid_baseline": 0.459,
+      "results": {
+        "hybrid_ctg": {"acc": 0.312, "delta": -0.147, "p": 0.0, "wins": 8, "losses": 47, "gate": "FAIL (significantly worse)"},
+        "hybrid_tl": {"acc": 0.447, "delta": -0.011, "p": 0.7012, "wins": 12, "losses": 15, "gate": "FAIL (no improvement)"},
+        "hybrid_enum": {"acc": 0.387, "delta": -0.071, "p": 0.0003, "wins": 3, "losses": 22, "gate": "FAIL (significantly worse)"},
+        "hybrid_all": {"acc": 0.282, "delta": -0.177, "p": 0.0, "wins": 11, "losses": 58, "gate": "FAIL (significantly worse)"}
+      }
+    },
+    "strong_non_inferiority": {
+      "definition": "variant vs same-run hybrid on knowledge-update + the three single-session types (n=234); ship requires no significant regression (margin 0.02)",
+      "hybrid_baseline": 0.897,
+      "results": {
+        "hybrid_ctg": {"acc": 0.863, "delta": -0.034, "p": 0.1139, "wins": 6, "losses": 14, "gate": "FAIL (point regression beyond margin)"},
+        "hybrid_tl": {"acc": 0.859, "delta": -0.038, "p": 0.0034, "wins": 0, "losses": 9, "gate": "FAIL (significant regression, 0 wins)"},
+        "hybrid_enum": {"acc": 0.91, "delta": 0.013, "p": 0.3763, "wins": 4, "losses": 1, "gate": "PASS (only gate any knob passes)"},
+        "hybrid_all": {"acc": 0.808, "delta": -0.09, "p": 0.0002, "wins": 5, "losses": 26, "gate": "FAIL (significant regression)"}
+      }
+    },
+    "beam_directional_check": "not run — with every weak gate failed there is no ship candidate for the direction check to qualify"
+  },
+  "reading": {
+    "contiguity": "injecting zero-scored temporal neighbors around each hit dilutes the context: 47 weak-type losses vs 8 wins. The neighbors displace nothing (contexts grew ~315 tokens) but bury the signal and invite the answerer to anchor on adjacent-but-wrong material.",
+    "timeline": "essentially inert where it was aimed (weak delta -0.011, p 0.70) and strictly harmful where it fired spuriously (strong set: 0 wins, 9 losses, p 0.003 — cue-triggered chronological reordering of already-good contexts only breaks them).",
+    "enum": "enumerated per-fact history helps nothing on aggregation questions (whose answers span entries, not one slot's version chain) while adding tokens; its strong-set pass (+0.013) shows the rendering is safe where facts already carry the answer — safe but not useful.",
+    "combined": "worst of all four (weak -0.177), confirming the failures compound rather than complement.",
+    "consistent_with_autopsy": "the pre-registration autopsy found weak-type answers are rarely fact-shaped (representational absence, not a ranking problem). Louder retrieval over the same stored material cannot surface what extraction never stored. Two benchmarks (BEAM event_ordering 0.13, LME multi-session/temporal) plus this controlled negative now point at the same fix: store events/occurrences as first-class records at extraction time — Phase 2."
+  },
+  "cost": "~6 GPU-hours (one extraction + 7 judged arms x 500 questions) to rule out three cheap retrieval-side hypotheses before any touched production defaults. Nothing to roll back: all knobs shipped default-off in PR #91.",
+  "decision": "All Phase 1 knobs stay default-off (SearchConfig.contiguity_neighbors=0, timeline_channel=False, inline fact rendering). Code remains in-tree: the knobs are honest ablation infrastructure and the --variants harness is reusable for Phase 2's gates. Next: Phase 2 chronicle store (schema v28) per the same design doc."
+}

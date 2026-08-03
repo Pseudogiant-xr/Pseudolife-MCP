@@ -1,0 +1,62 @@
+{
+  "n": 266,
+  "dropped_a": 234,
+  "dropped_b": 234,
+  "draws": 10000,
+  "seed": 0,
+  "a": {
+    "file": "evals/results/longmemeval-all-oracle-qwen-27b-aggp1-variants-0803.jsonl",
+    "arms": {
+      "hybrid_enum": 0.3872
+    }
+  },
+  "b": {
+    "file": "evals/results/longmemeval-all-oracle-qwen-27b-aggp1-variants-0803.jsonl",
+    "arms": {
+      "hybrid": 0.4586
+    }
+  },
+  "paired": {
+    "a_vs_b": {
+      "hybrid_enum_vs_hybrid": {
+        "delta": -0.0714,
+        "p": 0.0003,
+        "wins": 3,
+        "losses": 22,
+        "win_qids": [
+          "09ba9854_abs",
+          "a96c20ee_abs",
+          "b3c15d39"
+        ],
+        "loss_qids": [
+          "0bc8ad92",
+          "21d02d0d",
+          "36b9f61e",
+          "5025383b",
+          "5e1b23de",
+          "77eafa52",
+          "85fa3a3f",
+          "dd2973ad",
+          "f0853d11",
+          "gpt4_21adecb5",
+          "gpt4_2f584639",
+          "gpt4_385a5000",
+          "gpt4_45189cb4",
+          "gpt4_468eb064",
+          "gpt4_4929293b",
+          "gpt4_4ef30696",
+          "gpt4_59149c77",
+          "gpt4_8c8961ae",
+          "gpt4_8e165409",
+          "gpt4_e414231e",
+          "gpt4_f2262a51",
+          "gpt4_fa19884c"
+        ]
+      }
+    }
+  },
+  "types": [
+    "multi-session",
+    "temporal-reasoning"
+  ]
+}

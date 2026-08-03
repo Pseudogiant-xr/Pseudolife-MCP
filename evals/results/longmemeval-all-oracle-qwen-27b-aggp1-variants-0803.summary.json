@@ -1,0 +1,120 @@
+{
+  "dataset": "oracle",
+  "extractor": "qwen-27b",
+  "n": 500,
+  "arms": {
+    "rag": {
+      "accuracy": 0.688,
+      "context_tokens": 1209.7
+    },
+    "cortex": {
+      "accuracy": 0.416,
+      "context_tokens": 158.2
+    },
+    "hybrid": {
+      "accuracy": 0.664,
+      "context_tokens": 842.1
+    },
+    "hybrid_all": {
+      "accuracy": 0.528,
+      "context_tokens": 1153.8
+    },
+    "hybrid_ctg": {
+      "accuracy": 0.57,
+      "context_tokens": 1157.6
+    },
+    "hybrid_enum": {
+      "accuracy": 0.632,
+      "context_tokens": 861.1
+    },
+    "hybrid_tl": {
+      "accuracy": 0.64,
+      "context_tokens": 803.4
+    },
+    "cascade": {
+      "accuracy": 0.69,
+      "context_tokens": 882.6
+    }
+  },
+  "superseded_total": 948,
+  "types": {
+    "knowledge-update": {
+      "n": 78,
+      "arms": {
+        "rag": 0.859,
+        "cortex": 0.756,
+        "hybrid": 0.91,
+        "hybrid_all": 0.744,
+        "hybrid_ctg": 0.846,
+        "hybrid_enum": 0.91,
+        "hybrid_tl": 0.872
+      },
+      "cascade": 0.936
+    },
+    "multi-session": {
+      "n": 133,
+      "arms": {
+        "rag": 0.504,
+        "cortex": 0.211,
+        "hybrid": 0.383,
+        "hybrid_all": 0.271,
+        "hybrid_ctg": 0.308,
+        "hybrid_enum": 0.353,
+        "hybrid_tl": 0.376
+      },
+      "cascade": 0.474
+    },
+    "single-session-assistant": {
+      "n": 56,
+      "arms": {
+        "rag": 0.911,
+        "cortex": 0.571,
+        "hybrid": 0.964,
+        "hybrid_all": 0.875,
+        "hybrid_ctg": 0.929,
+        "hybrid_enum": 0.964,
+        "hybrid_tl": 0.893
+      },
+      "cascade": 0.929
+    },
+    "single-session-preference": {
+      "n": 30,
+      "arms": {
+        "rag": 0.8,
+        "cortex": 0.733,
+        "hybrid": 0.6,
+        "hybrid_all": 0.567,
+        "hybrid_ctg": 0.533,
+        "hybrid_enum": 0.667,
+        "hybrid_tl": 0.6
+      },
+      "cascade": 0.7
+    },
+    "single-session-user": {
+      "n": 70,
+      "arms": {
+        "rag": 0.929,
+        "cortex": 0.671,
+        "hybrid": 0.957,
+        "hybrid_all": 0.929,
+        "hybrid_ctg": 0.971,
+        "hybrid_enum": 0.971,
+        "hybrid_tl": 0.929
+      },
+      "cascade": 0.943
+    },
+    "temporal-reasoning": {
+      "n": 133,
+      "arms": {
+        "rag": 0.526,
+        "cortex": 0.15,
+        "hybrid": 0.534,
+        "hybrid_all": 0.293,
+        "hybrid_ctg": 0.316,
+        "hybrid_enum": 0.421,
+        "hybrid_tl": 0.519
+      },
+      "cascade": 0.526
+    }
+  }
+}
