@@ -86,10 +86,23 @@ def _perm_p(deltas: list[int], draws: int, seed: int) -> float:
 
 
 def compare(a_file: Path, b_file: Path, *, draws: int = 10_000,
-            seed: int = 0) -> dict:
+            seed: int = 0,
+            types: tuple[str, ...] | None = None,
+            arm_pairs: list[tuple[str, str]] | None = None) -> dict:
+    """``types`` restricts pairing to rows of those ``question_type``s
+    (the Phase-1 multi-session+temporal gate and its non-inferiority set).
+    ``arm_pairs`` compares arm A in file A against arm B in file B —
+    ``[("hybrid_ctg", "hybrid")]`` with ``a_file == b_file`` is the
+    within-run variant pairing of the 2026-08-03 amendment; ``None``
+    keeps the original same-arm-across-runs behavior over ARMS."""
     a_rows = _load_rows(Path(a_file))
     b_rows = _load_rows(Path(b_file))
     shared = sorted(a_rows.keys() & b_rows.keys())
+    if types:
+        tset = set(types)
+        shared = [q for q in shared
+                  if a_rows[q].get("question_type",
+                                   "knowledge-update") in tset]
     n = len(shared)
     if n == 0:
         raise SystemExit("no shared question_ids between the two runs")
@@ -103,15 +116,21 @@ def compare(a_file: Path, b_file: Path, *, draws: int = 10_000,
         "b": {"file": _repo_rel(b_file), "arms": {}},
         "paired": {"a_vs_b": {}},
     }
-    for arm in ARMS:
-        a_ok = {q: _correct(a_rows[q], arm) for q in shared}
-        b_ok = {q: _correct(b_rows[q], arm) for q in shared}
-        out["a"]["arms"][arm] = round(sum(a_ok.values()) / n, 4)
-        out["b"]["arms"][arm] = round(sum(b_ok.values()) / n, 4)
+    if types:
+        out["types"] = sorted(types)
+    pairs = (arm_pairs if arm_pairs is not None
+             else [(arm, arm) for arm in ARMS])
+    for arm_a, arm_b in pairs:
+        key = arm_a if arm_a == arm_b and arm_pairs is None \
+            else f"{arm_a}_vs_{arm_b}"
+        a_ok = {q: _correct(a_rows[q], arm_a) for q in shared}
+        b_ok = {q: _correct(b_rows[q], arm_b) for q in shared}
+        out["a"]["arms"][arm_a] = round(sum(a_ok.values()) / n, 4)
+        out["b"]["arms"][arm_b] = round(sum(b_ok.values()) / n, 4)
         deltas = [int(a_ok[q]) - int(b_ok[q]) for q in shared]
         win_qids = [q for q in shared if a_ok[q] and not b_ok[q]]
         loss_qids = [q for q in shared if b_ok[q] and not a_ok[q]]
-        out["paired"]["a_vs_b"][arm] = {
+        out["paired"]["a_vs_b"][key] = {
             "delta": round(sum(deltas) / n, 4),
             "p": round(_perm_p(deltas, draws, seed), 5),
             "wins": len(win_qids),
@@ -143,7 +162,16 @@ def main() -> None:
     ap.add_argument("--out-tag", required=True)
     ap.add_argument("--draws", type=int, default=10_000)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--types", default=None,
+                    help="comma list of question_types to pair over "
+                         "(Phase-1 per-type gates); default = all rows")
+    ap.add_argument("--arm-a", default=None,
+                    help="arm name in file A (with --arm-b: cross-arm "
+                         "pairing, e.g. a variant vs its in-run baseline)")
+    ap.add_argument("--arm-b", default=None)
     args = ap.parse_args()
+    if bool(args.arm_a) != bool(args.arm_b):
+        raise SystemExit("--arm-a and --arm-b go together")
 
     a_file = _resolve(args.a, args.a_file, args.dataset, args.extractor, "a")
     b_file = _resolve(args.b, args.b_file, args.dataset, args.extractor, "b")
@@ -152,15 +180,20 @@ def main() -> None:
         raise SystemExit(f"{out_path} exists — pick a fresh --out-tag "
                          "(never overwrite a canonical result file)")
 
-    result = compare(a_file, b_file, draws=args.draws, seed=args.seed)
+    types = (tuple(t.strip() for t in args.types.split(",") if t.strip())
+             if args.types else None)
+    arm_pairs = [(args.arm_a, args.arm_b)] if args.arm_a else None
+    result = compare(a_file, b_file, draws=args.draws, seed=args.seed,
+                     types=types, arm_pairs=arm_pairs)
     out_path.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(f"n={result['n']}  (dropped a={result['dropped_a']} "
           f"b={result['dropped_b']})")
-    print(f"{'arm':<10}{'A':>8}{'B':>8}{'delta':>8}{'p':>10}{'W/L':>8}")
-    for arm in ARMS:
-        pa = result["paired"]["a_vs_b"][arm]
-        print(f"{arm:<10}{result['a']['arms'][arm]:>8.3f}"
-              f"{result['b']['arms'][arm]:>8.3f}{pa['delta']:>8.3f}"
+    print(f"{'arm':<22}{'A':>8}{'B':>8}{'delta':>8}{'p':>10}{'W/L':>8}")
+    for key, pa in result["paired"]["a_vs_b"].items():
+        arm_a = key.split("_vs_")[0] if "_vs_" in key else key
+        arm_b = key.split("_vs_")[-1] if "_vs_" in key else key
+        print(f"{key:<22}{result['a']['arms'][arm_a]:>8.3f}"
+              f"{result['b']['arms'][arm_b]:>8.3f}{pa['delta']:>8.3f}"
               f"{pa['p']:>10.5f}{pa['wins']:>5}/{pa['losses']}")
     print(f"wrote {out_path}")
 

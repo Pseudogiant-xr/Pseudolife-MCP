@@ -93,6 +93,34 @@ and `beam100k-qwen-0802`. Same harness, same reproducible qwen server,
   measured result recorded in the verdict artifact
   (`evals/results/agg-recall-phase1-verdict.json`).
 
+### Amendment (2026-08-03, before any gate ran) — within-run variants
+
+Implementation surfaced a wrong assumption above: "banks are reusable, so
+answer/judge re-run only". `dump_bank` (`evals/longmemeval_bench.py`)
+persists **cortex facts only** — no band entries — and knobs 1–2 operate
+on band entries, so per-knob runs would each need full re-extraction
+(~4 h × 4 = infeasible). Replacement design, strictly stronger pairing:
+
+- **One run, five hybrid context variants per question**, built from the
+  same live service right after its single ingest+dream: `hybrid`
+  (vanilla), `hybrid_ctg` (contiguity_neighbors=1), `hybrid_tl`
+  (timeline), `hybrid_enum` (enumerated facts, vanilla retrieval),
+  `hybrid_all` (all three). Each variant is answered and judged in the
+  same row. Every variant shares the identical bank, so deltas are
+  knob-only with within-question pairing; the rag control is
+  byte-identical across variants by construction (one pinned call), so
+  the tripwire becomes an exact-equality invariant rather than a
+  cross-run check.
+- Gates unchanged in substance, re-anchored: each knob's ship rule is
+  its variant vs the same-run `hybrid` arm (paired permutation, 10k
+  draws, seed 0, `compare_arms --a-file == --b-file` with a `--types`
+  filter added for the multi-session+temporal combined gate and the
+  non-inferiority set). The cross-run alltypes-0803 baseline remains
+  the sanity anchor for the vanilla hybrid arm (its accuracy should
+  reproduce within extraction noise), not a gate input.
+- Cost: one ~5–6 h run (extraction unchanged, +4 answered/judged arms
+  per question) instead of four ~4 h runs.
+
 ## Phase 2 — chronicle store (schema v28): events as first-class records
 
 The dream pass currently extracts only slot claims

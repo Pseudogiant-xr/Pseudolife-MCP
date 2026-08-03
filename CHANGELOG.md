@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-03 — within-run variant gates for Phase 1)
+- **`evals/longmemeval_bench.py --variants`** builds five hybrid context
+  variants per question from the same live service (vanilla, +contiguity,
+  +timeline, +enumerated facts, all three), each answered and judged in
+  the same row — one extraction pass instead of four (the design doc's
+  bank-reuse assumption was wrong: `dump_bank` persists cortex facts
+  only, no band entries; documented in the spec's 2026-08-03 Amendment).
+  `answer_and_judge` and `report` handle arbitrary context arms;
+  `evals/compare_arms.py` gains `--types` (per-type gate subsets) and
+  `--arm-a/--arm-b` (cross-arm within-run pairing).
+
 ### Added (2026-08-03 — aggregation-aware recall, Phase 1)
 - **Three retrieval-side knobs targeting the cross-session
   aggregation/ordering weakness** the 2026-08-03 BEAM 100K + LongMemEval
