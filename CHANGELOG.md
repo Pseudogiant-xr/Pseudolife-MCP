@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-03 — aggregation-aware recall, Phase 1)
+- **Three retrieval-side knobs targeting the cross-session
+  aggregation/ordering weakness** the 2026-08-03 BEAM 100K + LongMemEval
+  all-types runs exposed (per the preregistration in
+  `docs/superpowers/specs/2026-08-03-aggregation-aware-recall-design.md`;
+  all default OFF until their gates pass):
+  `memory.search.contiguity_neighbors` — each search hit also surfaces its
+  stream-adjacent neighbors (same episode, else same source), placed around
+  the hit in (timestamp, seq) order and marked `via: "contiguity"`;
+  `memory.search.timeline_channel` — temporally-cued queries get
+  lexically-relevant entries injected beside the dense/slot/BM25 channels
+  and the memory portion of the result ordered by stream position instead
+  of score; and `--fact-render enum` on `evals/longmemeval_bench.py` —
+  numbered, dated, one-per-line supersession chains and set members in the
+  served fact context. Per-call overrides pin the eval harness's rag
+  control arm to vanilla retrieval regardless of config, so the
+  preregistered tripwire holds by construction.
+
 ### Fixed (2026-08-03 — shim autostart pointed at a nonexistent script)
 - **`ops/install-shim-autostart.ps1` registered a logon task that could never
   start the shim**: a scripted rename edit had written literal BEL (0x07)

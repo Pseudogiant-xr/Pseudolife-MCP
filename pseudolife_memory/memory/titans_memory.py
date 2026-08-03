@@ -113,10 +113,17 @@ class MemoryEntry:
 
 @dataclass
 class RetrievalResult:
-    """Result from memory retrieval."""
+    """Result from memory retrieval.
+
+    ``via`` (agg-recall Phase 1) is an optional per-entry channel marker
+    aligned with ``entries`` — e.g. ``"timeline"`` for entries the timeline
+    channel injected. ``None`` (the default, and every pre-Phase-1 caller)
+    means no markers; a list uses ``None`` for ordinary dense/slot/BM25
+    hits so consumers can tell structural context from scored hits."""
     entries: list[MemoryEntry]
     scores: list[float]
     surprises: list[float]
+    via: list[str | None] | None = None
 
 
 # v0.5: the deprecated ``MemoryMLP`` / ``TitansMemoryBank`` compat shims were

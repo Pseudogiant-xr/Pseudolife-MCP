@@ -341,7 +341,25 @@ def ingest_and_dream(svc, extractor, q: dict, ex_url: str) -> dict:
     return tally
 
 
-def _compose_fact_line(f: dict, versions: list[dict]) -> str:
+# Agg-recall Phase 1 knobs (spec 2026-08-03-aggregation-aware-recall-design).
+# Set by --fact-render / --contiguity / --timeline in main(); defaults keep
+# every pre-Phase-1 artifact byte-identical. The hybrid/memory arm follows
+# these; the rag control arm is pinned to vanilla retrieval in
+# build_contexts regardless (the preregistered tripwire's contract).
+FACT_RENDER = "inline"
+HYBRID_CONTIG: int | None = None
+HYBRID_TIMELINE: bool | None = None
+
+
+def _fmt_epoch_date(v) -> str | None:
+    """Epoch seconds → ``YYYY-MM-DD`` (UTC), or None when absent/zero."""
+    if not v:
+        return None
+    return time.strftime("%Y-%m-%d", time.gmtime(float(v)))
+
+
+def _compose_fact_line(f: dict, versions: list[dict],
+                       enumerated: bool = False) -> str:
     """One served fact line: ``entity — attribute: value``, plus garnish.
 
     Scalar facts (no ``"kind"``, or ``"kind" != "set"``) show earlier
@@ -356,9 +374,49 @@ def _compose_fact_line(f: dict, versions: list[dict]) -> str:
     Pure and GPU-free: ``versions`` is whatever the caller already fetched
     from ``svc.history(...)["versions"]`` (or ``[]`` on failure/miss), so
     this composes offline and is unit-testable without a service or model.
+
+    ``enumerated=True`` (Phase 1 knob 3) renders chains and set members as
+    numbered, dated, one-per-line blocks instead of inline garnish — the
+    2026-08-03 autopsy showed the answerer miscounting values that were
+    fully present but "a -> b -> c"-rendered. The current value always
+    leads (stale demotion: an older value never renders above its
+    replacement) and never repeats in the chain.
     """
     line = (f"{f.get('entity', '')} — {f.get('attribute', '')}: "
             f"{f.get('value', '')}")
+    if enumerated:
+        if f.get("kind") == "set":
+            out = [line]
+            members = f.get("members", [])
+            if members:
+                out.append("  members:")
+                for i, m in enumerate(members, 1):
+                    d = _fmt_epoch_date(m.get("asserted_at"))
+                    out.append(f"  {i}. {m.get('value', '')}"
+                               + (f" ({d})" if d else ""))
+            current_norm = {(m.get("value") or "").strip().casefold()
+                            for m in members}
+            removed = [v for v in versions
+                       if v.get("event") == "removed" and v.get("value")
+                       and (v.get("value") or "").strip().casefold()
+                       not in current_norm]
+            if removed:
+                out.append("  former members:")
+                for i, v in enumerate(removed, 1):
+                    d = _fmt_epoch_date(v.get("at"))
+                    out.append(f"  {i}. {v.get('value', '')}"
+                               + (f" (removed {d})" if d else " (removed)"))
+            return "\n".join(out)
+        older = [v for v in versions[:-1]
+                 if v.get("value") and v.get("value") != f.get("value")]
+        if not older:
+            return line
+        out = [line, "  earlier values, oldest first:"]
+        for i, v in enumerate(older, 1):
+            d = _fmt_epoch_date(v.get("tx_time") or v.get("asserted_at"))
+            out.append(f"  {i}. {v.get('value', '')}"
+                       + (f" ({d})" if d else ""))
+        return "\n".join(out)
     if f.get("kind") == "set":
         # A remove-then-re-add leaves a "removed" event for the value AND a
         # current member carrying it (re-adding mints a fresh current row
@@ -383,8 +441,19 @@ def _compose_fact_line(f: dict, versions: list[dict]) -> str:
 
 
 def build_contexts(svc, question: str) -> dict[str, str]:
-    raw = svc.search(question, top_k=RAG_TOP_K).get("entries", [])
+    # Control-arm contract (spec 2026-08-03): the rag arm ALWAYS uses
+    # vanilla retrieval — Phase-1 knobs pinned off per-call — so a rag
+    # delta between runs signals harness/era drift, never a knob under
+    # test. The hybrid/memory arm follows the CLI/config knobs. With
+    # knobs at their defaults the two calls return identical entries and
+    # every pre-Phase-1 artifact stays byte-identical.
+    raw = svc.search(question, top_k=RAG_TOP_K,
+                     contiguity_neighbors=0, timeline=False).get("entries", [])
     raw_texts = [e.get("text", "") for e in raw]
+    mem = svc.search(question, top_k=RAG_TOP_K,
+                     contiguity_neighbors=HYBRID_CONTIG,
+                     timeline=HYBRID_TIMELINE).get("entries", [])
+    mem_texts = [e.get("text", "") for e in mem]
     cortex = svc.cortex_search(question, top_k=CORTEX_TOP_K,
                                min_score=CORTEX_MIN_SCORE).get("entries", [])
     # Facts carry their supersession chain: knowledge-update asks about BOTH
@@ -398,13 +467,14 @@ def build_contexts(svc, question: str) -> dict[str, str]:
                                    f.get("attribute", "")).get("versions", [])
         except Exception:  # noqa: BLE001 — history is garnish, never fatal
             versions = []
-        fact_lines.append(_compose_fact_line(f, versions))
+        fact_lines.append(_compose_fact_line(
+            f, versions, enumerated=(FACT_RENDER == "enum")))
     return {
         "rag": "\n\n".join(raw_texts),
         "cortex": "\n".join(fact_lines),
         "hybrid": ("Known facts:\n" + "\n".join(fact_lines) +
                    "\n\nRelevant memories:\n" +
-                   "\n\n".join(raw_texts[:HYBRID_TOP_K])),
+                   "\n\n".join(mem_texts[:HYBRID_TOP_K])),
     }
 
 
@@ -607,11 +677,27 @@ def main() -> int:
     ap.add_argument("--qids", default=None,
                     help="comma-separated question_ids to run (targeted "
                          "extraction / bank forensics; composes with --tag)")
+    ap.add_argument("--fact-render", choices=("inline", "enum"),
+                    default="inline",
+                    help="Fact-context rendering: 'enum' = numbered, dated, "
+                         "one-per-line chains/members (Phase 1 knob 3); "
+                         "default keeps pre-Phase-1 artifacts byte-identical")
+    ap.add_argument("--contiguity", type=int, default=None,
+                    help="Temporal-contiguity neighbors per side for the "
+                         "hybrid/memory arm (Phase 1 knob 1); rag control "
+                         "arm stays pinned to vanilla retrieval")
+    ap.add_argument("--timeline", action="store_true", default=None,
+                    help="Enable the timeline channel for the hybrid/memory "
+                         "arm (Phase 1 knob 2); rag control arm stays pinned")
     ap.add_argument("--types", default="knowledge-update",
                     help="question types: comma list or 'all' (default "
                          "knowledge-update — canonical filenames unchanged; "
                          "other selections get a type-slug artifact prefix)")
     args = ap.parse_args()
+    global FACT_RENDER, HYBRID_CONTIG, HYBRID_TIMELINE
+    FACT_RENDER = args.fact_render
+    HYBRID_CONTIG = args.contiguity
+    HYBRID_TIMELINE = args.timeline
     types = parse_types(args.types)
     if args.report:
         report(args.dataset, args.extractor, args.tag, types)
