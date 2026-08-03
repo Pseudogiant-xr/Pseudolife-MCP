@@ -176,6 +176,51 @@ adds a second extraction output: **event records**.
 - Verdict artifact: `evals/results/agg-recall-phase2-verdict.json`.
   Every number that reaches the docs gets a `test_eval_evidence.py` row.
 
+### Amendment (2026-08-04, at Phase 2 build start) — Phase 1 outcome + implementation decisions
+
+Phase 1 ran and **failed every weak-type gate**
+(`evals/results/agg-recall-phase1-verdict.json`): contiguity −0.147
+(p 0.00000), timeline −0.011 (p 0.70120), enum −0.071 (p 0.00030),
+combined −0.177 (p 0.00000), n=266 paired. All knobs stay default-off.
+Consequences and decisions folded into the Phase 2 build:
+
+- **Phase 2's LME weak-type baseline** is the `aggp1-variants-0803`
+  vanilla hybrid arm (0.459 on the weak set), which reproduced the
+  independent `alltypes-0803` run exactly — the strongest baseline
+  available.
+- **Serving gates on the temporal cue directly** (`has_temporal_cue`),
+  NOT on `timeline_channel` — that knob failed its gate and stays off,
+  and the spec's original "when the timeline channel fires" wording
+  would have made the events block permanently unreachable.
+- **HLC stamp** is implemented as the v11-convention column triplet
+  (`hlc_phys`, `hlc_logical`, `writer_id`), not a text column.
+- **`occurred_at` is `TIMESTAMPTZ NULL`**; the extractor may only emit
+  an exact `YYYY-MM-DD`, and code accepts it only when the batch corpus
+  actually contains a date-like span (`_DATE_LIKE_RE`) — a cheap
+  fabrication guard: a batch with no date information cannot yield a
+  dated event. Otherwise the event stores undated with its verbatim
+  `occurred_phrase` and sorts by `recorded_at` behind dated rows
+  (`occurred_at ASC NULLS LAST`).
+- **Journal targeting**: `dream_run_slots` gains a nullable
+  `chronicle_event_id` column (additive, part of v28) so kind
+  `"event"` rows can be rolled back by exact id (delete — additive-only
+  records make deletion safe).
+- **Extraction transport**: events ride the same batched call and the
+  same returned list, as dicts with `kind: "event"` — the claim loop
+  routes them before slot resolution. Dedup is application-level exact
+  `(actor_norm, occurred_at, description_norm)`.
+- **Config**: `dream.chronicle: bool = False` until the gates pass; the
+  search-response events block needs no knob of its own (an empty table
+  serves nothing).
+- **Prompt lineage**: variant `v7-chronicle-events` builds on the
+  shipped v5 artifact (v6 failed its gate and never shipped); artifact
+  `evals/prompts/ku_op_prompt_v7_events.txt`, pinned to the variant.
+  The LME date anchors need no harness change — the bench already
+  embeds each session's date in the turn text (`[2023/04/10 …] user:`).
+- **The BEAM re-run gate is deferred past the build night** (~6.5 h does
+  not fit alongside op-probe + ladder); it remains preregistered and
+  blocks any claim about event_ordering/summarization until run.
+
 ## Design decisions stated up front
 
 - **Additive, never replacing.** Episodic entries, facts, and events

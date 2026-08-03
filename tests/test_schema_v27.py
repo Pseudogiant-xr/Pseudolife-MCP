@@ -17,7 +17,7 @@ from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
 
 
 def test_meta_version_is_27():
-    assert SCHEMA_META_VERSION == 27
+    assert SCHEMA_META_VERSION == 28
 
 
 def test_dream_runs_table_exists_with_lifecycle_columns(pg_conn):

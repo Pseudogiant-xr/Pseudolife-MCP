@@ -30,6 +30,15 @@ def test_literal_fidelity_prompt_file_matches_probe_construction():
     assert path.read_text(encoding="utf-8") == op_probe.VARIANTS["v6-literal-fidelity"]
 
 
+def test_chronicle_events_prompt_file_matches_probe_construction():
+    """Same pin for the chronicle-events arm's prompt (v7: shipped v5 + the
+    events extraction rule with a single-event worked example — Phase 2 of
+    the 2026-08-03 aggregation-aware-recall design; ships as the live
+    prompt only if its preregistered gates pass)."""
+    path = Path(__file__).resolve().parents[1] / "evals" / "prompts" / "ku_op_prompt_v7_events.txt"
+    assert path.read_text(encoding="utf-8") == op_probe.VARIANTS["v7-chronicle-events"]
+
+
 def test_shipped_prompt_is_the_measured_v5_artifact():
     """The hold-reversal ship (2026-08-01): the live extraction prompt must
     be byte-identical to the artifact the count-exclusion gate measured

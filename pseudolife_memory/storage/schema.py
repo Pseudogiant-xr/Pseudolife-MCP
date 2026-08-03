@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 27
+SCHEMA_META_VERSION = 28
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -576,6 +576,49 @@ def ensure_schema(conn) -> dict:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS dream_run_slots_run_idx "
             "ON dream_run_slots (run_id, seq)")
+        # v28 additive: chronicle events — dated occurrences as first-class
+        # records (design doc
+        # docs/superpowers/specs/2026-08-03-aggregation-aware-recall-design.md,
+        # Phase 2). occurred_at = event time (nullable — never fabricated;
+        # undated rows keep the source's verbatim occurred_phrase and sort
+        # by recorded_at behind dated rows); recorded_at = transaction time
+        # (the mention-time/event-time split). Additive-only: contradiction
+        # handling sets invalidated_at, never deletes. NO foreign keys —
+        # src_entry_id references evictable entries (the memory_traces FK
+        # is the origin of the reflush-stall class). HLC stamp is the v11
+        # column-triplet convention.
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chronicle_events (
+              id BIGSERIAL PRIMARY KEY,
+              occurred_at TIMESTAMPTZ,
+              occurred_phrase TEXT,
+              recorded_at DOUBLE PRECISION NOT NULL,
+              actor TEXT NOT NULL,
+              actor_norm TEXT NOT NULL,
+              description TEXT NOT NULL,
+              description_norm TEXT NOT NULL,
+              episode TEXT,
+              src_entry_id BIGINT,
+              hlc_phys BIGINT,
+              hlc_logical INT,
+              writer_id TEXT,
+              invalidated_at DOUBLE PRECISION
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS chronicle_events_actor_idx "
+            "ON chronicle_events (actor_norm, occurred_at)")
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS chronicle_events_episode_idx "
+            "ON chronicle_events (episode, occurred_at)")
+        # Event journal rows name the chronicle row they created so
+        # rollback can delete it by exact id (kind "event"; deletion is
+        # safe for additive-only records). NULL for scalar/member rows.
+        cur.execute(
+            "ALTER TABLE dream_run_slots ADD COLUMN IF NOT EXISTS "
+            "chronicle_event_id BIGINT")
         # One-time upgrade: drop the old episode FK only when it's actually
         # present. Guarding avoids taking an ACCESS EXCLUSIVE lock on every
         # init (which could block behind any open transaction on entries).

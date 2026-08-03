@@ -126,6 +126,31 @@ _V5_COUNT_BLOCK = (
     'array, and NO "op":"add" claim for Northern Flicker.\n'
 )
 
+# The chronicle-events rule (2026-08-03 aggregation-aware-recall design,
+# Phase 2): dated occurrences become first-class records beside claims.
+# Same rhetorical shape as the count rule — one rule plus one single-event
+# inline example, no second Output block (the v3->v5 lesson). Dates resolve
+# against dates visible in the note text (LongMemEval turns carry a
+# [session date] stamp); exact calendar days only, null over invention.
+_EVENTS_BLOCK = (
+    "ALSO EXTRACT EVENTS: when a note describes something that HAPPENED "
+    "at a stated or inferable time (a trip taken, a purchase, an "
+    "adoption, a start or an end — an occurrence, not a standing fact), "
+    'add it to a separate top-level "events" array beside "claims": '
+    '{"events":[{"description":..,"actor":..,"date":"YYYY-MM-DD",'
+    '"date_phrase":<the note\'s own words about when>,"source":<number '
+    "of the note>}]}. Resolve date from dates written in the note "
+    "(including a leading [date] stamp); exact calendar days only — when "
+    "the note's words cannot pin an exact day, set date to null and keep "
+    "date_phrase verbatim. Never invent a date. For example, the note "
+    "[7] [2023/05/14 (Sun) 10:02] user: we finally adopted the kitten "
+    "yesterday! — yields the single event "
+    '{"description":"adopted a kitten","actor":"user",'
+    '"date":"2023-05-13","date_phrase":"yesterday","source":7} inside '
+    "the one events array. Facts still go in claims; one note can yield "
+    "both.\n"
+)
+
 # The literal-fidelity rule (2026-08-02 design: consolidation must keep
 # exact dates/numbers/versions/identifiers verbatim, not round or reword).
 _LITERAL_BLOCK = (
@@ -258,6 +283,15 @@ VARIANTS: dict[str, str] = {
         'Return {"claims":[]} if nothing qualifies.',
         _V0_FAILED_BLOCK + _V5_COUNT_BLOCK + _LITERAL_BLOCK
         + 'Return {"claims":[]} if nothing qualifies.'),
+
+    # Shipped v5 + the chronicle-events rule (Phase 2 of the 2026-08-03
+    # aggregation-aware-recall design). Builds on v5, NOT v6 — the literal
+    # rule failed its KU gate and never shipped. The Return-empty line
+    # gains the empty events array so both keys are always present.
+    "v7-chronicle-events": _BASE.replace(
+        'Return {"claims":[]} if nothing qualifies.',
+        _V0_FAILED_BLOCK + _V5_COUNT_BLOCK + _EVENTS_BLOCK
+        + 'Return {"claims":[],"events":[]} if nothing qualifies.'),
 }
 
 

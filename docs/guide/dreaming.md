@@ -318,6 +318,41 @@ older rows and their journals are pruned on the sweep tick beside
 superseded-row compaction. Design doc:
 `docs/superpowers/specs/2026-08-01-dream-run-journal-design.md`.
 
+## Chronicle events (schema v28) — dated occurrences beside facts
+
+Facts answer "what is current"; they systematically lose *occurrences* —
+things that happened at a time ("adopted the kitten on May 13") rather
+than states that hold. `memory.dream.chronicle: true` makes the dream
+pass extract those too, into `chronicle_events`, from the same batched
+call (an events-capable prompt — the measured v7 artifact — emits an
+`events` array beside `claims`; the shipped prompt does not, so the knob
+alone changes nothing until the prompt ships with it).
+
+- **Event time vs record time.** `occurred_at` is when it happened;
+  `recorded_at` is when the dream stored it. A date is accepted only as
+  an exact `YYYY-MM-DD` *and* only when the batch actually contained
+  date information — otherwise the event stores undated with the
+  source's verbatim `occurred_phrase` ("a while back") and sorts behind
+  dated rows. A date is never fabricated.
+- **Additive-only.** Nothing updates a stored event; contradiction
+  handling sets `invalidated_at` (invalidated rows stop serving but stay
+  auditable). Exact restatements dedup against the live row.
+- **Gated like claims.** The literal gate applies to event descriptions
+  (batch scope, same `enforce`/`log`/`off` modes and counters).
+- **Journaled like claims.** Event writes journal into the run's
+  pre-image journal (kind `event`), so `memory_dream(action="rollback")`
+  deletes exactly the rows that pass created — safe precisely because
+  records are additive-only.
+- **Serving.** A temporally-cued `memory_search` (when/first/before…)
+  adds an `events` block: matching live events, oldest first, each with
+  `date` (or `null` plus the verbatim `phrase`). No knob — an empty
+  table serves nothing.
+
+The knob is **off by default** until its preregistered gates pass
+(`docs/superpowers/specs/2026-08-03-aggregation-aware-recall-design.md`,
+Phase 2 — the Phase 1 retrieval-side knobs measurably failed, which is
+what makes extraction-time event capture the live hypothesis).
+
 ## Deep dream — full-corpus graph consolidation
 
 The incremental dream (tiers above) is window-local: it distils only the
