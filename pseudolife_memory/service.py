@@ -928,6 +928,8 @@ class MemoryService:
         disable_recency_boost: bool = False,
         rerank: bool | None = None,
         bm25: bool | None = None,
+        contiguity_neighbors: int | None = None,
+        timeline: bool | None = None,
     ) -> dict[str, Any]:
         """Retrieve relevant memories ranked by associative similarity.
 
@@ -958,6 +960,22 @@ class MemoryService:
           (function names, version strings, error codes) that dense
           retrieval can underweight. Pure-stdlib, no extra deps.
         * ``False`` — skip BM25 even if config enables it.
+
+        ``contiguity_neighbors`` overrides
+        ``config.memory.search.contiguity_neighbors`` (``None`` follows
+        config): when > 0, each hit also surfaces up to that many
+        stream-adjacent neighbors per side — same episode, else same
+        source — placed around their parent hit in timestamp order and
+        marked ``"via": "contiguity"`` with score 0.0. Passing an
+        explicit ``0`` pins vanilla retrieval regardless of config (the
+        eval harness's control arm relies on this).
+
+        ``timeline`` overrides ``config.memory.search.timeline_channel``
+        (``None`` follows config): when on and the query carries a
+        temporal cue, lexically-relevant entries are injected (marked
+        ``"via": "timeline"``) and the memory portion of the result is
+        ordered by stream position instead of score. Explicit ``False``
+        pins vanilla retrieval (control-arm contract, as above).
         """
         with self._lock:
             self._ensure_init()
@@ -979,19 +997,52 @@ class MemoryService:
                 disable_recency_boost=disable_recency_boost,
                 rerank=rerank,
                 bm25=bm25,
+                timeline=timeline,
             )
             from pseudolife_memory.memory.abstain import low_confidence
+            n_ctg = (self.config.memory.search.contiguity_neighbors
+                     if contiguity_neighbors is None
+                     else int(contiguity_neighbors))
+            vias = result.via or [None] * len(result.entries)
+            ranked: list[tuple[Any, float | None, str | None]] = [
+                (e, s, v) for e, s, v in
+                zip(result.entries, result.scores, vias)
+            ]
+            if n_ctg > 0 and ranked:
+                # Direct hits are all pre-seen so a neighbor can never
+                # duplicate one; neighbors of later hits skip entries an
+                # earlier hit already surfaced.
+                seen = {e.text for e, _, _ in ranked}
+                expanded: list[tuple[Any, float | None, str | None]] = []
+                for e, s, via in ranked:
+                    before, after = self._cms.temporal_neighbors(e, n_ctg)
+                    for nb in before:
+                        if nb.text not in seen:
+                            expanded.append((nb, 0.0, "contiguity"))
+                            seen.add(nb.text)
+                    expanded.append((e, s, via))
+                    for nb in after:
+                        if nb.text not in seen:
+                            expanded.append((nb, 0.0, "contiguity"))
+                            seen.add(nb.text)
+                ranked = expanded
+            entries_out = []
+            for e, s, via in ranked:
+                d = _entry_to_dict(e, s)
+                if via is not None:
+                    d["via"] = via
+                entries_out.append(d)
             return {
                 "query": query,
-                "count": len(result.entries),
+                "count": len(entries_out),
+                # Confidence is judged on the *direct* hits only —
+                # structural neighbors carry score 0.0 by construction
+                # and must not drag the floor check down.
                 "low_confidence": low_confidence(
                     list(result.scores),
                     self.config.memory.search_confidence_floor,
                 ),
-                "entries": [
-                    _entry_to_dict(e, s)
-                    for e, s in zip(result.entries, result.scores)
-                ],
+                "entries": entries_out,
             }
 
     # ------------------------------------------------------------------

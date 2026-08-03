@@ -55,6 +55,29 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# Temporal-cue lexicon for the timeline retrieval channel (agg-recall
+# Phase 1, spec 2026-08-03-aggregation-aware-recall-design.md). Word-
+# boundary matched, casefolded. Deliberate omissions: "may" (modal verb
+# far more often than the month), bare weekday names (high-frequency in
+# scheduling chatter that isn't asking about order). A false positive
+# costs only chronological presentation of the memory portion, so the
+# list leans inclusive elsewhere.
+_TEMPORAL_CUE_RE = re.compile(
+    r"\b(first|last|when|earliest|latest|before|after|since|until|ago|"
+    r"how many times|how long|what order|in order|order in which|"
+    r"sequence|chronolog\w*|timeline|"
+    r"january|february|march|april|june|july|august|september|october|"
+    r"november|december)\b",
+    re.IGNORECASE,
+)
+
+
+def has_temporal_cue(text: str) -> bool:
+    """True when ``text`` carries an ordinal/temporal cue — the trigger
+    for the timeline retrieval channel. Pure and cheap (single regex)."""
+    return bool(_TEMPORAL_CUE_RE.search(text or ""))
+
+
 # Saved-state schema versions. Bump when the on-disk layout changes in a
 # way the loader needs to branch on.
 #
@@ -454,6 +477,51 @@ class ContinuumMemorySystem:
     # Retrieval path
     # ------------------------------------------------------------------
 
+    def temporal_neighbors(
+        self, entry: MemoryEntry, n_each: int
+    ) -> tuple[list[MemoryEntry], list[MemoryEntry]]:
+        """Stream-adjacent neighbors of ``entry``, ordered by timestamp.
+
+        Neighborhood is the entry's episode when it has one, else its
+        source (an episode-less entry never matches episode-carrying
+        neighbors — the fallback is a scope, not a superset). Returns
+        ``(before, after)``: ``before`` ends with the nearest earlier
+        neighbor, ``after`` starts with the nearest later one.
+
+        Per-query linear scan over band entries — the same cost profile
+        the BM25 candidate pool already accepts (see ``retrieve``);
+        deliberately no derived index, so there is no maintenance policy
+        to get wrong.
+        """
+        if n_each <= 0:
+            return [], []
+        hide_superseded = bool(getattr(self.config, "hide_superseded", False))
+        pool: list[MemoryEntry] = []
+        seen: set[str] = {entry.text}
+        for band in self.bands:
+            for e in band.entries:
+                if e.text in seen:
+                    continue
+                if hide_superseded and e.superseded_at is not None:
+                    continue
+                if entry.episode_id:
+                    if e.episode_id != entry.episode_id:
+                        continue
+                elif e.episode_id or e.source != entry.source:
+                    continue
+                pool.append(e)
+                seen.add(e.text)
+        # (timestamp, seq): the wall clock cannot order same-tick stores —
+        # ``MemoryEntry.seq`` exists precisely for this tie (see its
+        # docstring) and survives band promotion.
+        anchor = (entry.timestamp, entry.seq)
+        stream_key = lambda e: (e.timestamp, e.seq)  # noqa: E731
+        before = sorted(
+            (e for e in pool if stream_key(e) <= anchor), key=stream_key)
+        after = sorted(
+            (e for e in pool if stream_key(e) > anchor), key=stream_key)
+        return before[-n_each:], after[:n_each]
+
     def retrieve_with_trace(
         self,
         query_embedding: torch.Tensor,
@@ -536,6 +604,7 @@ class ContinuumMemorySystem:
         disable_recency_boost: bool = False,
         rerank: bool | None = None,
         bm25: bool | None = None,
+        timeline: bool | None = None,
         _trace: dict | None = None,
     ) -> RetrievalResult:
         """Retrieve from CMS bands and merge results.
@@ -815,12 +884,27 @@ class ContinuumMemorySystem:
             if hasattr(self.config, "bm25")
             else False
         )
-        if bm25_enabled and query_text:
-            bm25_cfg = self.config.bm25
-            # Build the candidate pool: every entry across every (filtered)
-            # band. Cheaper than rebuilding the slot graph; rebuild-per-query
-            # is acceptable up to ~tens of thousands of entries.
-            candidates: list[MemoryEntry] = []
+        # ── Pool 1.9: timeline channel resolution (agg-recall Phase 1) ───────
+        # Resolved here (before BM25 runs) because both lexical channels
+        # share one candidate pool. ``getattr`` guards mirror the bm25/
+        # reranker idiom: eval harnesses pass config objects predating the
+        # ``search`` block.
+        search_cfg = getattr(self.config, "search", None)
+        timeline_enabled = (
+            timeline
+            if timeline is not None
+            else bool(getattr(search_cfg, "timeline_channel", False))
+        )
+        timeline_fired = bool(
+            timeline_enabled and query_text and has_temporal_cue(query_text)
+        )
+        via_map: dict[str, str] = {}
+
+        # Shared lexical candidate pool: every entry across every (filtered)
+        # band. Cheaper than rebuilding the slot graph; rebuild-per-query
+        # is acceptable up to ~tens of thousands of entries.
+        candidates: list[MemoryEntry] = []
+        if query_text and (bm25_enabled or timeline_fired):
             for band in self.bands:
                 if band_filter is not None and band.name not in band_filter:
                     continue
@@ -839,6 +923,8 @@ class ContinuumMemorySystem:
                             continue
                     candidates.append(entry)
 
+        if bm25_enabled and query_text:
+            bm25_cfg = self.config.bm25
             if candidates:
                 idx = BM25Index(candidates, k1=bm25_cfg.k1, b=bm25_cfg.b)
                 raw_hits = idx.score(query_text, top_k=bm25_cfg.top_n)
@@ -910,6 +996,42 @@ class ContinuumMemorySystem:
                     "fired": False,
                     "reason": "no_candidates_after_filters",
                 }
+
+        # ── Pool 1.9: timeline channel injection (agg-recall Phase 1) ────────
+        # Lexically-relevant entries for a temporally-cued query enter the
+        # pool exactly like BM25-only injections: ``weight × normalised``
+        # score (low, so they never displace strong dense hits), the
+        # explicit caller floor still applies, the default floor
+        # deliberately does not. The channel's second half — chronological
+        # presentation — happens after the final merge below.
+        if timeline_fired and candidates:
+            TIMELINE_TOP_N = 6
+            TIMELINE_WEIGHT = 0.3
+            t_cfg = self.config.bm25  # scorer params only; independent of enabled
+            t_idx = BM25Index(candidates, k1=t_cfg.k1, b=t_cfg.b)
+            t_raw = t_idx.score(query_text, top_k=TIMELINE_TOP_N)
+            t_norm = normalize_scores(t_raw)
+            injected_n = 0
+            for entry, norm_score in t_norm:
+                if entry.text in seen_texts or norm_score <= 0.0:
+                    continue
+                injected_score = TIMELINE_WEIGHT * norm_score
+                if explicit_floor and injected_score < MIN_SCORE:
+                    continue
+                neural.append((entry, injected_score, 0.0))
+                seen_texts.add(entry.text)
+                via_map[entry.text] = "timeline"
+                if entry.bank:
+                    hit_band_names.add(entry.bank)
+                injected_n += 1
+            if _trace is not None:
+                _trace["timeline"] = {"fired": True, "injected": injected_n}
+        elif _trace is not None and timeline_enabled and query_text:
+            _trace["timeline"] = {
+                "fired": False,
+                "reason": ("no_temporal_cue" if not timeline_fired
+                           else "no_candidates_after_filters"),
+            }
 
         neural.sort(key=lambda x: x[1], reverse=True)
         neural = neural[:k]
@@ -1054,6 +1176,19 @@ class ContinuumMemorySystem:
         if not combined:
             return RetrievalResult(entries=[], scores=[], surprises=[])
 
+        # Timeline presentation: when the channel fired, the MEMORY portion
+        # of the final result is ordered by stream position — (timestamp,
+        # seq), the tie-break the wall clock cannot provide — because
+        # sequence is exactly what score-ordering destroys and what
+        # temporally-cued questions need. Reference documents keep their
+        # trailing position: they carry no meaningful stream position.
+        if timeline_fired:
+            ref_texts = {e.text for e, _, _ in ref_pool}
+            mem_part = [t for t in combined if t[0].text not in ref_texts]
+            ref_part = [t for t in combined if t[0].text in ref_texts]
+            mem_part.sort(key=lambda t: (t[0].timestamp, t[0].seq))
+            combined = mem_part + ref_part
+
         entries, scores, surprises = zip(*combined)
         # Access accrual happens HERE, on the final merged result set —
         # not in band.retrieve, whose top-k is only a candidate pool.
@@ -1063,6 +1198,7 @@ class ContinuumMemorySystem:
             entries=list(entries),
             scores=list(scores),
             surprises=list(surprises),
+            via=([via_map.get(e.text) for e in entries] if via_map else None),
         )
 
     def compute_surprise(self, embedding: torch.Tensor) -> float:

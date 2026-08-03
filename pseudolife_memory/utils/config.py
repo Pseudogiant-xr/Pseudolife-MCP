@@ -543,6 +543,25 @@ class RecallConfig:
 
 
 @dataclass
+class SearchConfig:
+    """Aggregation-aware retrieval knobs (Phase 1, spec
+    2026-08-03-aggregation-aware-recall-design.md). Both default OFF until
+    the preregistered gates pass; the eval harness pins its control arm to
+    vanilla retrieval via per-call overrides regardless of these values."""
+
+    # Temporal-contiguity expansion (EM-LLM, arXiv:2407.09450): each search
+    # hit also surfaces up to N temporal neighbors per side — same episode,
+    # falling back to same source — marked ``via: "contiguity"`` in the
+    # response. 0 = off.
+    contiguity_neighbors: int = 0
+    # Timeline channel: queries with temporal cues ("first", "how many
+    # times", month names…) get lexically-relevant entries injected and the
+    # final result ordered ascending by timestamp — the presentation the
+    # raw-turns control arm gets for free and consolidation loses.
+    timeline_channel: bool = False
+
+
+@dataclass
 class MemoryConfig:
     embedding_dim: int = 384
     # MIRAS (v0.5+) — preset-driven per-band specification. The default
@@ -558,6 +577,8 @@ class MemoryConfig:
     bm25: BM25Config = field(default_factory=BM25Config)
     # Cross-encoder reranker over the merged retrieval pool (Tier B).
     reranker: RerankerConfig = field(default_factory=RerankerConfig)
+    # Aggregation-aware retrieval knobs (contiguity / timeline; Phase 1).
+    search: SearchConfig = field(default_factory=SearchConfig)
     # Dream pass — MIRAS→cortex consolidation (pluggable extractor).
     dream: DreamConfig = field(default_factory=DreamConfig)
     # Manual full-corpus graph consolidation (deep dream, Phase-2 'C').
@@ -715,6 +736,9 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             config.memory.reference = _dict_to_dataclass(ReferenceConfig, mem_raw["reference"])
         if "nli" in mem_raw:
             config.memory.nli = _dict_to_dataclass(NLIConfig, mem_raw["nli"])
+        if "search" in mem_raw:
+            config.memory.search = _dict_to_dataclass(
+                SearchConfig, mem_raw["search"])
         if "bm25" in mem_raw:
             config.memory.bm25 = _dict_to_dataclass(
                 BM25Config, mem_raw["bm25"],
