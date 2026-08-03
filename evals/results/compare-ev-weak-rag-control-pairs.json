@@ -1,0 +1,35 @@
+{
+  "n": 266,
+  "dropped_a": 0,
+  "dropped_b": 234,
+  "draws": 10000,
+  "seed": 0,
+  "a": {
+    "file": "evals/results/longmemeval-ms-tr-oracle-qwen-27b-ev-weak-0804.jsonl",
+    "arms": {
+      "rag": 0.515
+    }
+  },
+  "b": {
+    "file": "evals/results/longmemeval-all-oracle-qwen-27b-aggp1-variants-0803.jsonl",
+    "arms": {
+      "rag": 0.515
+    }
+  },
+  "paired": {
+    "a_vs_b": {
+      "rag_vs_rag": {
+        "delta": 0.0,
+        "p": 1.0,
+        "wins": 0,
+        "losses": 0,
+        "win_qids": [],
+        "loss_qids": []
+      }
+    }
+  },
+  "types": [
+    "multi-session",
+    "temporal-reasoning"
+  ]
+}
