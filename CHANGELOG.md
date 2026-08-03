@@ -6,6 +6,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-04 — chronicle events: dated occurrences as first-class records (schema v28))
+- **`chronicle_events`** — the dream pass can now extract *occurrences*
+  ("adopted the kitten on May 13") beside current-state facts, the record
+  type Phase 1's controlled negative showed was missing from the bank
+  entirely. Bi-temporal by design: `occurred_at` (event time, nullable —
+  accepted only as an exact `YYYY-MM-DD` and only when the batch corpus
+  actually carries date information, never fabricated) vs `recorded_at`
+  (transaction time); undated events keep the source's verbatim
+  `occurred_phrase` and sort behind dated rows. Additive-only:
+  contradiction handling sets `invalidated_at`, never deletes; exact
+  restatements dedup. Event descriptions pass the same literal gate as
+  claims; every write journals into the v27 dream-run journal (kind
+  `event`), so `memory_dream(action="rollback")` reverts them by exact-id
+  delete. Temporally-cued `memory_search` calls serve matching live
+  events as an `events` block, oldest first. Extraction ships **off**
+  (`memory.dream.chronicle = false`) with the shipped prompt unchanged —
+  the events-capable prompt is a new measured artifact
+  (`evals/prompts/ku_op_prompt_v7_events.txt`, op-probe variant
+  `v7-chronicle-events`) that only ships if the Phase 2 preregistered
+  gates pass (op adoption + count-decoy hold, ladder conformance, LME
+  weak-type gate; BEAM re-run deferred — see the design doc's 2026-08-04
+  amendment).
+
 ### Measured (2026-08-04 — aggregation-aware recall Phase 1 fails its gates; defaults unchanged)
 - **All four Phase 1 retrieval knobs fail their preregistered gates** on the
   500-question within-run variants run (tag `aggp1-variants-0803`; verdict
