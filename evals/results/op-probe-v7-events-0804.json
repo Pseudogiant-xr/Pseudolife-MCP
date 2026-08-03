@@ -1,0 +1,442 @@
+{
+  "tag": "v7-events-0804",
+  "battery_notes": 13,
+  "variants": {
+    "v5-count-exclusion-claim-example": {
+      "adoption": 1.0,
+      "decoy_ok": 1.0,
+      "adopt_frac": "7/7",
+      "decoy_frac": "7/7",
+      "per_note": [
+        {
+          "note": 0,
+          "claims": [
+            {
+              "entity": "user",
+              "attribute": "Korean restaurants tried",
+              "value": "Seoul Garden",
+              "confidence": 0.9,
+              "origin": "agent",
+              "op": "add",
+              "source": 0
+            }
+          ]
+        },
+        {
+          "note": 1,
+          "claims": [
+            {
+              "entity": "user",
+              "attribute": "bikes owned",
+              "value": "gravel bike",
+              "confidence": 0.9,
+              "origin": "agent",
+              "op": "add",
+              "source": 0
+            }
+          ]
+        },
+        {
+          "note": 2,
+          "claims": [
+            {
+              "entity": "user",
+              "attribute": "weekend tasks",
+              "value": "fix the fence",
+              "confidence": 0.9,
+              "origin": "agent",
+              "op": "add",
+              "source": 0
+            },
+            {
+              "entity": "user",
+              "attribute": "weekend tasks",
+              "value": "clean gutters",
+              "confidence": 0.9,
+              "origin": "agent",
+              "op": "add",
+              "source": 0
+            }
+          ]
+        },
+        {
+          "note": 3,
+          "claims": [
+            {
+              "entity": "user",
+              "attribute": "books read this year",
+              "value": "The Nightingale",
+              "confidence": 0.9,
+              "origin": "agent",
+              "op": "add"
+            }
+          ]
+        },
+        {
+          "note": 4,
+          "claims": [
+            {
+              "entity": "user",
+              "attribute": "bikes owned",
+              "value": "road bike",
+              "confidence": 0.9,
+              "origin": "agent",
+              "op": "remove"
+            }
+          ]
+        },
+        {
+          "note": 5,
+          "claims": [
+            {
+              "entity": "user",
+              "attribute": "pending tasks",
+              "value": "clean gutters",
+              "confidence": 0.9,
+              "origin": "agent",
+              "op": "remove"
+            }
+          ]
+        },
+        {
+          "note": 6,
+          "claims": [
+            {
+              "entity": "user",
+              "attribute": "current employer",
+              "value": "Meridian Labs",
+              "confidence": 0.95,
+              "origin": "agent",
+              "source": 0
+            }
+          ]
+        },
+        {
+          "note": 7,
+          "claims": [
+            {
+              "entity": "user",
+              "attribute": "residence",
+              "value": "Portland",
+              "confidence": 0.9,
+              "origin": "agent"
+            }
+          ]
+        },
+        {
+          "note": 8,
+          "claims": [
+            {
+              "entity": "deploy target",
+              "attribute": "environment",
+              "value": "prod-eu",
+              "confidence": 0.9,
+              "origin": "agent",
+              "source": 0
+            }
+          ]
+        },
+        {
+          "note": 9,
+          "claims": [
+            {
+              "entity": "user",
+              "attribute": "bird species seen at local park",
+              "value": "32",
+              "confidence": 0.9,
+              "origin": "agent"
+            }
+          ]
+        },
+        {
+          "note": 10,
+          "claims": [
+            {
+              "entity": "user",
+              "attribute": "Instagram followers",
+              "value": "1300",
+              "confidence": 0.9,
+              "origin": "agent",
+              "source": 0
+            }
+          ]
+        },
+        {
+          "note": 11,
+          "claims": [
+            {
+              "entity": "user",
+              "attribute": "Crash Course videos watched",
+              "value": "15",
+              "confidence": 0.9,
+              "origin": "agent",
+              "source": 0
+            }
+          ]
+        },
+        {
+          "note": 12,
+          "claims": [
+            {
+              "entity": "user",
+              "attribute": "to-watch list count",
+              "value": "25",
+              "confidence": 0.9,
+              "origin": "agent",
+              "source": 0
+            }
+          ]
+        }
+      ]
+    },
+    "v7-chronicle-events": {
+      "adoption": 1.0,
+      "decoy_ok": 1.0,
+      "adopt_frac": "7/7",
+      "decoy_frac": "7/7",
+      "per_note": [
+        {
+          "note": 0,
+          "claims": [
+            {
+              "entity": "user",
+              "attribute": "Korean restaurants tried",
+              "value": "Seoul Garden",
+              "confidence": 0.9,
+              "origin": "agent",
+              "op": "add",
+              "source": 0
+            }
+          ]
+        },
+        {
+          "note": 1,
+          "claims": [
+            {
+              "entity": "user",
+              "attribute": "bikes owned",
+              "value": "road",
+              "confidence": 0.9,
+              "origin": "agent",
+              "source": 0
+            },
+            {
+              "entity": "user",
+              "attribute": "bikes owned",
+              "value": "commuter",
+              "confidence": 0.9,
+              "origin": "agent",
+              "source": 0
+            },
+            {
+              "entity": "user",
+              "attribute": "bikes owned",
+              "value": "gravel",
+              "confidence": 0.9,
+              "origin": "agent",
+              "op": "add",
+              "source": 0
+            },
+            {
+              "kind": "event",
+              "description": "picked up a gravel bike",
+              "actor": "user",
+              "date": null,
+              "date_phrase": "this weekend",
+              "source": 0
+            }
+          ]
+        },
+        {
+          "note": 2,
+          "claims": [
+            {
+              "entity": "user",
+              "attribute": "weekend tasks",
+              "value": "fix the fence",
+              "confidence": 0.9,
+              "origin": "agent",
+              "op": "add"
+            },
+            {
+              "entity": "user",
+              "attribute": "weekend tasks",
+              "value": "clean gutters",
+              "confidence": 0.9,
+              "origin": "agent",
+              "op": "add"
+            }
+          ]
+        },
+        {
+          "note": 3,
+          "claims": [
+            {
+              "entity": "user",
+              "attribute": "books read this year",
+              "value": "The Nightingale",
+              "confidence": 0.9,
+              "origin": "agent",
+              "op": "add"
+            }
+          ]
+        },
+        {
+          "note": 4,
+          "claims": [
+            {
+              "entity": "user",
+              "attribute": "bikes owned",
+              "value": "road bike",
+              "confidence": 0.9,
+              "origin": "agent",
+              "op": "remove"
+            },
+            {
+              "kind": "event",
+              "description": "sold the road bike",
+              "actor": "user",
+              "date": null,
+              "date_phrase": "today"
+            }
+          ]
+        },
+        {
+          "note": 5,
+          "claims": [
+            {
+              "entity": "user",
+              "attribute": "pending tasks",
+              "value": "clean gutters",
+              "confidence": 0.9,
+              "origin": "agent",
+              "op": "remove",
+              "source": 0
+            },
+            {
+              "kind": "event",
+              "description": "cleaned gutters",
+              "actor": "user",
+              "date": null,
+              "date_phrase": "the weekend",
+              "source": 0
+            }
+          ]
+        },
+        {
+          "note": 6,
+          "claims": [
+            {
+              "entity": "user",
+              "attribute": "current employer",
+              "value": "Meridian Labs",
+              "confidence": 0.9,
+              "origin": "agent",
+              "source": 0
+            },
+            {
+              "kind": "event",
+              "description": "switched jobs to Meridian Labs",
+              "actor": "user",
+              "date": null,
+              "date_phrase": "last month",
+              "source": 0
+            }
+          ]
+        },
+        {
+          "note": 7,
+          "claims": [
+            {
+              "entity": "user",
+              "attribute": "current city",
+              "value": "Portland",
+              "confidence": 0.9,
+              "origin": "agent"
+            },
+            {
+              "kind": "event",
+              "description": "moved from Austin to Portland",
+              "actor": "user",
+              "date": null,
+              "date_phrase": "in the spring"
+            }
+          ]
+        },
+        {
+          "note": 8,
+          "claims": [
+            {
+              "entity": "deploy target",
+              "attribute": "environment",
+              "value": "prod-eu",
+              "confidence": 0.9,
+              "origin": "agent",
+              "source": 0
+            }
+          ]
+        },
+        {
+          "note": 9,
+          "claims": [
+            {
+              "entity": "user",
+              "attribute": "bird species seen at local park",
+              "value": "32",
+              "confidence": 0.9,
+              "origin": "agent",
+              "source": 0
+            },
+            {
+              "kind": "event",
+              "description": "spotted a Northern Flicker",
+              "actor": "user",
+              "date": null,
+              "date_phrase": "today",
+              "source": 0
+            }
+          ]
+        },
+        {
+          "note": 10,
+          "claims": [
+            {
+              "entity": "user",
+              "attribute": "Instagram followers",
+              "value": "1300",
+              "confidence": 0.9,
+              "origin": "agent",
+              "source": 0
+            }
+          ]
+        },
+        {
+          "note": 11,
+          "claims": [
+            {
+              "entity": "user",
+              "attribute": "Crash Course videos watched",
+              "value": "15",
+              "confidence": 0.9,
+              "origin": "agent",
+              "source": 0
+            }
+          ]
+        },
+        {
+          "note": 12,
+          "claims": [
+            {
+              "entity": "user",
+              "attribute": "to-watch list count",
+              "value": "25",
+              "confidence": 0.9,
+              "origin": "agent",
+              "source": 0
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
