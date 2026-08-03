@@ -440,42 +440,71 @@ def _compose_fact_line(f: dict, versions: list[dict],
     return line
 
 
-def build_contexts(svc, question: str) -> dict[str, str]:
+def build_contexts(svc, question: str, variants: bool = False) -> dict[str, str]:
     # Control-arm contract (spec 2026-08-03): the rag arm ALWAYS uses
     # vanilla retrieval — Phase-1 knobs pinned off per-call — so a rag
     # delta between runs signals harness/era drift, never a knob under
     # test. The hybrid/memory arm follows the CLI/config knobs. With
     # knobs at their defaults the two calls return identical entries and
     # every pre-Phase-1 artifact stays byte-identical.
+    #
+    # ``variants=True`` (spec Amendment 2026-08-03): five hybrid variants
+    # built from the SAME live service — vanilla (shares the pinned
+    # control call: byte-identical baseline by construction), +contiguity,
+    # +timeline, +enumerated facts, and all three combined — so knob
+    # deltas pair within-question over an identical bank.
     raw = svc.search(question, top_k=RAG_TOP_K,
                      contiguity_neighbors=0, timeline=False).get("entries", [])
     raw_texts = [e.get("text", "") for e in raw]
-    mem = svc.search(question, top_k=RAG_TOP_K,
-                     contiguity_neighbors=HYBRID_CONTIG,
-                     timeline=HYBRID_TIMELINE).get("entries", [])
-    mem_texts = [e.get("text", "") for e in mem]
+    if variants:
+        mem_texts = raw_texts
+    else:
+        mem = svc.search(question, top_k=RAG_TOP_K,
+                         contiguity_neighbors=HYBRID_CONTIG,
+                         timeline=HYBRID_TIMELINE).get("entries", [])
+        mem_texts = [e.get("text", "") for e in mem]
     cortex = svc.cortex_search(question, top_k=CORTEX_TOP_K,
                                min_score=CORTEX_MIN_SCORE).get("entries", [])
     # Facts carry their supersession chain: knowledge-update asks about BOTH
     # the current value and the original one ("where did I initially ...") —
     # the version timeline (HLC supersession) is the memory system's actual
     # capability here, so the context must surface it.
-    fact_lines = []
+    fact_lines, fact_versions = [], []
     for f in cortex:
         try:
             versions = svc.history(f.get("entity", ""),
                                    f.get("attribute", "")).get("versions", [])
         except Exception:  # noqa: BLE001 — history is garnish, never fatal
             versions = []
+        fact_versions.append((f, versions))
         fact_lines.append(_compose_fact_line(
             f, versions, enumerated=(FACT_RENDER == "enum")))
-    return {
+
+    def _hyb(facts: list[str], mems: list[str]) -> str:
+        return ("Known facts:\n" + "\n".join(facts) +
+                "\n\nRelevant memories:\n" +
+                "\n\n".join(mems[:HYBRID_TOP_K]))
+
+    ctx = {
         "rag": "\n\n".join(raw_texts),
         "cortex": "\n".join(fact_lines),
-        "hybrid": ("Known facts:\n" + "\n".join(fact_lines) +
-                   "\n\nRelevant memories:\n" +
-                   "\n\n".join(mem_texts[:HYBRID_TOP_K])),
+        "hybrid": _hyb(fact_lines, mem_texts),
     }
+    if variants:
+        def _texts(**kw) -> list[str]:
+            got = svc.search(question, top_k=RAG_TOP_K, **kw)
+            return [e.get("text", "") for e in got.get("entries", [])]
+
+        ctg = _texts(contiguity_neighbors=1, timeline=False)
+        tl = _texts(contiguity_neighbors=0, timeline=True)
+        both = _texts(contiguity_neighbors=1, timeline=True)
+        enum_lines = [_compose_fact_line(f, v, enumerated=True)
+                      for f, v in fact_versions]
+        ctx["hybrid_ctg"] = _hyb(fact_lines, ctg)
+        ctx["hybrid_tl"] = _hyb(fact_lines, tl)
+        ctx["hybrid_enum"] = _hyb(enum_lines, mem_texts)
+        ctx["hybrid_all"] = _hyb(enum_lines, both)
+    return ctx
 
 
 def answer_and_judge(row: dict) -> dict:
@@ -485,7 +514,11 @@ def answer_and_judge(row: dict) -> dict:
     judge_system = (_JUDGE_SYSTEM
                     if row.get("question_type", "knowledge-update")
                     == "knowledge-update" else _JUDGE_SYSTEM_GENERIC)
-    for arm in ARMS:
+    # Every persisted context arm gets answered and judged — pre-variants
+    # rows carry exactly the three ARMS keys in that order, so their
+    # call sequence (and artifacts) is unchanged; variant rows add their
+    # hybrid_* arms.
+    for arm in row["contexts"]:
         ctx = row["contexts"].get(arm, "")
         prompt = (f"Question date: {row['question_date']}\n"
                   f"Question: {row['question']}\n\nMemory context:\n{ctx or '(empty)'}")
@@ -517,7 +550,8 @@ def run_extract(dataset: str, limit: int | None, extractor_name: str,
                 do_answer: bool, tag: str = "", window: int = 0,
                 system_prompt_file: str | None = None,
                 qids: str | None = None,
-                types: tuple[str, ...] = DEFAULT_TYPES) -> None:
+                types: tuple[str, ...] = DEFAULT_TYPES,
+                variants: bool = False) -> None:
     ex_url = EXTRACTORS[extractor_name]
     if not probe(ex_url):
         sys.exit(f"no extractor server at {ex_url} — start it first")
@@ -550,7 +584,7 @@ def run_extract(dataset: str, limit: int | None, extractor_name: str,
         svc.config.memory.dream.known_facts_window = window
         extractor = _make_extractor(ex_url, system_prompt_file)
         tally = ingest_and_dream(svc, extractor, q, ex_url)
-        contexts = build_contexts(svc, q["question"])
+        contexts = build_contexts(svc, q["question"], variants=variants)
         facts = dump_bank(svc, q, bank_dir(dataset, extractor_name, tag,
                                            slug)
                           / f"{q['question_id']}.json.gz")
@@ -611,7 +645,12 @@ def report(dataset: str, extractor_name: str, tag: str = "",
     print(f"{'arm':<10}{'accuracy':>10}{'ctx tok/q':>12}")
     summary = {"dataset": dataset, "extractor": extractor_name, "n": n,
                "arms": {}}
-    for arm in ARMS + ("cascade",):
+    # Variant arms (hybrid_ctg etc.) are detected from the rows so old
+    # three-arm artifacts report identically.
+    extra_arms = tuple(sorted(
+        {k.removesuffix("_correct") for k in rows[0] if k.endswith("_correct")}
+        - set(ARMS)))
+    for arm in ARMS + extra_arms + ("cascade",):
         if arm == "cascade":
             # Derived commit-gated cascade — cortex answer when that arm
             # commits, rag fallback on abstention. Computed from the judged
@@ -641,13 +680,13 @@ def report(dataset: str, extractor_name: str, tag: str = "",
                 "n": tn,
                 "arms": {arm: round(
                     sum(r[f"{arm}_correct"] for r in trows) / tn, 3)
-                    for arm in ARMS},
+                    for arm in ARMS + extra_arms},
                 "cascade": round(
                     sum(cascade_correct(r) for r in trows) / tn, 3),
             }
             print(f"  {qt:<28} n={tn:<4} " + " ".join(
                 f"{arm}={summary['types'][qt]['arms'][arm]:.3f}"
-                for arm in ARMS))
+                for arm in ARMS + extra_arms))
     # NOT with_suffix: extractor names contain dots (qwen3.5-4b), which
     # pathlib would treat as a suffix and truncate.
     out_path.with_name(
@@ -689,6 +728,10 @@ def main() -> int:
     ap.add_argument("--timeline", action="store_true", default=None,
                     help="Enable the timeline channel for the hybrid/memory "
                          "arm (Phase 1 knob 2); rag control arm stays pinned")
+    ap.add_argument("--variants", action="store_true",
+                    help="Build and judge the five within-run hybrid "
+                         "variants per question (spec Amendment 2026-08-03) "
+                         "— one extraction, knob-only paired deltas")
     ap.add_argument("--types", default="knowledge-update",
                     help="question types: comma list or 'all' (default "
                          "knowledge-update — canonical filenames unchanged; "
@@ -709,7 +752,7 @@ def main() -> int:
                     do_answer=(args.phase == "full"), tag=args.tag,
                     window=args.window,
                     system_prompt_file=args.system_prompt_file,
-                    qids=args.qids, types=types)
+                    qids=args.qids, types=types, variants=args.variants)
     if args.phase != "extract":
         report(args.dataset, args.extractor, args.tag, types)
     return 0
