@@ -349,6 +349,10 @@ def ingest_and_dream(svc, extractor, q: dict, ex_url: str) -> dict:
 FACT_RENDER = "inline"
 HYBRID_CONTIG: int | None = None
 HYBRID_TIMELINE: bool | None = None
+# Phase 2 (chronicle): --chronicle enables event extraction on the bench
+# service (pair with --system-prompt-file ku_op_prompt_v7_events.txt) and
+# adds a hybrid_ev context arm — vanilla hybrid + the served events block.
+CHRONICLE = False
 
 
 def _fmt_epoch_date(v) -> str | None:
@@ -453,8 +457,9 @@ def build_contexts(svc, question: str, variants: bool = False) -> dict[str, str]
     # control call: byte-identical baseline by construction), +contiguity,
     # +timeline, +enumerated facts, and all three combined — so knob
     # deltas pair within-question over an identical bank.
-    raw = svc.search(question, top_k=RAG_TOP_K,
-                     contiguity_neighbors=0, timeline=False).get("entries", [])
+    pinned = svc.search(question, top_k=RAG_TOP_K,
+                        contiguity_neighbors=0, timeline=False)
+    raw = pinned.get("entries", [])
     raw_texts = [e.get("text", "") for e in raw]
     if variants:
         mem_texts = raw_texts
@@ -504,6 +509,22 @@ def build_contexts(svc, question: str, variants: bool = False) -> dict[str, str]
         ctx["hybrid_tl"] = _hyb(fact_lines, tl)
         ctx["hybrid_enum"] = _hyb(enum_lines, mem_texts)
         ctx["hybrid_all"] = _hyb(enum_lines, both)
+    if CHRONICLE:
+        # hybrid + the events block the PINNED call already served (cue-
+        # gated service-side). Same call as the rag control — no extra
+        # search, so the hybrid/hybrid_ev delta is the block and nothing
+        # else; cue-less or event-less rows pair to an honest zero.
+        events = pinned.get("events") or []
+        block = ""
+        if events:
+            lines = [
+                (f"- {e['date']}: {e['description']}" if e.get("date")
+                 else f"- (undated: {e.get('phrase') or '?'}): "
+                      f"{e['description']}")
+                for e in events]
+            block = ("\n\nEvents (dated, oldest first):\n"
+                     + "\n".join(lines))
+        ctx["hybrid_ev"] = ctx["hybrid"] + block
     return ctx
 
 
@@ -582,6 +603,7 @@ def run_extract(dataset: str, limit: int | None, extractor_name: str,
         svc = build_service(tmp)                      # fresh, truncated bench DB
         svc.config.memory.dream.extract_relations = False   # facts only
         svc.config.memory.dream.known_facts_window = window
+        svc.config.memory.dream.chronicle = CHRONICLE
         extractor = _make_extractor(ex_url, system_prompt_file)
         tally = ingest_and_dream(svc, extractor, q, ex_url)
         contexts = build_contexts(svc, q["question"], variants=variants)
@@ -736,11 +758,17 @@ def main() -> int:
                     help="question types: comma list or 'all' (default "
                          "knowledge-update — canonical filenames unchanged; "
                          "other selections get a type-slug artifact prefix)")
+    ap.add_argument("--chronicle", action="store_true",
+                    help="Phase 2: enable chronicle event extraction on the "
+                         "bench service (pair with --system-prompt-file "
+                         "ku_op_prompt_v7_events.txt) and add the hybrid_ev "
+                         "context arm (hybrid + served events block)")
     args = ap.parse_args()
-    global FACT_RENDER, HYBRID_CONTIG, HYBRID_TIMELINE
+    global FACT_RENDER, HYBRID_CONTIG, HYBRID_TIMELINE, CHRONICLE
     FACT_RENDER = args.fact_render
     HYBRID_CONTIG = args.contiguity
     HYBRID_TIMELINE = args.timeline
+    CHRONICLE = args.chronicle
     types = parse_types(args.types)
     if args.report:
         report(args.dataset, args.extractor, args.tag, types)
