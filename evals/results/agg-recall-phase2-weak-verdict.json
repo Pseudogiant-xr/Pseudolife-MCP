@@ -1,5 +1,13 @@
 {
-  "verdict": "Phase 2 v1 (chronicle events, as prompted by v7 and served as a context block) FAILS its weak-type gate: hybrid_ev is statistically indistinguishable from vanilla hybrid on the exact questions events were built to fix (-0.007, p 0.852, 13W/15L), and the v7 prompt itself significantly regresses claim extraction (-0.053, p 0.011, 7W/21L vs the v5-extracted baseline). Chronicle stays default-off; the v7 prompt does not ship. The infrastructure (schema v28, dedup, journal, rollback, cue-gated serving) is validated and remains in-tree, default-off.",
+  "CORRECTION_2026_08_04": {
+    "status": "the serving-side conclusion below (hybrid_ev delta -0.007) is INVALIDATED by a harness bug found the same day; the extraction-side finding (v7 prompt costs -0.053 on claims) is unaffected and stands",
+    "bug": "ladder_sweep.reset_bench()'s _ALL_TABLES truncate list — the BENCH reset path, distinct from the tests' pg_fixtures list — did not include chronicle_events (FK-free, so no CASCADE reaches it). Events therefore accumulated across all 266 questions in the one bench DB, and chronicle_search (oldest-first, lexical OR) served every question a pool contaminated by all prior questions' events. Late-run blocks demonstrably serve other questions' occurrences.",
+    "what_survives": "the run's rag/cortex/hybrid arms (serving untouched by the bug), the rag cross-run control (exactly 0), and the v7-extraction-effect pair (-0.053, p 0.011) — none of these read chronicle_events",
+    "what_does_not": "every hybrid_ev number: it measured a contaminated events block, so the clean question 'does a correctly-scoped events block help weak types?' is OPEN, not answered-negative",
+    "fix": "chronicle_events (and dream_runs, hygiene) added to ladder_sweep._ALL_TABLES with a regression-lock test (test_lme_chronicle.py::test_bench_reset_truncates_served_tables); a clean re-run of this gate requires ~3.5 GPU-hours and is proposed, not assumed",
+    "lesson": "the project rule 'enumerate every mutation path first' was violated: the tests' truncate list was updated, the bench's was not. Any future FK-free SERVED table lands in both lists on creation."
+  },
+  "verdict": "SUPERSEDED — see CORRECTION_2026_08_04. Original text: Phase 2 v1 (chronicle events, as prompted by v7 and served as a context block) FAILS its weak-type gate: hybrid_ev is statistically indistinguishable from vanilla hybrid on the exact questions events were built to fix (-0.007, p 0.852, 13W/15L), and the v7 prompt itself significantly regresses claim extraction (-0.053, p 0.011, 7W/21L vs the v5-extracted baseline). Chronicle stays default-off; the v7 prompt does not ship. The infrastructure (schema v28, dedup, journal, rollback, cue-gated serving) is validated and remains in-tree, default-off.",
   "date": "2026-08-04",
   "preregistration": "docs/superpowers/specs/2026-08-03-aggregation-aware-recall-design.md (Phase 2 gates + 2026-08-04 amendment)",
   "run": {
