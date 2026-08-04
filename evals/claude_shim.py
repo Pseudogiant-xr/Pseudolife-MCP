@@ -181,7 +181,8 @@ def make_handler(cli: ClaudeCli):
                     {"id": m, "object": "model"}
                     for m in dict.fromkeys([
                         cli.model, "claude-opus-5", "claude-sonnet-5",
-                        "claude-haiku-4-5", "extractor", "bench"])]})
+                        "claude-haiku-4-5", "claude-fable-5",
+                        "extractor", "bench"])]})
             else:
                 self._json(404, {"error": "not found"})
 

@@ -379,6 +379,7 @@ input:focus, select:focus, textarea:focus { outline:none; border-color:color-mix
   box-shadow:var(--shadow-pop); font-size:.86rem; max-width:360px; animation:slidein .2s var(--ease); }
 .toast.ok { border-left:3px solid var(--c-ok); }
 .toast.bad { border-left:3px solid var(--c-danger); }
+.toast.warn { border-left:3px solid var(--c-warn); }
 .toast.info { border-left:3px solid var(--accent); }
 
 /* ── Reveal animation ───────────────────────────────────────────────────── */
@@ -549,6 +550,20 @@ input:focus, select:focus, textarea:focus { outline:none; border-color:color-mix
 .np-fact .a { font-family:var(--font-mono); font-size:.74rem; color:var(--ink-3); }
 
 /* ── Config console (knobs & dials) ─────────────────────────────────────── */
+/* Dreamer hero card (console) — effective extractor + one-click model picker */
+.dreamer { margin-bottom:18px; }
+.dreamer .dreamer-chips { display:flex; gap:8px; flex-wrap:wrap; }
+.dreamer .dreamer-pick { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-top:14px; }
+.dreamer .dreamer-pick > .lbl { font-weight:500; font-size:.92rem; }
+.dreamer .seg-row { display:inline-flex; border:1px solid var(--line); border-radius:var(--radius-xs); overflow:hidden; }
+.dreamer .seg { padding:7px 14px; font-size:.85rem; background:var(--bg-2); color:var(--ink-2); border:none; border-right:1px solid var(--line); cursor:pointer; }
+.dreamer .seg:last-child { border-right:none; }
+.dreamer .seg:hover { background:var(--bg-3); }
+.dreamer .seg.active { background:color-mix(in srgb, var(--accent) 22%, var(--bg-2)); color:var(--ink); font-weight:600; }
+.dreamer .with-custom { display:inline-flex; gap:6px; }
+.dreamer .with-custom input { width:150px; font-family:var(--font-mono); font-size:.8rem; }
+.dreamer .help { font-size:.78rem; color:var(--ink-3); line-height:1.45; }
+
 .knob-groups { display:grid; grid-template-columns:repeat(auto-fit, minmax(380px,1fr)); gap:16px; align-items:start; }
 .knob { display:grid; grid-template-columns:1fr auto; gap:16px; padding:15px 0; border-bottom:1px solid var(--line); align-items:start; }
 .knob:last-child { border-bottom:none; }

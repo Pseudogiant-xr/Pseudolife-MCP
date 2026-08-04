@@ -265,6 +265,14 @@ class DreamConfig:
     # env default without silently breaking existing env-driven deploys.
     # api_key stays env-only either way (never persisted to config.yaml).
     extractor_source: str = "env"
+    # Model-only override for the PRIMARY extractor, applied by
+    # resolve_endpoints AFTER env-vs-config resolution — so the Console's
+    # dreamer picker can switch the served model (e.g. between claude-*
+    # tiers on the CLI shim, which honours per-request model names) without
+    # flipping extractor_source to "config" and re-owning the env-managed
+    # endpoint/fallback wiring. None (default) = inert; the fallback model
+    # is never overridden (the sidecar serves one fixed model).
+    extractor_model_override: str | None = None
     # Output budget for the extractor call. Sized generously so a dense dream
     # batch can emit all its claim JSON without truncation (a truncated response
     # parses to fewer/zero claims). 2048 ≈ 40-80 claims. Override per-deploy with

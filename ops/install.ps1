@@ -21,6 +21,9 @@
 param(
     [ValidateSet("", "sidecar", "sonnet-fallback", "sonnet-only")]
     [string]$Extractor = "",
+    [ValidateSet("", "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5",
+                 "claude-fable-5")]
+    [string]$Model = "",
     [ValidateSet("claude", "codex", "both")]
     [string]$Client = "claude",
     [ValidateSet("", "append", "skip")]
@@ -67,6 +70,34 @@ if (-not $Extractor) {
     }
 }
 Write-Host "==> Extractor mode: $Extractor"
+
+# -- 2b. dreamer model choice (Claude-shim modes only) ---------------------------
+# Opus is the recommended default per the 2026-08-02 same-harness comparison
+# (evals/results/dreamer-choice-verdict.json). The shim honours per-request
+# claude-* names, so this is only the launch default — switchable later from
+# the Console's Extractor panel without a reinstall.
+if ($Extractor -ne "sidecar" -and -not $Model) {
+    if ($interactive) {
+        Write-Host ""
+        Write-Host "Which Claude model should extract memories (the 'dreamer')?"
+        Write-Host "  1) claude-opus-5    - recommended: best measured extraction quality"
+        Write-Host "  2) claude-sonnet-5  - balanced"
+        Write-Host "  3) claude-haiku-4-5 - fastest / lightest on plan usage"
+        Write-Host "  4) claude-fable-5   - most capable tier"
+        while (-not $Model) {
+            switch (Read-Host "Choose 1/2/3/4 (Enter = 1)") {
+                { $_ -in "", "1" } { $Model = "claude-opus-5" }
+                "2" { $Model = "claude-sonnet-5" }
+                "3" { $Model = "claude-haiku-4-5" }
+                "4" { $Model = "claude-fable-5" }
+                default { Write-Host "  please answer 1, 2, 3 or 4" }
+            }
+        }
+    } else {
+        $Model = "claude-opus-5"
+    }
+    Write-Host "==> Dreamer model: $Model"
+}
 
 # -- 3. volumes (respect names overridden in an existing ops/.env) --------------
 function Get-EnvValue($name) {
@@ -166,11 +197,11 @@ if ($LASTEXITCODE -ne 0) { throw "compose up failed" }
 if ($Extractor -ne "sidecar") {
     Write-Host "==> Registering the Claude shim autostart (Task Scheduler; needs an ELEVATED pwsh)..."
     try {
-        & (Join-Path $PSScriptRoot "install-shim-autostart.ps1") -Port $ShimPort
+        & (Join-Path $PSScriptRoot "install-shim-autostart.ps1") -Port $ShimPort -Model $Model
     } catch {
         Write-Warning "Shim autostart registration failed (usually elevation): $_"
-        Write-Host "  Re-run later from an admin pwsh: ops\install-shim-autostart.ps1 -Port $ShimPort"
-        Write-Host "  Or start it manually: python evals\claude_shim.py --port $ShimPort --system-prompt-file evals\prompts\sonnet_extractor_v2.md"
+        Write-Host "  Re-run later from an admin pwsh: ops\install-shim-autostart.ps1 -Port $ShimPort -Model $Model"
+        Write-Host "  Or start it manually: python evals\claude_shim.py --port $ShimPort --model $Model --system-prompt-file evals\prompts\sonnet_extractor_v2.md"
     }
 }
 

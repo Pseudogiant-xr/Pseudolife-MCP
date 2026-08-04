@@ -21,6 +21,7 @@
 set -euo pipefail
 
 EXTRACTOR=""
+MODEL=""
 CLIENT=claude
 CLAUDE_MD=""
 INSTRUCTIONS=""
@@ -35,6 +36,7 @@ usage() {
 while [ $# -gt 0 ]; do
     case "$1" in
         --extractor) EXTRACTOR="$2"; shift 2 ;;
+        --model) MODEL="$2"; shift 2 ;;
         --client) CLIENT="$2"; shift 2 ;;
         --claude-md) CLAUDE_MD="$2"; shift 2 ;;
         --instructions) INSTRUCTIONS="$2"; shift 2 ;;
@@ -46,6 +48,9 @@ while [ $# -gt 0 ]; do
 done
 case "$EXTRACTOR" in ""|sidecar|sonnet-fallback|sonnet-only) ;; *)
     echo "invalid --extractor '$EXTRACTOR' (sidecar|sonnet-fallback|sonnet-only)" >&2; exit 2 ;;
+esac
+case "$MODEL" in ""|claude-opus-5|claude-sonnet-5|claude-haiku-4-5|claude-fable-5) ;; *)
+    echo "invalid --model '$MODEL' (claude-opus-5|claude-sonnet-5|claude-haiku-4-5|claude-fable-5)" >&2; exit 2 ;;
 esac
 case "$CLIENT" in claude|codex|both) ;; *)
     echo "invalid --client '$CLIENT' (claude|codex|both)" >&2; exit 2 ;;
@@ -96,6 +101,36 @@ if [ -z "$EXTRACTOR" ]; then
     done
 fi
 echo "==> Extractor mode: $EXTRACTOR"
+
+# ── 2b. dreamer model choice (Claude-shim modes only) ──────────────────────
+# Opus is the recommended default per the 2026-08-02 same-harness comparison
+# (evals/results/dreamer-choice-verdict.json). The shim honours per-request
+# claude-* names, so this is only the launch default — switchable later from
+# the Console's Extractor panel without a reinstall.
+if [ "$EXTRACTOR" != "sidecar" ] && [ -z "$MODEL" ]; then
+    if [ -t 0 ]; then
+        echo ""
+        echo "Which Claude model should extract memories (the 'dreamer')?"
+        echo "  1) claude-opus-5    — recommended: best measured extraction quality"
+        echo "  2) claude-sonnet-5  — balanced"
+        echo "  3) claude-haiku-4-5 — fastest / lightest on plan usage"
+        echo "  4) claude-fable-5   — most capable tier"
+        while [ -z "$MODEL" ]; do
+            printf "Choose 1/2/3/4 (Enter = 1): "
+            read -r choice
+            case "$choice" in
+                ""|1) MODEL=claude-opus-5 ;;
+                2) MODEL=claude-sonnet-5 ;;
+                3) MODEL=claude-haiku-4-5 ;;
+                4) MODEL=claude-fable-5 ;;
+                *) echo "  please answer 1, 2, 3 or 4" ;;
+            esac
+        done
+    else
+        MODEL=claude-opus-5
+    fi
+    echo "==> Dreamer model: $MODEL"
+fi
 
 # ── 3. volumes (respect names overridden in an existing ops/.env) ─────────
 get_env() { [ -f "$env_file" ] && sed -n "s/^$1=//p" "$env_file" | tail -1 || true; }
@@ -185,11 +220,11 @@ docker compose "${compose[@]}" up -d --build
 # must not abort the install between `compose up` and the hooks/mcp-add/health
 # steps — that strands a running stack that was never wired into Claude Code.
 if [ "$EXTRACTOR" != "sidecar" ]; then
-    echo "==> Registering the Sonnet shim autostart (systemd --user)..."
-    if ! "$repo/ops/install-shim-autostart.sh" --port "$SHIM_PORT"; then
+    echo "==> Registering the Claude shim autostart (systemd --user)..."
+    if ! "$repo/ops/install-shim-autostart.sh" --port "$SHIM_PORT" --model "$MODEL"; then
         echo "WARNING: shim autostart registration failed (no systemd --user on this host?)" >&2
-        echo "  Re-run later: ops/install-shim-autostart.sh --port $SHIM_PORT" >&2
-        echo "  Or start it manually: python evals/sonnet_shim.py --port $SHIM_PORT --system-prompt-file evals/prompts/sonnet_extractor_v2.md" >&2
+        echo "  Re-run later: ops/install-shim-autostart.sh --port $SHIM_PORT --model $MODEL" >&2
+        echo "  Or start it manually: python evals/claude_shim.py --port $SHIM_PORT --model $MODEL --system-prompt-file evals/prompts/sonnet_extractor_v2.md" >&2
     fi
 fi
 

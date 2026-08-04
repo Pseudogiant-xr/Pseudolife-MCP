@@ -6,6 +6,47 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-04 — Console Dreamer card: one-click dreamer model switching)
+- **`memory.dream.extractor_model_override`** — a model-only override for
+  the primary extractor, applied by `resolve_endpoints` *after*
+  env-vs-config ownership resolution, so the dreamer model can be switched
+  live without flipping `extractor_source` to `config` and re-owning the
+  env-managed endpoint/fallback wiring. Primary only; the fallback
+  sidecar's model is never overridden. `None` (default) is inert —
+  resolution is byte-identical to before. `build_extractor` now delegates
+  its env-vs-config resolution to `resolve_endpoints` (one authority for
+  builder and status display — its private copy of the logic is exactly
+  where the override initially failed to reach, caught by the watched-RED
+  builder tests).
+- **Console "Dreamer" hero card** (top of the Console tab) — shows the
+  *effective* extractor resolution (primary/fallback endpoint → model,
+  probe health, last-dream selection, settings owner; `dream_status` now
+  carries `primary_model` / `fallback_model` / `extractor_source` /
+  `model_override`) and a one-click model picker (Opus 5 / Sonnet 5 /
+  Haiku 4.5 / Fable 5, custom `claude-*` names, or endpoint default)
+  writing the override knob. The Claude CLI shim honours `claude-*` names
+  per request (2026-08-02), so the switch takes effect on the next dream
+  with no restarts; `evals/claude_shim.py` adds `claude-fable-5` to its
+  `/v1/models` listing.
+- **Installer dreamer-model choice** — `ops/install.ps1` / `ops/install.sh`
+  now prompt for the shim's launch model on Claude-shim installs
+  (`-Model` / `--model` non-interactively; default and recommendation stay
+  `claude-opus-5` per `evals/results/dreamer-choice-verdict.json`) and
+  forward it to the autostart scripts. `ops/install-shim-autostart.sh`
+  gains `--model` — and now launches `evals/claude_shim.py`: it still
+  pointed at the removed `sonnet_shim.py` path, so the systemd unit it
+  wrote could never start.
+- **Console knob gap-fill** — config fields added since July now have
+  Console knobs: `dream.literal_gate`/`literal_gate_scope`,
+  `dream.min_relation_confidence`, `dream.relation_quarantine_below`,
+  `dream.retype_quarantined_max`, `dream.runs_keep`,
+  `bm25.cortex_enabled`, `reranker.skip_margin`, and the
+  `lessons.synthesize_in_dream`/`infer_outcomes`/`infer_outcomes_max_signals`
+  trio (all live, defaults unchanged). Gated-off capabilities
+  (`dream.chronicle`, `dream.known_facts_window`, the agg-recall search
+  knobs) deliberately stay out of the registry until their preregistered
+  gates pass, pinned by `tests/test_console_knob_gapfill.py`.
+
 ### Added (2026-08-04 — separate-pass event extraction: chronicle without the claims tax)
 - **The dream's chronicle events now come from their own extractor
   call** (`OpenAICompatExtractor.extract_events`, events-only prompt

@@ -302,6 +302,99 @@ def test_startup_warns_primary_equals_fallback(monkeypatch):
     assert any("same endpoint" in w for w in warnings)
 
 
+# ── model override (console dreamer picker, 2026-08-04) ──────────────────
+
+def test_dreamconfig_model_override_default_none():
+    assert DreamConfig().extractor_model_override is None
+
+
+def test_model_override_wins_over_env(monkeypatch):
+    # The whole point of the override: switch the dreamer model without
+    # flipping extractor_source to "config" (which would orphan the
+    # env-owned endpoint/fallback wiring).
+    from pseudolife_memory.memory.dream import resolve_endpoints
+    monkeypatch.setenv("PSEUDOLIFE_DREAM_BASE_URL", "http://p:1/v1")
+    monkeypatch.setenv("PSEUDOLIFE_DREAM_MODEL", "extractor")
+    monkeypatch.setenv("PSEUDOLIFE_DREAM_FALLBACK_BASE_URL", "http://f:2/v1")
+    monkeypatch.setenv("PSEUDOLIFE_DREAM_FALLBACK_MODEL", "fm")
+    r = resolve_endpoints(DreamConfig(extractor_model_override="claude-fable-5"))
+    assert r["primary_model"] == "claude-fable-5"
+    # Only the primary model is overridden — the fallback sidecar keeps
+    # serving its own model name, and URLs stay env-owned.
+    assert r["fallback_model"] == "fm"
+    assert r["primary_url"] == "http://p:1/v1"
+
+
+def test_model_override_wins_over_config():
+    from pseudolife_memory.memory.dream import resolve_endpoints
+    cfg = _cfg("http://p:1/v1", fb="http://f:2/v1")
+    cfg.extractor_model_override = "claude-sonnet-5"
+    r = resolve_endpoints(cfg)
+    assert r["primary_model"] == "claude-sonnet-5"
+    assert r["fallback_model"] == "m2"
+
+
+def test_model_override_unset_is_inert(monkeypatch):
+    from pseudolife_memory.memory.dream import resolve_endpoints
+    monkeypatch.setenv("PSEUDOLIFE_DREAM_MODEL", "extractor")
+    r = resolve_endpoints(DreamConfig())
+    assert r["primary_model"] == "extractor"
+
+
+def test_build_extractor_applies_model_override(monkeypatch):
+    # The builder that constructs the ACTUAL dream extractor must resolve
+    # through the same path the status display does — an override that only
+    # showed in dream_status while build_extractor ignored it would be the
+    # console lying about what the next dream runs.
+    from pseudolife_memory.memory.dream import build_extractor
+    monkeypatch.setenv("PSEUDOLIFE_DREAM_BASE_URL", "http://p:1/v1")
+    monkeypatch.setenv("PSEUDOLIFE_DREAM_MODEL", "extractor")
+    ext = build_extractor(DreamConfig(extractor_model_override="claude-fable-5"))
+    assert ext.model == "claude-fable-5"
+
+
+def test_builder_primary_path_applies_model_override(monkeypatch):
+    from pseudolife_memory.memory import dream as d
+    monkeypatch.setattr(d, "probe_endpoint", lambda *a, **k: True)
+    cfg = _cfg("http://p:1/v1", fb="http://f:2/v1")
+    cfg.extractor_model_override = "claude-haiku-4-5"
+    ext, which = d.build_extractor_with_fallback(cfg)
+    assert which == "primary" and ext.model == "claude-haiku-4-5"
+
+
+def test_status_fields_carry_models_source_and_override(monkeypatch):
+    # The console dreamer card needs the EFFECTIVE models, not just URLs.
+    from pseudolife_memory.memory import dream as d
+    monkeypatch.setattr(d, "probe_endpoint", lambda *a, **k: True)
+    cfg = _cfg("http://p:1/v1", fb="http://f:2/v1")
+    cfg.extractor_model_override = "claude-opus-5"
+    fields = d._status_extractor_fields(cfg, None)
+    assert fields["primary_model"] == "claude-opus-5"
+    assert fields["fallback_model"] == "m2"
+    assert fields["extractor_source"] == "config"
+    assert fields["model_override"] == "claude-opus-5"
+
+
+def test_status_fields_no_fallback_hides_fallback_model():
+    from pseudolife_memory.memory.dream import _status_extractor_fields
+    fields = _status_extractor_fields(_cfg("http://p:1/v1"), None)
+    assert fields["primary_model"] == "m"
+    assert fields["fallback_model"] is None
+    assert fields["model_override"] is None
+
+
+def test_config_io_has_model_override_knob():
+    from pseudolife_memory.web.config_io import KNOBS
+    knob = next(e for e in KNOBS
+                if e["path"] == "memory.dream.extractor_model_override")
+    assert knob["type"] == "string"
+    assert knob["restart"] is False
+    # The picker presets — all four current Anthropic tiers.
+    for m in ("claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5",
+              "claude-fable-5"):
+        assert m in knob["suggestions"]
+
+
 # ── console schema entries ────────────────────────────────────────────────
 
 def test_config_io_has_fallback_knobs():
