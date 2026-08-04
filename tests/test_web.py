@@ -240,8 +240,8 @@ def test_routes_config_write_via_dispatch(svc):
 
 def test_dream_status_carries_dreamer_card_fields(svc):
     st = ConsoleRoutes(svc).dispatch("GET", "/api/dream/status", {}, {})
-    for key in ("primary_model", "fallback_model", "extractor_source",
-                "model_override"):
+    for key in ("primary_model", "primary_model_served", "fallback_model",
+                "extractor_source", "model_override"):
         assert key in st, f"dreamer card field missing: {key}"
 
 

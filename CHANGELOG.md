@@ -27,7 +27,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   writing the override knob. The Claude CLI shim honours `claude-*` names
   per request (2026-08-02), so the switch takes effect on the next dream
   with no restarts; `evals/claude_shim.py` adds `claude-fable-5` to its
-  `/v1/models` listing.
+  `/v1/models` listing. Follow-up: a launch-default alias (`extractor` /
+  `bench`) as the effective primary model is resolved to the endpoint's
+  concrete model via its `/v1/models` listing (`primary_model_served` in
+  `dream_status`, 300s TTL cache, failure = display degradation only), so
+  the card reads `→ claude-opus-5` instead of `→ extractor` on stock
+  shim deploys.
 - **Installer dreamer-model choice** — `ops/install.ps1` / `ops/install.sh`
   now prompt for the shim's launch model on Claude-shim installs
   (`-Model` / `--model` non-interactively; default and recommendation stay
