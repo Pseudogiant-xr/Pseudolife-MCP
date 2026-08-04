@@ -1,0 +1,32 @@
+{
+  "verdict": "INERT: with production configuration (shipped v5 prompt, memory.dream.chronicle=false), the schema-v28 code writes exactly what pre-v28 code wrote — zero differences over 14 paired questions (42 contexts byte-identical, all consolidation tallies equal, all 114 dumped bank facts semantically equal per side). The deploy gate for the v28 dream-write-path changes is cleared.",
+  "date": "2026-08-04",
+  "purpose": "deploy-time substitute for the full ladder-conformance rung on an inert-path change (maintainer decision 2026-08-04, recorded in the design doc amendment): the ladder's breadth serves quality measurement; an inertness claim is better served by exact within-question pairing of old vs new code on identical inputs — the reproducible server makes any difference attributable to code alone.",
+  "design": {
+    "questions": "14 (the 12 temporal-reasoning smoke qids + the 2 highest-supersession knowledge-update qids from aggp1-variants-0803, so member ops, supersedes, and long 58-turn batches all fire)",
+    "arms": {
+      "old": "worktree at e1c4954a (master before #93/#94 — pre-v28 code)",
+      "new": "master + PR #95 fix (bench-reset truncation)"
+    },
+    "command_per_arm": "python evals/longmemeval_bench.py --dataset oracle --extractor qwen-27b --types all --qids <14 ids> --phase extract --tag inert-{old|new}-0804",
+    "server": "qwen3.6-27b reproducible q8_0 (evals/qwen_server.ps1 Start-Qwen); extract-only, no judge calls",
+    "comparison": "evals/inert_diff.py (committed producer): contexts byte-equal; tallies equal minus extract_seconds; bank facts equal minus wall-clock fields (asserted_at/age/tx_time/valid_time/hlc/stale/last_confirmed/writer/session/version/id/embedding), history chains ordered"
+  },
+  "result": {
+    "questions_compared": 14,
+    "context_differences": 0,
+    "tally_differences": 0,
+    "bank_fact_differences": 0,
+    "bank_facts_per_side": 114
+  },
+  "artifacts": [
+    "evals/results/longmemeval-all-oracle-qwen-27b-inert-old-0804.jsonl",
+    "evals/results/longmemeval-all-oracle-qwen-27b-inert-new-0804.jsonl"
+  ],
+  "notes": [
+    "bank dumps (evals/results/banks/) are gitignored; the committed jsonl artifacts durably carry the context+tally legs, and the bank leg reproduces by re-running both arms",
+    "two harness hiccups during setup, neither a code finding: the old worktree needed the gitignored evals/data dir junctioned in, and the first comparator draft flagged extract_seconds (wall-clock) before it was normalized out",
+    "GPU cost ~18 minutes total vs ~1h+ for a full ladder rung"
+  ],
+  "decision": "deploy of merged master (v28) to the live daemon is unblocked from the write-path side. The chronicle FEATURE remains default-off and unmeasured-clean (its serving gate was invalidated by the bench-reset contamination, PR #95); enabling it ever remains gated on a clean re-run."
+}

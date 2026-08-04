@@ -221,6 +221,31 @@ Consequences and decisions folded into the Phase 2 build:
   not fit alongside op-probe + ladder); it remains preregistered and
   blocks any claim about event_ordering/summarization until run.
 
+### Amendment (2026-08-04, post-merge) — gate outcomes and substitutions
+
+- **Weak-type gate: measured, then INVALIDATED (serving side).** The
+  ev-weak-0804 run's hybrid_ev numbers were contaminated by a
+  bench-harness bug (`ladder_sweep.reset_bench` never truncated
+  `chronicle_events`, so events accumulated across all 266 questions —
+  fixed with a regression lock, PR #95). The clean serving question is
+  OPEN. What stands from that run: the rag control at exactly zero, and
+  the **v7-prompt extraction effect: −0.053 (p 0.011) on vanilla-hybrid
+  claims** — the events section competes with claims extraction on real
+  batches, which the op-probe (necessary, not sufficient) cannot see.
+  Consequence for any retry: extract events in a SEPARATE pass, never
+  riding the claims call.
+- **Ladder conformance: substituted by a differential inertness diff**
+  (maintainer decision): 14 questions (12 tr + 2 supersession-heavy KU)
+  run extract-only through pre-v28 code (e1c4954a) and merged master,
+  same v5 prompt, chronicle off, reproducible server — **zero
+  differences** (contexts byte-identical, tallies equal, all 114 bank
+  facts equal; `evals/results/inert-diff-v28-verdict.json`, producer
+  `evals/inert_diff.py`). Rationale: the ladder's breadth serves quality
+  measurement; an inertness claim is better served by exact old-vs-new
+  pairing on identical inputs, at ~1/4 the GPU cost. Deploy of the
+  (default-off) v28 write path is unblocked; a full rung remains the
+  escalation if a future diff ever comes back non-empty.
+
 ## Design decisions stated up front
 
 - **Additive, never replacing.** Episodic entries, facts, and events
