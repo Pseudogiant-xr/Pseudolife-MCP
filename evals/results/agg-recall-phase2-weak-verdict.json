@@ -1,0 +1,50 @@
+{
+  "verdict": "Phase 2 v1 (chronicle events, as prompted by v7 and served as a context block) FAILS its weak-type gate: hybrid_ev is statistically indistinguishable from vanilla hybrid on the exact questions events were built to fix (-0.007, p 0.852, 13W/15L), and the v7 prompt itself significantly regresses claim extraction (-0.053, p 0.011, 7W/21L vs the v5-extracted baseline). Chronicle stays default-off; the v7 prompt does not ship. The infrastructure (schema v28, dedup, journal, rollback, cue-gated serving) is validated and remains in-tree, default-off.",
+  "date": "2026-08-04",
+  "preregistration": "docs/superpowers/specs/2026-08-03-aggregation-aware-recall-design.md (Phase 2 gates + 2026-08-04 amendment)",
+  "run": {
+    "command": "python evals/longmemeval_bench.py --dataset oracle --extractor qwen-27b --types multi-session,temporal-reasoning --chronicle --tag ev-weak-0804 --system-prompt-file evals/prompts/ku_op_prompt_v7_events.txt",
+    "questions": 266,
+    "arms_judged": ["rag", "cortex", "hybrid", "hybrid_ev"],
+    "design": "weak set only (the primary gate; the strong non-inferiority set is moot for shipping given the primary FAIL). hybrid_ev = vanilla hybrid + the events block the pinned control search serves on temporal cue — same call as the rag control, so the within-run hybrid/hybrid_ev delta is the served block and nothing else. Extraction ran the v7 events prompt with dream.chronicle on, so the cross-run vanilla-hybrid pair vs aggp1-variants-0803 isolates the v7-prompt extraction effect.",
+    "answer_judge": "qwen3.6-27b on the reproducible q8_0 server (evals/qwen_server.ps1 Start-Qwen)",
+    "artifacts": [
+      "evals/results/longmemeval-ms-tr-oracle-qwen-27b-ev-weak-0804.jsonl",
+      "evals/results/longmemeval-ms-tr-oracle-qwen-27b-ev-weak-0804.summary.json",
+      "evals/results/compare-ev-weak-primary-pairs.json",
+      "evals/results/compare-ev-weak-rag-control-pairs.json",
+      "evals/results/compare-ev-weak-v7-extraction-effect-pairs.json"
+    ]
+  },
+  "validity": {
+    "rag_control": "rag vs aggp1-variants-0803 rag on the 266 shared weak questions: delta 0.000, 0 wins / 0 losses (compare-ev-weak-rag-control-pairs.json) — zero measurement noise; every delta below is real",
+    "smoke": "12-question end-to-end smoke (ev-smoke-0804) validated the plumbing first: events served on 10/12 rows, dates resolved from in-text session stamps, undated rows carried verbatim phrases"
+  },
+  "gates": {
+    "weak_primary": {
+      "definition": "hybrid_ev vs same-run hybrid on multi-session + temporal-reasoning (n=266), paired sign-flip permutation, 10k draws, seed 0; ship requires improvement with p < 0.05",
+      "hybrid": 0.406, "hybrid_ev": 0.399,
+      "delta": -0.0075, "p": 0.8521, "wins": 13, "losses": 15,
+      "gate": "FAIL (no improvement; served events flip verdicts near-randomly)"
+    },
+    "v7_extraction_effect": {
+      "definition": "this run's vanilla hybrid vs aggp1-variants-0803's vanilla hybrid on the same 266 questions — identical serving, only the extraction prompt (v7 vs v5) and the chronicle write-path differ",
+      "v7_hybrid": 0.406, "v5_hybrid": 0.459,
+      "delta": -0.0526, "p": 0.0108, "wins": 7, "losses": 21,
+      "reading": "the events section in the prompt COSTS claim quality on real 58-turn batches — attention/token budget competes with claims extraction. The op-probe (7 short notes) held 7/7 adoption + 7/7 decoy and was structurally too coarse to catch this; a probe pass is necessary but not sufficient for a prompt addition of this size."
+    },
+    "per_type": {
+      "multi-session": {"n": 133, "rag": 0.504, "hybrid": 0.346, "hybrid_ev": 0.346},
+      "temporal-reasoning": {"n": 133, "rag": 0.526, "hybrid": 0.466, "hybrid_ev": 0.451}
+    },
+    "strong_non_inferiority": "not run — moot for shipping with the primary gate failed",
+    "ladder_conformance": "still pending — required before any deploy of the (inert-path) claim-loop changes, independent of this verdict",
+    "beam_rerun": "not run — deferred per the 2026-08-04 amendment; nothing to qualify with the primary gate failed"
+  },
+  "reading": {
+    "events_serving": "events WERE extracted, deduped, and served (the smoke confirmed 10/12 coverage) — and converting them into a context block still moved nothing (13W/15L). The representational-absence hypothesis survives only in weakened form: the answer material may need synthesis (counting, ordering across events, cross-referencing) that a listed block does not provide the answerer, or the extracted events are not the ones the questions need. The 15 loss rows vs 13 win rows are the autopsy corpus for whichever comes next.",
+    "prompt_cost": "the significant -0.053 on claims is the sharper finding: extending the extraction prompt is not free even when every targeted probe holds. Any future events extraction should be a SEPARATE pass (own call, own prompt) rather than riding the claims call — trading one extra LLM call per batch for zero interference.",
+    "cost": "~3.5 GPU-hours + the 12-q smoke. Third controlled negative in the aggregation series; all three shipped nothing to production defaults."
+  },
+  "decision": "memory.dream.chronicle stays default-off (it already is); ku_op_prompt_v7_events.txt does not ship as the live prompt; PR #94's infrastructure (schema v28, storage, journal/rollback, cue-gated serving, --chronicle harness) remains in-tree and default-off — it is the reusable substrate for any next attempt. Next candidates, in evidence order: (1) autopsy the 15 loss / 13 win rows to see what the answerer did with served events; (2) separate-pass event extraction (no claims interference by construction); (3) answer-time synthesis over events (counting/ordering) rather than raw listing."
+}

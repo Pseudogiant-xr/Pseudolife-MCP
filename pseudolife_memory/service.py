@@ -1032,7 +1032,24 @@ class MemoryService:
                 if via is not None:
                     d["via"] = via
                 entries_out.append(d)
-            return {
+            # Chronicle events (schema v28): a temporally-cued query also
+            # serves matching live events, chronologically ascending.
+            # Needs no knob — an empty table (chronicle extraction off,
+            # the default) serves nothing, and non-cued queries skip the
+            # lookup entirely.
+            events_block = None
+            if self._storage is not None:
+                from pseudolife_memory.memory.cms import has_temporal_cue
+                if has_temporal_cue(query):
+                    hits = self._storage.chronicle_search(query, limit=6)
+                    if hits:
+                        events_block = [
+                            {"description": h["description"],
+                             "actor": h["actor"],
+                             "date": h["occurred_date"],
+                             "phrase": h["occurred_phrase"]}
+                            for h in hits]
+            out = {
                 "query": query,
                 "count": len(entries_out),
                 # Confidence is judged on the *direct* hits only —
@@ -1044,6 +1061,9 @@ class MemoryService:
                 ),
                 "entries": entries_out,
             }
+            if events_block:
+                out["events"] = events_block
+            return out
 
     # ------------------------------------------------------------------
     # Tool: trace — search + structured ranking trace
@@ -3113,12 +3133,14 @@ class MemoryService:
             return {"pulled": 0, "claims": 0, "inserted": 0, "confirmed": 0,
                     "contested": 0, "superseded": 0, "relations": 0,
                     "literal_flagged": 0, "literal_dropped": 0,
+                    "events_inserted": 0, "events_duplicate": 0,
                     "cursor": pulled["cursor"], "lessons": lessons,
                     "outcome_inference": outcome_inference,
                     "graph_insight": graph_insight, "retyped": retyped}
         from pseudolife_memory.memory.cortex import (_TIER_RANK, _norm_key,
                                                      _norm_value)
-        from pseudolife_memory.memory.dream import literal_violations
+        from pseudolife_memory.memory.dream import (_DATE_LIKE_RE,
+                                                    literal_violations)
         import time as _time
         traces_cfg = self.config.memory.traces
         dream_cfg = self.config.memory.dream
@@ -3135,6 +3157,11 @@ class MemoryService:
         gate_scope = dream_cfg.literal_gate_scope
         literal_flagged = 0
         literal_dropped = 0
+        # Chronicle events (schema v28): OFF until the Phase 2 gates pass;
+        # requires PG (the table has no file-mode counterpart).
+        chronicle_on = bool(dream_cfg.chronicle) and self._storage is not None
+        events_inserted = 0
+        events_duplicate = 0
 
         def _held(reason: str, exc: Exception) -> dict[str, Any]:
             logger.warning("dream %s (%s); cursor NOT advanced, will retry "
@@ -3144,6 +3171,8 @@ class MemoryService:
                     "cursor": self._cortex.dream_cursor, "extractor_failed": True,
                     "literal_flagged": literal_flagged,
                     "literal_dropped": literal_dropped,
+                    "events_inserted": events_inserted,
+                    "events_duplicate": events_duplicate,
                     "lessons": {"signals": 0, "lessons": 0}}
 
         # ONE batched call for the whole pull: the model must see a fact's
@@ -3158,6 +3187,11 @@ class MemoryService:
         src_text = {e["db_id"]: e["text"] for e in entries
                     if e.get("db_id") is not None}
         batch_text = "\n".join(texts)
+        # Event-date fabrication guard: an extractor can only have resolved
+        # a real calendar date if the batch actually contains date
+        # information — otherwise the date is dropped and the event stores
+        # undated with its verbatim phrase (design amendment 2026-08-04).
+        batch_has_date = bool(_DATE_LIKE_RE.search(batch_text))
         batch_key = tuple(e.get("db_id") if e.get("db_id") is not None
                           else e["text"][:200] for e in entries)
         pairs: list[tuple[dict, Any]] = []      # (claim, source entry db_id)
@@ -3233,7 +3267,11 @@ class MemoryService:
         # retention window on passes that provably wrote nothing).
         run_id = None
         run_seq = 0
-        if pairs and self._storage is not None:
+        # Events with chronicle off are inert — they alone must not mint a
+        # run row (same zero-write-no-row rule as an empty extraction).
+        actionable = any(c.get("kind") != "event" or chronicle_on
+                         for c, _ in pairs)
+        if pairs and actionable and self._storage is not None:
             with self._lock:
                 run_id = self._storage.start_dream_run(
                     _time.time(), self._cortex.dream_cursor, len(entries),
@@ -3255,12 +3293,79 @@ class MemoryService:
                         tallies={**tally,
                                  "literal_flagged": literal_flagged,
                                  "literal_dropped": literal_dropped,
+                                 "events_inserted": events_inserted,
+                                 "events_duplicate": events_duplicate,
                                  "quarantined": quarantined})
             except Exception as exc2:  # noqa: BLE001
                 logger.warning("dream: run-row finish failed (%s)", exc2)
 
         try:
             for c, src_id in pairs:
+                # Chronicle events (schema v28) route before slot
+                # resolution — they carry no entity/attribute. Literal
+                # gate applies to the description exactly as to claim
+                # values; the date carries its own fabrication guard;
+                # exact duplicates (batch retry, restatements) write and
+                # journal nothing.
+                if c.get("kind") == "event":
+                    if not chronicle_on:
+                        continue
+                    desc = str(c.get("description", "")).strip()
+                    if not desc:
+                        continue
+                    if gate_mode != "off" and src_id is not None:
+                        corpus = (batch_text if gate_scope == "batch"
+                                  else src_text.get(src_id, ""))
+                        bad = literal_violations(desc, corpus)
+                        if bad:
+                            literal_flagged += 1
+                            logger.info(
+                                "dream: unsupported literal(s) %s in event "
+                                "%r%s", bad, desc,
+                                " (dropped)" if gate_mode == "enforce"
+                                else "")
+                            if gate_mode == "enforce":
+                                literal_dropped += 1
+                                continue
+                    actor = str(c.get("actor") or "user")
+                    idx = c.get("source")
+                    episode = (entries[idx].get("episode_id")
+                               if isinstance(idx, int)
+                               and 0 <= idx < len(entries) else None)
+                    ev_row = {
+                        "occurred_at": (c.get("date") if batch_has_date
+                                        else None),
+                        "occurred_phrase": c.get("date_phrase"),
+                        "recorded_at": _time.time(),
+                        "actor": actor, "actor_norm": _norm_key(actor),
+                        "description": desc,
+                        "description_norm": _norm_value(desc),
+                        "episode": episode, "src_entry_id": src_id}
+                    with self._lock:
+                        ev_id, ev_action = \
+                            self._storage.add_chronicle_event(ev_row)
+                    if ev_action != "inserted":
+                        events_duplicate += 1
+                        continue
+                    events_inserted += 1
+                    if run_id is not None:
+                        journal_row = {
+                            "seq": run_seq, "entity": actor,
+                            "attribute": "event",
+                            "entity_norm": _norm_key(actor),
+                            "attribute_norm": "event",
+                            "kind": "event", "op": None,
+                            "prev_kind": None, "prev_value": None,
+                            "prev_status": None, "prev_confidence": None,
+                            "prev_support": None, "new_value": desc,
+                            "action": "event_inserted",
+                            "src_entry_id": src_id, "at": _time.time(),
+                            "chronicle_event_id": ev_id}
+                        with self._lock:
+                            self._storage.add_dream_run_slot(
+                                run_id, journal_row)
+                        run_seq += 1
+                    continue
                 ent, attr = self._resolve_dream_slot(c["entity"], c["attribute"])
                 # Claim-level op (Task 7): "add"/"remove" route to the member
                 # model; anything else (absent, or a value the extractor got
@@ -3477,6 +3582,8 @@ class MemoryService:
                 "graph_insight": graph_insight,
                 "literal_flagged": literal_flagged,
                 "literal_dropped": literal_dropped,
+                "events_inserted": events_inserted,
+                "events_duplicate": events_duplicate,
                 "traces": traces_n, "sources_attributed": sources_attributed,
                 "quarantined": quarantined, "retyped": retyped}
 
@@ -3546,6 +3653,17 @@ class MemoryService:
                         outcome = "reverted"
                     else:
                         outcome = "skipped:superseded_by_later"
+                elif row["kind"] == "event":
+                    # Chronicle rows are additive-only, so the reversal of
+                    # an insert is a plain delete of the exact row the
+                    # journal names (schema v28).
+                    ev_id = row.get("chronicle_event_id")
+                    deleted = False
+                    if ev_id is not None:
+                        with self._lock:
+                            deleted = self._storage.delete_chronicle_event(
+                                ev_id)
+                    outcome = "reverted" if deleted else "skipped:already_gone"
                 elif row["kind"] == "scalar":
                     if action == "inserted" and row["prev_status"] is None:
                         with self._lock:

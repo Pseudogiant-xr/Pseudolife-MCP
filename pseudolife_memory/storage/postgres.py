@@ -984,7 +984,8 @@ class PostgresStorage:
                         "entity_norm", "attribute_norm", "kind", "op",
                         "prev_kind", "prev_value", "prev_status",
                         "prev_confidence", "prev_support", "new_value",
-                        "action", "src_entry_id", "at")
+                        "action", "src_entry_id", "at",
+                        "chronicle_event_id")
 
     def start_dream_run(self, started_at: float, cursor_before: float,
                         pulled: int, extractor: str | None = None,
@@ -1018,15 +1019,17 @@ class PostgresStorage:
                 "INSERT INTO dream_run_slots (run_id, seq, entity, "
                 "attribute, entity_norm, attribute_norm, kind, op, "
                 "prev_kind, prev_value, prev_status, prev_confidence, "
-                "prev_support, new_value, action, src_entry_id, at) "
+                "prev_support, new_value, action, src_entry_id, at, "
+                "chronicle_event_id) "
                 "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
-                "%s, %s, %s, %s, %s)",
+                "%s, %s, %s, %s, %s, %s)",
                 (run_id, row["seq"], row["entity"], row["attribute"],
                  row["entity_norm"], row["attribute_norm"], row["kind"],
                  row.get("op"), row.get("prev_kind"), row.get("prev_value"),
                  row.get("prev_status"), row.get("prev_confidence"),
                  row.get("prev_support"), row.get("new_value"),
-                 row["action"], row.get("src_entry_id"), row["at"]))
+                 row["action"], row.get("src_entry_id"), row["at"],
+                 row.get("chronicle_event_id")))
 
     def recent_dream_runs(self, limit: int = 10) -> list[dict[str, Any]]:
         rows = self.conn.execute(
@@ -1074,6 +1077,79 @@ class PostgresStorage:
                 "(SELECT id FROM dream_runs ORDER BY id DESC LIMIT %s)",
                 (max(0, int(keep)),))
         return cur.rowcount
+
+    # ── chronicle events (schema v28) ────────────────────────────────────
+    # Additive-only: writes insert or exact-dedup; contradiction handling
+    # sets invalidated_at, never deletes; the only delete is dream-run
+    # rollback, safe precisely because nothing ever updates these rows.
+
+    def add_chronicle_event(self, row: dict) -> tuple[int, str]:
+        """Insert one event, deduping on exact (actor_norm,
+        description_norm, occurred_at) among live rows — IS NOT DISTINCT
+        FROM so two undated statements of the same occurrence also match.
+        Returns ``(id, "inserted"|"duplicate")``."""
+        with self._txn():
+            dup = self.conn.execute(
+                "SELECT id FROM chronicle_events WHERE actor_norm = %s "
+                "AND description_norm = %s AND occurred_at IS NOT DISTINCT "
+                "FROM %s::timestamptz AND invalidated_at IS NULL "
+                "ORDER BY id LIMIT 1",
+                (row["actor_norm"], row["description_norm"],
+                 row.get("occurred_at"))).fetchone()
+            if dup is not None:
+                return int(dup[0]), "duplicate"
+            new = self.conn.execute(
+                "INSERT INTO chronicle_events (occurred_at, occurred_phrase, "
+                "recorded_at, actor, actor_norm, description, "
+                "description_norm, episode, src_entry_id, hlc_phys, "
+                "hlc_logical, writer_id) VALUES (%s::timestamptz, %s, %s, "
+                "%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                (row.get("occurred_at"), row.get("occurred_phrase"),
+                 row["recorded_at"], row["actor"], row["actor_norm"],
+                 row["description"], row["description_norm"],
+                 row.get("episode"), row.get("src_entry_id"),
+                 row.get("hlc_phys"), row.get("hlc_logical"),
+                 row.get("writer_id"))).fetchone()
+        return int(new[0]), "inserted"
+
+    def chronicle_search(self, query: str,
+                         limit: int = 6) -> list[dict[str, Any]]:
+        """Live events lexically matching ``query``, chronologically
+        ascending — undated rows (phrase-only) trail dated ones and order
+        among themselves by when they were recorded. ANY-term match
+        (plainto_tsquery's AND rebuilt with OR): a "when did X happen"
+        question should surface the related events around X, not only the
+        rows carrying every query token."""
+        lex = self.conn.execute(
+            "SELECT plainto_tsquery('english', %s)::text",
+            (query,)).fetchone()[0]
+        if not lex:
+            return []
+        rows = self.conn.execute(
+            "SELECT id, to_char(occurred_at, 'YYYY-MM-DD'), occurred_phrase, "
+            "recorded_at, actor, description, episode, src_entry_id "
+            "FROM chronicle_events "
+            "WHERE invalidated_at IS NULL AND "
+            "to_tsvector('english', description) @@ to_tsquery('english', %s) "
+            "ORDER BY occurred_at ASC NULLS LAST, recorded_at ASC LIMIT %s",
+            (lex.replace(" & ", " | "), limit)).fetchall()
+        cols = ("id", "occurred_date", "occurred_phrase", "recorded_at",
+                "actor", "description", "episode", "src_entry_id")
+        return [dict(zip(cols, r)) for r in rows]
+
+    def invalidate_chronicle_event(self, event_id: int, at: float) -> bool:
+        with self._txn():
+            cur = self.conn.execute(
+                "UPDATE chronicle_events SET invalidated_at = %s "
+                "WHERE id = %s AND invalidated_at IS NULL", (at, event_id))
+        return cur.rowcount > 0
+
+    def delete_chronicle_event(self, event_id: int) -> bool:
+        """Rollback-only removal (see class of methods above)."""
+        with self._txn():
+            cur = self.conn.execute(
+                "DELETE FROM chronicle_events WHERE id = %s", (event_id,))
+        return cur.rowcount > 0
 
     def set_edge_confidence(self, edge_id: int, confidence: float) -> None:
         with self._txn():

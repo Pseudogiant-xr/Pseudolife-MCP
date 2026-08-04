@@ -1,0 +1,50 @@
+{
+  "dataset": "oracle",
+  "extractor": "qwen-27b",
+  "n": 266,
+  "arms": {
+    "rag": {
+      "accuracy": 0.515,
+      "context_tokens": 1182.4
+    },
+    "cortex": {
+      "accuracy": 0.147,
+      "context_tokens": 225.1
+    },
+    "hybrid": {
+      "accuracy": 0.406,
+      "context_tokens": 892.8
+    },
+    "hybrid_ev": {
+      "accuracy": 0.398,
+      "context_tokens": 948.0
+    },
+    "cascade": {
+      "accuracy": 0.511,
+      "context_tokens": 1181.0
+    }
+  },
+  "superseded_total": 863,
+  "types": {
+    "multi-session": {
+      "n": 133,
+      "arms": {
+        "rag": 0.504,
+        "cortex": 0.211,
+        "hybrid": 0.346,
+        "hybrid_ev": 0.346
+      },
+      "cascade": 0.489
+    },
+    "temporal-reasoning": {
+      "n": 133,
+      "arms": {
+        "rag": 0.526,
+        "cortex": 0.083,
+        "hybrid": 0.466,
+        "hybrid_ev": 0.451
+      },
+      "cascade": 0.534
+    }
+  }
+}

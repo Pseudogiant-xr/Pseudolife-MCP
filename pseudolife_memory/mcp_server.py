@@ -306,7 +306,8 @@ def memory_search(
     facts arrive AHEAD of ``entries`` — the current, deduped answer
     (``contested: true`` awaits ``memory_fact_resolve``).
     ``low_confidence=True``: no confident match, prefer abstaining. On a
-    superseded entry, prefer ``superseded_by_text``.
+    superseded entry, prefer ``superseded_by_text``. Temporal cues may
+    add ``events`` (oldest first).
 
     Args:
         query: Natural-language description; specific beats vague.
@@ -880,15 +881,15 @@ def memory_dream(
         ``run``: a server-side dream with the configured extractor
             (loop to drain).
         ``deep``: full-corpus graph consolidation, dry-run unless
-            ``apply=true`` (snapshots graph tables first; refuses if it
-            can't). Settle candidates via ``memory_graph_review``;
-            ``snippets=false`` omits evidence; duplicate lesson/world
-            slots listed for hand curation.
-        ``runs``: recent dream passes (cursor delta, tallies, status).
+            ``apply=true`` (snapshots graph tables first). Settle
+            candidates via ``memory_graph_review``; ``snippets=false``
+            omits evidence; duplicate lesson/world slots listed for
+            hand curation.
+        ``runs``: recent dream passes (tallies, status).
         ``rollback``: revert the newest committed pass from its journal
-            (facts only; traces + cursor kept). ``run_id`` optional.
+            (facts + events; traces/cursor kept). ``run_id`` optional.
 
-    Returns: per-action dict; ``{error}`` on a bad action or missing cursor.
+    Returns: per-action dict; ``{error}`` on bad input.
     """
     if action == "status":
         return service.dream_status()

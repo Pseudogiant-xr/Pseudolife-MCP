@@ -46,6 +46,9 @@ _ALL_TABLES = (
     # No FK from any table above — its own CASCADE covers dream_run_slots,
     # but nothing reaches dream_runs itself; same leak class as above.
     "dream_runs",
+    # Deliberately FK-free (src_entry_id references evictable entries) —
+    # same leak class as above.
+    "chronicle_events",
 )
 
 

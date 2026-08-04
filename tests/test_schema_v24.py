@@ -14,7 +14,7 @@ from pseudolife_memory.storage import schema
 
 
 def test_schema_version_is_24():
-    assert schema.SCHEMA_META_VERSION == 27
+    assert schema.SCHEMA_META_VERSION == 28
 
 
 def test_entity_kinds_table_present(pg_conn):

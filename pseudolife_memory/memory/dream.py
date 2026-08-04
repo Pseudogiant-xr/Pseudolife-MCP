@@ -207,6 +207,54 @@ def unflatten_slot_key_claims(claims: list, vocab: list[str]) -> list:
     return out
 
 
+def events_from_parsed(parsed: dict, n_texts: int) -> list[dict]:
+    """Validate the extractor's ``events`` array (chronicle, schema v28).
+
+    Events ride the same batched call as claims and travel back in the
+    same list, marked ``kind: "event"`` — the service claim loop routes
+    them before slot resolution. Conservative by construction: an event
+    without a non-empty description is dropped; ``date`` must be an exact
+    ``YYYY-MM-DD`` (anything else — "May 2023", a phrase, a fabricated
+    format — degrades to None, keeping the verbatim ``date_phrase``);
+    ``source`` maps to the 0-based note index exactly like claims and is
+    omitted when out of range. Pure; returns ``[]`` for anything that is
+    not a list of dicts."""
+    from datetime import datetime
+
+    raw = parsed.get("events", []) if isinstance(parsed, dict) else []
+    out: list[dict] = []
+    for ev in raw if isinstance(raw, list) else []:
+        if not isinstance(ev, dict):
+            continue
+        description = str(ev.get("description", "")).strip()
+        if not description:
+            continue
+        date = ev.get("date")
+        if date is not None:
+            date = str(date).strip()
+            try:
+                datetime.strptime(date, "%Y-%m-%d")
+            except ValueError:
+                date = None
+        phrase = ev.get("date_phrase")
+        item: dict = {
+            "kind": "event",
+            "description": description,
+            "actor": str(ev.get("actor") or "user").strip() or "user",
+            "date": date,
+            "date_phrase": (str(phrase).strip() or None
+                            if phrase is not None else None),
+        }
+        try:
+            idx = int(ev.get("source")) - 1     # 1-based in the prompt
+        except (TypeError, ValueError):
+            idx = -1
+        if 0 <= idx < n_texts:
+            item["source"] = idx
+        out.append(item)
+    return out
+
+
 # ── literal-faithfulness gate (2026-08-02 design doc) ────────────────────
 # Date-like spans are exempt from gating: format variance ("2026-08-01" vs
 # "August 1, 2026") makes digit matching unsafe, and the prompt's
@@ -550,6 +598,10 @@ class OpenAICompatExtractor:
                 content = content[s:e + 1]
             parsed = json.loads(content)
             raw = parsed.get("claims", []) if isinstance(parsed, dict) else []
+            # Chronicle events (schema v28) ride the same call; validated
+            # here and routed by the claim loop via their kind marker. An
+            # events-less prompt (the shipped v5) simply yields none.
+            events = events_from_parsed(parsed, len(texts))
         except Exception as exc:  # noqa: BLE001
             # Signal failure (vs genuine empty) so the dream doesn't advance its
             # cursor past these memories on a transient timeout/network blip.
@@ -578,7 +630,7 @@ class OpenAICompatExtractor:
             if 0 <= idx < len(texts):
                 claim["source"] = idx
             claims.append(claim)
-        return claims
+        return claims + events
 
     def extract_lessons(self, signals: list[dict]) -> list[LessonClaim]:
         """Synthesise procedural lessons from outcome signals via the same
