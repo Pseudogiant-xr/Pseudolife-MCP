@@ -35,6 +35,13 @@ EXPOSE 8081
 # llama.cpp images default to 4 slots sharing ONE unified KV buffer — concurrent
 # ~4k-token dream calls then exceed the context and every request 500s
 # ("Context size has been exceeded"); one slot serializes = old behaviour.
+# --sleep-idle-seconds unloads the model after idle (frees its ~7 GB; /health
+# keeps answering; the next request blocks while it reloads) — the sidecar is
+# typically only the fallback dreamer, so resident weights are wasted RAM.
+# NOTE: ops/docker-compose.yml carries a `command:` that REPLACES this CMD
+# (same list, sleep window env-tunable there) — keep the two in step; a guard
+# test (tests/test_extractor_idle_sleep.py) pins the match.
 CMD ["--model", "/models/extractor.gguf", \
      "--host", "0.0.0.0", "--port", "8081", \
-     "--ctx-size", "8192", "--jinja", "--parallel", "1"]
+     "--ctx-size", "8192", "--jinja", "--parallel", "1", \
+     "--sleep-idle-seconds", "300"]
