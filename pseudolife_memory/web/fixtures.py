@@ -660,10 +660,18 @@ class FixtureService:
 
     # dream / consolidation
     def dream_status(self):
+        # Mirror the daemon's resolution: the model-only override wins over
+        # the (fixture) env-owned model, so the Console's dreamer picker
+        # round-trips honestly against the devserver.
+        override = self.config.memory.dream.extractor_model_override
         return {"backlog": 14, "idle_seconds": 2100.0, "dream_cursor": _NOW - 6 * _H,
                 "would_fire": True, "extractor_mode": "auto",
                 "primary_url": "http://host.docker.internal:8082/v1",
+                "primary_model": override or "claude-opus-5",
                 "fallback_url": "http://pseudolife-extractor:8081/v1",
+                "fallback_model": "extractor",
+                "extractor_source": "env",
+                "model_override": override,
                 "primary_healthy": True,
                 "last_dream_extractor": {"which": "primary",
                                          "base_url": "http://host.docker.internal:8082/v1",

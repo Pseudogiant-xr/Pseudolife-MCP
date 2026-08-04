@@ -166,7 +166,10 @@ Console's config view edits the endpoint, model, timeout, and token budget
 live — flip its "Settings source" switch to `config` first (while it is
 `env`, the default, the `PSEUDOLIFE_DREAM_*` variables below own the
 settings and the panel's values are ignored). The API key stays env-only
-either way.
+either way. The *model alone* needs no source flip: the **Dreamer** card at
+the top of the same view writes a model-only override
+(`memory.dream.extractor_model_override`) that wins over both owners while
+the endpoint wiring keeps its owner.
 
 *Via env:* for the Docker stack, set the override in `ops/.env` (the
 compose file interpolates it into the daemon) and restart the daemon
@@ -217,16 +220,18 @@ steps:
    requires a logged-in `claude` CLI:
    - Windows: `ops\install-shim-autostart.ps1` (Task Scheduler, at logon,
      `127.0.0.1:8082`; `-Model` picks the served default —
-     `claude-opus-5` since the 2026-08-02 dreamer comparison).
+     `claude-opus-5` since the 2026-08-02 dreamer comparison; the one-shot
+     installer prompts for this choice on Claude-shim installs).
    The shim also honors a concrete `claude-*` model named per request, so
-   the Console's Extractor panel (settings source = config, model =
-   `claude-sonnet-5` / `claude-opus-5` / `claude-haiku-4-5`) switches the
-   dreamer model live — no shim restart; alias names like the compose
-   default `extractor` keep the launch model.
-   - Linux: `ops/install-shim-autostart.sh` (systemd `--user` unit; binds
-     the docker bridge IP so the daemon container can reach it —
-     `host-gateway` routes container→host traffic to the bridge, where a
-     loopback bind is invisible).
+   the Console's **Dreamer** card switches the dreamer live — one click
+   between `claude-opus-5` / `claude-sonnet-5` / `claude-haiku-4-5` /
+   `claude-fable-5` (or any `claude-*` name typed in), no shim restart and
+   no settings-source flip; alias names like the compose default
+   `extractor` keep the launch model.
+   - Linux: `ops/install-shim-autostart.sh` (systemd `--user` unit, same
+     `--model` choice; binds the docker bridge IP so the daemon container
+     can reach it — `host-gateway` routes container→host traffic to the
+     bridge, where a loopback bind is invisible).
 2. Set in `ops/.env` (both vars must flip together — pointing only one at
    the shim leaves dreams silently on the sidecar):
    `PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:8082/v1`,

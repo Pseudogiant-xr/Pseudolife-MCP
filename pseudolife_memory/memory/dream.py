@@ -910,6 +910,11 @@ def resolve_endpoints(cfg) -> dict:
         }
     if out["mode"] not in _EXTRACTOR_MODES:
         out["mode"] = "auto"
+    # Model-only override (console dreamer picker): wins over BOTH ownership
+    # modes, primary only — URLs and the fallback model keep their owner.
+    override = getattr(cfg, "extractor_model_override", None)
+    if override:
+        out["primary_model"] = override
     return out
 
 
@@ -1043,7 +1048,11 @@ def _status_extractor_fields(cfg, last_dream_extractor) -> dict:
     return {
         "extractor_mode": r["mode"],
         "primary_url": r["primary_url"],
+        "primary_model": r["primary_model"],
         "fallback_url": r["fallback_url"] if has_fallback else None,
+        "fallback_model": r["fallback_model"] if has_fallback else None,
+        "extractor_source": getattr(cfg, "extractor_source", "env"),
+        "model_override": getattr(cfg, "extractor_model_override", None),
         "primary_healthy": (probe_endpoint(r["primary_url"], timeout=2.0)
                             if has_fallback and r["primary_url"] else None),
         "last_dream_extractor": last_dream_extractor,
@@ -1062,34 +1071,21 @@ def build_extractor(cfg) -> DreamExtractor:
     the Console's Extractor panel) uses the config values and ignores those
     env vars — otherwise a UI change would silently lose to the env defaults
     the compose file always sets. ``PSEUDOLIFE_DREAM_API_KEY`` is honoured
-    in both modes (secrets stay out of config.yaml)."""
+    in both modes (secrets stay out of config.yaml).
+
+    Resolution is delegated to :func:`resolve_endpoints` — the single
+    authority the status display also reads, so what ``dream_status`` shows
+    (including the model-only override) is what this builder constructs.
+    A private copy of the env-vs-config logic here previously let the two
+    drift."""
     import os
 
-    def _env_num(name, fallback, cast):
-        raw = os.environ.get(name)
-        if not raw:
-            return fallback
-        try:
-            return cast(raw)
-        except (TypeError, ValueError):
-            return fallback
-
-    from_config = getattr(cfg, "extractor_source", "env") == "config"
-    if from_config:
-        base_url, model = cfg.extractor_base_url, cfg.extractor_model
-        max_tokens, timeout = cfg.extractor_max_tokens, cfg.extractor_timeout_seconds
-    else:
-        base_url = os.environ.get("PSEUDOLIFE_DREAM_BASE_URL") or cfg.extractor_base_url
-        model = os.environ.get("PSEUDOLIFE_DREAM_MODEL") or cfg.extractor_model
-        max_tokens = _env_num("PSEUDOLIFE_DREAM_MAX_TOKENS",
-                              cfg.extractor_max_tokens, int)
-        timeout = _env_num("PSEUDOLIFE_DREAM_TIMEOUT_SECONDS",
-                           cfg.extractor_timeout_seconds, float)
+    r = resolve_endpoints(cfg)
     api_key = os.environ.get("PSEUDOLIFE_DREAM_API_KEY") or cfg.extractor_api_key
-    if base_url and model:
+    if r["primary_url"] and r["primary_model"]:
         return OpenAICompatExtractor(
-            base_url, model, api_key=api_key,
-            max_tokens=max_tokens, timeout_seconds=timeout,
+            r["primary_url"], r["primary_model"], api_key=api_key,
+            max_tokens=r["max_tokens"], timeout_seconds=r["timeout"],
         )
     return NoOpExtractor()
 

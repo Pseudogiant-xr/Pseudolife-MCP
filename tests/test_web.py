@@ -238,6 +238,20 @@ def test_routes_config_write_via_dispatch(svc):
     assert "memory.top_k" in out["applied"]
 
 
+def test_dream_status_carries_dreamer_card_fields(svc):
+    st = ConsoleRoutes(svc).dispatch("GET", "/api/dream/status", {}, {})
+    for key in ("primary_model", "fallback_model", "extractor_source",
+                "model_override"):
+        assert key in st, f"dreamer card field missing: {key}"
+
+
+def test_dreamer_model_override_knob_applies_live(svc):
+    out = ConsoleRoutes(svc).dispatch(
+        "POST", "/api/config", {},
+        {"patch": {"memory.dream.extractor_model_override": "claude-fable-5"}})
+    assert "memory.dream.extractor_model_override" in out["applied"]
+
+
 # ── ASGI app ────────────────────────────────────────────────────────────────
 
 async def _stub_mcp(scope, receive, send):

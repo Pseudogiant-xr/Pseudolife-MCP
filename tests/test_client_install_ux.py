@@ -49,6 +49,35 @@ def test_hook_installers_support_codex_hook_store() -> None:
         assert "AGENTS.md" in text
 
 
+def test_installers_offer_dreamer_model_choice() -> None:
+    """Claude-shim installs prompt for the dreamer model (2026-08-04): all
+    four current Anthropic tiers are offered, Opus is the recommended
+    default (dreamer-choice-verdict.json), and the choice reaches the
+    autostart script instead of being hardcoded there."""
+    ps = _read("ops/install.ps1")
+    sh = _read("ops/install.sh")
+    for text in (ps, sh):
+        for model in ("claude-opus-5", "claude-sonnet-5",
+                      "claude-haiku-4-5", "claude-fable-5"):
+            assert model in text, f"missing model option: {model}"
+    assert "-Model $Model" in ps          # choice forwarded to autostart
+    assert '--model "$MODEL"' in sh
+
+
+def test_shim_autostart_scripts_accept_model_and_run_live_shim() -> None:
+    ps = _read("ops/install-shim-autostart.ps1")
+    sh = _read("ops/install-shim-autostart.sh")
+    # Opus stays the non-interactive default (measured winner).
+    assert 'Model = "claude-opus-5"' in ps
+    assert 'MODEL="claude-opus-5"' in sh
+    assert "--model" in sh
+    # The Linux unit must launch the shim that exists: evals/claude_shim.py
+    # (sonnet_shim.py was renamed; a unit pointing at it fails at start).
+    assert "claude_shim.py" in sh
+    assert "sonnet_shim.py" not in sh
+    assert "sonnet_shim.py" not in _read("ops/install.sh")
+
+
 def test_preflight_checks_the_selected_client_only() -> None:
     ps = _read("ops/preflight.ps1")
     sh = _read("ops/preflight.sh")

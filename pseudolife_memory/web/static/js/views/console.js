@@ -1,20 +1,41 @@
 // views/console.js — the knobs & dials editor over /api/config. Type-aware
 // controls, live-vs-restart badges, dirty tracking, diff-preview, atomic save.
-import { el, mount, clear, loadingBlock, errorBlock } from "../util.js";
+// Headlined by the Dreamer card: effective extractor resolution (from
+// /api/dream/status) + a one-click model picker over the model-only
+// override knob (memory.dream.extractor_model_override).
+import { el, mount, clear, loadingBlock, errorBlock, fmtAge } from "../util.js";
 import { api } from "../api.js";
 import { openModal, closeModal, toast } from "../ui.js";
 import { badge } from "../components.js";
 
 let cfg = null;
+let dream = null;        // /api/dream/status snapshot for the Dreamer card
 let edits = new Map();   // path -> new value
 let originals = new Map();
 let viewCtx = null;      // the render ctx (for refresh) — module-scoped so the
                          // save bar can be rebuilt on edit without losing it.
 
+const OVERRIDE_PATH = "memory.dream.extractor_model_override";
+const DREAMER_MODELS = [
+  { id: "claude-opus-5", label: "Opus 5",
+    note: "recommended — best measured extraction quality" },
+  { id: "claude-sonnet-5", label: "Sonnet 5", note: "balanced" },
+  { id: "claude-haiku-4-5", label: "Haiku 4.5",
+    note: "fastest / lightest on plan usage" },
+  { id: "claude-fable-5", label: "Fable 5", note: "most capable tier" },
+];
+
 export async function renderConsole(root, ctx) {
   viewCtx = ctx;
   mount(root, loadingBlock("Loading configuration…"));
-  try { cfg = await api.get("/api/config"); }
+  try {
+    // The card degrades gracefully: a dream-status failure hides it rather
+    // than blocking the whole config editor.
+    [cfg, dream] = await Promise.all([
+      api.get("/api/config"),
+      api.get("/api/dream/status").catch(() => null),
+    ]);
+  }
   catch (err) { mount(root, errorBlock(err)); return; }
 
   edits = new Map();
@@ -28,9 +49,99 @@ export async function renderConsole(root, ctx) {
       el("span", { class: "count-note" }, `${originals.size} knobs · `),
       el("span", { class: "chip", title: "config file on the daemon host" },
         el("span", { class: "k" }, "config"), " " + (cfg.config_path || "config.yaml"))),
+    dreamerCard(),
     groups, savebar);
 
   refreshSaveBar(savebar);
+}
+
+// ── Dreamer hero card ──────────────────────────────────────────────────────
+
+function dreamerCard() {
+  if (!dream || !dream.primary_url) return null;
+  const override = dream.model_override || null;
+  const chips = [
+    el("span", { class: "chip", title: "effective primary endpoint → model" },
+      el("span", { class: "k" }, "primary"),
+      ` ${dream.primary_url} → `,
+      el("span", { class: "mono" }, dream.primary_model || "?")),
+    healthChip(),
+  ];
+  if (dream.fallback_url) {
+    chips.push(el("span", { class: "chip", title: "effective fallback endpoint → model" },
+      el("span", { class: "k" }, "fallback"),
+      ` ${dream.fallback_url} → `,
+      el("span", { class: "mono" }, dream.fallback_model || "?")));
+  }
+  const last = dream.last_dream_extractor;
+  if (last) {
+    chips.push(el("span", { class: last.which === "fallback" ? "chip warn" : "chip" },
+      el("span", { class: "k" }, "last dream"),
+      ` ${last.which}${last.at ? " · " + fmtAge(last.at) : ""}`));
+  }
+  chips.push(el("span", { class: "chip",
+    title: "who owns the endpoint settings (Extractor panel below); the model picker wins over both" },
+    el("span", { class: "k" }, "settings"), " " + (dream.extractor_source || "env")));
+
+  const segs = DREAMER_MODELS.map((m) =>
+    el("button", {
+      class: "seg" + (override === m.id ? " active" : ""),
+      "aria-pressed": String(override === m.id), title: m.note,
+      onclick: () => setDreamerModel(m.id),
+    }, m.label));
+  segs.push(el("button", {
+    class: "seg" + (!override ? " active" : ""),
+    "aria-pressed": String(!override),
+    title: "clear the override — the endpoint's own default model serves",
+    onclick: () => setDreamerModel(null),
+  }, "Default"));
+  const customInput = el("input", { type: "text", placeholder: "claude-…",
+    "aria-label": "custom dreamer model",
+    value: override && !DREAMER_MODELS.some((m) => m.id === override) ? override : "" });
+  customInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && customInput.value.trim()) setDreamerModel(customInput.value.trim());
+  });
+
+  return el("div", { class: "panel dreamer reveal" },
+    el("div", { class: "panel-head" },
+      el("h2", {}, "Dreamer"),
+      el("span", { class: "sub" }, "which model consolidates memories")),
+    el("div", { class: "panel-body" },
+      el("div", { class: "dreamer-chips" }, chips),
+      el("div", { class: "dreamer-pick" },
+        el("span", { class: "lbl" }, "Model"),
+        el("div", { class: "seg-row", role: "group", "aria-label": "dreamer model" }, segs),
+        el("span", { class: "with-custom" }, customInput,
+          el("button", { class: "btn", onclick: () => {
+            const v = customInput.value.trim();
+            if (v) setDreamerModel(v);
+          } }, "Apply"))),
+      el("p", { class: "help", style: { margin: "8px 0 0" } },
+        "Applies live to the next dream via the model-only override — endpoint "
+        + "wiring keeps its owner. The Claude CLI shim honours claude-* names "
+        + "per request; the local sidecar ignores model names.")));
+}
+
+function healthChip() {
+  if (dream.primary_healthy === true) return el("span", { class: "chip ok" }, "primary ✓");
+  if (dream.primary_healthy === false) return el("span", { class: "chip bad" }, "primary DOWN");
+  return el("span", { class: "chip", title: "single-extractor deploy — no probe on status" }, "no probe");
+}
+
+async function setDreamerModel(value) {
+  if (edits.size) {
+    toast("Save or discard the pending edits below first", "warn");
+    return;
+  }
+  const current = dream?.model_override || null;
+  if ((value || null) === current) return;
+  try {
+    await api.post("/api/config", { patch: { [OVERRIDE_PATH]: value } });
+    toast(value
+      ? `Saved · next dream extracts with ${value}`
+      : "Saved · override cleared — endpoint default serves", "ok", 6000);
+    viewCtx?.refresh();
+  } catch (e) { toast("Save failed: " + e.message, "bad"); }
 }
 
 function groupPanel(g) {

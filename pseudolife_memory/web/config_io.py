@@ -99,6 +99,20 @@ KNOBS: list[dict[str, Any]] = [
      "label": "BM25 fusion weight", "type": "float", "default": 0.3,
      "min": 0.0, "max": 1.0, "step": 0.05, "restart": False,
      "help": "Contribution of normalised BM25 to the fused score."},
+    {"path": "memory.bm25.cortex_enabled", "group": "Reranker",
+     "label": "BM25 on cortex facts", "type": "bool", "default": False,
+     "restart": False,
+     "help": "Lexical fusion for cortex fact retrieval. Ships OFF: the "
+             "2026-07-30 pre-registered A/B moved 56/78 served contexts with "
+             "zero accuracy gain and cost ~1 oracle-gate question. Opt in "
+             "for identifier-heavy corpora."},
+    {"path": "memory.reranker.skip_margin", "group": "Reranker",
+     "label": "Reranker skip margin", "type": "float", "default": 0.0,
+     "min": 0.0, "max": 1.0, "step": 0.01, "restart": False,
+     "help": "Skip the cross-encoder when the top-2 bi-encoder gap ≥ this "
+             "(a decisive head can't be fixed by reranking). 0 = always "
+             "rerank. CAUTION: skips return raw bi-encoder scores — don't "
+             "combine with an abstention floor tuned to the fused scale."},
     # ── Cortex ─────────────────────────────────────────────────────────────
     {"path": "memory.cortex.search_first", "group": "Cortex",
      "label": "Cortex-first search", "type": "bool", "default": True,
@@ -164,9 +178,53 @@ KNOBS: list[dict[str, Any]] = [
      "help": "New dream entity whose name-embedding cosine vs an existing "
              "entity reaches this files a merge proposal for review (semantic "
              "complement to the Jaccard detector). 0 = off."},
+    {"path": "memory.dream.min_relation_confidence", "group": "Dream",
+     "label": "Relation confidence floor", "type": "float", "default": 0.2,
+     "min": 0.0, "max": 1.0, "step": 0.05, "restart": False,
+     "help": "Dream-extracted graph edges scoring below this are dropped at "
+             "the source (hard type-violations score ≤0.175). 0 = write "
+             "everything."},
+    {"path": "memory.dream.relation_quarantine_below", "group": "Dream",
+     "label": "Relation quarantine below", "type": "float", "default": 0.5,
+     "min": 0.0, "max": 1.0, "step": 0.05, "restart": False,
+     "help": "Edges at/above the floor but below this route to the "
+             "edge-proposal review queue instead of the live graph. At 0.5 "
+             "this quarantines exactly the untyped co-mention edges (0.45). "
+             "0 = off."},
+    {"path": "memory.dream.retype_quarantined_max", "group": "Dream",
+     "label": "Retype pass cap (per dream)", "type": "int", "default": 3,
+     "min": 0, "max": 20, "step": 1, "restart": False,
+     "help": "Quarantined untyped pairs re-asked for a TYPED relation each "
+             "dream (~44% name a real relationship with the wrong label). "
+             "No-ops on an empty quarantine. 0 = off."},
+    {"path": "memory.dream.literal_gate", "group": "Dream",
+     "label": "Literal-faithfulness gate", "type": "enum",
+     "default": "enforce", "options": ["off", "log", "enforce"],
+     "restart": False,
+     "help": "Digit-bearing tokens in a dreamed value must appear in the "
+             "source notes: enforce drops unbacked claims, log only flags "
+             "them. Default enforce by measured evidence (fires on 1.3-1.7% "
+             "of gateable claims, almost all genuinely unbacked)."},
+    {"path": "memory.dream.literal_gate_scope", "group": "Dream",
+     "label": "Literal gate scope", "type": "enum", "default": "batch",
+     "options": ["batch", "source"], "restart": False,
+     "help": "Source corpus for the gate: batch = union of the pull's note "
+             "texts (default; derived sums and cross-note values are "
+             "measured false-drop classes under per-note gating); source = "
+             "only the note the claim cites."},
     # ── Extractor ──────────────────────────────────────────────────────────
     # All live: build_extractor() constructs the client fresh on every dream
     # invocation from service.config.
+    {"path": "memory.dream.extractor_model_override", "group": "Extractor",
+     "label": "Dreamer model override", "type": "string", "default": None,
+     "restart": False,
+     "suggestions": ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5",
+                     "claude-fable-5"],
+     "help": "Model-only override for the primary extractor — wins over BOTH "
+             "env and config ownership, so the dreamer model can be switched "
+             "without re-owning the endpoint wiring. The Claude CLI shim "
+             "honours claude-* names per request; the fallback sidecar is "
+             "never affected. Empty = the endpoint's own default."},
     {"path": "memory.dream.extractor_source", "group": "Extractor",
      "label": "Settings source", "type": "enum", "default": "env",
      "options": ["env", "config"], "restart": False,
@@ -241,6 +299,22 @@ KNOBS: list[dict[str, Any]] = [
      "label": "Signal retention (days)", "type": "int", "default": 30, "min": 1,
      "max": 3650, "step": 1, "restart": False,
      "help": "Outcome signals older than this are pruned on the dream sweep."},
+    {"path": "memory.lessons.synthesize_in_dream", "group": "Lessons",
+     "label": "Synthesize in dream", "type": "bool", "default": True,
+     "restart": False,
+     "help": "Dream drains outcome signals into lessons. Off = signals are "
+             "still pruned by retention but never become lessons."},
+    {"path": "memory.lessons.infer_outcomes", "group": "Lessons",
+     "label": "Infer missing outcomes", "type": "bool", "default": True,
+     "restart": False,
+     "help": "Infer outcome signals for episodes that closed with entries "
+             "but zero explicit outcomes (origin=inferred; lessons from "
+             "all-inferred batches start at confidence 0.4)."},
+    {"path": "memory.lessons.infer_outcomes_max_signals", "group": "Lessons",
+     "label": "Inferred signals cap", "type": "int", "default": 3,
+     "min": 0, "max": 10, "step": 1, "restart": False,
+     "help": "Max inferred outcome signals per closed episode. 0 disables "
+             "inference regardless of the toggle above."},
     # ── Recall ─────────────────────────────────────────────────────────────
     {"path": "memory.recall.driver", "group": "Recall", "label": "Recall driver",
      "type": "enum", "default": "mechanical",
@@ -268,6 +342,12 @@ KNOBS: list[dict[str, Any]] = [
      "min": 0.0, "max": 365.0, "step": 1.0, "restart": False,
      "help": "A superseded version younger than this is never purged, "
              "whatever the per-slot count."},
+    {"path": "memory.dream.runs_keep", "group": "Retention",
+     "label": "Dream runs kept", "type": "int", "default": 50,
+     "min": 1, "max": 1000, "step": 1, "restart": False,
+     "help": "Newest N dream-run audit rows (and their pre-image journals) "
+             "survive the sweep prune. The journal is the rollback source, "
+             "so this bounds how far back a dream pass stays revertible."},
     # ── Presentation ───────────────────────────────────────────────────────
     {"path": "time.relative_age", "group": "Presentation",
      "label": "Relative age labels", "type": "bool", "default": True,
