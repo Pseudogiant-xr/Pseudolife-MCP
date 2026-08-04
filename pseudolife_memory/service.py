@@ -3134,6 +3134,7 @@ class MemoryService:
                     "contested": 0, "superseded": 0, "relations": 0,
                     "literal_flagged": 0, "literal_dropped": 0,
                     "events_inserted": 0, "events_duplicate": 0,
+                    "events_pass_failed": False,
                     "cursor": pulled["cursor"], "lessons": lessons,
                     "outcome_inference": outcome_inference,
                     "graph_insight": graph_insight, "retyped": retyped}
@@ -3173,6 +3174,7 @@ class MemoryService:
                     "literal_dropped": literal_dropped,
                     "events_inserted": events_inserted,
                     "events_duplicate": events_duplicate,
+                    "events_pass_failed": False,
                     "lessons": {"signals": 0, "lessons": 0}}
 
         # ONE batched call for the whole pull: the model must see a fact's
@@ -3299,72 +3301,78 @@ class MemoryService:
             except Exception as exc2:  # noqa: BLE001
                 logger.warning("dream: run-row finish failed (%s)", exc2)
 
+        # Chronicle event writer, shared by the (dormant with the shipped
+        # v5 prompt) inline kind:"event" routing below and the SEPARATE
+        # events pass after the claims loop (design doc 2026-08-04):
+        # literal gate on the description exactly as for claim values,
+        # the batch-corpus date-fabrication guard, exact dedup (batch
+        # retries and restatements write and journal nothing), journal
+        # kind "event" with the exact chronicle row id for rollback.
+        events_pass_failed = False
+
+        def _write_event(c: dict, src_id) -> None:
+            nonlocal literal_flagged, literal_dropped, events_inserted, \
+                events_duplicate, run_seq
+            desc = str(c.get("description", "")).strip()
+            if not desc:
+                return
+            if gate_mode != "off" and src_id is not None:
+                corpus = (batch_text if gate_scope == "batch"
+                          else src_text.get(src_id, ""))
+                bad = literal_violations(desc, corpus)
+                if bad:
+                    literal_flagged += 1
+                    logger.info(
+                        "dream: unsupported literal(s) %s in event %r%s",
+                        bad, desc,
+                        " (dropped)" if gate_mode == "enforce" else "")
+                    if gate_mode == "enforce":
+                        literal_dropped += 1
+                        return
+            actor = str(c.get("actor") or "user")
+            idx = c.get("source")
+            episode = (entries[idx].get("episode_id")
+                       if isinstance(idx, int)
+                       and 0 <= idx < len(entries) else None)
+            ev_row = {
+                "occurred_at": (c.get("date") if batch_has_date
+                                else None),
+                "occurred_phrase": c.get("date_phrase"),
+                "recorded_at": _time.time(),
+                "actor": actor, "actor_norm": _norm_key(actor),
+                "description": desc,
+                "description_norm": _norm_value(desc),
+                "episode": episode, "src_entry_id": src_id}
+            with self._lock:
+                ev_id, ev_action = \
+                    self._storage.add_chronicle_event(ev_row)
+            if ev_action != "inserted":
+                events_duplicate += 1
+                return
+            events_inserted += 1
+            if run_id is not None:
+                journal_row = {
+                    "seq": run_seq, "entity": actor,
+                    "attribute": "event",
+                    "entity_norm": _norm_key(actor),
+                    "attribute_norm": "event",
+                    "kind": "event", "op": None,
+                    "prev_kind": None, "prev_value": None,
+                    "prev_status": None, "prev_confidence": None,
+                    "prev_support": None, "new_value": desc,
+                    "action": "event_inserted",
+                    "src_entry_id": src_id, "at": _time.time(),
+                    "chronicle_event_id": ev_id}
+                with self._lock:
+                    self._storage.add_dream_run_slot(run_id, journal_row)
+                run_seq += 1
+
         try:
             for c, src_id in pairs:
-                # Chronicle events (schema v28) route before slot
-                # resolution — they carry no entity/attribute. Literal
-                # gate applies to the description exactly as to claim
-                # values; the date carries its own fabrication guard;
-                # exact duplicates (batch retry, restatements) write and
-                # journal nothing.
+                # Events route before slot resolution — no entity/attribute.
                 if c.get("kind") == "event":
-                    if not chronicle_on:
-                        continue
-                    desc = str(c.get("description", "")).strip()
-                    if not desc:
-                        continue
-                    if gate_mode != "off" and src_id is not None:
-                        corpus = (batch_text if gate_scope == "batch"
-                                  else src_text.get(src_id, ""))
-                        bad = literal_violations(desc, corpus)
-                        if bad:
-                            literal_flagged += 1
-                            logger.info(
-                                "dream: unsupported literal(s) %s in event "
-                                "%r%s", bad, desc,
-                                " (dropped)" if gate_mode == "enforce"
-                                else "")
-                            if gate_mode == "enforce":
-                                literal_dropped += 1
-                                continue
-                    actor = str(c.get("actor") or "user")
-                    idx = c.get("source")
-                    episode = (entries[idx].get("episode_id")
-                               if isinstance(idx, int)
-                               and 0 <= idx < len(entries) else None)
-                    ev_row = {
-                        "occurred_at": (c.get("date") if batch_has_date
-                                        else None),
-                        "occurred_phrase": c.get("date_phrase"),
-                        "recorded_at": _time.time(),
-                        "actor": actor, "actor_norm": _norm_key(actor),
-                        "description": desc,
-                        "description_norm": _norm_value(desc),
-                        "episode": episode, "src_entry_id": src_id}
-                    with self._lock:
-                        ev_id, ev_action = \
-                            self._storage.add_chronicle_event(ev_row)
-                    if ev_action != "inserted":
-                        events_duplicate += 1
-                        continue
-                    events_inserted += 1
-                    if run_id is not None:
-                        journal_row = {
-                            "seq": run_seq, "entity": actor,
-                            "attribute": "event",
-                            "entity_norm": _norm_key(actor),
-                            "attribute_norm": "event",
-                            "kind": "event", "op": None,
-                            "prev_kind": None, "prev_value": None,
-                            "prev_status": None, "prev_confidence": None,
-                            "prev_support": None, "new_value": desc,
-                            "action": "event_inserted",
-                            "src_entry_id": src_id, "at": _time.time(),
-                            "chronicle_event_id": ev_id}
-                        with self._lock:
-                            self._storage.add_dream_run_slot(
-                                run_id, journal_row)
-                        run_seq += 1
+                    if chronicle_on:
+                        _write_event(c, src_id)
                     continue
                 ent, attr = self._resolve_dream_slot(c["entity"], c["attribute"])
                 # Claim-level op (Task 7): "add"/"remove" route to the member
@@ -3545,6 +3553,32 @@ class MemoryService:
                             if self._cms is not None:
                                 self._cms.bump_entry_reinforcements(src_id, 1)
                             traces_n += 1
+            # Separate events pass (design doc 2026-08-04): after the
+            # claims loop so a claims failure never wastes the call, and
+            # before dream_commit so event writes journal under this run.
+            # The extractor call failing is NON-FATAL by design — events
+            # are additive enrichment and must never stall consolidation
+            # (the lost batch is not retried; the cursor moves). A
+            # STORAGE failure inside _write_event still propagates to the
+            # handler below and honestly marks the run failed.
+            if chronicle_on and hasattr(extractor, "extract_events"):
+                try:
+                    ev_items = extractor.extract_events(texts)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "dream: events pass failed (%s); events skipped "
+                        "this cycle, claims unaffected", exc)
+                    events_pass_failed = True
+                    ev_items = []
+                for c in ev_items:
+                    idx = c.get("source")
+                    if isinstance(idx, int) and 0 <= idx < len(entries):
+                        ev_src = entries[idx].get("db_id")
+                    elif len(entries) == 1:
+                        ev_src = entries[0].get("db_id")
+                    else:
+                        ev_src = None
+                    _write_event(c, ev_src)
         except Exception as exc:  # noqa: BLE001 — a write failure must hold the cursor too
             # Partial writes may have landed and are journaled — record
             # `failed` (NOT a silent absence) so rollback can refuse to
@@ -3584,6 +3618,7 @@ class MemoryService:
                 "literal_dropped": literal_dropped,
                 "events_inserted": events_inserted,
                 "events_duplicate": events_duplicate,
+                "events_pass_failed": events_pass_failed,
                 "traces": traces_n, "sources_attributed": sources_attributed,
                 "quarantined": quarantined, "retyped": retyped}
 

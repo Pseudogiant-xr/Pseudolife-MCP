@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-04 — separate-pass event extraction: chronicle without the claims tax)
+- **The dream's chronicle events now come from their own extractor
+  call** (`OpenAICompatExtractor.extract_events`, events-only prompt
+  pinned to `evals/prompts/events_pass_v1.txt`) instead of riding the
+  claims call — the v7 combined prompt measurably cost claim quality
+  (-0.053, p 0.011) and never shipped; with the separate pass the claims
+  call runs the shipped v5 prompt byte-identically, so interference is
+  zero by construction (and is measured as an exact-zero cross-run
+  tripwire in the preregistered gate). An events-pass failure is
+  non-fatal by design: claims commit, the cursor advances,
+  `events_pass_failed: true` is reported, and the batch's events are not
+  retried — an additive enrichment layer must never stall consolidation.
+  Event writes reuse the existing gated/journaled chronicle path
+  unchanged. `memory.dream.chronicle` still defaults off pending the
+  gates (`docs/superpowers/specs/2026-08-04-separate-pass-events-design.md`).
+
 ### Added (2026-08-04 — chronicle events: dated occurrences as first-class records (schema v28))
 - **`chronicle_events`** — the dream pass can now extract *occurrences*
   ("adopted the kitten on May 13") beside current-state facts, the record
