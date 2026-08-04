@@ -275,6 +275,13 @@ def bench_url() -> str:
 _ALL_TABLES = (
     "edges", "entity_aliases", "relations", "facts", "world_facts", "entries",
     "episodes", "entities", "meta",
+    # FK-free tables nothing cascades into. chronicle_events is SERVED
+    # (memory_search events block), so a leftover row contaminates the
+    # next question's contexts — the 2026-08-04 ev-weak run accumulated
+    # events across all 266 questions this way and its serving-side
+    # verdict had to be invalidated. dream_runs (CASCADE covers
+    # dream_run_slots) is audit-only but grows unboundedly across a run.
+    "chronicle_events", "dream_runs",
 )
 
 
