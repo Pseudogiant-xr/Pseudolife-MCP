@@ -1,0 +1,92 @@
+{
+  "n": 266,
+  "dropped_a": 234,
+  "dropped_b": 234,
+  "draws": 10000,
+  "seed": 0,
+  "a": {
+    "file": "evals/results/longmemeval-all-oracle-qwen-27b-aggp1-variants-0803.jsonl",
+    "arms": {
+      "hybrid_ctg": 0.312
+    }
+  },
+  "b": {
+    "file": "evals/results/longmemeval-all-oracle-qwen-27b-aggp1-variants-0803.jsonl",
+    "arms": {
+      "hybrid": 0.4586
+    }
+  },
+  "paired": {
+    "a_vs_b": {
+      "hybrid_ctg_vs_hybrid": {
+        "delta": -0.1466,
+        "p": 0.0,
+        "wins": 8,
+        "losses": 47,
+        "win_qids": [
+          "6c49646a",
+          "d851d5ba",
+          "eeda8a6d_abs",
+          "gpt4_0a05b494",
+          "gpt4_2ba83207",
+          "gpt4_e061b84g",
+          "gpt4_f420262d",
+          "gpt4_f49edff3"
+        ],
+        "loss_qids": [
+          "0bc8ad92",
+          "1c549ce4",
+          "1f2b8d4f",
+          "21d02d0d",
+          "27016adc",
+          "4adc0475",
+          "4bc144e2",
+          "4dfccbf7",
+          "60bf93ed",
+          "6613b389",
+          "681a1674",
+          "7405e8b1",
+          "85fa3a3f",
+          "91b15a6e",
+          "b46e15ee",
+          "b5ef892d",
+          "d905b33f",
+          "f0853d11",
+          "gpt4_18c2b244",
+          "gpt4_1e4a8aeb",
+          "gpt4_21adecb5",
+          "gpt4_2655b836",
+          "gpt4_2f584639",
+          "gpt4_385a5000",
+          "gpt4_45189cb4",
+          "gpt4_483dd43c",
+          "gpt4_4929293b",
+          "gpt4_4cd9eba1",
+          "gpt4_4edbafa2",
+          "gpt4_4ef30696",
+          "gpt4_59149c77",
+          "gpt4_5dcc0aab",
+          "gpt4_65aabe59",
+          "gpt4_74aed68e",
+          "gpt4_76048e76",
+          "gpt4_7a0daae1",
+          "gpt4_8279ba03",
+          "gpt4_85da3956",
+          "gpt4_8e165409",
+          "gpt4_93f6379c",
+          "gpt4_b4a80587",
+          "gpt4_b5700ca0",
+          "gpt4_c27434e8",
+          "gpt4_e414231e",
+          "gpt4_f2262a51",
+          "gpt4_fa19884c",
+          "gpt4_fe651585"
+        ]
+      }
+    }
+  },
+  "types": [
+    "multi-session",
+    "temporal-reasoning"
+  ]
+}

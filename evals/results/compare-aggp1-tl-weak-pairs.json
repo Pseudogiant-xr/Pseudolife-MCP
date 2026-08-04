@@ -1,0 +1,64 @@
+{
+  "n": 266,
+  "dropped_a": 234,
+  "dropped_b": 234,
+  "draws": 10000,
+  "seed": 0,
+  "a": {
+    "file": "evals/results/longmemeval-all-oracle-qwen-27b-aggp1-variants-0803.jsonl",
+    "arms": {
+      "hybrid_tl": 0.4474
+    }
+  },
+  "b": {
+    "file": "evals/results/longmemeval-all-oracle-qwen-27b-aggp1-variants-0803.jsonl",
+    "arms": {
+      "hybrid": 0.4586
+    }
+  },
+  "paired": {
+    "a_vs_b": {
+      "hybrid_tl_vs_hybrid": {
+        "delta": -0.0113,
+        "p": 0.7012,
+        "wins": 12,
+        "losses": 15,
+        "win_qids": [
+          "71017276",
+          "a1cc6108",
+          "eac54adc",
+          "gpt4_0a05b494",
+          "gpt4_213fd887",
+          "gpt4_8279ba02",
+          "gpt4_98f46fc6",
+          "gpt4_9a159967",
+          "gpt4_af6db32f",
+          "gpt4_e061b84g",
+          "gpt4_e072b769",
+          "gpt4_f49edff3"
+        ],
+        "loss_qids": [
+          "4dfccbf7",
+          "5e1b23de",
+          "7405e8b1",
+          "9a707b82",
+          "a3045048",
+          "c18a7dc8",
+          "gpt4_2f584639",
+          "gpt4_483dd43c",
+          "gpt4_4929293b",
+          "gpt4_4cd9eba1",
+          "gpt4_59149c78",
+          "gpt4_65aabe59",
+          "gpt4_93f6379c",
+          "gpt4_c27434e8",
+          "gpt4_fe651585"
+        ]
+      }
+    }
+  },
+  "types": [
+    "multi-session",
+    "temporal-reasoning"
+  ]
+}
