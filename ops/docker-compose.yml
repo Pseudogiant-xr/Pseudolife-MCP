@@ -184,6 +184,32 @@ services:
       timeout: 5s
       retries: 5
       start_period: 90s
+    # llama-server args. This REPLACES the image CMD (keep the two lists in
+    # step — ops/Dockerfile.extractor documents each flag; a guard test pins
+    # the match) so the idle-sleep window is tunable via ops/.env without a
+    # rebuild. --sleep-idle-seconds: after that many idle seconds the server
+    # unloads the model and frees its ~7 GB — the sidecar is typically only
+    # the FALLBACK dreamer, so the weights otherwise sit resident against a
+    # rare failure path. GET /health still answers 200 while sleeping without
+    # waking it (the healthcheck above neither breaks nor keeps it awake),
+    # and the next completion request blocks until the model reloads (mmap,
+    # seconds on an SSD — far inside PSEUDOLIFE_DREAM_TIMEOUT_SECONDS), so an
+    # unattended dream sweep that falls back mid-run just waits, it never
+    # errors. Set -1 to keep the model always resident (pre-0.12 behavior).
+    command:
+      - "--model"
+      - "/models/extractor.gguf"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8081"
+      - "--ctx-size"
+      - "8192"
+      - "--jinja"
+      - "--parallel"
+      - "1"
+      - "--sleep-idle-seconds"
+      - "${PSEUDOLIFE_EXTRACTOR_SLEEP_IDLE_SECONDS:-300}"
     # Swap in a different GGUF without a rebuild: put the mount in a
     # machine-local ops/docker-compose.override.yml (gitignored — never
     # reference files here that aren't in the repo, or fresh clones get an

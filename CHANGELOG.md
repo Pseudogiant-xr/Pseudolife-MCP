@@ -6,6 +6,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-08-04 — extractor sidecar unloads its model when idle)
+- **The in-stack extractor sidecar no longer holds its ~7 GB model resident
+  while idle.** `ops/docker-compose.yml` now passes llama-server
+  `--sleep-idle-seconds` (via a `command:` override; knob
+  `PSEUDOLIFE_EXTRACTOR_SLEEP_IDLE_SECONDS`, default 300, `-1` restores
+  always-resident): after the idle window the server unloads the model and
+  drops to a few hundred MB — on shim installs the sidecar is only the
+  *fallback* dreamer, so the weights were the box's largest steady-state
+  resident in service of a rare failure path. Wake is transparent:
+  `/health` answers 200 while sleeping (healthcheck holds, and doesn't keep
+  it awake), and the next completion request blocks until the model
+  reloads, comfortably inside `PSEUDOLIFE_DREAM_TIMEOUT_SECONDS`, so an
+  unattended dream sweep that falls back mid-run waits instead of failing.
+  First fallback dream after a long idle pays the reload (seconds on an
+  SSD). Existing installs pick this up with a config-only recreate of the
+  extractor container (`docker compose ... up -d --no-deps
+  pseudolife-extractor`) — no rebuild. No ladder re-run: the extractor
+  binary, model file, prompts, and sampling are all bit-identical; only the
+  process's idle lifetime changes, and a reload maps the same weights.
+  Compose/Dockerfile arg-list drift is pinned by
+  `tests/test_extractor_idle_sleep.py`.
+
 ### Fixed (2026-08-04 — boot-window memory balloon: no model load before storage connects)
 - **`MemoryService._ensure_init` no longer re-loads the embedding model on
   failed init retries.** While Postgres was in crash-recovery after machine

@@ -144,6 +144,19 @@ the default was chosen (even the smallest bake, Gemma 4 E2B, beats
 naive-RAG at ~40× fewer tokens/query); see
 [`evals/README.md`](../../evals/README.md).
 
+The sidecar **unloads its model when idle**: after 5 minutes without a
+request (llama-server `--sleep-idle-seconds`, tunable via
+`PSEUDOLIFE_EXTRACTOR_SLEEP_IDLE_SECONDS` in `ops/.env`, `-1` = always
+resident) the server frees the ~7 GB of weights and drops to a few hundred
+MB. This matters most on shim installs where the sidecar is only the
+*fallback* dreamer and would otherwise hold that memory around the clock
+against a rare failure path. Waking is transparent and needs no operator:
+`/health` keeps answering while asleep, and the next dream call simply
+blocks while the model reloads (seconds on an SSD) — comfortably inside
+`PSEUDOLIFE_DREAM_TIMEOUT_SECONDS`, so an unattended sweep that falls back
+mid-run waits instead of failing. The first fallback dream after a long
+idle is a little slower; nothing else changes.
+
 ## Upgrading the extractor — bigger local models
 
 If you have a GPU (or a beefier box on your LAN), any OpenAI-compatible
