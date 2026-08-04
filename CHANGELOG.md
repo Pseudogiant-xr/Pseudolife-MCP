@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-08-04 — boot-window memory balloon: no model load before storage connects)
+- **`MemoryService._ensure_init` no longer re-loads the embedding model on
+  failed init retries.** While Postgres was in crash-recovery after machine
+  boot (~3 minutes), every incoming API/MCP call retried the whole lazy init;
+  the embedder was constructed *before* the storage connect, so each retry
+  loaded a fresh ~2.4 GB Qwen3-Embedding-0.6B and then failed on the
+  connect — 12 loads in the 2026-08-04 incident window ballooned the daemon
+  to 21.2 GB RSS (31.5 GB cgroup peak) and nearly OOMed the host, with the
+  dead copies stuck in torch module reference cycles. Storage now connects
+  first (a down database costs a fast connect error, never a model load) and
+  an embedder built by a partially-successful attempt is reused by the next
+  attempt. Regression-pinned by `tests/test_init_retry_model_reuse.py`;
+  reproduced pre-fix as a +2.35 GB/request RSS staircase against an
+  unreachable-DB container.
+
 ### Added (2026-08-04 — Console Dreamer card: one-click dreamer model switching)
 - **`memory.dream.extractor_model_override`** — a model-only override for
   the primary extractor, applied by `resolve_endpoints` *after*
