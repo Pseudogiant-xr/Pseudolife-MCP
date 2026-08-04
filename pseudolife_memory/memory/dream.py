@@ -157,6 +157,34 @@ _SYSTEM_PROMPT = (
 # artifact + gate.
 
 
+# Events-only prompt for the SEPARATE extraction pass (design doc
+# 2026-08-04-separate-pass-events-design.md): the claims call runs
+# _SYSTEM_PROMPT byte-identically, so events cannot tax claim quality —
+# the v7 combined prompt measured -0.053 (p 0.011) on claims for exactly
+# that reason and never shipped. Pinned byte-identical to the measured
+# artifact evals/prompts/events_pass_v1.txt (test_events_pass.py); edit
+# only through a new measured artifact + gate. Language carries over the
+# v7 events section's phrasing, which produced well-formed blocks in
+# both serving smokes.
+_EVENTS_SYSTEM_PROMPT = (
+    "You extract EVENTS from numbered notes — dated occurrences (a trip "
+    "taken, a purchase, an adoption, a start or an end), not standing "
+    'facts. Return JSON: {"events":[{"description":..,"actor":..,'
+    '"date":"YYYY-MM-DD","date_phrase":<the note\'s own words about '
+    'when>,"source":<number of the note>}]}. Resolve date from dates '
+    "written in the note (including a leading [date] stamp); exact "
+    "calendar days only — when the note's words cannot pin an exact "
+    "day, set date to null and keep date_phrase verbatim. Never invent "
+    "a date. For example, the note [7] [2023/05/14 (Sun) 10:02] user: "
+    "we finally adopted the kitten yesterday! — yields the single event "
+    '{"description":"adopted a kitten","actor":"user",'
+    '"date":"2023-05-13","date_phrase":"yesterday","source":7} inside '
+    "the one events array. Skip standing facts, opinions, and "
+    "narrative; extract each real occurrence once. Return "
+    '{"events":[]} if nothing qualifies.'
+)
+
+
 def _vocab_hint(vocab: list[str]) -> str:
     if not vocab:
         return ""
@@ -631,6 +659,49 @@ class OpenAICompatExtractor:
                 claim["source"] = idx
             claims.append(claim)
         return claims + events
+
+    def extract_events(self, texts: list[str]) -> list[dict]:
+        """The separate events pass: same endpoint and numbered-notes
+        message, events-only system prompt (``_EVENTS_SYSTEM_PROMPT``),
+        parsed by :func:`events_from_parsed`. Raises
+        :class:`ExtractorError` on failure — the caller treats that as
+        non-fatal (events are additive enrichment; claims must commit)."""
+        import json
+        import urllib.request
+
+        texts = [t for t in (texts or []) if t]
+        if not texts:
+            return []
+        headers = {"content-type": "application/json"}
+        if self.api_key:
+            headers["authorization"] = f"Bearer {self.api_key}"
+        try:
+            body = json.dumps({
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": _EVENTS_SYSTEM_PROMPT},
+                    {"role": "user", "content": "\n\n".join(
+                        f"[{i + 1}] {t}" for i, t in enumerate(texts))},
+                ],
+                "response_format": {"type": "json_object"},
+                "max_tokens": self.max_tokens,
+                "temperature": 0,
+                "chat_template_kwargs": {"enable_thinking": False},
+            }).encode()
+            req = urllib.request.Request(
+                f"{self.base_url}/chat/completions", data=body,
+                headers=headers, method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                data = json.loads(resp.read().decode())
+            content = data["choices"][0]["message"]["content"] or ""
+            s, e = content.find("{"), content.rfind("}")
+            if s != -1 and e > s:
+                content = content[s:e + 1]
+            parsed = json.loads(content)
+        except Exception as exc:  # noqa: BLE001
+            raise ExtractorError(f"events pass failed: {exc}") from exc
+        return events_from_parsed(parsed, len(texts))
 
     def extract_lessons(self, signals: list[dict]) -> list[LessonClaim]:
         """Synthesise procedural lessons from outcome signals via the same
