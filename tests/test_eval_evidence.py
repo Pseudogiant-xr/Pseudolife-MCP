@@ -668,6 +668,62 @@ CLAIMS.append(Claim(
     stated=0.0, places=4))
 
 
+EV2 = RESULTS + "compare-ev2-{}-pairs.json"
+EV2_SUMMARY = RESULTS + "longmemeval-all-oracle-qwen-27b-ev2-sep-0804.summary.json"
+# ── the separate-pass events gate result (2026-08-05) ────────────────────
+# The CHANGELOG states all four preregistered gates pass; the two controls
+# (rag, claims-inertness) at exactly zero are what license reading the
+# hybrid_ev deltas as event effects, so they pin at 4 places.
+CLAIMS.append(Claim(
+    id="ev2-rag-control", doc=CHANGELOG,
+    needle="delta 0.000, 0 flips over 500 questions vs the independent",
+    artifacts=(EV2.format("rag-control"),),
+    value=lambda d: d["paired"]["a_vs_b"]["rag_vs_rag"]["delta"],
+    stated=0.0, places=4))
+CLAIMS.append(Claim(
+    id="ev2-claims-inertness", doc=CHANGELOG,
+    needle="hybrid at delta 0.000 with 0 flips over all 500",
+    artifacts=(EV2.format("claims-inertness"),),
+    value=lambda d: d["paired"]["a_vs_b"]["hybrid_vs_hybrid"]["delta"],
+    stated=0.0, places=4))
+CLAIMS.append(Claim(
+    id="ev2-weak-delta", doc=CHANGELOG,
+    needle="hybrid by +0.056 (p 0.00450,",
+    artifacts=(EV2.format("weak-primary"),),
+    value=lambda d: d["paired"]["a_vs_b"]["hybrid_ev_vs_hybrid"]["delta"],
+    stated=0.056, places=3))
+CLAIMS.append(Claim(
+    id="ev2-weak-p", doc=CHANGELOG,
+    needle="20 wins / 5 losses), concentrated",
+    artifacts=(EV2.format("weak-primary"),),
+    value=lambda d: d["paired"]["a_vs_b"]["hybrid_ev_vs_hybrid"]["p"],
+    stated=0.00450, places=5))
+CLAIMS.append(Claim(
+    id="ev2-strong-delta", doc=CHANGELOG,
+    needle="non-inferiority (n=234): delta 0.000 with 0 flips",
+    artifacts=(EV2.format("strong-noninferiority"),),
+    value=lambda d: d["paired"]["a_vs_b"]["hybrid_ev_vs_hybrid"]["delta"],
+    stated=0.0, places=4))
+CLAIMS.append(Claim(
+    id="ev2-tr-hybrid-ev", doc=CHANGELOG,
+    needle="temporal-reasoning 0.534 to 0.624",
+    artifacts=(EV2_SUMMARY,),
+    value=lambda d: d["types"]["temporal-reasoning"]["arms"]["hybrid_ev"],
+    stated=0.624, places=3))
+CLAIMS.append(Claim(
+    id="ev2-tr-hybrid", doc=CHANGELOG,
+    needle="temporal-reasoning 0.534 to 0.624",
+    artifacts=(EV2_SUMMARY,),
+    value=lambda d: d["types"]["temporal-reasoning"]["arms"]["hybrid"],
+    stated=0.534, places=3))
+CLAIMS.append(Claim(
+    id="ev2-ms-hybrid-ev", doc=CHANGELOG,
+    needle="multi-session 0.383 to 0.406",
+    artifacts=(EV2_SUMMARY,),
+    value=lambda d: d["types"]["multi-session"]["arms"]["hybrid_ev"],
+    stated=0.406, places=3))
+
+
 def test_every_published_number_names_a_committed_artifact():
     """A claim whose evidence is untracked cannot be checked by a reader.
 
