@@ -39,7 +39,7 @@
 #   weights, so they are unreachable at runtime. Bump to >=5.5 as soon as
 #   optimum-onnx supports transformers 5.x.
 aiohappyeyeballs==2.6.2
-aiohttp==3.14.1
+aiohttp==3.14.3
 aiosignal==1.4.0
 annotated-doc==0.0.4
 annotated-types==0.7.0
