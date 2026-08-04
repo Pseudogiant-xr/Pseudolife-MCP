@@ -58,15 +58,21 @@ def test_resolve_endpoints_bad_mode_falls_back_to_auto(monkeypatch):
 class _HealthHandler(http.server.BaseHTTPRequestHandler):
     health_status = 200   # per-subclass override
     models_status = 200
+    # Shim-shaped /models listing: launch model first, aliases after.
+    models_body = (b'{"object":"list","data":[{"id":"claude-opus-5"},'
+                   b'{"id":"extractor"},{"id":"bench"}]}')
 
     def do_GET(self):  # noqa: N802
-        status = (type(self).health_status if self.path == "/health"
-                  else type(self).models_status if self.path.endswith("/models")
-                  else 404)
+        if self.path.endswith("/models"):
+            status, body = type(self).models_status, type(self).models_body
+        elif self.path == "/health":
+            status, body = type(self).health_status, b"{}"
+        else:
+            status, body = 404, b"{}"
         self.send_response(status)
-        self.send_header("content-length", "2")
+        self.send_header("content-length", str(len(body)))
         self.end_headers()
-        self.wfile.write(b"{}")
+        self.wfile.write(body)
 
     def log_message(self, *a):
         pass
@@ -393,6 +399,71 @@ def test_config_io_has_model_override_knob():
     for m in ("claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5",
               "claude-fable-5"):
         assert m in knob["suggestions"]
+
+
+# ── served-model alias resolution (dreamer-card follow-up) ───────────────
+
+def test_fetch_served_model_returns_first_listing():
+    from pseudolife_memory.memory import dream as d
+    d._served_model_cache.clear()
+    with _health_server() as base:
+        assert d.fetch_served_model(base) == "claude-opus-5"
+
+
+def test_fetch_served_model_caches_within_ttl():
+    # Status is polled by the console and session hooks — the TTL cache
+    # bounds the cost to one small GET per endpoint per window.
+    from pseudolife_memory.memory import dream as d
+    d._served_model_cache.clear()
+    with _health_server() as base:
+        assert d.fetch_served_model(base) == "claude-opus-5"
+    # Server is gone; the cached verdict still answers inside the TTL.
+    assert d.fetch_served_model(base) == "claude-opus-5"
+
+
+def test_fetch_served_model_failure_is_none():
+    from pseudolife_memory.memory import dream as d
+    d._served_model_cache.clear()
+    assert d.fetch_served_model("http://127.0.0.1:9/v1", timeout=0.3) is None
+
+
+def test_status_resolves_alias_to_served_model(monkeypatch):
+    from pseudolife_memory.memory import dream as d
+    monkeypatch.setattr(d, "probe_endpoint", lambda *a, **k: True)
+    monkeypatch.setattr(d, "fetch_served_model",
+                        lambda *a, **k: "claude-opus-5")
+    cfg = _cfg("http://p:1/v1", fb="http://f:2/v1")
+    cfg.extractor_model = "extractor"          # launch-default alias
+    fields = d._status_extractor_fields(cfg, None)
+    assert fields["primary_model_served"] == "claude-opus-5"
+
+
+def test_status_skips_resolution_for_concrete_model(monkeypatch):
+    from pseudolife_memory.memory import dream as d
+    monkeypatch.setattr(d, "probe_endpoint", lambda *a, **k: True)
+
+    def _boom(*a, **k):
+        raise AssertionError("no /models fetch for a concrete model name")
+    monkeypatch.setattr(d, "fetch_served_model", _boom)
+    fields = d._status_extractor_fields(
+        _cfg("http://p:1/v1", fb="http://f:2/v1"), None)   # model "m"
+    assert fields["primary_model_served"] is None
+
+
+def test_status_skips_resolution_when_override_set(monkeypatch):
+    # An override IS the concrete model — the alias never reaches the wire.
+    from pseudolife_memory.memory import dream as d
+    monkeypatch.setattr(d, "probe_endpoint", lambda *a, **k: True)
+
+    def _boom(*a, **k):
+        raise AssertionError("no /models fetch when the override decides")
+    monkeypatch.setattr(d, "fetch_served_model", _boom)
+    cfg = _cfg("http://p:1/v1", fb="http://f:2/v1")
+    cfg.extractor_model = "extractor"
+    cfg.extractor_model_override = "claude-fable-5"
+    fields = d._status_extractor_fields(cfg, None)
+    assert fields["primary_model_served"] is None
+    assert fields["primary_model"] == "claude-fable-5"
 
 
 # ── console schema entries ────────────────────────────────────────────────

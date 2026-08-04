@@ -991,6 +991,45 @@ def startup_extractor_warnings(cfg) -> list[str]:
 # Seconds between the two probe attempts in auto mode (tests zero this).
 _probe_retry_delay = 2.0
 
+# Launch-default alias names the Claude shim resolves to its own launch
+# model (claude_shim.resolve_model): a status display showing one of these
+# hides which model actually serves, so dream_status resolves the alias via
+# the endpoint's /models listing (first entry = the shim's launch model;
+# llama-server lists its --alias, which for the sidecar IS "extractor").
+_ALIAS_MODEL_NAMES = ("extractor", "bench")
+# base_url -> (served model id | None, monotonic stamp). Status is polled by
+# the console and session hooks; the TTL bounds cost to one small GET per
+# endpoint per window, and failures are cached too so a down endpoint can't
+# stall every poll for the full timeout (the 2026-07-19 shim-health lesson).
+_served_model_cache: dict[str, tuple[str | None, float]] = {}
+_SERVED_MODEL_TTL = 300.0
+
+
+def fetch_served_model(base_url: str, timeout: float = 1.5) -> str | None:
+    """First model id from ``GET {base_url}/models`` — the concrete model a
+    launch-default alias resolves to. ``None`` on any failure (unresolved is
+    a display degradation, never an error)."""
+    import json
+    import time
+    import urllib.request
+
+    now = time.monotonic()
+    hit = _served_model_cache.get(base_url)
+    if hit and now - hit[1] < _SERVED_MODEL_TTL:
+        return hit[0]
+    served: str | None = None
+    try:
+        url = f"{base_url.rstrip('/')}/models"
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8", "replace"))
+        entries = data.get("data") or []
+        if entries and isinstance(entries[0], dict) and entries[0].get("id"):
+            served = str(entries[0]["id"])
+    except Exception:  # noqa: BLE001 — connection refused, timeout, bad JSON
+        served = None
+    _served_model_cache[base_url] = (served, now)
+    return served
+
 
 def _probe_primary(url: str) -> bool:
     """Probe with ONE retry: the first probe after a daemon container restart
@@ -1045,10 +1084,16 @@ def _status_extractor_fields(cfg, last_dream_extractor) -> dict:
     single-extractor deploy pays no probe cost on a status poll."""
     r = resolve_endpoints(cfg)
     has_fallback = bool(r["fallback_url"] and r["fallback_model"])
+    # Resolve a launch-default alias to the endpoint's concrete model; a
+    # concrete name (including any override) needs no wire trip.
+    served = (fetch_served_model(r["primary_url"])
+              if r["primary_url"] and r["primary_model"] in _ALIAS_MODEL_NAMES
+              else None)
     return {
         "extractor_mode": r["mode"],
         "primary_url": r["primary_url"],
         "primary_model": r["primary_model"],
+        "primary_model_served": served,
         "fallback_url": r["fallback_url"] if has_fallback else None,
         "fallback_model": r["fallback_model"] if has_fallback else None,
         "extractor_source": getattr(cfg, "extractor_source", "env"),

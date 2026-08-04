@@ -60,11 +60,19 @@ export async function renderConsole(root, ctx) {
 function dreamerCard() {
   if (!dream || !dream.primary_url) return null;
   const override = dream.model_override || null;
+  // A launch-default alias ("extractor"/"bench") hides the real model; the
+  // daemon resolves it from the endpoint's /v1/models. Show the concrete
+  // model and keep the alias in the tooltip.
+  const served = dream.primary_model_served;
+  const aliasResolved = served && served !== dream.primary_model;
   const chips = [
-    el("span", { class: "chip", title: "effective primary endpoint → model" },
+    el("span", { class: "chip", title: aliasResolved
+        ? `configured name "${dream.primary_model}" is a launch-default alias — `
+          + "resolved from the endpoint's /v1/models"
+        : "effective primary endpoint → model" },
       el("span", { class: "k" }, "primary"),
       ` ${dream.primary_url} → `,
-      el("span", { class: "mono" }, dream.primary_model || "?")),
+      el("span", { class: "mono" }, (aliasResolved ? served : dream.primary_model) || "?")),
     healthChip(),
   ];
   if (dream.fallback_url) {
