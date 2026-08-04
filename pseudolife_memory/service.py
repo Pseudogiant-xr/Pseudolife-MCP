@@ -596,7 +596,43 @@ class MemoryService:
         if self._cms is not None:
             return
         logger.info("MemoryService: initialising embedder + CMS (first call).")
-        self._embedder = EmbeddingPipeline(self.config.embedding)
+        # Storage connects BEFORE any model load (2026-08-04 boot balloon):
+        # while Postgres is in crash-recovery after machine boot, every
+        # incoming call retries this whole method, and each retry used to
+        # load a fresh ~2.4 GB embedder before failing on the connect —
+        # a dozen queued retries ballooned the daemon to a 31.5 GB cgroup
+        # peak. A down database must cost a fast connect error, never a
+        # model load.
+        if self._db_url:
+            from pseudolife_memory.storage.postgres import PostgresStorage
+            try:
+                self._storage = PostgresStorage(self._db_url)
+            except RuntimeError as exc:
+                # schema.py's dim-mismatch refusal (schema v25) fires here —
+                # record it for /health, then let it propagate: this call
+                # (and every _ensure_init retry until the bank is migrated)
+                # must still fail loudly, not just silently degrade.
+                self._init_refusal = str(exc)
+                raise
+            self._init_refusal = None
+            logger.info("storage: postgres (%s)",
+                        self._db_url.rsplit("@", 1)[-1])
+            # Invariant: unqualified tables MUST resolve to the real `public`
+            # bank, never the role-named `pseudolife` shadow schema (v0.4
+            # collision fix). PostgresStorage pins this; fail loud if regressed.
+            self._assert_public_search_path()
+            from pseudolife_memory.memory.graph_store import PostgresNetworkxGraphStore
+            self._graph = PostgresNetworkxGraphStore(self._storage)
+            # Identity tier 3: hydrate the active-session pointer left by a
+            # prior process (daemon restart) so tier resolution survives it.
+            raw = self._storage.get_meta(self._ACTIVE_SESSION_META_KEY)
+            if isinstance(raw, dict) and raw.get("session_id"):
+                self._active_session = (str(raw["session_id"]),
+                                         float(raw.get("ts") or 0.0))
+        if self._embedder is None:
+            # Reused across failed attempts: a retry after a mid-init
+            # failure must never rebuild the model (same incident).
+            self._embedder = EmbeddingPipeline(self.config.embedding)
         # Make sure the embedder dim matches the configured memory dim —
         # Qwen3-Embedding-0.6B (the default since embedding-backbone-v25) is
         # 1024-d; all-MiniLM-L6-v2 is 384-d. Whatever model is configured,
@@ -624,32 +660,6 @@ class MemoryService:
             fusion_weight=self.config.memory.reranker.fusion_weight,
             top_n=self.config.memory.reranker.top_n,
         )
-        if self._db_url:
-            from pseudolife_memory.storage.postgres import PostgresStorage
-            try:
-                self._storage = PostgresStorage(self._db_url)
-            except RuntimeError as exc:
-                # schema.py's dim-mismatch refusal (schema v25) fires here —
-                # record it for /health, then let it propagate: this call
-                # (and every _ensure_init retry until the bank is migrated)
-                # must still fail loudly, not just silently degrade.
-                self._init_refusal = str(exc)
-                raise
-            self._init_refusal = None
-            logger.info("storage: postgres (%s)",
-                        self._db_url.rsplit("@", 1)[-1])
-            # Invariant: unqualified tables MUST resolve to the real `public`
-            # bank, never the role-named `pseudolife` shadow schema (v0.4
-            # collision fix). PostgresStorage pins this; fail loud if regressed.
-            self._assert_public_search_path()
-            from pseudolife_memory.memory.graph_store import PostgresNetworkxGraphStore
-            self._graph = PostgresNetworkxGraphStore(self._storage)
-            # Identity tier 3: hydrate the active-session pointer left by a
-            # prior process (daemon restart) so tier resolution survives it.
-            raw = self._storage.get_meta(self._ACTIVE_SESSION_META_KEY)
-            if isinstance(raw, dict) and raw.get("session_id"):
-                self._active_session = (str(raw["session_id"]),
-                                         float(raw.get("ts") or 0.0))
         self._cms = ContinuumMemorySystem(
             self.config.memory,
             reference_bank=self._reference,
