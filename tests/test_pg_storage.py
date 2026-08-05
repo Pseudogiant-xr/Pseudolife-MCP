@@ -208,6 +208,52 @@ def test_failed_mutation_does_not_poison_connection(storage):
     assert eid > 0
 
 
+def _edge_origin(storage, src, relation, dst):
+    return storage.conn.execute(
+        "SELECT origin FROM edges WHERE src_id = %s AND relation = %s "
+        "AND dst_id = %s", (src, relation, dst)).fetchone()[0]
+
+
+def test_upsert_edge_origin_sticky_by_rank(storage):
+    """Origin is sticky by rank (user > action > agent): a dream re-assertion
+    (origin='agent') must not downgrade an edge a human blessed (origin='user'
+    via bless_edge) or a review verdict accepted (origin='action') — a
+    downgrade lets rescore_edges recompute the confidence from names and
+    dubious_edges re-flag a human-settled edge."""
+    src = storage.ensure_entity("origin-src")
+    dst = storage.ensure_entity("origin-dst")
+
+    # Dream plants the edge, human blesses it, dream re-extracts the triple.
+    storage.upsert_edge(src, "uses", dst, confidence=0.6, origin="agent")
+    assert storage.bless_edge(src, "uses", dst) is True
+    storage.upsert_edge(src, "uses", dst, confidence=0.6, origin="agent",
+                        revive=False)
+    assert _edge_origin(storage, src, "uses", dst) == "user"
+
+    # Same for an accepted proposal (origin='action').
+    dst2 = storage.ensure_entity("origin-dst2")
+    storage.upsert_edge(src, "uses", dst2, confidence=0.7, origin="action")
+    storage.upsert_edge(src, "uses", dst2, confidence=0.6, origin="agent",
+                        revive=False)
+    assert _edge_origin(storage, src, "uses", dst2) == "action"
+
+
+def test_upsert_edge_origin_upgrades_and_omitted_keep_working(storage):
+    """Rank stickiness must not break the pre-existing semantics: an omitted
+    origin keeps the stored one, and a higher-ranked assertion still wins."""
+    src = storage.ensure_entity("origin-up-src")
+    dst = storage.ensure_entity("origin-up-dst")
+
+    storage.upsert_edge(src, "uses", dst, origin="agent")
+    storage.upsert_edge(src, "uses", dst)  # origin omitted keeps 'agent'
+    assert _edge_origin(storage, src, "uses", dst) == "agent"
+
+    storage.upsert_edge(src, "uses", dst, origin="action")
+    assert _edge_origin(storage, src, "uses", dst) == "action"
+    storage.upsert_edge(src, "uses", dst, origin="user")
+    assert _edge_origin(storage, src, "uses", dst) == "user"
+
+
 def test_merge_entity_stale_from_id_is_a_noop_not_a_merge(storage):
     """Three mutual duplicates a<b<c generate pairwise folds (b,a), (c,a),
     (c,b) under the "higher id into lower" tie-break exact_duplicate_pairs

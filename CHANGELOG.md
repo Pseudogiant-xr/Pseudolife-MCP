@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-08-05 — edge origin sticky by rank)
+- **A dream re-assertion no longer downgrades a human-settled edge origin.**
+  `upsert_edge`'s conflict clause took any non-null incoming origin verbatim,
+  so the dream re-extracting an existing triple (`origin="agent"`) overwrote
+  an edge blessed to `origin='user'` (`graph_bless_edge`) or confirmed as
+  `origin='action'` (accepted review verdict) — after which the next apply's
+  name-based `rescore_edges` recomputed its confidence and `dubious_edges`
+  re-flagged the settled edge. Origin is now sticky by rank
+  (user > action > agent): a lower-ranked re-assertion keeps the stored
+  origin, upgrades and omitted-origin re-assertions behave as before.
+
 ### Changed (2026-08-05 — deep dream review autonomy)
 - **The review queue no longer manufactures work a reviewer must undo.**
   Five mechanical fixes derived from the 2026-08-05 full-queue triage
