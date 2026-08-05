@@ -91,3 +91,57 @@ def test_mismatched_qids_use_intersection(tmp_path):
     out = compare_arms.compare(a, b, draws=100, seed=0)
     assert out["n"] == 1
     assert out["dropped_a"] == 1 and out["dropped_b"] == 1
+
+
+# ── score metric (BEAM rows: float rubric means, no _correct booleans) ───
+
+def _beam_row(chat_id, qtype, index, **scores):
+    return {
+        "chat_id": chat_id, "type": qtype, "index": index,
+        **{f"{arm}_score": v for arm, v in scores.items()},
+    }
+
+
+def test_score_metric_pairs_beam_rows_by_chat_type_index(tmp_path):
+    rows_a = [_beam_row("1", "event_ordering", i,
+                        rag=0.5, cortex=0.0, hybrid=0.5, hybrid_ev=1.0)
+              for i in range(4)]
+    rows_b = [_beam_row("1", "event_ordering", i,
+                        rag=0.5, cortex=0.0, hybrid=0.5, hybrid_ev=0.5)
+              for i in range(4)]
+    a = _write(tmp_path / "a.jsonl", rows_a)
+    b = _write(tmp_path / "b.jsonl", rows_b)
+    out = compare_arms.compare(a, b, draws=1000, seed=0, metric="score")
+    assert out["n"] == 4                      # keyed without question_id
+    assert out["paired"]["a_vs_b"]["rag"]["delta"] == 0.0
+    assert out["paired"]["a_vs_b"]["rag"]["p"] == 1.0
+    pa = out["paired"]["a_vs_b"]["hybrid_ev"]
+    assert pa["delta"] == 0.5
+    assert pa["wins"] == 4 and pa["losses"] == 0
+    # cascade is an LME accuracy derivation; score mode must not emit it
+    assert "cascade" not in out["paired"]["a_vs_b"]
+
+
+def test_score_metric_half_point_deltas_and_signs(tmp_path):
+    # 0.5-step float deltas survive rounding, and a loss counts by sign.
+    rows_a = [_beam_row("2", "summarization", 0, hybrid=1.0, hybrid_ev=0.5),
+              _beam_row("2", "summarization", 1, hybrid=0.0, hybrid_ev=1.0)]
+    a = _write(tmp_path / "ab.jsonl", rows_a)
+    out = compare_arms.compare(a, a, draws=1000, seed=0, metric="score",
+                               arm_pairs=[("hybrid_ev", "hybrid")])
+    pa = out["paired"]["a_vs_b"]["hybrid_ev_vs_hybrid"]
+    assert pa["delta"] == 0.25                # (-0.5 + 1.0) / 2
+    assert pa["wins"] == 1 and pa["losses"] == 1
+    assert pa["win_qids"] == ["2/summarization/1"]
+    assert pa["loss_qids"] == ["2/summarization/0"]
+
+
+def test_score_metric_types_filter_reads_beam_type_field(tmp_path):
+    rows = [_beam_row("1", "event_ordering", 0, hybrid=0.0, hybrid_ev=1.0),
+            _beam_row("1", "abstention", 0, hybrid=1.0, hybrid_ev=1.0)]
+    a = _write(tmp_path / "t.jsonl", rows)
+    out = compare_arms.compare(a, a, draws=100, seed=0, metric="score",
+                               types=("event_ordering",),
+                               arm_pairs=[("hybrid_ev", "hybrid")])
+    assert out["n"] == 1
+    assert out["paired"]["a_vs_b"]["hybrid_ev_vs_hybrid"]["delta"] == 1.0

@@ -107,3 +107,55 @@ and their tests.
   time.
 - No supersession/dedup logic beyond the existing exact match.
 - No production default flip inside this change.
+
+## 2026-08-06 amendment: the deferred BEAM re-run (preregistered before any GPU run)
+
+The Phase 2 design deferred its BEAM gate; with the four LME gates passed
+(`evals/results/ev2-separate-pass-verdict.json`), this amendment closes that
+debt. Motivation baseline: the committed `beam100k-qwen-0802` run, where
+hybrid collapses on exactly the abilities events target — event_ordering
+0.13, summarization 0.24, contradiction_resolution 0.28 (float means;
+`evals/results/beam-100K-qwen-27b-beam100k-qwen-0802.jsonl`).
+
+Run: BEAM 100K tier, all 20 chats / 400 questions, `--extractor qwen-27b`,
+`--chronicle`, tag `beam100k-ev-0806`, reproducible q8_0 judge
+(`Start-Qwen`, never `-Fast`). The adapter gains `--chronicle` (sets the
+LME `CHRONICLE` context flag + `svc.config.memory.dream.chronicle` per
+chat service) and answers/judges the `hybrid_ev` arm beside the three
+existing arms. `compare_arms.py` gains a `--metric score` mode (BEAM rows
+carry per-question float rubric means, not `_correct` booleans; the
+sign-flip permutation applies unchanged to float deltas, wins/losses =
+sign counts) and BEAM row keying (`chat_id/type/index` when
+`question_id` is absent).
+
+Gates, in order (1–2 are validity; a failure invalidates 3–4):
+
+1. **rag control** — rag vs the `beam100k-qwen-0802` rag, all 400 shared
+   questions, `--metric score`: delta exactly 0. Nonzero = pipeline or
+   judge drift; run invalid.
+2. **claims-inertness** — this run's vanilla hybrid vs the 0802 hybrid:
+   delta exactly 0. The events pass runs during ingestion; the claims
+   bank and its retrieval must be untouched, as measured on LME.
+3. **primary** — hybrid_ev vs same-run hybrid on `event_ordering`
+   (n=40, baseline 0.13), paired sign-flip permutation 10k/seed 0:
+   improvement with p < 0.05. Secondary (reported, not gating):
+   summarization, contradiction_resolution, temporal_reasoning deltas.
+4. **non-inferiority** — hybrid_ev vs same-run hybrid pooled over all
+   remaining abilities: no regression beyond 0.02 mean score.
+
+Ship rule: this run cannot flip any default (that decision belongs to the
+live soak review, task #36). It exists to back or bound the event_ordering
+claim on a second benchmark: 4/4 pass ⇒ the BEAM weak-ability claim in the
+docs gains its events counterpoint with `test_eval_evidence.py` rows;
+gate 3 fails with 1–2 passing ⇒ recorded as an honest negative — BEAM
+event ordering needs answer-time synthesis, not just served blocks (the
+already-named next experiment). Verdict either way:
+`evals/results/beam-ev-verdict.json`. Never overwrite any
+`beam100k-qwen-0802` artifact.
+
+Power note, stated up front: n=40 per ability. A sign test needs roughly
+6+ net wins to clear p<0.05, i.e. a real per-question effect on ~15% of
+event_ordering rows. The LME temporal-reasoning effect was that large
+(+0.090 on n=133 with events served on 71% of rows); if BEAM serving
+rates are much lower, an underpowered null is the honest expected
+outcome and will be recorded as such, not spun.
