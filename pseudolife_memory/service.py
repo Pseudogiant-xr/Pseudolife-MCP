@@ -3090,6 +3090,18 @@ class MemoryService:
                 new_emb = self._embedder.encode([d for _, d in new_items])
                 ex_emb = self._embedder.encode([d for _, d in ex_items])
                 sims = new_emb @ ex_emb.T          # encode() normalizes
+                # Fold direction is evidence-ranked like _propose_write_dedup:
+                # the thin side folds into the evidence-bearing side. Filing
+                # (new, existing) verbatim made the reviewer's only accept
+                # fold rich standing entities into just-minted shells
+                # (29 wrong-direction proposals, 2026-08-05 triage).
+                from pseudolife_memory.graph import degree_counts
+                deg = degree_counts(self._storage.load_graph()["edges"])
+                fct = self._storage.entity_fact_counts()
+
+                def _evidence(eid: int) -> int:
+                    return deg.get(eid, 0) + fct.get(eid, 0)
+
                 now = _t.time()
                 for i, (_, disp) in enumerate(new_items):
                     j = int(sims[i].argmax())
@@ -3106,8 +3118,11 @@ class MemoryService:
                     b = self._resolve_or_create_entity(target)
                     if a["id"] == b["id"]:
                         continue                    # already aliased/merged
+                    frm, into = a["id"], b["id"]
+                    if _evidence(frm) > _evidence(into):
+                        frm, into = into, frm
                     if self._storage.insert_entity_proposal(
-                            "merge", a["id"], b["id"], round(score, 3),
+                            "merge", frm, into, round(score, 3),
                             f"dream-alias: {disp!r} ~ {target!r} "
                             f"(cosine {score:.2f})", now) is not None:
                         filed += 1
@@ -4828,6 +4843,11 @@ class MemoryService:
     # Phase 2 — knowledge graph (Postgres mode only)
     # ------------------------------------------------------------------
 
+    # Confidence floor for an edge a reviewer accepted: above graph_review's
+    # _DUBIOUS_CONF (0.6) so a settled verdict leaves the queue, below the
+    # human bless tier (0.8).
+    _REVIEWED_EDGE_MIN_CONF = 0.7
+
     _GRAPH_UNAVAILABLE = {
         "error": "graph_requires_postgres",
         "hint": "The graph lives in Postgres — set PSEUDOLIFE_MCP_DATABASE_URL "
@@ -5815,11 +5835,16 @@ class MemoryService:
                     "detail": "pre-apply graph snapshot could not be written; nothing changed"}
         import time as _t
         superseded = merged = merge_proposed = junk_proposed = 0
+        junk_deleted = scoped = 0
         with self._lock:
             # Writes apply against the snapshot read above; like the dream's
             # graph-relation extraction, a concurrent edit between the two lock
             # windows is tolerated — supersede/merge/rescore are no-ops on a row
             # that has since changed.
+            # Entities removed by this apply (merged-away or junk-deleted):
+            # later steps must not reference their ids — entity_sources and
+            # entity_proposals FK-cascade with the row.
+            dropped: set[int] = set()
             for eid, conf in rescore:
                 self._storage.set_edge_confidence(eid, conf)
             if cfg.auto_apply_safe:
@@ -5829,15 +5854,77 @@ class MemoryService:
                 for frm, into in dups:
                     if self._storage.merge_entity(frm, into):
                         merged += 1
-            # Non-destructive: populate the review queue regardless of auto_apply_safe.
-            for m in merge_cands:
-                if self._storage.insert_entity_proposal(
-                        "merge", m["from_id"], m["into_id"], m["similarity"], m["reason"], _t.time()) is not None:
-                    merge_proposed += 1
+                        dropped.add(frm)
+            # Junk auto-apply: a flagged entity with no edges and at most the
+            # one fact slot it was minted from carries no structure a wrong
+            # deletion could lose (the node re-mints on next mention; the
+            # snapshot above is the undo). Anything evidence-bearing stays a
+            # proposal for review — 68 of 70 junk verdicts on 2026-08-05 were
+            # mechanical accepts of exactly the guard-passing class. Runs
+            # BEFORE the merge-proposal inserts so a proposal never lands on
+            # an id this pass is about to delete.
+            from pseudolife_memory.graph import degree_counts as _dc
+            deg = _dc(edges)
+            now = _t.time()
             for j in junk:
                 if self._storage.insert_entity_proposal(
                         "junk", j["entity_id"], None, None, j["reason"], _t.time()) is not None:
                     junk_proposed += 1
+            disp_by_id = {e["id"]: e["display"] for e in entities}
+            for p in self._storage.pending_entity_proposals():
+                if p.get("kind") != "junk":
+                    continue
+                eid = p["entity_id"]
+                if deg.get(eid, 0) > 0 or fact_counts.get(eid, 0) > 1:
+                    continue
+                if self._storage.delete_entity(eid):
+                    # The proposal row CASCADEs away with the entity, so the
+                    # denormalized merge_decisions row (no FK) is the only
+                    # durable record of an unattended deletion.
+                    self._storage.record_merge_decision(
+                        p["id"], disp_by_id.get(eid, p.get("entity") or "?"),
+                        None, "accepted", p.get("score"),
+                        f"junk auto-delete: {p.get('reason')}", "dream-auto",
+                        now)
+                    junk_deleted += 1
+                    dropped.add(eid)
+            # Non-destructive: populate the review queue regardless of auto_apply_safe.
+            for m in merge_cands:
+                if m["from_id"] in dropped or m["into_id"] in dropped:
+                    continue
+                if self._storage.insert_entity_proposal(
+                        "merge", m["from_id"], m["into_id"], m["similarity"], m["reason"], _t.time()) is not None:
+                    merge_proposed += 1
+            # Scope stamping: attribute still-unattributed entities from the
+            # sources of the entries that mention them (the mentions map is
+            # already computed for the context vectors). backfill_entity_
+            # sources only reaches entities with a current fact, which left
+            # 327 entities projectless on 2026-08-05.
+            scopes_cfg = self.config.memory.scopes
+            excl = {str(s).strip().lower() for s in scopes_cfg.exclude}
+            roll = {str(k).strip().lower(): str(v).strip().lower()
+                    for k, v in scopes_cfg.rollup.items()}
+            entry_source = {en["id"]: str(en.get("source") or "")
+                           for en in entries}
+            for e in entities:
+                eid = e["id"]
+                if eid in dropped:
+                    continue                     # deleted this pass; FK is gone
+                if scope_map.get(eid) or not mentions.get(eid):
+                    continue
+                keys: set[str] = set()
+                for entry_id in mentions[eid]:
+                    key = entry_source.get(entry_id, "").strip().lower()
+                    if not key or key in excl:
+                        continue
+                    keys.add(key)
+                    umb = roll.get(key)
+                    if umb and umb != key and umb not in excl:
+                        keys.add(umb)
+                for key in sorted(keys):
+                    self._storage.upsert_entity_source(eid, key, "derived", now)
+                if keys:
+                    scoped += 1
         # Re-read pending merges: the apply loop above may have just inserted
         # fresh proposals the Step-C triage should see in the same response.
         with self._lock:
@@ -5848,7 +5935,8 @@ class MemoryService:
             include_snippets)
         return {"applied": True, "rescored": len(rescore), "superseded": superseded,
                 "merged": merged, "merge_proposed": merge_proposed,
-                "junk_proposed": junk_proposed, "snapshot": snapshot,
+                "junk_proposed": junk_proposed, "junk_deleted": junk_deleted,
+                "scoped": scoped, "snapshot": snapshot,
                 "merge_proposals": merge_proposals,
                 "lesson_duplicates": lesson_dups,
                 "world_duplicates": world_dups,
@@ -6005,8 +6093,14 @@ class MemoryService:
             prop = self._storage.get_proposal(proposal_id)
             if prop is None or prop["status"] != "pending":
                 return {"accepted": False, "reason": "not_pending", "id": proposal_id}
+            # A reviewed edge is no longer dubious: floor its confidence above
+            # the dubious_edges threshold AND store it as a confirming action —
+            # origin "agent" would be recaptured by the next apply's
+            # rescore_edges (pure name-based recompute, e.g. related-to back
+            # to 0.45) and re-flagged, undoing the verdict.
+            conf = max(float(prop["confidence"] or 0.0), self._REVIEWED_EDGE_MIN_CONF)
             self._graph.upsert_edge(prop["src_id"], prop["relation"], prop["dst_id"],
-                                    confidence=prop["confidence"], origin="agent")
+                                    confidence=conf, origin="action")
             self._storage.set_proposal_status(proposal_id, "accepted")
             disp = {e["id"]: e["display"] for e in self._storage.load_graph()["entities"]}
         return {"accepted": True, "src": disp.get(prop["src_id"]),

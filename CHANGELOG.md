@@ -6,6 +6,56 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-08-05 — deep dream review autonomy)
+- **The review queue no longer manufactures work a reviewer must undo.**
+  Five mechanical fixes derived from the 2026-08-05 full-queue triage
+  (~400 findings, ~85% settled mechanically):
+  - *Junk auto-apply with a keep-guard*: `deep_dream(apply=true)` now
+    deletes flagged junk entities that have no edges and at most the one
+    fact slot they were minted from (the pre-apply graph snapshot is the
+    undo; the node re-mints on next mention). Evidence-bearing junk stays
+    a proposal. Each unattended deletion writes a durable
+    `merge_decisions` audit row (`decided_by="dream-auto"`) — the
+    proposal row CASCADEs away with the entity. Response gains
+    `junk_deleted`.
+  - *Mention-derived scope stamping*: the apply pass attributes
+    still-unattributed entities from the sources of their mentioning
+    entries (`memory.scopes` exclude/rollup respected) — the fact-keyed
+    backfill never reached entities without a current fact, which had left
+    327 entities projectless. Response gains `scoped`.
+  - *Dream-echo suppression*: a fact write whose value is a strict
+    compression of the slot's standing value now **confirms** the richer
+    value instead of parking a contender — 4 of 7 contested slots in the
+    audit were the dream re-asserting a terser copy of what the slot
+    already said. Disqualified outright (conflict path preserved): any
+    novel digit-bearing token, a negator on either side ("not deployed"
+    -> "deployed" is an update, not an echo), or fewer than three tokens.
+  - *Evidence-ranked fold direction for dream-alias proposals*:
+    `_propose_dream_alias_candidates` now orders from/into by
+    degree+fact evidence like the write-dedup detector, instead of filing
+    (new, existing) verbatim — 29 proposals in the triage were real
+    duplicates offered in the wrong direction, unactionable by accept.
+  - *Accepted edges leave the dubious queue — and stay out*:
+    `accept_link` floors the edge confidence at 0.7 (above the 0.6
+    dubious threshold) and stores the edge as `origin="action"` (a
+    confirming action), so neither `dubious_edges` nor the next apply's
+    name-based `rescore_edges` (which recomputes every agent edge, e.g.
+    related-to back to 0.45) undoes the verdict.
+- **Slot-duplicate listings stop flagging deliberate structure.**
+  Same-entity lesson/world pairs (aspect siblings: approach vs pitfall vs
+  correction) are held to a 0.95 similarity floor instead of 0.80 — near-
+  verbatim key-mint drift still lists; ordinary siblings (13 of 13 lesson
+  listings in the audit) do not. Identifier-keyed sibling entities
+  (`arxiv:X` vs `arxiv:Y`) are never listed: different identifiers are
+  different referents by construction (15 of 20 world listings).
+- **`memory_graph_review` grows the missing verdict and batch triage.**
+  New `relate` action settles a related-not-duplicate pair (file vs the
+  concept it implements, phase vs programme) by writing the typed edge and
+  dismissing the pair in one call — previously only reachable through the
+  console REST API. The five id-verdict actions accept `proposal_ids` for
+  batch triage (the 2026-08-05 triage took ~470 single calls);
+  JSON-stringified lists from MCP clients are coerced.
+
 ### Measured (2026-08-05 — separate-pass events pass all four preregistered gates)
 - **The separate-pass chronicle design passes its full preregistered gate
   run** (500 questions, 4 judged arms, tag `ev2-sep-0804`; verdict in

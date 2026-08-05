@@ -192,9 +192,39 @@ def candidate_pairs(vectors: dict[int, np.ndarray], edges: list[dict],
 
 # --- Store curation: cross-key near-duplicate slot pairs ----------------------
 
+# Identifier-keyed entity names ("arxiv:2602-05665") — two records whose
+# entities share the prefix but differ in the identifier denote DIFFERENT
+# referents by construction, however similar their values embed (a paper
+# corpus keyed by id fills the listing with same-attribute siblings
+# otherwise; 15 of 20 world listings on 2026-08-05 were exactly this).
+# The suffix must be one whitespace-free token so prose after a colon
+# ("action: rebuild the daemon") never matches.
+_ID_KEYED_ENTITY = re.compile(r"^([A-Za-z][\w.-]*):(\S+)$")
+
+# Same-entity pairs are usually deliberate aspect siblings (approach vs
+# pitfall vs correction on one task) — 13 of 13 such lesson listings on
+# 2026-08-05 were siblings, not duplicates. A near-verbatim value under a
+# second attribute IS the known key-mint-drift failure, so the pair is
+# still listed above this stricter floor rather than exempted outright.
+_SAME_ENTITY_MIN_SIMILARITY = 0.95
+
+
+def _slot_entity(rec: dict, key: str) -> str:
+    ent = rec.get("entity")
+    return str(ent) if ent else key.split("|", 1)[0]
+
+
+def _id_keyed_siblings(ea: str, eb: str) -> bool:
+    ma, mb = _ID_KEYED_ENTITY.match(ea), _ID_KEYED_ENTITY.match(eb)
+    return bool(ma and mb
+                and ma.group(1).casefold() == mb.group(1).casefold()
+                and ma.group(2).casefold() != mb.group(2).casefold())
+
+
 def slot_duplicate_candidates(records: list[dict], *,
                               min_similarity: float = 0.80, top_k: int = 20,
                               dismissed: set[tuple[str, str]] | None = None,
+                              same_entity_min_similarity: float = _SAME_ENTITY_MIN_SIMILARITY,
                               ) -> list[dict]:
     """Cross-key near-duplicate pairs in a slot-keyed store (lessons / world
     facts) — the store-curation REVIEW candidates. Slot supersession dedups
@@ -204,6 +234,10 @@ def slot_duplicate_candidates(records: list[dict], *,
     records' own embeddings, floor + top-k, human-dismissed pairs skipped.
     Listing-only — settling (forget / re-key / dismiss) stays with the
     reviewer; nothing is deleted here.
+
+    Same-entity pairs (aspect siblings) are held to
+    ``same_entity_min_similarity``; identifier-keyed sibling entities
+    (``arxiv:X`` vs ``arxiv:Y``) are never listed.
 
     Each record: ``{"key": <norm slot key>, "embedding": vector | None,
     ...label fields}``. Records without embeddings (legacy rows) are skipped.
@@ -225,8 +259,13 @@ def slot_duplicate_candidates(records: list[dict], *,
                 continue
             if dismissed and (ka, kb) in dismissed:
                 continue
+            ea = _slot_entity(recs[i], recs[i]["key"]).strip().casefold()
+            eb = _slot_entity(recs[j], recs[j]["key"]).strip().casefold()
+            if _id_keyed_siblings(ea, eb):
+                continue                       # distinct identifiers, never dups
             sim = float(np.dot(vecs[i], vecs[j]))
-            if sim < min_similarity:
+            floor = same_entity_min_similarity if ea == eb else min_similarity
+            if sim < floor:
                 continue
             a, b = ((recs[i], recs[j]) if recs[i]["key"] == ka
                     else (recs[j], recs[i]))

@@ -213,6 +213,70 @@ def test_graph_review_dismiss_pair_routes_to_service(tmp_path: Path, monkeypatch
     assert calls == [("dismiss", "accept-link", "reject-merge")]
 
 
+def test_graph_review_relate_writes_edge_and_dismisses_pair(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    # The third verdict on a duplicate pair: related, neither merge nor
+    # unrelated. One call writes the typed edge AND retires the pair.
+    mod = _reload(tmp_path, monkeypatch)
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        mod.service, "graph_relate",
+        lambda src, relation, dst, origin=None: calls.append(
+            ("relate", src, relation, dst, origin)) or {
+                "src": src, "relation": relation, "dst": dst})
+    monkeypatch.setattr(
+        mod.service, "graph_dismiss_duplicate",
+        lambda a, b: calls.append(("dismiss", a, b)) or {"dismissed": True})
+    out = _invoke("memory_graph_review",
+                  {"action": "relate", "src": "cortex.py",
+                   "relation": "part-of", "dst": "Cortex"})
+    assert out["pair_dismissed"] is True and out["relation"] == "part-of"
+    assert calls == [("relate", "cortex.py", "part-of", "Cortex", "agent"),
+                     ("dismiss", "cortex.py", "Cortex")]
+    # unknown relation: error propagates, pair NOT dismissed
+    calls.clear()
+    monkeypatch.setattr(
+        mod.service, "graph_relate",
+        lambda src, relation, dst, origin=None: {"error": "unknown_relation"})
+    out = _invoke("memory_graph_review",
+                  {"action": "relate", "src": "a", "relation": "zzz", "dst": "b"})
+    assert out.get("error") == "unknown_relation" and calls == []
+    assert mod.memory_graph_review(
+        "relate", src="a", dst="b").get("error") == "src_relation_dst_required"
+
+
+def test_graph_review_batch_verdicts(tmp_path: Path, monkeypatch) -> None:
+    # Agent triage settles hundreds of proposals; proposal_ids batches them
+    # in one call. A JSON-stringified list (MCP clients stringify untyped
+    # list params) must coerce, and not_pending ids don't count as settled.
+    mod = _reload(tmp_path, monkeypatch)
+    seen: list[int] = []
+
+    def _accept(pid):
+        seen.append(pid)
+        if pid == 13:
+            return {"accepted": False, "reason": "not_pending", "id": pid}
+        return {"accepted": True, "id": pid}
+
+    monkeypatch.setattr(mod.service, "graph_accept_proposal", _accept)
+    out = _invoke("memory_graph_review",
+                  {"action": "accept_link", "proposal_ids": [11, 12, 13]})
+    assert seen == [11, 12, 13]
+    assert out["settled"] == 2 and len(out["results"]) == 3
+    seen.clear()
+    out = mod.memory_graph_review("accept_link", proposal_ids="[21, 22]")
+    assert seen == [21, 22] and out["settled"] == 2
+    # reject handlers report {"rejected": False} for a stale id (e.g. one
+    # the deep dream's junk auto-delete already cascaded away) with no
+    # error/reason keys — that must not count as settled.
+    monkeypatch.setattr(
+        mod.service, "graph_reject_proposal",
+        lambda pid: {"rejected": pid != 30, "id": pid})
+    out = mod.memory_graph_review("reject_link", proposal_ids=[30, 31])
+    assert out["settled"] == 1
+
+
 def test_dream_deep_routes_snippets_param(tmp_path: Path, monkeypatch) -> None:
     mod = _reload(tmp_path, monkeypatch)
     calls: list[dict] = []
@@ -275,7 +339,11 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # Bumped again 2026-07-31: memory_set_add's description gained the
     # aggregate-conversion-guard contract (number-led scalars park as a
     # contender instead of converting), already trimmed to its minimum.
-    budgets = {"minimal": 4800, "core": 10250, "full": 16250}
+    # Full bumped 2026-08-05: memory_graph_review gained the relate verdict
+    # and proposal_ids batching; 16250 left zero headroom after trimming.
+    # Full tier is opt-in (sessions start minimal/core), so it carries the
+    # slack; the default surfaces stay tight.
+    budgets = {"minimal": 4800, "core": 10250, "full": 17000}
     for tier, cap in budgets.items():
         total = sum(sizes[n] for n in mod._visible_tool_names(tier))
         assert total <= cap, f"{tier} manifest {total} chars exceeds {cap}"
