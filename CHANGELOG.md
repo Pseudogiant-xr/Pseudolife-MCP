@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Measured (2026-08-05 — echo suppression is ladder-neutral; deployed)
+- **The dream-write-path change in the review-autonomy work (echo
+  suppression) re-ran the extraction ladder and is verdict-neutral.**
+  Paired arms on the same reproducible Qwen-27B server, pre-merge master
+  (`a6b9a7b7`) vs merged master (`b7934184`): `qwen-27b` rung
+  gold_recoverable 1.0 / stale_leak 0.0 / 4.5 tokens-per-query on **both**
+  arms; `floor` rung 0.1 / 0.1 / 3.4 on both arms. Artifacts:
+  `evals/results/{floor,qwen-27b}-pr104-{pre,post}.json`. Deployed to the
+  live daemon via `ops/update.ps1` (rollback tag
+  `0.12.0-pre-dream-autonomy`); live verification exercised the new
+  paths end-to-end — batch verdicts (`settled: 0` on stale ids), the
+  `relate` verdict, and a full deep-dream apply that scope-stamped 192
+  previously unattributed entities and filed 4 junk proposals, all
+  correctly guard-kept.
+
 ### Changed (2026-08-05 — deep dream review autonomy)
 - **The review queue no longer manufactures work a reviewer must undo.**
   Five mechanical fixes derived from the 2026-08-05 full-queue triage
