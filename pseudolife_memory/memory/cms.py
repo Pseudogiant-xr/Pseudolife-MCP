@@ -78,6 +78,26 @@ def has_temporal_cue(text: str) -> bool:
     return bool(_TEMPORAL_CUE_RE.search(text or ""))
 
 
+# Aggregation cues (2026-08-06-aggregation-serving-design.md): a SEPARATE
+# predicate, deliberately not a widening of _TEMPORAL_CUE_RE — that regex
+# also fires the timeline channel, which failed its gates and measured
+# harmful on spurious firing. This one only widens chronicle-event
+# serving, which measured harmless-when-present (ev2 gate 4). Bare
+# "total"/"count"/"all the" are omitted as too frequent outside counting
+# questions.
+_AGGREGATION_CUE_RE = re.compile(
+    r"\b(how many|how much|how often|what percentage|in total|"
+    r"total number|altogether|each time|every time)\b",
+    re.IGNORECASE,
+)
+
+
+def has_aggregation_cue(text: str) -> bool:
+    """True when ``text`` asks for a count/amount over occurrences — the
+    trigger for full-list (uncapped-to-30) chronicle event serving."""
+    return bool(_AGGREGATION_CUE_RE.search(text or ""))
+
+
 # Saved-state schema versions. Bump when the on-disk layout changes in a
 # way the loader needs to branch on.
 #

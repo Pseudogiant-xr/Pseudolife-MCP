@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-06 — aggregation-cued event serving: counting needs the whole list)
+- **Chronicle events now also serve on aggregation cues** ("how many /
+  how much / how often / what percentage / in total / total number /
+  altogether / each time / every time" — `has_aggregation_cue`, a
+  predicate deliberately separate from `_TEMPORAL_CUE_RE`, which also
+  fires the gate-failed timeline channel and must not widen). On an
+  aggregation-cued query the serve cap rises from 6 to 30 (a count over
+  a capped prefix is wrong by construction) and the search result
+  carries `events_total` — a computed property of the served list, not
+  a claimed answer. Temporal-only queries are byte-identical to before
+  (same gate, same limit-6 prefix under the same ordering). Motivation
+  is the `ev2-sep-0804` multi-session autopsy: 116/133 multi-session
+  questions are aggregation-cued and the old gate served events on only
+  21 of them, while rag led hybrid_ev 0.517 to 0.405 exactly there.
+  Dead code while `memory.dream.chronicle` is off (the default);
+  preregistered gates in
+  `docs/superpowers/specs/2026-08-06-aggregation-serving-design.md`.
+
 ### Fixed (2026-08-05 — edge origin sticky by rank)
 - **A dream re-assertion no longer downgrades a human-settled edge origin.**
   `upsert_edge`'s conflict clause took any non-null incoming origin verbatim,
