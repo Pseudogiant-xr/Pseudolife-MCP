@@ -6,6 +6,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Measured (2026-08-05 — separate-pass events pass all four preregistered gates)
+- **The separate-pass chronicle design passes its full preregistered gate
+  run** (500 questions, 4 judged arms, tag `ev2-sep-0804`; verdict in
+  `evals/results/ev2-separate-pass-verdict.json`). Gate 1, rag control:
+  delta 0.000, 0 flips over 500 questions vs the independent
+  `aggp1-variants-0803` run. Gate 2, the claims-inertness tripwire this
+  design exists to pass: the vanilla hybrid arm reproduces the
+  `aggp1-variants-0803` hybrid at delta 0.000 with 0 flips over all 500
+  questions — a fresh extraction with the events pass added leaves the
+  claims bank verdict-for-verdict identical, eliminating the v7 inline
+  design's -0.053 claims tax by construction and by measurement. Gate 3,
+  weak-set primary (multi-session + temporal-reasoning, n=266): serving
+  events lifts hybrid_ev over the same-run hybrid by +0.056 (p 0.00450,
+  20 wins / 5 losses), concentrated where the design aimed —
+  temporal-reasoning 0.534 to 0.624, multi-session 0.383 to 0.406.
+  Gate 4, strong-set non-inferiority (n=234): delta 0.000 with 0 flips,
+  despite events being served on 22 strong-set questions — harmless when
+  present, not merely absent. `memory.dream.chronicle` remains
+  default-off in this change; flipping the default is a separate,
+  human-gated decision.
+
 ### Changed (2026-08-04 — extractor sidecar unloads its model when idle)
 - **The in-stack extractor sidecar no longer holds its ~7 GB model resident
   while idle.** `ops/docker-compose.yml` now passes llama-server

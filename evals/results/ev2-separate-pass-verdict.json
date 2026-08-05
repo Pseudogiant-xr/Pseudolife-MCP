@@ -1,0 +1,53 @@
+{
+  "verdict": "Separate-pass event extraction PASSES all four preregistered gates. The claims call runs the shipped v5 prompt untouched and reproduces the aggp1 baseline with exactly zero flips over all 500 questions, so the claims tax that sank the v7 inline design is a measured zero, not an assumption. Serving the resulting chronicle events lifts the weak set +0.056 (p 0.0045), concentrated exactly where the design aimed: temporal-reasoning +0.090. The strong set is untouched despite events being served on 22 of its questions. Ship candidate; default-on is a separate PR and a human decision.",
+  "date": "2026-08-05",
+  "preregistration": "docs/superpowers/specs/2026-08-04-separate-pass-events-design.md",
+  "run": {
+    "command": "python evals/longmemeval_bench.py --dataset oracle --extractor qwen-27b --types all --chronicle --tag ev2-sep-0804 (preceded by an 8-question temporal-reasoning smoke, tag ev2-smoke-0804, validated 8/8 rows with events served on 7 before the full run launched)",
+    "questions": 500,
+    "arms_judged": ["rag", "cortex", "hybrid", "hybrid_ev"],
+    "design": "two extractor calls per dream batch: claims via the shipped v5 prompt byte-identically (NO --system-prompt-file), events via their own events-only prompt (evals/prompts/events_pass_v1.txt, extract_events). hybrid_ev = the vanilla hybrid context plus a cue-gated chronicle block rendered from the same pinned search call that feeds the rag control, so all arm deltas are paired within-question.",
+    "commit": "ce78a53e (feat/separate-pass-events, PR #97)",
+    "answer_judge": "qwen3.6-27b on the reproducible q8_0 server (evals/qwen_server.ps1 Start-Qwen; never -Fast for judged output)",
+    "artifacts": [
+      "evals/results/longmemeval-all-oracle-qwen-27b-ev2-sep-0804.jsonl",
+      "evals/results/longmemeval-all-oracle-qwen-27b-ev2-sep-0804.summary.json",
+      "evals/results/longmemeval-tr-oracle-qwen-27b-ev2-smoke-0804.jsonl",
+      "evals/results/compare-ev2-rag-control-pairs.json",
+      "evals/results/compare-ev2-claims-inertness-pairs.json",
+      "evals/results/compare-ev2-weak-primary-pairs.json",
+      "evals/results/compare-ev2-strong-noninferiority-pairs.json"
+    ]
+  },
+  "controls": {
+    "rag_control": "rag vs rag against the independent aggp1-variants-0803 run: 0.688 = 0.688, delta 0.000, 0 wins / 0 losses over all 500 shared questions (compare-ev2-rag-control-pairs.json) — zero measurement noise on the reproducible server; every other delta in this file sits on an exact-zero floor",
+    "claims_inertness_tripwire": "hybrid vs the aggp1-variants-0803 hybrid: 0.664 = 0.664, delta 0.000, 0 wins / 0 losses over all 500 questions (compare-ev2-claims-inertness-pairs.json). This is the gate the whole design exists to pass: a fresh extraction with the events pass ADDED reproduces the baseline claims bank verdict-for-verdict, proving the separate pass costs the claims path nothing — the v7 inline design's measured -0.053 claims tax is eliminated by construction and confirmed by measurement",
+    "chronicle_hygiene": "bench reset truncates chronicle_events per question (evals/ladder_sweep.py _ALL_TABLES, regression-locked after the ev-weak contamination); the smoke stage additionally verified per-question event scoping before the full run launched"
+  },
+  "gates": {
+    "gate_1_rag_control": {
+      "definition": "rag arm vs the aggp1-variants-0803 rag arm must be exactly 0 flips; nonzero invalidates the run",
+      "result": {"delta": 0.0, "wins": 0, "losses": 0, "gate": "PASS"}
+    },
+    "gate_2_claims_inertness": {
+      "definition": "this run's vanilla hybrid vs the aggp1-variants-0803 hybrid must be exactly 0 flips over all 500 questions; nonzero means the events pass perturbed the claims path and invalidates the run",
+      "result": {"a": 0.664, "b": 0.664, "delta": 0.0, "wins": 0, "losses": 0, "gate": "PASS"}
+    },
+    "gate_3_weak_primary": {
+      "definition": "hybrid_ev vs same-run hybrid on multi-session + temporal-reasoning (n=266), paired sign-flip permutation, 10k draws, seed 0; ship requires improvement with p < 0.05",
+      "result": {"hybrid_ev": 0.515, "hybrid": 0.4586, "delta": 0.0564, "p": 0.0045, "wins": 20, "losses": 5, "gate": "PASS"}
+    },
+    "gate_4_strong_noninferiority": {
+      "definition": "hybrid_ev vs same-run hybrid on knowledge-update + the three single-session types (n=234); ship requires no regression beyond margin 0.02",
+      "result": {"hybrid_ev": 0.8974, "hybrid": 0.8974, "delta": 0.0, "wins": 0, "losses": 0, "gate": "PASS"}
+    }
+  },
+  "reading": {
+    "per_type": "temporal-reasoning 0.534 -> 0.624 (+0.090, events served on 94/133 questions); multi-session 0.383 -> 0.406 (+0.023, served 23/133); all four strong types identical to vanilla hybrid",
+    "strong_set_is_served_but_harmless": "events were served on 22 strong-set questions (knowledge-update 12/78, single-session-user 10/70; the cue gate never fired on assistant/preference) and not one verdict moved in either direction — the pass is 'harmless when present', not merely 'absent', which is the stronger form of the non-inferiority claim",
+    "vs_the_inline_v7_design": "the v7 inline design bought a similar event signal by rewriting the claims prompt and paid -0.053 on claims quality for it (agg-recall weak-gate FAIL). Separating the passes keeps the entire event win and pays zero: same bank, same claims verdicts, +0.056 weak-set on top",
+    "loss_qids": "5 weak-set losses (see compare-ev2-weak-primary-pairs.json loss_qids) vs 20 wins; no loss cluster by type",
+    "cost": "one extra extractor call per dream batch, charged only when chronicle is on; run wall-clock ~5.2h for 500 questions x 4 judged arms including both extractor passes"
+  },
+  "decision": "All four gates pass; the separate-pass design is the ship candidate for chronicle event extraction (PR #97). Chronicle remains default-off in this PR; flipping the default is a separate PR gated on a human decision, per the preregistration."
+}
