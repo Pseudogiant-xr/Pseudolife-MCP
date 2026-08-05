@@ -1,0 +1,49 @@
+{
+  "n": 40,
+  "dropped_a": 360,
+  "dropped_b": 360,
+  "draws": 10000,
+  "seed": 0,
+  "a": {
+    "file": "evals/results/beam-100K-qwen-27b-beam100k-ev-0806.jsonl",
+    "arms": {
+      "hybrid_ev": 0.1254
+    }
+  },
+  "b": {
+    "file": "evals/results/beam-100K-qwen-27b-beam100k-ev-0806.jsonl",
+    "arms": {
+      "hybrid": 0.1413
+    }
+  },
+  "paired": {
+    "a_vs_b": {
+      "hybrid_ev_vs_hybrid": {
+        "delta": -0.0158,
+        "p": 0.6847,
+        "wins": 4,
+        "losses": 8,
+        "win_qids": [
+          "13/event_ordering/1",
+          "20/event_ordering/0",
+          "20/event_ordering/1",
+          "6/event_ordering/0"
+        ],
+        "loss_qids": [
+          "10/event_ordering/1",
+          "11/event_ordering/0",
+          "13/event_ordering/0",
+          "14/event_ordering/0",
+          "14/event_ordering/1",
+          "16/event_ordering/1",
+          "7/event_ordering/0",
+          "7/event_ordering/1"
+        ]
+      }
+    }
+  },
+  "metric": "score",
+  "types": [
+    "event_ordering"
+  ]
+}

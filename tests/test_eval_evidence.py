@@ -716,6 +716,59 @@ CLAIMS.append(Claim(
     artifacts=(EV2_SUMMARY,),
     value=lambda d: d["types"]["temporal-reasoning"]["arms"]["hybrid"],
     stated=0.534, places=3))
+
+# ── BEAM chronicle re-run (beam100k-ev-0806): honest negative, recorded ──
+BEAMEV = RESULTS + "compare-beam-ev-{}-pairs.json"
+BEAMEV_SUMMARY = RESULTS + "beam-100K-qwen-27b-beam100k-ev-0806.summary.json"
+
+CLAIMS.append(Claim(
+    id="beamev-rag-control", doc=CHANGELOG,
+    needle="delta exactly 0 over 400 questions, 0/0 flips",
+    artifacts=(BEAMEV.format("rag-control"),),
+    value=lambda d: d["paired"]["a_vs_b"]["rag_vs_rag"]["delta"],
+    stated=0.0, places=4))
+CLAIMS.append(Claim(
+    id="beamev-claims-inertness-delta", doc=CHANGELOG,
+    needle="missed its exact-zero bar at −0.002 (p 0.83,",
+    artifacts=(BEAMEV.format("claims-inertness"),),
+    value=lambda d: d["paired"]["a_vs_b"]["hybrid_vs_hybrid"]["delta"],
+    stated=-0.002, places=3))
+CLAIMS.append(Claim(
+    id="beamev-claims-inertness-p", doc=CHANGELOG,
+    needle="19W/18L)",
+    artifacts=(BEAMEV.format("claims-inertness"),),
+    value=lambda d: d["paired"]["a_vs_b"]["hybrid_vs_hybrid"]["p"],
+    stated=0.8305, places=4))
+CLAIMS.append(Claim(
+    id="beamev-primary-delta", doc=CHANGELOG,
+    needle="event_ordering gate FAILED (−0.016, p 0.68)",
+    artifacts=(BEAMEV.format("primary"),),
+    value=lambda d: d["paired"]["a_vs_b"]["hybrid_ev_vs_hybrid"]["delta"],
+    stated=-0.016, places=3))
+CLAIMS.append(Claim(
+    id="beamev-noninf-delta", doc=CHANGELOG,
+    needle="+0.020 pooled over the 9",
+    artifacts=(BEAMEV.format("strong-noninferiority"),),
+    value=lambda d: d["paired"]["a_vs_b"]["hybrid_ev_vs_hybrid"]["delta"],
+    stated=0.020, places=3))
+CLAIMS.append(Claim(
+    id="beamev-noninf-p", doc=CHANGELOG,
+    needle="remaining abilities (p 0.023), driven by temporal_reasoning",
+    artifacts=(BEAMEV.format("strong-noninferiority"),),
+    value=lambda d: d["paired"]["a_vs_b"]["hybrid_ev_vs_hybrid"]["p"],
+    stated=0.0233, places=4))
+CLAIMS.append(Claim(
+    id="beamev-tr-hybrid", doc=CHANGELOG,
+    needle="0.4625 → 0.6188 (+0.156, served on 32/40 rows)",
+    artifacts=(BEAMEV_SUMMARY,),
+    value=lambda d: d["types"]["temporal_reasoning"]["hybrid"],
+    stated=0.4625, places=4))
+CLAIMS.append(Claim(
+    id="beamev-tr-hybrid-ev", doc=CHANGELOG,
+    needle="0.4625 → 0.6188 (+0.156, served on 32/40 rows)",
+    artifacts=(BEAMEV_SUMMARY,),
+    value=lambda d: d["types"]["temporal_reasoning"]["hybrid_ev"],
+    stated=0.6188, places=4))
 CLAIMS.append(Claim(
     id="ev2-ms-hybrid-ev", doc=CHANGELOG,
     needle="multi-session 0.383 to 0.406",

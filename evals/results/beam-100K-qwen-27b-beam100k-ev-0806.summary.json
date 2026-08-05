@@ -1,0 +1,98 @@
+{
+  "benchmark": "BEAM",
+  "tier": "100K",
+  "extractor": "qwen-27b",
+  "n_questions": 400,
+  "n_chats": 20,
+  "scoring_note": "paper-faithful float mean; _intfaithful mirrors upstream int() flooring of 0.5",
+  "arms": {
+    "rag": {
+      "score": 0.4808,
+      "score_intfaithful": 0.4693
+    },
+    "cortex": {
+      "score": 0.2619,
+      "score_intfaithful": 0.2503
+    },
+    "hybrid": {
+      "score": 0.4618,
+      "score_intfaithful": 0.448
+    },
+    "hybrid_ev": {
+      "score": 0.478,
+      "score_intfaithful": 0.4641
+    }
+  },
+  "types": {
+    "abstention": {
+      "n": 40,
+      "rag": 0.75,
+      "cortex": 0.95,
+      "hybrid": 0.725,
+      "hybrid_ev": 0.725
+    },
+    "contradiction_resolution": {
+      "n": 40,
+      "rag": 0.2938,
+      "cortex": 0.1094,
+      "hybrid": 0.2906,
+      "hybrid_ev": 0.3094
+    },
+    "event_ordering": {
+      "n": 40,
+      "rag": 0.2265,
+      "cortex": 0.0631,
+      "hybrid": 0.1413,
+      "hybrid_ev": 0.1254
+    },
+    "information_extraction": {
+      "n": 40,
+      "rag": 0.6146,
+      "cortex": 0.2458,
+      "hybrid": 0.6271,
+      "hybrid_ev": 0.5979
+    },
+    "instruction_following": {
+      "n": 40,
+      "rag": 0.5,
+      "cortex": 0.1875,
+      "hybrid": 0.5563,
+      "hybrid_ev": 0.5625
+    },
+    "knowledge_update": {
+      "n": 40,
+      "rag": 0.45,
+      "cortex": 0.275,
+      "hybrid": 0.425,
+      "hybrid_ev": 0.45
+    },
+    "multi_session_reasoning": {
+      "n": 40,
+      "rag": 0.4647,
+      "cortex": 0.2365,
+      "hybrid": 0.4559,
+      "hybrid_ev": 0.4496
+    },
+    "preference_following": {
+      "n": 40,
+      "rag": 0.7312,
+      "cortex": 0.3438,
+      "hybrid": 0.7063,
+      "hybrid_ev": 0.7063
+    },
+    "summarization": {
+      "n": 40,
+      "rag": 0.2525,
+      "cortex": 0.1327,
+      "hybrid": 0.228,
+      "hybrid_ev": 0.2355
+    },
+    "temporal_reasoning": {
+      "n": 40,
+      "rag": 0.525,
+      "cortex": 0.075,
+      "hybrid": 0.4625,
+      "hybrid_ev": 0.6188
+    }
+  }
+}

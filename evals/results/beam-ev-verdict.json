@@ -1,0 +1,69 @@
+{
+ "verdict": "BEAM chronicle re-run: 2 of 4 preregistered gates pass; recorded as an honest negative on the primary claim per the preregistered ship rule. Gate 1 (rag control) is an exact zero over all 400 questions, revalidating cross-run judge/answerer reproducibility four days apart. Gate 2 (claims-inertness) misses its exact-zero bar: the vanilla hybrid arm differs from the 0802 baseline by -0.002 pooled (p 0.83, 19W/18L) because the claims bank itself rebuilt differently on ~11 of 20 chats. Forensics attribute this to request-stream-composition nondeterminism of the shared llama-server, not to any events->claims code path: (a) 1 of 400 rag responses also changed under byte-identical inputs (the same noise floor in isolation, score unchanged), (b) per-chat dream counts are identical everywhere and claim COUNTS differ on only 4 chats while claim content diverged wider (extraction flips cascade within a chat through supersession), and (c) the same code measured exactly zero claims flips over 500 LME questions (ev2-separate-pass-verdict.json). Per the preregistration gates 1-2 are validity gates, so gates 3-4 lose confirmatory status and are reported as within-run (internally paired, same bank) exploratory readings. Gate 3 (primary, event_ordering n=40): -0.016, p 0.68 - and NOT the anticipated underpowered-unserved null: events were served on 23/40 event_ordering rows and netted -0.633 rubric points on those rows. Raw dated event blocks do not solve BEAM event ordering even when present; answer-time ordering synthesis is the already-named next experiment. Gate 4 (non-inferiority, 9 pooled abilities n=360): +0.020 (p 0.023), passing the -0.02 margin with a nominally positive delta driven by temporal_reasoning +0.156 (0.4625 -> 0.6188, served on 32/40 rows, +6.25 net points) - the LME temporal-reasoning effect replicating in direction and concentration on a second benchmark, recorded here as exploratory because gate 2 failed. No docs claim changes; the chronicle default decision stays with the live soak review.",
+ "date": "2026-08-06",
+ "preregistration": "docs/superpowers/specs/2026-08-04-separate-pass-events-design.md (2026-08-06 amendment: the deferred BEAM re-run)",
+ "run": {
+  "command": "python evals/beam_adapter.py --tier 100K --extractor qwen-27b --chronicle --tag beam100k-ev-0806 (preceded by a chat-1 smoke validating 20/20 rows, events_inserted=1, events_pass_failures=0)",
+  "chats": 20,
+  "questions": 400,
+  "arms_judged": ["rag", "cortex", "hybrid", "hybrid_ev"],
+  "metric": "score (BEAM per-question float rubric means; compare_arms --metric score, sign-flip permutation 10k draws seed 0)",
+  "judge": "reproducible stock q8_0 llama-server via Start-Qwen (never -Fast)",
+  "commit": "stage 1 executed the working tree that became 187c945e (committed mid-run at 00:41; process start 00:37); smoke ran at 4ed0addf state. The delta between the two is the aggregation-cued serving feature, which is behavior-preserving for the hybrid_ev arm by the bench-side reconstruction gate (events shown only on a temporal cue, first 6 - pinned by tests/test_lme_chronicle.py::test_hybrid_ev_reconstructs_old_gate_on_agg_only_query and ::test_hybrid_ev_truncates_to_six_on_temporal_query; beam_adapter builds contexts via lme.build_contexts).",
+  "baseline": "evals/results/beam-100K-qwen-27b-beam100k-qwen-0802.jsonl (never overwritten)",
+  "rows": "evals/results/beam-100K-qwen-27b-beam100k-ev-0806.jsonl",
+  "summary": "evals/results/beam-100K-qwen-27b-beam100k-ev-0806.summary.json",
+  "events_inserted_total": 888,
+  "events_pass_failures": 2,
+  "served_rate_proxy": "118/400 rows overall have hybrid_ev_response != hybrid_response (deterministic answerer makes response inequality a faithful proxy for an events block being present); temporal_reasoning 32/40, event_ordering 23/40"
+ },
+ "gates": [
+  {
+   "gate": 1,
+   "name": "rag control (validity)",
+   "prereg": "rag vs beam100k-qwen-0802 rag, all 400 questions, delta exactly 0",
+   "measured": {"a": 0.481, "b": 0.481, "delta": 0.0, "p": 1.0, "wins_losses": "0/0", "n": 400},
+   "artifact": "evals/results/compare-beam-ev-rag-control-pairs.json",
+   "result": "PASS (exact)"
+  },
+  {
+   "gate": 2,
+   "name": "claims-inertness (validity)",
+   "prereg": "this run's vanilla hybrid vs the 0802 hybrid, delta exactly 0",
+   "measured": {"a": 0.462, "b": 0.463, "delta": -0.002, "p": 0.8305, "wins_losses": "19/18", "n": 400},
+   "artifact": "evals/results/compare-beam-ev-claims-inertness-pairs.json",
+   "result": "FAIL (bounded at noise)",
+   "forensics": {
+    "hybrid_responses_differ": "146/400 across chats 3,5,6,7,8,9,11,12,13,17,19,20",
+    "cortex_responses_differ": "71/400 (the fact bank itself diverged, not retrieval)",
+    "rag_responses_differ": "1/400 (byte-identical inputs; score unchanged; the server's cross-run noise floor when the surrounding request stream differs)",
+    "per_chat_claim_counts": "identical on 16/20 chats; differ on chats 3 (57->55), 8 (129->131), 9 (70->75), 11 (169->175); dream counts identical on all 20",
+    "mechanism": "the events pass changes the ingestion request stream; at a ~0.25%-per-call flip rate over ~200 long-generation claims calls a handful of extraction calls flipped, and each flip cascades within its chat through sequential supersession. The run cannot distinguish stream-composition sensitivity from generic cross-run BEAM nondeterminism (no chronicle-off BEAM re-run replicate exists); neither is a claims-path code interference - the construction is byte-identical by design and measured exactly zero over 500 LME questions (ev2-separate-pass-verdict.json)."
+   }
+  },
+  {
+   "gate": 3,
+   "name": "primary: event_ordering (confirmatory status lost to gate 2; reported within-run)",
+   "prereg": "hybrid_ev vs same-run hybrid on event_ordering (n=40, 0802 baseline 0.13), improvement with p < 0.05",
+   "measured": {"a": 0.125, "b": 0.141, "delta": -0.016, "p": 0.6847, "wins_losses": "4/8", "n": 40},
+   "artifact": "evals/results/compare-beam-ev-primary-pairs.json",
+   "result": "FAIL",
+   "reading": "Served-but-unhelpful, not the anticipated underpowered-unserved null: events present on 23/40 rows, net -0.633 rubric points on served rows. BEAM event ordering needs answer-time ordering synthesis over the block, not the raw block.",
+   "secondary_reported_not_gating": {
+    "summarization": {"hybrid": 0.228, "hybrid_ev": 0.2355, "delta": 0.0075},
+    "contradiction_resolution": {"hybrid": 0.2906, "hybrid_ev": 0.3094, "delta": 0.0188},
+    "temporal_reasoning": {"hybrid": 0.4625, "hybrid_ev": 0.6188, "delta": 0.1563}
+   }
+  },
+  {
+   "gate": 4,
+   "name": "non-inferiority: pooled remaining abilities (confirmatory status lost to gate 2; reported within-run)",
+   "prereg": "hybrid_ev vs same-run hybrid pooled over all 9 non-event_ordering abilities, no regression beyond 0.02 mean score",
+   "measured": {"a": 0.517, "b": 0.497, "delta": 0.02, "p": 0.0233, "wins_losses": "16/4", "n": 360},
+   "artifact": "evals/results/compare-beam-ev-strong-noninferiority-pairs.json",
+   "result": "PASS (nominally positive)",
+   "reading": "Driven by temporal_reasoning +0.156 (served 32/40, +6.25 net rubric points on served rows) - the LME tr effect (+0.090 on n=133) replicating in direction and concentration on a second benchmark. Exploratory under the preregistered validity rule; a future preregistered run may promote it."
+  }
+ ],
+ "decision": "Per the preregistered ship rule (gate 3 fails => recorded as an honest negative): no docs claim gains the events counterpoint; the BEAM weak-ability claim stands unmodified; chronicle stays opt-in and the default-on decision remains with the live soak review (2026-08-12). Follow-up candidates, in order: (1) answer-time ordering/counting synthesis over served events (the aggserve-0806 run's syn arm tests the counting half on LME the same day), (2) a chronicle-off BEAM re-run replicate if cross-run inertness at exact-zero ever needs to be a load-bearing claim on BEAM - LME already carries that claim at n=500."
+}
