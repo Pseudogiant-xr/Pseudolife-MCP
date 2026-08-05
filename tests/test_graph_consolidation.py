@@ -464,3 +464,47 @@ def test_slot_duplicate_candidates_orders_and_caps():
         (c["similarity"] for c in out), reverse=True)
     capped = gc.slot_duplicate_candidates(recs, min_similarity=0.85, top_k=1)
     assert len(capped) == 1 and capped[0]["similarity"] == 1.0
+
+
+def test_slot_duplicate_candidates_holds_same_entity_pairs_to_higher_floor():
+    # Aspect siblings (one task, approach vs pitfall) embed close but are
+    # deliberate structure, not duplicates — below the same-entity floor they
+    # must not be listed even though they clear min_similarity.
+    siblings = [
+        _slot_rec("deploy-daemon|approach", "deploy daemon", "approach",
+                  "backup first, then rebuild", _vec(1, 0.35)),
+        _slot_rec("deploy-daemon|pitfall", "deploy daemon", "pitfall",
+                  "never compose down -v", _vec(1, 0)),   # sim ~0.94
+    ]
+    assert gc.slot_duplicate_candidates(siblings, min_similarity=0.80) == []
+    # A near-verbatim value under a second attribute (key-mint drift) still
+    # clears the stricter floor and is listed.
+    drift = [
+        _slot_rec("deploy-daemon|approach", "deploy daemon", "approach",
+                  "backup first, then rebuild", _vec(1, 0)),
+        _slot_rec("deploy-daemon|correction", "deploy daemon", "correction",
+                  "backup first, then rebuild.", _vec(1, 0.05)),  # sim ~0.999
+    ]
+    out = gc.slot_duplicate_candidates(drift, min_similarity=0.80)
+    assert [(c["a_key"], c["b_key"]) for c in out] == [
+        ("deploy-daemon|approach", "deploy-daemon|correction")]
+
+
+def test_slot_duplicate_candidates_skips_id_keyed_sibling_entities():
+    # Two records keyed by different identifiers under one prefix are
+    # different referents by construction (arxiv:X vs arxiv:Y) — never
+    # listed, even at similarity 1.0. A non-id cross-entity pair at the
+    # same similarity is the control and still lists.
+    recs = [
+        _slot_rec("arxiv:2602-05665|relevance", "arxiv:2602-05665",
+                  "relevance", "graph memory survey", _vec(1, 0)),
+        _slot_rec("arxiv:2604-12285|relevance", "arxiv:2604-12285",
+                  "relevance", "graph memory hierarchy", _vec(1, 0)),
+        _slot_rec("gam-survey|relevance", "gam survey", "relevance",
+                  "graph memory survey notes", _vec(1, 0)),
+    ]
+    out = gc.slot_duplicate_candidates(recs, min_similarity=0.80)
+    pairs = {(c["a_key"], c["b_key"]) for c in out}
+    assert ("arxiv:2602-05665|relevance", "arxiv:2604-12285|relevance") not in pairs
+    assert ("arxiv:2602-05665|relevance", "gam-survey|relevance") in pairs
+    assert ("arxiv:2604-12285|relevance", "gam-survey|relevance") in pairs

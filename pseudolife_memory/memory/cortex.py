@@ -74,6 +74,47 @@ def _norm_value(s: str) -> str:
     return (s or "").strip().casefold()
 
 
+_VALUE_TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
+# Fraction of a shorter value's tokens that must already appear in the
+# standing value for the write to count as a re-statement (echo) rather than
+# a conflict. Tuned on the 2026-08-05 contested-slot audit: all four dream
+# echoes clear it, all three genuine conflicts fall below it.
+_ECHO_CONTAINMENT = 0.75
+# A negated value is never judged by token containment: "knob not retired"
+# is built entirely from tokens of "... knob retired ... not yet deployed"
+# yet inverts its meaning, and dropping the "not" from a negated standing
+# value ("not deployed" -> "deployed") inverts it just as silently. Either
+# side carrying a negator routes the write down the normal conflict path
+# (contender), which is only ever the pre-echo behavior.
+_ECHO_NEGATORS = frozenset({"not", "no", "never", "none", "without"})
+# A one- or two-token value ("healthy", "v5 deployed") contains too little
+# signal for containment to distinguish echo from update — such writes also
+# keep the conflict path.
+_ECHO_MIN_TOKENS = 3
+
+
+def _is_compression_echo(new_value: str, cur_value: str) -> bool:
+    """True when ``new_value`` is a strict compression of ``cur_value`` — a
+    shorter re-statement whose tokens are (almost) all already present in the
+    standing value. The dream re-extracting a slot from the same status entry
+    produces exactly this shape, and parking it as a contender manufactures a
+    conflict where there is none. Disqualified outright: a novel digit-bearing
+    token (a changed number, version, or id), a negator on either side, or a
+    new value of fewer than ``_ECHO_MIN_TOKENS`` tokens."""
+    ns, cs = _norm_value(new_value), _norm_value(cur_value)
+    if not ns or len(ns) >= len(cs):
+        return False
+    nt = set(_VALUE_TOKEN_RE.findall(ns))
+    if len(nt) < _ECHO_MIN_TOKENS:
+        return False
+    ct = set(_VALUE_TOKEN_RE.findall(cs))
+    if (nt | ct) & _ECHO_NEGATORS:
+        return False
+    if any(any(ch.isdigit() for ch in tok) for tok in (nt - ct)):
+        return False
+    return len(nt & ct) / len(nt) >= _ECHO_CONTAINMENT
+
+
 # Number-led values ("32", "27 species", "$1,500") — the class the C2-op gate
 # measured being destroyed by scalar->set conversion (evals/results/
 # c2op-gate-verdict.json). Currency sign then optional sign then a digit.
@@ -360,29 +401,19 @@ class CortexStore:
 
         cur = self.records[idx]
         if _norm_value(cur.value) == _norm_value(slot.value):
-            # Same fact reasserted → confirm, never duplicate. Union the support
-            # tier so corroboration (agent guess → user confirm) is recorded, and
-            # let a higher-tier confirmation lift confidence past plain reinforce.
-            cur.last_confirmed = t
-            cur.provenance |= prov
-            if sup:
-                cur.support.add(sup)
-            cur.confidence = min(1.0, max(self._reinforce(cur.confidence), float(confidence)))
-            # Backfill slot_embedding on first confirmation via a caller that supplies
-            # one — covers records auto-promoted (pre-v8) without a slot embedding.
-            if semb is not None and cur.slot_embedding is None:
-                cur.slot_embedding = semb
-            # Re-confirmation advances the ordering clock + last toucher; tx_time
-            # tracks the latest touch. valid_time (when it first became true) is
-            # NOT moved — re-asserting the same value doesn't change when it held.
-            cur.tx_time = txt
-            if hlc is not None:
-                cur.hlc_phys, cur.hlc_logical = hlc
-            if writer_id:
-                cur.writer_id = writer_id
-            if session_id:
-                cur.session_id = session_id
-            return WriteResult("confirmed", cur)
+            # Same fact reasserted → confirm, never duplicate.
+            return self._confirm(cur, prov, sup, confidence, t, txt, hlc,
+                                 writer_id, session_id, semb)
+
+        if _is_compression_echo(slot.value, cur.value):
+            # A shorter re-statement of the standing value (dream echo) is
+            # corroboration, not conflict: confirm the richer current value
+            # instead of parking the compression as a contender.
+            self._log(cur, slot.value, confidence, t, "confirm",
+                      "compression_echo", writer_id=writer_id,
+                      session_id=session_id)
+            return self._confirm(cur, prov, sup, confidence, t, txt, hlc,
+                                 writer_id, session_id, semb)
 
         # Genuine conflict at the same slot. Provenance guard: only a write whose
         # tier is >= the current value's tier may supersede; a weaker-tier write
@@ -408,6 +439,32 @@ class CortexStore:
             return WriteResult("contested", cur)
         return self._contend(cur, slot, emb, confidence, prov, t, sup, reason, semb,
                              writer_id=writer_id, session_id=session_id)
+
+    def _confirm(self, cur, prov, sup, confidence, t, txt, hlc,
+                 writer_id, session_id, semb) -> WriteResult:
+        """Confirm the standing record: union support tier so corroboration
+        (agent guess → user confirm) is recorded, and let a higher-tier
+        confirmation lift confidence past plain reinforce."""
+        cur.last_confirmed = t
+        cur.provenance |= prov
+        if sup:
+            cur.support.add(sup)
+        cur.confidence = min(1.0, max(self._reinforce(cur.confidence), float(confidence)))
+        # Backfill slot_embedding on first confirmation via a caller that supplies
+        # one — covers records auto-promoted (pre-v8) without a slot embedding.
+        if semb is not None and cur.slot_embedding is None:
+            cur.slot_embedding = semb
+        # Re-confirmation advances the ordering clock + last toucher; tx_time
+        # tracks the latest touch. valid_time (when it first became true) is
+        # NOT moved — re-asserting the same value doesn't change when it held.
+        cur.tx_time = txt
+        if hlc is not None:
+            cur.hlc_phys, cur.hlc_logical = hlc
+        if writer_id:
+            cur.writer_id = writer_id
+        if session_id:
+            cur.session_id = session_id
+        return WriteResult("confirmed", cur)
 
     def _insert(
         self,

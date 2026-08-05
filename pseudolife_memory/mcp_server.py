@@ -912,37 +912,59 @@ def memory_dream(
                         "rollback"]}
 
 
+def _coerce_id_list(value: Any) -> list[int] | None:
+    """Accept a real list, a JSON-encoded list (some MCP clients stringify
+    untyped list params), or None."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        import json
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return None
+    if isinstance(value, (list, tuple)):
+        try:
+            return [int(v) for v in value]
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
 @_tool()
 def memory_graph_review(
-    action: Literal["list", "propose", "dismiss_pair", "dismiss_slot_pair",
-                    "accept_link", "reject_link", "accept_merge",
-                    "accept_junk", "reject_entity"] = "list",
+    action: Literal["list", "propose", "relate", "dismiss_pair",
+                    "dismiss_slot_pair", "accept_link", "reject_link",
+                    "accept_merge", "accept_junk", "reject_entity"] = "list",
     proposal_id: int | None = None,
+    proposal_ids: list[int] | None = None,
     proposals: list[dict] | None = None,
     scope: str | None = None,
     src: str | None = None,
     dst: str | None = None,
+    relation: str | None = None,
     store: str | None = None,
 ) -> dict[str, Any]:
     """Work the graph review queue — deep-dream proposals that need a
-    verdict before they touch the real graph.
+    verdict before they touch the graph.
 
     Actions:
-        ``list``: pending findings/proposals (optional ``scope`` filter).
-        ``propose``: submit link proposals ``[{src, relation, dst,
-            similarity?, rationale?}]`` — stored for review, never
-            written directly.
-        ``dismiss_pair``: mark ``src``/``dst`` genuinely distinct (stops
-            resurfacing).
-        ``dismiss_slot_pair``: same for lesson/world duplicate listings
-            (``store``; ``src``/``dst`` = listed "entity|attribute" keys).
-        ``accept_link`` / ``reject_link``: settle an edge proposal by
-            ``proposal_id``.
-        ``accept_merge``: fold a near-duplicate entity into its twin.
-        ``accept_junk``: delete an over-extraction artifact entity.
-        ``reject_entity``: keep the entity; dismiss its proposal.
+        ``list``: pending findings/proposals (``scope`` filters).
+        ``propose``: file link proposals ``[{src, relation, dst,
+            similarity?, rationale?}]`` for review.
+        ``relate``: related-not-duplicate verdict — writes the
+            ``relation`` edge and dismisses the pair.
+        ``dismiss_pair``: mark ``src``/``dst`` genuinely distinct.
+        ``dismiss_slot_pair``: same for lesson/world duplicate
+            listings (``store``; keys are "entity|attribute").
+        ``accept_link``/``reject_link``: settle an edge proposal by id.
+        ``accept_merge``: fold a near-duplicate into its twin.
+        ``accept_junk``: delete an over-extraction artifact.
+        ``reject_entity``: keep the entity, dismiss the proposal.
 
-    Returns: per-action dict; ``{error}`` on a bad action or missing input.
+    Id actions accept ``proposal_ids`` for batch triage.
+
+    Returns: per-action dict; ``{error}`` on bad input.
     """
     if action == "list":
         return service.graph_review(scope=scope)
@@ -950,6 +972,14 @@ def memory_graph_review(
         if not proposals:
             return {"error": "proposals_required"}
         return service.graph_propose_links(proposals)
+    if action == "relate":
+        if not src or not dst or not relation:
+            return {"error": "src_relation_dst_required"}
+        out = service.graph_relate(src, relation, dst, origin="agent")
+        if out.get("error"):
+            return out
+        dismissed = service.graph_dismiss_duplicate(src, dst)
+        return {**out, "pair_dismissed": bool(dismissed.get("dismissed"))}
     if action == "dismiss_pair":
         if not src or not dst:
             return {"error": "src_dst_required"}
@@ -975,9 +1005,18 @@ def memory_graph_review(
     handler = handlers.get(action)
     if handler is None:
         return {"error": "unknown_action",
-                "actions": ["list", "propose", "dismiss_pair",
+                "actions": ["list", "propose", "relate", "dismiss_pair",
                             "dismiss_slot_pair", "accept_link", "reject_link",
                             "accept_merge", "accept_junk", "reject_entity"]}
+    batch = _coerce_id_list(proposal_ids)
+    if batch:
+        results = [handler(pid) for pid in batch]
+        # Every id handler reports success under "accepted" or "rejected";
+        # a stale id yields {"...": False} (or reason=not_pending) and must
+        # not count as settled.
+        ok = sum(1 for r in results
+                 if bool(r.get("accepted")) or bool(r.get("rejected")))
+        return {"action": action, "settled": ok, "results": results}
     if proposal_id is None:
         return {"error": "proposal_id_required", "action": action}
     return handler(proposal_id)

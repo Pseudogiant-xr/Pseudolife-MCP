@@ -85,6 +85,122 @@ def test_apply_persists_entity_proposals(svc):
     assert out["junk_proposed"] >= 1
 
 
+def test_apply_auto_deletes_structureless_junk_and_keeps_evidence_bearing(svc):
+    # Guard-passing junk (no edges, <=1 fact) is deleted in the same apply —
+    # the snapshot is the undo, the node re-mints on next mention. Junk with
+    # any edge stays a proposal for review.
+    with svc._lock:
+        svc._ensure_init()
+        svc._storage.ensure_entity("42", display="42")              # structureless
+        svc._storage.ensure_entity("43", display="43")              # evidence-bearing
+    svc.graph_relate("43", "related-to", "daemon", origin="agent")  # degree 1
+    out = svc.deep_dream(apply=True)
+    assert out["applied"] is True
+    assert out["junk_deleted"] >= 1
+    assert svc._storage.find_entity(norm_name("42")) is None
+    assert svc._storage.find_entity(norm_name("43")) is not None
+    pending = [p for p in svc._storage.pending_entity_proposals()
+               if p.get("kind") == "junk"]
+    assert any(p["entity_id"] == svc._storage.find_entity(norm_name("43"))["id"]
+               for p in pending)
+
+
+def test_apply_scopes_unattributed_entities_from_mentions(svc):
+    # Entities without a current fact never get attribution from
+    # backfill_entity_sources; the apply pass derives it from the sources of
+    # their mentioning entries instead.
+    with svc._lock:
+        svc._ensure_init()
+        svc._resolve_or_create_entity("atlas queue")
+    for text in (
+        "the atlas queue lists pending graph findings for review",
+        "accepting an atlas queue proposal folds the entities together",
+    ):
+        assert svc.store(text, source="dd-scope-test")["stored"] is True
+    out = svc.deep_dream(apply=True)
+    assert out["applied"] is True and out["scoped"] >= 1
+    eid = svc._storage.find_entity(norm_name("atlas queue"))["id"]
+    assert "dd-scope-test" in svc._storage.entity_sources_map().get(eid, [])
+
+
+def test_accept_link_lifts_quarantined_confidence_past_dubious(svc):
+    # An accepted proposal must leave the dubious_edges queue: the reviewed
+    # edge is floored at 0.7 (> _DUBIOUS_CONF 0.6), not left at its 0.45
+    # quarantine confidence for the next pass to re-flag.
+    import time
+    with svc._lock:
+        svc._ensure_init()
+        a = svc._resolve_or_create_entity("quarantine src")["id"]
+        b = svc._resolve_or_create_entity("quarantine dst")["id"]
+        pid = svc._storage.insert_proposal(
+            a, "related-to", b, 0.45, None, "low-confidence dream edge",
+            "dream-low-confidence", time.time())
+    assert svc.graph_accept_proposal(pid)["accepted"] is True
+    edge = next(e for e in svc._storage.load_graph()["edges"]
+                if e["src_id"] == a and e["dst_id"] == b)
+    assert edge["confidence"] >= 0.7
+    # ...and the verdict must survive the NEXT apply: rescore_edges
+    # recomputes every origin="agent" edge from names (related-to -> 0.45),
+    # so the accepted edge is stored as a confirming action instead.
+    assert edge["origin"] != "agent"
+    assert svc.deep_dream(apply=True)["applied"] is True
+    edge = next(e for e in svc._storage.load_graph()["edges"]
+                if e["src_id"] == a and e["dst_id"] == b)
+    assert edge["confidence"] >= 0.7
+
+
+def test_apply_survives_junk_delete_of_a_mentioned_entity(svc):
+    # Interaction regression: an entity that is junk-deleted this pass may
+    # ALSO be unattributed with mentions — the scope-stamping loop iterates
+    # the pre-apply entity list and must skip deleted ids, or the
+    # entity_sources upsert FK-violates mid-apply (partial apply, lost
+    # snapshot pointer).
+    with svc._lock:
+        svc._ensure_init()
+        svc._storage.ensure_entity("44", display="44")   # bare-number junk
+    for text in (
+        "build 44 failed on the runner",
+        "retrying build 44 after the cache purge",
+    ):
+        assert svc.store(text, source="dd-junk-scope")["stored"] is True
+    out = svc.deep_dream(apply=True)
+    assert out["applied"] is True
+    assert svc._storage.find_entity(norm_name("44")) is None
+    # durable audit for the unattended deletion
+    audited = [d for d in svc._storage.recent_entity_decisions(limit=50)
+               if d.get("decided_by") == "dream-auto" and d.get("entity") == "44"]
+    assert audited
+
+
+def test_dream_alias_proposal_folds_thin_side_into_evidence_bearing(svc):
+    # The alias screen compares a freshly-minted name against existing cortex
+    # entities. When the NEW side carries the evidence (facts/edges) and the
+    # existing side is a thin shell, the fold direction must still be
+    # thin -> rich, not new -> existing verbatim (29 wrong-direction
+    # proposals in the 2026-08-05 triage were this shape).
+    from pseudolife_memory.graph import norm_name as nn
+    svc.cortex_write("deployment pipeline", "role", "ships builds",
+                     support="user")                      # thin existing shell
+    svc.cortex_write("deploy pipeline", "role", "ships builds", support="user")
+    svc.cortex_write("deploy pipeline", "stage", "build then test",
+                     support="user")
+    svc.graph_relate("deploy pipeline", "uses", "docker", origin="agent")
+    rich = svc._storage.find_entity(nn("deploy pipeline"))["id"]
+    thin = svc._storage.find_entity(nn("deployment pipeline"))["id"]
+    key = None
+    for r in svc._cortex.records:
+        if r.status == "current" and r.entity == "deployment pipeline":
+            key = r.key[0]
+    assert key is not None
+    filed = svc._propose_dream_alias_candidates(
+        {nn("deploy pipeline"): "deploy pipeline"}, {key})
+    assert filed == 1
+    prop = [p for p in svc._storage.pending_entity_proposals()
+            if p.get("kind") == "merge"
+            and {p["entity_id"], p["into_id"]} == {rich, thin}]
+    assert prop and prop[0]["entity_id"] == thin and prop[0]["into_id"] == rich
+
+
 def _stage_link_pair(svc):
     """Two similar-context entities with NO memory_traces rows, no shared edge
     and no name containment -> a deep-dream LINK candidate whose evidence can
