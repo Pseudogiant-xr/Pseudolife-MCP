@@ -892,11 +892,16 @@ class PostgresStorage:
         revive: bool = True,
     ) -> dict:
         """Insert or re-assert. Re-assertion bumps confidence (+0.05,
-        capped 0.99) and keeps the stronger origin claim if the new call
-        omitted one. ``revive=True`` (explicit/human assertion) clears a
-        prior supersession; ``revive=False`` (agent re-extraction, e.g.
-        the dream) leaves a superseded edge superseded — a human removal
-        must be sticky against the extractor re-planting the same triple."""
+        capped 0.99) and keeps the higher-ranked origin claim
+        (user > action > agent > none): a dream re-extraction
+        (origin='agent') must not downgrade an edge a human blessed
+        (origin='user') or a review verdict confirmed (origin='action') —
+        a downgrade would let rescore_edges recompute its confidence and
+        dubious_edges re-flag a human-settled edge. ``revive=True``
+        (explicit/human assertion) clears a prior supersession;
+        ``revive=False`` (agent re-extraction, e.g. the dream) leaves a
+        superseded edge superseded — a human removal must be sticky
+        against the extractor re-planting the same triple."""
         with self._txn():
             row = self.conn.execute(
                 """
@@ -906,7 +911,15 @@ class PostgresStorage:
                 ON CONFLICT (src_id, relation, dst_id) DO UPDATE SET
                   confidence = LEAST(
                     0.99, GREATEST(EXCLUDED.confidence, edges.confidence + 0.05)),
-                  origin = COALESCE(EXCLUDED.origin, edges.origin),
+                  origin = CASE WHEN
+                      CASE edges.origin WHEN 'user' THEN 3
+                           WHEN 'action' THEN 2 WHEN 'agent' THEN 1
+                           ELSE 0 END
+                      >
+                      CASE EXCLUDED.origin WHEN 'user' THEN 3
+                           WHEN 'action' THEN 2 WHEN 'agent' THEN 1
+                           ELSE 0 END
+                    THEN edges.origin ELSE EXCLUDED.origin END,
                   superseded_at = CASE WHEN %s THEN NULL
                                        ELSE edges.superseded_at END,
                   asserted_at = EXCLUDED.asserted_at
