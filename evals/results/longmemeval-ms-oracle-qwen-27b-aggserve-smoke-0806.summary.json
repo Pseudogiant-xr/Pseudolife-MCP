@@ -1,0 +1,36 @@
+{
+  "dataset": "oracle",
+  "extractor": "qwen-27b",
+  "n": 8,
+  "arms": {
+    "rag": {
+      "accuracy": 0.125,
+      "context_tokens": 1020.1
+    },
+    "cortex": {
+      "accuracy": 0.0,
+      "context_tokens": 240.8
+    },
+    "hybrid": {
+      "accuracy": 0.125,
+      "context_tokens": 886.9
+    },
+    "hybrid_ev": {
+      "accuracy": 0.125,
+      "context_tokens": 894.0
+    },
+    "hybrid_ev_agg": {
+      "accuracy": 0.25,
+      "context_tokens": 912.4
+    },
+    "hybrid_ev_syn": {
+      "accuracy": 0.25,
+      "context_tokens": 914.5
+    },
+    "cascade": {
+      "accuracy": 0.0,
+      "context_tokens": 749.1
+    }
+  },
+  "superseded_total": 25
+}
