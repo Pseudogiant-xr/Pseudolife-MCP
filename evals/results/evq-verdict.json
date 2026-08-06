@@ -1,0 +1,76 @@
+{
+ "verdict": "Events quantity + coverage (v2 extraction prompt, cue widening, partial-record header): 4 of 5 preregistered gates pass; the primary misses significance and per the ship rule nothing is promoted. Run A (deterministic quantity smoke) passed with every seeded quantity retained verbatim and v1 parity intact. Gate 1 (rag control vs aggserve-0806): exact zero over all 500 shared questions. Gate 2 (claims-inertness, noise-floor bound |delta| <= 0.01 and p > 0.05 per memory signal 426): measured EXACT zero (0/0 flips) - the claims prompt is byte-untouched and this run's extraction stream happened to reproduce bit-identically, so the within-run and cross-run comparisons are both clean. Gate 3 (primary, hybrid_ev_syn on the v2 bank vs the committed aggserve-0806 hybrid_ev_syn on multi-session, n=133): +0.038 (0.474 vs 0.436), p 0.226, 8W/3L - FAIL at the preregistered p < 0.05. The mechanism join is the informative part: 7 of the 8 win rows are exactly the audited residual rows the design targeted (cue-miss 2b8f3739/36b9f61e/6c49646a, quantity-not-representable bb7c3b45/cc06de0d/d905b33f, extraction-or-retrieval-gap c2ac3c61 - all amount-arithmetic, all needing quantities), i.e. the quantity rule converts precisely the rows it was written for, at roughly half the audit's ~15-row ceiling, while 3 losses (one a former syn-win on instance-count) plus binomial noise at n=133 keep the net +5 under the bar. Gate 4 (hybrid_ev_hdr no-harm, pooled all types): +0.002 vs same-run syn - PASS; the header arm is nominally the best arm of the run (0.720 overall) and posts the best temporal-reasoning cell of the series (0.662). Gate 5 (non-inferiority): temporal-reasoning +0.007 and the four strong types exactly zero (0/0 flips, n=234) - PASS both. The multi-session ladder under the v2 bank is hybrid 0.376 -> hybrid_ev 0.391 -> hybrid_ev_agg 0.459 -> hybrid_ev_syn 0.474 vs rag 0.504: widened serving + tally now recover ~77% of the hybrid-to-rag gap, up from ~47% under the v1 bank. Temporal reasoning replicates and extends: hybrid 0.526 -> hybrid_ev 0.647, header arm 0.662.",
+ "date": "2026-08-07",
+ "preregistration": "docs/superpowers/specs/2026-08-06-events-quantity-coverage-design.md",
+ "run": {
+  "run_a": {
+   "command": "python evals/events_quantity_smoke.py --tag evq-0806 (v1 vs candidate v2 events prompt on synthetic quantity-bearing notes)",
+   "artifact": "evals/results/events-quantity-smoke-evq-0806.json",
+   "result": "PASS - quantities missing: none; parity missing: none (v1 events: 7, candidate events: 8)"
+  },
+  "run_b_command": "python evals/longmemeval_bench.py --dataset oracle --extractor qwen-27b --types all --chronicle --ev-variants --events-prompt-file evals/prompts/events_pass_v2.txt --tag evq-0806",
+  "questions": 500,
+  "arms_judged": ["rag", "cortex", "hybrid", "hybrid_ev", "hybrid_ev_agg", "hybrid_ev_syn", "hybrid_ev_hdr"],
+  "design": "Identical serving/variant construction to aggserve-0806 (hybrid_ev reconstructs the old gate; agg = full list on either cue; syn = agg + tally line) with two changes under test: the events extraction prompt is the v2 candidate (v1 + one keep-quantities/exhaustiveness rule) and has_aggregation_cue is widened (total <quantity-noun>, average, the most). hybrid_ev_hdr = syn content under a partial-record header, new this run.",
+  "judge": "reproducible stock q8_0 llama-server via Start-Qwen (never -Fast)",
+  "commit": "8bc0bfb8",
+  "baseline": "evals/results/longmemeval-all-oracle-qwen-27b-aggserve-0806.jsonl (never overwritten)",
+  "rows": "evals/results/longmemeval-all-oracle-qwen-27b-evq-0806.jsonl",
+  "summary": "evals/results/longmemeval-all-oracle-qwen-27b-evq-0806.summary.json"
+ },
+ "gates": [
+  {
+   "gate": 1,
+   "name": "rag control (validity)",
+   "prereg": "rag vs aggserve-0806 rag, 500 shared questions, exactly 0 - rag never touches extraction so exact zero remains required",
+   "measured": {"a": 0.688, "b": 0.688, "delta": 0.0, "p": 1.0, "wins_losses": "0/0", "n": 500},
+   "artifact": "evals/results/compare-evq-rag-control-pairs.json",
+   "result": "PASS (exact)"
+  },
+  {
+   "gate": 2,
+   "name": "claims-inertness (validity)",
+   "prereg": "vanilla hybrid vs aggserve-0806 hybrid, |delta| <= 0.01 AND p > 0.05 (noise-floor bound; the exact-zero cross-run bar was retired per memory signal 426 after failing twice on 2026-08-06 for a measured server-stream reason)",
+   "measured": {"a": 0.658, "b": 0.658, "delta": 0.0, "p": 1.0, "wins_losses": "0/0", "n": 500},
+   "artifact": "evals/results/compare-evq-claims-inertness-pairs.json",
+   "result": "PASS (exact zero - comfortably inside the bound; the claims prompt is byte-untouched and this run's extraction stream reproduced bit-identically)"
+  },
+  {
+   "gate": 3,
+   "name": "primary: hybrid_ev_syn (v2 bank) vs committed aggserve-0806 hybrid_ev_syn on multi-session",
+   "prereg": "improvement with p < 0.05, n=133, paired cross-run sign-flip permutation 10k/seed 0; the audit ceiling is ~15 reachable rows, >= 8 net conversions clears comfortably",
+   "measured": {"a": 0.4737, "b": 0.4361, "delta": 0.0376, "p": 0.2261, "wins_losses": "8/3", "n": 133},
+   "artifact": "evals/results/compare-evq-primary-pairs.json",
+   "result": "FAIL (direction-consistent, net +5 conversions, under the bar)",
+   "mechanism_join": {
+    "method": "win/loss qids joined against evals/results/events-coverage-audit-0806.json rows",
+    "wins_on_audited_targeted_rows": {
+     "cue-miss": ["2b8f3739", "36b9f61e", "6c49646a"],
+     "quantity-not-representable": ["bb7c3b45", "cc06de0d", "d905b33f"],
+     "extraction-or-retrieval-gap": ["c2ac3c61"]
+    },
+    "wins_unaudited": ["129d1232"],
+    "losses": {"former_syn_win_instance_count": ["gpt4_59c863d7"], "unaudited": ["85fa3a3f", "dd2973ad"]},
+    "reading": "All 7 audited win rows are amount-arithmetic rows needing quantities - the exact mechanism classes the v2 rule and cue widening were written for. The prompt-level fix works where extraction reaches; it converted ~half the audited ceiling, and the shortfall is churn (3 losses) plus the still-unserved gap/partial rows, which are retrieval-side."
+   }
+  },
+  {
+   "gate": 4,
+   "name": "header arm no-harm: hybrid_ev_hdr vs same-run hybrid_ev_syn, pooled all types",
+   "prereg": "no regression beyond 0.02 (reported + gating only against harm; its BEAM-facing win case is deferred to a BEAM re-run)",
+   "measured": {"a": 0.720, "b": 0.718, "delta": 0.002, "p": 1.0, "wins_losses": "2/1", "n": 500},
+   "artifact": "evals/results/compare-evq-hdr-harm-pairs.json",
+   "result": "PASS (no harm; nominally the best arm of the run at 0.720 overall and the best temporal-reasoning cell of the series at 0.662)"
+  },
+  {
+   "gate": 5,
+   "name": "non-inferiority: syn (v2 bank) vs same-run hybrid_ev on temporal-reasoning and the four strong types (margin 0.02 each)",
+   "measured": {
+    "temporal_reasoning": {"a": 0.654, "b": 0.647, "delta": 0.007, "p": 1.0, "wins_losses": "2/1", "n": 133, "artifact": "evals/results/compare-evq-noninf-tr-pairs.json"},
+    "strong_four": {"a": 0.893, "b": 0.893, "delta": 0.0, "p": 1.0, "wins_losses": "0/0", "n": 234, "artifact": "evals/results/compare-evq-noninf-strong-pairs.json"}
+   },
+   "result": "PASS (both; strong set exactly zero flips again)"
+  }
+ ],
+ "decision": "Not promoted (the ship rule requires gate 3 at p < 0.05 with gates 1-2 valid; gates 1-2 are valid, gate 3 fails). The shipped events extractor constant remains v1 (pinned by test); events_pass_v2.txt stays an unshipped candidate; the cue widening stays in the tree behind chronicle default-off, unblessed by measurement, same treatment as the aggserve serving change. Per the preregistered fail branch, the next probe is retrieval-side - chronicle_search matching on the gap rows (extraction-or-retrieval-gap 4, partial-block 2), measured, not assumed - because the mechanism join shows the prompt-level fix already converts the rows extraction reaches. Two subsidiary readings carry forward: (1) the hdr header is free (+0.002 pooled, best-of-run nominal cells) and its abstention-suppression win case should be measured on the next BEAM re-run before any production events_partial field is added; (2) v2 is non-inferior everywhere, exactly neutral on the strong four, and directionally better on multi-session, so its use as the teacher prompt for the events-pass distillation dataset (distill-events-opus1) stands."
+}
