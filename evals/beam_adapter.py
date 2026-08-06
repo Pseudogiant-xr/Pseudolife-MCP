@@ -47,10 +47,18 @@ os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 from ladder_sweep import build_service, probe  # noqa: E402
+import longmemeval_bench as lme  # noqa: E402
 from longmemeval_bench import (  # noqa: E402
     _chat, ARMS, EXTRACTORS, QWEN_URL, RESULTS_DIR,
     _make_extractor, build_contexts, load_rows,
 )
+
+
+def arms_for(chronicle: bool) -> tuple[str, ...]:
+    """The answered/judged arms: --chronicle adds hybrid_ev (vanilla
+    hybrid + the served events block, same pinned search call — the LME
+    ev2 arm contract)."""
+    return (*ARMS, "hybrid_ev") if chronicle else ARMS
 
 # BEAM answers are rubric-judged per nugget, and several abilities
 # (summarization, event ordering, instruction following) need multi-part
@@ -189,6 +197,9 @@ def _dream_until_drained(svc, extractor, tally: dict) -> None:
         tally["claims"] += r.get("claims", 0)
         tally["superseded"] += r.get("superseded", 0)
         tally["literal_dropped"] += r.get("literal_dropped", 0)
+        tally["events_inserted"] += r.get("events_inserted", 0)
+        tally["events_pass_failures"] += int(bool(
+            r.get("events_pass_failed")))
         if r.get("pulled", 0) == 0 or svc.dream_status().get("backlog", 0) == 0:
             return
 
@@ -197,7 +208,8 @@ def ingest_chat(svc, extractor, turns: list[dict]) -> dict:
     """Store every turn; drain the dream backlog at each BEAM batch
     boundary (the production between-sessions cadence) and at the end."""
     tally = {"turns": 0, "dreams": 0, "claims": 0, "superseded": 0,
-             "literal_dropped": 0}
+             "literal_dropped": 0, "events_inserted": 0,
+             "events_pass_failures": 0}
     current_batch = None
     for turn in turns:
         if current_batch is not None and turn["batch"] != current_batch:
@@ -215,7 +227,10 @@ def out_file(tier: str, extractor: str, tag: str) -> Path:
 
 
 def run(beam_root: Path, tier: str, extractor_name: str, tag: str,
-        chats: str | None, limit_chats: int | None) -> None:
+        chats: str | None, limit_chats: int | None,
+        chronicle: bool = False) -> None:
+    lme.CHRONICLE = chronicle          # build_contexts reads its module global
+    arms = arms_for(chronicle)
     ex_url = EXTRACTORS[extractor_name]
     if not probe(ex_url):
         sys.exit(f"no extractor server at {ex_url} — start it first")
@@ -245,6 +260,7 @@ def run(beam_root: Path, tier: str, extractor_name: str, tag: str,
         tmp = Path(tempfile.mkdtemp(prefix="beam_"))
         svc = build_service(tmp)
         svc.config.memory.dream.extract_relations = False
+        svc.config.memory.dream.chronicle = chronicle
         extractor = _make_extractor(ex_url, None)
         tally = ingest_chat(svc, extractor, load_chat_turns(chat_dir))
         ingest_s = round(time.perf_counter() - t0, 1)
@@ -260,7 +276,7 @@ def run(beam_root: Path, tier: str, extractor_name: str, tag: str,
                    "difficulty": q["difficulty"], "rubric": q["rubric"],
                    "extractor": extractor_name,
                    "consolidation": tally, "ingest_seconds": ingest_s}
-            for arm in ARMS:
+            for arm in arms:
                 ctx = contexts.get(arm, "")
                 prompt = (f"Question: {q['question']}\n\n"
                           f"Memory context:\n{ctx or '(empty)'}")
@@ -278,7 +294,7 @@ def run(beam_root: Path, tier: str, extractor_name: str, tag: str,
             with out_path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")
             print(f"  {chat_id}/{q['type']}[{q['index']}] " + " ".join(
-                f"{arm}={row[f'{arm}_score']:.2f}" for arm in ARMS),
+                f"{arm}={row[f'{arm}_score']:.2f}" for arm in arms),
                 flush=True)
         svc.flush()
         ingested[chat_id] = ()
@@ -289,13 +305,16 @@ def report(tier: str, extractor_name: str, tag: str) -> None:
     rows = load_rows(out_path)
     if not rows:
         sys.exit(f"no results in {out_path}")
+    # Arms come off the rows, not a static tuple: a --chronicle run's
+    # summary carries hybrid_ev, a vanilla run's does not.
+    arms = [a for a in arms_for(True) if f"{a}_score" in rows[0]]
     summary = {"benchmark": "BEAM", "tier": tier, "extractor": extractor_name,
                "n_questions": len(rows),
                "n_chats": len({r["chat_id"] for r in rows}),
                "scoring_note": ("paper-faithful float mean; _intfaithful "
                                 "mirrors upstream int() flooring of 0.5"),
                "arms": {}, "types": {}}
-    for arm in ARMS:
+    for arm in arms:
         summary["arms"][arm] = {
             "score": round(sum(r[f"{arm}_score"] for r in rows)
                            / len(rows), 4),
@@ -310,7 +329,7 @@ def report(tier: str, extractor_name: str, tag: str) -> None:
         summary["types"][qtype] = {
             "n": len(trows),
             **{arm: round(sum(r[f"{arm}_score"] for r in trows)
-                          / len(trows), 4) for arm in ARMS},
+                          / len(trows), 4) for arm in arms},
         }
     out_path.with_name(
         out_path.name.removesuffix(".jsonl") + ".summary.json").write_text(
@@ -330,13 +349,17 @@ def main() -> int:
     ap.add_argument("--chats", default=None,
                     help="comma-separated chat ids (default: all in tier)")
     ap.add_argument("--limit-chats", type=int, default=None)
+    ap.add_argument("--chronicle", action="store_true",
+                    help="enable chronicle event extraction on the bench "
+                         "service and answer/judge the hybrid_ev arm "
+                         "(hybrid + served events block)")
     ap.add_argument("--report", action="store_true")
     args = ap.parse_args()
     if args.report:
         report(args.tier, args.extractor, args.out_tag)
         return 0
     run(Path(args.beam_root), args.tier, args.extractor, args.out_tag,
-        args.chats, args.limit_chats)
+        args.chats, args.limit_chats, chronicle=args.chronicle)
     report(args.tier, args.extractor, args.out_tag)
     return 0
 

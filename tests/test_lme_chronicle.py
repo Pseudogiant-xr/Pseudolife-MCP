@@ -35,6 +35,7 @@ def test_bench_reset_truncates_served_tables():
 class _StubSvc:
     def __init__(self, events=None):
         self._events = events
+        self._extra: dict = {}     # e.g. events_total on agg-cued queries
         self.calls: list[dict] = []
 
     def search(self, question, **kw):
@@ -42,6 +43,7 @@ class _StubSvc:
         out = {"entries": [{"text": f"mem-{len(self.calls)}"}]}
         if self._events is not None:
             out["events"] = self._events
+        out.update(self._extra)
         return out
 
     def cortex_search(self, *a, **kw):
@@ -94,3 +96,59 @@ def test_chronicle_works_without_variants_mode(monkeypatch):
                              "when did I adopt the kitten?")
     assert "hybrid_ev" in ctx and "adopted a kitten" in ctx["hybrid_ev"]
     assert set(ctx) == {"rag", "cortex", "hybrid", "hybrid_ev"}
+
+
+# ── aggregation-serving variants (2026-08-06 design) ─────────────────────
+
+_MANY_EVENTS = [
+    {"description": f"went climbing at the {n} wall", "actor": "user",
+     "date": f"2023-05-{11 + i:02d}", "phrase": f"the {n} day"}
+    for i, n in enumerate(("alpha", "bravo", "charlie", "delta",
+                           "echo", "foxtrot", "golf", "hotel"))
+]
+
+
+def test_hybrid_ev_reconstructs_old_gate_on_agg_only_query(monkeypatch):
+    """The service now serves events on aggregation cues too, but the
+    hybrid_ev arm must stay byte-comparable to the ev2 run: events shown
+    only on a temporal cue, first 6 only — regardless of --ev-variants."""
+    monkeypatch.setattr(lmb, "CHRONICLE", True)
+    svc = _StubSvc(events=_MANY_EVENTS)
+    svc_out_total = dict(events_total=len(_MANY_EVENTS))
+    svc._extra = svc_out_total
+    ctx = lmb.build_contexts(svc, "how many walls did I climb?")
+    assert ctx["hybrid_ev"] == ctx["hybrid"]      # no temporal cue -> no block
+
+
+def test_hybrid_ev_truncates_to_six_on_temporal_query(monkeypatch):
+    monkeypatch.setattr(lmb, "CHRONICLE", True)
+    ctx = lmb.build_contexts(_StubSvc(events=_MANY_EVENTS),
+                             "when did I go climbing?")
+    assert "alpha wall" in ctx["hybrid_ev"]
+    assert "foxtrot wall" in ctx["hybrid_ev"]     # 6th event kept
+    assert "golf wall" not in ctx["hybrid_ev"]    # 7th truncated
+
+
+def test_ev_variants_add_agg_and_syn_arms(monkeypatch):
+    monkeypatch.setattr(lmb, "CHRONICLE", True)
+    monkeypatch.setattr(lmb, "EV_VARIANTS", True)
+    svc = _StubSvc(events=_MANY_EVENTS)
+    svc._extra = {"events_total": len(_MANY_EVENTS)}
+    ctx = lmb.build_contexts(svc, "how many walls did I climb?",
+                             variants=False)
+    # agg arm: full list on the aggregation cue, no tally
+    assert "hotel wall" in ctx["hybrid_ev_agg"]   # all 8 served
+    assert "Total events listed" not in ctx["hybrid_ev_agg"]
+    # syn arm: agg + the computed tally line
+    assert ctx["hybrid_ev_syn"].startswith(ctx["hybrid_ev_agg"])
+    assert "Total events listed: 8" in ctx["hybrid_ev_syn"]
+    # reconstruction arm unchanged beside them
+    assert ctx["hybrid_ev"] == ctx["hybrid"]
+
+
+def test_ev_variants_off_adds_no_extra_arms(monkeypatch):
+    monkeypatch.setattr(lmb, "CHRONICLE", True)
+    monkeypatch.setattr(lmb, "EV_VARIANTS", False)
+    ctx = lmb.build_contexts(_StubSvc(events=_EVENTS),
+                             "when did I adopt the kitten?")
+    assert "hybrid_ev_agg" not in ctx and "hybrid_ev_syn" not in ctx

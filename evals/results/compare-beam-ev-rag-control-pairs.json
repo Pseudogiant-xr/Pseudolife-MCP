@@ -1,0 +1,32 @@
+{
+  "n": 400,
+  "dropped_a": 0,
+  "dropped_b": 0,
+  "draws": 10000,
+  "seed": 0,
+  "a": {
+    "file": "evals/results/beam-100K-qwen-27b-beam100k-ev-0806.jsonl",
+    "arms": {
+      "rag": 0.4808
+    }
+  },
+  "b": {
+    "file": "evals/results/beam-100K-qwen-27b-beam100k-qwen-0802.jsonl",
+    "arms": {
+      "rag": 0.4808
+    }
+  },
+  "paired": {
+    "a_vs_b": {
+      "rag_vs_rag": {
+        "delta": 0.0,
+        "p": 1.0,
+        "wins": 0,
+        "losses": 0,
+        "win_qids": [],
+        "loss_qids": []
+      }
+    }
+  },
+  "metric": "score"
+}

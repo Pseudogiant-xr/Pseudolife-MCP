@@ -716,6 +716,127 @@ CLAIMS.append(Claim(
     artifacts=(EV2_SUMMARY,),
     value=lambda d: d["types"]["temporal-reasoning"]["arms"]["hybrid"],
     stated=0.534, places=3))
+
+# ── BEAM chronicle re-run (beam100k-ev-0806): honest negative, recorded ──
+BEAMEV = RESULTS + "compare-beam-ev-{}-pairs.json"
+BEAMEV_SUMMARY = RESULTS + "beam-100K-qwen-27b-beam100k-ev-0806.summary.json"
+
+CLAIMS.append(Claim(
+    id="beamev-rag-control", doc=CHANGELOG,
+    needle="delta exactly 0 over 400 questions, 0/0 flips",
+    artifacts=(BEAMEV.format("rag-control"),),
+    value=lambda d: d["paired"]["a_vs_b"]["rag_vs_rag"]["delta"],
+    stated=0.0, places=4))
+CLAIMS.append(Claim(
+    id="beamev-claims-inertness-delta", doc=CHANGELOG,
+    needle="missed its exact-zero bar at −0.002 (p 0.83,",
+    artifacts=(BEAMEV.format("claims-inertness"),),
+    value=lambda d: d["paired"]["a_vs_b"]["hybrid_vs_hybrid"]["delta"],
+    stated=-0.002, places=3))
+CLAIMS.append(Claim(
+    id="beamev-claims-inertness-p", doc=CHANGELOG,
+    needle="19W/18L)",
+    artifacts=(BEAMEV.format("claims-inertness"),),
+    value=lambda d: d["paired"]["a_vs_b"]["hybrid_vs_hybrid"]["p"],
+    stated=0.8305, places=4))
+CLAIMS.append(Claim(
+    id="beamev-primary-delta", doc=CHANGELOG,
+    needle="event_ordering gate FAILED (−0.016, p 0.68)",
+    artifacts=(BEAMEV.format("primary"),),
+    value=lambda d: d["paired"]["a_vs_b"]["hybrid_ev_vs_hybrid"]["delta"],
+    stated=-0.016, places=3))
+CLAIMS.append(Claim(
+    id="beamev-noninf-delta", doc=CHANGELOG,
+    needle="+0.020 pooled over the 9",
+    artifacts=(BEAMEV.format("strong-noninferiority"),),
+    value=lambda d: d["paired"]["a_vs_b"]["hybrid_ev_vs_hybrid"]["delta"],
+    stated=0.020, places=3))
+CLAIMS.append(Claim(
+    id="beamev-noninf-p", doc=CHANGELOG,
+    needle="remaining abilities (p 0.023), driven by temporal_reasoning",
+    artifacts=(BEAMEV.format("strong-noninferiority"),),
+    value=lambda d: d["paired"]["a_vs_b"]["hybrid_ev_vs_hybrid"]["p"],
+    stated=0.0233, places=4))
+CLAIMS.append(Claim(
+    id="beamev-tr-hybrid", doc=CHANGELOG,
+    needle="0.4625 → 0.6188 (+0.156, served on 32/40 rows)",
+    artifacts=(BEAMEV_SUMMARY,),
+    value=lambda d: d["types"]["temporal_reasoning"]["hybrid"],
+    stated=0.4625, places=4))
+CLAIMS.append(Claim(
+    id="beamev-tr-hybrid-ev", doc=CHANGELOG,
+    needle="0.4625 → 0.6188 (+0.156, served on 32/40 rows)",
+    artifacts=(BEAMEV_SUMMARY,),
+    value=lambda d: d["types"]["temporal_reasoning"]["hybrid_ev"],
+    stated=0.6188, places=4))
+
+# ── aggregation-cued serving gate run (aggserve-0806) ────────────────────
+AGGS = RESULTS + "compare-aggserve-{}-pairs.json"
+AGGS_SUMMARY = RESULTS + "longmemeval-all-oracle-qwen-27b-aggserve-0806.summary.json"
+
+CLAIMS.append(Claim(
+    id="aggserve-rag-control", doc=CHANGELOG,
+    needle="exactly (delta 0.000, 0/0 flips, contexts and",
+    artifacts=(AGGS.format("rag-control"),),
+    value=lambda d: d["paired"]["a_vs_b"]["rag_vs_rag"]["delta"],
+    stated=0.0, places=4))
+CLAIMS.append(Claim(
+    id="aggserve-claims-inertness", doc=CHANGELOG,
+    needle="missed their exact-zero bars at −0.006",
+    artifacts=(AGGS.format("claims-inertness"),),
+    value=lambda d: d["paired"]["a_vs_b"]["hybrid_vs_hybrid"]["delta"],
+    stated=-0.006, places=3))
+CLAIMS.append(Claim(
+    id="aggserve-reconstruction", doc=CHANGELOG,
+    needle="and −0.004 via the same",
+    artifacts=(AGGS.format("reconstruction"),),
+    value=lambda d: d["paired"]["a_vs_b"]["hybrid_ev_vs_hybrid_ev"]["delta"],
+    stated=-0.004, places=3))
+CLAIMS.append(Claim(
+    id="aggserve-primary-delta", doc=CHANGELOG,
+    needle="underpowered: +0.038 (p 0.123, 6W/1L)",
+    artifacts=(AGGS.format("primary"),),
+    value=lambda d: d["paired"]["a_vs_b"]["hybrid_ev_syn_vs_hybrid_ev"]["delta"],
+    stated=0.038, places=3))
+CLAIMS.append(Claim(
+    id="aggserve-primary-p", doc=CHANGELOG,
+    needle="underpowered: +0.038 (p 0.123, 6W/1L)",
+    artifacts=(AGGS.format("primary"),),
+    value=lambda d: d["paired"]["a_vs_b"]["hybrid_ev_syn_vs_hybrid_ev"]["p"],
+    stated=0.1226, places=4))
+CLAIMS.append(Claim(
+    id="aggserve-decomp-serving", doc=CHANGELOG,
+    needle="serving (+0.030, 4W/0L)",
+    artifacts=(AGGS.format("decomp-serving"),),
+    value=lambda d: d["paired"]["a_vs_b"]["hybrid_ev_agg_vs_hybrid_ev"]["delta"],
+    stated=0.030, places=3))
+CLAIMS.append(Claim(
+    id="aggserve-decomp-tally", doc=CHANGELOG,
+    needle="line (+0.007). The multi-session ladder",
+    artifacts=(AGGS.format("decomp-tally"),),
+    value=lambda d: d["paired"]["a_vs_b"]["hybrid_ev_syn_vs_hybrid_ev_agg"]["delta"],
+    stated=0.007, places=3))
+CLAIMS.append(Claim(
+    id="aggserve-noninf-strong", doc=CHANGELOG,
+    needle="exactly zero flips (n=234)",
+    artifacts=(AGGS.format("noninf-strong"),),
+    value=lambda d: d["paired"]["a_vs_b"]["hybrid_ev_syn_vs_hybrid_ev"]["delta"],
+    stated=0.0, places=4))
+for _arm, _stated in (("hybrid", 0.376), ("hybrid_ev", 0.398),
+                      ("hybrid_ev_agg", 0.429), ("hybrid_ev_syn", 0.436)):
+    CLAIMS.append(Claim(
+        id=f"aggserve-ms-{_arm}", doc=CHANGELOG,
+        needle=("monotone — hybrid 0.376," if _arm == "hybrid" else
+                "+events 0.398, +widened serving 0.429, +tally 0.436,"),
+        artifacts=(AGGS_SUMMARY,),
+        value=lambda d, a=_arm: d["types"]["multi-session"]["arms"][a],
+        stated=_stated, places=3))
+CLAIMS.append(Claim(
+    id="aggserve-ms-rag", doc=CHANGELOG,
+    needle="vs rag 0.504 —",
+    artifacts=(AGGS_SUMMARY,),
+    value=lambda d: d["types"]["multi-session"]["arms"]["rag"],
+    stated=0.504, places=3))
 CLAIMS.append(Claim(
     id="ev2-ms-hybrid-ev", doc=CHANGELOG,
     needle="multi-session 0.383 to 0.406",

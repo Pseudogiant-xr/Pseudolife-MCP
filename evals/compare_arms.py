@@ -53,6 +53,14 @@ def _repo_rel(path: Path) -> str:
         return p.name
 
 
+def _row_key(r: dict) -> str:
+    """LME rows carry ``question_id``; BEAM rows are keyed by their
+    (chat, ability, index) triple instead."""
+    if "question_id" in r:
+        return str(r["question_id"])
+    return f"{r['chat_id']}/{r['type']}/{r['index']}"
+
+
 def _load_rows(path: Path) -> dict[str, dict]:
     rows = {}
     with open(path, encoding="utf-8") as f:
@@ -60,7 +68,7 @@ def _load_rows(path: Path) -> dict[str, dict]:
             line = line.strip()
             if line:
                 r = json.loads(line)
-                rows[str(r["question_id"])] = r
+                rows[_row_key(r)] = r
     return rows
 
 
@@ -70,8 +78,10 @@ def _correct(row: dict, arm: str) -> bool:
     return bool(row[f"{arm}_correct"])
 
 
-def _perm_p(deltas: list[int], draws: int, seed: int) -> float:
-    """Two-sided sign-flip permutation p for paired binary deltas."""
+def _perm_p(deltas: list[float], draws: int, seed: int) -> float:
+    """Two-sided sign-flip permutation p for paired deltas (binary ints
+    for the accuracy metric, floats for BEAM rubric-mean scores — the
+    statistic is the same either way)."""
     observed = abs(sum(deltas))
     nonzero = [d for d in deltas if d]
     if not nonzero or observed == 0:
@@ -88,13 +98,21 @@ def _perm_p(deltas: list[int], draws: int, seed: int) -> float:
 def compare(a_file: Path, b_file: Path, *, draws: int = 10_000,
             seed: int = 0,
             types: tuple[str, ...] | None = None,
-            arm_pairs: list[tuple[str, str]] | None = None) -> dict:
+            arm_pairs: list[tuple[str, str]] | None = None,
+            metric: str = "correct") -> dict:
     """``types`` restricts pairing to rows of those ``question_type``s
-    (the Phase-1 multi-session+temporal gate and its non-inferiority set).
-    ``arm_pairs`` compares arm A in file A against arm B in file B —
-    ``[("hybrid_ctg", "hybrid")]`` with ``a_file == b_file`` is the
+    (the Phase-1 multi-session+temporal gate and its non-inferiority set);
+    BEAM rows carry the ability under ``type`` instead and are matched on
+    either. ``arm_pairs`` compares arm A in file A against arm B in file
+    B — ``[("hybrid_ctg", "hybrid")]`` with ``a_file == b_file`` is the
     within-run variant pairing of the 2026-08-03 amendment; ``None``
-    keeps the original same-arm-across-runs behavior over ARMS."""
+    keeps the original same-arm-across-runs behavior over ARMS.
+    ``metric="score"`` pairs BEAM per-question float rubric means
+    (``{arm}_score``) instead of LME ``{arm}_correct`` booleans: deltas
+    are floats, wins/losses count sign, and the cascade derivation (an
+    accuracy concept) is not emitted."""
+    if metric not in ("correct", "score"):
+        raise SystemExit(f"unknown metric {metric!r}")
     a_rows = _load_rows(Path(a_file))
     b_rows = _load_rows(Path(b_file))
     shared = sorted(a_rows.keys() & b_rows.keys())
@@ -102,7 +120,8 @@ def compare(a_file: Path, b_file: Path, *, draws: int = 10_000,
         tset = set(types)
         shared = [q for q in shared
                   if a_rows[q].get("question_type",
-                                   "knowledge-update") in tset]
+                                   a_rows[q].get("type",
+                                                 "knowledge-update")) in tset]
     n = len(shared)
     if n == 0:
         raise SystemExit("no shared question_ids between the two runs")
@@ -116,20 +135,32 @@ def compare(a_file: Path, b_file: Path, *, draws: int = 10_000,
         "b": {"file": _repo_rel(b_file), "arms": {}},
         "paired": {"a_vs_b": {}},
     }
+    if metric != "correct":
+        out["metric"] = metric
     if types:
         out["types"] = sorted(types)
-    pairs = (arm_pairs if arm_pairs is not None
-             else [(arm, arm) for arm in ARMS])
+    if arm_pairs is not None:
+        pairs = arm_pairs
+    elif metric == "score":
+        first = a_rows[shared[0]]
+        pairs = [(arm, arm) for arm in (*ARMS[:-1], "hybrid_ev")
+                 if f"{arm}_score" in first]      # no cascade in score mode
+    else:
+        pairs = [(arm, arm) for arm in ARMS]
     for arm_a, arm_b in pairs:
         key = arm_a if arm_a == arm_b and arm_pairs is None \
             else f"{arm_a}_vs_{arm_b}"
-        a_ok = {q: _correct(a_rows[q], arm_a) for q in shared}
-        b_ok = {q: _correct(b_rows[q], arm_b) for q in shared}
+        if metric == "score":
+            a_ok = {q: float(a_rows[q][f"{arm_a}_score"]) for q in shared}
+            b_ok = {q: float(b_rows[q][f"{arm_b}_score"]) for q in shared}
+        else:
+            a_ok = {q: _correct(a_rows[q], arm_a) for q in shared}
+            b_ok = {q: _correct(b_rows[q], arm_b) for q in shared}
         out["a"]["arms"][arm_a] = round(sum(a_ok.values()) / n, 4)
         out["b"]["arms"][arm_b] = round(sum(b_ok.values()) / n, 4)
-        deltas = [int(a_ok[q]) - int(b_ok[q]) for q in shared]
-        win_qids = [q for q in shared if a_ok[q] and not b_ok[q]]
-        loss_qids = [q for q in shared if b_ok[q] and not a_ok[q]]
+        deltas = [a_ok[q] - b_ok[q] for q in shared]
+        win_qids = [q for q in shared if a_ok[q] > b_ok[q]]
+        loss_qids = [q for q in shared if b_ok[q] > a_ok[q]]
         out["paired"]["a_vs_b"][key] = {
             "delta": round(sum(deltas) / n, 4),
             "p": round(_perm_p(deltas, draws, seed), 5),
@@ -169,6 +200,10 @@ def main() -> None:
                     help="arm name in file A (with --arm-b: cross-arm "
                          "pairing, e.g. a variant vs its in-run baseline)")
     ap.add_argument("--arm-b", default=None)
+    ap.add_argument("--metric", choices=("correct", "score"),
+                    default="correct",
+                    help="'score' pairs BEAM float rubric means "
+                         "({arm}_score) instead of LME _correct booleans")
     args = ap.parse_args()
     if bool(args.arm_a) != bool(args.arm_b):
         raise SystemExit("--arm-a and --arm-b go together")
@@ -184,7 +219,7 @@ def main() -> None:
              if args.types else None)
     arm_pairs = [(args.arm_a, args.arm_b)] if args.arm_a else None
     result = compare(a_file, b_file, draws=args.draws, seed=args.seed,
-                     types=types, arm_pairs=arm_pairs)
+                     types=types, arm_pairs=arm_pairs, metric=args.metric)
     out_path.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(f"n={result['n']}  (dropped a={result['dropped_a']} "
           f"b={result['dropped_b']})")

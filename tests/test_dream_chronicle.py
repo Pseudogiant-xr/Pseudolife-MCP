@@ -204,3 +204,55 @@ def test_search_without_cue_serves_no_events_block(svc):
         _event("adopted a kitten", date="2023-05-13", phrase="yesterday")]))
     out = svc.search("tell me about the kitten")
     assert "events" not in out
+
+
+# ── aggregation-cued serving (2026-08-06-aggregation-serving-design.md) ──
+
+def test_has_aggregation_cue_is_separate_from_temporal():
+    """The aggregation predicate must NOT ride _TEMPORAL_CUE_RE — that
+    regex also fires the (gate-failed) timeline channel."""
+    from pseudolife_memory.memory.cms import (
+        has_aggregation_cue, has_temporal_cue,
+    )
+    for q in ("how many books did I mention?", "how much did I spend?",
+              "how often do I run?", "what percentage were done?",
+              "in total, what did it cost?", "the total number of trips",
+              "altogether how big?", "each time I visited",
+              "every time we met"):
+        assert has_aggregation_cue(q), q
+        assert not has_temporal_cue(q), f"temporal RE must not widen: {q}"
+    for q in ("count the money", "the total was fine",
+              "all the things I like", "what is my favorite color?"):
+        assert not has_aggregation_cue(q), q
+
+
+def _eight_events():
+    # Digit-free descriptions: the enforce-mode literal gate correctly
+    # drops fabricated numbers absent from the batch corpus.
+    names = ("alpha", "bravo", "charlie", "delta",
+             "echo", "foxtrot", "golf", "hotel")
+    return [_event(f"went climbing at the {n} wall",
+                   date=f"2023-05-{11+i:02d}", phrase=f"the {n} day")
+            for i, n in enumerate(names)]
+
+
+def test_aggregation_cue_serves_full_list_with_total(svc):
+    """A counting question needs the whole set (limit 30, not 6) plus a
+    computed list-length total the answerer can rely on for arithmetic."""
+    svc.config.memory.dream.chronicle = True
+    svc.store("[2023/05/20] user: climbing log for May", source="notes")
+    svc.dream_run(_Stub(_eight_events()))
+    out = svc.search("how many climbing sessions did I do?")
+    assert len(out["events"]) == 8
+    assert out["events_total"] == 8
+
+
+def test_temporal_only_cue_keeps_the_six_event_cap(svc):
+    """Temporal-only queries are byte-identical to the shipped behavior:
+    same gate, same limit-6 prefix, no total field."""
+    svc.config.memory.dream.chronicle = True
+    svc.store("[2023/05/20] user: climbing log for May", source="notes")
+    svc.dream_run(_Stub(_eight_events()))
+    out = svc.search("when did I go climbing?")
+    assert len(out["events"]) == 6
+    assert "events_total" not in out

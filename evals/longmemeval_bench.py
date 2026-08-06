@@ -353,6 +353,12 @@ HYBRID_TIMELINE: bool | None = None
 # service (pair with --system-prompt-file ku_op_prompt_v7_events.txt) and
 # adds a hybrid_ev context arm — vanilla hybrid + the served events block.
 CHRONICLE = False
+# Aggregation-serving variants (2026-08-06 design): --ev-variants adds
+# hybrid_ev_agg (events on either cue, full served list) and
+# hybrid_ev_syn (agg + the computed tally line). hybrid_ev itself always
+# RECONSTRUCTS the pre-change gate — events iff temporal cue, first 6 —
+# so it stays byte-comparable to the ev2-sep-0804 run.
+EV_VARIANTS = False
 
 
 def _fmt_epoch_date(v) -> str | None:
@@ -510,21 +516,38 @@ def build_contexts(svc, question: str, variants: bool = False) -> dict[str, str]
         ctx["hybrid_enum"] = _hyb(enum_lines, mem_texts)
         ctx["hybrid_all"] = _hyb(enum_lines, both)
     if CHRONICLE:
-        # hybrid + the events block the PINNED call already served (cue-
-        # gated service-side). Same call as the rag control — no extra
-        # search, so the hybrid/hybrid_ev delta is the block and nothing
-        # else; cue-less or event-less rows pair to an honest zero.
+        # Events come from the PINNED call (same call as the rag control
+        # — no extra search). The service now serves on temporal OR
+        # aggregation cues (limit 30 on the latter), so the hybrid_ev arm
+        # RECONSTRUCTS the pre-change gate — events iff temporal cue,
+        # first 6, same ordering (the limit-6 result is a prefix of the
+        # limit-30 one) — keeping it byte-comparable to ev2-sep-0804.
+        from pseudolife_memory.memory.cms import has_temporal_cue
         events = pinned.get("events") or []
-        block = ""
-        if events:
+
+        def _ev_block(evs, total=None):
+            if not evs:
+                return ""
             lines = [
                 (f"- {e['date']}: {e['description']}" if e.get("date")
                  else f"- (undated: {e.get('phrase') or '?'}): "
                       f"{e['description']}")
-                for e in events]
+                for e in evs]
             block = ("\n\nEvents (dated, oldest first):\n"
                      + "\n".join(lines))
-        ctx["hybrid_ev"] = ctx["hybrid"] + block
+            if total is not None:
+                block += f"\nTotal events listed: {total}"
+            return block
+
+        old_gate = events[:6] if has_temporal_cue(question) else []
+        ctx["hybrid_ev"] = ctx["hybrid"] + _ev_block(old_gate)
+        if EV_VARIANTS:
+            # agg: either cue (the service already gated), full list.
+            # syn: agg + the computed tally — present only when the
+            # service marked the query aggregation-cued (events_total).
+            ctx["hybrid_ev_agg"] = ctx["hybrid"] + _ev_block(events)
+            ctx["hybrid_ev_syn"] = ctx["hybrid"] + _ev_block(
+                events, total=pinned.get("events_total"))
     return ctx
 
 
@@ -763,12 +786,20 @@ def main() -> int:
                          "bench service (pair with --system-prompt-file "
                          "ku_op_prompt_v7_events.txt) and add the hybrid_ev "
                          "context arm (hybrid + served events block)")
+    ap.add_argument("--ev-variants", action="store_true",
+                    help="aggregation-serving variants (2026-08-06 design): "
+                         "add hybrid_ev_agg (events on either cue, full "
+                         "list) and hybrid_ev_syn (+ computed tally line); "
+                         "requires --chronicle")
     args = ap.parse_args()
-    global FACT_RENDER, HYBRID_CONTIG, HYBRID_TIMELINE, CHRONICLE
+    if args.ev_variants and not args.chronicle:
+        ap.error("--ev-variants requires --chronicle")
+    global FACT_RENDER, HYBRID_CONTIG, HYBRID_TIMELINE, CHRONICLE, EV_VARIANTS
     FACT_RENDER = args.fact_render
     HYBRID_CONTIG = args.contiguity
     HYBRID_TIMELINE = args.timeline
     CHRONICLE = args.chronicle
+    EV_VARIANTS = args.ev_variants
     types = parse_types(args.types)
     if args.report:
         report(args.dataset, args.extractor, args.tag, types)

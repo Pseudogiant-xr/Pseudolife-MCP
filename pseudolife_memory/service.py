@@ -1048,10 +1048,19 @@ class MemoryService:
             # the default) serves nothing, and non-cued queries skip the
             # lookup entirely.
             events_block = None
+            agg_cued = False
             if self._storage is not None:
-                from pseudolife_memory.memory.cms import has_temporal_cue
-                if has_temporal_cue(query):
-                    hits = self._storage.chronicle_search(query, limit=6)
+                from pseudolife_memory.memory.cms import (
+                    has_aggregation_cue, has_temporal_cue,
+                )
+                # Aggregation cues serve the FULL list (a count over a
+                # capped prefix is wrong by construction); temporal-only
+                # cues keep the original 6 — same ordering, so the
+                # limit-6 result is a prefix of the limit-30 one.
+                agg_cued = has_aggregation_cue(query)
+                if agg_cued or has_temporal_cue(query):
+                    hits = self._storage.chronicle_search(
+                        query, limit=30 if agg_cued else 6)
                     if hits:
                         events_block = [
                             {"description": h["description"],
@@ -1073,6 +1082,11 @@ class MemoryService:
             }
             if events_block:
                 out["events"] = events_block
+                if agg_cued:
+                    # A computed property of the list (not a claimed
+                    # answer): lets the answerer do arithmetic over a
+                    # long enumeration without recounting lines.
+                    out["events_total"] = len(events_block)
             return out
 
     # ------------------------------------------------------------------

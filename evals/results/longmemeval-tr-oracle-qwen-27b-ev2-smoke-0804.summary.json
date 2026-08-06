@@ -1,0 +1,28 @@
+{
+  "dataset": "oracle",
+  "extractor": "qwen-27b",
+  "n": 8,
+  "arms": {
+    "rag": {
+      "accuracy": 0.75,
+      "context_tokens": 1142.6
+    },
+    "cortex": {
+      "accuracy": 0.375,
+      "context_tokens": 147.9
+    },
+    "hybrid": {
+      "accuracy": 0.875,
+      "context_tokens": 674.4
+    },
+    "hybrid_ev": {
+      "accuracy": 0.875,
+      "context_tokens": 713.1
+    },
+    "cascade": {
+      "accuracy": 0.75,
+      "context_tokens": 854.8
+    }
+  },
+  "superseded_total": 10
+}

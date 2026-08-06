@@ -6,6 +6,82 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Measured (2026-08-06 — aggregation-cued serving: monotone but underpowered; coverage is the bottleneck)
+- **The aggregation-serving gate run is recorded as an honest negative
+  with a measured cause** (preregistration
+  `docs/superpowers/specs/2026-08-06-aggregation-serving-design.md`;
+  verdict `evals/results/aggserve-verdict.json`; 500 questions, 6
+  judged arms, tag `aggserve-0806`). The rag control reproduced the
+  `ev2-sep-0804` baseline exactly (delta 0.000, 0/0 flips, contexts and
+  responses byte-identical on all 500). The claims-inertness and
+  reconstruction validity gates missed their exact-zero bars at −0.006
+  and −0.004 via the same llama-server extraction-stream noise floor
+  the BEAM run measured the same morning; the reconstruction check is
+  nonetheless structurally exact — zero prefix-property violations over
+  500 rows, so the within-run variant deltas are unconfounded. The
+  primary (full-list + tally `hybrid_ev_syn` vs reconstructed
+  `hybrid_ev` on multi-session, n=133) came in direction-consistent but
+  underpowered: +0.038 (p 0.123, 6W/1L), with the decomposition
+  attributing the effect to serving (+0.030, 4W/0L) over the tally
+  line (+0.007). The multi-session ladder is monotone — hybrid 0.376,
+  +events 0.398, +widened serving 0.429, +tally 0.436, vs rag 0.504 —
+  and non-inferiority passed both halves, with the four strong types at
+  exactly zero flips (n=234): serving up to 30 events on aggregation
+  cues is measurably harmless where it doesn't help. The
+  decision-relevant residual: of 24 multi-session rows where rag is
+  right and syn still wrong, the events block is absent on 16, and
+  widened serving reached only 44/133 rows against the ~95 predicted —
+  the remaining gap is extraction-coverage-side. Next: a coverage audit
+  of the events pass against a gold instance list, before any
+  answerer-side work.
+
+### Measured (2026-08-06 — BEAM chronicle re-run: honest negative on event ordering, temporal effect replicates)
+- **The deferred BEAM gate run is recorded as an honest negative per its
+  preregistered ship rule** (2026-08-06 amendment in
+  `docs/superpowers/specs/2026-08-04-separate-pass-events-design.md`;
+  verdict `evals/results/beam-ev-verdict.json`). BEAM 100K, all 20
+  chats / 400 questions, `--chronicle`, tag `beam100k-ev-0806`, float
+  rubric metric. Gate 1 (rag control vs the committed 0802 baseline):
+  delta exactly 0 over 400 questions, 0/0 flips — the reproducible-judge
+  pipeline reproduces bit-identically four days apart. Gate 2
+  (claims-inertness) missed its exact-zero bar at −0.002 (p 0.83,
+  19W/18L): the claims bank rebuilt differently on ~11 of 20 chats.
+  Forensics (in the verdict artifact) attribute this to
+  request-stream-composition nondeterminism of the shared llama-server
+  — 1/400 *rag* responses also changed under byte-identical inputs —
+  not to any events→claims code path, which measured exactly zero flips
+  over 500 LME questions the day before. Under the preregistration this
+  demotes gates 3–4 to within-run exploratory readings: the primary
+  event_ordering gate FAILED (−0.016, p 0.68) and not for lack of
+  serving — events were present on 23/40 event_ordering rows and netted
+  −0.63 rubric points there, so raw dated blocks don't solve BEAM event
+  ordering and answer-time synthesis is the named next experiment.
+  Non-inferiority passed nominally positive: +0.020 pooled over the 9
+  remaining abilities (p 0.023), driven by temporal_reasoning
+  0.4625 → 0.6188 (+0.156, served on 32/40 rows) — the LME
+  temporal-reasoning effect replicating in direction and concentration
+  on a second benchmark, held at exploratory status by the gate-2 rule.
+  No docs claim changes; chronicle stays opt-in pending the live soak
+  review.
+
+### Added (2026-08-06 — aggregation-cued event serving: counting needs the whole list)
+- **Chronicle events now also serve on aggregation cues** ("how many /
+  how much / how often / what percentage / in total / total number /
+  altogether / each time / every time" — `has_aggregation_cue`, a
+  predicate deliberately separate from `_TEMPORAL_CUE_RE`, which also
+  fires the gate-failed timeline channel and must not widen). On an
+  aggregation-cued query the serve cap rises from 6 to 30 (a count over
+  a capped prefix is wrong by construction) and the search result
+  carries `events_total` — a computed property of the served list, not
+  a claimed answer. Temporal-only queries are byte-identical to before
+  (same gate, same limit-6 prefix under the same ordering). Motivation
+  is the `ev2-sep-0804` multi-session autopsy: 116/133 multi-session
+  questions are aggregation-cued and the old gate served events on only
+  21 of them, while rag led hybrid_ev 0.517 to 0.405 exactly there.
+  Dead code while `memory.dream.chronicle` is off (the default);
+  preregistered gates in
+  `docs/superpowers/specs/2026-08-06-aggregation-serving-design.md`.
+
 ### Fixed (2026-08-05 — edge origin sticky by rank)
 - **A dream re-assertion no longer downgrades a human-settled edge origin.**
   `upsert_edge`'s conflict clause took any non-null incoming origin verbatim,
