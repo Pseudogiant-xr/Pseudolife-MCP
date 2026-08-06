@@ -1,0 +1,37 @@
+{
+  "n": 500,
+  "dropped_a": 0,
+  "dropped_b": 0,
+  "draws": 10000,
+  "seed": 0,
+  "a": {
+    "file": "evals/results/longmemeval-all-oracle-qwen-27b-aggserve-0806.jsonl",
+    "arms": {
+      "hybrid_ev": 0.69
+    }
+  },
+  "b": {
+    "file": "evals/results/longmemeval-all-oracle-qwen-27b-ev2-sep-0804.jsonl",
+    "arms": {
+      "hybrid_ev": 0.694
+    }
+  },
+  "paired": {
+    "a_vs_b": {
+      "hybrid_ev_vs_hybrid_ev": {
+        "delta": -0.004,
+        "p": 0.6194,
+        "wins": 1,
+        "losses": 3,
+        "win_qids": [
+          "e493bb7c"
+        ],
+        "loss_qids": [
+          "36b9f61e",
+          "7401057b",
+          "ce6d2d27"
+        ]
+      }
+    }
+  }
+}

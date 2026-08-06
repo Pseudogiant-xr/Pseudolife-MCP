@@ -6,6 +6,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Measured (2026-08-06 — aggregation-cued serving: monotone but underpowered; coverage is the bottleneck)
+- **The aggregation-serving gate run is recorded as an honest negative
+  with a measured cause** (preregistration
+  `docs/superpowers/specs/2026-08-06-aggregation-serving-design.md`;
+  verdict `evals/results/aggserve-verdict.json`; 500 questions, 6
+  judged arms, tag `aggserve-0806`). The rag control reproduced the
+  `ev2-sep-0804` baseline exactly (delta 0.000, 0/0 flips, contexts and
+  responses byte-identical on all 500). The claims-inertness and
+  reconstruction validity gates missed their exact-zero bars at −0.006
+  and −0.004 via the same llama-server extraction-stream noise floor
+  the BEAM run measured the same morning; the reconstruction check is
+  nonetheless structurally exact — zero prefix-property violations over
+  500 rows, so the within-run variant deltas are unconfounded. The
+  primary (full-list + tally `hybrid_ev_syn` vs reconstructed
+  `hybrid_ev` on multi-session, n=133) came in direction-consistent but
+  underpowered: +0.038 (p 0.123, 6W/1L), with the decomposition
+  attributing the effect to serving (+0.030, 4W/0L) over the tally
+  line (+0.007). The multi-session ladder is monotone — hybrid 0.376,
+  +events 0.398, +widened serving 0.429, +tally 0.436, vs rag 0.504 —
+  and non-inferiority passed both halves, with the four strong types at
+  exactly zero flips (n=234): serving up to 30 events on aggregation
+  cues is measurably harmless where it doesn't help. The
+  decision-relevant residual: of 24 multi-session rows where rag is
+  right and syn still wrong, the events block is absent on 16, and
+  widened serving reached only 44/133 rows against the ~95 predicted —
+  the remaining gap is extraction-coverage-side. Next: a coverage audit
+  of the events pass against a gold instance list, before any
+  answerer-side work.
+
 ### Measured (2026-08-06 — BEAM chronicle re-run: honest negative on event ordering, temporal effect replicates)
 - **The deferred BEAM gate run is recorded as an honest negative per its
   preregistered ship rule** (2026-08-06 amendment in

@@ -1,0 +1,67 @@
+{
+ "verdict": "Aggregation-cued event serving: 3 of 5 preregistered gates pass; the primary is a direction-consistent underpowered null and the run is recorded per the ship rule as an honest negative with a measured cause. Gate 1 (rag control vs ev2-sep-0804): exact zero over all 500 shared questions, contexts AND responses byte-identical. Gates 2-3 (claims-inertness -0.006 with 5 flips, reconstruction -0.004 with 4 flips) miss their exact-zero bars via the same extraction-stream noise floor the BEAM run measured the same morning (beam-ev-verdict.json): this run answers/judges 12 calls per question vs ev2's 8, perturbing the llama-server request stream around subsequent extraction calls; 29/500 rows show bank drift and all 9 flips sit on drift rows. Critically, the reconstruction check is structurally EXACT despite its letter failure: zero rows exist where the hybrid_ev context differs while the vanilla hybrid context is identical (0 prefix-property violations over 500 rows), so the variant deltas are not confounded by the serving-gate change - they share one bank within-run. Gate 4 (primary, hybrid_ev_syn vs hybrid_ev on multi-session n=133): +0.038, p 0.123, 6W/1L - direction consistent, underpowered at 7 discordant pairs. Decomposition: serving does the work (+0.030, 4W/0L), the tally line adds little (+0.007, 2W/1L). Gate 5 non-inferiority passes both halves: temporal-reasoning +0.007 and the four strong types EXACTLY zero (0/0 flips) - serving up to 30 events on aggregation cues is measurably harmless where it does not help, bounding the design's stated dilution risk at zero. The decision-relevant discovery is in the residual: of 24 multi-session rows where rag is right and syn still wrong, the events block is ABSENT on 16 - and widened serving reached only 44/133 ms rows against the design's predicted ~95. The remaining multi-session gap is two-thirds extraction-coverage-side, one-third answerer-side: the events pass misses instances (it has never been coverage-audited against a gold instance list, the design's first stated risk). Next experiment: events-pass coverage audit, then a re-run under a noise-floor-bounded validity gate (the exact-zero cross-run bar is unachievable at this call volume - measured twice today).",
+ "date": "2026-08-06",
+ "preregistration": "docs/superpowers/specs/2026-08-06-aggregation-serving-design.md",
+ "run": {
+  "command": "python evals/longmemeval_bench.py --dataset oracle --extractor qwen-27b --types all --chronicle --ev-variants --tag aggserve-0806 (preceded by an 8-question multi-session smoke, tag aggserve-smoke-0806, validated SMOKE OK rows=8 agg_widened=2 tally_rows=3 before the full run launched)",
+  "questions": 500,
+  "arms_judged": ["rag", "cortex", "hybrid", "hybrid_ev", "hybrid_ev_agg", "hybrid_ev_syn"],
+  "design": "hybrid_ev reconstructs the ev2 old gate exactly (events iff temporal cue, first 6); hybrid_ev_agg serves the full returned list on either cue (service cap 30 on aggregation cues); hybrid_ev_syn adds a computed 'Total events listed: N' line. All three render from the same pinned search call that feeds the rag control.",
+  "judge": "reproducible stock q8_0 llama-server via Start-Qwen (never -Fast)",
+  "commit": "187c945e",
+  "baseline": "evals/results/longmemeval-all-oracle-qwen-27b-ev2-sep-0804.jsonl (never overwritten)",
+  "rows": "evals/results/longmemeval-all-oracle-qwen-27b-aggserve-0806.jsonl",
+  "summary": "evals/results/longmemeval-all-oracle-qwen-27b-aggserve-0806.summary.json"
+ },
+ "gates": [
+  {
+   "gate": 1,
+   "name": "rag control (validity)",
+   "prereg": "rag vs ev2-sep-0804 rag, 500 shared questions, exactly 0 flips",
+   "measured": {"a": 0.688, "b": 0.688, "delta": 0.0, "p": 1.0, "wins_losses": "0/0", "n": 500},
+   "artifact": "evals/results/compare-aggserve-rag-control-pairs.json",
+   "result": "PASS (exact; contexts and responses byte-identical on all 500)"
+  },
+  {
+   "gate": 2,
+   "name": "claims-inertness (validity)",
+   "prereg": "vanilla hybrid vs ev2 hybrid, exactly 0 flips",
+   "measured": {"a": 0.658, "b": 0.664, "delta": -0.006, "p": 0.3729, "wins_losses": "1/4", "n": 500},
+   "artifact": "evals/results/compare-aggserve-claims-inertness-pairs.json",
+   "result": "FAIL (bounded at the measured noise floor)",
+   "forensics": "29/500 rows show hybrid-context drift (bank rebuilt differently); all 5 flips are on drift rows; rag contexts and responses are byte-identical on all 500, isolating the drift to extraction-time stream composition (12 answer/judge calls per question here vs 8 in ev2). Same mechanism, same day, as beam-ev-verdict.json gate 2; lesson recorded as memory signal 426 - future preregistrations bound this gate by the rag-control noise floor instead of demanding exact zero."
+  },
+  {
+   "gate": 3,
+   "name": "reconstruction check (validity)",
+   "prereg": "this run's hybrid_ev vs ev2 hybrid_ev, exactly 0 flips; nonzero would mean the old-gate reconstruction or the limit-6/limit-30 prefix property is wrong and every variant delta is confounded",
+   "measured": {"a": 0.690, "b": 0.694, "delta": -0.004, "p": 0.6194, "wins_losses": "1/3", "n": 500},
+   "artifact": "evals/results/compare-aggserve-reconstruction-pairs.json",
+   "result": "FAIL by letter; structurally EXACT",
+   "forensics": "Zero prefix-property violations over 500 rows: every row whose hybrid_ev context differs from ev2 also differs in the vanilla hybrid context (29 rows, the same bank-drift set as gate 2), and all 4 flips are on those rows. The reconstruction logic and the first-6-of-30 prefix property are verified exact; the letter failure is inherited bank drift, not a serving-gate confound. Within-run variant deltas (gates 4-5) share one bank and are unconfounded."
+  },
+  {
+   "gate": 4,
+   "name": "primary: hybrid_ev_syn vs hybrid_ev on multi-session (confirmatory status lost to gates 2-3; would also have missed p<0.05 on its own)",
+   "prereg": "improvement with p < 0.05, n=133, sign-flip permutation 10k/seed 0",
+   "measured": {"a": 0.436, "b": 0.399, "delta": 0.038, "p": 0.1226, "wins_losses": "6/1", "n": 133},
+   "artifact": "evals/results/compare-aggserve-primary-pairs.json",
+   "result": "FAIL (direction-consistent underpowered null)",
+   "decomposition_reported_not_gating": {
+    "serving_effect_agg_vs_ev": {"delta": 0.030, "p": 0.1203, "wins_losses": "4/0", "artifact": "evals/results/compare-aggserve-decomp-serving-pairs.json"},
+    "tally_effect_syn_vs_agg": {"delta": 0.007, "p": 1.0, "wins_losses": "2/1", "artifact": "evals/results/compare-aggserve-decomp-tally-pairs.json"}
+   },
+   "reading": "The multi-session ladder is monotone: hybrid 0.376 -> hybrid_ev 0.398 -> hybrid_ev_agg 0.429 -> hybrid_ev_syn 0.436 vs rag 0.504; widened serving+tally recover ~36% of the rag gap. But widened serving reached only 44/133 ms rows against the design's predicted ~95, and of the 24 residual rows (rag right, syn wrong) the events block is absent on 16: the gap is two-thirds extraction-coverage-side, one-third answerer-side. union(rag, syn) = 0.617."
+  },
+  {
+   "gate": 5,
+   "name": "non-inferiority: temporal-reasoning and the four strong types (margin 0.02 each)",
+   "measured": {
+    "temporal_reasoning": {"a": 0.632, "b": 0.624, "delta": 0.007, "p": 1.0, "wins_losses": "2/1", "n": 133, "artifact": "evals/results/compare-aggserve-noninf-tr-pairs.json"},
+    "strong_four": {"a": 0.893, "b": 0.893, "delta": 0.0, "p": 1.0, "wins_losses": "0/0", "n": 234, "artifact": "evals/results/compare-aggserve-noninf-strong-pairs.json"}
+   },
+   "result": "PASS (both; strong set exactly zero flips - the wider gate's dilution risk is bounded at zero)"
+  }
+ ],
+ "decision": "Not promoted to ship-candidate status (the prereg requires 5/5). The serving change stays in the tree as merged dead code behind chronicle default-off, unblessed by measurement; no docs claim gains a number from gates 2-4. Follow-ups in priority order: (1) events-pass coverage audit against a gold instance list on the multi-session slice - the residual decomposition (16 of 24 loss rows unserved; 44/133 widened vs ~95 predicted) makes coverage the measured bottleneck, ahead of any answerer-side work; (2) re-run the aggserve gates under a noise-floor-bounded validity bar (|delta| <= rag-control floor) once coverage improves - the exact-zero cross-run bar failed twice today for the same measured reason and is retired as a gate design (memory signal 426); (3) the tally line is cheap and harmless but not load-bearing (+0.007, p 1.0) - keep it only if it survives the coverage-fixed re-run."
+}
