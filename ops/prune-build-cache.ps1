@@ -23,6 +23,19 @@
 # (the honest, right-now number) was 3.314MB of that same cache. A policy
 # keyed on `docker builder du`'s reclaimability deletes hot cache and
 # cold-starts the next build.
+#
+# --all on every prune is load-bearing, not an optimization (2026-08-06,
+# Docker Desktop engine 29.6.2 / buildx 0.35, containerd image store):
+# without it, `docker builder prune` removes NOTHING — exit 0, "Total: 0B"
+# — for the age pass and the ceiling pass alike, so the cache grew to
+# 38.95GB against the 20GB ceiling while every run reported success. With
+# --all the identical commands reclaimed ~20GB, live images untouched.
+#
+# A single ceiling pass can also stop well above the target: cache-record
+# parent chains unwind one pass at a time and containerd's GC frees space
+# asynchronously (38.95GB -> 35.61GB -> 20.37GB -> 18.22GB measured across
+# passes live). The ceiling branch therefore re-measures and repeats while
+# it is over the cap and still making progress, bounded at 5 passes.
 param(
     [ValidateRange(0, 876000)][int]$MaxAgeHours = 168,
     [ValidateRange(0, 100000)][int]$MaxUsedSpaceGB = 20,
@@ -96,12 +109,14 @@ Write-Host ("==> Build-cache retention: {0} in cache (age policy {1}h, ceiling {
 if ($DryRun) {
     $stale = Get-StaleEstimateBytes -AgeHours $MaxAgeHours
     Write-Host "==> DRY RUN: nothing below is executed."
-    Write-Host "    age pass    : docker builder prune --force --filter until=${MaxAgeHours}h"
+    Write-Host "    age pass    : docker builder prune --all --force --filter until=${MaxAgeHours}h"
     Write-Host ("                  estimated reclaim {0}." -f (Format-Bytes $stale))
     Write-Host "                  (Estimate: sums CreatedAt; BuildKit's until= uses last-used,"
     Write-Host "                   and shared entries may not free fully.)"
     if (($before - $stale) -gt $capBytes) {
-        Write-Host "    ceiling pass: docker builder prune --force --max-used-space $capBytes"
+        Write-Host "    ceiling pass: docker builder prune --all --force --max-used-space $capBytes"
+        Write-Host "                  (repeated, max 5 passes, until the measured size is under"
+        Write-Host "                   the ceiling or a pass makes no progress)"
     } else {
         Write-Host "    ceiling pass: skipped (post-age size would be within the ceiling)."
     }
@@ -113,17 +128,39 @@ if ($DryRun) {
 }
 
 # Age pass — the normal policy, always runs.
-docker builder prune --force --filter "until=${MaxAgeHours}h" | Out-Null
+docker builder prune --all --force --filter "until=${MaxAgeHours}h" | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "docker builder prune (age pass) failed" }
 
 # Ceiling pass — backstop only. A heavy build week can exceed the cap with
-# nothing yet old enough for the age pass to touch.
+# nothing yet old enough for the age pass to touch. Repeated because one
+# pass can stop above the target (see header). Only the under-cap exit is
+# quiet: a pass that moves the measurement not at all means the rest is
+# pinned, and an exhausted pass budget means the ceiling was not met —
+# both warn (but never fail an otherwise-healthy deploy).
 $afterAge = Get-BuildCacheBytes
 if ($afterAge -gt $capBytes) {
     Write-Host ("==> Build-cache retention: {0} still over the {1} ceiling; enforcing." -f `
         (Format-Bytes $afterAge), (Format-Bytes $capBytes))
-    docker builder prune --force --max-used-space $capBytes | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "docker builder prune (ceiling pass) failed" }
+    $measured = $afterAge
+    $now = $afterAge
+    $settled = $false
+    foreach ($pass in 1..5) {
+        docker builder prune --all --force --max-used-space $capBytes | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "docker builder prune (ceiling pass) failed" }
+        $now = Get-BuildCacheBytes
+        if ($now -le $capBytes) { $settled = $true; break }
+        if ($now -ge $measured) {
+            Write-Warning ("Build-cache ceiling enforcement stalled at {0} (ceiling {1}); the remaining cache is pinned (live images or a running build)." -f `
+                (Format-Bytes $now), (Format-Bytes $capBytes))
+            $settled = $true
+            break
+        }
+        $measured = $now
+    }
+    if (-not $settled) {
+        Write-Warning ("Build-cache ceiling not reached after 5 passes: {0} vs the {1} ceiling; a later run continues from here." -f `
+            (Format-Bytes $now), (Format-Bytes $capBytes))
+    }
 }
 
 $after = Get-BuildCacheBytes

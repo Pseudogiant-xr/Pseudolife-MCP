@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-08-06 — build-cache retention was a silent no-op under the containerd image store)
+- **`ops/prune-build-cache.ps1` / `.sh` now pass `--all` on every
+  `docker builder prune`.** Under Docker Desktop's containerd image store
+  (engine 29.6.2, buildx 0.35), every non-`--all` prune form exits 0 and
+  reclaims `Total: 0B` regardless of filters, so both the age pass and
+  the ceiling pass had been no-ops since the scripts' introduction — the
+  cache grew to 38.95GB against the 20GB ceiling while every retention
+  run reported success. With `--all` the identical commands reclaimed
+  ~20GB live (38.95GB -> 18.22GB, fstrim returning 20.4GiB to the vhdx
+  free list) with live images untouched.
+- **The ceiling pass re-measures and repeats (bounded at 5 passes)**
+  instead of trusting a single prune: cache-record parent chains unwind
+  one pass at a time and containerd's GC frees space asynchronously, so
+  one pass can stop well above the target (38.95 -> 35.61 -> 20.37 ->
+  18.22GB measured across passes). Only the under-ceiling exit is quiet:
+  a no-progress pass (remainder pinned by live images) and an exhausted
+  5-pass budget both warn — and still exit 0 rather than failing an
+  otherwise-healthy deploy.
+
 ### Security (2026-08-06 — cryptography 50.0.0)
 - **Bumped `cryptography` 49.0.0 → 50.0.0 in the daemon image lock**
   (CVE-2026-69247, high: Bleichenbacher oracle in PKCS#7 EnvelopedData
@@ -1321,7 +1340,12 @@ daemon, and re-embed offline with `ops/migrate_embeddings.py` — see
   no-op during exactly the "heavy build week" it exists to cover; it only
   starts reclaiming once that cache has unshared, i.e. after the images
   holding it are removed (e.g. by `ops/prune-rollbacks.*`). The age pass
-  is the primary mechanism in the steady state.
+  is the primary mechanism in the steady state. **Superseded 2026-08-06:**
+  the 0B here was misattributed — the dominant cause was the missing
+  `--all`, without which `docker builder prune` removes nothing at all
+  under the containerd image store; with `--all` the ceiling pass
+  verifiably reclaims shared-record cache with live images untouched. See
+  the Unreleased fix entry and `docs/runbooks/docker-disk-retention.md`.
 - **`ops/update.ps1` / `.sh` prune after a healthy deploy**, via
   `-KeepCacheHours` / `--keep-cache-hours` (default 168) and
   `-NoCachePrune` / `--no-cache-prune`. Placement is load-bearing: before

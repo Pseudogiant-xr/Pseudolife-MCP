@@ -19,6 +19,19 @@
 # policy keyed on `docker builder du`'s reclaimability deletes hot cache
 # and cold-starts the next build.
 #
+# --all on every prune is load-bearing, not an optimization (2026-08-06,
+# Docker Desktop engine 29.6.2 / buildx 0.35, containerd image store):
+# without it, `docker builder prune` removes NOTHING — exit 0, "Total: 0B"
+# — for the age pass and the ceiling pass alike, so the cache grew to
+# 38.95GB against the 20GB ceiling while every run reported success. With
+# --all the identical commands reclaimed ~20GB, live images untouched.
+#
+# A single ceiling pass can also stop well above the target: cache-record
+# parent chains unwind one pass at a time and containerd's GC frees space
+# asynchronously (38.95GB -> 35.61GB -> 20.37GB -> 18.22GB measured across
+# passes live). The ceiling branch therefore re-measures and repeats while
+# it is over the cap and still making progress, bounded at 5 passes.
+#
 # The fstrim step is Windows/WSL-only; on Linux there is no vhdx and the
 # prune alone is the whole job.
 set -euo pipefail
@@ -167,14 +180,16 @@ echo "==> Build-cache retention: $(format_bytes "$before") in cache (age policy 
 
 if [ "$DRY_RUN" = "1" ]; then
     echo "==> DRY RUN: nothing below is executed."
-    echo "    age pass    : docker builder prune --force --filter until=${MAX_AGE_HOURS}h"
+    echo "    age pass    : docker builder prune --all --force --filter until=${MAX_AGE_HOURS}h"
     if is_gnu_date; then
         stale="$(stale_estimate_bytes)"
         echo "                  estimated reclaim $(format_bytes "$stale")."
         echo "                  (Estimate: sums CreatedAt; BuildKit's until= uses last-used,"
         echo "                   and shared entries may not free fully.)"
         if [ $(( before - stale )) -gt "$cap_bytes" ]; then
-            echo "    ceiling pass: docker builder prune --force --max-used-space $cap_bytes"
+            echo "    ceiling pass: docker builder prune --all --force --max-used-space $cap_bytes"
+            echo "                  (repeated, max 5 passes, until the measured size is under"
+            echo "                   the ceiling or a pass makes no progress)"
         else
             echo "    ceiling pass: skipped (post-age size would be within the ceiling)."
         fi
@@ -193,13 +208,36 @@ if [ "$DRY_RUN" = "1" ]; then
 fi
 
 # Age pass — the normal policy, always runs.
-docker builder prune --force --filter "until=${MAX_AGE_HOURS}h" > /dev/null
+docker builder prune --all --force --filter "until=${MAX_AGE_HOURS}h" > /dev/null
 
-# Ceiling pass — backstop only.
+# Ceiling pass — backstop only. Repeated because one pass can stop above
+# the target (see header). Only the under-cap exit is quiet: a pass that
+# moves the measurement not at all means the rest is pinned, and an
+# exhausted pass budget means the ceiling was not met — both warn (but
+# never fail an otherwise-healthy deploy).
 after_age="$(build_cache_bytes)"
 if [ "$after_age" -gt "$cap_bytes" ]; then
     echo "==> Build-cache retention: $(format_bytes "$after_age") still over the $(format_bytes "$cap_bytes") ceiling; enforcing."
-    docker builder prune --force --max-used-space "$cap_bytes" > /dev/null
+    measured="$after_age"
+    now="$after_age"
+    settled=0
+    for _pass in 1 2 3 4 5; do
+        docker builder prune --all --force --max-used-space "$cap_bytes" > /dev/null
+        now="$(build_cache_bytes)"
+        if [ "$now" -le "$cap_bytes" ]; then
+            settled=1
+            break
+        fi
+        if [ "$now" -ge "$measured" ]; then
+            echo "WARNING: build-cache ceiling enforcement stalled at $(format_bytes "$now") (ceiling $(format_bytes "$cap_bytes")); the remaining cache is pinned (live images or a running build)." >&2
+            settled=1
+            break
+        fi
+        measured="$now"
+    done
+    if [ "$settled" != "1" ]; then
+        echo "WARNING: build-cache ceiling not reached after 5 passes: $(format_bytes "$now") vs the $(format_bytes "$cap_bytes") ceiling; a later run continues from here." >&2
+    fi
 fi
 
 after="$(build_cache_bytes)"
