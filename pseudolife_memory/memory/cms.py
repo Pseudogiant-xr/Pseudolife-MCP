@@ -84,10 +84,13 @@ def has_temporal_cue(text: str) -> bool:
 # harmful on spurious firing. This one only widens chronicle-event
 # serving, which measured harmless-when-present (ev2 gate 4). Bare
 # "total"/"count"/"all the" are omitted as too frequent outside counting
-# questions.
+# questions; "total" only fires with an explicit quantity noun. The
+# total-<noun>/average/the-most widening covers the five cue-miss rows
+# in evals/results/events-coverage-audit-0806.json.
 _AGGREGATION_CUE_RE = re.compile(
     r"\b(how many|how much|how often|what percentage|in total|"
-    r"total number|altogether|each time|every time)\b",
+    r"total (?:number|amount|distance|cost|sum|time|money)|"
+    r"altogether|each time|every time|average|the most)\b",
     re.IGNORECASE,
 )
 

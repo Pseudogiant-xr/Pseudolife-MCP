@@ -152,3 +152,26 @@ def test_ev_variants_off_adds_no_extra_arms(monkeypatch):
     ctx = lmb.build_contexts(_StubSvc(events=_EVENTS),
                              "when did I adopt the kitten?")
     assert "hybrid_ev_agg" not in ctx and "hybrid_ev_syn" not in ctx
+
+
+def test_ev_variants_add_hdr_arm_with_partial_record_header(monkeypatch):
+    """Anti-suppression arm (2026-08-06 quantity+coverage design): same
+    content as hybrid_ev_syn but the block header marks the list as a
+    partial record, targeting the BEAM abstention-suppression regressions
+    (6/8 losses were 'I don't know' on questions vanilla hybrid answered)."""
+    monkeypatch.setattr(lmb, "CHRONICLE", True)
+    monkeypatch.setattr(lmb, "EV_VARIANTS", True)
+    svc = _StubSvc(events=_MANY_EVENTS)
+    svc._extra = {"events_total": len(_MANY_EVENTS)}
+    ctx = lmb.build_contexts(svc, "how many walls did I climb?",
+                             variants=False)
+    assert "hybrid_ev_hdr" in ctx
+    assert ("Events (dated, oldest first; partial record — other context "
+            "may hold more):") in ctx["hybrid_ev_hdr"]
+    # Same events and tally as syn, only the header differs.
+    assert "hotel wall" in ctx["hybrid_ev_hdr"]
+    assert "Total events listed: 8" in ctx["hybrid_ev_hdr"]
+    assert ctx["hybrid_ev_hdr"].replace(
+        "Events (dated, oldest first; partial record — other context "
+        "may hold more):",
+        "Events (dated, oldest first):") == ctx["hybrid_ev_syn"]

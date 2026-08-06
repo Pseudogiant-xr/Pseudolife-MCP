@@ -837,6 +837,35 @@ CLAIMS.append(Claim(
     artifacts=(AGGS_SUMMARY,),
     value=lambda d: d["types"]["multi-session"]["arms"]["rag"],
     stated=0.504, places=3))
+
+# ── events coverage audit (task #40, no GPU) ─────────────────────────────
+AUDIT = RESULTS + "events-coverage-audit-0806.json"
+
+CLAIMS.append(Claim(
+    id="audit-amount-arithmetic", doc=CHANGELOG,
+    needle="syn-wrong rows, 19 are amount-arithmetic",
+    artifacts=(AUDIT,),
+    value=lambda d: d["residual_classes"]["amount-arithmetic"],
+    stated=19, places=0))
+CLAIMS.append(Claim(
+    id="audit-cue-miss", doc=CHANGELOG,
+    needle="not-event-shaped (static facts, out of events' reach), 5 cue-miss,",
+    artifacts=(AUDIT,),
+    value=lambda d: d["residual_mechanisms"]["cue-miss"],
+    stated=5, places=0))
+CLAIMS.append(Claim(
+    id="audit-quantity-stripped", doc=CHANGELOG,
+    needle="4 extraction-or-retrieval gaps, 4 quantity-stripped, 2 partial",
+    artifacts=(AUDIT,),
+    value=lambda d: d["residual_mechanisms"]["quantity-not-representable"],
+    stated=4, places=0))
+CLAIMS.append(Claim(
+    id="audit-beam-no-misorder", doc=CHANGELOG,
+    needle="0 of 23 served event_ordering",
+    artifacts=(AUDIT,),
+    value=lambda d: d["beam_event_ordering_autopsy"]["failure_modes"][
+        "wrong-order-despite-events"],
+    stated=0, places=0))
 CLAIMS.append(Claim(
     id="ev2-ms-hybrid-ev", doc=CHANGELOG,
     needle="multi-session 0.383 to 0.406",
