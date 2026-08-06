@@ -226,6 +226,27 @@ def test_has_aggregation_cue_is_separate_from_temporal():
         assert not has_aggregation_cue(q), q
 
 
+def test_aggregation_cue_widening_covers_audited_phrasings():
+    """Regression lock for the five cue-miss rows in
+    events-coverage-audit-0806.json: 'total amount', 'total distance',
+    'average', and 'the most' phrasings fired nothing while the sessions
+    held the needed instances."""
+    from pseudolife_memory.memory.cms import (
+        has_aggregation_cue, has_temporal_cue,
+    )
+    for q in ("What is the total amount I spent on luxury items?",
+              "What is the total distance of the hikes I did?",
+              "What is the total cost of my orders?",
+              "What is the average GPA of my studies?",
+              "Which grocery store did I spend the most money at?"):
+        assert has_aggregation_cue(q), q
+        assert not has_temporal_cue(q), f"temporal RE must not widen: {q}"
+    # Guards: bare 'total' without a quantity noun, and 'mostly', stay out.
+    for q in ("the total was fine", "that room was mostly empty",
+              "I totally agree"):
+        assert not has_aggregation_cue(q), q
+
+
 def _eight_events():
     # Digit-free descriptions: the enforce-mode literal gate correctly
     # drops fabricated numbers absent from the batch corpus.

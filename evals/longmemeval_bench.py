@@ -525,7 +525,7 @@ def build_contexts(svc, question: str, variants: bool = False) -> dict[str, str]
         from pseudolife_memory.memory.cms import has_temporal_cue
         events = pinned.get("events") or []
 
-        def _ev_block(evs, total=None):
+        def _ev_block(evs, total=None, header="Events (dated, oldest first):"):
             if not evs:
                 return ""
             lines = [
@@ -533,8 +533,7 @@ def build_contexts(svc, question: str, variants: bool = False) -> dict[str, str]
                  else f"- (undated: {e.get('phrase') or '?'}): "
                       f"{e['description']}")
                 for e in evs]
-            block = ("\n\nEvents (dated, oldest first):\n"
-                     + "\n".join(lines))
+            block = "\n\n" + header + "\n" + "\n".join(lines)
             if total is not None:
                 block += f"\nTotal events listed: {total}"
             return block
@@ -545,9 +544,17 @@ def build_contexts(svc, question: str, variants: bool = False) -> dict[str, str]
             # agg: either cue (the service already gated), full list.
             # syn: agg + the computed tally — present only when the
             # service marked the query aggregation-cued (events_total).
+            # hdr: syn content under a partial-record header — the
+            # anti-suppression arm (2026-08-06 quantity+coverage design;
+            # 6/8 BEAM event_ordering losses were 'I don't know' on
+            # questions the vanilla hybrid context answered).
             ctx["hybrid_ev_agg"] = ctx["hybrid"] + _ev_block(events)
             ctx["hybrid_ev_syn"] = ctx["hybrid"] + _ev_block(
                 events, total=pinned.get("events_total"))
+            ctx["hybrid_ev_hdr"] = ctx["hybrid"] + _ev_block(
+                events, total=pinned.get("events_total"),
+                header=("Events (dated, oldest first; partial record — "
+                        "other context may hold more):"))
     return ctx
 
 

@@ -30,6 +30,21 @@ def test_events_prompt_artifact_matches_shipped_constant():
     assert path.read_text(encoding="utf-8") == _EVENTS_SYSTEM_PROMPT
 
 
+def test_events_v2_candidate_is_v1_plus_the_quantity_rule():
+    """The UNSHIPPED v2 candidate (2026-08-06 quantity+coverage design,
+    gate run held) must stay v1 + one appended rule, so the measured v1
+    body cannot drift inside it unnoticed. The shipped constant remains
+    v1 until v2 passes its preregistered gate."""
+    prompts = Path(__file__).resolve().parents[1] / "evals" / "prompts"
+    v1 = (prompts / "events_pass_v1.txt").read_text(encoding="utf-8")
+    v2 = (prompts / "events_pass_v2.txt").read_text(encoding="utf-8")
+    assert v2.startswith(v1.rstrip("\n"))
+    assert "KEEP QUANTITIES AND BE EXHAUSTIVE" in v2
+    assert "earning $225" in v2          # quantity kept verbatim in example
+    from pseudolife_memory.memory.dream import _EVENTS_SYSTEM_PROMPT
+    assert _EVENTS_SYSTEM_PROMPT == v1   # v2 NOT shipped by this change
+
+
 @pytest.fixture()
 def svc(pg_conn, pg_url, tmp_path):  # noqa: F811
     from pseudolife_memory.service import MemoryService

@@ -6,6 +6,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-06 — events coverage audit: quantities are the bottleneck, not ordering)
+- **The multi-session residual is now audited row-by-row against the
+  source sessions** (`evals/results/events-coverage-audit-0806.json`;
+  method and per-row quoted evidence inside). Of the 24 rag-right /
+  syn-wrong rows, 19 are amount-arithmetic — they need numeric values
+  combined across sessions, and the v1 events prompt strips those
+  numbers at extraction ("completed my first full marathon in 4h 22min"
+  served as "completed first full marathon"). Mechanism split: 7
+  not-event-shaped (static facts, out of events' reach), 5 cue-miss,
+  4 extraction-or-retrieval gaps, 4 quantity-stripped, 2 partial
+  blocks, 2 answerer failures. The paired BEAM autopsy (same artifact)
+  retires answer-time ordering synthesis: 0 of 23 served event_ordering
+  rows failed by misordering correctly-served events, and 6 of 8
+  regressions were abstention-suppression — a partial events block
+  reads as exhaustive and the model stops using the rest of the
+  context. Three changes land now, preregistered in
+  `docs/superpowers/specs/2026-08-06-events-quantity-coverage-design.md`
+  with **all GPU gate runs held**:
+  - `has_aggregation_cue` widens to `total <quantity-noun>`, `average`,
+    and `the most` (the five audited cue-miss phrasings); bare "total"
+    still does not fire.
+  - `--ev-variants` gains a `hybrid_ev_hdr` arm — syn content under a
+    partial-record header — targeting the abstention-suppression
+    regressions.
+  - `evals/prompts/events_pass_v2.txt` lands as an UNSHIPPED candidate
+    (v1 + a keep-quantities/exhaustiveness rule; pinned by test to stay
+    v1-plus-one-rule). The shipped extractor constant remains v1 until
+    v2 passes its preregistered gate.
+
 ### Measured (2026-08-06 — aggregation-cued serving: monotone but underpowered; coverage is the bottleneck)
 - **The aggregation-serving gate run is recorded as an honest negative
   with a measured cause** (preregistration
