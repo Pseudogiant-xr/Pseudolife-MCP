@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security (2026-08-06 — cryptography 50.0.0)
+- **Bumped `cryptography` 49.0.0 → 50.0.0 in the daemon image lock**
+  (CVE-2026-69247, high: Bleichenbacher oracle in PKCS#7 EnvelopedData
+  decryption via distinguishable errors and timing). The daemon does not
+  decrypt PKCS#7 payloads — the pin arrives transitively (pypdf/PyJWT/
+  oauthlib optional extras) — so exposure was theoretical, but the lock
+  now carries the patched release. Dependabot alert #11.
+
 ### Fixed (2026-08-06 — set history is deterministic under timestamp ties)
 - **`memory_history` on a set-valued slot no longer depends on strict
   timestamp inequality for its ordering.** The version list is built

@@ -52,7 +52,7 @@ cffi==2.0.0
 charset-normalizer==3.4.7
 chromadb==1.5.9
 click==8.4.1
-cryptography==49.0.0
+cryptography==50.0.0
 durationpy==0.10
 filelock==3.29.0
 flatbuffers==25.12.19
