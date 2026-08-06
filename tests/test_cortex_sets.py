@@ -807,6 +807,11 @@ def test_cortex_lookup_on_set_slot(tmp_service_dir):
 
 
 def test_history_on_set_slot_is_time_ordered(tmp_service_dir):
+    # Flaked once in a full-suite run (2026-08-06): the version list is
+    # built member-by-member and only the timestamp sort restores
+    # chronology, so an equal-timestamp tie let a removal sort ahead of a
+    # later member's add. The tie itself is pinned deterministically by
+    # test_history_set_order_is_deterministic_under_timestamp_ties below.
     from pseudolife_memory.service import MemoryService
 
     svc = MemoryService(data_dir=tmp_service_dir)
@@ -824,6 +829,34 @@ def test_history_on_set_slot_is_time_ordered(tmp_service_dir):
     ]
     ats = [v["at"] for v in got["versions"]]
     assert ats == sorted(ats)
+
+
+def test_history_set_order_is_deterministic_under_timestamp_ties(
+        tmp_service_dir, monkeypatch):
+    """Regression (2026-08-06 flake): with every write stamped at the SAME
+    clock value, the set-history sort has no timestamp signal at all — the
+    order must still come out adds-in-insertion-order with each removal
+    after the adds of its instant, via the tie-break key, not sort luck."""
+    import pseudolife_memory.memory.cortex as cortex_mod
+    from pseudolife_memory.service import MemoryService
+
+    class _FrozenTime:
+        @staticmethod
+        def time():
+            return 1_700_000_000.0
+
+    monkeypatch.setattr(cortex_mod, "time", _FrozenTime)
+    svc = MemoryService(data_dir=tmp_service_dir)
+    svc.set_add("user", "bikes owned", "road bike")
+    svc.set_add("user", "bikes owned", "gravel bike")
+    svc.set_remove("user", "bikes owned", "road bike")
+    got = svc.history("user", "bikes owned")
+    events = [(v["value"], v["event"]) for v in got["versions"]]
+    assert events == [
+        ("road bike", "added"),
+        ("gravel bike", "added"),
+        ("road bike", "removed"),
+    ]
 
 
 def test_resolve_refuses_when_slot_converted_to_set(store, emb):

@@ -2763,16 +2763,28 @@ class MemoryService:
             self._ensure_init()
             assert self._cortex is not None
             if self._cortex.slot_kind(entity, attribute) == "set":
+                # The list is built member-by-member, so only the sort
+                # restores chronology. Timestamps can tie (2026-08-06
+                # full-suite flake: a removal sorted ahead of a later
+                # member's add), so break ties adds-before-removes, then
+                # by member insertion order — the only deterministic
+                # order the store can still attest to at equal clocks.
                 versions: list[dict[str, Any]] = []
-                for r in self._cortex.members(entity, attribute, include_removed=True):
+                for idx, r in enumerate(
+                        self._cortex.members(entity, attribute,
+                                             include_removed=True)):
                     versions.append(
-                        {"value": r.value, "event": "added", "at": r.asserted_at})
+                        {"value": r.value, "event": "added",
+                         "at": r.asserted_at, "_tie": (0, idx)})
                     if r.status == "removed" and r.superseded_at is not None:
                         versions.append(
-                            {"value": r.value, "event": "removed", "at": r.superseded_at})
+                            {"value": r.value, "event": "removed",
+                             "at": r.superseded_at, "_tie": (1, idx)})
                 if cutoff is not None:
                     versions = [v for v in versions if (v["at"] or 0) <= cutoff]
-                versions.sort(key=lambda v: (v["at"] or 0))
+                versions.sort(key=lambda v: ((v["at"] or 0), v["_tie"]))
+                for v in versions:
+                    del v["_tie"]
                 out = {
                     "kind": "set", "entity": entity, "attribute": attribute,
                     "count": len(versions), "versions": versions,
