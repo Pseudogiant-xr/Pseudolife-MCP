@@ -294,7 +294,7 @@ def test_never_issues_a_forbidden_docker_verb(prune):
 def test_age_pass_always_runs_with_the_default_window(prune):
     proc, calls = prune(_fixture())
     assert proc.returncode == 0, proc.stderr
-    assert any("builder prune --force --filter until=168h" in c
+    assert any("builder prune --all --force --filter until=168h" in c
                for c in _prunes(calls)), calls
 
 
@@ -315,7 +315,63 @@ def test_ceiling_pass_fires_when_still_over_the_cap_after_the_age_pass(prune):
     fx = _fixture(size="30GB")
     proc, calls = prune(fx, "-MaxUsedSpaceGB", "8")
     assert proc.returncode == 0, proc.stderr
-    assert any("--max-used-space 8000000000" in c for c in _prunes(calls)), calls
+    assert any("builder prune --all --force --max-used-space 8000000000" in c
+               for c in _prunes(calls)), calls
+
+
+def test_every_prune_carries_all_for_the_containerd_image_store(prune):
+    """2026-08-06 live finding (Docker Desktop, engine 29.6.2, buildx 0.35,
+    containerd image store): ``docker builder prune`` WITHOUT ``--all``
+    removes nothing at all — exit 0, ``Total: 0B`` — for both the age pass
+    and the ceiling pass, so the cache grew unbounded (38.95GB against a
+    20GB ceiling) while every retention run reported success. With
+    ``--all`` the identical commands reclaimed ~20GB with the live images
+    untouched. ``--all`` is load-bearing, not an optimization: every prune
+    this script issues must carry it."""
+    fx = _fixture(size="30GB")
+    proc, calls = prune(fx, "-MaxUsedSpaceGB", "8")
+    assert proc.returncode == 0, proc.stderr
+    prunes = _prunes(calls)
+    assert prunes, "expected at least one builder prune call"
+    for c in prunes:
+        assert c.startswith("builder prune --all "), (
+            f"builder prune without --all is a no-op under the containerd "
+            f"image store: {c}")
+
+
+def test_ceiling_pass_repeats_until_the_measurement_is_under_the_cap(prune):
+    """2026-08-06 live finding: one ``--max-used-space`` pass can stop well
+    above the target — cache-record parent chains unwind one pass at a
+    time, and containerd's GC frees space asynchronously, so the measured
+    size keeps dropping across passes (38.95GB -> 35.61GB -> 20.37GB ->
+    18.22GB live). The ceiling branch must therefore re-measure and repeat
+    while it is still over the cap and making progress. Sequence: before
+    25GB, post-age 25GB (fires), post-pass-1 22GB (still over, progress),
+    post-pass-2 18GB (under the 20GB default cap — stop)."""
+    fx = _fixture(sizes=["25GB", "25GB", "22GB", "18GB"])
+    proc, calls = prune(fx)
+    assert proc.returncode == 0, proc.stderr
+    ceiling = [c for c in _prunes(calls) if "--max-used-space" in c]
+    assert len(ceiling) == 2, (f"expected exactly two ceiling passes "
+                               f"(22GB made progress, 18GB is under the cap): {ceiling}")
+    assert "reclaimed 7.00GB" in proc.stdout, proc.stdout
+
+
+def test_ceiling_pass_stops_after_a_pass_with_no_progress(prune):
+    """A pass that moves the measured size not at all means the remaining
+    cache is pinned (live images, running build) — repeating is futile.
+    The branch must stop after one fruitless pass, warn, and still exit 0:
+    retention is best-effort and must never fail an otherwise-healthy
+    deploy over an unreachable ceiling."""
+    fx = _fixture(sizes=["25GB", "25GB", "25GB"])
+    proc, calls = prune(fx)
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    ceiling = [c for c in _prunes(calls) if "--max-used-space" in c]
+    assert len(ceiling) == 1, (f"expected exactly one ceiling pass before "
+                               f"the no-progress stop: {ceiling}")
+    assert "stalled" in (proc.stdout + proc.stderr).lower(), (
+        f"a stalled ceiling must be reported, not silent\n"
+        f"stdout: {proc.stdout!r}\nstderr: {proc.stderr!r}")
 
 
 def test_ceiling_pass_uses_the_post_age_measurement_not_the_stale_before(prune):
@@ -330,6 +386,27 @@ def test_ceiling_pass_uses_the_post_age_measurement_not_the_stale_before(prune):
     proc, calls = prune(fx)
     assert proc.returncode == 0, proc.stderr
     assert not any("--max-used-space" in c for c in _prunes(calls)), calls
+
+
+def test_ceiling_pass_warns_when_the_pass_budget_is_exhausted(prune):
+    """Review finding on the 2026-08-06 fix: the loop has THREE exits, and
+    the third — all 5 passes spent while still over the cap and still
+    making progress — must not be the silent one. It reads as unqualified
+    success ('reclaimed 36GB') while the ceiling was never met, and the
+    weekly Scheduled Task's LastTaskResult stays 0. Also pins the bound
+    itself: an unbounded (or differently-bounded) loop fails the exact
+    count here. Sequence: before 60GB, post-age 60GB, then five passes of
+    monotone progress that never reach the 20GB default cap."""
+    fx = _fixture(sizes=["60GB", "60GB", "55GB", "50GB", "45GB", "40GB",
+                         "35GB", "30GB"])
+    proc, calls = prune(fx)
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    ceiling = [c for c in _prunes(calls) if "--max-used-space" in c]
+    assert len(ceiling) == 5, (f"expected exactly five ceiling passes "
+                               f"(the budget), got: {ceiling}")
+    assert "not reached" in (proc.stdout + proc.stderr).lower(), (
+        f"an exhausted pass budget must be reported, not silent\n"
+        f"stdout: {proc.stdout!r}\nstderr: {proc.stderr!r}")
 
 
 def test_dry_run_mutates_nothing(prune):

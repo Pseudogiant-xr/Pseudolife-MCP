@@ -154,11 +154,15 @@ actually keys on last-used time, and shared layers may not free in full,
 so read the dry-run number as a floor, not a promise.
 
 **What runs, in order, on a real (non-dry-run) invocation:**
-1. Age pass — always: `docker builder prune --force --filter until=<N>h`.
+1. Age pass — always: `docker builder prune --all --force --filter
+   until=<N>h`.
 2. Ceiling pass — only if the cache is still over the size cap *after* the
-   age pass: `docker builder prune --force --max-used-space <cap>`. A
-   backstop, and a weaker one than it sounds — see below, it can be a
-   no-op while cache is still shared with a live image.
+   age pass: `docker builder prune --all --force --max-used-space <cap>`,
+   repeated (re-measure between passes, max 5). Three exits, only the
+   first quiet: under the ceiling (done); a pass makes no progress —
+   the remaining cache is pinned (live images or a running build) —
+   warns; all 5 passes spent while still over the ceiling warns too.
+   Warnings never fail the run: it still exits 0.
 3. `fstrim` of the WSL disk (`wsl -d docker-desktop -e sh -c "fstrim -v
    /mnt/docker-desktop-disk"`) — Windows-only in effect, skipped quietly
    (not a failure) if `wsl` isn't on `PATH` (the case on Linux/macOS), or if the
@@ -171,17 +175,36 @@ pinned by a running build", not "not worth keeping". A policy keyed on
 that signal would delete hot cache and cold-start the very next build. The
 168h window keeps the week of cache that actually gets reused.
 
-**The size ceiling is a weaker backstop than it sounds — it cannot evict
-cache shared with a live image.** Measured 2026-07-28 against a 12.45GB /
-17-entry cache: `docker builder prune --force --max-used-space 8000000000`
-reclaimed **0 B**. Adding `--reserved-space 0` also reclaimed 0 B. Cause:
-14 of the 17 entries were `Shared=true` — shared with the live daemon
-image — and carried essentially all the bytes (8.739GB, 2.15GB, 1.159GB,
-348.5MB, …). Pruning a build-cache record cannot free layers a live image
-still holds. Only the 3 unshared (`source.local`) entries, totalling
-exactly 3.314MB, were actually prunable.
+**`--all` is load-bearing on every prune — without it, prune removes
+nothing at all under the containerd image store.** Measured 2026-08-06
+(Docker Desktop, engine 29.6.2, buildx 0.35, `driver-type:
+io.containerd.snapshotter.v1`): every non-`--all` form of `docker builder
+prune` — age-filtered, `--max-used-space`-capped, or bare — exited 0 and
+reported `Total: 0B`, whatever the cache held. Both retention passes ran
+as silent no-ops from the script's introduction until then, letting the
+cache grow to 38.95GB against the 20GB ceiling while every run reported
+success. With `--all`, the otherwise-identical commands reclaimed ~20GB
+(38.95GB -> 18.22GB), fstrim returned 20.4GiB to the vhdx free list, and
+the live images were untouched. The 2026-07-28 measurement — `docker
+builder prune --force --max-used-space 8000000000` reclaiming **0 B**
+against a 12.45GB cache, `--reserved-space 0` likewise — attributed the
+0 B to layer sharing (14 of 17 entries `Shared=true`); the dominant cause
+was the missing `--all`. This is consistent with the original manual
+cleanup: the 51.87GB backlog was reclaimed with `docker builder prune
+-af`, `-a` included.
 
-That is why the two commands disagree, and which one to trust:
+**One ceiling pass can stop well above the target.** Cache-record parent
+chains unwind one pass at a time, and containerd's GC frees space
+asynchronously — measured live: 38.95GB -> 35.61GB -> 20.37GB -> 18.22GB
+across successive identical passes, some of which themselves reported
+`Total: 0B` while the measured size kept falling. The script therefore
+re-measures and repeats (bounded at 5 passes) instead of trusting one
+pass or its self-reported total.
+
+Sharing still matters at the margin — a record shared with a live image
+can be deleted (with `--all`), but its layers only leave the disk when
+the image holding them goes. That is why the two du/df commands disagree,
+and which one to trust:
 
 - **`docker system df`'s `RECLAIMABLE`** (3.314MB in this measurement) is
   what a prune would free *right now* — it already accounts for sharing.
@@ -190,27 +213,24 @@ That is why the two commands disagree, and which one to trust:
   counts every entry not pinned by a running build, including shared ones
   that will not free while the image holding them still exists.
 
-**Consequence: in the "heavy build week" scenario the ceiling pass exists
-to cover, it may reclaim nothing at all**, because that week's cache is
-still shared with recent images. It only starts working once cache has
-become unshared — i.e. after the images that held those layers are
-removed. **The age pass is therefore the primary mechanism, not the
-ceiling**: aged cache becomes genuinely reclaimable as the images holding
-it are cleaned up (old rollback tags pruned by `ops/prune-rollbacks.*`),
-consistent with the original finding — 51.87GB across 169 entries, all
-inactive, some 5-6 weeks old, fully reclaimed by `docker builder prune -af`.
+**The age pass remains the primary mechanism, the ceiling the backstop**:
+aged cache is the cheapest to lose, and its layers free in full once the
+images that held them are cleaned up (old rollback tags pruned by
+`ops/prune-rollbacks.*`). The ceiling loop covers the heavy-build-week
+case where nothing is old enough yet; when the remaining cache is
+genuinely pinned by live images it stalls, warns, and leaves the rest to
+the age pass on a later run.
 
-**Why the age pass isn't neutered by the same sharing problem: step
-ordering, currently accidental.** `ops/prune-rollbacks.*` runs at
-`update.ps1`/`.sh` step 2b, *before* the build, retiring old rollback image
-tags; the build-cache age pass runs at step 5, *after* health. By the time
-`until=168h` fires, the images that were pinning the >168h-old cache
-layers are already gone and that cache has unshared. Neither script
-enforces this ordering explicitly — it holds only because rollback-tag
-retention runs early and cache retention runs late. A future change to
-`-KeepRollbacks` (keeping enough rollback tags to keep pinning week-old
-cache) or to either script's step position could silently degrade the age
-pass down to the ceiling pass's no-op behavior, with nothing to catch it.
+**Step ordering still helps the age pass free actual disk, and it is
+accidental.** `ops/prune-rollbacks.*` runs at `update.ps1`/`.sh` step 2b,
+*before* the build, retiring old rollback image tags; the build-cache age
+pass runs at step 5, *after* health. By the time `until=168h` fires, the
+images that were pinning the >168h-old cache layers are already gone, so
+deleting those records frees their bytes too. Neither script enforces
+this ordering explicitly — a future change to `-KeepRollbacks` or to
+either script's step position would quietly turn aged-record deletion
+into bookkeeping-only until the pinning images expire, with nothing to
+catch it.
 
 **What these scripts will never do:** touch images (that's
 `ops/prune-rollbacks.ps1` / `.sh`), touch containers, or run
