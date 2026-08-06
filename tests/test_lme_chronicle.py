@@ -146,6 +146,20 @@ def test_ev_variants_add_agg_and_syn_arms(monkeypatch):
     assert ctx["hybrid_ev"] == ctx["hybrid"]
 
 
+def test_make_extractor_threads_events_prompt_file(tmp_path):
+    """--events-prompt-file mirrors --system-prompt-file: candidate events
+    prompts (events_pass_v2) run through the identical code path with the
+    shipped constant untouched; omitted -> byte-identical v1 default."""
+    from pseudolife_memory.memory.dream import _EVENTS_SYSTEM_PROMPT
+
+    p = tmp_path / "candidate.txt"
+    p.write_text("CANDIDATE EVENTS PROMPT", encoding="utf-8")
+    ex = lmb._make_extractor("http://x/v1", None, events_prompt_file=str(p))
+    assert ex.events_prompt == "CANDIDATE EVENTS PROMPT"
+    default = lmb._make_extractor("http://x/v1", None)
+    assert default.events_prompt == _EVENTS_SYSTEM_PROMPT
+
+
 def test_ev_variants_off_adds_no_extra_arms(monkeypatch):
     monkeypatch.setattr(lmb, "CHRONICLE", True)
     monkeypatch.setattr(lmb, "EV_VARIANTS", False)

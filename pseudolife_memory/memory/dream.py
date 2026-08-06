@@ -564,7 +564,8 @@ class OpenAICompatExtractor:
 
     def __init__(self, base_url: str, model: str, *, api_key: str | None = None,
                  max_tokens: int = 400, timeout_seconds: float = 20.0,
-                 system_prompt: str | None = None) -> None:
+                 system_prompt: str | None = None,
+                 events_prompt: str | None = None) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.api_key = api_key or None
@@ -576,6 +577,12 @@ class OpenAICompatExtractor:
         # smoke) pass a domain-specific variant; the vocab/known-facts hints are
         # still appended, so key-reuse across a batch is preserved.
         self.system_prompt = system_prompt if system_prompt is not None else _SYSTEM_PROMPT
+        # Events-pass prompt, same override pattern: the daemon never passes
+        # this arg (shipped behaviour byte-identical to the measured v1);
+        # A/B harnesses use it to gate candidate prompts (e.g.
+        # evals/prompts/events_pass_v2.txt) before any ship decision.
+        self.events_prompt = (events_prompt if events_prompt is not None
+                              else _EVENTS_SYSTEM_PROMPT)
 
     def extract(self, texts: list[str], vocab: list[str],
                 known_facts: list[tuple[str, str, str]] | None = None,
@@ -662,7 +669,8 @@ class OpenAICompatExtractor:
 
     def extract_events(self, texts: list[str]) -> list[dict]:
         """The separate events pass: same endpoint and numbered-notes
-        message, events-only system prompt (``_EVENTS_SYSTEM_PROMPT``),
+        message, events-only system prompt (``self.events_prompt``,
+        default the shipped ``_EVENTS_SYSTEM_PROMPT``),
         parsed by :func:`events_from_parsed`. Raises
         :class:`ExtractorError` on failure — the caller treats that as
         non-fatal (events are additive enrichment; claims must commit)."""
@@ -679,7 +687,7 @@ class OpenAICompatExtractor:
             body = json.dumps({
                 "model": self.model,
                 "messages": [
-                    {"role": "system", "content": _EVENTS_SYSTEM_PROMPT},
+                    {"role": "system", "content": self.events_prompt},
                     {"role": "user", "content": "\n\n".join(
                         f"[{i + 1}] {t}" for i, t in enumerate(texts))},
                 ],

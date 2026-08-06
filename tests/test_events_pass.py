@@ -45,6 +45,48 @@ def test_events_v2_candidate_is_v1_plus_the_quantity_rule():
     assert _EVENTS_SYSTEM_PROMPT == v1   # v2 NOT shipped by this change
 
 
+def test_extract_events_prompt_is_overridable(monkeypatch):
+    """A/B harness plumbing (2026-08-06 quantity+coverage design): the
+    UNSHIPPED events_pass_v2 candidate must be runnable through the bench
+    without touching the shipped constant — mirroring the claims-prompt
+    ``system_prompt`` override. Default stays byte-identical to v1."""
+    import json
+
+    from pseudolife_memory.memory import dream as dream_mod
+    from pseudolife_memory.memory.dream import (
+        _EVENTS_SYSTEM_PROMPT, OpenAICompatExtractor,
+    )
+
+    sent = []
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return json.dumps({"choices": [{"message": {
+                "content": '{"events": []}'}}]}).encode()
+
+    def _fake_urlopen(req, timeout=None):
+        sent.append(json.loads(req.data.decode()))
+        return _Resp()
+
+    monkeypatch.setattr(
+        "urllib.request.urlopen", _fake_urlopen)
+    ex = OpenAICompatExtractor("http://x/v1", "m",
+                               events_prompt="CUSTOM EVENTS PROMPT")
+    ex.extract_events(["note one"])
+    assert sent[-1]["messages"][0]["content"] == "CUSTOM EVENTS PROMPT"
+
+    default = OpenAICompatExtractor("http://x/v1", "m")
+    default.extract_events(["note one"])
+    assert sent[-1]["messages"][0]["content"] == _EVENTS_SYSTEM_PROMPT
+    assert dream_mod._EVENTS_SYSTEM_PROMPT == _EVENTS_SYSTEM_PROMPT
+
+
 @pytest.fixture()
 def svc(pg_conn, pg_url, tmp_path):  # noqa: F811
     from pseudolife_memory.service import MemoryService
