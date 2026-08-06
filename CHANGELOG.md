@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-08-06 — set history is deterministic under timestamp ties)
+- **`memory_history` on a set-valued slot no longer depends on strict
+  timestamp inequality for its ordering.** The version list is built
+  member-by-member and re-ordered by a single timestamp sort, so two
+  writes landing on the same clock value could let a member's removal
+  sort ahead of a later member's add (surfaced as a one-off full-suite
+  flake). Ties now break adds-before-removes, then by member insertion
+  order — the only order the store can still attest to at equal clocks —
+  and a frozen-clock regression test pins it.
+
 ### Added (2026-08-06 — events coverage audit: quantities are the bottleneck, not ordering)
 - **The multi-session residual is now audited row-by-row against the
   source sessions** (`evals/results/events-coverage-audit-0806.json`;
