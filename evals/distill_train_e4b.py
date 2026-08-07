@@ -74,6 +74,7 @@ def find_resume_checkpoint(checkpoints_dir: Path) -> str | None:
 
 
 def tokenize_fixed(tok, rows: list[dict], jepa_k: int = 0) -> Dataset:
+    dropped = 0
     feats = {"input_ids": [], "labels": [], "attention_mask": []}
     if jepa_k:
         # Predictor tokens = Gemma's reserved <unusedN> vocab. Their embedding
@@ -103,7 +104,8 @@ def tokenize_fixed(tok, rows: list[dict], jepa_k: int = 0) -> Dataset:
         if p_ids and isinstance(p_ids[0], list):
             p_ids, c_ids = p_ids[0], c_ids[0]
         if len(p_ids) + len(c_ids) > MAX_SEQ:
-            continue                      # drop, never truncate the completion
+            dropped += 1                  # drop, never truncate the completion
+            continue
         ids = p_ids + c_ids
         labels = [-100] * len(p_ids) + c_ids
         mask = [1] * len(ids)
@@ -131,6 +133,8 @@ def tokenize_fixed(tok, rows: list[dict], jepa_k: int = 0) -> Dataset:
             feats["claims_mask"].append(
                 [1] * len(v_ids) + [0] * (CLAIMS_VIEW_SEQ - len(v_ids)))
             feats["claims_last_pos"].append(len(v_ids) - 1)
+    print(f"tokenize_fixed: kept {len(feats['input_ids'])}, dropped "
+          f"{dropped} rows over MAX_SEQ={MAX_SEQ}", flush=True)
     return Dataset.from_dict(feats)
 
 
@@ -229,9 +233,11 @@ def main() -> int:
     ap.add_argument("--jepa-pred-tokens", type=int, default=2)
     ap.add_argument("--out-dir", type=Path, default=OUT,
                     help="run dir (checkpoints + merged); default unchanged")
-    ap.add_argument("--data", type=Path, default=DATA,
-                    help="training jsonl (cleaned); a relative path resolves "
-                         "against the repo root. Default = Qwen baseline set")
+    ap.add_argument("--data", type=Path, nargs="+", default=[DATA],
+                    help="training jsonl file(s); a relative path resolves "
+                         "against the repo root. Multiple files are "
+                         "concatenated and shuffled (seed 0) for multi-task "
+                         "training. Default = Qwen baseline set")
     ap.add_argument("--save-steps", type=int, default=100)
     ap.add_argument("--eval-steps", type=int, default=200)
     ap.add_argument("--logging-steps", type=int, default=10)
@@ -259,8 +265,16 @@ def main() -> int:
         random_state=42,
     )
 
-    data_path = args.data if args.data.is_absolute() else REPO / args.data
-    rows = [json.loads(l) for l in data_path.open(encoding="utf-8")]
+    rows = []
+    for p in args.data:
+        data_path = p if p.is_absolute() else REPO / p
+        rows.extend(json.loads(l)
+                    for l in data_path.open(encoding="utf-8"))
+    if len(args.data) > 1:
+        # Multi-task mix (2026-08-07 evlora design): interleave tasks so
+        # neither dominates a training phase. Seeded, deterministic.
+        import random
+        random.Random(0).shuffle(rows)
     if args.smoke:
         rows = rows[-40:]                         # tail rows include long ones
     ds = tokenize_fixed(tokenizer, rows, jepa_k=jepa_k)
