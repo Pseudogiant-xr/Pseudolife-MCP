@@ -1,0 +1,120 @@
+{
+  "dataset": "oracle",
+  "extractor": "qwen-27b",
+  "n": 500,
+  "arms": {
+    "rag": {
+      "accuracy": 0.688,
+      "context_tokens": 1209.7
+    },
+    "cortex": {
+      "accuracy": 0.414,
+      "context_tokens": 157.2
+    },
+    "hybrid": {
+      "accuracy": 0.658,
+      "context_tokens": 841.1
+    },
+    "hybrid_ev": {
+      "accuracy": 0.694,
+      "context_tokens": 857.0
+    },
+    "hybrid_ev_agg": {
+      "accuracy": 0.712,
+      "context_tokens": 868.4
+    },
+    "hybrid_ev_hdr": {
+      "accuracy": 0.72,
+      "context_tokens": 876.0
+    },
+    "hybrid_ev_syn": {
+      "accuracy": 0.718,
+      "context_tokens": 870.3
+    },
+    "cascade": {
+      "accuracy": 0.688,
+      "context_tokens": 883.8
+    }
+  },
+  "superseded_total": 913,
+  "types": {
+    "knowledge-update": {
+      "n": 78,
+      "arms": {
+        "rag": 0.859,
+        "cortex": 0.731,
+        "hybrid": 0.897,
+        "hybrid_ev": 0.897,
+        "hybrid_ev_agg": 0.897,
+        "hybrid_ev_hdr": 0.897,
+        "hybrid_ev_syn": 0.897
+      },
+      "cascade": 0.91
+    },
+    "multi-session": {
+      "n": 133,
+      "arms": {
+        "rag": 0.504,
+        "cortex": 0.218,
+        "hybrid": 0.376,
+        "hybrid_ev": 0.391,
+        "hybrid_ev_agg": 0.459,
+        "hybrid_ev_hdr": 0.474,
+        "hybrid_ev_syn": 0.474
+      },
+      "cascade": 0.481
+    },
+    "single-session-assistant": {
+      "n": 56,
+      "arms": {
+        "rag": 0.911,
+        "cortex": 0.571,
+        "hybrid": 0.964,
+        "hybrid_ev": 0.964,
+        "hybrid_ev_agg": 0.964,
+        "hybrid_ev_hdr": 0.964,
+        "hybrid_ev_syn": 0.964
+      },
+      "cascade": 0.929
+    },
+    "single-session-preference": {
+      "n": 30,
+      "arms": {
+        "rag": 0.8,
+        "cortex": 0.733,
+        "hybrid": 0.6,
+        "hybrid_ev": 0.6,
+        "hybrid_ev_agg": 0.6,
+        "hybrid_ev_hdr": 0.6,
+        "hybrid_ev_syn": 0.6
+      },
+      "cascade": 0.7
+    },
+    "single-session-user": {
+      "n": 70,
+      "arms": {
+        "rag": 0.929,
+        "cortex": 0.671,
+        "hybrid": 0.957,
+        "hybrid_ev": 0.957,
+        "hybrid_ev_agg": 0.957,
+        "hybrid_ev_hdr": 0.957,
+        "hybrid_ev_syn": 0.957
+      },
+      "cascade": 0.943
+    },
+    "temporal-reasoning": {
+      "n": 133,
+      "arms": {
+        "rag": 0.526,
+        "cortex": 0.15,
+        "hybrid": 0.526,
+        "hybrid_ev": 0.647,
+        "hybrid_ev_agg": 0.647,
+        "hybrid_ev_hdr": 0.662,
+        "hybrid_ev_syn": 0.654
+      },
+      "cascade": 0.526
+    }
+  }
+}

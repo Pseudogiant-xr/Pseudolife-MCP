@@ -6,6 +6,36 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Measured (2026-08-07 — events quantity gates: the fix works row-for-row, the run stays under the bar)
+- **The events quantity + coverage gate run is recorded as a
+  mechanism-confirmed miss; nothing is promoted** (preregistration
+  `docs/superpowers/specs/2026-08-06-events-quantity-coverage-design.md`;
+  verdict `evals/results/evq-verdict.json`; 500 questions, 7 judged
+  arms, tag `evq-0806`). The deterministic quantity smoke passed with
+  every seeded quantity retained verbatim. Both validity gates came in
+  exact: the rag control reproduced `aggserve-0806` at delta 0.000
+  (0/0 flips), and claims-inertness — preregistered at the noise-floor
+  bound after the exact-zero bar was retired — also measured exactly
+  0.000 (0/0 flips). The primary (`hybrid_ev_syn` on the v2 events
+  bank vs the committed `aggserve-0806` syn, multi-session n=133)
+  missed: +0.038 (p 0.226, 8W/3L). The mechanism join is the finding:
+  7 of the 8 win rows are exactly the audited residual rows the design
+  targeted (3 cue-miss, 3 quantity-stripped, 1 extraction-gap — all
+  amount-arithmetic), so the keep-quantities rule converts precisely
+  the rows it was written for, at about half the audit's ~15-row
+  ceiling, while three losses and n=133 noise keep the net +5 under
+  p < 0.05. The new partial-record header arm is free (+0.002 pooled
+  vs syn) and posts the run's best cells — 0.720 overall, 0.662
+  temporal-reasoning; non-inferiority passed with the strong four at
+  exactly zero flips (n=234) again. The multi-session ladder under the
+  v2 bank — hybrid 0.376, +events 0.391, +widened serving 0.459,
+  +tally 0.474, vs rag 0.504 — now recovers ~77% of the hybrid→rag
+  gap, up from ~47% under v1. Per the preregistered fail branch the
+  shipped events prompt stays v1 and the next probe is retrieval-side
+  (`chronicle_search` matching on the still-unserved gap rows); the
+  header arm's abstention-suppression win case waits for a BEAM
+  re-run.
+
 ### Fixed (2026-08-06 — build-cache retention was a silent no-op under the containerd image store)
 - **`ops/prune-build-cache.ps1` / `.sh` now pass `--all` on every
   `docker builder prune`.** Under Docker Desktop's containerd image store

@@ -873,6 +873,78 @@ CLAIMS.append(Claim(
     value=lambda d: d["types"]["multi-session"]["arms"]["hybrid_ev"],
     stated=0.406, places=3))
 
+# ── events quantity + coverage gate run (evq-0806) ───────────────────────
+EVQ = RESULTS + "compare-evq-{}-pairs.json"
+EVQ_SUMMARY = RESULTS + "longmemeval-all-oracle-qwen-27b-evq-0806.summary.json"
+
+CLAIMS.append(Claim(
+    id="evq-rag-control", doc=CHANGELOG,
+    needle="reproduced `aggserve-0806` at delta 0.000",
+    artifacts=(EVQ.format("rag-control"),),
+    value=lambda d: d["paired"]["a_vs_b"]["rag_vs_rag"]["delta"],
+    stated=0.0, places=4))
+CLAIMS.append(Claim(
+    id="evq-claims-inertness", doc=CHANGELOG,
+    needle="also measured exactly\n  0.000 (0/0 flips)",
+    artifacts=(EVQ.format("claims-inertness"),),
+    value=lambda d: d["paired"]["a_vs_b"]["hybrid_vs_hybrid"]["delta"],
+    stated=0.0, places=4))
+CLAIMS.append(Claim(
+    id="evq-primary-delta", doc=CHANGELOG,
+    needle="missed: +0.038 (p 0.226, 8W/3L)",
+    artifacts=(EVQ.format("primary"),),
+    value=lambda d: d["paired"]["a_vs_b"][
+        "hybrid_ev_syn_vs_hybrid_ev_syn"]["delta"],
+    stated=0.0376, places=4))
+CLAIMS.append(Claim(
+    id="evq-primary-p", doc=CHANGELOG,
+    needle="missed: +0.038 (p 0.226, 8W/3L)",
+    artifacts=(EVQ.format("primary"),),
+    value=lambda d: d["paired"]["a_vs_b"][
+        "hybrid_ev_syn_vs_hybrid_ev_syn"]["p"],
+    stated=0.2261, places=4))
+CLAIMS.append(Claim(
+    id="evq-hdr-no-harm", doc=CHANGELOG,
+    needle="header arm is free (+0.002 pooled",
+    artifacts=(EVQ.format("hdr-harm"),),
+    value=lambda d: d["paired"]["a_vs_b"][
+        "hybrid_ev_hdr_vs_hybrid_ev_syn"]["delta"],
+    stated=0.002, places=3))
+CLAIMS.append(Claim(
+    id="evq-hdr-overall", doc=CHANGELOG,
+    needle="0.720 overall, 0.662\n  temporal-reasoning",
+    artifacts=(EVQ_SUMMARY,),
+    value=lambda d: d["arms"]["hybrid_ev_hdr"]["accuracy"],
+    stated=0.720, places=3))
+CLAIMS.append(Claim(
+    id="evq-hdr-tr", doc=CHANGELOG,
+    needle="0.720 overall, 0.662\n  temporal-reasoning",
+    artifacts=(EVQ_SUMMARY,),
+    value=lambda d: d["types"]["temporal-reasoning"]["arms"]["hybrid_ev_hdr"],
+    stated=0.662, places=3))
+CLAIMS.append(Claim(
+    id="evq-noninf-strong", doc=CHANGELOG,
+    needle="strong four at\n  exactly zero flips (n=234)",
+    artifacts=(EVQ.format("noninf-strong"),),
+    value=lambda d: d["paired"]["a_vs_b"]["hybrid_ev_syn_vs_hybrid_ev"][
+        "delta"],
+    stated=0.0, places=4))
+for _arm, _stated in (("hybrid", 0.376), ("hybrid_ev", 0.391),
+                      ("hybrid_ev_agg", 0.459), ("hybrid_ev_syn", 0.474)):
+    CLAIMS.append(Claim(
+        id=f"evq-ms-{_arm}", doc=CHANGELOG,
+        needle=("v2 bank — hybrid 0.376," if _arm == "hybrid" else
+                "+events 0.391, +widened serving 0.459,\n  +tally 0.474,"),
+        artifacts=(EVQ_SUMMARY,),
+        value=lambda d, a=_arm: d["types"]["multi-session"]["arms"][a],
+        stated=_stated, places=3))
+CLAIMS.append(Claim(
+    id="evq-ms-rag", doc=CHANGELOG,
+    needle="+tally 0.474, vs rag 0.504",
+    artifacts=(EVQ_SUMMARY,),
+    value=lambda d: d["types"]["multi-session"]["arms"]["rag"],
+    stated=0.504, places=3))
+
 
 def test_every_published_number_names_a_committed_artifact():
     """A claim whose evidence is untracked cannot be checked by a reader.

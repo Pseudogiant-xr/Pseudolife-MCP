@@ -1,0 +1,146 @@
+{
+ "tag": "evq-0806",
+ "candidate": "evals\\prompts\\events_pass_v2.txt",
+ "server": "http://127.0.0.1:1234/v1",
+ "checks": {
+  "quantities_expected": [
+   "15 jars",
+   "$225",
+   "4h 22min",
+   "$12",
+   "April 15th to 22nd",
+   "5-mile"
+  ],
+  "quantities_missing_in_candidate": [],
+  "parity_keywords": [
+   "kitten",
+   "Ethiopian"
+  ],
+  "parity_missing_in_candidate": []
+ },
+ "v1_events": [
+  {
+   "kind": "event",
+   "description": "sold 15 jars of jam at the market",
+   "actor": "user",
+   "date": "2024-05-29",
+   "date_phrase": "today",
+   "source": 0
+  },
+  {
+   "kind": "event",
+   "description": "completed first full marathon",
+   "actor": "user",
+   "date": "2024-05-21",
+   "date_phrase": "just",
+   "source": 1
+  },
+  {
+   "kind": "event",
+   "description": "missed train and took a taxi",
+   "actor": "user",
+   "date": "2024-05-03",
+   "date_phrase": "today",
+   "source": 2
+  },
+  {
+   "kind": "event",
+   "description": "returned from Japan trip",
+   "actor": "user",
+   "date": "2024-04-22",
+   "date_phrase": "back home",
+   "source": 3
+  },
+  {
+   "kind": "event",
+   "description": "did a 5-mile hike at Red Rock Canyon",
+   "actor": "user",
+   "date": "2024-05-11",
+   "date_phrase": "this morning",
+   "source": 4
+  },
+  {
+   "kind": "event",
+   "description": "adopted the kitten",
+   "actor": "user",
+   "date": "2024-05-12",
+   "date_phrase": "yesterday",
+   "source": 5
+  },
+  {
+   "kind": "event",
+   "description": "tried out a new Ethiopian restaurant",
+   "actor": "user",
+   "date": "2024-05-18",
+   "date_phrase": "today",
+   "source": 6
+  }
+ ],
+ "candidate_events": [
+  {
+   "kind": "event",
+   "description": "sold 15 jars of jam at the market, earning $225",
+   "actor": "user",
+   "date": "2024-05-29",
+   "date_phrase": "today",
+   "source": 0
+  },
+  {
+   "kind": "event",
+   "description": "completed first full marathon in 4h 22min",
+   "actor": "user",
+   "date": "2024-05-21",
+   "date_phrase": "just",
+   "source": 1
+  },
+  {
+   "kind": "event",
+   "description": "missed train by 5 minutes",
+   "actor": "user",
+   "date": "2024-05-03",
+   "date_phrase": "today",
+   "source": 2
+  },
+  {
+   "kind": "event",
+   "description": "took a taxi, which cost $12",
+   "actor": "user",
+   "date": "2024-05-03",
+   "date_phrase": "today",
+   "source": 2
+  },
+  {
+   "kind": "event",
+   "description": "Japan trip ran from April 15th to 22nd",
+   "actor": "user",
+   "date": "2024-04-15",
+   "date_phrase": "from April 15th to 22nd",
+   "source": 3
+  },
+  {
+   "kind": "event",
+   "description": "did a 5-mile hike at Red Rock Canyon",
+   "actor": "user",
+   "date": "2024-05-11",
+   "date_phrase": "this morning",
+   "source": 4
+  },
+  {
+   "kind": "event",
+   "description": "adopted the kitten",
+   "actor": "user",
+   "date": "2024-05-12",
+   "date_phrase": "yesterday",
+   "source": 5
+  },
+  {
+   "kind": "event",
+   "description": "tried out a new Ethiopian restaurant in town",
+   "actor": "user",
+   "date": "2024-05-18",
+   "date_phrase": "today",
+   "source": 6
+  }
+ ],
+ "pass": true
+}
