@@ -3,8 +3,11 @@
 Reads the artifacts the campaign launcher produced and scores gates
 T1-T3 of docs/superpowers/specs/2026-08-07-evlora-antisuppression-design.md:
 
-  T1a  ladder: e4b-v3 gold_recoverable within 0.02 of e4b-v2, and
-       stale_leak not worse than v2 by more than 0.02.
+  T1a  ladder: e4b-v3 gold_recoverable within 0.02 of e4b-v2.
+       stale_leak is REPORTED (flagged when worse than v2) but does not
+       gate — the preregistration gates T1 on gold_recoverable and KU
+       cortex only; adding conditions post-hoc would be the mirror image
+       of dropping them.
   T1b  KU-oracle cortex: v3 replicate mean within 0.02 of v2's
        (5 replicates each; the paired compare artifact is recorded).
   T2   quantity smoke passed.
@@ -48,7 +51,8 @@ def main() -> int:
     gold_v3 = rung_metric(v3l, "gold_recoverable", "e4b-v3.json")
     stale_v2 = rung_metric(v2l, "stale_leak", "e4b-v2.json")
     stale_v3 = rung_metric(v3l, "stale_leak", "e4b-v3.json")
-    t1a = (gold_v3 >= gold_v2 - MARGIN) and (stale_v3 <= stale_v2 + MARGIN)
+    t1a = gold_v3 >= gold_v2 - MARGIN
+    stale_flag = stale_v3 > stale_v2
 
     def agg_for(extractor: str) -> dict:
         hits = sorted(RESULTS.glob(
@@ -78,7 +82,11 @@ def main() -> int:
         "gates": {
             "T1a_ladder": {
                 "gold_recoverable": {"v2": gold_v2, "v3": gold_v3},
-                "stale_leak": {"v2": stale_v2, "v3": stale_v3},
+                "stale_leak": {
+                    "v2": stale_v2, "v3": stale_v3,
+                    "reported_not_gating_per_prereg": True,
+                    "regression_flag": stale_flag,
+                },
                 "margin": MARGIN, "pass": t1a,
                 "artifacts": ["evals/results/e4b-v2.json",
                               "evals/results/e4b-v3.json"],
@@ -101,6 +109,10 @@ def main() -> int:
     out.write_text(json.dumps(verdict, indent=1), encoding="utf-8")
     for g, d in verdict["gates"].items():
         print(f"{g}: {'PASS' if d['pass'] else 'FAIL'}")
+    if stale_flag:
+        print(f"NOTE: stale_leak regression v2 {stale_v2} -> v3 {stale_v3} "
+              "(reported, not gating per prereg — decision-relevant for "
+              "the ship call)")
     print(f"Run T -> {'PASS' if verdict['pass'] else 'FAIL'} -> {out.name}")
     return 0 if verdict["pass"] else 1
 
