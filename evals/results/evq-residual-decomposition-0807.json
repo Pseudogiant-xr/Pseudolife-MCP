@@ -1,0 +1,682 @@
+{
+ "title": "EVQ residual decomposition: extraction vs retrieval, offline matcher replay",
+ "date": "2026-08-07",
+ "method": "Residual = evq-0806 multi-session rows with rag correct and hybrid_ev_syn wrong. Served agg-block parsed from the row's rendered context; matcher replayed exactly (plainto_tsquery 'english', AND rebuilt as OR, per postgres.chronicle_search) against user-turn sentences of the haystack via bench PG. at-cap block => occurred_at-ASC crowding (retrieval-side); sub-cap + a digit-bearing sentence that matches => the instance was servable had it been extracted (extraction-side).",
+ "n_residual": 18,
+ "tally": {
+  "at_cap_retrieval_side": 0,
+  "subcap_matchable_extraction_side": 14,
+  "no_cue_fired": 1,
+  "served_but_wrong_answerer_side": 3,
+  "subcap_no_matchable_sentence": 0
+ },
+ "rows": [
+  {
+   "question_id": "00ca467f",
+   "question": "How many doctor's appointments did I go to in March?",
+   "answer": "2",
+   "cue": {
+    "aggregation": true,
+    "temporal": true
+   },
+   "agg_block_size": 2,
+   "agg_block_at_cap": false,
+   "v1_block_size": 2,
+   "block_delta_v1_to_v2": 0,
+   "sentences": {
+    "total": 741,
+    "any_term_matched": 24,
+    "digit_bearing": 48,
+    "digit_matched": 4
+   },
+   "matched_digit_sentences_sample": [
+    "Thompson, on March 20th, and it was a relief to hear that my knee is healing well.",
+    "I'm scheduled to start physical therapy sessions twice a week since March 25th to strengthen my leg muscles after my orthopedic surgeon, Dr.",
+    "Smith, on March 3rd, and he diagnosed me with bronchitis.",
+    "I'm also concerned about the numbness in my left hand, which I noticed around March 15th."
+   ],
+   "audit_mechanism": "answerer-failure",
+   "audit_rationale": "Only two completed (past-tense) doctor visits fall in March: Dr. Smith on March 3 and Dr. Thompson on March 20 (the EMG with Dr. Johnson is scheduled for April 1, i.e. future and out of window, and the gastroenterologist appointment is only 'considering scheduling'). served_events_block actually con",
+   "mechanical_class": "served_but_wrong_answerer_side",
+   "syn_response": "Based on the provided context, you had one doctor's appointment in March (the follow-up with orthopedic surgeon Dr. Thompson on 2023-03-20).",
+   "rag_response": "Based on the context, you went to two doctor's appointments in March (one with Dr. Smith on March 3rd and one with Dr. Thompson on March 20th)."
+  },
+  {
+   "question_id": "0100672e",
+   "question": "How much did I spend on each coffee mug for my coworkers?",
+   "answer": "$12",
+   "cue": {
+    "aggregation": true,
+    "temporal": false
+   },
+   "agg_block_size": 1,
+   "agg_block_at_cap": false,
+   "v1_block_size": 1,
+   "block_delta_v1_to_v2": 0,
+   "sentences": {
+    "total": 755,
+    "any_term_matched": 19,
+    "digit_bearing": 65,
+    "digit_matched": 5
+   },
+   "matched_digit_sentences_sample": [
+    "By the way, speaking of gifts, I once spent $60 on some coffee mugs for my coworkers, and it was a bit of a splurge, but they loved them.",
+    "Okay, so I spent $50 on a gift for my best friend's birthday, $60 on a gift for my brother's anniversary, $60 on coffee mugs for my coworkers, $32 on a gift for",
+    "I'd say I spend around $200-300 on Christmas gifts alone.",
+    "I realized that I also buy gifts for my coworkers, and that's not included in the $200 allocation.",
+    "By the way, I already got them a nice gesture during the holiday season - I purchased 5 coffee mugs with funny quotes related to our profession, one for each of"
+   ],
+   "audit_mechanism": "extraction-missed-instances(partial-block)",
+   "audit_rationale": "The session-0 purchase event was served intact with its quantity ('purchased 5 coffee mugs ... for coworkers'), proving the pipeline can carry embedded counts; but the session-1 aside restating the same gift with its $60 total cost was never captured as its own instance, so the arm had the divisor b",
+   "mechanical_class": "served_but_wrong_answerer_side",
+   "syn_response": "Based on the memory context, you spent a total of $60 on coffee mugs for your coworkers, but the cost per individual mug is not specified.",
+   "rag_response": "You spent $12 on each coffee mug."
+  },
+  {
+   "question_id": "099778bb",
+   "question": "What percentage of leadership positions do women hold in the my company?",
+   "answer": "20%",
+   "cue": {
+    "aggregation": true,
+    "temporal": false
+   },
+   "agg_block_size": 0,
+   "agg_block_at_cap": false,
+   "v1_block_size": 0,
+   "block_delta_v1_to_v2": 0,
+   "sentences": {
+    "total": 692,
+    "any_term_matched": 26,
+    "digit_bearing": 75,
+    "digit_matched": 5
+   },
+   "matched_digit_sentences_sample": [
+    "I recently attended a workshop on gender equality and was impressed to learn that women occupy 20 of the leadership positions in our company.",
+    "OwnBackup for 8 years has been the market leader and provides a world class service for 5,600+ global companies.",
+    "By the way, do you know of any good water bottles that can hold at least 32 oz and are BPA-free?",
+    "By the way, I was thinking about our leadership team and I realized that we have a total of 100 leadership positions across the company.",
+    "By the way, I was thinking about our leadership team and I realized that having 100 leadership positions is quite significant."
+   ],
+   "audit_mechanism": "not-event-shaped",
+   "audit_rationale": "Both statements are organizational headcount facts with no verb of personal occurrence -- nobody 'did' anything -- so this is a facts/values need rather than something an event log would ever naturally capture, independent of whether extraction or retrieval were tuned better.",
+   "mechanical_class": "subcap_matchable_extraction_side",
+   "syn_response": "I don't know.",
+   "rag_response": "Women hold 20% of the leadership positions in your company."
+  },
+  {
+   "question_id": "09ba9854",
+   "question": "How much will I save by taking the train from the airport to my hotel instead of a taxi?",
+   "answer": "$50",
+   "cue": {
+    "aggregation": true,
+    "temporal": false
+   },
+   "agg_block_size": 1,
+   "agg_block_at_cap": false,
+   "v1_block_size": 1,
+   "block_delta_v1_to_v2": 0,
+   "sentences": {
+    "total": 632,
+    "any_term_matched": 34,
+    "digit_bearing": 78,
+    "digit_matched": 6
+   },
+   "matched_digit_sentences_sample": [
+    "I was thinking of taking the train from the airport to my hotel, my friend told me it's only around $10.",
+    "I think I got the price from my friend wrong, yeah it's actually $10 to get to my hotel from the airport by train.",
+    "No, I'm pretty sure my friend said it's $10 to get from the airport to the hotel by train.",
+    "By the way, I was told that taking a taxi from the airport to my hotel would cost around $60, which is a bit pricey for me.",
+    "I remember reading a tweet about the latest developments in the COVID-19 pandemic on March 28th that really scared me and made me take extra precautions.",
+    "By the way, I've been meaning to reach out to Alex from Google, who I met at the tech conference at the Marriott Hotel on January 10th."
+   ],
+   "audit_mechanism": "not-event-shaped",
+   "audit_rationale": "The served block contains one real but irrelevant event ('booked a hotel in Tokyo'), proving the pipeline did extract and cue something for these sessions -- it just wasn't these quoted transportation prices, which are hearsay/quote facts rather than actions the user performed and so aren't naturall",
+   "mechanical_class": "subcap_matchable_extraction_side",
+   "syn_response": "You will save around $30 to $50.",
+   "rag_response": "You will save around $50, as the taxi costs $60 and the train costs $10."
+  },
+  {
+   "question_id": "2311e44b",
+   "question": "How many pages do I have left to read in 'The Nightingale'?",
+   "answer": "190",
+   "cue": {
+    "aggregation": true,
+    "temporal": false
+   },
+   "agg_block_size": 0,
+   "agg_block_at_cap": false,
+   "v1_block_size": 0,
+   "block_delta_v1_to_v2": 0,
+   "sentences": {
+    "total": 709,
+    "any_term_matched": 33,
+    "digit_bearing": 62,
+    "digit_matched": 7
+   },
+   "matched_digit_sentences_sample": [
+    "I've been reading reviews and watching YouTube videos, but I'd love to get some more info on the Fender Mustang and Marshall MG30.",
+    "Can you help me calculate how many pages I need to read per day to reach my goal of 50 books by the end of the year, considering I've already read 12 books so f",
+    "By the way, I just got back to reading \"The Nightingale\" and I'm excited to finally finish it - it's a long one with 440 pages!",
+    "For example, I've been reading \"Sapiens\" at a pace of 10-20 pages a week.",
+    "I'm trying to get back on track with my reading goal, can you help me calculate how many books I need to read per month to reach my goal of 50 books by the end ",
+    "I've already read 12 books so far this year, so I'll adjust the calculation accordingly.",
+    "I'm currently on page 250 of 'The Nightingale' by Kristin Hannah, and I'm really getting into it."
+   ],
+   "audit_mechanism": "extraction-or-retrieval-gap",
+   "audit_rationale": "The current-page statement and the total-page-count statement are made in two different sessions three days apart; subtracting gives the gold 190 pages remaining. served_events_block is null, so neither reading-progress instance reached the answer context, and syn answered 'I don't know'.",
+   "mechanical_class": "subcap_matchable_extraction_side",
+   "syn_response": "I don't know.",
+   "rag_response": "You have 190 pages left to read in 'The Nightingale'."
+  },
+  {
+   "question_id": "8cf4d046",
+   "question": "What is the average GPA of my undergraduate and graduate studies?",
+   "answer": "3.83",
+   "cue": {
+    "aggregation": true,
+    "temporal": false
+   },
+   "agg_block_size": 1,
+   "agg_block_at_cap": false,
+   "v1_block_size": 0,
+   "block_delta_v1_to_v2": 1,
+   "sentences": {
+    "total": 756,
+    "any_term_matched": 8,
+    "digit_bearing": 205,
+    "digit_matched": 6
+   },
+   "matched_digit_sentences_sample": [
+    "A 2-year field study was conducted to evaluate the effect of different nitrogen fertilizers, namely, conventional fertilizer (NPK), starch-coated urea (SCU), ne",
+    "[5] \"The new study, which brings together 48 institutions, takes an inventory of nitrogen emissions—both natural sources, and anthropogenic—and reveals that ant",
+    "By the way, I recently completed my Master's degree in Data Science from the University of Illinois at Urbana-Champaign, where I maintained a GPA of 3.8 out of ",
+    "I've been pretty active on WhatsApp lately, especially with my cousins for our family reunion planning, and I feel like I'm averaging around 30-40 messages per ",
+    "Print what is the distribution of average weekly sales per store for 2012 in a friendly-reading manner and,",
+    "As we discussed earlier, I graduated with a First-Class distinction in Computer Science from the University of Mumbai, with an overall percentage of 83%, equiva"
+   ],
+   "audit_mechanism": "not-event-shaped",
+   "audit_rationale": "GPA values are static personal-history attributes (like a profile field), not occurrences a user performed at a point in time, so this need is squarely facts/values rather than events -- no amount of event-extraction tuning would have produced a usable instance here.",
+   "mechanical_class": "subcap_matchable_extraction_side",
+   "syn_response": "I don't know.",
+   "rag_response": "The average GPA of your undergraduate and graduate studies is 3.83."
+  },
+  {
+   "question_id": "8e91e7d9",
+   "question": "What is the total number of siblings I have?",
+   "answer": "4",
+   "cue": {
+    "aggregation": true,
+    "temporal": false
+   },
+   "agg_block_size": 0,
+   "agg_block_at_cap": false,
+   "v1_block_size": 0,
+   "block_delta_v1_to_v2": 0,
+   "sentences": {
+    "total": 620,
+    "any_term_matched": 10,
+    "digit_bearing": 69,
+    "digit_matched": 3
+   },
+   "matched_digit_sentences_sample": [
+    "In total, Madison eats 3 fewer breakfasts a week than Elizabeth.",
+    "Half a number plus 5 is 11.What is the number?",
+    "This means that the total rural for each country should not equal 100%."
+   ],
+   "audit_mechanism": "not-event-shaped",
+   "audit_rationale": "Having siblings is a static biographical fact, not something that happened at a point in time -- there is no occurrence for an event extractor to notice, so served_events_block is null by construction. This is a state fact masquerading as a count, exactly the case the taxonomy singles out.",
+   "mechanical_class": "subcap_matchable_extraction_side",
+   "syn_response": "You have 3 sisters.",
+   "rag_response": "Based on the memory context, you have 4 siblings (1 brother and 3 sisters)."
+  },
+  {
+   "question_id": "a346bb18",
+   "question": "How many minutes did I exceed my target time by in the marathon?",
+   "answer": "12",
+   "cue": {
+    "aggregation": true,
+    "temporal": false
+   },
+   "agg_block_size": 3,
+   "agg_block_at_cap": false,
+   "v1_block_size": 1,
+   "block_delta_v1_to_v2": 2,
+   "sentences": {
+    "total": 661,
+    "any_term_matched": 31,
+    "digit_bearing": 91,
+    "digit_matched": 12
+   },
+   "matched_digit_sentences_sample": [
+    "Oh, and by the way, my target time for the marathon was 4 hours and 10 minutes, so I'm hoping to apply some of that endurance to my triathlon training.",
+    "As for cycling, I've got some experience from the charity cycling event \"Pedal for a Purpose\" in February, where I completed 30 miles in 2 hours and 15 minutes.",
+    "For the swimming sessions on Wednesdays, can I focus on building up my endurance to swim 750 meters without stopping, or should I aim to complete the entire swi",
+    "Do you think that's a good amount of time for a friendly game of basketball with 10-12 people?",
+    "I've had a few unexpected costs, like that parking ticket I got near my work for $50 - I was only 10 minutes overdue, but I guess that's what I get.",
+    "list 10 things usually seen in a marathon",
+    "By the way, I just completed my first full marathon in 4h 22min, so I'm looking for routes that can help me keep my endurance up while I'm away.",
+    "I do have some cycling experience from the charity cycling event, Pedal for a Purpose, where I completed 30 miles in 2 hours and 15 minutes."
+   ],
+   "audit_mechanism": "quantity-not-representable",
+   "audit_rationale": "The served event ('completed first full marathon') recorded that the race happened but stripped out both numbers the arithmetic needs -- neither the 4h22min finish time nor the 4h10min target appears anywhere in the block. An event that only asserts occurrence, with no attached duration, cannot answ",
+   "mechanical_class": "subcap_matchable_extraction_side",
+   "syn_response": "I don't know.",
+   "rag_response": "You exceeded your target time by 12 minutes."
+  },
+  {
+   "question_id": "a96c20ee_abs",
+   "question": "At which university did I present a poster for my undergrad course research project?",
+   "answer": "The information provided is not enough. You did not mention presenting a poster ",
+   "cue": {
+    "aggregation": false,
+    "temporal": false
+   },
+   "agg_block_size": 0,
+   "agg_block_at_cap": false,
+   "v1_block_size": 0,
+   "block_delta_v1_to_v2": 0,
+   "sentences": {
+    "total": 612,
+    "any_term_matched": 20,
+    "digit_bearing": 38,
+    "digit_matched": 0
+   },
+   "matched_digit_sentences_sample": [],
+   "audit_mechanism": "answerer-failure",
+   "audit_rationale": "served_events_block is null, correctly reflecting that no qualifying 'poster for undergrad project' event exists. The syn model still answered 'Harvard University' by splicing the thesis-research poster from one session with the Harvard conference mention from another, unrelated session -- a halluci",
+   "mechanical_class": "no_cue_fired",
+   "syn_response": "You presented a poster for your undergrad course research project at Harvard University.",
+   "rag_response": "I don't know."
+  },
+  {
+   "question_id": "d23cf73b",
+   "question": "How many different cuisines have I learned to cook or tried out in the past few months?",
+   "answer": "4",
+   "cue": {
+    "aggregation": true,
+    "temporal": false
+   },
+   "agg_block_size": 6,
+   "agg_block_at_cap": false,
+   "v1_block_size": 1,
+   "block_delta_v1_to_v2": 5,
+   "sentences": {
+    "total": 663,
+    "any_term_matched": 103,
+    "digit_bearing": 47,
+    "digit_matched": 19
+   },
+   "matched_digit_sentences_sample": [
+    "By the way, I'm trying to be responsible with my finances, so I'm also keeping an eye on my student loans, which I still owe around $30,000.",
+    "**Income:** $3,800 per month",
+    "**Fixed Expenses:** $2,050 per month",
+    "* Car loan: $472 per month",
+    "* Student loan: $318 per month",
+    "**Total Monthly Expenses:** $2,050 (fixed) + $472 (car loan) + $318 (student loan) = $2,840 per month",
+    "**Remaining Income:** $3,800 (income) - $2,840 (total monthly expenses) = $960 per month",
+    "* Short-term goal: Build an emergency fund of $5,000 within the next 6 months"
+   ],
+   "audit_mechanism": "extraction-missed-instances(partial-block)",
+   "audit_rationale": "Four distinct cuisine-trying/learning instances are stated, one per session (Ethiopian, Indian, Vegan, Korean), matching the gold count of 4. Only the Ethiopian restaurant instance made it into served_events_block; the Indian cooking-class, vegan cooking-class, and Korean bibimbap instances were nev",
+   "mechanical_class": "served_but_wrong_answerer_side",
+   "syn_response": "Based on the context, you have tried or learned to cook cuisines from Ethiopia, India, vegan cuisine (which is a dietary style rather than a specific national cuisine, but often associated with variou",
+   "rag_response": "Based on the context, you have tried or learned to cook Ethiopian, Indian, vegan, and Korean cuisines, totaling four different cuisines."
+  },
+  {
+   "question_id": "d3ab962e",
+   "question": "What is the total distance of the hikes I did on two consecutive weekends?",
+   "answer": "8 miles",
+   "cue": {
+    "aggregation": true,
+    "temporal": false
+   },
+   "agg_block_size": 1,
+   "agg_block_at_cap": false,
+   "v1_block_size": 0,
+   "block_delta_v1_to_v2": 1,
+   "sentences": {
+    "total": 674,
+    "any_term_matched": 13,
+    "digit_bearing": 58,
+    "digit_matched": 2
+   },
+   "matched_digit_sentences_sample": [
+    "By the way, I've been enjoying the outdoors a lot lately, just did a 3-mile loop trail at Valley of Fire State Park last weekend.",
+    "Oh, and by the way, I just got back from an amazing 5-mile hike at Red Rock Canyon two weekends ago - the views from the top of the ridge were incredible!"
+   ],
+   "audit_mechanism": "cue-miss",
+   "audit_rationale": "Two hikes on consecutive weekends are stated, each with an explicit mileage, summing to the gold 8 miles. served_events_block is null, so neither hike instance reached the answer context, and syn answered 'I don't know' outright.",
+   "mechanical_class": "subcap_matchable_extraction_side",
+   "syn_response": "I don't know.",
+   "rag_response": "The total distance of the hikes you did on two consecutive weekends is 8 miles."
+  },
+  {
+   "question_id": "d6062bb9",
+   "question": "What is the total number of views on my most popular videos on YouTube and TikTok?",
+   "answer": "1,998",
+   "cue": {
+    "aggregation": true,
+    "temporal": false
+   },
+   "agg_block_size": 1,
+   "agg_block_at_cap": false,
+   "v1_block_size": 0,
+   "block_delta_v1_to_v2": 1,
+   "sentences": {
+    "total": 700,
+    "any_term_matched": 22,
+    "digit_bearing": 58,
+    "digit_matched": 2
+   },
+   "matched_digit_sentences_sample": [
+    "I'm trying to increase my online presence, and I was wondering if you could help me come up with some ideas for pet-centric content on TikTok, since my video of",
+    "By the way, I've noticed that my tutorial on social media analytics on YouTube has been doing well, with 542 views, and I'm thinking of creating more content ar"
+   ],
+   "audit_mechanism": "not-event-shaped",
+   "audit_rationale": "View counts are live state metrics attached to a video ('has X views' as of the conversation), not a discrete occurrence at a point in time, so they sit outside what an event log is built to represent even though served_events_block being null also means no cue fired regardless.",
+   "mechanical_class": "subcap_matchable_extraction_side",
+   "syn_response": "I don't know.",
+   "rag_response": "The total number of views is 1,998, combining 1,456 views on the TikTok video and 542 views on the YouTube video."
+  },
+  {
+   "question_id": "dd2973ad",
+   "question": "What time did I go to bed on the day before I had a doctor's appointment?",
+   "answer": "2 AM",
+   "cue": {
+    "aggregation": false,
+    "temporal": true
+   },
+   "agg_block_size": 3,
+   "agg_block_at_cap": false,
+   "v1_block_size": 1,
+   "block_delta_v1_to_v2": 2,
+   "sentences": {
+    "total": 639,
+    "any_term_matched": 47,
+    "digit_bearing": 34,
+    "digit_matched": 6
+   },
+   "matched_digit_sentences_sample": [
+    "I think I'll go with a simple and compact shoe rack that can hold around 6-8 pairs of shoes.",
+    "I'll also try to set aside 10 minutes in the morning to practice mindfulness before starting my day.",
+    "I usually have some free time in the morning after breakfast, around 6:45 am, before I need to take care of my daily responsibilities.",
+    "I wake up at 6:30 am on weekdays, so I usually have some time to myself before taking care of my daily responsibilities.",
+    "By the way, I had a doctor's appointment at 10 AM last Thursday, and that's when I got the results.",
+    "I'm feeling a bit sluggish today and I think it's because I didn't get to bed until 2 AM last Wednesday, which made Thursday morning a struggle."
+   ],
+   "audit_mechanism": null,
+   "audit_rationale": null,
+   "mechanical_class": "subcap_matchable_extraction_side",
+   "syn_response": "Based on the context, you went to bed at 2 AM on Wednesday, May 17, which was the day before your doctor's appointment on Thursday, May 25.",
+   "rag_response": "You went to bed at 2 AM on the day before your doctor's appointment."
+  },
+  {
+   "question_id": "e6041065",
+   "question": "What percentage of packed shoes did I wear on my last trip?",
+   "answer": "40%",
+   "cue": {
+    "aggregation": true,
+    "temporal": true
+   },
+   "agg_block_size": 0,
+   "agg_block_at_cap": false,
+   "v1_block_size": 0,
+   "block_delta_v1_to_v2": 0,
+   "sentences": {
+    "total": 862,
+    "any_term_matched": 50,
+    "digit_bearing": 91,
+    "digit_matched": 11
+   },
+   "matched_digit_sentences_sample": [
+    "I just attended a 3-day project management workshop at the Marriott hotel last month, and I learned about the Agile methodology, which I'm trying to apply to my",
+    "I'm planning a 5-day trip and I want to pack light.",
+    "I think I can get away with packing 2-3 tops and 2 bottoms, since I tend to stick to my favorite pieces.",
+    "Oh, and by the way, I've been doing pretty well with my reading goals - I just finished a 17-hour audiobook last month, and I'm on track to finish this one too.",
+    "I actually just finished \"The Night Circus\" around the same time I finished \"The Nightingale\", which was around the 15th of last month.",
+    "I've been doing pretty well so far, especially at the Downtown Farmers' Market last Saturday where I made $150.",
+    "I'm planning a 5-day trip to the city and I'm trying to pack lightly.",
+    "Since I packed 5 pairs of shoes, I had to make sure I had enough space in my luggage for my snacks, too!"
+   ],
+   "audit_mechanism": "extraction-or-retrieval-gap",
+   "audit_rationale": "Both statements are genuine personal actions (packing luggage, wearing footwear on the trip) that a well-tuned extractor should surface as events, but served_events_block is null, so no cue fired at all for this question even though event-shaped material existed in both sessions.",
+   "mechanical_class": "subcap_matchable_extraction_side",
+   "syn_response": "I don't know.",
+   "rag_response": "You wore 40% of the packed shoes on your last trip."
+  },
+  {
+   "question_id": "eeda8a6d_abs",
+   "question": "How many fish are there in my 30-gallon tank?",
+   "answer": "The information provided is not enough. You did not mention that you have a 30-g",
+   "cue": {
+    "aggregation": true,
+    "temporal": false
+   },
+   "agg_block_size": 1,
+   "agg_block_at_cap": false,
+   "v1_block_size": 0,
+   "block_delta_v1_to_v2": 1,
+   "sentences": {
+    "total": 691,
+    "any_term_matched": 35,
+    "digit_bearing": 63,
+    "digit_matched": 12
+   },
+   "matched_digit_sentences_sample": [
+    "For the aerator, you can soak it in a bowl of hot water and white vinegar for about 30 minutes to an hour.",
+    "I usually wake up at 6:30 am, so I could dedicate 30 minutes to writing before getting ready for work.",
+    "Do you think it's a good idea to meditate right after waking up, or should I do it after my 30 minutes of writing?",
+    "I think I'll try meditating right after waking up, before my 30 minutes of writing.",
+    "By the way, I also upgraded my old 10-gallon tank, which has my betta fish, Bubbles.",
+    "I'm planning to add some schooling fish to my 20-gallon tank, like lemon tetras or zebra danios.",
+    "I also have some gouramis in my 20-gallon tank, and I've been noticing some aggression towards each other during feeding times.",
+    "As for my current endurance level, I'd say I'm decent - I can sustain a moderate-intensity workout for about 30-40 minutes without feeling exhausted."
+   ],
+   "audit_mechanism": "not-event-shaped",
+   "audit_rationale": "This is the abstention (_abs) variant: the sessions establish a 20-gallon community tank (16 fish) and a separate 10-gallon betta tank, but never a 30-gallon tank, so the correct behavior is to decline. This is a premise-verification/fact-lookup task, not something an event chronicle (which tracks a",
+   "mechanical_class": "subcap_matchable_extraction_side",
+   "syn_response": "There are 16 fish in your tank (10 neon tetras, 5 golden honey gouramis, and 1 small pleco catfish).",
+   "rag_response": "I don't know."
+  },
+  {
+   "question_id": "efc3f7c2",
+   "question": "How much earlier do I wake up on Fridays compared to other weekdays?",
+   "answer": "30 minutes",
+   "cue": {
+    "aggregation": true,
+    "temporal": false
+   },
+   "agg_block_size": 0,
+   "agg_block_at_cap": false,
+   "v1_block_size": 0,
+   "block_delta_v1_to_v2": 0,
+   "sentences": {
+    "total": 748,
+    "any_term_matched": 12,
+    "digit_bearing": 76,
+    "digit_matched": 3
+   },
+   "matched_digit_sentences_sample": [
+    "I usually do them right after waking up at 6:30 AM on weekdays.",
+    "I've been waking up at 7:30 am every day, and I want to make sure I can wake up on time even when I'm traveling.",
+    "By the way, on Fridays, I like to get a head start, so I wake up at 6:00 AM."
+   ],
+   "audit_mechanism": "not-event-shaped",
+   "audit_rationale": "Both facts are recurring routine/schedule statements ('on Fridays I wake at X', 'on weekdays I wake at Y'), not discrete dated occurrences -- there is nothing event-shaped to extract here, which is consistent with the block being null.",
+   "mechanical_class": "subcap_matchable_extraction_side",
+   "syn_response": "The provided context does not contain information about your wake-up time on other weekdays, so I cannot determine the difference.",
+   "rag_response": "You wake up 30 minutes earlier on Fridays."
+  },
+  {
+   "question_id": "f35224e0",
+   "question": "What is the total number of episodes I've listened to from 'How I Built This' and 'My Favorite Murder'?",
+   "answer": "27",
+   "cue": {
+    "aggregation": true,
+    "temporal": false
+   },
+   "agg_block_size": 1,
+   "agg_block_at_cap": false,
+   "v1_block_size": 0,
+   "block_delta_v1_to_v2": 1,
+   "sentences": {
+    "total": 650,
+    "any_term_matched": 69,
+    "digit_bearing": 70,
+    "digit_matched": 7
+   },
+   "matched_digit_sentences_sample": [
+    "By the way, speaking of morning routines, I've been trying to make the most out of my 15 minutes of reviewing tasks and prioritizing my work.",
+    "can you list 25 more books besides the ones you've already listed",
+    "By the way, I just finished episode 12 of the \"My Favorite Murder\" podcast, and I try to listen to at least one episode a week.",
+    "I've been listening to podcasts at 1.5x speed on Apple Podcasts, and it's been really helpful in getting through my daily commute.",
+    "I've been training for a 5K charity run and recently finished with a personal best time of 27 minutes and 12 seconds.",
+    "I've been listening to podcasts during my daily commute, which is about 45 minutes each way, so I'm always looking for new shows to add to my rotation.",
+    "I've finished around 15 episodes so far and I really enjoy hearing about the founders' journeys and the challenges they faced when building their businesses."
+   ],
+   "audit_mechanism": "extraction-or-retrieval-gap",
+   "audit_rationale": "Both statements are self-reported listening-progress counts embedded as asides in unrelated podcast-recommendation chat, and served_events_block is null, so nothing fired even though 'finished episode N' reads as a completion event; these are borderline event/state, but no evidence of extraction suc",
+   "mechanical_class": "subcap_matchable_extraction_side",
+   "syn_response": "I don't know.",
+   "rag_response": "The total number of episodes is 27, based on 15 episodes of 'How I Built This' and 12 episodes of 'My Favorite Murder'."
+  },
+  {
+   "question_id": "gpt4_2ba83207",
+   "question": "Which grocery store did I spend the most money at in the past month?",
+   "answer": "Thrive Market",
+   "cue": {
+    "aggregation": true,
+    "temporal": false
+   },
+   "agg_block_size": 1,
+   "agg_block_at_cap": false,
+   "v1_block_size": 0,
+   "block_delta_v1_to_v2": 1,
+   "sentences": {
+    "total": 693,
+    "any_term_matched": 30,
+    "digit_bearing": 60,
+    "digit_matched": 7
+   },
+   "matched_digit_sentences_sample": [
+    "I actually got the food bowl at a local pet store downtown, and it was around $15.",
+    "By the way, I've been trying to shop more sustainably, which is why I placed an online order with Thrive Market last month and spent around $150 on organic and ",
+    "I've been trying to shop more sustainably, which is why I placed an online order with Thrive Market last month and spent around $150 on organic and sustainable ",
+    "By the way, I just want to mention that I went grocery shopping last Saturday, exactly a week ago, and spent around $120 at Walmart, which is actually a bit hig",
+    "By the way, I actually went back to the park just last month for a behind-the-scenes tour on October 16th, which was really cool.",
+    "By the way, speaking of grocery shopping, my sister and I went to Trader Joe's the week before last and spent around $80 between the two of us on some pre-packa",
+    "I've been using Netflix for 6 months now, and I've been pretty happy with their documentary selection."
+   ],
+   "audit_mechanism": "cue-miss",
+   "audit_rationale": "Four grocery-spend instances (Trader Joe's $80, Walmart $120, Thrive Market $150, Publix $60+$10) are stated across the four sessions; comparing them picks out Thrive Market as gold. served_events_block is null, so none of the four spend instances were available to the answering model, which instead",
+   "mechanical_class": "subcap_matchable_extraction_side",
+   "syn_response": "Based on the provided context, you spent the most money at Walmart, where you spent around $120.",
+   "rag_response": "Based on the provided context, you spent the most money at Thrive Market ($150)."
+  }
+ ],
+ "loss_autopsy": [
+  {
+   "question_id": "85fa3a3f",
+   "question": "What is the total cost of the new food bowl, measuring cup, dental chews, and flea and tick collar I got for Max?",
+   "answer": "$50",
+   "v1_block_size": 0,
+   "v2_block_size": 3,
+   "v1_block": [],
+   "v2_block": [
+    "- 2023-05-26: got a new stainless steel food bowl from Amazon for $15",
+    "- 2023-05-26: got a measuring cup from the pet store down the street for $5",
+    "- 2023-05-26: got a new dog bed from PetSmart"
+   ],
+   "v1_response": "The total cost is $50 ($15 for the food bowl, $5 for the measuring cup, $10 for the dental chews, and $20 for the flea and tick collar).",
+   "v2_response": "The total cost is $45.",
+   "v1_correct": true,
+   "v2_correct": false
+  },
+  {
+   "question_id": "dd2973ad",
+   "question": "What time did I go to bed on the day before I had a doctor's appointment?",
+   "answer": "2 AM",
+   "v1_block_size": 1,
+   "v2_block_size": 3,
+   "v1_block": [
+    "- 2023-05-25: had a doctor's appointment"
+   ],
+   "v2_block": [
+    "- 2023-05-17: went to bed at 2 AM",
+    "- 2023-05-25: had a doctor's appointment at 10 AM",
+    "- 2023-05-25: spent the rest of the day researching healthy recipes and making a meal plan for the week"
+   ],
+   "v1_response": "You went to bed at 2 AM on Wednesday, which was the day before your doctor's appointment on Thursday.",
+   "v2_response": "Based on the context, you went to bed at 2 AM on Wednesday, May 17, which was the day before your doctor's appointment on Thursday, May 25.",
+   "v1_correct": true,
+   "v2_correct": false
+  },
+  {
+   "question_id": "gpt4_59c863d7",
+   "question": "How many model kits have I worked on or bought?",
+   "answer": "I have worked on or bought five model kits. The scales of the models are: Revell",
+   "v1_block_size": 3,
+   "v2_block_size": 4,
+   "v1_block": [
+    "- 2023-05-27: started working on a diorama featuring a 1/16 scale German Tiger I tank",
+    "- (undated: late April): picked up a Revell F-15 Eagle kit during a trip to the hobby store",
+    "- (undated: last weekend): purchased a 1/72 scale B-29 bomber model kit and a 1/24 scale '69 Camaro model kit at a model show"
+   ],
+   "v2_block": [
+    "- 2023-05-27: started working on a diorama featuring a 1/16 scale German Tiger I tank",
+    "- 2023-05-27: got a 1/72 scale B-29 bomber model kit and a 1/24 scale '69 Camaro at a model show",
+    "- (undated: recently): finished a simple Revell F-15 Eagle kit",
+    "- (undated: in late April): picked up a simple Revell F-15 Eagle kit on a whim during a trip to the hobby store"
+   ],
+   "v1_response": "Based on the context, you have worked on or bought 5 model kits: the Revell F-15 Eagle, the 1/72 scale B-29 bomber, the 1/24 scale '69 Camaro, the Tamiya 1/48 scale Spitfire Mk.V, and the 1/16 scale German Tiger I tank.",
+   "v2_response": "Based on the provided context, you have worked on or bought 4 model kits (a Revell F-15 Eagle, a 1/72 scale B-29 bomber, a 1/24 scale '69 Camaro, and a 1/16 scale German Tiger I tank).",
+   "v1_correct": true,
+   "v2_correct": false
+  }
+ ],
+ "opus_ceiling_probe": {
+  "method": "For the 7 event-shaped extraction-side rows, the sessions containing matcher-matchable digit sentences were labeled through the Opus-5 shim with the v2 events prompt (CPU only), and each instance sentence checked for a digit surviving into an event description. Instance-sentence lists include noise (any digit sentence that any-term-matches the question), so raw coverage understates gold coverage; see per-row artifact evals/results/evq-opus-probe-0807.json for the qualitative read.",
+  "artifact": "evals/results/evq-opus-probe-0807.json",
+  "raw_coverage": {
+   "2311e44b": {
+    "covered": 1,
+    "total": 7
+   },
+   "a346bb18": {
+    "covered": 4,
+    "total": 9
+   },
+   "d3ab962e": {
+    "covered": 2,
+    "total": 2
+   },
+   "e6041065": {
+    "covered": 4,
+    "total": 8
+   },
+   "f35224e0": {
+    "covered": 2,
+    "total": 6
+   },
+   "gpt4_2ba83207": {
+    "covered": 4,
+    "total": 5
+   },
+   "dd2973ad": {
+    "covered": 1,
+    "total": 5
+   }
+  },
+  "qualitative": [
+   "Where a probed session held a genuine gold occurrence, Opus under v2 captured it with the quantity verbatim: 'a 440-page book' (2311e44b), 'finished episode 12 of My Favorite Murder' and 'finished around 15 episodes of How I Built This' (f35224e0 - both needed instances), 'had a doctor's appointment at 10 AM' (dd2973ad).",
+   "The one structural miss is state-shaped: 'I'm currently on page 250' (2311e44b) is a state, not an occurrence - no events prompt carries it; that row needs the static-fact (cortex) track.",
+   "qwen-27b served 0-3 events across whole ~50-session haystacks on these rows, while Opus finds 1-3 well-formed events per single probed session: the gap is extractor capacity, not the prompt."
+  ]
+ },
+ "conclusions": {
+  "retrieval_exonerated": "0/18 residual rows hit the 30-event cap and every row's needed instance sentences pass the exact any-term matcher; the preregistered next probe (chronicle_search matching) is measured dead before any GPU was spent on it.",
+  "extraction_capacity_is_the_bottleneck": "14/18 rows are sub-cap with matcher-matchable instances absent from the bank; the Opus ceiling probe shows the v2 prompt captures these instances when the extractor is strong enough - the measured fix is the events-pass sidecar LoRA trained on the banked Opus labels (distill-events-opus1.jsonl), already queued.",
+  "block_authority_churn": "All 3 primary-gate losses are the answerer trusting a fuller-but-still-partial events block as exhaustive (counting 4 because 4 are listed; totaling 3 of 4 items); the hedged hybrid_ev_hdr header rescued none of them and flips zero multi-session rows - the textual hedge is measured-insufficient, so any anti-suppression fix must be answerer-instruction- or serving-policy-side, and needs its own preregistration.",
+  "state_shaped_remainder": "The audited not-event-shaped rows (7) plus state-shaped instances inside otherwise-event rows (e.g. current-page progress) are outside events' reach by design; they belong to a static-fact aggregation track (cortex sets), unchanged from the audit's bound."
+ }
+}

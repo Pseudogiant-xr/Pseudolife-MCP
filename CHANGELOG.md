@@ -6,6 +6,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Measured (2026-08-07 — evq residual decomposition: retrieval exonerated, extractor capacity is the gap)
+- **The evq-0806 multi-session residual is decomposed offline — no GPU —
+  by replaying `chronicle_search`'s exact matcher against the haystacks**
+  (`evals/results/evq-residual-decomposition-0807.json`, Opus ceiling
+  probe in `evals/results/evq-opus-probe-0807.json`). Of the 18 rows
+  where rag is right and `hybrid_ev_syn` still wrong: 0 hit the
+  30-event serving cap and every row's needed instance sentences pass
+  the any-term matcher, so the preregistered next probe — retrieval
+  matching — is measured dead before spending GPU on it. 14 rows are
+  sub-cap with matchable instances absent from the bank: extraction
+  side. The Opus ceiling probe (v2 prompt, instance-bearing sessions
+  only) shows a strong extractor captures those instances with
+  quantities verbatim where qwen-27b served 0–3 events across whole
+  ~50-session haystacks — the gap is extractor capacity, not the
+  prompt, and the measured fix is the events-pass sidecar LoRA on the
+  banked Opus labels. The 3 primary-gate losses share one mechanism:
+  block-authority — the answerer treats a fuller-but-still-partial
+  events block as exhaustive (counting 4 model kits because 4 are
+  listed); the hedged `hybrid_ev_hdr` header rescued none of them and
+  flips zero multi-session rows, so the textual hedge is
+  measured-insufficient and any anti-suppression fix moves to
+  answerer-instruction or serving policy, under its own
+  preregistration. State-shaped instances ("I'm currently on page
+  250") remain outside events' reach by design and stay with the
+  static-fact aggregation track.
+
 ### Measured (2026-08-07 — events quantity gates: the fix works row-for-row, the run stays under the bar)
 - **The events quantity + coverage gate run is recorded as a
   mechanism-confirmed miss; nothing is promoted** (preregistration

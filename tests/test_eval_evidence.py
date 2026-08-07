@@ -945,6 +945,35 @@ CLAIMS.append(Claim(
     value=lambda d: d["types"]["multi-session"]["arms"]["rag"],
     stated=0.504, places=3))
 
+# ── evq residual decomposition (offline matcher replay + Opus probe) ─────
+DECOMP = RESULTS + "evq-residual-decomposition-0807.json"
+
+CLAIMS.append(Claim(
+    id="decomp-n-residual", doc=CHANGELOG,
+    needle="Of the 18 rows\n  where rag is right",
+    artifacts=(DECOMP,),
+    value=lambda d: d["n_residual"],
+    stated=18, places=0))
+CLAIMS.append(Claim(
+    id="decomp-at-cap", doc=CHANGELOG,
+    needle="0 hit the\n  30-event serving cap",
+    artifacts=(DECOMP,),
+    value=lambda d: d["tally"]["at_cap_retrieval_side"],
+    stated=0, places=0))
+CLAIMS.append(Claim(
+    id="decomp-extraction-side", doc=CHANGELOG,
+    needle="14 rows are\n  sub-cap with matchable instances absent",
+    artifacts=(DECOMP,),
+    value=lambda d: d["tally"]["subcap_matchable_extraction_side"],
+    stated=14, places=0))
+CLAIMS.append(Claim(
+    id="decomp-losses-block-authority", doc=CHANGELOG,
+    needle="The 3 primary-gate losses share one mechanism",
+    artifacts=(DECOMP,),
+    value=lambda d: sum(1 for l in d["loss_autopsy"]
+                        if l["v1_correct"] and not l["v2_correct"]),
+    stated=3, places=0))
+
 
 def test_every_published_number_names_a_committed_artifact():
     """A claim whose evidence is untracked cannot be checked by a reader.
