@@ -1,0 +1,490 @@
+[
+ {
+  "question_id": "2311e44b",
+  "question": "How many pages do I have left to read in 'The Nightingale'?",
+  "answer": "190",
+  "instance_sessions_found": 3,
+  "sessions_probed": [
+   {
+    "session_id": "answer_bf633415_2",
+    "instance_sentences": [
+     "Can you help me calculate how many pages I need to read per day to reach my goal of 50 books by the end of the year, considering I've alread",
+     "By the way, I just got back to reading \"The Nightingale\" and I'm excited to finally finish it - it's a long one with 440 pages!",
+     "For example, I've been reading \"Sapiens\" at a pace of 10-20 pages a week."
+    ],
+    "opus_events_n": 1,
+    "opus_events": [
+     {
+      "description": "got back to reading \"The Nightingale\", a 440-page book",
+      "date": "2023-05-28"
+     }
+    ],
+    "instances_with_digit_in_event": 1,
+    "instances_total": 3
+   },
+   {
+    "session_id": "answer_bf633415_1",
+    "instance_sentences": [
+     "I'm trying to get back on track with my reading goal, can you help me calculate how many books I need to read per month to reach my goal of ",
+     "I've already read 12 books so far this year, so I'll adjust the calculation accordingly.",
+     "I'm currently on page 250 of 'The Nightingale' by Kristin Hannah, and I'm really getting into it."
+    ],
+    "opus_events_n": 0,
+    "opus_events": [],
+    "instances_with_digit_in_event": 0,
+    "instances_total": 3
+   },
+   {
+    "session_id": "aea71da3_2",
+    "instance_sentences": [
+     "I've been reading reviews and watching YouTube videos, but I'd love to get some more info on the Fender Mustang and Marshall MG30."
+    ],
+    "opus_events_n": 1,
+    "opus_events": [
+     {
+      "description": "had guitar repaired at GuitarWorks on 5th street",
+      "date": null
+     }
+    ],
+    "instances_with_digit_in_event": 0,
+    "instances_total": 1
+   }
+  ]
+ },
+ {
+  "question_id": "a346bb18",
+  "question": "How many minutes did I exceed my target time by in the marathon?",
+  "answer": "12",
+  "instance_sessions_found": 7,
+  "sessions_probed": [
+   {
+    "session_id": "answer_4934b2d7_2",
+    "instance_sentences": [
+     "Oh, and by the way, my target time for the marathon was 4 hours and 10 minutes, so I'm hoping to apply some of that endurance to my triathlo",
+     "As for cycling, I've got some experience from the charity cycling event \"Pedal for a Purpose\" in February, where I completed 30 miles in 2 h",
+     "For the swimming sessions on Wednesdays, can I focus on building up my endurance to swim 750 meters without stopping, or should I aim to com"
+    ],
+    "opus_events_n": 2,
+    "opus_events": [
+     {
+      "description": "started attending masters swimming sessions at the community pool every Wednesday evening",
+      "date": null
+     },
+     {
+      "description": "completed 30 miles in 2 hours and 15 minutes at the charity cycling event \"Pedal for a Purpose\"",
+      "date": null
+     }
+    ],
+    "instances_with_digit_in_event": 1,
+    "instances_total": 3
+   },
+   {
+    "session_id": "771ba1d5",
+    "instance_sentences": [
+     "Swimming lessons are on Tuesdays and Thursdays, each lasting 45 minutes.",
+     "I want to cycle at least 3 times a week, with a mix of endurance and interval training.",
+     "By the way, my personal best is 2 hours and 15 minutes, which I achieved on February 10th."
+    ],
+    "opus_events_n": 1,
+    "opus_events": [
+     {
+      "description": "achieved half-marathon personal best of 2 hours and 15 minutes",
+      "date": null
+     }
+    ],
+    "instances_with_digit_in_event": 1,
+    "instances_total": 3
+   },
+   {
+    "session_id": "answer_4934b2d7_1",
+    "instance_sentences": [
+     "By the way, I just completed my first full marathon in 4h 22min, so I'm looking for routes that can help me keep my endurance up while I'm a",
+     "I do have some cycling experience from the charity cycling event, Pedal for a Purpose, where I completed 30 miles in 2 hours and 15 minutes."
+    ],
+    "opus_events_n": 2,
+    "opus_events": [
+     {
+      "description": "completed first full marathon in 4h 22min",
+      "date": null
+     },
+     {
+      "description": "completed 30 miles in 2 hours and 15 minutes at the charity cycling event, Pedal for a Purpose",
+      "date": null
+     }
+    ],
+    "instances_with_digit_in_event": 2,
+    "instances_total": 2
+   },
+   {
+    "session_id": "2655efcc_1",
+    "instance_sentences": [
+     "Do you think that's a good amount of time for a friendly game of basketball with 10-12 people?"
+    ],
+    "opus_events_n": 2,
+    "opus_events": [
+     {
+      "description": "participated in the company's annual basketball tournament",
+      "date": "2023-04-30"
+     },
+     {
+      "description": "team \"Slam Dunkers\" made it to the semifinals but lost to the eventual champions, \"Hoop Heroes\"",
+      "date": null
+     }
+    ],
+    "instances_with_digit_in_event": 0,
+    "instances_total": 1
+   }
+  ]
+ },
+ {
+  "question_id": "d3ab962e",
+  "question": "What is the total distance of the hikes I did on two consecutive weekends?",
+  "answer": "8 miles",
+  "instance_sessions_found": 2,
+  "sessions_probed": [
+   {
+    "session_id": "answer_5237bb0b_2",
+    "instance_sentences": [
+     "By the way, I've been enjoying the outdoors a lot lately, just did a 3-mile loop trail at Valley of Fire State Park last weekend."
+    ],
+    "opus_events_n": 1,
+    "opus_events": [
+     {
+      "description": "did a 3-mile loop trail at Valley of Fire State Park",
+      "date": null
+     }
+    ],
+    "instances_with_digit_in_event": 1,
+    "instances_total": 1
+   },
+   {
+    "session_id": "answer_5237bb0b_1",
+    "instance_sentences": [
+     "Oh, and by the way, I just got back from an amazing 5-mile hike at Red Rock Canyon two weekends ago - the views from the top of the ridge we"
+    ],
+    "opus_events_n": 1,
+    "opus_events": [
+     {
+      "description": "got back from a 5-mile hike at Red Rock Canyon",
+      "date": null
+     }
+    ],
+    "instances_with_digit_in_event": 1,
+    "instances_total": 1
+   }
+  ]
+ },
+ {
+  "question_id": "e6041065",
+  "question": "What percentage of packed shoes did I wear on my last trip?",
+  "answer": "40%",
+  "instance_sessions_found": 7,
+  "sessions_probed": [
+   {
+    "session_id": "answer_4eb6d671_2",
+    "instance_sentences": [
+     "I'm planning a 5-day trip and I want to pack light.",
+     "I think I can get away with packing 2-3 tops and 2 bottoms, since I tend to stick to my favorite pieces."
+    ],
+    "opus_events_n": 1,
+    "opus_events": [
+     {
+      "description": "packed a lot of shoes for a trip but only wore two pairs - sneakers and sandals",
+      "date": null
+     }
+    ],
+    "instances_with_digit_in_event": 0,
+    "instances_total": 2
+   },
+   {
+    "session_id": "59b8f503",
+    "instance_sentences": [
+     "Oh, and by the way, I've been doing pretty well with my reading goals - I just finished a 17-hour audiobook last month, and I'm on track to ",
+     "I actually just finished \"The Night Circus\" around the same time I finished \"The Nightingale\", which was around the 15th of last month."
+    ],
+    "opus_events_n": 3,
+    "opus_events": [
+     {
+      "description": "finished a 17-hour audiobook",
+      "date": null
+     },
+     {
+      "description": "finished \"The Night Circus\"",
+      "date": "2023-04-15"
+     },
+     {
+      "description": "finished \"The Nightingale\"",
+      "date": "2023-04-15"
+     }
+    ],
+    "instances_with_digit_in_event": 1,
+    "instances_total": 2
+   },
+   {
+    "session_id": "answer_4eb6d671_1",
+    "instance_sentences": [
+     "I'm planning a 5-day trip to the city and I'm trying to pack lightly.",
+     "Since I packed 5 pairs of shoes, I had to make sure I had enough space in my luggage for my snacks, too!"
+    ],
+    "opus_events_n": 4,
+    "opus_events": [
+     {
+      "description": "packed an entire bag of skincare products and hair care products but only ended up using half of them",
+      "date": null
+     },
+     {
+      "description": "packed a bunch of snacks, including nuts and energy bars, which helped save money and stay energized",
+      "date": null
+     },
+     {
+      "description": "packed 5 pairs of shoes, having to make room in the luggage for snacks too",
+      "date": null
+     },
+     {
+      "description": "started using packing cubes",
+      "date": null
+     }
+    ],
+    "instances_with_digit_in_event": 1,
+    "instances_total": 2
+   },
+   {
+    "session_id": "ec616e7e_4",
+    "instance_sentences": [
+     "By the way, I've been to SF before, I went on a solo trip and stayed at the Hotel Zeppelin in the Fisherman's Wharf area from the 5th to 8th",
+     "By the way, I was thinking of exploring the Fisherman's Wharf area again, since I stayed at the Hotel Zeppelin in that area during my solo t"
+    ],
+    "opus_events_n": 2,
+    "opus_events": [
+     {
+      "description": "went on a solo trip to San Francisco, staying at the Hotel Zeppelin in the Fisherman's Wharf area from the 5th to 8th of December",
+      "date": null
+     },
+     {
+      "description": "had Dungeness crab during the solo trip to San Francisco, and loved it",
+      "date": null
+     }
+    ],
+    "instances_with_digit_in_event": 2,
+    "instances_total": 2
+   }
+  ]
+ },
+ {
+  "question_id": "f35224e0",
+  "question": "What is the total number of episodes I've listened to from 'How I Built This' and 'My Favorite Murder'?",
+  "answer": "27",
+  "instance_sessions_found": 5,
+  "sessions_probed": [
+   {
+    "session_id": "answer_e9bb9500_2",
+    "instance_sentences": [
+     "By the way, I just finished episode 12 of the \"My Favorite Murder\" podcast, and I try to listen to at least one episode a week.",
+     "I've been listening to podcasts at 1.5x speed on Apple Podcasts, and it's been really helpful in getting through my daily commute."
+    ],
+    "opus_events_n": 1,
+    "opus_events": [
+     {
+      "description": "finished episode 12 of the \"My Favorite Murder\" podcast",
+      "date": "2023-05-26"
+     }
+    ],
+    "instances_with_digit_in_event": 1,
+    "instances_total": 2
+   },
+   {
+    "session_id": "answer_e9bb9500_1",
+    "instance_sentences": [
+     "I've been listening to podcasts during my daily commute, which is about 45 minutes each way, so I'm always looking for new shows to add to m",
+     "I've finished around 15 episodes so far and I really enjoy hearing about the founders' journeys and the challenges they faced when building "
+    ],
+    "opus_events_n": 1,
+    "opus_events": [
+     {
+      "description": "finished around 15 episodes of the \"How I Built This\" podcast",
+      "date": null
+     }
+    ],
+    "instances_with_digit_in_event": 1,
+    "instances_total": 2
+   },
+   {
+    "session_id": "96da07f9_4",
+    "instance_sentences": [
+     "By the way, speaking of morning routines, I've been trying to make the most out of my 15 minutes of reviewing tasks and prioritizing my work"
+    ],
+    "opus_events_n": 0,
+    "opus_events": [],
+    "instances_with_digit_in_event": 0,
+    "instances_total": 1
+   },
+   {
+    "session_id": "sharegpt_0DiDwpY_23",
+    "instance_sentences": [
+     "can you list 25 more books besides the ones you've already listed"
+    ],
+    "opus_events_n": 0,
+    "opus_events": [],
+    "instances_with_digit_in_event": 0,
+    "instances_total": 1
+   }
+  ]
+ },
+ {
+  "question_id": "gpt4_2ba83207",
+  "question": "Which grocery store did I spend the most money at in the past month?",
+  "answer": "Thrive Market",
+  "instance_sessions_found": 6,
+  "sessions_probed": [
+   {
+    "session_id": "answer_6a3b5c13_3",
+    "instance_sentences": [
+     "By the way, I've been trying to shop more sustainably, which is why I placed an online order with Thrive Market last month and spent around ",
+     "I've been trying to shop more sustainably, which is why I placed an online order with Thrive Market last month and spent around $150 on orga"
+    ],
+    "opus_events_n": 2,
+    "opus_events": [
+     {
+      "description": "bought chicken breast and ground beef",
+      "date": null
+     },
+     {
+      "description": "placed an online order with Thrive Market, spending around $150 on organic and sustainable products",
+      "date": null
+     }
+    ],
+    "instances_with_digit_in_event": 2,
+    "instances_total": 2
+   },
+   {
+    "session_id": "bc6de190_1",
+    "instance_sentences": [
+     "I actually got the food bowl at a local pet store downtown, and it was around $15."
+    ],
+    "opus_events_n": 3,
+    "opus_events": [
+     {
+      "description": "got the food bowl (with the cute fish design) at a local pet store downtown for around $15",
+      "date": null
+     },
+     {
+      "description": "started trying out a new oatmeal shampoo on Max, his dog, which seems to be helping with his skin allergies",
+      "date": null
+     },
+     {
+      "description": "got a litter mat for Luna",
+      "date": null
+     }
+    ],
+    "instances_with_digit_in_event": 1,
+    "instances_total": 1
+   },
+   {
+    "session_id": "answer_6a3b5c13_1",
+    "instance_sentences": [
+     "By the way, I just want to mention that I went grocery shopping last Saturday, exactly a week ago, and spent around $120 at Walmart, which i"
+    ],
+    "opus_events_n": 1,
+    "opus_events": [
+     {
+      "description": "went grocery shopping at Walmart, spent around $120, with a 10% off coupon on dairy products",
+      "date": "2023-05-20"
+     }
+    ],
+    "instances_with_digit_in_event": 1,
+    "instances_total": 1
+   },
+   {
+    "session_id": "f379d356_2",
+    "instance_sentences": [
+     "By the way, I actually went back to the park just last month for a behind-the-scenes tour on October 16th, which was really cool."
+    ],
+    "opus_events_n": 1,
+    "opus_events": [
+     {
+      "description": "went back to Thrill Kingdom for a behind-the-scenes tour, won in a social media contest, seeing the control room and the inner workings of t",
+      "date": null
+     }
+    ],
+    "instances_with_digit_in_event": 0,
+    "instances_total": 1
+   }
+  ]
+ },
+ {
+  "question_id": "dd2973ad",
+  "question": "What time did I go to bed on the day before I had a doctor's appointment?",
+  "answer": "2 AM",
+  "instance_sessions_found": 5,
+  "sessions_probed": [
+   {
+    "session_id": "56266c38_1",
+    "instance_sentences": [
+     "I usually have some free time in the morning after breakfast, around 6:45 am, before I need to take care of my daily responsibilities.",
+     "I wake up at 6:30 am on weekdays, so I usually have some time to myself before taking care of my daily responsibilities."
+    ],
+    "opus_events_n": 0,
+    "opus_events": [],
+    "instances_with_digit_in_event": 0,
+    "instances_total": 2
+   },
+   {
+    "session_id": "072fac63_1",
+    "instance_sentences": [
+     "I think I'll go with a simple and compact shoe rack that can hold around 6-8 pairs of shoes."
+    ],
+    "opus_events_n": 2,
+    "opus_events": [
+     {
+      "description": "spilled coffee on brown loafers",
+      "date": null
+     },
+     {
+      "description": "got rid of old white sneakers that were causing blisters",
+      "date": null
+     }
+    ],
+    "instances_with_digit_in_event": 0,
+    "instances_total": 1
+   },
+   {
+    "session_id": "0f73eee7_2",
+    "instance_sentences": [
+     "I'll also try to set aside 10 minutes in the morning to practice mindfulness before starting my day."
+    ],
+    "opus_events_n": 1,
+    "opus_events": [
+     {
+      "description": "attended a lecture series downtown where the speaker, Dr. Khan, talked about the importance of mindfulness in daily life",
+      "date": null
+     }
+    ],
+    "instances_with_digit_in_event": 0,
+    "instances_total": 1
+   },
+   {
+    "session_id": "answer_f9de4602_2",
+    "instance_sentences": [
+     "By the way, I had a doctor's appointment at 10 AM last Thursday, and that's when I got the results."
+    ],
+    "opus_events_n": 3,
+    "opus_events": [
+     {
+      "description": "had a doctor's appointment at 10 AM",
+      "date": "2023-05-18"
+     },
+     {
+      "description": "got blood test results back, showing cholesterol levels a bit high",
+      "date": "2023-05-18"
+     },
+     {
+      "description": "spent the rest of the day researching healthy recipes and making a meal plan for the week",
+      "date": "2023-05-18"
+     }
+    ],
+    "instances_with_digit_in_event": 1,
+    "instances_total": 1
+   }
+  ]
+ }
+]
