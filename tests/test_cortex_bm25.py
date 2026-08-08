@@ -24,12 +24,18 @@ import tempfile
 from pseudolife_memory.service import MemoryService
 
 # Filler facts so the BM25 index has a corpus with real IDF spread.
+# Fillers are deliberately spread across semantic distance from the test
+# queries (one ops-adjacent, the rest remote): three ops-flavored fillers
+# once clustered within 0.004 fused score of each other against the
+# ops-flavored query below, which put the lockstep assertions at the mercy
+# of cross-environment embedding numerics (the 2026-08 CI flap). The
+# knife-edge guard inside the lockstep tests enforces the separation.
 _FILLER = [
     ("dinner party menu", "selected side dishes", "kimchi and bokkeumbap"),
     ("basmati rice", "cooking tips", "soak before cooking, correct ratio"),
-    ("user", "backup setup status", "completed"),
+    ("hallway repaint", "chosen color", "sage green"),
     ("payments-db", "host", "10.0.0.7"),
-    ("deploy pipeline", "gate", "regression suite green"),
+    ("garden birdfeeder", "refill cadence", "weekly, sunflower hearts"),
 ]
 
 
@@ -141,8 +147,21 @@ def test_rebuild_fact_ranking_matches_service_fusion():
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
         svc = MemoryService(data_dir=d)
         _seed(svc)
-        want = [e["entity"] for e in svc.cortex_search(
-            query, top_k=4, min_score=0.2, bm25=True)["entries"]]
+        res = svc.cortex_search(query, top_k=4, min_score=0.2, bm25=True)
+        want = [e["entity"] for e in res["entries"]]
+        # Knife-edge guard on the FIXTURE (2026-08-09): this test flapped on
+        # CI because two fillers fused within ~1.2e-3 of each other — inside
+        # cross-environment embedding-numerics noise, so the compared order
+        # was decided by BLAS rounding, not by the fusion under test. The
+        # lockstep assertion below needs well-separated scores to mean
+        # anything; if a fixture edit re-creates a near-tie, fail HERE with
+        # the pair named instead of flapping on CI.
+        scores = [e["score"] for e in res["entries"]]
+        for a, b, ea, eb in zip(scores, scores[1:], want, want[1:]):
+            assert a - b > 0.005, (
+                f"fixture knife-edge: {ea!r} ({a}) vs {eb!r} ({b}) fused "
+                "within 0.005 — separate the filler facts, don't loosen "
+                "the lockstep assertion")
         emb = svc._embedder  # same pipeline the service ranks with
         lines = rebuild_fact_lines(
             {"facts": facts, "question": query}, emb,
