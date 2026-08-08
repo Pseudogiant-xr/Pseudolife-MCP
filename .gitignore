@@ -61,3 +61,4 @@ evals/results/*-gate.jsonl
 evals/results/*-gate-r*.jsonl
 evals/results/*-gate.agg.json
 evals/results/*-gate*.summary.json
+.superpowers/
