@@ -1,0 +1,60 @@
+{
+ "tag": "warmfix-0809",
+ "rung": "e4b-v3",
+ "mode": "keep_warm",
+ "image": "pseudolife-extractor:gemma4-e4b",
+ "passes": [
+  {
+   "rung": "e4b-v3",
+   "label": "E4B v3 multi-task QLoRA (Opus claims+events, candidate)",
+   "kind": "llm",
+   "extract_seconds": 203.7,
+   "consolidation": {
+    "pulled": 26,
+    "claims": 19,
+    "inserted": 19,
+    "superseded": 0,
+    "literal_flagged": 0,
+    "literal_dropped": 0
+   },
+   "gold_recoverable": 1.0,
+   "stale_leak": 0.1,
+   "tokens_per_query": 16.9,
+   "search_latency_ms": 91.7,
+   "status": "ok"
+  },
+  {
+   "rung": "e4b-v3",
+   "label": "E4B v3 multi-task QLoRA (Opus claims+events, candidate)",
+   "kind": "llm",
+   "extract_seconds": 203.6,
+   "consolidation": {
+    "pulled": 26,
+    "claims": 19,
+    "inserted": 19,
+    "superseded": 0,
+    "literal_flagged": 0,
+    "literal_dropped": 0
+   },
+   "gold_recoverable": 1.0,
+   "stale_leak": 0.1,
+   "tokens_per_query": 16.9,
+   "search_latency_ms": 91.7,
+   "status": "ok"
+  }
+ ],
+ "agreement": {
+  "agree": true,
+  "detail": "all passes identical",
+  "gold_values": [
+   1.0,
+   1.0
+  ],
+  "stale_values": [
+   0.1,
+   0.1
+  ]
+ },
+ "hazard_note": "warm-container hazard (evlora 2026-08-08): reusing a llama.cpp candidate container across ladder passes corrupted stale_leak (1.0 warm vs 0.1 fresh); this runner restarts the container per pass unless --keep-warm is set for characterization",
+ "written_at": "2026-08-09T02:19:01"
+}

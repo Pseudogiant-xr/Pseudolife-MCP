@@ -6,6 +6,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-08-09 — warm-container ladder corruption root-caused: the llama-server prompt cache)
+- **The evlora campaign's warm-container hazard is pinned to
+  `cache_prompt` (the llama-server request default) and closed.** A
+  warm extractor container answers byte-identical temperature-0
+  requests differently once its prompt cache is populated: fresh pass
+  19 claims / stale_leak 0.1, warm passes 26 claims / 0.2 on the
+  current tree (`evals/results/e4b-v3-warmrep-*.json`); injecting
+  `cache_prompt: false` on the *same warm server* restores the fresh
+  output exactly, and reverting it restores the corruption
+  (`evals/results/warm-cache-probe-0809.json`, producer
+  `evals/warm_cache_probe.py`). Fix shipped in two layers:
+  `OpenAICompatExtractor` gains an `extra_body` passthrough (default
+  `None` — daemon behavior byte-identical) which the ladder pins to
+  `cache_prompt: false`, verified end-to-end by a keep-warm two-pass
+  replication now agreeing at the fresh baseline
+  (`evals/results/ladder-replicate-warmfix-0809.json`); and
+  **`evals/ladder_replicate.py`** makes fresh-container-per-pass the
+  paved road for replication — it owns the container lifecycle,
+  computes agreement over the deterministic metrics only, and refuses
+  to average a disagreeing pass set. Open question flagged for a
+  measured decision, not changed here: the *production* sidecar runs
+  warm with the cache on, so live extraction output can depend on
+  cache state — pinning it off in the daemon trades prefill latency
+  for determinism and deserves its own timing measurement.
+
 ### Added (2026-08-08 — retention-interval eval harness: the freshness machinery gets its first eval)
 - **`evals/retention_interval_eval.py`** (preregistration
   `docs/superpowers/specs/2026-08-08-retention-interval-eval-design.md`):
