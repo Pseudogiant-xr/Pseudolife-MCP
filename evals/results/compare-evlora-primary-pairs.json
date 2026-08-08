@@ -1,0 +1,73 @@
+{
+  "n": 133,
+  "dropped_a": 367,
+  "dropped_b": 367,
+  "draws": 10000,
+  "seed": 0,
+  "a": {
+    "file": "evals/results/longmemeval-all-oracle-e4b-v3-evlora-0807.jsonl",
+    "arms": {
+      "hybrid_ev_syn": 0.6015
+    }
+  },
+  "b": {
+    "file": "evals/results/longmemeval-all-oracle-qwen-27b-evq-0806.jsonl",
+    "arms": {
+      "hybrid_ev_syn": 0.4737
+    }
+  },
+  "paired": {
+    "a_vs_b": {
+      "hybrid_ev_syn_vs_hybrid_ev_syn": {
+        "delta": 0.1278,
+        "p": 0.0068,
+        "wins": 27,
+        "losses": 10,
+        "win_qids": [
+          "00ca467f",
+          "0100672e",
+          "09ba9854",
+          "2311e44b",
+          "46a3abf7",
+          "55241a1f",
+          "5a7937c8",
+          "67e0d0f2",
+          "85fa3a3f",
+          "87f22b4a",
+          "8cf4d046",
+          "92a0aa75",
+          "a346bb18",
+          "a4996e51",
+          "a96c20ee_abs",
+          "aae3761f",
+          "d23cf73b",
+          "d6062bb9",
+          "dd2973ad",
+          "e6041065",
+          "e831120c",
+          "efc3f7c2",
+          "f0e564bc",
+          "f35224e0",
+          "gpt4_2f8be40d",
+          "gpt4_2f91af09",
+          "gpt4_7fce9456"
+        ],
+        "loss_qids": [
+          "1a8a66a6",
+          "21d02d0d",
+          "2b8f3739",
+          "36b9f61e",
+          "60159905",
+          "a9f6b44c",
+          "c2ac3c61",
+          "e25c3b8d",
+          "ef66a6e5",
+          "gpt4_e05b82a6"
+        ]
+      }
+    }
+  },
+  "types": [
+    "multi-session"
+  ]
+}

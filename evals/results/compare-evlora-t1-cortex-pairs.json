@@ -1,0 +1,14 @@
+{
+  "delta": 0.0256,
+  "p_value": 0.80742,
+  "n_questions": 78,
+  "arm": "cortex",
+  "a": "e4b-v3/evlora-0807",
+  "b": "e4b-v2/evlora-0807",
+  "a_mean": 0.6795,
+  "a_std": 0.0,
+  "b_mean": 0.6538,
+  "b_std": 0.0,
+  "permutations": 10000,
+  "seed": 0
+}

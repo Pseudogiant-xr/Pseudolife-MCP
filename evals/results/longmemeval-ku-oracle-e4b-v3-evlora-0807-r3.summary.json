@@ -1,0 +1,24 @@
+{
+  "dataset": "oracle",
+  "extractor": "e4b-v3",
+  "n": 78,
+  "arms": {
+    "rag": {
+      "accuracy": 0.859,
+      "context_tokens": 1236.9
+    },
+    "cortex": {
+      "accuracy": 0.679,
+      "context_tokens": 318.7
+    },
+    "hybrid": {
+      "accuracy": 0.821,
+      "context_tokens": 980.1
+    },
+    "cascade": {
+      "accuracy": 0.795,
+      "context_tokens": 576.2
+    }
+  },
+  "superseded_total": 332
+}

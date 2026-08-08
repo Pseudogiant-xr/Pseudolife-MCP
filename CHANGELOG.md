@@ -6,6 +6,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Measured (2026-08-08 — e4b-v3 multi-task sidecar passes every gate; ship candidate)
+- **The evlora campaign (PR #114 preregistration) completes with every
+  gating check green and the ship rule met**
+  (`evals/results/evlora-verdict.json`; Run T verdict and all compare
+  artifacts committed beside it; tag `evlora-0807`). One multi-task
+  QLoRA over both Opus-teacher datasets (1483 rows kept, 317 dropped
+  over the 5120 shape) trains in 1.75 h and clears Run T: ladder gold
+  1.0 vs 1.0; KU-oracle cortex 0.679 vs the deployed v2's 0.654 over
+  five replicates each (judge std 0.0) — the claims regen *improves*
+  claims — quantity smoke clean, and the capacity spot captures 14 of
+  the 18 Opus-covered instances, nearly double its bar. Run B (500
+  questions, 8 arms, the student as extractor for both passes): rag
+  control exact zero; the primary — syn on the v3 bank vs the committed
+  `evq-0806` syn on multi-session — lands +0.128 (p 0.0068, 27W/10L),
+  read as a joint claims+events effect because the claims covariate
+  (+0.056, p 0.0039) exceeds its attribution bound: the 4B student's
+  claims bank now beats the qwen-27b bench extractor outright (hybrid
+  0.714 vs 0.658). The new directive instruction arm passes no-harm and
+  posts the series' best cells (0.764 pooled, 0.714
+  temporal-reasoning) but misses its promotion bar (ms p 0.72); it
+  stays bench-only. Honest residuals: ladder stale_leak 0.1 vs v2's
+  0.0 (one pair, stable across three fresh-container replicates), and
+  the KU guard misses its 0.02 letter by 0.006 (2 of 78 questions,
+  p 0.74). Incidental harness finding: a warm llama.cpp candidate
+  container corrupts subsequent ladder passes (stale_leak 1.0 on
+  passes 2–3 vs 0.1 fresh) — all campaign numbers were
+  fresh-container; ladder replication now restarts the container per
+  pass. Deploy remains a user decision; chronicle stays default-off.
+
 ### Measured (2026-08-07 — evq residual decomposition: retrieval exonerated, extractor capacity is the gap)
 - **The evq-0806 multi-session residual is decomposed offline — no GPU —
   by replaying `chronicle_search`'s exact matcher against the haystacks**

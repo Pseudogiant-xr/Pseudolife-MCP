@@ -1,0 +1,46 @@
+{
+  "n": 78,
+  "dropped_a": 422,
+  "dropped_b": 422,
+  "draws": 10000,
+  "seed": 0,
+  "a": {
+    "file": "evals/results/longmemeval-all-oracle-e4b-v3-evlora-0807.jsonl",
+    "arms": {
+      "hybrid": 0.8718
+    }
+  },
+  "b": {
+    "file": "evals/results/longmemeval-all-oracle-qwen-27b-evq-0806.jsonl",
+    "arms": {
+      "hybrid": 0.8974
+    }
+  },
+  "paired": {
+    "a_vs_b": {
+      "hybrid_vs_hybrid": {
+        "delta": -0.0256,
+        "p": 0.7436,
+        "wins": 4,
+        "losses": 6,
+        "win_qids": [
+          "42ec0761",
+          "618f13b2",
+          "eace081b",
+          "f685340e"
+        ],
+        "loss_qids": [
+          "41698283",
+          "6a1eabeb",
+          "89941a93",
+          "89941a94",
+          "c7dc5443",
+          "e493bb7c"
+        ]
+      }
+    }
+  },
+  "types": [
+    "knowledge-update"
+  ]
+}
