@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-08-08 — default extractor sidecar bumps to the e4b-v3 multi-task fine-tune)
+- **`ops/Dockerfile.extractor` bakes the v3 GGUF**
+  (`pseudolife-extractor-e4b-v3-Q4_K_M.gguf`): one adapter now serves
+  both the claims pass and the dated-events pass the chronicle uses,
+  trained from Opus-5 teacher labels. Ship-gated by the evlora campaign
+  below (every gating check green; `evals/results/evlora-verdict.json`
+  records the two reported residuals — a stable one-pair ladder
+  `stale_leak` and a noise-level KU letter miss — that the deploy
+  decision weighed). The v2 GGUF stays published on the same HF repo
+  for rollback via `--build-arg MODEL_URL`.
+
 ### Measured (2026-08-08 — e4b-v3 multi-task sidecar passes every gate; ship candidate)
 - **The evlora campaign (PR #114 preregistration) completes with every
   gating check green and the ship rule met**

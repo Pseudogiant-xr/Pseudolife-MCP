@@ -6,17 +6,18 @@
 # after the build.
 #
 # Default = the bespoke Pseudolife extractor fine-tune (Gemma 4 E4B QLoRA,
-# registry-datagen v2, Q4_K_M ~5.3GB) — beats the prior fine-tune on the
-# LongMemEval knowledge-update bench (same-session: cortex 0.705 vs 0.603,
-# hybrid 0.756 vs 0.744; ladder stale-leak 0.0). Evals and provenance:
-# https://huggingface.co/Pseudogiant-xr/pseudolife-extractor-gemma-4-e4b
+# multi-task v3: claims + dated-events extraction, Opus-5 teacher, Q4_K_M
+# ~5.3GB) — non-inferior to v2 on claims and adds the events pass the
+# chronicle needs; passed every preregistered gate of the 2026-08-07
+# evlora campaign (evals/results/evlora-verdict.json). Evals and
+# provenance: https://huggingface.co/Pseudogiant-xr/pseudolife-extractor-gemma-4-e4b
 # Bake the lighter Gemma 4 E2B QAT (~2.44GB, ladder-verified base model)
 # instead on constrained machines with:
 #   --build-arg MODEL_URL=https://huggingface.co/unsloth/gemma-4-E2B-it-qat-GGUF/resolve/main/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf
 # Or, for the benchmark, leave the baked default and mount a different GGUF over
 # /models/extractor.gguf at run time (see ops/docker-compose.yml).
 
-ARG MODEL_URL=https://huggingface.co/Pseudogiant-xr/pseudolife-extractor-gemma-4-e4b/resolve/main/pseudolife-extractor-e4b-v2-Q4_K_M.gguf
+ARG MODEL_URL=https://huggingface.co/Pseudogiant-xr/pseudolife-extractor-gemma-4-e4b/resolve/main/pseudolife-extractor-e4b-v3-Q4_K_M.gguf
 
 # Stage 1 — fetch the GGUF with a curl-equipped image (the llama.cpp server
 # image is minimal and may lack curl/wget).
