@@ -1,0 +1,20 @@
+[
+ {
+  "label": "p1-fresh-normal",
+  "gold": 1.0,
+  "stale": 0.1,
+  "claims": 19
+ },
+ {
+  "label": "p2-warm-nocache",
+  "gold": 1.0,
+  "stale": 0.1,
+  "claims": 19
+ },
+ {
+  "label": "p3-warm-normal",
+  "gold": 1.0,
+  "stale": 0.2,
+  "claims": 26
+ }
+]

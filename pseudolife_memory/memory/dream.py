@@ -565,12 +565,19 @@ class OpenAICompatExtractor:
     def __init__(self, base_url: str, model: str, *, api_key: str | None = None,
                  max_tokens: int = 400, timeout_seconds: float = 20.0,
                  system_prompt: str | None = None,
-                 events_prompt: str | None = None) -> None:
+                 events_prompt: str | None = None,
+                 extra_body: dict | None = None) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.api_key = api_key or None
         self.max_tokens = int(max_tokens)
         self.timeout = float(timeout_seconds)
+        # Extra top-level request fields, merged under the real fields (real
+        # keys win). The daemon never passes this; the eval harness pins the
+        # llama-server prompt cache off (``cache_prompt: false``) because a
+        # warm server's cache changes output on identical temperature-0 input
+        # (measured 2026-08-09, evals/results/warm-cache-probe-0809.json).
+        self.extra_body = dict(extra_body or {})
         # Base system prompt for claims extraction. Defaults to the shipped
         # ``_SYSTEM_PROMPT`` (the daemon never passes this arg, so its behaviour
         # is byte-identical). Off-label harnesses (e.g. the LME-V2 trajectory
@@ -597,7 +604,7 @@ class OpenAICompatExtractor:
         if self.api_key:
             headers["authorization"] = f"Bearer {self.api_key}"
         try:
-            body = json.dumps({
+            body = json.dumps({**self.extra_body,
                 "model": self.model,
                 "messages": [
                     {"role": "system",
@@ -684,7 +691,7 @@ class OpenAICompatExtractor:
         if self.api_key:
             headers["authorization"] = f"Bearer {self.api_key}"
         try:
-            body = json.dumps({
+            body = json.dumps({**self.extra_body,
                 "model": self.model,
                 "messages": [
                     {"role": "system", "content": self.events_prompt},
@@ -724,7 +731,7 @@ class OpenAICompatExtractor:
         if self.api_key:
             headers["authorization"] = f"Bearer {self.api_key}"
         try:
-            body = json.dumps({
+            body = json.dumps({**self.extra_body,
                 "model": self.model,
                 "messages": [
                     {"role": "system", "content": _LESSON_SYSTEM_PROMPT},
@@ -789,7 +796,7 @@ class OpenAICompatExtractor:
         if self.api_key:
             headers["authorization"] = f"Bearer {self.api_key}"
         try:
-            body = json.dumps({
+            body = json.dumps({**self.extra_body,
                 "model": self.model,
                 "messages": [
                     {"role": "system", "content": _relations_prompt(relations)},
@@ -843,7 +850,7 @@ class OpenAICompatExtractor:
         if self.api_key:
             headers["authorization"] = f"Bearer {self.api_key}"
         try:
-            body = json.dumps({
+            body = json.dumps({**self.extra_body,
                 "model": self.model,
                 "messages": [
                     {"role": "system", "content": _OUTCOME_INFER_SYSTEM_PROMPT},
