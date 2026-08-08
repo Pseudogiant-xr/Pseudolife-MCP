@@ -21,7 +21,9 @@ configuration scores today.
 Measured on the **knowledge-update subset of
 [LongMemEval](https://arxiv.org/abs/2410.10813)** (78 questions) — the
 "user's facts change over time" ability the HLC supersession spine exists
-for. Everything local: extraction, answering, and LLM-as-judge grading all
+for. (The harness can extend a run to all six LongMemEval question types —
+500 questions — via `--types`; the numbers below are the KU slice unless a
+row says otherwise.) Everything local: extraction, answering, and LLM-as-judge grading all
 run on the author's own hardware (judge = Qwen3.6-27B at temperature 0),
 so compare *within* the table, not against GPT-4o-judged leaderboards.
 

@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-08-08 — reversible dreams, chronicle events, and the multi-task extractor
+
 ### Changed (2026-08-08 — default extractor sidecar bumps to the e4b-v3 multi-task fine-tune)
 - **`ops/Dockerfile.extractor` bakes the v3 GGUF**
   (`pseudolife-extractor-e4b-v3-Q4_K_M.gguf`): one adapter now serves
@@ -23,7 +25,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`evals/results/evlora-verdict.json`; Run T verdict and all compare
   artifacts committed beside it; tag `evlora-0807`). One multi-task
   QLoRA over both Opus-teacher datasets (1483 rows kept, 317 dropped
-  over the 5120 shape) trains in 1.75 h and clears Run T: ladder gold
+  over the 5120 shape; the events-dataset producer is
+  `evals/distill_datagen_events.py`, committed with this entry) trains
+  in 1.75 h and clears Run T: ladder gold
   1.0 vs 1.0; KU-oracle cortex 0.679 vs the deployed v2's 0.654 over
   five replicates each (judge std 0.0) — the claims regen *improves*
   claims — quantity smoke clean, and the capacity spot captures 14 of

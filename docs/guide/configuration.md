@@ -165,11 +165,19 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   replays, so this bounds how far back a pass stays revertible — see
   [Dream runs — audit and rollback](dreaming.md#dream-runs--audit-and-rollback-schema-v27).
 - **Chronicle extraction off** (`memory.dream.chronicle = false`) — when
-  on (with an events-capable prompt), the dream pass also stores dated
-  occurrences into `chronicle_events` (schema v28) and temporally-cued
-  searches serve them as an `events` block. Off until its preregistered
-  gates pass — see
+  on, the dream pass runs a second, dedicated events-extraction call per
+  batch and stores dated occurrences into `chronicle_events` (schema
+  v28); temporally-cued searches serve them as an `events` block
+  (aggregation cues widen the block and add `events_total`). The
+  pipeline has passed its preregistered gates; default-on waits on a
+  production soak review — see
   [Chronicle events](dreaming.md#chronicle-events-schema-v28--dated-occurrences-beside-facts).
+- **Aggregation-recall retrieval knobs off**
+  (`memory.search.contiguity_neighbors = 0`,
+  `memory.search.timeline_channel = false`) — Phase 1 retrieval-side
+  experiments (neighbor expansion, a timeline channel) that measurably
+  failed their gates and ship dormant; they remain settable for
+  replication but there is no measured reason to enable them.
 
 ## Toolset tiers
 

@@ -132,7 +132,9 @@ artifact).
 ## The CPU extractor sidecar (batteries-included default)
 
 The stack ships a llama.cpp sidecar with a model baked in (the bespoke
-Gemma 4 E4B extractor fine-tune, ~5.3 GB — see "Upgrading the extractor"
+Gemma 4 E4B extractor fine-tune, ~5.3 GB — multi-task since the v3 bake:
+one adapter serves both the claims pass and the chronicle events pass —
+see "Upgrading the extractor"
 below for the lighter E2B bake), and `ops/docker-compose.yml` starts it by
 default and routes dream consolidation to it. It's internal-only (never
 published to the host). Single-writer cortex relies on it: with no
@@ -211,7 +213,9 @@ The unused sidecar can be stopped (`docker compose -f ops/docker-compose.yml
 stop pseudolife-extractor`) or left running as a fallback to switch back to.
 The default bake is the bespoke
 [Pseudolife extractor fine-tune](https://huggingface.co/Pseudogiant-xr/pseudolife-extractor-gemma-4-e4b)
-(Gemma 4 E4B QLoRA); constrained machines can bake the lighter **Gemma 4
+(Gemma 4 E4B QLoRA — the v3 bake is multi-task, claims + dated events;
+the v2 claims-only GGUF stays published on the same repo for rollback);
+constrained machines can bake the lighter **Gemma 4
 E2B QAT** instead (also ladder-verified) — see the `MODEL_URL` build-arg in
 `ops/Dockerfile.extractor`, or mount any GGUF over `/models/extractor.gguf`
 via a machine-local `ops/docker-compose.override.yml` (gitignored; example
@@ -341,10 +345,13 @@ superseded-row compaction. Design doc:
 Facts answer "what is current"; they systematically lose *occurrences* —
 things that happened at a time ("adopted the kitten on May 13") rather
 than states that hold. `memory.dream.chronicle: true` makes the dream
-pass extract those too, into `chronicle_events`, from the same batched
-call (an events-capable prompt — the measured v7 artifact — emits an
-`events` array beside `claims`; the shipped prompt does not, so the knob
-alone changes nothing until the prompt ships with it).
+pass extract those too, into `chronicle_events`, via a **separate
+extractor call per batch** — a dedicated events pass with its own pinned
+prompt artifact (`evals/prompts/events_pass_v1.txt`), run after the
+claims call. The events pass failing is non-fatal by design: claims
+commit regardless and the result carries `events_pass_failed: true`. The
+bundled sidecar model is fine-tuned for both passes (see the sidecar
+section above).
 
 - **Event time vs record time.** `occurred_at` is when it happened;
   `recorded_at` is when the dream stored it. A date is accepted only as
@@ -363,13 +370,22 @@ alone changes nothing until the prompt ships with it).
   records are additive-only.
 - **Serving.** A temporally-cued `memory_search` (when/first/before…)
   adds an `events` block: matching live events, oldest first, each with
-  `date` (or `null` plus the verbatim `phrase`). No knob — an empty
-  table serves nothing.
+  `date` (or `null` plus the verbatim `phrase`), capped at 6. An
+  **aggregation cue** (how many/count/total…) widens the cap to 30 and
+  adds `events_total` — a computed property of the served list, so the
+  answerer can do arithmetic over a long enumeration without recounting
+  lines (a count over a capped prefix would be wrong by construction).
+  No knob — an empty table serves nothing.
 
-The knob is **off by default** until its preregistered gates pass
-(`docs/superpowers/specs/2026-08-03-aggregation-aware-recall-design.md`,
-Phase 2 — the Phase 1 retrieval-side knobs measurably failed, which is
-what makes extraction-time event capture the live hypothesis).
+The knob is **off by default**. The extraction pipeline has since passed
+its preregistered gates (separate-pass events, and the multi-task
+sidecar fine-tune that serves it — see the CHANGELOG's measured
+entries), so the remaining question is production behavior, not bench
+quality: default-on waits on a soak review of the chronicle under real
+workloads. (Lineage: the Phase 1 retrieval-side knobs of
+`docs/superpowers/specs/2026-08-03-aggregation-aware-recall-design.md`
+measurably failed, which is what made extraction-time event capture the
+live hypothesis.)
 
 ## Deep dream — full-corpus graph consolidation
 
@@ -399,10 +415,10 @@ A duplicate finding whose two names are a source file and its own bare stem
 `suggested_relation` (`implements`) instead of forcing merge-or-dismiss:
 the concept usually has identity the file does not, and several files can
 realize one role, so merging asserts something false and dismissing throws
-a real relationship away. Settle it with
-`memory_graph_relate(<file>, "implements", <concept>)` followed by
-`memory_graph_review(action="dismiss_pair", ...)` — or one Relate button in
-the Atlas review drawer, which does both.
+a real relationship away. Settle it with one call —
+`memory_graph_review(action="relate", src=<file>, relation="implements",
+dst=<concept>)` writes the edge *and* dismisses the duplicate pair — or
+one Relate button in the Atlas review drawer, which does the same.
 
 **Draining the quarantine.** Quarantined edges are almost all untyped
 `related-to` co-mentions, and about half of them name a real relationship
