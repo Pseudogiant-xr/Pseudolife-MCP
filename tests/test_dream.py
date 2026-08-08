@@ -60,6 +60,50 @@ def _chat_relations_payload(relations):
         "content": json.dumps({"relations": relations})}}]})
 
 
+def test_extractor_extra_body_merges_into_every_chat_request():
+    """``extra_body`` rides into the request body verbatim; absent, the body
+    is unchanged. Exists for the bench's ``cache_prompt: false`` pin — the
+    llama-server default prompt cache changes output on identical
+    temperature-0 input once the server is warm (measured 2026-08-09:
+    19 claims/0.1 stale fresh vs 26/0.2 warm, restored exactly by the pin;
+    ``evals/results/warm-cache-probe-0809.json``)."""
+    from pseudolife_memory.memory.dream import OpenAICompatExtractor
+
+    captured: list[dict] = []
+
+    class _Capture(_StubHandler):
+        # Full override — the parent do_POST reads the body itself, so a
+        # capture-then-super() would block on a second read.
+        def do_POST(self):  # noqa: N802
+            n = int(self.headers.get("content-length", 0))
+            captured.append(json.loads(self.rfile.read(n)))
+            status, body = type(self).responder()
+            data = body.encode()
+            self.send_response(status)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+    payload = _chat_payload([])
+    handler = type("H", (_Capture,), {"responder": staticmethod(
+        lambda: (200, payload))})
+    srv = http.server.HTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        base = f"http://127.0.0.1:{srv.server_address[1]}"
+        OpenAICompatExtractor(base, "m",
+                              extra_body={"cache_prompt": False}).extract(
+            ["note"], [], [])
+        OpenAICompatExtractor(base, "m").extract(["note"], [], [])
+    finally:
+        srv.shutdown()
+    assert captured[0]["cache_prompt"] is False
+    assert "cache_prompt" not in captured[1]
+    # extra_body must not clobber the real fields.
+    assert captured[0]["messages"] and captured[0]["temperature"] == 0
+
+
 def test_openai_extractor_parses_relations():
     from pseudolife_memory.memory.dream import OpenAICompatExtractor
 
