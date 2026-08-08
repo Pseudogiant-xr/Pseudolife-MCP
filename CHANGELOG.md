@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-08-08 — reversible dreams, chronicle events, and the multi-task extractor
+
 ### Changed (2026-08-08 — default extractor sidecar bumps to the e4b-v3 multi-task fine-tune)
 - **`ops/Dockerfile.extractor` bakes the v3 GGUF**
   (`pseudolife-extractor-e4b-v3-Q4_K_M.gguf`): one adapter now serves
