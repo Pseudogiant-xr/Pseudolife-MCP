@@ -1,0 +1,39 @@
+{
+  "n": 234,
+  "dropped_a": 266,
+  "dropped_b": 266,
+  "draws": 10000,
+  "seed": 0,
+  "a": {
+    "file": "evals/results/longmemeval-all-oracle-e4b-v3-evlora-0807.jsonl",
+    "arms": {
+      "hybrid_ev_syn": 0.8846
+    }
+  },
+  "b": {
+    "file": "evals/results/longmemeval-all-oracle-e4b-v3-evlora-0807.jsonl",
+    "arms": {
+      "hybrid_ev": 0.8889
+    }
+  },
+  "paired": {
+    "a_vs_b": {
+      "hybrid_ev_syn_vs_hybrid_ev": {
+        "delta": -0.0043,
+        "p": 1.0,
+        "wins": 0,
+        "losses": 1,
+        "win_qids": [],
+        "loss_qids": [
+          "f685340e_abs"
+        ]
+      }
+    }
+  },
+  "types": [
+    "knowledge-update",
+    "single-session-assistant",
+    "single-session-preference",
+    "single-session-user"
+  ]
+}

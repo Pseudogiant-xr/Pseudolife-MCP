@@ -1,0 +1,383 @@
+{
+ "tag": "e4b-v3",
+ "prereg": "gate T3, docs/superpowers/specs/2026-08-07-evlora-antisuppression-design.md — student must capture >= half the Opus-covered instances",
+ "probe_artifact": "evals/results/evq-opus-probe-0807.json",
+ "student_covered_total": 14,
+ "opus_covered_total": 18,
+ "pass": true,
+ "rows": [
+  {
+   "question_id": "2311e44b",
+   "session_id": "answer_bf633415_2",
+   "student_events_n": 0,
+   "student_covered": 0,
+   "opus_covered": 1,
+   "instances_total": 3,
+   "student_events": []
+  },
+  {
+   "question_id": "2311e44b",
+   "session_id": "answer_bf633415_1",
+   "student_events_n": 0,
+   "student_covered": 0,
+   "opus_covered": 0,
+   "instances_total": 3,
+   "student_events": []
+  },
+  {
+   "question_id": "2311e44b",
+   "session_id": "aea71da3_2",
+   "student_events_n": 1,
+   "student_covered": 0,
+   "opus_covered": 0,
+   "instances_total": 1,
+   "student_events": [
+    {
+     "description": "took their guitar to GuitarWorks on 5th street for repairs",
+     "date": null
+    }
+   ]
+  },
+  {
+   "question_id": "a346bb18",
+   "session_id": "answer_4934b2d7_2",
+   "student_events_n": 1,
+   "student_covered": 1,
+   "opus_covered": 1,
+   "instances_total": 3,
+   "student_events": [
+    {
+     "description": "completed 30 miles in 2 hours and 15 minutes at the charity cycling event \"Pedal for a Purpose\"",
+     "date": null
+    }
+   ]
+  },
+  {
+   "question_id": "a346bb18",
+   "session_id": "771ba1d5",
+   "student_events_n": 1,
+   "student_covered": 1,
+   "opus_covered": 1,
+   "instances_total": 3,
+   "student_events": [
+    {
+     "description": "achieved a personal best half-marathon time of 2 hours and 15 minutes",
+     "date": "2023-02-10"
+    }
+   ]
+  },
+  {
+   "question_id": "a346bb18",
+   "session_id": "answer_4934b2d7_1",
+   "student_events_n": 2,
+   "student_covered": 2,
+   "opus_covered": 2,
+   "instances_total": 2,
+   "student_events": [
+    {
+     "description": "completed first full marathon in 4h 22min",
+     "date": "2023-05-24"
+    },
+    {
+     "description": "completed the charity cycling event, Pedal for a Purpose, covering 30 miles in 2 hours and 15 minutes",
+     "date": null
+    }
+   ]
+  },
+  {
+   "question_id": "a346bb18",
+   "session_id": "2655efcc_1",
+   "student_events_n": 2,
+   "student_covered": 0,
+   "opus_covered": 0,
+   "instances_total": 1,
+   "student_events": [
+    {
+     "description": "participated in the company's annual basketball tournament",
+     "date": "2023-04-30"
+    },
+    {
+     "description": "lost the tournament semifinals to the eventual champions, \"Hoop Heroes\"",
+     "date": "2023-04-30"
+    }
+   ]
+  },
+  {
+   "question_id": "d3ab962e",
+   "session_id": "answer_5237bb0b_2",
+   "student_events_n": 1,
+   "student_covered": 1,
+   "opus_covered": 1,
+   "instances_total": 1,
+   "student_events": [
+    {
+     "description": "did a 3-mile loop trail at Valley of Fire State Park",
+     "date": "2022-09-17"
+    }
+   ]
+  },
+  {
+   "question_id": "d3ab962e",
+   "session_id": "answer_5237bb0b_1",
+   "student_events_n": 1,
+   "student_covered": 1,
+   "opus_covered": 1,
+   "instances_total": 1,
+   "student_events": [
+    {
+     "description": "got back from a 5-mile hike at Red Rock Canyon",
+     "date": "2022-09-10"
+    }
+   ]
+  },
+  {
+   "question_id": "e6041065",
+   "session_id": "answer_4eb6d671_2",
+   "student_events_n": 1,
+   "student_covered": 0,
+   "opus_covered": 0,
+   "instances_total": 2,
+   "student_events": [
+    {
+     "description": "took a trip (the \"last trip\") where the user packed a lot of shoes but only wore two — sneakers and sandals",
+     "date": null
+    }
+   ]
+  },
+  {
+   "question_id": "e6041065",
+   "session_id": "59b8f503",
+   "student_events_n": 3,
+   "student_covered": 1,
+   "opus_covered": 1,
+   "instances_total": 2,
+   "student_events": [
+    {
+     "description": "finished a 17-hour audiobook",
+     "date": null
+    },
+    {
+     "description": "finished \"The Nightingale\"",
+     "date": "2023-04-15"
+    },
+    {
+     "description": "finished \"The Night Circus\"",
+     "date": null
+    }
+   ]
+  },
+  {
+   "question_id": "e6041065",
+   "session_id": "answer_4eb6d671_1",
+   "student_events_n": 3,
+   "student_covered": 1,
+   "opus_covered": 1,
+   "instances_total": 2,
+   "student_events": [
+    {
+     "description": "packed an entire bag of skincare products and hair care products on a trip",
+     "date": null
+    },
+    {
+     "description": "packed a bunch of snacks, including nuts and energy bars",
+     "date": null
+    },
+    {
+     "description": "packed 5 pairs of shoes",
+     "date": null
+    }
+   ]
+  },
+  {
+   "question_id": "e6041065",
+   "session_id": "ec616e7e_4",
+   "student_events_n": 1,
+   "student_covered": 0,
+   "opus_covered": 2,
+   "instances_total": 2,
+   "student_events": [
+    {
+     "description": "went on a solo trip to San Francisco, staying at the Hotel Zeppelin in the Fisherman's Wharf area",
+     "date": "2022-12-05"
+    }
+   ]
+  },
+  {
+   "question_id": "f35224e0",
+   "session_id": "answer_e9bb9500_2",
+   "student_events_n": 1,
+   "student_covered": 1,
+   "opus_covered": 1,
+   "instances_total": 2,
+   "student_events": [
+    {
+     "description": "finished episode 12 of the \"My Favorite Murder\" podcast",
+     "date": "2023-05-26"
+    }
+   ]
+  },
+  {
+   "question_id": "f35224e0",
+   "session_id": "answer_e9bb9500_1",
+   "student_events_n": 1,
+   "student_covered": 1,
+   "opus_covered": 1,
+   "instances_total": 2,
+   "student_events": [
+    {
+     "description": "finished around 15 episodes of the \"How I Built This\" podcast",
+     "date": null
+    }
+   ]
+  },
+  {
+   "question_id": "f35224e0",
+   "session_id": "96da07f9_4",
+   "student_events_n": 0,
+   "student_covered": 0,
+   "opus_covered": 0,
+   "instances_total": 1,
+   "student_events": []
+  },
+  {
+   "question_id": "f35224e0",
+   "session_id": "sharegpt_0DiDwpY_23",
+   "student_events_n": 0,
+   "student_covered": 0,
+   "opus_covered": 0,
+   "instances_total": 1,
+   "student_events": []
+  },
+  {
+   "question_id": "gpt4_2ba83207",
+   "session_id": "answer_6a3b5c13_3",
+   "student_events_n": 2,
+   "student_covered": 1,
+   "opus_covered": 2,
+   "instances_total": 2,
+   "student_events": [
+    {
+     "description": "bought chicken breast and ground beef",
+     "date": null
+    },
+    {
+     "description": "placed an online order with Thrive Market, spending around $150 on organic and sustainable products",
+     "date": null
+    }
+   ]
+  },
+  {
+   "question_id": "gpt4_2ba83207",
+   "session_id": "bc6de190_1",
+   "student_events_n": 1,
+   "student_covered": 1,
+   "opus_covered": 1,
+   "instances_total": 1,
+   "student_events": [
+    {
+     "description": "got the fish-design food bowl at a local pet store downtown, costing around $15",
+     "date": null
+    }
+   ]
+  },
+  {
+   "question_id": "gpt4_2ba83207",
+   "session_id": "answer_6a3b5c13_1",
+   "student_events_n": 1,
+   "student_covered": 1,
+   "opus_covered": 1,
+   "instances_total": 1,
+   "student_events": [
+    {
+     "description": "went grocery shopping at Walmart, spending around $120 and getting a 10% off coupon on dairy products; bought chicken breast",
+     "date": "2023-05-20"
+    }
+   ]
+  },
+  {
+   "question_id": "gpt4_2ba83207",
+   "session_id": "f379d356_2",
+   "student_events_n": 1,
+   "student_covered": 0,
+   "opus_covered": 0,
+   "instances_total": 1,
+   "student_events": [
+    {
+     "description": "went back to the park for a behind-the-scenes tour, having won it in a social media contest",
+     "date": "2023-10-16"
+    }
+   ]
+  },
+  {
+   "question_id": "dd2973ad",
+   "session_id": "56266c38_1",
+   "student_events_n": 0,
+   "student_covered": 0,
+   "opus_covered": 0,
+   "instances_total": 2,
+   "student_events": []
+  },
+  {
+   "question_id": "dd2973ad",
+   "session_id": "072fac63_1",
+   "student_events_n": 3,
+   "student_covered": 0,
+   "opus_covered": 0,
+   "instances_total": 1,
+   "student_events": [
+    {
+     "description": "spilled coffee on brown loafers",
+     "date": "2023-05-14"
+    },
+    {
+     "description": "went on a hike, having issues with wet feet",
+     "date": null
+    },
+    {
+     "description": "got rid of old white sneakers that were causing blisters",
+     "date": null
+    }
+   ]
+  },
+  {
+   "question_id": "dd2973ad",
+   "session_id": "0f73eee7_2",
+   "student_events_n": 1,
+   "student_covered": 0,
+   "opus_covered": 0,
+   "instances_total": 1,
+   "student_events": [
+    {
+     "description": "attended a lecture series downtown given by Dr. Khan on the importance of mindfulness",
+     "date": null
+    }
+   ]
+  },
+  {
+   "question_id": "dd2973ad",
+   "session_id": "answer_f9de4602_2",
+   "student_events_n": 4,
+   "student_covered": 1,
+   "opus_covered": 1,
+   "instances_total": 1,
+   "student_events": [
+    {
+     "description": "had a doctor's appointment at 10 AM and got blood test results",
+     "date": "2023-05-18"
+    },
+    {
+     "description": "spent the rest of the day researching healthy recipes and making a meal plan for the week",
+     "date": "2023-05-18"
+    },
+    {
+     "description": "report due by the end of the week",
+     "date": "2023-05-28"
+    },
+    {
+     "description": "do some online shopping for the healthy ingredients needed for the new meal plan",
+     "date": null
+    }
+   ]
+  }
+ ]
+}

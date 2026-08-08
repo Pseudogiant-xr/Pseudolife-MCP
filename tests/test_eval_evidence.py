@@ -974,6 +974,81 @@ CLAIMS.append(Claim(
                         if l["v1_correct"] and not l["v2_correct"]),
     stated=3, places=0))
 
+# ── evlora campaign (e4b-v3 multi-task sidecar, tag evlora-0807) ─────────
+EVL = RESULTS + "compare-evlora-{}-pairs.json"
+EVL_SUMMARY = RESULTS + "longmemeval-all-oracle-e4b-v3-evlora-0807.summary.json"
+EVL_AGG_V2 = RESULTS + "longmemeval-ku-oracle-e4b-v2-evlora-0807.agg.json"
+EVL_AGG_V3 = RESULTS + "longmemeval-ku-oracle-e4b-v3-evlora-0807.agg.json"
+
+CLAIMS.append(Claim(
+    id="evlora-t1b-cortex-v3", doc=CHANGELOG,
+    needle="cortex 0.679 vs the deployed v2's 0.654 over",
+    artifacts=(EVL_AGG_V3,),
+    value=lambda d: d["arms"]["cortex"]["mean"],
+    stated=0.6795, places=4))
+CLAIMS.append(Claim(
+    id="evlora-t1b-cortex-v2", doc=CHANGELOG,
+    needle="cortex 0.679 vs the deployed v2's 0.654 over",
+    artifacts=(EVL_AGG_V2,),
+    value=lambda d: d["arms"]["cortex"]["mean"],
+    stated=0.6538, places=4))
+CLAIMS.append(Claim(
+    id="evlora-t3-student", doc=CHANGELOG,
+    needle="captures 14 of\n  the 18 Opus-covered instances",
+    artifacts=(RESULTS + "evlora-capacity-spot-e4b-v3.json",),
+    value=lambda d: d["student_covered_total"],
+    stated=14, places=0))
+CLAIMS.append(Claim(
+    id="evlora-primary-delta", doc=CHANGELOG,
+    needle="lands +0.128 (p 0.0068, 27W/10L)",
+    artifacts=(EVL.format("primary"),),
+    value=lambda d: d["paired"]["a_vs_b"][
+        "hybrid_ev_syn_vs_hybrid_ev_syn"]["delta"],
+    stated=0.1278, places=4))
+CLAIMS.append(Claim(
+    id="evlora-primary-p", doc=CHANGELOG,
+    needle="lands +0.128 (p 0.0068, 27W/10L)",
+    artifacts=(EVL.format("primary"),),
+    value=lambda d: d["paired"]["a_vs_b"][
+        "hybrid_ev_syn_vs_hybrid_ev_syn"]["p"],
+    stated=0.0068, places=4))
+CLAIMS.append(Claim(
+    id="evlora-covariate-delta", doc=CHANGELOG,
+    needle="(+0.056, p 0.0039) exceeds its attribution bound",
+    artifacts=(EVL.format("claims-covariate"),),
+    value=lambda d: d["paired"]["a_vs_b"]["hybrid_vs_hybrid"]["delta"],
+    stated=0.056, places=3))
+CLAIMS.append(Claim(
+    id="evlora-hybrid-pooled", doc=CHANGELOG,
+    needle="hybrid\n  0.714 vs 0.658",
+    artifacts=(EVL_SUMMARY,),
+    value=lambda d: d["arms"]["hybrid"]["accuracy"],
+    stated=0.714, places=3))
+CLAIMS.append(Claim(
+    id="evlora-ins-pooled", doc=CHANGELOG,
+    needle="(0.764 pooled, 0.714",
+    artifacts=(EVL_SUMMARY,),
+    value=lambda d: d["arms"]["hybrid_ev_ins"]["accuracy"],
+    stated=0.764, places=3))
+CLAIMS.append(Claim(
+    id="evlora-ins-tr", doc=CHANGELOG,
+    needle="(0.764 pooled, 0.714",
+    artifacts=(EVL_SUMMARY,),
+    value=lambda d: d["types"]["temporal-reasoning"]["arms"]["hybrid_ev_ins"],
+    stated=0.714, places=3))
+CLAIMS.append(Claim(
+    id="evlora-stale-v3", doc=CHANGELOG,
+    needle="ladder stale_leak 0.1 vs v2's\n  0.0",
+    artifacts=(RESULTS + "e4b-v3.json",),
+    value=lambda d: d["stale_leak"],
+    stated=0.1, places=3))
+CLAIMS.append(Claim(
+    id="evlora-ku-guard-p", doc=CHANGELOG,
+    needle="by 0.006 (2 of 78 questions,\n  p 0.74)",
+    artifacts=(EVL.format("ku-guard"),),
+    value=lambda d: d["paired"]["a_vs_b"]["hybrid_vs_hybrid"]["p"],
+    stated=0.7436, places=4))
+
 
 def test_every_published_number_names_a_committed_artifact():
     """A claim whose evidence is untracked cannot be checked by a reader.

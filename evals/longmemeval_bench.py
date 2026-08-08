@@ -97,6 +97,12 @@ EXTRACTORS = {
     # production sonnet shim).
     "opus-5": "http://127.0.0.1:8083/v1",
     "fable-5": "http://127.0.0.1:8084/v1",
+    # evlora comparators (2026-08-07 design): both served on :8081 like
+    # every sidecar rung — operator swaps the GGUF. e4b-v2 is the DEPLOYED
+    # artifact (ops/Dockerfile.extractor MODEL_URL, hash-verified from HF);
+    # e4b-v3 is the multi-task candidate.
+    "e4b-v2": "http://127.0.0.1:8081/v1",
+    "e4b-v3": "http://127.0.0.1:8081/v1",
 }
 # Answerer + judge — constant across runs, so extractor is the only variable.
 QWEN_URL = os.environ.get("PSEUDOLIFE_BENCH_QWEN_URL", "http://127.0.0.1:1234/v1")
@@ -555,6 +561,16 @@ def build_contexts(svc, question: str, variants: bool = False) -> dict[str, str]
                 events, total=pinned.get("events_total"),
                 header=("Events (dated, oldest first; partial record — "
                         "other context may hold more):"))
+            # ins: syn + a directive footer (2026-08-07 evlora design).
+            # The descriptive hdr hedge rescued none of the 3 measured
+            # block-authority losses and flipped zero multi-session rows
+            # (evq-residual-decomposition-0807); this arm tests the
+            # directive lever instead.
+            ctx["hybrid_ev_ins"] = ctx["hybrid_ev_syn"] + (
+                "\nThis list is an extracted index, not the complete "
+                "record: when counting or totaling, re-scan the "
+                "conversation above and include occurrences not listed "
+                "here.")
     return ctx
 
 

@@ -1,0 +1,44 @@
+{
+  "n": 133,
+  "dropped_a": 367,
+  "dropped_b": 367,
+  "draws": 10000,
+  "seed": 0,
+  "a": {
+    "file": "evals/results/longmemeval-all-oracle-e4b-v3-evlora-0807.jsonl",
+    "arms": {
+      "hybrid_ev_ins": 0.6165
+    }
+  },
+  "b": {
+    "file": "evals/results/longmemeval-all-oracle-e4b-v3-evlora-0807.jsonl",
+    "arms": {
+      "hybrid_ev_syn": 0.6015
+    }
+  },
+  "paired": {
+    "a_vs_b": {
+      "hybrid_ev_ins_vs_hybrid_ev_syn": {
+        "delta": 0.015,
+        "p": 0.7182,
+        "wins": 5,
+        "losses": 3,
+        "win_qids": [
+          "60159905",
+          "7024f17c",
+          "c4a1ceb8",
+          "edced276",
+          "eeda8a6d"
+        ],
+        "loss_qids": [
+          "09ba9854_abs",
+          "5025383b",
+          "aae3761f"
+        ]
+      }
+    }
+  },
+  "types": [
+    "multi-session"
+  ]
+}

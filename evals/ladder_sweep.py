@@ -106,6 +106,18 @@ RUNGS: dict[str, dict] = {
                "label": "E4B QLoRA extractor fine-tune Q4_K_M (distill SFT 2026-07-06)",
                "base_url": "http://127.0.0.1:8081/v1",
                "model": "extractor"},
+    # evlora comparators (2026-08-07 design), NOT in LADDER_ORDER — run with
+    # --rung e4b-v2 / --rung e4b-v3 (operator swaps the GGUF on :8081).
+    # e4b-v2 is the DEPLOYED sidecar artifact (ops/Dockerfile.extractor
+    # MODEL_URL, hash-verified from HF); e4b-v3 the multi-task candidate.
+    "e4b-v2": {"kind": "llm",
+               "label": "E4B v2 registry-datagen QLoRA (deployed sidecar)",
+               "base_url": "http://127.0.0.1:8081/v1",
+               "model": "extractor"},
+    "e4b-v3": {"kind": "llm",
+               "label": "E4B v3 multi-task QLoRA (Opus claims+events, candidate)",
+               "base_url": "http://127.0.0.1:8081/v1",
+               "model": "extractor"},
     # Cloud ceiling probe (2026-07-11, user-requested): Claude via the Max-plan
     # CLI, served by evals/claude_shim.py. Deliberately NOT in LADDER_ORDER —
     # the default sweep stays sovereign-only; run with --rung sonnet-5.

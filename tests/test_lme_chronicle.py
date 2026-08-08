@@ -189,3 +189,23 @@ def test_ev_variants_add_hdr_arm_with_partial_record_header(monkeypatch):
         "Events (dated, oldest first; partial record — other context "
         "may hold more):",
         "Events (dated, oldest first):") == ctx["hybrid_ev_syn"]
+
+
+def test_ev_variants_add_ins_arm_with_directive_footer(monkeypatch):
+    """Anti-suppression instruction arm (2026-08-07 evlora design): syn
+    content plus one directive line AFTER the block. The descriptive hdr
+    hedge rescued none of the three measured block-authority losses and
+    flipped zero multi-session rows (evq-residual-decomposition-0807), so
+    this arm tests the directive lever instead."""
+    monkeypatch.setattr(lmb, "CHRONICLE", True)
+    monkeypatch.setattr(lmb, "EV_VARIANTS", True)
+    svc = _StubSvc(events=_MANY_EVENTS)
+    svc._extra = {"events_total": len(_MANY_EVENTS)}
+    ctx = lmb.build_contexts(svc, "how many walls did I climb?",
+                             variants=False)
+    assert "hybrid_ev_ins" in ctx
+    assert ctx["hybrid_ev_ins"].startswith(ctx["hybrid_ev_syn"])
+    assert ctx["hybrid_ev_ins"] == ctx["hybrid_ev_syn"] + (
+        "\nThis list is an extracted index, not the complete record: when "
+        "counting or totaling, re-scan the conversation above and include "
+        "occurrences not listed here.")

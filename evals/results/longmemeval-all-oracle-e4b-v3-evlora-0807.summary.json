@@ -1,0 +1,130 @@
+{
+  "dataset": "oracle",
+  "extractor": "e4b-v3",
+  "n": 500,
+  "arms": {
+    "rag": {
+      "accuracy": 0.688,
+      "context_tokens": 1209.7
+    },
+    "cortex": {
+      "accuracy": 0.532,
+      "context_tokens": 316.4
+    },
+    "hybrid": {
+      "accuracy": 0.714,
+      "context_tokens": 1000.2
+    },
+    "hybrid_ev": {
+      "accuracy": 0.742,
+      "context_tokens": 1022.5
+    },
+    "hybrid_ev_agg": {
+      "accuracy": 0.752,
+      "context_tokens": 1039.3
+    },
+    "hybrid_ev_hdr": {
+      "accuracy": 0.748,
+      "context_tokens": 1048.4
+    },
+    "hybrid_ev_ins": {
+      "accuracy": 0.764,
+      "context_tokens": 1080.9
+    },
+    "hybrid_ev_syn": {
+      "accuracy": 0.754,
+      "context_tokens": 1041.6
+    },
+    "cascade": {
+      "accuracy": 0.696,
+      "context_tokens": 768.2
+    }
+  },
+  "superseded_total": 1898,
+  "types": {
+    "knowledge-update": {
+      "n": 78,
+      "arms": {
+        "rag": 0.859,
+        "cortex": 0.731,
+        "hybrid": 0.872,
+        "hybrid_ev": 0.872,
+        "hybrid_ev_agg": 0.872,
+        "hybrid_ev_hdr": 0.859,
+        "hybrid_ev_ins": 0.872,
+        "hybrid_ev_syn": 0.859
+      },
+      "cascade": 0.808
+    },
+    "multi-session": {
+      "n": 133,
+      "arms": {
+        "rag": 0.504,
+        "cortex": 0.414,
+        "hybrid": 0.549,
+        "hybrid_ev": 0.564,
+        "hybrid_ev_agg": 0.594,
+        "hybrid_ev_hdr": 0.579,
+        "hybrid_ev_ins": 0.617,
+        "hybrid_ev_syn": 0.602
+      },
+      "cascade": 0.526
+    },
+    "single-session-assistant": {
+      "n": 56,
+      "arms": {
+        "rag": 0.911,
+        "cortex": 0.571,
+        "hybrid": 0.929,
+        "hybrid_ev": 0.929,
+        "hybrid_ev_agg": 0.929,
+        "hybrid_ev_hdr": 0.929,
+        "hybrid_ev_ins": 0.929,
+        "hybrid_ev_syn": 0.929
+      },
+      "cascade": 0.946
+    },
+    "single-session-preference": {
+      "n": 30,
+      "arms": {
+        "rag": 0.8,
+        "cortex": 0.633,
+        "hybrid": 0.633,
+        "hybrid_ev": 0.633,
+        "hybrid_ev_agg": 0.633,
+        "hybrid_ev_hdr": 0.633,
+        "hybrid_ev_ins": 0.6,
+        "hybrid_ev_syn": 0.633
+      },
+      "cascade": 0.6
+    },
+    "single-session-user": {
+      "n": 70,
+      "arms": {
+        "rag": 0.929,
+        "cortex": 0.857,
+        "hybrid": 0.971,
+        "hybrid_ev": 0.986,
+        "hybrid_ev_agg": 0.986,
+        "hybrid_ev_hdr": 0.986,
+        "hybrid_ev_ins": 0.957,
+        "hybrid_ev_syn": 0.986
+      },
+      "cascade": 0.971
+    },
+    "temporal-reasoning": {
+      "n": 133,
+      "arms": {
+        "rag": 0.526,
+        "cortex": 0.323,
+        "hybrid": 0.579,
+        "hybrid_ev": 0.662,
+        "hybrid_ev_agg": 0.669,
+        "hybrid_ev_hdr": 0.677,
+        "hybrid_ev_ins": 0.714,
+        "hybrid_ev_syn": 0.677
+      },
+      "cascade": 0.571
+    }
+  }
+}

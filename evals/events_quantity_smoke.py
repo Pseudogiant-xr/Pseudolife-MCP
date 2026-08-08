@@ -56,11 +56,11 @@ QUANTITIES = ["15 jars", "$225", "4h 22min", "$12", "April 15th to 22nd",
 PARITY_KEYWORDS = ["kitten", "Ethiopian"]
 
 
-def _extract(prompt_file: str | None) -> list[dict]:
+def _extract(prompt_file: str | None, url: str = QWEN_URL) -> list[dict]:
     from pseudolife_memory.memory.dream import OpenAICompatExtractor
     events_prompt = (Path(prompt_file).read_text(encoding="utf-8")
                      if prompt_file else None)
-    ex = OpenAICompatExtractor(QWEN_URL, "bench", max_tokens=4096,
+    ex = OpenAICompatExtractor(url, "bench", max_tokens=4096,
                                timeout_seconds=600.0,
                                events_prompt=events_prompt)
     return ex.extract_events(NOTES)
@@ -71,10 +71,14 @@ def main() -> int:
     ap.add_argument("--candidate", required=True,
                     help="candidate events prompt file (e.g. events_pass_v2.txt)")
     ap.add_argument("--tag", required=True)
+    ap.add_argument("--extractor-url", default=QWEN_URL,
+                    help="extraction endpoint; default = the qwen bench "
+                         "server. Point at :8081 to smoke a sidecar "
+                         "candidate (evlora gate T2).")
     args = ap.parse_args()
 
-    v1_events = _extract(None)
-    cand_events = _extract(args.candidate)
+    v1_events = _extract(None, args.extractor_url)
+    cand_events = _extract(args.candidate, args.extractor_url)
     v1_text = " | ".join(e.get("description", "") for e in v1_events)
     cand_text = " | ".join(e.get("description", "") for e in cand_events)
 
@@ -84,10 +88,19 @@ def main() -> int:
                       and k.lower() not in cand_text.lower()]
     ok = not missing and not parity_missing
 
+    # Record the candidate path repo-relative: an absolute path embeds the
+    # maintainer home directory in a committed artifact (the tracked-tree
+    # identifier guard fires on exactly this).
+    repo_root = Path(__file__).resolve().parents[1]
+    cand = Path(args.candidate)
+    try:
+        cand_rel = cand.resolve().relative_to(repo_root).as_posix()
+    except ValueError:
+        cand_rel = cand.as_posix()
     out = {
         "tag": args.tag,
-        "candidate": args.candidate,
-        "server": QWEN_URL,
+        "candidate": cand_rel,
+        "server": args.extractor_url,
         "checks": {
             "quantities_expected": QUANTITIES,
             "quantities_missing_in_candidate": missing,
