@@ -362,11 +362,13 @@ class DreamConfig:
     # during the sweep beside superseded-row compaction. The journal is the
     # rollback source, so this bounds how far back a pass stays revertible.
     runs_keep: int = 50
-    # Chronicle events (schema v28): when on, the dream pass also extracts
-    # dated occurrences into chronicle_events (requires an events-capable
-    # prompt — the v7 artifact). OFF until its preregistered gates pass
-    # (docs/superpowers/specs/2026-08-03-aggregation-aware-recall-design.md,
-    # Phase 2); the eval harness enables it per-run.
+    # Chronicle events (schema v28): when on, the dream pass runs a second,
+    # dedicated events-extraction call per batch (extract_events, pinned
+    # artifact evals/prompts/events_pass_v1.txt) and stores dated
+    # occurrences into chronicle_events. The pipeline passed its
+    # preregistered gates (separate-pass events + the multi-task sidecar);
+    # OFF pending a production soak review. The eval harness enables it
+    # per-run.
     chronicle: bool = False
 
 

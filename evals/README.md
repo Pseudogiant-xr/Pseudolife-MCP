@@ -10,8 +10,9 @@ This is **not** part of the test suite or the shipped package. It was built
 to make the "should the sidecar be default-on, and at which rung?" decision
 (see `docs/specs/2026-06-18-pluggable-llm-extraction-design.md` §4) with data
 instead of a guess — decided since: default-on, and the shipped bake has
-climbed the ladder to the E4B v2 fine-tune. It remains the harness for
-vetting any future extractor change.
+climbed the ladder to the E4B v3 multi-task fine-tune (claims + dated
+events in one adapter). It remains the harness for vetting any future
+extractor change.
 
 ## Isolation & safety
 
@@ -80,7 +81,7 @@ Note this is *separate* from the default-on compose sidecar
 (`pseudolife-mcp-extractor`), which is internal-only (`expose:`, not `ports:`)
 and reachable only by the daemon on the compose network.
 
-**Gemma E2B** — bake the E2B image (the shipped default is now the E4B v2
+**Gemma E2B** — bake the E2B image (the shipped default is now the E4B v3
 fine-tune, so E2B needs an explicit `MODEL_URL`), then serve it:
 
 ```bash
@@ -92,7 +93,7 @@ docker run -d --name pseudolife-mcp-extractor-bench -p 127.0.0.1:8081:8081 \
 
 **Gemma E4B** — stop the E2B container, then serve the E4B GGUF on the same
 port. The ladder's `gemma-e4b` rung is the QAT *base* model (the shipped
-default image bakes the v2 *fine-tune*, a different artifact — mount or bake
+default image bakes the v3 *fine-tune*, a different artifact — mount or bake
 the base explicitly for a like-for-like rung):
 
 ```bash
@@ -250,7 +251,13 @@ off.
 
 The first **external** benchmark: the knowledge-update subset (78 questions)
 of [LongMemEval](https://arxiv.org/abs/2410.10813) — the ability the HLC
-supersession spine is built for.
+supersession spine is built for. `--types` (comma list or `all`; default
+`knowledge-update`, with byte-identical artifact names) extends a run to
+the other five LongMemEval question types — 422 more questions for
+statistical power and LME-500 comparability. Non-KU rows are graded by a
+generic judge variant that drops only the KU-specific update clause;
+extended runs get a type-slug artifact prefix and a per-type summary
+breakdown.
 
 **Locality, precisely.** The default configuration runs entirely **locally** —
 extractor, answerer and judge are all served on this host or the LAN, and
@@ -296,7 +303,7 @@ rag 0.321±0.027, commit precision 0.76±0.05).
 Model roles are split so extraction quality is the **only** variable:
 
 - **Extractor** (varies): `gemma-e2b` (the smallest ladder-verified sidecar
-  bake — the shipped default is now the E4B v2 fine-tune — GPU-served for
+  bake — the shipped default is now the E4B v3 fine-tune — GPU-served for
   bench speed, ladder-verified identical output at temperature 0) = the
   **floor**; `qwen-27b` = the local **ceiling**.
 - **Answerer + judge** (constant): Qwen3.6-27B for every run, LongMemEval's
@@ -679,7 +686,7 @@ Gemma 2B (tuned prompt)       5/6       5/5     correction-polarity FIXED
   genuine small-model capability gap; **low real-world risk** because signals come
   from deliberate `memory_outcome` calls + correction auto-tags, not arbitrary
   chatter. (The default sidecar has since moved to E4B-class — 2026-07-06,
-  now the E4B v2 fine-tune — which narrows this gap.)
+  now the E4B v3 multi-task fine-tune — which narrows this gap.)
 - Gemma already handles the **merged fail→success** case and **clustering** well
   — better than the v1 live smoke suggested (that smoke's inversion was not
   systematic at temperature 0).

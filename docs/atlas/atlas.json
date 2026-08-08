@@ -1015,7 +1015,7 @@
    "p": "evals/distill_*.py",
    "d": [
     "Imports the LIVE production prompt from dream.py — no drift possible",
-    "Sonnet / Qwen-27B teachers → clean → train → merge → GGUF",
+    "Claude / Qwen-27B teachers (v3: Opus-5, claims + events) → clean → train → merge → GGUF",
     "Output is the shipped extractor image — the one eval→prod build artifact"
    ]
   },

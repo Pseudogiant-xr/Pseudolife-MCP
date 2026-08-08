@@ -79,8 +79,12 @@ snippets/scopes:
 
 **Junk entities.** The dream also proposes over-extraction artifacts for
 deletion — `would_junk` in the dry run, counted as `junk_proposed` on apply.
-These are never auto-applied (the `auto_apply_safe` path covers supersessions
-and exact-duplicate merges only), so they sit pending until someone votes.
+On `apply=true`, a pending junk proposal whose entity carries **no edges
+and at most the one fact slot it was minted from** is auto-deleted
+(`junk_deleted` in the result, recorded as a `dream-auto` decision in
+`merge_decisions`; the pre-apply graph snapshot is the undo, and the node
+simply re-mints on next mention). Anything evidence-bearing — any edge,
+more than one fact slot — sits pending until someone votes.
 `merge_proposals` does NOT carry them: get their `proposal_id`s from
 `memory_graph_review(action="list")`, where they appear as `kind: "junk"`.
 - **Genuinely junk** (extraction noise: a fragment, a mis-parsed span, an
