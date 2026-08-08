@@ -389,6 +389,12 @@ def make_extractor(rung: dict):
         rung["base_url"], rung["model"],
         max_tokens=4096, timeout_seconds=600.0,
         system_prompt=system_prompt,
+        # Pin the llama-server prompt cache OFF for bench determinism: a warm
+        # server's cache changes output on identical temperature-0 input
+        # (2026-08-09 probe — fresh 19 claims/0.1 stale vs warm 26/0.2,
+        # restored exactly by this pin; results/warm-cache-probe-0809.json).
+        # Servers that don't know the field ignore it.
+        extra_body={"cache_prompt": False},
     )
 
 
