@@ -6,6 +6,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Measured (2026-08-09 — retention-interval eval: serving is time-invariant; staleness flags work but are heeded selectively)
+- **Both preregistered hypotheses resolve on the first run**
+  (`evals/results/retention-interval-verdict.json`, producer
+  `evals/analyze_retention.py`, tag `ret-0809`, all replicate artifacts
+  committed beside it). **H1 confirmed exactly**: the ladder bank
+  queried under five simulated clocks (0–365 days) returns identical
+  metrics (gold 1.0, stale_leak 0.1) and one identical context hash —
+  nothing in the serving path reads the clock, certifying supersession
+  does not rot with age and pinning the regression guard for any future
+  time-aware serving. **H2 passes decisively but incompletely**: with
+  `effective_confidence`/`stale` visible, the answerer's
+  unqualified-stale-answer rate halves (1.0 → 0.5/0.4/0.6 across three
+  replicates; paired sign-flip p 0.0002, 30 pairs, every discordant
+  pair favoring flags) at zero cost to fresh facts and zero base-rate
+  hedging in the evergreen control. The residual is the finding: flag
+  compliance is **fact-consistent, not random** — version- and
+  quantity-shaped values (`deployed version 3.8.1`, `batch-size 500`)
+  are asserted unqualified in every replicate despite visible flags,
+  while other slots always hedge. Per the preregistered decision rule,
+  ScrubJay-style auto-perishability stays shelved (class granularity is
+  not the binding error); the measured next lever is a serving-side
+  staleness policy, under its own preregistration.
+
 ### Added (2026-08-08 — retention-interval eval harness: the freshness machinery gets its first eval)
 - **`evals/retention_interval_eval.py`** (preregistration
   `docs/superpowers/specs/2026-08-08-retention-interval-eval-design.md`):
