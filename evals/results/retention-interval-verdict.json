@@ -1,0 +1,85 @@
+{
+ "preregistration": "docs/superpowers/specs/2026-08-08-retention-interval-eval-design.md",
+ "inputs": {
+  "study_a": "retention-interval-ret-0809.json",
+  "study_b": [
+   "retention-interval-ret-0809-b-r1.json",
+   "retention-interval-ret-0809-b-r2.json",
+   "retention-interval-ret-0809-b-r3.json"
+  ]
+ },
+ "h1_time_invariance": {
+  "pass": true,
+  "offsets": {
+   "0": {
+    "gold_recoverable": 1.0,
+    "stale_leak": 0.1,
+    "context_sha256": "a000ad24f3047f40d5698fb38502d5fcac5c365d21dc724b522ac9782d9634c5"
+   },
+   "7": {
+    "gold_recoverable": 1.0,
+    "stale_leak": 0.1,
+    "context_sha256": "a000ad24f3047f40d5698fb38502d5fcac5c365d21dc724b522ac9782d9634c5"
+   },
+   "30": {
+    "gold_recoverable": 1.0,
+    "stale_leak": 0.1,
+    "context_sha256": "a000ad24f3047f40d5698fb38502d5fcac5c365d21dc724b522ac9782d9634c5"
+   },
+   "90": {
+    "gold_recoverable": 1.0,
+    "stale_leak": 0.1,
+    "context_sha256": "a000ad24f3047f40d5698fb38502d5fcac5c365d21dc724b522ac9782d9634c5"
+   },
+   "365": {
+    "gold_recoverable": 1.0,
+    "stale_leak": 0.1,
+    "context_sha256": "a000ad24f3047f40d5698fb38502d5fcac5c365d21dc724b522ac9782d9634c5"
+   }
+  }
+ },
+ "h2_flag_efficacy": {
+  "pass": true,
+  "paired_units": 30,
+  "discordant": 15,
+  "all_discordant_favor_flags": true,
+  "permutation_p_two_sided": 0.0002,
+  "draws": 10000,
+  "seed": 0,
+  "per_replicate": {
+   "retention-interval-ret-0809-b-r1.json": {
+    "visible_stale_rate": 0.5,
+    "stripped_stale_rate": 1.0,
+    "discordant_pairs": 5
+   },
+   "retention-interval-ret-0809-b-r2.json": {
+    "visible_stale_rate": 0.4,
+    "stripped_stale_rate": 1.0,
+    "discordant_pairs": 6
+   },
+   "retention-interval-ret-0809-b-r3.json": {
+    "visible_stale_rate": 0.6,
+    "stripped_stale_rate": 1.0,
+    "discordant_pairs": 4
+   }
+  },
+  "fresh_noninferiority_gap": 0.0,
+  "control_evergreen_answer_rate": [
+   1.0,
+   1.0,
+   1.0
+  ],
+  "per_fact_flag_effect": {
+   "auth-gateway": 1.0,
+   "billing-api": 0.0,
+   "build-farm": 0.3333333333333333,
+   "cache-tier": 1.0,
+   "edge-proxy": 1.0,
+   "ingest-queue": 0.6666666666666666,
+   "metrics-db": 0.3333333333333333,
+   "report-worker": 0.0,
+   "search-cluster": 0.3333333333333333,
+   "web-frontend": 0.3333333333333333
+  }
+ }
+}

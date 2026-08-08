@@ -1,0 +1,45 @@
+{
+ "preregistration": "docs/superpowers/specs/2026-08-08-retention-interval-eval-design.md",
+ "tag": "ret-0809",
+ "study_a": {
+  "rung": "e4b-v3",
+  "consolidate_seconds": 195.7,
+  "tally": {
+   "pulled": 26,
+   "claims": 19,
+   "inserted": 19,
+   "superseded": 0,
+   "literal_flagged": 0,
+   "literal_dropped": 0
+  },
+  "offsets": {
+   "0": {
+    "gold_recoverable": 1.0,
+    "stale_leak": 0.1,
+    "context_sha256": "a000ad24f3047f40d5698fb38502d5fcac5c365d21dc724b522ac9782d9634c5"
+   },
+   "7": {
+    "gold_recoverable": 1.0,
+    "stale_leak": 0.1,
+    "context_sha256": "a000ad24f3047f40d5698fb38502d5fcac5c365d21dc724b522ac9782d9634c5"
+   },
+   "30": {
+    "gold_recoverable": 1.0,
+    "stale_leak": 0.1,
+    "context_sha256": "a000ad24f3047f40d5698fb38502d5fcac5c365d21dc724b522ac9782d9634c5"
+   },
+   "90": {
+    "gold_recoverable": 1.0,
+    "stale_leak": 0.1,
+    "context_sha256": "a000ad24f3047f40d5698fb38502d5fcac5c365d21dc724b522ac9782d9634c5"
+   },
+   "365": {
+    "gold_recoverable": 1.0,
+    "stale_leak": 0.1,
+    "context_sha256": "a000ad24f3047f40d5698fb38502d5fcac5c365d21dc724b522ac9782d9634c5"
+   }
+  },
+  "h1_time_invariant": true
+ },
+ "written_at": "2026-08-09T00:58:32"
+}
