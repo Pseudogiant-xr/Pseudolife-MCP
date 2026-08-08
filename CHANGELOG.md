@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-08 — retention-interval eval harness: the freshness machinery gets its first eval)
+- **`evals/retention_interval_eval.py`** (preregistration
+  `docs/superpowers/specs/2026-08-08-retention-interval-eval-design.md`):
+  the first eval on the time-since-stored axis. Study A replays the
+  ladder bank under simulated query clocks (0–365 days, injected at the
+  freshness layer's single clock seam — no production knob) and
+  preregisters exact-zero deltas plus identical context hashes; Study B
+  seeds volatile/slow facts through the real write path, ages them past
+  the volatile staleness horizon, and renders paired answerer arms that
+  differ only in the `effective_confidence`/`stale` fields, against an
+  evergreen no-decay control. Contexts-only smoke verified live: at +90
+  simulated days volatile facts serve `stale: true` at the 0.4 decay
+  floor, slow facts decay on-curve without the flag, evergreen controls
+  are untouched. Judged scoring (reproducible bench server) runs under
+  its own tag; results land with the verdict artifact.
+
 ## [0.13.0] - 2026-08-08 — reversible dreams, chronicle events, and the multi-task extractor
 
 ### Changed (2026-08-08 — default extractor sidecar bumps to the e4b-v3 multi-task fine-tune)
