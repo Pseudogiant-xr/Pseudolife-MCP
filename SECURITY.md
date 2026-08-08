@@ -69,6 +69,18 @@ How this maps onto Pseudolife:
 - **The surprise gate is an admission filter, not a trust filter.** It
   drops near-duplicates. Novel malicious content passes it *preferentially*.
   Do not mistake novelty gating for a defense.
+- **No content screen is a defense either.** The 2026 attack literature
+  (MAFIA, arXiv 2608.03844) defeats *audited* memory stores from the
+  query interface alone: "factual cloaks" keep high semantic similarity
+  while preserving malicious effect, dropping audit detection from ~83%
+  to under 8% at ~90% attack success. Any check that inspects *what the
+  text says* — semantic screens, and this project's literal-faithfulness
+  gate, which checks fidelity to source, not trustworthiness of source —
+  is in the evaded class. The same work optimizes *placement* so poisoned
+  records win retrieval competition against a large benign pool; ranking
+  machinery is part of the attack surface, not a defense. Defenses that
+  key on *who wrote* (provenance tiers, writer keying, source tags) are
+  the class this attack does not straightforwardly evade.
 - **Dreams amplify.** The consolidation pass promotes episodic text into
   canonical cortex facts that outrank raw entries at recall time. A
   poisoned entry that survives to a dream becomes a poisoned *fact* with
@@ -85,7 +97,9 @@ How this maps onto Pseudolife:
   poison.
 
 Not yet built (roadmap, not promises): trust-weighted consolidation and a
-quarantine tier for low-trust sources ahead of the dream pass.
+quarantine tier for low-trust sources ahead of the dream pass — designed
+and preregistered in
+`docs/superpowers/specs/2026-08-09-consolidation-quarantine-design.md`.
 
 ## In scope
 
