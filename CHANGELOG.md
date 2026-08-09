@@ -80,6 +80,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   denies it silent *canonical* authority; writer identity remains
   self-reported (mitigation, not authentication).
 
+### Changed (2026-08-09 — set members are evergreen-only by decision; conversion drop is now audit-stamped)
+- **The scalar→set conversion's freshness-class drop is a stated decision,
+  not an accident, and no longer silent.** Set members remain outside the
+  staleness machinery — deliberately: retraction on a set is the explicit
+  `memory_set_remove` channel (decay would be a second, competing
+  invalidation mechanism), no group-level staleness can honour the
+  `stale_policy` fresh-payload no-harm contract, and per-member serving
+  would re-rank deployed banks unmeasured (rationale documented in
+  `docs/guide/memory-model.md`, "Conversion rules"). `_insert_member` now
+  hardcodes `evergreen` (the parameter nothing could pass is gone), and
+  converting a non-evergreen scalar stamps `dropped_freshness_class` on
+  the conversion's supersession-log entry — the superseded scalar row
+  keeps its own class for history. Serving payloads are unchanged
+  everywhere (the set-slot no-harm pin in `tests/test_stale_policy.py`
+  still holds byte-for-byte); the only new bytes are the audit stamp.
+
 ### Measured (2026-08-09 — H3: the staleness policy closes the answerer-discretion gap completely)
 - **Quarantine wins on all four preregistered gates**
   (`evals/results/stale-policy-verdict.json`, producer

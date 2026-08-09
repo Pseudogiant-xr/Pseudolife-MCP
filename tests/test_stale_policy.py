@@ -302,9 +302,12 @@ def test_search_restatement_dedup_keys_on_underlying_value(tmp_path,
 # ── set slots: outside the staleness machinery, pinned (review finding 3) ─
 
 def test_set_slots_are_outside_the_staleness_machinery():
-    """Set members are always evergreen — ``add_member`` carries no
-    freshness class and scalar→set conversion re-inserts the member with
-    the default (cortex.py ~655) — so no set payload can ever be policy-
+    """Set members are structurally evergreen — a deliberate rule, not a
+    default: ``_insert_member`` hardcodes the class, and scalar→set
+    conversion drops a non-evergreen scalar's class with an explicit
+    ``dropped_freshness_class`` audit stamp (rationale in
+    docs/guide/memory-model.md, "Conversion rules"; drop pinned in
+    tests/test_cortex_sets.py) — so no set payload can ever be policy-
     transformed. Pin that as a no-harm guard: a set-group search entry
     (including one converted from a VOLATILE scalar) is byte-identical
     across all three policies even past the staleness horizon."""
