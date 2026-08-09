@@ -408,8 +408,7 @@ class CortexStore:
                 # take current — park it currentless.
                 return self._contend(None, slot, emb, confidence, prov, t,
                                      sup, "quarantine_low_trust", semb,
-                                     writer_id=writer_id,
-                                     session_id=session_id)
+                                     freshness_class=freshness_class, **stamp)
             return WriteResult("inserted", self._insert(
                 slot, emb, confidence, prov, t, support=sup,
                 slot_embedding=semb, freshness_class=freshness_class, **stamp))
@@ -436,7 +435,7 @@ class CortexStore:
             # win the slot on tier arithmetic.
             return self._contend(cur, slot, emb, confidence, prov, t, sup,
                                  "quarantine_low_trust", semb,
-                                 writer_id=writer_id, session_id=session_id)
+                                 freshness_class=freshness_class, **stamp)
 
         # Genuine conflict at the same slot. Provenance guard: only a write whose
         # tier is >= the current value's tier may supersede; a weaker-tier write
@@ -461,7 +460,7 @@ class CortexStore:
                       writer_id=writer_id, session_id=session_id)
             return WriteResult("contested", cur)
         return self._contend(cur, slot, emb, confidence, prov, t, sup, reason, semb,
-                             writer_id=writer_id, session_id=session_id)
+                             freshness_class=freshness_class, **stamp)
 
     def _confirm(self, cur, prov, sup, confidence, t, txt, hlc,
                  writer_id, session_id, semb) -> WriteResult:
@@ -648,10 +647,10 @@ class CortexStore:
                 if _norm_value(slot.value) == _norm_value(cur.value):
                     # The same total re-asserted through add_member -> confirm
                     # the scalar, never park a contender identical to itself
-                    # (review finding). Mirrors write_fact's own confirm branch
-                    # (~line 360); tx_time/hlc are deliberately left untouched,
-                    # consistent with this guarded path already dropping hlc
-                    # on the contender branch below.
+                    # (review finding). Confidence/provenance/support only;
+                    # tx_time/hlc are deliberately left untouched — a
+                    # member-channel echo corroborates the total but is not a
+                    # scalar re-assertion through write_fact's stamped path.
                     cur.last_confirmed = t
                     cur.provenance |= {p for p in provenance if p}
                     sup = _norm_support(support)
@@ -666,7 +665,8 @@ class CortexStore:
                                      "member_add_blocked_aggregate",
                                      cur.slot_embedding,
                                      writer_id=writer_id,
-                                     session_id=session_id)
+                                     session_id=session_id,
+                                     hlc=hlc, tx_time=t, valid_time=t)
             self.dirty_slots.add(key)
             cur.status = "superseded"
             cur.superseded_at = t
@@ -864,11 +864,20 @@ class CortexStore:
         return [r for r in self.records if r.key == key and r.status == "contested"]
 
     def _contend(self, cur, slot, emb, confidence, prov, t, sup, reason,
-                 slot_embedding=None, writer_id=None, session_id=None):
+                 slot_embedding=None, writer_id=None, session_id=None,
+                 hlc=None, tx_time=None, valid_time=None,
+                 freshness_class="evergreen"):
         """Park a conflicting value as a contender at ``cur``'s slot rather than
         superseding. Keeps the current value canonical. At most one active
         contender per slot: a matching value confirms (reinforces) the existing
         contender; a different value supersedes the prior contender.
+
+        The contender carries the write's own temporal stamps
+        (hlc/tx_time/valid_time) and freshness class — parking must not
+        strip them, or a later promotion serves an unstamped fact. A
+        contender-confirm advances tx_time/hlc like :meth:`_confirm` but
+        never moves valid_time (when it first held is not when it was
+        re-stated).
 
         ``cur`` may be None (quarantine's empty-slot park): the key is
         derived from ``slot`` and log rows anchor on the contender itself —
@@ -888,6 +897,10 @@ class CortexStore:
                 existing.writer_id = writer_id
             if session_id:
                 existing.session_id = session_id
+            if tx_time is not None:
+                existing.tx_time = float(tx_time)
+            if hlc is not None:
+                existing.hlc_phys, existing.hlc_logical = hlc
             self._log(cur if cur is not None else existing, slot.value,
                       confidence, t, "contested", "contender_confirmed",
                       writer_id=writer_id, session_id=session_id)
@@ -912,8 +925,13 @@ class CortexStore:
             embedding=emb,
             slot_embedding=slot_embedding,
             support={sup} if sup else set(),
+            tx_time=tx_time,
+            valid_time=valid_time,
+            hlc_phys=(hlc[0] if hlc else None),
+            hlc_logical=(hlc[1] if hlc else None),
             writer_id=writer_id,
             session_id=session_id,
+            freshness_class=_norm_freshness(freshness_class),
         )
         self.records.append(rec)   # deliberately NOT registered in self._current
         self._log(cur if cur is not None else rec, slot.value, confidence, t,
@@ -922,7 +940,7 @@ class CortexStore:
         return WriteResult("contested", rec)
 
     def resolve(self, entity, attribute, accept: bool, now: float | None = None,
-                support: str = "user"):
+                support: str = "user", hlc: tuple[int, int] | None = None):
         """Resolve the active contender at a slot. ``accept=True`` promotes it to
         current (old current -> superseded; the contender's support gains
         ``support`` — "user" for the explicit MCP resolve, "agent" when the
@@ -930,6 +948,14 @@ class CortexStore:
         so an automated promotion is never stamped as a human act);
         ``accept=False`` retires it (current untouched). Returns a ``WriteResult``
         or ``None`` when there is no active contender.
+
+        Promotion is itself a transaction: tx_time moves to the promotion
+        time, and ``hlc`` — a fresh tick from the caller that owns the clock
+        (the service layer) — becomes the promoted fact's ordering stamp, so
+        it can defend the slot in :meth:`_should_supersede` against a later
+        write replaying a pre-promotion HLC. Without ``hlc`` the contender's
+        parked stamp stands. valid_time is never moved: when the fact became
+        true is not when it was accepted.
 
         Service-adjacent routing guard (Task 4): if the slot was converted to
         a set (:meth:`add_member`) after this contender was parked against the
@@ -968,6 +994,9 @@ class CortexStore:
             # steerable upward by malformed input (2026-08-09 review).
             contender.support.add(_norm_support(support) or "agent")
             contender.last_confirmed = t
+            contender.tx_time = t
+            if hlc is not None:
+                contender.hlc_phys, contender.hlc_logical = hlc
             contender.supersedes_value = cur.value if cur is not None else contender.supersedes_value
             self._current[key] = c_idx
             self._log(cur or contender, contender.value, contender.confidence, t,

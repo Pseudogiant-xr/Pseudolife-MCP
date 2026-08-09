@@ -1931,8 +1931,13 @@ class MemoryService:
         with self._lock:
             self._ensure_init()
             assert self._cortex is not None
+            # A fresh HLC tick on accept: promotion is an ordering event, and
+            # the promoted fact must outrank any pre-promotion stamp (same
+            # failure class as the 2026-07-02 _promote_slots fix). Rejection
+            # retires without competing, so it needs no tick.
             res = self._cortex.resolve(entity, attribute, accept,
-                                       support=support)
+                                       support=support,
+                                       hlc=self._hlc.tick() if accept else None)
             if res is None:
                 return {"resolved": False, "reason": "no_contender",
                         "entity": entity, "attribute": attribute}
