@@ -1,13 +1,17 @@
-"""Session-scoped toolset tiers (spec: docs/superpowers/specs/2026-07-11).
+"""Principal-scoped toolset tiers (specs: 2026-07-11, re-keyed 2026-08-10).
 
 Visibility model: every tool registers with FastMCP; the transport's
 tools/list handler (mcp_server._wire_transport_tiering) filters by the
-session's resolved tier. Ordering: minimal ⊂ core ⊂ full. Resolution:
-session override (memory_toolset) → writer map (PSEUDOLIFE_MCP_TIER_MAP)
-→ env default (PSEUDOLIFE_MCP_TOOLSET). Visibility is a token lever, not
-a security boundary — the server does not reject hidden-tool calls, but
-Claude clients gate calls against their own tools/list, so in practice a
-session expands its tier first; auth is the bearer token.
+PRINCIPAL's resolved tier — the named principal from the bearer token, or
+the writer id for single-token installs (principals share the writer-id
+namespace). The MCP 2026-07-28 tools spec forbids per-connection variance
+and sanctions exactly this per-authorization axis. Ordering: minimal ⊂
+core ⊂ full. Resolution: principal override (memory_toolset) → tier map
+(PSEUDOLIFE_MCP_TIER_MAP, principal:tier) → env default
+(PSEUDOLIFE_MCP_TOOLSET). Visibility is a token lever, not a security
+boundary — the server does not reject hidden-tool calls, but Claude
+clients gate calls against their own tools/list, so in practice a session
+expands its tier first; auth is the bearer token.
 """
 from __future__ import annotations
 
@@ -20,8 +24,8 @@ logger = logging.getLogger("pseudolife-mcp.tiers")
 TIERS: tuple[str, ...] = ("minimal", "core", "full")
 _RANK = {t: i for i, t in enumerate(TIERS)}
 
-# Sessions are transient (Claude conversations); 12h comfortably outlives
-# one and lets abandoned entries lapse without a reaper thread.
+# Overrides are working-day-scoped; 12h comfortably outlives a stretch of
+# sessions and lets abandoned entries lapse without a reaper thread.
 SESSION_TTL_S = 12 * 3600.0
 
 
@@ -66,11 +70,13 @@ def step(tier: str, delta: int, floor: str = "minimal") -> str:
     return TIERS[i]
 
 
-class SessionTierState:
-    """TTL'd session-tier overrides. Thread-safe: read on the event loop
-    (tools/list) and written from tool handlers. Lazy expiry — no reaper."""
+class PrincipalTierState:
+    """TTL'd principal-tier overrides. Thread-safe: read on the event loop
+    (tools/list) and written from tool handlers. Lazy expiry — no reaper.
+    Keys normalize to the lowercased writer-id namespace; ``None``/empty is
+    the shared bucket for key-less callers (embedded stdio, tests, direct
+    HTTP with neither a named token nor a writer id)."""
 
-    # Fallback bucket for key-less callers (embedded stdio/tests). HTTP transports always carry a session id, so concurrent sessions never share it.
     _GLOBAL = "__global__"
 
     def __init__(self, ttl_s: float = SESSION_TTL_S) -> None:
@@ -78,8 +84,12 @@ class SessionTierState:
         self._lock = threading.Lock()
         self._m: dict[str, tuple[str, float]] = {}
 
+    @classmethod
+    def _key(cls, key: str | None) -> str:
+        return (key or "").strip().lower() or cls._GLOBAL
+
     def get(self, key: str | None) -> str | None:
-        k = key or self._GLOBAL
+        k = self._key(key)
         now = time.monotonic()
         with self._lock:
             row = self._m.get(k)
@@ -92,7 +102,7 @@ class SessionTierState:
             return tier
 
     def set(self, key: str | None, tier: str) -> None:
-        k = key or self._GLOBAL
+        k = self._key(key)
         now = time.monotonic()
         with self._lock:
             self._m[k] = (tier, now)
@@ -102,15 +112,16 @@ class SessionTierState:
                     del self._m[stale]
 
 
-def resolve_tier(writer: str | None, session_key: str | None, *,
-                 state: SessionTierState, tier_map: dict[str, str],
+def resolve_tier(principal: str | None, *,
+                 state: PrincipalTierState, tier_map: dict[str, str],
                  default_tier: str) -> str:
-    """Session override → writer map → default."""
-    override = state.get(session_key)
+    """Principal override → tier map → default (spec 2026-08-10; the
+    session axis no longer participates)."""
+    override = state.get(principal)
     if override is not None:
         return override
-    if writer:
-        mapped = tier_map.get(writer.strip().lower())
+    if principal:
+        mapped = tier_map.get(principal.strip().lower())
         if mapped:
             return mapped
     return default_tier

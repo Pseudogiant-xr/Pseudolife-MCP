@@ -88,12 +88,16 @@ def run_daemon(host: str | None = None, port: int | None = None) -> None:
 
     host = host or os.environ.get("PSEUDOLIFE_MCP_HOST", DEFAULT_HOST)
     port = int(port or os.environ.get("PSEUDOLIFE_MCP_PORT", DEFAULT_PORT))
+    from pseudolife_memory.principals import parse_token_map
+
     token = os.environ.get("PSEUDOLIFE_MCP_TOKEN") or None
+    token_map = parse_token_map(os.environ.get("PSEUDOLIFE_MCP_TOKENS"))
+    auth_configured = token is not None or bool(token_map)
     trust_bind = os.environ.get("PSEUDOLIFE_MCP_TRUST_BIND", "").lower() in (
         "1", "true", "yes", "on",
     )
 
-    if host not in _LOOPBACK and token is None:
+    if host not in _LOOPBACK and not auth_configured:
         # Inside a container the process MUST bind 0.0.0.0, but the real
         # network boundary is the Docker port publish (compose binds it to
         # 127.0.0.1). PSEUDOLIFE_MCP_TRUST_BIND is the operator's explicit
@@ -109,16 +113,17 @@ def run_daemon(host: str | None = None, port: int | None = None) -> None:
             )
         else:
             logger.error(
-                "Refusing to bind %s without PSEUDOLIFE_MCP_TOKEN — the memory "
-                "bank must not listen on the network unauthenticated. Set the "
-                "token (and give it to LAN clients), bind 127.0.0.1, or set "
+                "Refusing to bind %s without PSEUDOLIFE_MCP_TOKEN (or a "
+                "PSEUDOLIFE_MCP_TOKENS map) — the memory bank must not listen "
+                "on the network unauthenticated. Set a token (and give it to "
+                "LAN clients), bind 127.0.0.1, or set "
                 "PSEUDOLIFE_MCP_TRUST_BIND=1 if the boundary is external "
                 "(containerised, loopback-published).", host,
             )
             sys.exit(2)
 
     def _health() -> dict:
-        return _build_health_payload(mcp_server.service, token is not None)
+        return _build_health_payload(mcp_server.service, auth_configured)
 
     mcp_server.start_background_durability()
     mcp_server.start_dream_sweep()
@@ -131,9 +136,12 @@ def run_daemon(host: str | None = None, port: int | None = None) -> None:
 
     app = build_console_app(
         mcp_server.mcp.streamable_http_app(), token, _health, mcp_server.service,
+        token_map=token_map,
     )
-    logger.info("daemon: listening on %s:%s (auth=%s, storage=%s) — console at /ui/",
-                host, port, token is not None, _health()["storage"])
+    logger.info("daemon: listening on %s:%s (auth=%s, principals=%d, "
+                "storage=%s) — console at /ui/",
+                host, port, auth_configured, len(token_map),
+                _health()["storage"])
     uvicorn.run(app, host=host, port=port, log_level="warning")
 
 

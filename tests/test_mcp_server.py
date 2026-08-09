@@ -890,17 +890,37 @@ def test_memory_toolset_ladder_and_status(tmp_path: Path, monkeypatch) -> None:
         assert names == mod._visible_tool_names("minimal")
 
 
-def test_memory_toolset_expansion_is_session_scoped(tmp_path: Path, monkeypatch) -> None:
+def test_memory_toolset_expansion_is_principal_scoped(tmp_path: Path, monkeypatch) -> None:
+    """Spec 2026-08-10: tier overrides key on the principal (bearer token),
+    not the session — two sessions sharing a token share the view; a
+    different token is untouched."""
     mod = _reload_tiered(tmp_path, monkeypatch,
-                         PSEUDOLIFE_MCP_TOOLSET="minimal")
-    with _FakeReqCtx({"x-pl-session": "sA"}):
+                         PSEUDOLIFE_MCP_TOOLSET="minimal",
+                         PSEUDOLIFE_MCP_TOKENS="tokA:alpha,tokB:beta")
+    with _FakeReqCtx({"authorization": "Bearer tokA", "x-pl-session": "sA"}):
         _invoke("memory_toolset", {"action": "expand"})
-    with _FakeReqCtx({"x-pl-session": "sA"}):
+    # Different session, SAME token -> shares the expanded view.
+    with _FakeReqCtx({"authorization": "Bearer tokA", "x-pl-session": "sZ"}):
         names = {t.name for t in asyncio.run(_transport_list(mod))}
     assert names == mod._visible_tool_names("core")
-    with _FakeReqCtx({"x-pl-session": "sB"}):   # untouched session stays minimal
+    # Different token -> independent, stays at the default.
+    with _FakeReqCtx({"authorization": "Bearer tokB", "x-pl-session": "sB"}):
         names_b = {t.name for t in asyncio.run(_transport_list(mod))}
     assert names_b == mod._visible_tool_names("minimal")
+
+
+def test_writer_fallback_scopes_tiers_without_tokens(tmp_path: Path, monkeypatch) -> None:
+    """Single-token/no-token installs: the writer id (X-PL-Writer) is the
+    principal, so distinct shim writers keep distinct tier views."""
+    mod = _reload_tiered(tmp_path, monkeypatch,
+                         PSEUDOLIFE_MCP_TOOLSET="minimal")
+    with _FakeReqCtx({"x-pl-writer": "hermes-box", "x-pl-session": "h1"}):
+        _invoke("memory_toolset", {"action": "expand"})
+        names = {t.name for t in asyncio.run(_transport_list(mod))}
+    assert names == mod._visible_tool_names("core")
+    with _FakeReqCtx({"x-pl-writer": "other-box", "x-pl-session": "o1"}):
+        names_o = {t.name for t in asyncio.run(_transport_list(mod))}
+    assert names_o == mod._visible_tool_names("minimal")
 
 
 def test_memory_toolset_is_minimal_tier_and_registered() -> None:

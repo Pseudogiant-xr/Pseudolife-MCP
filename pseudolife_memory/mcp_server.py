@@ -88,7 +88,7 @@ _MCP_INSTRUCTIONS = """Pseudolife is durable memory shared across sessions. At t
 mcp = FastMCP("Pseudolife Memory", instructions=_MCP_INSTRUCTIONS)
 
 from pseudolife_memory.toolset_tiers import (
-    SessionTierState, normalize_tier, parse_tier_map, rank as _tier_rank,
+    PrincipalTierState, normalize_tier, parse_tier_map, rank as _tier_rank,
 )
 
 # Session-scoped toolset tiers (spec 2026-07-11). All tools register; the
@@ -99,7 +99,7 @@ from pseudolife_memory.toolset_tiers import (
 _DEFAULT_TIER = normalize_tier(os.environ.get("PSEUDOLIFE_MCP_TOOLSET"),
                                warn_context="PSEUDOLIFE_MCP_TOOLSET")
 _TIER_MAP = parse_tier_map(os.environ.get("PSEUDOLIFE_MCP_TIER_MAP"))
-_SESSION_TIERS = SessionTierState()
+_PRINCIPAL_TIERS = PrincipalTierState()
 _TOOL_TIERS: dict[str, str] = {}
 
 
@@ -500,19 +500,18 @@ async def memory_toolset(
     action: Literal["expand", "collapse", "status"],
     ctx: Context,
 ) -> dict[str, Any]:
-    """Adjust THIS session's visible toolset, one tier at a time
-    (minimal → core → full; session-scoped, free, instant). Core adds
-    graph/recall, world facts, lessons, documents; full adds
+    """Adjust YOUR visible toolset, one tier at a time (minimal → core →
+    full; scoped to your credential/writer identity, free, instant). Core
+    adds graph/recall, world facts, lessons, documents; full adds
     supersede/forget/history, dream and graph-review admin. ``status``
     reports the ladder. Expand first: clients reject hidden-tool calls.
     """
     from pseudolife_memory.toolset_tiers import TIERS, step
-    from pseudolife_memory.writer_context import _http_writer_session
 
-    writer, session = _http_writer_session()
-    default_tier = (_TIER_MAP.get((writer or os.environ.get(
-        "PSEUDOLIFE_WRITER_ID") or "").strip().lower()) or _DEFAULT_TIER)
-    current = _resolve_session_tier()
+    principal = _tier_principal()
+    default_tier = (_TIER_MAP.get((principal or "").strip().lower())
+                    or _DEFAULT_TIER)
+    current = _resolve_principal_tier()
 
     if action == "status":
         return {"current": current, "default": default_tier,
@@ -525,7 +524,7 @@ async def memory_toolset(
                 "reason": ("already at full" if action == "expand"
                            else f"already at this session's floor ({default_tier})")}
 
-    _SESSION_TIERS.set(session, new)
+    _PRINCIPAL_TIERS.set(principal, new)
     before, after = _visible_tool_names(current), _visible_tool_names(new)
     out: dict[str, Any] = {
         "changed": True, "current": new, "previous": current,
@@ -1306,17 +1305,31 @@ def document_search(query: str, top_k: int = 5) -> dict[str, Any]:
     return service.search_documents(query=query, top_k=top_k)
 
 
-def _resolve_session_tier() -> str:
-    """Tier for the CURRENT request: session override → writer map → env
-    default. Writer falls back to the daemon's default id so direct-HTTP
-    clients (no X-PL-Writer header) still match the tier map. Safe outside
-    a request (returns the env default)."""
+def _tier_principal() -> str | None:
+    """Tier bucket + map key for the CURRENT request (spec 2026-08-10):
+    the named principal from the bearer token, else the writer id
+    (X-PL-Writer header, or the daemon default so direct-HTTP clients
+    still match the tier map) — principals share the writer-id namespace.
+    ``None`` (embedded stdio/tests, nothing configured) is the shared
+    bucket."""
+    from pseudolife_memory.principals import DEFAULT_PRINCIPAL
+    from pseudolife_memory.writer_context import (
+        _http_writer_session, current_principal)
+
+    principal = current_principal()
+    if principal != DEFAULT_PRINCIPAL:
+        return principal
+    writer, _ = _http_writer_session()
+    return writer or os.environ.get("PSEUDOLIFE_WRITER_ID") or None
+
+
+def _resolve_principal_tier() -> str:
+    """Tier for the CURRENT request: principal override → tier map → env
+    default. Safe outside a request (returns the env default)."""
     from pseudolife_memory.toolset_tiers import resolve_tier
-    from pseudolife_memory.writer_context import _http_writer_session
-    writer, session = _http_writer_session()
     return resolve_tier(
-        writer or os.environ.get("PSEUDOLIFE_WRITER_ID"), session,
-        state=_SESSION_TIERS, tier_map=_TIER_MAP, default_tier=_DEFAULT_TIER,
+        _tier_principal(),
+        state=_PRINCIPAL_TIERS, tier_map=_TIER_MAP, default_tier=_DEFAULT_TIER,
     )
 
 
@@ -1335,7 +1348,7 @@ def _wire_transport_tiering() -> None:
     async def _filtered_list(_req) -> mtypes.ServerResult:
         tools = await FastMCP.list_tools(mcp)   # full registry, mcp.types.Tool
         server._tool_cache.update({t.name: t for t in tools})
-        names = _visible_tool_names(_resolve_session_tier())
+        names = _visible_tool_names(_resolve_principal_tier())
         return mtypes.ServerResult(mtypes.ListToolsResult(
             tools=[t for t in tools if t.name in names]))
 

@@ -6,6 +6,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-10 — per-principal bearer tokens; tiers re-key to the principal)
+- **`PSEUDOLIFE_MCP_TOKENS` (`token:principal,…`) maps bearer tokens to
+  named principals** (spec
+  `docs/superpowers/specs/2026-08-10-identity-rekeying-principal-tokens-design.md`).
+  A matched token's principal becomes the writer id (outranking the
+  client-asserted `X-PL-Writer`) and keys the toolset tier — the identity
+  axis sanctioned by the MCP 2026-07-28 revision, which forbids
+  per-connection `tools/list` variance and removes `Mcp-Session-Id`.
+  The singular `PSEUDOLIFE_MCP_TOKEN` maps to the reserved principal
+  `default` and keeps the legacy `X-PL-Writer`/`PSEUDOLIFE_WRITER_ID`
+  writer path, so existing installs are unaffected. Malformed map entries
+  fail closed (skipped tokens do not authenticate); either token form
+  satisfies the non-loopback bind requirement; token comparison is
+  constant-time.
+- **Toolset tiers are principal-scoped** (`PrincipalTierState`, replacing
+  the session-keyed `SessionTierState`): `memory_toolset` overrides apply
+  per credential/writer, not per transport session — sessions sharing a
+  token share a tier view, and the per-connection axis (dead under the
+  stateless core, and connection-multiplexed even today) no longer
+  participates. `PSEUDOLIFE_MCP_TIER_MAP` semantics are unchanged
+  (principals share the writer-id namespace).
+- **The SessionStart briefing now advertises the episode handle as
+  always-pass** (`pass episode="…" on every memory write`) — identity
+  tier 2, the concurrency-correct channel — instead of conditioning it on
+  concurrent sessions.
+
 ### Fixed (2026-08-09 — file-mode cortex snapshot round-trips temporal stamps)
 - **`CortexStore.save()`/`load()` now persist the v11 temporal stamp
   (`tx_time`/`valid_time`/`hlc_phys`/`hlc_logical`/`writer_id`/

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pseudolife_memory.toolset_tiers import (
-    TIERS, SessionTierState, normalize_tier, parse_tier_map, rank,
+    TIERS, PrincipalTierState, normalize_tier, parse_tier_map, rank,
     resolve_tier, step,
 )
 
@@ -38,23 +38,35 @@ def test_step_ladder_and_floor():
     assert step("minimal", -1, floor="minimal") == "minimal"
 
 
-def test_session_state_ttl_and_none_key():
-    s = SessionTierState(ttl_s=0.0)   # everything instantly stale
+def test_principal_state_ttl_and_none_key():
+    s = PrincipalTierState(ttl_s=0.0)   # everything instantly stale
     s.set("a", "full")
     assert s.get("a") is None
-    s2 = SessionTierState()
+    s2 = PrincipalTierState()
     s2.set(None, "core")              # None key -> global bucket
     assert s2.get(None) == "core"
     assert s2.get("other") is None
 
 
+def test_principal_state_normalizes_keys():
+    # Principals share the writer-id namespace (lowercased); a shim-asserted
+    # "Hermes-Box" and the token-map's "hermes-box" are the same bucket.
+    s = PrincipalTierState()
+    s.set(" Hermes-Box ", "full")
+    assert s.get("hermes-box") == "full"
+    assert s.get("") == s.get(None)   # empty collapses to the global bucket
+
+
 def test_resolve_tier_precedence():
-    state = SessionTierState()
-    kw = dict(state=state, tier_map={"claude-desktop": "minimal"}, default_tier="core")
+    state = PrincipalTierState()
+    kw = dict(state=state, tier_map={"claude-desktop": "minimal"},
+              default_tier="core")
     # env default when nothing else matches
-    assert resolve_tier(None, "s1", **kw) == "core"
-    # writer map beats default (case/space-insensitive writer)
-    assert resolve_tier(" Claude-Desktop ", "s1", **kw) == "minimal"
-    # session override beats writer map
-    state.set("s1", "full")
-    assert resolve_tier("claude-desktop", "s1", **kw) == "full"
+    assert resolve_tier(None, **kw) == "core"
+    # tier map beats default (case/space-insensitive principal)
+    assert resolve_tier(" Claude-Desktop ", **kw) == "minimal"
+    # principal override beats the map
+    state.set("claude-desktop", "full")
+    assert resolve_tier("claude-desktop", **kw) == "full"
+    # other principals untouched by that override
+    assert resolve_tier("hermes-box", **kw) == "core"
