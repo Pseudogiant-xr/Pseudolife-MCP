@@ -358,6 +358,42 @@ def test_scalar_to_member_conversion_preserves_provenance(store, emb):
     assert members["road bike"].origin == "user"
 
 
+def test_conversion_drops_freshness_class_and_says_so(store, emb):
+    """Deliberate decision (2026-08-09, stale-policy review finding 3): set
+    members are evergreen-only — staleness decay compensates for scalar
+    values that change without notice, while a set's "no longer true"
+    channel is the explicit ``remove_member`` retraction; group-level
+    policy transforms cannot honour the fresh-payload no-harm contract
+    (docs/guide/memory-model.md, "Conversion rules"). The scalar→set
+    conversion therefore DROPS a non-evergreen scalar's freshness class
+    rather than carrying it onto the member — but must state the drop on
+    the conversion's supersession-log entry instead of doing it silently.
+    Unlike polarity/provenance above, this loss is intentional; the audit
+    stamp is what makes it a decision rather than a bug."""
+    store.write_fact(Slot("deploy", "status", "pending"), emb("pending"),
+                     freshness_class="volatile")
+    store.add_member(Slot("deploy", "status", "rollback armed"),
+                     emb("rollback armed"))
+    # The converted member is evergreen — the class did not ride along...
+    members = {m.value: m for m in store.members("deploy", "status")}
+    assert members["pending"].freshness_class == "evergreen"
+    # ...and the audit entry states exactly what was dropped.
+    entry = next(e for e in store.supersession_log
+                 if e["decision"] == "convert_to_set")
+    assert entry["dropped_freshness_class"] == "volatile"
+
+
+def test_conversion_of_evergreen_scalar_logs_no_drop(store, emb):
+    """The stamp marks a real loss, not the no-op case: converting an
+    evergreen scalar (nothing to drop) must not add the key, so old log
+    entries and drop-free conversions keep their existing shape."""
+    store.write_fact(Slot("user", "bikes owned", "road bike"), emb("road bike"))
+    store.add_member(Slot("user", "bikes owned", "gravel bike"), emb("gravel bike"))
+    entry = next(e for e in store.supersession_log
+                 if e["decision"] == "convert_to_set")
+    assert "dropped_freshness_class" not in entry
+
+
 def test_write_fact_rejects_scalar_write_on_set_slot(store, emb):
     """Item 2: once a slot holds current members, write_fact must not insert
     a parallel current scalar at the same key — the slot models are mutually

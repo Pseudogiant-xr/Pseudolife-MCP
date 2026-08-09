@@ -177,6 +177,31 @@ directions of the story**:
   dedicated "revert" call — and the removed member rows stay as audit, they
   just no longer make the slot read as a set.
 
+Set members are **evergreen-only, by design**: there is no way to give a
+member a `freshness_class`, and the scalar → set conversion **drops** a
+non-evergreen scalar's class rather than carrying it onto the member (a
+`volatile` "deploy status: pending" that gets a second status added
+becomes an ordinary evergreen membership). Three reasons, weighed
+deliberately rather than left implicit:
+
+- staleness decay exists to age scalar values that change without anyone
+  saying so; a set already has an explicit "no longer true" channel —
+  `memory_set_remove`, with removal tombstones — and decay layered on top
+  would be a second, competing invalidation mechanism;
+- there is no group-level staleness that honours the `stale_policy`
+  contract: quarantining or demoting a whole set entry because one member
+  aged would transform *fresh* members' payloads (the no-harm gate the
+  policy eval preregistered), while per-member transforms would still leak
+  raw stale text through the composed group `value`;
+- the serving change would re-rank deployed banks on an unmeasured
+  assumption — the same reason `freshness_class` itself defaulted personal
+  facts to `evergreen` at v23.
+
+The drop is audit-visible, not silent: the conversion's supersession-log
+entry carries `dropped_freshness_class` (e.g. `"volatile"`) whenever the
+converted scalar was non-evergreen, and the superseded scalar row keeps
+its own class for history. If a fact's staleness matters, keep it scalar.
+
 The scalar → set conversion carries one guard: if the current scalar is a
 **number-led aggregate value** — a value with an optional leading currency
 symbol (`$` `€` `£`), then an optional leading `+`/`-` sign, then a required
@@ -218,7 +243,9 @@ only matched one member by name. A set entry carries `last_confirmed`,
 `asserted_at`, and `age`, all anchored to the most recent add/confirm
 activity across its members — **removing a member never moves these dates**.
 It carries no `freshness_class` at all (it renders as `evergreen`, same as
-any unclassified scalar); age-based decay is a scalar-only affordance in v1.
+any unclassified scalar); age-based decay is a scalar-only affordance, by
+the deliberate evergreen-only rule under [Conversion
+rules](#conversion-rules) above.
 
 ### Dream extraction
 

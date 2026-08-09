@@ -599,6 +599,10 @@ class CortexStore:
         member. A scalar record already occupying the slot is converted
         one-way to a member first (the scalar row survives as an
         audit-visible superseded record; there is no path back to scalar).
+        The conversion does NOT carry a non-evergreen scalar's
+        ``freshness_class`` onto the member — set members are structurally
+        evergreen (see :meth:`_insert_member`) — and stamps the drop on the
+        conversion's supersession-log entry as ``dropped_freshness_class``.
         Exception: when the current scalar is a number-led aggregate value
         (``_is_aggregate_value``), the slot is NOT converted; the incoming
         member is parked as a contender (reason
@@ -675,6 +679,14 @@ class CortexStore:
             self._log(cur, slot.value, confidence, t, "convert_to_set",
                       "member_add_to_scalar", writer_id=writer_id,
                       session_id=session_id)
+            # Set members are evergreen-only (see _insert_member), so a
+            # non-evergreen scalar's freshness class does NOT ride through
+            # the conversion. The loss is deliberate — stamp it on the
+            # conversion's audit entry rather than dropping it silently.
+            # The superseded scalar row above keeps its own class for audit.
+            if cur.freshness_class and cur.freshness_class != "evergreen":
+                self.supersession_log[-1]["dropped_freshness_class"] = \
+                    cur.freshness_class
             self._insert_member(Slot(cur.entity, cur.attribute, cur.value,
                                      cur.polarity),
                                 cur.embedding, cur.confidence,
@@ -727,11 +739,19 @@ class CortexStore:
         writer_id: str | None = None,
         session_id: str | None = None,
         support: str | None = None,
-        freshness_class: str = "evergreen",
     ) -> CortexRecord:
         """Append one current member row and register it in ``self._members``.
         Mirrors :meth:`_insert` but never touches ``self._current`` — many of
-        these can coexist at the same key."""
+        these can coexist at the same key.
+
+        Unlike :meth:`_insert` there is deliberately no ``freshness_class``
+        parameter: set members are structurally evergreen. Staleness decay
+        exists to age scalar values that change without notice; a set's
+        "no longer true" channel is the explicit :meth:`remove_member`
+        retraction, and a group-level policy transform could not honour the
+        stale-policy contract that fresh payloads stay byte-identical (see
+        docs/guide/memory-model.md, "Conversion rules", and the pin in
+        tests/test_stale_policy.py)."""
         rec = CortexRecord(
             entity=slot.entity,
             attribute=slot.attribute,
@@ -751,7 +771,7 @@ class CortexStore:
             hlc_logical=(hlc[1] if hlc else None),
             writer_id=writer_id,
             session_id=session_id,
-            freshness_class=_norm_freshness(freshness_class),
+            freshness_class="evergreen",
         )
         self.records.append(rec)
         self._members.setdefault(rec.key, []).append(len(self.records) - 1)
