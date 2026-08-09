@@ -52,6 +52,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   asserted structurally in `tests/test_stale_policy.py` — and an
   unrecognised policy value degrades to `annotate`.
 
+### Changed (2026-08-09 — the daemon pins the extractor prompt cache off, by measurement)
+- **Every extractor the daemon builds now sends `cache_prompt: false`**
+  (`memory.dream.extractor_cache_prompt`, default `false`; `null`
+  restores the server default, `true` forces the cache on; non-llama.cpp
+  endpoints ignore the field). This resolves the decision deliberately
+  deferred in the warm-cache root-cause fix with the measurement it
+  asked for: on the LIVE production sidecar the pin costs +7.25s per
+  extraction call of shared-prefix prefill (3.41s → 10.65s over 4
+  alternating pairs, producer `evals/sidecar_cache_probe.py`, artifact
+  `evals/results/sidecar-cache-latency-sidecar-cache-0809.json`) —
+  noise for a background sweep on a 600s interval with a 480s timeout
+  budget, against the measured alternative of extraction output that
+  depends on cache state (`warm-cache-probe-0809`). Takes effect on the
+  next deploy.
+
 ### Fixed (2026-08-09 — warm-container ladder corruption root-caused: the llama-server prompt cache)
 - **The evlora campaign's warm-container hazard is pinned to
   `cache_prompt` (the llama-server request default) and closed.** A

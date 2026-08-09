@@ -278,6 +278,17 @@ class DreamConfig:
     # parses to fewer/zero claims). 2048 ≈ 40-80 claims. Override per-deploy with
     # ``PSEUDOLIFE_DREAM_MAX_TOKENS``.
     extractor_max_tokens: int = 2048
+    # llama-server's default prompt cache changes extractor OUTPUT once
+    # populated (measured: evals/results/warm-cache-probe-0809.json — a warm
+    # container answers byte-identical temperature-0 requests differently).
+    # The daemon therefore pins ``cache_prompt: false`` on every extractor
+    # request by default; the measured cost on the live sidecar is
+    # +7.25s/call of shared-prefix prefill
+    # (evals/results/sidecar-cache-latency-sidecar-cache-0809.json) — noise
+    # for a 600s background sweep. ``None`` restores the server default
+    # (cache on) for deployments that prefer the latency; ``True`` forces
+    # the cache on explicitly. Non-llama.cpp endpoints ignore the field.
+    extractor_cache_prompt: bool | None = False
     # A small CPU extractor generates at ~12-30 tok/s depending on the bake, so
     # a full ``extractor_max_tokens`` (2048) generation is ~70-170s — plus prompt
     # processing of the texts + vocab hint. The old 20s default timed the dream

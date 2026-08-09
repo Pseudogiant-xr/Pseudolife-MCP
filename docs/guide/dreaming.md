@@ -73,6 +73,15 @@ for slower hardware. The same env vars also upgrade
 `memory_dream(action="run")`. A local model keeps all text on-box; a hosted
 endpoint does not.
 
+Every extractor request the daemon builds carries `cache_prompt: false`
+(`memory.dream.extractor_cache_prompt`, default `false`): llama-server's
+prompt cache measurably changes extraction output once populated, and the
+pin's cost — ~7s of shared-prefix prefill per call on the shipped sidecar
+(`evals/results/sidecar-cache-latency-sidecar-cache-0809.json`) — is noise
+for a background sweep. Set the knob to `null` to restore the server
+default if your deployment prefers the latency; non-llama.cpp endpoints
+ignore the field.
+
 ## What the extractor captures
 
 The tier-2 prompt (`_SYSTEM_PROMPT` in `pseudolife_memory/memory/dream.py`,
