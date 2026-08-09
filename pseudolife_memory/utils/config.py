@@ -575,6 +575,18 @@ class SearchConfig:
     # final result ordered ascending by timestamp — the presentation the
     # raw-turns control arm gets for free and consolidation loses.
     timeline_channel: bool = False
+    # Serving-side staleness policy (spec 2026-08-09-serving-side-staleness-
+    # design.md). ret-0809 measured that the annotation flags halve
+    # unqualified stale serving but compliance keys on value shape — a
+    # daemon-side policy removes that answerer discretion. Applied at the
+    # shared record render sites, so every read surface behaves identically;
+    # version history (audit chain) is deliberately exempt.
+    #   "annotate"   — flags only (today's behavior, default)
+    #   "demote"     — stale records sort after non-stale on list surfaces
+    #                  and carry a top-level ``warning``
+    #   "quarantine" — a stale record's ``value`` is replaced by a wrapper
+    #                  and the original moves to ``last_known_value``
+    stale_policy: str = "annotate"
 
 
 @dataclass

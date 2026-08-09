@@ -1049,6 +1049,66 @@ CLAIMS.append(Claim(
     value=lambda d: d["paired"]["a_vs_b"]["hybrid_vs_hybrid"]["p"],
     stated=0.7436, places=4))
 
+# ── retention-interval (ret-0809) + staleness-policy H3 (stalepol-0809) ──
+# The ret-0809 rows are retroactive: PR #120 published the numbers without
+# evidence rows (caught in the 2026-08-09 H3 change; the same-change rule
+# exists precisely because this slip is invisible once merged).
+RET_VERDICT = RESULTS + "retention-interval-verdict.json"
+STALEPOL_VERDICT = RESULTS + "stale-policy-verdict.json"
+
+CLAIMS.append(Claim(
+    id="ret0809-h2-p", doc=CHANGELOG,
+    needle="paired sign-flip p 0.0002, 30 pairs",
+    artifacts=(RET_VERDICT,),
+    value=lambda d: d["h2_flag_efficacy"]["permutation_p_two_sided"],
+    stated=0.0002, places=4))
+CLAIMS.append(Claim(
+    id="ret0809-h2-pairs", doc=CHANGELOG,
+    needle="paired sign-flip p 0.0002, 30 pairs",
+    artifacts=(RET_VERDICT,),
+    value=lambda d: float(d["h2_flag_efficacy"]["paired_units"]),
+    stated=30.0, places=0))
+CLAIMS.append(Claim(
+    id="stalepol-q-p", doc=CHANGELOG,
+    needle="quarantine paired sign-flip p 0.0005, 13/30 discordant",
+    artifacts=(STALEPOL_VERDICT,),
+    value=lambda d: d["arms"]["policy_quarantine"]["gate1_efficacy"][
+        "permutation_p_two_sided"],
+    stated=0.0005, places=4))
+CLAIMS.append(Claim(
+    id="stalepol-q-discordant", doc=CHANGELOG,
+    needle="quarantine paired sign-flip p 0.0005, 13/30 discordant",
+    artifacts=(STALEPOL_VERDICT,),
+    value=lambda d: float(
+        d["arms"]["policy_quarantine"]["gate1_efficacy"]["discordant"]),
+    stated=13.0, places=0))
+CLAIMS.append(Claim(
+    id="stalepol-q-rate", doc=CHANGELOG,
+    needle="unqualified-stale-answer rate to 0.0 in every\n  replicate",
+    artifacts=(STALEPOL_VERDICT,),
+    value=lambda d: d["arms"]["policy_quarantine"]["stale_answer_rate_mean"],
+    stated=0.0, places=3))
+CLAIMS.append(Claim(
+    id="stalepol-d-p", doc=CHANGELOG,
+    needle="demote identical at p 0.0005",
+    artifacts=(STALEPOL_VERDICT,),
+    value=lambda d: d["arms"]["policy_demote"]["gate1_efficacy"][
+        "permutation_p_two_sided"],
+    stated=0.0005, places=4))
+CLAIMS.append(Claim(
+    id="stalepol-recovery", doc=CHANGELOG,
+    needle="recovered on explicit ask at rate 1.0 in every\n  replicate",
+    artifacts=(STALEPOL_VERDICT,),
+    value=lambda d: d["gate3_recovery"]["recovery_rate_mean"],
+    stated=1.0, places=3))
+CLAIMS.append(Claim(
+    id="stalepol-fresh-gap", doc=CHANGELOG,
+    needle="fresh payloads byte-identical, gap 0.0",
+    artifacts=(STALEPOL_VERDICT,),
+    value=lambda d: d["arms"]["policy_quarantine"]["gate2_no_harm"][
+        "fresh_gap"],
+    stated=0.0, places=4))
+
 
 def test_every_published_number_names_a_committed_artifact():
     """A claim whose evidence is untracked cannot be checked by a reader.

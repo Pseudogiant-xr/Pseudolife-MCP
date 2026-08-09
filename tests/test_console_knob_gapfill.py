@@ -78,6 +78,10 @@ def test_gated_off_capabilities_stay_out_of_console():
         "memory.dream.known_facts_window",
         "memory.search.contiguity_neighbors",
         "memory.search.timeline_channel",
+        # stale_policy ships default-"annotate"; console exposure waits on
+        # the H3 verdict AND a deliberate exposure decision (the chronicle
+        # precedent: a passed gate alone does not surface a knob).
+        "memory.search.stale_policy",
     ):
         assert path not in _BY_PATH, f"gated-off knob surfaced: {path}"
 

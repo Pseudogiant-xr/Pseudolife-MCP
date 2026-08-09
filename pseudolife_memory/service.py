@@ -113,7 +113,44 @@ def _entry_to_dict(
     return out
 
 
-def _cortex_record_to_dict(rec, relative_age: bool = True) -> dict[str, Any]:
+# Serving-side staleness policy (memory.search.stale_policy; spec
+# 2026-08-09-serving-side-staleness-design.md). ret-0809 measured that the
+# annotation flags halve unqualified stale serving but the answerer's
+# compliance keys on value shape — the policy binds regardless of how
+# authoritative the value looks. Applied inside the shared record
+# serialisers so every read surface behaves identically; the version-history
+# chain (audit surface) deliberately renders with the default "annotate".
+_STALE_WARNING = "stale — re-verify before relying on this value"
+_STALE_QUARANTINE_WRAPPER = "(stale — re-verify; last known value below)"
+
+
+def _apply_stale_policy(d: dict[str, Any], policy: str) -> dict[str, Any]:
+    """Transform one rendered record per the staleness policy.
+
+    Non-stale records are returned UNTOUCHED under every policy — the
+    prereg's no-harm gate is structural, not statistical. "quarantine"
+    moves data, never hides it: the raw value stays adjacent in
+    ``last_known_value``."""
+    if not d.get("stale") or policy == "annotate":
+        return d
+    if policy == "demote":
+        d["warning"] = _STALE_WARNING
+    elif policy == "quarantine":
+        d["last_known_value"] = d["value"]
+        d["value"] = _STALE_QUARANTINE_WRAPPER
+    return d
+
+
+def _demote_stale(entries: list[dict], policy: str) -> list[dict]:
+    """Stable stale-last ordering for list surfaces under "demote" — score
+    (or alphabetical) order is preserved within each group."""
+    if policy == "demote":
+        entries.sort(key=lambda d: bool(d.get("stale")))
+    return entries
+
+
+def _cortex_record_to_dict(rec, relative_age: bool = True,
+                           stale_policy: str = "annotate") -> dict[str, Any]:
     """Serialise a :class:`CortexRecord` for transport (JSON-safe).
 
     Surfaces the v0.4 temporal/provenance stamp (tx_time, valid_time, writer_id,
@@ -149,7 +186,7 @@ def _cortex_record_to_dict(rec, relative_age: bool = True) -> dict[str, Any]:
     }
     if relative_age:
         d["age"] = _relative_time(rec.tx_time or rec.asserted_at)
-    return d
+    return _apply_stale_policy(d, stale_policy)
 
 
 # A URL scheme per RFC 3986: ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ) ":".
@@ -176,10 +213,11 @@ def _is_safe_source_url(url: str) -> bool:
     return _URL_SCHEME.match(cleaned) is None  # no scheme at all → inert, allow
 
 
-def _world_record_to_dict(rec, now=None) -> dict[str, Any]:
+def _world_record_to_dict(rec, now=None,
+                          stale_policy: str = "annotate") -> dict[str, Any]:
     """Serialise a WorldRecord for transport, with read-time effective confidence
     (age-decayed) and a stale flag, plus the per-fact citation."""
-    return {
+    return _apply_stale_policy({
         "entity": rec.entity,
         "attribute": rec.attribute,
         "value": rec.value,
@@ -198,7 +236,7 @@ def _world_record_to_dict(rec, now=None) -> dict[str, Any]:
         "supersedes_value": rec.supersedes_value,
         "superseded_by_value": rec.superseded_by_value,
         "superseded_at": rec.superseded_at,
-    }
+    }, stale_policy)
 
 
 def _lesson_record_to_dict(rec) -> dict[str, Any]:
@@ -1646,10 +1684,14 @@ class MemoryService:
                     and (support or "").strip().lower() == "user"):
                 self._emit_correction_signal(
                     entity, attribute, res.record.supersedes_value, value)
-            out = {"action": res.action, **_cortex_record_to_dict(res.record)}
+            out = {"action": res.action,
+                   **_cortex_record_to_dict(
+                       res.record, stale_policy=self._stale_policy)}
             if res.action == "contested":
                 cur = self._cortex.lookup(entity, attribute)
-                out["current"] = _cortex_record_to_dict(cur) if cur is not None else None
+                out["current"] = (_cortex_record_to_dict(
+                    cur, stale_policy=self._stale_policy)
+                    if cur is not None else None)
             if episode_warning:
                 out["episode_warning"] = "unknown or closed episode handle"
             return out
@@ -1730,6 +1772,12 @@ class MemoryService:
                 "members_count": len(self._cortex.members(entity, attribute)),
             }
 
+    @property
+    def _stale_policy(self) -> str:
+        """The serving-side staleness policy for record render sites
+        (``memory.search.stale_policy``; "annotate" = today's behavior)."""
+        return getattr(self.config.memory.search, "stale_policy", "annotate")
+
     def cortex_lookup(self, entity: str, attribute: str) -> dict[str, Any] | None:
         """Exact slot lookup — the one ``current`` fact, or ``None``.
 
@@ -1767,15 +1815,19 @@ class MemoryService:
                                 name, attribute, include_removed=True)
                             if r.status == "removed"
                         ]
+                        sp = self._stale_policy
                         return {
                             "kind": "set", "entity": name, "attribute": attribute,
-                            "members": [_cortex_record_to_dict(r, relative_age=ra)
-                                        for r in members],
-                            "removed": [_cortex_record_to_dict(r, relative_age=ra)
-                                        for r in removed],
+                            "members": [_cortex_record_to_dict(
+                                r, relative_age=ra, stale_policy=sp)
+                                for r in members],
+                            "removed": [_cortex_record_to_dict(
+                                r, relative_age=ra, stale_policy=sp)
+                                for r in removed],
                         }
                 return None
-            d = _cortex_record_to_dict(rec, relative_age=self.config.time.relative_age)
+            d = _cortex_record_to_dict(rec, relative_age=self.config.time.relative_age,
+                                       stale_policy=self._stale_policy)
             if self._storage is not None:
                 from pseudolife_memory.memory.cortex import _norm_key
                 d["source_entries"] = self._storage.traces_for_slot(
@@ -1791,7 +1843,8 @@ class MemoryService:
             recs = self._cortex.contenders_for(entity, attribute)
             return {
                 "entity": entity, "attribute": attribute,
-                "contenders": [_cortex_record_to_dict(r) for r in recs],
+                "contenders": [_cortex_record_to_dict(
+                    r, stale_policy=self._stale_policy) for r in recs],
             }
 
     def cortex_candidates(self, entity: str, attribute: str,
@@ -1851,8 +1904,11 @@ class MemoryService:
                 "resolved": True,
                 "accepted": bool(accept),
                 "action": res.action,
-                "current": _cortex_record_to_dict(cur) if cur is not None else None,
-                "record": _cortex_record_to_dict(res.record),
+                "current": (_cortex_record_to_dict(
+                    cur, stale_policy=self._stale_policy)
+                    if cur is not None else None),
+                "record": _cortex_record_to_dict(
+                    res.record, stale_policy=self._stale_policy),
             }
 
     def cortex_search(
@@ -1922,7 +1978,9 @@ class MemoryService:
             for tag, payload in order:
                 if tag == "scalar":
                     r, s = payload
-                    d = {**_cortex_record_to_dict(r), "score": round(float(s), 4)}
+                    d = {**_cortex_record_to_dict(
+                        r, stale_policy=self._stale_policy),
+                        "score": round(float(s), 4)}
                     conts = self._cortex.contenders_for(r.entity, r.attribute)
                     if conts:
                         d["contested"] = True
@@ -1967,7 +2025,9 @@ class MemoryService:
                         "entity": entity,
                         "attribute": attribute,
                         "value": value,
-                        "members": [_cortex_record_to_dict(m) for m in all_members],
+                        "members": [_cortex_record_to_dict(
+                            m, stale_policy=self._stale_policy)
+                            for m in all_members],
                         "score": round(float(score), 4) if score is not None else 0.0,
                         "contested": False,
                         "last_confirmed": max(
@@ -1975,6 +2035,7 @@ class MemoryService:
                         "asserted_at": anchor,
                         "age": _relative_time(anchor) if anchor else None,
                     })
+            _demote_stale(entries, self._stale_policy)
             return {"count": len(entries), "entries": entries}
 
     def _cortex_bm25_fuse(self, query, hits, cfg, top_k):
@@ -2062,14 +2123,16 @@ class MemoryService:
                 content_hash=content_hash, source_doc_id=source_doc_id, now=now,
                 hlc=self._hlc.tick(), writer_id=writer_id, session_id=session_id)
             self._save_world()
-            return {"action": action, **_world_record_to_dict(rec)}
+            return {"action": action, **_world_record_to_dict(
+                rec, stale_policy=self._stale_policy)}
 
     def world_lookup(self, entity: str, attribute: str) -> dict[str, Any] | None:
         with self._lock:
             self._ensure_init()
             assert self._world is not None
             rec = self._world.lookup(entity, attribute)
-            return _world_record_to_dict(rec) if rec is not None else None
+            return (_world_record_to_dict(rec, stale_policy=self._stale_policy)
+                    if rec is not None else None)
 
     def world_search(self, query: str, top_k: int = 5, min_score: float = 0.0) -> dict[str, Any]:
         """Fuzzy search over current world facts; entries carry decayed
@@ -2079,16 +2142,21 @@ class MemoryService:
             assert self._embedder is not None and self._world is not None
             emb = self._embedder.encode_query(query)
             hits = self._world.search(emb, top_k=top_k, min_score=min_score)
-            entries = [{**_world_record_to_dict(r), "score": round(float(s), 4)}
+            entries = [{**_world_record_to_dict(
+                            r, stale_policy=self._stale_policy),
+                        "score": round(float(s), 4)}
                        for r, s in hits]
+            _demote_stale(entries, self._stale_policy)
             return {"count": len(entries), "entries": entries}
 
     def world_dump(self) -> dict[str, Any]:
         with self._lock:
             self._ensure_init()
             assert self._world is not None
-            rows = [_world_record_to_dict(r) for r in self._world.current_records()]
+            rows = [_world_record_to_dict(r, stale_policy=self._stale_policy)
+                    for r in self._world.current_records()]
             rows.sort(key=lambda d: (d["entity"].lower(), d["attribute"].lower()))
+            _demote_stale(rows, self._stale_policy)
             return {"count": len(rows), "entries": rows}
 
     def world_forget(self, entity: str, attribute: str | None = None) -> dict[str, Any]:
@@ -2652,9 +2720,11 @@ class MemoryService:
             self._ensure_init()
             assert self._cortex is not None
             ra = self.config.time.relative_age
-            rows = [_cortex_record_to_dict(r, relative_age=ra)
+            rows = [_cortex_record_to_dict(r, relative_age=ra,
+                                           stale_policy=self._stale_policy)
                     for r in self._cortex.current_records()]
             rows.sort(key=lambda d: (d["entity"].lower(), d["attribute"].lower()))
+            _demote_stale(rows, self._stale_policy)
             if self._storage is not None:
                 from pseudolife_memory.graph import norm_name
                 from pseudolife_memory.memory.cortex import _norm_key
@@ -2800,6 +2870,11 @@ class MemoryService:
             recs = sorted(recs, key=lambda r: (r.tx_time or r.asserted_at))
             out = {
                 "entity": entity, "attribute": attribute, "count": len(recs),
+                # Deliberately NOT policy-rendered (stale_policy stays at its
+                # "annotate" default here): the version chain is the audit
+                # surface — and the recovery path when a current value is
+                # quarantined — so it must always show what was actually
+                # stored.
                 "versions": [_cortex_record_to_dict(r, relative_age=ra)
                              for r in recs],
             }

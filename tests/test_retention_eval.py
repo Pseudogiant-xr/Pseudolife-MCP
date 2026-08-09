@@ -144,3 +144,72 @@ def test_result_artifact_written_by_default(tmp_path):
     assert data["tag"] == "test"
     assert data["preregistration"].endswith(
         "2026-08-08-retention-interval-eval-design.md")
+
+
+# ── Study H3 pure helpers (staleness-policy arms, PR #121 prereg) ────────
+
+def test_value_recovered_accepts_hedged_statements():
+    """Gate 3 asks for the LAST RECORDED value — hedging is correct there,
+    so recovery must not require an unqualified serve."""
+    assert rie.value_recovered(
+        "The last recorded value was 3.8.1, though it may be outdated.",
+        "3.8.1") is True
+    assert rie.value_recovered("It was 500.", "500") is True
+
+
+def test_value_recovered_rejects_absent_value():
+    assert rie.value_recovered(
+        "The value is quarantined and I cannot recover it.", "3.8.1") is False
+
+
+def test_fresh_payloads_identical_ignores_order_catches_rewrites():
+    fresh_a = {"entity": "dns-zone", "value": "gandi", "stale": False}
+    fresh_b = {"entity": "vault", "value": "aes", "stale": False}
+    stale = {"entity": "proxy", "value": "5c31f2", "stale": True}
+    base = [{"context": [fresh_a, stale, fresh_b]}]
+    reordered = [{"context": [fresh_b, {**stale, "value": "(wrapped)",
+                                        "last_known_value": "5c31f2"},
+                              fresh_a]}]
+    assert rie.fresh_payloads_identical(base, reordered) is True
+    rewritten = [{"context": [fresh_a, stale,
+                              {**fresh_b, "value": "TOUCHED"}]}]
+    assert rie.fresh_payloads_identical(base, rewritten) is False
+
+
+def test_recovery_rows_target_stale_facts_with_last_recorded_question():
+    rows = [
+        {"entity": "billing-api", "attribute": "deployed version",
+         "seeded_value": "3.8.1", "freshness_class": "volatile",
+         "question": "orig?", "context": []},
+        {"entity": "dns-zone", "attribute": "registrar",
+         "seeded_value": "gandi", "freshness_class": "slow",
+         "question": "orig?", "context": []},
+    ]
+    got = rie._recovery_rows(rows)
+    assert [r["entity"] for r in got] == ["billing-api"]
+    assert got[0]["question"] == (
+        "What was the last recorded billing-api deployed version?")
+
+
+def test_answered_other_fact_flags_substituted_answers_only():
+    ctx = [{"value": "(stale — re-verify; last known value below)",
+            "last_known_value": "5c31f2", "stale": True},
+           {"value": "netlify", "stale": False}]
+    # Seeded value absent, another entry's value served: the confound.
+    assert rie.answered_other_fact(
+        "The hosting vendor is netlify.", "5c31f2", ctx) is True
+    # Seeded value present: not a substitution, whatever else is said.
+    assert rie.answered_other_fact(
+        "Serial 5c31f2, hosted on netlify.", "5c31f2", ctx) is False
+    # Neither present (a hedge/abstention): not a substitution.
+    assert rie.answered_other_fact(
+        "The memory looks unreliable here.", "5c31f2", ctx) is False
+    # The quarantine wrapper itself never counts as "another value".
+    assert rie.answered_other_fact(
+        "The value is stale — re-verify.", "5c31f2",
+        [ctx[0]]) is False
+
+
+def test_fresh_payloads_identical_never_passes_vacuously():
+    all_stale = [{"context": [{"value": "x", "stale": True}]}]
+    assert rie.fresh_payloads_identical(all_stale, all_stale) is False

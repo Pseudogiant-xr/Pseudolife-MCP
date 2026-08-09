@@ -137,6 +137,54 @@ def unqualified_stale(answer: str, value: str) -> bool:
     return not any(m in a for m in HEDGE_MARKERS)
 
 
+def value_recovered(answer: str, value: str) -> bool:
+    """Gate-3 classifier: the answer states the value AT ALL — hedged or
+    not. Recovery questions explicitly ask for the *last recorded* value,
+    so hedging is correct behavior there, not a miss. Same terminal-
+    punctuation folding as ``unqualified_stale``."""
+    import re
+    from ladder_sweep import value_present
+    a = re.sub(r"[.!?,;](?=\s|$)", " ", (answer or "").casefold())
+    return value_present(a, value.casefold())
+
+
+def answered_other_fact(answer: str, seeded_value: str,
+                        context: list[dict]) -> bool:
+    """Demote-confound diagnostic (2026-08-09 review finding): a policy arm
+    can "improve" its stale rate by degrading the answer — the answerer
+    reads a *different* context entry's value instead of hedging. True when
+    the seeded value is absent from the answer but some other context
+    entry's underlying value is present. Reported beside the stale rate;
+    not a gate."""
+    import re
+    from ladder_sweep import value_present
+    a = re.sub(r"[.!?,;](?=\s|$)", " ", (answer or "").casefold())
+    if value_present(a, seeded_value.casefold()):
+        return False
+    for e in context:
+        v = str(e.get("last_known_value", e.get("value")) or "")
+        if v and v.casefold() != seeded_value.casefold() \
+                and value_present(a, v.casefold()):
+            return True
+    return False
+
+
+def fresh_payloads_identical(base_rows: list[dict],
+                             policy_rows: list[dict]) -> bool:
+    """Prereg gate 2, structural half: every non-stale context entry under a
+    policy arm must be byte-identical to the annotate arm's. Order-
+    insensitive — "demote" reorders lists by design; it must never rewrite
+    a fresh record."""
+    def keyset(rows):
+        return sorted(
+            json.dumps(e, sort_keys=True, ensure_ascii=False)
+            for r in rows for e in r["context"] if not e.get("stale"))
+    base = keyset(base_rows)
+    # The load-bearing no-harm gate must never pass without evidence: an
+    # all-stale render compares empty lists and would return True vacuously.
+    return bool(base) and base == keyset(policy_rows)
+
+
 def write_artifact(out: Path, payload: dict) -> None:
     payload = {"preregistration": PREREG, **payload,
                "written_at": time.strftime("%Y-%m-%dT%H:%M:%S")}
@@ -281,8 +329,10 @@ def _chat(url: str, system: str, user: str, timeout: float = 120.0) -> str:
 def _score_arm(rows: list[dict], arm: str, answer_url: str) -> list[dict]:
     scored = []
     for row in rows:
-        ctx = row["context"] if arm == "flags_visible" else strip_flags(
-            row["context"])
+        # Only the stripped arm mutates the context; policy arms arrive
+        # already rendered by the daemon-side policy (flags visible).
+        ctx = strip_flags(row["context"]) if arm == "flags_stripped" \
+            else row["context"]
         user = ("MEMORY:\n" + json.dumps(ctx, indent=1, ensure_ascii=False)
                 + "\n\nQUESTION: " + row["question"])
         answer = _chat(answer_url, _ANSWER_SYSTEM, user)
@@ -291,6 +341,8 @@ def _score_arm(rows: list[dict], arm: str, answer_url: str) -> list[dict]:
                                    "freshness_class", "question")},
             "arm": arm, "answer": answer,
             "unqualified": unqualified_stale(answer, row["seeded_value"]),
+            "answered_other": answered_other_fact(
+                answer, row["seeded_value"], row["context"]),
         })
     return scored
 
@@ -349,11 +401,138 @@ def run_study_b(answer_url: str | None) -> dict:
     return out
 
 
+# ── Study H3 — serving-side staleness policy arms ────────────────────────
+# Preregistration: docs/superpowers/specs/2026-08-09-serving-side-staleness-design.md
+# Same 20-fact bank and +90d clock as Study B; the arms differ ONLY in
+# memory.search.stale_policy at render time. flags_visible (annotate) is
+# re-scored inside each replicate so the sign-flip pairs stay same-bank,
+# same-replicate.
+
+H3_PREREG = "docs/superpowers/specs/2026-08-09-serving-side-staleness-design.md"
+H3_POLICIES = ("annotate", "demote", "quarantine")
+
+
+def _recovery_rows(rows: list[dict]) -> list[dict]:
+    """Gate-3 question set: explicitly ask for the last recorded value of
+    each *stale* (volatile) fact — quarantine must move data, not lose it."""
+    out = []
+    for row in rows:
+        if row["freshness_class"] != "volatile":
+            continue
+        out.append({**row, "question":
+                    f"What was the last recorded {row['entity']} "
+                    f"{row['attribute'].replace('-', ' ')}?"})
+    return out
+
+
+def _score_recovery(rows: list[dict], answer_url: str) -> list[dict]:
+    scored = []
+    for row in rows:
+        user = ("MEMORY:\n" + json.dumps(row["context"], indent=1,
+                                         ensure_ascii=False)
+                + "\n\nQUESTION: " + row["question"])
+        answer = _chat(answer_url, _ANSWER_SYSTEM, user)
+        scored.append({
+            **{k: row[k] for k in ("entity", "attribute", "seeded_value",
+                                   "freshness_class", "question")},
+            "arm": "recovery_quarantine", "answer": answer,
+            "recovered": value_recovered(answer, row["seeded_value"]),
+        })
+    return scored
+
+
+def run_study_h3(answer_url: str | None) -> dict:
+    """Render all three policy arms from ONE seeded bank (so pairs cannot
+    drift), assert the structural no-harm gate, score if an answerer is
+    given."""
+    import tempfile
+
+    import ladder_sweep as ls
+
+    out: dict = {"preregistration": H3_PREREG,
+                 "query_offset_days": QUERY_OFFSET_DAYS,
+                 "n_facts": len(STUDY_B_FACTS)}
+
+    with tempfile.TemporaryDirectory(prefix="plret_h3_",
+                                     ignore_cleanup_errors=True) as td:
+        svc = ls.build_service(Path(td))
+        seeded_at = _seed(svc, STUDY_B_FACTS)
+        now = seeded_at + QUERY_OFFSET_DAYS * DAY
+        rows_by_policy: dict[str, list[dict]] = {}
+        for policy in H3_POLICIES:
+            svc.config.memory.search.stale_policy = policy
+            rows_by_policy[policy] = _render_contexts(svc, STUDY_B_FACTS, now)
+        svc.config.memory.search.stale_policy = "annotate"
+
+    # Evergreen control rendered under the strongest policy: the policy
+    # must never touch never-stale records, so these bytes double as the
+    # gate-4 structural evidence.
+    with tempfile.TemporaryDirectory(prefix="plret_h3c_",
+                                     ignore_cleanup_errors=True) as td:
+        svc = ls.build_service(Path(td))
+        seeded_at = _seed(svc, STUDY_B_FACTS, force_class="evergreen")
+        now = seeded_at + QUERY_OFFSET_DAYS * DAY
+        svc.config.memory.search.stale_policy = "quarantine"
+        control_rows = _render_contexts(svc, STUDY_B_FACTS, now)
+        svc.config.memory.search.stale_policy = "annotate"
+        for row in control_rows:
+            for e in row["context"]:
+                assert not e.get("stale") and "last_known_value" not in e, (
+                    "policy touched an evergreen record — no-harm violation")
+
+    out["contexts"] = rows_by_policy
+    out["control_contexts"] = control_rows
+    # Gate 2, structural half — computed at render time and persisted.
+    out["fresh_payloads_identical"] = {
+        policy: fresh_payloads_identical(rows_by_policy["annotate"],
+                                         rows_by_policy[policy])
+        for policy in ("demote", "quarantine")}
+
+    if not answer_url:
+        out["scored"] = False
+        return out
+
+    out["scored"] = True
+    out["arms"] = {
+        "flags_visible": _score_arm(rows_by_policy["annotate"],
+                                    "flags_visible", answer_url),
+        "policy_demote": _score_arm(rows_by_policy["demote"],
+                                    "policy_demote", answer_url),
+        "policy_quarantine": _score_arm(rows_by_policy["quarantine"],
+                                        "policy_quarantine", answer_url),
+        "control_evergreen": _score_arm(control_rows, "flags_visible",
+                                        answer_url),
+    }
+    out["recovery"] = _score_recovery(
+        _recovery_rows(rows_by_policy["quarantine"]), answer_url)
+    for name, scored in out["arms"].items():
+        stale_rows = [r for r in scored if r["freshness_class"] == "volatile"]
+        fresh_rows = [r for r in scored if r["freshness_class"] != "volatile"]
+        out.setdefault("summary", {})[name] = {
+            "stale_answer_rate": round(
+                sum(r["unqualified"] for r in stale_rows)
+                / max(len(stale_rows), 1), 3),
+            "fresh_answer_rate": round(
+                sum(r["unqualified"] for r in fresh_rows)
+                / max(len(fresh_rows), 1), 3),
+            # Confound diagnostic: rate at which the answerer served a
+            # DIFFERENT fact's value for a stale-fact question.
+            "answered_other_rate": round(
+                sum(r["answered_other"] for r in stale_rows)
+                / max(len(stale_rows), 1), 3),
+        }
+    out["summary"]["recovery_rate"] = round(
+        sum(r["recovered"] for r in out["recovery"])
+        / max(len(out["recovery"]), 1), 3)
+    return out
+
+
 # ── entry point ──────────────────────────────────────────────────────────
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--study", choices=("a", "b", "both"), default="both")
+    ap.add_argument("--study", choices=("a", "b", "both", "h3"),
+                    default="both")
     ap.add_argument("--rung", default="e4b-v3",
                     help="ladder rung for Study A's bank build")
     ap.add_argument("--offsets", default=",".join(map(str, OFFSETS_DAYS)),
@@ -376,6 +555,11 @@ def main() -> int:
         payload["study_b"] = run_study_b(args.answer_url)
         if payload["study_b"].get("summary"):
             print(f"study B: {json.dumps(payload['study_b']['summary'])}",
+                  flush=True)
+    if args.study == "h3":
+        payload["study_h3"] = run_study_h3(args.answer_url)
+        if payload["study_h3"].get("summary"):
+            print(f"study H3: {json.dumps(payload['study_h3']['summary'])}",
                   flush=True)
     write_artifact(out, payload)
     return 0

@@ -382,6 +382,19 @@ def memory_search(
                          "contender_origin": f.get("contender_origin", "")}
                         if f.get("contested") else {}
                     ),
+                    # Serving-side staleness policy (memory.search.
+                    # stale_policy): the fields the policy adds must survive
+                    # this key re-selection, or the most-used read surface
+                    # would serve the quarantine wrapper without the
+                    # original value beside it.
+                    **(
+                        {"warning": f["warning"]}
+                        if f.get("warning") else {}
+                    ),
+                    **(
+                        {"last_known_value": f["last_known_value"]}
+                        if "last_known_value" in f else {}
+                    ),
                     # Supersede-at-discovery: aged/stale/contested facts
                     # carry their exact correction call (see CORRECTION_NOTE).
                     **(
@@ -393,7 +406,13 @@ def memory_search(
             ]
             if any("correct_with" in c for c in result["cortex"]):
                 result["correction_note"] = CORRECTION_NOTE
-            fact_vals = [f.get("value", "") for f in facts]
+            # Dedup against the UNDERLYING value, not the served one: under
+            # stale_policy="quarantine" the served value is the wrapper
+            # string, and keying on it would re-expose the raw stale value
+            # in the entries below the quarantined fact (2026-08-09 review
+            # finding).
+            fact_vals = [f.get("last_known_value", f.get("value", ""))
+                         for f in facts]
             kept = [
                 e for e in result.get("entries", [])
                 if not any(_restates_fact(e.get("text", ""), v) for v in fact_vals)
@@ -748,10 +767,16 @@ def memory_world_search(query: str, top_k: int = 5,
 
 
 def _compact_world(e: dict[str, Any]) -> dict[str, Any]:
+    # "warning" / "last_known_value" are the stale_policy fields (demote /
+    # quarantine) — the compact projection must carry them or the default
+    # world surface serves the quarantine wrapper with the original value
+    # destroyed (2026-08-09 review finding).
     out = {k: e[k] for k in ("entity", "attribute", "value",
                              "effective_confidence", "stale", "score",
-                             "correct_with")
+                             "correct_with", "warning")
            if k in e}
+    if "last_known_value" in e:
+        out["last_known_value"] = e["last_known_value"]
     if e.get("source_url"):
         out["source_url"] = e["source_url"]
     if e.get("source_quote"):
