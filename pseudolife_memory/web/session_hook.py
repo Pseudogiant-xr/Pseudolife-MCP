@@ -69,7 +69,10 @@ For anything live (deployed version, config, what's running), read the
 config/code and say where you read it. A memory records what was true when
 it was WRITTEN: cortex facts now carry `asserted_at` / `age`, so check them
 before relying on one; a fact marked `stale: true` is a lead, not truth —
-re-verify before acting on it. When memory and the code disagree, say so
+re-verify before acting on it (a stale fact may arrive with its `value`
+quarantined and the original preserved in `last_known_value` — that is
+your starting point for re-verification, never the current answer).
+When memory and the code disagree, say so
 out loud, trust the code, and correct the memory (`memory_fact_set` at the
 same slot) rather than silently picking one — a stale fact nobody corrects
 is one the next session will believe too. Recall results mark

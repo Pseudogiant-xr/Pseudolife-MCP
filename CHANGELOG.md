@@ -6,6 +6,52 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Measured (2026-08-09 — H3: the staleness policy closes the answerer-discretion gap completely)
+- **Quarantine wins on all four preregistered gates**
+  (`evals/results/stale-policy-verdict.json`, producer
+  `evals/analyze_stale_policy.py`, three replicate artifacts
+  `retention-interval-stalepol-0809-r{1,2,3}.json` committed beside it;
+  prereg `docs/superpowers/specs/2026-08-09-serving-side-staleness-design.md`).
+  Against a flags-visible floor of 0.5/0.4/0.4 across replicates, BOTH
+  policy arms drive the unqualified-stale-answer rate to 0.0 in every
+  replicate (quarantine paired sign-flip p 0.0005, 13/30 discordant
+  pairs all favoring the policy; demote identical at p 0.0005) — the
+  version/quantity-shaped residual that sailed through the textual
+  flags in ret-0809 does not survive the policy. No-harm holds
+  structurally (fresh payloads byte-identical, gap 0.0), the
+  quarantined value is recovered on explicit ask at rate 1.0 in every
+  replicate (data moved, never lost), the evergreen control is
+  untouched at 1.0, and the answered-other-fact confound diagnostic is
+  0.0 everywhere — the win is compliance, not degradation. Per the
+  preregistered fallback ladder the winner is `"quarantine"`; it ships
+  selectable with the default unchanged (`"annotate"`) — flipping the
+  default is a separate decision with its own soak, and demote's
+  identical score is recorded as the less contract-invasive fallback.
+  Honest scope: the eval measures the policy when staleness is served;
+  production hit rates on stale facts remain unmeasured (ret-0809's
+  caveat carries over).
+
+### Added (2026-08-09 — serving-side staleness policy: `memory.search.stale_policy`)
+- **Stale facts can now be demoted or value-quarantined at the daemon,
+  not just annotated** (spec
+  `docs/superpowers/specs/2026-08-09-serving-side-staleness-design.md`,
+  implementing the ret-0809 finding that the answerer heeds staleness
+  flags selectively, keyed on value shape). `memory.search.stale_policy`
+  defaults to `"annotate"` (byte-identical to previous behavior);
+  `"demote"` sorts stale records after non-stale ones on every list
+  surface and adds a top-level `warning`; `"quarantine"` replaces a
+  stale record's `value` with a wrapper and moves the original to
+  `last_known_value` — data moved, never hidden. Applied inside the
+  shared record serialisers, covering every scalar-record read surface
+  (search, lookup, dump, contenders, the compact `memory_search` cortex
+  block, and the compact `memory_world_search` projection). Deliberate
+  exemptions, named: version history (the audit and recovery surface),
+  `chain`/graph fact projections (machine-consumed summaries), and
+  set-valued slots (members are structurally always evergreen, pinned by
+  test). Non-stale records are byte-identical under every policy —
+  asserted structurally in `tests/test_stale_policy.py` — and an
+  unrecognised policy value degrades to `annotate`.
+
 ### Fixed (2026-08-09 — warm-container ladder corruption root-caused: the llama-server prompt cache)
 - **The evlora campaign's warm-container hazard is pinned to
   `cache_prompt` (the llama-server request default) and closed.** A

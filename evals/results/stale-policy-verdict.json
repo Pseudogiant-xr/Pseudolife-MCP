@@ -1,0 +1,83 @@
+{
+ "preregistration": "docs/superpowers/specs/2026-08-09-serving-side-staleness-design.md",
+ "n_replicates": 3,
+ "arms": {
+  "policy_demote": {
+   "stale_answer_rate_mean": 0.0,
+   "stale_answer_rates": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "answered_other_rate_mean": 0.0,
+   "gate1_efficacy": {
+    "pass": true,
+    "bar": 0.2,
+    "paired_units": 30,
+    "discordant": 13,
+    "permutation_p_two_sided": 0.0005
+   },
+   "gate2_no_harm": {
+    "pass": true,
+    "fresh_gap": 0.0,
+    "structural_byte_identity": [
+     true,
+     true,
+     true
+    ]
+   }
+  },
+  "policy_quarantine": {
+   "stale_answer_rate_mean": 0.0,
+   "stale_answer_rates": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "answered_other_rate_mean": 0.0,
+   "gate1_efficacy": {
+    "pass": true,
+    "bar": 0.2,
+    "paired_units": 30,
+    "discordant": 13,
+    "permutation_p_two_sided": 0.0005
+   },
+   "gate2_no_harm": {
+    "pass": true,
+    "fresh_gap": 0.0,
+    "structural_byte_identity": [
+     true,
+     true,
+     true
+    ]
+   }
+  }
+ },
+ "gate3_recovery": {
+  "pass": true,
+  "bar": 0.9,
+  "recovery_rate_mean": 1.0,
+  "recovery_rates": [
+   1.0,
+   1.0,
+   1.0
+  ]
+ },
+ "gate4_control": {
+  "pass": true,
+  "control_rates": [
+   1.0,
+   1.0,
+   1.0
+  ]
+ },
+ "decision": {
+  "winner": "quarantine",
+  "why": "gates 1-4 pass for value-quarantine"
+ },
+ "inputs": [
+  "retention-interval-stalepol-0809-r1.json",
+  "retention-interval-stalepol-0809-r2.json",
+  "retention-interval-stalepol-0809-r3.json"
+ ]
+}

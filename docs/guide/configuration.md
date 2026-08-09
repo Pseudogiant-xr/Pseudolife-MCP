@@ -178,6 +178,25 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   experiments (neighbor expansion, a timeline channel) that measurably
   failed their gates and ship dormant; they remain settable for
   replication but there is no measured reason to enable them.
+- **Staleness served as annotation** (`memory.search.stale_policy =
+  "annotate"`) — stale records (past 2×TTL for their freshness class)
+  carry `effective_confidence`/`stale` flags and nothing more, today's
+  behavior. `"demote"` additionally sorts stale records after non-stale
+  ones on list surfaces and adds a top-level `warning`; `"quarantine"`
+  replaces a stale record's `value` with a wrapper string and moves the
+  original to `last_known_value` (data moved, never hidden). Applied at
+  the shared record serialisers, so every scalar-fact read surface —
+  including the compact `memory_search` / `memory_world_search`
+  projections — behaves identically. Deliberate exemptions: version
+  history (the audit surface and the recovery path), `chain` summaries
+  and graph fact projections (machine-consumed), and set-valued slots
+  (set members are structurally always evergreen — the set API carries
+  no freshness class — so no set payload can be stale). Non-stale
+  records are byte-identical under every policy; an unrecognised policy
+  value degrades safely to `annotate`. Console note: the web console
+  renders the record `value` field, so under `quarantine` a stale fact
+  shows the wrapper there — a known P2 cost to weigh before ever
+  flipping the default.
 
 ## Toolset tiers
 
