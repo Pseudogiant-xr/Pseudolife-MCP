@@ -6,6 +6,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-08-09 — contenders carry temporal stamps; promotion ticks the HLC)
+- **A parked contender now carries its write's temporal stamps, and
+  promotion is stamped as its own transaction.** Before this fix
+  `write_fact` computed the v11 stamp (`hlc`/`tx_time`/`valid_time`) and
+  the `freshness_class` for every write but dropped all four on the
+  contend path, and `resolve(accept=true)` flipped the contender to
+  `current` without stamping — so a promoted fact served with HLC
+  `(0,0)` and default-evergreen freshness, and any later write replaying
+  a *pre-promotion* HLC would silently supersede the explicit
+  resolution (the same failure class as the 2026-07-02 `_promote_slots`
+  fix). Now: parking preserves the write's stamps and freshness class; a
+  contender-confirm advances `tx_time`/HLC like `_confirm` (never
+  `valid_time`); and `resolve(accept=true)` stamps `tx_time` with the
+  promotion time and takes a fresh HLC tick from the service — covering
+  both the manual `memory_fact_resolve` path and the consolidation
+  quarantine's automated second-witness promotions. `valid_time` is
+  never moved: when a fact became true is not when it was accepted.
+  All four `_contend` call sites are covered, including
+  `add_member`'s aggregate-guard park (found by the pre-commit review
+  pass). Pinned in `tests/test_contender_stamps.py` (9 tests, including
+  the stale-HLC-replay defense). No schema change — the columns
+  existed; the values were being dropped.
+
 ### Measured (2026-08-09 — consolidation quarantine: all three preregistered gates resolve)
 - **Gate 1 (poisoning smoke)** is pinned deterministically in
   `tests/test_dream_quarantine.py`: same-tier agent-over-agent
