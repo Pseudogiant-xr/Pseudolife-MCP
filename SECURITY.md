@@ -88,18 +88,28 @@ How this maps onto Pseudolife:
   (`user` origin outranks `action`, which outranks `agent` — a planted
   agent-origin claim cannot silently overwrite a user-stated fact),
   per-entry `source` tags, `source="status"` exclusion from dream
-  extraction, and the engram cross-index (every cortex fact links back to
-  its source entries, so a bad fact is auditable to the entry that fed it).
+  extraction, the engram cross-index (every cortex fact links back to
+  its source entries, so a bad fact is auditable to the entry that fed
+  it), and — opt-in via `memory.dream.quarantine_low_trust` — the
+  two-man rule: an untrusted agent-tier claim parks as a visible
+  contender instead of taking `current`, promotable only by an explicit
+  human resolve or an independent second witness. The quarantine's claim
+  is deliberately narrow: it does not stop a poisoned entry from being
+  stored or retrieved — episodic search still surfaces it — it stops
+  poison from silently gaining *canonical* authority.
 - **Remediation is deletion, not correction.** If a poisoned memory lands:
   `memory_forget` the entry, then follow its engram links and retire any
   cortex facts derived from it. Supersession history is your audit trail.
   Telling the agent "that was wrong" only adds a correction alongside live
   poison.
 
-Not yet built (roadmap, not promises): trust-weighted consolidation and a
-quarantine tier for low-trust sources ahead of the dream pass — designed
-and preregistered in
-`docs/superpowers/specs/2026-08-09-consolidation-quarantine-design.md`.
+The consolidation quarantine above implements the preregistration in
+`docs/superpowers/specs/2026-08-09-consolidation-quarantine-design.md`
+(ships off; writer identity remains self-reported over MCP, so the rule
+raises the bar from "one convinced model call" to "two independent-looking
+writes or one human act" — a mitigation, not an authentication scheme).
+Not yet built (roadmap, not promises): cryptographic writer authentication,
+the stronger form.
 
 ## In scope
 

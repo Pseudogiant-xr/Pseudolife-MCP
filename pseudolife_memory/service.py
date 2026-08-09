@@ -368,6 +368,35 @@ def _origin_from_source(source: str | None) -> str | None:
     return _SOURCE_ORIGIN.get((source or "").strip().lower())
 
 
+# ── consolidation quarantine (spec 2026-08-09-consolidation-quarantine) ──
+# The two-man rule keys on WHO wrote — persisted entry metadata only (the
+# prereg mandates no schema change, and the entries table stores neither
+# origin nor writer_id): origin is derived from the entry's source via the
+# same _origin_from_source mapping the auto-promote write path uses, and
+# witness identity is ep:<episode_id> when the entry has one (the daemon's
+# session identity), else src:<source>. A claim with no resolvable backing
+# entry has no witness at all — it follows its own origin field.
+
+def _quarantine_low_trust(claim: dict, src_entry: dict | None,
+                          trusted: set[str]) -> bool:
+    """True iff the claim's backing is agent-tier and outside ``trusted``."""
+    if src_entry is not None:
+        src = src_entry.get("source") or ""
+        return _origin_from_source(src) == "agent" and src not in trusted
+    return (claim.get("origin") or "agent") == "agent"
+
+
+def _quarantine_witness(claim: dict, src_entry: dict | None) -> str:
+    """Independence token stamped into the parked contender's provenance;
+    a later matching claim promotes only when its token differs."""
+    if src_entry is not None:
+        ep = src_entry.get("episode_id")
+        if ep:
+            return f"ep:{ep}"
+        return f"src:{src_entry.get('source') or ''}"
+    return f"origin:{claim.get('origin') or 'agent'}"
+
+
 def _onnx_embedding_available() -> bool:
     """True when the optional ``[onnx]`` extra (optimum) is installed."""
     import importlib.util  # noqa: PLC0415
@@ -1611,10 +1640,15 @@ class MemoryService:
         now: float | None = None,
         episode: str | None = None,
         freshness_class: str = "auto",
+        force_contend: bool = False,
     ) -> dict[str, Any]:
         """Write / confirm / supersede a canonical fact at the
         ``(entity, attribute)`` slot. The claim is embedded through the same
         pipeline as memories so cortex search shares the embedding space.
+
+        ``force_contend`` (internal; consolidation quarantine): park the
+        value as a contender regardless of tier — including at an empty
+        slot. Not exposed on the MCP surface.
 
         ``support`` records who asserted the fact — ``"user"`` (the human stated
         it), ``"action"`` (a tool/agent action confirmed it), or ``"agent"`` (the
@@ -1664,6 +1698,7 @@ class MemoryService:
                     writer_id=writer_id,
                     session_id=session_id,
                     freshness_class=freshness_class,
+                    force_contend=force_contend,
                 )
             except ValueError as exc:
                 if "holds a set" in str(exc):
@@ -1880,18 +1915,24 @@ class MemoryService:
                                     -(c["score"] or 1.0)))
             return out[:top_k]
 
-    def cortex_resolve(self, entity: str, attribute: str, accept: bool) -> dict[str, Any]:
+    def cortex_resolve(self, entity: str, attribute: str, accept: bool,
+                       support: str = "user") -> dict[str, Any]:
         """Promote (accept) or retire (reject) the active contender at a slot.
         Persists. Returns ``{"resolved": False, "reason": "no_contender"}`` when
         there is nothing parked to resolve, and ``{"resolved": False,
         "reason": "slot_holds_set"}`` when the slot was converted to a set
         (``memory_set_add``) after the contender was parked against the
         scalar it used to hold — resolve it via ``memory_set_add`` /
-        ``memory_set_remove`` instead."""
+        ``memory_set_remove`` instead.
+
+        ``support`` (internal): the tier stamped on an accepted contender —
+        "user" for the MCP tool path; the consolidation quarantine passes
+        "agent" so an automated promotion never reads as a human act."""
         with self._lock:
             self._ensure_init()
             assert self._cortex is not None
-            res = self._cortex.resolve(entity, attribute, accept)
+            res = self._cortex.resolve(entity, attribute, accept,
+                                       support=support)
             if res is None:
                 return {"resolved": False, "reason": "no_contender",
                         "entity": entity, "attribute": attribute}
@@ -3259,6 +3300,8 @@ class MemoryService:
             return {"pulled": 0, "claims": 0, "inserted": 0, "confirmed": 0,
                     "contested": 0, "superseded": 0, "relations": 0,
                     "literal_flagged": 0, "literal_dropped": 0,
+                    "quarantine_parked": 0, "quarantine_held": 0,
+                    "quarantine_promoted": 0,
                     "events_inserted": 0, "events_duplicate": 0,
                     "events_pass_failed": False,
                     "cursor": pulled["cursor"], "lessons": lessons,
@@ -3284,6 +3327,14 @@ class MemoryService:
         gate_scope = dream_cfg.literal_gate_scope
         literal_flagged = 0
         literal_dropped = 0
+        # Consolidation quarantine (two-man rule, spec 2026-08-09; ships
+        # OFF). Counters live outside tally like the literal gate's; the
+        # name avoids "quarantined", which the link-retype path owns.
+        quarantine_on = bool(dream_cfg.quarantine_low_trust)
+        qt_trusted = set(dream_cfg.trusted_sources or [])
+        qt_parked = 0
+        qt_held = 0
+        qt_promoted = 0
         # Chronicle events (schema v28): OFF until the Phase 2 gates pass;
         # requires PG (the table has no file-mode counterpart).
         chronicle_on = bool(dream_cfg.chronicle) and self._storage is not None
@@ -3298,6 +3349,9 @@ class MemoryService:
                     "cursor": self._cortex.dream_cursor, "extractor_failed": True,
                     "literal_flagged": literal_flagged,
                     "literal_dropped": literal_dropped,
+                    "quarantine_parked": qt_parked,
+                    "quarantine_held": qt_held,
+                    "quarantine_promoted": qt_promoted,
                     "events_inserted": events_inserted,
                     "events_duplicate": events_duplicate,
                     "events_pass_failed": False,
@@ -3322,7 +3376,11 @@ class MemoryService:
         batch_has_date = bool(_DATE_LIKE_RE.search(batch_text))
         batch_key = tuple(e.get("db_id") if e.get("db_id") is not None
                           else e["text"][:200] for e in entries)
-        pairs: list[tuple[dict, Any]] = []      # (claim, source entry db_id)
+        # (claim, source entry db_id, source entry dict-or-None). The entry
+        # dict travels beside the id because file mode has no db_id and the
+        # quarantine's eligibility/witness derivation reads entry metadata
+        # (source, episode_id), not the id.
+        pairs: list[tuple[dict, Any, dict | None]] = []
         try:
             from pseudolife_memory.memory.dream import unflatten_slot_key_claims
             extracted = (extractor.extract(texts, vocab,
@@ -3334,14 +3392,15 @@ class MemoryService:
             for c in extracted:
                 idx = c.get("source")
                 if isinstance(idx, int) and 0 <= idx < len(entries):
-                    src_id = entries[idx].get("db_id")
+                    src_entry = entries[idx]
                 elif len(entries) == 1:
                     # Unambiguous: extractors that don't cite sources (stubs,
                     # older models) still attribute a single-entry batch.
-                    src_id = entries[0].get("db_id")
+                    src_entry = entries[0]
                 else:
-                    src_id = None
-                pairs.append((c, src_id))
+                    src_entry = None
+                src_id = src_entry.get("db_id") if src_entry else None
+                pairs.append((c, src_id, src_entry))
         except Exception as exc:  # noqa: BLE001 — an extractor must never break a dream
             fails = self._dream_batch_failures.get(batch_key, 0) + 1
             self._dream_batch_failures[batch_key] = fails
@@ -3370,7 +3429,7 @@ class MemoryService:
                     failed_keys.append(key)
                     continue
                 succeeded += 1
-                pairs.extend((c, e.get("db_id")) for c in e_claims)
+                pairs.extend((c, e.get("db_id"), e) for c in e_claims)
             if succeeded == 0 and len(entries) > 1:
                 return _held("all entries failed the isolation pass "
                              "(outage, not poison)", exc)
@@ -3398,7 +3457,7 @@ class MemoryService:
         # Events with chronicle off are inert — they alone must not mint a
         # run row (same zero-write-no-row rule as an empty extraction).
         actionable = any(c.get("kind") != "event" or chronicle_on
-                         for c, _ in pairs)
+                         for c, _, _ in pairs)
         if pairs and actionable and self._storage is not None:
             with self._lock:
                 run_id = self._storage.start_dream_run(
@@ -3423,6 +3482,9 @@ class MemoryService:
                                  "literal_dropped": literal_dropped,
                                  "events_inserted": events_inserted,
                                  "events_duplicate": events_duplicate,
+                                 "quarantine_parked": qt_parked,
+                                 "quarantine_held": qt_held,
+                                 "quarantine_promoted": qt_promoted,
                                  "quarantined": quarantined})
             except Exception as exc2:  # noqa: BLE001
                 logger.warning("dream: run-row finish failed (%s)", exc2)
@@ -3494,7 +3556,7 @@ class MemoryService:
                 run_seq += 1
 
         try:
-            for c, src_id in pairs:
+            for c, src_id, src_entry in pairs:
                 # Events route before slot resolution — no entity/attribute.
                 if c.get("kind") == "event":
                     if chronicle_on:
@@ -3607,11 +3669,70 @@ class MemoryService:
                 elif op == "remove":
                     res = self.set_remove(ent, attr, c["value"])
                 else:
+                    # Consolidation quarantine (two-man rule): route the
+                    # scalar claim BEFORE the write. Scope v1 is scalars
+                    # only — member ops keep their existing guards (members
+                    # are never contested by design; the aggregate guard
+                    # already parks the member-over-scalar case).
+                    q_route, q_low = None, False
+                    if quarantine_on:
+                        q_route, q_witness, q_low = self._quarantine_route(
+                            ent, attr, c, src_entry, qt_trusted)
                     try:
-                        res = self.cortex_write(
-                            ent, attr, c["value"],
-                            confidence=float(c.get("confidence", 0.55)),
-                            support=c.get("origin", "agent"))
+                        if q_route == "promote":
+                            # Independent second witness: promote the parked
+                            # value via the contender machinery. Support is
+                            # the LITERAL "agent" — never the claim's own
+                            # origin field, which is model output and
+                            # steerable by note text (2026-08-09 review).
+                            rr = self.cortex_resolve(
+                                ent, attr, accept=True, support="agent")
+                            if rr.get("resolved"):
+                                qt_promoted += 1
+                                res = {"action": "quarantine_promoted"}
+                            else:
+                                # Raced away (e.g. the user rejected the
+                                # contender from another connection between
+                                # the route read and this resolve): fail
+                                # CLOSED — a low-trust claim still parks.
+                                res = self.cortex_write(
+                                    ent, attr, c["value"],
+                                    confidence=float(
+                                        c.get("confidence", 0.55)),
+                                    support=c.get("origin", "agent"),
+                                    provenance=(
+                                        ["quarantine:low_trust", q_witness]
+                                        if q_low else None),
+                                    force_contend=q_low)
+                                if q_low and res["action"] == "contested":
+                                    qt_parked += 1
+                        elif q_route in ("park", "hold", "hold_ordinary"):
+                            # "hold_ordinary" parks WITHOUT the marker: an
+                            # ordinary tier-conflict contender must never
+                            # become witness-promotable by restatement.
+                            prov = (["quarantine:low_trust", q_witness]
+                                    if q_route != "hold_ordinary"
+                                    else [q_witness])
+                            res = self.cortex_write(
+                                ent, attr, c["value"],
+                                confidence=float(c.get("confidence", 0.55)),
+                                support=c.get("origin", "agent"),
+                                provenance=prov,
+                                force_contend=True)
+                            # Count OUTCOMES, not routes — a write that
+                            # confirmed instead of parking counts nothing
+                            # (the friction numbers gate 3 reports must be
+                            # honest).
+                            if res["action"] == "contested":
+                                if q_route == "park":
+                                    qt_parked += 1
+                                else:
+                                    qt_held += 1
+                        else:
+                            res = self.cortex_write(
+                                ent, attr, c["value"],
+                                confidence=float(c.get("confidence", 0.55)),
+                                support=c.get("origin", "agent"))
                     except ValueError as exc:
                         if "holds a set" in str(exc):
                             # Spec rule 2: a scalar claim (no op) landing on a
@@ -3742,11 +3863,80 @@ class MemoryService:
                 "graph_insight": graph_insight,
                 "literal_flagged": literal_flagged,
                 "literal_dropped": literal_dropped,
+                "quarantine_parked": qt_parked,
+                "quarantine_held": qt_held,
+                "quarantine_promoted": qt_promoted,
                 "events_inserted": events_inserted,
                 "events_duplicate": events_duplicate,
                 "events_pass_failed": events_pass_failed,
                 "traces": traces_n, "sources_attributed": sources_attributed,
                 "quarantined": quarantined, "retyped": retyped}
+
+    def _quarantine_route(self, ent: str, attr: str, c: dict,
+                          src_entry: dict | None,
+                          trusted: set[str]) -> tuple[str | None, str, bool]:
+        """Route one scalar dream claim under the two-man rule.
+
+        Returns ``(route, witness, low)``:
+
+        * ``"promote"`` — a MARKED parked value gains an independent
+          second witness AND the witness's tier (entry-metadata-derived,
+          never claim text) is not below the current record's origin —
+          the two-man rule must never be weaker than the provenance
+          guard it reinforces (2026-08-09 review: two agent witnesses
+          must not supersede a user fact);
+        * ``"park"`` — first low-trust sighting (fresh marked contender);
+        * ``"hold"`` — restating a marked parked value without meeting
+          the promote conditions (confirms, accumulates the witness);
+        * ``"hold_ordinary"`` — a low-trust claim matching an ORDINARY
+          tier-conflict contender: parked without the marker so an
+          explicit-resolve-only contender never becomes
+          witness-promotable by restatement;
+        * ``None`` — not quarantine's business (normal write): trusted
+          claims with no marked contender in play, and any claim
+          corroborating the CANONICAL value (confirm must not stamp the
+          marker onto the current record).
+        """
+        from pseudolife_memory.memory.cortex import (_TIER_RANK,
+                                                     _is_compression_echo,
+                                                     _norm_value)
+
+        low = _quarantine_low_trust(c, src_entry, trusted)
+        witness = _quarantine_witness(c, src_entry)
+        # The witness's tier comes from the backing entry's source (the
+        # only trust base the rule stands on); an unbacked claim ranks as
+        # agent regardless of what its text asserts.
+        claim_tier = ((_origin_from_source(src_entry.get("source"))
+                       if src_entry is not None else None) or "agent")
+        with self._lock:
+            self._ensure_init()
+            assert self._cortex is not None
+            cur = self._cortex.lookup(ent, attr)
+            cur_value = cur.value if cur is not None else None
+            cur_origin = cur.origin if cur is not None else None
+            match = next(
+                (r for r in self._cortex.contenders_for(ent, attr)
+                 if _norm_value(r.value) == _norm_value(c["value"])), None)
+            marked = (match is not None
+                      and "quarantine:low_trust" in match.provenance)
+            witnesses = set(match.provenance) if match is not None else set()
+        if cur_value is not None and (
+                _norm_value(cur_value) == _norm_value(c["value"])
+                or _is_compression_echo(c["value"], cur_value)):
+            return None, witness, False
+        if marked:
+            independent = (not low) or witness not in witnesses
+            tier_ok = (cur_origin is None
+                       or _TIER_RANK.get(claim_tier, 0)
+                       >= _TIER_RANK.get(cur_origin, 0))
+            if independent and tier_ok:
+                return "promote", witness, low
+            return "hold", witness, low
+        if match is not None:
+            return ("hold_ordinary" if low else None), witness, low
+        if low:
+            return "park", witness, low
+        return None, witness, low
 
     def dream_rollback(self, run_id: int | None = None) -> dict[str, Any]:
         """Revert the latest committed dream pass by replaying its v27
@@ -3834,6 +4024,20 @@ class MemoryService:
                                    else "skipped:already_gone")
                     elif action == "superseded":
                         outcome = _rewrite_prev(row)
+                    elif action == "quarantine_promoted":
+                        # Reversal of a two-man promotion: restore the
+                        # previous current (the promoted value stays in
+                        # history as superseded, not re-parked — rollback
+                        # is a revert, not a re-quarantine). A promotion
+                        # onto an EMPTY slot reverses like an insert.
+                        if row["prev_status"] is None:
+                            with self._lock:
+                                res = self._cortex.retire_current(
+                                    row["entity"], row["attribute"])
+                            outcome = ("reverted" if res is not None
+                                       else "skipped:already_gone")
+                        else:
+                            outcome = _rewrite_prev(row)
                     elif action == "confirmed":
                         # Only confidence/last_confirmed moved; unwinding
                         # that is not expressible through the write path.

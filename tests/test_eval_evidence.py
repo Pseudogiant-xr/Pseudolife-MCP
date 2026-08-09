@@ -1109,6 +1109,43 @@ CLAIMS.append(Claim(
         "fresh_gap"],
     stated=0.0, places=4))
 
+# ── consolidation quarantine gates (qgate/qreplay 0809) ──────────────────
+QGATE = RESULTS + "quarantine-gate-qgate-0809.json"
+QREPLAY = RESULTS + "quarantine-replay-qreplay-0809.json"
+
+for _arm in ("quarantine_off", "quarantine_on_paranoid"):
+    CLAIMS.append(Claim(
+        id=f"qgate-{_arm}-gold", doc=CHANGELOG,
+        needle="gold 1.0 / stale_leak 0.1 /\n  19 claims both arms, parked 0",
+        artifacts=(QGATE,),
+        value=(lambda a: lambda d: d["arms"][a]["gold_recoverable"])(_arm),
+        stated=1.0, places=3))
+    CLAIMS.append(Claim(
+        id=f"qgate-{_arm}-stale", doc=CHANGELOG,
+        needle="gold 1.0 / stale_leak 0.1 /\n  19 claims both arms, parked 0",
+        artifacts=(QGATE,),
+        value=(lambda a: lambda d: d["arms"][a]["stale_leak"])(_arm),
+        stated=0.1, places=3))
+CLAIMS.append(Claim(
+    id="qgate-paranoid-parked", doc=CHANGELOG,
+    needle="gold 1.0 / stale_leak 0.1 /\n  19 claims both arms, parked 0",
+    artifacts=(QGATE,),
+    value=lambda d: float(
+        d["arms"]["quarantine_on_paranoid"]["quarantine_parked"]),
+    stated=0.0, places=0))
+CLAIMS.append(Claim(
+    id="qreplay-would-park", doc=CHANGELOG,
+    needle="0 of 629 scalar claims would have parked",
+    artifacts=(QREPLAY,),
+    value=lambda d: float(d["would_park"]),
+    stated=0.0, places=0))
+CLAIMS.append(Claim(
+    id="qreplay-scalar-rows", doc=CHANGELOG,
+    needle="0 of 629 scalar claims would have parked",
+    artifacts=(QREPLAY,),
+    value=lambda d: float(d["scalar_rows"]),
+    stated=629.0, places=0))
+
 
 def test_every_published_number_names_a_committed_artifact():
     """A claim whose evidence is untracked cannot be checked by a reader.

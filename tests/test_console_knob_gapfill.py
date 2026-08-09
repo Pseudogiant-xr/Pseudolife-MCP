@@ -82,6 +82,10 @@ def test_gated_off_capabilities_stay_out_of_console():
         # the H3 verdict AND a deliberate exposure decision (the chronicle
         # precedent: a passed gate alone does not surface a knob).
         "memory.search.stale_policy",
+        # Two-man-rule quarantine ships default-off; console exposure is a
+        # separate decision after the gate-3 friction estimate.
+        "memory.dream.quarantine_low_trust",
+        "memory.dream.trusted_sources",
     ):
         assert path not in _BY_PATH, f"gated-off knob surfaced: {path}"
 
