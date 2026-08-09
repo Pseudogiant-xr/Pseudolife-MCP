@@ -1,0 +1,23 @@
+{
+ "container": "pseudolife-mcp-extractor",
+ "tag": "sidecar-cache-0809",
+ "prompt_chars": 2445,
+ "pairs": 4,
+ "default_seconds": [
+  3.419123,
+  3.423598,
+  3.400022,
+  3.380211
+ ],
+ "nocache_seconds": [
+  10.590559,
+  10.718919,
+  10.606893,
+  10.703523
+ ],
+ "default_mean": 3.41,
+ "nocache_mean": 10.65,
+ "nocache_penalty_seconds": 7.25,
+ "note": "penalty = prefill of the shared system prompt per call; the dream is a background sweep (600s interval) so latency tolerance is high — weigh against the measured warm-cache output nondeterminism (warm-cache-probe-0809)",
+ "written_at": "2026-08-09T13:17:29"
+}

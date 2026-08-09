@@ -1147,6 +1147,29 @@ CLAIMS.append(Claim(
     stated=629.0, places=0))
 
 
+# ── sidecar cache_prompt pin (measured decision, 0809) ──────────────────
+SIDECAR_CACHE = RESULTS + "sidecar-cache-latency-sidecar-cache-0809.json"
+
+CLAIMS.append(Claim(
+    id="sidecar-cache-penalty", doc=CHANGELOG,
+    needle="the pin costs +7.25s per\n  extraction call",
+    artifacts=(SIDECAR_CACHE,),
+    value=lambda d: d["nocache_penalty_seconds"],
+    stated=7.25, places=2))
+CLAIMS.append(Claim(
+    id="sidecar-cache-default-mean", doc=CHANGELOG,
+    needle="(3.41s → 10.65s over 4",
+    artifacts=(SIDECAR_CACHE,),
+    value=lambda d: d["default_mean"],
+    stated=3.41, places=2))
+CLAIMS.append(Claim(
+    id="sidecar-cache-nocache-mean", doc=CHANGELOG,
+    needle="(3.41s → 10.65s over 4",
+    artifacts=(SIDECAR_CACHE,),
+    value=lambda d: d["nocache_mean"],
+    stated=10.65, places=2))
+
+
 def test_every_published_number_names_a_committed_artifact():
     """A claim whose evidence is untracked cannot be checked by a reader.
 

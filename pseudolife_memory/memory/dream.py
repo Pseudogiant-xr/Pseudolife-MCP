@@ -1058,6 +1058,17 @@ def _probe_primary(url: str) -> bool:
     return probe_endpoint(url)
 
 
+def _cache_extra_body(cfg) -> dict | None:
+    """The daemon-side ``cache_prompt`` pin (measured decision, 2026-08-09):
+    llama-server's default prompt cache changes extractor output once
+    populated (warm-cache-probe-0809), and pinning it off costs +7.25s/call
+    of shared-prefix prefill on the live sidecar (sidecar-cache-latency) —
+    noise for a background sweep. ``extractor_cache_prompt=None`` restores
+    the server default; non-llama.cpp endpoints ignore the field."""
+    v = getattr(cfg, "extractor_cache_prompt", False)
+    return None if v is None else {"cache_prompt": bool(v)}
+
+
 def build_extractor_with_fallback(cfg) -> tuple["DreamExtractor", str]:
     """Selection step for the LIVE dream path: returns (extractor, which)
     with which in {"primary", "fallback"}. Fallback unset => exactly
@@ -1078,6 +1089,7 @@ def build_extractor_with_fallback(cfg) -> tuple["DreamExtractor", str]:
         return OpenAICompatExtractor(
             r["fallback_url"], r["fallback_model"], api_key=api_key,
             max_tokens=r["max_tokens"], timeout_seconds=r["timeout"],
+            extra_body=_cache_extra_body(cfg),
         ), "fallback"
     if not (r["fallback_url"] and r["fallback_model"]) or r["mode"] == "primary":
         return build_extractor(cfg), "primary"
@@ -1090,6 +1102,7 @@ def build_extractor_with_fallback(cfg) -> tuple["DreamExtractor", str]:
     return OpenAICompatExtractor(
         r["fallback_url"], r["fallback_model"], api_key=api_key,
         max_tokens=r["max_tokens"], timeout_seconds=r["timeout"],
+        extra_body=_cache_extra_body(cfg),
     ), "fallback"
 
 
@@ -1146,6 +1159,7 @@ def build_extractor(cfg) -> DreamExtractor:
         return OpenAICompatExtractor(
             r["primary_url"], r["primary_model"], api_key=api_key,
             max_tokens=r["max_tokens"], timeout_seconds=r["timeout"],
+            extra_body=_cache_extra_body(cfg),
         )
     return NoOpExtractor()
 
