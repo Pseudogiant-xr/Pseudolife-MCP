@@ -340,6 +340,41 @@ older rows and their journals are pruned on the sweep tick beside
 superseded-row compaction. Design doc:
 `docs/superpowers/specs/2026-08-01-dream-run-journal-design.md`.
 
+## Consolidation quarantine — the two-man rule (opt-in)
+
+`memory.dream.quarantine_low_trust` (ships **off**) closes the dream's
+poisoning-amplifier path with a defense keyed on *who wrote*, never on
+what the text says (the MAFIA result in `SECURITY.md` closes the argument
+that content inspection can defend this path). When on, a **scalar** claim
+whose backing entry is agent-tier — its `source` maps to origin `agent` —
+and outside `memory.dream.trusted_sources` never takes `current`
+directly:
+
+- it **parks** via the ordinary contender machinery (visible as
+  `contested` in `memory_fact_get`, `quarantine:low_trust` in its
+  provenance), including at a brand-new slot (a currentless contender);
+- it **promotes** on exactly two routes: an explicit
+  `memory_fact_resolve(accept=true)`, or an **independent second
+  witness** — a later matching claim backed by a different witness token
+  (the entry's episode, else its source) or by a non-agent origin —
+  **and only when the witness's tier is not below the standing current's
+  origin**: the two-man rule is never weaker than the provenance guard
+  it reinforces, so two agent witnesses cannot supersede a user-stated
+  fact. The same witness restating merely re-confirms the parked value;
+  an automated promotion is stamped agent-supported (a literal, never
+  the claim's own origin field), and never as a user act.
+
+Run results carry `quarantine_parked` / `quarantine_held` /
+`quarantine_promoted`; parks and promotions are journaled (a promotion
+under its own action) and `memory_dream(rollback)` reverses both. Nothing
+is dropped or hidden — quarantined claims stay stored, searchable, and
+auditable through their engram links. Honest scope: episodic search still
+surfaces a poisoned *entry*; the quarantine only denies it silent
+*canonical* authority. Member ops are outside v1 (members are never
+contested by design; the aggregate guard already parks the dangerous
+member-over-scalar case). Preregistration:
+`docs/superpowers/specs/2026-08-09-consolidation-quarantine-design.md`.
+
 ## Chronicle events (schema v28) — dated occurrences beside facts
 
 Facts answer "what is current"; they systematically lose *occurrences* —

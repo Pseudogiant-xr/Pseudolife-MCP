@@ -363,10 +363,18 @@ class CortexStore:
         writer_id: str | None = None,
         session_id: str | None = None,
         freshness_class: str = "evergreen",
+        force_contend: bool = False,
     ) -> WriteResult:
         """Write a scalar fact at ``(slot.entity, slot.attribute)`` — the
         canonical insert/confirm/supersede/contest path (see the module
         docstring).
+
+        ``force_contend`` (consolidation quarantine, spec 2026-08-09):
+        a conflicting or brand-new value is parked as a contender
+        regardless of tier — including at an EMPTY slot, where it parks
+        currentless (``resolve(accept=True)`` promotes it to first
+        current). A value matching the standing current still confirms:
+        corroborating the canonical value is never a conflict.
 
         Raises ``ValueError`` if the slot currently holds set members (a
         prior :meth:`add_member` populated or converted it): scalar writes
@@ -395,6 +403,13 @@ class CortexStore:
 
         idx = self._current.get(key)
         if idx is None:
+            if force_contend:
+                # Quarantine: even a brand-new slot's first value must not
+                # take current — park it currentless.
+                return self._contend(None, slot, emb, confidence, prov, t,
+                                     sup, "quarantine_low_trust", semb,
+                                     writer_id=writer_id,
+                                     session_id=session_id)
             return WriteResult("inserted", self._insert(
                 slot, emb, confidence, prov, t, support=sup,
                 slot_embedding=semb, freshness_class=freshness_class, **stamp))
@@ -414,6 +429,14 @@ class CortexStore:
                       session_id=session_id)
             return self._confirm(cur, prov, sup, confidence, t, txt, hlc,
                                  writer_id, session_id, semb)
+
+        if force_contend:
+            # Quarantine: park unconditionally — tier is not consulted,
+            # because the whole point is that a low-trust write must not
+            # win the slot on tier arithmetic.
+            return self._contend(cur, slot, emb, confidence, prov, t, sup,
+                                 "quarantine_low_trust", semb,
+                                 writer_id=writer_id, session_id=session_id)
 
         # Genuine conflict at the same slot. Provenance guard: only a write whose
         # tier is >= the current value's tier may supersede; a weaker-tier write
@@ -845,8 +868,14 @@ class CortexStore:
         """Park a conflicting value as a contender at ``cur``'s slot rather than
         superseding. Keeps the current value canonical. At most one active
         contender per slot: a matching value confirms (reinforces) the existing
-        contender; a different value supersedes the prior contender."""
-        existing = self._active_contender(cur.key)
+        contender; a different value supersedes the prior contender.
+
+        ``cur`` may be None (quarantine's empty-slot park): the key is
+        derived from ``slot`` and log rows anchor on the contender itself —
+        there is no current record to anchor on."""
+        key = cur.key if cur is not None else (
+            _norm_key(slot.entity), _norm_key(slot.attribute))
+        existing = self._active_contender(key)
         if existing is not None and _norm_value(existing.value) == _norm_value(slot.value):
             existing.last_confirmed = t
             existing.provenance |= prov
@@ -859,7 +888,8 @@ class CortexStore:
                 existing.writer_id = writer_id
             if session_id:
                 existing.session_id = session_id
-            self._log(cur, slot.value, confidence, t, "contested", "contender_confirmed",
+            self._log(cur if cur is not None else existing, slot.value,
+                      confidence, t, "contested", "contender_confirmed",
                       writer_id=writer_id, session_id=session_id)
             return WriteResult("contested", existing)
         supersedes_val = None
@@ -886,13 +916,18 @@ class CortexStore:
             session_id=session_id,
         )
         self.records.append(rec)   # deliberately NOT registered in self._current
-        self._log(cur, slot.value, confidence, t, "contested", reason,
+        self._log(cur if cur is not None else rec, slot.value, confidence, t,
+                  "contested", reason,
                   writer_id=writer_id, session_id=session_id)
         return WriteResult("contested", rec)
 
-    def resolve(self, entity, attribute, accept: bool, now: float | None = None):
+    def resolve(self, entity, attribute, accept: bool, now: float | None = None,
+                support: str = "user"):
         """Resolve the active contender at a slot. ``accept=True`` promotes it to
-        current (old current -> superseded; contender stamped user-confirmed);
+        current (old current -> superseded; the contender's support gains
+        ``support`` — "user" for the explicit MCP resolve, "agent" when the
+        consolidation quarantine promotes on an independent second witness,
+        so an automated promotion is never stamped as a human act);
         ``accept=False`` retires it (current untouched). Returns a ``WriteResult``
         or ``None`` when there is no active contender.
 
@@ -927,7 +962,11 @@ class CortexStore:
                 cur.superseded_at = t
                 cur.superseded_by_value = contender.value
             contender.status = "current"
-            contender.support.add("user")
+            # Fail CLOSED on an unrecognised tier: an invalid explicit
+            # ``support`` lands as "agent" (the weakest asserting tier),
+            # never "user" — the promotion path's stamp must not be
+            # steerable upward by malformed input (2026-08-09 review).
+            contender.support.add(_norm_support(support) or "agent")
             contender.last_confirmed = t
             contender.supersedes_value = cur.value if cur is not None else contender.supersedes_value
             self._current[key] = c_idx

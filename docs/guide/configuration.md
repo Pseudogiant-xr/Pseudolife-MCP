@@ -172,6 +172,22 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   pipeline has passed its preregistered gates; default-on waits on a
   production soak review — see
   [Chronicle events](dreaming.md#chronicle-events-schema-v28--dated-occurrences-beside-facts).
+- **Consolidation quarantine off** (`memory.dream.quarantine_low_trust =
+  false`) — when on, a scalar dream claim whose backing entry is
+  agent-tier (its `source` maps to origin `agent`) and outside
+  `memory.dream.trusted_sources` never takes `current` directly: it
+  parks via the existing contender machinery (visible in
+  `memory_fact_get` as contested), promotable only by an explicit
+  `memory_fact_resolve(accept=true)` or by an independent second
+  witness — a later matching claim from a different witness token
+  (episode, else source) or a non-agent origin. The same witness
+  restating confirms but never promotes. Parks and promotions are
+  journaled (schema v27) and covered by `memory_dream(rollback)`.
+  Honest scope: this does not stop a poisoned entry from being stored
+  or retrieved — episodic search still surfaces it; the claim is that
+  poison does not silently gain *canonical* authority. Scalar claims
+  only in v1; member ops keep their existing guards. See
+  [dreaming](dreaming.md) and the threat model in `SECURITY.md`.
 - **Aggregation-recall retrieval knobs off**
   (`memory.search.contiguity_neighbors = 0`,
   `memory.search.timeline_channel = false`) — Phase 1 retrieval-side

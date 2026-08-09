@@ -1,0 +1,16 @@
+{
+ "preregistration": "docs/superpowers/specs/2026-08-09-consolidation-quarantine-design.md",
+ "tag": "qreplay-0809",
+ "dsn_host": "127.0.0.1:5433/pseudolife_memory",
+ "runs_examined": 50,
+ "journal_rows": 791,
+ "scalar_rows": 629,
+ "would_park": 0,
+ "no_backing": 0,
+ "unresolvable": 0,
+ "excluded_confirmed": 7,
+ "excluded_contested": 6,
+ "by_source": {},
+ "would_park_rate": 0.0,
+ "written_at": "2026-08-09T13:05:02"
+}

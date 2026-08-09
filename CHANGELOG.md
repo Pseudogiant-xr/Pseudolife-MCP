@@ -6,6 +6,57 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Measured (2026-08-09 — consolidation quarantine: all three preregistered gates resolve)
+- **Gate 1 (poisoning smoke)** is pinned deterministically in
+  `tests/test_dream_quarantine.py`: same-tier agent-over-agent
+  supersession parks, an independent second witness promotes, the same
+  witness restating holds, empty-slot claims park currentless, parks
+  and promotions journal and roll back. **Gate 2 (common-path
+  non-inferiority)**: quarantine ON in the paranoid configuration is
+  metric-identical to OFF on the e4b rung — gold 1.0 / stale_leak 0.1 /
+  19 claims both arms, parked 0
+  (`evals/results/quarantine-gate-qgate-0809.json`, producer
+  `evals/quarantine_gate.py`; structural note in the artifact: the
+  bench source carries no origin tier, so this run verifies the
+  restructured claim loop, and firing behavior is pinned by the CPU
+  tests). **Gate 3 (live friction)**: replaying the last 50 live
+  dream-run journals, 0 of 629 scalar claims would have parked
+  (`evals/results/quarantine-replay-qreplay-0809.json`, producer
+  `evals/quarantine_replay.py`, 0 unresolvable rows) — zero production
+  friction, with the honest coverage caveat that cuts the other way:
+  the entries table persists no per-entry origin, so the v1 rule keys
+  on source-derived origin (`claude`/`assistant`/`agent` source tags),
+  and a bank whose writers use project-tag sources is outside its
+  reach until a schema change persists origin per entry (a future,
+  separately-preregistered decision).
+
+### Added (2026-08-09 — consolidation quarantine: the two-man rule for low-trust dream claims)
+- **`memory.dream.quarantine_low_trust`** (ships off; spec
+  `docs/superpowers/specs/2026-08-09-consolidation-quarantine-design.md`,
+  the MAFIA-informed hardening — defenses key on WHO wrote, never on
+  what the text says). When on, a scalar dream claim whose backing entry
+  is agent-tier and outside `memory.dream.trusted_sources` parks as a
+  contender instead of taking `current` — including at a brand-new slot
+  (currentless contender, a new `write_fact(force_contend=...)` path) —
+  and promotes on exactly two routes: explicit
+  `memory_fact_resolve(accept=true)`, or an independent second witness
+  (a later matching claim from a different witness token — episode,
+  else source — or a non-agent origin; the same witness restating
+  confirms but never promotes) — tier-gated so the rule is never weaker
+  than the provenance guard it reinforces: two agent witnesses cannot
+  supersede a user-stated fact, and a claim corroborating the canonical
+  value confirms without ever stamping quarantine provenance onto the
+  current record. Automated promotions are stamped with a literal
+  agent-tier support (never the claim's own origin field, which is
+  model output), never as a user act; parks ride the existing
+  `contested` journal rows and promotions journal under
+  `quarantine_promoted`, both reversed by `memory_dream(rollback)`.
+  Run results carry `quarantine_parked` / `quarantine_held` /
+  `quarantine_promoted`. Honest scope, stated in `SECURITY.md`: a
+  poisoned entry is still stored and retrievable — the quarantine
+  denies it silent *canonical* authority; writer identity remains
+  self-reported (mitigation, not authentication).
+
 ### Measured (2026-08-09 — H3: the staleness policy closes the answerer-discretion gap completely)
 - **Quarantine wins on all four preregistered gates**
   (`evals/results/stale-policy-verdict.json`, producer

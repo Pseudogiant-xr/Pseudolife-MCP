@@ -253,6 +253,18 @@ class DreamConfig:
     idle_seconds: float = 600.0
     max_batch: int = 40
     sweep_interval_seconds: float = 600.0   # used by the Phase 3 daemon sweep
+    # Consolidation quarantine — the two-man rule for low-trust claims
+    # (spec 2026-08-09-consolidation-quarantine-design.md; MAFIA-informed:
+    # the defense keys on WHO wrote, never on what the text says). When on,
+    # a scalar dream claim whose backing entry is agent-tier (source maps
+    # to origin "agent") and outside ``trusted_sources`` parks as a
+    # contender instead of taking ``current``; promotion needs an explicit
+    # ``memory_fact_resolve(accept=True)`` or an independent second
+    # witness. Ships OFF; flipping the default is a separate soak decision.
+    quarantine_low_trust: bool = False
+    # Sources operators explicitly trust past the quarantine (exact match
+    # on the entry's ``source`` tag). Empty = the paranoid configuration.
+    trusted_sources: list[str] = field(default_factory=list)
     # Tier 2 (Phase 3) — BYO OpenAI-compatible extractor. Unused in Phases 1–2.
     extractor_base_url: str | None = None
     extractor_api_key: str | None = None
