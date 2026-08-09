@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-08-09 — file-mode cortex snapshot round-trips temporal stamps)
+- **`CortexStore.save()`/`load()` now persist the v11 temporal stamp
+  (`tx_time`/`valid_time`/`hlc_phys`/`hlc_logical`/`writer_id`/
+  `session_id`/`version`) and `freshness_class`.** The `.pt` snapshot —
+  the persistence path when `MemoryService` runs without a storage
+  backend (file mode) — omitted all eight fields, so every restart
+  stripped every fact's stamp: records reloaded at HLC `(0,0)` in
+  `_should_supersede` (any stale-HLC replay could silently supersede a
+  standing fact) and freshness reset to evergreen — the same failure
+  class the contender-stamps fix closed for the write path, reopened at
+  reload. The Postgres path (`storage/sync.py`) already round-tripped
+  these fields, so live PG-backed deployments were unaffected; this is
+  correctness for file-mode users. Legacy snapshots load with the
+  dataclass defaults (`None` / version 1 / evergreen). Pinned in
+  `tests/test_cortex_snapshot_stamps.py`, including the
+  stale-HLC-after-restart defense. No schema bump — file snapshot only.
+
 ### Fixed (2026-08-09 — contenders carry temporal stamps; promotion ticks the HLC)
 - **A parked contender now carries its write's temporal stamps, and
   promotion is stamped as its own transaction.** Before this fix

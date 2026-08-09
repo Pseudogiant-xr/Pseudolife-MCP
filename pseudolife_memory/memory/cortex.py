@@ -1351,6 +1351,18 @@ class CortexStore:
                     "embedding": r.embedding,
                     "slot_embedding": r.slot_embedding,
                     "support": sorted(r.support),
+                    # v11 temporal stamp + v23 freshness. Omitting these was
+                    # the file-mode half of the contender-stamps fix: every
+                    # restart reloaded facts at HLC (0,0), so any stale write
+                    # could supersede them, and freshness reset to evergreen.
+                    "tx_time": r.tx_time,
+                    "valid_time": r.valid_time,
+                    "hlc_phys": r.hlc_phys,
+                    "hlc_logical": r.hlc_logical,
+                    "writer_id": r.writer_id,
+                    "session_id": r.session_id,
+                    "version": r.version,
+                    "freshness_class": r.freshness_class,
                 }
                 for r in self.records
             ],
@@ -1393,6 +1405,14 @@ class CortexStore:
                 embedding=d.get("embedding"),
                 slot_embedding=d.get("slot_embedding"),
                 support=set(d.get("support", [])),
+                tx_time=d.get("tx_time"),
+                valid_time=d.get("valid_time"),
+                hlc_phys=d.get("hlc_phys"),
+                hlc_logical=d.get("hlc_logical"),
+                writer_id=d.get("writer_id"),
+                session_id=d.get("session_id"),
+                version=d.get("version", 1) or 1,
+                freshness_class=d.get("freshness_class", "evergreen"),
             )
             self.records.append(rec)
         self._reindex_current()
