@@ -1,7 +1,11 @@
 # Cortex for Pseudolife-MCP — implementation spec (core-only)
 
-Status: proposed. Target repo: **Pseudolife-MCP** (`origin`), core-only, branched
-off `origin/master` (`adc39a8`). Deliberately excludes the agent-side gateway "dream".
+Status: historical — implemented and long since shipped; kept as the original
+design record. Some named internals have since been removed (e.g.
+`extract_slots_regex`, deleted in the 2026-07-30 dead-code pass) — trust the
+current code over the inventories below. Target repo: **Pseudolife-MCP**
+(`origin`), core-only, branched off `origin/master` (`adc39a8`). Deliberately
+excludes the agent-side gateway "dream".
 
 ## 1. Why (model-agnostic motivation)
 

@@ -52,7 +52,7 @@ def svc(pg_conn, pg_url):  # noqa: F811
 
 
 def test_schema_version_is_23():
-    assert schema.SCHEMA_META_VERSION == 28
+    assert schema.SCHEMA_META_VERSION >= 23  # freshness_class landed at v23; persists into later schemas
 
 
 def test_facts_table_declares_freshness_class():

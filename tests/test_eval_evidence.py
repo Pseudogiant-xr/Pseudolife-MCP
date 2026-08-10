@@ -94,8 +94,14 @@ class Claim:
     places: int          # decimals the doc rounds to
 
     def actual(self) -> float:
-        loaded = [json.loads((REPO / a).read_text(encoding="utf-8"))
-                  for a in self.artifacts]
+        loaded = []
+        for a in self.artifacts:
+            text = (REPO / a).read_text(encoding="utf-8")
+            if a.endswith(".jsonl"):
+                loaded.append([json.loads(line) for line in text.splitlines()
+                               if line.strip()])
+            else:
+                loaded.append(json.loads(text))
         return self.value(*loaded)
 
 
@@ -1168,6 +1174,59 @@ CLAIMS.append(Claim(
     artifacts=(SIDECAR_CACHE,),
     value=lambda d: d["nocache_mean"],
     stated=10.65, places=2))
+
+
+# ── gaps found by the 2026-08-10 alignment audit ─────────────────────────
+# Three published numbers had no evidence row while their table siblings
+# did, and the floor-vs-ceiling extractor section had none at all — the
+# exact failure class this file's docstring records from the 2026-07-17
+# and 2026-07-21 audits.
+
+# The two shootout table rows that were never pinned (siblings were).
+for _arm_key, _needle, _r10 in [
+    ("granite-embedding-english-r2",
+     "| granite-embedding-english-r2 | 768 | 0.662 |", 0.662),
+    ("snowflake-arctic-embed-l-v2.0 (query prefix)",
+     "| snowflake-arctic-embed-l-v2.0 | 1024 | 0.732 |", 0.732),
+]:
+    CLAIMS.append(Claim(
+        id=f"embed-r10-{_arm_key.split()[0].split('-')[0]}", doc=BENCH,
+        needle=_needle, artifacts=(SHOOTOUT,),
+        value=(lambda k: lambda d: next(
+            a["recall"]["10"] for a in d["arms"] if a["arm"] == k))(_arm_key),
+        stated=_r10, places=3))
+
+# The per-question channel union behind the cascade argument. Derived from
+# the e2e run's per-question rows (rag_correct OR cortex_correct); the
+# three replicates are byte-identical, so the first jsonl suffices.
+E2E_ROWS = RESULTS + "longmemeval-ku-oracle-qwen-27b-ceiling-e2e.jsonl"
+CLAIMS.append(Claim(
+    id="e2e-channel-union", doc=BENCH,
+    needle="per-question union is\n0.949",
+    artifacts=(E2E_ROWS,),
+    value=lambda rows: (sum(1 for r in rows
+                            if r["rag_correct"] or r["cortex_correct"])
+                        / len(rows)),
+    stated=0.949, places=3))
+
+# The floor-vs-ceiling extractor comparison (single-run point estimates,
+# stated as such in the doc — pinned all the same).
+FLOOR_SUMMARY = RESULTS + "longmemeval-ku-oracle-gemma-e2b.summary.json"
+CEILING_SINGLE = RESULTS + "longmemeval-ku-oracle-qwen-27b.summary.json"
+for _cid, _artifact, _needle, _arm, _stated in [
+    ("floorceil-cortex-ceiling", CEILING_SINGLE,
+     "0.564 → 0.192 when the extractor shrinks", "cortex", 0.564),
+    ("floorceil-cortex-floor", FLOOR_SUMMARY,
+     "0.564 → 0.192 when the extractor shrinks", "cortex", 0.192),
+    ("floorceil-rag-ceiling", CEILING_SINGLE,
+     "0.615 → 0.564 — a shift inside the run-to-run band", "rag", 0.615),
+    ("floorceil-rag-floor", FLOOR_SUMMARY,
+     "0.615 → 0.564 — a shift inside the run-to-run band", "rag", 0.564),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=BENCH, needle=_needle, artifacts=(_artifact,),
+        value=(lambda a: lambda d: d["arms"][a]["accuracy"])(_arm),
+        stated=_stated, places=3))
 
 
 def test_every_published_number_names_a_committed_artifact():

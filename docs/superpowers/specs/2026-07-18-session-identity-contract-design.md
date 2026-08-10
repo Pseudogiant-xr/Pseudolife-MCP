@@ -97,7 +97,10 @@ tiers rank identity only.
   immediately — no longer lazily on first store — sets the **machine-scoped
   active-session pointer** to it, and includes in the returned briefing text
   one line advertising the handle: the episode id and the instruction to
-  pass `episode=<id>` on writes when running concurrent sessions.
+  pass `episode=<id>` on writes when running concurrent sessions
+  *(amended 2026-08-10: the briefing now advertises the handle as always-pass
+  — see
+  [2026-08-10-identity-rekeying-principal-tokens-design.md](2026-08-10-identity-rekeying-principal-tokens-design.md))*.
 - A SessionEnd hook is added to the plugin: calls
   `POST /api/hook/session-end` with the same `session_id`; the daemon closes
   that session's root (dream fires per existing close semantics) and clears

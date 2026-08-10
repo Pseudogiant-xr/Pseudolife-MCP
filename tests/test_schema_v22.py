@@ -11,7 +11,7 @@ from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
 
 
 def test_schema_version_is_current():
-    assert SCHEMA_META_VERSION == 28
+    assert SCHEMA_META_VERSION >= 22  # dst-side edge index landed at v22; persists into later schemas
 
 
 def test_edges_dst_id_index_present(pg_conn):
