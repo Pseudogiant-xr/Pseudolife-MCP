@@ -427,6 +427,13 @@ class MemoryService:
         self._db_url = database_url or os.environ.get("PSEUDOLIFE_MCP_DATABASE_URL")
         self._storage = None
         self._graph = None  # GraphStore
+        # Activity clock for handle-attributed writes. The idle reaper
+        # proxies activity by band-entry timestamps, but two of the three
+        # episode-handle callers (record_outcome, cortex_write) never
+        # produce a band entry — without this, a handle-resumed episode is
+        # re-reaped on the next sweep, firing a dream per resume cycle.
+        # In-memory only: a restart re-fires the SessionStart hook anyway.
+        self._episode_touches: dict[str, float] = {}
         # Resolve data directory first — that's where memory_state lives
         # AND where the default config sits (if config_path not given).
         self.data_dir = Path(data_dir) if data_dir else Path.cwd() / "data"
@@ -4409,7 +4416,8 @@ class MemoryService:
                 if (root.ended_at is not None or root.parent_id is not None
                         or not root.session_key):
                     continue
-                activity = last_ts.get(root.id, root.started_at)
+                activity = max(last_ts.get(root.id, root.started_at),
+                               self._episode_touches.get(root.id, 0.0))
                 for e in em.episodes.values():
                     if (e.id != root.id and e.id in last_ts
                             and em._descends_from(e, root.id)):
@@ -4555,6 +4563,7 @@ class MemoryService:
                    if e.parent_id is None and e.ended_at is None
                    and e.id.startswith(handle)]
         if len(matches) == 1:
+            self._episode_touches[matches[0].id] = time.time()
             return (matches[0].id, matches[0].session_key)
         if len(matches) > 1:
             return None
@@ -4564,7 +4573,7 @@ class MemoryService:
             return None
         closed = [e for e in self._cms.episodes.episodes.values()
                   if e.parent_id is None and e.ended_at is not None
-                  and e.id.startswith(handle)]
+                  and e.session_key and e.id.startswith(handle)]
         if len(closed) != 1:
             return None
         ep = closed[0]
@@ -4572,6 +4581,7 @@ class MemoryService:
             return None
         ep.ended_at = None
         ep.closed_by_new_start = False
+        self._episode_touches[ep.id] = time.time()
         self._persist_episodes()
         logger.info("resumed session episode %s via handle", ep.id)
         return (ep.id, ep.session_key)

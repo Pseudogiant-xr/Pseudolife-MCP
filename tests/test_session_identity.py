@@ -435,3 +435,58 @@ def test_reaped_handle_resume_disabled_warns(pg_service, monkeypatch):
     svc.episode_end_session("keyV")   # close survives: episode is non-empty
     res = svc.store("resume off", source="t", episode=ep["id"][:12])
     assert res["episode_warning"] == "unknown or closed episode handle"
+
+
+def test_handle_touch_survives_the_next_reaper_sweep(pg_service):
+    """Post-review hardening (finding 1): the reaper proxies activity by
+    band-entry timestamps, but record_outcome never writes a band entry —
+    without the touch map, a handle-resumed episode is re-reaped on the
+    very next sweep, firing a dream per resume cycle."""
+    svc = pg_service
+    ep = svc.episode_start_session("keyW", "session W")
+    svc.store("seed keyW", source="t", episode=ep["id"][:12])
+    for band in svc._cms.bands:                # age the only activity proxy
+        for e in band.entries:
+            if e.episode_id == ep["id"]:
+                e.timestamp = _time.time() - 20_000
+    svc._episode_touches.clear()               # the seed store touched too
+    svc.reap_idle_sessions(7_200)
+    assert svc._cms.episodes.episodes[ep["id"]].ended_at is not None
+    svc.record_outcome(task="t", outcome="success", episode=ep["id"][:12])
+    root = svc._cms.episodes.episodes[ep["id"]]
+    assert root.ended_at is None               # resumed
+    svc.reap_idle_sessions(7_200)
+    assert root.ended_at is None, "touched episode must survive the sweep"
+    # The touch map is exactly what keeps it alive: clear it and the same
+    # sweep re-reaps (the pre-hardening behavior).
+    svc._episode_touches.clear()
+    svc.reap_idle_sessions(7_200)
+    assert root.ended_at is not None
+
+
+def test_handle_resume_reaches_storage(pg_service):
+    """Post-review hardening (finding 2): the reopen must hit the episodes
+    table, or a daemon restart hydrates the root closed again and the
+    2026-08-10 symptom returns silently."""
+    svc = pg_service
+    ep = svc.episode_start_session("keyY", "session Y")
+    svc.store("seed keyY", source="t", episode=ep["id"][:12])
+    svc.episode_end_session("keyY")
+    svc.store("resumed keyY", source="t", episode=ep["id"][:12])
+    row = next(r for r in svc._storage.load_episodes() if r["id"] == ep["id"])
+    assert row["ended_at"] is None
+
+
+def test_keyless_root_never_resumes_via_handle(pg_service):
+    """Post-review hardening (finding 4): the reaper skips keyless roots, so
+    resuming one via handle would leave it open forever with no auto-close
+    and no end-of-session dream — refuse, warn-and-degrade instead."""
+    svc = pg_service
+    ep = svc.episode_start_session("keyZ", "session Z")
+    svc.store("seed keyZ", source="t", episode=ep["id"][:12])
+    root = svc._cms.episodes.episodes[ep["id"]]
+    root.session_key = None
+    root.ended_at = _time.time()
+    res = svc.store("keyless resume", source="t", episode=ep["id"][:12])
+    assert res["episode_warning"] == "unknown or closed episode handle"
+    assert root.ended_at is not None
