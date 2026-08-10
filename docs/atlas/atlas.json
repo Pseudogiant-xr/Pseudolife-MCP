@@ -3,7 +3,7 @@
   "title": "PseudoLife-MCP System Atlas",
   "version": "0.13.0",
   "schema": 28,
-  "verified": "2026-08-08"
+  "verified": "2026-08-10"
  },
  "groups": {
   "clients": {
@@ -259,7 +259,7 @@
    "d": [
     "Every tool is a thin tier-tagged wrapper over MemoryService",
     "_async_offload: tool bodies run on worker threads",
-    "tools/list filtered per session tier; hidden tools stay callable server-side"
+    "tools/list filtered per principal tier; hidden tools stay callable server-side"
    ]
   },
   {
@@ -271,9 +271,9 @@
    "s": "minimal ⊂ core ⊂ full",
    "p": "pseudolife_memory/toolset_tiers.py",
    "d": [
-    "Resolution: session override → writer map → env default (core)",
-    "12h-TTL session overrides; visibility is a token lever, NOT security",
-    "core = 21 of 35 tools; minimal = 8; auth is the bearer token"
+    "Resolution: principal override → tier map → env default (core)",
+    "12h-TTL principal overrides (PrincipalTierState); visibility is a token lever, NOT security",
+    "core = 22 of 35 tools; minimal = 9; auth is the bearer token"
    ]
   },
   {
@@ -285,8 +285,23 @@
    "s": "who-wrote-this chokepoint",
    "p": "pseudolife_memory/writer_context.py",
    "d": [
-    "X-PL-Writer / X-PL-Session → hook pointer → legacy mcp-session-id",
+    "A NAMED principal from the bearer token outranks X-PL-Writer (2026-08-10)",
+    "Then: X-PL-Writer / X-PL-Session → hook pointer → legacy mcp-session-id",
     "mcp-session-id removed from MCP spec 2026-07-28 — fallback only"
+   ]
+  },
+  {
+   "id": "principals",
+   "g": "daemon",
+   "x": 1200,
+   "y": 360,
+   "t": "principals.py",
+   "s": "token → principal map",
+   "p": "pseudolife_memory/principals.py",
+   "d": [
+    "PSEUDOLIFE_MCP_TOKENS (token:principal,…) parsed fail-closed; malformed entries skipped",
+    "Matched principal IS the writer id and keys the toolset tier",
+    "Singular PSEUDOLIFE_MCP_TOKEN → reserved principal 'default' (legacy writer path kept)"
    ]
   },
   {
@@ -1247,6 +1262,12 @@
    "f": "mcpsrv",
    "t": "writer",
    "l": "identity resolve",
+   "k": "control"
+  },
+  {
+   "f": "writer",
+   "t": "principals",
+   "l": "token → principal",
    "k": "control"
   },
   {

@@ -21,6 +21,10 @@ from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
 
 
 def test_meta_version_is_28():
+    # The newest schema test carries the exact current-version pin — the
+    # deliberate tripwire that forces a bump author through the shipping
+    # checklist. On the v29 bump: relax this to >= 28 and pin == 29 in the
+    # new test_schema_v29.py (two-file touch, not ten).
     assert SCHEMA_META_VERSION == 28
 
 

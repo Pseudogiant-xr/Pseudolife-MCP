@@ -200,7 +200,7 @@ is agent context every session, so it stays lean.
 | `memory_relation_define(name, description, ...)` | Grow the closed relation vocabulary (deliberate, rare act) |
 | `document_ingest(path, source?)` | Index a file (txt/md/pdf) in the reference bank |
 | `document_search(query, top_k?)` | RAG search over the reference bank only |
-| `memory_toolset(action)` | Check or change this session's visibility tier: `status` / `expand` / `collapse` |
+| `memory_toolset(action)` | Check or change this principal's visibility tier: `status` / `expand` / `collapse` |
 
 Each tool returns plain JSON. See `pseudolife_memory/mcp_server.py` for
 docstrings — those are what Claude reads to decide when to call which tool.
@@ -210,9 +210,10 @@ metadata. Full-table dumps and topology views live in the **Cortex Console**
 (`/api/*`) and the `pseudolife-mcp briefing` CLI.
 
 **Toolset tiers.** Three visibility tiers — `minimal` (9 tools), `core`
-(22, the shipped default), `full` (35) — filtered per session at
-`tools/list`; a session steps its own tier up or down with `memory_toolset`
-before calling a hidden tool. Defaults, per-client mapping, and weak-model
+(22, the shipped default), `full` (35) — filtered per principal at
+`tools/list`; a principal (the named bearer-token identity, or the writer
+id for single-token installs) steps its own tier up or down with
+`memory_toolset` before calling a hidden tool. Defaults, per-client mapping, and weak-model
 deployments:
 [Configuration — toolset tiers](docs/guide/configuration.md#toolset-tiers).
 

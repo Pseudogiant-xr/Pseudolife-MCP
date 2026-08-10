@@ -175,6 +175,29 @@ def test_readme_schema_version_matches_code() -> None:
         f"configuration.md DSN row says v{dsn}, code says v{SCHEMA_META_VERSION}")
 
 
+def test_schema_version_history_table_reaches_current() -> None:
+    """Every other schema-bump surface (README table, DSN row, CHANGELOG
+    mention, atlas meta) is guarded, but the 2026-08-10 audit found the
+    'Schema version history' table in configuration.md pinned by nothing —
+    a bump with a forgotten history row would pass the suite silently and
+    the table would stop at v28 forever. The table must have a row for the
+    current version and no gaps from v11 (its first row) upward."""
+    from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
+
+    conf = (_DOCS_GUIDE / "configuration.md").read_text(encoding="utf-8")
+    section = conf.split("## Schema version history", 1)
+    assert len(section) == 2, (
+        "configuration.md must keep the 'Schema version history' section")
+    rows = [int(v) for v in re.findall(r"^\| v(\d+) \|", section[1],
+                                       flags=re.MULTILINE)]
+    assert rows, "the history table must hold | vNN | rows"
+    assert max(rows) == SCHEMA_META_VERSION, (
+        f"history table stops at v{max(rows)}, code is at "
+        f"v{SCHEMA_META_VERSION} — add the missing row")
+    assert sorted(rows) == list(range(min(rows), SCHEMA_META_VERSION + 1)), (
+        f"history table has gaps: {sorted(rows)}")
+
+
 def test_dockerfile_bakes_the_default_embedding_model() -> None:
     """CRITICAL (2026-07-28 v25 review): the daemon image baked only
     all-MiniLM-L6-v2 while ``EmbeddingConfig.model_name``'s default moved to
@@ -281,6 +304,22 @@ def test_tracked_tree_carries_no_maintainer_identifiers() -> None:
     fixtures must use ``192.168.1.x`` (or ``192.168.x.x`` placeholders),
     never the real ``.0.x`` subnet that leaked via eval-harness defaults."""
     needles = [("HAM" "O9").lower(), "pseudogiant" + "92", "192.168." + "0."]
+    # Pattern classes (2026-08-10 audit): the needle list only catches the
+    # identifiers that already leaked once — a differently-shaped future
+    # leak (another username, subnet, or a credential) sailed through. The
+    # classes below catch the shape, with the tree's sanctioned synthetic
+    # forms allowlisted. Generic email scanning is deliberately absent:
+    # the eval fixtures hold hundreds of synthetic addresses.
+    username_pat = re.compile(r"c:\\+users\\+(?!<|o'brien)[a-z0-9]")
+    rfc1918_pat = re.compile(
+        r"\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
+        r"|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
+        r"|192\.168\.\d{1,3}\.\d{1,3})\b")
+    allowed_ip_prefixes = ("10.0.0.", "192.168.1.", "172.17.0.1")
+    credential_pat = re.compile(
+        r"\b(?:ghp_[a-z0-9]{20,}|github_pat_[a-z0-9_]{20,}"
+        r"|akia[a-z0-9]{16}|xox[bpars]-[a-z0-9-]{10,}"
+        r"|sk-ant-[a-z0-9-]{8,})\b")
     repo = Path(__file__).resolve().parents[1]
     try:
         proc = subprocess.run(["git", "ls-files"], cwd=repo, check=True,
@@ -295,7 +334,18 @@ def test_tracked_tree_carries_no_maintainer_identifiers() -> None:
         except OSError:
             continue
         if any(n in text for n in needles):
-            hits.append(rel)
+            hits.append((rel, "needle"))
+            continue
+        if username_pat.search(text):
+            hits.append((rel, "windows username path"))
+            continue
+        if credential_pat.search(text):
+            hits.append((rel, "credential-shaped string"))
+            continue
+        for m in rfc1918_pat.finditer(text):
+            if not m.group(0).startswith(allowed_ip_prefixes):
+                hits.append((rel, f"unsanctioned private IP {m.group(0)}"))
+                break
     assert hits == [], f"maintainer identifiers in tracked files: {hits}"
 
 

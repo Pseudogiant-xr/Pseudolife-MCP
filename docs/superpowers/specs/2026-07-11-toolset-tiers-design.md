@@ -1,7 +1,10 @@
 # Session-scoped toolset tiers — design
 
 **Date:** 2026-07-11
-**Status:** approved (user), pending implementation plan
+**Status:** implemented, then superseded by
+[2026-08-10-identity-rekeying-principal-tokens-design.md](2026-08-10-identity-rekeying-principal-tokens-design.md)
+— tier overrides are now keyed to the principal, not the session (the MCP
+2026-07-28 revision forbids per-connection `tools/list` variance)
 **Prereqs:** compact-by-default payloads (5b5e2eb), env-overridable toolset (28b1002)
 
 ## Problem
