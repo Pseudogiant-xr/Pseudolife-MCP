@@ -477,6 +477,40 @@ def test_handle_resume_reaches_storage(pg_service):
     assert row["ended_at"] is None
 
 
+def test_hook_resume_touch_survives_the_next_reaper_sweep(pg_service):
+    """Review follow-up (2026-08-11): _resume_closed_session_locked (the
+    session-key path shared by episode_start_session and the store path)
+    cleared ended_at without writing a touch — the same blind spot the
+    handle path fixed above. A SessionStart-resumed episode whose session
+    then makes only non-band-entry writes (outcomes, cortex writes) was
+    re-reaped on the very next sweep."""
+    svc = pg_service
+    ep = svc.episode_start_session("keyX", "session X")
+    svc.store("seed keyX", source="t", episode=ep["id"][:12])
+    for band in svc._cms.bands:                # age the only activity proxy
+        for e in band.entries:
+            if e.episode_id == ep["id"]:
+                e.timestamp = _time.time() - 20_000
+    svc._episode_touches.clear()               # the seed store touched too
+    svc.reap_idle_sessions(7_200)
+    assert svc._cms.episodes.episodes[ep["id"]].ended_at is not None
+    resumed = svc.episode_start_session("keyX", "session X")   # hook re-fire
+    assert resumed["id"] == ep["id"]
+    root = svc._cms.episodes.episodes[ep["id"]]
+    assert root.ended_at is None               # resumed, not forked
+    # Outcome-only return: no episode handle (attributes via the current
+    # pointer the resume just moved), so neither a band entry nor a
+    # handle-path touch is written — the resume itself must protect.
+    svc.record_outcome(task="t", outcome="success")
+    svc.reap_idle_sessions(7_200)
+    assert root.ended_at is None, "resumed episode must survive the sweep"
+    # The touch map is exactly what keeps it alive: clear it and the same
+    # sweep re-reaps (the pre-hardening behavior).
+    svc._episode_touches.clear()
+    svc.reap_idle_sessions(7_200)
+    assert root.ended_at is not None
+
+
 def test_keyless_root_never_resumes_via_handle(pg_service):
     """Post-review hardening (finding 4): the reaper skips keyless roots, so
     resuming one via handle would leave it open forever with no auto-close
