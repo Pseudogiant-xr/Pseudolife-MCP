@@ -352,6 +352,40 @@ def test_asgi_auth_gate(svc):
                  headers=[(b"authorization", b"Bearer secret")])[0] == 200
     # static + health stay open even with a token set
     assert _call(app, "GET", "/health")[0] == 200
+
+
+def test_asgi_auth_gate_token_map(svc):
+    """Spec 2026-08-10: per-principal tokens authenticate alongside the
+    singular token; unknown bearers stay rejected."""
+    app = build_console_app(_stub_mcp, "single-tok", lambda: {"status": "ok"},
+                            svc, token_map={"tokA": "hermes-box"})
+    assert _call(app, "GET", "/api/overview",
+                 headers=[(b"authorization", b"Bearer tokA")])[0] == 200
+    assert _call(app, "GET", "/api/overview",
+                 headers=[(b"authorization", b"Bearer single-tok")])[0] == 200
+    assert _call(app, "GET", "/api/overview",
+                 headers=[(b"authorization", b"Bearer nope")])[0] == 401
+    assert _call(app, "GET", "/api/overview")[0] == 401
+
+
+def test_asgi_auth_gate_non_ascii_bearer_is_401_not_500(svc):
+    """Review 2026-08-10 finding 1: compare_digest rejects non-ASCII str;
+    the gate must answer 401, never propagate a TypeError to uvicorn."""
+    app = _app(svc, token="secret")
+    st, _ = _call(app, "GET", "/api/overview",
+                  headers=[(b"authorization", "Bearer café".encode("utf-8"))])
+    assert st == 401
+
+
+def test_asgi_auth_gate_map_only_closes_gate(svc):
+    """A token map with no singular token still closes the gate — auth is
+    configured, so anonymous callers are rejected."""
+    app = build_console_app(_stub_mcp, None, lambda: {"status": "ok"},
+                            svc, token_map={"tokA": "hermes-box"})
+    assert _call(app, "GET", "/api/overview")[0] == 401
+    assert _call(app, "GET", "/api/overview",
+                 headers=[(b"authorization", b"Bearer tokA")])[0] == 200
+    assert _call(app, "GET", "/health")[0] == 200   # liveness stays open
     assert _call(app, "GET", "/ui/")[0] == 200
 
 

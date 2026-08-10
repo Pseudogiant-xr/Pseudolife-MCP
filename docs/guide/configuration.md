@@ -11,7 +11,8 @@ backups. Part of the [user guide](../../README.md#documentation).
 | `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v28). Unset → v0.1 file-only mode. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). |
 | `PSEUDOLIFE_MCP_HOST` / `_PORT` | `127.0.0.1` / `8765` | Daemon bind address. |
-| `PSEUDOLIFE_MCP_TOKEN` | _(unset)_ | Bearer token; **required** to bind a non-loopback host. |
+| `PSEUDOLIFE_MCP_TOKEN` | _(unset)_ | Bearer token; **required** to bind a non-loopback host (a `PSEUDOLIFE_MCP_TOKENS` map also satisfies this). Maps to the reserved principal `default`, which keeps the `X-PL-Writer`/`PSEUDOLIFE_WRITER_ID` writer path. |
+| `PSEUDOLIFE_MCP_TOKENS` | _(unset)_ | Per-principal bearer tokens: `token:principal,token:principal`. A matched token's principal **is** the writer id and keys the toolset tier (the identity axis that survives the MCP 2026-07-28 stateless core). Malformed entries are logged and skipped — a skipped token does not authenticate, and a map that parses to zero entries with no singular token refuses startup rather than running open. May be set alongside `PSEUDOLIFE_MCP_TOKEN`; the map wins for its tokens. Note the singular-token holder is fully trusted and may still assert any writer via `X-PL-Writer` — mint per-principal tokens when that distinction matters. |
 | `PSEUDOLIFE_MCP_TRUST_BIND` | _(unset)_ | Set `1` to allow a non-loopback bind without a token when the boundary is external (containerized, loopback-published). The compose daemon sets this; never set it for a host daemon. |
 | `PSEUDOLIFE_MCP_DATA_DIR` | `./data` (cwd-relative) | Weights cache + legacy-migration source + ChromaDB. |
 | `PSEUDOLIFE_MCP_CONFIG` | `<data_dir>/config.yaml` if present, else built-ins | Override MIRAS / embedding / memory config. |
@@ -219,14 +220,16 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
 Three visibility tiers — `minimal` (9 tools: the recall/capture loop, the
 set-slot pair, the gate), `core` (22: + graph/recall, world facts, lessons,
 documents, episodes, stats, `memory_get`, `memory_fact_resolve`),
-`full` (35) — filtered per session at `tools/list`. The filter is
+`full` (35) — filtered per principal at `tools/list` (the named principal
+from a `PSEUDOLIFE_MCP_TOKENS` bearer, else the writer id; sessions sharing
+a credential share a tier view). The filter is
 visibility, not auth (the bearer token is the security boundary) — but
 Claude clients gate calls against their own tool list, so in practice a
 session expands its tier before calling a hidden tool. Defaults:
 `PSEUDOLIFE_MCP_TOOLSET` (shipped: `core`) sets the baseline;
 `PSEUDOLIFE_MCP_TIER_MAP="claude-desktop:minimal,claude-code:core"` sets
-per-client defaults by writer id. Any session can step its own tier up or
-down at runtime with `memory_toolset(action="expand"|"collapse"|"status")`
+per-client defaults by principal (writer id). Any caller can step its tier
+up or down at runtime with `memory_toolset(action="expand"|"collapse"|"status")`
 — the daemon emits `tools/list_changed` so the client refreshes its list.
 Eager-loading clients (Claude Desktop) start at ~1.5k tokens of manifest on
 `minimal`; clients that defer schemas client-side (Claude Code) barely

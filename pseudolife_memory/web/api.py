@@ -120,18 +120,26 @@ def build_console_app(
     token: str | None,
     health_payload: Callable[[], dict],
     service: Any,
+    token_map: dict[str, str] | None = None,
 ) -> Callable:
     """Return the composed ASGI app. ``mcp_app`` is forwarded for non-console
-    paths; ``health_payload`` powers ``/health``; ``service`` backs ``/api``."""
+    paths; ``health_payload`` powers ``/health``; ``service`` backs ``/api``.
+    ``token`` is the singular bearer (default principal); ``token_map`` maps
+    per-principal tokens (spec 2026-08-10) — either alone closes the gate."""
+    from pseudolife_memory.principals import resolve_principal
+
     token = token or None
+    token_map = dict(token_map or {})
+    auth_configured = token is not None or bool(token_map)
     routes = ConsoleRoutes(service)
 
     def _authorized(scope) -> bool:
-        if token is None:
+        if not auth_configured:
             return True
         headers = {k.decode().lower(): v.decode()
                    for k, v in scope.get("headers", [])}
-        return headers.get("authorization") == f"Bearer {token}"
+        return resolve_principal(
+            headers.get("authorization"), token_map, token) is not None
 
     def _hdr(scope, name: bytes) -> str | None:
         for k, v in scope.get("headers", []):
@@ -159,7 +167,7 @@ def build_console_app(
         and pass. With a token set, Authorization already proves intent (it
         cannot be attached cross-origin without a failing preflight), so
         remote/LAN hosts stay legitimate."""
-        if token is not None:
+        if auth_configured:
             return None
         origin = _hdr(scope, b"origin")
         if origin is not None and _host_part(origin) not in _LOOPBACK:

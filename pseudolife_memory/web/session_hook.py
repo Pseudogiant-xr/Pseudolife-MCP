@@ -11,7 +11,8 @@ start: this module never raises and the endpoint always answers 200.
 When the hook passes a ``session_id`` (identity tier 3, spec 2026-07-18),
 ``hook_session_start`` additionally registers a session episode and the
 active-session pointer, and prepends a one-line advertisement of the episode
-handle so the agent can pass ``episode=`` on writes from concurrent sessions.
+handle instructing the agent to pass ``episode=`` on every write (identity
+tier 2 — the concurrency-correct channel; promoted spec 2026-08-10).
 ``hook_session_end`` mirrors this on the SessionEnd hook: it closes the
 session's episode and clears the pointer (only if still owned). Both are
 fail-open — registration/close failures are logged and never surface to the
@@ -185,8 +186,9 @@ def _episode_advertisement(session_id: str, source: str | None, service: Any) ->
         short = (ep.get("id") or "")[:12]
         if not short:
             return ""
-        return (f'Session episode: {short} — pass episode="{short}" on memory '
-                f"writes when running concurrent sessions.")
+        return (f'Session episode: {short} — pass episode="{short}" on every '
+                f"memory write (keeps attribution correct even when other "
+                f"sessions are open).")
     except Exception:  # noqa: BLE001 — never break a session start
         logger.exception(
             "session-start identity registration failed for session_id=%r "

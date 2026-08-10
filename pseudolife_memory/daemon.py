@@ -88,12 +88,32 @@ def run_daemon(host: str | None = None, port: int | None = None) -> None:
 
     host = host or os.environ.get("PSEUDOLIFE_MCP_HOST", DEFAULT_HOST)
     port = int(port or os.environ.get("PSEUDOLIFE_MCP_PORT", DEFAULT_PORT))
+    from pseudolife_memory.principals import (
+        misconfigured_tokens_env, parse_token_map)
+
     token = os.environ.get("PSEUDOLIFE_MCP_TOKEN") or None
+    raw_tokens = os.environ.get("PSEUDOLIFE_MCP_TOKENS")
+    token_map = parse_token_map(raw_tokens)
+    if misconfigured_tokens_env(raw_tokens, token_map):
+        # The operator configured a token map, but no entry parsed. Without
+        # a singular token that would silently degrade to OPEN mode — refuse
+        # rather than serve the bank unauthenticated (review 2026-08-10).
+        if token is None:
+            logger.error(
+                "PSEUDOLIFE_MCP_TOKENS is set but no entry parsed (want "
+                "\"token:principal,...\") and PSEUDOLIFE_MCP_TOKEN is unset — "
+                "refusing to start in open mode. Fix the map or unset it.")
+            sys.exit(2)
+        logger.warning(
+            "PSEUDOLIFE_MCP_TOKENS is set but no entry parsed (want "
+            "\"token:principal,...\") — continuing with the singular "
+            "PSEUDOLIFE_MCP_TOKEN only; no named principals are active.")
+    auth_configured = token is not None or bool(token_map)
     trust_bind = os.environ.get("PSEUDOLIFE_MCP_TRUST_BIND", "").lower() in (
         "1", "true", "yes", "on",
     )
 
-    if host not in _LOOPBACK and token is None:
+    if host not in _LOOPBACK and not auth_configured:
         # Inside a container the process MUST bind 0.0.0.0, but the real
         # network boundary is the Docker port publish (compose binds it to
         # 127.0.0.1). PSEUDOLIFE_MCP_TRUST_BIND is the operator's explicit
@@ -109,16 +129,17 @@ def run_daemon(host: str | None = None, port: int | None = None) -> None:
             )
         else:
             logger.error(
-                "Refusing to bind %s without PSEUDOLIFE_MCP_TOKEN — the memory "
-                "bank must not listen on the network unauthenticated. Set the "
-                "token (and give it to LAN clients), bind 127.0.0.1, or set "
+                "Refusing to bind %s without PSEUDOLIFE_MCP_TOKEN (or a "
+                "PSEUDOLIFE_MCP_TOKENS map) — the memory bank must not listen "
+                "on the network unauthenticated. Set a token (and give it to "
+                "LAN clients), bind 127.0.0.1, or set "
                 "PSEUDOLIFE_MCP_TRUST_BIND=1 if the boundary is external "
                 "(containerised, loopback-published).", host,
             )
             sys.exit(2)
 
     def _health() -> dict:
-        return _build_health_payload(mcp_server.service, token is not None)
+        return _build_health_payload(mcp_server.service, auth_configured)
 
     mcp_server.start_background_durability()
     mcp_server.start_dream_sweep()
@@ -131,9 +152,12 @@ def run_daemon(host: str | None = None, port: int | None = None) -> None:
 
     app = build_console_app(
         mcp_server.mcp.streamable_http_app(), token, _health, mcp_server.service,
+        token_map=token_map,
     )
-    logger.info("daemon: listening on %s:%s (auth=%s, storage=%s) — console at /ui/",
-                host, port, token is not None, _health()["storage"])
+    logger.info("daemon: listening on %s:%s (auth=%s, principals=%d, "
+                "storage=%s) — console at /ui/",
+                host, port, auth_configured, len(token_map),
+                _health()["storage"])
     uvicorn.run(app, host=host, port=port, log_level="warning")
 
 
