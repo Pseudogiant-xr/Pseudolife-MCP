@@ -4645,6 +4645,10 @@ class MemoryService:
         last.ended_at = None
         last.closed_by_new_start = False
         em.current_id = last.id
+        # The reaper proxies activity by band-entry timestamps; a resumed
+        # session that then makes only non-band-entry writes (outcomes,
+        # cortex writes) would be re-reaped on the next sweep without this.
+        self._episode_touches[last.id] = time.time()
         self._persist_episodes()
         logger.info("resumed session episode %s (session_key=%s)",
                     last.id, session_key)

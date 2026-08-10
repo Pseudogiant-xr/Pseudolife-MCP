@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-08-11 — session-key resume survives the idle reaper)
+- **A session-key resume (`_resume_closed_session_locked`, shared by the
+  SessionStart hook path and the store path) now records an activity touch
+  for the reopened episode**, matching the handle path. The idle reaper
+  proxies activity by band-entry timestamps, so a resumed session that then
+  made only non-band-entry writes (outcome signals, cortex writes,
+  surprise-gated restatement stores) was re-reaped on the very next sweep —
+  firing an extra end-of-session dream per resume cycle. Benign in the
+  common resume-then-store flow; systematic for outcome-only returns.
+  Flagged by the 2026-08-11 independent review of the handle-resume fix.
+
 ### Fixed (2026-08-10 — episode handle survives the idle reaper; capture-policy briefing)
 - **A write carrying a valid `episode=` handle to an idle-reaped root now
   resumes that episode** (within `PSEUDOLIFE_SESSION_RESUME_SECONDS`, the
