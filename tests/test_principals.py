@@ -64,3 +64,38 @@ def test_resolve_principal_open_mode_when_no_tokens_configured():
     # No auth configured at all (loopback open mode): everyone is "default".
     assert resolve_principal(None, {}, None) == DEFAULT_PRINCIPAL
     assert resolve_principal("Bearer anything", {}, None) == DEFAULT_PRINCIPAL
+
+
+def test_resolve_principal_non_ascii_bearer_rejected_not_500(  # review 2026-08-10 finding 1
+):
+    # hmac.compare_digest raises TypeError on non-ASCII str; the gate must
+    # answer 401 (None), never propagate an exception.
+    m = {"tok": "x"}
+    assert resolve_principal("Bearer café", m, "sing1") is None
+    assert resolve_principal("Bearer café", {}, "sing1") is None
+
+
+def test_resolve_principal_non_ascii_token_still_authenticates():
+    # An operator may mint a passphrase-style token with non-ASCII chars;
+    # byte-wise comparison must match it, not crash on it.
+    m = {"café-token": "hermes-box"}
+    assert resolve_principal("Bearer café-token", m, None) == "hermes-box"
+    assert resolve_principal("Bearer café-token", {}, "café-tok2") is None
+
+
+def test_parse_token_map_token_may_contain_colon():
+    # rpartition: principals cannot contain ":", tokens may.
+    assert parse_token_map("s3cr:et:alice") == {"s3cr:et": "alice"}
+
+
+def test_misconfigured_tokens_env():
+    # review 2026-08-10 finding 2: "configured but nothing parsed" must be
+    # distinguishable from "not configured" so the daemon can refuse to
+    # start in silent open mode.
+    from pseudolife_memory.principals import misconfigured_tokens_env
+    assert misconfigured_tokens_env("nocolon", {}) is True
+    assert misconfigured_tokens_env("tok9:default", {}) is True   # all skipped
+    assert misconfigured_tokens_env(None, {}) is False
+    assert misconfigured_tokens_env("", {}) is False
+    assert misconfigured_tokens_env("  ", {}) is False
+    assert misconfigured_tokens_env("a:x", {"a": "x"}) is False

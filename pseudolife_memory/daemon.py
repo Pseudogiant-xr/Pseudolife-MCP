@@ -88,10 +88,26 @@ def run_daemon(host: str | None = None, port: int | None = None) -> None:
 
     host = host or os.environ.get("PSEUDOLIFE_MCP_HOST", DEFAULT_HOST)
     port = int(port or os.environ.get("PSEUDOLIFE_MCP_PORT", DEFAULT_PORT))
-    from pseudolife_memory.principals import parse_token_map
+    from pseudolife_memory.principals import (
+        misconfigured_tokens_env, parse_token_map)
 
     token = os.environ.get("PSEUDOLIFE_MCP_TOKEN") or None
-    token_map = parse_token_map(os.environ.get("PSEUDOLIFE_MCP_TOKENS"))
+    raw_tokens = os.environ.get("PSEUDOLIFE_MCP_TOKENS")
+    token_map = parse_token_map(raw_tokens)
+    if misconfigured_tokens_env(raw_tokens, token_map):
+        # The operator configured a token map, but no entry parsed. Without
+        # a singular token that would silently degrade to OPEN mode — refuse
+        # rather than serve the bank unauthenticated (review 2026-08-10).
+        if token is None:
+            logger.error(
+                "PSEUDOLIFE_MCP_TOKENS is set but no entry parsed (want "
+                "\"token:principal,...\") and PSEUDOLIFE_MCP_TOKEN is unset — "
+                "refusing to start in open mode. Fix the map or unset it.")
+            sys.exit(2)
+        logger.warning(
+            "PSEUDOLIFE_MCP_TOKENS is set but no entry parsed (want "
+            "\"token:principal,...\") — continuing with the singular "
+            "PSEUDOLIFE_MCP_TOKEN only; no named principals are active.")
     auth_configured = token is not None or bool(token_map)
     trust_bind = os.environ.get("PSEUDOLIFE_MCP_TRUST_BIND", "").lower() in (
         "1", "true", "yes", "on",

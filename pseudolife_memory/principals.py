@@ -44,7 +44,8 @@ def parse_token_map(raw: str | None) -> dict[str, str]:
         part = part.strip()
         if not part:
             continue
-        token, sep, principal = part.partition(":")
+        # rpartition: principals cannot contain ":", tokens may.
+        token, sep, principal = part.rpartition(":")
         token = token.strip()
         principal = principal.strip().lower()
         if not sep or not token or not principal:
@@ -65,6 +66,16 @@ def parse_token_map(raw: str | None) -> dict[str, str]:
             continue
         out[token] = principal
     return out
+
+
+def misconfigured_tokens_env(raw: str | None,
+                             token_map: dict[str, str]) -> bool:
+    """True when ``PSEUDOLIFE_MCP_TOKENS`` was SET but no entry survived
+    parsing. Per-entry skipping is fail-closed, but an entirely-skipped map
+    plus no singular token would silently degrade the daemon to OPEN mode —
+    the caller must treat this state as a startup error, not "no auth
+    configured" (review 2026-08-10, finding 2)."""
+    return bool((raw or "").strip()) and not token_map
 
 
 def resolve_principal(auth_header: str | None,
@@ -89,9 +100,13 @@ def resolve_principal(auth_header: str | None,
     presented = presented.strip()
     if scheme.lower() != "bearer" or not presented:
         return None
+    # Compare bytes: compare_digest raises TypeError on non-ASCII str, which
+    # would 500 the gate instead of 401ing (review 2026-08-10, finding 1).
+    presented_b = presented.encode("utf-8")
     for token, principal in token_map.items():
-        if hmac.compare_digest(presented, token):
+        if hmac.compare_digest(presented_b, token.encode("utf-8")):
             return principal
-    if single_token is not None and hmac.compare_digest(presented, single_token):
+    if single_token is not None and hmac.compare_digest(
+            presented_b, single_token.encode("utf-8")):
         return DEFAULT_PRINCIPAL
     return None

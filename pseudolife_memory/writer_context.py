@@ -4,7 +4,10 @@ A single chokepoint for "who wrote this version". Resolution order:
 
 1. An explicit override set via :func:`set_writer_context` — for tests,
    direct API callers, and future in-process agents.
-2. The live MCP request. When the service runs inside the daemon, the MCP
+2. A NAMED principal from the request's bearer token
+   (``PSEUDOLIFE_MCP_TOKENS``, spec 2026-08-10) — the credential outranks
+   the client-asserted header below.
+3. The live MCP request. When the service runs inside the daemon, the MCP
    SDK binds the originating Starlette request (headers and all) to a
    contextvar *inside the handler's task* (``request_ctx`` in
    ``mcp.server.lowlevel.server``). That is the same task the tool runs
@@ -12,7 +15,7 @@ A single chokepoint for "who wrote this version". Resolution order:
    streamable-HTTP session-task boundary — the integration risk the plan
    flagged. ``session_id`` reuses the transport's ``mcp-session-id``
    header, which is stable per connection.
-3. The process default (``PSEUDOLIFE_WRITER_ID`` env, or ``"unknown"``),
+4. The process default (``PSEUDOLIFE_WRITER_ID`` env, or ``"unknown"``),
    supplied by the caller.
 
 The MCP read is best-effort and fully isolated to this module: file-mode

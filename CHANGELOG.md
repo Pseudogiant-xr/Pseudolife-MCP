@@ -31,6 +31,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   always-pass** (`pass episode="…" on every memory write`) — identity
   tier 2, the concurrency-correct channel — instead of conditioning it on
   concurrent sessions.
+- Post-review hardening (independent review pass, 2026-08-10): token
+  comparison is byte-wise so a non-ASCII bearer (or token) answers 401
+  instead of 500ing the gate; a `PSEUDOLIFE_MCP_TOKENS` that parses to
+  zero entries with no singular token refuses startup rather than
+  silently serving in open mode; token/token-map env plumbed into the
+  compose daemon and documented in `ops/.env.example` (the feature was
+  otherwise unreachable in the shipped deploy); token map parses with
+  `rpartition` so tokens may contain `:`.
 
 ### Fixed (2026-08-09 — file-mode cortex snapshot round-trips temporal stamps)
 - **`CortexStore.save()`/`load()` now persist the v11 temporal stamp

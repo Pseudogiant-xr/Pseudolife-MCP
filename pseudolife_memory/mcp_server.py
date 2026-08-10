@@ -91,11 +91,12 @@ from pseudolife_memory.toolset_tiers import (
     PrincipalTierState, normalize_tier, parse_tier_map, rank as _tier_rank,
 )
 
-# Session-scoped toolset tiers (spec 2026-07-11). All tools register; the
-# transport tools/list handler filters per session. PSEUDOLIFE_MCP_TOOLSET
+# Principal-scoped toolset tiers (specs 2026-07-11, re-keyed 2026-08-10).
+# All tools register; the transport tools/list handler filters per
+# principal (bearer-token principal, else writer id). PSEUDOLIFE_MCP_TOOLSET
 # is the DEFAULT tier (was: a registration gate); PSEUDOLIFE_MCP_TIER_MAP
-# maps writer ids (X-PL-Writer / daemon default) to default tiers. The
-# Cortex Console is unaffected (REST calls service.*, not MCP tools).
+# maps principals (writer-id namespace) to default tiers. The Cortex
+# Console is unaffected (REST calls service.*, not MCP tools).
 _DEFAULT_TIER = normalize_tier(os.environ.get("PSEUDOLIFE_MCP_TOOLSET"),
                                warn_context="PSEUDOLIFE_MCP_TOOLSET")
 _TIER_MAP = parse_tier_map(os.environ.get("PSEUDOLIFE_MCP_TIER_MAP"))
@@ -522,7 +523,7 @@ async def memory_toolset(
     if new == current:
         return {"changed": False, "current": current,
                 "reason": ("already at full" if action == "expand"
-                           else f"already at this session's floor ({default_tier})")}
+                           else f"already at your floor ({default_tier})")}
 
     _PRINCIPAL_TIERS.set(principal, new)
     before, after = _visible_tool_names(current), _visible_tool_names(new)

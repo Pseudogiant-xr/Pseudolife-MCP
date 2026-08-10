@@ -108,6 +108,12 @@ services:
       # 127.0.0.1, so the network boundary is the Docker mapping, not the
       # bind host. This flag tells the daemon's guard exactly that.
       PSEUDOLIFE_MCP_TRUST_BIND: "1"
+      # Bearer auth (optional on a loopback-published stack). The singular
+      # token maps to the reserved principal "default"; the TOKENS map
+      # ("token:principal,...") mints per-principal tokens — a matched
+      # token's principal becomes the writer id and keys the toolset tier.
+      PSEUDOLIFE_MCP_TOKEN: ${PSEUDOLIFE_MCP_TOKEN:-}
+      PSEUDOLIFE_MCP_TOKENS: ${PSEUDOLIFE_MCP_TOKENS:-}
       # Writer identity stamped on every canonical write (schema v11).
       PSEUDOLIFE_WRITER_ID: ${PSEUDOLIFE_WRITER_ID:-mcp-client}
       # Default toolset tier: "minimal" (9 tools: recall/capture loop incl.

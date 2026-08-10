@@ -368,6 +368,15 @@ def test_asgi_auth_gate_token_map(svc):
     assert _call(app, "GET", "/api/overview")[0] == 401
 
 
+def test_asgi_auth_gate_non_ascii_bearer_is_401_not_500(svc):
+    """Review 2026-08-10 finding 1: compare_digest rejects non-ASCII str;
+    the gate must answer 401, never propagate a TypeError to uvicorn."""
+    app = _app(svc, token="secret")
+    st, _ = _call(app, "GET", "/api/overview",
+                  headers=[(b"authorization", "Bearer café".encode("utf-8"))])
+    assert st == 401
+
+
 def test_asgi_auth_gate_map_only_closes_gate(svc):
     """A token map with no singular token still closes the gate — auth is
     configured, so anonymous callers are rejected."""
