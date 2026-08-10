@@ -65,7 +65,13 @@ reliably — without the agent having to remember:
 
    A store arriving after the reaper closed the episode **resumes** it —
    same identity, same episode — rather than opening a new husk
-   (`PSEUDOLIFE_SESSION_RESUME_SECONDS`, default 6 h; `0` disables).
+   (`PSEUDOLIFE_SESSION_RESUME_SECONDS`, default 6 h; `0` disables). The
+   same window applies to the briefing's `episode="<id>"` handle: a write
+   carrying a handle whose root the reaper closed reopens that episode
+   (without moving the current-episode pointer — the writer may be a
+   different session), so the always-pass handle stays valid across long
+   pauses. Past the window, or on an ambiguous prefix, the write proceeds
+   under normal identity with an `episode_warning`.
    Direct-HTTP titles start generic
    (`session - YYYY-MM-DD HH:MM`, since the daemon has no project `cwd`) —
    name the session with `memory_session_title` (store responses carry an

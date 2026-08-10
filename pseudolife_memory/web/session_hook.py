@@ -90,6 +90,14 @@ CAPTURE — as durable things arise (one claim per call):
   search can scope its results.
 - `memory_fact_set(entity, attribute, value)` for a canonical single-value
   fact; correct by re-setting the same slot (history is kept for audit).
+- Facts the repo or config can answer (deployed version, schema number,
+  counts, budgets) do NOT belong in fact slots — they drift by construction;
+  store the WHY as an entry and read the value from the repo. A one-off
+  observation or audit finding is an EVENT: `memory_store` it (status),
+  never mint a fact slot for it.
+- Before re-asserting a slot another session may have corrected, re-read it
+  and SKIP on a semantic match — a near-duplicate re-assert from a second
+  writer contests an already-correct slot instead of confirming it.
 - `memory_set_add(entity, attribute, member)` / `memory_set_remove` when a
   slot holds MANY concurrent values (bikes owned, pending tasks) — the first
   add converts a scalar slot one-way; `memory_fact_set` on a set slot
