@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-08-10 — episode handle survives the idle reaper; capture-policy briefing)
+- **A write carrying a valid `episode=` handle to an idle-reaped root now
+  resumes that episode** (within `PSEUDOLIFE_SESSION_RESUME_SECONDS`, the
+  same window the session-key path already honours) instead of degrading
+  with `episode_warning`. The SessionStart briefing advertises the handle
+  as always-pass, but the idle reaper could close the episode mid-session
+  and silently break the contract for the rest of the session — observed
+  live 2026-08-10 during the alignment audit. A handle resume never moves
+  the current-episode pointer (the writer may be a different session);
+  ambiguous prefixes and past-window handles still warn-and-degrade.
+- **The session briefing's CAPTURE section now warns against minting fact
+  slots for repo-derivable values and against re-asserting slots without
+  re-reading them first** (mirrored into `examples/CLAUDE.memory.md`, which
+  is byte-pinned to the served block) — the two agent-side capture failures
+  behind the 25-day-stale `version-published` fact and the contested-slot
+  collision the same audit surfaced.
+
 ### Added (2026-08-10 — per-principal bearer tokens; tiers re-key to the principal)
 - **`PSEUDOLIFE_MCP_TOKENS` (`token:principal,…`) maps bearer tokens to
   named principals** (spec

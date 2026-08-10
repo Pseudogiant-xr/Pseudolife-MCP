@@ -379,3 +379,59 @@ def test_hook_endpoints_authorized_with_token_mutate_normally(pg_service):
     assert st2 == 200
     assert json.loads(body2) == {"ok": True}
     assert svc._resolve_writer()[1] is None
+
+
+# ── handle-path resume of a reaped episode (2026-08-10 incident) ─────────────
+# The idle reaper closed a session's root mid-session; the briefing handle the
+# session was told to always-pass then warned instead of attributing. The
+# session-key path already resumes a reaped root within the resume window
+# (_resume_closed_session_locked); the explicit-handle path must match.
+import time as _time
+
+
+def test_store_with_reaped_handle_resumes_within_window(pg_service):
+    svc = pg_service
+    ep = svc.episode_start_session("keyR", "session R")
+    svc.store("seed keyR", source="t", episode=ep["id"][:12])
+    svc.episode_end_session("keyR")   # simulate the idle reaper; close survives (non-empty)
+    res = svc.store("resumed via handle", source="t", episode=ep["id"][:12])
+    assert "episode_warning" not in res
+    found = [e for band in svc._cms.bands for e in band.entries
+             if e.text == "resumed via handle"]
+    assert found and found[0].episode_id == ep["id"]
+    root = svc._cms.episodes.episodes[ep["id"]]
+    assert root.ended_at is None             # the episode is open again
+
+
+def test_reaped_handle_does_not_hijack_current_pointer(pg_service):
+    """A handle write may come from a DIFFERENT session (the concurrency
+    use-case) — resuming the target root must not redirect the global
+    current-episode pointer the way a session-key resume deliberately does."""
+    svc = pg_service
+    ep = svc.episode_start_session("keyS", "session S")
+    svc.store("seed keyS", source="t", episode=ep["id"][:12])
+    svc.episode_end_session("keyS")   # close survives: episode is non-empty
+    other = svc.episode_start_session("keyT", "session T")
+    svc.store("cross-session attribution", source="t", episode=ep["id"][:12])
+    assert svc._cms.episodes.current_id == other["id"]
+
+
+def test_reaped_handle_past_resume_window_still_warns(pg_service):
+    svc = pg_service
+    ep = svc.episode_start_session("keyU", "session U")
+    svc.store("seed keyU", source="t", episode=ep["id"][:12])
+    svc.episode_end_session("keyU")   # close survives: episode is non-empty
+    root = svc._cms.episodes.episodes[ep["id"]]
+    root.ended_at = _time.time() - 30_000    # beyond the 6 h window
+    res = svc.store("too old", source="t", episode=ep["id"][:12])
+    assert res["episode_warning"] == "unknown or closed episode handle"
+
+
+def test_reaped_handle_resume_disabled_warns(pg_service, monkeypatch):
+    monkeypatch.setenv("PSEUDOLIFE_SESSION_RESUME_SECONDS", "0")
+    svc = pg_service
+    ep = svc.episode_start_session("keyV", "session V")
+    svc.store("seed keyV", source="t", episode=ep["id"][:12])
+    svc.episode_end_session("keyV")   # close survives: episode is non-empty
+    res = svc.store("resume off", source="t", episode=ep["id"][:12])
+    assert res["episode_warning"] == "unknown or closed episode handle"
