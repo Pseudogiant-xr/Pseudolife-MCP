@@ -16,8 +16,11 @@ Call `memory_dream(action="deep")` (dry-run by default). Review:
   context snippets; `snippets=false` omits them).
 - `merge_proposals` — pending near-duplicate merges (write-time dedup +
   analyzer), each side enriched with display/etype/degree/scopes/snippets;
-  accept folds `from` into `into` exactly as shown (write-dedup rows are
-  stored lower-degree → higher-degree at insert time).
+  accept folds `from` into `into` as shown. The direction is re-derived
+  from CURRENT evidence (degree + fact count) at both display and accept
+  time — insert-time orientation goes stale as the graph grows — so a
+  batch of accepts can legitimately flip a later pair's direction between
+  the listing and the click.
 - `lesson_duplicates` / `world_duplicates` — cross-key near-duplicate slot
   pairs in the lesson / world stores (slot supersession only dedups within
   one key, so these accumulate silently). Listing-only, in dry-run AND

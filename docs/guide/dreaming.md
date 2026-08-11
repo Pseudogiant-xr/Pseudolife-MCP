@@ -478,16 +478,21 @@ no-ops on an empty quarantine, and reports
 `retyped: {considered, retyped, settled}` from `memory_dream(action="run")`.
 Set `0` to disable.
 
-**What no longer reaches the graph.** Four sources of review-queue noise
+**What no longer reaches the graph.** Five sources of review-queue noise
 were closed at the write path rather than cleaned up afterwards: dotted
 pseudo-entities minted when an extractor read a flattened
 `entity.attribute` vocabulary hint as a name; the `<artifact> <aspect>`
 nodes `memory_outcome` mints, which shared nearly every token with the
 artifact they mentioned and so dominated the duplicate and orphan
 findings; merge proposals pointing *at* a contentless entity, now that
-fold direction ranks on facts as well as degree; and edges to git branch
+fold direction ranks on facts as well as degree; edges to git branch
 names, which typed as unknown — and therefore as neutral — and sailed past
-the confidence floor.
+the confidence floor; and merge proposals for name-shape false-positive
+classes — a broader name paired with a date/run-tag-stamped event node,
+and sibling ids differing only by numeric tokens (`CT200`/`CT400`) or the
+pre/post pair — vetoed at both filing sites, with the rules gated by a
+replay of the 2026-08-11 full-queue triage (they suppress 12 of that
+pass's 101 rejected proposals and none of its 38 accepted ones).
 
 ## Consolidation workflow (agent-driven dedup)
 

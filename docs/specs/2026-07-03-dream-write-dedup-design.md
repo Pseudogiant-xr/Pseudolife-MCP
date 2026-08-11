@@ -63,6 +63,13 @@ the normal Atlas queue for everything uncertain.
   `accept_merge` folds `from` into `into` exactly as shown (re-orienting the
   presentation would let the model approve the mirror image of what the
   accept applies).
+  - *Amended 2026-08-12:* insert-time orientation goes stale as the graph
+    grows (two live rows filed 2026-08-09 had the from-side reach degree 8
+    against a degree-0 target while pending). Direction is now re-derived
+    from current evidence by ONE shared rule (`_fold_direction`) at every
+    review surface (`_enrich_merge_proposals`, `graph_review`) AND in
+    `graph_accept_entity_merge` — the shown/applied pairing this bullet
+    protects is preserved, just derived live instead of at insert.
 
 ## Audit trail
 
