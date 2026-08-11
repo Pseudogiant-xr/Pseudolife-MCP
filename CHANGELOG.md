@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-08-11 — dream runs are single-flight)
+- **`dream_run` now takes a non-blocking in-process guard for the whole
+  pull → extract → commit cycle**: a second caller while a cycle is in
+  flight returns `{"skipped": "dream_in_progress"}` immediately instead of
+  pulling the same cursor window. Every live trigger (sweep, console, MCP
+  tool, session-end) funnels into this path, and the extractor call runs
+  outside the service lock — two triggers racing consumed the same window
+  twice (observed live 2026-08-10, dream runs 68/69: absorbed by the dedup
+  layers, but double extractor cost and a window for contested writes).
+  The next sweep tick retries anything a skipped trigger would have
+  consumed; the bench harness's sequential `dream_run` calls are unaffected.
+
 ### Fixed (2026-08-11 — session-key resume survives the idle reaper)
 - **A session-key resume (`_resume_closed_session_locked`, shared by the
   SessionStart hook path and the store path) now records an activity touch
