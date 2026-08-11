@@ -476,6 +476,13 @@ class MemoryService:
         # the strikes, which just means a poison entry needs its three
         # failures again before quarantine.
         self._dream_batch_failures: dict[Any, int] = {}
+        # Dream single-flight guard: every live trigger (sweep, console, MCP
+        # tool, session-end) funnels into dream_run, and the extractor call
+        # runs outside _lock, so two triggers racing consume the same cursor
+        # window twice (observed live 2026-08-10, runs 68/69 — absorbed by
+        # dedup, but double extractor cost and a contested-write window).
+        # In-process is sufficient: one daemon process owns the bank.
+        self._dream_run_guard = Lock()
         # Count of durable-save failures (cortex/world/lessons). Exposed via the
         # daemon /health probe so swallowed-then-surfaced saves are observable.
         self._persist_errors = 0
@@ -3290,7 +3297,22 @@ class MemoryService:
         via ``extractor`` (an extractor that yields nothing writes nothing —
         single-writer cortex, no regex fallback), write each to the cortex, advance
         the dream cursor. Returns a summary. The single consolidation path shared by
-        the MCP tool and (later) the daemon sweep."""
+        the MCP tool and (later) the daemon sweep.
+
+        Single-flight: a second caller while a cycle is in flight returns
+        ``{"skipped": "dream_in_progress", ...}`` immediately instead of
+        pulling the same cursor window (see ``_dream_run_guard``). The next
+        sweep tick retries anything the skipped trigger would have consumed.
+        """
+        if not self._dream_run_guard.acquire(blocking=False):
+            return {"skipped": "dream_in_progress", "pulled": 0, "claims": 0}
+        try:
+            return self._dream_run_locked(extractor, limit=limit)
+        finally:
+            self._dream_run_guard.release()
+
+    def _dream_run_locked(self, extractor, *,
+                          limit: int | None = None) -> dict[str, Any]:
         cap = int(limit if limit is not None else self.config.memory.dream.max_batch)
         pulled = self.dream_pull(limit=cap)
         entries = pulled["entries"]

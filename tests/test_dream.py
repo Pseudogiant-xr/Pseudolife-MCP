@@ -708,6 +708,43 @@ def test_dream_run_does_not_advance_cursor_on_failure(svc):
     assert svc.cortex_lookup("relay", "port") is not None
 
 
+def test_dream_run_second_concurrent_caller_skips(svc):
+    # Regression (2026-08-10, live runs 68/69): dream_run had no concurrency
+    # guard, so two triggers (sweep + session-end/MCP) racing into the same
+    # cursor window both pulled and extracted it. The second concurrent
+    # caller must skip without touching the cursor or the extractor.
+    svc.config.memory.cortex.auto_promote = False
+    started = threading.Event()
+    release = threading.Event()
+
+    class _BlockingExtractor:
+        def extract(self, texts, vocab, known_facts=None):
+            started.set()
+            release.wait(timeout=30)
+            return [{"entity": "gizmo", "attribute": "port", "value": "7001",
+                     "source": 0}]
+
+    svc.store("the gizmo port is 7001", source="notes")
+    first: dict = {}
+    t = threading.Thread(
+        target=lambda: first.update(svc.dream_run(_BlockingExtractor())))
+    t.start()
+    try:
+        assert started.wait(timeout=30)     # first run is inside extract()
+        second = svc.dream_run(_StubExtractor([]))
+        assert second.get("skipped") == "dream_in_progress"
+        assert second["pulled"] == 0 and second["claims"] == 0
+    finally:
+        release.set()
+        t.join(timeout=60)
+    assert not t.is_alive()
+    assert first["pulled"] >= 1             # in-flight run was unaffected
+    assert svc.cortex_lookup("gizmo", "port") is not None
+    # Guard released: the next call proceeds normally (and sees no backlog).
+    after = svc.dream_run(_StubExtractor([]))
+    assert "skipped" not in after
+
+
 class _BatchRecordingExtractor:
     """Records each extract() call's texts; returns fixed claims."""
 
