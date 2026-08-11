@@ -463,9 +463,14 @@ class FixtureService:
              "links": [{"id": 1, "src": "Track A", "relation": "related-to", "dst": "Track B",
                         "confidence": 0.45, "similarity": 0.9, "rationale": "co-discussed"}]},
             {"type": "merge_candidate", "severity": "warn", "action": "merge",
-             "label": "1 near-duplicate entity merges",
+             "label": "3 near-duplicate entity merges",
              "merges": [{"from": "live daemon", "into": "daemon", "similarity": 0.99,
-                         "reason": "token-subset", "id": 1}]},
+                         "reason": "token-subset", "id": 1, "group": None},
+                        # a shared-from group: one entity, two competing targets
+                        {"from": "events v2", "into": "events_pass_v2", "similarity": 0.8,
+                         "reason": "write-dedup", "id": 3, "group": "events v2"},
+                        {"from": "events v2", "into": "v2 events bank", "similarity": 0.75,
+                         "reason": "write-dedup", "id": 4, "group": "events v2"}]},
             {"type": "junk_candidate", "severity": "warn", "action": "delete",
              "label": "1 junk entities to prune",
              "entities": [{"entity": "2", "reason": "bare-number", "id": 2}]},
@@ -481,7 +486,9 @@ class FixtureService:
                      "into": "postgres.py", "score": 0.7,
                      "reason": "write-dedup",
                      "status": "rejected", "decided_by": "human",
-                     "decided_at": 1782980000.0}]}
+                     "decided_at": 1782980000.0}],
+                "merge_decision_stats": {"accepted": 39, "rejected": 102,
+                                         "total": 141, "accept_rate": 0.277}}
 
     def entity_provenance(self, entity, limit=20):
         return {"found": True, "entity": entity,

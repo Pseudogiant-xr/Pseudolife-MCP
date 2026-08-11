@@ -5291,6 +5291,15 @@ class MemoryService:
             # an alias is vetoed against the display name it will present as.
             matches = [m for m in matches
                        if merge_veto(name, m["display"]) is None]
+            # Junk-first routing: an entity with a pending junk proposal is
+            # the junk queue's to settle — filing a merge against it double-
+            # handles the same node (delete-vs-fold) across two queues.
+            junk_owned = {p["entity_id"]
+                          for p in self._storage.pending_entity_proposals()
+                          if p.get("kind") == "junk"}
+            matches = [m for m in matches
+                       if m["entity_id"] not in junk_owned
+                       and entity_id not in junk_owned]
             if not matches:
                 return
             deg = degree_counts(g["edges"])
@@ -5509,6 +5518,7 @@ class MemoryService:
                         lesson_entity_ids=lesson_ids)
         with self._lock:
             out["recent_merges"] = self._storage.recent_entity_decisions()
+            out["merge_decision_stats"] = self._storage.merge_decision_stats()
         return out
 
     def graph_dismiss_duplicate(self, a: str, b: str) -> dict[str, Any]:
@@ -6194,6 +6204,15 @@ class MemoryService:
             | {_nn(a) for als in g["aliases"].values() for a in als})
         junk = gc.junk_entities(entities, edges, max_degree=cfg.junk_max_degree,
                                 known_norms=known_norms)
+        # Junk-first routing (mirrors the write-dedup filing): a side that is
+        # junk-flagged — this pass or a pending proposal — belongs to the
+        # junk queue; a merge against it would double-handle the same node.
+        junk_owned = ({j["entity_id"] for j in junk}
+                      | {p["entity_id"] for p in pending_props
+                         if p.get("kind") == "junk"})
+        merge_cands = [m for m in merge_cands
+                       if m["from_id"] not in junk_owned
+                       and m["into_id"] not in junk_owned]
         if include_snippets:
             candidates = self._attach_candidate_snippets(
                 link_cands, entities, entries, traces, cfg.max_context_snippets,
@@ -6438,16 +6457,21 @@ class MemoryService:
         def ev(eid):
             return deg.get(eid, 0) + facts.get(eid, 0)
 
+        from pseudolife_memory.memory.graph_review import shared_pair_groups
         rows = [p for p in pending if p.get("kind") == "merge"]
         oriented = [self._fold_direction(p["entity_id"], p["into_id"], ev)
                     for p in rows]
+        # Group key on the STORED ids (direction-agnostic): rows sharing an
+        # endpoint are one where-does-this-entity-belong decision.
+        groups = shared_pair_groups(
+            [(p["entity_id"], p["into_id"]) for p in rows])
         shaped = [{"src_id": f, "dst_id": i} for f, i in oriented]
         if include_snippets:
             self._attach_candidate_snippets(
                 shaped, entities, entries, traces, k,
                 mentions=mentions, max_chars=max_chars)
         out = []
-        for p, (frm, into), s in zip(rows, oriented, shaped):
+        for p, (frm, into), g, s in zip(rows, oriented, groups, shaped):
             def side(eid, snips):
                 e = by_id.get(eid) or {}
                 return {"display": e.get("display"), "etype": e.get("etype"),
@@ -6456,6 +6480,8 @@ class MemoryService:
                         "snippets": snips if include_snippets else []}
             out.append({"id": p["id"], "score": p.get("score"),
                         "reason": p.get("reason"),
+                        "group": (by_id.get(g) or {}).get("display")
+                        if g is not None else None,
                         "from": side(frm, s.get("src_snippets", [])),
                         "into": side(into, s.get("dst_snippets", []))})
         return out

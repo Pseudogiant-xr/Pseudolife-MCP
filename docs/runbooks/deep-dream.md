@@ -71,7 +71,10 @@ subagents for large batches — reuse the
 ## 3b. Step C — triage entity proposals (this session)
 
 **Near-duplicate merges.** Judge each `merge_proposals` item from its per-side
-snippets/scopes:
+snippets/scopes. Items sharing a `group` value pivot on one entity (the
+write-dedup detector files up to three matches per mint) and are ONE
+where-does-it-belong decision — accept at most one; the first accept
+deletes the shared entity:
 - **Same referent** → `memory_graph_review(action="accept_merge",
   proposal_id=...)` — applies immediately and irreversibly (it deletes the
   `from` entity, per step 2); logged to the recent-merges audit as

@@ -1332,6 +1332,24 @@ class PostgresStorage:
                  reason, decided_by, decided_at)).fetchone()
         return int(row[0])
 
+    def merge_decision_stats(self) -> dict:
+        """Accept/reject tallies over merge_decisions — the direct measure of
+        the dedup detector's precision (the 2026-08-11 triage ran 38/153 and
+        the number previously vanished into the audit log). ``dream-auto``
+        rows are junk auto-deletes recorded to the same table; they are not
+        merge verdicts and are excluded."""
+        rows = self.conn.execute(
+            "SELECT status, count(*) FROM merge_decisions "
+            "WHERE decided_by <> 'dream-auto' "
+            "  AND status IN ('accepted', 'rejected') "
+            "GROUP BY status").fetchall()
+        counts = {status: int(n) for status, n in rows}
+        accepted = counts.get("accepted", 0)
+        rejected = counts.get("rejected", 0)
+        total = accepted + rejected
+        return {"accepted": accepted, "rejected": rejected, "total": total,
+                "accept_rate": round(accepted / total, 3) if total else None}
+
     def recent_entity_decisions(self, limit: int = 20) -> list[dict]:
         """Merge decisions newest-first — the audit trail behind Atlas
         'recent merge decisions'. Reads merge_decisions (durable), not

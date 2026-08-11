@@ -50,7 +50,10 @@ reviewed proposals:
    `degree`, `scopes`, and `snippets`; accepting folds `from` into `into` as
    shown — the direction is re-derived from current evidence at both display
    and accept time, so an accept earlier in the batch can flip a later
-   pair's direction. Judge
+   pair's direction. Rows sharing a `group` value pivot on one entity and
+   are ONE where-does-it-belong decision: accept at most one of them (the
+   first accept deletes the shared entity), and settle the others with
+   reject/dismiss or leave them. Judge
    from the snippets, never names alone — the bank's confirmed-distinct history
    (postgres vs postgres.py) is exactly why:
    - **Same referent** (naming-layer variants of one thing — file suffixes,
