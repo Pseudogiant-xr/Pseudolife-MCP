@@ -6,6 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-12 — review-queue Phase 2: grouping, junk-first routing, accept-rate)
+- **Merge proposals sharing an endpoint carry a `group` key** (the shared
+  entity's display) in both review payloads — the deep-dream
+  `merge_proposals` enrichment and the `graph_review` merge-candidate
+  finding the Atlas queue renders (shown as a `⛓` chip). The write-dedup
+  detector files up to three matches per minted entity, so such rows are
+  one where-does-this-entity-belong decision: the first accept deletes the
+  shared entity. The `/dream deep` command and the deep-dream runbook now
+  say so.
+- **Junk-first routing**: neither filing site (write-dedup, deep-dream)
+  proposes a merge whose side is junk-flagged — pending junk proposal or
+  flagged in the same pass. The junk queue owns that node; a parallel
+  merge proposal double-handled it (delete-vs-fold across two queues).
+- **`merge_decision_stats`** in the `graph_review` payload (and an accept-
+  rate line in the Atlas recent-merges panel): accepted/rejected tallies
+  and accept rate over the durable `merge_decisions` audit, excluding
+  `dream-auto` junk deletions. This is the detector-precision measure the
+  2026-08-11 triage produced (38/153) and previously lost to the audit
+  log; no schema change — computed from existing rows.
+
 ### Changed (2026-08-12 — merge-proposal precision: name-shape vetoes + live fold direction)
 - **Merge-proposal filing (write-dedup and deep-dream) now applies two
   name-shape vetoes** (`graph_review.merge_veto`): `event-slug` (a broader

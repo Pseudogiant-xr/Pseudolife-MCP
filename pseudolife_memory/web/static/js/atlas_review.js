@@ -16,7 +16,8 @@ const CHIP = { background: "var(--bg-2)", padding: "2px 7px",
 
 export function reviewPanel(data, onAct) {
   const findings = (data && data.findings) || [];
-  const recent = recentMerges((data && data.recent_merges) || []);
+  const recent = recentMerges((data && data.recent_merges) || [],
+    data && data.merge_decision_stats);
   if (!findings.length) {
     return panel("Review queue",
       el("div", {},
@@ -33,11 +34,15 @@ export function reviewPanel(data, onAct) {
 }
 
 // Read-only audit list: who folded / rejected which near-duplicate, and when.
-function recentMerges(rows) {
-  if (!rows.length) return null;
+function recentMerges(rows, stats) {
+  const rate = stats && stats.total
+    ? dim(`accept rate ${Math.round(stats.accept_rate * 100)}% `
+      + `(${stats.accepted}/${stats.total})`)
+    : null;
+  if (!rows.length && !rate) return null;
   return el("div", { style: { marginTop: "10px" } },
     el("div", { class: "eyebrow", style: { marginBottom: "4px" } },
-      "recent merge decisions"),
+      "recent merge decisions ", rate),
     rows.map((m) => el("div", { style: { margin: "2px 0", fontSize: "12px" } },
       el("span", { class: "mono" }, `${m.entity ?? "?"} → ${m.into ?? "?"}`),
       el("span", { class: `badge ${m.status === "accepted" ? "action" : "agent"}`,
@@ -242,8 +247,11 @@ function body(f, onAct) {
 
 function mergeItem(m, onAct) {
   const from = entityRef(m.from), into = entityRef(m.into);
+  // Rows sharing a group pivot on one entity — the first accepted merge
+  // deletes it, so at most one of the group can land.
   return itemRow([
-    from.chip, dim("→"), into.chip, sim(m.similarity), dim(m.reason),
+    from.chip, dim("→"), into.chip, sim(m.similarity),
+    m.group ? dim(`⛓ ${m.group}`) : null, dim(m.reason),
     btn("Merge", { onClick: () => onAct({ kind: "merge-entity", id: m.id, from: m.from, into: m.into }) }),
     btn("Reject", { kind: "ghost", onClick: () => onAct({ kind: "reject-entity", id: m.id }) }),
   ], [from, into]);

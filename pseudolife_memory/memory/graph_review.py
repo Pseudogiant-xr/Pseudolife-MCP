@@ -335,12 +335,46 @@ def proposed_links(proposals):
              "links": links}]
 
 
+def shared_pair_groups(pairs):
+    """Per-pair group id for merge pairs ``[(a_id, b_id), ...]``: the entity
+    appearing in MORE THAN ONE pair (highest count wins; ties break to the
+    lower id), else ``None``. The write-dedup detector files up to three
+    matches per minted entity, so rows sharing an endpoint are really one
+    where-does-this-entity-belong decision — 22 of the 153 proposals in the
+    2026-08-11 triage shared a side, each group presented as independent
+    rows (and accepting two of them would race, since the first accept
+    deletes the shared entity)."""
+    from collections import Counter
+    counts = Counter()
+    for a, b in pairs:
+        counts[a] += 1
+        counts[b] += 1
+    out = []
+    for a, b in pairs:
+        shared = [i for i in (a, b) if counts[i] > 1]
+        out.append(min(shared, key=lambda i: (-counts[i], i))
+                   if shared else None)
+    return out
+
+
 def merge_candidates(entity_proposals):
     rows = [p for p in (entity_proposals or []) if p.get("kind") == "merge"]
     if not rows:
         return []
+    # Group on ids when the rows carry them (PG pending_entity_proposals);
+    # fall back to display names for id-less rows (older callers, tests).
+    def key(p, side, name):
+        return p[side] if p.get(side) is not None else p[name]
+
+    disp = {key(p, "entity_id", "entity"): p["entity"] for p in rows}
+    disp.update({key(p, "into_id", "into"): p["into"] for p in rows})
+    groups = shared_pair_groups(
+        [(key(p, "entity_id", "entity"), key(p, "into_id", "into"))
+         for p in rows])
     merges = [{"from": p["entity"], "into": p["into"], "similarity": p.get("score"),
-               "reason": p.get("reason"), "id": p["id"]} for p in rows]
+               "reason": p.get("reason"), "id": p["id"],
+               "group": disp.get(g) if g is not None else None}
+              for p, g in zip(rows, groups)]
     return [{"type": "merge_candidate", "severity": "warn", "action": "merge",
              "label": f"{len(merges)} near-duplicate entity merges", "merges": merges}]
 
