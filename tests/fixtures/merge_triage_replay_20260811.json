@@ -1,0 +1,1721 @@
+{
+ "note": "Ground truth from the 2026-08-11 full merge-queue triage (153 write-dedup/deep-dream proposals judged from entry-snippet evidence). Entity names are sanitized: hostnames/usernames are masked, which preserves token structure for the veto rules.",
+ "pairs": [
+  {
+   "from": "PR #104",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": ".104",
+   "into_scopes": [
+    "hermes-infra",
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "Run B",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "Run T",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "shim.py",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "shim",
+   "into_scopes": [
+    "pseudolife",
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "shim.py",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "evals/dg_shim.py",
+   "into_scopes": [
+    "pseudolife-mcp",
+    "re-evidence-hub"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "test_plugin_packaging",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "tests/test_plugin_packaging.py",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "accept"
+  },
+  {
+   "from": "pseudo-life-mcp",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "pseudo-life-mcp-toolset",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "Tri-Serpent",
+   "from_scopes": [
+    "hermes-infra",
+    "pseudolife",
+    "pseudolife-mcp"
+   ],
+   "into": "tri-serpent-overnight-build-20260807",
+   "into_scopes": [
+    "hermes-infra"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "deep-dream-autonomy",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "memory_deep_dream",
+   "into_scopes": [
+    "pseudolife",
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "docker-builder-prune",
+   "from_scopes": [
+    "claude-code-setup",
+    "pseudolife-mcp"
+   ],
+   "into": "docker-build-cache-prune-fix",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "hermes-fix-deploy",
+   "from_scopes": [
+    "hermes-infra"
+   ],
+   "into": "hermes-engine-deploy-20260807",
+   "into_scopes": [
+    "hermes-infra"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "deep-dream-queue",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "memory_deep_dream",
+   "into_scopes": [
+    "pseudolife",
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "hostb-hermes",
+   "from_scopes": [
+    "home-network"
+   ],
+   "into": "PseudoLife-Hermes",
+   "into_scopes": [
+    "hermes-infra",
+    "pseudolife",
+    "pseudolife-hermes",
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "memory.dream.chronicle",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "memory_dream",
+   "into_scopes": [
+    "pseudolife",
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "hermes-background-llm-endpoint",
+   "from_scopes": [
+    "hermes-infra"
+   ],
+   "into": "hermes-agent",
+   "into_scopes": [
+    "hermes-infra"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "e4b-v3",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "e4b-ft",
+   "into_scopes": [
+    "pseudolife-mcp",
+    "pseudolife-mcp-benchmarks"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "pseudolife-mcp-fact-slots",
+   "from_scopes": [
+    "hermes-infra"
+   ],
+   "into": "pseudolife-mcp",
+   "into_scopes": [
+    "pseudolife",
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "mcp-v2",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "pseudolife-mcp-mcp-sdk-v2-review",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "ev2-gate-run",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "aggserve-gate-run",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "test_init_retry_model_reuse.py",
+   "from_scopes": [
+    "pseudolife-hermes"
+   ],
+   "into": "tests/test_init_retry_model_reuse.py",
+   "into_scopes": [
+    "pseudolife-hermes",
+    "pseudolife-mcp"
+   ],
+   "verdict": "accept"
+  },
+  {
+   "from": "hermes-live-shakedown",
+   "from_scopes": [
+    "hermes-infra"
+   ],
+   "into": "hermes-agent",
+   "into_scopes": [
+    "hermes-infra"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "ev2-gate-run",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "evq-gate-run-0806",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "hermes-overnight-stall-20260807",
+   "from_scopes": [
+    "hermes-infra"
+   ],
+   "into": "Hermes",
+   "into_scopes": [
+    "hermes-infra",
+    "pseudolife-mcp",
+    "re-evidence-hub"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "proxmox-notifications",
+   "from_scopes": [
+    "homelab-proxmox"
+   ],
+   "into": "proxmox-host",
+   "into_scopes": [
+    "homelab-proxmox"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "extractor-op-prompt",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "dream primary extractor",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "Security Remediation",
+   "from_scopes": [],
+   "into": "cve-2026-69247-remediation",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "chronicle",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "chronicle-events-phase2",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "hermes-live-backend-pth",
+   "from_scopes": [
+    "hermes-infra"
+   ],
+   "into": "pseudolife-hermes-sync",
+   "into_scopes": [
+    "pseudolife-hermes"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "Tri-Serpent overnight build",
+   "from_scopes": [
+    "hermes-infra"
+   ],
+   "into": "tri-serpent-overnight-build-20260807",
+   "into_scopes": [
+    "hermes-infra"
+   ],
+   "verdict": "accept"
+  },
+  {
+   "from": "MCP SDK v2.0.0",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "MCP SDK v2.0.0 tag",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "leave"
+  },
+  {
+   "from": "ev2-separate-pass",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "separate-pass-events",
+   "into_scopes": [
+    "hermes-infra",
+    "llama-turboq",
+    "pseudolife-mcp"
+   ],
+   "verdict": "accept"
+  },
+  {
+   "from": "hermes-mcp-client",
+   "from_scopes": [
+    "hermes-infra"
+   ],
+   "into": "hermes-agent",
+   "into_scopes": [
+    "hermes-infra"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "proxmox-thin-pool",
+   "from_scopes": [
+    "homelab-proxmox"
+   ],
+   "into": "proxmox-host",
+   "into_scopes": [
+    "homelab-proxmox"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "ct102",
+   "from_scopes": [
+    "homelab-proxmox"
+   ],
+   "into": "SP-1",
+   "into_scopes": [
+    "pseudolife",
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "ct103",
+   "from_scopes": [
+    "homelab-proxmox"
+   ],
+   "into": "MemCoT",
+   "into_scopes": [
+    "pseudolife",
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "hermes-cron-prewarm-35b",
+   "from_scopes": [
+    "hermes-infra"
+   ],
+   "into": "hermes-agent",
+   "into_scopes": [
+    "hermes-infra"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "enshrouded-server",
+   "from_scopes": [],
+   "into": "enshrouded-entrypoint",
+   "into_scopes": [
+    "homelab-proxmox"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "ladder-harness",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "evals/ladder_sweep.py",
+   "into_scopes": [
+    "pseudolife-mcp",
+    "pseudolife-mcp-benchmarks"
+   ],
+   "verdict": "accept"
+  },
+  {
+   "from": "evaluation_command",
+   "from_scopes": [],
+   "into": "agent-fabricated-completion",
+   "into_scopes": [
+    "hermes-infra"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "pseudolife-mcp-mcp-sdk-v2-review",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "mcp-sdk-v2-migration-assessment",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "accept"
+  },
+  {
+   "from": "backups",
+   "from_scopes": [],
+   "into": "proxmox-backup-coverage",
+   "into_scopes": [
+    "homelab-proxmox"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "ev2-gate-run",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "v28-deploy-gate",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "chronicle",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "beam-chronicle-rerun",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "hermes-fix-deploy",
+   "from_scopes": [
+    "hermes-infra"
+   ],
+   "into": "hermes-desktop-app",
+   "into_scopes": [
+    "hermes-infra"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "Session-scoped episodes",
+   "from_scopes": [
+    "pseudolife",
+    "pseudolife-mcp"
+   ],
+   "into": "pseudolife-mcp.session-episode-handle",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "EV2 separate-pass events",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "separate-pass-events",
+   "into_scopes": [
+    "hermes-infra",
+    "llama-turboq",
+    "pseudolife-mcp"
+   ],
+   "verdict": "accept"
+  },
+  {
+   "from": "EV2 separate-pass events",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "ev2-separate-pass",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "leave"
+  },
+  {
+   "from": "chronicle-event-soak",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "chronicle-events-phase2",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "feat/deep-dream-autonomy",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "deep-dream-autonomy",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "accept"
+  },
+  {
+   "from": "evals/results/qwen-27b-pr104-post.json",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "evals/results/qwen-27b-pr104-pre.json",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "events coverage audit gates",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "events-coverage-audit",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "accept"
+  },
+  {
+   "from": "background LLM endpoint",
+   "from_scopes": [
+    "hermes-infra"
+   ],
+   "into": "hermes-background-llm-endpoint",
+   "into_scopes": [
+    "hermes-infra"
+   ],
+   "verdict": "accept"
+  },
+  {
+   "from": "CVE-2026-69247",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "cve-2026-69247-remediation",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "test_mcp_server.py",
+   "from_scopes": [
+    "pseudolife-hermes"
+   ],
+   "into": "tests/test_mcp_server.py",
+   "into_scopes": [
+    "pseudolife",
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "sonnet_extractor_v2 prompt",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "sonnet-v2-prompt",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "accept"
+  },
+  {
+   "from": "EVQ residual decomposition",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "evq-0806-residual-decomposition",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "accept"
+  },
+  {
+   "from": "prewarm-35b cron",
+   "from_scopes": [
+    "hermes-infra"
+   ],
+   "into": "hermes-cron-prewarm-35b",
+   "into_scopes": [
+    "hermes-infra"
+   ],
+   "verdict": "leave"
+  },
+  {
+   "from": "Opus claims-regen",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "Opus claims-regen dataset",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "accept"
+  },
+  {
+   "from": "auto-perishability (ScrubJay pi/tau)",
+   "from_scopes": [
+    "pseudolife-mcp",
+    "pseudolife-mcp-benchmarks"
+   ],
+   "into": "auto-perishability-scrubjay",
+   "into_scopes": [
+    "pseudolife-mcp",
+    "pseudolife-mcp-benchmarks"
+   ],
+   "verdict": "accept"
+  },
+  {
+   "from": "MCP SDK v2",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "Anthropic MCP v2 SDK",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "leave"
+  },
+  {
+   "from": "MCP SDK v2.0.0",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "MCP SDK v2",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "accept"
+  },
+  {
+   "from": "evaluation_command",
+   "from_scopes": [],
+   "into": "events-prompt",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "opus-4.8",
+   "from_scopes": [
+    "pseudolife",
+    "pseudolife-mcp"
+   ],
+   "into": "distill-extract-opus1.jsonl",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "backups",
+   "from_scopes": [],
+   "into": "proxmox-backup-job",
+   "into_scopes": [
+    "homelab-proxmox"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "agents-md",
+   "from_scopes": [
+    "hermes-infra"
+   ],
+   "into": "hermes-agent",
+   "into_scopes": [
+    "hermes-infra"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "P1_roadmap_item",
+   "from_scopes": [],
+   "into": "milestone-slot",
+   "into_scopes": [
+    "hermes-infra"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "Pruning result",
+   "from_scopes": [],
+   "into": "cortex-hygiene-prune",
+   "into_scopes": [
+    "hermes-infra"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "Residual Noise",
+   "from_scopes": [],
+   "into": "evq-0806-residual-decomposition",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "opus-4.8",
+   "from_scopes": [
+    "pseudolife",
+    "pseudolife-mcp"
+   ],
+   "into": "distill-events-opus1.jsonl",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "dream-consolidation-contamination-20260807",
+   "from_scopes": [
+    "pseudolife",
+    "pseudolife-mcp"
+   ],
+   "into": "deep-dream-2026-08-05",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "hermes-provider-memory-store",
+   "from_scopes": [
+    "hermes-infra"
+   ],
+   "into": "hermes-dashboard",
+   "into_scopes": [
+    "hermes-infra",
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "proxmox-containers",
+   "from_scopes": [
+    "homelab-proxmox"
+   ],
+   "into": "pseudolife-daemon",
+   "into_scopes": [
+    "pseudolife",
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "bonsai-bank-correction-shakedown",
+   "from_scopes": [
+    "hermes-infra"
+   ],
+   "into": "bonsai-27b-ternary",
+   "into_scopes": [
+    "hermes-infra",
+    "llama-turboq",
+    "pseudolife-mcp",
+    "re-evidence-hub"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "user-machine",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "dev-box",
+   "into_scopes": [
+    "hermes-infra"
+   ],
+   "verdict": "leave"
+  },
+  {
+   "from": "tui_gateway",
+   "from_scopes": [
+    "hermes-infra"
+   ],
+   "into": "GW2 ToS",
+   "into_scopes": [
+    "gw2-reshade"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "user-machine",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "proxmox-host",
+   "into_scopes": [
+    "homelab-proxmox"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "RE-Evidence-Hub PR #8",
+   "from_scopes": [
+    "re-evidence-hub"
+   ],
+   "into": "ret-0809-eval",
+   "into_scopes": [
+    "pseudolife-mcp",
+    "pseudolife-mcp-benchmarks"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "evals/results/floor-pr104-post.json",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "evals/results/floor-pr104-pre.json",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "evals/models/e4b-v3-Q4_K_M.gguf",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "evals/models/e4b-arm1-Q4_K_M.gguf",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "SP-1",
+   "from_scopes": [
+    "pseudolife",
+    "pseudolife-mcp"
+   ],
+   "into": "tri-serpent-overnight-build-20260807",
+   "into_scopes": [
+    "hermes-infra"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "auto-perishability-scrubjay",
+   "from_scopes": [
+    "pseudolife-mcp",
+    "pseudolife-mcp-benchmarks"
+   ],
+   "into": "Junked Artifact",
+   "into_scopes": [
+    "pseudolife",
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "evlora-preregistration",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "evq-gate-run-0806",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "nebula-serpent",
+   "from_scopes": [
+    "hermes-infra",
+    "home-network",
+    "pseudolife",
+    "pseudolife-mcp"
+   ],
+   "into": "PseudoLife-Hermes",
+   "into_scopes": [
+    "hermes-infra",
+    "pseudolife",
+    "pseudolife-hermes",
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "renderGalaxy",
+   "from_scopes": [],
+   "into": "nebula-serpent",
+   "into_scopes": [
+    "hermes-infra",
+    "home-network",
+    "pseudolife",
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "milestone-checkbox",
+   "from_scopes": [
+    "hermes-infra"
+   ],
+   "into": "progress-md",
+   "into_scopes": [
+    "hermes-infra"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "merge-direction-ranking",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "edge-origin-sticky-by-rank-fix",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "P2_roadmap_item",
+   "from_scopes": [],
+   "into": "progress-md",
+   "into_scopes": [
+    "hermes-infra"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "events-coverage-audit",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "graph_review.py",
+   "into_scopes": [
+    "pseudolife",
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "fix",
+   "from_scopes": [],
+   "into": "flaky-fix-verification",
+   "into_scopes": [
+    "hermes-infra"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "RUST1",
+   "from_scopes": [
+    "homelab-proxmox"
+   ],
+   "into": "SP-1",
+   "into_scopes": [
+    "pseudolife",
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "Stale development branches",
+   "from_scopes": [],
+   "into": "h3-staleness-policy",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "upsert_edge",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "PostgresStorage.upsert_edge",
+   "into_scopes": [],
+   "verdict": "accept"
+  },
+  {
+   "from": "evals/results/aggserve-verdict.json",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "evals/results/beam-ev-verdict.json",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "rag control",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "Flat RAG control",
+   "into_scopes": [
+    "pseudolife-mcp",
+    "pseudolife-mcp-benchmarks"
+   ],
+   "verdict": "accept"
+  },
+  {
+   "from": "v1 events prompt",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "v1 prompt",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "tui_gateway.server",
+   "from_scopes": [
+    "hermes-infra"
+   ],
+   "into": "tui_gateway",
+   "into_scopes": [
+    "hermes-infra"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "mcp_client",
+   "from_scopes": [
+    "hermes-infra"
+   ],
+   "into": "hermes-mcp-client",
+   "into_scopes": [
+    "hermes-infra"
+   ],
+   "verdict": "leave"
+  },
+  {
+   "from": "test_mcp_server.py",
+   "from_scopes": [
+    "pseudolife-hermes"
+   ],
+   "into": "mcp_server.py",
+   "into_scopes": [],
+   "verdict": "reject"
+  },
+  {
+   "from": "docs/i18n/",
+   "from_scopes": [
+    "pseudolife-hermes"
+   ],
+   "into": "docs/i18n/README",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "config.yaml",
+   "from_scopes": [
+    "hermes-infra"
+   ],
+   "into": "User config.yaml",
+   "into_scopes": [
+    "pseudolife",
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "config.yaml",
+   "from_scopes": [
+    "hermes-infra"
+   ],
+   "into": "/root/.hermes/pseudolife-config.yaml",
+   "into_scopes": [
+    "pseudolife-hermes",
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "evals/results/evq-verdict.json",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "evals/results/beam-ev-verdict.json",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "evals/results/evq-verdict.json",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "evals/results/aggserve-verdict.json",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "Opus-5 teacher",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "Opus 5",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "leave"
+  },
+  {
+   "from": "v2 prompt",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "sonnet-v2-prompt",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "accept"
+  },
+  {
+   "from": "prewarm-35b cron",
+   "from_scopes": [
+    "hermes-infra"
+   ],
+   "into": "prewarm-35b",
+   "into_scopes": [
+    "hermes-infra"
+   ],
+   "verdict": "accept"
+  },
+  {
+   "from": "CT100 hosta-hermes",
+   "from_scopes": [
+    "homelab-proxmox"
+   ],
+   "into": "hosta-hermes",
+   "into_scopes": [
+    "pseudolife",
+    "pseudolife-hermes",
+    "pseudolife-mcp"
+   ],
+   "verdict": "accept"
+  },
+  {
+   "from": "CT200 hostb-hermes",
+   "from_scopes": [
+    "homelab-proxmox"
+   ],
+   "into": "hostb-hermes",
+   "into_scopes": [
+    "home-network"
+   ],
+   "verdict": "accept"
+  },
+  {
+   "from": "~/.ssh/hosta-proxmox",
+   "from_scopes": [
+    "homelab-proxmox"
+   ],
+   "into": "hosta-proxmox",
+   "into_scopes": [
+    "homelab-proxmox"
+   ],
+   "verdict": "leave"
+  },
+  {
+   "from": "vzdump job",
+   "from_scopes": [
+    "homelab-proxmox"
+   ],
+   "into": "vzdump backup job",
+   "into_scopes": [
+    "homelab-proxmox"
+   ],
+   "verdict": "accept"
+  },
+  {
+   "from": "CT101 claw",
+   "from_scopes": [
+    "homelab-proxmox"
+   ],
+   "into": "CT101 hosta-claw",
+   "into_scopes": [
+    "homelab-proxmox"
+   ],
+   "verdict": "accept"
+  },
+  {
+   "from": "thin pool",
+   "from_scopes": [
+    "homelab-proxmox"
+   ],
+   "into": "proxmox-thin-pool",
+   "into_scopes": [
+    "homelab-proxmox"
+   ],
+   "verdict": "accept"
+  },
+  {
+   "from": "e4b-v3",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "e4b-v3 LoRA",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "accept"
+  },
+  {
+   "from": "production sidecar",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "PseudoLife-MCP default extractor sidecar",
+   "into_scopes": [
+    "pseudolife",
+    "pseudolife-mcp"
+   ],
+   "verdict": "accept"
+  },
+  {
+   "from": "production sidecar",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "production extractor sidecar",
+   "into_scopes": [
+    "pseudolife",
+    "pseudolife-mcp"
+   ],
+   "verdict": "leave"
+  },
+  {
+   "from": "e4b-v2",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "e4b-ft-v2 default",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "accept"
+  },
+  {
+   "from": "events v2",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "events_pass_v2",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "leave"
+  },
+  {
+   "from": "events v2",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "v2 events bank",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "leave"
+  },
+  {
+   "from": "events v2",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "events v2 dataset",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "leave"
+  },
+  {
+   "from": "v28 chronicle events",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "chronicle events",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "accept"
+  },
+  {
+   "from": "stale-policy eval",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "stale-policy",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "MCP SDK v2",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "mcp-python-sdk",
+   "into_scopes": [
+    "pseudolife",
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "MCP SDK v2",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "mcp-v2",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "leave"
+  },
+  {
+   "from": "MCP SDK v1",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "mcp-python-sdk",
+   "into_scopes": [
+    "pseudolife",
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "SDK v1",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "MCP SDK v1",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "accept"
+  },
+  {
+   "from": "Identity re-keying",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "Identity re-keying design",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "accept"
+  },
+  {
+   "from": "PSEUDOLIFE_MCP_TOKENS",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "pseudolife-mcp",
+   "into_scopes": [
+    "pseudolife",
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "episode-handle",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "_resolve_episode_handle",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "unattended-run-quiesce-checklist",
+   "from_scopes": [
+    "hermes-infra"
+   ],
+   "into": "pseudolife-daemon health check",
+   "into_scopes": [
+    "pseudolife",
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "autonomous-multi-session-builds",
+   "from_scopes": [
+    "hermes-infra"
+   ],
+   "into": "tri-serpent-overnight-build-20260807",
+   "into_scopes": [
+    "hermes-infra"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "ReferenceBank ChromaDB math",
+   "from_scopes": [
+    "pseudolife",
+    "pseudolife-mcp"
+   ],
+   "into": "opus5-teacher-datagen-20260807",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "Self-dedup mechanism",
+   "from_scopes": [
+    "pseudolife",
+    "pseudolife-mcp"
+   ],
+   "into": "identity-rekeying-design",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "Working repository state",
+   "from_scopes": [],
+   "into": "weak-model-state-file-handoff",
+   "into_scopes": [
+    "hermes-infra"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "v7-inline-events-design",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "separate-pass-events",
+   "into_scopes": [
+    "hermes-infra",
+    "llama-turboq",
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "evals/results/floor-pr104-pre.json",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "evals/results/qwen-27b-pr104-pre.json",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "evals/results/floor-pr104-post.json",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "evals/results/qwen-27b-pr104-post.json",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "re-architected session handling",
+   "from_scopes": [],
+   "into": "session-key-resume-touch-fix",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "statement_timeout",
+   "from_scopes": [
+    "pseudolife",
+    "pseudolife-mcp"
+   ],
+   "into": "contender-temporal-stamps-fix",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "sonnet_extractor_v2 prompt",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "LME-V2 Sonnet-extractor",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "events_pass_v2 teacher prompt",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "events_pass_v2",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "accept"
+  },
+  {
+   "from": "evq-0806 Run A smoke",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "evq-gate-run-0806",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "memory_fact_set",
+   "from_scopes": [
+    "pseudolife",
+    "pseudolife-mcp"
+   ],
+   "into": "cortex fact disambiguation / memory_fact_set",
+   "into_scopes": [],
+   "verdict": "reject"
+  },
+  {
+   "from": "distill-events-opus1 labels",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "distill-events-opus1.jsonl",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "accept"
+  },
+  {
+   "from": "Zombie sweep",
+   "from_scopes": [],
+   "into": "respawnSnake-fix",
+   "into_scopes": [
+    "hermes-infra"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "GitHub release v0.13.0",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "release/0.13.0",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "GitHub release v0.13.0",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "v0.13.0",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "accept"
+  },
+  {
+   "from": "0.12.0 image tag",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "tag v0.12.0",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "retention-interval eval (ret-0809)",
+   "from_scopes": [
+    "pseudolife-mcp",
+    "pseudolife-mcp-benchmarks"
+   ],
+   "into": "ret-0809-eval",
+   "into_scopes": [
+    "pseudolife-mcp",
+    "pseudolife-mcp-benchmarks"
+   ],
+   "verdict": "accept"
+  },
+  {
+   "from": "serving-side stale_policy",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "serving-side staleness policy",
+   "into_scopes": [
+    "pseudolife-mcp",
+    "pseudolife-mcp-benchmarks"
+   ],
+   "verdict": "accept"
+  },
+  {
+   "from": "MCP SDK v2.0.0 tag",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "MCP SDK v2",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "accept"
+  },
+  {
+   "from": "MCP SDK v2.0.0",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "Anthropic MCP v2 SDK",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "leave"
+  },
+  {
+   "from": "spec docs/superpowers/specs/2026-08-10-capture-hygiene-proposals.md",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "2026-08-10-capture-hygiene-proposals.md",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "accept"
+  },
+  {
+   "from": "claude-opus-5 shim on :8082",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "Opus 5",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "reject"
+  },
+  {
+   "from": "claude-opus-5 shim on :8082",
+   "from_scopes": [
+    "pseudolife-mcp"
+   ],
+   "into": "opus-shim",
+   "into_scopes": [
+    "pseudolife-mcp"
+   ],
+   "verdict": "accept"
+  }
+ ]
+}

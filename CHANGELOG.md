@@ -6,6 +6,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-08-12 — merge-proposal precision: name-shape vetoes + live fold direction)
+- **Merge-proposal filing (write-dedup and deep-dream) now applies two
+  name-shape vetoes** (`graph_review.merge_veto`): `event-slug` (a broader
+  name never folds into a date/run-tag-stamped event node; same-name-modulo-
+  date pairs stay proposable) and `numeric-substitution` (differing
+  numeric tokens with identical alpha stems, or the pre/post antonym pair,
+  mark siblings, not duplicates — one-sided numeric extensions such as
+  `v2.0.0` vs `v2` still propose). Both rules are gated by a replay of the
+  2026-08-11 full-queue triage (153 human/agent-judged proposals,
+  `tests/fixtures/merge_triage_replay_20260811.json`, sanitized): they
+  suppress 12 of the 101 ground-truth rejections and **zero of the 38
+  accepted merges** (`tests/test_merge_veto.py` pins both properties).
+  A scope-disjoint veto was measured and deliberately not shipped: two
+  accepted host merges had fully disjoint scopes — naming drift correlates
+  with scope drift, so for merge pairs disjoint scopes are weak evidence.
+- **Merge fold direction is re-derived from current evidence at review and
+  accept time** (`_fold_direction`, shared by every surface that presents a
+  pending merge — `_enrich_merge_proposals` for the deep-dream payload,
+  `graph_review` for the Atlas/console/wiki Merge buttons — and by
+  `graph_accept_entity_merge`, which applies it): the insert-time
+  orientation goes stale as the graph grows — two live proposals filed
+  2026-08-09 had their from-side reach degree 8 against a degree-0 target
+  while pending. Shown and applied derive from the same rule; ties keep
+  the stored direction, and a batch of accepts can legitimately flip a
+  later pending pair between listing and click.
+
 ### Fixed (2026-08-11 — dream runs are single-flight)
 - **`dream_run` now takes a non-blocking in-process guard for the whole
   pull → extract → commit cycle**: a second caller while a cycle is in

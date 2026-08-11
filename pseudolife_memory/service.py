@@ -5276,13 +5276,21 @@ class MemoryService:
             if thr <= 0:
                 return
             from pseudolife_memory.graph import degree_counts
-            from pseudolife_memory.memory.graph_review import near_duplicate_names
+            from pseudolife_memory.memory.graph_review import (merge_veto,
+                                                               near_duplicate_names)
             g = self._storage.load_graph()
             existing = [{**e, "aliases": g["aliases"].get(e["id"], [])}
                         for e in g["entities"] if e["id"] != entity_id]
             matches = near_duplicate_names(
                 name, existing, min_jaccard=thr,
                 dismissed=frozenset(self._storage.dismissed_pairs()))
+            # Name-shape vetoes (event-slug, numeric-substitution): Jaccard
+            # alone filed the project-vs-event and sibling-id classes that
+            # dominated the 2026-08-11 triage's 101 rejections. Known limit:
+            # the matcher scores across aliases too, so a pair matched via
+            # an alias is vetoed against the display name it will present as.
+            matches = [m for m in matches
+                       if merge_veto(name, m["display"]) is None]
             if not matches:
                 return
             deg = degree_counts(g["edges"])
@@ -5470,6 +5478,26 @@ class MemoryService:
             entity_proposals = self._storage.pending_entity_proposals()
             dismissed = self._storage.dismissed_pairs()
             lesson_ids = self._storage.lesson_entity_ids()
+            fact_counts = self._storage.entity_fact_counts()
+        # Merge rows present in the direction an accept will APPLY — the same
+        # current-evidence rule graph_accept_entity_merge uses. Without this,
+        # the Atlas/console/wiki Merge buttons (which render this payload)
+        # could show A → B while the accept folds B → A. Evidence is computed
+        # over the FULL graph even for scoped views.
+        from pseudolife_memory.graph import degree_counts as _dc
+        _deg = _dc(g["edges"])
+
+        def _ev(eid):
+            return _deg.get(eid, 0) + fact_counts.get(eid, 0)
+
+        entity_proposals = [
+            {**p, "entity_id": p["into_id"], "into_id": p["entity_id"],
+             "entity": p["into"], "into": p["entity"]}
+            if p.get("kind") == "merge"
+            and self._fold_direction(p["entity_id"], p["into_id"], _ev)
+            != (p["entity_id"], p["into_id"])
+            else p
+            for p in entity_proposals]
         entities, edges = g["entities"], g["edges"]
         if scope and scope != "all":
             keep = {eid for eid, ss in src_map.items() if scope in ss}
@@ -6154,6 +6182,12 @@ class MemoryService:
         merge_cands, link_cands = gc.partition_candidates(
             near, entities, edges, merge_min_similarity=cfg.merge_min_similarity,
             fact_counts=fact_counts)
+        # Same name-shape vetoes the write-dedup filing applies — dry-run
+        # display and the apply-time filing loop both consume merge_cands,
+        # so filtering here keeps them agreeing.
+        from pseudolife_memory.memory.graph_review import merge_veto as _mv
+        merge_cands = [m for m in merge_cands
+                       if _mv(m["from"], m["into"]) is None]
         from pseudolife_memory.graph import norm_name as _nn
         known_norms = frozenset(
             {e["canonical"] for e in entities}
@@ -6169,7 +6203,7 @@ class MemoryService:
         merge_proposals = self._enrich_merge_proposals(
             pending_props, entities, edges, entries, traces, mentions,
             scope_map, cfg.max_context_snippets, cfg.snippet_max_chars,
-            include_snippets)
+            include_snippets, fact_counts=fact_counts)
         # Store curation (listing-only, both dry-run and apply): cross-key
         # near-duplicate lesson/world slots. Settled by the reviewer via
         # curation_dismiss_duplicate (distinct) or the existing forget /
@@ -6301,7 +6335,7 @@ class MemoryService:
         merge_proposals = self._enrich_merge_proposals(
             pending_props, entities, edges, entries, traces, mentions,
             scope_map, cfg.max_context_snippets, cfg.snippet_max_chars,
-            include_snippets)
+            include_snippets, fact_counts=fact_counts)
         return {"applied": True, "rescored": len(rescore), "superseded": superseded,
                 "merged": merged, "merge_proposed": merge_proposed,
                 "junk_proposed": junk_proposed, "junk_deleted": junk_deleted,
@@ -6386,27 +6420,34 @@ class MemoryService:
 
     def _enrich_merge_proposals(self, pending, entities, edges, entries,
                                 traces, mentions, scope_map, k, max_chars,
-                                include_snippets):
+                                include_snippets, *, fact_counts=None):
         """Evidence payload for Step-C merge triage (write-dedup spec): each
         pending merge proposal with per-side display/etype/degree/scopes and
-        snippets. Presentation follows the STORED direction — ``accept_merge``
-        folds ``from`` into ``into`` exactly as shown (a degree-based
-        re-orientation here would make the model approve the mirror image of
-        what the accept applies). Write-dedup rows are already stored
-        lower-degree → higher-degree at insert time."""
+        snippets. Presentation and application both derive the fold direction
+        from CURRENT evidence via ``_fold_direction`` — the stored direction
+        was computed when the minted side had no history and goes stale as
+        the graph grows (rows 981/983, 2026-08-12: the from-side reached
+        degree 8 while its proposal sat pending against a degree-0 target).
+        ``accept_merge`` applies the same rule, so what is shown is still
+        exactly what an accept does."""
         from pseudolife_memory.graph import degree_counts
         deg = degree_counts(edges)
         by_id = {e["id"]: e for e in entities}
+        facts = fact_counts or {}
+
+        def ev(eid):
+            return deg.get(eid, 0) + facts.get(eid, 0)
 
         rows = [p for p in pending if p.get("kind") == "merge"]
-        shaped = [{"src_id": p["entity_id"], "dst_id": p["into_id"]}
-                  for p in rows]
+        oriented = [self._fold_direction(p["entity_id"], p["into_id"], ev)
+                    for p in rows]
+        shaped = [{"src_id": f, "dst_id": i} for f, i in oriented]
         if include_snippets:
             self._attach_candidate_snippets(
                 shaped, entities, entries, traces, k,
                 mentions=mentions, max_chars=max_chars)
         out = []
-        for p, s in zip(rows, shaped):
+        for p, (frm, into), s in zip(rows, oriented, shaped):
             def side(eid, snips):
                 e = by_id.get(eid) or {}
                 return {"display": e.get("display"), "etype": e.get("etype"),
@@ -6415,9 +6456,23 @@ class MemoryService:
                         "snippets": snips if include_snippets else []}
             out.append({"id": p["id"], "score": p.get("score"),
                         "reason": p.get("reason"),
-                        "from": side(p["entity_id"], s.get("src_snippets", [])),
-                        "into": side(p["into_id"], s.get("dst_snippets", []))})
+                        "from": side(frm, s.get("src_snippets", [])),
+                        "into": side(into, s.get("dst_snippets", []))})
         return out
+
+    @staticmethod
+    def _fold_direction(frm: int, into: int, evidence) -> tuple[int, int]:
+        """The fold direction a merge proposal SHOULD apply with, re-derived
+        from current evidence (degree + fact count, the insert-time rule):
+        swap when the stored from-side now outweighs the target; ties keep
+        the stored direction. Shared by the review payloads
+        (``_enrich_merge_proposals``, ``graph_review``) and
+        ``graph_accept_entity_merge`` so both derive direction from the same
+        rule. The guarantee is same-rule, not same-instant: accept re-reads
+        evidence at click time, so a batch of accepts can legitimately flip
+        a later pending row that was displayed before the batch began —
+        current evidence is the truth being tracked."""
+        return (into, frm) if evidence(frm) > evidence(into) else (frm, into)
 
     def graph_propose_links(self, proposals: list[dict]) -> dict[str, Any]:
         """Ingest Step-C subagent link proposals. Each is gated by the SAME mechanism
@@ -6493,19 +6548,28 @@ class MemoryService:
             prop = self._storage.get_entity_proposal(proposal_id)
             if prop is None or prop["status"] != "pending" or prop["kind"] != "merge":
                 return {"accepted": False, "reason": "not_pending", "id": proposal_id}
-            disp = {e["id"]: e["display"] for e in self._storage.load_graph()["entities"]}
+            from pseudolife_memory.graph import degree_counts
+            g = self._storage.load_graph()
+            disp = {e["id"]: e["display"] for e in g["entities"]}
+            deg = degree_counts(g["edges"])
+            facts = self._storage.entity_fact_counts()
+            # Same current-evidence rule the enrich payload presented with —
+            # the stored direction can be stale (see _enrich_merge_proposals).
+            frm, into = self._fold_direction(
+                prop["entity_id"], prop["into_id"],
+                lambda eid: deg.get(eid, 0) + facts.get(eid, 0))
             now = _t.time()
             # Audit BEFORE the merge: the accepted proposal row CASCADEs away
             # with the folded entity, so merge_decisions is the durable record.
             self._storage.record_merge_decision(
-                proposal_id, disp.get(prop["entity_id"], "?"),
-                disp.get(prop["into_id"], "?"), "accepted", prop.get("score"),
+                proposal_id, disp.get(frm, "?"),
+                disp.get(into, "?"), "accepted", prop.get("score"),
                 prop.get("reason"), decided_by, now)
-            ok = self._storage.merge_entity(prop["entity_id"], prop["into_id"])
+            ok = self._storage.merge_entity(frm, into)
             self._storage.set_entity_proposal_status(
                 proposal_id, "accepted", decided_by=decided_by, decided_at=now)
-        return {"accepted": ok, "from": disp.get(prop["entity_id"]),
-                "into": disp.get(prop["into_id"])}
+        return {"accepted": ok, "from": disp.get(frm),
+                "into": disp.get(into)}
 
     def graph_accept_entity_junk(self, proposal_id: int) -> dict[str, Any]:
         with self._lock:

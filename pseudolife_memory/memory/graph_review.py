@@ -84,6 +84,88 @@ _CODE_FILE_RE = re.compile(
     r"\.(py|js|mjs|ts|tsx|jsx|ps1|sh|bat|rb|go|rs|java|c|cc|cpp|h|hpp)$", re.I)
 
 
+# ── merge-proposal vetoes (2026-08-12, measured on the 2026-08-11 triage) ──
+#
+# Name-shape classes that produced most of the merge queue's false positives
+# (101/153 proposals rejected). Both rules are gated by the replay fixture
+# (tests/fixtures/merge_triage_replay_20260811.json): a rule change that
+# suppresses even one ground-truth ACCEPTED merge goes red. A scope-disjoint
+# veto was measured and deliberately NOT shipped: naming drift correlates
+# with scope drift (two accepted host merges — CT-id vs hostname variants of
+# one box — had fully disjoint scopes), so for MERGE pairs disjoint scopes
+# are weak evidence. The rule stays where it is safe, in candidate_pairs'
+# link filtering.
+
+# A token is an event slug when it is a full date (20YYMMDD / 20YY-MM-DD)
+# or a bare/suffixed MMDD run tag (0806, smoke0726). Version atoms (v2, 0),
+# PR numbers (104) and most ports (8082) fall outside the window — but any
+# 4-digit token whose halves parse as MM/DD does match (1024, 1230), so a
+# dimension- or port-shaped token can flag a name as dated. Safe in the
+# one-sided case (the strip-and-compare equality still applies); the replay
+# gate bounds the rest.
+_EVENT_TOKEN_RE = re.compile(
+    r"^[a-z]*(20\d{2}[01]\d[0-3]\d|(0[1-9]|1[0-2])([0-2]\d|3[01]))$")
+# Separator-form dates (2026-08-05) must be recognized BEFORE tokenizing —
+# the tokenizer would split them into innocuous fragments (2026 / 08 / 05).
+_ISO_DATE_RE = re.compile(r"20\d{2}[-_.][01]\d[-_.][0-3]\d")
+_ANTONYM_DIFFS = ({"pre"}, {"post"})
+
+
+def _veto_tokens(name):
+    """``(tokens, sluggy)`` — lowercased alphanumeric tokens with short
+    tokens KEPT (sibling ids, version atoms and antonyms are load-bearing
+    here, unlike in the Jaccard matcher's _token_set), plus whether the name
+    carries a date/run-tag. ISO dates are stripped whole so their fragments
+    never pollute the token set."""
+    s = str(name).lower()
+    sluggy = bool(_ISO_DATE_RE.search(s))
+    s = _ISO_DATE_RE.sub(" ", s)
+    toks = {t for t in re.split(r"[^a-z0-9]+", s) if t}
+    return toks, sluggy or any(_EVENT_TOKEN_RE.match(t) for t in toks)
+
+
+def merge_veto(name_a, name_b):
+    """Reason string when a merge proposal for ``(name_a, name_b)`` should
+    not be filed, else ``None``. Purely name-shaped — callers with stronger
+    evidence (exact duplicates, human proposals) should not consult it.
+
+    * ``"event-slug"``: exactly one side carries a date/run-tag token, and
+      stripping those tokens does NOT make the token sets equal — a broader
+      name (project, programme) paired with one dated event. When stripping
+      makes them equal, the pair is one event under naming drift and stays
+      proposable. Two dated names are left to evidence when the dates are
+      separator-form (stripped whole before tokenizing); COMPACT dates
+      surviving as tokens can still veto as numeric-substitution
+      (notes-20260805 / notes-20260807) — sibling events, correctly so.
+    * ``"numeric-substitution"``: both sides carry numeric-bearing tokens
+      the other lacks, with identical alpha stems (CT200/CT400,
+      0-11-0/0-13-0) — or the diff is exactly the pre/post antonym pair.
+      Sibling artifacts, not duplicates. One-sided numeric EXTENSIONS
+      (v2.0.0 vs v2, "CT100 host" vs "host") do not veto, and extra
+      alpha-only tokens beside a numeric substitution do not rescue the
+      pair ("CT300 Local-Models" vs "CT200" stays vetoed).
+    """
+    (ta, ea), (tb, eb) = _veto_tokens(name_a), _veto_tokens(name_b)
+    if not ta or not tb or ta == tb:
+        return None
+    if ea != eb:
+        dated, plain = (ta, tb) if ea else (tb, ta)
+        if {t for t in dated if not _EVENT_TOKEN_RE.match(t)} != plain:
+            return "event-slug"
+        return None
+    a_only, b_only = ta - tb, tb - ta
+    if not a_only or not b_only:
+        return None
+    if (a_only, b_only) in (_ANTONYM_DIFFS, _ANTONYM_DIFFS[::-1]):
+        return "numeric-substitution"
+    stem = lambda toks: sorted(re.sub(r"\d+", "", t) for t in toks)  # noqa: E731
+    na = {t for t in a_only if any(c.isdigit() for c in t)}
+    nb = {t for t in b_only if any(c.isdigit() for c in t)}
+    if na and nb and stem(na) == stem(nb):
+        return "numeric-substitution"
+    return None
+
+
 def _stem_key(name):
     """Fold a bare name for stem comparison: case, separators and the
     directory prefix all ignored."""
