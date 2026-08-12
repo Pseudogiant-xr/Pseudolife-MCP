@@ -57,6 +57,11 @@ entries, a cached view of the graph, a memoized score):
 - TDD with a watched RED per the superpowers skill; for invalidation contracts,
   spot-check that each hook is load-bearing by disabling it and confirming the
   test goes red (a hook that never fires red is decoration, and worth saying so).
+- **A tuning constant set or changed for a measured reason carries a comment
+  naming the measurement** — what was measured, when, at what scale (the
+  `recency_boost_enabled` comment in `utils/config.py` is the shape). Adopt
+  as files are touched; no retrofit sweeps — a comment-only pass across the
+  tree is merge-conflict noise with no behavior change.
 - Eval- or retrieval-affecting changes run `evals/regression_gate.ps1`
   before commit (pinned replicated slice vs committed baseline; exit 1 =
   regression). Extraction/dream-path changes re-run the ladder instead —
