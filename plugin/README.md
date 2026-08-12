@@ -71,7 +71,7 @@ don't double up:
   (Git Bash on Windows) and `curl` — both ship with git / the OS.
 - **SessionEnd hook** — closes the session's episode and clears the
   active-session pointer when the session ends.
-- **`/dream`** — agent-led consolidation pass (facts + graph review)
+- **`/dream`** — judgment session over the review queues (graph triage; manual fact extraction only where no extractor is configured)
 - **`/memory-status`** — daemon health + bank stats readout
 
 ## Non-default setups

@@ -1,37 +1,46 @@
 ---
-description: Consolidate recent Pseudolife memories into canonical cortex facts
-argument-hint: "[deep]"
+description: Run a judgment session over the Pseudolife memory bank — triage the review queues; extract facts only where no extractor can
 ---
-Run a dream pass over the Pseudolife-MCP bank:
+Run a judgment session over the Pseudolife-MCP bank. The pipeline halves
+run themselves — the auto-sweep extracts facts through the configured
+extractor, and a need-based tick applies the deep dream's mechanical half
+(rescore, guarded junk deletes, scope stamping, proposal filing,
+snapshot-first). What cannot be automated is judgment: this command works
+the review queues that automation fills.
 
-1. Call `memory_dream(action="status")`. If `would_fire` is false and there is
-   no backlog, report "nothing to consolidate" and stop.
-2. Call `memory_dream(action="pull")` (default limit).
-3. From the pulled text, extract only **durable, current-state, slot-shaped**
-   facts as `(entity, attribute, value)`. Skip narrative, in-progress work, and
-   superseded states. Reuse existing slot keys where they fit.
-4. Write each with `memory_fact_set` (origin `user` only for things the human
-   stated; otherwise `agent`). If the fact is a MEMBER of a set the user
-   maintains (bikes owned, pending tasks), use `memory_set_add` /
-   `memory_set_remove` instead — `memory_fact_set` on a set-valued slot
-   errors and names the right tool.
-5. Call `memory_dream(action="commit", cursor=<newest timestamp from the pull>)`.
-6. Report inserted / confirmed / contested / member-add counts. Surface any
-   `contested` results to the user — those are conflicts to settle, not
-   silent overwrites (an add onto a number-led scalar parks as a contender
-   by design; `member_capped` means the 100-member cap was hit).
-
-## Deep mode (`/dream deep`)
-
-Full-corpus graph consolidation plus Step C — turning link candidates into
-reviewed proposals:
-
-1. `memory_dream(action="deep")` — dry-run preview. Report the would-* counts
-   (items flagged `already_proposed: true` will be skipped by apply).
-2. `memory_dream(action="deep", apply=true)` — the daemon snapshots the graph
-   tables first (`snapshot` in the response is the undo file); a
-   `snapshot_failed` error means nothing was changed — investigate, don't retry
-   blindly.
+1. Call `memory_dream(action="status")` and read three things:
+   - `deep_dream` — `{recommended, reason, new_entities, days_since}`:
+     whether the mechanical pass is due. The tick normally handles this;
+     if `recommended` is still true (tick disabled, or the daemon just
+     restarted), run `memory_dream(action="deep", apply=true)` yourself —
+     the daemon snapshots the graph tables first (`snapshot` in the
+     response is the undo file); a `snapshot_failed` error means nothing
+     was changed — investigate, don't retry blindly. Otherwise run
+     `memory_dream(action="deep")` (dry-run) to fetch the queues with
+     evidence snippets.
+   - the extractor fields (`primary_url` / `fallback_url`): whether this
+     deployment has ANY automatic cortex writer.
+   - `backlog` / `would_fire`: whether unconsolidated memories are waiting
+     for the next sweep.
+2. ONLY when no extractor endpoint is configured (primary and fallback
+   both null) or both are unreachable: you are this deployment's only
+   cortex writer — run the manual extraction pass:
+   - `memory_dream(action="pull")` (default limit).
+   - From the pulled text, extract only **durable, current-state,
+     slot-shaped** facts as `(entity, attribute, value)`. Skip narrative,
+     in-progress work, and superseded states. Reuse existing slot keys
+     where they fit.
+   - Write each with `memory_fact_set` (origin `user` only for things the
+     human stated; otherwise `agent`). If the fact is a MEMBER of a set
+     the user maintains (bikes owned, pending tasks), use `memory_set_add`
+     / `memory_set_remove` instead — `memory_fact_set` on a set-valued
+     slot errors and names the right tool.
+   - `memory_dream(action="commit", cursor=<newest timestamp from the
+     pull>)`.
+   - Surface any `contested` results to the user — those are conflicts to
+     settle, not silent overwrites (an add onto a number-led scalar parks
+     as a contender by design; `member_capped` means the 100-member cap
+     was hit).
 3. Work the returned `candidates` (Step C). For each pair, judge from the
    `src_snippets` / `dst_snippets` evidence, never from names alone:
    - **Related** (one uses/contains/produces the other, etc.): submit via
@@ -57,7 +66,7 @@ reviewed proposals:
    - **Same referent** (naming-layer variants of one thing — file suffixes,
      abbreviations, display drift): `memory_graph_review(action="accept_merge",
      proposal_id=...)`. The merge applies immediately (the graph snapshot from
-     step 2 is the undo artifact) and is logged to the recent-merges audit as
+     step 1 is the undo artifact) and is logged to the recent-merges audit as
      decided_by=agent.
    - **Distinct things**: `memory_graph_review(action="reject_entity",
      proposal_id=...)` AND `memory_graph_review(action="dismiss_pair",
@@ -73,7 +82,7 @@ reviewed proposals:
    - **Artifact** (`concat-artifact`, `list-artifact`, `compound-artifact`,
      `bare-number`, `status-word` …): `memory_graph_review(
      action="accept_junk", proposal_id=...)`. This DELETES the entity — the
-     step-2 snapshot is the only undo.
+     step-1 snapshot is the only undo.
    - **A real thing that merely looks thin** — short, weakly-connected names
      are often legitimate ("Go", "uv"):
      `memory_graph_review(action="reject_entity", proposal_id=...)`.
@@ -89,8 +98,9 @@ reviewed proposals:
      store="lesson"|"world", src=<a_key>, dst=<b_key>)` so the pair
      never re-lists.
    - **Unsure**: leave listed. Do not guess.
-7. Report: superseded / merged / proposed / dismissed counts, merges you
-   applied or rejected (they appear under "recent merge decisions" in Atlas),
-   junk entities deleted or kept, lesson/world pairs settled, and the
-   snapshot filename. Link proposals still need a human verdict
-   (`accept_link` / `reject_link` or Atlas).
+7. Report: what the mechanical pass did (or that the tick already had),
+   proposed / dismissed counts, merges you applied or rejected (they appear
+   under "recent merge decisions" in Atlas, beside the accept-rate stat),
+   junk entities deleted or kept, lesson/world pairs settled, contested
+   facts if step 2 ran, and the snapshot filename. Link proposals still
+   need a human verdict (`accept_link` / `reject_link` or Atlas).
