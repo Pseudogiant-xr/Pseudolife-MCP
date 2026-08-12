@@ -158,11 +158,13 @@ def candidate_pairs(vectors: dict[int, np.ndarray], edges: list[dict],
                     excluded_ids: set[int] | None = None) -> list[dict]:
     """Unlinked, scope-coherent, semantically-near entity pairs — the link
     candidates. Drops pairs that already have an edge (either direction), exact
-    duplicates (a Step-A merge), have near-identical supporting-entry sets
-    (Jaccard >= ``max_support_overlap`` — co-occurrence, not independent
-    similarity; 1.0 keeps only the strict-equality drop), sit in disjoint
-    non-empty project scopes, or were human-dismissed (``dismissed`` holds
-    sorted canonical-name pairs from dismissed_pairs).
+    duplicates (a Step-A merge), have co-occurring supporting-entry sets
+    (CONTAINMENT ``|shared| / min(|a|, |b|)`` >= ``max_support_overlap`` —
+    when the smaller side's support sits inside the other's, the similarity
+    is co-mention, not independent evidence; 1.0 still admits any pair with
+    one non-shared entry per side), sit in disjoint non-empty project
+    scopes, or were human-dismissed (``dismissed`` holds sorted
+    canonical-name pairs from dismissed_pairs).
 
     ``pending_pairs`` (id frozensets) and ``excluded_ids`` drop pairs that
     already have a PENDING link proposal, and pairs touching junk-flagged
@@ -186,7 +188,18 @@ def candidate_pairs(vectors: dict[int, np.ndarray], edges: list[dict],
             if dismissed and tuple(sorted((canon.get(u, ""), canon.get(v, "")))) in dismissed:
                 continue
             mu, mv = mentions.get(u), mentions.get(v)
-            if mu and mv and len(mu & mv) / len(mu | mv) >= max_support_overlap:
+            # Containment, not Jaccard: when the SMALLER side's mentions sit
+            # almost wholly inside the other's, its context IS the
+            # co-mention — one shared note pair generated ten cross-product
+            # candidates at Jaccard 0.67 on 2026-08-12, all noise. EXEMPT:
+            # name-contained pairs (the MERGE-shaped class) co-occur by
+            # construction — the scan fallback makes the shorter name's
+            # mentions a superset of the longer's — so the drop would
+            # silently disable merge-candidate discovery for them.
+            if (mu and mv
+                    and (len(mu & mv) / min(len(mu), len(mv))
+                         >= max_support_overlap)
+                    and not _name_contains(disp.get(u, ""), disp.get(v, ""))):
                 continue                           # shared support -> co-occurrence
             su, sv = set(scope_map.get(u, [])), set(scope_map.get(v, []))
             if su and sv and not (su & sv):       # disjoint, both attributed

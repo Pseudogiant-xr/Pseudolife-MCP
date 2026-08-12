@@ -54,6 +54,10 @@ EMBEDDER_CALL_SITE_INVENTORY = frozenset({
     ("cortex_write", "encode_single"),
     ("lesson_search", "encode_query"),
     ("lesson_write", "encode_single"),
+    # Synthesis-time dedup gate (2026-08-12): document-side on purpose — it
+    # re-composes the exact string lesson_write embeds, so the comparison
+    # against stored lesson embeddings is symmetric.
+    ("_synthesized_lesson_duplicate", "encode_single"),
     ("search", "encode_query"),
     ("search_documents", "encode_query"),
     ("set_add", "encode_single"),

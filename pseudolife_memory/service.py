@@ -2746,8 +2746,18 @@ class MemoryService:
         created = [s["created_at"] for s in signals if s.get("created_at")]
         batch_valid_time = min(created) if created else None
         written = 0
+        deduped = 0
+        dedup_thr = float(getattr(cfg, "synthesis_dedup_min_similarity", 0.0)
+                          or 0.0)
         for c in claims:
             try:
+                if dedup_thr and self._synthesized_lesson_duplicate(
+                        c["task"], c.get("aspect", "lesson"), c["lesson"],
+                        c.get("polarity", "+"), dedup_thr):
+                    deduped += 1
+                    logger.info("lesson synthesis dedup: %r near-duplicates "
+                                "an existing lesson; skipped", c.get("task"))
+                    continue
                 self.lesson_write(
                     c["task"], c.get("aspect", "lesson"), c["lesson"],
                     about=c.get("about"), outcome=c.get("outcome", "success"),
@@ -2761,7 +2771,10 @@ class MemoryService:
                 written += 1
             except Exception as exc:  # noqa: BLE001
                 logger.warning("lesson write skipped (%s): %s", exc, c)
-        if written:
+        if written or deduped:
+            # A fully-deduped batch is HANDLED, not failed — leaving its
+            # signals pending would re-synthesize the same near-duplicates
+            # every sweep, forever bouncing off the gate.
             with self._lock:
                 self._storage.consume_signals([s["id"] for s in signals])
         else:
@@ -2771,7 +2784,31 @@ class MemoryService:
             # the retry window.
             logger.info("lesson synthesis wrote nothing; leaving %d signals "
                         "pending", len(signals))
-        return {"signals": len(signals), "lessons": written}
+        return {"signals": len(signals), "lessons": written, "deduped": deduped}
+
+    def _synthesized_lesson_duplicate(self, task: str, aspect: str,
+                                      lesson: str, polarity: str,
+                                      threshold: float) -> bool:
+        """Cross-key near-duplicate gate for SYNTHESIZED lessons only —
+        explicit ``lesson_write`` callers are never gated. True when an
+        existing CURRENT lesson at a DIFFERENT ``(task, aspect)`` key with
+        the SAME polarity sits at/above ``threshold`` cosine (the store's
+        own search metric). Same-key hits pass through: supersession is the
+        store's job. Opposite-polarity hits pass through: an "avoid"
+        inversion of a "do" lesson is new information, never a duplicate."""
+        from pseudolife_memory.memory.cortex import _norm_key
+        with self._lock:
+            self._ensure_init()
+            if self._lessons is None or self._embedder is None:
+                return False
+            key = (_norm_key(task), _norm_key(aspect))
+            emb = self._embedder.encode_single(
+                f"{task} {aspect} {lesson}".strip())
+            for rec, _score in self._lessons.search(emb, top_k=3,
+                                                    min_score=threshold):
+                if rec.key != key and rec.polarity == polarity:
+                    return True
+        return False
 
     def cortex_dump(self) -> dict[str, Any]:
         """All current canonical facts (entity, attribute, value, origin, …) for
@@ -6181,6 +6218,7 @@ class MemoryService:
             prop_keys = self._storage.entity_proposal_keys()
             pending_props = self._storage.pending_entity_proposals()
             pending_links = self._storage.pending_proposals()
+            lesson_refs = self._storage.lesson_entity_ids()
             fact_counts = self._storage.entity_fact_counts()
             lesson_recs = self._curation_records("lesson", cfg.snippet_max_chars)
             world_recs = self._curation_records("world", cfg.snippet_max_chars)
@@ -6203,13 +6241,18 @@ class MemoryService:
                          if p.get("kind") == "junk"})
         vectors, mentions = gc.entity_context_vectors(
             entities, entries, traces, min_mentions=cfg.min_entity_mentions)
+        # Lesson-minted <task> <aspect> nodes are not graph entities — the
+        # same exclusion graph_review has always applied; without it they
+        # paired with the artifacts they mention and burned candidate slots
+        # (five pairs in one 2026-08-12 session).
+        from pseudolife_memory.memory.graph_review import lesson_only_ids
         near = gc.candidate_pairs(
             vectors, edges, entities, scope_map, mentions,
             min_similarity=cfg.min_similarity, top_k=cfg.top_k_candidates,
             dismissed=dismissed, max_support_overlap=cfg.max_support_overlap,
             pending_pairs={frozenset((p["src_id"], p["dst_id"]))
                            for p in pending_links},
-            excluded_ids=junk_owned)
+            excluded_ids=junk_owned | lesson_only_ids(edges, lesson_refs))
         merge_cands, link_cands = gc.partition_candidates(
             near, entities, edges, merge_min_similarity=cfg.merge_min_similarity,
             fact_counts=fact_counts)
