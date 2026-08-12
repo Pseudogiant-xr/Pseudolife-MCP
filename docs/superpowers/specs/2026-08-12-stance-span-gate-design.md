@@ -53,6 +53,33 @@ Next iteration owns: why the stance rule degrades KU extraction
 stance should be stripped from the ANSWER context (serving-side
 timidity) independent of extraction.
 
+### Post-gate forensics (2026-08-13, from the committed per-question banks)
+
+Bank diffs for three representative v8 losses
+(`evals/results/banks/oracle-qwen-27b-sgku-{v5,v8}/`) localize the
+mechanism — it is NOT stance-field semantics (the lost banks barely use
+the field) but **prompt-example interference with slot naming and
+update consolidation**:
+
+- `9ea5eabc`: v5 → 4 clean slots, `past-travel-experience` superseded
+  Hawaii→Paris correctly. v8 → 19 slots: one activity list exploded
+  into ~15 near-duplicate `planned-solo-travel-activities` scalars, key
+  format drifted (`past travel experience`, space-separated), and the
+  Paris update was NEVER extracted — the slot froze at Hawaii.
+- `6aeb4375`: v5 superseded the running count 3→4; v8 froze it at 3
+  (the count-exclusion behavior v5's example anchors, weakened).
+- `852ce960`: both banks carry the correct current value — that loss is
+  purely answer-side (the timidity component), a separate, smaller
+  effect.
+
+Iteration hints this buys: (a) the stance rule's worked example should
+itself demonstrate a hedged UPDATE being consolidated onto an existing
+slot (reinforcing, not diluting, the one-slot/current-value anchor);
+(b) measure slot-count and key-format drift as cheap leading indicators
+in any future prompt arm (both were visible here without a judge);
+(c) the answer-side timidity is real but second-order — fix extraction
+first.
+
 Two extraction-quality changes that share one surface (the dream extractor's
 claim schema) and are therefore specced and measured together, in separate
 arms. Both are grounded in externally verified 2026-08 results and in this
