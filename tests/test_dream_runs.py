@@ -241,6 +241,26 @@ def test_rollback_restores_prev_scalar_via_supersede(svc):
     assert _runs(svc)[0]["status"] == "rolled_back"
 
 
+def test_rollback_restores_the_superseded_records_stance(svc):
+    """Review fix (2026-08-13): the journal's fixed columns carry no
+    stance (v29 spec amendment 3), so ``_rewrite_prev`` recovers it from
+    the superseded record itself — without that, a rollback silently
+    converts a restored hedged fact into a plain assertion, the exact
+    failure the stance field exists to prevent."""
+    svc.store("the project is probably delayed", source="notes")
+    svc.dream_run(_Stub([_scalar("project", "status", "maybe delayed",
+                                 stance="probably")]))
+    svc.store("the project is on track now", source="notes")
+    svc.dream_run(_Stub([_scalar("project", "status", "on track",
+                                 confidence=0.9)]))
+    out = svc.dream_rollback()
+    assert out.get("error") is None, out
+    assert out["reverted"] == 1
+    cur = svc.cortex_lookup("project", "status")
+    assert cur is not None and cur["value"] == "maybe delayed"
+    assert cur.get("stance") == "probably"
+
+
 def test_rollback_retires_inserted_slot(svc):
     svc.store("the mascot is a fox", source="notes")
     svc.dream_run(_Stub([_scalar("team", "mascot", "fox")]))

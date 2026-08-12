@@ -256,6 +256,13 @@ class CortexRecord:
     # transient state (deployment status, what is "currently" running) so they
     # lose trust as they age instead of reading as gospel forever.
     freshness_class: str = "evergreen"
+    # v29 epistemic stance: the source's own hedge words ("probably",
+    # "per the runbook"), kept verbatim and separate from ``value``. None =
+    # asserted plainly. Follows the LATEST asserting write: a confirm or
+    # supersede without a stance clears it. Reader metadata only — never an
+    # input to confidence, ranking, or supersession (it is model-emitted and
+    # steerable by note text, the same trust class as a claim's ``origin``).
+    stance: str | None = None
 
     @property
     def key(self) -> tuple[str, str]:
@@ -364,10 +371,17 @@ class CortexStore:
         session_id: str | None = None,
         freshness_class: str = "evergreen",
         force_contend: bool = False,
+        stance: str | None = None,
     ) -> WriteResult:
         """Write a scalar fact at ``(slot.entity, slot.attribute)`` — the
         canonical insert/confirm/supersede/contest path (see the module
         docstring).
+
+        ``stance`` (v29) follows the latest asserting write on every
+        outcome — insert, confirm, supersede, and contend all stamp the
+        written/confirmed record with this call's stance, where ``None``
+        means "asserted plainly" and clears any stored hedge. It is never
+        consulted by the routing logic below.
 
         ``force_contend`` (consolidation quarantine, spec 2026-08-09):
         a conflicting or brand-new value is parked as a contender
@@ -408,16 +422,18 @@ class CortexStore:
                 # take current — park it currentless.
                 return self._contend(None, slot, emb, confidence, prov, t,
                                      sup, "quarantine_low_trust", semb,
-                                     freshness_class=freshness_class, **stamp)
+                                     freshness_class=freshness_class,
+                                     stance=stance, **stamp)
             return WriteResult("inserted", self._insert(
                 slot, emb, confidence, prov, t, support=sup,
-                slot_embedding=semb, freshness_class=freshness_class, **stamp))
+                slot_embedding=semb, freshness_class=freshness_class,
+                stance=stance, **stamp))
 
         cur = self.records[idx]
         if _norm_value(cur.value) == _norm_value(slot.value):
             # Same fact reasserted → confirm, never duplicate.
             return self._confirm(cur, prov, sup, confidence, t, txt, hlc,
-                                 writer_id, session_id, semb)
+                                 writer_id, session_id, semb, stance=stance)
 
         if _is_compression_echo(slot.value, cur.value):
             # A shorter re-statement of the standing value (dream echo) is
@@ -427,7 +443,7 @@ class CortexStore:
                       "compression_echo", writer_id=writer_id,
                       session_id=session_id)
             return self._confirm(cur, prov, sup, confidence, t, txt, hlc,
-                                 writer_id, session_id, semb)
+                                 writer_id, session_id, semb, stance=stance)
 
         if force_contend:
             # Quarantine: park unconditionally — tier is not consulted,
@@ -435,7 +451,8 @@ class CortexStore:
             # win the slot on tier arithmetic.
             return self._contend(cur, slot, emb, confidence, prov, t, sup,
                                  "quarantine_low_trust", semb,
-                                 freshness_class=freshness_class, **stamp)
+                                 freshness_class=freshness_class,
+                                 stance=stance, **stamp)
 
         # Genuine conflict at the same slot. Provenance guard: only a write whose
         # tier is >= the current value's tier may supersede; a weaker-tier write
@@ -450,7 +467,8 @@ class CortexStore:
                       writer_id=writer_id, session_id=session_id)
             new = self._insert(slot, emb, confidence, prov, t, supersedes=cur.value,
                                support=sup, slot_embedding=semb,
-                               freshness_class=freshness_class, **stamp)
+                               freshness_class=freshness_class,
+                               stance=stance, **stamp)
             return WriteResult("superseded", new)
 
         reason = "tier_downgrade" if not tier_ok else "below_confidence_margin"
@@ -460,13 +478,18 @@ class CortexStore:
                       writer_id=writer_id, session_id=session_id)
             return WriteResult("contested", cur)
         return self._contend(cur, slot, emb, confidence, prov, t, sup, reason, semb,
-                             freshness_class=freshness_class, **stamp)
+                             freshness_class=freshness_class,
+                             stance=stance, **stamp)
 
     def _confirm(self, cur, prov, sup, confidence, t, txt, hlc,
-                 writer_id, session_id, semb) -> WriteResult:
+                 writer_id, session_id, semb,
+                 stance: str | None = None) -> WriteResult:
         """Confirm the standing record: union support tier so corroboration
         (agent guess → user confirm) is recorded, and let a higher-tier
         confirmation lift confidence past plain reinforce."""
+        # v29: the latest asserting write owns the stance — a plain
+        # restatement (stance=None) clears a stored hedge.
+        cur.stance = stance
         cur.last_confirmed = t
         cur.provenance |= prov
         if sup:
@@ -504,6 +527,7 @@ class CortexStore:
         writer_id: str | None = None,
         session_id: str | None = None,
         freshness_class: str = "evergreen",
+        stance: str | None = None,
     ) -> CortexRecord:
         rec = CortexRecord(
             entity=slot.entity,
@@ -526,6 +550,7 @@ class CortexStore:
             writer_id=writer_id,
             session_id=session_id,
             freshness_class=_norm_freshness(freshness_class),
+            stance=stance,
         )
         self.records.append(rec)
         self._current[rec.key] = len(self.records) - 1
@@ -886,7 +911,7 @@ class CortexStore:
     def _contend(self, cur, slot, emb, confidence, prov, t, sup, reason,
                  slot_embedding=None, writer_id=None, session_id=None,
                  hlc=None, tx_time=None, valid_time=None,
-                 freshness_class="evergreen"):
+                 freshness_class="evergreen", stance=None):
         """Park a conflicting value as a contender at ``cur``'s slot rather than
         superseding. Keeps the current value canonical. At most one active
         contender per slot: a matching value confirms (reinforces) the existing
@@ -906,6 +931,9 @@ class CortexStore:
             _norm_key(slot.entity), _norm_key(slot.attribute))
         existing = self._active_contender(key)
         if existing is not None and _norm_value(existing.value) == _norm_value(slot.value):
+            # v29: same rule as _confirm — the latest asserting write owns
+            # the contender's stance.
+            existing.stance = stance
             existing.last_confirmed = t
             existing.provenance |= prov
             if sup:
@@ -952,6 +980,7 @@ class CortexStore:
             writer_id=writer_id,
             session_id=session_id,
             freshness_class=_norm_freshness(freshness_class),
+            stance=stance,
         )
         self.records.append(rec)   # deliberately NOT registered in self._current
         self._log(cur if cur is not None else rec, slot.value, confidence, t,
@@ -1363,6 +1392,10 @@ class CortexStore:
                     "session_id": r.session_id,
                     "version": r.version,
                     "freshness_class": r.freshness_class,
+                    # v29: nullable stance; omitting it here would silently
+                    # strip every hedge on restart (the same file-mode
+                    # round-trip class as the stamp/freshness fix above).
+                    "stance": r.stance,
                 }
                 for r in self.records
             ],
@@ -1413,6 +1446,8 @@ class CortexStore:
                 session_id=d.get("session_id"),
                 version=d.get("version", 1) or 1,
                 freshness_class=d.get("freshness_class", "evergreen"),
+                # v29; pre-v29 snapshots have no key -> None ("plainly").
+                stance=d.get("stance"),
             )
             self.records.append(rec)
         self._reindex_current()

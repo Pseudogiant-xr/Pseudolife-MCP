@@ -380,6 +380,17 @@ class DreamConfig:
     # false-drop classes under per-note gating) or "source" (only the note
     # the claim cites).
     literal_gate_scope: str = "batch"    # "batch" | "source"
+    # Provenance-span gate (2026-08-12 stance+span-gate design, Feature B):
+    # the extractor emits a verbatim "quote" from the cited note; the claim
+    # loop verifies containment against THAT note (source scope is correct
+    # by construction for a quote). "log" counts and logs unbacked claims
+    # but still writes them; "contend" parks unbacked SCALAR claims as
+    # contenders (span:unbacked provenance marker) — never a silent drop,
+    # because span failures include benign paraphrase. Ships "off": the
+    # live v5 prompt emits no quotes, so any other default would flag 100%
+    # of claims. Flipping to "contend" requires the gate-4 firing audit
+    # (evals/results/span-gate-verdict.json), not preference.
+    span_gate: str = "off"               # "off" | "log" | "contend"
     # Dream-run audit retention (schema v27): the newest N run rows (and,
     # via CASCADE, their pre-image journals) survive; older ones are pruned
     # during the sweep beside superseded-row compaction. The journal is the

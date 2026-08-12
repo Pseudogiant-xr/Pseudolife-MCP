@@ -151,6 +151,40 @@ _EVENTS_BLOCK = (
     "both.\n"
 )
 
+# The epistemic-stance rule (2026-08-12 stance+span-gate design, Feature A:
+# hedges survive consolidation as a labelled field, arXiv:2608.06953). Same
+# rhetorical shape as the count rule — one rule plus one single-claim inline
+# example, no second Output block (the v3->v5 lesson). The example slot is
+# deliberately NOT the v0 example's deploy-target so the two never compete.
+_STANCE_BLOCK = (
+    "HEDGES GO IN A STANCE FIELD: when the note itself hedges a fact "
+    '("probably", "might", "unconfirmed", "not final", "per the '
+    'runbook"), keep the value CLEAN and put the note\'s own hedge '
+    'words in a "stance" field on that claim — never inside the value, '
+    "and never invent a stance the note does not carry; a plainly "
+    "stated fact has no stance field. For example, the note [6] I "
+    "think we'll switch the database to Postgres 18, not final yet — "
+    "yields the single claim "
+    '{"entity":"database","attribute":"planned version",'
+    '"value":"Postgres 18","stance":"not final yet","confidence":0.6,'
+    '"source":6} inside the one claims array.\n'
+)
+
+# The provenance-quote rule (2026-08-12 design, Feature B: a claim must
+# carry a verbatim span from its cited note — the span gate verifies
+# containment at the claim loop). Same shape discipline as above.
+_QUOTE_BLOCK = (
+    'CITE A QUOTE: every claim also carries a "quote" field — a short '
+    "span copied VERBATIM from the note the claim cites, enough to back "
+    "the value. Copy the note's exact words; never paraphrase or "
+    "abbreviate inside quote. For example, the note [7] the health "
+    "probe now polls every 30 seconds — yields the single claim "
+    '{"entity":"health probe","attribute":"poll interval",'
+    '"value":"every 30 seconds","quote":"the health probe now polls '
+    'every 30 seconds","confidence":0.9,"source":7} inside the one '
+    "claims array.\n"
+)
+
 # The literal-fidelity rule (2026-08-02 design: consolidation must keep
 # exact dates/numbers/versions/identifiers verbatim, not round or reword).
 _LITERAL_BLOCK = (
@@ -292,6 +326,22 @@ VARIANTS: dict[str, str] = {
         'Return {"claims":[]} if nothing qualifies.',
         _V0_FAILED_BLOCK + _V5_COUNT_BLOCK + _EVENTS_BLOCK
         + 'Return {"claims":[],"events":[]} if nothing qualifies.'),
+
+    # Shipped v5 + the stance rule (2026-08-12 design, Feature A). Builds on
+    # v5, NOT v6/v7 — neither ever shipped. Incremental by design: a gate
+    # failure on this arm attributes to the stance rule alone.
+    "v8-stance": _BASE.replace(
+        'Return {"claims":[]} if nothing qualifies.',
+        _V0_FAILED_BLOCK + _V5_COUNT_BLOCK + _STANCE_BLOCK
+        + 'Return {"claims":[]} if nothing qualifies.'),
+
+    # v8 + the quote rule (Feature B). The second increment: v9-vs-v8
+    # isolates the quote field's claims tax (the v7 combined-events prompt
+    # measured -0.053 on claims for exactly this class of addition).
+    "v9-stance-quote": _BASE.replace(
+        'Return {"claims":[]} if nothing qualifies.',
+        _V0_FAILED_BLOCK + _V5_COUNT_BLOCK + _STANCE_BLOCK + _QUOTE_BLOCK
+        + 'Return {"claims":[]} if nothing qualifies.'),
 }
 
 

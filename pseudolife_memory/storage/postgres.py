@@ -51,6 +51,8 @@ _FACT_COLS = (
     # facts_slot_current_scalar_uq instead of landing in the member index.
     # value_norm is the member dedup identity; NULL on scalar rows.
     "kind", "value_norm",
+    # v29: epistemic stance — nullable, NULL = asserted plainly.
+    "stance",
 ) + _STAMP_COLS
 _FACT_JSONB = {"support", "provenance"}
 

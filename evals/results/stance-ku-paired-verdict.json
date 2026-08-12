@@ -1,0 +1,81 @@
+{
+  "tag": "sgku",
+  "reference": "v5",
+  "n": 78,
+  "noise_floor_rag_control": {
+    "identical_rag_context": "78/78",
+    "any_run_disagreement": 0,
+    "pairwise_disagreement": {
+      "v5 vs v8": 0,
+      "v5 vs v9": 0,
+      "v8 vs v9": 0
+    },
+    "worst_pairwise": 0
+  },
+  "comparisons": {
+    "v8": {
+      "cortex": {
+        "accuracy": 0.615,
+        "reference_accuracy": 0.731,
+        "delta": -0.115,
+        "wins": 1,
+        "losses": 10,
+        "net": -9,
+        "p_mcnemar_exact": 0.0117,
+        "exceeds_noise_floor": true
+      },
+      "hybrid": {
+        "accuracy": 0.821,
+        "reference_accuracy": 0.897,
+        "delta": -0.077,
+        "wins": 2,
+        "losses": 8,
+        "net": -6,
+        "p_mcnemar_exact": 0.1094,
+        "exceeds_noise_floor": true
+      },
+      "rag": {
+        "accuracy": 0.859,
+        "reference_accuracy": 0.859,
+        "delta": 0.0,
+        "wins": 0,
+        "losses": 0,
+        "net": 0,
+        "p_mcnemar_exact": 1.0,
+        "exceeds_noise_floor": false
+      }
+    },
+    "v9": {
+      "cortex": {
+        "accuracy": 0.718,
+        "reference_accuracy": 0.731,
+        "delta": -0.013,
+        "wins": 4,
+        "losses": 5,
+        "net": -1,
+        "p_mcnemar_exact": 1.0,
+        "exceeds_noise_floor": true
+      },
+      "hybrid": {
+        "accuracy": 0.833,
+        "reference_accuracy": 0.897,
+        "delta": -0.064,
+        "wins": 0,
+        "losses": 5,
+        "net": -5,
+        "p_mcnemar_exact": 0.0625,
+        "exceeds_noise_floor": true
+      },
+      "rag": {
+        "accuracy": 0.859,
+        "reference_accuracy": 0.859,
+        "delta": 0.0,
+        "wins": 0,
+        "losses": 0,
+        "net": 0,
+        "p_mcnemar_exact": 1.0,
+        "exceeds_noise_floor": false
+      }
+    }
+  }
+}

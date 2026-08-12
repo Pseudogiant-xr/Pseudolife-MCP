@@ -184,6 +184,11 @@ def _cortex_record_to_dict(rec, relative_age: bool = True,
         "writer_id": rec.writer_id,
         "session_id": rec.session_id,
     }
+    # v29 epistemic stance: present ONLY when the latest asserting write
+    # hedged — an absent key is the plainly-asserted common case, so the
+    # payload stays byte-identical for every pre-v29 fact.
+    if getattr(rec, "stance", None):
+        d["stance"] = rec.stance
     if relative_age:
         d["age"] = _relative_time(rec.tx_time or rec.asserted_at)
     return _apply_stale_policy(d, stale_policy)
@@ -1658,6 +1663,7 @@ class MemoryService:
         episode: str | None = None,
         freshness_class: str = "auto",
         force_contend: bool = False,
+        stance: str | None = None,
     ) -> dict[str, Any]:
         """Write / confirm / supersede a canonical fact at the
         ``(entity, attribute)`` slot. The claim is embedded through the same
@@ -1716,6 +1722,7 @@ class MemoryService:
                     session_id=session_id,
                     freshness_class=freshness_class,
                     force_contend=force_contend,
+                    stance=stance,
                 )
             except ValueError as exc:
                 if "holds a set" in str(exc):
@@ -3384,7 +3391,8 @@ class MemoryService:
         from pseudolife_memory.memory.cortex import (_TIER_RANK, _norm_key,
                                                      _norm_value)
         from pseudolife_memory.memory.dream import (_DATE_LIKE_RE,
-                                                    literal_violations)
+                                                    literal_violations,
+                                                    span_unbacked)
         import time as _time
         traces_cfg = self.config.memory.traces
         dream_cfg = self.config.memory.dream
@@ -3401,6 +3409,12 @@ class MemoryService:
         gate_scope = dream_cfg.literal_gate_scope
         literal_flagged = 0
         literal_dropped = 0
+        # Provenance-span gate (Feature B, 2026-08-12 design). Counters
+        # live outside tally like the literal gate's. Source scope by
+        # construction: the quote verifies against the CITED note only.
+        span_mode = dream_cfg.span_gate
+        span_flagged = 0
+        span_parked = 0
         # Consolidation quarantine (two-man rule, spec 2026-08-09; ships
         # OFF). Counters live outside tally like the literal gate's; the
         # name avoids "quarantined", which the link-retype path owns.
@@ -3424,6 +3438,8 @@ class MemoryService:
                     "cursor": self._cortex.dream_cursor, "extractor_failed": True,
                     "literal_flagged": literal_flagged,
                     "literal_dropped": literal_dropped,
+                    "span_flagged": span_flagged,
+                    "span_parked": span_parked,
                     "quarantine_parked": qt_parked,
                     "quarantine_held": qt_held,
                     "quarantine_promoted": qt_promoted,
@@ -3555,6 +3571,8 @@ class MemoryService:
                         tallies={**tally,
                                  "literal_flagged": literal_flagged,
                                  "literal_dropped": literal_dropped,
+                                 "span_flagged": span_flagged,
+                                 "span_parked": span_parked,
                                  "events_inserted": events_inserted,
                                  "events_duplicate": events_duplicate,
                                  "events_pass_failed": events_pass_failed,
@@ -3668,6 +3686,28 @@ class MemoryService:
                         if gate_mode == "enforce":
                             literal_dropped += 1
                             continue
+                # Provenance-span gate (Feature B): verify the claim's quote
+                # against the CITED note only (span_unbacked docstring has
+                # the scope rationale). Events never reach here — they
+                # routed above. Member ops are counted but never parked
+                # (members have no contender path in v1); scalar routing
+                # happens at the write branch below.
+                span_reason = None
+                if span_mode != "off":
+                    span_reason = span_unbacked(
+                        c.get("quote"),
+                        src_entry["text"] if src_entry else "")
+                    if span_reason:
+                        span_flagged += 1
+                        # Reason only — the OUTCOME is not known yet (the
+                        # quarantine route below may own the claim), and a
+                        # predicted "(parking)" here would poison the
+                        # log-audit trail the contend-default decision
+                        # reads. Outcomes live in span_parked/the journal.
+                        logger.info(
+                            "dream: span gate %s for claim %s.%s = %r "
+                            "(quote=%r)", span_reason, ent, attr,
+                            c["value"], c.get("quote"))
                 # The has_trace guard is keyed by (slot, source entry) only —
                 # it has no member value to key on, so it must never gate a
                 # member op: a second op:"add" for the SAME slot from the
@@ -3753,6 +3793,16 @@ class MemoryService:
                     if quarantine_on:
                         q_route, q_witness, q_low = self._quarantine_route(
                             ent, attr, c, src_entry, qt_trusted)
+                    # Claim-derived kwargs shared by every scalar write
+                    # below — one definition, so the next claim field
+                    # cannot silently miss one of the routing paths (this
+                    # change originally threaded stance into four
+                    # hand-edited sites).
+                    claim_kwargs = {
+                        "confidence": float(c.get("confidence", 0.55)),
+                        "support": c.get("origin", "agent"),
+                        "stance": c.get("stance"),
+                    }
                     try:
                         if q_route == "promote":
                             # Independent second witness: promote the parked
@@ -3772,13 +3822,11 @@ class MemoryService:
                                 # CLOSED — a low-trust claim still parks.
                                 res = self.cortex_write(
                                     ent, attr, c["value"],
-                                    confidence=float(
-                                        c.get("confidence", 0.55)),
-                                    support=c.get("origin", "agent"),
                                     provenance=(
                                         ["quarantine:low_trust", q_witness]
                                         if q_low else None),
-                                    force_contend=q_low)
+                                    force_contend=q_low,
+                                    **claim_kwargs)
                                 if q_low and res["action"] == "contested":
                                     qt_parked += 1
                         elif q_route in ("park", "hold", "hold_ordinary"):
@@ -3790,10 +3838,9 @@ class MemoryService:
                                     else [q_witness])
                             res = self.cortex_write(
                                 ent, attr, c["value"],
-                                confidence=float(c.get("confidence", 0.55)),
-                                support=c.get("origin", "agent"),
                                 provenance=prov,
-                                force_contend=True)
+                                force_contend=True,
+                                **claim_kwargs)
                             # Count OUTCOMES, not routes — a write that
                             # confirmed instead of parking counts nothing
                             # (the friction numbers gate 3 reports must be
@@ -3803,11 +3850,25 @@ class MemoryService:
                                     qt_parked += 1
                                 else:
                                     qt_held += 1
-                        else:
+                        elif span_mode == "contend" and span_reason:
+                            # Span parking: an unbacked scalar claim parks
+                            # as a visible contender — a fidelity failure
+                            # is never a silent drop (unlike the literal
+                            # gate: span failures include benign
+                            # paraphrase). When quarantine routing is
+                            # active it owns the claim above — trust and
+                            # fidelity are orthogonal axes, and the parked
+                            # outcome is the same.
                             res = self.cortex_write(
                                 ent, attr, c["value"],
-                                confidence=float(c.get("confidence", 0.55)),
-                                support=c.get("origin", "agent"))
+                                provenance=["span:unbacked"],
+                                force_contend=True,
+                                **claim_kwargs)
+                            if res["action"] == "contested":
+                                span_parked += 1
+                        else:
+                            res = self.cortex_write(
+                                ent, attr, c["value"], **claim_kwargs)
                     except ValueError as exc:
                         if "holds a set" in str(exc):
                             # Spec rule 2: a scalar claim (no op) landing on a
@@ -3938,6 +3999,8 @@ class MemoryService:
                 "graph_insight": graph_insight,
                 "literal_flagged": literal_flagged,
                 "literal_dropped": literal_dropped,
+                "span_flagged": span_flagged,
+                "span_parked": span_parked,
                 "quarantine_parked": qt_parked,
                 "quarantine_held": qt_held,
                 "quarantine_promoted": qt_promoted,
@@ -4048,11 +4111,28 @@ class MemoryService:
         counts = {"reverted": 0, "skipped": 0, "partial": 0}
         details: list[dict[str, Any]] = []
 
+        def _prev_stance(row: dict) -> str | None:
+            # v29: the journal's fixed columns carry no stance (spec
+            # amendment 3), so recover it from the superseded record
+            # itself — superseded rows keep every field as audit history.
+            # Newest matching supersession wins; None (plainly asserted)
+            # when no superseded record for that value carried a hedge.
+            want = _norm_value(row["prev_value"] or "")
+            with self._lock:
+                recs = [r for r in self._cortex.records_for(
+                            row["entity"], row["attribute"])
+                        if r.status == "superseded" and r.stance
+                        and _norm_value(r.value) == want]
+            if not recs:
+                return None
+            return max(recs, key=lambda r: r.superseded_at or 0).stance
+
         def _rewrite_prev(row: dict) -> str:
             res = self.cortex_write(
                 row["entity"], row["attribute"], row["prev_value"],
                 confidence=float(row["prev_confidence"] or 0.55),
-                support=row["prev_support"] or "agent")
+                support=row["prev_support"] or "agent",
+                stance=_prev_stance(row))
             if res["action"] == "contested":
                 # Rollback is explicit authority: a low-confidence prev
                 # must still win the slot back (the same path resolve
