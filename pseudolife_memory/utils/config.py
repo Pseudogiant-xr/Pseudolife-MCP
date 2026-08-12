@@ -388,11 +388,12 @@ class DreamConfig:
     # Chronicle events (schema v28): when on, the dream pass runs a second,
     # dedicated events-extraction call per batch (extract_events, pinned
     # artifact evals/prompts/events_pass_v1.txt) and stores dated
-    # occurrences into chronicle_events. The pipeline passed its
-    # preregistered gates (separate-pass events + the multi-task sidecar);
-    # OFF pending a production soak review. The eval harness enables it
-    # per-run.
-    chronicle: bool = False
+    # occurrences into chronicle_events. ON by default since 2026-08-12:
+    # the pipeline passed its preregistered gates (separate-pass events +
+    # the multi-task sidecar) and the 08-05..08-12 production soak
+    # reviewed clean (188 events, 0 incorrect dates, negligible volume).
+    # Requires PG; an events-pass failure is non-fatal to claims.
+    chronicle: bool = True
 
 
 @dataclass

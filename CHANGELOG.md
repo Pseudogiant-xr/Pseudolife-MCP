@@ -6,7 +6,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Changed (2026-08-12 — three queue-noise closures from the judgment sessions)
+### Changed (2026-08-12 — chronicle events default-on after the production soak)
+- **`memory.dream.chronicle` now defaults to `true`** and is surfaced as
+  a Console knob (Dream group, live-mutable). The v28 events pipeline
+  had already passed all four preregistered ev2 gates on 2026-08-05 (see
+  that entry below and `evals/results/ev2-separate-pass-verdict.json`);
+  the remaining question was production behavior, answered by the
+  2026-08-05..08-12 live soak
+  (`evals/results/chronicle-soak-review-20260812.json`): 188 events
+  written, every row's description and date judged correct against
+  independent records (0 incorrect dates, including historical
+  backdating to June and April), 2 duplicate events both caught by the
+  dedup guard, cadence continuous across two daemon recreations, and
+  volume a negligible 160 kB for the week. The fallback sidecar is
+  events-capable since the e4b-v3 multi-task bake
+  (`evals/results/evlora-verdict.json`), so sidecar-only installs run
+  the same pass; the soak's 20 sidecar-extracted events were judged
+  separately (dates all correct; rougher phrasing). Independent field
+  convergence: LeanMem (arXiv:2608.03463) lands on events as a distinct
+  memory type with their own maintenance policy. Requires Postgres; an
+  events-pass failure never stalls claims. Set `false` to opt out.
+- **An explicit year-first date now counts as a temporal cue for event
+  serving** (`has_date_cue`, a separate predicate so the gate-failed
+  timeline channel stays untouched): the soak review found "what
+  happened on 2026-08-08?" served no events because the cue regex only
+  knows month *names*. Serving cap and ordering are unchanged.
+- **`events_pass_failed` is persisted in the dream-run row's tallies**
+  (previously only in the in-memory dream result): the soak review could
+  not tally pass-failures for the week because container recreation had
+  discarded the only record (the warning log).
 - **Lesson-minted `<task> <aspect>` nodes no longer reach deep-dream link
   candidates** — `deep_dream` now applies the same `lesson_only_ids`
   exclusion `graph_review` has always used (via the candidate

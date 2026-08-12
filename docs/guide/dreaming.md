@@ -392,7 +392,8 @@ member-over-scalar case). Preregistration:
 
 Facts answer "what is current"; they systematically lose *occurrences* —
 things that happened at a time ("adopted the kitten on May 13") rather
-than states that hold. `memory.dream.chronicle: true` makes the dream
+than states that hold. `memory.dream.chronicle` (**on by default**; needs
+Postgres) makes the dream
 pass extract those too, into `chronicle_events`, via a **separate
 extractor call per batch** — a dedicated events pass with its own pinned
 prompt artifact (`evals/prompts/events_pass_v1.txt`), run after the
@@ -416,21 +417,24 @@ section above).
   pre-image journal (kind `event`), so `memory_dream(action="rollback")`
   deletes exactly the rows that pass created — safe precisely because
   records are additive-only.
-- **Serving.** A temporally-cued `memory_search` (when/first/before…)
-  adds an `events` block: matching live events, oldest first, each with
+- **Serving.** A temporally-cued `memory_search` (when/first/before…, or
+  an explicit year-first calendar date like `2026-08-08`) adds an
+  `events` block: matching live events, oldest first, each with
   `date` (or `null` plus the verbatim `phrase`), capped at 6. An
   **aggregation cue** (how many/count/total…) widens the cap to 30 and
   adds `events_total` — a computed property of the served list, so the
   answerer can do arithmetic over a long enumeration without recounting
   lines (a count over a capped prefix would be wrong by construction).
-  No knob — an empty table serves nothing.
+  No serving knob — an empty table serves nothing.
 
-The knob is **off by default**. The extraction pipeline has since passed
-its preregistered gates (separate-pass events, and the multi-task
-sidecar fine-tune that serves it — see the CHANGELOG's measured
-entries), so the remaining question is production behavior, not bench
-quality: default-on waits on a soak review of the chronicle under real
-workloads. (Lineage: the Phase 1 retrieval-side knobs of
+Extraction is **on by default** (and surfaced as a Console knob) since
+the 2026-08-12 soak review: the pipeline passed its preregistered gates
+(separate-pass events, and the multi-task sidecar fine-tune that serves
+it — see the CHANGELOG's measured entries), then ran a 2026-08-05..08-12
+production soak (188 events, 0 incorrect dates, historical backdating
+correct, dedup and literal gates load-bearing, ~160 kB/week volume).
+Set `memory.dream.chronicle: false` to opt out. (Lineage: the Phase 1
+retrieval-side knobs of
 `docs/superpowers/specs/2026-08-03-aggregation-aware-recall-design.md`
 measurably failed, which is what made extraction-time event capture the
 live hypothesis.)

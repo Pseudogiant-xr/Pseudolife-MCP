@@ -7,7 +7,8 @@ events (dicts with ``kind: "event"`` riding the same batched call) into
 the batch corpus actually contains date information (fabrication guard),
 exact-deduped, journaled as kind ``"event"`` for rollback-by-delete.
 Serving: ``memory_search`` gains an ``events`` block on temporally-cued
-queries. Everything is OFF by default until the preregistered gates pass.
+queries. Extraction is ON by default since the 2026-08-12 soak review
+(ev2 gates + 08-05..08-12 production soak); the knob remains for opt-out.
 
 PG-backed service tests skip without the bench server.
 """
@@ -77,8 +78,21 @@ def test_events_from_parsed_handles_absent_key():
 
 # ── the dream write path ─────────────────────────────────────────────────
 
-def test_chronicle_off_by_default_ignores_events(svc):
-    assert svc.config.memory.dream.chronicle is False
+def test_chronicle_on_by_default_writes_events(svc):
+    # Default-on since 2026-08-12: ev2 gates all passed
+    # (evals/results/ev2-separate-pass-verdict.json) and the 08-05..08-12
+    # production soak reviewed clean (188 events, 0 wrong dates).
+    assert svc.config.memory.dream.chronicle is True
+    svc.store("[2023/05/14 (Sun) 10:02] user: adopted the kitten yesterday",
+              source="notes")
+    out = svc.dream_run(_Stub([
+        _event("adopted a kitten", date="2023-05-13", phrase="yesterday")]))
+    assert out["events_inserted"] == 1
+    assert len(_chronicle_rows(svc)) == 1
+
+
+def test_chronicle_explicit_off_ignores_events(svc):
+    svc.config.memory.dream.chronicle = False
     svc.store("[2023/05/14 (Sun) 10:02] user: adopted the kitten yesterday",
               source="notes")
     out = svc.dream_run(_Stub([
@@ -275,5 +289,41 @@ def test_temporal_only_cue_keeps_the_six_event_cap(svc):
     svc.store("[2023/05/20] user: climbing log for May", source="notes")
     svc.dream_run(_Stub(_eight_events()))
     out = svc.search("when did I go climbing?")
+    assert len(out["events"]) == 6
+    assert "events_total" not in out
+
+
+# ── explicit-date cue (2026-08-12 soak-review finding) ───────────────────
+
+def test_has_date_cue_is_separate_from_temporal():
+    """An explicit calendar date is a temporal cue for event serving, but
+    must NOT ride _TEMPORAL_CUE_RE — that regex also fires the
+    (gate-failed) timeline channel. Same isolation rule as the
+    aggregation predicate above."""
+    from pseudolife_memory.memory.cms import has_date_cue, has_temporal_cue
+    for q in ("what happened on 2026-08-08?",
+              "what did we ship on 2026-8-5?",
+              "show the deploys from 2026/08/09"):
+        assert has_date_cue(q), q
+        assert not has_temporal_cue(q), f"temporal RE must not widen: {q}"
+    for q in ("what is my favorite color?",
+              "issue #2026 was closed",         # bare number, not a date
+              "the 08-08 build broke",          # month-day only: ambiguous
+              "call 0412-345-678 about it"):    # phone-number shape
+        assert not has_date_cue(q), q
+
+
+def test_iso_date_query_serves_events(svc):
+    """Soak-review finding (2026-08-12): 'what happened on <ISO date>…?'
+    carries no _TEMPORAL_CUE_RE word, so the events channel never fired
+    on the strongest possible temporal cue (the live miss had a matching
+    content word; only the cue gate blocked serving). The date predicate
+    widens the serving condition only — cap and ordering match a
+    temporal cue. Matching stays lexical, so a content word is still
+    required; date-window matching against occurred_at is out of scope."""
+    svc.config.memory.dream.chronicle = True
+    svc.store("[2023/05/20] user: climbing log for May", source="notes")
+    svc.dream_run(_Stub(_eight_events()))
+    out = svc.search("what happened on 2023-05-12 at the climbing wall?")
     assert len(out["events"]) == 6
     assert "events_total" not in out

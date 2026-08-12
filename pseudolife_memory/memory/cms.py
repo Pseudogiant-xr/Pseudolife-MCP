@@ -101,6 +101,22 @@ def has_aggregation_cue(text: str) -> bool:
     return bool(_AGGREGATION_CUE_RE.search(text or ""))
 
 
+# Explicit-date cue (2026-08-12 soak-review finding): "what happened on
+# 2026-08-08?" carries none of the _TEMPORAL_CUE_RE words, so the
+# strongest possible temporal cue served no events. A SEPARATE predicate
+# for the same reason as the aggregation one — it widens only chronicle
+# serving, never the gate-failed timeline channel. Year-first full dates
+# only: month-day forms ("08-08") collide with ranges and issue numbers,
+# and phone-number shapes ("0412-345-678") must not fire.
+_DATE_CUE_RE = re.compile(r"\b\d{4}[-/]\d{1,2}[-/]\d{1,2}\b")
+
+
+def has_date_cue(text: str) -> bool:
+    """True when ``text`` contains an explicit year-first calendar date —
+    a chronicle-serving trigger equivalent to a temporal cue word."""
+    return bool(_DATE_CUE_RE.search(text or ""))
+
+
 # Saved-state schema versions. Bump when the on-disk layout changes in a
 # way the loader needs to branch on.
 #

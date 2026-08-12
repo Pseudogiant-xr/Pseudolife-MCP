@@ -1228,6 +1228,41 @@ for _cid, _artifact, _needle, _arm, _stated in [
         value=(lambda a: lambda d: d["arms"][a]["accuracy"])(_arm),
         stated=_stated, places=3))
 
+# ── chronicle production soak review (default-on decision, 2026-08-12) ───
+SOAK = RESULTS + "chronicle-soak-review-20260812.json"
+
+CLAIMS.append(Claim(
+    id="chronicle-soak-events", doc=CHANGELOG,
+    needle="188 events\n  written",
+    artifacts=(SOAK,),
+    value=lambda d: float(d["events"]["total"]),
+    stated=188.0, places=0))
+CLAIMS.append(Claim(
+    id="chronicle-soak-bad-dates", doc=CHANGELOG,
+    needle="(0 incorrect dates, including historical",
+    artifacts=(SOAK,),
+    value=lambda d: float(d["correctness_judgment"]["incorrect_dates"]),
+    stated=0.0, places=0))
+CLAIMS.append(Claim(
+    id="chronicle-soak-dups", doc=CHANGELOG,
+    needle="2 duplicate events both caught by the",
+    artifacts=(SOAK,),
+    value=lambda d: float(d["dream_runs"]["events_duplicate"]),
+    stated=2.0, places=0))
+CLAIMS.append(Claim(
+    id="chronicle-soak-volume", doc=CHANGELOG,
+    needle="a negligible 160 kB for the week",
+    artifacts=(SOAK,),
+    value=lambda d: float(d["events"]["table_total_kb"]),
+    stated=160.0, places=0))
+CLAIMS.append(Claim(
+    id="chronicle-soak-sidecar-events", doc=CHANGELOG,
+    needle="the soak's 20 sidecar-extracted events were judged",
+    artifacts=(SOAK,),
+    value=lambda d: float(
+        d["dream_runs"]["by_extractor"]["sidecar-e4b-v3"]["events"]),
+    stated=20.0, places=0))
+
 
 def test_every_published_number_names_a_committed_artifact():
     """A claim whose evidence is untracked cannot be checked by a reader.
