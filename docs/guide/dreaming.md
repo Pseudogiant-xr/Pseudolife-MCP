@@ -435,7 +435,18 @@ live hypothesis.)
 
 The incremental dream (tiers above) is window-local: it distils only the
 recent MIRAS tail into cortex facts. `memory_dream(action="deep")` is a
-separate, manually-triggered full-corpus GRAPH pass (Phase-2 'C'). A
+separate full-corpus GRAPH pass (Phase-2 'C'). Its MECHANICAL half also
+runs itself: a need-based tick on the sweep timer applies Steps A/B —
+rescore, guard-passing junk auto-delete, scope stamping, proposal
+filing, snapshot-first — once the bank has grown by
+`memory.deep_dream.auto_min_new_entities` (default 150) since the last
+apply or `auto_interval_days` (default 7) have passed; every apply,
+manual or tick, resets that clock (`auto_tick: false` disables). Step C
+(judgment) is never automated: the tick only fills the review queues.
+The same need signal rides `memory_dream(action="status")` as the
+`deep_dream: {recommended, reason, ...}` block — a harness-agnostic
+nudge any MCP client can surface to its user when a triage session is
+worth scheduling. A
 dry-run (default) returns a preview of what it would change: re-scored
 edges, hard type-violation edges queued for supersession, exact-duplicate
 entity pairs queued for merging, and semantic link *candidates* across
