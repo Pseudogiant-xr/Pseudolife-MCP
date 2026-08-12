@@ -1132,7 +1132,11 @@ class PostgresStorage:
         among themselves by when they were recorded. ANY-term match
         (plainto_tsquery's AND rebuilt with OR): a "when did X happen"
         question should surface the related events around X, not only the
-        rows carrying every query token."""
+        rows carrying every query token. The rebuilt string is parsed
+        with the 'simple' config: its terms are already-stemmed English
+        lexemes, and to_tsquery('english', ...) would stem them a second
+        time ('releas' -> 'relea'), silently matching nothing for any
+        word whose stem is itself stemmable."""
         lex = self.conn.execute(
             "SELECT plainto_tsquery('english', %s)::text",
             (query,)).fetchone()[0]
@@ -1143,7 +1147,7 @@ class PostgresStorage:
             "recorded_at, actor, description, episode, src_entry_id "
             "FROM chronicle_events "
             "WHERE invalidated_at IS NULL AND "
-            "to_tsvector('english', description) @@ to_tsquery('english', %s) "
+            "to_tsvector('english', description) @@ to_tsquery('simple', %s) "
             "ORDER BY occurred_at ASC NULLS LAST, recorded_at ASC LIMIT %s",
             (lex.replace(" & ", " | "), limit)).fetchall()
         cols = ("id", "occurred_date", "occurred_phrase", "recorded_at",

@@ -6,7 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Changed (2026-08-12 — chronicle events default-on after the production soak)
+### Fixed (2026-08-12 — chronicle search no longer re-stems its own lexemes)
+- **`chronicle_search` parses its rebuilt OR-query with the `simple`
+  config instead of `english`**: the matcher stems the query once via
+  `plainto_tsquery('english', ...)`, rebuilds AND as OR on the lexeme
+  text, and previously fed that back through `to_tsquery('english', ...)`
+  — which stemmed each lexeme a second time. Any query word whose stem is
+  itself stemmable ('release' → 'releas' → 'relea') therefore silently
+  matched no event description. Observed live 2026-08-12: "what happened
+  on 2026-08-08 with the release?" could not serve the "published release
+  0.13.0" event (tsvector holds 'releas'; the re-stemmed query asked for
+  'relea') and only matched other events via the literal '2026' token.
+  The `simple` config passes the already-stemmed lexemes through
+  unmodified; ranking, ordering, and the ANY-term semantics are
+  unchanged.
 - **`memory.dream.chronicle` now defaults to `true`** and is surfaced as
   a Console knob (Dream group, live-mutable). The v28 events pipeline
   had already passed all four preregistered ev2 gates on 2026-08-05 (see
