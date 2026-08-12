@@ -4208,6 +4208,11 @@ class MemoryService:
                 "dream_cursor": cursor, "would_fire": would_fire,
                 "infer_outcomes": {"pending": infer_pending,
                                    "retry_pending": retry_pending},
+                # Harness-agnostic deep-dream nudge: any MCP client polling
+                # status (or a SessionStart hook) can surface this to its
+                # user. Computed outside the lock above — deep_dream_need
+                # takes the (non-reentrant) service lock itself.
+                "deep_dream": self.deep_dream_need(),
                 **_status_extractor_fields(
                     cfg, getattr(self, "_last_dream_extractor", None))}
 
@@ -6349,7 +6354,13 @@ class MemoryService:
                     scoped += 1
         # Re-read pending merges: the apply loop above may have just inserted
         # fresh proposals the Step-C triage should see in the same response.
+        # The watermark stamp makes EVERY apply (manual or tick) reset the
+        # deep-dream need signal — see deep_dream_need.
         with self._lock:
+            self._storage.set_meta(
+                "deep_last_apply",
+                {"ts": _t.time(),
+                 "max_entity_id": self._storage.max_entity_id()})
             pending_props = self._storage.pending_entity_proposals()
         merge_proposals = self._enrich_merge_proposals(
             pending_props, entities, edges, entries, traces, mentions,
@@ -6363,6 +6374,66 @@ class MemoryService:
                 "lesson_duplicates": lesson_dups,
                 "world_duplicates": world_dups,
                 "candidates": candidates, "totals": totals}
+
+    def deep_dream_need(self) -> dict[str, Any]:
+        """Cheap need signal for the deep dream's mechanical half — and the
+        harness-agnostic "deep dream recommended" flag: it rides
+        ``dream_status`` (hence ``memory_dream(action="status")``), so ANY
+        MCP client can read it and nudge its user or schedule a pass,
+        without Claude-specific machinery. Watermark = the meta row every
+        ``deep_dream(apply=True)`` stamps."""
+        import time as _t
+        cfg = self.config.memory.deep_dream
+        with self._lock:
+            self._ensure_init()
+            if self._storage is None:
+                return {"recommended": False, "reason": "no_storage"}
+            mark = self._storage.get_meta("deep_last_apply")
+            max_id = self._storage.max_entity_id()
+            if mark is None:
+                if max_id == 0:
+                    return {"recommended": False, "reason": "empty graph",
+                            "last_apply_at": None}
+                return {"recommended": True,
+                        "reason": f"never deep-dreamed ({max_id} entities)",
+                        "last_apply_at": None, "new_entities": max_id}
+            new = self._storage.entities_above(int(mark["max_entity_id"]))
+        days = (_t.time() - float(mark["ts"])) / 86400.0
+        out = {"recommended": False, "reason": "below thresholds",
+               "last_apply_at": mark["ts"], "new_entities": new,
+               "days_since": round(days, 2)}
+        if cfg.auto_min_new_entities and new >= cfg.auto_min_new_entities:
+            out.update(recommended=True,
+                       reason=f"{new} new entities since the last deep apply")
+        elif cfg.auto_interval_days and days >= cfg.auto_interval_days:
+            out.update(recommended=True,
+                       reason=f"{days:.1f} days since the last deep apply")
+        return out
+
+    def deep_dream_tick(self) -> dict[str, Any]:
+        """Sweep-tick automation of the deep dream's MECHANICAL half: when
+        the need signal fires, run ``deep_dream(apply=True)`` — rescore,
+        guard-passing junk auto-delete, scope stamping, proposal filing,
+        snapshot-first. Step C (judgment) is never run here; the queues
+        fill and wait for an agent or the Atlas. Never raises into the
+        sweep timer; returns a slim summary for the sweep log."""
+        cfg = self.config.memory.deep_dream
+        if not cfg.auto_tick:
+            return {"fired": False, "reason": "disabled"}
+        try:
+            need = self.deep_dream_need()
+            if not need.get("recommended"):
+                return {"fired": False, "reason": "below_threshold",
+                        "need": need}
+            result = self.deep_dream(apply=True, include_snippets=False)
+        except Exception as exc:  # noqa: BLE001 — a tick must never kill the sweep
+            logger.warning("deep-dream tick failed: %s", exc)
+            return {"fired": False, "reason": f"error: {exc}"}
+        slim = {k: v for k, v in result.items() if k in (
+            "applied", "error", "rescored", "superseded", "merged",
+            "merge_proposed", "junk_proposed", "junk_deleted", "scoped",
+            "snapshot")}
+        return {"fired": True, "reason": need["reason"], **slim}
 
     def _write_graph_snapshot(self) -> str | None:
         """Timestamped JSON dump of the five graph tables the apply path is

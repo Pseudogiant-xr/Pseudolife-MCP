@@ -411,6 +411,14 @@ class DeepDreamConfig:
     snapshot_keep: int = 10              # graph-snapshot undo files kept under data_dir/graph_snapshots
     curation_min_similarity: float = 0.80  # cosine floor for a lesson/world cross-key duplicate listing; slot embeddings include the key text, so even a verbatim-duplicate value at a different key lands near ~0.82
     curation_top_k: int = 20             # max store-curation pairs listed per store per pass
+    # Need-based sweep-tick automation of the MECHANICAL half only (Steps
+    # A/B apply: rescore, guard-passing junk auto-delete, scope stamping,
+    # proposal filing — all snapshot-first). Step C (judgment) is never
+    # automated here; the same need signal is surfaced as
+    # dream_status["deep_dream"] so ANY MCP client can nudge its user.
+    auto_tick: bool = True               # False disables the tick entirely
+    auto_min_new_entities: int = 150     # fire when the bank grew this much since the last apply; 0 disables
+    auto_interval_days: float = 7.0      # time backstop since the last apply; 0 disables
 
 
 @dataclass

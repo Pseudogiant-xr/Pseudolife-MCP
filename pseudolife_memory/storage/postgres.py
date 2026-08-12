@@ -1332,6 +1332,20 @@ class PostgresStorage:
                  reason, decided_by, decided_at)).fetchone()
         return int(row[0])
 
+    def max_entity_id(self) -> int:
+        """High-water mark of the entities serial — the deep-dream need
+        signal's watermark (id-based, not count-based: merges and junk
+        deletions shrink counts and would mask growth)."""
+        row = self.conn.execute(
+            "SELECT coalesce(max(id), 0) FROM entities").fetchone()
+        return int(row[0])
+
+    def entities_above(self, entity_id: int) -> int:
+        row = self.conn.execute(
+            "SELECT count(*) FROM entities WHERE id > %s",
+            (int(entity_id),)).fetchone()
+        return int(row[0])
+
     def merge_decision_stats(self) -> dict:
         """Accept/reject tallies over merge_decisions — the direct measure of
         the dedup detector's precision (the 2026-08-11 triage ran 38/153 and

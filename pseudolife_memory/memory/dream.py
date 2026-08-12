@@ -1177,12 +1177,20 @@ def run_sweep_once(service) -> dict:
     # dream-run journal retention rides the same tick for the same reason.
     compacted = service.compact_superseded().get("total", 0)
     runs_pruned = service.prune_dream_runs()
+    # Need-based deep-dream tick (mechanical Steps A/B only) rides the same
+    # timer, independent of the shallow trigger — a quiet bank can still be
+    # overdue for consolidation. getattr-guarded for older fakes/tests.
+    deep_tick = getattr(service, "deep_dream_tick", None)
+    deep = deep_tick() if deep_tick is not None else None
+    if deep and deep.get("fired"):
+        logger.info("deep-dream tick fired: %s", deep)
+    extra = {"deep_tick": deep} if deep is not None else {}
     status = service.dream_status()
     if not status["would_fire"]:
         return {"fired": False, "reason": "below_threshold",
                 "backlog": status["backlog"], "compacted": compacted,
-                "runs_pruned": runs_pruned}
+                "runs_pruned": runs_pruned, **extra}
     result = service.dream_run_auto()
     logger.info("dream sweep fired: %s", result)
     return {"fired": True, "compacted": compacted,
-            "runs_pruned": runs_pruned, **result}
+            "runs_pruned": runs_pruned, **extra, **result}
