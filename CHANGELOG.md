@@ -6,6 +6,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-08-12 — three queue-noise closures from the judgment sessions)
+- **Lesson-minted `<task> <aspect>` nodes no longer reach deep-dream link
+  candidates** — `deep_dream` now applies the same `lesson_only_ids`
+  exclusion `graph_review` has always used (via the candidate
+  `excluded_ids` mechanism). They paired with the artifacts they mention
+  and burned five top-k slots in one session.
+- **The candidate support-overlap drop uses containment, not Jaccard**
+  (`|shared| / min(|a|, |b|)` against the same
+  `memory.deep_dream.max_support_overlap` knob): when the smaller side's
+  mentions sit inside the other's, the similarity is co-mention, not
+  independent evidence — one shared note pair generated ten cross-product
+  candidates at Jaccard 0.67, all noise.
+- **Lesson synthesis gates cross-key near-duplicates at write time**
+  (`memory.lessons.synthesis_dedup_min_similarity`, default 0.88; 0
+  disables): a synthesized lesson hitting an existing current lesson at a
+  different key with the SAME polarity is skipped and counted as
+  `deduped` — the store re-minted the same deploy/triage lessons at fresh
+  keys every session (five folded on 2026-08-12 alone). Opposite-polarity
+  near-matches are never gated (an "avoid" inversion of a "do" lesson is
+  new information), same-key writes still supersede, explicit
+  `lesson_write` callers are never gated, and a fully-deduped batch still
+  consumes its signals (leaving them pending would bounce the same
+  duplicates off the gate every sweep).
+
 ### Changed (2026-08-12 — /dream becomes a judgment session)
 - **The `/dream` command (plugin + examples copy) is restructured around
   what automation cannot do.** With the auto-sweep extracting facts and

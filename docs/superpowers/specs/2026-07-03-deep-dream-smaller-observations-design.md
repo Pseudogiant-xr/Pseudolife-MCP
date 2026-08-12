@@ -44,6 +44,10 @@ co-occurrence noise.
 
 **Change:** replace the equality test with Jaccard overlap:
 drop when `|mu ∩ mv| / |mu ∪ mv| >= deep_dream.max_support_overlap`
+(*amended 2026-08-12: the metric is now containment,
+`|mu ∩ mv| / min(|mu|, |mv|)` — Jaccard let near-subset supports through
+at 0.67 and one co-mention note pair generated ten cross-product
+candidates*)
 (default 0.8, config-exposed). Equality is the overlap-1.0 special case, so
 the filter only widens.
 

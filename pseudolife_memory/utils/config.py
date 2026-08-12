@@ -488,6 +488,16 @@ class LessonsConfig:
     # lessons from all-inferred batches start at confidence 0.4.
     infer_outcomes: bool = True
     infer_outcomes_max_signals: int = 3
+    # Synthesis-time cross-key near-duplicate gate: a SYNTHESIZED lesson
+    # whose embedding hits an existing current lesson at a DIFFERENT key
+    # with the SAME polarity at/above this cosine is skipped (counted as
+    # ``deduped``). The store re-minted the same deploy/triage lessons at
+    # fresh keys every session (five folded on 2026-08-12 alone). 0.88 is
+    # deliberately above the 0.80 curation-listing floor: a false skip
+    # silently loses a new lesson, a missed dup merely waits for curation.
+    # Opposite-polarity near-matches are NEVER gated (an "avoid" inversion
+    # of a "do" lesson is new information). 0 disables.
+    synthesis_dedup_min_similarity: float = 0.88
 
 
 @dataclass
