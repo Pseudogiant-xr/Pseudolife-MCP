@@ -1,0 +1,82 @@
+{
+  "review": "chronicle events production soak — default-on decision review",
+  "review_date": "2026-08-12",
+  "soak_window": {"start": "2026-08-05", "end": "2026-08-12"},
+  "method": {
+    "events": "every chronicle_events row read via psql and judged for description and date correctness against independent memory records",
+    "tallies": "dream_runs rows summed over the retained window; reconciled against the events table",
+    "serving": "live memory_search probes through the daemon with temporal, date, and aggregation cues",
+    "note": "raw event rows are deliberately not committed — descriptions embed local absolute paths (tracked-tree identifier guard)"
+  },
+  "events": {
+    "total": 188,
+    "invalidated": 0,
+    "table_total_kb": 160,
+    "database_size_mb": 54,
+    "avg_recorded_per_day": 26.9,
+    "per_day_recorded_utc": {
+      "2026-08-05": 17,
+      "2026-08-06": 74,
+      "2026-08-07": 43,
+      "2026-08-08": 13,
+      "2026-08-09": 9,
+      "2026-08-10": 11,
+      "2026-08-11": 21
+    },
+    "cadence_note": "continuous across the 2026-08-08 v0.13.0 daemon recreation and the 2026-08-11 17:36Z recreation"
+  },
+  "dream_runs": {
+    "retained_rows": 50,
+    "retained_id_range": [32, 81],
+    "retention_note": "runs_keep=50 pruned the 2026-08-05 runs normally; their events remain in chronicle_events",
+    "events_inserted_retained_runs": 171,
+    "events_from_pruned_runs": 17,
+    "reconciliation": "171 + 17 = 188 = chronicle_events row count",
+    "events_duplicate": 2,
+    "duplicate_note": "both in run 69, a zero-claims re-process — exact-dedup guard working as designed",
+    "literal_dropped_week": 16,
+    "literal_flagged_week": 16,
+    "literal_note": "shared counter across the claims and events paths; not separable from tallies",
+    "failed_runs": 0,
+    "events_pass_failed": null,
+    "events_pass_failed_note": "not persisted in dream_runs tallies at review time (fixed by this change); no failure lines in available daemon logs, which only survive since the 08-11 container recreation",
+    "by_extractor": {
+      "claude-opus-5": {"retained_runs": 32, "events_total_incl_pruned": 168},
+      "sidecar-e4b-v3": {"retained_runs": 18, "events": 20,
+                         "run_id_range": [59, 76]}
+    }
+  },
+  "correctness_judgment": {
+    "incorrect_dates": 0,
+    "fabricated_events": 0,
+    "historical_backdated_rows": 12,
+    "historical_spot_verified": 6,
+    "historical_note": "backdated occurred_at values (April, June, July) matched independent records on every spot-check, including 2026-06-22 (AGE removal), 2026-07-02 (_promote_slots), 2026-04-27 (stale vzdump backup)",
+    "fragment_descriptions": 3,
+    "mega_event_descriptions": 5,
+    "cross_episode_duplicate_pairs": 4,
+    "occurred_phrase_pollution_rows": 1,
+    "sidecar_judgment": "all 20 sidecar-extracted event dates correct incl. 4 historical backdatings; the 3 fragment rows and 2 of the mega-events are sidecar-extracted — usable but rougher phrasing than the Opus shim"
+  },
+  "serving_probes": [
+    {"query": "when did we flip memory.dream.chronicle on and start the production soak?",
+     "cue_fired": "temporal", "outcome": "pass — both target events served with correct dates"},
+    {"query": "what happened on 2026-08-08 with the release?",
+     "cue_fired": "none", "outcome": "MISS — no events block; the cue regex knows month names but not numeric dates (has_date_cue added by this change)"},
+    {"query": "when was the Proxmox backup job configured and what retention policy was chosen?",
+     "cue_fired": "temporal", "outcome": "partial — related events served, target event outside the top-6 lexical ranking; cortex facts carried the answer"},
+    {"query": "when was the AGE graph extension removed from the engine?",
+     "cue_fired": "temporal", "outcome": "pass — the exact backdated historical event (2026-06-22) served first"},
+    {"query": "how many times did we deploy the daemon via ops/update.ps1 since the soak started?",
+     "cue_fired": "aggregation", "outcome": "pass — full list served with events_total 30; deploy events countable"}
+  ],
+  "verdict": "default-on",
+  "verdict_basis": [
+    "ev2 preregistered gates all passed 2026-08-05 (evals/results/ev2-separate-pass-verdict.json)",
+    "soak: 0 incorrect dates and 0 fabricated events over all 188 rows",
+    "dedup and literal gates observed load-bearing in production",
+    "volume negligible (160 kB/week against a 54 MB bank)",
+    "fallback sidecar events-capable since e4b-v3 (evals/results/evlora-verdict.json)",
+    "field convergence: LeanMem arXiv:2608.03463 — events as a distinct memory type with their own maintenance policy"
+  ]
+}

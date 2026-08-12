@@ -212,6 +212,14 @@ KNOBS: list[dict[str, Any]] = [
              "texts (default; derived sums and cross-note values are "
              "measured false-drop classes under per-note gating); source = "
              "only the note the claim cites."},
+    {"path": "memory.dream.chronicle", "group": "Dream",
+     "label": "Chronicle events", "type": "bool", "default": True,
+     "restart": False,
+     "help": "Dream also extracts dated occurrences (a separate extractor "
+             "call per batch; claims are untouched by construction) into "
+             "chronicle_events; temporally-cued searches serve them. On by "
+             "default since the 2026-08-12 soak review. Needs Postgres; an "
+             "events-pass failure never stalls claims."},
     # ── Extractor ──────────────────────────────────────────────────────────
     # All live: build_extractor() constructs the client fresh on every dream
     # invocation from service.config.

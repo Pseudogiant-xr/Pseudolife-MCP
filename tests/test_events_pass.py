@@ -143,6 +143,7 @@ def test_separate_pass_writes_and_journals_events(svc):
     assert _chronicle_rows(svc) == [("adopted a kitten", "2023-05-13")]
     runs = svc._storage.recent_dream_runs(limit=5)
     assert runs[0]["status"] == "committed"
+    assert runs[0]["tallies"]["events_pass_failed"] is False
     journal = svc._storage.dream_run_journal(runs[0]["id"])
     kinds = [r["kind"] for r in journal]
     assert kinds.count("scalar") == 1 and kinds.count("event") == 1
@@ -152,7 +153,7 @@ def test_separate_pass_writes_and_journals_events(svc):
 
 
 def test_chronicle_off_never_calls_the_events_pass(svc):
-    assert svc.config.memory.dream.chronicle is False
+    svc.config.memory.dream.chronicle = False
     svc.store("user: adopted the kitten", source="notes")
     ex = _TwoPass([_CLAIM], [_EVENT])
     out = svc.dream_run(ex)
@@ -175,6 +176,10 @@ def test_events_pass_failure_is_non_fatal(svc):
     assert _chronicle_rows(svc) == []
     runs = svc._storage.recent_dream_runs(limit=5)
     assert runs[0]["status"] == "committed"     # claims committed
+    # Persisted, not just returned: the 2026-08-12 soak review could not
+    # tally pass-failures because the run row never recorded them (and
+    # container recreation had discarded the warning logs).
+    assert runs[0]["tallies"]["events_pass_failed"] is True
     assert out["cursor"] > 0                    # cursor advanced
 
 

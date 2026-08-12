@@ -1125,21 +1125,24 @@ class MemoryService:
                 entries_out.append(d)
             # Chronicle events (schema v28): a temporally-cued query also
             # serves matching live events, chronologically ascending.
-            # Needs no knob — an empty table (chronicle extraction off,
-            # the default) serves nothing, and non-cued queries skip the
+            # Needs no knob — an empty table (chronicle extraction
+            # disabled) serves nothing, and non-cued queries skip the
             # lookup entirely.
             events_block = None
             agg_cued = False
             if self._storage is not None:
                 from pseudolife_memory.memory.cms import (
-                    has_aggregation_cue, has_temporal_cue,
+                    has_aggregation_cue, has_date_cue, has_temporal_cue,
                 )
                 # Aggregation cues serve the FULL list (a count over a
                 # capped prefix is wrong by construction); temporal-only
-                # cues keep the original 6 — same ordering, so the
-                # limit-6 result is a prefix of the limit-30 one.
+                # cues (cue words, or an explicit calendar date — the
+                # 2026-08-12 soak-review gap) keep the original 6 — same
+                # ordering, so the limit-6 result is a prefix of the
+                # limit-30 one.
                 agg_cued = has_aggregation_cue(query)
-                if agg_cued or has_temporal_cue(query):
+                if (agg_cued or has_temporal_cue(query)
+                        or has_date_cue(query)):
                     hits = self._storage.chronicle_search(
                         query, limit=30 if agg_cued else 6)
                     if hits:
@@ -3406,11 +3409,12 @@ class MemoryService:
         qt_parked = 0
         qt_held = 0
         qt_promoted = 0
-        # Chronicle events (schema v28): OFF until the Phase 2 gates pass;
-        # requires PG (the table has no file-mode counterpart).
+        # Chronicle events (schema v28): default-on since the 2026-08-12
+        # soak review; requires PG (the table has no file-mode counterpart).
         chronicle_on = bool(dream_cfg.chronicle) and self._storage is not None
         events_inserted = 0
         events_duplicate = 0
+        events_pass_failed = False
 
         def _held(reason: str, exc: Exception) -> dict[str, Any]:
             logger.warning("dream %s (%s); cursor NOT advanced, will retry "
@@ -3553,6 +3557,7 @@ class MemoryService:
                                  "literal_dropped": literal_dropped,
                                  "events_inserted": events_inserted,
                                  "events_duplicate": events_duplicate,
+                                 "events_pass_failed": events_pass_failed,
                                  "quarantine_parked": qt_parked,
                                  "quarantine_held": qt_held,
                                  "quarantine_promoted": qt_promoted,
@@ -3567,7 +3572,6 @@ class MemoryService:
         # the batch-corpus date-fabrication guard, exact dedup (batch
         # retries and restatements write and journal nothing), journal
         # kind "event" with the exact chronicle row id for rollback.
-        events_pass_failed = False
 
         def _write_event(c: dict, src_id) -> None:
             nonlocal literal_flagged, literal_dropped, events_inserted, \

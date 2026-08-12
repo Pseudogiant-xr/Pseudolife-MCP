@@ -167,13 +167,14 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   compaction. The journal is what `memory_dream(action="rollback")`
   replays, so this bounds how far back a pass stays revertible — see
   [Dream runs — audit and rollback](dreaming.md#dream-runs--audit-and-rollback-schema-v27).
-- **Chronicle extraction off** (`memory.dream.chronicle = false`) — when
-  on, the dream pass runs a second, dedicated events-extraction call per
+- **Chronicle extraction on** (`memory.dream.chronicle = true`) — the
+  dream pass runs a second, dedicated events-extraction call per
   batch and stores dated occurrences into `chronicle_events` (schema
   v28); temporally-cued searches serve them as an `events` block
-  (aggregation cues widen the block and add `events_total`). The
-  pipeline has passed its preregistered gates; default-on waits on a
-  production soak review — see
+  (aggregation cues widen the block and add `events_total`). Default-on
+  since 2026-08-12: the pipeline passed its preregistered gates and a
+  2026-08-05..08-12 production soak reviewed clean. Needs Postgres; an
+  events-pass failure never stalls claims. Set `false` to opt out — see
   [Chronicle events](dreaming.md#chronicle-events-schema-v28--dated-occurrences-beside-facts).
 - **Consolidation quarantine off** (`memory.dream.quarantine_low_trust =
   false`) — when on, a scalar dream claim whose backing entry is
@@ -464,7 +465,7 @@ milestones:
 | v25 | `entries`/`facts`/`world_facts`/`lessons.embedding` move from `vector(384)` to `vector(1024)` — default embedding backbone swaps to Qwen/Qwen3-Embedding-0.6B (measured R@10 0.809 vs shipped MiniLM's 0.572). Qwen3-Embedding is instruction-asymmetric — see [asymmetric query/document encoding](retrieval.md#asymmetric-query-and-document-encoding) — so similarity-threshold semantics shift too. `ensure_schema` refuses to start against an existing v24-dimensioned bank rather than attempting an in-place ALTER; migrate first with `ops/migrate_embeddings.py` (dry-run by default; `--apply --backup-verified` to commit) |
 | v26 | `facts.kind` (`scalar` \| `member`) and `facts.value_norm` — set-valued cortex slots (many concurrently-current members per `(entity, attribute)`, not one NOW value). The per-slot current-uniqueness constraint splits by kind (`facts_slot_current_scalar_uq` keeps one live scalar row per slot; `facts_member_current_uq` allows several current members on the same slot); the daemon-start duplicate-healing pass is scoped to `kind = 'scalar'` so it never demotes member rows. Additive/idempotent; every existing fact defaults to `kind='scalar'` and dedupes exactly as before. See [Set-valued slots](memory-model.md#set-valued-slots-schema-v26) |
 | v27 | `dream_runs` + `dream_run_slots` — every dream pass that pulls entries records a run row (cursor movement, tallies, lifecycle status) and a per-claim pre-image journal (what each slot held before the write, `NULL` = slot absent). The journal is what `memory_dream(action="rollback")` replays, and it survives superseded-row compaction by construction (own tables, own newest-N retention via `memory.dream.runs_keep`). `dream_run_slots.src_entry_id` deliberately carries no FK — entries are evictable. Additive/idempotent |
-| v28 | `chronicle_events` — dated occurrences as first-class records beside facts (`occurred_at` = event time, nullable and never fabricated; `occurred_phrase` = the source's verbatim wording; `recorded_at` = transaction time). Additive-only: contradiction handling sets `invalidated_at`, never deletes; event writes journal into `dream_run_slots` (new nullable `chronicle_event_id` column) so rollback can delete them by exact id. No FKs — `src_entry_id` references evictable entries. Extraction into the table is off by default (`memory.dream.chronicle`) until its preregistered gates pass. Additive/idempotent |
+| v28 | `chronicle_events` — dated occurrences as first-class records beside facts (`occurred_at` = event time, nullable and never fabricated; `occurred_phrase` = the source's verbatim wording; `recorded_at` = transaction time). Additive-only: contradiction handling sets `invalidated_at`, never deletes; event writes journal into `dream_run_slots` (new nullable `chronicle_event_id` column) so rollback can delete them by exact id. No FKs — `src_entry_id` references evictable entries. Extraction into the table (`memory.dream.chronicle`) shipped off by default and flipped on 2026-08-12 after its preregistered gates and a production soak both passed. Additive/idempotent |
 
 After running the entity-kind backfill (`evals/apply_entity_kinds.py --apply`), the daemon must be restarted for inference to take effect — it caches the entity-kind map for the life of its process.
 

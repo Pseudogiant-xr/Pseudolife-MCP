@@ -69,12 +69,24 @@ def test_lessons_inference_knobs():
     assert sig["type"] == "int" and sig["default"] == 3
 
 
+def test_chronicle_knob_surfaced_default_on():
+    # Surfaced 2026-08-12 with the default-on flip: ev2 preregistered
+    # gates all passed (evals/results/ev2-separate-pass-verdict.json) and
+    # the 08-05..08-12 production soak reviewed clean — the exposure
+    # decision the absence list below deliberately waited on.
+    knob = _knob("memory.dream.chronicle")
+    assert knob["type"] == "bool"
+    assert knob["default"] is True
+    # chronicle_on is read from service.config on every dream pass.
+    assert knob["restart"] is False
+
+
 def test_gated_off_capabilities_stay_out_of_console():
-    # chronicle + known_facts_window failed their gates; the agg-recall
-    # search knobs have not passed theirs. None may appear until a
-    # preregistered gate PASSES (update this test in the same change).
+    # known_facts_window failed its gate; the agg-recall search knobs
+    # have not passed theirs. None may appear until a preregistered gate
+    # PASSES and exposure is deliberately decided (update this test in
+    # the same change — chronicle graduated out of this list 2026-08-12).
     for path in (
-        "memory.dream.chronicle",
         "memory.dream.known_facts_window",
         "memory.search.contiguity_neighbors",
         "memory.search.timeline_channel",
