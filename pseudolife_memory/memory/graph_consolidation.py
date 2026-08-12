@@ -153,19 +153,29 @@ def candidate_pairs(vectors: dict[int, np.ndarray], edges: list[dict],
                     mentions: dict[int, frozenset[int]], *,
                     min_similarity: float = 0.55, top_k: int = 50,
                     dismissed: set[tuple[str, str]] | None = None,
-                    max_support_overlap: float = 1.0) -> list[dict]:
+                    max_support_overlap: float = 1.0,
+                    pending_pairs: set[frozenset[int]] | None = None,
+                    excluded_ids: set[int] | None = None) -> list[dict]:
     """Unlinked, scope-coherent, semantically-near entity pairs — the link
     candidates. Drops pairs that already have an edge (either direction), exact
     duplicates (a Step-A merge), have near-identical supporting-entry sets
     (Jaccard >= ``max_support_overlap`` — co-occurrence, not independent
     similarity; 1.0 keeps only the strict-equality drop), sit in disjoint
     non-empty project scopes, or were human-dismissed (``dismissed`` holds
-    sorted canonical-name pairs from dismissed_pairs)."""
+    sorted canonical-name pairs from dismissed_pairs).
+
+    ``pending_pairs`` (id frozensets) and ``excluded_ids`` drop pairs that
+    already have a PENDING link proposal, and pairs touching junk-flagged
+    entities. Both must be excluded HERE, before top-k — the 2026-08-12
+    round-2 pass lost ~20 of 49 slots to already-proposed pairs and 6 more
+    to one junk-flagged compound entity."""
     disp = _disp(entities)
     canon = {e["id"]: e["canonical"] for e in entities}
     linked = {frozenset((e["src_id"], e["dst_id"])) for e in edges}
+    linked |= pending_pairs or set()
+    excl = excluded_ids or set()
     dup = {frozenset(p) for p in exact_duplicate_pairs(entities, edges)}
-    ids = sorted(vectors)
+    ids = sorted(i for i in vectors if i not in excl)
     scored: list[dict] = []
     for i in range(len(ids)):
         for j in range(i + 1, len(ids)):
