@@ -90,6 +90,26 @@ entries, a cached view of the graph, a memoized score):
   `evals/judge_determinism_check.py` measures the floor directly;
   `evals/analyze_extractor_comparison.py` reports it beside each paired test.
 
+## Pull requests
+
+- **Open the body with 1–3 plain-language sentences: the problem as a user
+  or maintainer would notice it, then what the change does about it.** Only
+  then the dense technical body — evidence with dates, design decisions,
+  what was measured and deliberately not shipped, verification. Keep writing
+  that body; it is what makes old PRs reconstructable. The lead exists
+  because bodies that open with a plan inventory are unreadable to a human
+  six months later.
+  - Bad lead (PR #137): "Phase 0+1 of the detector-precision plan, grounded
+    in the 2026-08-11 full merge-queue triage…" — names the plan step, not
+    the problem.
+  - Good lead (PR #136): "`dream_run` had no concurrency guard … two
+    triggers racing pulled and extracted the same cursor window twice." —
+    problem first, in one breath.
+- **Titles say why the change matters, not the mechanism**, within the
+  existing `type(scope):` convention where one applies. "fix(dream): stop
+  concurrent dreams double-extracting the same window" beats "fix(dream):
+  add non-blocking guard to dream_run".
+
 ## Publishing a benchmark number
 
 Whether a number is *right* needs a GPU and stays a human gate. Whether it
@@ -154,3 +174,57 @@ Log `memory_outcome` at task end — success/failure/correction signals are the
 only feeder for the lessons surfaced at session start. Deploys and eval results
 get a `memory_store` with source `pseudolife-mcp` (status chatter →
 `source="status"`).
+
+## Glossary
+
+Use these terms — and only these — when describing work back to the
+maintainer, in PR bodies, and in commit messages. The point is less that you
+understand them (you will infer them) and more that every session describes
+the same thing with the same word.
+
+- **continuum / bands** — the associative store: 8 MIRAS bands from
+  `working` to `forever`, similarity-ranked and decaying. An **entry** is
+  one memory in a band.
+- **cortex** — the slot-keyed canonical-fact store: one *current* value per
+  `(entity, attribute)` **slot**; supersession, not decay. A **set-valued
+  slot** holds many concurrent members (add/remove, not replace).
+- **contender** — a competing value parked against a slot instead of
+  overwriting it (low-trust dream claims and number-led set adds land here).
+- **supersede** — replace a slot's value while keeping the old version as
+  audit history. Nothing is ever silently overwritten.
+- **freshness_class / stale** — how fast a slot rots: `evergreen` / `slow` /
+  `volatile`. `stale: true` (past twice the TTL) means re-verify at the
+  source before acting, never "the value is wrong".
+- **HLC** — the hybrid logical clock; the monotonic ordering authority for
+  supersession. Wall-clock times are display-only.
+- **dream** — the consolidation pass: pull the unconsolidated stream →
+  extract `(entity, attribute, value)` claims → `fact_set` → advance the
+  **cursor** (monotonic; each memory is processed once).
+- **extractor / sidecar** — the model that does dream extraction: the
+  bundled CPU sidecar, the Sonnet CLI shim, or any OpenAI-compatible
+  endpoint.
+- **deep dream** — the separate, manually-triggered full-corpus graph pass:
+  safe self-clean plus merge/link candidates routed to review.
+- **merge proposal / fold direction / merge veto** — graph entity dedup: a
+  proposal folds one entity into another; fold direction says which side
+  survives (re-derived from current evidence at review time); a veto is a
+  name-shape rule that blocks a bad fold at filing.
+- **review queue** — pending graph proposals awaiting accept/reject (the
+  Console's Atlas Review view).
+- **quarantine** — overloaded; qualify it: *serving-side* quarantine is the
+  `stale_policy` that withholds a stale value; *consolidation* quarantine is
+  the two-man rule parking low-trust dream claims as contenders.
+- **world facts** — cited external facts (source URL + quote); a separate
+  cortex from project facts.
+- **lessons / outcomes** — `memory_outcome` success/failure/correction
+  signals, distilled into the do/avoid guidance surfaced at session start.
+- **episode** — the session-scoped attribution handle every write is
+  stamped with.
+- **bank / daemon / shim** — the durable memory volumes; the HTTP service
+  that owns them (one process, one bank); the stdio MCP process bridging a
+  client to the daemon.
+- **principal / tier** — bearer-token caller identity; the principal keys
+  the toolset tier.
+- **Console** — the web UI (Cortex Console). The **System Atlas**
+  (`docs/atlas/`) is the hand-curated *codebase* architecture map — distinct
+  from the Console's Atlas view, which visualizes the memory bank's graph.

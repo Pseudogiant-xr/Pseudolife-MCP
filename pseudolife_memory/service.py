@@ -6180,6 +6180,7 @@ class MemoryService:
             dismissed = self._storage.dismissed_pairs()
             prop_keys = self._storage.entity_proposal_keys()
             pending_props = self._storage.pending_entity_proposals()
+            pending_links = self._storage.pending_proposals()
             fact_counts = self._storage.entity_fact_counts()
             lesson_recs = self._curation_records("lesson", cfg.snippet_max_chars)
             world_recs = self._curation_records("world", cfg.snippet_max_chars)
@@ -6188,12 +6189,27 @@ class MemoryService:
         rescore = gc.rescore_edges(edges, entities)
         violations = gc.hard_violation_edges(edges, entities)
         dups = gc.exact_duplicate_pairs(entities, edges)
+        from pseudolife_memory.graph import norm_name as _nn
+        known_norms = frozenset(
+            {e["canonical"] for e in entities}
+            | {_nn(a) for als in g["aliases"].values() for a in als})
+        junk = gc.junk_entities(entities, edges, max_degree=cfg.junk_max_degree,
+                                known_norms=known_norms)
+        # Junk-first routing: a junk-flagged side — this pass or a pending
+        # proposal — belongs to the junk queue; neither a merge nor a
+        # candidate slot should double-handle it.
+        junk_owned = ({j["entity_id"] for j in junk}
+                      | {p["entity_id"] for p in pending_props
+                         if p.get("kind") == "junk"})
         vectors, mentions = gc.entity_context_vectors(
             entities, entries, traces, min_mentions=cfg.min_entity_mentions)
         near = gc.candidate_pairs(
             vectors, edges, entities, scope_map, mentions,
             min_similarity=cfg.min_similarity, top_k=cfg.top_k_candidates,
-            dismissed=dismissed, max_support_overlap=cfg.max_support_overlap)
+            dismissed=dismissed, max_support_overlap=cfg.max_support_overlap,
+            pending_pairs={frozenset((p["src_id"], p["dst_id"]))
+                           for p in pending_links},
+            excluded_ids=junk_owned)
         merge_cands, link_cands = gc.partition_candidates(
             near, entities, edges, merge_min_similarity=cfg.merge_min_similarity,
             fact_counts=fact_counts)
@@ -6203,18 +6219,8 @@ class MemoryService:
         from pseudolife_memory.memory.graph_review import merge_veto as _mv
         merge_cands = [m for m in merge_cands
                        if _mv(m["from"], m["into"]) is None]
-        from pseudolife_memory.graph import norm_name as _nn
-        known_norms = frozenset(
-            {e["canonical"] for e in entities}
-            | {_nn(a) for als in g["aliases"].values() for a in als})
-        junk = gc.junk_entities(entities, edges, max_degree=cfg.junk_max_degree,
-                                known_norms=known_norms)
-        # Junk-first routing (mirrors the write-dedup filing): a side that is
-        # junk-flagged — this pass or a pending proposal — belongs to the
-        # junk queue; a merge against it would double-handle the same node.
-        junk_owned = ({j["entity_id"] for j in junk}
-                      | {p["entity_id"] for p in pending_props
-                         if p.get("kind") == "junk"})
+        # Belt over the candidate-level exclusion: merge filing must stay
+        # junk-clean even if candidate generation changes shape later.
         merge_cands = [m for m in merge_cands
                        if m["from_id"] not in junk_owned
                        and m["into_id"] not in junk_owned]

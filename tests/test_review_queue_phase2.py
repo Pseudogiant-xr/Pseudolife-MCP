@@ -123,6 +123,85 @@ def test_deep_dream_skips_merge_cands_with_pending_junk(svc):
     assert "live gadget daemon" not in flat
 
 
+# ── candidate-slot filters (Phase 2.5) ────────────────────────────────────
+#
+# Both exclusions must run INSIDE candidate_pairs, before top-k — filtering
+# afterwards would still let the excluded pairs consume top-k slots (the
+# 2026-08-12 round-2 pass lost ~20 of 49 slots to pairs with pending link
+# proposals and 6 more to one junk-flagged compound entity).
+
+def _vec2(x, y):
+    import numpy as np
+    v = np.array([x, y], dtype=np.float32)
+    return v / np.linalg.norm(v)
+
+
+def _cand_fixture():
+    ents = [{"id": 1, "canonical": "a", "display": "a", "etype": None},
+            {"id": 2, "canonical": "b", "display": "b", "etype": None},
+            {"id": 3, "canonical": "c", "display": "c", "etype": None}]
+    vectors = {1: _vec2(1, 0), 2: _vec2(1, 0), 3: _vec2(1, 0)}
+    mentions = {1: frozenset({10}), 2: frozenset({20}), 3: frozenset({30})}
+    return ents, vectors, mentions
+
+
+def test_candidate_pairs_skips_pending_proposal_pairs():
+    from pseudolife_memory.memory import graph_consolidation as gc
+
+    ents, vectors, mentions = _cand_fixture()
+    out = gc.candidate_pairs(vectors, [], ents, {}, mentions,
+                             min_similarity=0.55, top_k=50,
+                             pending_pairs={frozenset((1, 2))})
+    assert {(c["src_id"], c["dst_id"]) for c in out} == {(1, 3), (2, 3)}
+
+
+def test_candidate_pairs_skips_excluded_ids():
+    from pseudolife_memory.memory import graph_consolidation as gc
+
+    ents, vectors, mentions = _cand_fixture()
+    out = gc.candidate_pairs(vectors, [], ents, {}, mentions,
+                             min_similarity=0.55, top_k=50,
+                             excluded_ids={3})
+    assert {(c["src_id"], c["dst_id"]) for c in out} == {(1, 2)}
+
+
+def _stage_link_pair(svc, a, b):
+    # Two non-name-related entities with near-identical mention entries →
+    # a LINK candidate (high sim, no name containment → not a merge).
+    svc.graph_relate(a, "related-to", f"anchor-{a[:4]}", origin="agent")
+    svc.graph_relate(b, "related-to", f"anchor-{b[:4]}", origin="agent")
+    for ent in (a, b):
+        svc.store(f"{ent} serves the relay endpoint from the container",
+                  source="phase25-test")
+        svc.store(f"{ent} restarted cleanly after the deploy",
+                  source="phase25-test")
+
+
+def test_deep_dream_candidates_exclude_pending_link_proposals(svc):
+    _stage_link_pair(svc, "gadget relay", "widget beacon")
+    out1 = svc.deep_dream(apply=False, include_snippets=False)
+    pairs1 = {frozenset((c["src"], c["dst"])) for c in out1["candidates"]}
+    assert frozenset(("gadget relay", "widget beacon")) in pairs1  # control
+    r = svc.graph_propose_links([
+        {"src": "gadget relay", "relation": "related-to",
+         "dst": "widget beacon", "similarity": 0.9, "rationale": "test"}])
+    assert r["proposed"] == 1
+    out2 = svc.deep_dream(apply=False, include_snippets=False)
+    pairs2 = {frozenset((c["src"], c["dst"])) for c in out2["candidates"]}
+    assert frozenset(("gadget relay", "widget beacon")) not in pairs2
+
+
+def test_deep_dream_candidates_exclude_junk_owned_entities(svc):
+    import time
+    _stage_link_pair(svc, "gadget relay", "widget beacon")
+    svc._storage.insert_entity_proposal(
+        "junk", _entity_id(svc, "widget beacon"), None, None,
+        "compound-artifact", time.time())
+    out = svc.deep_dream(apply=False, include_snippets=False)
+    flat = {n for c in out["candidates"] for n in (c["src"], c["dst"])}
+    assert "widget beacon" not in flat
+
+
 # ── merge accept-rate stat ────────────────────────────────────────────────
 
 def test_graph_review_reports_merge_decision_stats(svc):

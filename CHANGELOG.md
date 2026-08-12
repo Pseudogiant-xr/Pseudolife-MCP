@@ -24,6 +24,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   recommended" nudge ANY MCP client can read and surface to its user.
   Tool-result content is deliberately the only channel used: it is the
   one MCP signaling path reliably delivered across hosts.
+### Changed (2026-08-12 — candidate slots stop leaking to settled work)
+- **Deep-dream link candidates now exclude pairs that already have a
+  PENDING link proposal, and pairs touching junk-flagged entities** — both
+  applied inside `candidate_pairs` before top-k, because post-filtering
+  would still let them consume slots. Measured on the 2026-08-12 round-2
+  pass: already-proposed pairs re-occupied ~20 of 49 candidate slots and
+  one junk-flagged compound entity held 6 more, crowding out genuinely new
+  pairs. The merge-filing junk filter stays as a second layer.
 
 ### Added (2026-08-12 — review-queue Phase 2: grouping, junk-first routing, accept-rate)
 - **Merge proposals sharing an endpoint carry a `group` key** (the shared
