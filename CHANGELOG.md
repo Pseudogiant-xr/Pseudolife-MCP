@@ -6,6 +6,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-13 — misleading-recall probe: measuring the harm a wrong memory does)
+- **`evals/misleading_recall_probe.py`** — the eval category ContextWeave
+  (arXiv:2608.04830) showed retrieval-shaped benches lack: paired
+  scenarios where a confidently-worded, WRONG memory block (cortex-fact-
+  or lesson-shaped) accompanies, or replaces, the evidence that refutes
+  it. Deterministic substring scoring (no judge), four arms per item,
+  battery integrity pinned by `tests/test_misleading_recall_probe.py`.
+  Baseline on the reproducible bench server
+  (`evals/results/misleading-recall-20260813-baseline.json`, 12
+  scenarios, evidence ceiling 1.00): with the refuting evidence IN
+  context the answerer never follows the wrong memory (harm rate 0.00,
+  placebo 0.00) — but in the cortex-only regime, with nothing to
+  contradict it, the unchecked-follow rate is 0.67 and abstention only
+  0.17, despite the prompt stating memory may be stale. That 0.67 is
+  the quantified motivation for serving-side mitigations (contested /
+  stance / staleness rendering) and the baseline they will be measured
+  against. Caveats recorded in the artifact: single battery, one
+  answerer (Qwen3.6-27B), and negation-shaped traps can leak the gold
+  answer (one item; the leak direction is conservative — it can only
+  understate the follow rate).
+
 ### Added (2026-08-13 — slot-index shadow verification catches maintenance bypasses at query time)
 - **Sampled shadow check on the slot-token index**
   (`memory.slot_index_shadow_rate`, default `0.01`): on ~1% of non-dirty
@@ -88,7 +109,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `contend` requires the preregistered firing audit
   (`evals/results/span-gate-verdict.json`), not preference. Inspired by
   SodaMem's mandatory provenance spans (arXiv:2608.08055).
-
 ### Fixed (2026-08-12 — chronicle search no longer re-stems its own lexemes)
 - **`chronicle_search` parses its rebuilt OR-query with the `simple`
   config instead of `english`**: the matcher stems the query once via
