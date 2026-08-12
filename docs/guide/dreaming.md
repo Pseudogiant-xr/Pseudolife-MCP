@@ -25,15 +25,19 @@ required** if you'd rather not run one:
 | Tier | How it runs | Needs | Quality |
 |------|-------------|-------|---------|
 | **0 — none** | no extractor configured — the dream still runs, prunes and advances its cursor, but writes no canonical facts | nothing | none (single-writer cortex: `memory_fact_set` is your only writer) |
-| **1 — agent-driven** | the **agent itself** is the gateway: the `/dream` command | the agent you already run | highest |
+| **1 — agent-driven** | the **agent itself** is the gateway: the `/dream` judgment session (its manual-extraction branch fires only when no endpoint is configured) | the agent you already run | highest |
 | **2 — shipped default** | daemon auto-sweep calls an OpenAI-compatible endpoint — the bundled sidecar out of the box, or any endpoint you point it at | nothing (sidecar) / one base-URL + key + model | high; free if local |
 
 **Tier 1 — `/dream` (agent-driven).** Copy `examples/commands/dream.md` to
-`.claude/commands/dream.md` in any project, then run `/dream`. The agent
-reads `memory_dream(action="pull")`, extracts durable current-state facts,
-writes them with `memory_fact_set`, and commits the cursor. To run it on a
-cadence instead of by hand, point a scheduled agent/cron job at the same
-prompt.
+`.claude/commands/dream.md` in any project, then run `/dream`. The command
+is a **judgment session**: the agent reads `memory_dream(action="status")`
+— including the `deep_dream: {recommended, ...}` nudge — runs the
+mechanical graph pass if the tick hasn't, and works the review queues
+(link candidates, merge proposals, junk, store curation). Its manual
+extraction branch (`pull` → extract → `memory_fact_set` → `commit`) fires
+ONLY when no extractor endpoint is configured or reachable — on such
+deployments the agent is the sole cortex writer. To run it on a cadence
+instead of by hand, point a scheduled agent/cron job at the same prompt.
 
 **Tier 0 — no extractor.** With no endpoint configured the cortex has no
 automatic writer: `memory_dream(action="run")` still drains the backlog,
@@ -445,7 +449,7 @@ five graph tables to a JSON forensic record under `data_dir/graph_snapshots/`
 (refusing with `snapshot_failed` if it can't), then commits the safe
 self-clean (re-score + supersede violations + merge exact dups) and returns
 `candidates` for review. The agent then drives Step C in the same session
-(see the `/dream deep` flow in `examples/commands/dream.md`): judge each
+(see the `/dream` flow in `examples/commands/dream.md`): judge each
 candidate from its snippets, post the real relations with
 `memory_graph_review(action="propose")` — they land in the Atlas Review
 queue (`proposed_link` findings) for per-item accept/reject before anything

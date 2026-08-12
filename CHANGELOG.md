@@ -6,6 +6,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-08-12 — /dream becomes a judgment session)
+- **The `/dream` command (plugin + examples copy) is restructured around
+  what automation cannot do.** With the auto-sweep extracting facts and
+  the need-based tick applying the deep dream's mechanical half, the
+  separate `deep` mode is gone: bare `/dream` now reads
+  `memory_dream(action="status")` (including the `deep_dream` nudge),
+  runs the mechanical pass only if the tick hasn't, and works the review
+  queues — link candidates, merge proposals (group rule), junk, store
+  curation. The old manual pull → extract → commit flow survives as an
+  explicit fallback branch that fires ONLY when no extractor endpoint is
+  configured or reachable — on such deployments the agent remains the
+  sole cortex writer (tier 1). Guide and plugin README updated to match.
+
 ### Changed (2026-08-12 — candidate slots stop leaking to settled work)
 - **Deep-dream link candidates now exclude pairs that already have a
   PENDING link proposal, and pairs touching junk-flagged entities** — both
