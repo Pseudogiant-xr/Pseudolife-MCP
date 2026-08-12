@@ -80,6 +80,22 @@ def test_search_matches_lexically_in_chronological_order(storage):
     assert hits[2]["occurred_phrase"] == "a while back"
 
 
+def test_search_matches_words_whose_stem_is_itself_stemmable(storage):
+    """The OR rebuild must not re-stem the already-stemmed lexemes.
+
+    'release' stems to 'releas', but 'releas' is itself stemmable (to
+    'relea'), so parsing the rebuilt OR-string with the 'english' config
+    again produces a lexeme the tsvector never contains. The existing
+    tests never caught this because 'kitten' is a fixed point of the
+    stemmer."""
+    storage.add_chronicle_event(_event(
+        description="published release 0.13.0 to PyPI",
+        description_norm="published release 0.13.0 to pypi"))
+    hits = storage.chronicle_search("what happened with the release", limit=10)
+    assert [h["description"] for h in hits] == [
+        "published release 0.13.0 to PyPI"]
+
+
 def test_invalidated_events_do_not_serve(storage):
     ev_id, _ = storage.add_chronicle_event(_event())
     storage.invalidate_chronicle_event(ev_id, 500.0)
