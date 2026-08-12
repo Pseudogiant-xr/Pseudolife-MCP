@@ -19,6 +19,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   configured or reachable — on such deployments the agent remains the
   sole cortex writer (tier 1). Guide and plugin README updated to match.
 
+### Added (2026-08-12 — need-based deep-dream tick + harness-agnostic nudge flag)
+- **The deep dream's MECHANICAL half now runs itself**: a need-based tick
+  on the existing sweep timer runs `deep_dream(apply=True)` — rescore,
+  guard-passing junk auto-delete, scope stamping, proposal filing, all
+  snapshot-first — when the bank has grown by
+  `memory.deep_dream.auto_min_new_entities` (default 150) since the last
+  apply, or `auto_interval_days` (default 7) have passed. Step C
+  (judgment) is never automated: the queues fill and wait for an agent or
+  the Atlas. Every apply — manual or tick — stamps an id-watermark meta
+  row (id-based, not count-based: merges and junk deletions shrink counts
+  and would mask growth), so a manual pass resets the clock;
+  `auto_tick: false` disables.
+- **`dream_status` (and so `memory_dream(action="status")`) now carries a
+  `deep_dream` block**: `{recommended, reason, new_entities, days_since,
+  last_apply_at}` — a harness-agnostic "a consolidation pass is
+  recommended" nudge ANY MCP client can read and surface to its user.
+  Tool-result content is deliberately the only channel used: it is the
+  one MCP signaling path reliably delivered across hosts.
+
 ### Changed (2026-08-12 — candidate slots stop leaking to settled work)
 - **Deep-dream link candidates now exclude pairs that already have a
   PENDING link proposal, and pairs touching junk-flagged entities** — both
