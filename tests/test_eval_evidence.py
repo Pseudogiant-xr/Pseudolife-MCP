@@ -1310,6 +1310,28 @@ CLAIMS.append(Claim(
     value=lambda d: d["arms"]["hybrid"]["accuracy"],
     stated=0.833, places=3))
 
+# ── misleading-recall probe baseline (2026-08-13) ────────────────────────
+MRP = RESULTS + "misleading-recall-20260813-baseline.json"
+
+CLAIMS.append(Claim(
+    id="mrp-unchecked-follow", doc=CHANGELOG,
+    needle="the unchecked-follow rate is 0.67",
+    artifacts=(MRP,),
+    value=lambda d: d["metrics"]["unchecked_follow_rate"],
+    stated=0.67, places=2))
+CLAIMS.append(Claim(
+    id="mrp-harm-with-evidence", doc=CHANGELOG,
+    needle="never follows the wrong memory (harm rate 0.00,",
+    artifacts=(MRP,),
+    value=lambda d: d["metrics"]["harm_rate"],
+    stated=0.0, places=2))
+CLAIMS.append(Claim(
+    id="mrp-evidence-ceiling", doc=CHANGELOG,
+    needle="12\n  scenarios, evidence ceiling 1.00",
+    artifacts=(MRP,),
+    value=lambda d: d["metrics"]["evidence_ceiling"],
+    stated=1.0, places=2))
+
 
 def test_every_published_number_names_a_committed_artifact():
     """A claim whose evidence is untracked cannot be checked by a reader.
