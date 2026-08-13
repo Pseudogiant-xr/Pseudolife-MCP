@@ -1,0 +1,47 @@
+{
+  "tag": "sg2",
+  "reference": "v5ctl",
+  "n": 78,
+  "noise_floor_rag_control": {
+    "identical_rag_context": "78/78",
+    "any_run_disagreement": 0,
+    "pairwise_disagreement": {
+      "v5ctl vs v10": 0
+    },
+    "worst_pairwise": 0
+  },
+  "comparisons": {
+    "v10": {
+      "cortex": {
+        "accuracy": 0.731,
+        "reference_accuracy": 0.731,
+        "delta": 0.0,
+        "wins": 5,
+        "losses": 5,
+        "net": 0,
+        "p_mcnemar_exact": 1.0,
+        "exceeds_noise_floor": false
+      },
+      "hybrid": {
+        "accuracy": 0.859,
+        "reference_accuracy": 0.897,
+        "delta": -0.038,
+        "wins": 2,
+        "losses": 5,
+        "net": -3,
+        "p_mcnemar_exact": 0.4531,
+        "exceeds_noise_floor": true
+      },
+      "rag": {
+        "accuracy": 0.859,
+        "reference_accuracy": 0.859,
+        "delta": 0.0,
+        "wins": 0,
+        "losses": 0,
+        "net": 0,
+        "p_mcnemar_exact": 1.0,
+        "exceeds_noise_floor": false
+      }
+    }
+  }
+}

@@ -1332,6 +1332,67 @@ CLAIMS.append(Claim(
     value=lambda d: d["metrics"]["evidence_ceiling"],
     stated=1.0, places=2))
 
+# ── v10 stance prompt ship (2026-08-14) ──────────────────────────────────
+V10_PAIRED = RESULTS + "stance-v10-ku-paired-verdict.json"
+V10_PROBE = RESULTS + "stance-probe-20260813-v10.json"
+V10_DRIFT = RESULTS + "bank-drift-sg2-v5-vs-v10.json"
+V10_FLOOR = RESULTS + "bank-drift-crosswindow-v5-floor.json"
+
+
+def _sg2(arm: str) -> str:
+    return (f"{RESULTS}longmemeval-ku-oracle-qwen-27b-sg2-{arm}"
+            ".summary.json")
+
+
+CLAIMS.append(Claim(
+    id="v10-probe-capture", doc=CHANGELOG,
+    needle="stance capture 0.919 with false-stance 0.00",
+    artifacts=(V10_PROBE,),
+    value=lambda d: d["arms"]["v10"]["metrics"]["stance_capture"],
+    stated=0.919, places=3))
+CLAIMS.append(Claim(
+    id="v10-probe-false-stance", doc=CHANGELOG,
+    needle="stance capture 0.919 with false-stance 0.00",
+    artifacts=(V10_PROBE,),
+    value=lambda d: d["arms"]["v10"]["metrics"]["false_stance"],
+    stated=0.0, places=2))
+CLAIMS.append(Claim(
+    id="v10-probe-hedged-recovery", doc=CHANGELOG,
+    needle="hedged-fact recovery\n  0.30→0.925",
+    artifacts=(V10_PROBE,),
+    value=lambda d: d["arms"]["v10"]["metrics"]["hedged_recovered"],
+    stated=0.925, places=3))
+CLAIMS.append(Claim(
+    id="v10-drift-slot-ratio", doc=CHANGELOG,
+    needle="slot ratio 1.20 / key jaccard 0.49",
+    artifacts=(V10_DRIFT,),
+    value=lambda d: d["aggregates"]["mean_slot_ratio"],
+    stated=1.20, places=2))
+CLAIMS.append(Claim(
+    id="v10-ku-cortex-unchanged", doc=CHANGELOG,
+    needle="cortex exactly\n  unchanged (0.731 vs 0.731, net 0, p=1.0",
+    artifacts=(V10_PAIRED,),
+    value=lambda d: d["comparisons"]["v10"]["cortex"]["p_mcnemar_exact"],
+    stated=1.0, places=2))
+CLAIMS.append(Claim(
+    id="v10-ku-hybrid-watch", doc=CHANGELOG,
+    needle="hybrid 0.859 vs 0.897 (2W/5L, p=0.45",
+    artifacts=(_sg2("v10"),),
+    value=lambda d: d["arms"]["hybrid"]["accuracy"],
+    stated=0.859, places=3))
+CLAIMS.append(Claim(
+    id="v10-drift-jaccard", doc=CHANGELOG,
+    needle="slot ratio 1.20 / key jaccard 0.49",
+    artifacts=(V10_DRIFT,),
+    value=lambda d: d["aggregates"]["mean_key_jaccard"],
+    stated=0.49, places=2))
+CLAIMS.append(Claim(
+    id="v10-drift-floor", doc=CHANGELOG,
+    needle="clean 1.00/1.00 cross-window v5 floor",
+    artifacts=(V10_FLOOR,),
+    value=lambda d: d["aggregates"]["mean_key_jaccard"],
+    stated=1.0, places=2))
+
 
 def test_every_published_number_names_a_committed_artifact():
     """A claim whose evidence is untracked cannot be checked by a reader.

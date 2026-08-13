@@ -12,8 +12,8 @@ gets the cheap tripwire BEFORE the expensive judged comparison.
 Per question present in both directories:
 - slot counts (reference vs candidate) and their ratio;
 - key-set Jaccard over normalized keys (case/separator-collapsed);
-- format-drift pairs: distinct candidate keys that COLLIDE after
-  normalization (``past travel experience`` vs
+- format-drift keys: normalized keys carrying more than one raw
+  candidate-side spelling (``past travel experience`` vs
   ``past-travel-experience``) — same fact minted under two spellings;
 - update-loss proxy: reference slots whose history shows >=2 values
   (an observed supersession) where the candidate's matching normalized
@@ -48,9 +48,15 @@ def _norm_key(entity: str, attribute: str) -> str:
     return f"{e}.{a}"
 
 
-def _load(bank_dir: Path, qid_file: Path) -> list[dict]:
-    with gzip.open(qid_file, "rt", encoding="utf-8") as f:
-        return json.load(f)["facts"]
+def _load(bank_dir: Path, qid_file: Path) -> list[dict] | None:
+    """None on a corrupt/truncated dump (an interrupted bench writes
+    incrementally) — the caller skips and COUNTS it; one bad file must
+    not kill the whole tripwire."""
+    try:
+        with gzip.open(qid_file, "rt", encoding="utf-8") as f:
+            return json.load(f)["facts"]
+    except Exception:  # noqa: BLE001 — corrupt dump = skip, never crash
+        return None
 
 
 def _slots(facts: list[dict]) -> dict[str, dict]:
@@ -96,18 +102,28 @@ def main(argv: list[str] | None = None) -> int:
     ref_dir = BANKS_DIR / args.reference
     cand_dir = BANKS_DIR / args.candidate
     rows = {}
+    corrupt = []
     for qf in sorted(ref_dir.glob("*.json.gz")):
         cf = cand_dir / qf.name
         if not cf.exists():
             continue
         qid = qf.name.replace(".json.gz", "")
-        rows[qid] = analyze_question(_load(ref_dir, qf), _load(cand_dir, cf))
+        ref, cand = _load(ref_dir, qf), _load(cand_dir, cf)
+        if ref is None or cand is None:
+            corrupt.append(qid)
+            continue
+        rows[qid] = analyze_question(ref, cand)
 
     n = len(rows)
-    ratios = [r["slot_ratio"] for r in rows.values() if r["slot_ratio"]]
+    # `is not None`, never truthiness: a candidate bank that collapsed to
+    # ZERO facts is the worst drift this tool exists to catch — a falsy
+    # filter would silently drop exactly those questions from the mean.
+    ratios = [r["slot_ratio"] for r in rows.values()
+              if r["slot_ratio"] is not None]
     out = {
         "reference": args.reference, "candidate": args.candidate,
         "n_questions": n,
+        "skipped_corrupt": corrupt,
         "aggregates": {
             "mean_slot_ratio": sum(ratios) / len(ratios) if ratios else None,
             "explosions_over_2x": sum(1 for r in ratios if r > 2.0),

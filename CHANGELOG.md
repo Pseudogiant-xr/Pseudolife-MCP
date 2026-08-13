@@ -6,6 +6,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-08-14 — the v10 update-anchored stance prompt is the live extraction prompt)
+- **`facts.stance` is now populated in production**: the live dream
+  extraction prompt moved v5 → v10 (`ku_op_prompt_v10_stance_update.txt`,
+  construction-pinned), activating the schema-v29 stance plumbing that
+  shipped dormant. v10 implements the bank-diff forensics hint that
+  killed v8 — an explicit "a hedged update is STILL an update" sentence
+  and a worked example that reuses the base example's own deploy-target
+  slot as a later hedged update, reinforcing the consolidation anchor v8
+  diluted. Gates (same-window v5 control, zero rag-control noise floor):
+  stance capture 0.919 with false-stance 0.00 and hedged-fact recovery
+  0.30→0.925; ladder 1.0/0.0 both replicates; KU-oracle cortex exactly
+  unchanged (0.731 vs 0.731, net 0, p=1.0 — v8's −0.115 regression
+  repaired); hybrid 0.859 vs 0.897 (2W/5L, p=0.45, not significant)
+  accepted by maintainer decision as a SOAK WATCH ITEM — production soak
+  review due ~2026-08-21, alongside a planned v11 iteration targeting
+  the residual bank drift measured by the new
+  `evals/analyze_bank_drift.py` (slot ratio 1.20 / key jaccard 0.49 vs a
+  clean 1.00/1.00 cross-window v5 floor; the instrument is validated
+  against the v8/v9 failure banks and reads as a tripwire, not a
+  predictor). Artifacts: `stance-v10-ku-paired-verdict.json`,
+  `longmemeval-ku-oracle-qwen-27b-sg2-{v5,v10}.summary.json`,
+  `stance-probe-20260813-v10.json`, `bank-drift-sg2-v5-vs-v10.json`,
+  `bank-drift-crosswindow-v5-floor.json`.
+
 ### Added (2026-08-13 — GPU-busy guard in the bench server helper)
 - **`Start-Qwen` refuses instead of displacing when the GPU is in use**
   (`Test-GpuBusy` in `evals/qwen_server.ps1`): more than 5 GB VRAM held

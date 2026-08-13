@@ -125,6 +125,16 @@ function Start-Qwen {
                         "launching or displacing. Stop the workload (or " +
                         "Stop-Qwen for a leftover bench server), or pass " +
                         "-Force to override deliberately.")
+            # Pace before returning: the busy refusal fails in one
+            # nvidia-smi call where a launch failure took ~300s, and the
+            # overnight scripts' retry loops (budgeted for an ~hourly
+            # crash cadence, e.g. overnight_lme_v2's maxRetries=20) would
+            # otherwise burn their whole budget in seconds and silently
+            # kill the batch — the exact 2026-07-19 failure class. 30s
+            # here buys those loops ~10 minutes of patience at one probe
+            # per retry; a true wait-until-free redesign of the callers
+            # is follow-up work, noted in the v10 PR.
+            Start-Sleep -Seconds 30
             return $false
         }
     }
