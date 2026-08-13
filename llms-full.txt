@@ -44,6 +44,19 @@ What you get:
 - **A web console to watch it think** — the Cortex Console above, plus cited
   world facts, session episodes, and document RAG.
 
+Measured, with receipts — on LongMemEval knowledge updates, routing
+answers through the fact spine beats naive RAG, and every number ships
+with its committed run artifact:
+
+| LongMemEval-KU | naive RAG | commit-gated cascade |
+|---|---:|---:|
+| oracle slice (78 questions, reproducible server) | 0.859 | **0.936** |
+| full haystack (~50 sessions/question, pre-registered) | 0.346 | **0.462** (p = 0.011) |
+
+Graded by a local, byte-reproducible judge — compare within rows, never
+against GPT-judged leaderboards. Full tables, caveats, and every
+artifact: [Benchmarks](docs/guide/benchmarks.md).
+
 ## Quickstart
 
 Requires Docker and Claude Code, Codex, or both. One command from clone to
@@ -127,6 +140,22 @@ thinking — your coding agent is the intelligence; these are tools it calls to 
 recall what matters. (Models *are* bundled as plumbing: baked embedding
 weights for retrieval, and the optional CPU extractor sidecar that
 consolidates memories into facts while you sleep.)
+
+Where it sits among the common approaches to agent memory — each column
+is a fair tool for what it's for; this table is about *what question each
+one answers*, not who's wrong:
+
+| | notes file (`CLAUDE.md`) | auto-journaling plugin | plain vector store | Pseudolife-MCP |
+|---|---|---|---|---|
+| Survives sessions and compactions | yes | yes | yes | yes |
+| "What is X *now*?" has one current answer | if you curate it | no — replays what happened | no — every stored version competes at recall | yes — slot-keyed cortex |
+| A correction replaces the old value | you edit the file | appended beside it | old and new both retrievable, unranked by recency of truth | supersedes, with full version history kept |
+| Facts know their age and go stale | no | no | no | dated, freshness-decayed, quarantined when stale |
+| Distils do/avoid lessons from its own outcomes | no | no | no | yes |
+| Benchmark numbers ship with their raw run artifacts | — | typically no | typically no | every published number, test-enforced |
+
+Auto-journaling records what the agent *did*; Pseudolife curates what it
+*learned*. Both are useful — they answer different questions.
 
 It layers several complementary stores: the **associative continuum** (an
 8-tier embedding store, working → forever, ranked by cosine similarity fused

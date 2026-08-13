@@ -197,6 +197,32 @@ for _cid, _needle, _val, _stated in [
         id=_cid, doc=BENCH, needle=_needle, artifacts=(CASC_CONF,),
         value=_val, stated=_stated, places=3))
 
+# ── the README scan-layer teaser (2026-08-14) ────────────────────────────
+# A two-row summary near the top of the README restates the headline
+# numbers from the tables pinned above; a restatement is a claim like any
+# other, so each cell is pinned to the same artifacts here.
+_TEASER_ORACLE = (
+    "| oracle slice (78 questions, reproducible server) "
+    "| 0.859 | **0.936** |")
+_TEASER_HAYSTACK = (
+    "| full haystack (~50 sessions/question, pre-registered) "
+    "| 0.346 | **0.462** (p = 0.011) |")
+for _cid, _needle, _arts, _val, _stated in [
+    ("teaser-oracle-rag", _TEASER_ORACLE, (E2E,),
+     _mean("rag"), 0.859),
+    ("teaser-oracle-cascade", _TEASER_ORACLE, (E2E,),
+     _mean("cascade"), 0.936),
+    ("teaser-haystack-rag", _TEASER_HAYSTACK, (CASC_CONF,),
+     lambda d: d["arm_means"]["rag"], 0.346),
+    ("teaser-haystack-cascade", _TEASER_HAYSTACK, (CASC_CONF,),
+     lambda d: d["arm_means"]["cascade"], 0.462),
+    ("teaser-haystack-p", _TEASER_HAYSTACK, (CASC_CONF,),
+     lambda d: d["paired_permutation"]["cascade_vs_rag"]["p_value"], 0.011),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=READ_ME, needle=_needle, artifacts=_arts,
+        value=_val, stated=_stated, places=3))
+
 # ── the replicated Arm-1 vs baseline table ───────────────────────────────
 for _arm, _needle, _a_mean, _b_mean in [
     ("rag", "| naive RAG (control) | 0.574 ± 0.006 | 0.585 ± 0.015 |",
