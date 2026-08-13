@@ -80,6 +80,35 @@ in any future prompt arm (both were visible here without a judge);
 (c) the answer-side timidity is real but second-order — fix extraction
 first.
 
+## v10 iteration outcome (2026-08-14) — SHIPPED, with a soak watch
+
+The v10 arm implemented hint (a) exactly (the "a hedged update is STILL
+an update" sentence + a worked example reusing the v0 example's own
+deploy-target slot) and hint (b) became `evals/analyze_bank_drift.py`,
+validated against the v8/v9 failure banks before being trusted.
+
+Gates (same-window v5 control, zero rag noise floor, artifacts
+committed): probe capture 0.919 / false-stance 0.00 / hedged recovery
+0.30→0.925; ladder 1.0/0.0 ×2; KU-oracle cortex EXACTLY unchanged
+(0.731 vs 0.731, 5W/5L, net 0, p=1.0 — the v8 −0.115 regression is
+repaired); hybrid 0.859 vs 0.897 (2W/5L, net −3, p=0.45, not
+significant, two-sided — unlike v9's one-sided 0W/5L). Bank drift
+remains elevated (slot ratio 1.20, key jaccard 0.49, frozen-update
+proxy 12, churn 154→179) against a clean cross-window v5 floor
+(1.00/1.00/0) — v10 restructures banks about as much as v8 did but no
+longer pays for it in cortex accuracy, confirming the drift instrument
+as tripwire-not-predictor.
+
+MAINTAINER DECISION (2026-08-14): ship v10 as the live prompt, with a
+production soak review due ~2026-08-21 (stance fill rate and
+correctness on live dreams, supersession churn, hybrid-arm health) and
+a v11 iteration targeting the residual drift (slot-naming stability;
+the hybrid −0.038 and jaccard 0.49 are its baseline to beat). Artifacts:
+`stance-probe-20260813-v10.json`, `qwen-27b-sg2-v10-r{1,2}.json`,
+`longmemeval-ku-oracle-qwen-27b-sg2-{v5,v10}.{jsonl,summary.json}`,
+`stance-v10-ku-paired-verdict.json`, `bank-drift-sg2-v5-vs-v10.json`,
+`bank-drift-crosswindow-v5-floor.json`.
+
 Two extraction-quality changes that share one surface (the dream extractor's
 claim schema) and are therefore specced and measured together, in separate
 arms. Both are grounded in externally verified 2026-08 results and in this

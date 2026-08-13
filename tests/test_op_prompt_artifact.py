@@ -56,12 +56,23 @@ def test_stance_quote_prompt_file_matches_probe_construction():
     assert path.read_text(encoding="utf-8") == op_probe.VARIANTS["v9-stance-quote"]
 
 
-def test_shipped_prompt_is_the_measured_v5_artifact():
-    """The hold-reversal ship (2026-08-01): the live extraction prompt must
-    be byte-identical to the artifact the count-exclusion gate measured
-    (cascade at the op-less control, sidecar + ladder validated). Any drift
-    between what runs and what was measured re-opens the gap all four
+def test_stance_v10_prompt_file_matches_probe_construction():
+    """Same pin for the v10 stance iteration (shipped v5 + the
+    update-anchored stance rule — the sgku bank-diff forensics traced
+    v8's KU failure to a diluted consolidation anchor, and v10's two
+    deltas target exactly that; ships as the live prompt only if its
+    gates pass, KU-oracle included)."""
+    path = Path(__file__).resolve().parents[1] / "evals" / "prompts" / "ku_op_prompt_v10_stance_update.txt"
+    assert path.read_text(encoding="utf-8") == op_probe.VARIANTS["v10-stance-update"]
+
+
+def test_shipped_prompt_is_the_measured_v10_artifact():
+    """The v10 stance ship (2026-08-14): the live extraction prompt must
+    be byte-identical to the artifact its gates measured (probe + ladder
+    + same-window KU-oracle paired control; ship decision recorded in
+    the 2026-08-12 stance-span-gate spec's gate-outcomes section). Any
+    drift between what runs and what was measured re-opens the gap the
     verdict artifacts exist to close."""
     from pseudolife_memory.memory.dream import _SYSTEM_PROMPT
-    path = Path(__file__).resolve().parents[1] / "evals" / "prompts" / "ku_op_prompt_v5.txt"
+    path = Path(__file__).resolve().parents[1] / "evals" / "prompts" / "ku_op_prompt_v10_stance_update.txt"
     assert _SYSTEM_PROMPT == path.read_text(encoding="utf-8")

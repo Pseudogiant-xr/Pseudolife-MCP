@@ -1,0 +1,638 @@
+{
+  "reference": "oracle-qwen-27b-sgku-v5",
+  "candidate": "oracle-qwen-27b-sg2-v5",
+  "n_questions": 78,
+  "aggregates": {
+    "mean_slot_ratio": 1.0,
+    "explosions_over_2x": 0,
+    "mean_key_jaccard": 1.0,
+    "format_drift_total": 7,
+    "frozen_update_total": 0
+  },
+  "questions": {
+    "01493427": {
+      "ref_slots": 1,
+      "cand_slots": 1,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "031748ae": {
+      "ref_slots": 7,
+      "cand_slots": 7,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "031748ae_abs": {
+      "ref_slots": 9,
+      "cand_slots": 9,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "06db6396": {
+      "ref_slots": 6,
+      "cand_slots": 6,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "07741c44": {
+      "ref_slots": 6,
+      "cand_slots": 6,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "07741c45": {
+      "ref_slots": 6,
+      "cand_slots": 6,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "08e075c7": {
+      "ref_slots": 5,
+      "cand_slots": 5,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "0977f2af": {
+      "ref_slots": 8,
+      "cand_slots": 8,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "0ddfec37": {
+      "ref_slots": 1,
+      "cand_slots": 1,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "0ddfec37_abs": {
+      "ref_slots": 1,
+      "cand_slots": 1,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "0e4e4c46": {
+      "ref_slots": 4,
+      "cand_slots": 4,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "0f05491a": {
+      "ref_slots": 2,
+      "cand_slots": 2,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "10e09553": {
+      "ref_slots": 3,
+      "cand_slots": 3,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "184da446": {
+      "ref_slots": 3,
+      "cand_slots": 3,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "18bc8abd": {
+      "ref_slots": 12,
+      "cand_slots": 12,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 1,
+      "frozen_update_keys": []
+    },
+    "1cea1afa": {
+      "ref_slots": 5,
+      "cand_slots": 5,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "2133c1b5": {
+      "ref_slots": 5,
+      "cand_slots": 5,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "2133c1b5_abs": {
+      "ref_slots": 5,
+      "cand_slots": 5,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "22d2cb42": {
+      "ref_slots": 6,
+      "cand_slots": 6,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "2698e78f": {
+      "ref_slots": 11,
+      "cand_slots": 11,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "2698e78f_abs": {
+      "ref_slots": 8,
+      "cand_slots": 8,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "26bdc477": {
+      "ref_slots": 6,
+      "cand_slots": 6,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "3ba21379": {
+      "ref_slots": 2,
+      "cand_slots": 2,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "41698283": {
+      "ref_slots": 7,
+      "cand_slots": 7,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 1,
+      "frozen_update_keys": []
+    },
+    "42ec0761": {
+      "ref_slots": 4,
+      "cand_slots": 4,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "45dc21b6": {
+      "ref_slots": 6,
+      "cand_slots": 6,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "4b24c848": {
+      "ref_slots": 4,
+      "cand_slots": 4,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "4d6b87c8": {
+      "ref_slots": 10,
+      "cand_slots": 10,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 1,
+      "frozen_update_keys": []
+    },
+    "50635ada": {
+      "ref_slots": 13,
+      "cand_slots": 13,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "5831f84d": {
+      "ref_slots": 2,
+      "cand_slots": 2,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "59524333": {
+      "ref_slots": 8,
+      "cand_slots": 8,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "5a4f22c0": {
+      "ref_slots": 8,
+      "cand_slots": 8,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "5c40ec5b": {
+      "ref_slots": 6,
+      "cand_slots": 6,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "603deb26": {
+      "ref_slots": 5,
+      "cand_slots": 5,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "6071bd76": {
+      "ref_slots": 2,
+      "cand_slots": 2,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "618f13b2": {
+      "ref_slots": 4,
+      "cand_slots": 4,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "69fee5aa": {
+      "ref_slots": 5,
+      "cand_slots": 5,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "6a1eabeb": {
+      "ref_slots": 6,
+      "cand_slots": 6,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "6a27ffc2": {
+      "ref_slots": 8,
+      "cand_slots": 8,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "6aeb4375": {
+      "ref_slots": 3,
+      "cand_slots": 3,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "6aeb4375_abs": {
+      "ref_slots": 1,
+      "cand_slots": 1,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "71315a70": {
+      "ref_slots": 3,
+      "cand_slots": 3,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "72e3ee87": {
+      "ref_slots": 12,
+      "cand_slots": 12,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "7401057b": {
+      "ref_slots": 16,
+      "cand_slots": 16,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "7a87bd0c": {
+      "ref_slots": 7,
+      "cand_slots": 7,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "7e974930": {
+      "ref_slots": 5,
+      "cand_slots": 5,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "830ce83f": {
+      "ref_slots": 4,
+      "cand_slots": 4,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "852ce960": {
+      "ref_slots": 15,
+      "cand_slots": 15,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "89941a93": {
+      "ref_slots": 8,
+      "cand_slots": 8,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 1,
+      "frozen_update_keys": []
+    },
+    "89941a94": {
+      "ref_slots": 6,
+      "cand_slots": 6,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 1,
+      "frozen_update_keys": []
+    },
+    "8fb83627": {
+      "ref_slots": 8,
+      "cand_slots": 8,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "945e3d21": {
+      "ref_slots": 4,
+      "cand_slots": 4,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "9bbe84a2": {
+      "ref_slots": 12,
+      "cand_slots": 12,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "9ea5eabc": {
+      "ref_slots": 4,
+      "cand_slots": 4,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "a1eacc2a": {
+      "ref_slots": 5,
+      "cand_slots": 5,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "a2f3aa27": {
+      "ref_slots": 8,
+      "cand_slots": 8,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "affe2881": {
+      "ref_slots": 3,
+      "cand_slots": 3,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "b01defab": {
+      "ref_slots": 6,
+      "cand_slots": 6,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 1,
+      "frozen_update_keys": []
+    },
+    "b6019101": {
+      "ref_slots": 5,
+      "cand_slots": 5,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 1,
+      "frozen_update_keys": []
+    },
+    "ba61f0b9": {
+      "ref_slots": 11,
+      "cand_slots": 11,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "c4ea545c": {
+      "ref_slots": 6,
+      "cand_slots": 6,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "c6853660": {
+      "ref_slots": 8,
+      "cand_slots": 8,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "c7dc5443": {
+      "ref_slots": 11,
+      "cand_slots": 11,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "cc5ded98": {
+      "ref_slots": 3,
+      "cand_slots": 3,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "ce6d2d27": {
+      "ref_slots": 6,
+      "cand_slots": 6,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "cf22b7bf": {
+      "ref_slots": 14,
+      "cand_slots": 14,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "d7c942c3": {
+      "ref_slots": 4,
+      "cand_slots": 4,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "dad224aa": {
+      "ref_slots": 7,
+      "cand_slots": 7,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "db467c8c": {
+      "ref_slots": 16,
+      "cand_slots": 16,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "dfde3500": {
+      "ref_slots": 5,
+      "cand_slots": 5,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "e493bb7c": {
+      "ref_slots": 4,
+      "cand_slots": 4,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "e61a7584": {
+      "ref_slots": 7,
+      "cand_slots": 7,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "e66b632c": {
+      "ref_slots": 23,
+      "cand_slots": 23,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "eace081b": {
+      "ref_slots": 8,
+      "cand_slots": 8,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "ed4ddc30": {
+      "ref_slots": 2,
+      "cand_slots": 2,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "f685340e": {
+      "ref_slots": 9,
+      "cand_slots": 9,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "f685340e_abs": {
+      "ref_slots": 4,
+      "cand_slots": 4,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    },
+    "f9e8c073": {
+      "ref_slots": 3,
+      "cand_slots": 3,
+      "slot_ratio": 1.0,
+      "key_jaccard": 1.0,
+      "format_drift_keys": 0,
+      "frozen_update_keys": []
+    }
+  }
+}

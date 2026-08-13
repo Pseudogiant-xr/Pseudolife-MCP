@@ -156,17 +156,38 @@ _SYSTEM_PROMPT = (
     '{"entity":"user","attribute":"bird species seen at park",'
     '"value":"32","confidence":0.9,"source":5} inside the one claims '
     'array, and NO "op":"add" claim for Northern Flicker.\n'
+    "HEDGES GO IN A STANCE FIELD: when the note itself hedges a fact "
+    '("probably", "might", "unconfirmed", "not final", "per the '
+    'runbook"), keep the value CLEAN and put the note\'s own hedge '
+    'words in a "stance" field on that claim — never inside the value, '
+    "and never invent a stance the note does not carry; a plainly "
+    "stated fact has no stance field. A hedged update is STILL an "
+    "update: use the same entity and attribute as the fact it changes "
+    "and emit only the CURRENT value, exactly as for a plain fact. For "
+    "example, a later note [6] we'll probably move the deploy target "
+    "again, to eu-west-1 next quarter — updates the deploy target slot "
+    "from the earlier example to the single claim "
+    '{"entity":"deploy target","attribute":"environment",'
+    '"value":"eu-west-1","stance":"probably","confidence":0.6,'
+    '"source":6} inside the one claims array.\n'
     'Return {"claims":[]} if nothing qualifies.'
 )
 # The op block + count-exclusion rule shipped 2026-08-01 (hold reversed by
-# maintainer decision after the count-exclusion gate). This prompt must stay
-# byte-identical to the measured artifact evals/prompts/ku_op_prompt_v5.txt
-# (pinned by test_op_prompt_artifact.py): the v0 op block alone measured
-# net-negative on KU-oracle (count updates re-routed into member-adds froze
-# stated totals; c2op-gate-verdict.json), and the count rule is what repaired
-# it (cascade back to the op-less control, sidecar + ladder validated;
-# c2op-count-verdict.json). Edit the prompt only through a new measured
-# artifact + gate.
+# maintainer decision after the count-exclusion gate; c2op verdict
+# artifacts). The update-anchored stance rule (v10) shipped 2026-08-14 by
+# maintainer decision after its gates: probe capture 0.919 / false-stance
+# 0.00, ladder 1.0/0.0 x2, KU-oracle cortex EXACTLY unchanged vs a
+# same-window control (0.731, net 0, p=1.0); hybrid -0.038 (2W/5L,
+# p=0.45, not significant) accepted as a soak watch item
+# (stance-v10-ku-paired-verdict.json; soak review due ~2026-08-21). v10's
+# two deltas vs the KU-failed v8 block (bank-diff forensics traced that
+# failure to a diluted consolidation anchor): the "a hedged update is
+# STILL an update" sentence, and a worked example reusing the v0
+# example's own deploy-target slot as a later hedged update. This prompt
+# must stay byte-identical to the measured artifact
+# evals/prompts/ku_op_prompt_v10_stance_update.txt (pinned by
+# test_op_prompt_artifact.py). Edit the prompt only through a new
+# measured artifact + gate.
 
 
 # Events-only prompt for the SEPARATE extraction pass (design doc
