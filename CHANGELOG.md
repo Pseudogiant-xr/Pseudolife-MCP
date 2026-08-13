@@ -6,6 +6,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-14 — prebuilt images: the Docker tier can pull instead of build)
+- **GHCR image publishing** (`images` job in `.github/workflows/release.yml`):
+  publishing a GitHub release now also pushes
+  `ghcr.io/pseudogiant-xr/pseudolife-daemon:{<version>,latest}` and
+  `ghcr.io/pseudogiant-xr/pseudolife-pg:{16,16-<version>}`, downstream of
+  the same human-approved `publish` gate as PyPI and the MCP registry —
+  one release click still lands every surface. The new
+  `ops/docker-compose.ghcr.yml` overlay consumes them
+  (`docker compose -f ops/docker-compose.yml -f ops/docker-compose.ghcr.yml
+  pull` + `up -d`) so a first install needs no local image build; the base
+  compose file, `ops/install.*`, and `ops/update.ps1`'s local-build deploy
+  flow are unchanged. The extractor sidecar stays build-local.
+
 ### Added (2026-08-14 — zero-config lite tier: `pip install pseudolife-mcp[lite]`)
 - **Embedded PostgreSQL storage** (`pseudolife_memory/storage/embedded_pg.py`):
   with the new `[lite]` extra installed (`pg0-embedded`, pinned

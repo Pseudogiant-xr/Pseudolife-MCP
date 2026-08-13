@@ -79,6 +79,77 @@ jobs:
       - name: Publish to PyPI (Trusted Publishing)
         uses: pypa/gh-action-pypi-publish@release/v1
 
+  images:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # Downstream of the human-approved `publish` gate, like `registry`:
+    # publishing the GitHub release remains the single action that lands
+    # every public surface. Pushes the prebuilt daemon + pg images so the
+    # Docker tier can pull instead of building locally.
+    #
+    # One-time setup after the FIRST release that runs this job: GHCR
+    # packages are created private — flip pseudolife-daemon and
+    # pseudolife-pg to public in the package settings (Packages → the
+    # package → Package settings → Change visibility), or every pull
+    # fails with "denied".
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free runner disk for the daemon image build
+        # The daemon image bakes torch (CPU) + the embedding models —
+        # a multi-GB build that can exhaust the default runner disk once
+        # build layers and the exported image coexist. Dropping the
+        # preinstalled toolchains we don't use buys ~30 GB.
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - name: Resolve version and image names
+        # GHCR requires lowercase repository paths; the owner is
+        # Pseudogiant-xr, so lowercase it once here.
+        run: |
+          echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          echo "OWNER_LC=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push the daemon image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ops/Dockerfile.daemon
+          push: true
+          tags: |
+            ghcr.io/${{ env.OWNER_LC }}/pseudolife-daemon:${{ env.VERSION }}
+            ghcr.io/${{ env.OWNER_LC }}/pseudolife-daemon:latest
+
+      - name: Build and push the pg image
+        uses: docker/build-push-action@v6
+        with:
+          context: ops
+          file: ops/Dockerfile.pg
+          push: true
+          # :16 tracks the PG major (matches the compose tag); the
+          # :16-<version> tag pins the exact release build for rollback.
+          tags: |
+            ghcr.io/${{ env.OWNER_LC }}/pseudolife-pg:16
+            ghcr.io/${{ env.OWNER_LC }}/pseudolife-pg:16-${{ env.VERSION }}
+
+      - name: Verify the pushed images are pullable by digest
+        run: |
+          docker buildx imagetools inspect "ghcr.io/${OWNER_LC}/pseudolife-daemon:${VERSION}"
+          docker buildx imagetools inspect "ghcr.io/${OWNER_LC}/pseudolife-pg:16-${VERSION}"
+
   registry:
     needs: publish
     runs-on: ubuntu-latest

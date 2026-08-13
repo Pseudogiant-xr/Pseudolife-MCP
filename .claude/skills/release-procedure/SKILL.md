@@ -1,15 +1,16 @@
 ---
 name: release-procedure
-description: Use when cutting a release or publishing anything to a public surface — GitHub release, PyPI, the MCP registry, or the Claude Code plugin marketplace. Covers the docs currency pass, the six-file version cut, build/inspect, the Trusted Publishing + registry automation, and verification.
+description: Use when cutting a release or publishing anything to a public surface — GitHub release, PyPI, the MCP registry, the GHCR container images, or the Claude Code plugin marketplace. Covers the docs currency pass, the six-file version cut, build/inspect, the Trusted Publishing + registry + image automation, and verification.
 ---
 
-# Release / publish procedure (four public surfaces)
+# Release / publish procedure (five public surfaces)
 
-GitHub releases, PyPI, the MCP registry, and the Claude Code plugin
-marketplace (`.claude-plugin/marketplace.json` + `plugin/` — served straight
-from master, no publish step; users pull via `/plugin marketplace update`)
-all serve from this repo; a release touches them in this order (first done
-2026-07-16, v0.8.0).
+GitHub releases, PyPI, the MCP registry, the GHCR container images, and the
+Claude Code plugin marketplace (`.claude-plugin/marketplace.json` +
+`plugin/` — served straight from master, no publish step; users pull via
+`/plugin marketplace update`) all serve from this repo; a release touches
+them in this order (first done 2026-07-16, v0.8.0; GHCR images added
+2026-08-14).
 
 0. **Docs currency pass before the cut** — two checks, and (a) is the one
    that gets skipped because nothing fails when you miss it.
@@ -89,3 +90,14 @@ all serve from this repo; a release touches them in this order (first done
    validation reads the **latest** PyPI release's description. The registry
    `description` field caps at 100 chars. Verify:
    `curl "https://registry.modelcontextprotocol.io/v0.1/servers?search=pseudolife"`.
+5. **GHCR images — automated.** The `images` job in `release.yml` (also
+   downstream of the human-approved `publish` gate) builds and pushes
+   `ghcr.io/pseudogiant-xr/pseudolife-daemon:{<version>,latest}` and
+   `ghcr.io/pseudogiant-xr/pseudolife-pg:{16,16-<version>}` with the
+   repo-scoped `GITHUB_TOKEN` — no stored secret. The compose overlay
+   `ops/docker-compose.ghcr.yml` is the consumer (pull-not-build installs);
+   the base compose file and `ops/update.ps1`'s local-build deploy flow are
+   untouched. One-time after the FIRST release that runs the job: flip both
+   packages to public in their GHCR package settings, or pulls fail with
+   "denied". Verify:
+   `docker manifest inspect ghcr.io/pseudogiant-xr/pseudolife-daemon:<version>`.

@@ -128,6 +128,10 @@ docker volume create pseudolife-mcp-bank
 docker volume create pseudolife-mcp-state
 docker compose -f ops/docker-compose.yml up -d --build   # first build, once
 
+# ...or pull the prebuilt images instead of building (releases >= 0.14.0):
+docker compose -f ops/docker-compose.yml -f ops/docker-compose.ghcr.yml pull pseudolife-pg pseudolife-daemon
+docker compose -f ops/docker-compose.yml -f ops/docker-compose.ghcr.yml up -d
+
 # Verify, then wire the transport into one or both clients.
 curl http://127.0.0.1:8765/health
 
