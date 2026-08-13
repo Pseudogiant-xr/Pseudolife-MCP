@@ -75,17 +75,58 @@ function Stop-Qwen {
     Start-Sleep -Seconds 5
 }
 
+function Test-GpuBusy {
+    <# Maintainer rule (2026-08-13): VRAM above 5 GB in use = the GPU
+       belongs to someone else — hold GPU work and tell the maintainer,
+       never launch onto it and never displace what is running. Set after
+       an unguarded Start-Qwen piled a 27B load onto a busy GPU.
+
+       Returns the used-MiB reading when busy, $null when free. Fails
+       OPEN when nvidia-smi is absent or unreadable — a CPU-only
+       environment must not be blocked by a GPU probe. Multi-GPU: the
+       busiest device decides (the bench pins everything to one card, so
+       any card above the bar means contention somewhere). #>
+    try {
+        $readings = (nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits) |
+            ForEach-Object { [int]$_.Trim() }
+        $used = ($readings | Measure-Object -Maximum).Maximum
+    } catch { return $null }
+    if ($used -gt 5000) { return $used }
+    return $null
+}
+
 function Start-Qwen {
     <# Ensure the requested config is serving :1234. Returns $true on success.
        If the OTHER config is already running it is stopped and replaced —
-       silently reusing the wrong server is the failure this guards against. #>
-    param([switch]$Fast)
+       silently reusing the wrong server is the failure this guards against.
+
+       GPU-busy guard (2026-08-13): when anything is holding > 5 GB VRAM
+       and the wanted server is not already the thing serving, this
+       REFUSES (returns $false) instead of launching or displacing —
+       Get-RunningQwenConfig's discriminator is MTP-only, so a foreign
+       llama-server (e.g. the daily driver) is indistinguishable from a
+       leftover bench server, and the safe default is to touch nothing.
+       That deliberately includes this helper's own leftover other-config
+       server: replacing it now takes an operator decision — run
+       Stop-Qwen first, or pass -Force. #>
+    param([switch]$Fast, [switch]$Force)
     $want = if ($Fast) { 'fast' } else { 'reproducible' }
 
     $running = Get-RunningQwenConfig
     if ($running -eq $want -and (Wait-QwenEndpoint -Seconds 5)) {
         Write-Host "$(Get-Date -Format 'HH:mm:ss') qwen server already up ($want)"
         return $true
+    }
+    if (-not $Force) {
+        $busy = Test-GpuBusy
+        if ($null -ne $busy) {
+            Write-Host ("$(Get-Date -Format 'HH:mm:ss') GPU BUSY — " +
+                        "${busy} MiB VRAM in use (> 5000): holding, not " +
+                        "launching or displacing. Stop the workload (or " +
+                        "Stop-Qwen for a leftover bench server), or pass " +
+                        "-Force to override deliberately.")
+            return $false
+        }
     }
     if ($running -and $running -ne $want) {
         Write-Host ("$(Get-Date -Format 'HH:mm:ss') qwen server running as " +

@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-13 — GPU-busy guard in the bench server helper)
+- **`Start-Qwen` refuses instead of displacing when the GPU is in use**
+  (`Test-GpuBusy` in `evals/qwen_server.ps1`): more than 5 GB VRAM held
+  by anything, while the wanted config is not already the thing serving,
+  now returns `$false` with a hold message — never launch onto a busy
+  GPU, never stop what is running. This deliberately includes the
+  helper's own leftover other-config server (replacing it now takes
+  `Stop-Qwen` first or an explicit `-Force`): the config discriminator
+  is MTP-only, so a foreign llama-server — e.g. the daily driver, which
+  binds the same port — is indistinguishable from a leftover bench
+  server, and the safe default is to touch nothing. Fails open without
+  `nvidia-smi` (CPU-only environments are not blocked). Maintainer rule
+  set 2026-08-13 after an unguarded launch piled a 27B load onto a busy
+  GPU.
+
 ### Added (2026-08-13 — misleading-recall probe: measuring the harm a wrong memory does)
 - **`evals/misleading_recall_probe.py`** — the eval category ContextWeave
   (arXiv:2608.04830) showed retrieval-shaped benches lack: paired
