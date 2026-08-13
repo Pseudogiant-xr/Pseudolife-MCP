@@ -26,6 +26,7 @@ for these (mirrors ``tests/test_tag_filters.py``).
 """
 from __future__ import annotations
 
+import random
 import time
 
 import torch
@@ -298,3 +299,149 @@ def test_slot_pool_finds_promoted_entry_with_band_filter() -> None:
     assert "I have a Ragdoll cat named Jacque" in _hit_texts(
         cms, "Jacque", band_filter={dest_name},
     )
+
+
+# ---------------------------------------------------------------------------
+# Shadow verification (2026-08-13). A sampled read recomputes the index
+# from the band entries and compares MEMBERSHIP against the live copy —
+# the runtime tripwire for mutation paths that neither extend the index
+# nor flag it dirty (the bug class the 2026-07-12 audit found three of).
+# ---------------------------------------------------------------------------
+
+
+def _shadow_cms(rate: float) -> ContinuumMemorySystem:
+    cms = _fresh_cms()
+    cms.config.slot_index_shadow_rate = rate
+    _pin_to_band0(cms)  # keep stores extend-in-place (no promotion dirtying)
+    return cms
+
+
+def _rogue_entry(dim: int) -> MemoryEntry:
+    return MemoryEntry(
+        text="zanthar build system times out after 4500 seconds",
+        embedding=torch.randn(dim),
+        source="user",
+        slots=[("zanthar build system", "default timeout", "4500 seconds", "+")],
+    )
+
+
+def test_shadow_check_repairs_stale_entry_after_bypassing_removal() -> None:
+    """A removal that skips the maintenance contract leaves the index
+    serving a ghost; the shadow check must catch and repair it."""
+    cms = _shadow_cms(rate=1.0)
+    dim = cms.config.embedding_dim
+    cms.store("I have a Ragdoll cat named Jacque", torch.randn(dim), source="user")
+    cms.store("I have a Siamese cat named Miso", torch.randn(dim), source="user")
+    _hit_texts(cms, "Jacque")  # build the index
+    assert not cms._slot_index_dirty, "test setup invalid: index went dirty"
+    # Bypass every maintenance hook: drop Jacque straight out of the band
+    # lists — no store(), no dirty flag.
+    for band in cms.bands:
+        band.entries[:] = [e for e in band.entries if "Jacque" not in e.text]
+    assert "I have a Ragdoll cat named Jacque" not in _hit_texts(cms, "Jacque")
+    assert cms.stats()["slot_index_shadow_divergences"] == 1
+    # The repair adopted the fresh copy: the next query diverges no further.
+    _hit_texts(cms, "Jacque")
+    assert cms.stats()["slot_index_shadow_divergences"] == 1
+
+
+def test_shadow_check_catches_entry_added_behind_the_index() -> None:
+    """An entry appended directly to a band (a hydrate-style bypass) is
+    invisible to the live index; the shadow check must surface it."""
+    cms = _shadow_cms(rate=1.0)
+    dim = cms.config.embedding_dim
+    cms.store("I have a Ragdoll cat named Jacque", torch.randn(dim), source="user")
+    _hit_texts(cms, "Jacque")  # build the index
+    assert not cms._slot_index_dirty, "test setup invalid: index went dirty"
+    cms.bands[0].entries.append(_rogue_entry(dim))
+    assert "zanthar build system times out after 4500 seconds" in _hit_texts(
+        cms, "zanthar timeout",
+    )
+    assert cms.stats()["slot_index_shadow_divergences"] == 1
+
+
+def test_shadow_rate_zero_leaves_stale_index_alone() -> None:
+    """rate=0.0 disables the check entirely — the poisoned index keeps
+    serving the ghost (this pins that the hook above is load-bearing)."""
+    cms = _shadow_cms(rate=0.0)
+    dim = cms.config.embedding_dim
+    cms.store("I have a Ragdoll cat named Jacque", torch.randn(dim), source="user")
+    _hit_texts(cms, "Jacque")
+    for band in cms.bands:
+        band.entries[:] = [e for e in band.entries if "Jacque" not in e.text]
+    assert "I have a Ragdoll cat named Jacque" in _hit_texts(cms, "Jacque")
+    assert cms.stats()["slot_index_shadow_divergences"] == 0
+
+
+def _entry_ordinals(
+    ix: dict[str, list[tuple[int, str, object]]],
+) -> dict[int, int]:
+    return {id(e): o for items in ix.values() for (o, _b, e) in items}
+
+
+def test_shadow_check_no_false_positive_from_extend_in_place() -> None:
+    """Extend-in-place ordinals legitimately differ from a rebuild's
+    band-then-insertion renumbering; the membership comparison must not
+    flag that. Setup mirrors the production shape where they actually
+    diverge: a slotted entry seated in a deeper band takes a LOW ordinal
+    at rebuild, then a later in-place store into band[0] takes the next
+    counter value — while a fresh walk would renumber band[0] first."""
+    cms = _shadow_cms(rate=1.0)
+    dim = cms.config.embedding_dim
+    deep = MemoryEntry(
+        text="zanthar deploy gate needs two approvals",
+        embedding=torch.randn(dim),
+        source="user",
+        slots=[("zanthar deploy gate", "approvals", "two", "+")],
+    )
+    cms.bands[1].entries.append(deep)
+    cms._slot_index_dirty = True
+    _hit_texts(cms, "zanthar")  # rebuild: the deep entry takes ordinal 0
+    cms.store("I have a Siamese cat named Miso", torch.randn(dim), source="user")
+    assert not cms._slot_index_dirty, "test setup invalid: store dirtied index"
+    # Load-bearing setup check: the live ordinals must genuinely differ
+    # from a fresh walk's, or this test degenerates and would pass even
+    # if the comparison wrongly included ordinals.
+    fresh_ix, _ = cms._compute_slot_index()
+    assert _entry_ordinals(cms._slot_token_index) != _entry_ordinals(fresh_ix), (
+        "test setup invalid: extend-in-place ordinals match a fresh rebuild"
+    )
+    for _ in range(3):
+        assert "I have a Siamese cat named Miso" in _hit_texts(cms, "Miso")
+    assert cms.stats()["slot_index_shadow_divergences"] == 0
+
+
+def test_shadow_rate_default_is_on() -> None:
+    """The shipped default keeps the tripwire live (CHANGELOG: 0.01)."""
+    assert MemoryConfig().slot_index_shadow_rate == 0.01
+
+
+def test_shadow_check_samples_at_default_rate(monkeypatch) -> None:
+    """Default config plus a forced sample: the check must fire without
+    the rate ever being set explicitly — pins that the gate reads the
+    real config field (a field rename or a zeroed default fails here)."""
+    cms = _fresh_cms()
+    _pin_to_band0(cms)
+    dim = cms.config.embedding_dim
+    cms.store("I have a Ragdoll cat named Jacque", torch.randn(dim), source="user")
+    _hit_texts(cms, "Jacque")
+    for band in cms.bands:
+        band.entries[:] = [e for e in band.entries if "Jacque" not in e.text]
+    monkeypatch.setattr(cms._shadow_rng, "random", lambda: 0.0)
+    assert "I have a Ragdoll cat named Jacque" not in _hit_texts(cms, "Jacque")
+    assert cms.stats()["slot_index_shadow_divergences"] == 1
+
+
+def test_shadow_sampler_does_not_touch_global_rng() -> None:
+    """The sampler draws from a dedicated Random instance — a consumer
+    that seeds the module-global ``random`` for reproducibility must see
+    an unperturbed stream regardless of how many queries sample."""
+    cms = _shadow_cms(rate=0.5)
+    dim = cms.config.embedding_dim
+    cms.store("I have a Ragdoll cat named Jacque", torch.randn(dim), source="user")
+    _hit_texts(cms, "Jacque")  # build the index
+    random.seed(1234)
+    expected = random.Random(1234).random()
+    for _ in range(20):
+        _hit_texts(cms, "Jacque")
+    assert random.random() == expected

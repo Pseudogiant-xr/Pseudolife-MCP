@@ -711,6 +711,15 @@ class MemoryConfig:
     # distractor hits. 0.0 = off (only an empty result is low-confidence).
     # Tuned on a dev split by the benchmark ladder; default off to preserve recall.
     search_confidence_floor: float = 0.0
+    # Shadow-verification of the slot-token index: on this fraction of
+    # non-dirty slot-pool queries, recompute the index from the band
+    # entries and compare membership against the live copy. A divergence
+    # means some mutation path neither extended the index nor flagged it
+    # dirty; it is logged, counted in stats(), and self-repaired by
+    # adopting the fresh copy. 0.0 disables; 1.0 checks every query
+    # (tests). The sampled rebuild is the whole cost, so keep the rate
+    # small in production.
+    slot_index_shadow_rate: float = 0.01
 
 
 @dataclass
@@ -801,6 +810,7 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             search_confidence_floor=mem_raw.get("search_confidence_floor", 0.0),
             recency_base_half_life_s=mem_raw.get("recency_base_half_life_s", 3600.0),
             recency_boost_enabled=mem_raw.get("recency_boost_enabled", False),
+            slot_index_shadow_rate=mem_raw.get("slot_index_shadow_rate", 0.01),
         )
         if "miras" in mem_raw:
             miras_raw = mem_raw["miras"]

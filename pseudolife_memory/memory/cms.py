@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import heapq
 import logging
+import random
 import re
 import time
 from functools import partial
@@ -320,6 +321,14 @@ class ContinuumMemorySystem:
         self._slot_token_index: dict[str, list[tuple[int, str, MemoryEntry]]] = {}
         self._slot_index_dirty: bool = True
         self._slot_index_ordinal: int = 0
+        # Divergences caught by the sampled shadow check (see
+        # :meth:`_slot_index_shadow_check`). Surfaced via stats() so a
+        # non-zero count is visible without grepping daemon logs.
+        self._slot_index_shadow_divergences: int = 0
+        # Dedicated RNG for the shadow sampler: drawing from the
+        # module-global generator would perturb any consumer that seeds
+        # ``random`` globally for reproducibility (PR #145 review note).
+        self._shadow_rng = random.Random()
 
     @property
     def total_memories(self) -> int:
@@ -1259,6 +1268,18 @@ class ContinuumMemorySystem:
         place via :meth:`_slot_index_add` instead. The ordinal records
         the band-then-insertion walk position for deterministic
         tie-breaking at query time."""
+        index, ordinal = self._compute_slot_index()
+        self._slot_token_index = index
+        self._slot_index_ordinal = ordinal
+        self._slot_index_dirty = False
+
+    def _compute_slot_index(
+        self,
+    ) -> tuple[dict[str, list[tuple[int, str, MemoryEntry]]], int]:
+        """Walk every band and build a fresh slot-token index, without
+        touching the live one — shared by :meth:`_rebuild_slot_index`
+        (which adopts the result) and the shadow check (which compares
+        against the live copy first)."""
         index: dict[str, list[tuple[int, str, MemoryEntry]]] = {}
         ordinal = 0
         for band in self.bands:
@@ -1272,9 +1293,66 @@ class ContinuumMemorySystem:
                 ordinal += 1
                 for tok in tokens:
                     index.setdefault(tok, []).append(item)
-        self._slot_token_index = index
-        self._slot_index_ordinal = ordinal
+        return index, ordinal
+
+    def _slot_index_shadow_check(self) -> bool:
+        """Sampled runtime tripwire for the slot-index maintenance contract.
+
+        Recomputes the index from the band entries and compares
+        MEMBERSHIP — ``token -> {(band, entry identity)}`` — against the
+        live copy. Ordinals are deliberately excluded: extend-in-place
+        assigns them past the last rebuild's ceiling, so they legitimately
+        differ from a fresh rebuild's band-then-insertion renumbering.
+        A membership divergence, by contrast, always means some mutation
+        path neither extended the index nor flagged it dirty (the bug
+        class the 2026-07-12 audit found three of post-deploy). On
+        divergence: log, count (``stats()``), and self-repair by adopting
+        the fresh copy. Returns True when a divergence was found.
+
+        The compare-and-adopt is only safe because every CMS read and
+        write runs under ``MemoryService._lock`` — a reader outside that
+        lock could otherwise lose a posting a concurrent store extended
+        into the live index after the fresh walk."""
+        fresh_index, fresh_ordinal = self._compute_slot_index()
+
+        def _membership(
+            ix: dict[str, list[tuple[int, str, MemoryEntry]]],
+        ) -> dict[str, set[tuple[str, int]]]:
+            return {
+                tok: {(band, id(entry)) for _o, band, entry in items}
+                for tok, items in ix.items()
+            }
+
+        live_m = _membership(self._slot_token_index)
+        fresh_m = _membership(fresh_index)
+        if live_m == fresh_m:
+            return False
+
+        # Name the suspect before the repair destroys the evidence: which
+        # tokens hold ghost postings (live-only) or missed ones
+        # (fresh-only), and which bands they sit in. Tokens only — no
+        # entry text in daemon logs.
+        stale = {t: live_m[t] - fresh_m.get(t, set())
+                 for t in live_m if live_m[t] - fresh_m.get(t, set())}
+        unindexed = {t: fresh_m[t] - live_m.get(t, set())
+                     for t in fresh_m if fresh_m[t] - live_m.get(t, set())}
+        bands = sorted({b for postings in (*stale.values(), *unindexed.values())
+                        for b, _i in postings})
+        self._slot_index_shadow_divergences += 1
+        logger.warning(
+            "Slot-index shadow check: live index diverged from a fresh "
+            "rebuild — a mutation path bypassed the maintenance contract. "
+            "%d stale token(s) (e.g. %s), %d unindexed token(s) (e.g. %s), "
+            "band(s) %s. Repaired by adopting the fresh copy; "
+            "divergence #%d.",
+            len(stale), sorted(stale)[:5],
+            len(unindexed), sorted(unindexed)[:5],
+            bands, self._slot_index_shadow_divergences,
+        )
+        self._slot_token_index = fresh_index
+        self._slot_index_ordinal = fresh_ordinal
         self._slot_index_dirty = False
+        return True
 
     def _slot_index_add(self, band_name: str, entry: "MemoryEntry") -> None:
         """Extend a live slot index with one freshly-stored entry."""
@@ -1318,6 +1396,15 @@ class ContinuumMemorySystem:
 
         if self._slot_index_dirty:
             self._rebuild_slot_index()
+        else:
+            # Sampled shadow verification of a live (non-dirty) index —
+            # a dirty index is about to be rebuilt anyway, so there is
+            # nothing to check. Plain attribute read: every construction
+            # site passes a real MemoryConfig, and a getattr fallback
+            # would turn a future field rename into a silent no-op.
+            rate = self.config.slot_index_shadow_rate
+            if rate > 0.0 and (rate >= 1.0 or self._shadow_rng.random() < rate):
+                self._slot_index_shadow_check()
 
         slot_trace_block: list[dict] | None = None
         if _trace is not None:
@@ -2045,6 +2132,10 @@ class ContinuumMemorySystem:
             # v0.2: True when weights.pt (and .bak) failed to load and the
             # band MLPs restarted fresh. Entries are unaffected.
             "weights_reset": self.weights_reset,
+            # Slot-index shadow-check divergences since startup. Non-zero
+            # means a mutation path bypassed the index maintenance
+            # contract and was caught + repaired at query time.
+            "slot_index_shadow_divergences": self._slot_index_shadow_divergences,
             # v0.4.x flat fields. Populate from the named banks when they
             # exist (titans preset), zero otherwise.
             "instant_bank_size": self.instant.size if self.instant else 0,

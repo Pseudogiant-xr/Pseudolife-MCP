@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-13 — slot-index shadow verification catches maintenance bypasses at query time)
+- **Sampled shadow check on the slot-token index**
+  (`memory.slot_index_shadow_rate`, default `0.01`): on ~1% of non-dirty
+  slot-pool queries the index is recomputed from the band entries and
+  compared by membership (`token -> {(band, entry)}`) against the live
+  copy. A divergence means some mutation path neither extended the index
+  nor flagged it dirty — the bug class the 2026-07-12 slot-index audit
+  found three of post-deploy, previously guarded only at test time. It is
+  logged, counted in `stats()` (`slot_index_shadow_divergences`), and
+  self-repaired by adopting the fresh copy, so a missed maintenance hook
+  degrades to a warning instead of silently serving stale or missing
+  entries. Ordinals are excluded from the comparison — extend-in-place
+  numbering legitimately differs from a rebuild's. `0.0` disables;
+  `1.0` checks every query (used by the tests). Pattern borrowed from
+  the shadow-verified derived projections in SuperLocalMemory's
+  semantic channel (reviewed 2026-08-13).
+
 ### Added (2026-08-12 — epistemic stance survives consolidation (schema v29) + provenance-span gate)
 - **`facts.stance` (schema v29)**: the dream pass is a compression step,
   and compression strips qualifiers — "we'll *probably* move to Postgres

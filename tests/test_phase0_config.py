@@ -49,5 +49,19 @@ def test_yaml_memory_block_omitted_keys_keep_dataclass_defaults(tmp_path):
     defaults = MemoryConfig()
     for field in ("embedding_dim", "surprise_threshold", "top_k",
                   "ref_top_k", "save_dir", "hide_superseded",
-                  "search_confidence_floor", "recency_base_half_life_s"):
+                  "search_confidence_floor", "recency_base_half_life_s",
+                  "slot_index_shadow_rate"):
         assert getattr(loaded, field) == getattr(defaults, field), field
+
+
+def test_yaml_memory_scalar_key_present_is_read(tmp_path):
+    """Companion to the omitted-keys pin above: a key PRESENT in the
+    memory: block must actually reach the dataclass. The hand-rolled
+    kwarg list silently drops any field it doesn't name — found in
+    review 2026-08-13: slot_index_shadow_rate was documented as a yaml
+    knob while the loader never read it."""
+    p = tmp_path / "config.yaml"
+    p.write_text("memory:\n  slot_index_shadow_rate: 0.0\n  top_k: 11\n")
+    loaded = load_config(p).memory
+    assert loaded.top_k == 11
+    assert loaded.slot_index_shadow_rate == 0.0

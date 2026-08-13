@@ -1,0 +1,46 @@
+{
+  "n_replicates": 2,
+  "replicates": [
+    "arm1-gate",
+    "arm1-gate-r2"
+  ],
+  "n_questions": 78,
+  "arms": {
+    "rag": {
+      "accuracies": [
+        0.6282,
+        0.6282
+      ],
+      "mean": 0.6282,
+      "std": 0.0
+    },
+    "cortex": {
+      "accuracies": [
+        0.6923,
+        0.6923
+      ],
+      "mean": 0.6923,
+      "std": 0.0
+    },
+    "hybrid": {
+      "accuracies": [
+        0.7821,
+        0.7821
+      ],
+      "mean": 0.7821,
+      "std": 0.0
+    },
+    "cascade": {
+      "accuracies": [
+        0.7821,
+        0.7821
+      ],
+      "mean": 0.7821,
+      "std": 0.0
+    }
+  },
+  "source_files": [
+    "longmemeval-ku-oracle-e4b-ft-arm1-gate.jsonl",
+    "longmemeval-ku-oracle-e4b-ft-arm1-gate-r2.jsonl"
+  ]
+}
