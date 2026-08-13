@@ -325,6 +325,10 @@ class ContinuumMemorySystem:
         # :meth:`_slot_index_shadow_check`). Surfaced via stats() so a
         # non-zero count is visible without grepping daemon logs.
         self._slot_index_shadow_divergences: int = 0
+        # Dedicated RNG for the shadow sampler: drawing from the
+        # module-global generator would perturb any consumer that seeds
+        # ``random`` globally for reproducibility (PR #145 review note).
+        self._shadow_rng = random.Random()
 
     @property
     def total_memories(self) -> int:
@@ -1399,7 +1403,7 @@ class ContinuumMemorySystem:
             # site passes a real MemoryConfig, and a getattr fallback
             # would turn a future field rename into a silent no-op.
             rate = self.config.slot_index_shadow_rate
-            if rate > 0.0 and (rate >= 1.0 or random.random() < rate):
+            if rate > 0.0 and (rate >= 1.0 or self._shadow_rng.random() < rate):
                 self._slot_index_shadow_check()
 
         slot_trace_block: list[dict] | None = None

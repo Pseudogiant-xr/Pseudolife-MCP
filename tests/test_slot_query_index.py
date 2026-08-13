@@ -26,6 +26,7 @@ for these (mirrors ``tests/test_tag_filters.py``).
 """
 from __future__ import annotations
 
+import random
 import time
 
 import torch
@@ -426,8 +427,21 @@ def test_shadow_check_samples_at_default_rate(monkeypatch) -> None:
     _hit_texts(cms, "Jacque")
     for band in cms.bands:
         band.entries[:] = [e for e in band.entries if "Jacque" not in e.text]
-    monkeypatch.setattr(
-        "pseudolife_memory.memory.cms.random.random", lambda: 0.0,
-    )
+    monkeypatch.setattr(cms._shadow_rng, "random", lambda: 0.0)
     assert "I have a Ragdoll cat named Jacque" not in _hit_texts(cms, "Jacque")
     assert cms.stats()["slot_index_shadow_divergences"] == 1
+
+
+def test_shadow_sampler_does_not_touch_global_rng() -> None:
+    """The sampler draws from a dedicated Random instance — a consumer
+    that seeds the module-global ``random`` for reproducibility must see
+    an unperturbed stream regardless of how many queries sample."""
+    cms = _shadow_cms(rate=0.5)
+    dim = cms.config.embedding_dim
+    cms.store("I have a Ragdoll cat named Jacque", torch.randn(dim), source="user")
+    _hit_texts(cms, "Jacque")  # build the index
+    random.seed(1234)
+    expected = random.Random(1234).random()
+    for _ in range(20):
+        _hit_texts(cms, "Jacque")
+    assert random.random() == expected
