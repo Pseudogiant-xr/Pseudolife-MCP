@@ -57,6 +57,17 @@ rerank = [
 pdf = [
     "pypdfium2>=4",
 ]
+# Zero-config lite tier — embedded PostgreSQL (PG 18 + pgvector 0.8.5)
+# via pg0-embedded; the daemon starts/attaches it when no
+# PSEUDOLIFE_MCP_DATABASE_URL is set. Upper-bounded deliberately: the
+# bundled PG major must match storage/embedded_pg.py::EXPECTED_PG_MAJOR
+# (18) — a silent major bump in a new pg0 wheel would strand existing
+# embedded banks (cross-major pgdata cannot start). 0.15.1 verified on
+# Windows 2026-08-14: crash recovery preserves data, attach-if-running
+# works, vector(1024)+HNSW pass.
+lite = [
+    "pg0-embedded>=0.15.1,<0.16",
+]
 # ONNX embedding backend — ~3x faster single-text encode on CPU with
 # bit-identical embeddings. Off by default; set ``embedding.backend =
 # "onnx"`` in config to enable (falls back to torch when unavailable).

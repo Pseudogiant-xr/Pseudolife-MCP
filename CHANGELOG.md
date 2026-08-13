@@ -6,6 +6,40 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-14 — zero-config lite tier: `pip install pseudolife-mcp[lite]`)
+- **Embedded PostgreSQL storage** (`pseudolife_memory/storage/embedded_pg.py`):
+  with the new `[lite]` extra installed (`pg0-embedded`, pinned
+  `>=0.15.1,<0.16` — bundles PostgreSQL 18 + pgvector 0.8.5), a daemon
+  started without `PSEUDOLIFE_MCP_DATABASE_URL` now provisions and
+  manages an embedded Postgres under the data dir instead of silently
+  dropping to v0.1 file mode. Resolution happens once, at the daemon
+  entrypoint only — `MemoryService`, the `embedded` stdio escape hatch,
+  and file-mode tests are untouched. Explicit DSN always wins;
+  `PSEUDOLIFE_MCP_STORAGE=files` opts out. File-mode fallback is now
+  announced with a startup warning instead of being silent. Guards, all
+  verified live on Windows 2026-08-14: cross-PG-major pgdata is refused
+  loudly (never re-initialized), non-ASCII data paths are refused on
+  Windows with a remedy (the embedded runtime cannot handle them),
+  attach-vs-own lifecycle (a process only ever stops an instance it
+  started), and nothing in shipped code can delete a data dir. When the
+  lite tier engages, the default data dir moves from cwd-relative
+  `./data` to a stable per-user location — a per-launch-directory
+  Postgres bank would scatter real data.
+- **`pseudolife-mcp backup`** (`backup_cli.py`): tier-agnostic backup
+  for the pip tiers, mirroring `ops/backup.ps1`'s shape — `pg_dump |
+  gzip` of the bank (`--no-owner --no-acl` so the artifact restores
+  under the Docker tier's `pseudolife` role — rehearsed against a
+  role-named Postgres in the test suite; bundled lite pg_dump preferred,
+  PATH fallback) plus a state archive of the data dir (excluding
+  `embedded_pg/` and `backups/`). Artifact names
+  (`pseudolife_lite_memory-*` / `pseudolife_lite_state-*`) are disjoint
+  from `ops/backup.*`'s so a shared backups directory is safe: neither
+  tool's rotation or restore-picker can touch the other's files. 7-day
+  rotation runs only after a successful fresh backup, never rotates
+  dumps on a run that produced none, and only deletes files the tool
+  itself wrote. A backup never initializes a bank that doesn't exist,
+  and never stops an embedded instance it merely attached to.
+
 ### Changed (2026-08-14 — the v10 update-anchored stance prompt is the live extraction prompt)
 - **`facts.stance` is now populated in production**: the live dream
   extraction prompt moved v5 → v10 (`ku_op_prompt_v10_stance_update.txt`,

@@ -30,7 +30,11 @@ Configuration
 -------------
 * ``PSEUDOLIFE_MCP_DATABASE_URL`` — Postgres DSN; when set, PG is the source of
   truth and the in-memory bands are a write-through cache. Unset →
-  v0.1 file-only mode.
+  v0.1 file-only mode — except under ``pseudolife-mcp serve``, where the
+  daemon first tries the ``[lite]`` embedded Postgres and exports the
+  resolved DSN through this same variable (see
+  :mod:`pseudolife_memory.storage.embedded_pg`;
+  ``PSEUDOLIFE_MCP_STORAGE=files`` opts out).
 * ``PSEUDOLIFE_MCP_DATA_DIR`` — where weights + ChromaDB live. **Set this
   explicitly** so the data path is stable regardless of cwd.
 * ``PSEUDOLIFE_MCP_CONFIG`` — path to a ``config.yaml`` (optional; sane
