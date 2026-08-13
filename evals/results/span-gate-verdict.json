@@ -1,0 +1,33 @@
+{
+  "verdict": "LOG-MODE SOAK REQUIRED BEFORE CONTEND — extraction-level evidence is clean but production-shaped",
+  "date": "2026-08-13",
+  "design": "docs/superpowers/specs/2026-08-12-stance-span-gate-design.md (gate 4, amended scope)",
+  "scope_honesty": [
+    "This verdict covers the EXTRACTION level only: the v9-stance-quote prompt's quote emission and verification rates on the stance-probe battery (80 single-note extractions) and the ladder rung (26-note batched bench). Single-note batches are quote-easy mode: the model sees exactly one source note.",
+    "The preregistered replay of retained dream-run journals was amended out (spec amendment 3): v5-era journals carry no quotes, so a replay measures nothing. The production-shaped half of gate 4 is a live log-mode soak, which requires the v9 prompt deployed on a bench window — not yet run.",
+    "The 'contend' default is therefore NOT proposed. span_gate ships 'off'."
+  ],
+  "extraction_level_evidence": {
+    "probe_battery": {
+      "artifact": "evals/results/stance-probe-20260813-gate1.json",
+      "claims_emitted_v9": 82,
+      "quote_present": 82,
+      "quote_verified_verbatim": 82,
+      "quote_present_rate": 1.0,
+      "quote_verified_rate": 1.0,
+      "reasons_histogram": {}
+    },
+    "ladder_quote_time_cost": {
+      "artifacts": [
+        "evals/results/qwen-27b-sg-v8-r1.json",
+        "evals/results/qwen-27b-sg-v8-r2.json",
+        "evals/results/qwen-27b-sg-v9-r1.json",
+        "evals/results/qwen-27b-sg-v9-r2.json"
+      ],
+      "extract_seconds_v8": [48.1, 50.9],
+      "extract_seconds_v9": [60.5, 58.7],
+      "note": "quote emission costs ~10s (~20%) extract time on the 26-note ladder batch; claims count and both deterministic metrics identical (16 claims, gold_recoverable 1.0, stale_leak 0.0, both replicates, cache_prompt off, reproducible q8_0 server)"
+    }
+  },
+  "next_step": "deploy v9 prompt on a bench/live window with span_gate='log'; review span_flagged reasons histogram from dream-run tallies; only then propose 'contend'"
+}

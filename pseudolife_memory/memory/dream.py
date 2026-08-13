@@ -12,6 +12,7 @@ never selected automatically (the store-path auto-promote and the old
 """
 from __future__ import annotations
 
+import functools
 import logging
 import re
 from typing import Protocol, TypedDict
@@ -38,6 +39,17 @@ class Claim(_ClaimRequired, total=False):
     # missing from the parse whitelist silently disabled the whole dream-op
     # path while the model emitted it correctly (c2-gate-verdict.json).
     op: str
+    # v29 epistemic stance: the note's own hedge words, near-verbatim
+    # ("probably", "per the runbook"), <= 48 chars. Absent = asserted
+    # plainly. Blank/non-string/oversize input normalises HERE, at the
+    # parse boundary (same rule as op — a field missing from the whitelist
+    # silently disables the feature while the model emits it correctly).
+    stance: str
+    # Provenance quote (span gate, no schema): a verbatim span from the
+    # cited note backing the claim, <= 200 chars. Absent = uncited-shaped;
+    # the span gate's mode decides what that costs. Same parse-boundary
+    # normalisation rule as stance.
+    quote: str
 
 
 class LessonClaim(TypedDict):
@@ -404,6 +416,49 @@ def literal_violations(value: str, corpus: str) -> list[str]:
     return bad
 
 
+# Span-gate normalisation: NFKC-normalise + casefold, then collapse every
+# non-word run to a single space, so quoting/punctuation/whitespace and
+# Unicode-form differences (NFC vs NFD "café", curly vs straight quotes)
+# never fail a genuinely verbatim span, while word order and word identity
+# must match exactly (paraphrase is not a quote). \w keeps letters of every
+# script — an ASCII-only class would fragment accented words and reduce
+# CJK notes to nothing. Known residual false-drop class, accepted and
+# documented: a model that STRIPS diacritics while quoting ("cafe" for
+# "café") fails containment — that is an altered quote, not a formatting
+# difference; log-mode firing data decides if it ever matters. lru_cache:
+# the claim loop verifies many claims against the same note text, and
+# per-object string hashing makes repeat lookups near-free.
+_SPAN_NORM_RE = re.compile(r"\W+")
+
+
+@functools.lru_cache(maxsize=512)
+def _span_norm(s: str) -> str:
+    import unicodedata
+    return _SPAN_NORM_RE.sub(
+        " ", unicodedata.normalize("NFKC", (s or "").casefold())).strip()
+
+
+def span_unbacked(quote: str | None, corpus: str) -> str | None:
+    """Reason a claim's provenance quote fails admission, or ``None`` when
+    the quote is a verbatim (normalised) span of ``corpus`` — the CITED
+    note's text, deliberately not the batch union: a quote is from one
+    note by construction, so source scope carries none of the literal
+    gate's measured batch-vs-note false-drop classes.
+
+    ``"quote_missing"`` — no usable quote at all (absent, blank, or
+    nothing left after normalisation). ``"quote_unverified"`` — a quote
+    that is not a span of the cited note (paraphrase, cross-note lift,
+    or fabrication; an empty corpus cannot verify anything and lands
+    here too). The ROUTING cost of each reason belongs to the caller's
+    ``span_gate`` mode, never to this function."""
+    q = _span_norm(quote or "")
+    if not q:
+        return "quote_missing"
+    if q in _span_norm(corpus):
+        return None
+    return "quote_unverified"
+
+
 _FACTS_HINT_HEAD = (
     "\n\nCurrent known facts (for key reuse — if a note updates one of "
     "these, emit the claim under the SAME entity and attribute with the new "
@@ -665,6 +720,16 @@ class OpenAICompatExtractor:
                           confidence=conf, origin="agent")
             if c.get("op") in ("add", "remove"):
                 claim["op"] = c["op"]
+            # v29 stance: strings only, stripped, capped at 48 chars;
+            # anything else degrades to absent (asserted plainly).
+            stance = c.get("stance")
+            if isinstance(stance, str) and stance.strip():
+                claim["stance"] = stance.strip()[:48]
+            # Span-gate quote: same rule, capped at 200 chars — a truncated
+            # prefix still verifies containment against the cited note.
+            quote = c.get("quote")
+            if isinstance(quote, str) and quote.strip():
+                claim["quote"] = quote.strip()[:200]
             try:
                 idx = int(c.get("source")) - 1     # 1-based in the prompt
             except (TypeError, ValueError):

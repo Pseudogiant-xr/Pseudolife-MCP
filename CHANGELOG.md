@@ -6,6 +6,72 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-12 — epistemic stance survives consolidation (schema v29) + provenance-span gate)
+- **`facts.stance` (schema v29)**: the dream pass is a compression step,
+  and compression strips qualifiers — "we'll *probably* move to Postgres
+  18" consolidated into a confident canonical fact. Claims may now carry
+  a `stance` field (the note's own hedge words, ≤48 chars, parsed at the
+  extractor boundary like `op`), stored as a nullable labelled column on
+  `facts` and on `CortexRecord`, surfaced in `memory_fact_get` / recall
+  cortex blocks / `history` only when set. Semantics: the LATEST
+  asserting write owns the stance — a confirm or supersede without one
+  clears the stored hedge (a confident restatement removes it). Stance is
+  never an input to confidence, ranking, or supersession (model-emitted
+  and steerable by note text, the same trust class as claim `origin`).
+  `NULL` = asserted plainly, so the migration is a no-op on existing
+  banks and pre-v29 file snapshots load unchanged. Grounded in
+  arXiv:2608.06953 (labelled-field stance survives compression +15pts,
+  pre-registered replication); design doc
+  `docs/superpowers/specs/2026-08-12-stance-span-gate-design.md`.
+- **The measured stance prompts did NOT ship — the live extraction
+  prompt remains v5.** The preregistered gates ran 2026-08-13 on the
+  reproducible q8_0 bench server and split: the stance probe passed
+  decisively (v8 stance capture 0.92, false-stance 0.00, and a headline
+  side-finding: under v5 the extractor silently DROPS 70% of hedged
+  facts — hedged-note recovery 0.30 vs 0.925 plain, repaired to 0.925
+  by the stance rule; `evals/results/stance-probe-20260813-gate1.json`),
+  and the extraction ladder passed saturated (all six runs across
+  v5/v8/v9 × 2 replicates at gold_recoverable 1.0 / stale_leak 0.0;
+  `evals/results/qwen-27b-sg-*.json`) — but the KU-oracle gate failed
+  exactly the way the v7-events precedent predicted a same-call field
+  addition could: v8 cortex 0.615 vs v5 control 0.731 (paired McNemar
+  p=0.0117, net −9/78), v8 supersession churn 154→181, and v9 hybrid
+  0.833 vs 0.897 (0 wins / 5 losses) against a rag control arm with
+  ZERO cross-arm disagreements (empirical noise floor 0/78;
+  `evals/results/longmemeval-ku-oracle-qwen-27b-sgku-{v5,v8,v9}.summary.json`,
+  paired analysis `evals/results/stance-ku-paired-verdict.json`).
+  Failure modes in the lost questions: stale values landing current,
+  new abstentions, and one answer refused despite being IN the served
+  current fact — a serving-side stance-makes-answerer-timid interaction
+  the probe could not see. The stance plumbing ships dormant (nothing
+  emits the field under v5 — the literal-gate v6 precedent); the
+  measured prompt artifacts (`evals/prompts/ku_op_prompt_v8_stance.txt`,
+  `ku_op_prompt_v9_stance_quote.txt`, construction-pinned by
+  `tests/test_op_prompt_artifact.py`) stay committed as the baseline any
+  future stance-prompt iteration must beat.
+- **Provenance-span gate (`memory.dream.span_gate`, ships `off`)**:
+  generalizes the literal-faithfulness gate (digit tokens only) to whole
+  claims — the extractor emits a verbatim `quote` (≤200 chars) from the
+  note it cites, and `span_unbacked` verifies normalized containment
+  against THAT note (source scope is correct by construction for a
+  quote; the literal gate's measured batch-vs-note false-drop classes do
+  not apply). `log` counts and logs unbacked claims but writes them
+  unchanged; `contend` parks unbacked scalar claims as visible
+  contenders (`span:unbacked` provenance marker, resolvable via
+  `memory_fact_resolve`) — never a silent drop, because span failures
+  include benign paraphrase. Member ops are counted, not parked (no
+  contender path for members); events are out of scope (own pass). Run
+  counters `span_flagged` / `span_parked` land in the dream-run tallies.
+  Boundary, restated from the two-man-rule spec: this checks
+  fidelity-to-source, NOT trustworthiness-of-source — a poisoned note
+  quotes itself perfectly, and `tests/test_span_quarantine_composition.py`
+  pins that a perfect self-quote still parks under the quarantine.
+  Default is `off` (not `log`) because the live v5 prompt emits no
+  quotes — any other default would flag 100% of claims; flipping to
+  `contend` requires the preregistered firing audit
+  (`evals/results/span-gate-verdict.json`), not preference. Inspired by
+  SodaMem's mandatory provenance spans (arXiv:2608.08055).
+
 ### Fixed (2026-08-12 — chronicle search no longer re-stems its own lexemes)
 - **`chronicle_search` parses its rebuilt OR-query with the `simple`
   config instead of `english`**: the matcher stems the query once via

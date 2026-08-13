@@ -39,6 +39,23 @@ def test_chronicle_events_prompt_file_matches_probe_construction():
     assert path.read_text(encoding="utf-8") == op_probe.VARIANTS["v7-chronicle-events"]
 
 
+def test_stance_prompt_file_matches_probe_construction():
+    """Same pin for the stance arm's prompt (v8: shipped v5 + the
+    hedges-go-in-a-stance-field rule with a single-claim worked example —
+    Feature A of the 2026-08-12 stance+span-gate design; ships as the live
+    prompt only if its preregistered gates pass)."""
+    path = Path(__file__).resolve().parents[1] / "evals" / "prompts" / "ku_op_prompt_v8_stance.txt"
+    assert path.read_text(encoding="utf-8") == op_probe.VARIANTS["v8-stance"]
+
+
+def test_stance_quote_prompt_file_matches_probe_construction():
+    """Same pin for the stance+quote arm's prompt (v9: v8 + the
+    cite-a-quote rule — Feature B of the 2026-08-12 design; the v9-vs-v8
+    ladder gate isolates the quote field's claims tax)."""
+    path = Path(__file__).resolve().parents[1] / "evals" / "prompts" / "ku_op_prompt_v9_stance_quote.txt"
+    assert path.read_text(encoding="utf-8") == op_probe.VARIANTS["v9-stance-quote"]
+
+
 def test_shipped_prompt_is_the_measured_v5_artifact():
     """The hold-reversal ship (2026-08-01): the live extraction prompt must
     be byte-identical to the artifact the count-exclusion gate measured

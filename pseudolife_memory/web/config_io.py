@@ -212,6 +212,15 @@ KNOBS: list[dict[str, Any]] = [
              "texts (default; derived sums and cross-note values are "
              "measured false-drop classes under per-note gating); source = "
              "only the note the claim cites."},
+    {"path": "memory.dream.span_gate", "group": "Dream",
+     "label": "Provenance-span gate", "type": "enum",
+     "default": "off", "options": ["off", "log", "contend"],
+     "restart": False,
+     "help": "A dreamed claim must carry a verbatim quote from the note it "
+             "cites: log counts unbacked claims, contend parks them as "
+             "contenders (never a silent drop). Off by default — the live "
+             "prompt does not emit quotes; needs the v9 stance+quote prompt "
+             "and the gate-4 firing audit before contend is proposed."},
     {"path": "memory.dream.chronicle", "group": "Dream",
      "label": "Chronicle events", "type": "bool", "default": True,
      "restart": False,

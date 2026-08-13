@@ -1263,6 +1263,53 @@ CLAIMS.append(Claim(
         d["dream_runs"]["by_extractor"]["sidecar-e4b-v3"]["events"]),
     stated=20.0, places=0))
 
+# ── stance+span-gate prereg outcomes (no-ship decision, 2026-08-13) ──────
+STANCE_PROBE = RESULTS + "stance-probe-20260813-gate1.json"
+SGKU_PAIRED = RESULTS + "stance-ku-paired-verdict.json"
+
+
+def _sgku(arm: str) -> str:
+    return (f"{RESULTS}longmemeval-ku-oracle-qwen-27b-sgku-{arm}"
+            ".summary.json")
+
+
+CLAIMS.append(Claim(
+    id="stance-probe-capture", doc=CHANGELOG,
+    needle="v8 stance capture 0.92, false-stance 0.00",
+    artifacts=(STANCE_PROBE,),
+    value=lambda d: d["arms"]["v8"]["metrics"]["stance_capture"],
+    stated=0.92, places=2))
+CLAIMS.append(Claim(
+    id="stance-probe-hedged-drop", doc=CHANGELOG,
+    needle="hedged-note recovery 0.30 vs 0.925 plain",
+    artifacts=(STANCE_PROBE,),
+    value=lambda d: d["arms"]["v5"]["metrics"]["hedged_recovered"],
+    stated=0.30, places=2))
+CLAIMS.append(Claim(
+    id="sgku-v8-cortex", doc=CHANGELOG,
+    needle="v8 cortex 0.615 vs v5 control 0.731",
+    artifacts=(_sgku("v8"),),
+    value=lambda d: d["arms"]["cortex"]["accuracy"],
+    stated=0.615, places=3))
+CLAIMS.append(Claim(
+    id="sgku-v5-cortex-control", doc=CHANGELOG,
+    needle="v8 cortex 0.615 vs v5 control 0.731",
+    artifacts=(_sgku("v5"),),
+    value=lambda d: d["arms"]["cortex"]["accuracy"],
+    stated=0.731, places=3))
+CLAIMS.append(Claim(
+    id="sgku-v8-mcnemar", doc=CHANGELOG,
+    needle="paired McNemar\n  p=0.0117, net −9/78",
+    artifacts=(SGKU_PAIRED,),
+    value=lambda d: d["comparisons"]["v8"]["cortex"]["p_mcnemar_exact"],
+    stated=0.0117, places=4))
+CLAIMS.append(Claim(
+    id="sgku-v9-hybrid", doc=CHANGELOG,
+    needle="v9 hybrid\n  0.833 vs 0.897 (0 wins / 5 losses)",
+    artifacts=(_sgku("v9"),),
+    value=lambda d: d["arms"]["hybrid"]["accuracy"],
+    stated=0.833, places=3))
+
 
 def test_every_published_number_names_a_committed_artifact():
     """A claim whose evidence is untracked cannot be checked by a reader.

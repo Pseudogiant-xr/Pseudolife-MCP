@@ -160,6 +160,8 @@ def _record_to_row(r: CortexRecord) -> dict[str, Any]:
         # scalar rows (Task 1: a NULL here would bypass the member-current
         # uniqueness constraint, since Postgres treats NULL as distinct).
         "value_norm": _norm_value(r.value) if r.kind == "member" else None,
+        # v29: nullable — NULL round-trips as "asserted plainly".
+        "stance": r.stance,
         **_stamp_to_row(r),
     }
 
@@ -258,6 +260,8 @@ def hydrate_cortex(cortex: CortexStore, storage) -> int:
             # duplicate-scalar healing demotes every member but one, and
             # persists that demotion straight back to Postgres.
             kind=row.get("kind") or "scalar",
+            # v29; pre-v29 rows have no column -> None ("asserted plainly").
+            stance=row.get("stance"),
             **_stamp_from_row(row),
         ))
     cortex.supersession_log = list(storage.meta_get(_CORTEX_LOG_KEY, []) or [])

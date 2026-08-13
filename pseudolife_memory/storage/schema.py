@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 28
+SCHEMA_META_VERSION = 29
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -187,7 +187,14 @@ CREATE TABLE IF NOT EXISTS facts (
   kind TEXT NOT NULL DEFAULT 'scalar',
   -- v26: the member identity the member index dedupes on. NULL on scalar
   -- rows (not part of their uniqueness key).
-  value_norm TEXT
+  value_norm TEXT,
+  -- v29 (epistemic stance): the source's own hedge words ("probably",
+  -- "unconfirmed", "per the runbook"), kept verbatim and SEPARATE from
+  -- value so consolidation cannot silently turn a hedged claim into a
+  -- confident canonical fact. NULL = asserted plainly (every pre-v29
+  -- row). Reader metadata only — never an input to confidence, ranking,
+  -- or supersession.
+  stance TEXT
 );
 CREATE INDEX IF NOT EXISTS facts_slot_idx
   ON facts (entity_norm, attribute_norm, status);
@@ -619,6 +626,11 @@ def ensure_schema(conn) -> dict:
         cur.execute(
             "ALTER TABLE dream_run_slots ADD COLUMN IF NOT EXISTS "
             "chronicle_event_id BIGINT")
+        # v29 additive: epistemic stance on facts — the source's hedge words
+        # as a labelled field (design doc 2026-08-12-stance-span-gate). NULL
+        # means "asserted plainly", exactly the pre-v29 behaviour, so this
+        # migration is a no-op until an extractor emits a stance.
+        cur.execute("ALTER TABLE facts ADD COLUMN IF NOT EXISTS stance TEXT")
         # One-time upgrade: drop the old episode FK only when it's actually
         # present. Guarding avoids taking an ACCESS EXCLUSIVE lock on every
         # init (which could block behind any open transaction on entries).
