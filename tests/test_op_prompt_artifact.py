@@ -56,6 +56,16 @@ def test_stance_quote_prompt_file_matches_probe_construction():
     assert path.read_text(encoding="utf-8") == op_probe.VARIANTS["v9-stance-quote"]
 
 
+def test_stance_v10_prompt_file_matches_probe_construction():
+    """Same pin for the v10 stance iteration (shipped v5 + the
+    update-anchored stance rule — the sgku bank-diff forensics traced
+    v8's KU failure to a diluted consolidation anchor, and v10's two
+    deltas target exactly that; ships as the live prompt only if its
+    gates pass, KU-oracle included)."""
+    path = Path(__file__).resolve().parents[1] / "evals" / "prompts" / "ku_op_prompt_v10_stance_update.txt"
+    assert path.read_text(encoding="utf-8") == op_probe.VARIANTS["v10-stance-update"]
+
+
 def test_shipped_prompt_is_the_measured_v5_artifact():
     """The hold-reversal ship (2026-08-01): the live extraction prompt must
     be byte-identical to the artifact the count-exclusion gate measured

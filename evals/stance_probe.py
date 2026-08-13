@@ -226,6 +226,7 @@ ARM_PROMPTS = {
     "v5": "v5-count-exclusion-claim-example",
     "v8": "v8-stance",
     "v9": "v9-stance-quote",
+    "v10": "v10-stance-update",
 }
 
 CAPTURE_FLOOR = 0.60      # preregistered: v8 stance capture on hedged notes

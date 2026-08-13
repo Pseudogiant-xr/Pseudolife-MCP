@@ -170,6 +170,34 @@ _STANCE_BLOCK = (
     '"source":6} inside the one claims array.\n'
 )
 
+# v10 stance rule (2026-08-13 iteration, from the sgku bank-diff
+# forensics): v8's block measured KU cortex −0.115 NOT through stance
+# semantics but by diluting the one-slot/current-value anchor — slot
+# explosions, key-format drift, frozen updates (spec gate-outcomes
+# section). v10 differs in exactly two ways: (1) an explicit "a hedged
+# update is STILL an update" sentence tying stance to the existing
+# consolidation rule instead of standing beside it; (2) the worked
+# example REUSES the v0 example's own deploy-target slot as a later
+# hedged update — demonstrating same-key consolidation under a hedge,
+# where v8's example deliberately used a fresh slot and thereby taught
+# slot-minting next to hedges.
+_STANCE_V10_BLOCK = (
+    "HEDGES GO IN A STANCE FIELD: when the note itself hedges a fact "
+    '("probably", "might", "unconfirmed", "not final", "per the '
+    'runbook"), keep the value CLEAN and put the note\'s own hedge '
+    'words in a "stance" field on that claim — never inside the value, '
+    "and never invent a stance the note does not carry; a plainly "
+    "stated fact has no stance field. A hedged update is STILL an "
+    "update: use the same entity and attribute as the fact it changes "
+    "and emit only the CURRENT value, exactly as for a plain fact. For "
+    "example, a later note [6] we'll probably move the deploy target "
+    "again, to eu-west-1 next quarter — updates the deploy target slot "
+    "from the earlier example to the single claim "
+    '{"entity":"deploy target","attribute":"environment",'
+    '"value":"eu-west-1","stance":"probably","confidence":0.6,'
+    '"source":6} inside the one claims array.\n'
+)
+
 # The provenance-quote rule (2026-08-12 design, Feature B: a claim must
 # carry a verbatim span from its cited note — the span gate verifies
 # containment at the claim loop). Same shape discipline as above.
@@ -341,6 +369,14 @@ VARIANTS: dict[str, str] = {
     "v9-stance-quote": _BASE.replace(
         'Return {"claims":[]} if nothing qualifies.',
         _V0_FAILED_BLOCK + _V5_COUNT_BLOCK + _STANCE_BLOCK + _QUOTE_BLOCK
+        + 'Return {"claims":[]} if nothing qualifies.'),
+
+    # The v10 iteration: shipped v5 + the update-anchored stance rule
+    # (see _STANCE_V10_BLOCK's comment for the two deliberate deltas vs
+    # the KU-failed v8 block).
+    "v10-stance-update": _BASE.replace(
+        'Return {"claims":[]} if nothing qualifies.',
+        _V0_FAILED_BLOCK + _V5_COUNT_BLOCK + _STANCE_V10_BLOCK
         + 'Return {"claims":[]} if nothing qualifies.'),
 }
 
