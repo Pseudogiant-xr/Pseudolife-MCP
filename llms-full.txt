@@ -112,10 +112,9 @@ per-user data dir and downloads the embedding model (~1.2 GB, one-time).
 The full Postgres feature set applies — cortex facts, graph, lessons —
 and the bank is plain Postgres data: `pseudolife-mcp backup` writes a
 standard owner-free `pg_dump` archive (plus a state archive) with 7-day
-rotation, restorable into any PostgreSQL 18 target regardless of role.
-(The Docker tier currently runs PostgreSQL 16; its move to 18 — which
-completes one-command lite→Docker graduation — is tracked follow-up
-work, since PG 18 dumps carry PG 17+ settings that 16 rejects.) Two honest
+rotation, restorable into any PostgreSQL 18 target regardless of role —
+including the Docker tier (PostgreSQL 18 since 0.14), so outgrowing
+lite is a dump/restore, not a migration project. Two honest
 limits: dream consolidation needs an extractor endpoint (the Docker
 tier's bundled sidecar is not part of lite — without one, canonical
 facts come from `memory_fact_set` only), and on Windows the embedded
@@ -2601,11 +2600,11 @@ current state).
 The pip tiers (lite / host-process) use `pseudolife-mcp backup` instead:
 same shape — a `pg_dump | gzip` of the bank (`--no-owner --no-acl`, so
 the artifact restores under any role — rehearsed in the test suite
-against a role-named PostgreSQL 18; note a PG 18 dump does not restore
-into the current PG 16 Docker tier until that tier's PG 18 bump lands,
-because PG 18 dumps carry PG 17+ SET parameters that 16 rejects; the
-lite tier uses the embedded runtime's own bundled `pg_dump`, attaching
-to the running instance or starting it for the duration) plus a
+against a role-named PostgreSQL 18; since the Docker tier's 16→18 bump
+(2026-08-14) both tiers run PostgreSQL 18, so a lite dump restores
+straight into the Docker tier; the lite tier uses the embedded
+runtime's own bundled `pg_dump`, attaching to the running instance or
+starting it for the duration) plus a
 `pseudolife_lite_state-*.tar.gz` of the data dir (ChromaDB, weights,
 config; `embedded_pg/` is excluded — the dump covers it), with the same
 7-day rotation (`--keep-days`). The artifact names

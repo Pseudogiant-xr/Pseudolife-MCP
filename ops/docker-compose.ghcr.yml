@@ -14,6 +14,6 @@
 # extractor sidecar is not published — it builds locally as before.
 services:
   pseudolife-pg:
-    image: ghcr.io/pseudogiant-xr/pseudolife-pg:16
+    image: ghcr.io/pseudogiant-xr/pseudolife-pg:18
   pseudolife-daemon:
     image: ghcr.io/pseudogiant-xr/pseudolife-daemon:${PSEUDOLIFE_IMAGE_TAG:-latest}

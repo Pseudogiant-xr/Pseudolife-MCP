@@ -437,11 +437,11 @@ current state).
 The pip tiers (lite / host-process) use `pseudolife-mcp backup` instead:
 same shape — a `pg_dump | gzip` of the bank (`--no-owner --no-acl`, so
 the artifact restores under any role — rehearsed in the test suite
-against a role-named PostgreSQL 18; note a PG 18 dump does not restore
-into the current PG 16 Docker tier until that tier's PG 18 bump lands,
-because PG 18 dumps carry PG 17+ SET parameters that 16 rejects; the
-lite tier uses the embedded runtime's own bundled `pg_dump`, attaching
-to the running instance or starting it for the duration) plus a
+against a role-named PostgreSQL 18; since the Docker tier's 16→18 bump
+(2026-08-14) both tiers run PostgreSQL 18, so a lite dump restores
+straight into the Docker tier; the lite tier uses the embedded
+runtime's own bundled `pg_dump`, attaching to the running instance or
+starting it for the duration) plus a
 `pseudolife_lite_state-*.tar.gz` of the data dir (ChromaDB, weights,
 config; `embedded_pg/` is excluded — the dump covers it), with the same
 7-day rotation (`--keep-days`). The artifact names

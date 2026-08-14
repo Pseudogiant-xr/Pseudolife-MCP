@@ -93,7 +93,7 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
 5. **GHCR images — automated.** The `images` job in `release.yml` (also
    downstream of the human-approved `publish` gate) builds and pushes
    `ghcr.io/pseudogiant-xr/pseudolife-daemon:{<version>,latest}` and
-   `ghcr.io/pseudogiant-xr/pseudolife-pg:{16,16-<version>}` with the
+   `ghcr.io/pseudogiant-xr/pseudolife-pg:{18,18-<version>}` with the
    repo-scoped `GITHUB_TOKEN` — no stored secret. The compose overlay
    `ops/docker-compose.ghcr.yml` is the consumer (pull-not-build installs);
    the base compose file and `ops/update.ps1`'s local-build deploy flow are

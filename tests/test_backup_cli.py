@@ -202,10 +202,10 @@ def _rehearse_restore_under_role_named_pg(sql: str, dsn: str, tmp_path) -> None:
     The rehearsal target is a scratch DB inside the embedded PG 18
     instance itself, with a freshly created `pseudolife` role: that
     proves the dump is owner/ACL-free (the review-found breaker) at the
-    dump's own major. It deliberately does NOT target the PG 16 bench:
-    PG 18 dumps carry PG 17+ SET parameters (`transaction_timeout`)
-    that PG 16 rejects — lite→Docker graduation is gated on the Docker
-    tier's PG 18 bump, and the docs say so."""
+    dump's own major, and stays valid regardless of what major the
+    bench happens to run. (Historical note: before the Docker tier's
+    16→18 bump this deliberately avoided the then-PG 16 bench, whose
+    server rejected the PG 17+ SET parameters in PG 18 dumps.)"""
     import subprocess
 
     import psycopg

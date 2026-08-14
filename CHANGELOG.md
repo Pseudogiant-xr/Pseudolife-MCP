@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-08-14 — Docker tier PostgreSQL 16 → 18: lite dumps now restore straight in)
+- **`pseudolife-pg` is PostgreSQL 18** (pgvector 0.8.6, `pgvector/pgvector:pg18`
+  base): aligns the Docker tier with the lite tier's embedded PostgreSQL 18,
+  so a `pseudolife-mcp backup` dump restores directly into the Docker tier —
+  previously blocked because PG 18 dumps carry PG 17+ `SET` parameters that
+  PG 16 rejected. A PG major bump cannot reuse the old data volume:
+  `ops/migrate-pg18.ps1` runs the cutover (backup → quiesce → dump →
+  new external volume → restore under `ON_ERROR_STOP` → exact count
+  verification → daemon health), retaining the PG 16 volume untouched as
+  the rollback. The 16→18 restore was rehearsed against a scratch pg18
+  container with a real bank dump before any of this shipped. **Mount-path
+  fix bundled**: PG 18 images moved `PGDATA` under `/var/lib/postgresql/18/`
+  and declare `VOLUME /var/lib/postgresql`, so the compose mount moved from
+  `/var/lib/postgresql/data` to `/var/lib/postgresql` — keeping the old
+  path would have silently left the cluster on an anonymous volume. CI's
+  service container and the GHCR pg-image tags (`18`, `18-<version>`)
+  move with it.
+
 ### Added (2026-08-14 — prebuilt images: the Docker tier can pull instead of build)
 - **GHCR image publishing** (`images` job in `.github/workflows/release.yml`):
   publishing a GitHub release now also pushes
