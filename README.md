@@ -106,10 +106,9 @@ per-user data dir and downloads the embedding model (~1.2 GB, one-time).
 The full Postgres feature set applies — cortex facts, graph, lessons —
 and the bank is plain Postgres data: `pseudolife-mcp backup` writes a
 standard owner-free `pg_dump` archive (plus a state archive) with 7-day
-rotation, restorable into any PostgreSQL 18 target regardless of role.
-(The Docker tier currently runs PostgreSQL 16; its move to 18 — which
-completes one-command lite→Docker graduation — is tracked follow-up
-work, since PG 18 dumps carry PG 17+ settings that 16 rejects.) Two honest
+rotation, restorable into any PostgreSQL 18 target regardless of role —
+including the Docker tier (PostgreSQL 18 since 0.14), so outgrowing
+lite is a dump/restore, not a migration project. Two honest
 limits: dream consolidation needs an extractor endpoint (the Docker
 tier's bundled sidecar is not part of lite — without one, canonical
 facts come from `memory_fact_set` only), and on Windows the embedded

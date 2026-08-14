@@ -139,16 +139,16 @@ jobs:
           context: ops
           file: ops/Dockerfile.pg
           push: true
-          # :16 tracks the PG major (matches the compose tag); the
-          # :16-<version> tag pins the exact release build for rollback.
+          # :18 tracks the PG major (matches the compose tag); the
+          # :18-<version> tag pins the exact release build for rollback.
           tags: |
-            ghcr.io/${{ env.OWNER_LC }}/pseudolife-pg:16
-            ghcr.io/${{ env.OWNER_LC }}/pseudolife-pg:16-${{ env.VERSION }}
+            ghcr.io/${{ env.OWNER_LC }}/pseudolife-pg:18
+            ghcr.io/${{ env.OWNER_LC }}/pseudolife-pg:18-${{ env.VERSION }}
 
       - name: Verify the pushed images are pullable by digest
         run: |
           docker buildx imagetools inspect "ghcr.io/${OWNER_LC}/pseudolife-daemon:${VERSION}"
-          docker buildx imagetools inspect "ghcr.io/${OWNER_LC}/pseudolife-pg:16-${VERSION}"
+          docker buildx imagetools inspect "ghcr.io/${OWNER_LC}/pseudolife-pg:18-${VERSION}"
 
   registry:
     needs: publish

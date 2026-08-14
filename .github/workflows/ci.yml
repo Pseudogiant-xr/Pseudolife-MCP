@@ -1,13 +1,12 @@
 # CI (P2, 2026-07-02 review; lite-tier lanes added 2026-08-14): the full
 # suite runs on every merge instead of only when someone remembers.
 # Three lanes:
-#   * test            — full suite vs the production-parity PG 16 service
-#                       container (pgvector image, same as the Docker tier);
+#   * test            — full suite vs the production-parity PG 18 service
+#                       container (pgvector image, same as the Docker tier
+#                       since the 2026-08-14 16→18 bump);
 #   * test-lite-linux — full suite vs the [lite] extra's embedded
-#                       PostgreSQL 18 (no service container): proves the
-#                       whole storage layer on PG 18 ahead of the Docker
-#                       tier's planned 16→18 bump, and pg0-embedded on a
-#                       Linux runner;
+#                       PostgreSQL 18 (no service container): covers the
+#                       lite provider itself on a Linux runner;
 #   * test-lite-windows — the lite-critical surface (embedded provider,
 #                       backup/restore rehearsal, shim) on a real Windows
 #                       runner. Windows runners cannot host service
@@ -38,7 +37,7 @@ jobs:
     services:
       postgres:
         # pgvector included — the schema requires CREATE EXTENSION vector.
-        image: pgvector/pgvector:pg16
+        image: pgvector/pgvector:pg18
         env:
           POSTGRES_USER: pseudolife
           POSTGRES_PASSWORD: pseudolife

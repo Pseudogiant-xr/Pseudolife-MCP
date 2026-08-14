@@ -1097,7 +1097,7 @@
    "s": "GitHub Actions test suite",
    "p": ".github/workflows/ci.yml",
    "d": [
-    "~760 tests vs a real pgvector pg16 service; offline, CPU torch",
+    "~760 tests vs a real pgvector pg18 service; offline, CPU torch",
     "Separate from evals/ — those never run in CI"
    ]
   },
