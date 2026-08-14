@@ -1,0 +1,19 @@
+# Pull-not-build overlay: run the Docker tier from the prebuilt GHCR
+# images instead of building locally. The base compose file keeps its
+# local build: definitions, so the existing install/update flow
+# (ops/install.*, ops/update.ps1's daemon-only rebuild) is unchanged —
+# this overlay is an alternative for installs that never want a local
+# image build.
+#
+#   docker compose -f ops/docker-compose.yml -f ops/docker-compose.ghcr.yml pull pseudolife-pg pseudolife-daemon
+#   docker compose -f ops/docker-compose.yml -f ops/docker-compose.ghcr.yml up -d
+#
+# Images are published by the release workflow (releases >= 0.14.0).
+# PSEUDOLIFE_IMAGE_TAG pins the daemon to a release (default: latest);
+# updates on this path are `pull` + `up -d`, not ops/update.ps1. The
+# extractor sidecar is not published — it builds locally as before.
+services:
+  pseudolife-pg:
+    image: ghcr.io/pseudogiant-xr/pseudolife-pg:16
+  pseudolife-daemon:
+    image: ghcr.io/pseudogiant-xr/pseudolife-daemon:${PSEUDOLIFE_IMAGE_TAG:-latest}
