@@ -29,7 +29,7 @@ param(
     [string]$NewVolume = "pseudolife-mcp-bank-pg18",
     [string]$PgContainer = "pseudolife-mcp-postgres",
     [string]$DaemonContainer = "pseudolife-mcp-daemon",
-    [string]$Db = "pseudolife_memory",
+    [string]$Database = "pseudolife_memory",
     [string]$User = "pseudolife"
 )
 
@@ -56,11 +56,12 @@ SELECT 'outcome_signals', count(*) FROM outcome_signals ORDER BY 1
 if (-not (Select-String -Path $compose -Pattern 'image:\s*pseudolife-pg:18' -Quiet)) {
     Fail "compose file does not say pseudolife-pg:18 — run this from the merged PG18 tree."
 }
-$liveMajor = (docker exec $PgContainer psql -U $User -d $Db -t -A -c "SHOW server_version_num") 2>$null
+$liveMajor = (docker exec $PgContainer psql -U $User -d $Database -t -A -c "SHOW server_version_num") 2>$null
 if (-not $liveMajor) { Fail "cannot reach the live Postgres in $PgContainer." }
 $liveMajor = [int]($liveMajor.Trim()) / 10000 -as [int]
 if ($liveMajor -ge 18) { Fail "live server is already PG $liveMajor — nothing to migrate." }
-if (docker volume inspect $NewVolume 2>$null) {
+docker volume inspect $NewVolume 2>$null | Out-Null
+if ($LASTEXITCODE -eq 0) {
     Fail "volume $NewVolume already exists — inspect it (and remove it yourself if it is a dead earlier attempt); this script never deletes volumes."
 }
 Write-Host "preflight ok: live PG $liveMajor -> 18, target volume $NewVolume" -ForegroundColor Cyan
@@ -72,11 +73,11 @@ if ($LASTEXITCODE -ne 0) { Fail "ops/backup.ps1 failed — not proceeding withou
 # --- 3. quiesce + cutover dump ---------------------------------------------
 Write-Host "stopping daemon (write quiesce)..." -ForegroundColor Cyan
 docker stop $DaemonContainer | Out-Null
-$before = docker exec $PgContainer psql -U $User -d $Db -t -A -F ':' -c $countsQuery
+$before = docker exec $PgContainer psql -U $User -d $Database -t -A -F ':' -c $countsQuery
 if ($LASTEXITCODE -ne 0) { docker start $DaemonContainer | Out-Null; Fail "count query failed." }
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $cutDump = "pseudolife_memory-pg18cut-$stamp.sql.gz"
-docker exec $PgContainer sh -c "pg_dump -U $User -d $Db | gzip -9 > /tmp/$cutDump"
+docker exec $PgContainer sh -c "pg_dump -U $User -d $Database | gzip -9 > /tmp/$cutDump"
 if ($LASTEXITCODE -ne 0) { docker start $DaemonContainer | Out-Null; Fail "cutover pg_dump failed." }
 New-Item -ItemType Directory -Force $backups | Out-Null
 docker cp "${PgContainer}:/tmp/$cutDump" (Join-Path $backups $cutDump)
@@ -100,24 +101,24 @@ if ($LASTEXITCODE -ne 0) { Fail "pg18 image build failed (old stack is stopped; 
 docker compose -f $compose up -d pseudolife-pg
 if ($LASTEXITCODE -ne 0) { Fail "pg18 start failed (rollback: restore .env, git checkout pg16 tree, compose up)." }
 $deadline = (Get-Date).AddSeconds(90)
-do { Start-Sleep -Seconds 2; docker exec $PgContainer pg_isready -U $User -d $Db 2>$null | Out-Null }
+do { Start-Sleep -Seconds 2; docker exec $PgContainer pg_isready -U $User -d $Database 2>$null | Out-Null }
 while ($LASTEXITCODE -ne 0 -and (Get-Date) -lt $deadline)
 if ($LASTEXITCODE -ne 0) { Fail "pg18 never became ready." }
 
 # --- 5. restore -------------------------------------------------------------
 docker cp (Join-Path $backups $cutDump) "${PgContainer}:/tmp/$cutDump"
-docker exec $PgContainer sh -c "gunzip -c /tmp/$cutDump | psql -U $User -d $Db -v ON_ERROR_STOP=1 -q"
+docker exec $PgContainer sh -c "gunzip -c /tmp/$cutDump | psql -U $User -d $Database -v ON_ERROR_STOP=1 -q"
 if ($LASTEXITCODE -ne 0) { Fail "restore FAILED — old volume + backups intact; do not retry blindly, read the psql error above." }
 
 # --- 6. verify --------------------------------------------------------------
-$after = docker exec $PgContainer psql -U $User -d $Db -t -A -F ':' -c $countsQuery
+$after = docker exec $PgContainer psql -U $User -d $Database -t -A -F ':' -c $countsQuery
 if (($before -join "`n") -ne ($after -join "`n")) {
     Write-Host "BEFORE:`n$($before -join "`n")`nAFTER:`n$($after -join "`n")"
     Fail "table counts differ after restore — investigate before starting the daemon."
 }
-$schema = (docker exec $PgContainer psql -U $User -d $Db -t -A -c "SELECT value FROM meta WHERE key='schema_version'").Trim()
-$vec = (docker exec $PgContainer psql -U $User -d $Db -t -A -c "SELECT extversion FROM pg_extension WHERE extname='vector'").Trim()
-$ver = (docker exec $PgContainer psql -U $User -d $Db -t -A -c "SHOW server_version").Trim()
+$schema = (docker exec $PgContainer psql -U $User -d $Database -t -A -c "SELECT value FROM meta WHERE key='schema_version'").Trim()
+$vec = (docker exec $PgContainer psql -U $User -d $Database -t -A -c "SELECT extversion FROM pg_extension WHERE extname='vector'").Trim()
+$ver = (docker exec $PgContainer psql -U $User -d $Database -t -A -c "SHOW server_version").Trim()
 Write-Host "restored: PG $ver, pgvector $vec, schema_version $schema, counts exact-match" -ForegroundColor Green
 
 docker compose -f $compose up -d pseudolife-daemon
