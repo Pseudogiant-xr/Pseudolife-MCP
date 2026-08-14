@@ -23,7 +23,19 @@ import uuid
 from pseudolife_memory.session_title import title_from_cwd
 
 DEFAULT_URL = "http://127.0.0.1:8765"
-_SPAWN_WAIT_S = 25.0  # daemon import (torch) can take a while on cold cache
+# Floor wait for a spawned daemon: torch import on a cold cache. The lite
+# tier's true first boot costs more BEFORE the port binds (pg0 runtime
+# extraction + initdb, then the torch import), so as long as the spawned
+# child is still alive we keep waiting up to _SPAWN_WAIT_ALIVE_S instead
+# of guessing — a dead child fails immediately. The cap is sized from a
+# measured cold-cold first boot (see the constant's comment).
+_SPAWN_WAIT_S = 25.0
+# Measured 2026-08-14 (Windows 11, NVMe, warm HF cache): a cold-cold lite
+# first boot — pg0 runtime extraction (~150 MB, Defender-scanned) +
+# initdb + torch import — reached /health in 21.5 s, already at the edge
+# of the 25 s floor on FAST hardware. 180 s gives slower disks/AV room;
+# the child-liveness check above keeps genuine failures fast.
+_SPAWN_WAIT_ALIVE_S = 180.0
 
 
 def _daemon_url() -> str:
@@ -38,7 +50,7 @@ def probe_health(url: str, timeout: float = 0.25) -> dict | None:
         return None
 
 
-def spawn_daemon() -> None:
+def spawn_daemon() -> subprocess.Popen:
     """Start ``pseudolife-mcp serve`` detached so it outlives this session."""
     kwargs: dict = {
         "stdin": subprocess.DEVNULL,
@@ -59,7 +71,7 @@ def spawn_daemon() -> None:
         )
     else:  # pragma: no cover - windows deployment
         kwargs["start_new_session"] = True
-    subprocess.Popen(
+    return subprocess.Popen(
         [sys.executable, "-m", "pseudolife_memory.cli", "serve"], **kwargs,
     )
 
@@ -69,19 +81,30 @@ def ensure_daemon(url: str) -> dict:
     if health is not None:
         return health
     print(f"[shim] no daemon at {url} — starting one...", file=sys.stderr)
-    spawn_daemon()
-    deadline = time.time() + _SPAWN_WAIT_S
-    while time.time() < deadline:
+    child = spawn_daemon()
+    start = time.time()
+    while True:
+        elapsed = time.time() - start
+        if elapsed >= _SPAWN_WAIT_ALIVE_S:
+            break
+        if elapsed >= _SPAWN_WAIT_S and child.poll() is not None:
+            # The spawned daemon exited without serving — waiting longer
+            # cannot help. (Before the floor, a poll() result can race
+            # the detach on some platforms, so only trust it after.)
+            print(
+                f"[shim] the spawned daemon exited (code {child.returncode}) "
+                f"before serving.", file=sys.stderr,
+            )
+            break
         time.sleep(0.5)
         health = probe_health(url, timeout=0.5)
         if health is not None:
             return health
     print(
         f"[shim] FAILED to reach the memory daemon at {url}.\n"
-        f"  Check:  docker compose -f ops/docker-compose.yml up -d\n"
-        f"  Then:   pseudolife-mcp serve   (or re-run this shim)\n"
-        f"  Logs:   the daemon logs to its own stderr; run serve in a "
-        f"terminal to see why it died.",
+        f"  Docker tier:  docker compose -f ops/docker-compose.yml up -d\n"
+        f"  Pip tiers:    pseudolife-mcp serve   (run it in a terminal — "
+        f"the daemon logs to its own stderr, so this shows why it died)",
         file=sys.stderr,
     )
     sys.exit(1)

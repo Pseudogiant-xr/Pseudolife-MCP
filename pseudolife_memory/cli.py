@@ -25,6 +25,8 @@ modes:
   embedded       in-process stdio server — no daemon, no Postgres (escape hatch)
   briefing       print the session-start briefing (for a SessionStart hook;
                  --hook-json emits Claude Code/Codex hook JSON)
+  backup         back up the bank: pg_dump + state archive with rotation
+                 (pip tiers; the Docker tier keeps ops/backup.ps1)
   episode-start  open a session episode (legacy hook helper)
   episode-end    close it
   help           show this message (also -h / --help)
@@ -50,6 +52,9 @@ def main() -> None:
     elif mode == "briefing":
         from pseudolife_memory.briefing_cli import run_briefing
         run_briefing()
+    elif mode == "backup":
+        from pseudolife_memory.backup_cli import run_backup
+        run_backup()
     elif mode in ("episode-start", "episode-end"):
         from pseudolife_memory.episode_cli import run_episode
         run_episode(mode)
