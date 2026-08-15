@@ -1,0 +1,12 @@
+{
+  "n_queries": 202,
+  "top_k": 6,
+  "flat_cap": 5250,
+  "divergence_rate_topk": 0.8762,
+  "divergence_rate_top3": 0.4109,
+  "mean_jaccard_topk": 0.5861,
+  "median_search_s_banded": 1.5619,
+  "median_search_s_flat": 1.535,
+  "escalate_to_judge": true,
+  "corpus_note": "queries harvested from local agent transcripts; texts withheld from this artifact (private)"
+}

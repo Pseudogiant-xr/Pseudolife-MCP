@@ -1,0 +1,14 @@
+{
+  "delta": 0.0,
+  "p_value": 1.0,
+  "n_questions": 78,
+  "arm": "rag",
+  "a": "qwen-27b/abl25-flat-off",
+  "b": "qwen-27b/wabl25-flat-off",
+  "a_mean": 0.8333,
+  "a_std": 0.0,
+  "b_mean": 0.8333,
+  "b_std": 0.0,
+  "permutations": 10000,
+  "seed": 0
+}

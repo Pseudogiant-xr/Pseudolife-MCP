@@ -1,0 +1,31 @@
+{
+  "all_claims_hold": true,
+  "checks": {
+    "evict_destroys_under_flat": {
+      "flat_stored": 8,
+      "flat_resident": 5,
+      "banded_stored": 8,
+      "banded_resident": 8,
+      "claim_holds": true,
+      "cite": "cms.py:2091 \u2014 demotion cascade needs a next band; n=1 restores pre-2026-07-25 delete-on-evict"
+    },
+    "legacy_band_filter_silently_empty": {
+      "unfiltered_hits": 1,
+      "legacy_filter_hits": 0,
+      "raised": false,
+      "claim_holds": true,
+      "cite": "cms.py:737,758-765 \u2014 no validation of band names; documented usage (cms.py:673-675) goes dark"
+    },
+    "state_restore_loses_all_entries": {
+      "saved_entries": 8,
+      "restored_entries": 0,
+      "claim_holds": true,
+      "cite": "cms.py:1907-1920 \u2014 bands matched by name, silent skip"
+    },
+    "promotion_dead_under_flat": {
+      "flat_consolidation_events": 0,
+      "claim_holds": true,
+      "cite": "cms.py:519 \u2014 range(len(bands)-1) is empty; update_interval/promotion_* become dead config"
+    }
+  }
+}

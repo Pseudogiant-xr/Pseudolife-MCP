@@ -1,0 +1,64 @@
+{
+  "n_replicates": 5,
+  "replicates": [
+    "arm1-abl25-continuum-hist",
+    "arm1-abl25-continuum-hist-r2",
+    "arm1-abl25-continuum-hist-r3",
+    "arm1-abl25-continuum-hist-r4",
+    "arm1-abl25-continuum-hist-r5"
+  ],
+  "n_questions": 78,
+  "arms": {
+    "rag": {
+      "accuracies": [
+        0.859,
+        0.859,
+        0.859,
+        0.859,
+        0.859
+      ],
+      "mean": 0.859,
+      "std": 0.0
+    },
+    "cortex": {
+      "accuracies": [
+        0.7051,
+        0.7051,
+        0.7051,
+        0.7051,
+        0.7051
+      ],
+      "mean": 0.7051,
+      "std": 0.0
+    },
+    "hybrid": {
+      "accuracies": [
+        0.8462,
+        0.8462,
+        0.8462,
+        0.8462,
+        0.8462
+      ],
+      "mean": 0.8462,
+      "std": 0.0
+    },
+    "cascade": {
+      "accuracies": [
+        0.8077,
+        0.8077,
+        0.8077,
+        0.8077,
+        0.8077
+      ],
+      "mean": 0.8077,
+      "std": 0.0
+    }
+  },
+  "source_files": [
+    "longmemeval-ku-oracle-e4b-ft-arm1-abl25-continuum-hist.jsonl",
+    "longmemeval-ku-oracle-e4b-ft-arm1-abl25-continuum-hist-r2.jsonl",
+    "longmemeval-ku-oracle-e4b-ft-arm1-abl25-continuum-hist-r3.jsonl",
+    "longmemeval-ku-oracle-e4b-ft-arm1-abl25-continuum-hist-r4.jsonl",
+    "longmemeval-ku-oracle-e4b-ft-arm1-abl25-continuum-hist-r5.jsonl"
+  ]
+}

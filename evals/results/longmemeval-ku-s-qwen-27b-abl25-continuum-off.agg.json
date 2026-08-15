@@ -1,0 +1,64 @@
+{
+  "n_replicates": 5,
+  "replicates": [
+    "abl25-continuum-off",
+    "abl25-continuum-off-r2",
+    "abl25-continuum-off-r3",
+    "abl25-continuum-off-r4",
+    "abl25-continuum-off-r5"
+  ],
+  "n_questions": 78,
+  "arms": {
+    "rag": {
+      "accuracies": [
+        0.859,
+        0.859,
+        0.859,
+        0.859,
+        0.859
+      ],
+      "mean": 0.859,
+      "std": 0.0
+    },
+    "cortex": {
+      "accuracies": [
+        0.2051,
+        0.2051,
+        0.2051,
+        0.2051,
+        0.2051
+      ],
+      "mean": 0.2051,
+      "std": 0.0
+    },
+    "hybrid": {
+      "accuracies": [
+        0.7436,
+        0.7436,
+        0.7436,
+        0.7436,
+        0.7436
+      ],
+      "mean": 0.7436,
+      "std": 0.0
+    },
+    "cascade": {
+      "accuracies": [
+        0.859,
+        0.859,
+        0.859,
+        0.859,
+        0.859
+      ],
+      "mean": 0.859,
+      "std": 0.0
+    }
+  },
+  "source_files": [
+    "longmemeval-ku-s-qwen-27b-abl25-continuum-off.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl25-continuum-off-r2.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl25-continuum-off-r3.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl25-continuum-off-r4.jsonl",
+    "longmemeval-ku-s-qwen-27b-abl25-continuum-off-r5.jsonl"
+  ]
+}
