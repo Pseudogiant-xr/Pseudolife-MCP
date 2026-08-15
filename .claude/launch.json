@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "atlas",
+      "runtimeExecutable": ".venv/Scripts/python.exe",
+      "runtimeArgs": ["-m", "http.server", "8899", "--bind", "127.0.0.1", "--directory", "docs/atlas"],
+      "port": 8899
+    },
+    {
+      "name": "console-devserver",
+      "runtimeExecutable": ".venv/Scripts/python.exe",
+      "runtimeArgs": ["-m", "pseudolife_memory.web.devserver", "--port", "8770"],
+      "port": 8770
+    }
+  ]
+}

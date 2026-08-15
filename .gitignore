@@ -62,6 +62,3 @@ evals/results/*-gate-r*.jsonl
 evals/results/*-gate.agg.json
 evals/results/*-gate*.summary.json
 .superpowers/
-
-# Local dev-server launcher (absolute paths, machine-specific)
-.claude/launch.json
