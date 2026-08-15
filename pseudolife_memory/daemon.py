@@ -82,6 +82,44 @@ def run_daemon(host: str | None = None, port: int | None = None) -> None:
     """Entry point for ``pseudolife-mcp serve``. Blocks until shutdown."""
     import uvicorn
 
+    # Logging must be configured BEFORE storage resolution: mcp_server's
+    # basicConfig (the process's usual configurer) is only imported
+    # further down, and an unconfigured root logger silently drops the
+    # INFO lines announcing where the embedded bank lives — the one
+    # thing a lite user needs from the log (review finding, 2026-08-14).
+    # Same stream/format as mcp_server.py, whose later call is a no-op.
+    logging.basicConfig(
+        stream=sys.stderr,
+        level=logging.INFO,
+        format="[%(asctime)s] %(name)s %(levelname)s: %(message)s",
+    )
+
+    # Storage resolution (lite tier) — must run BEFORE the mcp_server
+    # import below constructs the MemoryService. An explicit DSN wins;
+    # otherwise the [lite] extra's embedded Postgres engages and exports
+    # its DSN through the same env vars the service already reads; the
+    # file-mode fallback is announced loudly because a silently
+    # file-mode daemon (shim-spawned without the env var) has been an
+    # unnoticed degradation before.
+    from pseudolife_memory.storage import embedded_pg
+
+    try:
+        storage_mode = embedded_pg.resolve_daemon_storage(os.environ)
+    except RuntimeError as exc:
+        logger.error("storage resolution refused: %s", exc)
+        sys.exit(2)
+    if storage_mode == "postgres-embedded":
+        logger.info(
+            "storage: embedded postgres (lite tier) — data dir %s",
+            os.environ.get("PSEUDOLIFE_MCP_DATA_DIR"),
+        )
+    elif storage_mode == "files":
+        logger.warning(
+            "storage: v0.1 FILE MODE (associative bands only — no cortex "
+            "facts, graph, or lessons). Set PSEUDOLIFE_MCP_DATABASE_URL, "
+            "or install pseudolife-mcp[lite] for zero-config embedded "
+            "Postgres.")
+
     # Importing mcp_server constructs the FastMCP instance + MemoryService
     # and registers the autosave/warmup/atexit machinery via its helpers.
     from pseudolife_memory import mcp_server

@@ -54,7 +54,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.pg
-    image: pseudolife-pg:16
+    image: pseudolife-pg:18
     container_name: pseudolife-mcp-postgres
     restart: unless-stopped
     logging: *default-logging
@@ -65,7 +65,13 @@ services:
     ports:
       - "127.0.0.1:5433:5432"
     volumes:
-      - pseudolife_pgdata:/var/lib/postgresql/data
+      # PG 18 images moved the data layout: PGDATA is now
+      # /var/lib/postgresql/18/docker and the image declares
+      # VOLUME /var/lib/postgresql — mounting the old
+      # /var/lib/postgresql/data path would leave the real cluster on an
+      # ANONYMOUS volume, silently orphaned on container recreate. Mount
+      # the parent, exactly as the image intends.
+      - pseudolife_pgdata:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U pseudolife -d pseudolife_memory"]
       interval: 10s

@@ -1,11 +1,17 @@
-# PostgreSQL 16 + pgvector for Pseudolife-MCP.
+# PostgreSQL 18 + pgvector for Pseudolife-MCP.
 #
-# Base: the official pgvector image (postgres:16, Debian) with the pgvector
-# extension prebuilt. Apache AGE was removed in the graph-foundation work
-# (2026-06-22, docs/specs/2026-06-22-graph-foundation-design.md): the knowledge
-# graph is now the Postgres `entities` hub + NetworkX derive-on-read behind the
-# GraphStore port — no Cypher/AGE dependency, so the heavy AGE base is gone.
-FROM pgvector/pgvector:pg16
+# Base: the official pgvector image (postgres:18, Debian) with the pgvector
+# extension prebuilt. PG major 18 since 2026-08-14 (aligns the Docker tier
+# with the lite tier's embedded PostgreSQL 18, making lite dumps restore
+# directly — PG 18 pg_dump output carries PG 17+ SET parameters that 16
+# rejected). Migrating an existing PG 16 bank volume is a dump/restore:
+# ops/migrate-pg18.ps1 runs the whole cutover with verification; the old
+# volume is retained untouched as the rollback. Apache AGE was removed in
+# the graph-foundation work (2026-06-22,
+# docs/specs/2026-06-22-graph-foundation-design.md): the knowledge graph is
+# the Postgres `entities` hub + NetworkX derive-on-read behind the
+# GraphStore port — no Cypher/AGE dependency.
+FROM pgvector/pgvector:pg18
 
 # Patch base-image OS packages (security: perl / libsqlite3 / ncurses / ...).
 # Only updates Debian libraries — the Postgres server, the pgvector extension,

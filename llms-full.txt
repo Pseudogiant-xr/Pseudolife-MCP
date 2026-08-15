@@ -1,0 +1,3009 @@
+# Pseudolife-MCP — full documentation
+
+> Persistent long-term memory for Claude Code, Codex, and other MCP clients: an associative store that ages and supersedes, a slot-keyed canonical-fact cortex, dream consolidation into facts and a knowledge graph, procedural lessons, and cited world facts — served by a local daemon your coding agent calls over MCP.
+
+<!-- source: README.md -->
+
+# Pseudolife-MCP
+
+<!-- mcp-name: io.github.Pseudogiant-xr/pseudolife-mcp -->
+
+[![PyPI](https://img.shields.io/pypi/v/pseudolife-mcp)](https://pypi.org/project/pseudolife-mcp/)
+[![CI](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/workflows/ci.yml/badge.svg)](https://github.com/Pseudogiant-xr/Pseudolife-MCP/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![Python 3.10+](https://img.shields.io/pypi/pyversions/pseudolife-mcp)](https://pypi.org/project/pseudolife-mcp/)
+
+[简体中文](docs/i18n/README.zh.md) ·
+[日本語](docs/i18n/README.ja.md) ·
+[한국어](docs/i18n/README.ko.md) ·
+[Português (BR)](docs/i18n/README.pt-br.md) ·
+[Español](docs/i18n/README.es.md)
+
+**Persistent long-term memory for Claude Code, Codex, and other MCP clients.**
+
+An MCP server that gives coding agents a long-term memory that persists across
+sessions — surviving context compactions and fresh tasks. Your coding agent is
+the intelligence; this server is its memory on disk.
+
+![Cortex Console — Observatory view](https://raw.githubusercontent.com/Pseudogiant-xr/Pseudolife-MCP/master/docs/images/cortex-console-observatory.png)
+
+What you get:
+
+- **Associative memory that ages like memory should** — an 8-band
+  continuum from `working` to `forever`, ranked by hybrid dense-plus-lexical
+  similarity, with contradiction detection and supersession.
+- **Canonical facts, not vibes** — one *current* value per `entity.attribute`
+  slot (or a member set, for slots that hold many concurrent values);
+  corrections supersede rather than silently overwrite, and the full
+  version history survives.
+- **Dreams** — a bundled extractor (or Claude Sonnet via your Max plan)
+  consolidates the memory stream into facts and a knowledge graph while
+  you're not looking.
+- **Lessons from its own work** — successes, dead-ends, and your corrections
+  become do/avoid guidance surfaced at the start of every session.
+- **A web console to watch it think** — the Cortex Console above, plus cited
+  world facts, session episodes, and document RAG.
+
+Measured, with receipts — on LongMemEval knowledge updates, routing
+answers through the fact spine beats naive RAG, and every number ships
+with its committed run artifact:
+
+| LongMemEval-KU | naive RAG | commit-gated cascade |
+|---|---:|---:|
+| oracle slice (78 questions, reproducible server) | 0.859 | **0.936** |
+| full haystack (~50 sessions/question, pre-registered) | 0.346 | **0.462** (p = 0.011) |
+
+Graded by a local, byte-reproducible judge — compare within rows, never
+against GPT-judged leaderboards. Full tables, caveats, and every
+artifact: [Benchmarks](docs/guide/benchmarks.md).
+
+## Quickstart
+
+Requires Docker and Claude Code, Codex, or both. One command from clone to
+first memory (Claude remains the compatibility default):
+
+```bash
+git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
+cd Pseudolife-MCP
+ops/install.sh          # Linux / macOS
+ops\install.ps1         # Windows (pwsh 7+)
+# Codex: add --client codex / -Client codex
+# Both:  add --client both  / -Client both
+```
+
+The installer runs the preflight (one exact fix line per missing
+prerequisite), asks which **dream extractor** should consolidate memories —
+
+- **sonnet-only** — the lightest install: Claude Sonnet via a CLI shim
+  (needs a logged-in Max-plan `claude` CLI); the sidecar image is **never
+  built or pulled** (~9 GB lighter; dreams pause while the shim is down);
+- **sonnet-fallback** — Sonnet primary, the bundled sidecar as automatic
+  fallback (Max-plan CLI plus the ~9 GB image);
+- **sidecar** — the bundled local CPU model; no Claude plan needed, works
+  for everyone (~9 GB image) —
+
+then brings the stack up, installs the selected clients' session hooks,
+registers the MCP transport (the stdio shim by default, direct HTTP via
+`--transport http`), and health-checks the daemon. The session-hook briefing
+delivers the memory-loop guidance every session, and the server also
+advertises the core loop through MCP `instructions` — so no standing-file
+edit is needed or offered. `--instructions append` additionally writes the
+block from `examples/CLAUDE.memory.md` into `~/.claude/CLAUDE.md` /
+`~/.codex/AGENTS.md` (useful for subagent visibility or hook-less setups).
+Idempotent — re-run any time; `--extractor <mode>` switches extractor
+setups. Non-interactive example:
+`ops/install.sh --extractor sidecar --client codex`.
+Linux (Docker Engine): your user must be in the `docker` group —
+`sudo usermod -aG docker $USER`, then log out/in (the preflight checks this).
+
+### Zero-config lite tier (no Docker)
+
+The smallest possible start — one pip install, no Docker, no database to
+set up:
+
+```bash
+pip install "pseudolife-mcp[lite]"
+claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
+```
+
+The first session auto-starts the daemon, which provisions an **embedded
+PostgreSQL 18** (pgvector included, via `pg0-embedded`) under a stable
+per-user data dir and downloads the embedding model (~1.2 GB, one-time).
+The full Postgres feature set applies — cortex facts, graph, lessons —
+and the bank is plain Postgres data: `pseudolife-mcp backup` writes a
+standard owner-free `pg_dump` archive (plus a state archive) with 7-day
+rotation, restorable into any PostgreSQL 18 target regardless of role —
+including the Docker tier (PostgreSQL 18 since 0.14), so outgrowing
+lite is a dump/restore, not a migration project. Two honest
+limits: dream consolidation needs an extractor endpoint (the Docker
+tier's bundled sidecar is not part of lite — without one, canonical
+facts come from `memory_fact_set` only), and on Windows the embedded
+runtime needs an ASCII-only data path (the daemon refuses non-ASCII
+with a clear message; set `PSEUDOLIFE_MCP_DATA_DIR`, e.g.
+`C:\pseudolife-data`). The Docker stack remains the recommended durable
+tier: external volumes, health-checked services, deploy/rollback
+tooling.
+
+<details>
+<summary>Manual install (the steps the installer automates)</summary>
+
+```bash
+ops/preflight.sh --client codex    # or ops\preflight.ps1 -Client codex
+docker volume create pseudolife-mcp-bank
+docker volume create pseudolife-mcp-state
+docker compose -f ops/docker-compose.yml up -d --build   # first build, once
+
+# ...or pull the prebuilt images instead of building (releases >= 0.14.0):
+docker compose -f ops/docker-compose.yml -f ops/docker-compose.ghcr.yml pull pseudolife-pg pseudolife-daemon
+docker compose -f ops/docker-compose.yml -f ops/docker-compose.ghcr.yml up -d
+
+# Verify, then wire the transport into one or both clients.
+curl http://127.0.0.1:8765/health
+
+# Stdio shim (the installer's default — per-session episode identity):
+pip install pseudolife-mcp
+claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
+codex mcp add pseudolife-memory -- pseudolife-mcp
+
+# ...or direct HTTP (no pip package needed; fine for single-session setups):
+claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
+codex mcp add pseudolife-memory --url http://127.0.0.1:8765/mcp
+
+# Reinforce the protocol-level memory loop with a global standing instruction:
+cat examples/CLAUDE.memory.md >> ~/.claude/CLAUDE.md
+cat examples/CLAUDE.memory.md >> ~/.codex/AGENTS.md
+# (PowerShell: Add-Content "$env:USERPROFILE\.claude\CLAUDE.md" (Get-Content examples\CLAUDE.memory.md -Raw))
+```
+
+Optional knobs live in `ops/.env` (`cp ops/.env.example ops/.env` — the
+install/update scripts scaffold it too; every value is commented, a missing
+file runs entirely on defaults).
+</details>
+
+Then in either coding agent: *"remember that my staging box is
+haze-02"* → the agent calls `memory_store`; next session, *"which box is
+staging?"* → `memory_search` finds it. Browse everything at the Cortex
+Console: <http://127.0.0.1:8765/ui/>.
+
+## What this is
+
+A memory engine exposed over MCP. There's no chat UI and no LLM doing the
+thinking — your coding agent is the intelligence; these are tools it calls to store and
+recall what matters. (Models *are* bundled as plumbing: baked embedding
+weights for retrieval, and the optional CPU extractor sidecar that
+consolidates memories into facts while you sleep.)
+
+Where it sits among the common approaches to agent memory — each column
+is a fair tool for what it's for; this table is about *what question each
+one answers*, not who's wrong:
+
+| | notes file (`CLAUDE.md`) | auto-journaling plugin | plain vector store | Pseudolife-MCP |
+|---|---|---|---|---|
+| Survives sessions and compactions | yes | yes | yes | yes |
+| "What is X *now*?" has one current answer | if you curate it | no — replays what happened | no — every stored version competes at recall | yes — slot-keyed cortex |
+| A correction replaces the old value | you edit the file | appended beside it | old and new both retrievable, unranked by recency of truth | supersedes, with full version history kept |
+| Facts know their age and go stale | no | no | no | dated, freshness-decayed, quarantined when stale |
+| Distils do/avoid lessons from its own outcomes | no | no | no | yes |
+| Benchmark numbers ship with their raw run artifacts | — | typically no | typically no | every published number, test-enforced |
+
+Auto-journaling records what the agent *did*; Pseudolife curates what it
+*learned*. Both are useful — they answer different questions.
+
+It layers several complementary stores: the **associative continuum** (an
+8-tier embedding store, working → forever, ranked by cosine similarity fused
+with a BM25 lexical pool (on by default), with contradiction detection and
+supersession); the **cortex** (slot-keyed canonical facts — one *current*
+value per `entity.attribute`, or a member set for set-valued slots — with
+provenance tiers and contender parking instead of silent overwrites); a typed **knowledge graph** over those facts
+with a closed relation vocabulary and on-read inference; the **world
+cortex** (durable *cited* facts about external reality, age-decayed trust);
+**procedural lessons** learned from the agent's own work; and a ChromaDB
+**reference bank** for document RAG. The canonical layers in depth:
+[the memory model](docs/guide/memory-model.md); the graph and multi-hop
+recall: [retrieval](docs/guide/retrieval.md).
+
+State lives in Postgres (the durable source of truth) behind a single
+long-lived daemon; every session attaches through a thin stdio shim
+(installer default — per-session identity) or directly over HTTP
+(single-session setups). The result: Claude can pick up where it left
+off, correct itself when facts change, and reason over relationships —
+without you re-explaining context each session.
+
+## Documentation
+
+This README is the front door — install, wiring, and the basic loop. The
+deep material lives in the user guide:
+
+| Page | What's in it |
+|---|---|
+| [Configuration](docs/guide/configuration.md) | Env vars, tuned defaults, toolset tiers, stdio shim, LAN sharing, data layout, backups, schema history |
+| [Retrieval](docs/guide/retrieval.md) | Reranker, BM25 hybrid, abstention floors, ranking-trace debugging, `memory_recall`, the knowledge graph |
+| [Dreaming](docs/guide/dreaming.md) | Extractor tiers, the bundled sidecar, upgrading the extractor, Sonnet-fallback, cadence, deep dream, consolidation |
+| [Episodes & sessions](docs/guide/episodes.md) | Daemon-owned session episodes, the briefing hook, nested sub-episodes, tags |
+| [The memory model](docs/guide/memory-model.md) | Cortex slots, provenance contenders, world cortex, lessons, temporal/HLC stamps |
+| [Benchmarks](docs/guide/benchmarks.md) | LongMemEval results; why extraction quality dominates |
+
+Plus [`evals/README.md`](evals/README.md) (full benchmark methodology) and
+[CONTRIBUTING](CONTRIBUTING.md).
+
+## Tools exposed
+
+The surface was consolidated 2026-07-02 (55 → 32 tools; now 35 with
+`memory_toolset` and the set-slot pair): lifecycle families became verb-dispatched tools
+(`memory_dream`, `memory_forget`, `memory_graph_review`), and
+dump/introspection views moved to the Cortex Console (REST) — the manifest
+is agent context every session, so it stays lean.
+
+| Tool | Purpose |
+|------|---------|
+| `memory_store(text, source?, tags?, origin?, episode?)` | Remember one durable fact / decision / observation (canonical facts reach the cortex via the dream pass or `memory_fact_set`) |
+| `memory_search(query, top_k?, filters..., rerank?, bm25?, explain?, verbose?)` | Associative retrieval; canonical `cortex` facts surface ahead of recall hits, each dated (`asserted_at` / `last_confirmed` / human `age`, plus `stale` when it has rotted); `explain=True` attaches a ranking trace |
+| `memory_recent(n?, sources?, episodes?, tags?, verbose?)` | Newest stores, timestamp-ordered (debug + session catch-up) |
+| `memory_supersede(old_text, new_text)` | Explicit correction — mark a memory obsolete, keep it as history |
+| `memory_forget(scope, ...)` | Hard-delete from one store: `memory` (by text/substring/source/episode/tag), `fact`, `world`, or `lesson` (by entity/attribute) |
+| `memory_stats()` | Per-band sizes, hit rates, totals |
+| `memory_get(entry_id)` / `memory_reinforce(entry_id)` | Dereference a memory id to its full episode (+ `consolidated_into`); reinforce it after finding it useful |
+| `memory_fact_get(entity, attribute)` | The one CURRENT canonical value at a slot (+ parked contenders); on an empty slot returns ranked `candidates` (same-entity, then similar slots); aged/contested facts carry a ready-made `correct_with` call (as do `memory_search` / `memory_world_search` hits) |
+| `memory_fact_set(entity, attribute, value, origin?, confidence?, episode?, freshness_class?)` | Assert a canonical fact deliberately (insert / confirm / supersede / contest); `freshness_class` (`auto` default) says how fast the slot rots — `auto` infers it from the entity's kind |
+| `memory_fact_resolve(entity, attribute, accept)` | Settle a contested slot — adopt (`true`) or discard (`false`) the contender |
+| `memory_set_add(entity, attribute, member)` / `memory_set_remove(entity, attribute, member)` | Add/confirm or retract one member of a set-valued slot (many concurrent values, e.g. tags — not one NOW value); a scalar there converts to a set one-way on first `memory_set_add`, except a number-led aggregate scalar ("32", "$1,500"), which is protected — the add parks as a contender instead. Read with `memory_fact_get`, which returns `{kind: "set", members, removed}` for these slots |
+| `memory_history(entity, attribute?)` | With `attribute`: version timeline at a slot, with writer/temporal stamps. Without: the entity's causal chain — dated fact/entry/edge/lesson events ("what led to X") |
+| `memory_world_set(entity, attribute, value, source_url?, ...)` | Assert a cited WORLD fact (external knowledge; age-decayed trust by freshness class) |
+| `memory_world_search(query, top_k?, verbose?)` | Search world facts — each carries `effective_confidence`, a `stale` flag, and its citation |
+| `memory_outcome(task, outcome, about?, detail?, polarity?, episode?)` | Record a procedural outcome signal (`success`/`failure`/`correction`); the dream distils signals into lessons |
+| `memory_lesson_search(query, top_k?, verbose?)` | Recall learned lessons for the task at hand — heed `polarity` `-` dead-ends; `re_verify` flags lessons whose subject facts changed since |
+| `memory_dream(action, limit?, cursor?, apply?, snippets?, run_id?)` | Drive the dream: `status` / `pull` / `commit` / `run` (server-side extractor) / `runs` (audit trail of recent passes) / `rollback` (revert the latest committed pass from its pre-image journal) / `deep` (full-corpus graph consolidation; dry-run unless `apply`, which snapshots the graph tables first; `snippets=false` omits candidate evidence; responses carry evidence-enriched `merge_proposals` for near-duplicate triage) |
+| `memory_graph_review(action, proposal_id?, proposals?, scope?, src?, dst?)` | Work the review queue: `list` / `propose` / `relate` (link a pair *and* dismiss its duplicate proposal in one call) / `dismiss_pair` / `dismiss_slot_pair` / `accept_link` / `reject_link` / `accept_merge` / `accept_junk` / `reject_entity` (merge/entity decisions are audit-stamped `decided_by=agent` over MCP, `human` via Console) |
+| `memory_session_title(title)` | Name THIS session's auto-opened episode (default titles are generic) |
+| `memory_episode_start(title, hint?)` / `memory_episode_end()` | Open/close a nested sub-episode for a substantial task; entries stored while open carry its id |
+| `memory_episode_summary(id)` | Stats + tag/source distribution + recent entries within an episode |
+| `memory_consolidation_candidates(query?, episode?, ...)` | Cluster near-duplicate memories ripe for consolidation |
+| `memory_consolidate(replaces, new_text, source?, tags?)` | Atomic supersede + store — replace a cluster with one canonical note |
+| `memory_graph_relate(src, relation, dst, ...)` | Assert a typed edge (closed relation vocabulary; re-assertion bumps confidence) |
+| `memory_graph_unrelate(src, relation, dst)` | Retract an edge (superseded, kept for audit) |
+| `memory_alias(entity, alias)` | Bind an alternative name — lookups resolve aliases first |
+| `memory_graph(entity, depth?, include_facts?, to?, relation_filter?)` | Entity neighborhood (≤3 hops) with derived transitive/inverse edges and per-edge `EXTRACTED/INFERRED/AMBIGUOUS` provenance tags; `to` returns the shortest path between two entities |
+| `memory_recall(query, hops?, top_k?, verbose?)` | Multi-hop retrieval for relational questions; `low_confidence: true` → fall back to `memory_search` |
+| `memory_relation_define(name, description, ...)` | Grow the closed relation vocabulary (deliberate, rare act) |
+| `document_ingest(path, source?)` | Index a file (txt/md/pdf) in the reference bank |
+| `document_search(query, top_k?)` | RAG search over the reference bank only |
+| `memory_toolset(action)` | Check or change this principal's visibility tier: `status` / `expand` / `collapse` |
+
+Each tool returns plain JSON. See `pseudolife_memory/mcp_server.py` for
+docstrings — those are what Claude reads to decide when to call which tool.
+The five recall-path tools return **compact entries** by default (result
+payloads are agent context on every retrieval); pass `verbose=true` for full
+metadata. Full-table dumps and topology views live in the **Cortex Console**
+(`/api/*`) and the `pseudolife-mcp briefing` CLI.
+
+**Toolset tiers.** Three visibility tiers — `minimal` (9 tools), `core`
+(22, the shipped default), `full` (35) — filtered per principal at
+`tools/list`; a principal (the named bearer-token identity, or the writer
+id for single-token installs) steps its own tier up or down with
+`memory_toolset` before calling a hidden tool. Defaults, per-client mapping, and weak-model
+deployments:
+[Configuration — toolset tiers](docs/guide/configuration.md#toolset-tiers).
+
+## Architecture
+
+One **memory daemon** owns the bank and serves MCP over streamable HTTP
+at `/mcp`; every Claude Code session (and any LAN agent) attaches to it.
+**Postgres 16 + pgvector** (in Docker) is the durable source of truth —
+the in-memory MIRAS bands are a write-through cache hydrated at startup
+(a small `weights.pt` persists only band counters — there are no MLP weights).
+
+The daemon runs **either** containerized (recommended — portable, no host
+Python) **or** as a host process. Claude Code attaches through a thin
+torch-free stdio **shim** (the installer default — per-session identity,
+needed for concurrent sessions) **or** directly over **HTTP** (simpler for
+a single session):
+
+```
+Claude session A ─┐  stdio shim (installer default) or HTTP
+Claude session B ─┼───────────────────► pseudolife-mcp daemon ─► Postgres (Docker)
+LAN agent ────────┘  or stdio shim         (single writer)        pgvector
+                     (per session)         host proc OR Docker
+```
+
+This kills two v0.1 hazards by construction: a single writer means
+concurrent sessions can't clobber each other, and entries are transactional
+so a crash can't wipe the bank. On top of the associative bands sit the
+canonical layers — cortex, world facts, lessons, temporal/HLC stamps
+([the memory model](docs/guide/memory-model.md)) — joined to a typed
+knowledge graph walkable via `memory_graph` and multi-hop `memory_recall`
+([retrieval & the graph](docs/guide/retrieval.md)).
+
+## Install — containerized (recommended, any OS)
+
+The whole stack — Postgres **and** the memory daemon — runs in Docker.
+No host Python, no torch install, no version skew; the daemon image bakes
+in CPU-only torch and the embedding weights — `Qwen/Qwen3-Embedding-0.6B`
+(the default retrieval backbone since schema v25) plus `all-MiniLM-L6-v2`
+(kept baked for the ONNX-parity test path) — so it runs identically on
+Windows / macOS / Linux. Requires only Docker; built once: ~5.0 GB daemon
+image (measured 2026-07-29 on the deployed build) + ~0.6 GB Postgres + ~9 GB
+extractor sidecar (skip the sidecar entirely with the installer's
+`sonnet-only` mode). The ~12.6 GB and ~10.4 GB figures published before
+2026-07-29 are retired: both were inflated by a CUDA torch build that a
+dependency-resolution bug pulled into the image (see the CHANGELOG); the
+daemon has always been CPU-only.
+
+```bash
+git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
+cd Pseudolife-MCP
+
+# 1. One-time: create the two persistent volumes (bank + daemon state).
+docker volume create pseudolife-mcp-bank
+docker volume create pseudolife-mcp-state
+
+# 2. Build + start all three services (Postgres, extractor, then the daemon).
+docker compose -f ops/docker-compose.yml up -d --build
+```
+
+> **Upgrading from a pre-rename install** (volumes `ops_pseudolife_pgdata` /
+> `ops_pseudolife_data`)? Don't rename those volumes — keep pointing at them by
+> creating `ops/.env` with `PSEUDOLIFE_BANK_VOLUME=ops_pseudolife_pgdata` and
+> `PSEUDOLIFE_STATE_VOLUME=ops_pseudolife_data` before `up`. See the compose header.
+
+> **Windows:** Docker Desktop's WSL2 VM claims up to ~50% of host RAM by
+> default; the stack needs ~6–7 GB under dream load with the default sidecar
+> (~2 GB in `sonnet-only` mode — the Qwen3 embedding backbone is the bulk of
+> it) — cap the VM via `ops/wslconfig.example`
+> (see [Troubleshooting](#troubleshooting)).
+
+The daemon serves MCP at `http://127.0.0.1:8765/mcp` and restarts with
+Docker — no logon task needed. First build downloads the model into the
+image (once); every container start after that is offline and fast. Wire
+Claude Code in via the stdio shim (installer default) or directly over
+HTTP (both below). Where the data actually lives, and
+how to back it up:
+[Configuration — data layout](docs/guide/configuration.md#data-layout).
+
+**Host-process install (Windows, for GPU / dev):** run Postgres in Docker
+but the daemon on host Python — for hacking on the daemon or running the
+embedder on a local GPU. Steps, the `pseudolife-mcp` CLI modes, and the
+logon autostart task:
+[Configuration — host-process install](docs/guide/configuration.md#host-process-install-windows-for-gpu--dev).
+
+## Updating
+
+After a `git pull` (or local code change), redeploy the **daemon only** — safely,
+without touching Postgres or the extractor:
+
+```powershell
+.\ops\update.ps1        # Windows
+```
+```bash
+./ops/update.sh         # Linux / macOS
+```
+
+It backs up the bank (`pg_dump` + a state-volume tar), tags a rollback
+image (when a previous one exists — it says so loudly when there isn't),
+rebuilds + recreates **only** the daemon, and waits for `/health`.
+It never runs `down -v`. (Host-process install: just restart the daemon —
+`pip install -e .` is editable.) Build cache is pruned automatically after
+every healthy deploy; see
+[Docker disk retention](docs/runbooks/docker-disk-retention.md) for the
+weekly Scheduled Task and the manual `.vhdx` compact. Never run
+`docker system prune --volumes`, which deletes volumes.
+
+> **Upgrading an existing bank to 0.11.0 (schema v25) needs one manual step.**
+> The default embedding backbone changed to `Qwen/Qwen3-Embedding-0.6B` and every
+> embedding column moved from `vector(384)` to `vector(1024)` — not an additive
+> migration. The daemon **refuses to start** against an older-dimensioned bank
+> (`/health` reports `status: "degraded"` with `init_refusal`) rather than
+> half-migrating it. Back up, stop the daemon, then re-embed offline:
+>
+> ```bash
+> python ops/migrate_embeddings.py                            # dry run (default — writes nothing)
+> python ops/migrate_embeddings.py --apply --backup-verified  # commit
+> ```
+>
+> Full procedure, including the health check that confirms it took:
+> [the v25 migration runbook](docs/runbooks/embedding-v25-migration.md).
+
+## Wire into your coding agent
+
+**Plugin (hooks + commands).** With the daemon running, two commands inside
+Claude Code wire the session hooks (briefing + episode identity), the
+memory-loop instructions, and the `/dream` + `/memory-status` commands:
+
+```
+/plugin marketplace add Pseudogiant-xr/Pseudolife-MCP
+/plugin install pseudolife-memory@pseudolife-mcp
+```
+
+The plugin replaces the settings.json hook **and** the CLAUDE.md block below
+— the same standing instructions arrive as session context from the daemon.
+It deliberately does **not** bundle the MCP server: Claude Code loads a
+plugin server alongside any user-registered one with no deduplication, which
+doubled every session's tool namespace next to the installer's registration
+— so the transport is registered exactly once, by `ops/install.*` (stdio
+shim by default — per-session episode identity) or the one-liner below.
+Details, non-default ports/tokens, and migration:
+[plugin/README.md](plugin/README.md).
+
+**Manual transport registration.** The installer's default (shim mode)
+registers a thin stdio shim — one shim process per session, so every
+session carries its own tier-1 identity. The same wiring by hand:
+
+```bash
+pip install pseudolife-mcp
+claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
+```
+
+Direct HTTP works too — the daemon serves MCP over HTTP natively (no shim,
+no host command, nothing OS-specific; concurrent sessions then share one
+episode identity, so it fits single-session setups best):
+
+```bash
+claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
+```
+
+(`--scope user` registers it for every project; drop it to register for the
+current project only.) Or write the equivalent JSON yourself — into
+`~/.claude.json` under the top-level `mcpServers` key for user scope, or into
+a `.mcp.json` at a project root for project scope:
+
+```json
+{
+  "mcpServers": {
+    "pseudolife-memory": {
+      "type": "http",
+      "url": "http://127.0.0.1:8765/mcp"
+    }
+  }
+}
+```
+
+Codex — the installer's default (shim mode) wires the same stdio shim, so a
+Codex session gets its own tier-1 identity instead of inheriting a
+concurrent Claude session's episode:
+
+```bash
+pip install pseudolife-mcp
+codex mcp add pseudolife-memory -- pseudolife-mcp
+```
+
+The HTTP one-liner works too (no pip package needed):
+
+```bash
+codex mcp add pseudolife-memory --url http://127.0.0.1:8765/mcp
+```
+
+Or add the equivalent user-level entry to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.pseudolife-memory]
+url = "http://127.0.0.1:8765/mcp"
+```
+
+If you ran the daemon with a `PSEUDOLIFE_MCP_TOKEN`, add a `headers` key:
+`"headers": { "Authorization": "Bearer <your-token>" }`.
+
+**Verify:** run `claude mcp list` or `codex mcp list` (the server should report
+connected), then ask the agent to *"store a memory that this install works"* and check it
+appears in the Stream tab of the Console at <http://127.0.0.1:8765/ui/>.
+
+Preferring stdio (this is what the installer wires by default, for
+per-session identity)? A thin torch-free **shim** proxies stdio to the
+daemon:
+[stdio shim](docs/guide/configuration.md#stdio-shim-per-session-identity)
+· [LAN sharing](docs/guide/configuration.md#sharing-memory-on-the-lan)
+· [backups & restore rehearsal](docs/guide/configuration.md#backups).
+
+## Recommended agent setup (CLAUDE.md / AGENTS.md)
+
+The server's value depends entirely on the agent *using* it well — **this step
+is what makes the memory loop actually fire**. The MCP server advertises the
+core loop through protocol-level `instructions`, and the session hook (one
+command, below) delivers the full block every session — **plugin users and
+hook users need nothing more**. If you want it in a standing file instead —
+or additionally, for subagent visibility (subagents read `CLAUDE.md` but not
+hook output) — append it to Claude's global `~/.claude/CLAUDE.md`, Codex's
+global `~/.codex/AGENTS.md`, or a per-project `CLAUDE.md` / `AGENTS.md`:
+
+```bash
+cat examples/CLAUDE.memory.md >> ~/.claude/CLAUDE.md
+cat examples/CLAUDE.memory.md >> ~/.codex/AGENTS.md
+```
+
+```powershell
+Add-Content "$env:USERPROFILE\.claude\CLAUDE.md" (Get-Content examples\CLAUDE.memory.md -Raw)
+Add-Content "$env:USERPROFILE\.codex\AGENTS.md" (Get-Content examples\CLAUDE.memory.md -Raw)
+```
+
+The block ([`examples/CLAUDE.memory.md`](examples/CLAUDE.memory.md)) teaches
+the loop: **RECALL at the start** (`memory_search` / `memory_lesson_search` /
+`memory_fact_get` / `memory_world_search`), **CAPTURE as you go**
+(`memory_store` with an honest `origin`, `memory_fact_set` for canonical
+facts, `memory_world_set` for cited external facts, `source="status"` for
+verbose logs so they stay out of the dream), **REFLECT at the end**
+(`memory_outcome` — the dream distils these signals into the lessons
+surfaced at your next session start).
+
+One command — `ops\install-hook.ps1 -Client codex` (Windows, PowerShell 7) or
+`ops/install-hook.sh --client codex` (Linux/macOS) — installs the
+**SessionStart briefing hook** for the selected client (what your memory is
+unsure about + lessons from past work + verified world facts + where we left
+off, injected at every session start). It backs up `~/.claude/settings.json`
+or `~/.codex/hooks.json` and is idempotent. The manual hook JSON,
+the briefing budget flags, and how session episodes open/close/resume
+without any hooks: [Episodes & sessions](docs/guide/episodes.md).
+
+## Usage patterns
+
+**At session start** — loads what you've worked on before, persistent
+across compactions:
+```
+memory_search("project context for X")
+```
+
+**During work** — store real decisions; skip fleeting chatter (the shipped
+store gate is permissive, so deliberate, durable claims only):
+```
+memory_store("Decided to use stdio transport for the MCP because no port conflicts", source="pseudolife")
+```
+
+**When corrected** — marks the old fact superseded *and* stores the
+correction; both surface in future retrieval, the new one ranked higher:
+```
+memory_supersede(
+  "Provider interface uses synchronous calls",
+  "Provider interface uses async calls — sync version was the v0.7 prototype only"
+)
+```
+
+**Hygiene** — hard-delete (at least one filter is required for scope
+`memory`, preventing accidental wholesale deletion); for "keep the history
+but mark it wrong" use `memory_supersede` instead:
+```
+memory_forget(scope="memory", source="test-noise")
+memory_forget(scope="fact", entity="test-entity")
+```
+
+**Discovering what's in the bank:** open the Cortex Console — sources, tags,
+episodes, and full-table views all live there. Going deeper:
+[reranking, BM25, abstention, and trace debugging](docs/guide/retrieval.md)
+· [episodes + tags](docs/guide/episodes.md#episodes--tags)
+· [canonical facts, contenders, world facts, lessons](docs/guide/memory-model.md)
+· [the consolidation workflow](docs/guide/dreaming.md#consolidation-workflow-agent-driven-dedup).
+
+## Dreaming — consolidating memories into facts
+
+A **dream** distils the recent associative stream into canonical cortex
+facts while you're not looking: pull unconsolidated memories → extract
+`(entity, attribute, value)` → advance a cursor so nothing is reprocessed.
+Extraction is pluggable:
+
+| Tier | How it runs | Needs | Quality |
+|------|-------------|-------|---------|
+| **0 — baseline** | `memory_dream(action="run")` (regex floor) — headless, on-box, free | nothing | weak |
+| **1 — agent-driven** | the **agent itself** is the gateway: the `/dream` command | the agent you already run | highest |
+| **2 — shipped default** | daemon auto-sweep → the bundled CPU sidecar, or any OpenAI-compatible endpoint | nothing (sidecar) | high; free if local |
+
+The stack ships tier 2 preconfigured (the bespoke Gemma 4 E4B extractor
+fine-tune in a llama.cpp sidecar, internal-only). The sweep cadence,
+pointing dreams at a bigger local model or at Claude Sonnet with automatic
+sidecar fallback, the full-corpus **deep dream** graph pass, and the
+privacy/cost trade-offs: [Dreaming](docs/guide/dreaming.md).
+
+## Benchmarks
+
+Measured **end to end on the current shipped stack** — fresh local-ceiling
+extraction under the v25 embedding backbone, BM25-on turn retrieval,
+reproducible serving (3 byte-identical replicates — std 0.0000) — on the
+knowledge-update subset of
+[LongMemEval](https://arxiv.org/abs/2410.10813) (oracle variant):
+
+| arm | accuracy | context tokens/question |
+|-----|----------|------------------------|
+| naive RAG (top-6 turns) | 0.859 | ~1237 |
+| cortex facts only | 0.667 | **~259** |
+| hybrid (facts + top-3 turns) | 0.833 | ~920 |
+| **commit-gated cascade** | **0.936** | ~702 |
+
+The **cascade** is a serving policy, not a fourth pipeline: answer from
+the consolidated facts when that channel *commits*, fall back to raw-turn
+RAG when it abstains. It beats naive RAG by ~8 points while reading ~57%
+of the context, and the margin survives the full ~50-session haystacks —
+0.462 vs 0.346, a pre-registered paired test at p = 0.011
+([details](docs/guide/benchmarks.md)). Read honestly: with the v25
+retriever, raw-turn selection improved enough that the *concatenation*
+hybrid no longer beats naive RAG on this slice — sequencing the channels
+is what restores the fact spine's edge. The fact spine alone reaches
+0.667 on ~21% of RAG's token budget. Setup, caveats, and the evidence
+that extraction quality is the dominant factor:
+[Benchmarks](docs/guide/benchmarks.md); full methodology:
+[`evals/README.md`](evals/README.md).
+
+Retrieval itself was re-measured on the same corpus before the v25 backbone
+swap (150 questions, 74,183 haystack turns, 299 gold turns; pure recall — no
+reader, no judge): `Qwen/Qwen3-Embedding-0.6B` reaches **R@10 0.809** against
+`bge-base-en-v1.5`'s 0.742 and the previously-shipped `all-MiniLM-L6-v2`'s
+0.572, and beats bge-base head-to-head **+32/−12 at k=10 (p=0.004)**.
+Artifacts: [`embedder-recall-shootout-20260727.json`](evals/results/embedder-recall-shootout-20260727.json),
+[`embedder-recall-qwen-vs-bge-20260728.json`](evals/results/embedder-recall-qwen-vs-bge-20260728.json).
+
+## Cortex Console (web UI)
+
+An operator dashboard served by the daemon itself — point a browser at
+**`http://127.0.0.1:8765/ui/`** (the `/health` and `/mcp` endpoints are
+unchanged; the console is additive). It's a read-mostly instrument panel for
+seeing and steering the memory a human otherwise can't observe:
+**Observatory** (health, per-layer counts, the 8-band continuum, dream
+gauges), **Cortex** (canonical facts with provenance, version-history
+timelines, inline Accept/Discard for contested slots), **World / Lessons /
+Episodes**, **Stream** (live search with rerank/BM25 toggles and a
+ranking-trace debugger), **Graph** (interactive force-directed visualiser, with a review drawer that
+can Accept/Reject merges or — for a source file and its own bare concept,
+`band.py` ↔ `band` — record an `implements` edge instead of forcing
+merge-or-dismiss), and **Console** (every safe `config.yaml` scalar with live-vs-restart
+badges, diff-preview, and atomic save).
+
+**Auth** mirrors `/mcp`: `/ui` (static shell) and `/health` are open; `/api/*`
+requires the same `PSEUDOLIFE_MCP_TOKEN` bearer when one is set (the console
+prompts for it and stores it locally). No build step, no CDN, fully offline —
+vanilla ES modules + vendored OFL fonts served straight from the daemon.
+Developing the UI? A fixture-backed dev server (no Postgres, no torch)
+renders the real frontend against canned data:
+`python -m pseudolife_memory.web.devserver` → `http://127.0.0.1:8770/ui/`.
+
+## Capabilities at a glance
+
+| Capability | Status |
+|---|---|
+| Transport | Streamable-HTTP MCP daemon (`/mcp`); stdio shim is the installer default (per-session identity) — HTTP remains for single-session setups |
+| Storage | Postgres 16 + pgvector (source of truth); ChromaDB for the reference bank |
+| Associative continuum | 8-tier MIRAS bands; hybrid dense + BM25 ranking (BM25 on by default); contradiction detection and supersession, including a deterministic slot-identity path that fires regardless of embedding similarity |
+| Canonical-fact cortex | Single-writer: LLM dream pass + `memory_fact_*` (regex auto-promote opt-in, default off) |
+| Set-valued slots | `memory_set_add` / `memory_set_remove` for many-current-value slots; one-way scalar→set conversion, aggregate scalars guarded (park as contender) |
+| Provenance contenders | Tier-rank guard `user > action > agent`; `memory_fact_resolve` |
+| Fact currency | Every cortex fact is dated (`asserted_at` / `age`); `freshness_class` (`evergreen` / `slow` / `volatile`) decays `effective_confidence` and flags `stale`. Left `auto`, the class is inferred from the entity's kind (schema v24 `entity_kinds`) — only `system` entities can rot; artifacts and concepts stay evergreen |
+| Knowledge graph | Typed entities/edges, closed relation vocab, on-read closure (Postgres + NetworkX, no AGE/Cypher) |
+| World cortex | `memory_world_*` — cited external facts + age-decayed freshness (manual ingest) |
+| Procedural memory | `memory_outcome` (signals) → dream-synthesised lessons via `memory_lesson_search`; `prefers`/`avoids` graph edges; single-writer |
+| Sense of time + multi-writer | Per-write stamp (tx/valid time, HLC ordering, writer/session); `memory_history`; relative `age` on reads; `write_mode` seam (snapshot live, occ Phase-2) |
+| Episodes + tags | Session episodes daemon-owned, keyed by a resolved five-tier session identity; hook/shim eager-open or lazy-open + idle reaper + prune-empty + resume-after-reap; nested sub-episodes with subtree-expanded recall; multi-valued `tags=[...]` |
+| Session briefing | SessionStart hook injects unsure-graph + lessons + verified world facts + last-session recap (`pseudolife-mcp briefing`) |
+| Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
+| Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); ONNX embedding backend (`pip install .[onnx]` — ~3x faster CPU encode, bit-identical, auto-enabled when installed; the default Qwen3-Embedding-0.6B has no ONNX export and falls back to torch, so this currently only speeds up MiniLM-family models); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
+| Web console | Cortex Console at `/ui/` — health/stats, fact review + history, graph visualiser, search/trace, config editor (read-mostly, token-gated like `/mcp`) |
+| Schema version | v29 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
+
+## Troubleshooting
+
+Start with `curl http://127.0.0.1:8765/health` — it reports the schema
+version, storage backend, auth state, and `persist_errors` (non-zero means
+writes are failing to reach Postgres; check `docker logs
+pseudolife-mcp-daemon`).
+
+- **First build is slow / big.** The daemon image (~5.0 GB, several
+  minutes to build) bakes in CPU torch and the embedding weights (Qwen3-Embedding-0.6B
+  plus MiniLM); the extractor sidecar
+  adds a ~5.3 GB model download on its first build. Every start after that is
+  offline and fast — if a *rebuild* is re-downloading models, the Docker
+  layer cache was pruned.
+- **Daemon unreachable after `wsl --shutdown`** (Windows): the host port
+  forward is gone — `docker restart pseudolife-mcp-daemon` re-establishes it.
+- **Docker eating RAM** (Windows): the WSL2 VM (`Vmmem`) claims up to ~50% of
+  host memory by default. Copy `ops/wslconfig.example` to
+  `%USERPROFILE%\.wslconfig`, tune `memory=`, then `wsl --shutdown`.
+- **Port already in use**: the stack binds `127.0.0.1:8765` (daemon) and
+  `127.0.0.1:5433` (Postgres). Change the host side in
+  `ops/docker-compose.yml` if either collides.
+- **Console shows "offline" / Unauthorized**: "offline" means the daemon
+  isn't reachable (see above); a 401 prompt means it runs with
+  `PSEUDOLIFE_MCP_TOKEN` — paste that token into the Console's Token dialog.
+- **The coding agent doesn't see the tools**: `claude mcp list` or
+  `codex mcp list` should show
+  `pseudolife-memory` ✓ connected. If not, re-check the URL
+  (`http://127.0.0.1:8765/mcp` — the `/mcp` path matters) and the bearer
+  header when a token is set. The daemon preloads the embedder on a warmup
+  thread at start (~5–10 s); a very early first call can race it and take a
+  few seconds.
+
+## Uninstall
+
+Deletion is deliberate at every step:
+
+```bash
+# 1. Optional: take a final backup first (ops/backup.ps1 or ops/backup.sh).
+# 2. Stop and remove the containers (volumes survive this).
+docker compose -f ops/docker-compose.yml down
+# 3. Remove the MCP registration.
+claude mcp remove pseudolife-memory
+codex mcp remove pseudolife-memory
+# 4. Only when you're sure: delete the data volumes (THIS is the memory).
+docker volume rm pseudolife-mcp-bank pseudolife-mcp-state
+```
+
+Host-process installs: also unregister the logon task
+(`Unregister-ScheduledTask -TaskName "Pseudolife-MCP Daemon"`) and remove
+the SessionStart briefing hook from `~/.claude/settings.json` and/or
+`~/.codex/hooks.json` (a timestamped `.bak-*` sits next to each edited file).
+
+## Testing
+
+`pip install -e .[dev]`, then `pytest tests/`. The suite covers every
+layer, from the MemoryService surface to the Cortex Console REST API;
+model-heavy pieces are stubbed so it stays fast and offline. The PG-backed
+suites each target a throwaway per-run `pseudolife_memory_test_<pid>`
+database on the bundled dev container (never your real bank; concurrent
+runs can't collide), dropped on exit, and skip cleanly without Postgres.
+Full dev setup: [CONTRIBUTING](CONTRIBUTING.md).
+
+## What's not built yet
+
+- **Reflection via MCP sampling** — would let the dream borrow *Claude
+  itself* as the extractor;
+  [Claude Code doesn't yet support it](https://github.com/anthropics/claude-code/issues/1785).
+- **Cross-machine sync** — memory lives on one PC's disk; syncing via
+  rclone / syncthing is left as an exercise.
+- **Automated world-knowledge ingestion** — populating the world cortex
+  from the live web needs a web-fetch tool the standalone server doesn't
+  ship; an agent with web access can automate the fetch+cite step today
+  via `memory_world_set`.
+
+## License
+
+Apache-2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+---
+
+<!-- source: docs/guide/memory-model.md -->
+
+# The memory model — cortex, world facts, lessons, and time
+
+The canonical-fact layers in depth: the slot-keyed cortex, provenance
+contenders, the cited world cortex, procedural lessons, and the temporal /
+multi-writer stamp. Part of the [user guide](../../README.md#documentation).
+
+## Canonical facts — the cortex (schema v8)
+
+Alongside the associative continuum (the 8 MIRAS bands) sits the
+**cortex**: a slot-keyed canonical-fact store. Where the continuum is
+similarity-ranked and decaying, the cortex is **identity-not-similarity,
+supersession-not-decay, currency-not-frequency** — one *current* value per
+`(entity, attribute)` slot (or a member set, for [set-valued
+slots](#set-valued-slots)), retrievable out of the context window.
+
+- **Single-writer capture.** The LLM **dream** pass (the extractor sidecar)
+  is the sole *automatic* writer of canonical facts, plus deliberate
+  `memory_fact_set` calls. The deterministic regex auto-promote on `store`
+  is now **opt-in** (`memory.cortex.auto_promote`, default **off**): it
+  mis-splits compound entity names (`"payments database host"` →
+  `payments` / `database host`) and fragments slots, so it ships off — see
+  [the single-writer cortex design](../specs/2026-06-19-single-writer-cortex-design.md).
+  (When enabled it still uses the precision-first dev lexicon:
+  `<entity> <attr> is <value>` with the attribute drawn from a closed set —
+  port / version / host / branch / default timeout / … — plus
+  `my <attr> is <value>`, `<Entity>'s <attr> is <value>`,
+  `the <attr> of <entity> is <value>`, and single-line
+  `<entity> <attr>: <value>`.) A one-time `ops/dedup_cortex.py`
+  (dry-run-first, reversible) collapses sibling slots left by past
+  auto-promotes.
+- **Documented vs enacted.** A fact stated by a *document* you shared (a
+  spec, policy, protocol, runbook) is captured under that document's
+  subject, distinct from a fact about what was actually done — the rule and
+  the practice occupy different slots and can disagree without either
+  overwriting the other. See [what the extractor
+  captures](dreaming.md#what-the-extractor-captures).
+- **Deterministic read.** `memory_fact_get("project", "language")` returns
+  the one current value — no ranking, no stale duplicates. `memory_search`
+  also surfaces matching facts ahead of associative hits (a `"cortex"`
+  block) — the hybrid shape that outperforms either channel alone (see
+  [Benchmarks](benchmarks.md)).
+- **Deliberate write / correction.** `memory_fact_set(entity, attribute,
+  value, origin="user")` asserts a fact at higher confidence; setting a new
+  value at an existing slot supersedes the old (kept as audit history).
+
+### How current is this fact?
+
+A cortex fact is the *last thing asserted* at a slot, which is not the same
+as a *true* thing now. Two fields make that gap visible rather than leaving
+a reader to assume the value is live:
+
+- **Every fact carries its dates.** Reads project `asserted_at` and
+  `last_confirmed` (ISO-8601, second resolution) plus a human `age`
+  (`"3d ago"`). A value with no other signal is still judgeable: a
+  "currently deployed" fact last confirmed nine months ago is worth
+  re-checking against the source before acting on it.
+- **`freshness_class` says how fast the slot rots** — `evergreen`
+  (never decays), `slow` (~9 months), `volatile` (~3 weeks). Non-evergreen
+  facts report an `effective_confidence` that decays toward a per-class
+  floor with time since `last_confirmed`, and are flagged `stale: true`
+  past twice their TTL. Re-asserting the same value confirms it and
+  restores full confidence.
+
+Set it explicitly at write time: `memory_fact_set("pseudolife-mcp",
+"extractor-prompt-version", "v2", freshness_class="volatile")` — an
+explicit value always wins, and since v23 `POST /api/facts/set` threads it
+too, so the Console and the REST fallback (the documented workaround for
+clients that stringify MCP list params) no longer pin every fact they
+write to `evergreen`. Left unset (the default is the sentinel
+`"auto"`), the class is instead **inferred from the entity's kind**
+(schema v24, `entity_kinds`): a `system` entity (live, mutable — the sort
+of thing with a "currently deployed" answer) can resolve to `volatile`; an
+`artifact` (frozen at a point in time, like a tagged release) or a
+`concept` (abstract/definitional) always resolves `evergreen`, whatever
+the attribute name. `0-9-0-release / schema-version` is permanently true;
+`daemon / schema-version` rots — same attribute, opposite class, because
+the entities differ.
+
+The attribute still gets a vote, but only on a `system` entity and only in
+one direction: a short, deliberately dumb list of state-shaped names
+(`status`, `state`, `health`, `live`, `running`, `current`,
+`deployment`/`deployed`, `url`, `version`) resolves `volatile`, everything
+else stays `evergreen`, and event-shaped names (`…-date`, `…-at`,
+`…-hash`, `…-commit`, `…-count`) are forced `evergreen` first, so a
+recorded deployment *date* never inherits the volatility of the deployment
+it describes.
+
+An entity with no recorded kind — which is every entity until the offline
+classifier assigns one — resolves `evergreen`, not `volatile`: personal
+cortex facts are mostly durable, and defaulting the other way would
+re-rank every existing bank on an assumption nothing has measured. Facts
+already in the bank before schema v23, and any entity the classifier
+hasn't reached, read back exactly as before, so nothing changes until an
+entity is deliberately classified.
+
+Both fields are descriptive, not enforcement — a stale fact is still
+returned, marked. Nothing is auto-deleted or auto-superseded on age.
+The read surface does nudge, though: once a fact has aged past a third
+of its TTL (or sits contested), `memory_search`, `memory_fact_get`, and
+`memory_world_search` attach a ready-made `correct_with` call to it — a
+filled-in `memory_fact_set(...)` the reading agent can run the moment it
+verifies the value, re-asserting or correcting at the same slot. The
+`stale: true` flag is the louder, later signal (twice the TTL);
+`correct_with` fires earlier so drift gets fixed at first contact.
+
+Since 2026-07-25 **raw band entries follow the same slot rule.** When a
+stored memory and an earlier one assert different values — or opposite
+polarities — at the same normalised `(entity, attribute)` slot, the earlier
+entry is marked superseded. This is deterministic and does not consult
+embeddings, which matters because a value swap is a *minimal* edit: a real
+correction is often more embedding-similar than a harmless near-duplicate,
+so similarity alone is close to a coin flip for this judgment. It runs
+ahead of the similarity-gated heuristics (negation asymmetry, affirmative
+replacement, state transition), which still handle everything without
+slots. Slot extraction is deliberately precision-gated — about 0.6% of
+conversational turns yield one — so this path mostly serves deliberate,
+fact-shaped writes, and its reach grows with extraction quality.
+
+## Set-valued slots (schema v26)
+
+A cortex slot is scalar by default — one *current* value, corrected by
+supersession. Some facts aren't a single current value at all: restaurants
+you've tried, bikes you own, PRs pending review. Forcing a collection through
+the scalar model destroys information — the second `memory_fact_set` call
+supersedes the first, so "tried: Ramen-ya" then "tried: Pho Anh" leaves only
+Pho Anh current. A **set-valued slot** holds many members concurrently
+current instead of one.
+
+- **Use a set** when the fact is naturally plural and members are added and
+  retracted independently of each other — tags, memberships, an inventory,
+  a pending-items list.
+- **Keep scalar supersession** when there is one true value that changes over
+  time (a job title, a deployed version, a phone number) — the existing
+  `memory_fact_set` behaviour, unchanged.
+
+### Lifecycle
+
+`memory_set_add(entity, attribute, member)` adds a member or, if the same
+value (exact match or near-duplicate by embedding) is already current,
+*confirms* it — bumping `last_confirmed` and, if higher, confidence, rather
+than inserting a duplicate. `memory_set_remove(entity, attribute, member)`
+retracts one current member. Neither call touches any other member of the
+slot. As with scalar supersession, nothing is hard-deleted: a removed member's
+row survives with `status: "removed"`, so re-adding the same value later is a
+fresh add, not an undo, and the full history (added, confirmed, removed,
+re-added) stays inspectable via `memory_history` / the store's
+`members(..., include_removed=True)` audit view.
+
+Members are never *contested* — there is no provenance-tier dispute path for
+a set the way there is for a scalar (see [Provenance
+contenders](#provenance-contenders--never-silently-overwrite-a-user-fact)
+below). A second value landing on an already-populated set slot is just a
+second member, not a conflict to resolve. (The one exception: an *add*
+against a slot that still holds a protected aggregate scalar — see
+[Conversion rules](#conversion-rules) below — parks as a scalar contender.
+Once a slot has actually converted to a set, this still holds: members
+themselves are never contested.) A set slot also caps at 100 concurrent
+members; further adds beyond the cap are dropped (`"member_capped"`) rather
+than silently applied or queued.
+
+### Conversion rules
+
+Conversion between scalar and set is deliberately **one-way in both
+directions of the story**:
+
+- **Scalar → set**: the first `memory_set_add` call against a slot that
+  currently holds a scalar value converts it. The scalar row is superseded
+  (kept as audit history, same as any other supersession) and reinserted as
+  the set's first member. From that point, `memory_fact_set` against the
+  same slot raises an actionable error naming `memory_set_add` /
+  `memory_set_remove` instead of the store's own `add_member`/`remove_member`
+  vocabulary — there is no path back to scalar while any member is current.
+- **Set → scalar**: only once *every* member has been removed. With no
+  current record of either kind at the slot, `memory_fact_set`'s own guard
+  (which checks for current members, not history) allows a fresh scalar
+  write there. This is a byproduct of removing the last member, not a
+  dedicated "revert" call — and the removed member rows stay as audit, they
+  just no longer make the slot read as a set.
+
+Set members are **evergreen-only, by design**: there is no way to give a
+member a `freshness_class`, and the scalar → set conversion **drops** a
+non-evergreen scalar's class rather than carrying it onto the member (a
+`volatile` "deploy status: pending" that gets a second status added
+becomes an ordinary evergreen membership). Three reasons, weighed
+deliberately rather than left implicit:
+
+- staleness decay exists to age scalar values that change without anyone
+  saying so; a set already has an explicit "no longer true" channel —
+  `memory_set_remove`, with removal tombstones — and decay layered on top
+  would be a second, competing invalidation mechanism;
+- there is no group-level staleness that honours the `stale_policy`
+  contract: quarantining or demoting a whole set entry because one member
+  aged would transform *fresh* members' payloads (the no-harm gate the
+  policy eval preregistered), while per-member transforms would still leak
+  raw stale text through the composed group `value`;
+- the serving change would re-rank deployed banks on an unmeasured
+  assumption — the same reason `freshness_class` itself defaulted personal
+  facts to `evergreen` at v23.
+
+The drop is audit-visible, not silent: the conversion's supersession-log
+entry carries `dropped_freshness_class` (e.g. `"volatile"`) whenever the
+converted scalar was non-evergreen, and the superseded scalar row keeps
+its own class for history. If a fact's staleness matters, keep it scalar.
+
+The scalar → set conversion carries one guard: if the current scalar is a
+**number-led aggregate value** — a value with an optional leading currency
+symbol (`$` `€` `£`), then an optional leading `+`/`-` sign, then a required
+digit (`^[$€£]?[+-]?\d`; e.g. "32", "27 species", "$1,500") —
+`memory_set_add` does not convert it.
+Converting would destroy a stated total that no enumeration of members
+recovers, which is exactly what a paired eval gate measured as a
+net-negative effect on knowledge-update questions
+(`evals/results/c2op-gate-verdict.json`). Instead the incoming member is
+parked as a contender against the scalar (audit reason
+`member_add_blocked_aggregate`), the same provenance-contender machinery
+described below; the scalar stays current, and `memory_fact_resolve(...,
+accept=True)` remains the explicit human path to overwrite the total. If
+the incoming member equals the current scalar, it confirms the scalar
+instead of parking a contender identical to itself. The guard applies
+unconditionally — regardless of `memory.cortex.protect_provenance` —
+because protecting a stated total isn't a provenance-tier concern.
+Accepted v1 limitation: on content that enumerates members after stating a
+count ("I own 3 bikes" then "picked up a gravel bike"), the guard likewise
+suppresses set formation and leaves the latest add sitting as a contender —
+correct for stated-total content, a measured trade-off for enumerating
+content.
+
+### Reading a set slot
+
+`memory_fact_get(entity, attribute)` returns the scalar shape
+(`{record, contenders}`) for a scalar slot, but a set-valued slot returns a
+different shape instead: `{kind: "set", entity, attribute, members: [...],
+removed: [...]}`. **`members: []` (every member removed) reads as EMPTY** —
+the same signal a scalar miss gives a caller — not as "found, zero members."
+
+`memory_search` and `cortex_search` surface a set slot's whole current
+membership as **one entry**, not one hit per member: `{"kind": "set",
+"value": "m1; m2 (2 members)", "members": [...], "score": <top member's
+score>, "contested": false, ...}`. The composed value lists whichever members
+individually ranked highest first, then any current member that didn't rank
+on its own — so the full membership is always visible even when the query
+only matched one member by name. A set entry carries `last_confirmed`,
+`asserted_at`, and `age`, all anchored to the most recent add/confirm
+activity across its members — **removing a member never moves these dates**.
+It carries no `freshness_class` at all (it renders as `evergreen`, same as
+any unclassified scalar); age-based decay is a scalar-only affordance, by
+the deliberate evergreen-only rule under [Conversion
+rules](#conversion-rules) above.
+
+### Dream extraction
+
+A dream claim may carry `"op": "add" | "remove"` to target set membership
+instead of the scalar supersede path. `op` is for membership changes only —
+a plain value update ("moved to Seattle") is still an ordinary scalar claim
+with no `op`. A scalar claim (no `op`) landing on a slot that already holds
+current members is dropped and logged, not routed or silently applied — the
+only way to touch a set slot is an explicit `op` or the two MCP tools
+themselves. A malformed `op` value degrades to the scalar path with a
+warning rather than failing the dream. **Since 2026-08-01 the shipped
+extraction prompt solicits `op`**, paired with a counts-are-never-members
+rule: the bare op block measured net-negative on knowledge-update content
+(the model re-routed count *updates* into `op:"add"` claims, freezing
+stated totals — `evals/results/c2op-gate-verdict.json`), and the count
+rule is what repaired it — the gated run landed the commit-gated cascade
+exactly at the op-less control while genuine sets still formed
+(`evals/results/c2op-count-verdict.json`, with sidecar-adoption and
+ladder-rung validation in the same artifact). The shipped prompt is
+byte-pinned to the measured artifact (`evals/prompts/ku_op_prompt_v5.txt`).
+The aggregate-conversion guard (see [Conversion rules](#conversion-rules)
+above) remains the apply-time backstop: an `op:"add"` that does land on a
+stated-total scalar parks as a contender rather than converting, whether
+it came from a live `memory_set_add` call or a dream claim.
+
+## Provenance contenders — never silently overwrite a user fact
+
+Every cortex fact carries a provenance tier: **`user` > `action` >
+`agent`** (set via `origin=`, or defaulted from `source`). A write may only
+*supersede* a slot whose current value is backed by an equal-or-weaker
+tier. A **weaker-tier** write (e.g. an `agent` value conflicting with a
+`user`-stated fact), or one below the confidence margin, is **not
+applied** — it's parked as a *contender*:
+
+```python
+memory_fact_set("db", "host", "10.0.0.5", origin="user")   # current
+memory_fact_set("db", "host", "10.0.0.9", origin="agent")  # -> action="contested"
+# current stays 10.0.0.5; "10.0.0.9" is parked. memory_fact_get shows both;
+# memory_search flags the fact "contested": true.
+memory_fact_resolve("db", "host", accept=True)   # human said yes -> adopt (user-confirmed)
+# or accept=False -> discard the contender, current unchanged.
+```
+
+This catches the case where the agent *decides* to update something and the
+human only said "yes/proceed": the discrepancy surfaces (at the write, in
+search, and in `memory_fact_get`) so the agent can check in rather than
+overwrite. Set `memory.cortex.protect_provenance: false` in `config.yaml`
+to disable and restore pure newer-wins — for scalar-vs-scalar conflicts;
+the aggregate conversion guard's contender parking (see [Conversion
+rules](#conversion-rules) above) applies regardless of this setting, since
+protecting a stated total isn't a provenance-tier concern.
+
+## World knowledge — the world cortex (schema v9)
+
+A third layer sits beside the personal cortex: the **world cortex**, for
+durable facts about *external* reality that a frozen training cut-off may
+have wrong or stale — a current model version, a price, who holds a role, a
+research finding. It's a separate slot-keyed store (its own `world_facts`
+table, `origin=source`), so external claims never mingle with the
+user/project facts.
+
+```
+memory_world_set("anthropic", "latest-model", "opus-4.8",
+                 source_url="https://...", source_quote="Opus 4.8 is the latest...",
+                 freshness_class="volatile")   # weeks | "slow" months | "evergreen" never
+memory_world_search("which Claude model is current")
+# → entries with effective_confidence (age-decayed), a `stale` flag, and the citation
+```
+
+Each fact carries a **citation** (`source_url` + the 1–2 sentence
+`source_quote`, not the whole page) and a `freshness_class` that drives
+**age-decayed trust** at read time: past 2×TTL a fact is flagged `stale`
+(a lead to re-verify, not truth). The trust contract: prefer a fresh,
+*cited* world fact over frozen training intuition when they conflict — but
+cite it ("as of <date>, per <source>") rather than presenting it as your
+own knowledge; your own cortex/episodic facts stay the highest-trust ground
+truth. `memory_search` surfaces matching world facts in a separate block,
+and the Console's world view (`/api/world`) lists them all for audit.
+
+> The world cortex here is populated **manually** via `memory_world_set`.
+> The live-web `research_ingest` action (fetch + distil cited world facts
+> automatically) is an agent-side capability that depends on the agent's
+> web tool — it is not part of the standalone MCP server.
+
+## Procedural memory — the lessons store (schema v10)
+
+A fourth layer learns from the agent's *own work*. Where the cortex stores
+*declarative* facts ("X is Y"), the lessons store is *procedural*: keyed by
+a **task-type** and an **aspect** (`approach` / `pitfall` / `tool-choice` /
+`correction`), each lesson carries an **outcome** (`success` / `failure` /
+`correction`) and a **polarity** (`+` do-this / `-` avoid). Its own
+`lessons` table keeps it isolated from the personal and world cortex.
+
+Capture is cheap and in-session; synthesis is single-writer (the dream):
+
+```
+# during a task, log what happened — this writes a SIGNAL, not a lesson:
+memory_outcome("deploy engine to host", "failure",
+               about="tar --same-owner", detail="chown errors aborted the extract")
+memory_outcome("deploy engine to host", "success", about="tar --no-same-owner")
+# user corrections are auto-captured when a user-tier memory_fact_set supersedes a value.
+
+# the dream later distils accumulated signals into durable lessons; recall them at task start:
+memory_lesson_search("how do I deploy the engine to a host")
+# → [{task, aspect, lesson, about, polarity:"-"|"+", outcome, confidence, score}, ...]
+```
+
+Lessons are also **traversable in the graph**: a task-type becomes an
+`etype='task-type'` entity, and each lesson adds a `prefers` (positive) or
+`avoids` (negative / dead-end) edge to the tool/source it concerns — so
+`memory_graph("deploy engine to host")` shows what to reach for and what to
+avoid. Retrieval is embedding-on-query (mirrors `memory_world_search`); the
+graph edges power structured traversal.
+
+> Single-writer: `memory_outcome` only ever logs a signal — the dream's LLM
+> extractor is the sole writer of lessons. With no extractor configured,
+> signals accumulate (pruned by retention) and no lessons are synthesised,
+> exactly as the cortex behaves without an extractor. The synthesised
+> lessons are **auto-injected at session start** by the
+> `pseudolife-mcp briefing` SessionStart hook (the "lessons from past work"
+> block) — see [Episodes & session lifecycle](episodes.md).
+
+## Sense of time + multi-writer attribution (schema v11)
+
+Every canonical write (cortex, world, lessons) carries a **temporal /
+provenance stamp** so the agent has a real sense of *when* a fact held and
+*who* set it — and so concurrent writers can't silently clobber each other:
+
+- **`tx_time`** — when this version was *written* (wall-clock display).
+- **`valid_time`** — when the fact became *true* (event time). A lesson
+  synthesised from an outcome signal inherits the signal's observation
+  time, not the dream's write time, so the two clocks stay honest
+  (bitemporal).
+- **`(hlc_phys, hlc_logical)`** — a **Hybrid Logical Clock** that is the
+  *ordering authority* for supersession. Wall clocks can jump backwards
+  (NTP steps, clock skew across sessions); the HLC is monotonic, so "newer
+  wins" is jitter-proof — a later write always supersedes, even if its wall
+  time reads earlier. Wall time is display-only.
+- **`writer_id` / `session_id`** — which writer/session made the change.
+  The daemon reads an `X-PL-Writer` header per request (the stdio shim
+  forwards `PSEUDOLIFE_WRITER_ID`) and resolves the session id through the
+  five-tier [session-identity](configuration.md#session-identity) contract
+  (the shim's `X-PL-Session` header preferred), so a Codex session, a second
+  Claude session, and the dream are all distinguishable.
+
+Reads surface this: serialised facts include the stamp plus a human `age`
+("3 days ago"), and **`memory_history(entity, attribute)`** returns the
+full version timeline — current + superseded, oldest→newest, each
+attributed. The supersession log records the writer/session too.
+
+> **Writer topology.** The live path is a single daemon with a coarse lock
+> (`write_mode=snapshot`) — correct by construction. The schema also lays a
+> dormant `write_mode=occ` seam (a `version` column + per-row
+> compare-and-swap) for a future multi-process writer; selecting it raises
+> `NotImplementedError` until that Phase-2 path is built.
+>
+> **Collision fix (v0.4) + AGE removal.** The DB role is `pseudolife`; the
+> old Apache AGE graph was also named `pseudolife`, which made AGE create a
+> `pseudolife` schema that shadowed the real `public` bank. AGE has since
+> been removed entirely — edges live in the relational `edges` table (the
+> source of truth), so the collision can no longer recur.
+> `ops/migrate_drop_age.py` drops the AGE graph + extension from an
+> existing bank (back up first), and every connection still pins
+> `search_path` to `public` (asserted on startup).
+> `ops/retire_by_writer.py` supersedes a rogue writer's rows in one shot.
+
+---
+
+<!-- source: docs/guide/retrieval.md -->
+
+# Retrieval — search, recall, and the knowledge graph
+
+How `memory_search` ranks, the optional reranker and BM25 channels,
+abstention, ranking-trace debugging, multi-hop `memory_recall`, and the
+knowledge graph it walks. Part of the [user guide](../../README.md#documentation).
+
+## Asymmetric query and document encoding
+
+Since schema v25, the default embedding backbone (`Qwen/Qwen3-Embedding-0.6B`)
+is instruction-asymmetric: `memory_search` and every other retrieval probe
+(cortex/world/lesson search, recall seed queries) encode the query text with
+an instruction prefix (`EmbeddingConfig.query_prefix`) that stored documents
+never carry — entries, fact/world/lesson claim text, and slot/entity-name
+embeddings are all encoded bare, and every stored-to-stored comparison
+(dedup, curation, alias candidates, the surprise gate) stays bare on BOTH
+ends. Two distinct threshold effects follow, and they should not be
+conflated. The `min_score` 0.2/0.25 recall floors (and `supersede()`'s
+embedding-fallback paraphrase probe) now gate a prefixed-query-to-document
+cosine rather than a doc-to-doc one — their *semantics* shifted, not just
+their scale, and they read somewhat more conservative at the shipped
+defaults. By contrast, `alias_candidate_min_cosine`,
+`curation_min_similarity` and the surprise gate remain doc-to-doc
+comparisons whose cosine *distributions* merely shift with the new model.
+All are left unrecalibrated pending live data. See
+[Configuration](configuration.md#built-in-defaults-tuned-for-claudes-use-case)
+for the config fields and the [schema version history](configuration.md#schema-version-history)
+for the v25 cutover itself.
+
+## Cross-encoder reranking
+
+```
+memory_search("which python testing framework do we use", rerank=True)
+```
+
+After the bi-encoder retrieval builds the top-N candidate set, run
+`cross-encoder/ms-marco-MiniLM-L-6-v2` over each `(query, candidate)`
+pair and fuse the resulting relevance score with the bi-encoder score:
+
+```
+final = fusion_weight * sigmoid(ce_score) + (1 - fusion_weight) * original
+```
+
+The default `fusion_weight = 0.7` leans on the cross-encoder but
+preserves enough of the bi-encoder signal that recency / source /
+supersession multipliers still nudge order on near-ties. Off by
+default — enable per call with `rerank=True`, or globally via:
+
+```yaml
+memory:
+  reranker:
+    enabled: true
+    model_name: cross-encoder/ms-marco-MiniLM-L-6-v2
+    top_n: 20            # rerank the top-N candidates only
+    fusion_weight: 0.7   # 1.0 = pure CE, 0.0 = pure bi-encoder
+```
+
+First call lazy-loads the ~80 MB model from the HuggingFace Hub; later
+calls cost ~10 ms per reranked candidate on CPU (≈ 200 ms wall-clock
+added to a top-20 search). A `reranker.skip_margin` skips the pass when
+the top-2 bi-encoder gap is decisive. If the model fails to load, the
+reranker disables itself silently and retrieval falls back to bi-encoder
+ranking — search never breaks because of an optional component.
+
+`memory_search(..., rerank=True, explain=True)` surfaces the per-candidate
+`original_score`, `ce_score`, and `fused_score` under `trace.reranker`
+so you can see exactly how the cross-encoder reshuffled the
+bi-encoder ordering.
+
+## BM25 hybrid retrieval
+
+**On by default since 2026-07-25** — pass `bm25=False` to opt out of a
+single call. It shipped disabled for a year, which meant every published
+retrieval number measured the dense pool alone.
+
+```
+memory_search("process_chunk_v2")
+memory_search("ship blocker for v9.42.0")
+```
+
+Dense embeddings (Qwen3-Embedding-0.6B by default) are great for *semantic*
+similarity but can underweight tokens with no real semantic neighbours — function
+names, version strings, error codes, hex hashes. BM25 is the classic
+sparse-lexical scorer (Okapi BM25 with Lucene-style IDF) that weights
+tokens by inverse document frequency, so rare-but-exact tokens count
+for a lot. The BM25 pool runs in parallel with dense retrieval and
+fuses with weighted score-sum:
+
+```
+final = dense_score + weight * normalized_bm25_score
+```
+
+Entries already in the dense pool get *boosted*; entries only BM25
+found enter at `weight * normalized_bm25` (intentionally below a
+typical dense hit so semantic recall still drives ordering). The
+tokenizer keeps underscored identifiers and dotted version strings
+whole, lowercases everything, and filters a tiny stop list.
+
+Since 2026-07-30 the same channel is also *available* for **cortex fact
+retrieval** (`cortex_search`), but ships **opt-in**
+(`memory.bm25.cortex_enabled = false`, or per-call `bm25=True`) — unlike
+the turn pool. The pre-registered A/B that decided this
+(`evals/results/bm25-ab-confirmation.json`, `_s` haystacks, reproducible
+server, rag arm as byte-identical control): the fusion changed 56/78
+served fact contexts yet moved **nothing end to end** — cortex accuracy
+0.179 and cascade 0.423 in both arms — and cost ~1 question on the
+oracle regression-gate slice. Lexical gaps in fact retrieval are real
+but the abstentions trace to fact *coverage*, not ranking, so the
+default stays honest to the measurement. When enabled, the fusion is
+identical to the turn pool's, run over each fact record's composed
+`entity — attribute: value` text — per member record for set-valued
+slots, so an exact member name can rank on its own; grouping into one
+set entry happens after fusion — with one deliberate difference:
+lexical fact hits gate on the normalised `bm25.min_score`, *not* the
+caller's dense `min_score` floor, so an exact-name query can rescue a
+fact the embedder under-scores (useful on identifier-heavy corpora —
+agent-trajectory content is where this channel earned its keep in the
+LME-V2 smoke).
+Configure globally with:
+
+```yaml
+memory:
+  bm25:
+    enabled: true
+    k1: 1.5       # term-frequency saturation
+    b: 0.75       # length-normalisation
+    weight: 0.3   # contribution to the fused score
+    top_n: 20     # how many BM25 hits to consider
+    min_score: 0.1  # floor on normalised BM25 (drops noise)
+```
+
+No new dependencies — pure stdlib. Cost is one O(N tokens) index
+rebuild per query, ≈ 20-50ms on a 40K-entry bank.
+
+`memory_search(..., bm25=True, explain=True)` records per-hit `raw_bm25`,
+`normalized`, and any BM25-only injections under `trace.bm25`.
+
+## Abstention & confidence floors
+
+Off by default (`memory.search_confidence_floor = 0.0`). Set it above zero
+and `memory_search` returns `low_confidence: true` whenever the top match
+scores below the floor, so the agent can abstain instead of answering from
+a weak hit. A cortex fact in the result always overrides it — but *which*
+cortex facts count is tunable via `memory.cortex.guard_min_score` (default
+`0.2`; a LongMemEval retrieval replay showed the old `0.3` floor served
+*zero* facts for 60% of questions, because terse fact embeddings rarely
+score 0.3 against a natural-language query even when they are the answer —
+while going below 0.2 measurably hurt by diluting the context with weak
+facts): only facts scoring at/above it are treated as a confident answer,
+so weak topically-adjacent facts stop suppressing abstention.
+
+The two are calibrated as a **pair**; the [`evals/`](../../evals/README.md)
+sweep recommends `guard_min_score = 0.65` + `search_confidence_floor = 0.70`
+for an abstention-on deployment (doubles abstention recall at zero
+false-abstain).
+
+## Superseded entries
+
+An entry the contradiction pipeline marked superseded is **still
+retrieved**, with its score multiplied by `0.55`. Current values therefore
+outrank their own history without the history disappearing, which is what
+lets an answer read "you used to have X, then you changed it to Y".
+
+```yaml
+memory:
+  hide_superseded: true   # restore the pre-v0.7.3 hard filter
+```
+
+The filter is opt-in for a reason: hard-dropping superseded entries once
+made a category query miss the only entry that named the category (the
+entry had been superseded on an unrelated detail), and superseded rows
+carry knowledge-update recall on LongMemEval. Use it for debugging and
+audit, not as a deployment default. When on, it applies to both pools —
+including BM25-only injections, which otherwise bypass the dense pool's
+filters. `explain=True` reports dropped entries with
+`drop_reason: "superseded"`.
+
+## Debugging a retrieval miss
+
+```
+memory_search("why didn't X come back?", sources=["pseudolife"], explain=True)
+```
+
+Returns the normal search result plus a `trace` dict: every tier's
+candidates with raw_score, recency boost, source/supersession multipliers,
+and the `drop_reason` (or `kept=True`) for each. The `final_topk` block
+shows exactly which entries reached the result set and what score they
+carried.
+
+Also useful for state-probe queries where recency bias is unwelcome:
+
+```
+memory_search("current Python version", disable_recency_boost=True)
+```
+
+## Knowledge graph (ontology-lite)
+
+The cortex's canonical facts are joined to a typed entity graph
+(Postgres mode only). Edges use a **closed relation vocabulary** —
+builtins `depends-on`*, `part-of`*, `runs-on`↔`hosts`, `uses`,
+`configures`, `stores-data-in`, `related-to` (* = transitive) — so a
+weak model can't fragment the graph with `depends_on`/`dependsOn`
+variants: common forms normalize automatically, true unknowns are
+rejected *with suggestions*. Soft type hints warn but never reject.
+Transitive closure and inverse mirroring are computed **on read** by
+NetworkX inside `memory_graph`; derived edges arrive marked
+`derived: true` with rule provenance, so multi-hop conclusions read as
+plain facts — the server reasons, the model reads.
+
+The graph store is Postgres `entities` hub as source of truth, with a
+NetworkX derived read-model built on demand — behind a swappable
+`GraphStore` interface. There is no AGE/Cypher dependency; `memory_graph`
+serves multi-hop queries (neighborhood + derived/inverse edges + shortest
+path).
+
+## memory_recall (multi-hop retrieval)
+
+`memory_recall(query, hops=3, top_k=5)` answers **relational questions**
+by iteratively following the knowledge graph — things `memory_search`
+can't do with a single flat similarity pass.
+
+**When to use it vs `memory_search`:**
+
+- Use `memory_recall` for chain-of-links questions: "what does X ultimately
+  run on?", "where does Y's data end up?", "how does A reach C?".
+- Use `memory_search` for direct lookups: "what is X's port?", "what did I
+  decide about Y?" — those are flat similarity queries and `memory_search`
+  is faster and simpler.
+
+**How it works.** `memory_recall` searches for a seed entity in the query,
+then walks its graph neighbourhood one hop per iteration (up to `hops`,
+capped at 5), accumulating bridging entities, facts, edges, and paths. It
+is **read-only** — it never writes to the bank or the graph.
+
+**Return shape:** `seeds`, `entities` (each with current canonical facts),
+`edges` (with a `derived` flag for inferred transitive/inverse links),
+`paths`, supporting `texts`, and `iterations`.
+
+**`low_confidence: true`** means no seed entity matched the query — the
+graph had no starting point. In that case fall back to `memory_search`.
+
+**Driver config.** By default `memory_recall` uses the **mechanical** seed
+driver (token-intersection heuristic — no LLM call, deterministic, fast).
+Set `PSEUDOLIFE_RECALL_DRIVER=llm` to use the dream endpoint for seed
+resolution (better recall on ambiguous entity names; requires the dream
+extractor to be configured).
+
+---
+
+<!-- source: docs/guide/dreaming.md -->
+
+# Dreaming — consolidating memories into facts
+
+The dream pass, its extractor tiers (regex floor / agent-driven / headless
+auto-sweep), the bundled CPU sidecar, upgrading to a bigger model, the
+Sonnet-primary fallback setup, cadence, deep dream, and the deliberate
+consolidation workflow. Part of the [user guide](../../README.md#documentation).
+
+A **dream** distils the recent associative stream (MIRAS) into canonical
+cortex facts: pull unconsolidated memories → extract
+`(entity, attribute, value)` claims (a claim may also carry
+`op: "add"|"remove"` to target a [set-valued
+slot](memory-model.md#set-valued-slots) — solicited by the shipped prompt
+since 2026-08-01, paired with a counts-are-never-members rule; see the
+[memory model](memory-model.md#dream-extraction) for the measurement
+story) → `memory_fact_set` → advance a monotonic
+cursor so each memory is processed once. Because it keys on the **cursor**,
+not on "sessions", returning to an old session later just appends more
+tail — nothing is reprocessed, and there is no "session finished" event to
+detect.
+
+Extraction is pluggable; pick the tier that fits — the stack ships with
+tier 2 preconfigured (the extractor sidecar), and **no self-hosted model is
+required** if you'd rather not run one:
+
+| Tier | How it runs | Needs | Quality |
+|------|-------------|-------|---------|
+| **0 — none** | no extractor configured — the dream still runs, prunes and advances its cursor, but writes no canonical facts | nothing | none (single-writer cortex: `memory_fact_set` is your only writer) |
+| **1 — agent-driven** | the **agent itself** is the gateway: the `/dream` judgment session (its manual-extraction branch fires only when no endpoint is configured) | the agent you already run | highest |
+| **2 — shipped default** | daemon auto-sweep calls an OpenAI-compatible endpoint — the bundled sidecar out of the box, or any endpoint you point it at | nothing (sidecar) / one base-URL + key + model | high; free if local |
+
+**Tier 1 — `/dream` (agent-driven).** Copy `examples/commands/dream.md` to
+`.claude/commands/dream.md` in any project, then run `/dream`. The command
+is a **judgment session**: the agent reads `memory_dream(action="status")`
+— including the `deep_dream: {recommended, ...}` nudge — runs the
+mechanical graph pass if the tick hasn't, and works the review queues
+(link candidates, merge proposals, junk, store curation). Its manual
+extraction branch (`pull` → extract → `memory_fact_set` → `commit`) fires
+ONLY when no extractor endpoint is configured or reachable — on such
+deployments the agent is the sole cortex writer. To run it on a cadence
+instead of by hand, point a scheduled agent/cron job at the same prompt.
+
+**Tier 0 — no extractor.** With no endpoint configured the cortex has no
+automatic writer: `memory_dream(action="run")` still drains the backlog,
+prunes outcome signals and advances the cursor, but extracts no facts, and
+the daemon logs a startup warning. Populate the cortex with deliberate
+`memory_fact_set` calls, or configure tier 1 or 2.
+
+## Tier 2 — headless auto-sweep
+
+Point the daemon at any OpenAI-compatible endpoint and it dreams on its
+own — no agent, no manual trigger:
+
+```powershell
+$env:PSEUDOLIFE_DREAM_BASE_URL = "http://localhost:11434/v1"   # e.g. Ollama
+$env:PSEUDOLIFE_DREAM_MODEL    = "qwen2.5:7b"
+# $env:PSEUDOLIFE_DREAM_API_KEY = "sk-..."           # hosted endpoints (Haiku, OpenRouter, ...)
+# $env:PSEUDOLIFE_DREAM_TIMEOUT_SECONDS = "240"      # raise for a slow CPU / big model (default 240)
+# $env:PSEUDOLIFE_DREAM_MAX_TOKENS      = "2048"     # extractor output budget (default 2048)
+```
+
+The daemon runs a background sweep every
+`memory.dream.sweep_interval_seconds`; each tick it checks the same
+backlog+quiescence trigger and, if it fires, runs a dream with the
+configured extractor. Under the single-writer cortex a *successful* pass
+that finds no canonical facts writes nothing and advances the cursor; a
+**failed** call (timeout, network, malformed output) instead **holds the
+cursor**, so those memories are retried next sweep rather than skipped —
+up to three times. A batch that keeps failing is re-run entry by entry,
+the individual offenders are quarantined, and the cursor advances past
+them, so one unparseable memory cannot stall consolidation indefinitely.
+There is no regex fallback either way. The extractor timeout defaults to
+**240s** in code; the Docker stack ships **480s**
+(`PSEUDOLIFE_DREAM_TIMEOUT_SECONDS` in the compose file) because the
+default E4B sidecar generates at ~12–15 tok/s on CPU, so a full
+`PSEUDOLIFE_DREAM_MAX_TOKENS` generation runs ~150–170s — raise it further
+for slower hardware. The same env vars also upgrade
+`memory_dream(action="run")`. A local model keeps all text on-box; a hosted
+endpoint does not.
+
+Every extractor request the daemon builds carries `cache_prompt: false`
+(`memory.dream.extractor_cache_prompt`, default `false`): llama-server's
+prompt cache measurably changes extraction output once populated, and the
+pin's cost — ~7s of shared-prefix prefill per call on the shipped sidecar
+(`evals/results/sidecar-cache-latency-sidecar-cache-0809.json`) — is noise
+for a background sweep. Set the knob to `null` to restore the server
+default if your deployment prefers the latency; non-llama.cpp endpoints
+ignore the field.
+
+## What the extractor captures
+
+The tier-2 prompt (`_SYSTEM_PROMPT` in `pseudolife_memory/memory/dream.py`,
+shared by the bundled sidecar and any endpoint you point the daemon at)
+asks for three things and deliberately skips the rest — narrative,
+opinions, meta-chat about the conversation, and values a later note already
+superseded:
+
+- **Durable current-state facts**, one slot per real fact.
+- **Updates, landed on the slot the fact already had.** When several notes
+  state or update the same fact, only the *current* value is emitted, under
+  the same entity and attribute — so the cortex supersedes rather than
+  accumulating near-duplicate slots.
+- **What a document prescribes.** When a note quotes or summarizes a spec,
+  policy, protocol, runbook, or guide, its prescription is itself a durable
+  fact, stored under the *document's* subject — and kept separate from what
+  was actually done. Paste your deploy runbook, then mention a deploy that
+  skipped a step, and you get two facts (the documented rule, and the
+  incident), not one blurred into the other.
+
+That third one is deliberate, and it is the reason the prompt names its
+content classes rather than merely forbidding noise: an extraction prompt
+that enumerates what to extract makes an obedient model **silently discard
+whatever it doesn't name** — no error, no partial result, just a class of
+knowledge that never reaches the cortex. It cost a whole benchmark category
+to find (see [Benchmarks](benchmarks.md#longmemeval-v2--agent-trajectories-and-procedures)),
+and it is worth remembering before narrowing this prompt further.
+
+The Sonnet override prompt (`evals/prompts/sonnet_extractor_v2.md`, used
+when you run the shim below) carries the same three, tuned for a larger
+model.
+
+**Literal-faithfulness gate.** After extraction, every claim's digit-bearing
+tokens (dates exempt — format variance makes digit matching unsafe there)
+are checked against the pull's source notes: a fabricated number or
+identifier is dropped and counted under the default
+`memory.dream.literal_gate = "enforce"` (since 2026-08-02), or merely
+counted under `"log"`.
+The corpus is the whole batch's note union by default — derived sums and
+cross-note values are measured false-drop classes under per-note gating.
+The matcher normalizes the re-formattings extractors legitimately produce:
+spelled numbers back digits ("three week" backs "3-week"), hyphenated
+ranges and unit compounds gate per digit part ("1-3" ↔ "1 to 3",
+"66-acre" ↔ "66 acres"), `N+` minimums match their base number, and
+`~`-marked approximations are exempt like dates — classes triaged from the
+at-scale firing probe (`evals/results/gate-firing-verdict.json`, where 15
+of 17 batch-scope flags were normalization gaps, not fabrications).
+The post-matcher re-probe left the survivors dominated by genuinely
+unbacked literals — derived aggregates and imported world knowledge — at
+1.3–1.7% of gateable claims, which is what made enforcement the default
+(`evals/results/gate-firing-normfix-verdict.json`;
+`literal-fidelity-verdict.json` has the original opt-in decision).
+A companion prompt rule mandating verbatim literals was built, measured,
+and **held** — it significantly degraded the KU cascade (same verdict
+artifact).
+
+## The CPU extractor sidecar (batteries-included default)
+
+The stack ships a llama.cpp sidecar with a model baked in (the bespoke
+Gemma 4 E4B extractor fine-tune, ~5.3 GB — multi-task since the v3 bake:
+one adapter serves both the claims pass and the chronicle events pass —
+see "Upgrading the extractor"
+below for the lighter E2B bake), and `ops/docker-compose.yml` starts it by
+default and routes dream consolidation to it. It's internal-only (never
+published to the host). Single-writer cortex relies on it: with no
+extractor configured, the cortex is populated only by `memory_fact_set` and
+the daemon logs a startup warning. Reasoning models work too — the
+extractor disables their `<think>` trace so they return structured output
+instead of an empty budget. The `evals/` extractor-ladder benchmark is how
+the default was chosen (even the smallest bake, Gemma 4 E2B, beats
+naive-RAG at ~40× fewer tokens/query); see
+[`evals/README.md`](../../evals/README.md).
+
+The sidecar **unloads its model when idle**: after 5 minutes without a
+request (llama-server `--sleep-idle-seconds`, tunable via
+`PSEUDOLIFE_EXTRACTOR_SLEEP_IDLE_SECONDS` in `ops/.env`, `-1` = always
+resident) the server frees the ~7 GB of weights and drops to a few hundred
+MB. This matters most on shim installs where the sidecar is only the
+*fallback* dreamer and would otherwise hold that memory around the clock
+against a rare failure path. Waking is transparent and needs no operator:
+`/health` keeps answering while asleep, and the next dream call simply
+blocks while the model reloads (seconds on an SSD) — comfortably inside
+`PSEUDOLIFE_DREAM_TIMEOUT_SECONDS`, so an unattended sweep that falls back
+mid-run waits instead of failing. The first fallback dream after a long
+idle is a little slower; nothing else changes.
+
+## Upgrading the extractor — bigger local models
+
+If you have a GPU (or a beefier box on your LAN), any OpenAI-compatible
+server can replace the sidecar — the ladder measured a Qwen3.6-27B on a
+single RTX 4090 at the ladder ceiling (gold 1.0 / stale-leak 0.0) while
+extracting ~5× faster than the CPU sidecar — a bar the shipped bakes now
+also clear, so the ladder no longer separates them; the separation is in
+the LongMemEval numbers below. The win is speed, not recall: in the
+replicated LongMemEval-KU comparison
+([`evals/README.md`](../../evals/README.md), 2026-07-18) the bundled
+fine-tune outscores the generic 27B class end-to-end (hybrid 0.762 ± 0.027
+vs the 27B ceiling's 0.710 ± 0.019 — a same-stack comparison on the
+since-retired TurboQuant server; point estimates from separate runs, not a
+paired test, and not comparable to the ceiling's re-based 0.731), so point
+at a bigger *generic* model for faster
+dreams, not better answers. Two ways to switch:
+
+*From the Console (no restart):* the **Extractor** panel in the Cortex
+Console's config view edits the endpoint, model, timeout, and token budget
+live — flip its "Settings source" switch to `config` first (while it is
+`env`, the default, the `PSEUDOLIFE_DREAM_*` variables below own the
+settings and the panel's values are ignored). The API key stays env-only
+either way. The *model alone* needs no source flip: the **Dreamer** card at
+the top of the same view writes a model-only override
+(`memory.dream.extractor_model_override`) that wins over both owners while
+the endpoint wiring keeps its owner.
+
+*Via env:* for the Docker stack, set the override in `ops/.env` (the
+compose file interpolates it into the daemon) and restart the daemon
+(`docker compose -f ops/docker-compose.yml up -d --no-deps pseudolife-daemon`):
+
+```dotenv
+# ops/.env — point dream consolidation at a local model server.
+# From inside the container the host machine is host.docker.internal, NOT
+# localhost (works on Linux too via the extra_hosts entry shipped in
+# ops/docker-compose.yml).
+PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:1234/v1
+PSEUDOLIFE_DREAM_MODEL=qwen3.6-27b
+```
+
+Per-runtime defaults (all serve the same `/v1/chat/completions` shape):
+
+| Runtime | Typical base URL (from the container) | `PSEUDOLIFE_DREAM_MODEL` |
+|---------|----------------------------------------|--------------------------|
+| **LM Studio** | `http://host.docker.internal:1234/v1` | the model's API identifier shown in LM Studio's server tab |
+| **Ollama** | `http://host.docker.internal:11434/v1` | the tag, e.g. `qwen2.5:14b` |
+| **llama.cpp** (`llama-server`) | `http://host.docker.internal:8080/v1` | anything (single-model server ignores it) |
+| **vLLM** | `http://host.docker.internal:8000/v1` | the `--served-model-name` |
+| LAN box | `http://192.168.x.x:PORT/v1` | per the runtime above |
+
+The unused sidecar can be stopped (`docker compose -f ops/docker-compose.yml
+stop pseudolife-extractor`) or left running as a fallback to switch back to.
+The default bake is the bespoke
+[Pseudolife extractor fine-tune](https://huggingface.co/Pseudogiant-xr/pseudolife-extractor-gemma-4-e4b)
+(Gemma 4 E4B QLoRA — the v3 bake is multi-task, claims + dated events;
+the v2 claims-only GGUF stays published on the same repo for rollback);
+constrained machines can bake the lighter **Gemma 4
+E2B QAT** instead (also ladder-verified) — see the `MODEL_URL` build-arg in
+`ops/Dockerfile.extractor`, or mount any GGUF over `/models/extractor.gguf`
+via a machine-local `ops/docker-compose.override.yml` (gitignored; example
+in the compose file). If you run the daemon *outside* Docker (embedded
+stdio mode), the `$env:` variables above apply directly and `localhost`
+URLs work as-is. A local or LAN model keeps all memory text on your
+network; the same env triple pointed at a hosted endpoint does not.
+
+## Claude primary with local fallback
+
+With a Claude Max plan, the dream pass can use a Claude model as its primary
+extractor and keep the bundled local sidecar as an automatic fallback. The
+installer does all of this in one go —
+`ops/install.sh --extractor sonnet-fallback` (or `sonnet-only` to skip the
+sidecar entirely; `ops\install.ps1 -Extractor ...` on Windows). The manual
+steps:
+
+1. Register the CLI shim (`evals/claude_shim.py`) to start automatically —
+   requires a logged-in `claude` CLI:
+   - Windows: `ops\install-shim-autostart.ps1` (Task Scheduler, at logon,
+     `127.0.0.1:8082`; `-Model` picks the served default —
+     `claude-opus-5` since the 2026-08-02 dreamer comparison; the one-shot
+     installer prompts for this choice on Claude-shim installs).
+   The shim also honors a concrete `claude-*` model named per request, so
+   the Console's **Dreamer** card switches the dreamer live — one click
+   between `claude-opus-5` / `claude-sonnet-5` / `claude-haiku-4-5` /
+   `claude-fable-5` (or any `claude-*` name typed in), no shim restart and
+   no settings-source flip; alias names like the compose default
+   `extractor` keep the launch model.
+   - Linux: `ops/install-shim-autostart.sh` (systemd `--user` unit, same
+     `--model` choice; binds the docker bridge IP so the daemon container
+     can reach it — `host-gateway` routes container→host traffic to the
+     bridge, where a loopback bind is invisible).
+2. Set in `ops/.env` (both vars must flip together — pointing only one at
+   the shim leaves dreams silently on the sidecar):
+   `PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:8082/v1`,
+   `PSEUDOLIFE_DREAM_MODEL=extractor`,
+   `PSEUDOLIFE_DREAM_FALLBACK_BASE_URL=http://pseudolife-extractor:8081/v1`,
+   `PSEUDOLIFE_DREAM_FALLBACK_MODEL=extractor`,
+   `PSEUDOLIFE_DREAM_EXTRACTOR_MODE=auto` (or `primary`/`fallback` to force
+   a side — also switchable live in the Console's Extractor panel).
+3. Redeploy (`ops/update.ps1` / `ops/update.sh`), then **verify**:
+   `memory_dream(action="status")` should show `fallback_url` populated
+   and, with the shim up, `primary_healthy: true`; after the next dream,
+   `last_dream_extractor.which` should read `primary` against the `:8082`
+   URL. The daemon also logs a startup warning for the common
+   half-configurations (unresolvable `host.docker.internal`, `auto` without
+   a fallback, primary == fallback).
+
+When the shim is unreachable or the CLI is logged out, dreams automatically
+use the fallback; the Console's Observatory shows which extractor is
+active. Leave `PSEUDOLIFE_DREAM_FALLBACK_BASE_URL` unset to keep the
+existing single-extractor behavior.
+
+## Cadence — quiescence-gated, daemon-only
+
+What gets consolidated and when is configurable under `memory.dream`
+(`eligible_sources` / `exclude_sources`, and the `min_batch` /
+`idle_seconds` backlog+quiescence thresholds that
+`memory_dream(action="status")` reports).
+
+The auto-sweep (Tier 2) fires when:
+
+```
+backlog ≥ min_batch (8)
+  OR  (backlog ≥ 1 AND idle ≥ idle_seconds (600s))
+  OR  an episode is awaiting outcome inference
+```
+
+`idle` is time since the newest band entry, not since the last request — a
+session that only *reads* stays quiescent. Polled every
+`sweep_interval_seconds` (600s). It runs **only in the
+daemon** — the embedded stdio mode never sweeps. There is **no turn-based
+trigger** (the cortex does not "dream every N turns"), by design:
+consolidating mid-session would distil half-formed, still-changing state
+into canonical facts and burn the CPU extractor during your foreground
+work. So during an active session, prose-stored facts stay in the
+searchable bands and reach the cortex once you go quiet (~10 min idle) or a
+backlog of 8 accumulates.
+
+**Want a fact canonical *now*, mid-session?** Two on-demand paths bypass
+the wait: `memory_fact_set` writes a canonical fact instantly, and
+`memory_dream(action="run")` forces a full consolidation sweep on the spot
+(the `/dream` command wraps it). `memory_search` finds the original prose
+the entire time regardless.
+
+**Privacy & cost.** Tier 0 is on-box and free. Tier 1 spends the agent
+tokens you already pay for (a scheduled daily dream is small but non-zero).
+Tier 2 with a *cloud* endpoint sends memory text off-box — a local model
+(e.g. Ollama) keeps it on-machine.
+
+## Dream runs — audit and rollback (schema v27)
+
+Every dream pass that produces claims records a **run row** and a per-claim
+**pre-image journal** — what each touched slot held before the write. The
+journal lives outside the facts supersession chain on purpose: superseded-row
+compaction purges that chain in steady state, so it was never durable enough
+to revert from. Passes that write nothing (outages, zero-claim batches)
+leave no row.
+
+- `memory_dream(action="runs")` lists recent passes: id, cursor movement,
+  tallies (including the literal-gate counters), and lifecycle status
+  (`running | committed | failed | rolled_back`). A `failed` run means a
+  claim write blew up mid-pass — partial writes are journaled and the
+  cursor was held.
+- `memory_dream(action="rollback")` reverts the **latest committed** pass by
+  replaying its journal in reverse through the normal write paths — a
+  superseded value is superseded back (history preserved, nothing deleted),
+  a dream-inserted slot is retired, member adds/removes are mirrored.
+  Rollback covers fact writes only (not relations/lessons/graph), keeps the
+  source traces, and never rewinds the dream cursor. It refuses when a newer
+  run is `failed`/`running` (unjournaled uncertainty) and on double
+  rollback. Both actions are full-tier tools — expand with
+  `memory_toolset(action="expand")` from a core-tier session.
+- `memory_history(entity, attribute, as_of=...)` answers "what did this slot
+  say on date X?" from the version chain (ISO or epoch). Compaction keeps
+  only the newest few non-live versions past ~30 days, so a very old
+  `as_of` may return an incomplete chain.
+
+Retention: the newest `memory.dream.runs_keep` (default 50) runs survive;
+older rows and their journals are pruned on the sweep tick beside
+superseded-row compaction. Design doc:
+`docs/superpowers/specs/2026-08-01-dream-run-journal-design.md`.
+
+## Consolidation quarantine — the two-man rule (opt-in)
+
+`memory.dream.quarantine_low_trust` (ships **off**) closes the dream's
+poisoning-amplifier path with a defense keyed on *who wrote*, never on
+what the text says (the MAFIA result in `SECURITY.md` closes the argument
+that content inspection can defend this path). When on, a **scalar** claim
+whose backing entry is agent-tier — its `source` maps to origin `agent` —
+and outside `memory.dream.trusted_sources` never takes `current`
+directly:
+
+- it **parks** via the ordinary contender machinery (visible as
+  `contested` in `memory_fact_get`, `quarantine:low_trust` in its
+  provenance), including at a brand-new slot (a currentless contender);
+- it **promotes** on exactly two routes: an explicit
+  `memory_fact_resolve(accept=true)`, or an **independent second
+  witness** — a later matching claim backed by a different witness token
+  (the entry's episode, else its source) or by a non-agent origin —
+  **and only when the witness's tier is not below the standing current's
+  origin**: the two-man rule is never weaker than the provenance guard
+  it reinforces, so two agent witnesses cannot supersede a user-stated
+  fact. The same witness restating merely re-confirms the parked value;
+  an automated promotion is stamped agent-supported (a literal, never
+  the claim's own origin field), and never as a user act.
+
+Run results carry `quarantine_parked` / `quarantine_held` /
+`quarantine_promoted`; parks and promotions are journaled (a promotion
+under its own action) and `memory_dream(rollback)` reverses both. Nothing
+is dropped or hidden — quarantined claims stay stored, searchable, and
+auditable through their engram links. Honest scope: episodic search still
+surfaces a poisoned *entry*; the quarantine only denies it silent
+*canonical* authority. Member ops are outside v1 (members are never
+contested by design; the aggregate guard already parks the dangerous
+member-over-scalar case). Preregistration:
+`docs/superpowers/specs/2026-08-09-consolidation-quarantine-design.md`.
+
+## Chronicle events (schema v28) — dated occurrences beside facts
+
+Facts answer "what is current"; they systematically lose *occurrences* —
+things that happened at a time ("adopted the kitten on May 13") rather
+than states that hold. `memory.dream.chronicle` (**on by default**; needs
+Postgres) makes the dream
+pass extract those too, into `chronicle_events`, via a **separate
+extractor call per batch** — a dedicated events pass with its own pinned
+prompt artifact (`evals/prompts/events_pass_v1.txt`), run after the
+claims call. The events pass failing is non-fatal by design: claims
+commit regardless and the result carries `events_pass_failed: true`. The
+bundled sidecar model is fine-tuned for both passes (see the sidecar
+section above).
+
+- **Event time vs record time.** `occurred_at` is when it happened;
+  `recorded_at` is when the dream stored it. A date is accepted only as
+  an exact `YYYY-MM-DD` *and* only when the batch actually contained
+  date information — otherwise the event stores undated with the
+  source's verbatim `occurred_phrase` ("a while back") and sorts behind
+  dated rows. A date is never fabricated.
+- **Additive-only.** Nothing updates a stored event; contradiction
+  handling sets `invalidated_at` (invalidated rows stop serving but stay
+  auditable). Exact restatements dedup against the live row.
+- **Gated like claims.** The literal gate applies to event descriptions
+  (batch scope, same `enforce`/`log`/`off` modes and counters).
+- **Journaled like claims.** Event writes journal into the run's
+  pre-image journal (kind `event`), so `memory_dream(action="rollback")`
+  deletes exactly the rows that pass created — safe precisely because
+  records are additive-only.
+- **Serving.** A temporally-cued `memory_search` (when/first/before…, or
+  an explicit year-first calendar date like `2026-08-08`) adds an
+  `events` block: matching live events, oldest first, each with
+  `date` (or `null` plus the verbatim `phrase`), capped at 6. An
+  **aggregation cue** (how many/count/total…) widens the cap to 30 and
+  adds `events_total` — a computed property of the served list, so the
+  answerer can do arithmetic over a long enumeration without recounting
+  lines (a count over a capped prefix would be wrong by construction).
+  No serving knob — an empty table serves nothing.
+
+Extraction is **on by default** (and surfaced as a Console knob) since
+the 2026-08-12 soak review: the pipeline passed its preregistered gates
+(separate-pass events, and the multi-task sidecar fine-tune that serves
+it — see the CHANGELOG's measured entries), then ran a 2026-08-05..08-12
+production soak (188 events, 0 incorrect dates, historical backdating
+correct, dedup and literal gates load-bearing, ~160 kB/week volume).
+Set `memory.dream.chronicle: false` to opt out. (Lineage: the Phase 1
+retrieval-side knobs of
+`docs/superpowers/specs/2026-08-03-aggregation-aware-recall-design.md`
+measurably failed, which is what made extraction-time event capture the
+live hypothesis.)
+
+## Deep dream — full-corpus graph consolidation
+
+The incremental dream (tiers above) is window-local: it distils only the
+recent MIRAS tail into cortex facts. `memory_dream(action="deep")` is a
+separate full-corpus GRAPH pass (Phase-2 'C'). Its MECHANICAL half also
+runs itself: a need-based tick on the sweep timer applies Steps A/B —
+rescore, guard-passing junk auto-delete, scope stamping, proposal
+filing, snapshot-first — once the bank has grown by
+`memory.deep_dream.auto_min_new_entities` (default 150) since the last
+apply or `auto_interval_days` (default 7) have passed; every apply,
+manual or tick, resets that clock (`auto_tick: false` disables). Step C
+(judgment) is never automated: the tick only fills the review queues.
+The same need signal rides `memory_dream(action="status")` as the
+`deep_dream: {recommended, reason, ...}` block — a harness-agnostic
+nudge any MCP client can surface to its user when a triage session is
+worth scheduling. A
+dry-run (default) returns a preview of what it would change: re-scored
+edges, hard type-violation edges queued for supersession, exact-duplicate
+entity pairs queued for merging, and semantic link *candidates* across
+sessions (each with truncated context snippets; items the apply path would
+dedupe are flagged `already_proposed`). Adding `apply=True` first dumps the
+five graph tables to a JSON forensic record under `data_dir/graph_snapshots/`
+(refusing with `snapshot_failed` if it can't), then commits the safe
+self-clean (re-score + supersede violations + merge exact dups) and returns
+`candidates` for review. The agent then drives Step C in the same session
+(see the `/dream` flow in `examples/commands/dream.md`): judge each
+candidate from its snippets, post the real relations with
+`memory_graph_review(action="propose")` — they land in the Atlas Review
+queue (`proposed_link` findings) for per-item accept/reject before anything
+reaches live edges — and record clearly-distinct pairs with
+`memory_graph_review(action="dismiss_pair")` so they stop resurfacing. See
+[the deep-dream runbook](../runbooks/deep-dream.md) for the operator
+procedure.
+
+A duplicate finding whose two names are a source file and its own bare stem
+(`band.py` ↔ `band`) now arrives with `action: "relate"` and a
+`suggested_relation` (`implements`) instead of forcing merge-or-dismiss:
+the concept usually has identity the file does not, and several files can
+realize one role, so merging asserts something false and dismissing throws
+a real relationship away. Settle it with one call —
+`memory_graph_review(action="relate", src=<file>, relation="implements",
+dst=<concept>)` writes the edge *and* dismisses the duplicate pair — or
+one Relate button in the Atlas review drawer, which does the same.
+
+**Draining the quarantine.** Quarantined edges are almost all untyped
+`related-to` co-mentions, and about half of them name a real relationship
+that merely got the wrong label. Each dream therefore re-asks the extractor
+to *type* up to `memory.dream.retype_quarantined_max` quarantined pairs
+(default `3`), showing it only the notes where both entities co-occur. A
+pair that comes back with a real relation is filed as a fresh review
+proposal — a retype is a second guess on suspect material, so it never
+writes a live edge — and the untyped original is rejected either way, so
+the queue drains instead of accumulating. The pass runs even on a dream
+with no backlog (the quarantine grows fastest when dreams are rare),
+no-ops on an empty quarantine, and reports
+`retyped: {considered, retyped, settled}` from `memory_dream(action="run")`.
+Set `0` to disable.
+
+**What no longer reaches the graph.** Five sources of review-queue noise
+were closed at the write path rather than cleaned up afterwards: dotted
+pseudo-entities minted when an extractor read a flattened
+`entity.attribute` vocabulary hint as a name; the `<artifact> <aspect>`
+nodes `memory_outcome` mints, which shared nearly every token with the
+artifact they mentioned and so dominated the duplicate and orphan
+findings; merge proposals pointing *at* a contentless entity, now that
+fold direction ranks on facts as well as degree; edges to git branch
+names, which typed as unknown — and therefore as neutral — and sailed past
+the confidence floor; and merge proposals for name-shape false-positive
+classes — a broader name paired with a date/run-tag-stamped event node,
+and sibling ids differing only by numeric tokens (`CT200`/`CT400`) or the
+pre/post pair — vetoed at both filing sites, with the rules gated by a
+replay of the 2026-08-11 full-queue triage (they suppress 12 of that
+pass's 101 rejected proposals and none of its 38 accepted ones).
+
+## Consolidation workflow (agent-driven dedup)
+
+Long-running banks accumulate near-duplicate memories — the same fact
+phrased five different ways across five sessions. The literature on
+agent memory ([HiMem 2026](https://arxiv.org/abs/2601.06377);
+[MIRIX 2024](https://arxiv.org/abs/2507.07957); the
+[ICML 2025 position paper](https://arxiv.org/abs/2502.06975)) calls
+consolidation — turning episodes into reusable semantic notes — *the*
+most-important under-implemented capability of long-term LLM memory.
+
+The dream pass (the extractor sidecar) handles fact extraction server-side,
+but the server can't borrow *Claude's* judgment mid-call (Claude Code
+doesn't yet expose MCP sampling — see
+[feature request #1785](https://github.com/anthropics/claude-code/issues/1785)),
+so near-duplicate cleanup is surfaced as clusters for Claude to consolidate
+deliberately:
+
+```
+memory_consolidation_candidates(query="MCP transport choice", top_k=20)
+# → {clusters: [{cohesion: 0.84, size: 3, members: [<entry>, ...]}, ...]}
+
+memory_consolidate(
+  replaces=["MCP uses stdio transport", "stdio was chosen for MCP", "decided on stdio for MCP"],
+  new_text="MCP transport is stdio — chosen over TCP to avoid port conflicts.",
+  tags=["consolidated"],
+)
+# → {superseded_count: 3, new_memory_stored: true, ...}
+```
+
+The clustering is deterministic greedy: highest-relevance entry seeds
+the cluster, any unclustered candidate whose cosine with the seed
+clears `min_cohesion` (default 0.6) joins, cohesion is the mean
+intra-cluster cosine, clusters are sorted by `cohesion × size`. Cost
+is O(N²) within the candidate pool, bounded to `top_k` candidates.
+
+`memory_consolidate` reuses the supersession machinery so the
+predecessors stay in the bank but rank below the canonical note —
+the audit trail survives but retrieval defaults to the current
+phrasing. Useful idiom: tag the consolidation with `["consolidated"]`
+so you can later scan with `memory_search(..., tags=["consolidated"])`
+to see what's been distilled.
+
+---
+
+<!-- source: docs/guide/episodes.md -->
+
+# Episodes & session lifecycle
+
+How session episodes open and close (daemon-owned, no hooks required), the
+SessionStart briefing hook, nested sub-episodes, and tags. Part of the
+[user guide](../../README.md#documentation).
+
+## Session lifecycle — daemon-owned episodes
+
+Two things wire to Claude Code's session lifecycle so the memory loop runs
+reliably — without the agent having to remember:
+
+1. **SessionStart briefing.** `pseudolife-mcp briefing` prints a compact
+   block: **what your memory is unsure about** (surprising graph links +
+   open questions), **lessons from past work** (avoid / prefer),
+   **verified world facts** (fresh, cited, age-ranked), and **where we left
+   off** (a one-line recap of your last closed session). Empty sections are
+   omitted, so a cold bank injects nothing.
+2. **Episode lifecycle is owned by the daemon, keyed by a resolved session
+   identity — hooks make that identity precise, but nothing about opening
+   or closing an episode requires them.** Five tiers, strict precedence
+   (full table + rationale:
+   [Configuration — session identity](configuration.md#session-identity)):
+   a stdio shim's per-process `X-PL-Session` header outranks an explicit
+   `episode` handle passed on a write, which outranks the SessionStart-hook-
+   registered active session, which outranks the legacy transport
+   `mcp-session-id` (per-**connection**, not per-session, and removed
+   entirely by the MCP 2026-07-28 revision — SEP-2567, "Sessionless" — so
+   treat it as a dying fallback, not something to depend on), which falls
+   back to writer id + idle-gap sessionization when nothing above resolved.
+   - **Hook-registered identity.** The plugin's SessionStart hook forwards
+     Claude Code's own `session_id` to the daemon, which opens (or
+     resumes) that session's root episode immediately — no longer lazily
+     on first store — and sets it as the machine-scoped active-session
+     pointer. The returned briefing text carries a one-line **handle
+     advertisement**: the episode id (truncated) plus the instruction to
+     pass `episode="<id>"` on every memory write — the concurrency-correct
+     channel, so attribution stays right even when other sessions are open. A
+     SessionEnd hook closes that session's episode and clears the pointer
+     when the session ends. If a client crashes without firing SessionEnd,
+     the pointer expires after `PSEUDOLIFE_ACTIVE_SESSION_TTL_SECONDS`
+     (default 6 h, the resume window; `0` disables) so a dead session stops
+     attracting later tier-3 writes — SessionStart re-stamps it, so an active
+     session (Claude Code re-fires the hook on resume/compact) stays live.
+   - **Ownership guard.** `memory_episode_end` and the direct
+     `POST /api/episode/end` with no `session_key` in the body can only
+     close a root episode whose `session_key` matches the caller's own
+     resolved identity — a session can no longer pop another, still-open
+     session's root by accident. No match is a no-op:
+     `{"closed": null, "reason": "no owned open session"}`. The idle
+     reaper is separate: it closes any root idle past the threshold,
+     using each root's own key — that's its job, not a guard bypass.
+   - **The stdio shim** (the installer default) opens the episode eagerly
+     at connect with a title derived from the working directory, and
+     closes it when the client disconnects — so shim sessions get named
+     episodes without any hook.
+   - **Direct-HTTP / sessionless clients** (no shim, no hook, no explicit
+     handle) still get episodes: the daemon **lazily opens** one on the
+     first store of a new session (so empty sessions never leave a husk)
+     and the **idle reaper** closes it once inactive — firing the
+     end-of-session dream, or pruning it if empty
+     (`PSEUDOLIFE_SESSION_IDLE_SECONDS`, default 30 min). One open episode
+     is tracked *per resolved identity*, so concurrent sessions (e.g.
+     different projects) don't clobber each other, subject to tier 3's
+     last-start-wins limitation (see Configuration).
+
+   A store arriving after the reaper closed the episode **resumes** it —
+   same identity, same episode — rather than opening a new husk
+   (`PSEUDOLIFE_SESSION_RESUME_SECONDS`, default 6 h; `0` disables). The
+   same window applies to the briefing's `episode="<id>"` handle: a write
+   carrying a handle whose root the reaper closed reopens that episode
+   (without moving the current-episode pointer — the writer may be a
+   different session), so the always-pass handle stays valid across long
+   pauses. Past the window, or on an ambiguous prefix, the write proceeds
+   under normal identity with an `episode_warning`.
+   Direct-HTTP titles start generic
+   (`session - YYYY-MM-DD HH:MM`, since the daemon has no project `cwd`) —
+   name the session with `memory_session_title` (store responses carry an
+   `episode_hint` until you do); a session closing still-generic gets an
+   auto-derived `"{dominant source} - {stamp}: {first-entry snippet}"`
+   title. Fragmented history is repairable over REST:
+   `POST /api/episodes/rename` and `POST /api/episodes/merge`. Set `TZ` in
+   `ops/.env` for local time.
+
+## Inferred outcomes at session close
+
+Most sessions never call `memory_outcome` — the agent stores facts and
+moves on without logging how the work went. When a session episode closes
+with stored entries but zero outcome signals, the end-of-session dream
+runs an extra stage that infers up to 3 signals from the episode's own
+record (`origin="inferred"`) before the usual lesson synthesis — the
+context deliberately includes status-source entries too, since a
+session's own status chatter is still evidence of how it went, just
+weaker evidence than an explicit `memory_outcome` call. Lessons synthesised
+from a batch that is *entirely* inferred signals are written at a
+discounted confidence (0.4 vs the usual 0.6); a lesson that already
+exists at a higher confidence isn't dragged down — the write path keeps
+the higher value, as it always has. Kill switch:
+`memory.lessons.infer_outcomes: false` (see
+[Configuration](configuration.md)); the signal cap per episode
+(`infer_outcomes_max_signals`, default 3) is tunable alongside it.
+
+## Installing the briefing hook
+
+One command installs the briefing hook:
+
+```powershell
+.\ops\install-hook.ps1     # Windows (PowerShell 7)
+```
+```bash
+./ops/install-hook.sh      # Linux / macOS
+```
+
+It backs up your `settings.json`, then adds the hook **alongside** any
+existing ones (idempotent — safe to re-run; it installs only what's
+missing). Requires `pseudolife-mcp` on PATH — `pip install -e .` in the
+repo puts it there.
+
+Prefer to wire it by hand? The briefing's `--hook-json` flag emits the
+`hookSpecificOutput.additionalContext` payload Claude Code injects:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [
+        { "type": "command", "command": "pseudolife-mcp briefing --hook-json" }
+      ] }
+    ]
+  }
+}
+```
+
+The briefing connects to the *already-running* daemon (never starts one)
+and does nothing if the daemon is down — it can't slow or break session
+start. Tune the briefing budget with `--max-unsure N` / `--max-lessons N` /
+`--max-world N` (default 3 each). The briefing content is also available on
+demand via the CLI or the Console's `/api/briefing` route.
+
+## Episodes + tags
+
+An *episode* is a bracketed working session. While an episode is open,
+every memory stored carries the episode's id + title automatically, so
+later queries can scope by session. **Session episodes open and close for
+you**, daemon-owned and keyed by a resolved session identity (five tiers —
+shim header, `episode` handle, hook registration, legacy transport id, or
+idle-gap sessionization; see
+[Configuration — session identity](configuration.md#session-identity)) so
+concurrent sessions don't collide; absent a hook or shim, the daemon lazily
+opens one on first store and an idle reaper closes it. For a substantial
+multi-step task you open a **nested sub-episode** under the session:
+
+```
+memory_episode_start("auth refactor")            # nests under the open session
+memory_store("Decided to keep tags orthogonal to source instead of merging them")
+memory_episode_end()                             # pops back to the session
+memory_search("design choices", episodes=[session_id])  # expands to the subtree
+memory_episode_summary(session_id)               # stats + tag distribution + recent entries
+```
+
+Episodes **nest** (schema v15): `memory_episode_start` opens a child under
+the current open episode — the parent stays open — `memory_episode_end`
+pops back to it, and closing the session cascade-closes any still-open
+children. A session-scoped `memory_search(episodes=[root_id])` expands to
+the whole subtree, so a sub-episode's entries surface under their parent
+session too. (Calling `memory_episode_start` with nothing open simply opens
+a root.) In Postgres mode episodes live in the `episodes` table
+(`session_key` + `parent_id` columns); in file mode they ride
+`cms_state.pt` under the `episodes` key.
+
+Tags are a parallel multi-valued axis to `source`: pass
+`tags=["decision", "blocker"]` on store, filter with
+`memory_search(..., tags=[...])`. Normalised at store time (lowercased,
+stripped, deduped). Set intersection non-empty for the filter to pass
+(OR within the filter list, AND with the other filters).
+
+---
+
+<!-- source: docs/guide/configuration.md -->
+
+# Configuration
+
+Every knob the daemon reads — environment variables, the tuned built-in
+defaults, toolset tiers, the stdio shim, LAN sharing, data layout, and
+backups. Part of the [user guide](../../README.md#documentation).
+
+## Connection / deployment env vars
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v29). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
+| `PSEUDOLIFE_MCP_STORAGE` | `auto` | `files` opts the daemon out of the `[lite]` embedded Postgres (file mode even when pg0-embedded is installed). Only consulted when no DSN is set. |
+| `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). |
+| `PSEUDOLIFE_MCP_HOST` / `_PORT` | `127.0.0.1` / `8765` | Daemon bind address. |
+| `PSEUDOLIFE_MCP_TOKEN` | _(unset)_ | Bearer token; **required** to bind a non-loopback host (a `PSEUDOLIFE_MCP_TOKENS` map also satisfies this). Maps to the reserved principal `default`, which keeps the `X-PL-Writer`/`PSEUDOLIFE_WRITER_ID` writer path. |
+| `PSEUDOLIFE_MCP_TOKENS` | _(unset)_ | Per-principal bearer tokens: `token:principal,token:principal`. A matched token's principal **is** the writer id and keys the toolset tier (the identity axis that survives the MCP 2026-07-28 stateless core). Malformed entries are logged and skipped — a skipped token does not authenticate, and a map that parses to zero entries with no singular token refuses startup rather than running open. May be set alongside `PSEUDOLIFE_MCP_TOKEN`; the map wins for its tokens. Note the singular-token holder is fully trusted and may still assert any writer via `X-PL-Writer` — mint per-principal tokens when that distinction matters. |
+| `PSEUDOLIFE_MCP_TRUST_BIND` | _(unset)_ | Set `1` to allow a non-loopback bind without a token when the boundary is external (containerized, loopback-published). The compose daemon sets this; never set it for a host daemon. |
+| `PSEUDOLIFE_MCP_DATA_DIR` | `./data` (cwd-relative) | Weights cache + legacy-migration source + ChromaDB. When the `[lite]` embedded Postgres engages, the default moves to a stable per-user dir instead (`%LOCALAPPDATA%\pseudolife-mcp`, `~/.local/share/pseudolife-mcp`, or `~/Library/Application Support/pseudolife-mcp`) — a per-launch-directory Postgres bank would be a data-scattering footgun. Windows lite note: must be ASCII-only (the daemon refuses otherwise, with the remedy in the message). |
+| `PSEUDOLIFE_MCP_CONFIG` | `<data_dir>/config.yaml` if present, else built-ins | Override MIRAS / embedding / memory config. |
+| `PSEUDOLIFE_WRITER_ID` | `unknown` | Identifies this writer on every canonical write (schema v11). The shim forwards it as the `X-PL-Writer` header; the compose daemon defaults to `mcp-client`, and the installer pins `claude-code` / `codex` / `mcp-client` in `ops/.env` per the selected `--client`. Existing installs that predate the client selector should set `PSEUDOLIFE_WRITER_ID=claude-code` in `ops/.env` to keep their writer identity (and any `PSEUDOLIFE_MCP_TIER_MAP` keyed on it) stable. |
+| `PSEUDOLIFE_MCP_AUTOSAVE_SECONDS` | `30` | Interval of the file-mode autosave loop (weights/state cadence; Postgres-mode entries are transactional regardless). |
+| `PSEUDOLIFE_SESSION_REAP_SECONDS` | `300` | How often the idle-session reaper sweeps. The idle *threshold* it enforces is `PSEUDOLIFE_SESSION_IDLE_SECONDS` — see [Episodes](episodes.md). |
+
+For the Docker stack, set these in `ops/.env`
+(`cp ops/.env.example ops/.env` — the install/update scripts scaffold it too;
+every value is commented, a missing file runs entirely on defaults). The
+dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
+[Dreaming](dreaming.md).
+
+## Built-in defaults (tuned for Claude's use case)
+
+- **Embedding backbone `Qwen/Qwen3-Embedding-0.6B`** (`EmbeddingConfig.model_name`,
+  default since schema v25) — fp32 torch, no GPU sidecar. It's
+  instruction-asymmetric: query-side text (search/recall probes) is encoded
+  with `EmbeddingConfig.query_prefix`'s instruction prefix via
+  `encode_query()`; everything stored (entries, fact/world/lesson claim
+  text, slot and entity-name embeddings) is encoded bare via `encode()` /
+  `encode_single()`. `query_prefix` defaults to the Qwen3-Embedding card's
+  exact instruction string — set it to `""` to restore symmetric behavior
+  for a model (like the previous default, `all-MiniLM-L6-v2`) that doesn't
+  distinguish query/document sides. `max_seq_length` caps the tokenizer at
+  512 tokens (a min-with-model-default cap, never a raise) regardless of
+  the model's native context window. See
+  [asymmetric query/document encoding](retrieval.md#asymmetric-query-and-document-encoding)
+  for what this changes about retrieval, and the
+  [schema version history](#schema-version-history) below for the v25
+  cutover itself.
+- **Surprise threshold `0.0`** — the v0.5 store gate measures *novelty*
+  (`1 − max cos` to existing entries). Claude stores deliberately, so the
+  gate stays permissive (store everything; novelty still drives
+  eviction/promotion scoring). Raise it above zero to dedup near-duplicate
+  stores.
+- **Meta-filter off** (`memory.meta_filter.enabled = false` in the MCP
+  build) — the filter exists to drop auto-captured chat noise ("I don't
+  have anything saved about that"); every MCP store is a deliberate tool
+  call, and the filter's patterns collided with legitimate dev facts
+  about memory systems themselves.
+- **Recency base half-life 24h** (`memory.recency_base_half_life_s =
+  86400`, vs the 1h chat default) — Claude Code sessions are hours-to-
+  days apart; with a 1h half-life the recency boost was effectively
+  always zero. Halves per band depth as before (1d → 2d → 4d → …).
+  Note the depth ramp itself is **off by default since 2026-07-25** (see
+  below), so this setting only bites once you opt back in.
+- **MIRAS preset `continuum`** — the 8-tier `working / micro / instant /
+  fast / medium / slow / archival / forever` continuum. Bands are plain
+  cosine vector stores (v0.5); a band spec is capacity + consolidation
+  cadence + promotion thresholds + an eviction policy. Since 2026-07-25 a
+  band at capacity **demotes** its lowest-scoring entry to the next band
+  rather than deleting it; only overflow past `forever` is a real drop,
+  which makes the summed capacity (5,250) the actual bound. Previously a
+  full `working` band destroyed entries — and their storage rows — while
+  the deeper bands sat nearly empty, because promotion was the only other
+  way out and it requires `access_count >= N or surprise > threshold`.
+  **Changing the preset is safe**: restoring from Postgres or from
+  `cms_state.pt` reseats entries across the new band layout in one pass,
+  including rows whose old band name is gone. If the bank holds more rows
+  than the new preset seats, the deepest band is left over capacity and
+  the count logged rather than truncated at startup — normal eviction
+  drains it from there.
+- **No NLI scorer.** The `cross-encoder/nli-deberta-v3-xsmall`
+  contradiction model (~278 MB) is an unwired seam, not a switch: the
+  `[nli]` extra and `memory.nli.*` exist for library callers who inject a
+  scorer themselves, and no daemon path constructs one. The four-path
+  detector — slot identity, negation asymmetry, affirmative replacement,
+  state transition — is what actually runs.
+- **Cross-encoder reranker off** — wired into the pipeline but disabled by
+  default; enable globally (`memory.reranker.enabled = true`) or per-call
+  (`memory_search(..., rerank=True)`). Details: [Retrieval](retrieval.md#cross-encoder-reranking).
+- **BM25 hybrid lexical pool ON** (since 2026-07-25) — a pure-stdlib
+  sparse-retrieval channel that rescues exact-keyword queries. It shipped
+  disabled, which meant every eval measured dense-only retrieval; turn it
+  off with `memory.bm25.enabled = false` or per-call `bm25=False`. The
+  cortex-fact analogue exists but ships **opt-in**
+  (`memory.bm25.cortex_enabled = false` by default — a pre-registered A/B
+  measured no end-to-end benefit on facts).
+  Details: [Retrieval](retrieval.md#bm25-hybrid-retrieval).
+- **Depth-ramped recency boost off** (`memory.recency_boost_enabled =
+  false`, since 2026-07-25) — retrieval used to scale scores by a
+  `0.4 → 0.0` ramp over band depth, treating depth as a proxy for age.
+  Depth is set by promotion history, which without retrieval to accrue
+  access counts tracks *surprise*, not age — so the ramp could rank a
+  weaker match in `working` above a stronger match in a deeper band
+  (measured: up to 18 points on the LongMemEval naive-RAG arm). Set it
+  to `true` to restore the previous ranking.
+- **Superseded entries stay visible** (`memory.hide_superseded = false`,
+  since v0.7.3) — an entry the contradiction pipeline marked superseded
+  is still retrievable, downranked ×0.55 so current facts outrank their
+  own history. That is what lets the agent say "you used to have X, then
+  you said Y". Set it to `true` to restore the pre-v0.7.3 hard filter;
+  that filter is why a category query once missed the only entry naming
+  the category, and it costs knowledge-update recall, so treat it as a
+  debug/audit switch. Before 2026-07-30 this knob was mis-registered as
+  `memory.show_superseded` and did nothing.
+- **Abstention off** (`memory.search_confidence_floor = 0.0`) — set it
+  above zero and `memory_search` returns `low_confidence: true` whenever
+  the top match scores below the floor. Calibrated as a pair with
+  `memory.cortex.guard_min_score`; the recommended abstention-on values
+  and the calibration story: [Retrieval](retrieval.md#abstention--confidence-floors).
+- **Dream slot resolver off** (`memory.cortex.dream_slot_match_threshold =
+  0.0`) — a positive cosine floor lets the dream pass map a paraphrased
+  `(entity, attribute)` onto an existing slot before writing, to catch
+  small-model supersession forks. ⚠️ Calibration found **no measurable
+  benefit** on the benchmark (stale-leak flat; a false-merge at `0.80`):
+  the residual fragmentation comes from the deterministic regex
+  auto-promote, not paraphrase. Left off; enable only with the
+  false-merge risk in mind. See
+  [the single-writer cortex design](../specs/2026-06-19-single-writer-cortex-design.md)
+  for the structural fix.
+- **No HyDE / no reflection** — both rely on an LLM callback. Claude *is*
+  the LLM, so the natural way to reflect is for Claude to call
+  `memory_store` with a self-composed summary.
+- **Auto-outcome inference on** (`memory.lessons.infer_outcomes = true`) —
+  a session episode that closes with entries but zero `memory_outcome`
+  calls gets up to `memory.lessons.infer_outcomes_max_signals` (default
+  `3`) signals inferred from its own record on the end-of-session dream;
+  see [Episodes](episodes.md#inferred-outcomes-at-session-close). Set
+  either to `false` / `0` to turn it off.
+- **Dream edge quarantine on** (`memory.dream.relation_quarantine_below =
+  0.5`) — dream-extracted graph edges scoring below the floor are filed as
+  review proposals (`source="dream-low-confidence"`) instead of entering
+  the live graph. At the default this catches exactly the untyped
+  `related-to` co-mention edges (confidence 0.45); typed relations (0.70)
+  write live as before. Set `0.0` to disable and restore write-live
+  behavior.
+- **Literal-faithfulness gate on, enforcing** (`memory.dream.literal_gate
+  = "enforce"`, `memory.dream.literal_gate_scope = "batch"`) — digit-bearing
+  tokens in a dream claim's value (date-like spans and `~`-marked
+  approximations exempt) must appear in the pull's source notes, allowing
+  the legitimate re-formattings extractors produce (spelled numbers,
+  hyphenated ranges/compounds, `N+` minimums); unbacked literals are
+  dropped and counted (`literal_dropped`/`literal_flagged` in dream
+  results). Enforcement became the default on 2026-08-02, when the
+  extended matcher left the at-scale probes firing almost exclusively on
+  genuinely unbacked literals — derived aggregates and imported world
+  knowledge — at 1.3–1.7% of gateable claims
+  (`evals/results/gate-firing-normfix-verdict.json`). `"log"` counts
+  without dropping; `"off"` disables. The batch-union corpus default
+  exists because derived sums and cross-note values are measured
+  false-drop classes under per-note (`"source"`) gating.
+- **Quarantine retype on** (`memory.dream.retype_quarantined_max = 3`) —
+  per-dream cap on quarantined pairs re-offered to the extractor for
+  typing, shown only the notes where both entities co-occur; a typed
+  answer becomes a review proposal, never a live edge. Without it the
+  quarantine only accumulates. Set `0` to disable.
+- **Dream-run journal retention** (`memory.dream.runs_keep = 50`) — the
+  newest N dream-run rows and their pre-image journals (schema v27)
+  survive; older ones are pruned on the sweep tick beside superseded-row
+  compaction. The journal is what `memory_dream(action="rollback")`
+  replays, so this bounds how far back a pass stays revertible — see
+  [Dream runs — audit and rollback](dreaming.md#dream-runs--audit-and-rollback-schema-v27).
+- **Chronicle extraction on** (`memory.dream.chronicle = true`) — the
+  dream pass runs a second, dedicated events-extraction call per
+  batch and stores dated occurrences into `chronicle_events` (schema
+  v28); temporally-cued searches serve them as an `events` block
+  (aggregation cues widen the block and add `events_total`). Default-on
+  since 2026-08-12: the pipeline passed its preregistered gates and a
+  2026-08-05..08-12 production soak reviewed clean. Needs Postgres; an
+  events-pass failure never stalls claims. Set `false` to opt out — see
+  [Chronicle events](dreaming.md#chronicle-events-schema-v28--dated-occurrences-beside-facts).
+- **Consolidation quarantine off** (`memory.dream.quarantine_low_trust =
+  false`) — when on, a scalar dream claim whose backing entry is
+  agent-tier (its `source` maps to origin `agent`) and outside
+  `memory.dream.trusted_sources` never takes `current` directly: it
+  parks via the existing contender machinery (visible in
+  `memory_fact_get` as contested), promotable only by an explicit
+  `memory_fact_resolve(accept=true)` or by an independent second
+  witness — a later matching claim from a different witness token
+  (episode, else source) or a non-agent origin. The same witness
+  restating confirms but never promotes. Parks and promotions are
+  journaled (schema v27) and covered by `memory_dream(rollback)`.
+  Honest scope: this does not stop a poisoned entry from being stored
+  or retrieved — episodic search still surfaces it; the claim is that
+  poison does not silently gain *canonical* authority. Scalar claims
+  only in v1; member ops keep their existing guards. See
+  [dreaming](dreaming.md) and the threat model in `SECURITY.md`.
+- **Aggregation-recall retrieval knobs off**
+  (`memory.search.contiguity_neighbors = 0`,
+  `memory.search.timeline_channel = false`) — Phase 1 retrieval-side
+  experiments (neighbor expansion, a timeline channel) that measurably
+  failed their gates and ship dormant; they remain settable for
+  replication but there is no measured reason to enable them.
+- **Staleness served as annotation** (`memory.search.stale_policy =
+  "annotate"`) — stale records (past 2×TTL for their freshness class)
+  carry `effective_confidence`/`stale` flags and nothing more, today's
+  behavior. `"demote"` additionally sorts stale records after non-stale
+  ones on list surfaces and adds a top-level `warning`; `"quarantine"`
+  replaces a stale record's `value` with a wrapper string and moves the
+  original to `last_known_value` (data moved, never hidden). Applied at
+  the shared record serialisers, so every scalar-fact read surface —
+  including the compact `memory_search` / `memory_world_search`
+  projections — behaves identically. Deliberate exemptions: version
+  history (the audit surface and the recovery path), `chain` summaries
+  and graph fact projections (machine-consumed), and set-valued slots
+  (set members are structurally always evergreen — the set API carries
+  no freshness class — so no set payload can be stale). Non-stale
+  records are byte-identical under every policy; an unrecognised policy
+  value degrades safely to `annotate`. Console note: the web console
+  renders the record `value` field, so under `quarantine` a stale fact
+  shows the wrapper there — a known P2 cost to weigh before ever
+  flipping the default.
+
+## Toolset tiers
+
+Three visibility tiers — `minimal` (9 tools: the recall/capture loop, the
+set-slot pair, the gate), `core` (22: + graph/recall, world facts, lessons,
+documents, episodes, stats, `memory_get`, `memory_fact_resolve`),
+`full` (35) — filtered per principal at `tools/list` (the named principal
+from a `PSEUDOLIFE_MCP_TOKENS` bearer, else the writer id; sessions sharing
+a credential share a tier view). The filter is
+visibility, not auth (the bearer token is the security boundary) — but
+Claude clients gate calls against their own tool list, so in practice a
+session expands its tier before calling a hidden tool. Defaults:
+`PSEUDOLIFE_MCP_TOOLSET` (shipped: `core`) sets the baseline;
+`PSEUDOLIFE_MCP_TIER_MAP="claude-desktop:minimal,claude-code:core"` sets
+per-client defaults by principal (writer id). Any caller can step its tier
+up or down at runtime with `memory_toolset(action="expand"|"collapse"|"status")`
+— the daemon emits `tools/list_changed` so the client refreshes its list.
+Eager-loading clients (Claude Desktop) start at ~1.5k tokens of manifest on
+`minimal`; clients that defer schemas client-side (Claude Code) barely
+notice tiers at all.
+
+**Weak-model deployments:** set `PSEUDOLIFE_MCP_TOOLSET=core` — it exposes
+the curated core set and hides the power/hygiene tools (`memory_forget`,
+`memory_relation_define`, `memory_dream`, `memory_graph_review`, …) that a
+small model can misuse.
+
+## Host-process install (Windows, for GPU / dev)
+
+Runs Postgres in Docker but the daemon on host Python. Use this if you
+want to hack on the daemon or run the embedder on a local GPU. Requires
+Python 3.10+, Docker Desktop, and roughly 2 GB of disk — the
+Qwen3-Embedding-0.6B weights (~1.2 GB) download on first run, on top of
+CPU torch and the Python environment.
+
+```powershell
+git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
+cd Pseudolife-MCP
+python -m venv .venv
+.venv\Scripts\activate
+pip install -e .
+
+# 1. Start Postgres 16 + pgvector (one-time build, then persistent).
+docker compose -f ops/docker-compose.yml up -d --build pseudolife-pg
+
+# 2. Register the daemon to auto-start at logon (binds 127.0.0.1:8765).
+ops\install-autostart.ps1
+Start-ScheduledTask -TaskName "Pseudolife-MCP Daemon"
+```
+
+The `pseudolife-mcp` console-script is now on your PATH — run
+`pseudolife-mcp --help` for all modes. The main ones: `pseudolife-mcp serve`
+(the daemon), `pseudolife-mcp` (the stdio shim — auto-starts the daemon if
+absent), `pseudolife-mcp embedded` (the v0.1 in-process stdio server; no
+daemon, no Postgres — an escape hatch), and `pseudolife-mcp briefing`
+(print the session-start briefing; used by the hook).
+
+## stdio shim (per-session identity)
+
+The installer wires this by default (`ops/install.sh` / `ops/install.ps1`;
+pass `--transport http` / `-Transport http` to opt out) because it's the
+mechanism that gives **concurrent** Claude Code sessions distinct identity —
+a per-process `X-PL-Session` header, the strongest of the five
+[session-identity](#session-identity) tiers. The shim works against
+**either** daemon deployment, host-process or the containerized stack — it's
+just an HTTP client to `PSEUDOLIFE_MCP_DAEMON_URL` and only spawns a new host
+daemon when nothing answers there already. Point Claude Code at it directly:
+
+```json
+{
+  "mcpServers": {
+    "pseudolife-memory": {
+      "command": "C:\\path\\to\\Pseudolife-MCP\\.venv\\Scripts\\pseudolife-mcp.exe",
+      "env": {
+        "PSEUDOLIFE_MCP_DAEMON_URL": "http://127.0.0.1:8765",
+        "PSEUDOLIFE_MCP_DATABASE_URL": "postgresql://pseudolife:pseudolife@127.0.0.1:5433/pseudolife_memory",
+        "PSEUDOLIFE_MCP_DATA_DIR": "${USERPROFILE}\\.pseudolife-mcp"
+      }
+    }
+  }
+}
+```
+
+Replace `C:\path\to\Pseudolife-MCP` with wherever you cloned the repo. The
+`PSEUDOLIFE_MCP_DATABASE_URL` matches the bundled `ops/docker-compose.yml`
+defaults (user/password `pseudolife`, host port `5433`) — change it only if
+you edit the compose file or override the password. The default password is
+safe for the stock loopback-only stack (nothing off-box can reach Postgres);
+to use your own anyway, set `POSTGRES_PASSWORD` in `ops/.env` **before the
+first launch** (see the note in `ops/docker-compose.yml` for changing it
+later).
+
+The shim is torch-free, so sessions attach near-instantly; the daemon pays
+the one-time embedder warmup once for everyone. On first run with a v≤0.1
+`cms_state.pt` present in `PSEUDOLIFE_MCP_DATA_DIR`, the daemon
+auto-migrates it into Postgres and renames the originals `*.pre-v8.bak`
+(never deletes them).
+
+## Session identity
+
+Every request resolves "which session/episode does this write belong to"
+through one chokepoint, evaluated in strict precedence order:
+
+| tier | source | scope | notes |
+|---|---|---|---|
+| 1 | `X-PL-Session` header | per shim process = per session | the stdio shim sends this on every call; any integrator can |
+| 2 | explicit `episode` argument | per call | pass an open episode id (or its unambiguous ≥8-char prefix) on `memory_store` / `memory_outcome` / `memory_fact_set`; the daemon mints it and advertises it in the SessionStart briefing |
+| 3 | hook-registered active session | machine-scoped pointer | the SessionStart hook forwards Claude Code's own `session_id`; a SessionEnd hook closes it |
+| 4 | `mcp-session-id` header | per connection | legacy fallback — the MCP 2026-07-28 revision (SEP-2567, "Sessionless") removes this header and protocol sessions entirely, so treat this tier as a dead end, not something to build on |
+| 5 | none | — | writer id + idle-gap sessionization (the reaper) — the documented floor when nothing above resolved |
+
+**Why the header outranks the handle when both are present.** A shim
+header is infrastructure-asserted per OS process; an `episode` handle is
+model-supplied and can be confused between two concurrent sessions'
+briefings. But identity and target episode are separable — a write still
+lands in the handle's named episode even when the header wins identity for
+stamping. An unknown, closed, or ambiguous handle never fails the write —
+it degrades to the next tier and the result carries
+`"episode_warning": "unknown or closed episode handle"`.
+
+**Tier 3's limitation.** The active-session pointer is one machine-scoped
+value, last-start-wins: whichever SessionStart hook fired most recently
+owns it until its own SessionEnd clears it (or a later SessionStart
+overwrites it). Two concurrent sessions that are both *unheaded* (no shim)
+and *handle-less* (no `episode` argument) still misattribute to the newer
+one — tiers 1 and 2 are the actual concurrency answer, not tier 3. Accepted
+as YAGNI until a real multi-writer/LAN deployment needs a per-writer
+pointer.
+
+This cuts across clients, not just across Claude Code sessions: because the
+pointer is machine-scoped, a **second client that sets no identity of its
+own** — e.g. Codex or a ChatGPT connector talking to the daemon over direct
+HTTP with no shim, no hook, and no `episode` argument — resolves at tier 3
+to whatever session the Claude Code hook last registered, so its writes are
+attributed to Claude's session episode. The fix is the same as for
+concurrent sessions: give the second client a tier-1 identity (run it
+through the stdio shim) or pass explicit tier-2 `episode` handles on its
+writes. The installer's shim mode wires **Codex** through the shim by
+default (2026-07-19), so an installer-wired Codex doesn't hit this;
+ChatGPT connectors and other direct-HTTP clients still do.
+
+**Pointer TTL.** A client that crashes or is killed never fires SessionEnd,
+so without a bound its pointer would attribute every later tier-3 write to a
+dead session until the next SessionStart overwrote it. The pointer therefore
+expires: one older than `PSEUDOLIFE_ACTIVE_SESSION_TTL_SECONDS` (default
+`21600` = 6 h, the resume window — past it a return starts a fresh episode
+anyway; `0` disables the TTL) is treated as stale and tier 3 falls through to
+the transport/idle-gap floor. The timestamp refreshes on-set only, which
+Claude Code re-fires on resume/compact, so a genuinely active session stays
+live; resolution never refreshes it (a wrong client's traffic can't keep a
+dead session's pointer alive).
+
+The resolved identity becomes the episode's `session_key` wherever it's
+used; `session_key` is a free-text field, so none of this required a schema
+change.
+
+## Sharing memory on the LAN
+
+Run the daemon with `PSEUDOLIFE_MCP_HOST=0.0.0.0` and a
+`PSEUDOLIFE_MCP_TOKEN`; remote clients set the same
+`PSEUDOLIFE_MCP_DAEMON_URL` + `PSEUDOLIFE_MCP_TOKEN`. The daemon **refuses
+to bind a non-loopback host without a token**, and Postgres itself stays
+loopback-only — the LAN only ever sees the daemon.
+
+## Data layout
+
+**Containerized / daemon mode (recommended).** The durable source of truth
+is **Postgres**, which lives in an *external* Docker volume —
+`pseudolife-mcp-bank` by default (entries + facts + graph). A second
+external volume, `pseudolife-mcp-state`, holds the daemon's ChromaDB
+reference bank, the band-counter `weights.pt`, and the cortex snapshot.
+Both are declared `external` in `ops/docker-compose.yml` precisely so a
+container teardown can't take them with it. The host `data/` dir then holds
+only backups (`data/backups/` from `ops/backup.ps1` — a `pg_dump` of the
+bank *plus* a tar of the state volume) and one-time legacy-import staging —
+*not* the live bank.
+
+To wipe the bank in this mode you must drop those volumes deliberately —
+**never `docker compose down -v` or `docker volume rm` without
+`ops/backup.ps1` first**; `stop` / `start` and `up -d --build` keep both
+volumes.
+
+**File mode (no daemon / no Postgres — the `embedded` CLI, or unset
+`PSEUDOLIFE_MCP_DATABASE_URL`).** Everything lives under
+`PSEUDOLIFE_MCP_DATA_DIR`:
+
+```
+data/
+├── memory_state/
+│   └── cms_state.pt        # 8-tier MIRAS entries + metadata (file mode)
+├── cortex_state.pt         # Slot-keyed canonical facts (cortex, schema v8)
+├── chromadb/               # Reference bank (RAG documents)
+└── config.yaml             # Optional overrides
+```
+
+In **file mode only**, wipe memory by deleting `data/` and restarting; wipe
+just documents via `data/chromadb/`; wipe just the episodic bands via
+`data/memory_state/`. (In containerized mode these files are not the source
+of truth — see the volume note above.)
+
+## Backups
+
+`ops\backup.ps1` (Windows) / `ops/backup.sh` (Linux/macOS) runs `pg_dump`
+inside the container into `data\backups\` with 7-day rotation, and also
+tars the daemon **state volume** (ingested `document_ingest` files, cortex
+snapshot, graph snapshots — those live only there, not in Postgres) into a
+sibling `pseudolife_state-*.tgz`. An optional off-disk mirror via
+`PSEUDOLIFE_BACKUP_MIRROR` carries both artifacts;
+`PSEUDOLIFE_BACKUP_MIRROR_KEEP=N` (or `-MirrorKeep` / `--mirror-keep`) caps
+the mirror at the newest N files per kind — handy for cloud-synced folders.
+The matching `restore` script rehearses the newest backup into a scratch
+database by default (never touching the live bank) and only replaces the
+live bank with an explicit `-Apply` / `--apply`; add
+`-StateArchive <pseudolife_state-*.tgz>` / `--state-archive` to also
+restore the state volume (opt-in, so a DB-only restore never clobbers
+current state).
+
+The pip tiers (lite / host-process) use `pseudolife-mcp backup` instead:
+same shape — a `pg_dump | gzip` of the bank (`--no-owner --no-acl`, so
+the artifact restores under any role — rehearsed in the test suite
+against a role-named PostgreSQL 18; since the Docker tier's 16→18 bump
+(2026-08-14) both tiers run PostgreSQL 18, so a lite dump restores
+straight into the Docker tier; the lite tier uses the embedded
+runtime's own bundled `pg_dump`, attaching to the running instance or
+starting it for the duration) plus a
+`pseudolife_lite_state-*.tar.gz` of the data dir (ChromaDB, weights,
+config; `embedded_pg/` is excluded — the dump covers it), with the same
+7-day rotation (`--keep-days`). The artifact names
+(`pseudolife_lite_memory-*` / `pseudolife_lite_state-*`) are deliberately
+disjoint from `ops/backup.*`'s, so the two tools can share a directory
+without either's rotation or restore-picker ever touching the other's
+files. A backup never initializes a bank that doesn't exist yet, a run
+that produced no dump never rotates dumps, and rotation only ever
+deletes files the tool itself wrote.
+
+## Schema version history
+
+The current Postgres meta version is **v29**; migrations are additive
+`ADD COLUMN IF NOT EXISTS` on daemon start, and legacy file-mode `.pt`
+banks auto-migrate into Postgres. The one exception is v25 itself: a
+vector *dimension* change on an existing column is not additive, so
+`ensure_schema` refuses to start against a bank still dimensioned at
+v24 or earlier instead of attempting an in-place ALTER — run the
+human-gated `ops/migrate_embeddings.py` first. Full step-by-step operator
+procedure (backup, stop, dry-run, apply, deploy, verify, rollback):
+[the v25 migration runbook](../runbooks/embedding-v25-migration.md). The
+milestones:
+
+| Version | What it added |
+|---|---|
+| v11 | Temporal/provenance stamp (tx/valid time, HLC ordering, writer/session) |
+| v12 | Graph-insight communities |
+| v13 | Provenance-trace engram + reinforcements |
+| v14 | Episode `session_key` |
+| v15 | Episode `parent_id` (nesting) |
+| v16 | `entity_sources` (per-entity project attribution) |
+| v17 | `edge_proposals` (deep-dream link candidates) |
+| v18 | `entity_proposals` (deep-dream merge/junk candidates) |
+| v19 | Partial unique indexes enforcing one current row per slot on facts/world_facts/lessons (+ startup heal of pre-existing duplicates; per-slot write-through persistence replaces the full-table snapshot rewrite) |
+| v20 | `dismissed_pairs` (reviewed-distinct pairs stop resurfacing as duplicate findings) |
+| v21 | `merge_decisions` audit + write-time near-duplicate merge proposals |
+| v22 | `edges(dst_id)` index (dst-side graph lookups no longer sequential-scan) |
+| v23 | `facts.freshness_class` — read-time currency on personal cortex facts (evergreen default, so existing facts are unchanged; mark transient ones `volatile` and they decay and flag `stale`) |
+| v24 | `entity_kinds` (one `artifact`/`system`/`concept` kind per entity) — `freshness_class` now defaults to inferring from the entity's kind instead of a fixed default; only `system` entities can resolve `volatile`, and an empty table resolves everything to `evergreen`, so behaviour is unchanged until it is populated |
+| v25 | `entries`/`facts`/`world_facts`/`lessons.embedding` move from `vector(384)` to `vector(1024)` — default embedding backbone swaps to Qwen/Qwen3-Embedding-0.6B (measured R@10 0.809 vs shipped MiniLM's 0.572). Qwen3-Embedding is instruction-asymmetric — see [asymmetric query/document encoding](retrieval.md#asymmetric-query-and-document-encoding) — so similarity-threshold semantics shift too. `ensure_schema` refuses to start against an existing v24-dimensioned bank rather than attempting an in-place ALTER; migrate first with `ops/migrate_embeddings.py` (dry-run by default; `--apply --backup-verified` to commit) |
+| v26 | `facts.kind` (`scalar` \| `member`) and `facts.value_norm` — set-valued cortex slots (many concurrently-current members per `(entity, attribute)`, not one NOW value). The per-slot current-uniqueness constraint splits by kind (`facts_slot_current_scalar_uq` keeps one live scalar row per slot; `facts_member_current_uq` allows several current members on the same slot); the daemon-start duplicate-healing pass is scoped to `kind = 'scalar'` so it never demotes member rows. Additive/idempotent; every existing fact defaults to `kind='scalar'` and dedupes exactly as before. See [Set-valued slots](memory-model.md#set-valued-slots-schema-v26) |
+| v27 | `dream_runs` + `dream_run_slots` — every dream pass that pulls entries records a run row (cursor movement, tallies, lifecycle status) and a per-claim pre-image journal (what each slot held before the write, `NULL` = slot absent). The journal is what `memory_dream(action="rollback")` replays, and it survives superseded-row compaction by construction (own tables, own newest-N retention via `memory.dream.runs_keep`). `dream_run_slots.src_entry_id` deliberately carries no FK — entries are evictable. Additive/idempotent |
+| v28 | `chronicle_events` — dated occurrences as first-class records beside facts (`occurred_at` = event time, nullable and never fabricated; `occurred_phrase` = the source's verbatim wording; `recorded_at` = transaction time). Additive-only: contradiction handling sets `invalidated_at`, never deletes; event writes journal into `dream_run_slots` (new nullable `chronicle_event_id` column) so rollback can delete them by exact id. No FKs — `src_entry_id` references evictable entries. Extraction into the table (`memory.dream.chronicle`) shipped off by default and flipped on 2026-08-12 after its preregistered gates and a production soak both passed. Additive/idempotent |
+| v29 | `facts.stance` — epistemic stance as a labelled field: the source's own hedge words ("probably", "per the runbook"), kept verbatim and separate from `value` so consolidation cannot silently turn a hedged claim into a confident canonical fact (the labelled-field-vs-inline retention result is arXiv:2608.06953). `NULL` = asserted plainly, exactly the pre-v29 behaviour, so the migration is a no-op on existing banks. Stance follows the latest asserting write (a plain restatement clears the hedge), surfaces in `memory_fact_get`/recall/history only when set, and is never an input to confidence, ranking, or supersession. Written by the dream path since the v10 update-anchored stance prompt shipped its gates (2026-08-14); not exposed on the `memory_fact_set` tool surface. Additive/idempotent |
+
+After running the entity-kind backfill (`evals/apply_entity_kinds.py --apply`), the daemon must be restarted for inference to take effect — it caches the entity-kind map for the life of its process.
+
+A kind you set by hand is locked against later classifier runs — `evals/apply_entity_kinds.py --apply` overlays the model's labels onto the existing table rather than replacing it, so a deliberate marking is never reverted by a re-apply. The R@10 figures behind the v25 swap, and the rest of the shootout, are in [Benchmarks — embedding backbone](benchmarks.md#embedding-backbone--chosen-on-our-own-corpus).
+
+---
+
+<!-- source: docs/guide/benchmarks.md -->
+
+# Benchmarks
+
+What the memory actually buys, measured. Part of the
+[user guide](../../README.md#documentation); the full methodology and every
+finding live in [`evals/README.md`](../../evals/README.md).
+
+Nearly every number on this page was measured on the **pre-v25 stack**: the
+384-d MiniLM backbone, with the BM25 hybrid pool off. Both defaults have
+since changed — the backbone swapped at schema v25 and BM25 flipped on
+2026-07-25 — and the arms that read raw turns (naive RAG, hybrid) *select*
+those turns with the retriever that changed, whose measured R@10 moved
+0.572 → 0.809. The exception is the headline ceiling table below, re-judged
+2026-07-29 on the current reproducible server with its fact ranking under
+the v25 backbone — though even there extraction and raw-turn selection are
+held at the pre-v25 run (see the note under the table). Read the rest as
+historical measurements of the design, not as what the shipped
+configuration scores today.
+
+## LongMemEval — knowledge updates
+
+Measured on the **knowledge-update subset of
+[LongMemEval](https://arxiv.org/abs/2410.10813)** (78 questions) — the
+"user's facts change over time" ability the HLC supersession spine exists
+for. (The harness can extend a run to all six LongMemEval question types —
+500 questions — via `--types`; the numbers below are the KU slice unless a
+row says otherwise.) Everything local: extraction, answering, and LLM-as-judge grading all
+run on the author's own hardware (judge = Qwen3.6-27B at temperature 0),
+so compare *within* the table, not against GPT-4o-judged leaderboards.
+
+> **Reading the numbers.** Except for the ceiling table directly below
+> (re-judged 2026-07-29 on the reproducible stock server), accuracies on
+> this page are single-run point estimates unless marked mean ± std, and
+> they were measured on a stack
+> that **was not bit-reproducible**. Repeated runs of an *identical*
+> config varied by several points (observed spread: ~7.7 pp on the cortex
+> arm at n=78); that was long attributed to answerer/judge noise, and
+> root-caused on 2026-07-27 to the TurboQuant fork's fused TBQ4_0
+> flash-attention KV cache instead — `evals/results/judge-determinism-check.json`
+> records 6.8–7.7% verdict flips on byte-identical input, with
+> `verdict.reproducible: false`. On the stock server with
+> `--cache-type-k/v q8_0` the same pipeline reproduces exactly:
+> `evals/results/regression_gate.baseline.json` records **std 0.0000 on
+> all three arms at n=7**. So the numbers on this page carry a run-to-run
+> band that a re-measurement would not, and small single-run differences
+> between configs are not meaningful **here**. Re-measure rather than
+> reinterpret; decision-grade comparisons use replicates and a paired test
+> — see [Variance and replication](../../evals/README.md#variance-and-replication).
+
+## End to end on the current stack — and the commit-gated cascade (2026-07-30)
+
+The freshest measurement runs the **whole current pipeline** — fresh
+qwen-27b extraction under the v25 embedding backbone, BM25-on turn
+retrieval, reproducible q8_0 serving (`ceiling-e2e`: 3 byte-identical
+replicates — std 0.0000). Oracle variant, 78 questions:
+
+| arm | accuracy | context tokens/question |
+|-----|----------|------------------------|
+| naive RAG (top-6 turns) | 0.859 | ~1237 |
+| cortex facts only | 0.667 | **~259** |
+| hybrid (facts + top-3 turns) | 0.833 | ~920 |
+| **commit-gated cascade** | **0.936** | ~702 |
+
+Two findings, stated plainly. First, the v25 retriever + BM25 lifted
+raw-turn selection so much (R@10 0.572 → 0.809) that the **concatenation
+hybrid no longer beats naive RAG on this slice** — mixing facts and turns
+in one prompt costs stale-fact overrides and extra abstentions. Second,
+the channels remain strongly complementary (their per-question union is
+0.949), and the **commit-gated cascade** captures almost all of it: serve
+the cortex answer when that channel *commits*, fall back to RAG when it
+says "I don't know". Routing uses only the response text — correctness is
+never consulted — so the policy is deployable as-is. The cascade is a
+*derived* metric (`replicate.py cascade_correct`) over the judged
+rag/cortex arms: same artifacts, no fourth answered arm.
+
+**Full-haystack confirmation (pre-registered).** On the `_s` haystacks
+(~50 sessions/question, tag `casc-q8`, reproducible server verified by
+process inspection), the cascade scores **0.462 vs 0.346** for naive RAG —
+delta **+0.115** at **p = 0.011** (paired permutation, 10,000 draws,
+seed 0) — with **commit precision 0.714** on a 14/78 commit rate. Honest
+scoping: the margin over the concatenation hybrid there (+0.064) is
+directional only (p = 0.18), so the decision-grade claim is
+cascade-vs-RAG; and the commit rate is low — raising it is the current
+retrieval workstream. Artifacts:
+`evals/results/longmemeval-ku-oracle-qwen-27b-ceiling-e2e.agg.json`,
+`evals/results/casc-q8-confirmation.json`.
+
+This table is **not comparable per-arm** to the held-fixed table below:
+it re-ran extraction and turn selection on the current stack, while the
+table below deliberately holds both at the 2026-07-19 configuration.
+
+## The held-fixed rebuild (`ceiling-v25`)
+
+On the oracle variant (evidence sessions only), with the local-ceiling
+extractor (`ceiling-v25`: 3 replicates on the reproducible stock server,
+byte-identical — std 0.0000; contexts rebuilt from the 2026-07-19
+context-persisted bank dumps):
+
+| arm | accuracy | context tokens/question |
+|-----|----------|------------------------|
+| naive RAG (top-6 turns) | 0.628 | 1638 |
+| cortex facts only | 0.590 | **~182** |
+| **hybrid (facts + top-3 turns)** | **0.731** | ~1102 |
+
+Within this held-fixed frame the consolidated-facts posture beats naive
+RAG by ~10 points while reading **~67%** of the context — and the fact
+spine alone trails RAG by only ~4 points on **~11% of its token budget**.
+**Retired as a headline (2026-07-30):** on the current end-to-end stack
+(section above) the concatenation hybrid's margin over naive RAG does not
+survive the v25 retrieval upgrade; the commit-gated cascade is the
+posture that beats RAG there. This table remains valid for what it
+isolates — the serving-stack offset and cortex fact ranking under v25
+with 2026-07-19 extraction and turn selection. Notably, the shipped E4B
+fine-tune's replicated hybrid (0.762 ± 0.027, table below) beat this
+ceiling's own-stack figure (0.710 ± 0.019, superseded table below) in the
+one comparison that is valid — same stack, both on the TurboQuant fork —
+so on knowledge updates the specialised small extractor at least keeps
+pace with generic bigger models. No cross-stack comparison against the
+0.731 above is made.
+
+> **Why this table was re-based (2026-07-29).** Its previous published
+> numbers (superseded table below) were judged on the TurboQuant fork.
+> Re-judging the *same* contexts on the reproducible stock server moved
+> the naive-RAG arm **+0.0615** — and that arm's context is copied
+> **verbatim** by `rebuild_contexts.py`, so on byte-identical input the
+> move is the answerer/judge stack alone. At 3.7× the old measurement's
+> own rag std that is a systematic offset, not variance: the old stack was
+> scoring this slice about six points low, and headline claims measured
+> against a mis-scored control were never really established. Two things
+> are still held fixed by the rebuild: **extraction** (the 2026-07-19
+> banks) and **raw-turn selection** (the pre-v25 retriever picked the
+> turns; BM25 is not exercised) — only the cortex fact ranking runs under
+> the v25 backbone. Compare numbers only within a stack; across stacks,
+> re-measure. Artifact:
+> `evals/results/longmemeval-ku-oracle-qwen-27b-ceiling-v25.agg.json`.
+
+**Superseded — the v2 / TurboQuant measurement** (5 replicates,
+2026-07-19 context-persisted bank; judged on the nondeterministic fork,
+~6 points low on the control arm — retained for the record, not
+comparable to the table above):
+
+| arm | accuracy (mean ± std) | context tokens/question |
+|-----|----------------------|------------------------|
+| naive RAG (top-6 turns) | 0.567 ± 0.017 | 1638 |
+| cortex facts only | 0.559 ± 0.029 | **~124** |
+| **hybrid (facts + top-3 turns)** | **0.710 ± 0.019** | ~1043 |
+
+## Replicated results (2026-07-18)
+
+The first 5-replicate runs (same banks, answer/judge phase re-run per
+replicate; mean ± std) on the shipped-default fine-tuned extractor
+(`e4b-ft`, Arm-1) vs its same-model pre-fine-tune baseline:
+
+| arm | Arm-1 (shipped default) | baseline | paired p (78 questions) |
+|-----|------------------------|----------|-------------------------|
+| naive RAG (control) | 0.574 ± 0.006 | 0.585 ± 0.015 | 0.41 |
+| cortex facts only | 0.682 ± 0.017 | 0.603 ± 0.013 | **0.17** |
+| hybrid | 0.762 ± 0.027 | 0.749 ± 0.015 | 0.83 |
+
+The control arm is what bounds the rest: it is built from raw turns and
+never touches the extractor, so both runs feed it *identical* input and
+whatever it moves is pure measurement floor. It drifted −0.010. Against
+that, the cortex arm's +0.079 is roughly eight times the floor — a real
+effect by direction and size — and still does not clear significance on
+the paired test at n=78. Artifacts:
+`evals/results/longmemeval-ku-oracle-e4b-ft-arm1-vs-baseline-cortex.compare.json`,
+`...-hybrid.compare.json`, `...-rag.compare.json` (10,000 permutations,
+seed 0).
+
+Read honestly: the Arm-1 fine-tune's cortex-arm gain has a +8-point point
+estimate but does **not** clear the pre-registered p < 0.05 on the paired
+per-question test — the fine-tune fixes some questions and regresses
+others, so the evidence for the shipped default is *suggestive, not
+confirmed*, and the hybrid arm shows no measurable benefit at all. The
+earlier single-run "+0.102" comparison overstated the effect. (The
+ceiling table above was renumbered 2026-07-19 from a fresh
+context-persisted 5-replicate run — its historical single-run
+predecessor, hybrid 0.705, landed inside the replicated band — and
+re-based 2026-07-29 onto the reproducible server, hybrid 0.731, with
+the superseded TurboQuant figures retained above.)
+
+## LongMemEval-V2 — agent trajectories and procedures
+
+[LongMemEval-V2](https://arxiv.org/abs/2605.12493) (Wu et al.) is a
+different content class from the KU benchmark above: WorkArena **agent
+trajectories** — what an agent saw and clicked in an enterprise portal —
+rather than chat sessions. The **complete 74-question `procedure`
+category**, full 100-trajectory haystacks, scored by the benchmark's own
+deterministic eval functions (single pass per prompt):
+
+| arm | default answer prompt | composition-aware prompt |
+|-----|----------------------|--------------------------|
+| naive RAG (control) | 0.162 | 0.284 |
+| cortex facts only | 0.068 | 0.216 |
+| hybrid | **0.243** | 0.284 |
+
+Hybrid leads under the default prompt. Under the composition-aware prompt
+it **ties naive RAG** — so the complementarity is real but
+prompt-dependent, not universal.
+
+> **Superseding the pilot.** An earlier 10-question slice (3 replicates)
+> reported — and this table now supersedes —
+> `| naive RAG (control) | 0.300 [0.30–0.30] | 0.500 [0.40–0.60] |`,
+> `| cortex facts only | 0.167 [0.00–0.30] | 0.233 [0.10–0.30] |`,
+> `| hybrid | **0.533 [0.50–0.60]** | **0.633 [0.60–0.70]** |`,
+> concluding that *hybrid beat both single channels in every replicate
+> under both prompts*. **That conclusion does not survive the full
+> category.** The pilot's ten questions were simply the first ten in
+> dataset file order, and they proved far easier than the category as a
+> whole — every arm scores roughly half as well across all 74. This is
+> what a selection-biased pilot looks like from the other side, and it is
+> the reason for running the expansion at all.
+
+Read honestly: these are single-pass point estimates, not replicated, so
+small differences between arms carry no weight — the hybrid-vs-rag tie
+under the compose prompt should be read as "no measurable difference",
+not as parity established. The cortex arm remains the most run-to-run
+volatile (extractor generation varies between runs even at temperature
+0). None of this carries the 78-question paired testing the KU results
+above do.
+
+The more useful number is the starting one: **every arm scored 0.000**
+before five adapter and extraction fixes. The decisive fix was ours to make
+because the bug was ours to have caused — the trajectory-mode extraction
+prompt said "extract exactly two kinds of claim and nothing else", so the
+model *correctly* discarded the knowledge-base protocol articles that the
+gold answers were drawn from. Naming a third class (what a document
+prescribes) recovered the category, and the lesson was folded back into the
+shipped extraction prompt — see [what the extractor
+captures](dreaming.md#what-the-extractor-captures).
+
+## Embedding backbone — chosen on our own corpus
+
+The schema-v25 backbone swap was decided by a recall shootout on 150
+LongMemEval questions over a 74,183-turn haystack
+(`evals/results/embedder-recall-shootout-20260727.json`), scoring recall@k
+of the gold turns rather than end-to-end accuracy, so the retriever is
+measured without the answerer in the way.
+
+| model | dim | R@10 |
+|---|---|---|
+| all-MiniLM-L6-v2 (previous default) | 384 | 0.572 |
+| granite-embedding-english-r2 | 768 | 0.662 |
+| snowflake-arctic-embed-l-v2.0 | 1024 | 0.732 |
+| bge-base-en-v1.5 | 768 | 0.742 |
+| **Qwen3-Embedding-0.6B (instructed)** | **1024** | **0.809** |
+
+The winner's margin over the shipped model is decisive on a paired McNemar
+test at k=10 (78 questions gained, 7 lost, p ≈ 3e-16). Every arm ran at the
+harness's `max_seq_length: 512` (MiniLM caps itself at 256); the Qwen arm
+used the instruction prefix that is now `EmbeddingConfig.query_prefix` —
+see [asymmetric query/document encoding](retrieval.md#asymmetric-query-and-document-encoding).
+
+## Band structure — the continuum earns nothing on either side
+
+The 8-band cosine continuum is the memory's headline structure, so it is
+worth asking what it buys. An offline ablation rebuilt every KU answer
+context from the same banks with the bands collapsed into a **single flat
+cosine pool**, under two timestamp regimes (`wall` — every entry stamped
+now; `hist` — realistic aging), 5 replicates each, paired permutation test
+over 78 questions:
+
+| arm | Δ continuum − flat (`wall`) | p | Δ (`hist`) | p |
+|-----|---------------------------|------|-----------|------|
+| naive RAG | −0.067 | 0.10 | **−0.090** | **0.015** |
+| cortex facts only | +0.008 | 0.76 | −0.010 | 0.53 |
+| hybrid | −0.023 | 0.24 | +0.018 | 0.47 |
+
+The continuum does not beat a flat pool anywhere, and under realistic aging
+it is **significantly worse** at raw-turn selection. This is published
+as-is because a negative result about one's own centrepiece is exactly the
+kind that quietly goes unpublished: whatever the banding earns, it is not
+retrieval ranking. That left one defence — the write side.
+
+### The write side does not rescue it
+
+The ablation above holds *ingest* fixed: both arms re-rank the same
+surviving entries, so it cannot see what the banding does at write time.
+A second ablation re-runs ingest itself through **one flat band at the
+continuum's total capacity** (5,250 entries — the sum of all eight tiers),
+so eviction and promotion never partition by tier and a different set of
+entries survives. Run on the full-haystack `s` dataset (~488 turns per
+question), where capacity pressure is real; 5 replicates, paired
+permutation test over 78 questions.
+
+**Write-side isolation** — identical flat ranking on both arms, so the
+*only* difference is which entries survived ingest:
+
+| arm | Δ continuum − flat (`wall`) | p | Δ (`hist`) | p |
+|-----|---------------------------|------|-----------|------|
+| naive RAG | −0.090 | 0.17 | −0.097 | 0.15 |
+| hybrid | **−0.110** | **0.018** | **−0.108** | **0.027** |
+
+**Whole system** — the continuum as designed (banded ingest *and* banded
+ranking) against flat everything:
+
+| arm | Δ continuum − flat (`wall`) | p | Δ (`hist`) | p |
+|-----|---------------------------|------|-----------|------|
+| naive RAG | **−0.274** | **0.0001** | **−0.251** | **0.0001** |
+| hybrid | **−0.141** | **0.0038** | **−0.123** | **0.0153** |
+
+(The cortex arm is omitted: its context is the fact block, which both arms
+build identically, so the comparison is definitionally null. The two
+`0.0001` p-values are the resolution floor of a 10,000-permutation test —
+read them as "below 0.001", not as a precise estimate.)
+
+The mechanism is capacity accounting, and it is visible without any
+answering at all: at ~488 turns per question the continuum **evicts 31.1%
+of everything stored** — the 200-entry `working` band overflows long
+before promotion can drain it — while a flat pool of the *same total
+capacity* evicts nothing. Discarding a third of the evidence costs
+accuracy, and it does so on the arm that reads raw turns.
+
+Read honestly, and this bounds the claim: because the flat arm never
+evicts at all on this corpus, the comparison measures **eviction forced by
+tier partitioning against no eviction** — not one eviction *policy*
+against another. A corpus exceeding 5,250 turns per question would be
+needed to test the policy itself. What is established is narrower and
+still decisive for the design: partitioning a fixed capacity into
+recency tiers throws away entries that an unpartitioned store of the same
+size would have kept, and the memory is measurably worse for it.
+
+Both of the continuum's defences have now been measured and neither
+holds. The case for the banding, if there is one, has to be made on
+grounds this benchmark does not reach — and the honest engineering
+conclusion is that a flat store is the better default until such a case
+is made.
+
+## Extraction quality is the dominant factor
+
+Running floor (Gemma 4 E2B, the smallest CPU-sidecar bake) vs ceiling
+(Qwen3.6-27B) extractors with the RAG arm as a fixed control isolates
+**extraction quality as the dominant factor** in fact-spine accuracy — the
+measured case for upgrading the extractor when you have local compute to
+spare (see [Dreaming — upgrading the extractor](dreaming.md#upgrading-the-extractor--bigger-local-models)).
+Even the smallest bake beats naive-RAG at ~40× fewer tokens/query.
+
+Read honestly: the floor/ceiling runs are single-run point estimates, not
+replicates. The direction is safe anyway — the cortex arm collapses
+0.564 → 0.192 when the extractor shrinks, while the RAG control moves
+0.615 → 0.564 — a shift inside the run-to-run band, against a cortex
+effect roughly five times it — but
+finer-grained comparisons between adjacent extractor rungs are not
+decision-grade under the same standard the tables above are held to.
+
+The harder full-haystack (`_s`) results, the extractor-ladder screen used
+to choose the default sidecar model, and the abstention-calibration sweep
+are all in [`evals/README.md`](../../evals/README.md).
+
+---

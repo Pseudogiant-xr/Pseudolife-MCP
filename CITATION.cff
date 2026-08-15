@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use Pseudolife-MCP in your work, please cite it as below."
+title: "Pseudolife-MCP: persistent long-term memory for MCP coding agents"
+type: software
+authors:
+  - name: "Pseudogiant-xr"
+license: Apache-2.0
+repository-code: "https://github.com/Pseudogiant-xr/Pseudolife-MCP"
+url: "https://github.com/Pseudogiant-xr/Pseudolife-MCP"
+abstract: >-
+  An MCP server giving coding agents durable long-term memory: an
+  associative store with aging and supersession, a slot-keyed
+  canonical-fact cortex with full version history, consolidation of the
+  memory stream into facts and a knowledge graph, procedural lessons
+  from outcome signals, and cited world facts. Benchmarked on
+  LongMemEval with committed evidence artifacts.
+keywords:
+  - memory
+  - model-context-protocol
+  - llm-agents
+  - knowledge-graph
+  - retrieval

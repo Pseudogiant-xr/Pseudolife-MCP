@@ -10,9 +10,20 @@ import time
 
 import pytest
 
+from pseudolife_memory import shim as _shim
 from tests.pg_fixtures import resolve_test_db_url
 
 psycopg = pytest.importorskip("psycopg")
+
+# Outer async guard for tests that may autostart a daemon. It must
+# DOMINATE the shim's own two-tier spawn wait (dead-child floor +
+# live-child ceiling): 2026-08-14, two full-suite runs under concurrent
+# GPU eval load pushed legitimate autostarts past the then-hard 25 s
+# deadline, and the shim's exit(1) surfaced here as an opaque McpError.
+# Derived rather than hardcoded so a future bump of the shim's ceiling
+# cannot silently re-open the gap between the test's patience and the
+# shim's contract.
+_OUTER_TIMEOUT_S = _shim._SPAWN_WAIT_ALIVE_S + 60
 
 
 def _free_port() -> int:
@@ -66,7 +77,7 @@ def test_shim_autostarts_daemon_and_proxies(tmp_path):
 
     import asyncio
     try:
-        asyncio.run(asyncio.wait_for(_drive(), timeout=90))
+        asyncio.run(asyncio.wait_for(_drive(), timeout=_OUTER_TIMEOUT_S))
     finally:
         _reap_daemon(port)
 
@@ -124,7 +135,7 @@ def test_shim_survives_idle_gap(tmp_path):
                 assert _has_bands(await s.call_tool("memory_stats", {}))
 
     try:
-        asyncio.run(asyncio.wait_for(_drive(), timeout=120))
+        asyncio.run(asyncio.wait_for(_drive(), timeout=_OUTER_TIMEOUT_S))
     finally:
         _reap_daemon(port)
 
@@ -192,7 +203,7 @@ def test_shim_forwards_list_changed_on_toolset_expand(tmp_path):
                 assert "memory_world_search" in tools  # core tier now
 
     try:
-        asyncio.run(asyncio.wait_for(_drive(), timeout=120))
+        asyncio.run(asyncio.wait_for(_drive(), timeout=_OUTER_TIMEOUT_S))
     finally:
         _reap_daemon(port)
 

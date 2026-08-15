@@ -38,6 +38,19 @@ What you get:
 - **A web console to watch it think** — the Cortex Console above, plus cited
   world facts, session episodes, and document RAG.
 
+Measured, with receipts — on LongMemEval knowledge updates, routing
+answers through the fact spine beats naive RAG, and every number ships
+with its committed run artifact:
+
+| LongMemEval-KU | naive RAG | commit-gated cascade |
+|---|---:|---:|
+| oracle slice (78 questions, reproducible server) | 0.859 | **0.936** |
+| full haystack (~50 sessions/question, pre-registered) | 0.346 | **0.462** (p = 0.011) |
+
+Graded by a local, byte-reproducible judge — compare within rows, never
+against GPT-judged leaderboards. Full tables, caveats, and every
+artifact: [Benchmarks](docs/guide/benchmarks.md).
+
 ## Quickstart
 
 Requires Docker and Claude Code, Codex, or both. One command from clone to
@@ -77,6 +90,34 @@ setups. Non-interactive example:
 Linux (Docker Engine): your user must be in the `docker` group —
 `sudo usermod -aG docker $USER`, then log out/in (the preflight checks this).
 
+### Zero-config lite tier (no Docker)
+
+The smallest possible start — one pip install, no Docker, no database to
+set up:
+
+```bash
+pip install "pseudolife-mcp[lite]"
+claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
+```
+
+The first session auto-starts the daemon, which provisions an **embedded
+PostgreSQL 18** (pgvector included, via `pg0-embedded`) under a stable
+per-user data dir and downloads the embedding model (~1.2 GB, one-time).
+The full Postgres feature set applies — cortex facts, graph, lessons —
+and the bank is plain Postgres data: `pseudolife-mcp backup` writes a
+standard owner-free `pg_dump` archive (plus a state archive) with 7-day
+rotation, restorable into any PostgreSQL 18 target regardless of role —
+including the Docker tier (PostgreSQL 18 since 0.14), so outgrowing
+lite is a dump/restore, not a migration project. Two honest
+limits: dream consolidation needs an extractor endpoint (the Docker
+tier's bundled sidecar is not part of lite — without one, canonical
+facts come from `memory_fact_set` only), and on Windows the embedded
+runtime needs an ASCII-only data path (the daemon refuses non-ASCII
+with a clear message; set `PSEUDOLIFE_MCP_DATA_DIR`, e.g.
+`C:\pseudolife-data`). The Docker stack remains the recommended durable
+tier: external volumes, health-checked services, deploy/rollback
+tooling.
+
 <details>
 <summary>Manual install (the steps the installer automates)</summary>
 
@@ -85,6 +126,10 @@ ops/preflight.sh --client codex    # or ops\preflight.ps1 -Client codex
 docker volume create pseudolife-mcp-bank
 docker volume create pseudolife-mcp-state
 docker compose -f ops/docker-compose.yml up -d --build   # first build, once
+
+# ...or pull the prebuilt images instead of building (releases >= 0.14.0):
+docker compose -f ops/docker-compose.yml -f ops/docker-compose.ghcr.yml pull pseudolife-pg pseudolife-daemon
+docker compose -f ops/docker-compose.yml -f ops/docker-compose.ghcr.yml up -d
 
 # Verify, then wire the transport into one or both clients.
 curl http://127.0.0.1:8765/health
@@ -121,6 +166,22 @@ thinking — your coding agent is the intelligence; these are tools it calls to 
 recall what matters. (Models *are* bundled as plumbing: baked embedding
 weights for retrieval, and the optional CPU extractor sidecar that
 consolidates memories into facts while you sleep.)
+
+Where it sits among the common approaches to agent memory — each column
+is a fair tool for what it's for; this table is about *what question each
+one answers*, not who's wrong:
+
+| | notes file (`CLAUDE.md`) | auto-journaling plugin | plain vector store | Pseudolife-MCP |
+|---|---|---|---|---|
+| Survives sessions and compactions | yes | yes | yes | yes |
+| "What is X *now*?" has one current answer | if you curate it | no — replays what happened | no — every stored version competes at recall | yes — slot-keyed cortex |
+| A correction replaces the old value | you edit the file | appended beside it | old and new both retrievable, unranked by recency of truth | supersedes, with full version history kept |
+| Facts know their age and go stale | no | no | no | dated, freshness-decayed, quarantined when stale |
+| Distils do/avoid lessons from its own outcomes | no | no | no | yes |
+| Benchmark numbers ship with their raw run artifacts | — | typically no | typically no | every published number, test-enforced |
+
+Auto-journaling records what the agent *did*; Pseudolife curates what it
+*learned*. Both are useful — they answer different questions.
 
 It layers several complementary stores: the **associative continuum** (an
 8-tier embedding store, working → forever, ranked by cosine similarity fused
