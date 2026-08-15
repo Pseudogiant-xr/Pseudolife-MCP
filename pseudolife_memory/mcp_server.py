@@ -474,9 +474,9 @@ def memory_supersede(old_text: str, new_text: str) -> dict[str, Any]:
 
 @_tool(tier="core")
 def memory_stats() -> dict[str, Any]:
-    """Memory-bank vital signs: per-band sizes, capacities, hit rates, and
-    totals. Use to gauge how much has been remembered or to diagnose why
-    retrieval feels off.
+    """Memory-bank vital signs: store occupancy vs capacity, hit rates,
+    true-drop count, and totals. Use to gauge how much has been remembered
+    or to diagnose why retrieval feels off.
     """
     return service.stats()
 

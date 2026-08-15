@@ -61,11 +61,19 @@ def _make_config(preset: str, dim: int):
     preset; ``flat`` is one band at the continuum's total capacity with
     the fast tiers' retention (the same arm definition as
     band_ablation.write_flat_config, minus the YAML round-trip)."""
-    from pseudolife_memory.utils.config import MemoryConfig, MIRASBandSpec
+    from pseudolife_memory.utils.config import (
+        MemoryConfig, MIRASBandSpec, MIRASConfig,
+    )
 
     cfg = MemoryConfig(embedding_dim=dim)
-    if preset == "flat":
-        total = sum(b.max_entries for b in cfg.miras.bands)
+    if preset == "continuum":
+        # Explicit since the 2026-08-15 default flip — a bare
+        # MemoryConfig() is now the FLAT layout, and assigning
+        # ``miras.preset`` post-construction would not re-run
+        # __post_init__ (bands would silently stay flat).
+        cfg.miras = MIRASConfig(preset="continuum")
+    else:
+        total = 5250   # the continuum preset's measured total
         cfg.miras.preset = "custom"
         cfg.miras.bands = [MIRASBandSpec(
             name="flat", max_entries=total,

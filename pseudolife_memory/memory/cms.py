@@ -288,6 +288,11 @@ class ContinuumMemorySystem:
         # its entries in the top-k merge.
         self._tier_hits: dict[str, int] = {b.name: 0 for b in self.bands}
         self._tier_queries: int = 0
+        # True drops: capacity evictions with no deeper band to demote
+        # into — the only way an entry leaves the system at capacity.
+        # Under the flat default every eviction is one; surfaced in
+        # stats() so real capacity pressure is never silent.
+        self._true_drops: int = 0
 
         # Rolling coreference anchor for slot extraction (v0.7+). Tracks
         # the last named entity / type referent so that "I gave him away"
@@ -1919,6 +1924,45 @@ class ContinuumMemorySystem:
             # else: this band wasn't in the saved state (e.g. config bumped
             # to a longer-band preset). Leave fresh weights in place.
 
+        # Saved bands whose name no longer exists in the configured preset
+        # (e.g. a continuum-era save loaded under the flat default) route
+        # into the first band instead of being silently dropped — the same
+        # fallback hydrate_cms applies to storage rows. Before 2026-08-15
+        # this path lost every entry of a renamed layout. load() rebalances
+        # afterwards, so over-capacity seating is handled there.
+        configured = {b.name for b in self.bands}
+        first = self.bands[0]
+        for name, saved in saved_bands.items():
+            if name in configured:
+                continue
+            entries = saved.get("entries", [])
+            logger.warning(
+                "Saved band %r is not in the configured preset — routing "
+                "its %d entries into %r.", name, len(entries), first.name,
+            )
+            for e in entries:
+                try:
+                    first.entries.append(MemoryEntry(
+                        text=e["text"],
+                        embedding=e["embedding"].to(first.device),
+                        surprise_score=e["surprise_score"],
+                        timestamp=e["timestamp"],
+                        access_count=e["access_count"],
+                        source=e.get("source", ""),
+                        bank=first.name,
+                        superseded_at=e.get("superseded_at"),
+                        superseded_by_text=e.get("superseded_by_text"),
+                        last_logical_turn=e.get("last_logical_turn"),
+                        slots=e.get("slots", []),
+                        episode_id=e.get("episode_id"),
+                        episode_title=e.get("episode_title"),
+                        tags=list(e.get("tags") or []),
+                    ))
+                except Exception as exc:  # noqa: BLE001 — one bad entry
+                    logger.warning("Skipping unrestorable entry from saved "
+                                   "band %r: %s", name, exc)
+            first._dirty = True
+
         self._interaction_count = state.get("interaction_count", 0)
         # v3 fields — back-compat defaults preserve v2 behaviour.
         self._logical_turn_count = state.get("logical_turn_count", 0)
@@ -2086,11 +2130,22 @@ class ContinuumMemorySystem:
         is what the layout always claimed. Only the deepest band's overflow
         is a true drop. ``band_idx=None`` (a hand-wired callback) keeps the
         old delete-on-evict behaviour.
+
+        Under the ``flat`` preset (the default since 2026-08-15) there is
+        no deeper band, so every capacity eviction is a true drop by
+        design — a retention-scored delete that only fires at genuine
+        total capacity (the exact arm the flat-band verdict measured as
+        tying the continuum under forced eviction). True drops are
+        counted (``stats()["true_drops"]``) and logged so a bank under
+        real capacity pressure is visible, never silent.
         """
         self._slot_index_dirty = True
         if band_idx is not None and band_idx + 1 < len(self.bands):
             self._relocate(entry, self.bands[band_idx + 1])
             return
+        self._true_drops += 1
+        logger.info("capacity eviction (true drop #%d): %r",
+                    self._true_drops, entry.text[:80])
         if self.storage is not None and entry.db_id is not None:
             try:
                 self.storage.delete_entry_ids([entry.db_id])
@@ -2129,6 +2184,11 @@ class ContinuumMemorySystem:
             "interaction_count": self._interaction_count,
             "logical_turn_count": self._logical_turn_count,
             "retrieval_queries": self._tier_queries,
+            # Entries destroyed by capacity eviction since startup (no
+            # deeper band to demote into). 0 until the store genuinely
+            # fills; a growing number is the signal to raise capacity or
+            # curate.
+            "true_drops": self._true_drops,
             # v0.2: True when weights.pt (and .bak) failed to load and the
             # band MLPs restarted fresh. Entries are unaffected.
             "weights_reset": self.weights_reset,

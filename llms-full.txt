@@ -29,9 +29,12 @@ the intelligence; this server is its memory on disk.
 
 What you get:
 
-- **Associative memory that ages like memory should** — an 8-band
-  continuum from `working` to `forever`, ranked by hybrid dense-plus-lexical
-  similarity, with contradiction detection and supersession.
+- **Associative memory with honest forgetting** — a flat similarity store
+  ranked by hybrid dense-plus-lexical retrieval, with contradiction
+  detection and supersession. (The measured verdict: a preregistered
+  ablation campaign found the previous 8-band continuum tied a flat store
+  on every gate, so the simpler structure ships; the continuum remains
+  one config line away.)
 - **Canonical facts, not vibes** — one *current* value per `entity.attribute`
   slot (or a member set, for slots that hold many concurrent values);
   corrections supersede rather than silently overwrite, and the full
@@ -189,10 +192,10 @@ one answers*, not who's wrong:
 Auto-journaling records what the agent *did*; Pseudolife curates what it
 *learned*. Both are useful — they answer different questions.
 
-It layers several complementary stores: the **associative continuum** (an
-8-tier embedding store, working → forever, ranked by cosine similarity fused
-with a BM25 lexical pool (on by default), with contradiction detection and
-supersession); the **cortex** (slot-keyed canonical facts — one *current*
+It layers several complementary stores: the **associative store** (a flat
+embedding store ranked by cosine similarity fused with a BM25 lexical pool
+(on by default), with contradiction detection and supersession; an 8-tier
+banded layout is available as an opt-in preset); the **cortex** (slot-keyed canonical facts — one *current*
 value per `entity.attribute`, or a member set for set-valued slots — with
 provenance tiers and contender parking instead of silent overwrites); a typed **knowledge graph** over those facts
 with a closed relation vocabulary and on-read inference; the **world
@@ -241,7 +244,7 @@ is agent context every session, so it stays lean.
 | `memory_recent(n?, sources?, episodes?, tags?, verbose?)` | Newest stores, timestamp-ordered (debug + session catch-up) |
 | `memory_supersede(old_text, new_text)` | Explicit correction — mark a memory obsolete, keep it as history |
 | `memory_forget(scope, ...)` | Hard-delete from one store: `memory` (by text/substring/source/episode/tag), `fact`, `world`, or `lesson` (by entity/attribute) |
-| `memory_stats()` | Per-band sizes, hit rates, totals |
+| `memory_stats()` | Store occupancy, hit rates, totals |
 | `memory_get(entry_id)` / `memory_reinforce(entry_id)` | Dereference a memory id to its full episode (+ `consolidated_into`); reinforce it after finding it useful |
 | `memory_fact_get(entity, attribute)` | The one CURRENT canonical value at a slot (+ parked contenders); on an empty slot returns ranked `candidates` (same-entity, then similar slots); aged/contested facts carry a ready-made `correct_with` call (as do `memory_search` / `memory_world_search` hits) |
 | `memory_fact_set(entity, attribute, value, origin?, confidence?, episode?, freshness_class?)` | Assert a canonical fact deliberately (insert / confirm / supersede / contest); `freshness_class` (`auto` default) says how fast the slot rots — `auto` infers it from the entity's kind |
@@ -288,9 +291,9 @@ deployments:
 
 One **memory daemon** owns the bank and serves MCP over streamable HTTP
 at `/mcp`; every Claude Code session (and any LAN agent) attaches to it.
-**Postgres 16 + pgvector** (in Docker) is the durable source of truth —
-the in-memory MIRAS bands are a write-through cache hydrated at startup
-(a small `weights.pt` persists only band counters — there are no MLP weights).
+**Postgres 18 + pgvector** (in Docker) is the durable source of truth —
+the in-memory store is a write-through cache hydrated at startup
+(a small `weights.pt` persists only counters — there are no MLP weights).
 
 The daemon runs **either** containerized (recommended — portable, no host
 Python) **or** as a host process. Claude Code attaches through a thin
@@ -307,7 +310,7 @@ LAN agent ────────┘  or stdio shim         (single writer)    
 
 This kills two v0.1 hazards by construction: a single writer means
 concurrent sessions can't clobber each other, and entries are transactional
-so a crash can't wipe the bank. On top of the associative bands sit the
+so a crash can't wipe the bank. On top of the associative store sit the
 canonical layers — cortex, world facts, lessons, temporal/HLC stamps
 ([the memory model](docs/guide/memory-model.md)) — joined to a typed
 knowledge graph walkable via `memory_graph` and multi-hop `memory_recall`
@@ -631,7 +634,7 @@ An operator dashboard served by the daemon itself — point a browser at
 **`http://127.0.0.1:8765/ui/`** (the `/health` and `/mcp` endpoints are
 unchanged; the console is additive). It's a read-mostly instrument panel for
 seeing and steering the memory a human otherwise can't observe:
-**Observatory** (health, per-layer counts, the 8-band continuum, dream
+**Observatory** (health, per-layer counts, the memory store's capacity meter, dream
 gauges), **Cortex** (canonical facts with provenance, version-history
 timelines, inline Accept/Discard for contested slots), **World / Lessons /
 Episodes**, **Stream** (live search with rerank/BM25 toggles and a
@@ -654,8 +657,8 @@ renders the real frontend against canned data:
 | Capability | Status |
 |---|---|
 | Transport | Streamable-HTTP MCP daemon (`/mcp`); stdio shim is the installer default (per-session identity) — HTTP remains for single-session setups |
-| Storage | Postgres 16 + pgvector (source of truth); ChromaDB for the reference bank |
-| Associative continuum | 8-tier MIRAS bands; hybrid dense + BM25 ranking (BM25 on by default); contradiction detection and supersession, including a deterministic slot-identity path that fires regardless of embedding similarity |
+| Storage | Postgres 18 + pgvector (source of truth); ChromaDB for the reference bank |
+| Associative store | Flat similarity store (default since the 2026-08-15 measured verdict; the 8-tier banded preset remains opt-in); hybrid dense + BM25 ranking (BM25 on by default); contradiction detection and supersession, including a deterministic slot-identity path that fires regardless of embedding similarity |
 | Canonical-fact cortex | Single-writer: LLM dream pass + `memory_fact_*` (regex auto-promote opt-in, default off) |
 | Set-valued slots | `memory_set_add` / `memory_set_remove` for many-current-value slots; one-way scalar→set conversion, aggregate scalars guarded (park as contender) |
 | Provenance contenders | Tier-rank guard `user > action > agent`; `memory_fact_resolve` |
@@ -761,9 +764,10 @@ multi-writer stamp. Part of the [user guide](../../README.md#documentation).
 
 ## Canonical facts — the cortex (schema v8)
 
-Alongside the associative continuum (the 8 MIRAS bands) sits the
-**cortex**: a slot-keyed canonical-fact store. Where the continuum is
-similarity-ranked and decaying, the cortex is **identity-not-similarity,
+Alongside the associative store (a flat similarity-ranked pool since
+2026-08-15; an 8-band layout remains an opt-in preset) sits the
+**cortex**: a slot-keyed canonical-fact store. Where the associative
+store is similarity-ranked, the cortex is **identity-not-similarity,
 supersession-not-decay, currency-not-frequency** — one *current* value per
 `(entity, attribute)` slot (or a member set, for [set-valued
 slots](#set-valued-slots)), retrievable out of the context window.
@@ -2211,8 +2215,8 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
 - **Surprise threshold `0.0`** — the v0.5 store gate measures *novelty*
   (`1 − max cos` to existing entries). Claude stores deliberately, so the
   gate stays permissive (store everything; novelty still drives
-  eviction/promotion scoring). Raise it above zero to dedup near-duplicate
-  stores.
+  eviction scoring at capacity). Raise it above zero to dedup
+  near-duplicate stores.
 - **Meta-filter off** (`memory.meta_filter.enabled = false` in the MCP
   build) — the filter exists to drop auto-captured chat noise ("I don't
   have anything saved about that"); every MCP store is a deliberate tool
@@ -2221,22 +2225,28 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
 - **Recency base half-life 24h** (`memory.recency_base_half_life_s =
   86400`, vs the 1h chat default) — Claude Code sessions are hours-to-
   days apart; with a 1h half-life the recency boost was effectively
-  always zero. Halves per band depth as before (1d → 2d → 4d → …).
-  Note the depth ramp itself is **off by default since 2026-07-25** (see
-  below), so this setting only bites once you opt back in.
-- **MIRAS preset `continuum`** — the 8-tier `working / micro / instant /
-  fast / medium / slow / archival / forever` continuum. Bands are plain
-  cosine vector stores (v0.5); a band spec is capacity + consolidation
-  cadence + promotion thresholds + an eviction policy. Since 2026-07-25 a
-  band at capacity **demotes** its lowest-scoring entry to the next band
-  rather than deleting it; only overflow past `forever` is a real drop,
-  which makes the summed capacity (5,250) the actual bound. Previously a
-  full `working` band destroyed entries — and their storage rows — while
-  the deeper bands sat nearly empty, because promotion was the only other
-  way out and it requires `access_count >= N or surprise > threshold`.
-  **Changing the preset is safe**: restoring from Postgres or from
-  `cms_state.pt` reseats entries across the new band layout in one pass,
-  including rows whose old band name is gone. If the bank holds more rows
+  always zero. This knob is **doubly dormant under the flat default**:
+  the depth ramp it feeds has been off since 2026-07-25 AND the ramp is
+  structurally inert with one band; it only bites on a multi-band preset
+  with `recency_boost_enabled = true`.
+- **MIRAS preset `flat`** (default since 2026-08-15) — one band named
+  `flat` at capacity 5,250 (the previous continuum's summed total), with
+  a `balanced` retention policy. Eviction is a retention-scored **true
+  drop** that only fires at genuine capacity, is counted
+  (`memory_stats().true_drops`) and logged — a bank under real pressure
+  is visible, never silent. This is the arm the preregistered flat-band
+  verdict measured as tying the 8-band continuum on every gate (ranking,
+  forced-eviction retention quality, real recorded queries — see the
+  [benchmarks page](benchmarks.md#band-structure)), so the simpler
+  structure ships. The **`continuum` preset is retained** as the one-line
+  rollback: the 8-tier `working … forever` layout with promotion
+  thresholds, per-tier retention policies, and the 2026-07-25 demotion
+  cascade (a full band demotes into the next; only overflow past
+  `forever` drops).
+  **Changing the preset in either direction is safe**: hydration reseats
+  every row across the new band layout in one pass (rows whose old band
+  name is gone land in the first band) and **reconciles the stored band
+  stamps** to the new layout, idempotently. If the bank holds more rows
   than the new preset seats, the deepest band is left over capacity and
   the count logged rather than truncated at startup — normal eviction
   drains it from there.
@@ -2262,9 +2272,11 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   `0.4 → 0.0` ramp over band depth, treating depth as a proxy for age.
   Depth is set by promotion history, which without retrieval to accrue
   access counts tracks *surprise*, not age — so the ramp could rank a
-  weaker match in `working` above a stronger match in a deeper band
-  (measured: up to 18 points on the LongMemEval naive-RAG arm). Set it
-  to `true` to restore the previous ranking.
+  weaker shallow match above a stronger deep one (measured: up to 18
+  points on the LongMemEval naive-RAG arm). Under the flat default the
+  ramp is additionally structural dead weight (one band, no depths), so
+  the knob has left the Console config surface; it still applies to
+  multi-band presets via `config.yaml`.
 - **Superseded entries stay visible** (`memory.hide_superseded = false`,
   since v0.7.3) — an entry the contradiction pipeline marked superseded
   is still retrievable, downranked ×0.55 so current facts outrank their
@@ -2550,7 +2562,7 @@ loopback-only — the LAN only ever sees the daemon.
 is **Postgres**, which lives in an *external* Docker volume —
 `pseudolife-mcp-bank` by default (entries + facts + graph). A second
 external volume, `pseudolife-mcp-state`, holds the daemon's ChromaDB
-reference bank, the band-counter `weights.pt`, and the cortex snapshot.
+reference bank, the counter file `weights.pt`, and the cortex snapshot.
 Both are declared `external` in `ops/docker-compose.yml` precisely so a
 container teardown can't take them with it. The host `data/` dir then holds
 only backups (`data/backups/` from `ops/backup.ps1` — a `pg_dump` of the
@@ -2569,14 +2581,14 @@ volumes.
 ```
 data/
 ├── memory_state/
-│   └── cms_state.pt        # 8-tier MIRAS entries + metadata (file mode)
+│   └── cms_state.pt        # Associative entries + metadata (file mode)
 ├── cortex_state.pt         # Slot-keyed canonical facts (cortex, schema v8)
 ├── chromadb/               # Reference bank (RAG documents)
 └── config.yaml             # Optional overrides
 ```
 
 In **file mode only**, wipe memory by deleting `data/` and restarting; wipe
-just documents via `data/chromadb/`; wipe just the episodic bands via
+just documents via `data/chromadb/`; wipe just the associative store via
 `data/memory_state/`. (In containerized mode these files are not the source
 of truth — see the volume note above.)
 
@@ -2912,7 +2924,21 @@ see [asymmetric query/document encoding](retrieval.md#asymmetric-query-and-docum
 
 ## Band structure — the continuum earns nothing on either side
 
-The 8-band cosine continuum is the memory's headline structure, so it is
+> **Outcome (2026-08-15): shipped.** The flat store is now the default
+> preset. A preregistered rerun under the current retrieval backbone
+> (v25 embedder + BM25-on) plus six steelman edge cases — forced
+> eviction at matched capacity, depth-scaled recency at two half-life
+> bases, 202 real recorded queries under a blind judge, lifecycle
+> consumers, latency — came back a tie on every gate, in both
+> directions: the significant July deltas below (each way) did not
+> reproduce, and the write-side loss was fixed by the 2026-07-25
+> demotion cascade before the rerun (survival now 0.0 loss both arms).
+> The July results below are retained as the historical record that
+> opened the question; the rerun's full gates table lives in
+> `docs/superpowers/specs/2026-08-14-flat-band-verdict-preregistration.md`
+> with committed `abl25-*` artifacts.
+
+The 8-band cosine continuum was the memory's headline structure, so it was
 worth asking what it buys. An offline ablation rebuilt every KU answer
 context from the same banks with the bands collapsed into a **single flat
 cosine pool**, under two timestamp regimes (`wall` — every entry stamped
@@ -2979,11 +3005,16 @@ still decisive for the design: partitioning a fixed capacity into
 recency tiers throws away entries that an unpartitioned store of the same
 size would have kept, and the memory is measurably worse for it.
 
-Both of the continuum's defences have now been measured and neither
-holds. The case for the banding, if there is one, has to be made on
-grounds this benchmark does not reach — and the honest engineering
-conclusion is that a flat store is the better default until such a case
-is made.
+Both of the continuum's July defences were measured here and neither
+held. The 2026-08-15 preregistered rerun then closed the two bounds this
+page flags: the demotion cascade (2026-07-25) eliminated the
+partition-forced eviction entirely (loss 0.0 both ingest arms — the
+whole-system tables above describe code that no longer ships), and a
+capacity-scaled corpus where **both** arms genuinely evict found the
+banded retention stack ties a single flat policy on gold-evidence
+survival (0.459 vs 0.465, p = 1.0). With every gate a tie, the flat
+store became the default on 2026-08-15; the `continuum` preset remains
+one config line away.
 
 ## Extraction quality is the dominant factor
 

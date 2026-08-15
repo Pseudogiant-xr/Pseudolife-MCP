@@ -13,10 +13,10 @@ a memória dele em disco.
 
 O que você ganha:
 
-- **Memória associativa que envelhece como a memória deveria** — um
-  contínuo de recência de bandas de memória, ranqueadas por similaridade,
-  com detecção de contradição e supersessão: correções substituem
-  respostas antigas em vez de se acumularem ao lado delas.
+- **Memória associativa com esquecimento honesto** — um armazenamento
+  plano por similaridade com recuperação híbrida densa e lexical,
+  detecção de contradição e supersessão: correções substituem respostas
+  antigas em vez de se acumularem ao lado delas.
 - **Fatos canônicos, não achismos** — um valor *atual* por slot
   `entity.attribute` (ou um conjunto de membros, para slots que armazenam
   muitos valores simultâneos); correções fazem supersessão em vez de
@@ -85,7 +85,7 @@ O agente armazena uma afirmação de cada vez enquanto trabalha
 fluxo em fatos canônicos, relações de grafo e lições procedurais. No início de cada
 sessão, um briefing injeta o que a memória tem incerteza, lições de
 trabalhos anteriores e onde você parou. A recuperação combina busca
-semântica sobre as bandas de memória com o repositório de fatos
+semântica sobre o armazenamento associativo com o repositório de fatos
 canônicos, de modo que respostas corrigidas prevalecem sobre as
 desatualizadas.
 

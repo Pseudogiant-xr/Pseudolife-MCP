@@ -48,8 +48,8 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
 - **Surprise threshold `0.0`** — the v0.5 store gate measures *novelty*
   (`1 − max cos` to existing entries). Claude stores deliberately, so the
   gate stays permissive (store everything; novelty still drives
-  eviction/promotion scoring). Raise it above zero to dedup near-duplicate
-  stores.
+  eviction scoring at capacity). Raise it above zero to dedup
+  near-duplicate stores.
 - **Meta-filter off** (`memory.meta_filter.enabled = false` in the MCP
   build) — the filter exists to drop auto-captured chat noise ("I don't
   have anything saved about that"); every MCP store is a deliberate tool
@@ -58,22 +58,28 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
 - **Recency base half-life 24h** (`memory.recency_base_half_life_s =
   86400`, vs the 1h chat default) — Claude Code sessions are hours-to-
   days apart; with a 1h half-life the recency boost was effectively
-  always zero. Halves per band depth as before (1d → 2d → 4d → …).
-  Note the depth ramp itself is **off by default since 2026-07-25** (see
-  below), so this setting only bites once you opt back in.
-- **MIRAS preset `continuum`** — the 8-tier `working / micro / instant /
-  fast / medium / slow / archival / forever` continuum. Bands are plain
-  cosine vector stores (v0.5); a band spec is capacity + consolidation
-  cadence + promotion thresholds + an eviction policy. Since 2026-07-25 a
-  band at capacity **demotes** its lowest-scoring entry to the next band
-  rather than deleting it; only overflow past `forever` is a real drop,
-  which makes the summed capacity (5,250) the actual bound. Previously a
-  full `working` band destroyed entries — and their storage rows — while
-  the deeper bands sat nearly empty, because promotion was the only other
-  way out and it requires `access_count >= N or surprise > threshold`.
-  **Changing the preset is safe**: restoring from Postgres or from
-  `cms_state.pt` reseats entries across the new band layout in one pass,
-  including rows whose old band name is gone. If the bank holds more rows
+  always zero. This knob is **doubly dormant under the flat default**:
+  the depth ramp it feeds has been off since 2026-07-25 AND the ramp is
+  structurally inert with one band; it only bites on a multi-band preset
+  with `recency_boost_enabled = true`.
+- **MIRAS preset `flat`** (default since 2026-08-15) — one band named
+  `flat` at capacity 5,250 (the previous continuum's summed total), with
+  a `balanced` retention policy. Eviction is a retention-scored **true
+  drop** that only fires at genuine capacity, is counted
+  (`memory_stats().true_drops`) and logged — a bank under real pressure
+  is visible, never silent. This is the arm the preregistered flat-band
+  verdict measured as tying the 8-band continuum on every gate (ranking,
+  forced-eviction retention quality, real recorded queries — see the
+  [benchmarks page](benchmarks.md#band-structure)), so the simpler
+  structure ships. The **`continuum` preset is retained** as the one-line
+  rollback: the 8-tier `working … forever` layout with promotion
+  thresholds, per-tier retention policies, and the 2026-07-25 demotion
+  cascade (a full band demotes into the next; only overflow past
+  `forever` drops).
+  **Changing the preset in either direction is safe**: hydration reseats
+  every row across the new band layout in one pass (rows whose old band
+  name is gone land in the first band) and **reconciles the stored band
+  stamps** to the new layout, idempotently. If the bank holds more rows
   than the new preset seats, the deepest band is left over capacity and
   the count logged rather than truncated at startup — normal eviction
   drains it from there.
@@ -99,9 +105,11 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   `0.4 → 0.0` ramp over band depth, treating depth as a proxy for age.
   Depth is set by promotion history, which without retrieval to accrue
   access counts tracks *surprise*, not age — so the ramp could rank a
-  weaker match in `working` above a stronger match in a deeper band
-  (measured: up to 18 points on the LongMemEval naive-RAG arm). Set it
-  to `true` to restore the previous ranking.
+  weaker shallow match above a stronger deep one (measured: up to 18
+  points on the LongMemEval naive-RAG arm). Under the flat default the
+  ramp is additionally structural dead weight (one band, no depths), so
+  the knob has left the Console config surface; it still applies to
+  multi-band presets via `config.yaml`.
 - **Superseded entries stay visible** (`memory.hide_superseded = false`,
   since v0.7.3) — an entry the contradiction pipeline marked superseded
   is still retrievable, downranked ×0.55 so current facts outrank their
@@ -387,7 +395,7 @@ loopback-only — the LAN only ever sees the daemon.
 is **Postgres**, which lives in an *external* Docker volume —
 `pseudolife-mcp-bank` by default (entries + facts + graph). A second
 external volume, `pseudolife-mcp-state`, holds the daemon's ChromaDB
-reference bank, the band-counter `weights.pt`, and the cortex snapshot.
+reference bank, the counter file `weights.pt`, and the cortex snapshot.
 Both are declared `external` in `ops/docker-compose.yml` precisely so a
 container teardown can't take them with it. The host `data/` dir then holds
 only backups (`data/backups/` from `ops/backup.ps1` — a `pg_dump` of the
@@ -406,14 +414,14 @@ volumes.
 ```
 data/
 ├── memory_state/
-│   └── cms_state.pt        # 8-tier MIRAS entries + metadata (file mode)
+│   └── cms_state.pt        # Associative entries + metadata (file mode)
 ├── cortex_state.pt         # Slot-keyed canonical facts (cortex, schema v8)
 ├── chromadb/               # Reference bank (RAG documents)
 └── config.yaml             # Optional overrides
 ```
 
 In **file mode only**, wipe memory by deleting `data/` and restarting; wipe
-just documents via `data/chromadb/`; wipe just the episodic bands via
+just documents via `data/chromadb/`; wipe just the associative store via
 `data/memory_state/`. (In containerized mode these files are not the source
 of truth — see the volume note above.)
 

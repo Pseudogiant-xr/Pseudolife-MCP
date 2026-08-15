@@ -6,9 +6,10 @@ multi-writer stamp. Part of the [user guide](../../README.md#documentation).
 
 ## Canonical facts — the cortex (schema v8)
 
-Alongside the associative continuum (the 8 MIRAS bands) sits the
-**cortex**: a slot-keyed canonical-fact store. Where the continuum is
-similarity-ranked and decaying, the cortex is **identity-not-similarity,
+Alongside the associative store (a flat similarity-ranked pool since
+2026-08-15; an 8-band layout remains an opt-in preset) sits the
+**cortex**: a slot-keyed canonical-fact store. Where the associative
+store is similarity-ranked, the cortex is **identity-not-similarity,
 supersession-not-decay, currency-not-frequency** — one *current* value per
 `(entity, attribute)` slot (or a member set, for [set-valued
 slots](#set-valued-slots)), retrievable out of the context window.

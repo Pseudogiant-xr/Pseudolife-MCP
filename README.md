@@ -23,9 +23,12 @@ the intelligence; this server is its memory on disk.
 
 What you get:
 
-- **Associative memory that ages like memory should** — an 8-band
-  continuum from `working` to `forever`, ranked by hybrid dense-plus-lexical
-  similarity, with contradiction detection and supersession.
+- **Associative memory with honest forgetting** — a flat similarity store
+  ranked by hybrid dense-plus-lexical retrieval, with contradiction
+  detection and supersession. (The measured verdict: a preregistered
+  ablation campaign found the previous 8-band continuum tied a flat store
+  on every gate, so the simpler structure ships; the continuum remains
+  one config line away.)
 - **Canonical facts, not vibes** — one *current* value per `entity.attribute`
   slot (or a member set, for slots that hold many concurrent values);
   corrections supersede rather than silently overwrite, and the full
@@ -183,10 +186,10 @@ one answers*, not who's wrong:
 Auto-journaling records what the agent *did*; Pseudolife curates what it
 *learned*. Both are useful — they answer different questions.
 
-It layers several complementary stores: the **associative continuum** (an
-8-tier embedding store, working → forever, ranked by cosine similarity fused
-with a BM25 lexical pool (on by default), with contradiction detection and
-supersession); the **cortex** (slot-keyed canonical facts — one *current*
+It layers several complementary stores: the **associative store** (a flat
+embedding store ranked by cosine similarity fused with a BM25 lexical pool
+(on by default), with contradiction detection and supersession; an 8-tier
+banded layout is available as an opt-in preset); the **cortex** (slot-keyed canonical facts — one *current*
 value per `entity.attribute`, or a member set for set-valued slots — with
 provenance tiers and contender parking instead of silent overwrites); a typed **knowledge graph** over those facts
 with a closed relation vocabulary and on-read inference; the **world
@@ -235,7 +238,7 @@ is agent context every session, so it stays lean.
 | `memory_recent(n?, sources?, episodes?, tags?, verbose?)` | Newest stores, timestamp-ordered (debug + session catch-up) |
 | `memory_supersede(old_text, new_text)` | Explicit correction — mark a memory obsolete, keep it as history |
 | `memory_forget(scope, ...)` | Hard-delete from one store: `memory` (by text/substring/source/episode/tag), `fact`, `world`, or `lesson` (by entity/attribute) |
-| `memory_stats()` | Per-band sizes, hit rates, totals |
+| `memory_stats()` | Store occupancy, hit rates, totals |
 | `memory_get(entry_id)` / `memory_reinforce(entry_id)` | Dereference a memory id to its full episode (+ `consolidated_into`); reinforce it after finding it useful |
 | `memory_fact_get(entity, attribute)` | The one CURRENT canonical value at a slot (+ parked contenders); on an empty slot returns ranked `candidates` (same-entity, then similar slots); aged/contested facts carry a ready-made `correct_with` call (as do `memory_search` / `memory_world_search` hits) |
 | `memory_fact_set(entity, attribute, value, origin?, confidence?, episode?, freshness_class?)` | Assert a canonical fact deliberately (insert / confirm / supersede / contest); `freshness_class` (`auto` default) says how fast the slot rots — `auto` infers it from the entity's kind |
@@ -282,9 +285,9 @@ deployments:
 
 One **memory daemon** owns the bank and serves MCP over streamable HTTP
 at `/mcp`; every Claude Code session (and any LAN agent) attaches to it.
-**Postgres 16 + pgvector** (in Docker) is the durable source of truth —
-the in-memory MIRAS bands are a write-through cache hydrated at startup
-(a small `weights.pt` persists only band counters — there are no MLP weights).
+**Postgres 18 + pgvector** (in Docker) is the durable source of truth —
+the in-memory store is a write-through cache hydrated at startup
+(a small `weights.pt` persists only counters — there are no MLP weights).
 
 The daemon runs **either** containerized (recommended — portable, no host
 Python) **or** as a host process. Claude Code attaches through a thin
@@ -301,7 +304,7 @@ LAN agent ────────┘  or stdio shim         (single writer)    
 
 This kills two v0.1 hazards by construction: a single writer means
 concurrent sessions can't clobber each other, and entries are transactional
-so a crash can't wipe the bank. On top of the associative bands sit the
+so a crash can't wipe the bank. On top of the associative store sit the
 canonical layers — cortex, world facts, lessons, temporal/HLC stamps
 ([the memory model](docs/guide/memory-model.md)) — joined to a typed
 knowledge graph walkable via `memory_graph` and multi-hop `memory_recall`
@@ -625,7 +628,7 @@ An operator dashboard served by the daemon itself — point a browser at
 **`http://127.0.0.1:8765/ui/`** (the `/health` and `/mcp` endpoints are
 unchanged; the console is additive). It's a read-mostly instrument panel for
 seeing and steering the memory a human otherwise can't observe:
-**Observatory** (health, per-layer counts, the 8-band continuum, dream
+**Observatory** (health, per-layer counts, the memory store's capacity meter, dream
 gauges), **Cortex** (canonical facts with provenance, version-history
 timelines, inline Accept/Discard for contested slots), **World / Lessons /
 Episodes**, **Stream** (live search with rerank/BM25 toggles and a
@@ -648,8 +651,8 @@ renders the real frontend against canned data:
 | Capability | Status |
 |---|---|
 | Transport | Streamable-HTTP MCP daemon (`/mcp`); stdio shim is the installer default (per-session identity) — HTTP remains for single-session setups |
-| Storage | Postgres 16 + pgvector (source of truth); ChromaDB for the reference bank |
-| Associative continuum | 8-tier MIRAS bands; hybrid dense + BM25 ranking (BM25 on by default); contradiction detection and supersession, including a deterministic slot-identity path that fires regardless of embedding similarity |
+| Storage | Postgres 18 + pgvector (source of truth); ChromaDB for the reference bank |
+| Associative store | Flat similarity store (default since the 2026-08-15 measured verdict; the 8-tier banded preset remains opt-in); hybrid dense + BM25 ranking (BM25 on by default); contradiction detection and supersession, including a deterministic slot-identity path that fires regardless of embedding similarity |
 | Canonical-fact cortex | Single-writer: LLM dream pass + `memory_fact_*` (regex auto-promote opt-in, default off) |
 | Set-valued slots | `memory_set_add` / `memory_set_remove` for many-current-value slots; one-way scalar→set conversion, aggregate scalars guarded (park as contender) |
 | Provenance contenders | Tier-rank guard `user > action > agent`; `memory_fact_resolve` |

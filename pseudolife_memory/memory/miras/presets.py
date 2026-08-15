@@ -35,6 +35,27 @@ def _spec(**overrides: object) -> "MIRASBandSpec":
     return MIRASBandSpec(**overrides)  # type: ignore[arg-type]
 
 
+def flat_bands() -> list["MIRASBandSpec"]:
+    """One flat band at the continuum's measured total capacity — the
+    default since 2026-08-15.
+
+    Byte-for-byte the ablation arm that tied the 8-band continuum on
+    every preregistered gate (ranking, forced-eviction retention, real
+    recorded queries; docs/superpowers/specs/
+    2026-08-14-flat-band-verdict-preregistration.md). Promotion is
+    structurally unreachable; eviction is a retention-scored true drop
+    that only fires at genuine total capacity. The ``continuum`` preset
+    below is retained as the one-line rollback.
+    """
+    return [
+        _spec(name="flat", max_entries=5250,
+              update_interval=1_000_000_000,
+              promotion_access_count=1_000_000_000,
+              promotion_surprise=1.1,
+              retention_policy="balanced"),
+    ]
+
+
 def continuum_bands() -> list["MIRASBandSpec"]:
     """8 tiers: working / micro / instant / fast / medium / slow / archival /
     forever — a recency-tiered cosine store for agentic deployments.
@@ -80,9 +101,12 @@ def continuum_bands() -> list["MIRASBandSpec"]:
     ]
 
 
-# ``continuum`` is the only real layout now. The pre-v0.5 neural-experiment
-# presets are deprecated aliases so existing config.yaml files keep loading.
+# ``flat`` is the default layout since 2026-08-15; ``continuum`` is the
+# retained 8-tier layout (rollback + comparison). The pre-v0.5
+# neural-experiment presets are deprecated aliases so existing
+# config.yaml files keep loading.
 PRESET_REGISTRY = {
+    "flat": flat_bands,
     "continuum": continuum_bands,
     "titans": continuum_bands,
     "moneta": continuum_bands,

@@ -10,6 +10,7 @@ with Phase 2 when entity links make ids meaningful.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import asdict
 from typing import Any
 
@@ -19,6 +20,8 @@ from pseudolife_memory.memory.cortex import (CortexRecord, CortexStore,
                                              SUPERSESSION_LOG_CAP)
 from pseudolife_memory.memory.episodes import Episode, EpisodeManager
 from pseudolife_memory.memory.titans_memory import MemoryEntry
+
+logger = logging.getLogger(__name__)
 
 _CORTEX_LOG_KEY = "cortex_supersession_log"
 _CORTEX_CURSOR_KEY = "cortex_dream_cursor"
@@ -111,6 +114,32 @@ def hydrate_cms(cms, storage) -> int:
     # which absorbs rows whose band no longer exists) can be left far over
     # capacity. Seat them before anyone reads or writes.
     cms.rebalance_bands()
+    # Reconcile band stamps AFTER seating: a preset change (continuum ->
+    # flat, a legacy .pt import, a rollback the other way) leaves
+    # ``entry.bank`` naming a band that no longer holds the entry. The
+    # stale stamp flows into every entry dict the API serves, the Console
+    # chips, and the per-tier hit telemetry (phantom keys), and would be
+    # written back verbatim by reflush. Rewrite in memory and write
+    # through — config-aware where a schema migration cannot be, and
+    # idempotent (a second hydrate touches zero rows).
+    update = getattr(storage, "update_entry", None)
+    reconciled = 0
+    for band in cms.bands:
+        for e in band.entries:
+            if e.bank == band.name:
+                continue
+            e.bank = band.name
+            if update is not None and e.db_id is not None:
+                try:
+                    update(e.db_id, band=band.name)
+                    reconciled += 1
+                except Exception as exc:  # noqa: BLE001 — telemetry stamp,
+                    logger.warning(          # never worth failing a boot
+                        "band-stamp write-through failed for entry %s: %s",
+                        e.db_id, exc)
+    if reconciled:
+        logger.info("hydrate: reconciled %d stale band stamp(s) to the "
+                    "configured preset", reconciled)
     em = EpisodeManager()
     for ep in storage.load_episodes():
         em.episodes[ep["id"]] = Episode(**ep)

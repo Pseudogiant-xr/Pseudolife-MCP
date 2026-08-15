@@ -13,10 +13,10 @@ inteligencia; este servidor es su memoria en disco.
 
 Lo que obtienes:
 
-- **Memoria asociativa que envejece como debería envejecer una memoria** —
-  un continuo de recencia de bandas de memoria clasificadas por similitud,
-  con detección de contradicciones y sustitución: las correcciones
-  reemplazan las respuestas antiguas en lugar de acumularse junto a ellas.
+- **Memoria asociativa con un olvido honesto** — un almacén plano de
+  similitud con recuperación híbrida densa y léxica, detección de
+  contradicciones y sustitución: las correcciones reemplazan las
+  respuestas antiguas en lugar de acumularse junto a ellas.
 - **Hechos canónicos, no intuiciones** — un único valor *actual* por cada
   slot `entity.attribute` (o un conjunto de miembros, para los slots que
   contienen muchos valores simultáneos); las correcciones sustituyen en
@@ -86,7 +86,7 @@ Entre sesiones, el **sueño** destila el flujo en hechos canónicos,
 relaciones de grafo y lecciones de procedimiento. Al inicio de cada
 sesión, un resumen inyecta aquello de lo que la memoria no está segura,
 las lecciones del trabajo anterior y dónde quedaste. La recuperación
-combina la búsqueda semántica sobre las bandas de memoria con el almacén
+combina la búsqueda semántica sobre el almacén asociativo con el almacén
 de hechos canónicos, de modo que las respuestas corregidas prevalecen
 sobre las obsoletas.
 

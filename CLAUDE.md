@@ -187,9 +187,11 @@ maintainer, in PR bodies, and in commit messages. The point is less that you
 understand them (you will infer them) and more that every session describes
 the same thing with the same word.
 
-- **continuum / bands** — the associative store: 8 MIRAS bands from
-  `working` to `forever`, similarity-ranked and decaying. An **entry** is
-  one memory in a band.
+- **continuum / bands** — the associative store's banded layout. Since
+  2026-08-15 the default is ONE flat band (`preset: flat`, the measured
+  tie from the flat-band verdict); the 8-band `working`→`forever`
+  continuum survives as an opt-in preset and its machinery stays in the
+  tree. An **entry** is one memory in a band.
 - **cortex** — the slot-keyed canonical-fact store: one *current* value per
   `(entity, attribute)` **slot**; supersession, not decay. A **set-valued
   slot** holds many concurrent members (add/remove, not replace).

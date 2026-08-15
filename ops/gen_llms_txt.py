@@ -37,7 +37,7 @@ PAGES: list[tuple[str, str]] = [
      "The canonical-fact layers: cortex slots, supersession, contenders, "
      "world facts, lessons, and the temporal/multi-writer stamp"),
     ("docs/guide/retrieval.md",
-     "How memory_search ranks: bands, hybrid dense+lexical scoring, "
+     "How memory_search ranks: hybrid dense+lexical scoring, "
      "reranking, and the explain trace"),
     ("docs/guide/dreaming.md",
      "The consolidation pass: extractors, the cursor, claim gating, deep "

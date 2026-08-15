@@ -1506,6 +1506,41 @@ for _cid, _art_name, _stated in [
         value=lambda d: d["rows"][0]["store_median_ms"], stated=_stated,
         places=1))
 
+# The benchmarks page's 2026-08-15 closing block repeats two rerun
+# numbers where readers meet the July tables — pin them there too.
+for _cid, _needle, _key, _stated in [
+    ("abl25-bench-evict-a", "(0.459 vs 0.465, p = 1.0)",
+     "a_mean_evidence_survival", 0.459),
+    ("abl25-bench-evict-b", "(0.459 vs 0.465, p = 1.0)",
+     "b_mean_evidence_survival", 0.465),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=BENCH, needle=_needle, artifacts=(ABL25_EVICT,),
+        value=(lambda k: lambda d: d[k])(_key), stated=_stated, places=3))
+CLAIMS.append(Claim(
+    id="abl25-bench-survival-zero", doc=BENCH,
+    needle="(loss 0.0 both ingest arms",
+    artifacts=(ABL25_SURV,),
+    value=lambda d: d["continuum_loss_rate"], stated=0.0, places=3))
+
+# The distractor-scale probe's published gates (spec doc, 2026-08-15).
+PROBE_DOC = ("docs/superpowers/specs/"
+             "2026-08-15-distractor-scale-probe-preregistration.md")
+PROBE = RESULTS + "distractor-scale-probe-2026-08-15.json"
+for _cid, _needle, _val, _stated, _places in [
+    ("probe-1x", "1x 0.830", lambda d:
+        d["scales"]["1x"]["evidence_in_top6_mean"], 0.830, 3),
+    ("probe-15x", "15x 0.597", lambda d:
+        d["scales"]["15x"]["evidence_in_top6_mean"], 0.597, 3),
+    ("probe-delta", "delta **+0.233, p < 0.0001**", lambda d:
+        d["gates"]["G-D1"]["delta_mean_1x_minus_15x"], 0.233, 3),
+    ("probe-bm25-15x", "620 ms (15x)", lambda d:
+        d["bm25_latency_ms"]["15x"], 620.0, 0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=PROBE_DOC, needle=_needle, artifacts=(PROBE,),
+        value=_val, stated=_stated, places=_places))
+
 
 def test_every_published_number_names_a_committed_artifact():
     """A claim whose evidence is untracked cannot be checked by a reader.

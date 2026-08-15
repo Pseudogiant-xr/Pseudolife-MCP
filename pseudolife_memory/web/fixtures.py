@@ -111,6 +111,9 @@ def _lesson_dict(t):
 
 def _stream_dict(t, idx):
     text, source, band, tags, age_s = t
+    # Flat default: every entry lives in the one band regardless of the
+    # legacy band names the demo tuples carry.
+    band = "flat"
     return {"id": 1000 + idx, "text": text, "source": source, "bank": band, "tags": tags,
             "timestamp": _NOW - age_s, "age": _age(age_s),
             "score": round(0.9 - idx * 0.06, 3), "superseded": idx == 5,
@@ -130,18 +133,18 @@ class FixtureService:
         self._writer_id = "cortex-console-dev"
         self._persist_errors = 0
 
-    # health / stats
+    # health / stats — the flat default (2026-08-15): one band, one
+    # capacity meter. The demo must show the shipped experience, not the
+    # retained continuum rollback.
     def stats(self) -> dict[str, Any]:
-        caps = [200, 400, 2000, 5000, 8000, 12000, 20000, 100000]
-        sizes = [3, 11, 240, 612, 410, 380, 120, 64]
-        hits = [0.21, 0.34, 0.61, 0.52, 0.40, 0.28, 0.12, 0.41]
-        bands = [{"name": n, "size": s, "capacity": c, "update_interval": 1,
-                  "retention_policy": "balanced", "hit_rate": h,
-                  "hit_count": int(h * 100)}
-                 for n, s, c, h in zip(_BANDS, sizes, caps, hits)]
-        return {"bands": bands, "preset": "continuum",
-                "total_memories": sum(sizes), "interaction_count": 1840,
-                "retrieval_queries": 412, "weights_reset": False,
+        bands = [{"name": "flat", "size": 1840, "capacity": 5250,
+                  "update_interval": 1_000_000_000,
+                  "retention_policy": "balanced", "hit_rate": 0.62,
+                  "hit_count": 256}]
+        return {"bands": bands, "preset": "flat",
+                "total_memories": 1840, "interaction_count": 1840,
+                "retrieval_queries": 412, "true_drops": 0,
+                "weights_reset": False,
                 "reference": {"count": 3}}
 
     # cortex
