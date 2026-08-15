@@ -61,6 +61,166 @@ class TestFlatConfig:
         assert diffs == set()
 
 
+class TestScaledConfig:
+    """v25 eviction-policy arm (edge case 1): the 8-band layout at a
+    proportionally scaled total capacity. Any drift outside memory.miras
+    (or in the non-capacity band fields) is a silent confounder."""
+
+    def test_scaled_caps_proportional_and_summed(self):
+        from pseudolife_memory.memory.miras.presets import continuum_bands
+        caps = abl.scaled_caps(256)
+        specs = continuum_bands()
+        assert len(caps) == 8
+        assert all(c >= 1 for c in caps)
+        # Proportionality: the big slow band keeps the biggest share.
+        biggest = max(range(8), key=lambda i: specs[i].max_entries)
+        assert caps[biggest] == max(caps)
+        assert abs(sum(caps) - 256) <= 8   # rounding slack only
+
+    def test_write_scaled_config_preserves_non_capacity_fields(self, tmp_path):
+        from pseudolife_memory.memory.miras.presets import continuum_bands
+        _, realised = abl.write_scaled_config(tmp_path, 256)
+        cfg = load_config(tmp_path / "config.yaml")
+        assert cfg.memory.miras.preset == "custom"
+        bands = cfg.memory.miras.bands
+        assert len(bands) == 8
+        assert sum(b.max_entries for b in bands) == realised
+        for got, spec in zip(bands, continuum_bands()):
+            assert got.name == spec.name
+            assert got.update_interval == spec.update_interval
+            assert got.promotion_access_count == spec.promotion_access_count
+            assert got.promotion_surprise == spec.promotion_surprise
+            assert got.retention_policy == spec.retention_policy
+
+    def test_scaled_config_differs_from_defaults_only_in_bands(self, tmp_path):
+        abl.write_scaled_config(tmp_path, 256)
+        base = _leaves(load_config(tmp_path / "missing.yaml"))
+        scaled = _leaves(load_config(tmp_path / "config.yaml"))
+        diffs = {k for k in set(base) | set(scaled)
+                 if base.get(k) != scaled.get(k)
+                 and not k.startswith("memory.miras")}
+        assert diffs == set()
+
+
+class TestV25Mirror:
+    """The v25 rerun knobs on select_topk: recency off must make the
+    timestamp regime irrelevant; the BM25 pool must inject lexical
+    matches the dense pool missed (global pool — identical both arms)."""
+
+    @staticmethod
+    def _dump(entries, query="what colour is the sky?"):
+        return {"question_id": "q1", "question": query,
+                "question_ts": 2_000_000.0, "search_time": 1_000.0,
+                "turns_stored": len(entries),
+                "query_emb": [1.0, 0.0, 0.0, 0.0],
+                "bands": [{"name": "flat", "depth": 0, "entries": entries}],
+                "live_replay_rag": []}
+
+    @staticmethod
+    def _entry(text, emb, ts=500.0):
+        return {"text": text, "ts": ts, "hist_ts": ts - 400_000.0,
+                "source": "bench", "superseded_at": None,
+                "slots": [], "emb": emb}
+
+    def test_recency_off_makes_modes_identical(self):
+        entries = [self._entry("old strong match", [0.99, 0.1, 0.0, 0.0],
+                               ts=100.0),
+                   self._entry("new weaker match", [0.8, 0.5, 0.0, 0.0],
+                               ts=999.0)]
+        dump = self._dump(entries)
+        wall = abl.select_topk(dump, "flat", "wall", recency="off")
+        hist = abl.select_topk(dump, "flat", "hist", recency="off")
+        assert wall == hist
+
+    def test_recency_on_still_differs_by_mode(self):
+        # Under hist mode the older entry decays; under wall both are
+        # fresh. With a large enough gap the ORDER flips only in hist.
+        entries = [self._entry("old strong match", [0.60, 0.60, 0.0, 0.0],
+                               ts=999.0),
+                   self._entry("new weaker match", [0.58, 0.62, 0.0, 0.0],
+                               ts=999.0)]
+        entries[0]["hist_ts"] = 100.0            # ancient in hist mode
+        entries[1]["hist_ts"] = 1_999_999.0      # fresh in hist mode
+        dump = self._dump(entries)
+        wall = abl.select_topk(dump, "flat", "wall", recency="on")
+        hist = abl.select_topk(dump, "flat", "hist", recency="on")
+        assert wall[0] == "old strong match"
+        assert hist[0] == "new weaker match"
+
+    def test_bm25_injects_lexical_match_dense_missed(self):
+        # Orthogonal embedding -> cosine 0 -> dense pool drops it; the
+        # query tokens appear verbatim -> BM25 must inject it.
+        entries = [self._entry("the sky colour is cerulean today",
+                               [0.0, 0.0, 1.0, 0.0]),
+                   self._entry("dense hit about weather",
+                               [0.9, 0.1, 0.0, 0.0])]
+        dump = self._dump(entries, query="what colour is the sky?")
+        without = abl.select_topk(dump, "flat", "wall", recency="off",
+                                  bm25=False)
+        with_bm25 = abl.select_topk(dump, "flat", "wall", recency="off",
+                                    bm25=True)
+        assert "the sky colour is cerulean today" not in without
+        assert "the sky colour is cerulean today" in with_bm25
+        # Injection must not displace the dense hit.
+        assert "dense hit about weather" in with_bm25
+
+    def test_bm25_pool_identical_under_both_policies(self):
+        entries = [self._entry("the sky colour is cerulean today",
+                               [0.0, 0.0, 1.0, 0.0]),
+                   self._entry("dense hit about weather",
+                               [0.9, 0.1, 0.0, 0.0])]
+        dump = self._dump(entries, query="what colour is the sky?")
+        a = abl.select_topk(dump, "continuum", "wall", recency="off",
+                            bm25=True)
+        b = abl.select_topk(dump, "flat", "wall", recency="off", bm25=True)
+        assert set(a) == set(b)
+
+
+class TestEvidenceMetric:
+    def test_has_answer_markers_take_priority(self):
+        q = {"answer_session_ids": ["s1"],
+             "haystack_session_ids": ["s1"],
+             "haystack_dates": ["2023/04/10 (Mon) 02:03"],
+             "haystack_sessions": [
+                 [{"role": "user", "content": "filler", "has_answer": False},
+                  {"role": "user", "content": "the needle",
+                   "has_answer": True}],
+             ]}
+        assert abl._evidence_texts(q) == {
+            "[2023/04/10 (Mon) 02:03] user: the needle"}
+
+    def test_evidence_and_stored_texts(self):
+        q = {"answer_session_ids": ["s2"],
+             "haystack_session_ids": ["s1", "s2"],
+             "haystack_dates": ["2023/04/10 (Mon) 02:03",
+                                "2023/05/11 (Thu) 09:00"],
+             "haystack_sessions": [
+                 [{"role": "user", "content": "hello"}],
+                 [{"role": "user", "content": "my car is red"},
+                  {"role": "assistant", "content": ""}],   # empty skipped
+             ]}
+        ev = abl._evidence_texts(q)
+        assert ev == {"[2023/05/11 (Thu) 09:00] user: my car is red"}
+        stored = abl._stored_texts(q)
+        assert len(stored) == 2 and ev < stored
+
+    def test_paired_permutation_p(self):
+        # Consistent positive deltas -> small p; zero deltas -> p == 1.
+        assert abl._paired_permutation_p([0.2] * 20) < 0.01
+        assert abl._paired_permutation_p([0.0] * 20) == 1.0
+
+
+class TestTagPrefixes:
+    def test_v25_prefix_never_collides_with_july_tags(self):
+        assert abl.abl_tag("arm1", "continuum", "off",
+                           prefix="abl25") == "arm1-abl25-continuum-off"
+        assert abl.wabl_tag("", "off", prefix="abl25") == "wabl25-flat-off"
+
+    def test_default_prefix_preserves_legacy_tags(self):
+        assert abl.abl_tag("arm1", "flat", "hist") == "arm1-abl-flat-hist"
+        assert abl.wabl_tag("", "hist") == "wabl-flat-hist"
+
+
 class TestNaming:
     def test_out_file_supports_the_untagged_base_run(self):
         assert abl.out_file("s", "qwen-27b", "").name == (

@@ -1,0 +1,64 @@
+{
+  "n_replicates": 5,
+  "replicates": [
+    "arm1-abl25-flat-hist24",
+    "arm1-abl25-flat-hist24-r2",
+    "arm1-abl25-flat-hist24-r3",
+    "arm1-abl25-flat-hist24-r4",
+    "arm1-abl25-flat-hist24-r5"
+  ],
+  "n_questions": 78,
+  "arms": {
+    "rag": {
+      "accuracies": [
+        0.8718,
+        0.8718,
+        0.8718,
+        0.8718,
+        0.8718
+      ],
+      "mean": 0.8718,
+      "std": 0.0
+    },
+    "cortex": {
+      "accuracies": [
+        0.7051,
+        0.7051,
+        0.7051,
+        0.7051,
+        0.7051
+      ],
+      "mean": 0.7051,
+      "std": 0.0
+    },
+    "hybrid": {
+      "accuracies": [
+        0.8333,
+        0.8333,
+        0.8333,
+        0.8333,
+        0.8333
+      ],
+      "mean": 0.8333,
+      "std": 0.0
+    },
+    "cascade": {
+      "accuracies": [
+        0.8205,
+        0.8205,
+        0.8205,
+        0.8205,
+        0.8205
+      ],
+      "mean": 0.8205,
+      "std": 0.0
+    }
+  },
+  "source_files": [
+    "longmemeval-ku-oracle-e4b-ft-arm1-abl25-flat-hist24.jsonl",
+    "longmemeval-ku-oracle-e4b-ft-arm1-abl25-flat-hist24-r2.jsonl",
+    "longmemeval-ku-oracle-e4b-ft-arm1-abl25-flat-hist24-r3.jsonl",
+    "longmemeval-ku-oracle-e4b-ft-arm1-abl25-flat-hist24-r4.jsonl",
+    "longmemeval-ku-oracle-e4b-ft-arm1-abl25-flat-hist24-r5.jsonl"
+  ]
+}

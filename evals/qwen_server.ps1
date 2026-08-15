@@ -109,7 +109,7 @@ function Start-Qwen {
        That deliberately includes this helper's own leftover other-config
        server: replacing it now takes an operator decision — run
        Stop-Qwen first, or pass -Force. #>
-    param([switch]$Fast, [switch]$Force)
+    param([switch]$Fast, [switch]$Force, [int]$Ctx = 100000)
     $want = if ($Fast) { 'fast' } else { 'reproducible' }
 
     $running = Get-RunningQwenConfig
@@ -194,11 +194,15 @@ function Start-Qwen {
     # Flags mirror run-server.bat (the proven rollback) EXCEPT --cache-ram and
     # --ctx-checkpoints, which that .bat hardcodes to values the eval protocol
     # forbids. This exact set is the one measured bit-reproducible.
+    # -Ctx: KV-cache CAPACITY only — per-request compute and logits are
+    # unaffected (verified 2026-08-15: judge smoke byte-identical at
+    # 32768 vs 100000). Shrink it when desktop apps hold VRAM and the
+    # full 100k KV would OOM under mmq workspace spikes.
     $qwenArgs = @(
         "-m", (Get-QwenModelPath),
         "--host", "127.0.0.1", "--port", "1234",
         "-ngl", "999",
-        "-c", "100000",
+        "-c", "$Ctx",
         "-fa", "on",
         "--cache-type-k", "q8_0", "--cache-type-v", "q8_0",
         "--jinja",

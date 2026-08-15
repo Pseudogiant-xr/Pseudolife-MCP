@@ -1,0 +1,29 @@
+{
+  "n_judged": 3,
+  "replicates": 1,
+  "orders": 2,
+  "unparseable_verdicts": 0,
+  "mean_banded_preference": 0.6667,
+  "p_vs_null_paired_perm_10k_seed0": 1.0,
+  "banded_wins": 1,
+  "flat_wins": 0,
+  "ties": 2,
+  "per_query": [
+    {
+      "i": 0,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 1,
+      "banded_pref": 0.5,
+      "n_votes": 2
+    },
+    {
+      "i": 2,
+      "banded_pref": 0.5,
+      "n_votes": 2
+    }
+  ],
+  "corpus_note": "202 real transcript queries; divergent top-6 subset judged; texts withheld (private)"
+}

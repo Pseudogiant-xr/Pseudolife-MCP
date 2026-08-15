@@ -1420,6 +1420,93 @@ CLAIMS.append(Claim(
     stated=1.0, places=2))
 
 
+# ── the abl25 flat-band verdict (2026-08-15, preregistered) ──────────────
+# Every gate number in the verdict doc pins to its committed artifact.
+# The verdict is a tie-sweep, so the load-bearing numbers are the deltas'
+# p-values (nothing significant) plus the two mechanism receipts: zero
+# eviction under the cascade, and the judged-preference null on real
+# queries.
+ABL25_DOC = "docs/superpowers/specs/2026-08-14-flat-band-verdict-preregistration.md"
+_ABL25 = RESULTS + "longmemeval-ku-oracle-e4b-ft-arm1-abl25-{}.compare.json"
+_ABL25_S = RESULTS + "longmemeval-ku-s-qwen-27b-{}.compare.json"
+for _cid, _needle, _art, _key, _stated, _places in [
+    ("abl25-oracle-rag-a", "rag 0.859 vs 0.885", _ABL25.format("off-rag"),
+     "a_mean", 0.859, 3),
+    ("abl25-oracle-rag-b", "rag 0.859 vs 0.885", _ABL25.format("off-rag"),
+     "b_mean", 0.885, 3),
+    ("abl25-oracle-rag-p", "(Δ −2.6 pts, p = 0.619)",
+     _ABL25.format("off-rag"), "p_value", 0.619, 3),
+    ("abl25-oracle-hybrid-a", "hybrid 0.846 vs 0.833 (Δ +1.3, p = 1.0)",
+     _ABL25.format("off-hybrid"), "a_mean", 0.846, 3),
+    ("abl25-oracle-hybrid-p", "hybrid 0.846 vs 0.833 (Δ +1.3, p = 1.0)",
+     _ABL25.format("off-hybrid"), "p_value", 1.0, 3),
+    ("abl25-s-hybrid-p", "hybrid 0.744 vs 0.795 (Δ −5.1,\n  p = 0.348)",
+     _ABL25_S.format("abl25-continuum-off-vs-abl25-flat-off-hybrid"),
+     "p_value", 0.348, 3),
+    ("abl25-s-rag-p", "rag 0.859\n  vs 0.833 (Δ +2.6, p = 0.684)",
+     _ABL25_S.format("abl25-continuum-off-vs-abl25-flat-off-rag"),
+     "p_value", 0.684, 3),
+    ("abl25-hist24-rag-delta", "hist24 (86400 s) rag Δ 0.0",
+     _ABL25.format("hist24-rag"), "delta", 0.0, 3),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=ABL25_DOC, needle=_needle, artifacts=(_art,),
+        value=(lambda k: lambda d: d[k])(_key), stated=_stated,
+        places=_places))
+
+ABL25_SURV = RESULTS + "longmemeval-ku-s-qwen-27b-wabl25-survival.json"
+for _cid, _key in [("abl25-survival-continuum", "continuum_loss_rate"),
+                   ("abl25-survival-flat", "flat_loss_rate")]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=ABL25_DOC, needle="loss 0.0 for BOTH ingest arms",
+        artifacts=(ABL25_SURV,),
+        value=(lambda k: lambda d: d[k])(_key), stated=0.0, places=3))
+
+ABL25_EVICT = (RESULTS +
+               "longmemeval-ku-s-qwen-27b-evict-policy-scaled257-vs-flat257.json")
+for _cid, _needle, _key, _stated in [
+    ("abl25-evict-a", "0.459 (scaled 8-band) vs 0.465",
+     "a_mean_evidence_survival", 0.459),
+    ("abl25-evict-b", "0.459 (scaled 8-band) vs 0.465",
+     "b_mean_evidence_survival", 0.465),
+    ("abl25-evict-p", "Δ −0.006, p = 1.0",
+     "delta_p_paired_perm_10k_seed0", 1.0),
+    ("abl25-drop-p", "fraction 0.009 vs 0.009 (p = 1.0)",
+     "drop_delta_p_paired_perm_10k_seed0", 1.0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=ABL25_DOC, needle=_needle, artifacts=(ABL25_EVICT,),
+        value=(lambda k: lambda d: d[k])(_key), stated=_stated, places=3))
+
+ABL25_E5 = RESULTS + "abl25-e5-live-replay.json"
+ABL25_E5J = RESULTS + "abl25-e5-judged-preference.json"
+for _cid, _needle, _art, _key, _stated, _places in [
+    ("abl25-e5-div6", "top-6 divergence 0.876", ABL25_E5,
+     "divergence_rate_topk", 0.876, 3),
+    ("abl25-e5-div3", "top-3 0.411", ABL25_E5,
+     "divergence_rate_top3", 0.411, 3),
+    ("abl25-e5-pref", "banded 0.5508, p = 0.130", ABL25_E5J,
+     "mean_banded_preference", 0.5508, 4),
+    ("abl25-e5-pref-p", "banded 0.5508, p = 0.130", ABL25_E5J,
+     "p_vs_null_paired_perm_10k_seed0", 0.130, 3),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=ABL25_DOC, needle=_needle, artifacts=(_art,),
+        value=(lambda k: lambda d: d[k])(_key), stated=_stated,
+        places=_places))
+
+for _cid, _art_name, _stated in [
+    ("abl25-e6-store-flat", "abl25-e6-latency-flat.json", 17.5),
+    ("abl25-e6-store-cont", "abl25-e6-latency-continuum.json", 11.0),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=ABL25_DOC,
+        needle="flat store\n  median 17.5 ms vs 11.0 ms (1.59x, bar was 1.5x)",
+        artifacts=(RESULTS + _art_name,),
+        value=lambda d: d["rows"][0]["store_median_ms"], stated=_stated,
+        places=1))
+
+
 def test_every_published_number_names_a_committed_artifact():
     """A claim whose evidence is untracked cannot be checked by a reader.
 

@@ -1,0 +1,22 @@
+{
+  "warmup_stores": 12,
+  "samples": 25,
+  "preset": "flat",
+  "dim": 1024,
+  "queries": 50,
+  "corpus": "longmemeval-s replay dumps (1024-d)",
+  "rows": [
+    {
+      "resident": 5250,
+      "preset": "flat",
+      "dim": 1024,
+      "n_bands": 1,
+      "store_median_ms": 17.51689999946393,
+      "store_p95_ms": 20.07479999883799,
+      "retrieve_dense_median_ms": 0.3696999992826022,
+      "retrieve_dense_p95_ms": 0.461799994809553,
+      "retrieve_bm25_median_ms": 416.58470000402303,
+      "retrieve_bm25_p95_ms": 574.163099998259
+    }
+  ]
+}

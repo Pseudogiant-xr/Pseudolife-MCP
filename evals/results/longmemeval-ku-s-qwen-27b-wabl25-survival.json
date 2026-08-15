@@ -1,0 +1,1255 @@
+{
+  "n_questions": 78,
+  "continuum_loss_rate": 0.0,
+  "flat_loss_rate": 0.0,
+  "questions": [
+    {
+      "question_id": "6a1eabeb",
+      "turns_stored": 413,
+      "continuum_survivors": 413,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 188,
+        "instant": 14,
+        "fast": 4,
+        "medium": 6,
+        "slow": 0,
+        "archival": 1,
+        "forever": 0
+      },
+      "flat_survivors": 413
+    },
+    {
+      "question_id": "6aeb4375",
+      "turns_stored": 468,
+      "continuum_survivors": 468,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 225,
+        "instant": 24,
+        "fast": 7,
+        "medium": 7,
+        "slow": 2,
+        "archival": 3,
+        "forever": 0
+      },
+      "flat_survivors": 468
+    },
+    {
+      "question_id": "830ce83f",
+      "turns_stored": 511,
+      "continuum_survivors": 511,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 48,
+        "fast": 8,
+        "medium": 3,
+        "slow": 0,
+        "archival": 2,
+        "forever": 0
+      },
+      "flat_survivors": 511
+    },
+    {
+      "question_id": "852ce960",
+      "turns_stored": 396,
+      "continuum_survivors": 396,
+      "continuum_per_band": {
+        "working": 199,
+        "micro": 171,
+        "instant": 15,
+        "fast": 6,
+        "medium": 5,
+        "slow": 0,
+        "archival": 0,
+        "forever": 0
+      },
+      "flat_survivors": 396
+    },
+    {
+      "question_id": "945e3d21",
+      "turns_stored": 489,
+      "continuum_survivors": 489,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 24,
+        "fast": 7,
+        "medium": 8,
+        "slow": 0,
+        "archival": 0,
+        "forever": 0
+      },
+      "flat_survivors": 489
+    },
+    {
+      "question_id": "d7c942c3",
+      "turns_stored": 520,
+      "continuum_survivors": 520,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 53,
+        "fast": 7,
+        "medium": 6,
+        "slow": 3,
+        "archival": 1,
+        "forever": 0
+      },
+      "flat_survivors": 520
+    },
+    {
+      "question_id": "71315a70",
+      "turns_stored": 514,
+      "continuum_survivors": 514,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 48,
+        "fast": 9,
+        "medium": 7,
+        "slow": 0,
+        "archival": 0,
+        "forever": 0
+      },
+      "flat_survivors": 514
+    },
+    {
+      "question_id": "89941a93",
+      "turns_stored": 528,
+      "continuum_survivors": 528,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 62,
+        "fast": 9,
+        "medium": 6,
+        "slow": 1,
+        "archival": 0,
+        "forever": 0
+      },
+      "flat_survivors": 528
+    },
+    {
+      "question_id": "ce6d2d27",
+      "turns_stored": 521,
+      "continuum_survivors": 521,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 60,
+        "fast": 7,
+        "medium": 3,
+        "slow": 0,
+        "archival": 1,
+        "forever": 0
+      },
+      "flat_survivors": 521
+    },
+    {
+      "question_id": "9ea5eabc",
+      "turns_stored": 537,
+      "continuum_survivors": 537,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 73,
+        "fast": 8,
+        "medium": 3,
+        "slow": 2,
+        "archival": 1,
+        "forever": 0
+      },
+      "flat_survivors": 537
+    },
+    {
+      "question_id": "07741c44",
+      "turns_stored": 513,
+      "continuum_survivors": 513,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 51,
+        "fast": 8,
+        "medium": 3,
+        "slow": 0,
+        "archival": 1,
+        "forever": 0
+      },
+      "flat_survivors": 513
+    },
+    {
+      "question_id": "a1eacc2a",
+      "turns_stored": 474,
+      "continuum_survivors": 474,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 233,
+        "instant": 24,
+        "fast": 9,
+        "medium": 7,
+        "slow": 1,
+        "archival": 0,
+        "forever": 0
+      },
+      "flat_survivors": 474
+    },
+    {
+      "question_id": "184da446",
+      "turns_stored": 473,
+      "continuum_survivors": 473,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 248,
+        "instant": 17,
+        "fast": 5,
+        "medium": 2,
+        "slow": 1,
+        "archival": 0,
+        "forever": 0
+      },
+      "flat_survivors": 473
+    },
+    {
+      "question_id": "031748ae",
+      "turns_stored": 494,
+      "continuum_survivors": 494,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 30,
+        "fast": 9,
+        "medium": 4,
+        "slow": 1,
+        "archival": 0,
+        "forever": 0
+      },
+      "flat_survivors": 494
+    },
+    {
+      "question_id": "4d6b87c8",
+      "turns_stored": 516,
+      "continuum_survivors": 516,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 52,
+        "fast": 8,
+        "medium": 3,
+        "slow": 0,
+        "archival": 3,
+        "forever": 0
+      },
+      "flat_survivors": 516
+    },
+    {
+      "question_id": "0f05491a",
+      "turns_stored": 489,
+      "continuum_survivors": 489,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 246,
+        "instant": 31,
+        "fast": 8,
+        "medium": 4,
+        "slow": 0,
+        "archival": 0,
+        "forever": 0
+      },
+      "flat_survivors": 489
+    },
+    {
+      "question_id": "08e075c7",
+      "turns_stored": 484,
+      "continuum_survivors": 484,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 17,
+        "fast": 9,
+        "medium": 7,
+        "slow": 0,
+        "archival": 1,
+        "forever": 0
+      },
+      "flat_survivors": 484
+    },
+    {
+      "question_id": "f9e8c073",
+      "turns_stored": 504,
+      "continuum_survivors": 504,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 35,
+        "fast": 11,
+        "medium": 5,
+        "slow": 1,
+        "archival": 2,
+        "forever": 0
+      },
+      "flat_survivors": 504
+    },
+    {
+      "question_id": "41698283",
+      "turns_stored": 476,
+      "continuum_survivors": 476,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 238,
+        "instant": 20,
+        "fast": 7,
+        "medium": 8,
+        "slow": 3,
+        "archival": 0,
+        "forever": 0
+      },
+      "flat_survivors": 476
+    },
+    {
+      "question_id": "2698e78f",
+      "turns_stored": 478,
+      "continuum_survivors": 478,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 246,
+        "instant": 23,
+        "fast": 5,
+        "medium": 3,
+        "slow": 1,
+        "archival": 0,
+        "forever": 0
+      },
+      "flat_survivors": 478
+    },
+    {
+      "question_id": "b6019101",
+      "turns_stored": 510,
+      "continuum_survivors": 510,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 46,
+        "fast": 8,
+        "medium": 5,
+        "slow": 0,
+        "archival": 1,
+        "forever": 0
+      },
+      "flat_survivors": 510
+    },
+    {
+      "question_id": "45dc21b6",
+      "turns_stored": 485,
+      "continuum_survivors": 485,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 248,
+        "instant": 23,
+        "fast": 10,
+        "medium": 3,
+        "slow": 0,
+        "archival": 1,
+        "forever": 0
+      },
+      "flat_survivors": 485
+    },
+    {
+      "question_id": "5a4f22c0",
+      "turns_stored": 487,
+      "continuum_survivors": 487,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 247,
+        "instant": 26,
+        "fast": 10,
+        "medium": 3,
+        "slow": 1,
+        "archival": 0,
+        "forever": 0
+      },
+      "flat_survivors": 487
+    },
+    {
+      "question_id": "6071bd76",
+      "turns_stored": 482,
+      "continuum_survivors": 482,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 27,
+        "fast": 0,
+        "medium": 2,
+        "slow": 1,
+        "archival": 2,
+        "forever": 0
+      },
+      "flat_survivors": 482
+    },
+    {
+      "question_id": "e493bb7c",
+      "turns_stored": 506,
+      "continuum_survivors": 506,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 46,
+        "fast": 6,
+        "medium": 4,
+        "slow": 0,
+        "archival": 0,
+        "forever": 0
+      },
+      "flat_survivors": 506
+    },
+    {
+      "question_id": "618f13b2",
+      "turns_stored": 506,
+      "continuum_survivors": 506,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 47,
+        "fast": 6,
+        "medium": 3,
+        "slow": 0,
+        "archival": 0,
+        "forever": 0
+      },
+      "flat_survivors": 506
+    },
+    {
+      "question_id": "72e3ee87",
+      "turns_stored": 496,
+      "continuum_survivors": 496,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 33,
+        "fast": 5,
+        "medium": 5,
+        "slow": 0,
+        "archival": 3,
+        "forever": 0
+      },
+      "flat_survivors": 496
+    },
+    {
+      "question_id": "c4ea545c",
+      "turns_stored": 490,
+      "continuum_survivors": 490,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 22,
+        "fast": 9,
+        "medium": 8,
+        "slow": 0,
+        "archival": 1,
+        "forever": 0
+      },
+      "flat_survivors": 490
+    },
+    {
+      "question_id": "01493427",
+      "turns_stored": 487,
+      "continuum_survivors": 487,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 243,
+        "instant": 28,
+        "fast": 10,
+        "medium": 4,
+        "slow": 1,
+        "archival": 1,
+        "forever": 0
+      },
+      "flat_survivors": 487
+    },
+    {
+      "question_id": "6a27ffc2",
+      "turns_stored": 493,
+      "continuum_survivors": 493,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 240,
+        "instant": 27,
+        "fast": 12,
+        "medium": 13,
+        "slow": 1,
+        "archival": 0,
+        "forever": 0
+      },
+      "flat_survivors": 493
+    },
+    {
+      "question_id": "2133c1b5",
+      "turns_stored": 523,
+      "continuum_survivors": 523,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 46,
+        "fast": 15,
+        "medium": 8,
+        "slow": 4,
+        "archival": 0,
+        "forever": 0
+      },
+      "flat_survivors": 523
+    },
+    {
+      "question_id": "18bc8abd",
+      "turns_stored": 436,
+      "continuum_survivors": 436,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 199,
+        "instant": 18,
+        "fast": 11,
+        "medium": 6,
+        "slow": 1,
+        "archival": 1,
+        "forever": 0
+      },
+      "flat_survivors": 436
+    },
+    {
+      "question_id": "db467c8c",
+      "turns_stored": 475,
+      "continuum_survivors": 475,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 238,
+        "instant": 26,
+        "fast": 6,
+        "medium": 4,
+        "slow": 0,
+        "archival": 1,
+        "forever": 0
+      },
+      "flat_survivors": 475
+    },
+    {
+      "question_id": "7a87bd0c",
+      "turns_stored": 506,
+      "continuum_survivors": 506,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 42,
+        "fast": 8,
+        "medium": 5,
+        "slow": 0,
+        "archival": 1,
+        "forever": 0
+      },
+      "flat_survivors": 506
+    },
+    {
+      "question_id": "e61a7584",
+      "turns_stored": 496,
+      "continuum_survivors": 496,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 34,
+        "fast": 6,
+        "medium": 5,
+        "slow": 1,
+        "archival": 0,
+        "forever": 0
+      },
+      "flat_survivors": 496
+    },
+    {
+      "question_id": "1cea1afa",
+      "turns_stored": 485,
+      "continuum_survivors": 485,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 25,
+        "fast": 4,
+        "medium": 4,
+        "slow": 1,
+        "archival": 1,
+        "forever": 0
+      },
+      "flat_survivors": 485
+    },
+    {
+      "question_id": "ed4ddc30",
+      "turns_stored": 543,
+      "continuum_survivors": 543,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 79,
+        "fast": 6,
+        "medium": 6,
+        "slow": 1,
+        "archival": 1,
+        "forever": 0
+      },
+      "flat_survivors": 543
+    },
+    {
+      "question_id": "8fb83627",
+      "turns_stored": 485,
+      "continuum_survivors": 485,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 24,
+        "fast": 6,
+        "medium": 1,
+        "slow": 2,
+        "archival": 2,
+        "forever": 0
+      },
+      "flat_survivors": 485
+    },
+    {
+      "question_id": "b01defab",
+      "turns_stored": 503,
+      "continuum_survivors": 503,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 32,
+        "fast": 14,
+        "medium": 7,
+        "slow": 0,
+        "archival": 0,
+        "forever": 0
+      },
+      "flat_survivors": 503
+    },
+    {
+      "question_id": "22d2cb42",
+      "turns_stored": 473,
+      "continuum_survivors": 473,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 247,
+        "instant": 15,
+        "fast": 6,
+        "medium": 4,
+        "slow": 1,
+        "archival": 0,
+        "forever": 0
+      },
+      "flat_survivors": 473
+    },
+    {
+      "question_id": "0e4e4c46",
+      "turns_stored": 481,
+      "continuum_survivors": 481,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 239,
+        "instant": 32,
+        "fast": 8,
+        "medium": 0,
+        "slow": 1,
+        "archival": 1,
+        "forever": 0
+      },
+      "flat_survivors": 481
+    },
+    {
+      "question_id": "4b24c848",
+      "turns_stored": 514,
+      "continuum_survivors": 514,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 52,
+        "fast": 4,
+        "medium": 3,
+        "slow": 1,
+        "archival": 4,
+        "forever": 0
+      },
+      "flat_survivors": 514
+    },
+    {
+      "question_id": "7e974930",
+      "turns_stored": 502,
+      "continuum_survivors": 502,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 43,
+        "fast": 3,
+        "medium": 4,
+        "slow": 1,
+        "archival": 1,
+        "forever": 0
+      },
+      "flat_survivors": 502
+    },
+    {
+      "question_id": "603deb26",
+      "turns_stored": 472,
+      "continuum_survivors": 472,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 218,
+        "instant": 28,
+        "fast": 18,
+        "medium": 3,
+        "slow": 3,
+        "archival": 2,
+        "forever": 0
+      },
+      "flat_survivors": 472
+    },
+    {
+      "question_id": "59524333",
+      "turns_stored": 528,
+      "continuum_survivors": 528,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 62,
+        "fast": 9,
+        "medium": 5,
+        "slow": 0,
+        "archival": 2,
+        "forever": 0
+      },
+      "flat_survivors": 528
+    },
+    {
+      "question_id": "5831f84d",
+      "turns_stored": 422,
+      "continuum_survivors": 422,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 182,
+        "instant": 25,
+        "fast": 9,
+        "medium": 3,
+        "slow": 1,
+        "archival": 2,
+        "forever": 0
+      },
+      "flat_survivors": 422
+    },
+    {
+      "question_id": "eace081b",
+      "turns_stored": 489,
+      "continuum_survivors": 489,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 230,
+        "instant": 38,
+        "fast": 11,
+        "medium": 8,
+        "slow": 1,
+        "archival": 1,
+        "forever": 0
+      },
+      "flat_survivors": 489
+    },
+    {
+      "question_id": "affe2881",
+      "turns_stored": 481,
+      "continuum_survivors": 481,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 246,
+        "instant": 21,
+        "fast": 7,
+        "medium": 4,
+        "slow": 2,
+        "archival": 1,
+        "forever": 0
+      },
+      "flat_survivors": 481
+    },
+    {
+      "question_id": "50635ada",
+      "turns_stored": 531,
+      "continuum_survivors": 531,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 70,
+        "fast": 6,
+        "medium": 5,
+        "slow": 0,
+        "archival": 0,
+        "forever": 0
+      },
+      "flat_survivors": 531
+    },
+    {
+      "question_id": "e66b632c",
+      "turns_stored": 506,
+      "continuum_survivors": 506,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 42,
+        "fast": 6,
+        "medium": 3,
+        "slow": 2,
+        "archival": 3,
+        "forever": 0
+      },
+      "flat_survivors": 506
+    },
+    {
+      "question_id": "0ddfec37",
+      "turns_stored": 483,
+      "continuum_survivors": 483,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 236,
+        "instant": 32,
+        "fast": 8,
+        "medium": 6,
+        "slow": 0,
+        "archival": 1,
+        "forever": 0
+      },
+      "flat_survivors": 483
+    },
+    {
+      "question_id": "f685340e",
+      "turns_stored": 424,
+      "continuum_survivors": 424,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 199,
+        "instant": 13,
+        "fast": 7,
+        "medium": 5,
+        "slow": 0,
+        "archival": 0,
+        "forever": 0
+      },
+      "flat_survivors": 424
+    },
+    {
+      "question_id": "cc5ded98",
+      "turns_stored": 493,
+      "continuum_survivors": 493,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 248,
+        "instant": 26,
+        "fast": 9,
+        "medium": 10,
+        "slow": 0,
+        "archival": 0,
+        "forever": 0
+      },
+      "flat_survivors": 493
+    },
+    {
+      "question_id": "dfde3500",
+      "turns_stored": 480,
+      "continuum_survivors": 480,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 232,
+        "instant": 32,
+        "fast": 10,
+        "medium": 4,
+        "slow": 1,
+        "archival": 1,
+        "forever": 0
+      },
+      "flat_survivors": 480
+    },
+    {
+      "question_id": "69fee5aa",
+      "turns_stored": 483,
+      "continuum_survivors": 483,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 23,
+        "fast": 5,
+        "medium": 5,
+        "slow": 0,
+        "archival": 0,
+        "forever": 0
+      },
+      "flat_survivors": 483
+    },
+    {
+      "question_id": "7401057b",
+      "turns_stored": 446,
+      "continuum_survivors": 446,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 214,
+        "instant": 22,
+        "fast": 6,
+        "medium": 4,
+        "slow": 0,
+        "archival": 0,
+        "forever": 0
+      },
+      "flat_survivors": 446
+    },
+    {
+      "question_id": "cf22b7bf",
+      "turns_stored": 550,
+      "continuum_survivors": 550,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 86,
+        "fast": 6,
+        "medium": 8,
+        "slow": 0,
+        "archival": 0,
+        "forever": 0
+      },
+      "flat_survivors": 550
+    },
+    {
+      "question_id": "a2f3aa27",
+      "turns_stored": 448,
+      "continuum_survivors": 448,
+      "continuum_per_band": {
+        "working": 199,
+        "micro": 205,
+        "instant": 31,
+        "fast": 9,
+        "medium": 4,
+        "slow": 0,
+        "archival": 0,
+        "forever": 0
+      },
+      "flat_survivors": 448
+    },
+    {
+      "question_id": "c7dc5443",
+      "turns_stored": 478,
+      "continuum_survivors": 478,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 247,
+        "instant": 16,
+        "fast": 8,
+        "medium": 7,
+        "slow": 0,
+        "archival": 0,
+        "forever": 0
+      },
+      "flat_survivors": 478
+    },
+    {
+      "question_id": "06db6396",
+      "turns_stored": 479,
+      "continuum_survivors": 479,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 234,
+        "instant": 35,
+        "fast": 5,
+        "medium": 4,
+        "slow": 0,
+        "archival": 1,
+        "forever": 0
+      },
+      "flat_survivors": 479
+    },
+    {
+      "question_id": "3ba21379",
+      "turns_stored": 431,
+      "continuum_survivors": 431,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 193,
+        "instant": 26,
+        "fast": 7,
+        "medium": 4,
+        "slow": 0,
+        "archival": 1,
+        "forever": 0
+      },
+      "flat_survivors": 431
+    },
+    {
+      "question_id": "9bbe84a2",
+      "turns_stored": 459,
+      "continuum_survivors": 459,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 236,
+        "instant": 18,
+        "fast": 2,
+        "medium": 2,
+        "slow": 1,
+        "archival": 0,
+        "forever": 0
+      },
+      "flat_survivors": 459
+    },
+    {
+      "question_id": "10e09553",
+      "turns_stored": 472,
+      "continuum_survivors": 472,
+      "continuum_per_band": {
+        "working": 199,
+        "micro": 237,
+        "instant": 24,
+        "fast": 7,
+        "medium": 4,
+        "slow": 1,
+        "archival": 0,
+        "forever": 0
+      },
+      "flat_survivors": 472
+    },
+    {
+      "question_id": "dad224aa",
+      "turns_stored": 521,
+      "continuum_survivors": 521,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 58,
+        "fast": 4,
+        "medium": 7,
+        "slow": 2,
+        "archival": 0,
+        "forever": 0
+      },
+      "flat_survivors": 521
+    },
+    {
+      "question_id": "ba61f0b9",
+      "turns_stored": 454,
+      "continuum_survivors": 454,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 228,
+        "instant": 10,
+        "fast": 9,
+        "medium": 4,
+        "slow": 2,
+        "archival": 1,
+        "forever": 0
+      },
+      "flat_survivors": 454
+    },
+    {
+      "question_id": "42ec0761",
+      "turns_stored": 521,
+      "continuum_survivors": 521,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 49,
+        "fast": 9,
+        "medium": 10,
+        "slow": 1,
+        "archival": 2,
+        "forever": 0
+      },
+      "flat_survivors": 521
+    },
+    {
+      "question_id": "5c40ec5b",
+      "turns_stored": 479,
+      "continuum_survivors": 479,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 234,
+        "instant": 25,
+        "fast": 9,
+        "medium": 9,
+        "slow": 0,
+        "archival": 2,
+        "forever": 0
+      },
+      "flat_survivors": 479
+    },
+    {
+      "question_id": "c6853660",
+      "turns_stored": 477,
+      "continuum_survivors": 477,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 247,
+        "instant": 16,
+        "fast": 12,
+        "medium": 2,
+        "slow": 0,
+        "archival": 0,
+        "forever": 0
+      },
+      "flat_survivors": 477
+    },
+    {
+      "question_id": "26bdc477",
+      "turns_stored": 498,
+      "continuum_survivors": 498,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 36,
+        "fast": 6,
+        "medium": 5,
+        "slow": 0,
+        "archival": 1,
+        "forever": 0
+      },
+      "flat_survivors": 498
+    },
+    {
+      "question_id": "0977f2af",
+      "turns_stored": 484,
+      "continuum_survivors": 484,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 249,
+        "instant": 26,
+        "fast": 6,
+        "medium": 2,
+        "slow": 0,
+        "archival": 1,
+        "forever": 0
+      },
+      "flat_survivors": 484
+    },
+    {
+      "question_id": "6aeb4375_abs",
+      "turns_stored": 521,
+      "continuum_survivors": 521,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 56,
+        "fast": 11,
+        "medium": 3,
+        "slow": 1,
+        "archival": 0,
+        "forever": 0
+      },
+      "flat_survivors": 521
+    },
+    {
+      "question_id": "031748ae_abs",
+      "turns_stored": 523,
+      "continuum_survivors": 523,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 55,
+        "fast": 10,
+        "medium": 5,
+        "slow": 3,
+        "archival": 0,
+        "forever": 0
+      },
+      "flat_survivors": 523
+    },
+    {
+      "question_id": "2698e78f_abs",
+      "turns_stored": 462,
+      "continuum_survivors": 462,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 239,
+        "instant": 12,
+        "fast": 6,
+        "medium": 3,
+        "slow": 1,
+        "archival": 1,
+        "forever": 0
+      },
+      "flat_survivors": 462
+    },
+    {
+      "question_id": "2133c1b5_abs",
+      "turns_stored": 476,
+      "continuum_survivors": 476,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 236,
+        "instant": 18,
+        "fast": 14,
+        "medium": 5,
+        "slow": 2,
+        "archival": 1,
+        "forever": 0
+      },
+      "flat_survivors": 476
+    },
+    {
+      "question_id": "0ddfec37_abs",
+      "turns_stored": 447,
+      "continuum_survivors": 447,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 220,
+        "instant": 21,
+        "fast": 3,
+        "medium": 1,
+        "slow": 1,
+        "archival": 1,
+        "forever": 0
+      },
+      "flat_survivors": 447
+    },
+    {
+      "question_id": "f685340e_abs",
+      "turns_stored": 456,
+      "continuum_survivors": 456,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 235,
+        "instant": 15,
+        "fast": 5,
+        "medium": 1,
+        "slow": 0,
+        "archival": 0,
+        "forever": 0
+      },
+      "flat_survivors": 456
+    },
+    {
+      "question_id": "89941a94",
+      "turns_stored": 523,
+      "continuum_survivors": 523,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 55,
+        "fast": 7,
+        "medium": 7,
+        "slow": 2,
+        "archival": 2,
+        "forever": 0
+      },
+      "flat_survivors": 523
+    },
+    {
+      "question_id": "07741c45",
+      "turns_stored": 527,
+      "continuum_survivors": 527,
+      "continuum_per_band": {
+        "working": 200,
+        "micro": 250,
+        "instant": 56,
+        "fast": 11,
+        "medium": 8,
+        "slow": 1,
+        "archival": 1,
+        "forever": 0
+      },
+      "flat_survivors": 527
+    }
+  ]
+}

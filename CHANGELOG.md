@@ -6,6 +6,46 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-15 — flat-band verdict: the preregistered rerun + steelman campaign)
+- **The 8-band continuum's ablation was rerun under the current (v25+)
+  retrieval backbone with six preregistered steelman edge cases; verdict:
+  migrate flat, at the maintainer's leisure** — every gate came back a
+  TIE (spec + full gates table:
+  `docs/superpowers/specs/2026-08-14-flat-band-verdict-preregistration.md`).
+  The July effects evaporated in BOTH directions: the significant flat
+  ranking win (rag/hist −9.0 pts) is gone under
+  Qwen3-Embedding + global-pool BM25, and the 31.1% write-side eviction
+  loss measured pre-cascade code that no longer exists (survival now
+  loss 0.0 both ingest arms; the flat-ingest arm answers byte-identically
+  to flat ranking). Under forced eviction at matched capacity 257 the
+  band retention stack ties a single flat policy on gold-evidence
+  survival (0.459 vs 0.465, p = 1.0); 202 real recorded queries diverge
+  heavily between the read paths (top-6 0.876) but a blind
+  position-swapped judge shows no significant preference (banded 0.5508,
+  p = 0.130); flat store latency at 5250 resident marginally misses the
+  1.5x bar on the median (1.59x, +6.5 ms — perf caveat, not a blocker).
+  A naive flat migration has four smoke-proven breaks
+  (`evals/results/abl25-e4-flat-migration-smoke.json`), delete-on-evict
+  restoration being the worst — they are the migration PR's mandatory
+  work-item list. No migration is implemented by this change.
+- **Harness: v25-faithful mirror + eviction-policy tooling in
+  `evals/band_ablation.py`** — the offline ranking mirror gained the
+  production-default BM25 pool (real `BM25Index`, global candidates) and
+  recency-off path (G0 fidelity vs live search: 1.000 on all three
+  rebuild passes), `--tag-prefix` so `abl25`/`wabl25` artifacts can
+  never overwrite the July canonical files, a `scaled` band preset
+  (proportional capacity scale-down so BOTH arms genuinely evict), and
+  an `evidence` subcommand (per-turn `has_answer` survival + drop-set
+  evidence fraction, paired sign-flip permutation). New
+  `evals/live_replay_flat_ab.py` (transcript-harvested real-query A/B
+  over restored bank copies; aggregates only — query texts stay
+  untracked) and `evals/live_replay_judge.py` (blind position-swapped
+  preference, aborts on server failure instead of degrading to fake
+  ties). `evals/bench_store_latency.py` gained `--preset flat`,
+  `--dim`, and a retrieve-latency pass. `Start-Qwen` gained `-Ctx`
+  (KV capacity only; verified byte-identical verdicts at 32768 vs
+  100000 — used when desktop VRAM pressure would OOM the full 100k KV).
+
 ### Changed (2026-08-14 — Docker tier PostgreSQL 16 → 18: lite dumps now restore straight in)
 - **`pseudolife-pg` is PostgreSQL 18** (pgvector 0.8.6, `pgvector/pgvector:pg18`
   base): aligns the Docker tier with the lite tier's embedded PostgreSQL 18,

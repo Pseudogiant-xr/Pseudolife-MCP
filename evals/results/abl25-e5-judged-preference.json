@@ -1,0 +1,899 @@
+{
+  "n_judged": 177,
+  "replicates": 1,
+  "orders": 2,
+  "unparseable_verdicts": 33,
+  "mean_banded_preference": 0.5508,
+  "p_vs_null_paired_perm_10k_seed0": 0.1303,
+  "banded_wins": 78,
+  "flat_wins": 60,
+  "ties": 39,
+  "per_query": [
+    {
+      "i": 0,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 1,
+      "banded_pref": 0.5,
+      "n_votes": 2
+    },
+    {
+      "i": 2,
+      "banded_pref": 0.5,
+      "n_votes": 2
+    },
+    {
+      "i": 3,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 4,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 5,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 6,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 7,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 8,
+      "banded_pref": 0.5,
+      "n_votes": 2
+    },
+    {
+      "i": 9,
+      "banded_pref": 0.0,
+      "n_votes": 1
+    },
+    {
+      "i": 10,
+      "banded_pref": 0.5,
+      "n_votes": 2
+    },
+    {
+      "i": 12,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 13,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 14,
+      "banded_pref": 0.5,
+      "n_votes": 2
+    },
+    {
+      "i": 15,
+      "banded_pref": 0.5,
+      "n_votes": 2
+    },
+    {
+      "i": 16,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 17,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 18,
+      "banded_pref": 1.0,
+      "n_votes": 1
+    },
+    {
+      "i": 19,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 20,
+      "banded_pref": 0.5,
+      "n_votes": 0
+    },
+    {
+      "i": 21,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 22,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 24,
+      "banded_pref": 0.0,
+      "n_votes": 1
+    },
+    {
+      "i": 25,
+      "banded_pref": 1.0,
+      "n_votes": 1
+    },
+    {
+      "i": 26,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 27,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 28,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 31,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 32,
+      "banded_pref": 0.5,
+      "n_votes": 2
+    },
+    {
+      "i": 33,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 34,
+      "banded_pref": 1.0,
+      "n_votes": 1
+    },
+    {
+      "i": 35,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 36,
+      "banded_pref": 0.5,
+      "n_votes": 2
+    },
+    {
+      "i": 37,
+      "banded_pref": 0.5,
+      "n_votes": 1
+    },
+    {
+      "i": 38,
+      "banded_pref": 0.0,
+      "n_votes": 1
+    },
+    {
+      "i": 39,
+      "banded_pref": 0.5,
+      "n_votes": 2
+    },
+    {
+      "i": 41,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 42,
+      "banded_pref": 0.5,
+      "n_votes": 2
+    },
+    {
+      "i": 43,
+      "banded_pref": 0.5,
+      "n_votes": 2
+    },
+    {
+      "i": 44,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 45,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 46,
+      "banded_pref": 0.5,
+      "n_votes": 2
+    },
+    {
+      "i": 47,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 48,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 49,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 50,
+      "banded_pref": 0.5,
+      "n_votes": 2
+    },
+    {
+      "i": 52,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 53,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 54,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 55,
+      "banded_pref": 1.0,
+      "n_votes": 1
+    },
+    {
+      "i": 56,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 57,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 58,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 59,
+      "banded_pref": 1.0,
+      "n_votes": 1
+    },
+    {
+      "i": 60,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 61,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 62,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 63,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 64,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 65,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 66,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 67,
+      "banded_pref": 0.5,
+      "n_votes": 2
+    },
+    {
+      "i": 68,
+      "banded_pref": 0.5,
+      "n_votes": 2
+    },
+    {
+      "i": 69,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 70,
+      "banded_pref": 0.25,
+      "n_votes": 2
+    },
+    {
+      "i": 71,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 72,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 73,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 74,
+      "banded_pref": 0.25,
+      "n_votes": 2
+    },
+    {
+      "i": 75,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 76,
+      "banded_pref": 1.0,
+      "n_votes": 1
+    },
+    {
+      "i": 77,
+      "banded_pref": 0.0,
+      "n_votes": 1
+    },
+    {
+      "i": 78,
+      "banded_pref": 0.0,
+      "n_votes": 1
+    },
+    {
+      "i": 79,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 80,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 82,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 83,
+      "banded_pref": 0.5,
+      "n_votes": 2
+    },
+    {
+      "i": 86,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 87,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 88,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 89,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 90,
+      "banded_pref": 0.75,
+      "n_votes": 2
+    },
+    {
+      "i": 91,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 92,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 95,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 96,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 97,
+      "banded_pref": 0.5,
+      "n_votes": 0
+    },
+    {
+      "i": 98,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 99,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 100,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 102,
+      "banded_pref": 1.0,
+      "n_votes": 1
+    },
+    {
+      "i": 103,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 104,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 105,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 107,
+      "banded_pref": 0.5,
+      "n_votes": 2
+    },
+    {
+      "i": 108,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 109,
+      "banded_pref": 1.0,
+      "n_votes": 1
+    },
+    {
+      "i": 111,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 112,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 113,
+      "banded_pref": 0.5,
+      "n_votes": 2
+    },
+    {
+      "i": 114,
+      "banded_pref": 0.5,
+      "n_votes": 2
+    },
+    {
+      "i": 115,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 116,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 117,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 118,
+      "banded_pref": 0.5,
+      "n_votes": 0
+    },
+    {
+      "i": 119,
+      "banded_pref": 0.5,
+      "n_votes": 2
+    },
+    {
+      "i": 120,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 121,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 122,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 123,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 124,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 125,
+      "banded_pref": 1.0,
+      "n_votes": 1
+    },
+    {
+      "i": 126,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 127,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 128,
+      "banded_pref": 0.25,
+      "n_votes": 2
+    },
+    {
+      "i": 129,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 130,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 131,
+      "banded_pref": 0.5,
+      "n_votes": 2
+    },
+    {
+      "i": 132,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 133,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 134,
+      "banded_pref": 0.5,
+      "n_votes": 2
+    },
+    {
+      "i": 135,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 136,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 137,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 138,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 139,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 140,
+      "banded_pref": 1.0,
+      "n_votes": 1
+    },
+    {
+      "i": 142,
+      "banded_pref": 0.5,
+      "n_votes": 2
+    },
+    {
+      "i": 143,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 144,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 145,
+      "banded_pref": 0.5,
+      "n_votes": 2
+    },
+    {
+      "i": 146,
+      "banded_pref": 0.5,
+      "n_votes": 2
+    },
+    {
+      "i": 147,
+      "banded_pref": 0.0,
+      "n_votes": 1
+    },
+    {
+      "i": 148,
+      "banded_pref": 0.75,
+      "n_votes": 2
+    },
+    {
+      "i": 149,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 150,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 151,
+      "banded_pref": 0.0,
+      "n_votes": 1
+    },
+    {
+      "i": 152,
+      "banded_pref": 0.5,
+      "n_votes": 2
+    },
+    {
+      "i": 155,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 157,
+      "banded_pref": 0.0,
+      "n_votes": 1
+    },
+    {
+      "i": 158,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 159,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 160,
+      "banded_pref": 1.0,
+      "n_votes": 1
+    },
+    {
+      "i": 161,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 162,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 163,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 164,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 167,
+      "banded_pref": 0.5,
+      "n_votes": 1
+    },
+    {
+      "i": 169,
+      "banded_pref": 0.5,
+      "n_votes": 2
+    },
+    {
+      "i": 170,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 171,
+      "banded_pref": 0.0,
+      "n_votes": 1
+    },
+    {
+      "i": 172,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 173,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 174,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 175,
+      "banded_pref": 0.5,
+      "n_votes": 1
+    },
+    {
+      "i": 176,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 177,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 178,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 179,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 181,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 182,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 183,
+      "banded_pref": 0.5,
+      "n_votes": 2
+    },
+    {
+      "i": 184,
+      "banded_pref": 0.5,
+      "n_votes": 2
+    },
+    {
+      "i": 186,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 187,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 188,
+      "banded_pref": 1.0,
+      "n_votes": 1
+    },
+    {
+      "i": 189,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 190,
+      "banded_pref": 0.0,
+      "n_votes": 1
+    },
+    {
+      "i": 191,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 192,
+      "banded_pref": 0.5,
+      "n_votes": 2
+    },
+    {
+      "i": 193,
+      "banded_pref": 0.75,
+      "n_votes": 2
+    },
+    {
+      "i": 194,
+      "banded_pref": 0.5,
+      "n_votes": 2
+    },
+    {
+      "i": 195,
+      "banded_pref": 0.5,
+      "n_votes": 0
+    },
+    {
+      "i": 196,
+      "banded_pref": 0.0,
+      "n_votes": 2
+    },
+    {
+      "i": 198,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    },
+    {
+      "i": 200,
+      "banded_pref": 0.5,
+      "n_votes": 2
+    },
+    {
+      "i": 201,
+      "banded_pref": 1.0,
+      "n_votes": 2
+    }
+  ],
+  "corpus_note": "202 real transcript queries; divergent top-6 subset judged; texts withheld (private)"
+}
