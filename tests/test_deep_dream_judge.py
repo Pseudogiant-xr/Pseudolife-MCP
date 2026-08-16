@@ -1,0 +1,161 @@
+"""Autonomous Step-C judge (2026-08-16 design): the sweep shadow-judges
+pending merge proposals with the configured model; auto-apply is gated by
+``deep_dream.judge_mode`` and confidence. Contracts:
+
+* shadow mode records verdicts on the rows and applies NOTHING;
+* auto-reject mode applies only reject verdicts at/above the confidence
+  floor (``decided_by='dream-judge'`` in merge_decisions, pair dismissed);
+  accept verdicts are never applied by the judge at any mode;
+* already-judged proposals are not re-sent; a judge failure never raises.
+
+PG-backed (skips without the bench server).
+"""
+from __future__ import annotations
+
+import pytest
+
+from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
+
+
+@pytest.fixture()
+def svc(pg_conn, pg_url, tmp_path):  # noqa: F811
+    from pseudolife_memory.service import MemoryService
+
+    s = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    with s._lock:
+        s._ensure_init()
+    yield s
+    s.flush()
+
+
+class _StubJudge:
+    """Fixed verdict per (from, into) display pair; records what it saw."""
+
+    model = "stub-judge"
+
+    def __init__(self, verdicts):
+        self._verdicts = verdicts       # {(from, into): (verdict, conf)}
+        self.seen: list[tuple[str, str]] = []
+
+    def judge_merges(self, proposals):
+        out = []
+        for p in proposals:
+            key = (p["from"]["display"], p["into"]["display"])
+            self.seen.append(key)
+            v = self._verdicts.get(key)
+            if v is not None:
+                out.append({"n": p["n"], "verdict": v[0],
+                            "confidence": v[1], "note": "stub"})
+        return out
+
+
+def _propose(svc, frm, into):
+    import time
+    st = svc._storage
+    st.ensure_entity(frm, display=frm)
+    st.ensure_entity(into, display=into)
+    a = st.find_entity(frm)["id"]
+    b = st.find_entity(into)["id"]
+    pid = st.insert_entity_proposal("merge", a, b, 0.8, "test", time.time())
+    assert pid is not None
+    return pid
+
+
+def _row(svc, pid):
+    return next((p for p in svc._storage.pending_entity_proposals()
+                 if p["id"] == pid), None)
+
+
+def test_shadow_mode_records_and_applies_nothing(svc):
+    svc.config.memory.deep_dream.judge_mode = "shadow"
+    pid = _propose(svc, "alpha svc", "alpha service")
+    judge = _StubJudge({("alpha svc", "alpha service"): ("reject", 0.95)})
+    out = svc.deep_dream_judge(judge)
+    assert out["judged"] == 1 and out.get("auto_rejected", 0) == 0
+    row = _row(svc, pid)
+    assert row is not None and row["status"] == "pending"    # still queued
+    assert row["judge_verdict"] == "reject"
+    assert row["judge_model"] == "stub-judge"
+
+
+def test_auto_reject_applies_only_confident_rejects(svc):
+    svc.config.memory.deep_dream.judge_mode = "auto-reject"
+    svc.config.memory.deep_dream.judge_reject_min_confidence = 0.8
+    hi = _propose(svc, "beta svc", "beta harness")
+    lo = _propose(svc, "gamma svc", "gamma harness")
+    acc = _propose(svc, "delta svc", "delta service")
+    judge = _StubJudge({
+        ("beta svc", "beta harness"): ("reject", 0.9),      # applies
+        ("gamma svc", "gamma harness"): ("reject", 0.5),    # below floor
+        ("delta svc", "delta service"): ("accept", 0.99),   # never applied
+    })
+    out = svc.deep_dream_judge(judge)
+    assert out["judged"] == 3 and out["auto_rejected"] == 1
+    assert _row(svc, hi) is None                             # rejected, gone
+    assert _row(svc, lo)["status"] == "pending"
+    assert _row(svc, acc)["status"] == "pending"             # accept = opinion
+    # The applied reject is a durable dream-judge decision + dismissed pair.
+    decisions = svc._storage.recent_entity_decisions(limit=10)
+    assert any(d["decided_by"] == "dream-judge"
+               and d["status"] == "rejected" for d in decisions)
+    assert ("beta harness", "beta svc") in {
+        tuple(sorted(p)) for p in svc._storage.dismissed_pairs()}
+
+
+def test_judged_rows_are_not_resent(svc):
+    svc.config.memory.deep_dream.judge_mode = "shadow"
+    _propose(svc, "eps svc", "eps service")
+    judge = _StubJudge({("eps svc", "eps service"): ("leave", 0.4)})
+    assert svc.deep_dream_judge(judge)["judged"] == 1
+    again = _StubJudge({})
+    assert svc.deep_dream_judge(again)["judged"] == 0
+    assert again.seen == []                                  # nothing re-sent
+
+
+def test_skipped_rows_become_zero_confidence_leaves(svc):
+    # A model that returns no verdict for a row must not cause that row to
+    # be re-sent every sweep (queue-head starvation): it is recorded as an
+    # explicit abstain instead.
+    svc.config.memory.deep_dream.judge_mode = "shadow"
+    pid = _propose(svc, "iota svc", "iota service")
+    judge = _StubJudge({})                       # returns nothing for the row
+    assert svc.deep_dream_judge(judge)["judged"] == 1
+    row = _row(svc, pid)
+    assert row["judge_verdict"] == "leave"
+    assert row["judge_confidence"] == 0.0
+    again = _StubJudge({})
+    assert svc.deep_dream_judge(again)["judged"] == 0
+    assert again.seen == []                      # not re-sent
+
+
+def test_judge_failure_never_raises(svc):
+    svc.config.memory.deep_dream.judge_mode = "shadow"
+    _propose(svc, "zeta svc", "zeta service")
+
+    class _Boom:
+        model = "boom"
+
+        def judge_merges(self, proposals):
+            raise RuntimeError("endpoint down")
+
+    out = svc.deep_dream_judge(_Boom())
+    assert out["judged"] == 0 and "error" in out
+
+
+def test_off_mode_is_inert(svc):
+    svc.config.memory.deep_dream.judge_mode = "off"
+    _propose(svc, "eta svc", "eta service")
+    judge = _StubJudge({("eta svc", "eta service"): ("reject", 0.99)})
+    assert svc.deep_dream_judge(judge) == {"judged": 0, "skipped": "disabled"}
+    assert judge.seen == []
+
+
+def test_review_payload_carries_the_shadow_verdict(svc):
+    svc.config.memory.deep_dream.judge_mode = "shadow"
+    pid = _propose(svc, "theta svc", "theta service")
+    judge = _StubJudge({("theta svc", "theta service"): ("reject", 0.85)})
+    svc.deep_dream_judge(judge)
+    deep = svc.deep_dream(apply=False)
+    row = next(p for p in deep["merge_proposals"] if p["id"] == pid)
+    assert row["judge"]["verdict"] == "reject"
+    assert row["judge"]["model"] == "stub-judge"

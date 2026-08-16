@@ -443,6 +443,19 @@ class DeepDreamConfig:
     auto_tick: bool = True               # False disables the tick entirely
     auto_min_new_entities: int = 150     # fire when the bank grew this much since the last apply; 0 disables
     auto_interval_days: float = 7.0      # time backstop since the last apply; 0 disables
+    # Autonomous Step-C judge (2026-08-16 design): the sweep sends pending
+    # merge proposals to the configured extractor for a shadow verdict.
+    # "off" = never; "shadow" = record the verdict on the proposal, apply
+    # nothing; "auto-reject" = additionally apply reject verdicts at/above
+    # judge_reject_min_confidence (decided_by='dream-judge', pair
+    # dismissed). Accepts are NEVER auto-applied at this phase. Mode gates
+    # per the judge ladder (evals/judge_ladder.py,
+    # evals/results/judge-ladder-20260816.json).
+    judge_mode: str = "shadow"           # off | shadow | auto-reject
+    judge_batch: int = 8                 # proposals judged per sweep (one model call)
+    judge_reject_min_confidence: float = 0.8
+    judge_url: str = ""                  # optional OpenAI-compatible override endpoint; empty = the dream extractor
+    judge_model: str = ""                # model name for judge_url (ignored when judge_url is empty)
 
 
 @dataclass

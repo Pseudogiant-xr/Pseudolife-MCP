@@ -1,0 +1,3615 @@
+{
+ "built": "2026-08-16",
+ "provenance": "Ground truth = executed verdicts of the 2026-08-16 triage rounds 4+5 (Opus judge panels with main-thread spot-verification; 1103 overruled then re-judged reject; 1297 human-verified accept). Measures agreement-with-the-ratified-panel, which is the deployment question: can a cheaper judge reproduce panel judgment on live proposals. Snippets are scrubbed of maintainer identifiers (OS username -> <user>, LAN subnet -> 10.0.0.x) per the repo PII guard; the published arm runs consumed the pre-scrub text — the qwen-27b determinism re-check below confirms the scrub is verdict-inert.",
+ "rows": [
+  {
+   "from": {
+    "display": "/api/graph/assign-scope",
+    "degree": 0,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "PROJECT STARTED (2026-06-25): Cortex Console v2 — comprehensive update of the PseudoLife-MCP web console. Branch feat/cortex-console-v2 (off master; v1 already merged). Approved design: docs/superpowers/specs/2026-06-25-cortex-console-v2-de",
+     "MILESTONE (2026-06-27): \"Atlas\" project-scoped graph-review feature for Cortex Console — design spec + Stage-1 plan committed on branch feat/cortex-console-atlas (5c3d86c spec, c6004e6 stage-1 plan). NOT implemented/merged/deployed. Motivat"
+    ]
+   },
+   "into": {
+    "display": "assign-scope",
+    "degree": 1,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "PROJECT STARTED (2026-06-25): Cortex Console v2 — comprehensive update of the PseudoLife-MCP web console. Branch feat/cortex-console-v2 (off master; v1 already merged). Approved design: docs/superpowers/specs/2026-06-25-cortex-console-v2-de",
+     "MILESTONE (2026-06-27): \"Atlas\" project-scoped graph-review feature for Cortex Console — design spec + Stage-1 plan committed on branch feat/cortex-console-atlas (5c3d86c spec, c6004e6 stage-1 plan). NOT implemented/merged/deployed. Motivat"
+    ]
+   },
+   "reason": "token-subset",
+   "score": 1.0,
+   "label": "accept",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "<data_dir>/config.yaml",
+    "degree": 1,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": []
+   },
+   "into": {
+    "display": "/data/config.yaml",
+    "degree": 2,
+    "scopes": [
+     "pseudolife-mcp",
+     "pseudolife-mcp-ops",
+     "windows-env"
+    ],
+    "snippets": [
+     "PROJECT STARTED (2026-06-23): Building a web frontend (\"PseudoLife Cortex Console\") for PseudoLife-MCP — user-requested overnight autonomous build via /loop. Scope: (1) config editor for the knobs/dials (config.py dataclasses), (2) memory +",
+     "Scope-hygiene shipped + live (2026-07-19, merge b70c5d7, deployed 0.8.1 with rollback tag 0.8.1-pre-update-20260719-012835, schema 22): backfill_entity_sources now case-folds scope keys, skips memory.scopes.exclude meta sources (status/clau"
+    ]
+   },
+   "reason": "write-dedup: '/data/config.yaml' ~ '<data_dir>/config.yaml'",
+   "score": 0.75,
+   "label": "accept",
+   "decided_by": "opus-panel-r5"
+  },
+  {
+   "from": {
+    "display": "ForceGraph (graphview.js)",
+    "degree": 0,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "SHIPPED + LIVE (2026-06-27): Atlas Stage 2 (the Atlas view) merged to master (FF 19146a2->852872c, pushed, branch deleted) and DEPLOYED daemon-only (frontend-only: backup pseudolife_memory-20260627-165253.sql.gz, rollback tag pseudolife-dae",
+     "Cortex Console webui review (2026-07-01): root-caused the reported Graph/Atlas \"cramped / off to the side / sometimes fails to render\" bugs. (1) Backend _whole_graph (service.py ~2757) returns EVERY entity+edge with truncated:false — no nod"
+    ]
+   },
+   "into": {
+    "display": "graphview.js",
+    "degree": 1,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "SHIPPED + LIVE (2026-06-27): Atlas Stage 2 (the Atlas view) merged to master (FF 19146a2->852872c, pushed, branch deleted) and DEPLOYED daemon-only (frontend-only: backup pseudolife_memory-20260627-165253.sql.gz, rollback tag pseudolife-dae",
+     "Cortex Console webui review (2026-07-01): root-caused the reported Graph/Atlas \"cramped / off to the side / sometimes fails to render\" bugs. (1) Backend _whole_graph (service.py ~2757) returns EVERY entity+edge with truncated:false — no nod"
+    ]
+   },
+   "reason": "token-subset",
+   "score": 1.0,
+   "label": "accept",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "GENERIC_HUB gate",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Shipped 2026-07-02 (commit 501be83, live, schema v20): all five graph-quality review fixes are now deployed. New this deploy — dismissed_pairs table + POST /api/graph/dismiss-duplicate + Atlas Dismiss button (stateless duplicate analyzer sk",
+     "Deep-dream improvement scan (2026-08-16 judge-panel pass, 122 proposals triaged via 4 parallel Opus judges + main-thread spot-check): (1) VOLUME: 480 new entities / 3.5 days of multi-session use files ~35 merge proposals/day at stable ~23% "
+    ]
+   },
+   "into": {
+    "display": "GENERIC_HUB_NORMS gate",
+    "degree": 1,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": []
+   },
+   "reason": "write-dedup: 'GENERIC_HUB gate' ~ 'GENERIC_HUB_NORMS gate'",
+   "score": 0.75,
+   "label": "accept",
+   "decided_by": "opus-panel-r5"
+  },
+  {
+   "from": {
+    "display": "PostgreSQL 16",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "VERIFIED (2026-08-14, live smoke test on the Windows dev box): pixeltable-pgserver 0.6.0 is a viable embedded-Postgres backbone for the lite install tier. Wheel inspection + running server confirmed: bundles BOTH PostgreSQL 16.14 and 18.4 t",
+     "Phase 2 SHIPPED TO PR (2026-08-14): PR #154 (ci/lite-tier-lanes, 6283b9a0) adds two CI lanes beside the unchanged PG16 service-container lane: test-lite-linux (FULL suite vs embedded PostgreSQL 18 via the [lite] extra — doubles as whole-sto"
+    ]
+   },
+   "into": {
+    "display": "PostgreSQL 16.14",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "VERIFIED (2026-08-14, live smoke test on the Windows dev box): pixeltable-pgserver 0.6.0 is a viable embedded-Postgres backbone for the lite install tier. Wheel inspection + running server confirmed: bundles BOTH PostgreSQL 16.14 and 18.4 t",
+     "Phase 2 SHIPPED TO PR (2026-08-14): PR #154 (ci/lite-tier-lanes, 6283b9a0) adds two CI lanes beside the unchanged PG16 service-container lane: test-lite-linux (FULL suite vs embedded PostgreSQL 18 via the [lite] extra — doubles as whole-sto"
+    ]
+   },
+   "reason": "write-dedup: 'PostgreSQL 16' ~ 'PostgreSQL 16.14'",
+   "score": 0.667,
+   "label": "accept",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "PostgreSQL 18",
+    "degree": 2,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "VERIFIED (2026-08-14, live smoke test on the Windows dev box): pixeltable-pgserver 0.6.0 is a viable embedded-Postgres backbone for the lite install tier. Wheel inspection + running server confirmed: bundles BOTH PostgreSQL 16.14 and 18.4 t",
+     "HEAD-TO-HEAD (2026-08-14, identical smoke battery on the Windows dev box) pg0-embedded 0.15.1 vs pixeltable-pgserver 0.6.0 for the lite tier: (1) ASCII path with spaces — both full pass (vector(1024)+HNSW+cosine). (2) Non-ASCII path — BOTH "
+    ]
+   },
+   "into": {
+    "display": "embedded PostgreSQL 18",
+    "degree": 2,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "VERIFIED (2026-08-14, live smoke test on the Windows dev box): pixeltable-pgserver 0.6.0 is a viable embedded-Postgres backbone for the lite install tier. Wheel inspection + running server confirmed: bundles BOTH PostgreSQL 16.14 and 18.4 t",
+     "HEAD-TO-HEAD (2026-08-14, identical smoke battery on the Windows dev box) pg0-embedded 0.15.1 vs pixeltable-pgserver 0.6.0 for the lite tier: (1) ASCII path with spaces — both full pass (vector(1024)+HNSW+cosine). (2) Non-ASCII path — BOTH "
+    ]
+   },
+   "reason": "write-dedup: 'PostgreSQL 18' ~ 'embedded PostgreSQL 18'",
+   "score": 0.667,
+   "label": "accept",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "Qwen3-Embedding",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Embedding backbone decision (2026-07-28, PR #59, three committed artifacts): Qwen3-Embedding-0.6B is the swap target, NOT bge-base. fp32 shootout on our LongMemEval slice (150q/74183 turns): Qwen3 R@10 0.809 vs bge-base 0.742, best at every",
+     "Embedding backbone v25 branch COMPLETE, PR #60 open (2026-07-28, feat/embedding-v25, 14 commits, suite 1691/0/0, regression gate PASS at std 0.0000 vs baseline 1f0f13a). Qwen3-Embedding-0.6B default, vector(1024) x4 tables, asymmetric encod"
+    ]
+   },
+   "into": {
+    "display": "Qwen3-Embedding-0.6B",
+    "degree": 2,
+    "scopes": [
+     "pseudolife-hermes",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Embedding backbone decision (2026-07-28, PR #59, three committed artifacts): Qwen3-Embedding-0.6B is the swap target, NOT bge-base. fp32 shootout on our LongMemEval slice (150q/74183 turns): Qwen3 R@10 0.809 vs bge-base 0.742, best at every",
+     "Embedding backbone v25 branch COMPLETE, PR #60 open (2026-07-28, feat/embedding-v25, 14 commits, suite 1691/0/0, regression gate PASS at std 0.0000 vs baseline 1f0f13a). Qwen3-Embedding-0.6B default, vector(1024) x4 tables, asymmetric encod"
+    ]
+   },
+   "reason": "token-subset",
+   "score": 0.992,
+   "label": "accept",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "Security Remediation",
+    "degree": 0,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "DEPLOYED LIVE + VERIFIED (2026-06-23): security remediation of the PseudoLife-MCP stack from a CVE audit (OSV pip-audit + Trivy container scans). Branch fix/security-remediation (2 local commits, NOT pushed; off master 91cb544): (1) docs dr",
+     "UPDATE (2026-06-23): the PseudoLife-MCP security remediation is now MERGED to master and PUSHED — origin/master = 99f2df1 (fast-forward from 91cb544; commits 5616a23 docs-drift-fixes + 99f2df1 fix(security)). Supersedes the earlier \"branch "
+    ]
+   },
+   "into": {
+    "display": "PseudoLife-MCP security remediation",
+    "degree": 1,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "DEPLOYED LIVE + VERIFIED (2026-06-23): security remediation of the PseudoLife-MCP stack from a CVE audit (OSV pip-audit + Trivy container scans). Branch fix/security-remediation (2 local commits, NOT pushed; off master 91cb544): (1) docs dr",
+     "UPDATE (2026-06-23): the PseudoLife-MCP security remediation is now MERGED to master and PUSHED — origin/master = 99f2df1 (fast-forward from 91cb544; commits 5616a23 docs-drift-fixes + 99f2df1 fix(security)). Supersedes the earlier \"branch "
+    ]
+   },
+   "reason": "token-subset",
+   "score": 1.0,
+   "label": "accept",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "casc-q8",
+    "degree": 3,
+    "scopes": [
+     "pseudolife-mcp",
+     "pseudolife-mcp-benchmarks"
+    ],
+    "snippets": [
+     "PRE-REGISTRATION (2026-07-30, recorded BEFORE any answer call of the confirmation run): cascade confirmation on the _s haystacks, reproducible q8_0 stack. Setup: strip-copy the 2026-07-19 _s qwen-27b judged file (persisted contexts, pre-v25",
+     "AMENDMENT to the 2026-07-30 casc-q8 pre-registration (recorded before any r2 data exists, prompted by a user question mid-run): replicate count reduced from 3 to 2 (base + r2 only, r3 dropped). Rationale: on the reproducible q8_0 stack repl"
+    ]
+   },
+   "into": {
+    "display": "casc-q8-confirmation-run",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp",
+     "pseudolife-mcp-benchmarks"
+    ],
+    "snippets": [
+     "PRE-REGISTRATION (2026-07-30, recorded BEFORE any answer call of the confirmation run): cascade confirmation on the _s haystacks, reproducible q8_0 stack. Setup: strip-copy the 2026-07-19 _s qwen-27b judged file (persisted contexts, pre-v25",
+     "PRE-REGISTRATION (2026-07-30, recorded BEFORE any answer call of the confirmation run): cascade confirmation on the _s haystacks, reproducible q8_0 stack. Setup: strip-copy the 2026-07-19 _s qwen-27b judged file (persisted contexts, pre-v25"
+    ]
+   },
+   "reason": "token-subset",
+   "score": 1.0,
+   "label": "accept",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "chronicle-default-on-pr",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Chronicle soak review completed 2026-08-12 (scheduled task, 7-day production soak 2026-08-05 to 08-11). Findings: 188 events, 0 wrong dates (all spot-checks incl. 9 historical backdatings 2026-04-27..2026-07-30 verified against independent ",
+     "Chronicle soak review completed 2026-08-12 (scheduled task, 7-day production soak 2026-08-05 to 08-11). Findings: 188 events, 0 wrong dates (all spot-checks incl. 9 historical backdatings 2026-04-27..2026-07-30 verified against independent "
+    ]
+   },
+   "into": {
+    "display": "chronicle-default-on",
+    "degree": 4,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Chronicle default-on PR #143 opened 2026-08-12 (branch feat/chronicle-default-on, commit c421da74) — awaiting the user's merge click, then ops/update.ps1 deploy. Carries: memory.dream.chronicle default true + Console knob (Dream group, live",
+     "Chronicle default-on PR #143 opened 2026-08-12 (branch feat/chronicle-default-on, commit c421da74) — awaiting the user's merge click, then ops/update.ps1 deploy. Carries: memory.dream.chronicle default true + Console knob (Dream group, live"
+    ]
+   },
+   "reason": "dream-alias: 'chronicle-default-on' ~ 'chronicle-default-on-pr' (cosine 0.87)",
+   "score": 0.875,
+   "label": "accept",
+   "decided_by": "opus-panel-r5"
+  },
+  {
+   "from": {
+    "display": "embedding backbone",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Embedding backbone decision (2026-07-28, PR #59, three committed artifacts): Qwen3-Embedding-0.6B is the swap target, NOT bge-base. fp32 shootout on our LongMemEval slice (150q/74183 turns): Qwen3 R@10 0.809 vs bge-base 0.742, best at every",
+     "Embedding backbone v25 branch COMPLETE, PR #60 open (2026-07-28, feat/embedding-v25, 14 commits, suite 1691/0/0, regression gate PASS at std 0.0000 vs baseline 1f0f13a). Qwen3-Embedding-0.6B default, vector(1024) x4 tables, asymmetric encod"
+    ]
+   },
+   "into": {
+    "display": "v25-embedding-backbone",
+    "degree": 3,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "v25 embedding backbone PASSES the regression gate (2026-07-29, first time it was ever run against v25): rag 0.6282 (control arm, byte-identical to the pre-v25 baseline), cortex 0.6923 (-0.0128 vs baseline 0.7051), hybrid 0.7821 (+0.0129 vs ",
+     "v25 embedding backbone PASSES the regression gate (2026-07-29, first time it was ever run against v25): rag 0.6282 (control arm, byte-identical to the pre-v25 baseline), cortex 0.6923 (-0.0128 vs baseline 0.7051), hybrid 0.7821 (+0.0129 vs "
+    ]
+   },
+   "reason": "write-dedup: 'embedding backbone' ~ 'v25-embedding-backbone'",
+   "score": 0.667,
+   "label": "accept",
+   "decided_by": "opus-panel-r5"
+  },
+  {
+   "from": {
+    "display": "evals/regression_gate.ps1",
+    "degree": 2,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Known-facts window BUILD COMPLETE (2026-07-11, overnight autonomous, subagent-driven): branch feat/known-facts-window, 7 commits 1000f37..8f813bd off 77906fa. All 6 code tasks passed task review; opus whole-branch review READY TO MERGE (3 M",
+     "Eval-hygiene sprint checkpoint 2026-07-18 (autonomous overnight): Tasks 1-9 built+merged to master (FF at d99838c, NOT pushed — user decision pending). evals/replicate.py (25 tests, spawn/copy/run/agg/compare/gate-check/baseline), regressio"
+    ]
+   },
+   "into": {
+    "display": "regression_gate.ps1",
+    "degree": 6,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "P0 REVIEW FIXES IMPLEMENTED (2026-07-02, branch fix/review-2026-07-02-p0, commit 29ee30e, NOT yet merged to master or deployed). All six P0 items from the 2026-07-02 deep review landed TDD-style (every fix had a RED test observed first): (1",
+     "P2 QUALITY INFRA SHIPPED (2026-07-02, merge d59dfa1 + fix 2785684 on master, pushed): (1) GitHub Actions CI live and GREEN — .github/workflows/ci.yml runs the full 763-test suite on master pushes + PRs with pgvector/pg16 service, CPU-torch "
+    ]
+   },
+   "reason": "write-dedup: 'evals/regression_gate.ps1' ~ 'regression_gate.ps1'",
+   "score": 0.75,
+   "label": "accept",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "fact_get",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "PseudoLife-MCP cortex layer landed on master (commits adc39a8 durability + 2a98408 cortex, merged via PR #2 1c375fd). Cortex = slot-keyed canonical-fact store (schema v7, pseudolife_memory/memory/cortex.py): identity-not-similarity, superse",
+     "PseudoLife-MCP provenance-contenders feature IMPLEMENTED on branch cortex-provenance-contenders (7 commits ahead of master, f166474..04fccb6). Cortex now parks a weaker-tier or below-margin conflicting write as a status='contested' contende"
+    ]
+   },
+   "into": {
+    "display": "memory_fact_get",
+    "degree": 2,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "PseudoLife-MCP cortex layer landed on master (commits adc39a8 durability + 2a98408 cortex, merged via PR #2 1c375fd). Cortex = slot-keyed canonical-fact store (schema v7, pseudolife_memory/memory/cortex.py): identity-not-similarity, superse",
+     "PseudoLife-MCP provenance-contenders feature IMPLEMENTED on branch cortex-provenance-contenders (7 commits ahead of master, f166474..04fccb6). Cortex now parks a weaker-tier or below-margin conflicting write as a status='contested' contende"
+    ]
+   },
+   "reason": "write-dedup: 'fact_get' ~ 'memory_fact_get'",
+   "score": 0.667,
+   "label": "accept",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "feat/chronicle-default-on",
+    "degree": 2,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "DONE (2026-08-04): Console Dreamer card shipped as PR #98 (feat/console-dreamer-card, commit 027054c2) — NOT yet merged or deployed (master is PR-gated; deploy after merge via ops/update.ps1, then verify the card live at /ui/#/console). Con",
+     "Chronicle default-on PR #143 opened 2026-08-12 (branch feat/chronicle-default-on, commit c421da74) — awaiting the user's merge click, then ops/update.ps1 deploy. Carries: memory.dream.chronicle default true + Console knob (Dream group, live"
+    ]
+   },
+   "into": {
+    "display": "chronicle-default-on",
+    "degree": 2,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Chronicle default-on PR #143 opened 2026-08-12 (branch feat/chronicle-default-on, commit c421da74) — awaiting the user's merge click, then ops/update.ps1 deploy. Carries: memory.dream.chronicle default true + Console knob (Dream group, live",
+     "Chronicle default-on PR #143 opened 2026-08-12 (branch feat/chronicle-default-on, commit c421da74) — awaiting the user's merge click, then ops/update.ps1 deploy. Carries: memory.dream.chronicle default true + Console knob (Dream group, live"
+    ]
+   },
+   "reason": "write-dedup: 'feat/chronicle-default-on' ~ 'chronicle-default-on'",
+   "score": 0.667,
+   "label": "accept",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "feat/flat-band-migration",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": []
+   },
+   "into": {
+    "display": "flat-band-migration",
+    "degree": 6,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "DECISION (2026-08-13, user-ratified): flat-band migration (and the read-flat/lifecycle-banded middle option) is TABLED — not rejected — pending a future rerun/rereview. Condition to reopen: rerun the band ablation under the current (schema ",
+     "DECISION (2026-08-13, user-ratified): flat-band migration (and the read-flat/lifecycle-banded middle option) is TABLED — not rejected — pending a future rerun/rereview. Condition to reopen: rerun the band ablation under the current (schema "
+    ]
+   },
+   "reason": "write-dedup: 'feat/flat-band-migration' ~ 'flat-band-migration'",
+   "score": 0.75,
+   "label": "accept",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "feat/pg18-bump",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "SHIPPED TO PR (2026-08-14): install-floor Phases 0+1 both open awaiting user merge. PR #152 (feat/lite-tier-embedded-pg, commit 82a813e1) — the zero-config lite tier: [lite] extra pins pg0-embedded >=0.15.1,<0.16; storage resolution lives O",
+     "PG18 bump SHIPPED TO PR (2026-08-14): PR #155 (feat/pg18-bump, 212b0023) moves the Docker tier pseudolife-pg from PostgreSQL 16 to 18 (pgvector 0.8.6). CRITICAL catch during prep: PG18 official images moved PGDATA to /var/lib/postgresql/18/"
+    ]
+   },
+   "into": {
+    "display": "pg18-bump",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "PG18 bump SHIPPED TO PR (2026-08-14): PR #155 (feat/pg18-bump, 212b0023) moves the Docker tier pseudolife-pg from PostgreSQL 16 to 18 (pgvector 0.8.6). CRITICAL catch during prep: PG18 official images moved PGDATA to /var/lib/postgresql/18/",
+     "PG18 bump SHIPPED TO PR (2026-08-14): PR #155 (feat/pg18-bump, 212b0023) moves the Docker tier pseudolife-pg from PostgreSQL 16 to 18 (pgvector 0.8.6). CRITICAL catch during prep: PG18 official images moved PGDATA to /var/lib/postgresql/18/"
+    ]
+   },
+   "reason": "write-dedup: 'feat/pg18-bump' ~ 'pg18-bump'",
+   "score": 0.667,
+   "label": "accept",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "feat/slot-index-shadow-check",
+    "degree": 2,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": []
+   },
+   "into": {
+    "display": "slot-index-shadow-check",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Slot-index shadow verification implemented and PR #145 opened 2026-08-13 (branch feat/slot-index-shadow-check, commit 28c3b7aa, worktree .claude/worktrees/slot-shadow — kept for follow-ups; everything committed and pushed). Sampled runtime ",
+     "Slot-index shadow verification implemented and PR #145 opened 2026-08-13 (branch feat/slot-index-shadow-check, commit 28c3b7aa, worktree .claude/worktrees/slot-shadow — kept for follow-ups; everything committed and pushed). Sampled runtime "
+    ]
+   },
+   "reason": "write-dedup: 'feat/slot-index-shadow-check' ~ 'slot-index-shadow-check'",
+   "score": 0.8,
+   "label": "accept",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "flat-band verdict rerun",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "DECISION (2026-08-13, user-ratified): flat-band migration (and the read-flat/lifecycle-banded middle option) is TABLED — not rejected — pending a future rerun/rereview. Condition to reopen: rerun the band ablation under the current (schema ",
+     "Flat-band rerun SCHEDULED 2026-08-14 via task chip (task_55b017df): the reopen trigger from the 2026-07-12 re-eval closure fired — the live working band hit 200/200 (memory_stats 2026-08-13, 663 total memories), so partition-forced eviction"
+    ]
+   },
+   "into": {
+    "display": "flat-band-rerun",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Flat-band rerun SCHEDULED 2026-08-14 via task chip (task_55b017df): the reopen trigger from the 2026-07-12 re-eval closure fired — the live working band hit 200/200 (memory_stats 2026-08-13, 663 total memories), so partition-forced eviction",
+     "Flat-band rerun SCHEDULED 2026-08-14 via task chip (task_55b017df): the reopen trigger from the 2026-07-12 re-eval closure fired — the live working band hit 200/200 (memory_stats 2026-08-13, 663 total memories), so partition-forced eviction"
+    ]
+   },
+   "reason": "write-dedup: 'flat-band verdict rerun' ~ 'flat-band-rerun'",
+   "score": 0.75,
+   "label": "accept",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "gpu-box",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Flat-band migration IMPLEMENTED (2026-08-15, PR #159, branch feat/flat-band-migration): default preset flipped to flat (one band, cap 5250, balanced retention — the measured ablation arm); continuum retained as opt-in rollback with machiner"
+    ]
+   },
+   "into": {
+    "display": "Windows box",
+    "degree": 1,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "CORRECTION (2026-06-25): The Cortex Console devserver (python -m pseudolife_memory.web.devserver, port 8770) is NO LONGER torch-free. FixtureService.__init__ builds AppConfig(), whose __post_init__ imports preset_bands -> the memory package"
+    ]
+   },
+   "reason": "dream-alias: 'gpu-box' ~ 'Windows box' (cosine 0.73)",
+   "score": 0.729,
+   "label": "accept",
+   "decided_by": "human"
+  },
+  {
+   "from": {
+    "display": "ku_op_prompt_v10_stance_update.txt",
+    "degree": 3,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": []
+   },
+   "into": {
+    "display": "v10-stance-prompt",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "v10 stance prompt SHIPPED 2026-08-14 (maintainer decision: \"Ship V10, soak and iterate on v11\"): live dream extraction prompt moved v5→v10 (update-anchored stance rule; dream.py _SYSTEM_PROMPT pinned to ku_op_prompt_v10_stance_update.txt), ",
+     "v10 stance prompt SHIPPED 2026-08-14 (maintainer decision: \"Ship V10, soak and iterate on v11\"): live dream extraction prompt moved v5→v10 (update-anchored stance rule; dream.py _SYSTEM_PROMPT pinned to ku_op_prompt_v10_stance_update.txt), "
+    ]
+   },
+   "reason": "write-dedup: 'ku_op_prompt_v10_stance_update.txt' ~ 'v10-stance-prompt'",
+   "score": 0.6,
+   "label": "accept",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "memory_recall mechanical seeder",
+    "degree": 0,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "DEPLOYED LIVE + VERIFIED (2026-06-23): the read-only `memory_recall` MCP tool (live MemCoT multi-hop retrieval) AND GAM #2 graph-population are now live on the local Claude Code PseudoLife-MCP daemon. Procedure (worked, same as the lessons-",
+     "DEPLOYED LIVE + VERIFIED (2026-06-23): memory_recall mechanical seeder is now QUERY-FIRST. Change: recall.py MechanicalController.seed_entities seeds entities word-matched in the QUERY only, falling back to hit-derived matches solely when t"
+    ]
+   },
+   "into": {
+    "display": "MECHANICAL seeder",
+    "degree": 0,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "DEPLOYED LIVE + VERIFIED (2026-06-23): the read-only `memory_recall` MCP tool (live MemCoT multi-hop retrieval) AND GAM #2 graph-population are now live on the local Claude Code PseudoLife-MCP daemon. Procedure (worked, same as the lessons-",
+     "DEPLOYED LIVE + VERIFIED (2026-06-23): memory_recall mechanical seeder is now QUERY-FIRST. Change: recall.py MechanicalController.seed_entities seeds entities word-matched in the QUERY only, falling back to hit-derived matches solely when t"
+    ]
+   },
+   "reason": "token-subset",
+   "score": 1.0,
+   "label": "accept",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "pgvector/pgvector:pg16",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "PseudoLife-MCP v0.2 Phase 1 CODE COMPLETE (2026-06-11): daemon + Postgres source-of-truth implemented on branch v0.2-phase1, PR #6 open (https://github.com/Pseudogiant-xr/PseudoLife-MCP/pull/6), 260 tests pass (236 prior + 24 new). Delivere",
+     "DEPLOYED LIVE 2026-06-22 (commit e39f0af on feat/graph-foundation): the graph-foundation sub-project is now running on the live PseudoLife-MCP stack. Apache AGE fully gone end-to-end — Postgres recreated on pgvector/pgvector:pg16 (no age ex"
+    ]
+   },
+   "into": {
+    "display": "pgvector/pg16 service",
+    "degree": 1,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "P2 QUALITY INFRA SHIPPED (2026-07-02, merge d59dfa1 + fix 2785684 on master, pushed): (1) GitHub Actions CI live and GREEN — .github/workflows/ci.yml runs the full 763-test suite on master pushes + PRs with pgvector/pg16 service, CPU-torch ",
+     "PG18 bump SHIPPED TO PR (2026-08-14): PR #155 (feat/pg18-bump, 212b0023) moves the Docker tier pseudolife-pg from PostgreSQL 16 to 18 (pgvector 0.8.6). CRITICAL catch during prep: PG18 official images moved PGDATA to /var/lib/postgresql/18/"
+    ]
+   },
+   "reason": "write-dedup: 'pgvector/pgvector:pg16' ~ 'pgvector/pg16 service'",
+   "score": 0.667,
+   "label": "accept",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "primary extractor",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Sonnet sidecar cutover merged to master (c48b69a, 2026-07-11): dream extractor now supports primary/fallback selection — Sonnet via evals/sonnet_shim.py on host :8082 (v1 prompt) as primary, in-stack E4B container as automatic fallback. PSE",
+     "Linux install parity deployed live (2026-07-14, e05bcde, rollback tag pseudolife-daemon:0.7.0-pre-linux-parity): extra_hosts host-gateway now default in compose; ops/install-shim-autostart.sh (systemd --user, binds docker bridge IP — host-g"
+    ]
+   },
+   "into": {
+    "display": "dream primary extractor",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Dream review 2026-08-11: the dream primary extractor (claude-opus-5 shim on :8082) has been down for at least 24h — headless `claude -p` fails with \"OAuth session expired and could not be refreshed\" (shim /health returns 503 cli_error). All",
+     "Dream review 2026-08-11: the dream primary extractor (claude-opus-5 shim on :8082) has been down for at least 24h — headless `claude -p` fails with \"OAuth session expired and could not be refreshed\" (shim /health returns 503 cli_error). All"
+    ]
+   },
+   "reason": "write-dedup: 'primary extractor' ~ 'dream primary extractor'",
+   "score": 0.667,
+   "label": "accept",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "reject-proposal",
+    "degree": 2,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Phase-2 \"C\" (the deep dream) DESIGN SPEC committed to master (76a9f8c): docs/superpowers/specs/2026-06-28-deep-dream-graph-consolidation-design.md. A manual, session-driven full-corpus consolidation pass over the KNOWLEDGE GRAPH ONLY (corte",
+     "Phase-2 \"C\" (deep dream / graph consolidation) IMPLEMENTATION PLAN committed to master (c0493fb): docs/superpowers/plans/2026-06-28-deep-dream-graph-consolidation.md. 9 TDD tasks (Task 0 branch feat/deep-dream-graph-consolidation + 8 build "
+    ]
+   },
+   "into": {
+    "display": "graph_reject_entity_proposal",
+    "degree": 4,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Phase-2 \"C\" (the deep dream) DESIGN SPEC committed to master (76a9f8c): docs/superpowers/specs/2026-06-28-deep-dream-graph-consolidation-design.md. A manual, session-driven full-corpus consolidation pass over the KNOWLEDGE GRAPH ONLY (corte",
+     "Phase-2 \"C\" (deep dream / graph consolidation) IMPLEMENTATION PLAN committed to master (c0493fb): docs/superpowers/plans/2026-06-28-deep-dream-graph-consolidation.md. 9 TDD tasks (Task 0 branch feat/deep-dream-graph-consolidation + 8 build "
+    ]
+   },
+   "reason": "token-subset",
+   "score": 1.0,
+   "label": "accept",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "slot-index shadow verification",
+    "degree": 3,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Slot-index shadow verification implemented and PR #145 opened 2026-08-13 (branch feat/slot-index-shadow-check, commit 28c3b7aa, worktree .claude/worktrees/slot-shadow — kept for follow-ups; everything committed and pushed). Sampled runtime ",
+     "Regression gate run for PR #145 (slot-index shadow verification), 2026-08-13 ~13:46: PASS, exit 0, 2 replicates vs baseline 1f0f13a, std 0.0000 on all four arms (determinism canary clean — reproducible q8_0 server via Start-Qwen): rag 0.628"
+    ]
+   },
+   "into": {
+    "display": "slot-index-shadow-check",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Slot-index shadow verification implemented and PR #145 opened 2026-08-13 (branch feat/slot-index-shadow-check, commit 28c3b7aa, worktree .claude/worktrees/slot-shadow — kept for follow-ups; everything committed and pushed). Sampled runtime ",
+     "Slot-index shadow verification implemented and PR #145 opened 2026-08-13 (branch feat/slot-index-shadow-check, commit 28c3b7aa, worktree .claude/worktrees/slot-shadow — kept for follow-ups; everything committed and pushed). Sampled runtime "
+    ]
+   },
+   "reason": "write-dedup: 'slot-index shadow verification' ~ 'slot-index-shadow-check'",
+   "score": 0.6,
+   "label": "accept",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "stance-span-gate",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Spec written 2026-08-12: docs/superpowers/specs/2026-08-12-stance-span-gate-design.md — preregistration for (A) epistemic stance as a labelled claim field (from arXiv:2608.06953; new nullable stance column = schema v29, stance never feeds c",
+     "DECISION (2026-08-13, user-ratified): flat-band migration (and the read-flat/lifecycle-banded middle option) is TABLED — not rejected — pending a future rerun/rereview. Condition to reopen: rerun the band ablation under the current (schema "
+    ]
+   },
+   "into": {
+    "display": "feat/stance-span-gate",
+    "degree": 2,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Stance+span-gate gates progress (2026-08-13, branch feat/stance-span-gate): Gate 1 stance probe PASSED — v8 capture 0.92 / false-stance 0.00 / values clean; headline finding: under shipped v5 the extractor doesn't just strip hedges, it DROP",
+     "Slot-index shadow verification implemented and PR #145 opened 2026-08-13 (branch feat/slot-index-shadow-check, commit 28c3b7aa, worktree .claude/worktrees/slot-shadow — kept for follow-ups; everything committed and pushed). Sampled runtime "
+    ]
+   },
+   "reason": "write-dedup: 'stance-span-gate' ~ 'feat/stance-span-gate'",
+   "score": 0.75,
+   "label": "accept",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "tests/conftest.py",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "ROOT-CAUSED + FIXED (2026-07-19, worktree serene-sutherland-3f36a4, uncommitted): the nondeterministic full-suite failures (~15-170 psycopg.errors.AdminShutdown failures/errors, different victim set each run, every test green in isolation) ",
+     "Test-suite memory root cause + validated fix (2026-07-29). SYMPTOM: `pytest tests/` reached ~49.5GB private commit on a 61.6GB host and killed one run outright (fatal interpreter crash, faulthandler dump, not a test failure). ROOT CAUSE, tw"
+    ]
+   },
+   "into": {
+    "display": "conftest.py",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "ROOT-CAUSED + FIXED (2026-07-19, worktree serene-sutherland-3f36a4, uncommitted): the nondeterministic full-suite failures (~15-170 psycopg.errors.AdminShutdown failures/errors, different victim set each run, every test green in isolation) ",
+     "Test-suite memory root cause + validated fix (2026-07-29). SYMPTOM: `pytest tests/` reached ~49.5GB private commit on a 61.6GB host and killed one run outright (fatal interpreter crash, faulthandler dump, not a test failure). ROOT CAUSE, tw"
+    ]
+   },
+   "reason": "token-subset",
+   "score": 1.0,
+   "label": "accept",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "v25+ backbone",
+    "degree": 2,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Embedding backbone decision (2026-07-28, PR #59, three committed artifacts): Qwen3-Embedding-0.6B is the swap target, NOT bge-base. fp32 shootout on our LongMemEval slice (150q/74183 turns): Qwen3 R@10 0.809 vs bge-base 0.742, best at every",
+     "Embedding backbone v25 branch COMPLETE, PR #60 open (2026-07-28, feat/embedding-v25, 14 commits, suite 1691/0/0, regression gate PASS at std 0.0000 vs baseline 1f0f13a). Qwen3-Embedding-0.6B default, vector(1024) x4 tables, asymmetric encod"
+    ]
+   },
+   "into": {
+    "display": "v25-embedding-backbone",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "v25 embedding backbone PASSES the regression gate (2026-07-29, first time it was ever run against v25): rag 0.6282 (control arm, byte-identical to the pre-v25 baseline), cortex 0.6923 (-0.0128 vs baseline 0.7051), hybrid 0.7821 (+0.0129 vs ",
+     "v25 embedding backbone PASSES the regression gate (2026-07-29, first time it was ever run against v25): rag 0.6282 (control arm, byte-identical to the pre-v25 baseline), cortex 0.6923 (-0.0128 vs baseline 0.7051), hybrid 0.7821 (+0.0129 vs "
+    ]
+   },
+   "reason": "write-dedup: 'v25+ backbone' ~ 'v25-embedding-backbone'",
+   "score": 0.667,
+   "label": "accept",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "valid_time population prereg",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": []
+   },
+   "into": {
+    "display": "valid-time-population",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Night shift 2026-08-13 (~01:00-06:00) complete, four PRs open awaiting maintainer: #146 stance field (schema v29) + span gate — plumbing shipped dormant, v8/v9 prompts held back by the KU gate (v8 cortex 0.731→0.615 p=0.0117; v9 hybrid 0.89"
+    ]
+   },
+   "reason": "write-dedup: 'valid_time population prereg' ~ 'valid-time-population'",
+   "score": 0.75,
+   "label": "accept",
+   "decided_by": "opus-panel-r5"
+  },
+  {
+   "from": {
+    "display": "world facts",
+    "degree": 1,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "WORLD-KNOWLEDGE CORTEX Phase 3 COMPLETE (2026-06-13). Also dropped the 9 empty pseudolife-schema shadow tables (kept only the 6 AGE label tables; verified graph + bank intact). Phase 3 (engine repo PseudoLife-MCP master, commits fbe4946/a56",
+     "CORRECTION/UPDATE to the 2026-06-13 \"World-knowledge Cortex Phase 3 complete, Phase 4 remaining\" note: Phase 4 (provider/agent-facing) is in fact IMPLEMENTED in the hermes provider source (C:\\Users\\<user>\\ClaudeCode\\pl-github\\PseudoLife-MCP-"
+    ]
+   },
+   "into": {
+    "display": "memory_world_facts",
+    "degree": 1,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "WORLD-KNOWLEDGE CORTEX Phase 3 COMPLETE (2026-06-13). Also dropped the 9 empty pseudolife-schema shadow tables (kept only the 6 AGE label tables; verified graph + bank intact). Phase 3 (engine repo PseudoLife-MCP master, commits fbe4946/a56",
+     "CORRECTION/UPDATE to the 2026-06-13 \"World-knowledge Cortex Phase 3 complete, Phase 4 remaining\" note: Phase 4 (provider/agent-facing) is in fact IMPLEMENTED in the hermes provider source (C:\\Users\\<user>\\ClaudeCode\\pl-github\\PseudoLife-MCP-"
+    ]
+   },
+   "reason": "write-dedup: 'world facts' ~ 'memory_world_facts'",
+   "score": 0.667,
+   "label": "accept",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": ".claude-plugin/marketplace.json",
+    "degree": 1,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Claude Code skill/plugin curation on THIS PC (~/.claude), 2026-06-20. Setup was over-plugined: 37 official plugins (anthropics/claude-plugins-official) + ~52 gstack skills in ~/.claude/skills/ + anthropic-skills. APPLIED (reversible): disab",
+     "2026-07-16 Claude Code plugin shipped (commit 14dc336, not yet pushed; daemon not yet redeployed — user decision pending): repo is now a plugin marketplace (.claude-plugin/marketplace.json \"pseudolife-mcp\") serving plugin \"pseudolife-memory"
+    ]
+   },
+   "into": {
+    "display": "plugin marketplace",
+    "degree": 4,
+    "scopes": [
+     "claude-code-setup",
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Claude Code skill/plugin curation on THIS PC (~/.claude), 2026-06-20. Setup was over-plugined: 37 official plugins (anthropics/claude-plugins-official) + ~52 gstack skills in ~/.claude/skills/ + anthropic-skills. APPLIED (reversible): disab",
+     "2026-07-16 claude-mem vs Pseudolife-MCP comparison conclusions: different theses — claude-mem is passive auto-journaling (hooks record what the agent DID, compress, re-inject; zero model discipline needed), Pseudolife is curated semantic me"
+    ]
+   },
+   "reason": "write-dedup: '.claude-plugin/marketplace.json' ~ 'plugin marketplace'",
+   "score": 0.75,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": ".claude-plugin/marketplace.json",
+    "degree": 1,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Claude Code skill/plugin curation on THIS PC (~/.claude), 2026-06-20. Setup was over-plugined: 37 official plugins (anthropics/claude-plugins-official) + ~52 gstack skills in ~/.claude/skills/ + anthropic-skills. APPLIED (reversible): disab",
+     "2026-07-16 Claude Code plugin shipped (commit 14dc336, not yet pushed; daemon not yet redeployed — user decision pending): repo is now a plugin marketplace (.claude-plugin/marketplace.json \"pseudolife-mcp\") serving plugin \"pseudolife-memory"
+    ]
+   },
+   "into": {
+    "display": "plugin.json",
+    "degree": 3,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Hermes model \"router\" architecture (brendan-hermes box, 2026-06-13): the real router is /opt/lm-proxy/lm_proxy.js (538-line Node reverse proxy, lm-proxy.service, listens 0.0.0.0:1237), NOT lm_health_monitor.py (that script only LOGS health,",
+     "Claude Code skill/plugin curation on THIS PC (~/.claude), 2026-06-20. Setup was over-plugined: 37 official plugins (anthropics/claude-plugins-official) + ~52 gstack skills in ~/.claude/skills/ + anthropic-skills. APPLIED (reversible): disab"
+    ]
+   },
+   "reason": "write-dedup: '.claude-plugin/marketplace.json' ~ 'plugin.json'",
+   "score": 0.75,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": ".claude/launch.json",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Flat-band migration IMPLEMENTED (2026-08-15, PR #159, branch feat/flat-band-migration): default preset flipped to flat (one band, cap 5250, balanced retention — the measured ablation arm); continuum retained as opt-in rollback with machiner"
+    ]
+   },
+   "into": {
+    "display": "claude-code-desktop-app",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Episode session-keying bug DIAGNOSED (2026-07-18): session_key = mcp-session-id header (writer_context.py:60), designed on the assumption it is stable-per-Claude-Code-session. Live bank falsifies this: episodes 67e7c4cd (re-evidence-hub), 2"
+    ]
+   },
+   "reason": "dream-alias: '.claude/launch.json' ~ 'claude-code-desktop-app' (cosine 0.72)",
+   "score": 0.716,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "/api/dream/run",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "PseudoLife-MCP public-repo dream automation design (proposed 2026-06-15, spec at docs/specs/2026-06-15-pluggable-dream-extractor-design.md). Reframe: dreaming needs AN LLM, not a SELF-HOSTED one — a public MCP user already has the agent the",
+     "PseudoLife-MCP pluggable dream extractor — IMPLEMENTED (2026-06-15) on branch feat/pluggable-dream-extractor (10 commits, NOT yet merged to master; branched from master @ origin/master). Phases 1-3 of docs/specs/2026-06-15-pluggable-dream-e"
+    ]
+   },
+   "into": {
+    "display": "memory_dream",
+    "degree": 10,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "MCP tool-surface consolidation SHIPPED + DEPLOYED (2026-07-02, merge 0d7a06a): 55 -> 32 tools, description payload 36,978 -> 14,953 chars (max single 1,331). Three verb-dispatched merges: memory_dream(action=status|pull|commit|run|deep) rep",
+     "MCP tool-surface consolidation SHIPPED + DEPLOYED (2026-07-02, merge 0d7a06a): 55 -> 32 tools, description payload 36,978 -> 14,953 chars (max single 1,331). Three verb-dispatched merges: memory_dream(action=status|pull|commit|run|deep) rep"
+    ]
+   },
+   "reason": "write-dedup: '/api/dream/run' ~ 'memory_dream'",
+   "score": 0.667,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "2026-08-13-night-shift",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Night shift 2026-08-13 (~01:00-06:00) complete, four PRs open awaiting maintainer: #146 stance field (schema v29) + span gate — plumbing shipped dormant, v8/v9 prompts held back by the KU gate (v8 cortex 0.731→0.615 p=0.0117; v9 hybrid 0.89"
+    ]
+   },
+   "into": {
+    "display": "2026-07-19-missed-work-audit",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Missed-work audit (2026-07-19) found two concrete unlanded items: (1) branch claude/nervous-solomon-577bda holds a ready 25-line guard test \"every vN.N.N tag must keep its CHANGELOG section header\" that never merged — master's test_release_",
+     "Missed-work audit (2026-07-19) found two concrete unlanded items: (1) branch claude/nervous-solomon-577bda holds a ready 25-line guard test \"every vN.N.N tag must keep its CHANGELOG section header\" that never merged — master's test_release_"
+    ]
+   },
+   "reason": "dream-alias: '2026-08-13-night-shift' ~ '2026-07-19-missed-work-audit' (cosine 0.65)",
+   "score": 0.652,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "AGE",
+    "degree": 1,
+    "scopes": [
+     "gnd-share",
+     "hermes-infra"
+    ],
+    "snippets": [
+     "GND Share PQC landscape check 2026-08-15 (verified against live primary sources): the v0.3.0 design choices all still hold in Aug 2026 — nothing broken or deprecated. RFC 10024 (Aug 2026, Standards Track) registers X25519MLKEM768 at codepoi"
+    ]
+   },
+   "into": {
+    "display": "master",
+    "degree": 1,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "FIXED + DEPLOYED (2026-06-26): The bridge-entity 'Why does X connect X to ...' self-reference bug in graph_insight.suggest_questions is resolved and live. Reworded to 'Why is `X` a bridge to `<other communities>`?' — lists only the OTHER co",
+     "Public-release prep executed 2026-07-03 on PseudoLife-MCP: (1) relicensed MIT→Apache-2.0 (canonical LICENSE by hash, NOTICE incl. Gemma ToU pointer, pyproject, README) and swapped the optional pdf extra PyMuPDF(AGPL)→pypdfium2, merged as de"
+    ]
+   },
+   "reason": "dream-alias: 'age' ~ 'master' (cosine 0.68)",
+   "score": 0.681,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "Brain",
+    "degree": 0,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Evaluated Perplexity \"Brain\" (self-improving agent memory, launched 2026-06-18) against PseudoLife-MCP. Conclusion: PseudoLife already matches or beats most of Brain — overnight synthesis≈our dream (and ours is on-demand, avoiding Brain's a",
+     "BUILT: Procedural/outcome memory (\"lessons\", schema v10) for PseudoLife-MCP — the one real gap vs Perplexity Brain. On branch `procedural-outcome-memory` (commit 5b7e3b4), COMMITTED but NOT pushed/merged/deployed (live daemon still runs old"
+    ]
+   },
+   "into": {
+    "display": "cognee",
+    "degree": 1,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "2026-08-14 competitor DX/docs survey (3 parallel research agents, star counts verified via GitHub API same day): mem0 63.2k, claude-mem 90.6k, Graphiti 29.9k, cognee 30.0k, supermemory 28.9k, Letta 24.2k. Headline findings for Pseudolife-MC"
+    ]
+   },
+   "reason": "dream-alias: 'cognee' ~ 'Brain' (cosine 0.77)",
+   "score": 0.768,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "GENERIC_HUB gate",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Shipped 2026-07-02 (commit 501be83, live, schema v20): all five graph-quality review fixes are now deployed. New this deploy — dismissed_pairs table + POST /api/graph/dismiss-duplicate + Atlas Dismiss button (stateless duplicate analyzer sk",
+     "Deep-dream improvement scan (2026-08-16 judge-panel pass, 122 proposals triaged via 4 parallel Opus judges + main-thread spot-check): (1) VOLUME: 480 new entities / 3.5 days of multi-session use files ~35 merge proposals/day at stable ~23% "
+    ]
+   },
+   "into": {
+    "display": "hub_gate",
+    "degree": 0,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "PseudoLife-MCP pluggable dream extractor — IMPLEMENTED (2026-06-15) on branch feat/pluggable-dream-extractor (10 commits, NOT yet merged to master; branched from master @ origin/master). Phases 1-3 of docs/specs/2026-06-15-pluggable-dream-e",
+     "Track A (graphify-derived recall hub-gating) is now SPEC-APPROVED for PseudoLife-MCP. Branch feat/recall-hub-gating off master; design committed at docs/specs/2026-06-24-recall-hub-gating-design.md (commits 60f4c94 + 332fd01). Scope: (1) hu"
+    ]
+   },
+   "reason": "write-dedup: 'GENERIC_HUB gate' ~ 'hub_gate'",
+   "score": 0.667,
+   "label": "reject",
+   "decided_by": "opus-panel-r5"
+  },
+  {
+   "from": {
+    "display": "Gated Decision",
+    "degree": 0,
+    "scopes": [],
+    "snippets": [
+     "User is interested in eventually training a BESPOKE extraction model for PseudoLife-MCP's dream/sidecar (entity+relation+confidence extraction) as a potential separate project — floated 'On-Policy Self-Distillation (OPSD)' (arXiv 2601.18734"
+    ]
+   },
+   "into": {
+    "display": "stance-span-gate-spec",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Spec written 2026-08-12: docs/superpowers/specs/2026-08-12-stance-span-gate-design.md — preregistration for (A) epistemic stance as a labelled claim field (from arXiv:2608.06953; new nullable stance column = schema v29, stance never feeds c",
+     "Spec written 2026-08-12: docs/superpowers/specs/2026-08-12-stance-span-gate-design.md — preregistration for (A) epistemic stance as a labelled claim field (from arXiv:2608.06953; new nullable stance column = schema v29, stance never feeds c"
+    ]
+   },
+   "reason": "dream-alias: 'stance-span-gate-spec' ~ 'Gated Decision' (cosine 0.73)",
+   "score": 0.73,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "Graphiti",
+    "degree": 1,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "2026-08-14 competitor DX/docs survey (3 parallel research agents, star counts verified via GitHub API same day): mem0 63.2k, claude-mem 90.6k, Graphiti 29.9k, cognee 30.0k, supermemory 28.9k, Letta 24.2k. Headline findings for Pseudolife-MC"
+    ]
+   },
+   "into": {
+    "display": "e4b-ft",
+    "degree": 5,
+    "scopes": [
+     "pseudolife-mcp",
+     "pseudolife-mcp-benchmarks"
+    ],
+    "snippets": [
+     "E4B QLoRA extractor fine-tune (e4b-ft, 2026-07-06) PASSED its gate decisively: KU-oracle cortex 0.564 / hybrid 0.769 (base E4B QAT: 0.359/0.551; Qwen3.6-27B teacher: 0.397/0.590 — the 4B-class student beats the 27B teacher). Ladder: gold_re",
+     "E4B QLoRA extractor fine-tune (e4b-ft, 2026-07-06) PASSED its gate decisively: KU-oracle cortex 0.564 / hybrid 0.769 (base E4B QAT: 0.359/0.551; Qwen3.6-27B teacher: 0.397/0.590 — the 4B-class student beats the 27B teacher). Ladder: gold_re"
+    ]
+   },
+   "reason": "dream-alias: 'Graphiti' ~ 'e4b-ft' (cosine 0.71)",
+   "score": 0.709,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "HF dspark export",
+    "degree": 0,
+    "scopes": [
+     "llama-turboq"
+    ],
+    "snippets": [
+     "SINGLE POINT OF FAILURE (found 2026-08-15): the dspark_to_dflash.py conversion script that produced Ternary-Bonsai-27B-dspark-dflash.gguf is GONE — it lived in a prior session's scratchpad and is not in ClaudeCode\\, Temp\\claude\\, Desktop, D"
+    ]
+   },
+   "into": {
+    "display": "dspark-drafter",
+    "degree": 0,
+    "scopes": [
+     "llama-turboq"
+    ],
+    "snippets": [
+     "Bonsai master rebuild campaign (2026-08-04): PrismML upstreamed into llama.cpp mainline and their master (5f55650, 10200 commits past our July 38c66ad) CHANGED the Q2_0 block format g128->g64 (same type ID 42, QK2_0 128->64) and dropped g12",
+     "Bonsai master rebuild campaign (2026-08-04): PrismML upstreamed into llama.cpp mainline and their master (5f55650, 10200 commits past our July 38c66ad) CHANGED the Q2_0 block format g128->g64 (same type ID 42, QK2_0 128->64) and dropped g12"
+    ]
+   },
+   "reason": "dream-alias: 'HF dspark export' ~ 'dspark-drafter' (cosine 0.71)",
+   "score": 0.708,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "LITE tier",
+    "degree": 10,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "DECISION (2026-08-13, user-ratified direction): install-floor plan is (a) a zero-config LITE tier — pip install pseudolife-mcp[lite] with embedded Postgres via a pgserver-family package (pgvector bundled; AGE no longer needed per schema.py:",
+     "VERIFIED (2026-08-14, live smoke test on the Windows dev box): pixeltable-pgserver 0.6.0 is a viable embedded-Postgres backbone for the lite install tier. Wheel inspection + running server confirmed: bundles BOTH PostgreSQL 16.14 and 18.4 t"
+    ]
+   },
+   "into": {
+    "display": "ci/lite-tier-lanes",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": []
+   },
+   "reason": "write-dedup: 'ci/lite-tier-lanes' ~ 'LITE tier'",
+   "score": 0.667,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "Letta",
+    "degree": 2,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "2026-08-14 competitor DX/docs survey (3 parallel research agents, star counts verified via GitHub API same day): mem0 63.2k, claude-mem 90.6k, Graphiti 29.9k, cognee 30.0k, supermemory 28.9k, Letta 24.2k. Headline findings for Pseudolife-MC",
+     "2026-08-14 competitor DX/docs survey (3 parallel research agents, star counts verified via GitHub API same day): mem0 63.2k, claude-mem 90.6k, Graphiti 29.9k, cognee 30.0k, supermemory 28.9k, Letta 24.2k. Headline findings for Pseudolife-MC"
+    ]
+   },
+   "into": {
+    "display": "Hermes",
+    "degree": 21,
+    "scopes": [
+     "hermes-infra",
+     "pseudolife-mcp",
+     "re-evidence-hub"
+    ],
+    "snippets": [
+     "Homelab fix 2026-08-04: hermes had been stuck on the CPU 35B fallback since Jun 20 because the away-mode SSH-tunnel drop-in (PRIMARY_URL=127.0.0.1:18234) was never reverted after coming home AND the 4090 box's DHCP address had drifted from ",
+     "Homelab fix 2026-08-04: hermes had been stuck on the CPU 35B fallback since Jun 20 because the away-mode SSH-tunnel drop-in (PRIMARY_URL=127.0.0.1:18234) was never reverted after coming home AND the 4090 box's DHCP address had drifted from "
+    ]
+   },
+   "reason": "dream-alias: 'Letta' ~ 'hermes' (cosine 0.74)",
+   "score": 0.74,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "ML-research brief deduplication method",
+    "degree": 0,
+    "scopes": [],
+    "snippets": [
+     "DECISION (2026-06-30, user-requested): the Claude scheduled daily ML-research brief must route findings to the WORLD CORTEX (memory_world_set), not memory_store under source=\"pseudolife\". Convention: entity=\"arXiv:<id>\", attribute=\"relevanc"
+    ]
+   },
+   "into": {
+    "display": "lesson-dedup-gate",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Deep-dream improvement scan (2026-08-16 judge-panel pass, 122 proposals triaged via 4 parallel Opus judges + main-thread spot-check): (1) VOLUME: 480 new entities / 3.5 days of multi-session use files ~35 merge proposals/day at stable ~23% ",
+     "Deep-dream improvement scan (2026-08-16 judge-panel pass, 122 proposals triaged via 4 parallel Opus judges + main-thread spot-check): (1) VOLUME: 480 new entities / 3.5 days of multi-session use files ~35 merge proposals/day at stable ~23% "
+    ]
+   },
+   "reason": "dream-alias: 'lesson-dedup-gate' ~ 'ML-research brief deduplication method' (cosine 0.77)",
+   "score": 0.769,
+   "label": "reject",
+   "decided_by": "opus-panel-r5"
+  },
+  {
+   "from": {
+    "display": "Opus 5",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Track A (graphify-derived recall hub-gating) is BUILT + MERGED for PseudoLife-MCP (2026-06-24). Fast-forward merged to LOCAL master = 8e2b992 (NOT pushed to origin, NOT deployed — homelab daemon is a baked image; deploy is a separate gated ",
+     "Track B (graphify-derived graph insight layer) is BUILT + MERGED for PseudoLife-MCP (2026-06-24). Fast-forward merged to LOCAL master = b70a512 (NOT pushed to origin, NOT deployed — homelab daemon is a baked image; deploy is a separate gate"
+    ]
+   },
+   "into": {
+    "display": "Opus-5 teacher",
+    "degree": 2,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Deterministic Qwen re-judge of the smarter-extractor comparison (2026-07-27, tag smoke0726-qwenjudge, artifact evals/results/extractor-comparison-smoke0726-qwenjudge.json): re-judged the SAME persisted contexts/banks from the full-78 run wi",
+     "Definitive deterministic-judge extractor comparison (2026-07-27, tag detjudge, artifact evals/results/extractor-comparison-detjudge.json, PR on branch eval/smarter-extractor-full): LME KU oracle n=78, v2 prompt, judged on the reproducible q"
+    ]
+   },
+   "reason": "write-dedup: 'Opus-5 teacher' ~ 'Opus 5'",
+   "score": 0.667,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "PR #153",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "SHIPPED TO PR (2026-08-14): install-floor Phases 0+1 both open awaiting user merge. PR #152 (feat/lite-tier-embedded-pg, commit 82a813e1) — the zero-config lite tier: [lite] extra pins pg0-embedded >=0.15.1,<0.16; storage resolution lives O",
+     "SHIPPED TO PR (2026-08-14): install-floor Phases 0+1 both open awaiting user merge. PR #152 (feat/lite-tier-embedded-pg, commit 82a813e1) — the zero-config lite tier: [lite] extra pins pg0-embedded >=0.15.1,<0.16; storage resolution lives O"
+    ]
+   },
+   "into": {
+    "display": "pr-31",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "PR #31 opened 2026-07-21 (fix/shim-create-no-window -> master, MERGEABLE): shim.spawn_daemon switches DETACHED_PROCESS -> CREATE_NO_WINDOW, + 2 pinning tests + CHANGELOG. Built WITHOUT touching the shared working tree: the repo was on branc",
+     "PR #31 opened 2026-07-21 (fix/shim-create-no-window -> master, MERGEABLE): shim.spawn_daemon switches DETACHED_PROCESS -> CREATE_NO_WINDOW, + 2 pinning tests + CHANGELOG. Built WITHOUT touching the shared working tree: the repo was on branc"
+    ]
+   },
+   "reason": "dream-alias: 'PR #153' ~ 'pr-31' (cosine 0.81)",
+   "score": 0.806,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "PSEUDOLIFE_MCP_TOOLSET=core",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "DONE (2026-06-26): P1.5 tool-surface gate + redundancy trim (pseudolife-mcp) — built via brainstorm->spec->plan->inline TDD exec. 7 commits LOCAL on master (origin/master=431a0b1, NOT pushed — awaiting user go-ahead): spec 89aba98 + plan 76",
+     "FULL DEEP REVIEW of PseudoLife-MCP (2026-07-02, Fable 5: 5 parallel subagent reviews + personal verification of every headline claim; ~727 tests green, one ordering flake). VERIFIED CRITICAL FINDINGS: (1) All ~55 MCP tools are sync defs inv"
+    ]
+   },
+   "into": {
+    "display": "core toolset",
+    "degree": 4,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "DONE (2026-06-26): P1.5 tool-surface gate + redundancy trim (pseudolife-mcp) — built via brainstorm->spec->plan->inline TDD exec. 7 commits LOCAL on master (origin/master=431a0b1, NOT pushed — awaiting user go-ahead): spec 89aba98 + plan 76",
+     "FULL DEEP REVIEW of PseudoLife-MCP (2026-07-02, Fable 5: 5 parallel subagent reviews + personal verification of every headline claim; ~727 tests green, one ordering flake). VERIFIED CRITICAL FINDINGS: (1) All ~55 MCP tools are sync defs inv"
+    ]
+   },
+   "reason": "token-subset",
+   "score": 0.9983,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "PostgreSQL 18",
+    "degree": 2,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "VERIFIED (2026-08-14, live smoke test on the Windows dev box): pixeltable-pgserver 0.6.0 is a viable embedded-Postgres backbone for the lite install tier. Wheel inspection + running server confirmed: bundles BOTH PostgreSQL 16.14 and 18.4 t",
+     "HEAD-TO-HEAD (2026-08-14, identical smoke battery on the Windows dev box) pg0-embedded 0.15.1 vs pixeltable-pgserver 0.6.0 for the lite tier: (1) ASCII path with spaces — both full pass (vector(1024)+HNSW+cosine). (2) Non-ASCII path — BOTH "
+    ]
+   },
+   "into": {
+    "display": "PostgreSQL 18.1",
+    "degree": 2,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "VERIFIED (2026-08-14, live smoke test on the Windows dev box): pixeltable-pgserver 0.6.0 is a viable embedded-Postgres backbone for the lite install tier. Wheel inspection + running server confirmed: bundles BOTH PostgreSQL 16.14 and 18.4 t",
+     "HEAD-TO-HEAD (2026-08-14, identical smoke battery on the Windows dev box) pg0-embedded 0.15.1 vs pixeltable-pgserver 0.6.0 for the lite tier: (1) ASCII path with spaces — both full pass (vector(1024)+HNSW+cosine). (2) Non-ASCII path — BOTH "
+    ]
+   },
+   "reason": "write-dedup: 'PostgreSQL 18' ~ 'PostgreSQL 18.1'",
+   "score": 0.667,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "PostgreSQL 18.4",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "VERIFIED (2026-08-14, live smoke test on the Windows dev box): pixeltable-pgserver 0.6.0 is a viable embedded-Postgres backbone for the lite install tier. Wheel inspection + running server confirmed: bundles BOTH PostgreSQL 16.14 and 18.4 t",
+     "HEAD-TO-HEAD (2026-08-14, identical smoke battery on the Windows dev box) pg0-embedded 0.15.1 vs pixeltable-pgserver 0.6.0 for the lite tier: (1) ASCII path with spaces — both full pass (vector(1024)+HNSW+cosine). (2) Non-ASCII path — BOTH "
+    ]
+   },
+   "into": {
+    "display": "PostgreSQL 18",
+    "degree": 2,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "VERIFIED (2026-08-14, live smoke test on the Windows dev box): pixeltable-pgserver 0.6.0 is a viable embedded-Postgres backbone for the lite install tier. Wheel inspection + running server confirmed: bundles BOTH PostgreSQL 16.14 and 18.4 t",
+     "HEAD-TO-HEAD (2026-08-14, identical smoke battery on the Windows dev box) pg0-embedded 0.15.1 vs pixeltable-pgserver 0.6.0 for the lite tier: (1) ASCII path with spaces — both full pass (vector(1024)+HNSW+cosine). (2) Non-ASCII path — BOTH "
+    ]
+   },
+   "reason": "write-dedup: 'PostgreSQL 18' ~ 'PostgreSQL 18.4'",
+   "score": 0.667,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "Postgres database",
+    "degree": 0,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "PseudoLife-MCP v0.2 Phase 1 CODE COMPLETE (2026-06-11): daemon + Postgres source-of-truth implemented on branch v0.2-phase1, PR #6 open (https://github.com/Pseudogiant-xr/PseudoLife-MCP/pull/6), 260 tests pass (236 prior + 24 new). Delivere",
+     "PseudoLife-MCP Postgres has TWO cortex schemas in the pseudolife_memory DB: the LIVE one is `public` (PostgresStorage pins `SET search_path TO public, ag_catalog` in storage/postgres.py), while a `pseudolife` schema (named after the DB role"
+    ]
+   },
+   "into": {
+    "display": "docker tier postgres",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "HEAD-TO-HEAD (2026-08-14, identical smoke battery on the Windows dev box) pg0-embedded 0.15.1 vs pixeltable-pgserver 0.6.0 for the lite tier: (1) ASCII path with spaces — both full pass (vector(1024)+HNSW+cosine). (2) Non-ASCII path — BOTH ",
+     "SHIPPED TO PR (2026-08-14): install-floor Phases 0+1 both open awaiting user merge. PR #152 (feat/lite-tier-embedded-pg, commit 82a813e1) — the zero-config lite tier: [lite] extra pins pg0-embedded >=0.15.1,<0.16; storage resolution lives O"
+    ]
+   },
+   "reason": "dream-alias: 'docker tier postgres' ~ 'Postgres database' (cosine 0.77)",
+   "score": 0.768,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "RFC 9955",
+    "degree": 0,
+    "scopes": [
+     "gnd-share"
+    ],
+    "snippets": [
+     "GND Share PQC landscape check 2026-08-15 (verified against live primary sources): the v0.3.0 design choices all still hold in Aug 2026 — nothing broken or deprecated. RFC 10024 (Aug 2026, Standards Track) registers X25519MLKEM768 at codepoi"
+    ]
+   },
+   "into": {
+    "display": "4090",
+    "degree": 1,
+    "scopes": [
+     "hermes-infra",
+     "homelab-local-models"
+    ],
+    "snippets": [
+     "Homelab CPU inference box \"Local-Models\" (10.0.0.130, Proxmox LXC, root login): AMD Ryzen 7 5800X3D = 8 physical cores / 16 logical, 40GB RAM, NO GPU (CPU-only), llama.cpp build 8905. Runs two systemd-managed llama-server instances: llam",
+     "Hermes model \"router\" architecture (brendan-hermes box, 2026-06-13): the real router is /opt/lm-proxy/lm_proxy.js (538-line Node reverse proxy, lm-proxy.service, listens 0.0.0.0:1237), NOT lm_health_monitor.py (that script only LOGS health,"
+    ]
+   },
+   "reason": "dream-alias: 'RFC 9955' ~ '4090' (cosine 0.67)",
+   "score": 0.672,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "Specs/plans",
+    "degree": 0,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "External-findings program SHIPPED to local master (2026-07-03, merges 3e3245f wave-1 + 5f57a34 wave-2, NOT pushed — push to origin/master needs user authorization; daemon NOT redeployed, separate gated rebuild). Five features, all read-time",
+     "External-findings program SHIPPED to local master (2026-07-03, merges 3e3245f wave-1 + 5f57a34 wave-2, NOT pushed — push to origin/master needs user authorization; daemon NOT redeployed, separate gated rebuild). Five features, all read-time"
+    ]
+   },
+   "into": {
+    "display": "install-floor-plan",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "DECISION (2026-08-13, user-ratified direction): install-floor plan is (a) a zero-config LITE tier — pip install pseudolife-mcp[lite] with embedded Postgres via a pgserver-family package (pgvector bundled; AGE no longer needed per schema.py:",
+     "DECISION (2026-08-13, user-ratified direction): install-floor plan is (a) a zero-config LITE tier — pip install pseudolife-mcp[lite] with embedded Postgres via a pgserver-family package (pgvector bundled; AGE no longer needed per schema.py:"
+    ]
+   },
+   "reason": "dream-alias: 'install-floor-plan' ~ 'Specs/plans' (cosine 0.70)",
+   "score": 0.702,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "Ternary-Bonsai-27B-Q2_g64.gguf",
+    "degree": 3,
+    "scopes": [
+     "llama-turboq"
+    ],
+    "snippets": [
+     "Built and VERIFIED the PrismML fork Bonsai server package (2026-07-17): cloned github.com/PrismML-Eng/llama.cpp branch prism @ 38c66ad into prismml-src, built with the proven recipe (CUDA 13.1 nvcc via -DCMAKE_CUDA_COMPILER, Ninja Release, ",
+     "Bonsai master rebuild campaign (2026-08-04): PrismML upstreamed into llama.cpp mainline and their master (5f55650, 10200 commits past our July 38c66ad) CHANGED the Q2_0 block format g128->g64 (same type ID 42, QK2_0 128->64) and dropped g12"
+    ]
+   },
+   "into": {
+    "display": "bonsai-27b-ternary",
+    "degree": 8,
+    "scopes": [
+     "hermes-infra",
+     "llama-turboq",
+     "pseudolife-mcp",
+     "re-evidence-hub"
+    ],
+    "snippets": [
+     "Bonsai 27B ternary local-serving result (moved out of the world-fact slot 2026-07-19): on the 4070Ti SUPER 16GB (Windows, llama.cpp) the ternary GGUF serves at 80K context with 1.5GB VRAM free; used successfully via Hermes to trace function",
+     "Bonsai 27B ternary local-serving result (moved out of the world-fact slot 2026-07-19): on the 4070Ti SUPER 16GB (Windows, llama.cpp) the ternary GGUF serves at 80K context with 1.5GB VRAM free; used successfully via Hermes to trace function"
+    ]
+   },
+   "reason": "dream-alias: 'ternary-bonsai-27b-q2-g64' ~ 'Ternary-Bonsai-27B' (cosine 0.95)",
+   "score": 0.946,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "Ternary-Bonsai-27B-dspark-dflash.gguf",
+    "degree": 3,
+    "scopes": [
+     "llama-turboq"
+    ],
+    "snippets": [
+     "SINGLE POINT OF FAILURE (found 2026-08-15): the dspark_to_dflash.py conversion script that produced Ternary-Bonsai-27B-dspark-dflash.gguf is GONE — it lived in a prior session's scratchpad and is not in ClaudeCode\\, Temp\\claude\\, Desktop, D",
+     "SINGLE POINT OF FAILURE (found 2026-08-15): the dspark_to_dflash.py conversion script that produced Ternary-Bonsai-27B-dspark-dflash.gguf is GONE — it lived in a prior session's scratchpad and is not in ClaudeCode\\, Temp\\claude\\, Desktop, D"
+    ]
+   },
+   "into": {
+    "display": "bonsai-27b-ternary",
+    "degree": 8,
+    "scopes": [
+     "hermes-infra",
+     "llama-turboq",
+     "pseudolife-mcp",
+     "re-evidence-hub"
+    ],
+    "snippets": [
+     "Bonsai 27B ternary local-serving result (moved out of the world-fact slot 2026-07-19): on the 4070Ti SUPER 16GB (Windows, llama.cpp) the ternary GGUF serves at 80K context with 1.5GB VRAM free; used successfully via Hermes to trace function",
+     "Bonsai 27B ternary local-serving result (moved out of the world-fact slot 2026-07-19): on the 4070Ti SUPER 16GB (Windows, llama.cpp) the ternary GGUF serves at 80K context with 1.5GB VRAM free; used successfully via Hermes to trace function"
+    ]
+   },
+   "reason": "dream-alias: 'Ternary-Bonsai-27B-dspark-dflash.gguf' ~ 'Ternary-Bonsai-27B' (cosine 0.89)",
+   "score": 0.891,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "Zep",
+    "degree": 3,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "2026-08-14 competitor DX/docs survey (3 parallel research agents, star counts verified via GitHub API same day): mem0 63.2k, claude-mem 90.6k, Graphiti 29.9k, cognee 30.0k, supermemory 28.9k, Letta 24.2k. Headline findings for Pseudolife-MC"
+    ]
+   },
+   "into": {
+    "display": "SP-1",
+    "degree": 3,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "SHIPPED + MERGED + PUSHED + DEPLOYED LIVE (2026-06-29): Entity Consolidation (Entity-Quality SP-1). origin/master = 7cb4f2b (FF-merged from feat/entity-consolidation, branch deleted); daemon redeployed /health schema=18 persist_errors=0, ba",
+     "SHIPPED + MERGED + PUSHED + DEPLOYED LIVE (2026-06-29): Entity Consolidation (Entity-Quality SP-1). origin/master = 7cb4f2b (FF-merged from feat/entity-consolidation, branch deleted); daemon redeployed /health schema=18 persist_errors=0, ba"
+    ]
+   },
+   "reason": "dream-alias: 'Zep' ~ 'SP-1' (cosine 0.76)",
+   "score": 0.759,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "_SPAWN_WAIT_S",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "USER PREFERENCE (2026-07-01, origin=user): Subagents are standing-authorized — spawn parallel subagents (Agent/Task) on your own judgment when the work genuinely benefits (independent/parallelizable streams; a big self-contained exploration",
+     "Shim autostart test flake ROOT-CAUSED (2026-08-14): test_shim.py::test_shim_autostarts_daemon_and_proxies failed twice (2026-08-13/14) with an opaque McpError only in full-suite runs that coincided with the flat-band ablation ladder running"
+    ]
+   },
+   "into": {
+    "display": "_SPAWN_WAIT_ALIVE_S",
+    "degree": 2,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": []
+   },
+   "reason": "write-dedup: '_SPAWN_WAIT_ALIVE_S' ~ '_SPAWN_WAIT_S'",
+   "score": 0.667,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "agent-fabricated-completion",
+    "degree": 0,
+    "scopes": [
+     "hermes-infra"
+    ],
+    "snippets": [
+     "SECOND FABRICATED COMPLETION + THE FIX THAT WORKS (2026-08-07, Tri-Serpent on Bonsai-27B). PATTERN NOW CONFIRMED TWICE: the agent ticks a milestone checkbox and reports success without doing the work. Case 1 (overnight, 35B): claimed \"page ",
+     "SECOND FABRICATED COMPLETION + THE FIX THAT WORKS (2026-08-07, Tri-Serpent on Bonsai-27B). PATTERN NOW CONFIRMED TWICE: the agent ticks a milestone checkbox and reports success without doing the work. Case 1 (overnight, 35B): claimed \"page "
+    ]
+   },
+   "into": {
+    "display": "v10-stance-prompt",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "v10 stance prompt SHIPPED 2026-08-14 (maintainer decision: \"Ship V10, soak and iterate on v11\"): live dream extraction prompt moved v5→v10 (update-anchored stance rule; dream.py _SYSTEM_PROMPT pinned to ku_op_prompt_v10_stance_update.txt), ",
+     "v10 stance prompt SHIPPED 2026-08-14 (maintainer decision: \"Ship V10, soak and iterate on v11\"): live dream extraction prompt moved v5→v10 (update-anchored stance rule; dream.py _SYSTEM_PROMPT pinned to ku_op_prompt_v10_stance_update.txt), "
+    ]
+   },
+   "reason": "dream-alias: 'v10-stance-prompt' ~ 'agent-fabricated-completion' (cosine 0.74)",
+   "score": 0.74,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "analysis",
+    "degree": 0,
+    "scopes": [
+     "hermes-infra",
+     "hermes-ops",
+     "pseudolife",
+     "pseudolife-mcp",
+     "pseudolife-mcp-benchmarks",
+     "re-evidence-hub"
+    ],
+    "snippets": [
+     "MTP root-cause analysis + path-forward (2026-06-14 research, follow-up to the MTP-FAILED finding). Our llama.cpp is b9371; LATEST mainline is b9626 (~255 builds newer). MTP merged into mainline via PR #22673 (am17an, May 16 2026) using flag",
+     "Hermes prompt cacheability analysis (2026-06-19/20, from request_dump on .104). Live prompt ~24.3k tokens = TOOLS ~14.8k (31 tools) + SYSTEM ~6.5k + conversation. Per-turn recall (## Cortex / <memory-context>) is correctly placed in the LAT"
+    ]
+   },
+   "into": {
+    "display": "temporal-decay",
+    "degree": 2,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Forgetting assessment post flat-band verdict (2026-08-15, user question): NOT confirmed that forgetting has no benefit — confirmed that mechanical forgetting has none in this system. Tested-and-failed: novelty-ranked eviction (destroyed evi"
+    ]
+   },
+   "reason": "dream-alias: 'temporal-decay' ~ 'analysis' (cosine 0.71)",
+   "score": 0.714,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "band-ablation",
+    "degree": 2,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "DECISION (2026-08-13, user-ratified): flat-band migration (and the read-flat/lifecycle-banded middle option) is TABLED — not rejected — pending a future rerun/rereview. Condition to reopen: rerun the band ablation under the current (schema "
+    ]
+   },
+   "into": {
+    "display": "band-ablation-replicates",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Band-ablation GPU replicates COMPLETE (2026-07-19, ~80 min, 4 tags × 5 replicates × 78 questions, all green): the 8-band continuum's retrieval-time pooling NEVER beats a single flat cosine pool on LongMemEval-KU. 2×2 results (rag/cortex/hyb",
+     "Band-ablation GPU replicates COMPLETE (2026-07-19, ~80 min, 4 tags × 5 replicates × 78 questions, all green): the 8-band continuum's retrieval-time pooling NEVER beats a single flat cosine pool on LongMemEval-KU. 2×2 results (rag/cortex/hyb"
+    ]
+   },
+   "reason": "dream-alias: 'band-ablation' ~ 'band-ablation-replicates' (cosine 0.92)",
+   "score": 0.924,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "bank drift tripwire",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": []
+   },
+   "into": {
+    "display": "bank-drift",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "v10 stance prompt SHIPPED 2026-08-14 (maintainer decision: \"Ship V10, soak and iterate on v11\"): live dream extraction prompt moved v5→v10 (update-anchored stance rule; dream.py _SYSTEM_PROMPT pinned to ku_op_prompt_v10_stance_update.txt), ",
+     "v10 stance prompt SHIPPED 2026-08-14 (maintainer decision: \"Ship V10, soak and iterate on v11\"): live dream extraction prompt moved v5→v10 (update-anchored stance rule; dream.py _SYSTEM_PROMPT pinned to ku_op_prompt_v10_stance_update.txt), "
+    ]
+   },
+   "reason": "write-dedup: 'bank drift tripwire' ~ 'bank-drift'",
+   "score": 0.667,
+   "label": "reject",
+   "decided_by": "opus-panel-r5"
+  },
+  {
+   "from": {
+    "display": "bonsai-server-build-20260717",
+    "degree": 0,
+    "scopes": [
+     "llama-turboq"
+    ],
+    "snippets": [
+     "Built and VERIFIED the PrismML fork Bonsai server package (2026-07-17): cloned github.com/PrismML-Eng/llama.cpp branch prism @ 38c66ad into prismml-src, built with the proven recipe (CUDA 13.1 nvcc via -DCMAKE_CUDA_COMPILER, Ninja Release, ",
+     "Built and VERIFIED the PrismML fork Bonsai server package (2026-07-17): cloned github.com/PrismML-Eng/llama.cpp branch prism @ 38c66ad into prismml-src, built with the proven recipe (CUDA 13.1 nvcc via -DCMAKE_CUDA_COMPILER, Ninja Release, "
+    ]
+   },
+   "into": {
+    "display": "bonsai-server-win64-cuda",
+    "degree": 0,
+    "scopes": [
+     "llama-turboq"
+    ],
+    "snippets": [
+     "Built bonsai-server-win64-cuda-20260815.zip (411.7MB, llama.ccp root, 2026-08-15) — v2 friend-distributable package superseding the July fork build. Contents: 9 files from prismml-master-src\\build\\bin (master @5f55650, CUDA 13.1, sm_89, Rel",
+     "Built bonsai-server-win64-cuda-20260815.zip (411.7MB, llama.ccp root, 2026-08-15) — v2 friend-distributable package superseding the July fork build. Contents: 9 files from prismml-master-src\\build\\bin (master @5f55650, CUDA 13.1, sm_89, Rel"
+    ]
+   },
+   "reason": "dream-alias: 'bonsai-server-win64-cuda' ~ 'bonsai-server-build-20260717' (cosine 0.86)",
+   "score": 0.861,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "chronicle-deploy-build-hang",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Chronicle default-on deployed live 2026-08-12 ~18:58 via ops/update.ps1 (master fe06df12, rollback tag pseudolife-daemon:0.13.0-pre-update-20260812-185801). First update.ps1 attempt hung ~25 min inside the daemon image build — the HF model-",
+     "Chronicle default-on deployed live 2026-08-12 ~18:58 via ops/update.ps1 (master fe06df12, rollback tag pseudolife-daemon:0.13.0-pre-update-20260812-185801). First update.ps1 attempt hung ~25 min inside the daemon image build — the HF model-"
+    ]
+   },
+   "into": {
+    "display": "chronicle-default-on",
+    "degree": 2,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Chronicle default-on PR #143 opened 2026-08-12 (branch feat/chronicle-default-on, commit c421da74) — awaiting the user's merge click, then ops/update.ps1 deploy. Carries: memory.dream.chronicle default true + Console knob (Dream group, live",
+     "Chronicle default-on PR #143 opened 2026-08-12 (branch feat/chronicle-default-on, commit c421da74) — awaiting the user's merge click, then ops/update.ps1 deploy. Carries: memory.dream.chronicle default true + Console knob (Dream group, live"
+    ]
+   },
+   "reason": "dream-alias: 'chronicle-deploy-build-hang' ~ 'chronicle-default-on' (cosine 0.71)",
+   "score": 0.713,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "claude-mem",
+    "degree": 2,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "2026-08-14 competitor DX/docs survey (3 parallel research agents, star counts verified via GitHub API same day): mem0 63.2k, claude-mem 90.6k, Graphiti 29.9k, cognee 30.0k, supermemory 28.9k, Letta 24.2k. Headline findings for Pseudolife-MC",
+     "2026-08-14 competitor DX/docs survey (3 parallel research agents, star counts verified via GitHub API same day): mem0 63.2k, claude-mem 90.6k, Graphiti 29.9k, cognee 30.0k, supermemory 28.9k, Letta 24.2k. Headline findings for Pseudolife-MC"
+    ]
+   },
+   "into": {
+    "display": "claude-memory-system",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "2026-07-16 rich memory-loop instructions are now the served base (commit 32809ae, pushed + deployed, backup 20260716-203150, rollback tag 0.8.1-pre-update-20260716-203153): MEMORY_LOOP_BLOCK == examples/CLAUDE.memory.md is the full RECALL/C",
+     "2026-07-16 cold-bank onboarding live (commit 50c4a4b, pushed + deployed, backup 20260716-204446, rollback tag 0.8.1-pre-update-20260716-204448): /api/hook/session-start appends ONBOARDING_BLOCK (seed guidance: session title, 2-3 memory_stor"
+    ]
+   },
+   "reason": "dream-alias: 'claude-mem' ~ 'claude-memory-system' (cosine 0.86)",
+   "score": 0.859,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "combined events prompt",
+    "degree": 0,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Evlora preregistration drafted (2026-08-07, PR #114, docs/superpowers/specs/2026-08-07-evlora-antisuppression-design.md): combined run = e4b-v3 single multi-task QLoRA (Opus claims-regen + events v2 datasets, one GGUF, task separation by sy",
+     "Spec written 2026-08-12: docs/superpowers/specs/2026-08-12-stance-span-gate-design.md — preregistration for (A) epistemic stance as a labelled claim field (from arXiv:2608.06953; new nullable stance column = schema v29, stance never feeds c"
+    ]
+   },
+   "into": {
+    "display": "events-prompt",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "EVQ gate run (tag evq-0806, PR #112) verdict: 4/5 preregistered gates pass, primary FAILS (p 0.226), nothing promoted. Both validity gates EXACT zero (rag control and claims-inertness 0/0 flips vs aggserve-0806). Primary: hybrid_ev_syn on v"
+    ]
+   },
+   "reason": "write-dedup: 'combined events prompt' ~ 'events-prompt'",
+   "score": 0.667,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "competitor DX/docs survey 2026-08-14",
+    "degree": 0,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "2026-08-14 competitor DX/docs survey (3 parallel research agents, star counts verified via GitHub API same day): mem0 63.2k, claude-mem 90.6k, Graphiti 29.9k, cognee 30.0k, supermemory 28.9k, Letta 24.2k. Headline findings for Pseudolife-MC"
+    ]
+   },
+   "into": {
+    "display": "graph_review.py",
+    "degree": 19,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "SHIPPED + merged to master (2026-06-28, commit c16b6cc): Phase-2/B1 relation-extraction eval. `evals/relation_extraction_bench.py` (dev-only, no DB/embedder) + `tests/test_relation_bench.py` + two `graph_review.py` analyzer fixes (`_token_s",
+     "Missed-work audit (2026-07-19) found two concrete unlanded items: (1) branch claude/nervous-solomon-577bda holds a ready 25-line guard test \"every vN.N.N tag must keep its CHANGELOG section header\" that never merged — master's test_release_"
+    ]
+   },
+   "reason": "dream-alias: 'competitor DX/docs survey 2026-08-14' ~ 'graph_review analyzer findings' (cosine 0.74)",
+   "score": 0.744,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "config.yaml",
+    "degree": 1,
+    "scopes": [
+     "hermes-infra"
+    ],
+    "snippets": [
+     "Hermes 27B memory-robustness fix applied 2026-06-05 (root cause: SOUL.md had contradictory memory instructions - lines 4-56 said 'environment facts live in MEMORY.md / trust files over memory / add to MEMORY.md' while line 57 bolted on the ",
+     "Hermes model \"router\" architecture (brendan-hermes box, 2026-06-13): the real router is /opt/lm-proxy/lm_proxy.js (538-line Node reverse proxy, lm-proxy.service, listens 0.0.0.0:1237), NOT lm_health_monitor.py (that script only LOGS health,"
+    ]
+   },
+   "into": {
+    "display": "/data/config.yaml",
+    "degree": 2,
+    "scopes": [
+     "pseudolife-mcp",
+     "pseudolife-mcp-ops",
+     "windows-env"
+    ],
+    "snippets": [
+     "PROJECT STARTED (2026-06-23): Building a web frontend (\"PseudoLife Cortex Console\") for PseudoLife-MCP — user-requested overnight autonomous build via /loop. Scope: (1) config editor for the knobs/dials (config.py dataclasses), (2) memory +",
+     "Scope-hygiene shipped + live (2026-07-19, merge b70c5d7, deployed 0.8.1 with rollback tag 0.8.1-pre-update-20260719-012835, schema 22): backfill_entity_sources now case-folds scope keys, skips memory.scopes.exclude meta sources (status/clau"
+    ]
+   },
+   "reason": "write-dedup: '/data/config.yaml' ~ 'config.yaml'",
+   "score": 0.667,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "configuration_file",
+    "degree": 0,
+    "scopes": [],
+    "snippets": [
+     "GOTCHA (iMMERSE RTGI temporal artifact): \"scene brightens when standing still, darkens when moving\" = RTGI's temporal accumulation + weak motion vectors. RTGI accumulates indirect light over frames when static (converges/brightens); on moti"
+    ]
+   },
+   "into": {
+    "display": "load_config",
+    "degree": 2,
+    "scopes": [
+     "pseudolife-mcp",
+     "pseudolife-mcp-benchmarks"
+    ],
+    "snippets": [
+     "Slot-index shadow verification implemented and PR #145 opened 2026-08-13 (branch feat/slot-index-shadow-check, commit 28c3b7aa, worktree .claude/worktrees/slot-shadow — kept for follow-ups; everything committed and pushed). Sampled runtime "
+    ]
+   },
+   "reason": "dream-alias: 'load_config' ~ 'configuration_file' (cosine 0.78)",
+   "score": 0.781,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "cortex supersession",
+    "degree": 1,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "PseudoLife-MCP cortex layer landed on master (commits adc39a8 durability + 2a98408 cortex, merged via PR #2 1c375fd). Cortex = slot-keyed canonical-fact store (schema v7, pseudolife_memory/memory/cortex.py): identity-not-similarity, superse",
+     "PseudoLife-MCP benchmark pre-flight finding (2026-06-17, Tier B efficiency screen): the productization wedge is currently BLOCKED by auto-extraction recall, not by the cortex mechanism. Tier A (clean phrasing) passed all probes, but Tier B "
+    ]
+   },
+   "into": {
+    "display": "cortex supersession_log",
+    "degree": 1,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "BUILT: Procedural/outcome memory (\"lessons\", schema v10) for PseudoLife-MCP — the one real gap vs Perplexity Brain. On branch `procedural-outcome-memory` (commit 5b7e3b4), COMMITTED but NOT pushed/merged/deployed (live daemon still runs old",
+     "DEPLOYED (2026-07-02): P1 per-slot persistence + schema v19 is LIVE on the homelab daemon. Merge 129a8c9 (feat commit 37fbcff) on master, pushed. Deployed via ops/update.ps1 (backup pseudolife_memory-20260702-142258.sql.gz, rollback image p"
+    ]
+   },
+   "reason": "write-dedup: 'cortex supersession' ~ 'cortex supersession_log'",
+   "score": 0.667,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "cortex-hygiene-prune",
+    "degree": 0,
+    "scopes": [
+     "hermes-infra"
+    ],
+    "snippets": [
+     "Cortex hygiene 2026-08-06: pruned the wordfreq test-project noise from the .104 bank (5 facts + 3 conversation entries + entity row 18; graph refs went via ON DELETE CASCADE, facts deleted first since facts.entity_id does NOT cascade), daem",
+     "Cortex hygiene 2026-08-06: pruned the wordfreq test-project noise from the .104 bank (5 facts + 3 conversation entries + entity row 18; graph refs went via ON DELETE CASCADE, facts deleted first since facts.entity_id does NOT cascade), daem"
+    ]
+   },
+   "into": {
+    "display": "cortex-compaction",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Compaction audit 2026-08-14: no real purge has happened yet, and that is correct — zero rows qualify. Superseded/retired counts are facts=330, world_facts=10, lessons=93 (vs 80/3/28 at deploy), but only 7 fact rows sit beyond keep-3 and the",
+     "Compaction audit 2026-08-14: no real purge has happened yet, and that is correct — zero rows qualify. Superseded/retired counts are facts=330, world_facts=10, lessons=93 (vs 80/3/28 at deploy), but only 7 fact rows sit beyond keep-3 and the"
+    ]
+   },
+   "reason": "dream-alias: 'cortex-compaction' ~ 'cortex-hygiene-prune' (cosine 0.75)",
+   "score": 0.747,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "cortex-shadow-check",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Slot-index shadow verification implemented and PR #145 opened 2026-08-13 (branch feat/slot-index-shadow-check, commit 28c3b7aa, worktree .claude/worktrees/slot-shadow — kept for follow-ups; everything committed and pushed). Sampled runtime "
+    ]
+   },
+   "into": {
+    "display": "Cortex Console",
+    "degree": 21,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Console-tab audit (2026-08-04): all 37 config_io.py knobs resolve against AppConfig and defaults match dataclass + _apply_mcp_defaults (half-life 86400, surprise 0.0 documented honestly). Gaps: no knobs for dream.literal_gate/_scope, relati",
+     "Console-tab audit (2026-08-04): all 37 config_io.py knobs resolve against AppConfig and defaults match dataclass + _apply_mcp_defaults (half-life 86400, surprise 0.0 documented honestly). Gaps: no knobs for dream.literal_gate/_scope, relati"
+    ]
+   },
+   "reason": "dream-alias: 'cortex-shadow-check' ~ 'cortex-console' (cosine 0.76)",
+   "score": 0.757,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "ct102",
+    "degree": 0,
+    "scopes": [
+     "homelab-proxmox"
+    ],
+    "snippets": [
+     "Enshrouded servers verified healthy 2026-08-08 ~01:00 after being started from a cold stop on the Proxmox host: CT102 GND loaded savegame (10 bases, 1,145 entities) with 34G free on its 49G disk; CT103 GNDv2 completed the forced Steam reval"
+    ]
+   },
+   "into": {
+    "display": "RFC 10024",
+    "degree": 1,
+    "scopes": [
+     "gnd-share"
+    ],
+    "snippets": [
+     "GND Share PQC landscape check 2026-08-15 (verified against live primary sources): the v0.3.0 design choices all still hold in Aug 2026 — nothing broken or deprecated. RFC 10024 (Aug 2026, Standards Track) registers X25519MLKEM768 at codepoi"
+    ]
+   },
+   "reason": "dream-alias: 'RFC 10024' ~ 'ct102' (cosine 0.69)",
+   "score": 0.691,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "daemon image build",
+    "degree": 2,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "DEPLOYED + VERIFIED LIVE (2026-06-21): Lessons schema v10 is now live on the local Claude Code PseudoLife-MCP daemon. Procedure used (worked): ops/backup.ps1 (pg_dump -> data/backups/) FIRST, then `docker compose -f ops/docker-compose.yml -",
+     "DEPLOYED LIVE + VERIFIED (2026-06-23): the read-only `memory_recall` MCP tool (live MemCoT multi-hop retrieval) AND GAM #2 graph-population are now live on the local Claude Code PseudoLife-MCP daemon. Procedure (worked, same as the lessons-"
+    ]
+   },
+   "into": {
+    "display": "pseudolife-daemon",
+    "degree": 36,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "UPDATE (2026-06-26): Cortex Console v2 Phase 1 is now PUSHED to origin/master (7f1f2ab->08d63e2) and DEPLOYED LIVE (supersedes the earlier 'not pushed/not deployed' note). Standard procedure: ops/backup.ps1 first (data/backups/pseudolife_me",
+     "UPDATE (2026-06-26): Cortex Console v2 Phase 1 is now PUSHED to origin/master (7f1f2ab->08d63e2) and DEPLOYED LIVE (supersedes the earlier 'not pushed/not deployed' note). Standard procedure: ops/backup.ps1 first (data/backups/pseudolife_me"
+    ]
+   },
+   "reason": "write-dedup: 'daemon image build' ~ 'pseudolife-daemon'",
+   "score": 0.667,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "deep-dream-judge-panel",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Deep-dream improvement scan (2026-08-16 judge-panel pass, 122 proposals triaged via 4 parallel Opus judges + main-thread spot-check): (1) VOLUME: 480 new entities / 3.5 days of multi-session use files ~35 merge proposals/day at stable ~23% "
+    ]
+   },
+   "into": {
+    "display": "deep-dream-queue",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Deep-dream autonomy DEPLOYED + LIVE-VERIFIED (2026-08-05): PR #104 merged by user (b7934184); ladder gate PASSED before deploy — paired floor + qwen-27b rungs on the reproducible bench server, pre-merge a6b9a7b7 vs merged master, identical ",
+     "Deep-dream autonomy DEPLOYED + LIVE-VERIFIED (2026-08-05): PR #104 merged by user (b7934184); ladder gate PASSED before deploy — paired floor + qwen-27b rungs on the reproducible bench server, pre-merge a6b9a7b7 vs merged master, identical "
+    ]
+   },
+   "reason": "dream-alias: 'deep-dream-judge-panel' ~ 'deep-dream-queue' (cosine 0.79)",
+   "score": 0.789,
+   "label": "reject",
+   "decided_by": "opus-panel-r5"
+  },
+  {
+   "from": {
+    "display": "deep-dream-scan-2026-08-16",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Deep-dream improvement scan (2026-08-16 judge-panel pass, 122 proposals triaged via 4 parallel Opus judges + main-thread spot-check): (1) VOLUME: 480 new entities / 3.5 days of multi-session use files ~35 merge proposals/day at stable ~23% ",
+     "Deep-dream improvement scan (2026-08-16 judge-panel pass, 122 proposals triaged via 4 parallel Opus judges + main-thread spot-check): (1) VOLUME: 480 new entities / 3.5 days of multi-session use files ~35 merge proposals/day at stable ~23% "
+    ]
+   },
+   "into": {
+    "display": "deep-dream-2026-08-11",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Deep dream pass 2026-08-11 (snapshot graph-20260811-080955.json, the undo artifact): apply did 2 auto-merges, 17 junk proposals, 1 junk delete, 19 rescopes, 0 supersedes. Full Step-C triage completed in-session: 38 merge proposals accepted ",
+     "Deep dream pass 2026-08-11 (snapshot graph-20260811-080955.json, the undo artifact): apply did 2 auto-merges, 17 junk proposals, 1 junk delete, 19 rescopes, 0 supersedes. Full Step-C triage completed in-session: 38 merge proposals accepted "
+    ]
+   },
+   "reason": "dream-alias: 'deep-dream-scan-2026-08-16' ~ 'deep-dream-2026-08-11' (cosine 0.91)",
+   "score": 0.906,
+   "label": "reject",
+   "decided_by": "opus-panel-r5"
+  },
+  {
+   "from": {
+    "display": "draft-irtf-cfrg-hybrid-kems-12",
+    "degree": 0,
+    "scopes": [
+     "gnd-share"
+    ],
+    "snippets": [
+     "GND Share PQC landscape check 2026-08-15 (verified against live primary sources): the v0.3.0 design choices all still hold in Aug 2026 — nothing broken or deprecated. RFC 10024 (Aug 2026, Standards Track) registers X25519MLKEM768 at codepoi"
+    ]
+   },
+   "into": {
+    "display": "hybrid retrieval",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "LME-V2 lessons transferred to product (2026-07-20, PR #23, branch feat/lme-v2-lessons-transfer, commit 99e4415): (1) shipped extraction prompt _SYSTEM_PROMPT now names document prescriptions as extractable + carries a worked example — gated"
+    ]
+   },
+   "reason": "dream-alias: 'draft-irtf-cfrg-hybrid-kems-12' ~ 'hybrid retrieval' (cosine 0.72)",
+   "score": 0.717,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "dream path",
+    "degree": 1,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "DONE (2026-06-13): wired PseudoLife dream + research_ingest through the lm-proxy /background route to the homelab. Implemented in two stages, both verified live. STAGE 1 router (/opt/lm-proxy/lm_proxy.js on brendan-hermes, backup lm_proxy.j",
+     "PseudoLife-MCP extractor-ladder benchmark (2026-06-18, branch feat/pluggable-llm-extraction, evals/ladder_sweep.py). SHIPPED FIX (memory/dream.py OpenAICompatExtractor): reasoning models (Qwen3.6) burned the whole max_tokens budget on a <th"
+    ]
+   },
+   "into": {
+    "display": "dream write path",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "DEPLOYED LIVE + VERIFIED (2026-06-23): the read-only `memory_recall` MCP tool (live MemCoT multi-hop retrieval) AND GAM #2 graph-population are now live on the local Claude Code PseudoLife-MCP daemon. Procedure (worked, same as the lessons-",
+     "DEPLOYED LIVE + VERIFIED (2026-06-25): provenance-as-link Phase 1 (the engram cross-index). origin/master = 6b0dee0 (ff-merged feat/provenance-as-link, branch deleted local+remote). Live daemon rebuilt (pseudolife-daemon only; pg+extractor "
+    ]
+   },
+   "reason": "write-dedup: 'dream path' ~ 'dream write path'",
+   "score": 0.667,
+   "label": "reject",
+   "decided_by": "opus-panel-r5"
+  },
+  {
+   "from": {
+    "display": "dream path",
+    "degree": 1,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "DONE (2026-06-13): wired PseudoLife dream + research_ingest through the lm-proxy /background route to the homelab. Implemented in two stages, both verified live. STAGE 1 router (/opt/lm-proxy/lm_proxy.js on brendan-hermes, backup lm_proxy.j",
+     "PseudoLife-MCP extractor-ladder benchmark (2026-06-18, branch feat/pluggable-llm-extraction, evals/ladder_sweep.py). SHIPPED FIX (memory/dream.py OpenAICompatExtractor): reasoning models (Qwen3.6) burned the whole max_tokens budget on a <th"
+    ]
+   },
+   "into": {
+    "display": "pseudolife dream path",
+    "degree": 1,
+    "scopes": [
+     "hermes-infra"
+    ],
+    "snippets": [
+     "DONE (2026-06-13): wired PseudoLife dream + research_ingest through the lm-proxy /background route to the homelab. Implemented in two stages, both verified live. STAGE 1 router (/opt/lm-proxy/lm_proxy.js on brendan-hermes, backup lm_proxy.j",
+     "PseudoLife-MCP extractor-ladder benchmark (2026-06-18, branch feat/pluggable-llm-extraction, evals/ladder_sweep.py). SHIPPED FIX (memory/dream.py OpenAICompatExtractor): reasoning models (Qwen3.6) burned the whole max_tokens budget on a <th"
+    ]
+   },
+   "reason": "write-dedup: 'dream path' ~ 'pseudolife dream path'",
+   "score": 0.667,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "dream sweep",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp",
+     "pseudolife-mcp-ops",
+     "windows-env"
+    ],
+    "snippets": [
+     "PseudoLife-MCP public-repo dream automation design (proposed 2026-06-15, spec at docs/specs/2026-06-15-pluggable-dream-extractor-design.md). Reframe: dreaming needs AN LLM, not a SELF-HOSTED one — a public MCP user already has the agent the",
+     "PseudoLife-MCP pluggable dream extractor — IMPLEMENTED (2026-06-15) on branch feat/pluggable-dream-extractor (10 commits, NOT yet merged to master; branched from master @ origin/master). Phases 1-3 of docs/specs/2026-06-15-pluggable-dream-e"
+    ]
+   },
+   "into": {
+    "display": "sweep tick",
+    "degree": 1,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "FULL DEEP REVIEW of PseudoLife-MCP (2026-07-02, Fable 5: 5 parallel subagent reviews + personal verification of every headline claim; ~727 tests green, one ordering flake). VERIFIED CRITICAL FINDINGS: (1) All ~55 MCP tools are sync defs inv",
+     "Superseded-row compaction BUILT on worktree branch claude/ecstatic-haslett-2581ae (2026-07-14, NOT yet merged to master, NOT deployed): spec docs/superpowers/specs/2026-07-14-superseded-row-compaction-design.md + 7 code commits (28d59e8..ff"
+    ]
+   },
+   "reason": "write-dedup: 'dream sweep' ~ 'sweep tick'",
+   "score": 0.667,
+   "label": "reject",
+   "decided_by": "opus-panel-r5"
+  },
+  {
+   "from": {
+    "display": "dream-run result",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "GAM #2 graph-from-text — relation-extraction benchmark result (2026-06-22, evals/relations_bench.py, on the shipped Gemma 4 E2B CPU sidecar floor; Qwen ceilings unreachable). Two prompt variants scored against a 12-snippet / 20-gold-triple ",
+     "Fallback validation entry (2026-07-11): with the host Sonnet shim stopped, the daemon's dream pass must consolidate this entry via the in-stack E4B fallback — dream_run result should stamp extractor=fallback and recovery should follow when "
+    ]
+   },
+   "into": {
+    "display": "memory_dream",
+    "degree": 10,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "MCP tool-surface consolidation SHIPPED + DEPLOYED (2026-07-02, merge 0d7a06a): 55 -> 32 tools, description payload 36,978 -> 14,953 chars (max single 1,331). Three verb-dispatched merges: memory_dream(action=status|pull|commit|run|deep) rep",
+     "MCP tool-surface consolidation SHIPPED + DEPLOYED (2026-07-02, merge 0d7a06a): 55 -> 32 tools, description payload 36,978 -> 14,953 chars (max single 1,331). Three verb-dispatched merges: memory_dream(action=status|pull|commit|run|deep) rep"
+    ]
+   },
+   "reason": "write-dedup: 'dream-run result' ~ 'memory_dream'",
+   "score": 0.667,
+   "label": "reject",
+   "decided_by": "opus-panel-r5"
+  },
+  {
+   "from": {
+    "display": "dream_runs",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Deep-dream improvement scan (2026-08-16 judge-panel pass, 122 proposals triaged via 4 parallel Opus judges + main-thread spot-check): (1) VOLUME: 480 new entities / 3.5 days of multi-session use files ~35 merge proposals/day at stable ~23% "
+    ]
+   },
+   "into": {
+    "display": "memory_dream",
+    "degree": 10,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "MCP tool-surface consolidation SHIPPED + DEPLOYED (2026-07-02, merge 0d7a06a): 55 -> 32 tools, description payload 36,978 -> 14,953 chars (max single 1,331). Three verb-dispatched merges: memory_dream(action=status|pull|commit|run|deep) rep",
+     "MCP tool-surface consolidation SHIPPED + DEPLOYED (2026-07-02, merge 0d7a06a): 55 -> 32 tools, description payload 36,978 -> 14,953 chars (max single 1,331). Three verb-dispatched merges: memory_dream(action=status|pull|commit|run|deep) rep"
+    ]
+   },
+   "reason": "dream-alias: 'dream_runs' ~ 'dream_run' (cosine 0.96)",
+   "score": 0.956,
+   "label": "reject",
+   "decided_by": "opus-panel-r5"
+  },
+  {
+   "from": {
+    "display": "dspark_to_dflash.py",
+    "degree": 2,
+    "scopes": [
+     "llama-turboq"
+    ],
+    "snippets": [
+     "SINGLE POINT OF FAILURE (found 2026-08-15): the dspark_to_dflash.py conversion script that produced Ternary-Bonsai-27B-dspark-dflash.gguf is GONE — it lived in a prior session's scratchpad and is not in ClaudeCode\\, Temp\\claude\\, Desktop, D"
+    ]
+   },
+   "into": {
+    "display": "dspark-drafter",
+    "degree": 0,
+    "scopes": [
+     "llama-turboq"
+    ],
+    "snippets": [
+     "Bonsai master rebuild campaign (2026-08-04): PrismML upstreamed into llama.cpp mainline and their master (5f55650, 10200 commits past our July 38c66ad) CHANGED the Q2_0 block format g128->g64 (same type ID 42, QK2_0 128->64) and dropped g12",
+     "Bonsai master rebuild campaign (2026-08-04): PrismML upstreamed into llama.cpp mainline and their master (5f55650, 10200 commits past our July 38c66ad) CHANGED the Q2_0 block format g128->g64 (same type ID 42, QK2_0 128->64) and dropped g12"
+    ]
+   },
+   "reason": "dream-alias: 'dspark_to_dflash.py' ~ 'dspark-drafter' (cosine 0.73)",
+   "score": 0.726,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "embedding backbone",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Embedding backbone decision (2026-07-28, PR #59, three committed artifacts): Qwen3-Embedding-0.6B is the swap target, NOT bge-base. fp32 shootout on our LongMemEval slice (150q/74183 turns): Qwen3 R@10 0.809 vs bge-base 0.742, best at every",
+     "Embedding backbone v25 branch COMPLETE, PR #60 open (2026-07-28, feat/embedding-v25, 14 commits, suite 1691/0/0, regression gate PASS at std 0.0000 vs baseline 1f0f13a). Qwen3-Embedding-0.6B default, vector(1024) x4 tables, asymmetric encod"
+    ]
+   },
+   "into": {
+    "display": "embedding-backbone-decision",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Embedding backbone decision (2026-07-28, PR #59, three committed artifacts): Qwen3-Embedding-0.6B is the swap target, NOT bge-base. fp32 shootout on our LongMemEval slice (150q/74183 turns): Qwen3 R@10 0.809 vs bge-base 0.742, best at every",
+     "Embedding backbone decision (2026-07-28, PR #59, three committed artifacts): Qwen3-Embedding-0.6B is the swap target, NOT bge-base. fp32 shootout on our LongMemEval slice (150q/74183 turns): Qwen3 R@10 0.809 vs bge-base 0.742, best at every"
+    ]
+   },
+   "reason": "write-dedup: 'embedding backbone' ~ 'embedding-backbone-decision'",
+   "score": 0.667,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "evals/regression_gate.ps1",
+    "degree": 2,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Known-facts window BUILD COMPLETE (2026-07-11, overnight autonomous, subagent-driven): branch feat/known-facts-window, 7 commits 1000f37..8f813bd off 77906fa. All 6 code tasks passed task review; opus whole-branch review READY TO MERGE (3 M",
+     "Eval-hygiene sprint checkpoint 2026-07-18 (autonomous overnight): Tasks 1-9 built+merged to master (FF at d99838c, NOT pushed — user decision pending). evals/replicate.py (25 tests, spawn/copy/run/agg/compare/gate-check/baseline), regressio"
+    ]
+   },
+   "into": {
+    "display": "evals/regression_gate.ps1 + rebuild_contexts.py",
+    "degree": 2,
+    "scopes": [],
+    "snippets": []
+   },
+   "reason": "write-dedup: 'evals/regression_gate.ps1' ~ 'evals/regression_gate.ps1 + rebuild_contexts.py'",
+   "score": 0.667,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "evals/results/banks",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Deterministic Qwen re-judge of the smarter-extractor comparison (2026-07-27, tag smoke0726-qwenjudge, artifact evals/results/extractor-comparison-smoke0726-qwenjudge.json): re-judged the SAME persisted contexts/banks from the full-78 run wi",
+     "Fresh end-to-end LongMemEval-KU oracle run on the current shipped stack (2026-07-30, tag ceiling-e2e; fresh qwen-27b extraction under the v25 embedding backbone, BM25-on turn retrieval, reproducible q8_0 serving; 3 replicates, std 0.0000 al"
+    ]
+   },
+   "into": {
+    "display": "evals/results",
+    "degree": 6,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "PseudoLife-MCP extractor-ladder benchmark (2026-06-18, branch feat/pluggable-llm-extraction, evals/ladder_sweep.py). SHIPPED FIX (memory/dream.py OpenAICompatExtractor): reasoning models (Qwen3.6) burned the whole max_tokens budget on a <th",
+     "PseudoLife-MCP TITANS/MIRAS (2026-06-22): user is NOW doing a training run for a TOY TITANS/MIRAS model — the proper follow-up to the 2026-06-21 root-cause finding (the failed neural-blend reranker had NO training loop; learned surprise/for"
+    ]
+   },
+   "reason": "write-dedup: 'evals/results/banks' ~ 'evals/results'",
+   "score": 0.667,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "feat/chronicle-default-on",
+    "degree": 2,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "DONE (2026-08-04): Console Dreamer card shipped as PR #98 (feat/console-dreamer-card, commit 027054c2) — NOT yet merged or deployed (master is PR-gated; deploy after merge via ops/update.ps1, then verify the card live at /ui/#/console). Con",
+     "Chronicle default-on PR #143 opened 2026-08-12 (branch feat/chronicle-default-on, commit c421da74) — awaiting the user's merge click, then ops/update.ps1 deploy. Carries: memory.dream.chronicle default true + Console knob (Dream group, live"
+    ]
+   },
+   "into": {
+    "display": "chronicle-default-on-pr",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Chronicle soak review completed 2026-08-12 (scheduled task, 7-day production soak 2026-08-05 to 08-11). Findings: 188 events, 0 wrong dates (all spot-checks incl. 9 historical backdatings 2026-04-27..2026-07-30 verified against independent ",
+     "Chronicle soak review completed 2026-08-12 (scheduled task, 7-day production soak 2026-08-05 to 08-11). Findings: 188 events, 0 wrong dates (all spot-checks incl. 9 historical backdatings 2026-04-27..2026-07-30 verified against independent "
+    ]
+   },
+   "reason": "write-dedup: 'feat/chronicle-default-on' ~ 'chronicle-default-on-pr'",
+   "score": 0.667,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "feat/stance-span-gate",
+    "degree": 2,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Stance+span-gate gates progress (2026-08-13, branch feat/stance-span-gate): Gate 1 stance probe PASSED — v8 capture 0.92 / false-stance 0.00 / values clean; headline finding: under shipped v5 the extractor doesn't just strip hedges, it DROP",
+     "Slot-index shadow verification implemented and PR #145 opened 2026-08-13 (branch feat/slot-index-shadow-check, commit 28c3b7aa, worktree .claude/worktrees/slot-shadow — kept for follow-ups; everything committed and pushed). Sampled runtime "
+    ]
+   },
+   "into": {
+    "display": "stance-span-gate-spec",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Spec written 2026-08-12: docs/superpowers/specs/2026-08-12-stance-span-gate-design.md — preregistration for (A) epistemic stance as a labelled claim field (from arXiv:2608.06953; new nullable stance column = schema v29, stance never feeds c",
+     "Spec written 2026-08-12: docs/superpowers/specs/2026-08-12-stance-span-gate-design.md — preregistration for (A) epistemic stance as a labelled claim field (from arXiv:2608.06953; new nullable stance column = schema v29, stance never feeds c"
+    ]
+   },
+   "reason": "write-dedup: 'feat/stance-span-gate' ~ 'stance-span-gate-spec'",
+   "score": 0.6,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "flat-band-rerun",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Flat-band rerun SCHEDULED 2026-08-14 via task chip (task_55b017df): the reopen trigger from the 2026-07-12 re-eval closure fired — the live working band hit 200/200 (memory_stats 2026-08-13, 663 total memories), so partition-forced eviction",
+     "Flat-band rerun SCHEDULED 2026-08-14 via task chip (task_55b017df): the reopen trigger from the 2026-07-12 re-eval closure fired — the live working band hit 200/200 (memory_stats 2026-08-13, 663 total memories), so partition-forced eviction"
+    ]
+   },
+   "into": {
+    "display": "flat-band-migration",
+    "degree": 6,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "DECISION (2026-08-13, user-ratified): flat-band migration (and the read-flat/lifecycle-banded middle option) is TABLED — not rejected — pending a future rerun/rereview. Condition to reopen: rerun the band ablation under the current (schema ",
+     "DECISION (2026-08-13, user-ratified): flat-band migration (and the read-flat/lifecycle-banded middle option) is TABLED — not rejected — pending a future rerun/rereview. Condition to reopen: rerun the band ablation under the current (schema "
+    ]
+   },
+   "reason": "dream-alias: 'flat-band-rerun' ~ 'flat-band-migration' (cosine 0.75)",
+   "score": 0.745,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "hell-let-loose-freeze-bug",
+    "degree": 0,
+    "scopes": [
+     "gaming-rig"
+    ],
+    "snippets": [
+     "Hell Let Loose has a known long-standing bug (community-reported, unfixed by Team17): the game freezes 30s-1min, GPU utilisation collapses to ~1%, it self-recovers, and degraded performance can persist ~5 minutes after. Associated with bomb",
+     "Hell Let Loose has a known long-standing bug (community-reported, unfixed by Team17): the game freezes 30s-1min, GPU utilisation collapses to ~1%, it self-recovers, and degraded performance can persist ~5 minutes after. Associated with bomb"
+    ]
+   },
+   "into": {
+    "display": "Hell Let Loose: Vietnam",
+    "degree": 5,
+    "scopes": [
+     "hll-vietnam-tuning"
+    ],
+    "snippets": [
+     "Hell Let Loose: Vietnam (UE 5.5.4, Steam app 3079210, config in %LOCALAPPDATA%\\HLLVietnam): user Engine.ini overrides are locked/inert (confirmed by sharpen-canary test 2026-08-15). Above-Ultra route that works: sg.*Quality=4 (Cinematic) in",
+     "Original Hell Let Loose (UE 4.25, config %LOCALAPPDATA%\\HLL\\Saved\\Config\\WindowsNoEditor): same GameUserSettings [ScalabilityGroups] structure as Vietnam but only 9 groups (no GI/Reflection/Landscape). Applied 2026-08-15 test: sg.Texture/Sh"
+    ]
+   },
+   "reason": "dream-alias: 'Hell Let Loose: Vietnam' ~ 'hell-let-loose-freeze-bug' (cosine 0.69)",
+   "score": 0.689,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "hpke crate",
+    "degree": 0,
+    "scopes": [
+     "gnd-share"
+    ],
+    "snippets": [
+     "GND Share PQC landscape check 2026-08-15 (verified against live primary sources): the v0.3.0 design choices all still hold in Aug 2026 — nothing broken or deprecated. RFC 10024 (Aug 2026, Standards Track) registers X25519MLKEM768 at codepoi"
+    ]
+   },
+   "into": {
+    "display": "hermes-live-shakedown",
+    "degree": 0,
+    "scopes": [
+     "hermes-infra"
+    ],
+    "snippets": [
+     "Hermes live shakedown 2026-08-06 (hermes v0.20.0 on brendan-hermes, Bonsai-27B via lm-proxy) — HEADLINE FINDING: the pseudolife provider's dream/consolidation pass has been effectively inert since 2026-06-12. Evidence from /root/.hermes/pse"
+    ]
+   },
+   "reason": "dream-alias: 'hpke crate' ~ 'hermes-live-shakedown' (cosine 0.66)",
+   "score": 0.662,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "identity.rs",
+    "degree": 1,
+    "scopes": [
+     "gnd-share"
+    ],
+    "snippets": [
+     "PseudoLife-MCP cortex layer landed on master (commits adc39a8 durability + 2a98408 cortex, merged via PR #2 1c375fd). Cortex = slot-keyed canonical-fact store (schema v7, pseudolife_memory/memory/cortex.py): identity-not-similarity, superse",
+     "GND Share Option C (post-quantum) is DESIGNED + PLANNED (2026-06-09), not yet implemented. Decisions: both halves (PQ confidentiality of file contents + PQ identity/invite integrity); library = RustCrypto pure-Rust ml-kem (ML-KEM-768) + ml-"
+    ]
+   },
+   "into": {
+    "display": "identity",
+    "degree": 2,
+    "scopes": [
+     "gnd-share",
+     "llama-turboq"
+    ],
+    "snippets": [
+     "PseudoLife-MCP cortex layer landed on master (commits adc39a8 durability + 2a98408 cortex, merged via PR #2 1c375fd). Cortex = slot-keyed canonical-fact store (schema v7, pseudolife_memory/memory/cortex.py): identity-not-similarity, superse",
+     "GND Share Option C (post-quantum) is DESIGNED + PLANNED (2026-06-09), not yet implemented. Decisions: both halves (PQ confidentiality of file contents + PQ identity/invite integrity); library = RustCrypto pure-Rust ml-kem (ML-KEM-768) + ml-"
+    ]
+   },
+   "reason": "write-dedup: 'identity' ~ 'identity.rs'",
+   "score": 1.0,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "installers",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "DONE (2026-08-04): Console Dreamer card shipped as PR #98 (feat/console-dreamer-card, commit 027054c2) — NOT yet merged or deployed (master is PR-gated; deploy after merge via ops/update.ps1, then verify the card live at /ui/#/console). Con"
+    ]
+   },
+   "into": {
+    "display": "lite install tier",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "HEAD-TO-HEAD (2026-08-14, identical smoke battery on the Windows dev box) pg0-embedded 0.15.1 vs pixeltable-pgserver 0.6.0 for the lite tier: (1) ASCII path with spaces — both full pass (vector(1024)+HNSW+cosine). (2) Non-ASCII path — BOTH ",
+     "HEAD-TO-HEAD (2026-08-14, identical smoke battery on the Windows dev box) pg0-embedded 0.15.1 vs pixeltable-pgserver 0.6.0 for the lite tier: (1) ASCII path with spaces — both full pass (vector(1024)+HNSW+cosine). (2) Non-ASCII path — BOTH "
+    ]
+   },
+   "reason": "dream-alias: 'lite install tier' ~ 'installers' (cosine 0.62)",
+   "score": 0.623,
+   "label": "reject",
+   "decided_by": "opus-panel-r5"
+  },
+  {
+   "from": {
+    "display": "lite-to-docker-graduation",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "SHIPPED TO PR (2026-08-14): install-floor Phases 0+1 both open awaiting user merge. PR #152 (feat/lite-tier-embedded-pg, commit 82a813e1) — the zero-config lite tier: [lite] extra pins pg0-embedded >=0.15.1,<0.16; storage resolution lives O"
+    ]
+   },
+   "into": {
+    "display": "Dockerfiles",
+    "degree": 0,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "DEPLOYED LIVE + VERIFIED (2026-06-23): security remediation of the PseudoLife-MCP stack from a CVE audit (OSV pip-audit + Trivy container scans). Branch fix/security-remediation (2 local commits, NOT pushed; off master 91cb544): (1) docs dr",
+     "UPDATE (2026-06-23): the PseudoLife-MCP security remediation is now MERGED to master and PUSHED — origin/master = 99f2df1 (fast-forward from 91cb544; commits 5616a23 docs-drift-fixes + 99f2df1 fix(security)). Supersedes the earlier \"branch "
+    ]
+   },
+   "reason": "dream-alias: 'lite-to-docker-graduation' ~ 'Dockerfiles' (cosine 0.69)",
+   "score": 0.69,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "live bank",
+    "degree": 0,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Shipped 2026-07-02 (commit 501be83, live, schema v20): all five graph-quality review fixes are now deployed. New this deploy — dismissed_pairs table + POST /api/graph/dismiss-duplicate + Atlas Dismiss button (stateless duplicate analyzer sk",
+     "ROOT CAUSE CONFIRMED (2026-07-03) for the ladder-screen stale-leak regression: commit eec67b1 (2026-06-25, \"dream attributes claims per-entry and writes slot->episode traces\") restructured dream_run extraction from ONE batched extractor.ext"
+    ]
+   },
+   "into": {
+    "display": "bank-drift",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "v10 stance prompt SHIPPED 2026-08-14 (maintainer decision: \"Ship V10, soak and iterate on v11\"): live dream extraction prompt moved v5→v10 (update-anchored stance rule; dream.py _SYSTEM_PROMPT pinned to ku_op_prompt_v10_stance_update.txt), ",
+     "v10 stance prompt SHIPPED 2026-08-14 (maintainer decision: \"Ship V10, soak and iterate on v11\"): live dream extraction prompt moved v5→v10 (update-anchored stance rule; dream.py _SYSTEM_PROMPT pinned to ku_op_prompt_v10_stance_update.txt), "
+    ]
+   },
+   "reason": "dream-alias: 'bank-drift' ~ 'live bank' (cosine 0.79)",
+   "score": 0.793,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "local Python 3.11 dev env",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "SHIPPED TO PR (2026-08-14): install-floor Phases 0+1 both open awaiting user merge. PR #152 (feat/lite-tier-embedded-pg, commit 82a813e1) — the zero-config lite tier: [lite] extra pins pg0-embedded >=0.15.1,<0.16; storage resolution lives O"
+    ]
+   },
+   "into": {
+    "display": "PyPI",
+    "degree": 6,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Public-release prep executed 2026-07-03 on PseudoLife-MCP: (1) relicensed MIT→Apache-2.0 (canonical LICENSE by hash, NOTICE incl. Gemma ToU pointer, pyproject, README) and swapped the optional pdf extra PyMuPDF(AGPL)→pypdfium2, merged as de"
+    ]
+   },
+   "reason": "dream-alias: 'local Python 3.11 dev env' ~ 'PyPI' (cosine 0.72)",
+   "score": 0.716,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "mcp_client",
+    "degree": 1,
+    "scopes": [
+     "hermes-infra"
+    ],
+    "snippets": [
+     "PseudoLife-MCP cortex-first search dedup TIGHTENED (branch cortex-search-dedup-tighten, commit 45d7fdc). Previously memory_search dropped any associative recall hit whose text merely CONTAINED a surfaced cortex fact value (substring, len>=5",
+     "PseudoLife-MCP test suite gotcha: running `pytest` ONLINE is flaky (~110s, intermittent failures in test_cortex_service + test_mcp_server with \"Cannot send a request, as the client has been closed\") because every MemoryService init does an "
+    ]
+   },
+   "into": {
+    "display": "hermes-mcp-client",
+    "degree": 0,
+    "scopes": [
+     "hermes-infra"
+    ],
+    "snippets": [
+     "Hermes fix deployment 2026-08-06 (follow-up to the shakedown findings), all on brendan-hermes, repo commit 7b18dd1: (1) live-backend .pth restored (venv path site-packages/hermes_live_backend.pth, 2 lines) and made update-proof — post-updat",
+     "Hermes fix deployment 2026-08-06 (follow-up to the shakedown findings), all on brendan-hermes, repo commit 7b18dd1: (1) live-backend .pth restored (venv path site-packages/hermes_live_backend.pth, 2 lines) and made update-proof — post-updat"
+    ]
+   },
+   "reason": "write-dedup: 'mcp_client' ~ 'hermes-mcp-client'",
+   "score": 0.667,
+   "label": "reject",
+   "decided_by": "opus-panel-r5"
+  },
+  {
+   "from": {
+    "display": "mem0",
+    "degree": 1,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "2026-08-14 competitor DX/docs survey (3 parallel research agents, star counts verified via GitHub API same day): mem0 63.2k, claude-mem 90.6k, Graphiti 29.9k, cognee 30.0k, supermemory 28.9k, Letta 24.2k. Headline findings for Pseudolife-MC",
+     "2026-08-14 competitor DX/docs survey (3 parallel research agents, star counts verified via GitHub API same day): mem0 63.2k, claude-mem 90.6k, Graphiti 29.9k, cognee 30.0k, supermemory 28.9k, Letta 24.2k. Headline findings for Pseudolife-MC"
+    ]
+   },
+   "into": {
+    "display": "memory_forget",
+    "degree": 2,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "MCP tool-surface consolidation SHIPPED + DEPLOYED (2026-07-02, merge 0d7a06a): 55 -> 32 tools, description payload 36,978 -> 14,953 chars (max single 1,331). Three verb-dispatched merges: memory_dream(action=status|pull|commit|run|deep) rep",
+     "MCP tool-surface consolidation SHIPPED + DEPLOYED (2026-07-02, merge 0d7a06a): 55 -> 32 tools, description payload 36,978 -> 14,953 chars (max single 1,331). Three verb-dispatched merges: memory_dream(action=status|pull|commit|run|deep) rep"
+    ]
+   },
+   "reason": "dream-alias: 'mem0' ~ 'memory_forget' (cosine 0.77)",
+   "score": 0.768,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "memory-bank",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Forgetting assessment post flat-band verdict (2026-08-15, user question): NOT confirmed that forgetting has no benefit — confirmed that mechanical forgetting has none in this system. Tested-and-failed: novelty-ranked eviction (destroyed evi"
+    ]
+   },
+   "into": {
+    "display": "supermemory",
+    "degree": 1,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "2026-08-14 competitor DX/docs survey (3 parallel research agents, star counts verified via GitHub API same day): mem0 63.2k, claude-mem 90.6k, Graphiti 29.9k, cognee 30.0k, supermemory 28.9k, Letta 24.2k. Headline findings for Pseudolife-MC"
+    ]
+   },
+   "reason": "dream-alias: 'memory-bank' ~ 'supermemory' (cosine 0.87)",
+   "score": 0.865,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "memory-servers",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Deep-dream automation design record (2026-08-12, 9-host MCP survey via parallel research agents, all claims cited in PR #140 discussion): (1) Task-chip-style affordances are HOST-INTERNAL everywhere — Claude Code's spawn_task, Cline's new_t"
+    ]
+   },
+   "into": {
+    "display": "superlocalmemory",
+    "degree": 9,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "2026-08-13 superlocalmemory (github.com/qualixar/superlocalmemory) vs Pseudolife-MCP comparison conclusions. SLM is REAL and large, not vaporware: ~171K LOC Python, 8,744 test functions, real cross-OS CI with security jobs, SQLite+sqlite-ve",
+     "2026-08-13 superlocalmemory (github.com/qualixar/superlocalmemory) vs Pseudolife-MCP comparison conclusions. SLM is REAL and large, not vaporware: ~171K LOC Python, 8,744 test functions, real cross-OS CI with security jobs, SQLite+sqlite-ve"
+    ]
+   },
+   "reason": "dream-alias: 'superlocalmemory' ~ 'memory-servers' (cosine 0.77)",
+   "score": 0.768,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "memory_forget",
+    "degree": 2,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "MCP tool-surface consolidation SHIPPED + DEPLOYED (2026-07-02, merge 0d7a06a): 55 -> 32 tools, description payload 36,978 -> 14,953 chars (max single 1,331). Three verb-dispatched merges: memory_dream(action=status|pull|commit|run|deep) rep",
+     "MCP tool-surface consolidation SHIPPED + DEPLOYED (2026-07-02, merge 0d7a06a): 55 -> 32 tools, description payload 36,978 -> 14,953 chars (max single 1,331). Three verb-dispatched merges: memory_dream(action=status|pull|commit|run|deep) rep"
+    ]
+   },
+   "into": {
+    "display": "forgetting",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Forgetting assessment post flat-band verdict (2026-08-15, user question): NOT confirmed that forgetting has no benefit — confirmed that mechanical forgetting has none in this system. Tested-and-failed: novelty-ranked eviction (destroyed evi",
+     "Forgetting assessment post flat-band verdict (2026-08-15, user question): NOT confirmed that forgetting has no benefit — confirmed that mechanical forgetting has none in this system. Tested-and-failed: novelty-ranked eviction (destroyed evi"
+    ]
+   },
+   "reason": "dream-alias: 'forgetting' ~ 'memory_forget' (cosine 0.88)",
+   "score": 0.883,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "milestone-slot",
+    "degree": 0,
+    "scopes": [
+     "hermes-infra"
+    ],
+    "snippets": [
+     "SECOND FABRICATED COMPLETION + THE FIX THAT WORKS (2026-08-07, Tri-Serpent on Bonsai-27B). PATTERN NOW CONFIRMED TWICE: the agent ticks a milestone checkbox and reports success without doing the work. Case 1 (overnight, 35B): claimed \"page ",
+     "SECOND FABRICATED COMPLETION + THE FIX THAT WORKS (2026-08-07, Tri-Serpent on Bonsai-27B). PATTERN NOW CONFIRMED TWICE: the agent ticks a milestone checkbox and reports success without doing the work. Case 1 (overnight, 35B): claimed \"page "
+    ]
+   },
+   "into": {
+    "display": "pg18-bump",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "PG18 bump SHIPPED TO PR (2026-08-14): PR #155 (feat/pg18-bump, 212b0023) moves the Docker tier pseudolife-pg from PostgreSQL 16 to 18 (pgvector 0.8.6). CRITICAL catch during prep: PG18 official images moved PGDATA to /var/lib/postgresql/18/",
+     "PG18 bump SHIPPED TO PR (2026-08-14): PR #155 (feat/pg18-bump, 212b0023) moves the Docker tier pseudolife-pg from PostgreSQL 16 to 18 (pgvector 0.8.6). CRITICAL catch during prep: PG18 official images moved PGDATA to /var/lib/postgresql/18/"
+    ]
+   },
+   "reason": "dream-alias: 'pg18-bump' ~ 'milestone-slot' (cosine 0.68)",
+   "score": 0.68,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "misleading-recall-probe",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Night shift 2026-08-13 (~01:00-06:00) complete, four PRs open awaiting maintainer: #146 stance field (schema v29) + span gate — plumbing shipped dormant, v8/v9 prompts held back by the KU gate (v8 cortex 0.731→0.615 p=0.0117; v9 hybrid 0.89",
+     "Night shift 2026-08-13 (~01:00-06:00) complete, four PRs open awaiting maintainer: #146 stance field (schema v29) + span gate — plumbing shipped dormant, v8/v9 prompts held back by the KU gate (v8 cortex 0.731→0.615 p=0.0117; v9 hybrid 0.89"
+    ]
+   },
+   "into": {
+    "display": "distractor-scale probe",
+    "degree": 3,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Distractor-scale probe RESULT (2026-08-15, preregistered, artifact distractor-scale-probe-2026-08-15.json): ACCUMULATION MEASURABLY HURTS RETRIEVAL — the first positive evidence for curation/forgetting in PseudoLife. Evidence-in-top-6 falls",
+     "Distractor-scale probe RESULT (2026-08-15, preregistered, artifact distractor-scale-probe-2026-08-15.json): ACCUMULATION MEASURABLY HURTS RETRIEVAL — the first positive evidence for curation/forgetting in PseudoLife. Evidence-in-top-6 falls"
+    ]
+   },
+   "reason": "dream-alias: 'distractor-scale-probe' ~ 'misleading-recall-probe' (cosine 0.73)",
+   "score": 0.728,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "network.rs",
+    "degree": 0,
+    "scopes": [
+     "gnd-share"
+    ],
+    "snippets": [
+     "GND Share: Phase C (mutual-trust invite redemption) implemented and verified (cargo test 21/21, +3 new: redeem_request_roundtrip, redeem_response_roundtrip, issued_invite_is_single_use; zero new warnings). New module redeem.rs defines the /",
+     "GND Share: Phase A (transport/networking fix) is implemented and verified (cargo check + 17 tests pass on both crates, libp2p 0.54.1). Changes: added libp2p features dns/relay/dcutr/ping (src-tauri) and ping (relay); network.rs AppBehaviour"
+    ]
+   },
+   "into": {
+    "display": "lm-network",
+    "degree": 1,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Contested-slot cleanup 2026-08-12: all three long-standing contested fact slots settled by discarding the contenders. (1) lm-network/primary — the contender was a correction NOTE (\"Corrected 2026-08-06 by agent audit...\") parked as a value,"
+    ]
+   },
+   "reason": "write-dedup: 'network.rs' ~ 'lm-network'",
+   "score": 1.0,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "ops/docker-compose.ghcr.yml",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": []
+   },
+   "into": {
+    "display": "ops/docker-compose.yml",
+    "degree": 10,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "DEPLOYED + VERIFIED LIVE (2026-06-21): Lessons schema v10 is now live on the local Claude Code PseudoLife-MCP daemon. Procedure used (worked): ops/backup.ps1 (pg_dump -> data/backups/) FIRST, then `docker compose -f ops/docker-compose.yml -",
+     "FIXED + DEPLOYED (2026-06-22): the dream consolidation was timing out 100% on the live CPU Gemma E2B sidecar — extractor_timeout_seconds default 20s was too short (sidecar runs ~30 tok/s, so a full 1024-token extraction is ~30s plus prompt "
+    ]
+   },
+   "reason": "write-dedup: 'ops/docker-compose.ghcr.yml' ~ 'ops/docker-compose.yml'",
+   "score": 0.8,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "ops/docker-compose.ghcr.yml",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": []
+   },
+   "into": {
+    "display": "docker-compose.override.yml",
+    "degree": 2,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Toolset gating rework (2026-07-11): the user's daemon now runs PSEUDOLIFE_MCP_TOOLSET=full again, gated by Claude Code's client-side schema deferral instead of the server-side core tier — trimmed tools cost only their names in context until",
+     "Release-readiness pass #2 (2026-07-12, 124 commits since scrubbed de21e3b): GREEN — 1022 tests pass incl. release-UX pins; gitleaks clean on new commits; all new commits use the clean noreply identity; no large blobs (GGUFs excluded by eval"
+    ]
+   },
+   "reason": "write-dedup: 'ops/docker-compose.ghcr.yml' ~ 'docker-compose.override.yml'",
+   "score": 0.667,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "ops/install-shim-autostart.sh",
+    "degree": 3,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "PseudoLife-MCP v0.2 Phase 1 CODE COMPLETE (2026-06-11): daemon + Postgres source-of-truth implemented on branch v0.2-phase1, PR #6 open (https://github.com/Pseudogiant-xr/PseudoLife-MCP/pull/6), 260 tests pass (236 prior + 24 new). Delivere",
+     "PseudoLife-MCP v0.2 LIVE CUTOVER DONE (2026-06-11, pre-merge on branch v0.2-phase1 per user choice): legacy bank (30 entries, 4 facts) migrated into Postgres pseudolife_memory; originals renamed .pre-v8.bak in C:/Users/<user>/.pseudolife-mcp"
+    ]
+   },
+   "into": {
+    "display": "shim-autostart-test-flake",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Shim autostart test flake ROOT-CAUSED (2026-08-14): test_shim.py::test_shim_autostarts_daemon_and_proxies failed twice (2026-08-13/14) with an opaque McpError only in full-suite runs that coincided with the flat-band ablation ladder running",
+     "Shim autostart test flake ROOT-CAUSED (2026-08-14): test_shim.py::test_shim_autostarts_daemon_and_proxies failed twice (2026-08-13/14) with an opaque McpError only in full-suite runs that coincided with the flat-band ablation ladder running"
+    ]
+   },
+   "reason": "dream-alias: 'shim-autostart-test-flake' ~ 'install-shim-autostart-sh' (cosine 0.83)",
+   "score": 0.833,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "pr-31",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "PR #31 opened 2026-07-21 (fix/shim-create-no-window -> master, MERGEABLE): shim.spawn_daemon switches DETACHED_PROCESS -> CREATE_NO_WINDOW, + 2 pinning tests + CHANGELOG. Built WITHOUT touching the shared working tree: the repo was on branc",
+     "PR #31 opened 2026-07-21 (fix/shim-create-no-window -> master, MERGEABLE): shim.spawn_daemon switches DETACHED_PROCESS -> CREATE_NO_WINDOW, + 2 pinning tests + CHANGELOG. Built WITHOUT touching the shared working tree: the repo was on branc"
+    ]
+   },
+   "into": {
+    "display": "PR #152",
+    "degree": 2,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "SHIPPED TO PR (2026-08-14): install-floor Phases 0+1 both open awaiting user merge. PR #152 (feat/lite-tier-embedded-pg, commit 82a813e1) — the zero-config lite tier: [lite] extra pins pg0-embedded >=0.15.1,<0.16; storage resolution lives O",
+     "SHIPPED TO PR (2026-08-14): install-floor Phases 0+1 both open awaiting user merge. PR #152 (feat/lite-tier-embedded-pg, commit 82a813e1) — the zero-config lite tier: [lite] extra pins pg0-embedded >=0.15.1,<0.16; storage resolution lives O"
+    ]
+   },
+   "reason": "dream-alias: 'PR #152' ~ 'pr-31' (cosine 0.79)",
+   "score": 0.791,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "primary extractor",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Sonnet sidecar cutover merged to master (c48b69a, 2026-07-11): dream extractor now supports primary/fallback selection — Sonnet via evals/sonnet_shim.py on host :8082 (v1 prompt) as primary, in-stack E4B container as automatic fallback. PSE",
+     "Linux install parity deployed live (2026-07-14, e05bcde, rollback tag pseudolife-daemon:0.7.0-pre-linux-parity): extra_hosts host-gateway now default in compose; ops/install-shim-autostart.sh (systemd --user, binds docker bridge IP — host-g"
+    ]
+   },
+   "into": {
+    "display": "dream extractor",
+    "degree": 14,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "PseudoLife-MCP public-repo dream automation design (proposed 2026-06-15, spec at docs/specs/2026-06-15-pluggable-dream-extractor-design.md). Reframe: dreaming needs AN LLM, not a SELF-HOSTED one — a public MCP user already has the agent the",
+     "PseudoLife-MCP pluggable dream extractor — IMPLEMENTED (2026-06-15) on branch feat/pluggable-dream-extractor (10 commits, NOT yet merged to master; branched from master @ origin/master). Phases 1-3 of docs/specs/2026-06-15-pluggable-dream-e"
+    ]
+   },
+   "reason": "write-dedup: 'primary extractor' ~ 'dream extractor'",
+   "score": 0.667,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "pseudolife-mcp[lite]",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "PseudoLife-MCP v0.2 Phase 1 CODE COMPLETE (2026-06-11): daemon + Postgres source-of-truth implemented on branch v0.2-phase1, PR #6 open (https://github.com/Pseudogiant-xr/PseudoLife-MCP/pull/6), 260 tests pass (236 prior + 24 new). Delivere",
+     "PseudoLife-MCP v0.2 Phase 0 COMPLETE (2026-06-10): all four storage-independent review fixes implemented on branch v0.2-daemon-postgres, PR #5 open (https://github.com/Pseudogiant-xr/PseudoLife-MCP/pull/5), 236 tests pass (207 existing + 29"
+    ]
+   },
+   "into": {
+    "display": "pseudolife-mcp",
+    "degree": 66,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "2026-07-03 GitNexus/graphify vs PseudoLife-MCP comparison conclusions: different categories (they index FILE CORPORA into rebuildable graphs; PseudoLife is a LIVING temporal memory over conversations — HLC supersession, provenance tiers, su",
+     "Public-release prep for PseudoLife-MCP started 2026-07-03. Dependency/license audit results: core lock (ops/requirements.lock.txt) is all permissive (Apache/MIT/BSD); psycopg is LGPL-3.0 (fine as unmodified dependency); certifi MPL-2.0 (fin"
+    ]
+   },
+   "reason": "write-dedup: 'pseudolife-mcp[lite]' ~ 'pseudolife-mcp'",
+   "score": 0.667,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "pseudolife-pg",
+    "degree": 5,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "PseudoLife-MCP v0.2 architecture RATIFIED by user (2026-06-10): migrate from stdio-per-session + torch.save .pt files to (1) a single long-lived memory daemon serving MCP over streamable-HTTP (port 8765, bearer token required off-loopback; ",
+     "PseudoLife-MCP cortex layer landed on master (commits adc39a8 durability + 2a98408 cortex, merged via PR #2 1c375fd). Cortex = slot-keyed canonical-fact store (schema v7, pseudolife_memory/memory/cortex.py): identity-not-similarity, superse"
+    ]
+   },
+   "into": {
+    "display": "Pseudolife",
+    "degree": 5,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "2026-06-25 research scan: standout finding is \"Language Models Need Sleep: Learning to Self-Modify and Consolidate Memories\" (arXiv:2606.03979, Behrouz/Hashemi/Mirrokni, Google — same group as TITANS/HOPE). Sleep paradigm with two stages: ("
+    ]
+   },
+   "reason": "write-dedup: 'pseudolife-pg' ~ 'Pseudolife'",
+   "score": 1.0,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "regression-gate",
+    "degree": 7,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Regression gate run for PR #145 (slot-index shadow verification), 2026-08-13 ~13:46: PASS, exit 0, 2 replicates vs baseline 1f0f13a, std 0.0000 on all four arms (determinism canary clean — reproducible q8_0 server via Start-Qwen): rag 0.628",
+     "CORRECTION (2026-08-13, supersedes the claim inside the earlier gate-run entry from this date): regression-gate receipts ARE committed by house convention — a named, dated agg artifact per gate-worthy change (e.g. evals/results/regression_g"
+    ]
+   },
+   "into": {
+    "display": "regression-gate-baseline",
+    "degree": 2,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Regression-gate baseline re-established 2026-07-26 (PR #46) on clean origin/master commit 959ecad, 8 replicates: rag 0.5753±0.0232 margin 0.0464, cortex 0.6651±0.0332 margin 0.0663, hybrid 0.7820±0.0182 margin 0.0363. The retired 3-replicat",
+     "Regression-gate baseline re-established 2026-07-26 (PR #46) on clean origin/master commit 959ecad, 8 replicates: rag 0.5753±0.0232 margin 0.0464, cortex 0.6651±0.0332 margin 0.0663, hybrid 0.7820±0.0182 margin 0.0363. The retired 3-replicat"
+    ]
+   },
+   "reason": "dream-alias: 'regression-gate' ~ 'regression-gate-baseline' (cosine 0.93)",
+   "score": 0.929,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "regression-gate / evals",
+    "degree": 1,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp",
+     "pseudolife-mcp-benchmarks"
+    ],
+    "snippets": [
+     "MemCoT iterative retrieval-loop MEASUREMENT HARNESS built + MERGED to master (origin/master = 55d576e, pushed 2026-06-23; branch eval/memcot-retrieval-loop ff-merged then deleted). Built via subagent-driven-development (6 TDD tasks + a corp",
+     "Track A (graphify-derived recall hub-gating) is BUILT + MERGED for PseudoLife-MCP (2026-06-24). Fast-forward merged to LOCAL master = 8e2b992 (NOT pushed to origin, NOT deployed — homelab daemon is a baked image; deploy is a separate gated "
+    ]
+   },
+   "into": {
+    "display": "evals/regression_gate.ps1",
+    "degree": 2,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Known-facts window BUILD COMPLETE (2026-07-11, overnight autonomous, subagent-driven): branch feat/known-facts-window, 7 commits 1000f37..8f813bd off 77906fa. All 6 code tasks passed task review; opus whole-branch review READY TO MERGE (3 M",
+     "Eval-hygiene sprint checkpoint 2026-07-18 (autonomous overnight): Tasks 1-9 built+merged to master (FF at d99838c, NOT pushed — user decision pending). evals/replicate.py (25 tests, spawn/copy/run/agg/compare/gate-check/baseline), regressio"
+    ]
+   },
+   "reason": "write-dedup: 'evals/regression_gate.ps1' ~ 'regression-gate / evals'",
+   "score": 0.75,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "retention-policy-choice",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Forgetting assessment post flat-band verdict (2026-08-15, user question): NOT confirmed that forgetting has no benefit — confirmed that mechanical forgetting has none in this system. Tested-and-failed: novelty-ranked eviction (destroyed evi"
+    ]
+   },
+   "into": {
+    "display": "rollback-retention",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Rollback-tag retention shipped (2026-07-14, commit a268427 on claude/magical-driscoll-d04290, worktree cool-wu-edfa0e): ops/prune-rollbacks.ps1 keeps the newest N pre-* pseudolife-daemon rollback tags (sorted by image Created) and rmi's the",
+     "Rollback-tag retention shipped (2026-07-14, commit a268427 on claude/magical-driscoll-d04290, worktree cool-wu-edfa0e): ops/prune-rollbacks.ps1 keeps the newest N pre-* pseudolife-daemon rollback tags (sorted by image Created) and rmi's the"
+    ]
+   },
+   "reason": "dream-alias: 'retention-policy-choice' ~ 'rollback-retention' (cosine 0.72)",
+   "score": 0.724,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "rust-libp2p",
+    "degree": 0,
+    "scopes": [
+     "gnd-share"
+    ],
+    "snippets": [
+     "GND Share PQC landscape check 2026-08-15 (verified against live primary sources): the v0.3.0 design choices all still hold in Aug 2026 — nothing broken or deprecated. RFC 10024 (Aug 2026, Standards Track) registers X25519MLKEM768 at codepoi"
+    ]
+   },
+   "into": {
+    "display": "lm-network",
+    "degree": 1,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Contested-slot cleanup 2026-08-12: all three long-standing contested fact slots settled by discarding the contenders. (1) lm-network/primary — the contender was a correction NOTE (\"Corrected 2026-08-06 by agent audit...\") parked as a value,"
+    ]
+   },
+   "reason": "dream-alias: 'rust-libp2p' ~ 'lm-network' (cosine 0.69)",
+   "score": 0.687,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "shim",
+    "degree": 12,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Console-tab audit (2026-08-04): all 37 config_io.py knobs resolve against AppConfig and defaults match dataclass + _apply_mcp_defaults (half-life 86400, surprise 0.0 documented honestly). Gaps: no knobs for dream.literal_gate/_scope, relati",
+     "DONE (2026-08-04): Console Dreamer card shipped as PR #98 (feat/console-dreamer-card, commit 027054c2) — NOT yet merged or deployed (master is PR-gated; deploy after merge via ops/update.ps1, then verify the card live at /ui/#/console). Con"
+    ]
+   },
+   "into": {
+    "display": "slot-index-shadow-check",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Slot-index shadow verification implemented and PR #145 opened 2026-08-13 (branch feat/slot-index-shadow-check, commit 28c3b7aa, worktree .claude/worktrees/slot-shadow — kept for follow-ups; everything committed and pushed). Sampled runtime ",
+     "Slot-index shadow verification implemented and PR #145 opened 2026-08-13 (branch feat/slot-index-shadow-check, commit 28c3b7aa, worktree .claude/worktrees/slot-shadow — kept for follow-ups; everything committed and pushed). Sampled runtime "
+    ]
+   },
+   "reason": "dream-alias: 'slot-index-shadow-check' ~ 'shim' (cosine 0.67)",
+   "score": 0.666,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "single-shot recall",
+    "degree": 0,
+    "scopes": [],
+    "snippets": []
+   },
+   "into": {
+    "display": "misleading-recall-probe",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Night shift 2026-08-13 (~01:00-06:00) complete, four PRs open awaiting maintainer: #146 stance field (schema v29) + span gate — plumbing shipped dormant, v8/v9 prompts held back by the KU gate (v8 cortex 0.731→0.615 p=0.0117; v9 hybrid 0.89",
+     "Night shift 2026-08-13 (~01:00-06:00) complete, four PRs open awaiting maintainer: #146 stance field (schema v29) + span gate — plumbing shipped dormant, v8/v9 prompts held back by the KU gate (v8 cortex 0.731→0.615 p=0.0117; v9 hybrid 0.89"
+    ]
+   },
+   "reason": "dream-alias: 'misleading-recall-probe' ~ 'single-shot recall' (cosine 0.73)",
+   "score": 0.73,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "slow band capacity",
+    "degree": 0,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "BAND SIZING ANALYSIS (2026-06-27, for the 2026-07-06 continuum re-eval): the MIRAS bands' current ~44K total capacity is HARMLESS — no performance or imminent retrieval-quality issue; right-sizing the live bank is OPTIONAL, not needed. EMPI"
+    ]
+   },
+   "into": {
+    "display": "flat-band-migration",
+    "degree": 6,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "DECISION (2026-08-13, user-ratified): flat-band migration (and the read-flat/lifecycle-banded middle option) is TABLED — not rejected — pending a future rerun/rereview. Condition to reopen: rerun the band ablation under the current (schema ",
+     "DECISION (2026-08-13, user-ratified): flat-band migration (and the read-flat/lifecycle-banded middle option) is TABLED — not rejected — pending a future rerun/rereview. Condition to reopen: rerun the band ablation under the current (schema "
+    ]
+   },
+   "reason": "dream-alias: 'flat-band-migration' ~ 'slow band capacity' (cosine 0.65)",
+   "score": 0.655,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "stance-span-gate",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Spec written 2026-08-12: docs/superpowers/specs/2026-08-12-stance-span-gate-design.md — preregistration for (A) epistemic stance as a labelled claim field (from arXiv:2608.06953; new nullable stance column = schema v29, stance never feeds c",
+     "DECISION (2026-08-13, user-ratified): flat-band migration (and the read-flat/lifecycle-banded middle option) is TABLED — not rejected — pending a future rerun/rereview. Condition to reopen: rerun the band ablation under the current (schema "
+    ]
+   },
+   "into": {
+    "display": "span gate",
+    "degree": 4,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Spec written 2026-08-12: docs/superpowers/specs/2026-08-12-stance-span-gate-design.md — preregistration for (A) epistemic stance as a labelled claim field (from arXiv:2608.06953; new nullable stance column = schema v29, stance never feeds c",
+     "DECISION (2026-08-13, user-ratified): flat-band migration (and the read-flat/lifecycle-banded middle option) is TABLED — not rejected — pending a future rerun/rereview. Condition to reopen: rerun the band ablation under the current (schema "
+    ]
+   },
+   "reason": "write-dedup: 'stance-span-gate' ~ 'span gate'",
+   "score": 0.667,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "stance-span-gate",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Spec written 2026-08-12: docs/superpowers/specs/2026-08-12-stance-span-gate-design.md — preregistration for (A) epistemic stance as a labelled claim field (from arXiv:2608.06953; new nullable stance column = schema v29, stance never feeds c",
+     "DECISION (2026-08-13, user-ratified): flat-band migration (and the read-flat/lifecycle-banded middle option) is TABLED — not rejected — pending a future rerun/rereview. Condition to reopen: rerun the band ablation under the current (schema "
+    ]
+   },
+   "into": {
+    "display": "stance-span-gate-spec",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Spec written 2026-08-12: docs/superpowers/specs/2026-08-12-stance-span-gate-design.md — preregistration for (A) epistemic stance as a labelled claim field (from arXiv:2608.06953; new nullable stance column = schema v29, stance never feeds c",
+     "Spec written 2026-08-12: docs/superpowers/specs/2026-08-12-stance-span-gate-design.md — preregistration for (A) epistemic stance as a labelled claim field (from arXiv:2608.06953; new nullable stance column = schema v29, stance never feeds c"
+    ]
+   },
+   "reason": "write-dedup: 'stance-span-gate' ~ 'stance-span-gate-spec'",
+   "score": 0.75,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "supermemory",
+    "degree": 1,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "2026-08-14 competitor DX/docs survey (3 parallel research agents, star counts verified via GitHub API same day): mem0 63.2k, claude-mem 90.6k, Graphiti 29.9k, cognee 30.0k, supermemory 28.9k, Letta 24.2k. Headline findings for Pseudolife-MC"
+    ]
+   },
+   "into": {
+    "display": "superlocalmemory",
+    "degree": 9,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "2026-08-13 superlocalmemory (github.com/qualixar/superlocalmemory) vs Pseudolife-MCP comparison conclusions. SLM is REAL and large, not vaporware: ~171K LOC Python, 8,744 test functions, real cross-OS CI with security jobs, SQLite+sqlite-ve",
+     "2026-08-13 superlocalmemory (github.com/qualixar/superlocalmemory) vs Pseudolife-MCP comparison conclusions. SLM is REAL and large, not vaporware: ~171K LOC Python, 8,744 test functions, real cross-OS CI with security jobs, SQLite+sqlite-ve"
+    ]
+   },
+   "reason": "dream-alias: 'supermemory' ~ 'superlocalmemory' (cosine 0.85)",
+   "score": 0.852,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "sweep-agent",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Distractor-scale probe RESULT (2026-08-15, preregistered, artifact distractor-scale-probe-2026-08-15.json): ACCUMULATION MEASURABLY HURTS RETRIEVAL — the first positive evidence for curation/forgetting in PseudoLife. Evidence-in-top-6 falls"
+    ]
+   },
+   "into": {
+    "display": "evals/ladder_sweep.py",
+    "degree": 8,
+    "scopes": [
+     "pseudolife-mcp",
+     "pseudolife-mcp-benchmarks"
+    ],
+    "snippets": [
+     "PseudoLife-MCP extractor-ladder benchmark (2026-06-18, branch feat/pluggable-llm-extraction, evals/ladder_sweep.py). SHIPPED FIX (memory/dream.py OpenAICompatExtractor): reasoning models (Qwen3.6) burned the whole max_tokens budget on a <th",
+     "Overnight model-eval suite results (2026-06-23, data/overnight-20260623-003657, on the dev box w/ 4090). Three extractors tested: Gemma 4 E2B (shipped CPU sidecar), Qwen 3.6 27B (4090 turboq), Gemma 4 E4B (completing). KEY FINDINGS: (1) pyt"
+    ]
+   },
+   "reason": "dream-alias: 'sweep-agent' ~ 'ladder_sweep' (cosine 0.71)",
+   "score": 0.712,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "symbolic-contender-resolution",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Night shift 2026-08-13 (~01:00-06:00) complete, four PRs open awaiting maintainer: #146 stance field (schema v29) + span gate — plumbing shipped dormant, v8/v9 prompts held back by the KU gate (v8 cortex 0.731→0.615 p=0.0117; v9 hybrid 0.89",
+     "Night shift 2026-08-13 (~01:00-06:00) complete, four PRs open awaiting maintainer: #146 stance field (schema v29) + span gate — plumbing shipped dormant, v8/v9 prompts held back by the KU gate (v8 cortex 0.731→0.615 p=0.0117; v9 hybrid 0.89"
+    ]
+   },
+   "into": {
+    "display": "merge_candidate",
+    "degree": 1,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "DOGFOODING BUG (2026-06-29): The deep-dream review UI is broken for the 3 finding types the deep dream itself produces. memory_deep_dream(apply=True) on the live bank worked (rescored 5, superseded 1, merged 2, merge_proposed 9, junk_propos",
+     "DOGFOODING BUG (2026-06-29): The deep-dream review UI is broken for the 3 finding types the deep dream itself produces. memory_deep_dream(apply=True) on the live bank worked (rescored 5, superseded 1, merged 2, merge_proposed 9, junk_propos"
+    ]
+   },
+   "reason": "dream-alias: 'symbolic-contender-resolution' ~ 'merge_candidate' (cosine 0.71)",
+   "score": 0.71,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "task_a60962c0",
+    "degree": 0,
+    "scopes": [
+     "claude-code-setup"
+    ],
+    "snippets": [
+     "Docker vhdx ballooning root cause (confirmed 2026-07-28): docker_data.vhdx never auto-shrinks (sparse mode deliberately declined as risky in July), and the recurring growth is BUILD CACHE regrowth, not fragmentation. Timeline: the 2026-07-1"
+    ]
+   },
+   "into": {
+    "display": "release-procedure skill",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "SHIPPED TO PR (2026-08-14): install-floor Phases 0+1 both open awaiting user merge. PR #152 (feat/lite-tier-embedded-pg, commit 82a813e1) — the zero-config lite tier: [lite] extra pins pg0-embedded >=0.15.1,<0.16; storage resolution lives O"
+    ]
+   },
+   "reason": "dream-alias: 'release-procedure skill' ~ 'task_a60962c0' (cosine 0.67)",
+   "score": 0.673,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "transfer.rs",
+    "degree": 0,
+    "scopes": [
+     "gnd-share"
+    ],
+    "snippets": [
+     "GND Share: Phase A (transport/networking fix) is implemented and verified (cargo check + 17 tests pass on both crates, libp2p 0.54.1). Changes: added libp2p features dns/relay/dcutr/ping (src-tauri) and ping (relay); network.rs AppBehaviour",
+     "GND Share Option C (post-quantum) is DESIGNED + PLANNED (2026-06-09), not yet implemented. Decisions: both halves (PQ confidentiality of file contents + PQ identity/invite integrity); library = RustCrypto pure-Rust ml-kem (ML-KEM-768) + ml-"
+    ]
+   },
+   "into": {
+    "display": "transfer",
+    "degree": 2,
+    "scopes": [
+     "gnd-share",
+     "llama-turboq"
+    ],
+    "snippets": [
+     "GND Share: Phase A (transport/networking fix) is implemented and verified (cargo check + 17 tests pass on both crates, libp2p 0.54.1). Changes: added libp2p features dns/relay/dcutr/ping (src-tauri) and ping (relay); network.rs AppBehaviour",
+     "GND Share Option C (post-quantum) is DESIGNED + PLANNED (2026-06-09), not yet implemented. Decisions: both halves (PQ confidentiality of file contents + PQ identity/invite integrity); library = RustCrypto pure-Rust ml-kem (ML-KEM-768) + ml-"
+    ]
+   },
+   "reason": "write-dedup: 'transfer' ~ 'transfer.rs'",
+   "score": 1.0,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "user-machine",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Deploy 2026-07-26 03:41 (band/retrieval fix stack, PRs #38-#42, NOT yet merged — deployed from the #42 tip): ops/update.ps1 clean, backup written (pg_dump + state tgz, mirrored to G:), daemon healthy schema=22 persist_errors=0. Verified liv"
+    ]
+   },
+   "into": {
+    "display": "dev-box",
+    "degree": 1,
+    "scopes": [
+     "hermes-infra"
+    ],
+    "snippets": [
+     "Qwen/Bonsai agent-driven bank-correction shakedown 2026-08-06 (hermes v0.20.0, Ternary-Bonsai-27B primary, brendan-hermes): the full recall->verify->correct->consolidate loop WORKS end-to-end with the local 27B driving. (1) lm-network audit"
+    ]
+   },
+   "reason": "dream-alias: 'dev-box' ~ 'user-machine' (cosine 0.72)",
+   "score": 0.719,
+   "label": "reject",
+   "decided_by": "opus-panel-r5"
+  },
+  {
+   "from": {
+    "display": "v10-stance-deploy",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "DEPLOYED 2026-08-14 ~01:47 via ops/update.ps1: master c4900e17 (PR #150 merge — v10 stance prompt live, plus all five PRs #145-150 since v0.13.0: slot-index shadow check, schema v29 stance plumbing, span gate off, misleading-recall probe, G",
+     "DEPLOYED 2026-08-14 ~01:47 via ops/update.ps1: master c4900e17 (PR #150 merge — v10 stance prompt live, plus all five PRs #145-150 since v0.13.0: slot-index shadow check, schema v29 stance plumbing, span gate off, misleading-recall probe, G"
+    ]
+   },
+   "into": {
+    "display": "v10-stance-prompt",
+    "degree": 1,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "v10 stance prompt SHIPPED 2026-08-14 (maintainer decision: \"Ship V10, soak and iterate on v11\"): live dream extraction prompt moved v5→v10 (update-anchored stance rule; dream.py _SYSTEM_PROMPT pinned to ku_op_prompt_v10_stance_update.txt), ",
+     "v10 stance prompt SHIPPED 2026-08-14 (maintainer decision: \"Ship V10, soak and iterate on v11\"): live dream extraction prompt moved v5→v10 (update-anchored stance rule; dream.py _SYSTEM_PROMPT pinned to ku_op_prompt_v10_stance_update.txt), "
+    ]
+   },
+   "reason": "dream-alias: 'v10-stance-deploy' ~ 'v10-stance-prompt' (cosine 0.81)",
+   "score": 0.808,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "v11 drift-iteration prompt work",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "The v11 drift-iteration prompt work will probably start after the stance soak review on 2026-08-21 — not final until the soak numbers are in."
+    ]
+   },
+   "into": {
+    "display": "agent-fabricated-completion",
+    "degree": 0,
+    "scopes": [
+     "hermes-infra"
+    ],
+    "snippets": [
+     "SECOND FABRICATED COMPLETION + THE FIX THAT WORKS (2026-08-07, Tri-Serpent on Bonsai-27B). PATTERN NOW CONFIRMED TWICE: the agent ticks a milestone checkbox and reports success without doing the work. Case 1 (overnight, 35B): claimed \"page ",
+     "SECOND FABRICATED COMPLETION + THE FIX THAT WORKS (2026-08-07, Tri-Serpent on Bonsai-27B). PATTERN NOW CONFIRMED TWICE: the agent ticks a milestone checkbox and reports success without doing the work. Case 1 (overnight, 35B): claimed \"page "
+    ]
+   },
+   "reason": "dream-alias: 'v11 drift-iteration prompt work' ~ 'agent-fabricated-completion' (cosine 0.70)",
+   "score": 0.704,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "valid-time-population",
+    "degree": 0,
+    "scopes": [
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "Night shift 2026-08-13 (~01:00-06:00) complete, four PRs open awaiting maintainer: #146 stance field (schema v29) + span gate — plumbing shipped dormant, v8/v9 prompts held back by the KU gate (v8 cortex 0.731→0.615 p=0.0117; v9 hybrid 0.89"
+    ]
+   },
+   "into": {
+    "display": "live_verification",
+    "degree": 0,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "MCP tool-surface consolidation SHIPPED + DEPLOYED (2026-07-02, merge 0d7a06a): 55 -> 32 tools, description payload 36,978 -> 14,953 chars (max single 1,331). Three verb-dispatched merges: memory_dream(action=status|pull|commit|run|deep) rep"
+    ]
+   },
+   "reason": "dream-alias: 'valid-time-population' ~ 'live_verification' (cosine 0.73)",
+   "score": 0.734,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "windows-auto-reboot-mitigation",
+    "degree": 0,
+    "scopes": [
+     "windows-env"
+    ],
+    "snippets": [
+     "SUPERSEDES the 2026-06-24 mitigation status (RestartNotificationsAllowed2=1 + NoAutoRebootWithLoggedOnUsers=1): those proved insufficient — KB5121003 still force-rebooted PSEUDO-PC at 06:29 on 2026-08-14 while idle. New fix applied 2026-08-",
+     "SUPERSEDES the 2026-06-24 mitigation status (RestartNotificationsAllowed2=1 + NoAutoRebootWithLoggedOnUsers=1): those proved insufficient — KB5121003 still force-rebooted PSEUDO-PC at 06:29 on 2026-08-14 while idle. New fix applied 2026-08-"
+    ]
+   },
+   "into": {
+    "display": "Windows Update",
+    "degree": 6,
+    "scopes": [
+     "windows-env"
+    ],
+    "snippets": [
+     "User runs Windows 11 on PC \"PSEUDO-PC\" (user <user>) and does not want unattended overnight Windows Update reboots. Their active hours are auto-managed (SmartActiveHoursState=1, set to 11:00–05:00), so updates reboot in the 05:00–11:00 gap; ",
+     "On 2026-06-24, to stop overnight Windows Update reboots on PSEUDO-PC, set two registry values under HKLM\\SOFTWARE\\Microsoft\\WindowsUpdate\\UX\\Settings: RestartNotificationsAllowed2=1 (notify when restart required, was unset) and IsContinuous"
+    ]
+   },
+   "reason": "dream-alias: 'windows-auto-reboot-mitigation' ~ 'Windows Update' (cosine 0.71)",
+   "score": 0.709,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  },
+  {
+   "from": {
+    "display": "x-wing crate",
+    "degree": 0,
+    "scopes": [
+     "gnd-share"
+    ],
+    "snippets": [
+     "GND Share PQC landscape check 2026-08-15 (verified against live primary sources): the v0.3.0 design choices all still hold in Aug 2026 — nothing broken or deprecated. RFC 10024 (Aug 2026, Standards Track) registers X25519MLKEM768 at codepoi"
+    ]
+   },
+   "into": {
+    "display": "SP-1",
+    "degree": 3,
+    "scopes": [
+     "pseudolife",
+     "pseudolife-mcp"
+    ],
+    "snippets": [
+     "SHIPPED + MERGED + PUSHED + DEPLOYED LIVE (2026-06-29): Entity Consolidation (Entity-Quality SP-1). origin/master = 7cb4f2b (FF-merged from feat/entity-consolidation, branch deleted); daemon redeployed /health schema=18 persist_errors=0, ba",
+     "SHIPPED + MERGED + PUSHED + DEPLOYED LIVE (2026-06-29): Entity Consolidation (Entity-Quality SP-1). origin/master = 7cb4f2b (FF-merged from feat/entity-consolidation, branch deleted); daemon redeployed /health schema=18 persist_errors=0, ba"
+    ]
+   },
+   "reason": "dream-alias: 'x-wing crate' ~ 'SP-1' (cosine 0.74)",
+   "score": 0.738,
+   "label": "reject",
+   "decided_by": "opus-panel-r4"
+  }
+ ]
+}

@@ -1298,10 +1298,14 @@ class PostgresStorage:
         return out
 
     def pending_entity_proposals(self) -> list[dict]:
-        cols = ("id", "kind", "entity_id", "into_id", "score", "reason", "status", "created_at")
+        cols = ("id", "kind", "entity_id", "into_id", "score", "reason",
+                "status", "created_at", "judge_verdict", "judge_confidence",
+                "judge_note", "judge_model", "judged_at")
         rows = self.conn.execute(
             "SELECT p.id, p.kind, p.entity_id, p.into_id, p.score, p.reason, p.status, "
-            "       p.created_at, e.display, i.display "
+            "       p.created_at, p.judge_verdict, p.judge_confidence, "
+            "       p.judge_note, p.judge_model, p.judged_at, "
+            "       e.display, i.display "
             "FROM entity_proposals p "
             "JOIN entities e ON e.id = p.entity_id "
             "LEFT JOIN entities i ON i.id = p.into_id "
@@ -1309,10 +1313,24 @@ class PostgresStorage:
         ).fetchall()
         out = []
         for r in rows:
-            d = dict(zip(cols, r[:8]))
-            d["entity"], d["into"] = r[8], r[9]
+            d = dict(zip(cols, r[:13]))
+            d["entity"], d["into"] = r[13], r[14]
             out.append(d)
         return out
+
+    def set_entity_proposal_judgment(self, proposal_id: int, *,
+                                     verdict: str, confidence: float | None,
+                                     note: str | None, model: str | None,
+                                     at: float) -> bool:
+        """Record the autonomous judge's shadow verdict on a pending
+        proposal (an opinion, not a decision — see schema v30)."""
+        with self._txn():
+            cur = self.conn.execute(
+                "UPDATE entity_proposals SET judge_verdict=%s, "
+                "judge_confidence=%s, judge_note=%s, judge_model=%s, "
+                "judged_at=%s WHERE id=%s AND status='pending'",
+                (verdict, confidence, note, model, at, proposal_id))
+        return cur.rowcount > 0
 
     def get_entity_proposal(self, proposal_id: int) -> dict | None:
         cols = ("id", "kind", "entity_id", "into_id", "score", "reason", "status", "created_at")

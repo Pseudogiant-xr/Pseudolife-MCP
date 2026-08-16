@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 29
+SCHEMA_META_VERSION = 30
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -475,6 +475,16 @@ def ensure_schema(conn) -> dict:
             "ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS "
             "decided_at DOUBLE PRECISION"
         )
+        # v30 additive: the autonomous Step-C judge's shadow verdict on a
+        # pending proposal — a model pre-judgment recorded on the row (and
+        # surfaced to review), applied only when the judge mode says so.
+        # Lives on the proposal, not merge_decisions: it is an OPINION until
+        # a decision path (human, agent, or auto-reject) ratifies it.
+        for ddl in ("judge_verdict TEXT", "judge_confidence REAL",
+                    "judge_note TEXT", "judge_model TEXT",
+                    "judged_at DOUBLE PRECISION"):
+            cur.execute(
+                f"ALTER TABLE entity_proposals ADD COLUMN IF NOT EXISTS {ddl}")
         # v23 additive: read-time currency on personal cortex facts, mirroring
         # world_facts. DEFAULT 'evergreen', not world_facts' 'volatile' — an
         # existing bank of durable project facts must not start decaying on an

@@ -6,6 +6,44 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-16 — autonomous Step-C judge: the dream answers its own review queue, schema v30)
+- **The sweep now judges pending merge proposals** (`deep_dream.judge_mode`,
+  default `shadow`): a bounded batch per sweep is sent to the configured
+  model — the dream extractor by default, or a dedicated
+  `deep_dream.judge_url` endpoint — with the same evidence pack the review
+  surfaces show, and the verdict (`accept`/`reject`/`leave` + confidence +
+  note) is recorded on the proposal row and surfaced beside the evidence in
+  review payloads. Schema **v30** adds the five nullable
+  `entity_proposals.judge_*` columns; the verdict is an opinion — the
+  durable record stays `merge_decisions`, written only when a decision path
+  ratifies it.
+- **`auto-reject` mode** additionally applies reject verdicts at/above
+  `judge_reject_min_confidence` (`decided_by='dream-judge'`, pair
+  dismissed). Accept verdicts are never auto-applied at this phase —
+  folds wait for a decision path with stronger guarantees (two-vote
+  design, phase 2). Goal per the 2026-08-16 maintainer directive: a
+  memory system by agents for agents, with minimal human interaction —
+  the human queue should hold only what machine judgment genuinely
+  cannot settle.
+- **Judge-model ladder** (`evals/judge_ladder.py` +
+  `evals/data/judge_eval_20260816.json`, 129 evidence-backed rows from the
+  two ratified 2026-08-16 triage rounds, 30 accept / 99 reject): runs the
+  SHIPPED judge code path (same prompt, serialization, and batch size)
+  against Claude arms via the CLI shim, the local Qwen bench server, and
+  the deployed sidecar, scoring reject-precision / false-reject-rate /
+  accept-precision with replicates and majority vote, plus a simulation of
+  exactly what auto-reject at confidence >= 0.8 would apply. Measured floor
+  (artifact: `evals/results/judge-ladder-20260816.json`): **calibration,
+  not accuracy, gates autonomy** — all arms make similar raw errors, but
+  only Opus-class knows which verdicts it is unsure of. Auto-reject
+  precision at the 0.8 gate: fable-5 1.0 (0 false in 73), opus-5 0.9867
+  (1 false in 75), sonnet-5 0.9589 (3 false), qwen-27b 0.9175 (its
+  confidence is uninformative: every reject including all 8 false ones sat
+  at >= 0.8), sidecar-e4b 0.9583 but with 67% coverage and 71% agreement —
+  the deployed extractor can extract but cannot judge. Consequence: the
+  shipped default stays `shadow` for any endpoint; flipping `auto-reject`
+  on is measured-safe only with an Opus-class (or better) `judge_url`.
+
 ### Fixed (2026-08-16 — round-2 review-queue noise: hub contexts, immortal dismissals, junk re-review)
 - **Scan-fallback hub cap** (`deep_dream.max_fallback_mentions`, default 30):
   a trace-less entity whose token-mention fallback matched an outsized share

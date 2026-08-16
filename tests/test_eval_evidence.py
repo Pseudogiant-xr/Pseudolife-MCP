@@ -1542,6 +1542,23 @@ for _cid, _needle, _val, _stated, _places in [
         value=_val, stated=_stated, places=_places))
 
 
+# The judge-model ladder's published auto-reject precisions (CHANGELOG,
+# 2026-08-16): the measured floor for the autonomous Step-C judge.
+JUDGE_LADDER = RESULTS + "judge-ladder-20260816.json"
+for _arm, _needle, _stated in [
+    ("fable-5", "fable-5 1.0 (0 false in 73)", 1.0),
+    ("opus-5", "opus-5 0.9867", 0.9867),
+    ("sonnet-5", "sonnet-5 0.9589", 0.9589),
+    ("qwen-27b", "qwen-27b 0.9175", 0.9175),
+    ("sidecar-e4b", "sidecar-e4b 0.9583", 0.9583),
+]:
+    CLAIMS.append(Claim(
+        id=f"judge-ladder-{_arm}-auto-prec", doc=CHANGELOG, needle=_needle,
+        artifacts=(JUDGE_LADDER,),
+        value=(lambda a: lambda d: d["arms"][a]["auto_reject_precision"])(_arm),
+        stated=_stated, places=4))
+
+
 def test_every_published_number_names_a_committed_artifact():
     """A claim whose evidence is untracked cannot be checked by a reader.
 
