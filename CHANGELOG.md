@@ -6,6 +6,46 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-08-17 — GPU bench server migrated to Qwen3.8-27B)
+- **`evals/qwen_server.ps1` now serves Qwen3.8-27B-UD-Q4_K_XL on the
+  llama.cpp b10453 engine** (the 3.6-era b9371 binary cannot load 3.8's
+  hybrid DeltaNet architecture). Reproducible config keeps the eval
+  protocol (q8_0 KV, cache-ram 0, ctx-checkpoints 0, MTP off) with the
+  official 3.8 thinking sampler and the model's embedded chat template
+  (`reasoning_effort=medium` server default; per-request
+  `enable_thinking:false` verified still honoured, so extractor call
+  sites are unchanged). `-Fast` now selects mainline embedded-MTP
+  speculation instead of the retired TurboQuant fork; the running-config
+  discriminator also matches `--spec-type draft-mtp`. Rollback:
+  `evals/qwen_server.ps1.bak-qwen36-20260817` + the 3.6 model/engine
+  still on disk.
+- **Byte-determinism re-proven for the new stack**
+  (`evals/results/judge-determinism-check-qwen38.json`): 3 replicates at
+  gate and e2e scale, 0 verdict flips, 0 response diffs, std 0.0000 on
+  every arm — judged numbers on the 3.8 server are trustworthy.
+- **Regression-gate baseline re-established** for the 3.8 answerer/judge
+  (`regression_gate.baseline.json`, n=3): rag 0.5897 / cortex 0.6923 /
+  hybrid 0.7692 (3.6 was 0.6282 / 0.7051 / 0.7692 — the old values
+  remain in git history and the dated establish artifacts).
+- **3.8 campaign artifacts** (tagged, canonical 3.6 files untouched):
+  ladder rung `qwen-27b-qwen38` gold 1.0 / stale 0.0 (extract 33.0 s and
+  13.4 tok/q vs 3.6's 9.0 s / 1.4 — richer extraction, same gate);
+  KU-oracle `ceiling-v38` n=3 rag 0.8590 / cortex 0.6667 (both equal to
+  the 3.6 ceiling-e2e aggregates) / hybrid 0.8462 (+0.013) / cascade
+  0.8462 (−0.090 — root-caused to reduced abstention: 22/78 cortex
+  "don't know" vs 32/78, so fewer rag rescues); judge ladder
+  `judge-ladder-qwen38-20260817.json` false-reject 0.567 vs 0.267 and
+  auto-reject precision 0.844 vs 0.918 (regression; shadow-mode default
+  and the Opus-class auto-reject floor already shipped are unaffected);
+  stance GATE PASS (v8 capture 0.97); misleading-recall harm 0.00;
+  gate-firing 1.15% of gateable; events-quantity smoke **FAIL** — the
+  seeded "April 15th to 22nd" range survives in `date_phrase` but the
+  check requires description-field verbatim (field-placement drift, not
+  data loss; checker-vs-prompt decision pending). Docs front-door
+  numbers still cite 3.6 and are deliberately not switched in this
+  change — promotion needs its own docs-currency pass with
+  `tests/test_eval_evidence.py` rows updated alongside.
+
 ### Added (2026-08-16 — autonomous Step-C judge: the dream answers its own review queue, schema v30)
 - **The sweep now judges pending merge proposals** (`deep_dream.judge_mode`,
   default `shadow`): a bounded batch per sweep is sent to the configured
