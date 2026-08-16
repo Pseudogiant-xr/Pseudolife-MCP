@@ -1024,6 +1024,17 @@ class PostgresStorage:
                 (status, finished_at, cursor_after, claims,
                  Jsonb(tallies), run_id))
 
+    def update_dream_run_tallies(self, run_id: int, extra: dict) -> None:
+        """Merge ``extra`` into an existing run row's tallies JSONB. Exists
+        for counters produced AFTER the commit stamp (lesson synthesis runs
+        post-commit by design, so its tallies would otherwise live only in
+        the transient dream-run result)."""
+        with self._txn():
+            self.conn.execute(
+                "UPDATE dream_runs SET "
+                "tallies = COALESCE(tallies, '{}'::jsonb) || %s WHERE id=%s",
+                (Jsonb(extra), run_id))
+
     def add_dream_run_slot(self, run_id: int, row: dict) -> None:
         """One pre-image journal row, written immediately after its claim's
         write lands (crash-durable, mirroring add_trace's per-claim
@@ -1338,6 +1349,17 @@ class PostgresStorage:
                  reason, decided_by, decided_at)).fetchone()
         return int(row[0])
 
+    def junk_accepted_displays(self) -> list[str]:
+        """Displays of every entity ever deleted as junk (reviewed or
+        dream-auto) — the junk TOMBSTONES. Junk rows are the accepted
+        merge_decisions with no fold target; the proposal row itself
+        CASCADEs away with the entity, so this denormalized table is the
+        only durable record a verdict happened."""
+        rows = self.conn.execute(
+            "SELECT DISTINCT entity_display FROM merge_decisions "
+            "WHERE status = 'accepted' AND into_display IS NULL").fetchall()
+        return [r[0] for r in rows]
+
     def max_entity_id(self) -> int:
         """High-water mark of the entities serial — the deep-dream need
         signal's watermark (id-based, not count-based: merges and junk
@@ -1355,12 +1377,14 @@ class PostgresStorage:
     def merge_decision_stats(self) -> dict:
         """Accept/reject tallies over merge_decisions — the direct measure of
         the dedup detector's precision (the 2026-08-11 triage ran 38/153 and
-        the number previously vanished into the audit log). ``dream-auto``
-        rows are junk auto-deletes recorded to the same table; they are not
-        merge verdicts and are excluded."""
+        the number previously vanished into the audit log). Junk deletions —
+        auto (``decided_by='dream-auto'``) and reviewed alike — are recorded
+        to the same table with ``into_display IS NULL``; they are not merge
+        verdicts and are excluded."""
         rows = self.conn.execute(
             "SELECT status, count(*) FROM merge_decisions "
             "WHERE decided_by <> 'dream-auto' "
+            "  AND into_display IS NOT NULL "
             "  AND status IN ('accepted', 'rejected') "
             "GROUP BY status").fetchall()
         counts = {status: int(n) for status, n in rows}

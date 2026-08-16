@@ -649,7 +649,7 @@ class FixtureService:
         return {"accepted": True, "from": "live daemon", "into": "daemon",
                 "decided_by": decided_by}
 
-    def graph_accept_entity_junk(self, proposal_id):
+    def graph_accept_entity_junk(self, proposal_id, *, decided_by="human"):
         return {"accepted": True, "entity": "2"}
 
     def graph_reject_entity_proposal(self, proposal_id, *, decided_by="human"):

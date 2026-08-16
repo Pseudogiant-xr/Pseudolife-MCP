@@ -100,12 +100,21 @@ def _l2(v: np.ndarray) -> np.ndarray:
 def entity_context_vectors(entities: list[dict], entries: list[dict],
                            traces_by_entity: dict[str, list[int]], *,
                            min_mentions: int = 2,
+                           max_fallback_mentions: int | None = None,
                            ) -> tuple[dict[int, np.ndarray], dict[int, frozenset[int]]]:
     """Per-entity context vector = L2-normalized mean of its mentioning entries'
     embeddings, plus the set of those entry ids. Trace entries are the primary
     source; entities without traces fall back to a token-mention scan. An entity is
     included only if it has >= min_mentions DISTINCT mentioning entries (with
-    embeddings) — a centroid-of-one isn't a context. Returns (vectors, mentions)."""
+    embeddings) — a centroid-of-one isn't a context. Returns (vectors, mentions).
+
+    ``max_fallback_mentions`` caps the SCAN branch only: a trace-less entity
+    whose token set subset-matches more entries than the cap is excluded
+    outright — such a match set is a corpus centroid, not a context, and its
+    vector pairs promiscuously (2026-08-16 live bank: ``pseudolife-pg``
+    matched 301/695 embedded entries because ``_token_set`` drops its short
+    ``pg`` token, and filed 9 cross-hub merge pairs in one pass). Trace-backed
+    mentions are real evidence and are never capped."""
     by_id = {e["id"]: e for e in entries}
     entry_tokens = [(e["id"], _token_set(e.get("text", ""))) for e in entries]
     vectors: dict[int, np.ndarray] = {}
@@ -116,6 +125,9 @@ def entity_context_vectors(entities: list[dict], entries: list[dict],
             want = _token_set(ent["display"])
             if want:
                 ids = [eid for eid, toks in entry_tokens if want <= toks]
+                if (max_fallback_mentions is not None
+                        and len(ids) > max_fallback_mentions):
+                    continue                    # corpus centroid, not a context
         valid = {i for i in ids if i in by_id}      # distinct entries with embeddings
         if len(valid) < min_mentions:
             continue

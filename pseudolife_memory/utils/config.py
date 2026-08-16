@@ -420,6 +420,14 @@ class DeepDreamConfig:
     max_context_snippets: int = 3      # context snippets per entity in a candidate
     auto_apply_safe: bool = True       # auto-supersede violations + merge exact dups (apply only)
     min_entity_mentions: int = 2       # an entity needs >= this many distinct mentioning entries to be candidate-eligible
+    # Upper bound on the token-mention FALLBACK scan (trace-less entities
+    # only): above it the match set is a corpus centroid, not a context.
+    # Default = p90 of the fallback-set size distribution measured on the
+    # live bank 2026-08-16 (695 embedded entries, 3792 entities, 1342
+    # vector-eligible fallback entities: p50=5, p90=30, p95=59; the incident
+    # class sat far above — 'pseudolife-pg' matched 301, 'VS Code' 124 —
+    # and filed 9 cross-hub merge pairs in one pass). 0/None disables.
+    max_fallback_mentions: int = 30
     merge_min_similarity: float = 0.90   # cosine floor for a near-dup MERGE candidate (vs a link)
     junk_max_degree: int = 1             # junk entities must be this weakly connected to be flagged
     max_support_overlap: float = 0.8     # Jaccard on supporting-entry sets at/above which a pair is co-occurrence

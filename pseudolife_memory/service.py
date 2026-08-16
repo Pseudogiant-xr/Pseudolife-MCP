@@ -4008,6 +4008,18 @@ class MemoryService:
             new_entities, known_entities)
         outcome_inference = self.infer_outcomes_stage(extractor)
         lessons = self.synthesize_lessons(extractor)
+        # Lesson synthesis runs after the commit stamp by design, so its
+        # counters never made it into the run row — merge them in now (a
+        # bookkeeping failure must not break the dream).
+        if run_id is not None:
+            try:
+                with self._lock:
+                    self._storage.update_dream_run_tallies(run_id, {
+                        "lesson_signals": int(lessons.get("signals", 0)),
+                        "lessons_written": int(lessons.get("lessons", 0)),
+                        "lessons_deduped": int(lessons.get("deduped", 0))})
+            except Exception as exc2:  # noqa: BLE001
+                logger.warning("dream: lesson-tally update failed (%s)", exc2)
         graph_insight = self._safe_refresh_graph_insight()
         sources_attributed = self.graph_backfill_sources().get("attributed", 0)
         # Drain a few quarantined untyped pairs per dream (no-op once empty).
@@ -5670,8 +5682,13 @@ class MemoryService:
 
     def graph_dismiss_duplicate(self, a: str, b: str) -> dict[str, Any]:
         """Human verdict on a duplicate finding: these two names are genuinely
-        distinct. Persisted by normalized name so the stateless analyzer never
-        re-flags the pair."""
+        distinct. Persisted by the ENTITY's stored canonical when the name
+        resolves to a live entity (falling back to ``norm_name``): the
+        analyzer filters on stored canonicals, and an entity minted from a
+        bare name later display-enriched has a canonical ``norm_name`` of the
+        display never reproduces — 'GND (Enshrouded server)' (canonical
+        ``gnd``) re-listed after every dismissal because the two key spaces
+        never met (live bank, 2026-08-16)."""
         from pseudolife_memory import graph as G
         an, bn = G.norm_name(a), G.norm_name(b)
         if not an or not bn or an == bn:
@@ -5680,6 +5697,16 @@ class MemoryService:
             self._ensure_init()
             if self._storage is None:
                 return dict(self._GRAPH_UNAVAILABLE)
+            canon_by_norm: dict[str, str] = {}
+            for e in self._storage.load_graph()["entities"]:
+                canon_by_norm.setdefault(e["canonical"], e["canonical"])
+                canon_by_norm.setdefault(G.norm_name(e["display"]),
+                                         e["canonical"])
+            an = canon_by_norm.get(an, an)
+            bn = canon_by_norm.get(bn, bn)
+            if an == bn:        # both names resolve to one entity: not a pair
+                return {"dismissed": False, "reason": "bad_pair",
+                        "a": a, "b": b}
             new = self._storage.dismiss_pair(an, bn)
         return {"dismissed": True, "new": new, "a": a, "b": b}
 
@@ -6345,7 +6372,8 @@ class MemoryService:
                       | {p["entity_id"] for p in pending_props
                          if p.get("kind") == "junk"})
         vectors, mentions = gc.entity_context_vectors(
-            entities, entries, traces, min_mentions=cfg.min_entity_mentions)
+            entities, entries, traces, min_mentions=cfg.min_entity_mentions,
+            max_fallback_mentions=cfg.max_fallback_mentions or None)
         # Lesson-minted <task> <aspect> nodes are not graph entities — the
         # same exclusion graph_review has always applied; without it they
         # paired with the artifacts they mention and burned candidate slots
@@ -6452,21 +6480,37 @@ class MemoryService:
                         "junk", j["entity_id"], None, None, j["reason"], _t.time()) is not None:
                     junk_proposed += 1
             disp_by_id = {e["id"]: e["display"] for e in entities}
+            # Junk tombstones: names a prior verdict (reviewed or auto)
+            # already deleted. A re-mint of such a name that the detector
+            # flags AGAIN is auto-deleted at the detector's own degree bar
+            # instead of re-queueing for a second verdict — 'G:' was
+            # deleted on 2026-08-16 and re-minted into the same queue the
+            # same week. The zero-structure guard below still protects
+            # never-judged names.
+            from pseudolife_memory.graph import norm_name as _nn2
+            tombstones = {_nn2(d)
+                          for d in self._storage.junk_accepted_displays()}
             for p in self._storage.pending_entity_proposals():
                 if p.get("kind") != "junk":
                     continue
                 eid = p["entity_id"]
-                if deg.get(eid, 0) > 0 or fact_counts.get(eid, 0) > 1:
+                display = disp_by_id.get(eid, p.get("entity") or "?")
+                zero_structure = (deg.get(eid, 0) == 0
+                                  and fact_counts.get(eid, 0) <= 1)
+                tombstoned = (_nn2(display) in tombstones
+                              and deg.get(eid, 0) <= cfg.junk_max_degree)
+                if not (zero_structure or tombstoned):
                     continue
                 if self._storage.delete_entity(eid):
                     # The proposal row CASCADEs away with the entity, so the
                     # denormalized merge_decisions row (no FK) is the only
                     # durable record of an unattended deletion.
+                    suffix = ("" if zero_structure else " (tombstoned)")
                     self._storage.record_merge_decision(
-                        p["id"], disp_by_id.get(eid, p.get("entity") or "?"),
+                        p["id"], display,
                         None, "accepted", p.get("score"),
-                        f"junk auto-delete: {p.get('reason')}", "dream-auto",
-                        now)
+                        f"junk auto-delete: {p.get('reason')}{suffix}",
+                        "dream-auto", now)
                     junk_deleted += 1
                     dropped.add(eid)
             # Non-destructive: populate the review queue regardless of auto_apply_safe.
@@ -6822,7 +6866,9 @@ class MemoryService:
         return {"accepted": ok, "from": disp.get(frm),
                 "into": disp.get(into)}
 
-    def graph_accept_entity_junk(self, proposal_id: int) -> dict[str, Any]:
+    def graph_accept_entity_junk(self, proposal_id: int, *,
+                                 decided_by: str = "human") -> dict[str, Any]:
+        import time as _t
         with self._lock:
             self._ensure_init()
             if self._storage is None:
@@ -6831,8 +6877,19 @@ class MemoryService:
             if prop is None or prop["status"] != "pending" or prop["kind"] != "junk":
                 return {"accepted": False, "reason": "not_pending", "id": proposal_id}
             disp = {e["id"]: e["display"] for e in self._storage.load_graph()["entities"]}
+            # Audit BEFORE the delete, like the merge path: the proposal row
+            # CASCADEs away with the entity, so the merge_decisions row
+            # (into_display NULL = junk) is the only durable record — and the
+            # TOMBSTONE that lets the deep dream auto-suppress a re-mint of
+            # the same name instead of re-queueing it for a second verdict.
+            self._storage.record_merge_decision(
+                proposal_id, disp.get(prop["entity_id"], "?"), None,
+                "accepted", prop.get("score"),
+                f"junk: {prop.get('reason')}", decided_by, _t.time())
             ok = self._storage.delete_entity(prop["entity_id"])
-            self._storage.set_entity_proposal_status(proposal_id, "accepted")
+            self._storage.set_entity_proposal_status(
+                proposal_id, "accepted", decided_by=decided_by,
+                decided_at=_t.time())
         return {"accepted": ok, "entity": disp.get(prop["entity_id"])}
 
     def graph_reject_entity_proposal(self, proposal_id: int, *,
