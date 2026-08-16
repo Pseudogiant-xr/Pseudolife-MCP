@@ -232,6 +232,15 @@ def duplicate_candidates(entities, *, min_jaccard=0.6, dismissed=frozenset(),
             if jac < min_jaccard:
                 continue
             pair = file_concept_split(toks[i][1], toks[j][1])
+            # Same name-shape vetoes the proposal-filing paths apply (the
+            # replay gate that admitted them covers this listing too — same
+            # predicate): a numeric-substitution / event-slug pair clutters
+            # the Console with never-merge siblings ("pgvector 0.8.5" ↔
+            # "0.8.6", two dated snapshot files) that filing already
+            # refuses. Relate-action pairs (file/concept) are not merges
+            # and keep listing.
+            if not pair and merge_veto(toks[i][1], toks[j][1]) is not None:
+                continue
             names = list(pair) if pair else [toks[i][1], toks[j][1]]
             found = {"type": "duplicate", "severity": "warn",
                      "label": f"{names[0]} ↔ {names[1]}", "entities": names,

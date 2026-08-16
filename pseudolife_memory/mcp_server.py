@@ -1027,7 +1027,8 @@ def memory_graph_review(
         "reject_link": service.graph_reject_proposal,
         "accept_merge": lambda pid: service.graph_accept_entity_merge(
             pid, decided_by="agent"),
-        "accept_junk": service.graph_accept_entity_junk,
+        "accept_junk": lambda pid: service.graph_accept_entity_junk(
+            pid, decided_by="agent"),
         "reject_entity": lambda pid: service.graph_reject_entity_proposal(
             pid, decided_by="agent"),
     }

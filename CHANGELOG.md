@@ -6,6 +6,42 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-08-16 — round-2 review-queue noise: hub contexts, immortal dismissals, junk re-review)
+- **Scan-fallback hub cap** (`deep_dream.max_fallback_mentions`, default 30):
+  a trace-less entity whose token-mention fallback matched an outsized share
+  of the corpus got a corpus-centroid context vector and paired
+  promiscuously — on the 2026-08-16 live bank `pseudolife-pg` matched
+  301/695 embedded entries (its short `pg` token is dropped by the Jaccard
+  tokenizer, leaving one generic token) and filed 9 cross-hub merge pairs in
+  a single pass. The cap applies to the fallback scan only; trace-backed
+  mentions are never capped. Default is the measured p90 of the
+  fallback-set size distribution.
+- **Duplicate-finding dismissals now key on the entity's stored canonical**,
+  not `norm_name(display)`: an entity minted from a bare name and later
+  display-enriched (canonical `gnd`, display `GND (Enshrouded server)`)
+  re-listed after every dismissal because the analyzer filters on stored
+  canonicals — the dismissal row could never match. Old mismatched rows are
+  inert; re-dismissing once with the fix persists correctly.
+- **The stateless duplicate listing applies `merge_veto`**, matching the
+  proposal-filing paths: numeric-substitution and event-slug sibling pairs
+  (`pgvector 0.8.5` ↔ `0.8.6`, two dated snapshot files) no longer clutter
+  the Console review queue with pairs filing already refuses. File/concept
+  relate suggestions are unaffected.
+- **Reviewed junk deletions are durable and tombstoned**: accepting a junk
+  proposal now records a `merge_decisions` row (`into_display` NULL) before
+  the delete — previously the proposal row CASCADEd away with the entity
+  and no record survived, so the same name re-minted and re-queued for a
+  second verdict. The deep dream now auto-deletes a re-minted, re-flagged
+  tombstoned name at the detector's own degree bar (`junk_max_degree`),
+  while never-judged names keep the zero-structure auto-delete guard.
+  `merge_decision_stats` excludes all junk rows (`into_display IS NULL`) so
+  detector precision keeps measuring merges only.
+- **Lesson-synthesis tallies journaled into `dream_runs`**
+  (`lesson_signals` / `lessons_written` / `lessons_deduped` merged into the
+  run row's tallies post-commit): the dedup counter previously existed only
+  in the transient dream-run result, making gate behavior invisible to
+  history.
+
 ### Changed (2026-08-15 — the flat band is the default store; the continuum becomes an opt-in preset)
 - **`memory.miras.preset` defaults to `flat`**: one band at the
   continuum's total capacity (5,250), `balanced` retention — byte-for-byte

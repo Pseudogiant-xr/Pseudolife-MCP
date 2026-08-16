@@ -168,7 +168,8 @@ def test_graph_review_actions_route_to_the_right_service_calls(
                         lambda pid, decided_by=None: calls.append(
                             ("accept_merge", pid, decided_by)) or {"accepted": True})
     monkeypatch.setattr(mod.service, "graph_accept_entity_junk",
-                        lambda pid: calls.append(("accept_junk", pid)) or {"accepted": True})
+                        lambda pid, decided_by=None: calls.append(
+                            ("accept_junk", pid, decided_by)) or {"accepted": True})
     monkeypatch.setattr(mod.service, "graph_reject_entity_proposal",
                         lambda pid, decided_by=None: calls.append(
                             ("reject_entity", pid, decided_by)) or {"rejected": True})
@@ -183,7 +184,7 @@ def test_graph_review_actions_route_to_the_right_service_calls(
 
     assert calls == [("list", None), ("propose", 1), ("accept_link", 7),
                      ("reject_link", 7), ("accept_merge", 7, "agent"),
-                     ("accept_junk", 7), ("reject_entity", 7, "agent")]
+                     ("accept_junk", 7, "agent"), ("reject_entity", 7, "agent")]
 
 
 def test_graph_review_validates_inputs(tmp_path: Path, monkeypatch) -> None:

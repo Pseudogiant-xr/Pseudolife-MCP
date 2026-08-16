@@ -213,7 +213,8 @@ class ConsoleRoutes:
         p("/api/graph/accept-entity-merge",
           lambda q, b: svc.graph_accept_entity_merge(
               b["id"], decided_by=_decided_by(b)))
-        p("/api/graph/accept-entity-junk", lambda q, b: svc.graph_accept_entity_junk(b["id"]))
+        p("/api/graph/accept-entity-junk", lambda q, b: svc.graph_accept_entity_junk(
+              b["id"], decided_by=_decided_by(b)))
         p("/api/graph/reject-entity-proposal",
           lambda q, b: svc.graph_reject_entity_proposal(
               b["id"], decided_by=_decided_by(b)))
