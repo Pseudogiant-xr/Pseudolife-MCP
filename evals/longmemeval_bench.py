@@ -14,7 +14,7 @@ arms (cortex answer when that arm commits, rag fallback on abstention) — a
 serving-policy metric, not a fourth answered arm; see ``replicate.py``.
 
 Model roles: the EXTRACTOR is the experiment variable (``--extractor``,
-floor = the shipped Gemma 4 E2B weights, ceiling = Qwen3.6-27B); the ANSWERER
+floor = the shipped Gemma 4 E2B weights, ceiling = Qwen3.8-27B); the ANSWERER
 and JUDGE are always the Qwen endpoint so runs stay comparable. The rag arm
 never touches the extractor, so it doubles as a cross-run control. Everything
 runs on local OpenAI-compatible endpoints — nothing leaves the machine.
