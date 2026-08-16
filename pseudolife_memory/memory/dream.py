@@ -217,6 +217,54 @@ _EVENTS_SYSTEM_PROMPT = (
     '{"events":[]} if nothing qualifies.'
 )
 
+# Merge-proposal judge (autonomous Step C, 2026-08-16 design). The rules are
+# the distilled house judgment brief the 2026-08-16 Opus panel ran with,
+# grounded in 761 recorded verdicts (23% accept rate — hence the skeptical
+# prior stated outright). SHARED between the daemon's shadow/auto judge and
+# evals/judge_ladder.py so measured arms and the shipped judge are
+# byte-identical; change it only through a new ladder run.
+_JUDGE_SYSTEM_PROMPT = (
+    "You judge MERGE PROPOSALS for a knowledge-graph deduper. Each numbered "
+    "proposal asks: are FROM and INTO two names for the SAME real-world "
+    "referent (accept folds FROM into INTO), or different things (reject)? "
+    "Historically only ~23% of proposals are true merges — be skeptical.\n"
+    "Rules:\n"
+    "1. Evidence over name-shape: accept only when BOTH sides' evidence "
+    "snippets describe the same referent. Similar names with mismatched or "
+    "absent evidence are not enough.\n"
+    "2. Differing variant tokens (sizes, quants, versions, dates: v0.8.5 vs "
+    "v0.8.6, 26B vs 4B, two dated filenames) mean sibling artifacts — "
+    "reject.\n"
+    "3. A dated run/session slug paired with a broader name (a project, a "
+    "process) is one event vs a category — reject.\n"
+    "4. File-vs-concept, feature-vs-phase, tool-vs-its-output, table-vs-tool "
+    "pairs are related but distinct — reject.\n"
+    "5. Legitimate merge shapes: branch-vs-slug, path-vs-basename of the "
+    "same file, bare-vs-qualified name, abbreviation-vs-full name — when "
+    "the evidence agrees.\n"
+    "6. Use \"leave\" only when the evidence is genuinely insufficient to "
+    "decide; do not use it to avoid judging.\n"
+    'Return JSON only: {"verdicts":[{"id":<proposal number>,'
+    '"verdict":"accept"|"reject"|"leave","confidence":<0..1>,'
+    '"note":"<reason, max 25 words>"}]} — one entry per proposal, '
+    "confidence is your honest probability that the verdict is correct."
+)
+
+
+def format_judge_proposal(p: dict) -> str:
+    """One proposal rendered for the judge prompt. Shared with the ladder
+    harness so measurement and production serialize identically."""
+    def _side(s: dict) -> str:
+        snips = "; ".join(str(x)[:240] for x in (s.get("snippets") or [])[:2])
+        return (f"'{s.get('display', '?')}' (degree {s.get('degree', 0)}, "
+                f"scopes {s.get('scopes') or []})"
+                + (f" evidence: {snips}" if snips else " evidence: none"))
+    return (f"[{p['n']}] FROM {_side(p.get('from') or {})}\n"
+            f"    INTO {_side(p.get('into') or {})}\n"
+            f"    detector: {p.get('reason') or '?'}"
+            + (f" (score {p.get('score')})" if p.get("score") is not None
+               else ""))
+
 
 def _vocab_hint(vocab: list[str]) -> str:
     if not vocab:
@@ -923,6 +971,73 @@ class OpenAICompatExtractor:
                                      confidence=conf))
         return out
 
+    def judge_merges(self, proposals: list[dict]) -> list[dict]:
+        """Judge merge proposals (autonomous Step C). Each proposal dict
+        carries ``n`` (1-based number), ``from``/``into`` sides (display,
+        degree, scopes, snippets), ``reason`` and ``score`` — see
+        :func:`format_judge_proposal`. Returns validated verdict dicts
+        ``{"n", "verdict", "confidence", "note"}``; proposals the model
+        skipped are simply absent. Raises :class:`ExtractorError` on
+        transport/parse failure so the caller can tell failure from a
+        genuine empty result."""
+        import json
+        import urllib.request
+
+        proposals = [p for p in (proposals or []) if p]
+        if not proposals:
+            return []
+        headers = {"content-type": "application/json"}
+        if self.api_key:
+            headers["authorization"] = f"Bearer {self.api_key}"
+        try:
+            body = json.dumps({**self.extra_body,
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": _JUDGE_SYSTEM_PROMPT},
+                    {"role": "user", "content": "\n\n".join(
+                        format_judge_proposal(p) for p in proposals)},
+                ],
+                "response_format": {"type": "json_object"},
+                # Verdict rows are short but one is needed PER proposal; the
+                # extraction budget (400) truncates a full batch of 8.
+                "max_tokens": max(self.max_tokens, 120 * len(proposals)),
+                "temperature": 0,
+                "chat_template_kwargs": {"enable_thinking": False},
+            }).encode()
+            req = urllib.request.Request(
+                f"{self.base_url}/chat/completions", data=body,
+                headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                data = json.loads(resp.read().decode())
+            content = data["choices"][0]["message"]["content"] or ""
+            s, e = content.find("{"), content.rfind("}")
+            if s != -1 and e > s:
+                content = content[s:e + 1]
+            parsed = json.loads(content)
+            raw = parsed.get("verdicts", []) if isinstance(parsed, dict) else []
+        except Exception as exc:  # noqa: BLE001
+            raise ExtractorError(f"judge_merges failed: {exc}") from exc
+        known = {int(p["n"]) for p in proposals}
+        out: list[dict] = []
+        for v in raw if isinstance(raw, list) else []:
+            if not isinstance(v, dict):
+                continue
+            try:
+                n = int(v.get("id"))
+            except (TypeError, ValueError):
+                continue
+            verdict = str(v.get("verdict", "")).strip().lower()
+            if n not in known or verdict not in ("accept", "reject", "leave"):
+                continue
+            try:
+                conf = max(0.0, min(1.0, float(v.get("confidence", 0.5))))
+            except (TypeError, ValueError):
+                conf = 0.5
+            note = str(v.get("note", "")).strip()[:200]
+            out.append({"n": n, "verdict": verdict, "confidence": conf,
+                        "note": note})
+        return out
+
     def infer_outcomes(self, context_text: str, *,
                        cap: int = 3) -> list[dict] | None:
         """Infer outcome signals from one closed episode's stored record.
@@ -1271,6 +1386,16 @@ def run_sweep_once(service) -> dict:
     if deep and deep.get("fired"):
         logger.info("deep-dream tick fired: %s", deep)
     extra = {"deep_tick": deep} if deep is not None else {}
+    # Autonomous Step-C judge rides the same timer (2026-08-16 design):
+    # shadow-judges a bounded batch of unjudged pending merge proposals,
+    # auto-applying only what the configured mode allows. getattr-guarded
+    # like the tick; never raises into the sweep.
+    judge = getattr(service, "deep_dream_judge", None)
+    judged = judge() if judge is not None else None
+    if judged and judged.get("judged"):
+        logger.info("deep-dream judge: %s", judged)
+    if judged is not None:
+        extra["deep_judge"] = judged
     status = service.dream_status()
     if not status["would_fire"]:
         return {"fired": False, "reason": "below_threshold",

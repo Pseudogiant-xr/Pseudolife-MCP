@@ -2,8 +2,8 @@
  "meta": {
   "title": "PseudoLife-MCP System Atlas",
   "version": "0.13.0",
-  "schema": 29,
-  "verified": "2026-08-15"
+  "schema": 30,
+  "verified": "2026-08-16"
  },
  "groups": {
   "clients": {
@@ -653,7 +653,8 @@
     "Batch retry ×3 → per-entry quarantine (poison-pill isolation)",
     "run_sweep_once: compaction every tick; dream on backlog + quiescence",
     "Claim op:add/remove routes to set members; op prompt block shipped 2026-08-01 (v5, count-exclusion repaired the KU-negative v0)",
-    "Write gates: literal_violations (digit fidelity, enforce) · span_unbacked (quote-vs-cited-note containment, ships off) — fidelity checks, never trust checks"
+    "Write gates: literal_violations (digit fidelity, enforce) · span_unbacked (quote-vs-cited-note containment, ships off) — fidelity checks, never trust checks",
+    "run_sweep_once also rides: need-based deep tick + autonomous Step-C judge (judge_merges, shadow/auto-reject, v30)"
    ]
   },
   {

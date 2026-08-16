@@ -450,7 +450,17 @@ filing, snapshot-first — once the bank has grown by
 `memory.deep_dream.auto_min_new_entities` (default 150) since the last
 apply or `auto_interval_days` (default 7) have passed; every apply,
 manual or tick, resets that clock (`auto_tick: false` disables). Step C
-(judgment) is never automated: the tick only fills the review queues.
+(judgment) is autonomous too, in measured stages: each sweep also sends a
+bounded batch of pending merge proposals — with the same evidence pack the
+review surfaces show — to the configured model (`memory.deep_dream.judge_mode`,
+default `shadow`; the dream extractor, or a dedicated `judge_url`), and
+records the verdict + confidence + note on the proposal row (schema v30),
+shown beside the evidence in every review surface. In `auto-reject` mode,
+reject verdicts at/above `judge_reject_min_confidence` are applied
+(`decided_by='dream-judge'`, pair dismissed); accepts are never auto-applied
+at this phase. Which models judge reliably is measured, not assumed:
+`evals/judge_ladder.py` scores arms against ratified triage verdicts
+(`evals/results/judge-ladder-20260816.json`).
 The same need signal rides `memory_dream(action="status")` as the
 `deep_dream: {recommended, reason, ...}` block — a harness-agnostic
 nudge any MCP client can surface to its user when a triage session is

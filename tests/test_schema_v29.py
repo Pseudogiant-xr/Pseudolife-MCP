@@ -19,12 +19,10 @@ from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
 from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
 
 
-def test_meta_version_is_29():
-    # The newest schema test carries the exact current-version pin — the
-    # deliberate tripwire that forces a bump author through the shipping
-    # checklist. On the v30 bump: relax this to >= 29 and pin == 30 in the
-    # new test_schema_v30.py (two-file touch, not ten).
-    assert SCHEMA_META_VERSION == 29
+def test_meta_version_is_at_least_29():
+    # Relaxed on the v30 bump; the exact current-version pin lives in the
+    # newest schema test (test_schema_v30.py).
+    assert SCHEMA_META_VERSION >= 29
 
 
 def test_facts_stance_column_exists_and_is_nullable(pg_conn):

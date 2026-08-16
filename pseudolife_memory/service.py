@@ -6633,6 +6633,117 @@ class MemoryService:
             "snapshot")}
         return {"fired": True, "reason": need["reason"], **slim}
 
+    def _judge_extractor(self, extractor=None):
+        """The endpoint the autonomous judge calls: an explicit override
+        (``judge_url``), the passed extractor, or the daemon's dream
+        extractor — whichever first supports ``judge_merges``."""
+        cfg = self.config.memory.deep_dream
+        dream_cfg = self.config.memory.dream
+        if cfg.judge_url:
+            from pseudolife_memory.memory.dream import OpenAICompatExtractor
+            return OpenAICompatExtractor(
+                cfg.judge_url, cfg.judge_model or "judge",
+                timeout_seconds=dream_cfg.extractor_timeout_seconds)
+        if extractor is None:
+            from pseudolife_memory.memory.dream import (
+                build_extractor_with_fallback,
+            )
+            try:
+                extractor, _which = build_extractor_with_fallback(dream_cfg)
+            except ValueError:
+                return None
+        return extractor if hasattr(extractor, "judge_merges") else None
+
+    def deep_dream_judge(self, extractor=None, *,
+                         limit: int | None = None) -> dict[str, Any]:
+        """Autonomous Step C (2026-08-16 design): shadow-judge a bounded
+        batch of not-yet-judged pending MERGE proposals with the configured
+        model, recording each verdict on the proposal row. In
+        ``auto-reject`` mode, reject verdicts at/above
+        ``judge_reject_min_confidence`` are applied
+        (``decided_by='dream-judge'``, pair dismissed). Accept verdicts are
+        NEVER applied here — they wait for a decision path with stronger
+        guarantees. Never raises into the sweep timer."""
+        import time as _t
+        cfg = self.config.memory.deep_dream
+        if cfg.judge_mode not in ("shadow", "auto-reject"):
+            return {"judged": 0, "skipped": "disabled"}
+        try:
+            with self._lock:
+                self._ensure_init()
+                if self._storage is None:
+                    return {"judged": 0, "skipped": "no_storage"}
+                pending = [p for p in self._storage.pending_entity_proposals()
+                           if p.get("kind") == "merge"
+                           and not p.get("judge_verdict")]
+            if not pending:
+                return {"judged": 0}
+            ex = self._judge_extractor(extractor)
+            if ex is None:
+                return {"judged": 0, "skipped": "no_judge_extractor"}
+            cap = int(limit if limit is not None else cfg.judge_batch)
+            pending = pending[:max(1, cap)]
+            with self._lock:
+                g = self._storage.load_graph()
+                scope_map = self._storage.entity_sources_map()
+                traces = self._storage.traces_by_entity_norm()
+                entries = self._storage.load_entries()
+                fact_counts = self._storage.entity_fact_counts()
+            from pseudolife_memory.memory import graph_consolidation as gc
+            _, mentions = gc.entity_context_vectors(
+                g["entities"], entries, traces,
+                min_mentions=cfg.min_entity_mentions,
+                max_fallback_mentions=cfg.max_fallback_mentions or None)
+            enriched = self._enrich_merge_proposals(
+                pending, g["entities"], g["edges"], entries, traces,
+                mentions, scope_map, cfg.max_context_snippets,
+                cfg.snippet_max_chars, True, fact_counts=fact_counts)
+            proposals = [{"n": i + 1, "from": e["from"], "into": e["into"],
+                          "reason": e.get("reason"), "score": e.get("score")}
+                         for i, e in enumerate(enriched)]
+            verdicts = ex.judge_merges(proposals)
+            model = getattr(ex, "model", None) or type(ex).__name__
+            judged = rejected = 0
+            now = _t.time()
+            # Rows the model silently skipped in an otherwise-successful call
+            # are recorded as zero-confidence leaves: without this they are
+            # re-sent every sweep and a stubborn batch head starves the rest
+            # of the queue (the sidecar arm returned no verdict for 33% of
+            # rows on the 2026-08-16 ladder). Transport failures raise above
+            # and mark nothing.
+            returned = {v["n"] for v in verdicts}
+            for p in proposals:
+                if p["n"] not in returned:
+                    verdicts.append({"n": p["n"], "verdict": "leave",
+                                     "confidence": 0.0,
+                                     "note": "model returned no verdict"})
+            for v in verdicts:
+                e = enriched[v["n"] - 1]
+                with self._lock:
+                    ok = self._storage.set_entity_proposal_judgment(
+                        e["id"], verdict=v["verdict"],
+                        confidence=v["confidence"], note=v["note"] or None,
+                        model=model, at=now)
+                if not ok:
+                    continue
+                judged += 1
+                if (cfg.judge_mode == "auto-reject"
+                        and v["verdict"] == "reject"
+                        and v["confidence"] >= cfg.judge_reject_min_confidence):
+                    out = self.graph_reject_entity_proposal(
+                        e["id"], decided_by="dream-judge")
+                    if out.get("rejected"):
+                        rejected += 1
+                        self.graph_dismiss_duplicate(
+                            e["from"]["display"] or "",
+                            e["into"]["display"] or "")
+            return {"judged": judged, "auto_rejected": rejected,
+                    "pending_unjudged": max(0, len(verdicts) - judged),
+                    "model": model, "mode": cfg.judge_mode}
+        except Exception as exc:  # noqa: BLE001 — the judge must never kill the sweep
+            logger.warning("deep-dream judge failed: %s", exc)
+            return {"judged": 0, "error": str(exc)}
+
     def _write_graph_snapshot(self) -> str | None:
         """Timestamped JSON dump of the five graph tables the apply path is
         about to mutate — a targeted undo artifact (pg_dump backups remain the
@@ -6747,12 +6858,20 @@ class MemoryService:
                         "degree": deg.get(eid, 0),
                         "scopes": sorted(scope_map.get(eid, [])),
                         "snippets": snips if include_snippets else []}
-            out.append({"id": p["id"], "score": p.get("score"),
-                        "reason": p.get("reason"),
-                        "group": (by_id.get(g) or {}).get("display")
-                        if g is not None else None,
-                        "from": side(frm, s.get("src_snippets", [])),
-                        "into": side(into, s.get("dst_snippets", []))})
+            row = {"id": p["id"], "score": p.get("score"),
+                   "reason": p.get("reason"),
+                   "group": (by_id.get(g) or {}).get("display")
+                   if g is not None else None,
+                   "from": side(frm, s.get("src_snippets", [])),
+                   "into": side(into, s.get("dst_snippets", []))}
+            # Shadow pre-judgment (v30): an opinion for the reviewer, shown
+            # beside the evidence it judged from.
+            if p.get("judge_verdict"):
+                row["judge"] = {"verdict": p["judge_verdict"],
+                                "confidence": p.get("judge_confidence"),
+                                "note": p.get("judge_note"),
+                                "model": p.get("judge_model")}
+            out.append(row)
         return out
 
     @staticmethod
