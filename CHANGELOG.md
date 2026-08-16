@@ -6,6 +6,44 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-08-15 — the flat band is the default store; the continuum becomes an opt-in preset)
+- **`memory.miras.preset` defaults to `flat`**: one band at the
+  continuum's total capacity (5,250), `balanced` retention — byte-for-byte
+  the ablation arm the flat-band verdict measured as tying the 8-band
+  continuum on every preregistered gate. The `continuum` preset (and its
+  deprecated aliases) stays in the registry as the one-line rollback; the
+  multi-band machinery (promotion, demotion cascade, per-tier retention)
+  remains in the tree, exercised by its invariant tests. The four breaks
+  a naive flip would have caused are fixed in the same change: capacity
+  eviction under one band is now an intentional, counted
+  (`memory_stats().true_drops`), logged true drop; unknown `bands=`
+  filter names raise with the valid set instead of silently matching
+  nothing; file-mode state restore routes saved bands whose name left
+  the preset into the first band (previously lost every entry); and
+  hydration reconciles stale `entries.band` stamps to the configured
+  layout, write-through, idempotently — covering preset changes in both
+  directions and legacy `.pt` imports. Console: the Observatory renders
+  a single-band store as a capacity meter ("Memory store", no degenerate
+  ladder), the Stream hides the constant band chip, and the two inert
+  depth-recency knobs left the config surface (fields remain for
+  multi-band configs). Docs/README/atlas/i18n/llms surfaces audited to
+  match. The deploy cutover and rollback path are documented in
+  `docs/superpowers/specs/2026-08-15-flat-band-migration-design.md`.
+
+### Added (2026-08-15 — distractor-scale probe: accumulation measurably hurts retrieval)
+- **First positive evidence for curation**: a preregistered offline probe
+  (`evals/distractor_scale_probe.py`, G0-validated mirror, no judge)
+  found evidence-in-top-6 falls monotonically as off-topic distractors
+  accumulate — 0.830 at own-haystack scale to 0.597 at ~7k entries
+  (paired delta +0.233, p < 0.0001, 78 questions) — while BM25 latency
+  stays under 1 s until ~11.4k entries (~0.088 ms/entry): quality binds
+  long before latency. Consequence recorded in the spec
+  (`2026-08-15-distractor-scale-probe-preregistration.md`): a future
+  sweep agent has a measured recovery ceiling (~23 points at 15x);
+  orthogonal to the flat-band migration (dilution hits banded and flat
+  pooling identically). Artifact:
+  `evals/results/distractor-scale-probe-2026-08-15.json`.
+
 ### Added (2026-08-15 — flat-band verdict: the preregistered rerun + steelman campaign)
 - **The 8-band continuum's ablation was rerun under the current (v25+)
   retrieval backbone with six preregistered steelman edge cases; verdict:

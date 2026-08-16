@@ -242,10 +242,9 @@ class TestStatsAndSave:
             pristine_service.store(f"Stat-test memory {i}", source="t")
         stats = pristine_service.stats()
         assert stats["total_memories"] >= 3
-        # Continuum preset has 8 bands.
-        assert len(stats["bands"]) == 8
-        # First band ('working' in continuum) or 'instant' — at least one
-        # band has size > 0.
+        # Flat default (2026-08-15): one band named "flat".
+        assert len(stats["bands"]) == 1
+        assert stats["bands"][0]["name"] == "flat"
         assert any(b["size"] > 0 for b in stats["bands"])
 
     def test_save_returns_target_dir(
@@ -293,10 +292,10 @@ class TestTrace:
     ) -> None:
         pristine_service.store("X happened", source="trace-test")
         out = pristine_service.trace(
-            "X", top_k=3, sources=["trace-test"], bands=["instant"],
+            "X", top_k=3, sources=["trace-test"], bands=["flat"],
         )
         assert out["trace"]["filters"]["sources"] == ["trace-test"]
-        assert out["trace"]["filters"]["bands"] == ["instant"]
+        assert out["trace"]["filters"]["bands"] == ["flat"]
 
     def test_trace_tier_candidates_explain_drops(
         self, pristine_service: MemoryService,

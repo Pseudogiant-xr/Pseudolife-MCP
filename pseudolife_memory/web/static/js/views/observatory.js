@@ -9,7 +9,9 @@ import { donutWithLegend, barRows, sparkline } from "../charts.js";
 
 const CARDS = [
   { key: "entries", label: "Associative entries", tone: "var(--c-assoc)", route: "stream",
-    sub: (c) => c.band_count ? `across ${c.band_count} bands` : "continuum" },
+    // One band is the flat default (2026-08-15) — "across 1 bands" would
+    // present the store as a degenerate continuum instead of what it is.
+    sub: (c) => c.band_count > 1 ? `across ${c.band_count} bands` : "flat store" },
   { key: "facts", label: "Canonical facts", tone: "var(--c-cortex)", route: "cortex",
     sub: (c) => c.facts_contested ? `${c.facts_contested} contested` : "cortex" },
   { key: "world", label: "World facts", tone: "var(--c-world)", route: "world",
@@ -152,15 +154,19 @@ function continuumPanel(stats) {
         }))
     : el("div", { class: "empty" }, el("div", { class: "big" }, "No band stats"));
 
+  // Single-band (the flat default): a capacity meter, not a continuum —
+  // the cross-band sparkline and depth eyebrow only mean something with
+  // multiple tiers to compare.
+  const multi = bands.length > 1;
   return el("div", { class: "panel" },
     el("div", { class: "panel-head" },
-      el("h2", {}, "Memory continuum"),
+      el("h2", {}, multi ? "Memory continuum" : "Memory store"),
       el("span", { class: "sub" }, stats.preset ? `${stats.preset} · ${fmtNum(stats.total_memories || 0)} entries` : ""),
       el("span", { class: "spacer" }),
-      bands.length ? el("span", { class: "spark-wrap", title: "retrieval hit rate across bands" },
+      multi ? el("span", { class: "spark-wrap", title: "retrieval hit rate across bands" },
         el("span", { class: "eyebrow" }, "hit rate"),
         sparkline(bands.map((b) => (b.hit_rate || 0) * 100), { w: 84, h: 20, color: "var(--accent)" })) : null,
-      el("span", { class: "eyebrow" }, "working → forever")),
+      el("span", { class: "eyebrow" }, multi ? "working → forever" : "capacity")),
     el("div", { class: "panel-body" }, body));
 }
 

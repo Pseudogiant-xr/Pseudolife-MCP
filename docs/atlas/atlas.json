@@ -3,7 +3,7 @@
   "title": "PseudoLife-MCP System Atlas",
   "version": "0.13.0",
   "schema": 29,
-  "verified": "2026-08-10"
+  "verified": "2026-08-15"
  },
  "groups": {
   "clients": {
@@ -394,11 +394,11 @@
    "g": "engine",
    "x": 900,
    "y": 690,
-   "t": "cms.py · Continuum (CMS)",
-   "s": "band orchestrator · 5-pool retrieval",
+   "t": "cms.py · Memory store (CMS)",
+   "s": "store orchestrator · 5-pool retrieval",
    "p": "pseudolife_memory/memory/cms.py",
    "d": [
-    "store(): band[0] + promotion walk on logical-turn cadence",
+    "store(): flat band by default (2026-08-15); promotion walk only under multi-band presets",
     "retrieve(): neural + slot-index + BM25 + reference + rerank pools",
     "retrieve_with_trace() powers the memory_trace diagnostics tool",
     "Write-through to Postgres; .pt fallback schema v6 with migration"
@@ -409,12 +409,13 @@
    "g": "engine",
    "x": 900,
    "y": 800,
-   "t": "miras/ · 8-band continuum",
-   "s": "working → forever · cosine",
+   "t": "miras/ · flat band (default) + continuum preset",
+   "s": "flat · 5,250 cap · cosine",
    "p": "pseudolife_memory/memory/miras/",
    "d": [
     "Plain cosine stores + novelty surprise gate (neural MLP removed v0.5)",
-    "Geometric update_interval 1→1000 drives promotion cadence; ~5K total capacity",
+    "Default: ONE flat band, retention-scored true drop at capacity (2026-08-15 verdict)",
+    "Opt-in continuum preset: 8 tiers, promotion cadence, demotion cascade",
     "Retention policies: balanced / recency / surprise + reinforcement boost"
    ]
   },
@@ -1364,7 +1365,7 @@
   {
    "f": "cms",
    "t": "bands",
-   "l": "band[0] + promotion walk",
+   "l": "flat band (promotion walk under multi-band presets)",
    "k": "data"
   },
   {
@@ -1713,7 +1714,7 @@
  "flows": {
   "store": {
    "name": "store",
-   "desc": "memory_store: Claude Code → shim → /mcp → MemoryService → embed → CMS (contradiction check BEFORE the surprise gate) → band[0] + slot index → regex slot promotion into the cortex → write-through to Postgres.",
+   "desc": "memory_store: Claude Code → shim → /mcp → MemoryService → embed → CMS (contradiction check BEFORE the surprise gate) → the flat band + slot index → regex slot promotion into the cortex → write-through to Postgres.",
    "seq": [
     "cc>shim",
     "shim>api",
@@ -1730,7 +1731,7 @@
   },
   "recall": {
    "name": "search / recall",
-   "desc": "memory_search & memory_recall: query embedded, then a 5-pool merge — neural bands + slot index + optional BM25 + reference bank + optional cross-encoder rerank. memory_recall wraps it in an iterative graph-hop loop.",
+   "desc": "memory_search & memory_recall: query embedded, then a 5-pool merge — the neural store + slot index + optional BM25 + reference bank + optional cross-encoder rerank. memory_recall wraps it in an iterative graph-hop loop.",
    "seq": [
     "cc>shim",
     "shim>api",

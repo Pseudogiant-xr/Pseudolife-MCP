@@ -674,7 +674,7 @@ function renderAbout() {
     <div class="about">
       <h2 style="font-size:15px">System Atlas</h2>
       <p><span class="stat">${state.nodes.length}</span> components · <span class="stat">${state.edges.length}</span> edges · <span class="stat">11</span> subsystems. Built from a four-way deep read of the codebase (engine, transport, storage/ops, evals) and verified against the working tree on ${META.verified} (v${META.version}, schema v${META.schema}).</p>
-      <p><b>Read it left to right:</b> MCP clients enter through the stdio shim (or direct HTTP) into the daemon on <span class="stat">:8765</span>, whose single MemoryService orchestrates the 8-band continuum, three canonical stores, the graph, and the dream cycle — all persisting to Postgres + pgvector on <span class="stat">:5433</span> behind two external volumes.</p>
+      <p><b>Read it left to right:</b> MCP clients enter through the stdio shim (or direct HTTP) into the daemon on <span class="stat">:8765</span>, whose single MemoryService orchestrates the flat associative store, three canonical stores, the graph, and the dream cycle — all persisting to Postgres + pgvector on <span class="stat">:5433</span> behind two external volumes.</p>
       <p><b>Editing:</b> drag nodes, click → Edit to rewrite any card or add notes (dot marks annotated nodes), + node / + edge to extend, export/import JSON. Edits live in your browser's localStorage — reset restores the source atlas.</p>
       <label>flows — click a chip above to trace</label>
       ${flowRows}

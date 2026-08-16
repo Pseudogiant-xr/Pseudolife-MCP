@@ -117,7 +117,10 @@ function entryCard(e, searching) {
     el("div", { class: "entry-text" }, e.text),
     el("div", { class: "entry-meta" },
       e.source ? badge(e.source) : null,
-      e.bank ? el("span", { class: "band-chip" }, e.bank) : null,
+      // "flat" is the single-band default (2026-08-15): a chip that is
+      // identical on every entry is noise. Multi-band/custom presets
+      // keep their per-entry band chips.
+      e.bank && e.bank !== "flat" ? el("span", { class: "band-chip" }, e.bank) : null,
       ...(e.tags || []).slice(0, 6).map((t) => el("span", { class: "band-chip" }, "#" + t)),
       e.superseded ? badge("superseded", "stale") : null,
       el("span", { class: "spacer" }),

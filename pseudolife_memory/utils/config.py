@@ -80,13 +80,17 @@ class MIRASConfig:
     Attributes
     ----------
     preset:
-        ``titans`` / ``moneta`` / ``yaad`` / ``memora`` / ``continuum`` /
-        ``custom``. ``continuum`` is the v0.6 8-tier preset designed for
+        ``flat`` (default since 2026-08-15 — one band at the continuum's
+        total capacity; the measured tie, see docs/superpowers/specs/
+        2026-08-14-flat-band-verdict-preregistration.md) / ``continuum``
+        (the retained 8-tier layout — one-line rollback) / ``titans`` /
+        ``moneta`` / ``yaad`` / ``memora`` (deprecated aliases of
+        ``continuum``) / ``custom``. ``continuum`` is the v0.6 8-tier preset designed for
         agentic deployments.
     bands:
         Per-tier specs. Populated from the preset for non-``custom``.
     """
-    preset: str = "continuum"
+    preset: str = "flat"
     bands: list[MIRASBandSpec] = field(default_factory=list)
 
     def __post_init__(self) -> None:
@@ -819,8 +823,11 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
             bands = [_dict_to_dataclass(MIRASBandSpec, b) for b in bands_raw]
             # Construction triggers __post_init__ which overrides ``bands`` from
             # the preset registry for non-custom presets — see :class:`MIRASConfig`.
+            # Fallback must match the dataclass default (flat since
+            # 2026-08-15) — a miras block that omits ``preset`` must not
+            # resolve differently than no miras block at all.
             config.memory.miras = MIRASConfig(
-                preset=miras_raw.get("preset", "titans"),
+                preset=miras_raw.get("preset", "flat"),
                 bands=bands,
             )
         if "reference" in mem_raw:

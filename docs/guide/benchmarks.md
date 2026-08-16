@@ -252,7 +252,21 @@ see [asymmetric query/document encoding](retrieval.md#asymmetric-query-and-docum
 
 ## Band structure — the continuum earns nothing on either side
 
-The 8-band cosine continuum is the memory's headline structure, so it is
+> **Outcome (2026-08-15): shipped.** The flat store is now the default
+> preset. A preregistered rerun under the current retrieval backbone
+> (v25 embedder + BM25-on) plus six steelman edge cases — forced
+> eviction at matched capacity, depth-scaled recency at two half-life
+> bases, 202 real recorded queries under a blind judge, lifecycle
+> consumers, latency — came back a tie on every gate, in both
+> directions: the significant July deltas below (each way) did not
+> reproduce, and the write-side loss was fixed by the 2026-07-25
+> demotion cascade before the rerun (survival now 0.0 loss both arms).
+> The July results below are retained as the historical record that
+> opened the question; the rerun's full gates table lives in
+> `docs/superpowers/specs/2026-08-14-flat-band-verdict-preregistration.md`
+> with committed `abl25-*` artifacts.
+
+The 8-band cosine continuum was the memory's headline structure, so it was
 worth asking what it buys. An offline ablation rebuilt every KU answer
 context from the same banks with the bands collapsed into a **single flat
 cosine pool**, under two timestamp regimes (`wall` — every entry stamped
@@ -319,11 +333,16 @@ still decisive for the design: partitioning a fixed capacity into
 recency tiers throws away entries that an unpartitioned store of the same
 size would have kept, and the memory is measurably worse for it.
 
-Both of the continuum's defences have now been measured and neither
-holds. The case for the banding, if there is one, has to be made on
-grounds this benchmark does not reach — and the honest engineering
-conclusion is that a flat store is the better default until such a case
-is made.
+Both of the continuum's July defences were measured here and neither
+held. The 2026-08-15 preregistered rerun then closed the two bounds this
+page flags: the demotion cascade (2026-07-25) eliminated the
+partition-forced eviction entirely (loss 0.0 both ingest arms — the
+whole-system tables above describe code that no longer ships), and a
+capacity-scaled corpus where **both** arms genuinely evict found the
+banded retention stack ties a single flat policy on gold-evidence
+survival (0.459 vs 0.465, p = 1.0). With every gate a tie, the flat
+store became the default on 2026-08-15; the `continuum` preset remains
+one config line away.
 
 ## Extraction quality is the dominant factor
 

@@ -12,16 +12,24 @@ def test_recency_base_default():
     assert cfg.recency_base_half_life_s == 3600.0
 
 
-def test_continuum_preset_yields_eight_cosine_bands():
-    """v0.5: the default preset is the 8-tier continuum; band specs carry only
-    capacity / cadence / promotion / eviction (no neural axes)."""
+def test_default_preset_is_the_flat_band():
+    """2026-08-15: the default preset is one flat band (the flat-band
+    verdict's measured tie); band specs carry only capacity / cadence /
+    promotion / eviction (no neural axes)."""
     cfg = MemoryConfig()
-    assert cfg.miras.preset == "continuum"
-    assert len(cfg.miras.bands) == 8
+    assert cfg.miras.preset == "flat"
+    assert len(cfg.miras.bands) == 1
     spec = cfg.miras.bands[0]
     assert spec.retention_policy in {"balanced", "recency_heavy", "surprise_heavy"}
     assert not hasattr(spec, "objective")
     assert not hasattr(spec, "memory_module")
+
+
+def test_continuum_preset_retained_yields_eight_cosine_bands():
+    """The 8-tier continuum stays available as the opt-in rollback."""
+    from pseudolife_memory.utils.config import MIRASConfig
+    cfg = MIRASConfig(preset="continuum")
+    assert len(cfg.bands) == 8
 
 
 def test_yaml_overrides(tmp_path):

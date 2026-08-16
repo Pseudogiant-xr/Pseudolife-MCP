@@ -203,6 +203,21 @@ def write_scaled_config(data_dir: Path, total: int) -> tuple[Path, int]:
     return p, sum(caps)
 
 
+def write_continuum_config(data_dir: Path) -> Path:
+    """Pin the 8-band continuum for the continuum replay arm. Required
+    since the 2026-08-15 default flip (a bare service is now FLAT);
+    ``surprise_threshold`` pinned to 0.0 for the same YAML-loader
+    divergence reason as :func:`write_flat_config`, keeping the arm
+    byte-identical to the pre-flip continuum arm."""
+    p = Path(data_dir) / "config.yaml"
+    p.write_text("""memory:
+  surprise_threshold: 0.0
+  miras:
+    preset: continuum
+""", encoding="utf-8")
+    return p
+
+
 def write_flat_config(data_dir: Path, cap: int) -> Path:
     """Write a config.yaml that MemoryService will pick up, replacing the
     8-band continuum with ONE flat band of ``cap`` entries. Promotion can
@@ -345,6 +360,10 @@ def cmd_replay(args) -> int:
             write_flat_config(tmp, flat_cap)
         elif args.band_preset == "scaled":
             write_scaled_config(tmp, args.scale_total)
+        else:
+            # Explicit since the 2026-08-15 default flip: a bare service
+            # is now the flat layout, which would invalidate this arm.
+            write_continuum_config(tmp)
         svc = build_service(tmp)              # fresh, truncated bench DB —
         if args.band_preset != "continuum":
             # A silent fallback to the 8-band preset would invalidate the

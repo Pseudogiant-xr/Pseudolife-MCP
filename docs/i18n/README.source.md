@@ -18,8 +18,8 @@ coding agent is the intelligence; this server is its memory on disk.
 
 What you get:
 
-- **Associative memory that ages like memory should** — a recency continuum
-  of memory bands ranked by similarity, with contradiction detection and
+- **Associative memory with honest forgetting** — a flat similarity store
+  with hybrid dense-plus-lexical retrieval, contradiction detection and
   supersession: corrections replace old answers instead of piling up
   beside them.
 - **Canonical facts, not vibes** — one *current* value per
@@ -86,8 +86,8 @@ The agent stores one claim at a time as it works (`memory_store`,
 sessions, the **dream** distils the stream into canonical facts, graph
 relations, and procedural lessons. At every session start, a briefing
 injects what the memory is unsure about, lessons from past work, and where
-you left off. Retrieval blends semantic search over the memory bands with
-the canonical fact store, so corrected answers win over stale ones.
+you left off. Retrieval blends semantic search over the associative store
+with the canonical fact store, so corrected answers win over stale ones.
 
 ## Documentation (English)
 

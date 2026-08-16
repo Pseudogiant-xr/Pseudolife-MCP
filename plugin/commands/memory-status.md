@@ -7,11 +7,14 @@ Report the state of the Pseudolife memory stack:
    report that the daemon is down and how to start it:
    `docker compose -f <clone>/ops/docker-compose.yml up -d`
    (install guide: https://github.com/Pseudogiant-xr/Pseudolife-MCP#quickstart).
-2. Call `memory_stats()` and summarize: `total_memories`, per-band occupancy
-   (`bands[].size` / `capacity` / `hit_rate`), the `preset`, the reference
-   bank (`reference_bank_size` / `reference_document_count`), and
-   `communities`. Flag `weights_reset: true` if present — it means band
-   weights restarted fresh.
+2. Call `memory_stats()` and summarize: `total_memories`, store occupancy
+   as a capacity meter (`bands[0].size` / `capacity` under the default
+   flat preset — multi-band presets get a per-band table instead), the
+   `preset`, `true_drops` (non-zero means real capacity pressure —
+   flag it), the reference bank (`reference_bank_size` /
+   `reference_document_count`), and `communities`. Flag
+   `weights_reset: true` if present — it means the store's counters
+   restarted fresh.
 3. Call `memory_dream(action="status")` for consolidation state: `backlog`,
    `idle_seconds`, `would_fire`, `dream_cursor` (how far consolidation has
    got), and any pending outcome inference. Fact/lesson counts and dream

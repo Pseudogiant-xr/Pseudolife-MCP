@@ -1076,6 +1076,7 @@ class MemoryService:
         with self._lock:
             self._ensure_init()
             assert self._embedder is not None and self._cms is not None
+            self._validate_band_filter(bands)
             episodes = self._episode_subtree(episodes)
             query = (query or "").strip()
             if not query:
@@ -1182,6 +1183,25 @@ class MemoryService:
     # Tool: trace — search + structured ranking trace
     # ------------------------------------------------------------------
 
+    def _validate_band_filter(self, bands: list[str] | None) -> None:
+        """Unknown band names raise instead of silently matching nothing.
+
+        Before 2026-08-15 a ``bands=`` filter naming a band the preset
+        doesn't have (e.g. the continuum-era ``["working","instant"]``
+        under the flat default) returned an empty result set with no
+        error — indistinguishable from "nothing relevant stored". Caller
+        must already hold self._lock with the CMS initialised.
+        """
+        if not bands:
+            return
+        assert self._cms is not None
+        valid = {b.name for b in self._cms.bands}
+        unknown = [b for b in bands if b not in valid]
+        if unknown:
+            raise ValueError(
+                f"unknown band name(s) {unknown!r} — this preset has "
+                f"{sorted(valid)!r}")
+
     def trace(
         self,
         query: str,
@@ -1211,6 +1231,7 @@ class MemoryService:
         with self._lock:
             self._ensure_init()
             assert self._embedder is not None and self._cms is not None
+            self._validate_band_filter(bands)
             query = (query or "").strip()
             if not query:
                 return {

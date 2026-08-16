@@ -65,7 +65,13 @@ def test_store_writes_through(cms, storage):
     assert _pg_view(storage)["write-through fact one"]["tags"] == ["wt"]
 
 
-def test_promotion_moves_band_in_storage(cms, storage):
+def test_promotion_moves_band_in_storage(storage):
+    # Promotion needs a deeper band — the retained continuum preset
+    # (the flat default has nowhere to promote to).
+    from pseudolife_memory.utils.config import MIRASConfig
+    cfg = MemoryConfig()
+    cfg.miras = MIRASConfig(preset="continuum")
+    cms = ContinuumMemorySystem(cfg, storage=storage)
     cms.store("promotable fact", _emb(3), source="t")
     src_idx, entry = next(
         (i, e) for i, b in enumerate(cms.bands)

@@ -13,7 +13,11 @@ def _emb(seed: int) -> torch.Tensor:
 
 
 def test_half_life_uses_config_base():
+    from pseudolife_memory.utils.config import MIRASConfig
     cfg = MemoryConfig()
+    # The ramp needs depths to ramp over — the flat default (2026-08-15)
+    # has one band, so this pin runs on the retained continuum preset.
+    cfg.miras = MIRASConfig(preset="continuum")
     cfg.recency_base_half_life_s = 7200.0
     # The depth ramp is opt-in since 2026-07-25; this pins the ramp itself.
     cfg.recency_boost_enabled = True

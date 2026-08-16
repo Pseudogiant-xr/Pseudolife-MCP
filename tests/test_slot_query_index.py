@@ -38,9 +38,13 @@ from pseudolife_memory.utils.config import (
 )
 
 
-def _fresh_cms() -> ContinuumMemorySystem:
+def _fresh_cms(preset: str | None = None) -> ContinuumMemorySystem:
+    """Default (flat since 2026-08-15) unless a test needs the retained
+    multi-band machinery — pass preset="continuum" for those."""
     cfg = MemoryConfig()
     cfg.surprise_threshold = -1.0  # disable the surprise gate
+    if preset is not None:
+        cfg.miras = MIRASConfig(preset=preset)
     return ContinuumMemorySystem(cfg)
 
 
@@ -279,7 +283,8 @@ def test_band_filter_matches_containing_band_not_bank_stamp() -> None:
 
 
 def test_slot_pool_finds_promoted_entry_with_band_filter() -> None:
-    cms = _fresh_cms()
+    # Promotion needs somewhere to promote TO — the retained continuum.
+    cms = _fresh_cms(preset="continuum")
     # Pin Jacque to band[0] first (see test_slot_pool_excludes_evicted_entry
     # for why: the default preset would otherwise auto-promote it out of
     # "working" on this very store, before the index is even built,
@@ -309,8 +314,8 @@ def test_slot_pool_finds_promoted_entry_with_band_filter() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _shadow_cms(rate: float) -> ContinuumMemorySystem:
-    cms = _fresh_cms()
+def _shadow_cms(rate: float, preset: str | None = None) -> ContinuumMemorySystem:
+    cms = _fresh_cms(preset=preset)
     cms.config.slot_index_shadow_rate = rate
     _pin_to_band0(cms)  # keep stores extend-in-place (no promotion dirtying)
     return cms
@@ -386,7 +391,8 @@ def test_shadow_check_no_false_positive_from_extend_in_place() -> None:
     diverge: a slotted entry seated in a deeper band takes a LOW ordinal
     at rebuild, then a later in-place store into band[0] takes the next
     counter value — while a fresh walk would renumber band[0] first."""
-    cms = _shadow_cms(rate=1.0)
+    # Needs a deeper band to seat the low-ordinal entry in — continuum.
+    cms = _shadow_cms(rate=1.0, preset="continuum")
     dim = cms.config.embedding_dim
     deep = MemoryEntry(
         text="zanthar deploy gate needs two approvals",
