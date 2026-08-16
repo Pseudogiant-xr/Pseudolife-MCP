@@ -380,10 +380,19 @@ def merge_candidates(entity_proposals):
     groups = shared_pair_groups(
         [(key(p, "entity_id", "entity"), key(p, "into_id", "into"))
          for p in rows])
-    merges = [{"from": p["entity"], "into": p["into"], "similarity": p.get("score"),
-               "reason": p.get("reason"), "id": p["id"],
-               "group": disp.get(g) if g is not None else None}
-              for p, g in zip(rows, groups)]
+    merges = []
+    for p, g in zip(rows, groups):
+        m = {"from": p["entity"], "into": p["into"], "similarity": p.get("score"),
+             "reason": p.get("reason"), "id": p["id"],
+             "group": disp.get(g) if g is not None else None}
+        # Shadow pre-judgment (schema v30): the reviewer sees the model's
+        # opinion beside the pair; a verdict-less row shows nothing.
+        if p.get("judge_verdict"):
+            m["judge"] = {"verdict": p["judge_verdict"],
+                          "confidence": p.get("judge_confidence"),
+                          "note": p.get("judge_note"),
+                          "model": p.get("judge_model")}
+        merges.append(m)
     return [{"type": "merge_candidate", "severity": "warn", "action": "merge",
              "label": f"{len(merges)} near-duplicate entity merges", "merges": merges}]
 

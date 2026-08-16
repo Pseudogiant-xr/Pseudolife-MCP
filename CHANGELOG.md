@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-08-17 — the shadow verdict actually reaches the reviewer)
+- **The Console review queue now shows the judge's pre-judgment**: the
+  shadow verdict survived only in the deep response — the
+  `graph_review.merge_candidates` listing (what the Atlas Review panel
+  renders) dropped the v30 judge fields, so a human working the queue
+  never saw them. The listing now carries the `judge` block and the panel
+  renders it as a verdict chip (accept/reject/leave with confidence;
+  tooltip = the model's one-line reason and which model judged). The
+  `/dream` Step-C brief tells agents to treat the block as a lead, never
+  a decision.
+
 ### Added (2026-08-16 — autonomous Step-C judge: the dream answers its own review queue, schema v30)
 - **The sweep now judges pending merge proposals** (`deep_dream.judge_mode`,
   default `shadow`): a bounded batch per sweep is sent to the configured

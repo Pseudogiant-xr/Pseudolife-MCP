@@ -150,6 +150,28 @@ def test_off_mode_is_inert(svc):
     assert judge.seen == []
 
 
+def test_merge_candidates_listing_carries_the_shadow_verdict():
+    # The Console's review payload is built by graph_review.merge_candidates
+    # — the judge block must survive it, or the human reviewer never sees
+    # the pre-judgment (found post-deploy on 2026-08-17: the verdict lived
+    # only in the deep response).
+    from pseudolife_memory.memory.graph_review import merge_candidates
+
+    rows = [{"id": 7, "kind": "merge", "entity_id": 1, "into_id": 2,
+             "entity": "alpha svc", "into": "alpha service", "score": 0.9,
+             "reason": "write-dedup", "judge_verdict": "reject",
+             "judge_confidence": 0.92, "judge_note": "siblings",
+             "judge_model": "claude-opus-5"},
+            {"id": 8, "kind": "merge", "entity_id": 3, "into_id": 4,
+             "entity": "beta", "into": "beta svc", "score": 0.9,
+             "reason": "write-dedup"}]
+    merges = merge_candidates(rows)[0]["merges"]
+    judged = next(m for m in merges if m["id"] == 7)
+    assert judged["judge"] == {"verdict": "reject", "confidence": 0.92,
+                               "note": "siblings", "model": "claude-opus-5"}
+    assert "judge" not in next(m for m in merges if m["id"] == 8)
+
+
 def test_review_payload_carries_the_shadow_verdict(svc):
     svc.config.memory.deep_dream.judge_mode = "shadow"
     pid = _propose(svc, "theta svc", "theta service")
