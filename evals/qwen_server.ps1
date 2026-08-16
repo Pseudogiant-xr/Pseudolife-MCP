@@ -4,45 +4,52 @@ Shared Qwen-27B bench server control. Dot-source it:
 
     . (Join-Path $PSScriptRoot "qwen_server.ps1")
     if (-not (Start-Qwen))      { ... }   # reproducible (default)
-    if (-not (Start-Qwen -Fast)) { ... }  # turboq, throughput only
+    if (-not (Start-Qwen -Fast)) { ... }  # MTP, throughput only
+
+MODEL: Qwen3.8-27B-UD-Q4_K_XL (migrated 2026-08-17; previously Qwen3.6-27B —
+rollback copy of this file: qwen_server.ps1.bak-qwen36-20260817, and the 3.6
+model/engine remain on disk). Qwen3.8 is a hybrid DeltaNet architecture the
+old root llama-server.exe (b9371) cannot load; both configs now use the
+b10453 engine under engine-b10453\.
 
 TWO CONFIGS, AND THE CHOICE IS NOT A PREFERENCE
 -----------------------------------------------
-Reproducible (default): the stock llama-server with q8_0 KV. Byte-identical
-outputs for byte-identical inputs — verified 2026-07-27 over 12 repeats,
-including a variant that interleaved decoy requests to vary KV-slot history
-and with the prompt cache off (evals/results/judge-determinism-check.json).
+Reproducible (default): stock flags with q8_0 KV, MTP OFF. The 3.6-era
+byte-determinism result (12 repeats, decoy interleave, cache off —
+evals/results/judge-determinism-check.json) does NOT automatically carry to
+a new architecture and engine: 3.8 determinism is re-verified by
+evals/results/judge-determinism-check-qwen38.json. Do not trust judged
+numbers unless that artifact exists and passes for the running config.
 
-Fast (-Fast): the TurboQuant+MTP fork (run-server-turboq.bat). Its fused
-TBQ4_0 flash-attention KV is NOT bit-reproducible: re-running identical
-inputs flips ~7% of judged verdicts and swings arm accuracy up to +/-0.05.
-Measured both with and without MTP (6.8% / 7.7%) and with the prompt cache
-both on and off, so neither speculative decoding nor caching is the cause —
-it is the quantized fused-attention KV itself.
+Fast (-Fast): run-server-qwen38.bat = same engine, same GGUF, embedded-MTP
+speculative decoding ON (--spec-type draft-mtp). Unlike the retired 3.6
+turboq fork (fused TBQ4_0 KV, ~7% verdict flips), this shares the stock KV
+path, but its determinism is UNMEASURED — the fork precedent says assume
+non-reproducible until measured.
 
-RULE: anything whose output is JUDGED — an answerer or judge call, i.e.
-longmemeval_bench.py --phase answer/full, replicate.py, lme_v2_smoke.py —
-uses the reproducible config. -Fast is for throughput work whose result is
-a bank or a raw generation, never a graded number. When in doubt, omit
--Fast: correctness costs less than re-running a bench you cannot trust.
+RULE (unchanged): anything whose output is JUDGED — an answerer or judge
+call, i.e. longmemeval_bench.py --phase answer/full, replicate.py,
+lme_v2_smoke.py — uses the reproducible config. -Fast is for throughput
+work whose result is a bank or a raw generation, never a graded number.
+When in doubt, omit -Fast.
 
-Both paths pin the eval env protocol (cache-ram 0, ctx-checkpoints 0). That
-protocol used to be copy-pasted into nine harnesses; it lives here now, so a
-harness cannot forget it. Note run-server.bat passes --cache-ram/-ctx-
-checkpoints explicitly on its command line, where they would OVERRIDE the
-env vars and reintroduce the ~350-request 0xC0000409 crash, so the
-reproducible path invokes llama-server.exe directly with the verified flags
-rather than going through that .bat.
+Both paths pin the eval env protocol (cache-ram 0, ctx-checkpoints 0). The
+reproducible path invokes llama-server.exe directly with explicit flags;
+the -Fast path goes through run-server-qwen38.bat, whose knobs are batch
+variables (CACHE_RAM / CTX_CHECKPOINTS / MTP) that this helper sets in the
+environment — the LLAMA_ARG_* env vars alone are NOT enough for the .bat
+path because its explicit command-line flags would override them.
 #>
 
-$script:QwenDir = "$env:USERPROFILE\ClaudeCode\llama.ccp"
-$script:QwenUrl = "http://127.0.0.1:1234/v1/models"
+$script:QwenDir    = "$env:USERPROFILE\ClaudeCode\llama.ccp"
+$script:QwenEngine = "$script:QwenDir\engine-b10453"
+$script:QwenUrl    = "http://127.0.0.1:1234/v1/models"
 
 function Get-QwenModelPath {
     param([switch]$Fast)
-    # The MTP-enabled GGUF lives under models\mtp\; the stock one beside it.
-    if ($Fast) { return "$script:QwenDir\models\mtp\Qwen3.6-27B-UD-Q4_K_XL.gguf" }
-    return "$script:QwenDir\models\Qwen3.6-27B-UD-Q4_K_XL.gguf"
+    # Qwen3.8 GGUFs embed the MTP head in the main file — one model for both
+    # configs (the 3.6 split between models\ and models\mtp\ is retired).
+    return "$script:QwenDir\models\Qwen3.8-27B-UD-Q4_K_XL.gguf"
 }
 
 function Wait-QwenEndpoint {
@@ -64,7 +71,9 @@ function Get-RunningQwenConfig {
         -ErrorAction SilentlyContinue
     if (-not $procs) { return $null }
     foreach ($p in $procs) {
-        if ($p.CommandLine -match '--spec-type\s+mtp') { return 'fast' }
+        # Matches both the retired turboq fork's '--spec-type mtp' and the
+        # mainline b10453 '--spec-type draft-mtp' (run-server-qwen38.bat).
+        if ($p.CommandLine -match '--spec-type\s+(draft-)?mtp') { return 'fast' }
     }
     return 'reproducible'
 }
@@ -178,26 +187,31 @@ function Start-Qwen {
     $env:LLAMA_ARG_CTX_CHECKPOINTS = "0"
 
     if ($Fast) {
-        Write-Host "$(Get-Date -Format 'HH:mm:ss') starting Qwen 27B (FAST/turboq — not reproducible)"
+        Write-Host "$(Get-Date -Format 'HH:mm:ss') starting Qwen3.8 27B (FAST/MTP — treat as not reproducible)"
+        # The .bat's knobs are batch variables with 'if not defined' defaults,
+        # so setting them in the environment here pins the eval protocol; the
+        # LLAMA_ARG_* vars above would lose to the .bat's explicit flags.
+        $env:CACHE_RAM = "0"
+        $env:CTX_CHECKPOINTS = "0"
+        $env:CTX = "$Ctx"
         Start-Process -FilePath cmd.exe -WorkingDirectory $script:QwenDir `
             -WindowStyle Minimized `
-            -ArgumentList '/c', "`"$script:QwenDir\run-server-turboq.bat`" > qwen-server.log 2>&1"
+            -ArgumentList '/c', "`"$script:QwenDir\run-server-qwen38.bat`" > qwen-server.log 2>&1"
         return (Wait-QwenEndpoint -Seconds 300)
     }
 
-    Write-Host "$(Get-Date -Format 'HH:mm:ss') starting Qwen 27B (reproducible q8_0)"
-    # From-source CUDA runtime DLLs must resolve for the stock exe too.
-    $cuda = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1"
-    if ($env:PATH -notlike "*$cuda\bin\x64*") {
-        $env:PATH = "$cuda\bin\x64;$cuda\bin;$env:PATH"
-    }
-    # Flags mirror run-server.bat (the proven rollback) EXCEPT --cache-ram and
-    # --ctx-checkpoints, which that .bat hardcodes to values the eval protocol
-    # forbids. This exact set is the one measured bit-reproducible.
-    # -Ctx: KV-cache CAPACITY only — per-request compute and logits are
-    # unaffected (verified 2026-08-15: judge smoke byte-identical at
-    # 32768 vs 100000). Shrink it when desktop apps hold VRAM and the
-    # full 100k KV would OOM under mmq workspace spikes.
+    Write-Host "$(Get-Date -Format 'HH:mm:ss') starting Qwen3.8 27B (reproducible q8_0, MTP off)"
+    # No CUDA-toolkit PATH surgery: the b10453 release engine bundles its own
+    # cudart/cublas 12.4 DLLs beside the exe, which Windows resolves first.
+    # Flags mirror run-server-qwen38.bat EXCEPT the eval-protocol trio that
+    # bat defaults differently: --cache-ram 0, --ctx-checkpoints 0, and no
+    # --spec-type (MTP off — speculative decoding stays out of judged runs
+    # until measured). Sampler is the official Qwen3.8 thinking set (temp 1.0,
+    # pp 0.0); the 3.6-era froggeric template and --reasoning-budget are
+    # retired — 3.8 uses its embedded template with reasoning_effort
+    # (xhigh|medium|low; 'none' is rejected by the template) and
+    # enable_thinking:false still works per-request (verified 2026-08-17).
+    # -Ctx: KV-cache CAPACITY only, as before.
     $qwenArgs = @(
         "-m", (Get-QwenModelPath),
         "--host", "127.0.0.1", "--port", "1234",
@@ -206,12 +220,14 @@ function Start-Qwen {
         "-fa", "on",
         "--cache-type-k", "q8_0", "--cache-type-v", "q8_0",
         "--jinja",
-        "--chat-template-file", "$script:QwenDir\qwen3-template-froggeric.jinja",
-        "--reasoning-format", "deepseek",
-        "--reasoning-budget", "4096",
+        # Backslash-escaped quotes survive Start-Process's naive space-join:
+        # the child's CommandLineToArgvW turns \" back into literal quotes,
+        # so llama-server receives valid JSON. Raw quotes here get stripped.
+        "--chat-template-kwargs", '{\"reasoning_effort\":\"medium\"}',
+        "--reasoning-preserve",
         "--parallel", "1",
         "--metrics",
-        "--temp", "0.6", "--top-k", "20", "--top-p", "0.95", "--min-p", "0.0",
+        "--temp", "1.0", "--top-k", "20", "--top-p", "0.95", "--min-p", "0.0",
         "--presence-penalty", "0.0",
         "-b", "512", "-ub", "256",
         "-t", "8", "-tb", "8",
@@ -219,8 +235,8 @@ function Start-Qwen {
         "--cache-ram", "0",
         "--ctx-checkpoints", "0"
     )
-    Start-Process -FilePath "$script:QwenDir\llama-server.exe" `
-        -WorkingDirectory $script:QwenDir -WindowStyle Minimized `
+    Start-Process -FilePath "$script:QwenEngine\llama-server.exe" `
+        -WorkingDirectory $script:QwenEngine -WindowStyle Minimized `
         -ArgumentList $qwenArgs `
         -RedirectStandardOutput (Join-Path $script:QwenDir 'qwen-server.log') `
         -RedirectStandardError  (Join-Path $script:QwenDir 'qwen-server.err')
