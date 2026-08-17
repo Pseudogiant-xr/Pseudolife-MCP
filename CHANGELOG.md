@@ -46,6 +46,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   change — promotion needs its own docs-currency pass with
   `tests/test_eval_evidence.py` rows updated alongside.
 
+### Added (2026-08-17 — thinking-judge experiment knob)
+- **`OpenAICompatExtractor(judge_thinking=True)`** (daemon never passes it;
+  shipped judge payloads stay byte-identical, guarded by
+  `tests/test_judge_thinking_payload.py`): unpins the judge call's
+  `enable_thinking:false` so the server/template reasoning default governs,
+  with +4096 reasoning headroom. Exposed as `judge_ladder.py --thinking`.
+  Finding (artifact `judge-ladder-qwen38-thinking-20260817.json`): the 3.8
+  judge regression is mostly thinking-deprivation — with thinking, false
+  rejects 17→11, auto-reject precision 0.844→0.920 (above 3.6's 0.918),
+  accept precision 0.632→0.842, still deterministic (0 flip rows), at
+  ~4.7× verdict latency and 0.969 coverage. Server-side reasoning kwargs
+  are inert for every shipped call site while the per-request pin exists —
+  a reasoning_effort=xhigh server reproduced the non-thinking ladder
+  byte-identically (`judge-ladder-qwen38-xhigh-20260817.json`).
+
 ### Added (2026-08-16 — autonomous Step-C judge: the dream answers its own review queue, schema v30)
 - **The sweep now judges pending merge proposals** (`deep_dream.judge_mode`,
   default `shadow`): a bounded batch per sweep is sent to the configured

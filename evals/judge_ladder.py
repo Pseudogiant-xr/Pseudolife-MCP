@@ -127,11 +127,16 @@ def main() -> None:
                     help="proposals per call; keep = deep_dream.judge_batch")
     ap.add_argument("--timeout", type=float, default=600.0)
     ap.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    ap.add_argument("--thinking", action="store_true",
+                    help="unpin enable_thinking:false on the judge call so "
+                         "the server/template reasoning default governs — "
+                         "an experimental arm, NOT the shipped code path")
     args = ap.parse_args()
 
     rows = json.loads(DATA.read_text(encoding="utf-8"))["rows"]
     ex = OpenAICompatExtractor(args.base_url, args.model,
-                               timeout_seconds=args.timeout)
+                               timeout_seconds=args.timeout,
+                               judge_thinking=args.thinking)
     reps: list[list[str | None]] = []
     for i in range(args.replicates):
         t0 = time.time()
