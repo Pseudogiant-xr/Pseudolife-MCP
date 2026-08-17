@@ -691,7 +691,7 @@ class OpenAICompatExtractor:
                  system_prompt: str | None = None,
                  events_prompt: str | None = None,
                  extra_body: dict | None = None,
-                 judge_thinking: bool = False) -> None:
+                 judge_thinking: bool | str = False) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.api_key = api_key or None
@@ -708,8 +708,9 @@ class OpenAICompatExtractor:
         # lets judge_merges leave thinking to the server/template default
         # instead of pinning it off. Server-side reasoning kwargs are inert
         # while the pin is present (a reasoning_effort=xhigh server produced
-        # a byte-identical judge ladder).
-        self.judge_thinking = bool(judge_thinking)
+        # a byte-identical judge ladder). True = server/template default;
+        # "low"/"medium" pins an explicit per-request reasoning_effort.
+        self.judge_thinking = judge_thinking
         # Base system prompt for claims extraction. Defaults to the shipped
         # ``_SYSTEM_PROMPT`` (the daemon never passes this arg, so its behaviour
         # is byte-identical). Off-label harnesses (e.g. the LME-V2 trajectory
@@ -1013,10 +1014,15 @@ class OpenAICompatExtractor:
                 "chat_template_kwargs": {"enable_thinking": False},
             }
             if self.judge_thinking:
-                # Let the server/template default govern thinking, and give
-                # the reasoning trace headroom the verdict budget lacks
-                # (reasoning tokens count against max_tokens).
-                del payload["chat_template_kwargs"]
+                # Let thinking run, and give the reasoning trace headroom the
+                # verdict budget lacks (reasoning tokens count against
+                # max_tokens). True defers to the server/template default;
+                # a string pins an explicit reasoning_effort level.
+                if isinstance(self.judge_thinking, str):
+                    payload["chat_template_kwargs"] = {
+                        "reasoning_effort": self.judge_thinking}
+                else:
+                    del payload["chat_template_kwargs"]
                 payload["max_tokens"] += 4096
             body = json.dumps(payload).encode()
             req = urllib.request.Request(

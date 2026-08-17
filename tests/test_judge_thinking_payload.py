@@ -63,3 +63,11 @@ def test_judge_thinking_unpins_and_adds_reasoning_headroom(captured):
 def test_judge_thinking_default_is_off():
     ex = D.OpenAICompatExtractor("http://x/v1", "m")
     assert ex.judge_thinking is False
+
+
+def test_judge_thinking_effort_string_sets_reasoning_effort(captured):
+    ex = D.OpenAICompatExtractor("http://x/v1", "m", judge_thinking="low")
+    ex.judge_merges([_PROPOSAL])
+    body = captured[0]
+    assert body["chat_template_kwargs"] == {"reasoning_effort": "low"}
+    assert body["max_tokens"] == max(ex.max_tokens, 120) + 4096

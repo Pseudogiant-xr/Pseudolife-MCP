@@ -131,12 +131,16 @@ def main() -> None:
                     help="unpin enable_thinking:false on the judge call so "
                          "the server/template reasoning default governs — "
                          "an experimental arm, NOT the shipped code path")
+    ap.add_argument("--thinking-effort", choices=("low", "medium"),
+                    help="like --thinking but pins an explicit per-request "
+                         "reasoning_effort level")
     args = ap.parse_args()
 
     rows = json.loads(DATA.read_text(encoding="utf-8"))["rows"]
     ex = OpenAICompatExtractor(args.base_url, args.model,
                                timeout_seconds=args.timeout,
-                               judge_thinking=args.thinking)
+                               judge_thinking=(args.thinking_effort
+                                               or args.thinking))
     reps: list[list[str | None]] = []
     for i in range(args.replicates):
         t0 = time.time()
