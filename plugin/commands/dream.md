@@ -60,7 +60,11 @@ the review queues that automation fills.
    pair's direction. Rows sharing a `group` value pivot on one entity and
    are ONE where-does-it-belong decision: accept at most one of them (the
    first accept deletes the shared entity), and settle the others with
-   reject/dismiss or leave them. Judge
+   reject/dismiss or leave them. Rows may carry a `judge` block — the
+   sweep's shadow pre-judgment (verdict/confidence/note + which model):
+   treat it as a lead, not a decision; verify every accept against the
+   evidence yourself (the shipped judge floor is measured in
+   evals/results/judge-ladder-20260816.json). Judge
    from the snippets, never names alone — the bank's confirmed-distinct history
    (postgres vs postgres.py) is exactly why:
    - **Same referent** (naming-layer variants of one thing — file suffixes,

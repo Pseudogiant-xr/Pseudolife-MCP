@@ -245,13 +245,26 @@ function body(f, onAct) {
   }
 }
 
+// The autonomous judge's shadow verdict (schema v30): an opinion shown
+// beside the evidence, never an applied decision. Tooltip carries the
+// model's one-line reason and which model judged.
+function judgeChip(j) {
+  if (!j || !j.verdict) return null;
+  const confidence = j.confidence == null ? "" : ` ·${Number(j.confidence).toFixed(2)}`;
+  const chip = badge(`🤖 ${j.verdict}${confidence}`,
+                     j.verdict === "accept" ? "pos"
+                     : j.verdict === "reject" ? "neg" : "contested");
+  chip.title = `${j.model || "judge"}: ${j.note || "no note"}`;
+  return chip;
+}
+
 function mergeItem(m, onAct) {
   const from = entityRef(m.from), into = entityRef(m.into);
   // Rows sharing a group pivot on one entity — the first accepted merge
   // deletes it, so at most one of the group can land.
   return itemRow([
     from.chip, dim("→"), into.chip, sim(m.similarity),
-    m.group ? dim(`⛓ ${m.group}`) : null, dim(m.reason),
+    m.group ? dim(`⛓ ${m.group}`) : null, judgeChip(m.judge), dim(m.reason),
     btn("Merge", { onClick: () => onAct({ kind: "merge-entity", id: m.id, from: m.from, into: m.into }) }),
     btn("Reject", { kind: "ghost", onClick: () => onAct({ kind: "reject-entity", id: m.id }) }),
   ], [from, into]);
