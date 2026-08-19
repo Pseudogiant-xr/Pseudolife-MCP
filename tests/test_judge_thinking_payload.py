@@ -65,6 +65,16 @@ def test_judge_thinking_default_is_off():
     assert ex.judge_thinking is False
 
 
+def test_constructor_token_default_matches_shipped_config():
+    # The constructor default was a stale pre-2026-06-22 remnant (400) while
+    # the shipped DreamConfig moved to 2048 — direct constructors (public-API
+    # users, judge_ladder.py) silently got a quarter of the deployed budget.
+    # Keep them in lockstep so "the default" means one thing.
+    from pseudolife_memory.utils.config import DreamConfig
+    ex = D.OpenAICompatExtractor("http://x/v1", "m")
+    assert ex.max_tokens == DreamConfig().extractor_max_tokens
+
+
 def test_judge_thinking_effort_string_sets_reasoning_effort(captured):
     ex = D.OpenAICompatExtractor("http://x/v1", "m", judge_thinking="low")
     ex.judge_merges([_PROPOSAL])

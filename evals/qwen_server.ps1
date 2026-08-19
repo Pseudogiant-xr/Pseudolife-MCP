@@ -42,7 +42,9 @@ path because its explicit command-line flags would override them.
 #>
 
 $script:QwenDir    = "$env:USERPROFILE\ClaudeCode\llama.ccp"
-$script:QwenEngine = "$script:QwenDir\engine-b10453"
+# b10488 (2026-08-19): byte-identical output to b10453 on the fixed probe
+# (hash 6444B058CAAC both) and ~4% faster decode; gate canary re-run on bump.
+$script:QwenEngine = "$script:QwenDir\engine-b10488"
 $script:QwenUrl    = "http://127.0.0.1:1234/v1/models"
 
 function Get-QwenModelPath {

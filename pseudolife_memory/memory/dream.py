@@ -687,7 +687,10 @@ class OpenAICompatExtractor:
     extractable claims returns ``[]``. Uses stdlib urllib — no new deps."""
 
     def __init__(self, base_url: str, model: str, *, api_key: str | None = None,
-                 max_tokens: int = 400, timeout_seconds: float = 20.0,
+                 # Default matches DreamConfig.extractor_max_tokens (kept in
+                 # lockstep by test_judge_thinking_payload) — the old 400 was
+                 # a pre-2026-06-22 remnant that only direct constructors hit.
+                 max_tokens: int = 2048, timeout_seconds: float = 20.0,
                  system_prompt: str | None = None,
                  events_prompt: str | None = None,
                  extra_body: dict | None = None,

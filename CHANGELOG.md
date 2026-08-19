@@ -62,6 +62,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   deliberately not run for this reason — pending its own scheduling
   decision).
 
+### Changed (2026-08-19 — bench engine b10488 + extractor token-default sync)
+- **Bench engine bumped b10453 → b10488**: byte-identical output on a fixed
+  16k-token probe (same content hash), ~4% faster decode, and the
+  regression-gate canary re-passed on the new engine (std 0.0000, PASS vs
+  the committed 3.8 baseline). Mainline MTP measured on this build is
+  byte-deterministic run-to-run and verdict-lossless vs stock
+  (`judge-determinism-check-qwen38-mtp.json`); extraction-phase adoption
+  is a follow-up design (answer/judge calls gain nothing from it).
+- **`OpenAICompatExtractor` default `max_tokens` 400 → 2048**, matching
+  `DreamConfig.extractor_max_tokens` (lockstep-pinned by test). New
+  installs were unaffected (the daemon always passed the config value);
+  the stale default only reached direct constructors — including
+  `judge_ladder.py`, whose per-batch judge budget floor rises from 960 to
+  2048 (no behavioral change measured: verdicts are short and were never
+  truncating).
+
 ### Added (2026-08-17 — thinking-judge experiment knob)
 - **`OpenAICompatExtractor(judge_thinking=True)`** (daemon never passes it;
   shipped judge payloads stay byte-identical, guarded by
