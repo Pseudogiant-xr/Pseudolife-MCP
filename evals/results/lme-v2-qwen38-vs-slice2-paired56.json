@@ -1,0 +1,58 @@
+{
+  "comparison": "lme-v2 procedure, paired by question_id",
+  "a": "slice2 (Qwen3.6, 74 rows)",
+  "b": "qwen38-slice (Qwen3.8, 56 rows)",
+  "paired_n": 56,
+  "primary_metric": "eval (deterministic scorer)",
+  "note": "judge metric is 3.6-judging-3.6 vs 3.8-judging-3.8 \u2014 judge identity is confounded with answerer; eval is the preregistered primary. Off-ramp per user option-2 decision 2026-08-18; stopped at 56/74.",
+  "arms": {
+    "rag_correct": {
+      "acc_36": 0.1786,
+      "acc_38": 0.1964,
+      "delta": 0.0179,
+      "wins": 8,
+      "losses": 7,
+      "sign_test_p": 1.0
+    },
+    "cortex_correct": {
+      "acc_36": 0.0536,
+      "acc_38": 0.1429,
+      "delta": 0.0893,
+      "wins": 6,
+      "losses": 1,
+      "sign_test_p": 0.125
+    },
+    "hybrid_correct": {
+      "acc_36": 0.2857,
+      "acc_38": 0.2679,
+      "delta": -0.0179,
+      "wins": 8,
+      "losses": 9,
+      "sign_test_p": 1.0
+    },
+    "rag_judge": {
+      "acc_36": 0.1429,
+      "acc_38": 0.0357,
+      "delta": -0.1071,
+      "wins": 1,
+      "losses": 7,
+      "sign_test_p": 0.0703
+    },
+    "cortex_judge": {
+      "acc_36": 0.0536,
+      "acc_38": 0.0714,
+      "delta": 0.0179,
+      "wins": 3,
+      "losses": 2,
+      "sign_test_p": 1.0
+    },
+    "hybrid_judge": {
+      "acc_36": 0.2143,
+      "acc_38": 0.0714,
+      "delta": -0.1429,
+      "wins": 3,
+      "losses": 11,
+      "sign_test_p": 0.0574
+    }
+  }
+}

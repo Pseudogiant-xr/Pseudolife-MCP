@@ -46,6 +46,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   change — promotion needs its own docs-currency pass with
   `tests/test_eval_evidence.py` rows updated alongside.
 
+### Changed (2026-08-19 — LME-V2 slice verdict + 3.8 extraction pace)
+- **LME-V2 `procedure` paired comparison** (56 shared questions, off-ramp
+  taken at the user's option-2 decision; artifact
+  `lme-v2-qwen38-vs-slice2-paired56.json`): on the preregistered primary
+  metric (deterministic eval) Qwen3.8 ≥ 3.6 on every arm — cortex 0.143 vs
+  0.054 (+0.089, 6 wins / 1 loss), rag +0.018, hybrid −0.018 (both noise).
+  The secondary LLM-judge metric drops on rag/hybrid, consistent with the
+  measured 3.8 no-think judge strictness and confounded by judge identity;
+  the primary metric carries the verdict.
+- **Operational finding: 3.8 extraction is ~3.5–4× slower than 3.6**
+  (34 min vs ~10.6 min per extraction-heavy lme_v2 row; ladder extract
+  33.0 s vs 9.0 s at 13.4 vs 1.4 tok/q). Scale all 3.6-era runtime
+  estimates accordingly before scheduling 3.8 extraction workloads (BEAM
+  deliberately not run for this reason — pending its own scheduling
+  decision).
+
 ### Added (2026-08-17 — thinking-judge experiment knob)
 - **`OpenAICompatExtractor(judge_thinking=True)`** (daemon never passes it;
   shipped judge payloads stay byte-identical, guarded by
