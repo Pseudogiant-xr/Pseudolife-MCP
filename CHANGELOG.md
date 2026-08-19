@@ -6,6 +6,93 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-08-17 — GPU bench server migrated to Qwen3.8-27B)
+- **`evals/qwen_server.ps1` now serves Qwen3.8-27B-UD-Q4_K_XL on the
+  llama.cpp b10453 engine** (the 3.6-era b9371 binary cannot load 3.8's
+  hybrid DeltaNet architecture). Reproducible config keeps the eval
+  protocol (q8_0 KV, cache-ram 0, ctx-checkpoints 0, MTP off) with the
+  official 3.8 thinking sampler and the model's embedded chat template
+  (`reasoning_effort=medium` server default; per-request
+  `enable_thinking:false` verified still honoured, so extractor call
+  sites are unchanged). `-Fast` now selects mainline embedded-MTP
+  speculation instead of the retired TurboQuant fork; the running-config
+  discriminator also matches `--spec-type draft-mtp`. Rollback:
+  `evals/qwen_server.ps1.bak-qwen36-20260817` + the 3.6 model/engine
+  still on disk.
+- **Byte-determinism re-proven for the new stack**
+  (`evals/results/judge-determinism-check-qwen38.json`): 3 replicates at
+  gate and e2e scale, 0 verdict flips, 0 response diffs, std 0.0000 on
+  every arm — judged numbers on the 3.8 server are trustworthy.
+- **Regression-gate baseline re-established** for the 3.8 answerer/judge
+  (`regression_gate.baseline.json`, n=3): rag 0.5897 / cortex 0.6923 /
+  hybrid 0.7692 (3.6 was 0.6282 / 0.7051 / 0.7692 — the old values
+  remain in git history and the dated establish artifacts).
+- **3.8 campaign artifacts** (tagged, canonical 3.6 files untouched):
+  ladder rung `qwen-27b-qwen38` gold 1.0 / stale 0.0 (extract 33.0 s and
+  13.4 tok/q vs 3.6's 9.0 s / 1.4 — richer extraction, same gate);
+  KU-oracle `ceiling-v38` n=3 rag 0.8590 / cortex 0.6667 (both equal to
+  the 3.6 ceiling-e2e aggregates) / hybrid 0.8462 (+0.013) / cascade
+  0.8462 (−0.090 — root-caused to reduced abstention: 22/78 cortex
+  "don't know" vs 32/78, so fewer rag rescues); judge ladder
+  `judge-ladder-qwen38-20260817.json` false-reject 0.567 vs 0.267 and
+  auto-reject precision 0.844 vs 0.918 (regression; shadow-mode default
+  and the Opus-class auto-reject floor already shipped are unaffected);
+  stance GATE PASS (v8 capture 0.97); misleading-recall harm 0.00;
+  gate-firing 1.15% of gateable; events-quantity smoke **FAIL** — the
+  seeded "April 15th to 22nd" range survives in `date_phrase` but the
+  check requires description-field verbatim (field-placement drift, not
+  data loss; checker-vs-prompt decision pending). Docs front-door
+  numbers still cite 3.6 and are deliberately not switched in this
+  change — promotion needs its own docs-currency pass with
+  `tests/test_eval_evidence.py` rows updated alongside.
+
+### Changed (2026-08-19 — LME-V2 slice verdict + 3.8 extraction pace)
+- **LME-V2 `procedure` paired comparison** (56 shared questions, off-ramp
+  taken at the user's option-2 decision; artifact
+  `lme-v2-qwen38-vs-slice2-paired56.json`): on the preregistered primary
+  metric (deterministic eval) Qwen3.8 ≥ 3.6 on every arm — cortex 0.143 vs
+  0.054 (+0.089, 6 wins / 1 loss), rag +0.018, hybrid −0.018 (both noise).
+  The secondary LLM-judge metric drops on rag/hybrid, consistent with the
+  measured 3.8 no-think judge strictness and confounded by judge identity;
+  the primary metric carries the verdict.
+- **Operational finding: 3.8 extraction is ~3.5–4× slower than 3.6**
+  (34 min vs ~10.6 min per extraction-heavy lme_v2 row; ladder extract
+  33.0 s vs 9.0 s at 13.4 vs 1.4 tok/q). Scale all 3.6-era runtime
+  estimates accordingly before scheduling 3.8 extraction workloads (BEAM
+  deliberately not run for this reason — pending its own scheduling
+  decision).
+
+### Changed (2026-08-19 — bench engine b10488 + extractor token-default sync)
+- **Bench engine bumped b10453 → b10488**: byte-identical output on a fixed
+  16k-token probe (same content hash), ~4% faster decode, and the
+  regression-gate canary re-passed on the new engine (std 0.0000, PASS vs
+  the committed 3.8 baseline). Mainline MTP measured on this build is
+  byte-deterministic run-to-run and verdict-lossless vs stock
+  (`judge-determinism-check-qwen38-mtp.json`); extraction-phase adoption
+  is a follow-up design (answer/judge calls gain nothing from it).
+- **`OpenAICompatExtractor` default `max_tokens` 400 → 2048**, matching
+  `DreamConfig.extractor_max_tokens` (lockstep-pinned by test). New
+  installs were unaffected (the daemon always passed the config value);
+  the stale default only reached direct constructors — including
+  `judge_ladder.py`, whose per-batch judge budget floor rises from 960 to
+  2048 (no behavioral change measured: verdicts are short and were never
+  truncating).
+
+### Added (2026-08-17 — thinking-judge experiment knob)
+- **`OpenAICompatExtractor(judge_thinking=True)`** (daemon never passes it;
+  shipped judge payloads stay byte-identical, guarded by
+  `tests/test_judge_thinking_payload.py`): unpins the judge call's
+  `enable_thinking:false` so the server/template reasoning default governs,
+  with +4096 reasoning headroom. Exposed as `judge_ladder.py --thinking`.
+  Finding (artifact `judge-ladder-qwen38-thinking-20260817.json`): the 3.8
+  judge regression is mostly thinking-deprivation — with thinking, false
+  rejects 17→11, auto-reject precision 0.844→0.920 (above 3.6's 0.918),
+  accept precision 0.632→0.842, still deterministic (0 flip rows), at
+  ~4.7× verdict latency and 0.969 coverage. Server-side reasoning kwargs
+  are inert for every shipped call site while the per-request pin exists —
+  a reasoning_effort=xhigh server reproduced the non-thinking ladder
+  byte-identically (`judge-ladder-qwen38-xhigh-20260817.json`).
+
 ### Fixed (2026-08-17 — the shadow verdict actually reaches the reviewer)
 - **The Console review queue now shows the judge's pre-judgment**: the
   shadow verdict survived only in the deep response — the

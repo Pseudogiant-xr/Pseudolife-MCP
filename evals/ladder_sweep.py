@@ -74,10 +74,10 @@ RUNGS: dict[str, dict] = {
                  "base_url": os.environ.get("PSEUDOLIFE_BENCH_A3B_URL",
                                             "http://127.0.0.1:1236/v1"),
                  "model": "Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf"},
-    "qwen-27b": {"kind": "llm", "label": "Qwen3.6-27B (4090)",
+    "qwen-27b": {"kind": "llm", "label": "Qwen3.8-27B (4090)",
                  "base_url": os.environ.get("PSEUDOLIFE_BENCH_QWEN_URL",
                                             "http://127.0.0.1:1234/v1"),
-                 "model": "Qwen3.6-27B-UD-Q4_K_XL.gguf"},
+                 "model": "Qwen3.8-27B-UD-Q4_K_XL.gguf"},
     # Sidecar-upgrade bake-off candidates (2026-07-04) — all served on :8081
     # like the gemma rungs (operator swaps the GGUF between runs).
     "qwen3.5-4b": {"kind": "llm", "label": "Qwen3.5-4B (candidate)",

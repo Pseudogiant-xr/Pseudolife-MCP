@@ -245,7 +245,7 @@ ARMS = ("evidence", "no_memory", "misleading", "memory_only")
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--url", default="http://127.0.0.1:1234/v1")
-    ap.add_argument("--model", default="Qwen3.6-27B-UD-Q4_K_XL.gguf")
+    ap.add_argument("--model", default="Qwen3.8-27B-UD-Q4_K_XL.gguf")
     ap.add_argument("--tag", required=True)
     args = ap.parse_args(argv)
 

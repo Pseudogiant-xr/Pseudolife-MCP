@@ -1,0 +1,1964 @@
+{
+ "data": "judge_eval_20260816.json",
+ "arms": {
+  "qwen-27b": {
+   "arm": "qwen-27b",
+   "model": "qwen",
+   "base_url": "http://127.0.0.1:1234/v1",
+   "replicates": 2,
+   "batch": 8,
+   "flip_rows": 0,
+   "rows": 129,
+   "decided": 128,
+   "coverage": 0.9922,
+   "agreement_on_decided": 0.8125,
+   "accept_precision": 0.6316,
+   "reject_precision": 0.844,
+   "false_reject_rate": 0.5667,
+   "false_rejects": 17,
+   "true_accepts": 30,
+   "auto_conf": 0.8,
+   "auto_rejected": 109,
+   "auto_reject_share_of_true_rejects": 0.9293,
+   "auto_false_rejects": 17,
+   "auto_reject_precision": 0.844,
+   "per_row": [
+    {
+     "from": "/api/graph/assign-scope",
+     "into": "assign-scope",
+     "label": "accept",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "<data_dir>/config.yaml",
+     "into": "/data/config.yaml",
+     "label": "accept",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "ForceGraph (graphview.js)",
+     "into": "graphview.js",
+     "label": "accept",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "GENERIC_HUB gate",
+     "into": "GENERIC_HUB_NORMS gate",
+     "label": "accept",
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "PostgreSQL 16",
+     "into": "PostgreSQL 16.14",
+     "label": "accept",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "PostgreSQL 18",
+     "into": "embedded PostgreSQL 18",
+     "label": "accept",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "Qwen3-Embedding",
+     "into": "Qwen3-Embedding-0.6B",
+     "label": "accept",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "Security Remediation",
+     "into": "PseudoLife-MCP security remediation",
+     "label": "accept",
+     "votes": [
+      [
+       "accept",
+       0.95
+      ],
+      [
+       "accept",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "casc-q8",
+     "into": "casc-q8-confirmation-run",
+     "label": "accept",
+     "votes": [
+      [
+       "accept",
+       0.95
+      ],
+      [
+       "accept",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "chronicle-default-on-pr",
+     "into": "chronicle-default-on",
+     "label": "accept",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "embedding backbone",
+     "into": "v25-embedding-backbone",
+     "label": "accept",
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "evals/regression_gate.ps1",
+     "into": "regression_gate.ps1",
+     "label": "accept",
+     "votes": [
+      [
+       "accept",
+       0.95
+      ],
+      [
+       "accept",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "fact_get",
+     "into": "memory_fact_get",
+     "label": "accept",
+     "votes": [
+      [
+       "accept",
+       0.9
+      ],
+      [
+       "accept",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "feat/chronicle-default-on",
+     "into": "chronicle-default-on",
+     "label": "accept",
+     "votes": [
+      [
+       "accept",
+       0.95
+      ],
+      [
+       "accept",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "feat/flat-band-migration",
+     "into": "flat-band-migration",
+     "label": "accept",
+     "votes": [
+      [
+       "accept",
+       0.9
+      ],
+      [
+       "accept",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "feat/pg18-bump",
+     "into": "pg18-bump",
+     "label": "accept",
+     "votes": [
+      [
+       "accept",
+       0.95
+      ],
+      [
+       "accept",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "feat/slot-index-shadow-check",
+     "into": "slot-index-shadow-check",
+     "label": "accept",
+     "votes": [
+      [
+       "accept",
+       0.95
+      ],
+      [
+       "accept",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "flat-band verdict rerun",
+     "into": "flat-band-rerun",
+     "label": "accept",
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "gpu-box",
+     "into": "Windows box",
+     "label": "accept",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "ku_op_prompt_v10_stance_update.txt",
+     "into": "v10-stance-prompt",
+     "label": "accept",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "memory_recall mechanical seeder",
+     "into": "MECHANICAL seeder",
+     "label": "accept",
+     "votes": [
+      [
+       "accept",
+       0.95
+      ],
+      [
+       "accept",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "pgvector/pgvector:pg16",
+     "into": "pgvector/pg16 service",
+     "label": "accept",
+     "votes": [
+      [
+       "reject",
+       0.8
+      ],
+      [
+       "reject",
+       0.8
+      ]
+     ]
+    },
+    {
+     "from": "primary extractor",
+     "into": "dream primary extractor",
+     "label": "accept",
+     "votes": [
+      [
+       "accept",
+       0.9
+      ],
+      [
+       "accept",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "reject-proposal",
+     "into": "graph_reject_entity_proposal",
+     "label": "accept",
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "slot-index shadow verification",
+     "into": "slot-index-shadow-check",
+     "label": "accept",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "stance-span-gate",
+     "into": "feat/stance-span-gate",
+     "label": "accept",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "tests/conftest.py",
+     "into": "conftest.py",
+     "label": "accept",
+     "votes": [
+      [
+       "accept",
+       0.99
+      ],
+      [
+       "accept",
+       0.99
+      ]
+     ]
+    },
+    {
+     "from": "v25+ backbone",
+     "into": "v25-embedding-backbone",
+     "label": "accept",
+     "votes": [
+      [
+       "accept",
+       0.95
+      ],
+      [
+       "accept",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "valid_time population prereg",
+     "into": "valid-time-population",
+     "label": "accept",
+     "votes": [
+      [
+       "leave",
+       0.5
+      ],
+      [
+       "leave",
+       0.5
+      ]
+     ]
+    },
+    {
+     "from": "world facts",
+     "into": "memory_world_facts",
+     "label": "accept",
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": ".claude-plugin/marketplace.json",
+     "into": "plugin marketplace",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": ".claude-plugin/marketplace.json",
+     "into": "plugin.json",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": ".claude/launch.json",
+     "into": "claude-code-desktop-app",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "/api/dream/run",
+     "into": "memory_dream",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "2026-08-13-night-shift",
+     "into": "2026-07-19-missed-work-audit",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "AGE",
+     "into": "master",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "Brain",
+     "into": "cognee",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "GENERIC_HUB gate",
+     "into": "hub_gate",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "Gated Decision",
+     "into": "stance-span-gate-spec",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "Graphiti",
+     "into": "e4b-ft",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "HF dspark export",
+     "into": "dspark-drafter",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "LITE tier",
+     "into": "ci/lite-tier-lanes",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "Letta",
+     "into": "Hermes",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "ML-research brief deduplication method",
+     "into": "lesson-dedup-gate",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "Opus 5",
+     "into": "Opus-5 teacher",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "PR #153",
+     "into": "pr-31",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.99
+      ],
+      [
+       "reject",
+       0.99
+      ]
+     ]
+    },
+    {
+     "from": "PSEUDOLIFE_MCP_TOOLSET=core",
+     "into": "core toolset",
+     "label": "reject",
+     "votes": [
+      [
+       "accept",
+       0.95
+      ],
+      [
+       "accept",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "PostgreSQL 18",
+     "into": "PostgreSQL 18.1",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "PostgreSQL 18.4",
+     "into": "PostgreSQL 18",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "Postgres database",
+     "into": "docker tier postgres",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "RFC 9955",
+     "into": "4090",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.99
+      ],
+      [
+       "reject",
+       0.99
+      ]
+     ]
+    },
+    {
+     "from": "Specs/plans",
+     "into": "install-floor-plan",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "Ternary-Bonsai-27B-Q2_g64.gguf",
+     "into": "bonsai-27b-ternary",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "Ternary-Bonsai-27B-dspark-dflash.gguf",
+     "into": "bonsai-27b-ternary",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "Zep",
+     "into": "SP-1",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.99
+      ],
+      [
+       "reject",
+       0.99
+      ]
+     ]
+    },
+    {
+     "from": "_SPAWN_WAIT_S",
+     "into": "_SPAWN_WAIT_ALIVE_S",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "agent-fabricated-completion",
+     "into": "v10-stance-prompt",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "analysis",
+     "into": "temporal-decay",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "band-ablation",
+     "into": "band-ablation-replicates",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "bank drift tripwire",
+     "into": "bank-drift",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "bonsai-server-build-20260717",
+     "into": "bonsai-server-win64-cuda",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "chronicle-deploy-build-hang",
+     "into": "chronicle-default-on",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "claude-mem",
+     "into": "claude-memory-system",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "combined events prompt",
+     "into": "events-prompt",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "competitor DX/docs survey 2026-08-14",
+     "into": "graph_review.py",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "config.yaml",
+     "into": "/data/config.yaml",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "configuration_file",
+     "into": "load_config",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "cortex supersession",
+     "into": "cortex supersession_log",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "cortex-hygiene-prune",
+     "into": "cortex-compaction",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "cortex-shadow-check",
+     "into": "Cortex Console",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "ct102",
+     "into": "RFC 10024",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.99
+      ],
+      [
+       "reject",
+       0.99
+      ]
+     ]
+    },
+    {
+     "from": "daemon image build",
+     "into": "pseudolife-daemon",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "deep-dream-judge-panel",
+     "into": "deep-dream-queue",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "deep-dream-scan-2026-08-16",
+     "into": "deep-dream-2026-08-11",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.98
+      ],
+      [
+       "reject",
+       0.98
+      ]
+     ]
+    },
+    {
+     "from": "draft-irtf-cfrg-hybrid-kems-12",
+     "into": "hybrid retrieval",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.99
+      ],
+      [
+       "reject",
+       0.99
+      ]
+     ]
+    },
+    {
+     "from": "dream path",
+     "into": "dream write path",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "dream path",
+     "into": "pseudolife dream path",
+     "label": "reject",
+     "votes": [
+      [
+       "accept",
+       0.95
+      ],
+      [
+       "accept",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "dream sweep",
+     "into": "sweep tick",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "dream-run result",
+     "into": "memory_dream",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "dream_runs",
+     "into": "memory_dream",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "dspark_to_dflash.py",
+     "into": "dspark-drafter",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "embedding backbone",
+     "into": "embedding-backbone-decision",
+     "label": "reject",
+     "votes": [
+      [
+       "accept",
+       0.9
+      ],
+      [
+       "accept",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "evals/regression_gate.ps1",
+     "into": "evals/regression_gate.ps1 + rebuild_contexts.py",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "evals/results/banks",
+     "into": "evals/results",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "feat/chronicle-default-on",
+     "into": "chronicle-default-on-pr",
+     "label": "reject",
+     "votes": [
+      [
+       "accept",
+       0.85
+      ],
+      [
+       "accept",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "feat/stance-span-gate",
+     "into": "stance-span-gate-spec",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "flat-band-rerun",
+     "into": "flat-band-migration",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "hell-let-loose-freeze-bug",
+     "into": "Hell Let Loose: Vietnam",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "hpke crate",
+     "into": "hermes-live-shakedown",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.99
+      ],
+      [
+       "reject",
+       0.99
+      ]
+     ]
+    },
+    {
+     "from": "identity.rs",
+     "into": "identity",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "installers",
+     "into": "lite install tier",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "lite-to-docker-graduation",
+     "into": "Dockerfiles",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "live bank",
+     "into": "bank-drift",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "local Python 3.11 dev env",
+     "into": "PyPI",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.99
+      ],
+      [
+       "reject",
+       0.99
+      ]
+     ]
+    },
+    {
+     "from": "mcp_client",
+     "into": "hermes-mcp-client",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "mem0",
+     "into": "memory_forget",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.99
+      ],
+      [
+       "reject",
+       0.99
+      ]
+     ]
+    },
+    {
+     "from": "memory-bank",
+     "into": "supermemory",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "memory-servers",
+     "into": "superlocalmemory",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "memory_forget",
+     "into": "forgetting",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "milestone-slot",
+     "into": "pg18-bump",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "misleading-recall-probe",
+     "into": "distractor-scale probe",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "network.rs",
+     "into": "lm-network",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "ops/docker-compose.ghcr.yml",
+     "into": "ops/docker-compose.yml",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "ops/docker-compose.ghcr.yml",
+     "into": "docker-compose.override.yml",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "ops/install-shim-autostart.sh",
+     "into": "shim-autostart-test-flake",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "pr-31",
+     "into": "PR #152",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.99
+      ],
+      [
+       "reject",
+       0.99
+      ]
+     ]
+    },
+    {
+     "from": "primary extractor",
+     "into": "dream extractor",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "pseudolife-mcp[lite]",
+     "into": "pseudolife-mcp",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "pseudolife-pg",
+     "into": "Pseudolife",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "regression-gate",
+     "into": "regression-gate-baseline",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "regression-gate / evals",
+     "into": "evals/regression_gate.ps1",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "retention-policy-choice",
+     "into": "rollback-retention",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "rust-libp2p",
+     "into": "lm-network",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "shim",
+     "into": "slot-index-shadow-check",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "single-shot recall",
+     "into": "misleading-recall-probe",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "slow band capacity",
+     "into": "flat-band-migration",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "stance-span-gate",
+     "into": "span gate",
+     "label": "reject",
+     "votes": [
+      [
+       "accept",
+       0.95
+      ],
+      [
+       "accept",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "stance-span-gate",
+     "into": "stance-span-gate-spec",
+     "label": "reject",
+     "votes": [
+      [
+       "accept",
+       0.95
+      ],
+      [
+       "accept",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "supermemory",
+     "into": "superlocalmemory",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "sweep-agent",
+     "into": "evals/ladder_sweep.py",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "symbolic-contender-resolution",
+     "into": "merge_candidate",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "task_a60962c0",
+     "into": "release-procedure skill",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "transfer.rs",
+     "into": "transfer",
+     "label": "reject",
+     "votes": [
+      [
+       "accept",
+       0.98
+      ],
+      [
+       "accept",
+       0.98
+      ]
+     ]
+    },
+    {
+     "from": "user-machine",
+     "into": "dev-box",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "v10-stance-deploy",
+     "into": "v10-stance-prompt",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "v11 drift-iteration prompt work",
+     "into": "agent-fabricated-completion",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "valid-time-population",
+     "into": "live_verification",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "windows-auto-reboot-mitigation",
+     "into": "Windows Update",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "x-wing crate",
+     "into": "SP-1",
+     "label": "reject",
+     "votes": [
+      [
+       "reject",
+       0.99
+      ],
+      [
+       "reject",
+       0.99
+      ]
+     ]
+    }
+   ]
+  }
+ }
+}

@@ -14,7 +14,7 @@ arms (cortex answer when that arm commits, rag fallback on abstention) — a
 serving-policy metric, not a fourth answered arm; see ``replicate.py``.
 
 Model roles: the EXTRACTOR is the experiment variable (``--extractor``,
-floor = the shipped Gemma 4 E2B weights, ceiling = Qwen3.6-27B); the ANSWERER
+floor = the shipped Gemma 4 E2B weights, ceiling = Qwen3.8-27B); the ANSWERER
 and JUDGE are always the Qwen endpoint so runs stay comparable. The rag arm
 never touches the extractor, so it doubles as a cross-run control. Everything
 runs on local OpenAI-compatible endpoints — nothing leaves the machine.
@@ -158,16 +158,39 @@ _JUDGE_SYSTEM_GENERIC = (
 )
 
 
+_THINKING_LEVELS = ("low", "medium")
+
+
 def _chat(system: str, user: str, *, max_tokens: int = 256,
           timeout: float = 600.0) -> str:
-    body = json.dumps({
+    # Experiment knobs (2026-08-17 synthesis plan). Defaults are the
+    # permanent regression-gate config and stay byte-identical:
+    #   PSEUDOLIFE_BENCH_THINKING=low|medium — labeled thinking arms:
+    #     replaces the enable_thinking:false pin with a per-request
+    #     reasoning_effort and adds reasoning headroom (reasoning tokens
+    #     count against max_tokens).
+    #   PSEUDOLIFE_BENCH_SAMPLER=<json> — merged into the body LAST (e.g.
+    #     official instruct sampler + fixed seed for the seeded pilot).
+    payload: dict = {
         "model": "bench",
         "messages": [{"role": "system", "content": system},
                      {"role": "user", "content": user}],
         "max_tokens": max_tokens,
         "temperature": 0,
         "chat_template_kwargs": {"enable_thinking": False},
-    }).encode()
+    }
+    thinking = os.environ.get("PSEUDOLIFE_BENCH_THINKING", "").strip().lower()
+    if thinking:
+        if thinking not in _THINKING_LEVELS:
+            raise ValueError(
+                f"PSEUDOLIFE_BENCH_THINKING={thinking!r} — expected one of "
+                f"{_THINKING_LEVELS} (the 3.8 template rejects other levels)")
+        payload["chat_template_kwargs"] = {"reasoning_effort": thinking}
+        payload["max_tokens"] = max_tokens + 4096
+    sampler = os.environ.get("PSEUDOLIFE_BENCH_SAMPLER", "").strip()
+    if sampler:
+        payload.update(json.loads(sampler))
+    body = json.dumps(payload).encode()
     req = urllib.request.Request(
         f"{QWEN_URL.rstrip('/')}/chat/completions", data=body,
         headers={"content-type": "application/json"}, method="POST")

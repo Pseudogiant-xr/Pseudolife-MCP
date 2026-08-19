@@ -1,0 +1,73 @@
+{
+  "probe": "gate-firing",
+  "extractor_url": "http://127.0.0.1:1234/v1",
+  "model": "teacher",
+  "max_tokens": 2048,
+  "dataset": "longmemeval_s_cleaned (non-KU haystack sessions)",
+  "sessions": 400,
+  "failures": 0,
+  "claims": 1209,
+  "claims_cited": 1209,
+  "claims_with_gateable_literals": 261,
+  "flagged_batch": 3,
+  "flagged_source_only": 3,
+  "flagged_batch_share_of_gateable": 0.0115,
+  "source_only_share_of_gateable": 0.0115,
+  "examples": [
+    {
+      "session": "54df03d4_4",
+      "slot": "user.watch purchase intent",
+      "value": "leaning towards Seiko 5 Sports, specifically interested in SRAD733J1 model",
+      "violations_batch": [],
+      "violations_source_only": [
+        "5"
+      ]
+    },
+    {
+      "session": "sharegpt_rKxzzvF_0",
+      "slot": "Mentoring for Foreign Students program.budget",
+      "value": "$11,000 (Recruitment/training: $5000, Materials: $1000, Marketing: $2000, Staff: $3000)",
+      "violations_batch": [
+        "11000"
+      ],
+      "violations_source_only": []
+    },
+    {
+      "session": "0781daa1_1",
+      "slot": "user.bus pass replacements",
+      "value": "2 in the past month",
+      "violations_batch": [],
+      "violations_source_only": [
+        "2"
+      ]
+    },
+    {
+      "session": "sharegpt_h4ZC1fl_203",
+      "slot": "VIDAS Nephrocheck.SPR coating",
+      "value": "mouse monoclonal IgG anti-IGFBP-7 and anti-TIMP-2",
+      "violations_batch": [],
+      "violations_source_only": [
+        "7",
+        "2"
+      ]
+    },
+    {
+      "session": "ultrachat_136505",
+      "slot": "King's College London.acquired building",
+      "value": "161-165 Borough High Street (former Southwark Council office)",
+      "violations_batch": [
+        "161"
+      ],
+      "violations_source_only": []
+    },
+    {
+      "session": "sharegpt_zvmX9pX_25",
+      "slot": "Midjourney.quality parameter values",
+      "value": "0.25, 0.5, 1",
+      "violations_batch": [
+        "0.5"
+      ],
+      "violations_source_only": []
+    }
+  ]
+}

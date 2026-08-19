@@ -513,6 +513,19 @@ The documented procedure is Catalog then Requests (duplicate dropped).
 \\boxed{Catalog; Requests}"""
 
 
+def judge_says_yes(verdict: str) -> bool:
+    """Parse the LLM judge's verdict, tolerating a ``\\boxed{}`` wrapper.
+
+    Qwen3.8 boxes its verdict when the judged response itself carries boxed
+    answers (the compose prompt primes it) — observed 2026-08-17, when the
+    bare startswith parse scored judge_acc 0.0 across arms. Bare 3.6-era
+    verdicts parse unchanged; a judge that echoes the answer instead of a
+    verdict still scores as a miss.
+    """
+    text = _extract_boxed(verdict or "") or (verdict or "")
+    return text.strip().lower().startswith("yes")
+
+
 def answer_judge_score(row: dict, answer_system: str | None = None) -> dict:
     """Fill answer/score/judge/latency fields from the row's persisted contexts.
 
@@ -545,7 +558,7 @@ def answer_judge_score(row: dict, answer_system: str | None = None) -> dict:
             f"Question: {row['question']}\n"
             f"Correct answer: {row['answer']}\n"
             f"Model response: {response}"), max_tokens=8)
-        row[f"{arm}_judge"] = verdict.strip().lower().startswith("yes")
+        row[f"{arm}_judge"] = judge_says_yes(verdict)
         row[f"{arm}_context_tokens"] = approx_tokens(ctx)
     return row
 

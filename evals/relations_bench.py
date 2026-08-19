@@ -71,10 +71,10 @@ RUNGS: dict[str, dict] = {
                  "base_url": os.environ.get("PSEUDOLIFE_BENCH_A3B_URL",
                                             "http://127.0.0.1:1236/v1"),
                  "model": "Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf"},
-    "qwen-27b": {"label": "Qwen3.6-27B (4090 ceiling)",
+    "qwen-27b": {"label": "Qwen3.8-27B (4090 ceiling)",
                  "base_url": os.environ.get("PSEUDOLIFE_BENCH_QWEN_URL",
                                             "http://127.0.0.1:1234/v1"),
-                 "model": "Qwen3.6-27B-UD-Q4_K_XL.gguf"},
+                 "model": "Qwen3.8-27B-UD-Q4_K_XL.gguf"},
 }
 
 # --- Gold corpus: realistically-phrased snippets + their gold triples (in vocab).

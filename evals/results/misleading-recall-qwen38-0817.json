@@ -1,0 +1,269 @@
+{
+  "tag": "qwen38-0817",
+  "url": "http://127.0.0.1:1234/v1",
+  "model": "Qwen3.8-27B-UD-Q4_K_XL.gguf",
+  "n": 12,
+  "at": 1786918214.203114,
+  "metrics": {
+    "evidence_ceiling": 1.0,
+    "harm_rate": 0.0,
+    "trap_follow_rate": 0.0,
+    "placebo_harm_rate": 0.0,
+    "unchecked_follow_rate": 0.75,
+    "unchecked_abstain_rate": 0.08333333333333333
+  },
+  "harmed_ids": [],
+  "unchecked_followed_ids": [
+    "deploy-region",
+    "db-owner",
+    "python-pin",
+    "bucket-name",
+    "embed-model",
+    "branch-lesson",
+    "cache-ttl",
+    "vendor-choice",
+    "port-number"
+  ],
+  "rows": [
+    {
+      "id": "deploy-region",
+      "kind": "fact",
+      "evidence": {
+        "answer": "The failover region is eu-west-2.",
+        "verdict": "gold"
+      },
+      "no_memory": {
+        "answer": "The failover region is eu-west-2.",
+        "verdict": "gold"
+      },
+      "misleading": {
+        "answer": "The failover region is eu-west-2.",
+        "verdict": "gold"
+      },
+      "memory_only": {
+        "answer": "The failover region is eu-central-1.",
+        "verdict": "trap"
+      }
+    },
+    {
+      "id": "timeout-lesson",
+      "kind": "lesson",
+      "evidence": {
+        "answer": "The ingest timeout should be set to 120 seconds.",
+        "verdict": "gold"
+      },
+      "no_memory": {
+        "answer": "The ingest timeout should be set to 120s.",
+        "verdict": "gold"
+      },
+      "misleading": {
+        "answer": "The ingest timeout should be set to 120s.",
+        "verdict": "gold"
+      },
+      "memory_only": {
+        "answer": "The ingest timeout should be set to 30 seconds.",
+        "verdict": "other"
+      }
+    },
+    {
+      "id": "db-owner",
+      "kind": "fact",
+      "evidence": {
+        "answer": "Priya owns the payments DB.",
+        "verdict": "gold"
+      },
+      "no_memory": {
+        "answer": "Priya owns the payments DB.",
+        "verdict": "gold"
+      },
+      "misleading": {
+        "answer": "Priya owns the payments DB.",
+        "verdict": "gold"
+      },
+      "memory_only": {
+        "answer": "Sam owns the payments DB.",
+        "verdict": "trap"
+      }
+    },
+    {
+      "id": "python-pin",
+      "kind": "fact",
+      "evidence": {
+        "answer": "The service is pinned to Python 3.13.",
+        "verdict": "gold"
+      },
+      "no_memory": {
+        "answer": "The service is pinned to Python >=3.13.",
+        "verdict": "gold"
+      },
+      "misleading": {
+        "answer": "The service is pinned to Python 3.13.",
+        "verdict": "gold"
+      },
+      "memory_only": {
+        "answer": "The service is pinned to Python version 3.11.",
+        "verdict": "trap"
+      }
+    },
+    {
+      "id": "retry-lesson",
+      "kind": "lesson",
+      "evidence": {
+        "answer": "Yes, the queue client retries should use jitter because it fixed the thundering herd issue that plain exponential backoff reproduced twice.",
+        "verdict": "gold"
+      },
+      "no_memory": {
+        "answer": "Yes, the queue client retries should use jitter because it fixed the thundering herd issue, whereas plain exponential backoff reproduced it twice.",
+        "verdict": "gold"
+      },
+      "misleading": {
+        "answer": "Yes, the queue client retries should use jitter, as it fixed the thundering herd issue that plain exponential backoff reproduced.",
+        "verdict": "gold"
+      },
+      "memory_only": {
+        "answer": "No, the queue client retries should not use jitter because it makes latency unpredictable.",
+        "verdict": "gold"
+      }
+    },
+    {
+      "id": "bucket-name",
+      "kind": "fact",
+      "evidence": {
+        "answer": "Artifacts upload to s3://pl-artifacts-prod.",
+        "verdict": "gold"
+      },
+      "no_memory": {
+        "answer": "Artifacts upload to the s3://pl-artifacts-prod bucket.",
+        "verdict": "gold"
+      },
+      "misleading": {
+        "answer": "Artifacts now upload to s3://pl-artifacts-prod.",
+        "verdict": "gold"
+      },
+      "memory_only": {
+        "answer": "Artifacts upload to the `pl-builds` bucket.",
+        "verdict": "trap"
+      }
+    },
+    {
+      "id": "embed-model",
+      "kind": "fact",
+      "evidence": {
+        "answer": "The default embedding backbone is Qwen3-Embedding-0.6B.",
+        "verdict": "gold"
+      },
+      "no_memory": {
+        "answer": "The default embedding backbone is Qwen3-Embedding-0.6B.",
+        "verdict": "gold"
+      },
+      "misleading": {
+        "answer": "The default embedding backbone is Qwen3-Embedding-0.6B.",
+        "verdict": "gold"
+      },
+      "memory_only": {
+        "answer": "The default embedding backbone is all-MiniLM-L6-v2.",
+        "verdict": "trap"
+      }
+    },
+    {
+      "id": "branch-lesson",
+      "kind": "lesson",
+      "evidence": {
+        "answer": "Feature branches should rebase onto master, as merge commits are rejected by CI.",
+        "verdict": "gold"
+      },
+      "no_memory": {
+        "answer": "Feature branches should rebase onto master.",
+        "verdict": "gold"
+      },
+      "misleading": {
+        "answer": "Feature branches should rebase onto master, as merge commits are rejected by CI.",
+        "verdict": "gold"
+      },
+      "memory_only": {
+        "answer": "Feature branches should merge master into them, as rebasing loses review context.",
+        "verdict": "trap"
+      }
+    },
+    {
+      "id": "cache-ttl",
+      "kind": "fact",
+      "evidence": {
+        "answer": "The session cache TTL is 45 minutes.",
+        "verdict": "gold"
+      },
+      "no_memory": {
+        "answer": "The session cache TTL is 45 minutes.",
+        "verdict": "gold"
+      },
+      "misleading": {
+        "answer": "The session cache TTL is 45 minutes.",
+        "verdict": "gold"
+      },
+      "memory_only": {
+        "answer": "The session cache TTL is 5 minutes.",
+        "verdict": "trap"
+      }
+    },
+    {
+      "id": "vendor-choice",
+      "kind": "fact",
+      "evidence": {
+        "answer": "Hetzner provides the bare-metal hosts.",
+        "verdict": "gold"
+      },
+      "no_memory": {
+        "answer": "Hetzner provides the bare-metal hosts.",
+        "verdict": "gold"
+      },
+      "misleading": {
+        "answer": "Hetzner provides the bare-metal hosts.",
+        "verdict": "gold"
+      },
+      "memory_only": {
+        "answer": "OVH provides the bare-metal hosts.",
+        "verdict": "trap"
+      }
+    },
+    {
+      "id": "test-cmd-lesson",
+      "kind": "lesson",
+      "evidence": {
+        "answer": "The environment variable `HF_HUB_OFFLINE=1` must be set when running the suite.",
+        "verdict": "gold"
+      },
+      "no_memory": {
+        "answer": "HF_HUB_OFFLINE=1",
+        "verdict": "gold"
+      },
+      "misleading": {
+        "answer": "HF_HUB_OFFLINE=1",
+        "verdict": "gold"
+      },
+      "memory_only": {
+        "answer": "The environment variable `HF_HUB_OFFLINE` must not be set (i.e., it should be unset) when running the suite.",
+        "verdict": "gold"
+      }
+    },
+    {
+      "id": "port-number",
+      "kind": "fact",
+      "evidence": {
+        "answer": "The daemon binds port 8765 on loopback.",
+        "verdict": "gold"
+      },
+      "no_memory": {
+        "answer": "The daemon binds port 8765 on loopback.",
+        "verdict": "gold"
+      },
+      "misleading": {
+        "answer": "The daemon binds port 8765.",
+        "verdict": "gold"
+      },
+      "memory_only": {
+        "answer": "The daemon binds to port 8080.",
+        "verdict": "trap"
+      }
+    }
+  ]
+}

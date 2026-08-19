@@ -1,19 +1,24 @@
 {
-  "established_at": "2026-07-27T15:33:49",
-  "commit": "1f0f13a",
-  "n_replicates": 7,
+  "established_at": "2026-08-17T07:08:09",
+  "commit": "dbda72c5",
+  "n_replicates": 3,
   "arms": {
     "rag": {
-      "mean": 0.6282,
+      "mean": 0.5897,
       "std": 0.0,
       "margin": 0.03
     },
     "cortex": {
-      "mean": 0.7051,
+      "mean": 0.6923,
       "std": 0.0,
       "margin": 0.03
     },
     "hybrid": {
+      "mean": 0.7692,
+      "std": 0.0,
+      "margin": 0.03
+    },
+    "cascade": {
       "mean": 0.7692,
       "std": 0.0,
       "margin": 0.03

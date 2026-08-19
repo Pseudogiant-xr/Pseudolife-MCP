@@ -687,10 +687,14 @@ class OpenAICompatExtractor:
     extractable claims returns ``[]``. Uses stdlib urllib — no new deps."""
 
     def __init__(self, base_url: str, model: str, *, api_key: str | None = None,
-                 max_tokens: int = 400, timeout_seconds: float = 20.0,
+                 # Default matches DreamConfig.extractor_max_tokens (kept in
+                 # lockstep by test_judge_thinking_payload) — the old 400 was
+                 # a pre-2026-06-22 remnant that only direct constructors hit.
+                 max_tokens: int = 2048, timeout_seconds: float = 20.0,
                  system_prompt: str | None = None,
                  events_prompt: str | None = None,
-                 extra_body: dict | None = None) -> None:
+                 extra_body: dict | None = None,
+                 judge_thinking: bool | str = False) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.api_key = api_key or None
@@ -702,6 +706,14 @@ class OpenAICompatExtractor:
         # warm server's cache changes output on identical temperature-0 input
         # (measured 2026-08-09, evals/results/warm-cache-probe-0809.json).
         self.extra_body = dict(extra_body or {})
+        # Experiment knob (2026-08-17, judge-ladder harness only — the daemon
+        # never passes it, so shipped judge payloads stay byte-identical):
+        # lets judge_merges leave thinking to the server/template default
+        # instead of pinning it off. Server-side reasoning kwargs are inert
+        # while the pin is present (a reasoning_effort=xhigh server produced
+        # a byte-identical judge ladder). True = server/template default;
+        # "low"/"medium" pins an explicit per-request reasoning_effort.
+        self.judge_thinking = judge_thinking
         # Base system prompt for claims extraction. Defaults to the shipped
         # ``_SYSTEM_PROMPT`` (the daemon never passes this arg, so its behaviour
         # is byte-identical). Off-label harnesses (e.g. the LME-V2 trajectory
@@ -990,7 +1002,7 @@ class OpenAICompatExtractor:
         if self.api_key:
             headers["authorization"] = f"Bearer {self.api_key}"
         try:
-            body = json.dumps({**self.extra_body,
+            payload = {**self.extra_body,
                 "model": self.model,
                 "messages": [
                     {"role": "system", "content": _JUDGE_SYSTEM_PROMPT},
@@ -1003,7 +1015,19 @@ class OpenAICompatExtractor:
                 "max_tokens": max(self.max_tokens, 120 * len(proposals)),
                 "temperature": 0,
                 "chat_template_kwargs": {"enable_thinking": False},
-            }).encode()
+            }
+            if self.judge_thinking:
+                # Let thinking run, and give the reasoning trace headroom the
+                # verdict budget lacks (reasoning tokens count against
+                # max_tokens). True defers to the server/template default;
+                # a string pins an explicit reasoning_effort level.
+                if isinstance(self.judge_thinking, str):
+                    payload["chat_template_kwargs"] = {
+                        "reasoning_effort": self.judge_thinking}
+                else:
+                    del payload["chat_template_kwargs"]
+                payload["max_tokens"] += 4096
+            body = json.dumps(payload).encode()
             req = urllib.request.Request(
                 f"{self.base_url}/chat/completions", data=body,
                 headers=headers, method="POST")

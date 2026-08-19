@@ -14,7 +14,7 @@ optimisation target.
 Self-contained (stdlib only) so it runs *inside* the daemon container, where
 both endpoints are reachable:
   * gemma     -> http://pseudolife-extractor:8081/v1   (model ``extractor``)
-  * qwen-27b  -> http://host.docker.internal:1234/v1   (model ``Qwen3.6-27B-...``)
+  * qwen-27b  -> http://host.docker.internal:1234/v1   (model ``Qwen3.8-27B-...``)
 
     docker cp evals/lesson_synthesis_bench.py pseudolife-mcp-daemon:/tmp/lb.py
     docker exec pseudolife-mcp-daemon python /tmp/lb.py --target all
@@ -458,7 +458,7 @@ def print_infer_report(result: dict) -> None:
 # Endpoints assume execution INSIDE the daemon container; override via CLI.
 TARGETS = {
     "gemma": ("http://pseudolife-extractor:8081/v1", "extractor"),
-    "qwen-27b": ("http://host.docker.internal:1234/v1", "Qwen3.6-27B-UD-Q4_K_XL.gguf"),
+    "qwen-27b": ("http://host.docker.internal:1234/v1", "Qwen3.8-27B-UD-Q4_K_XL.gguf"),
 }
 
 
