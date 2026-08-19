@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-08-20 — daemon container memory cap)
+- **The daemon container now ships with a hard memory cap** (`mem_limit`,
+  default `4g`, override via `PSEUDOLIFE_DAEMON_MEM_LIMIT` in `ops/.env`;
+  the memory+swap total is pinned to the memory limit, so the container
+  gets no swap — by design). Steady state is ~2.8 GB with
+  the default embedder loaded; the cap fences the 2026-08-04 incident where
+  the daemon transiently allocated 21 GB RSS within minutes of boot (root
+  cause still under investigation) — the failure mode becomes a clean
+  container restart (`restart: unless-stopped`) instead of a host-wide
+  memory event. A capped daemon has been serving continuously under a
+  tighter 3.5 GB limit since 2026-08-19 with no restarts.
+
 ### Fixed (2026-08-19 — review-pass hardening of judged-run integrity)
 - **Pre-merge review of the 3.8 migration branch surfaced 11 findings; all
   applied.** Shipped-path corrections: the deep-dream judge (`judge_url`)
