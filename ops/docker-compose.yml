@@ -90,6 +90,19 @@ services:
     container_name: pseudolife-mcp-daemon
     restart: unless-stopped
     logging: *default-logging
+    # Hard memory cap. Steady state is ~2.8 GB with the default embedder
+    # loaded (measured 2026-08-04 post-restart on the reference deployment,
+    # re-confirmed 2026-08-19/20 on a capped standby holding 2.7 GB across a
+    # day of serving); the cap exists because the daemon once ballooned to
+    # 21 GB RSS within minutes of boot (2026-08-04 incident, root cause
+    # still open) and an uncapped container takes the whole host with it.
+    # 4g clears every measured steady state with headroom — raise it via
+    # PSEUDOLIFE_DAEMON_MEM_LIMIT in ops/.env for very large banks.
+    # memswap_limit is the memory+swap TOTAL; setting it equal to the
+    # memory limit disallows swap entirely, so hitting the cap is a clean
+    # OOM restart (restart: unless-stopped), not host swap thrash.
+    mem_limit: ${PSEUDOLIFE_DAEMON_MEM_LIMIT:-4g}
+    memswap_limit: ${PSEUDOLIFE_DAEMON_MEM_LIMIT:-4g}
     # No depends_on for the extractor: dream extraction is runtime HTTP with
     # per-sweep retry (a probe against a still-loading extractor just fails
     # and retries next sweep), and the sidecar must be disableable via a
