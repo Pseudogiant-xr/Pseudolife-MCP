@@ -131,13 +131,19 @@ def main() -> None:
                     help="unpin enable_thinking:false on the judge call so "
                          "the server/template reasoning default governs — "
                          "an experimental arm, NOT the shipped code path")
-    ap.add_argument("--thinking-effort", choices=("low", "medium"),
+    ap.add_argument("--thinking-effort", choices=("low", "medium", "xhigh"),
                     help="like --thinking but pins an explicit per-request "
                          "reasoning_effort level")
     args = ap.parse_args()
 
     rows = json.loads(DATA.read_text(encoding="utf-8"))["rows"]
     ex = OpenAICompatExtractor(args.base_url, args.model,
+                               # The ladder's measured budget: verdict rows
+                               # are ~120 tokens/proposal (judge_merges floors
+                               # at 120*batch), decoupled from the extraction
+                               # default so a default bump can never silently
+                               # change this bench's config again.
+                               max_tokens=400,
                                timeout_seconds=args.timeout,
                                judge_thinking=(args.thinking_effort
                                                or args.thinking))
@@ -158,6 +164,11 @@ def main() -> None:
     result = {
         "arm": args.arm, "model": args.model, "base_url": args.base_url,
         "replicates": args.replicates, "batch": args.batch,
+        # Results merge into a shared artifact keyed by arm name, so the
+        # thinking config must live IN the record — without it, a --thinking
+        # rerun of the same arm silently replaces the non-thinking numbers
+        # with nothing distinguishing the two.
+        "judge_thinking": args.thinking_effort or args.thinking or False,
         "flip_rows": flips, **score(rows, final),
         "per_row": [{"from": r["from"]["display"],
                      "into": r["into"]["display"], "label": r["label"],

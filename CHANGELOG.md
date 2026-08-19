@@ -6,6 +6,68 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-08-19 — review-pass hardening of judged-run integrity)
+- **Pre-merge review of the 3.8 migration branch surfaced 11 findings; all
+  applied.** Shipped-path corrections: the deep-dream judge (`judge_url`)
+  constructor now passes `extractor_max_tokens` explicitly (it silently
+  inherited the constructor default), and the constructor's
+  `timeout_seconds` default is synced 20→240 s alongside `max_tokens`
+  (half-synced defaults recreated the documented big-budget/tiny-timeout
+  claims:0 failure; both now lockstep-tested). Eval integrity:
+  `Get-RunningQwenConfig` now returns `'foreign'` for a llama-server not
+  serving the expected GGUF and `Start-Qwen` refuses to reuse or displace
+  it (a leftover 3.6 rollback server could previously masquerade as
+  reproducible); `-Fast` pins `MTP=1` against ambient env state;
+  `live_replay_judge.py` and `retention_interval_eval.py` pin
+  `enable_thinking:false` (the 3.8 server default is thinking-on with the
+  3.6-era budget cap retired); the bench env knobs are stamped into
+  summary artifacts, may not override `messages`/`model`/
+  `chat_template_kwargs`, and accept `xhigh` (the template's real level
+  set); `judge_says_yes` is position-anchored (an echoed gold
+  `\boxed{yes}` no longer scores as a pass; `\boxed{\text{yes}}` and
+  8-token-truncated boxes now parse — both directions test-pinned);
+  `judge_ladder.py` records its thinking config in the artifact and pins
+  `max_tokens=400`, as does `lesson_synthesis_bench.py` (measured budgets
+  decoupled from the extraction default); overnight preflight resolves
+  the engine/GGUF/launcher from `qwen_server.ps1` instead of gating on
+  the retired turboq `.bat`.
+
+### Changed (2026-08-19 — LME-V2 slice verdict + 3.8 extraction pace)
+- **LME-V2 `procedure` paired comparison** (56 shared questions, off-ramp
+  taken at the user's option-2 decision; artifact
+  `lme-v2-qwen38-vs-slice2-paired56.json`): on the preregistered primary
+  metric (deterministic eval) Qwen3.8 ≥ 3.6 on every arm — cortex 0.143 vs
+  0.054 (+0.089, 6 wins / 1 loss), rag +0.018, hybrid −0.018 (both noise).
+  The secondary LLM-judge metric drops on rag/hybrid, consistent with the
+  measured 3.8 no-think judge strictness and confounded by judge identity;
+  the primary metric carries the verdict.
+- **Operational finding: 3.8 extraction is ~3.5–4× slower than 3.6**
+  (34 min vs ~10.6 min per extraction-heavy lme_v2 row; ladder extract
+  33.0 s vs 9.0 s at 13.4 vs 1.4 tok/q). Scale all 3.6-era runtime
+  estimates accordingly before scheduling 3.8 extraction workloads (BEAM
+  deliberately not run for this reason — pending its own scheduling
+  decision).
+
+### Changed (2026-08-19 — bench engine b10488 + extractor token-default sync)
+- **Bench engine bumped b10453 → b10488**: byte-identical output on a fixed
+  16k-token probe (same content hash), ~4% faster decode, and the
+  regression-gate canary re-passed on the new engine (std 0.0000, PASS vs
+  the committed 3.8 baseline — artifacts:
+  `regression_gate-2026-08-19-canary-b10488-n2.agg.json` and
+  `engine-b10488-probe-20260819.json`). Mainline MTP measured on this build is
+  byte-deterministic run-to-run and verdict-lossless vs stock
+  (`judge-determinism-check-qwen38-mtp.json`); extraction-phase adoption
+  is a follow-up design (answer/judge calls gain nothing from it).
+- **`OpenAICompatExtractor` default `max_tokens` 400 → 2048**, matching
+  `DreamConfig.extractor_max_tokens` (lockstep-pinned by test). The dream
+  extractor path always passed the config value, but the deep-dream
+  judge (`judge_url`) constructor did not — it now passes
+  `extractor_max_tokens` explicitly (2026-08-19 review finding);
+  the stale default only reached direct constructors — including
+  `judge_ladder.py`, whose per-batch judge budget floor rises from 960 to
+  2048 (no behavioral change measured: verdicts are short and were never
+  truncating).
+
 ### Changed (2026-08-17 — GPU bench server migrated to Qwen3.8-27B)
 - **`evals/qwen_server.ps1` now serves Qwen3.8-27B-UD-Q4_K_XL on the
   llama.cpp b10453 engine** (the 3.6-era b9371 binary cannot load 3.8's
@@ -45,38 +107,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   numbers still cite 3.6 and are deliberately not switched in this
   change — promotion needs its own docs-currency pass with
   `tests/test_eval_evidence.py` rows updated alongside.
-
-### Changed (2026-08-19 — LME-V2 slice verdict + 3.8 extraction pace)
-- **LME-V2 `procedure` paired comparison** (56 shared questions, off-ramp
-  taken at the user's option-2 decision; artifact
-  `lme-v2-qwen38-vs-slice2-paired56.json`): on the preregistered primary
-  metric (deterministic eval) Qwen3.8 ≥ 3.6 on every arm — cortex 0.143 vs
-  0.054 (+0.089, 6 wins / 1 loss), rag +0.018, hybrid −0.018 (both noise).
-  The secondary LLM-judge metric drops on rag/hybrid, consistent with the
-  measured 3.8 no-think judge strictness and confounded by judge identity;
-  the primary metric carries the verdict.
-- **Operational finding: 3.8 extraction is ~3.5–4× slower than 3.6**
-  (34 min vs ~10.6 min per extraction-heavy lme_v2 row; ladder extract
-  33.0 s vs 9.0 s at 13.4 vs 1.4 tok/q). Scale all 3.6-era runtime
-  estimates accordingly before scheduling 3.8 extraction workloads (BEAM
-  deliberately not run for this reason — pending its own scheduling
-  decision).
-
-### Changed (2026-08-19 — bench engine b10488 + extractor token-default sync)
-- **Bench engine bumped b10453 → b10488**: byte-identical output on a fixed
-  16k-token probe (same content hash), ~4% faster decode, and the
-  regression-gate canary re-passed on the new engine (std 0.0000, PASS vs
-  the committed 3.8 baseline). Mainline MTP measured on this build is
-  byte-deterministic run-to-run and verdict-lossless vs stock
-  (`judge-determinism-check-qwen38-mtp.json`); extraction-phase adoption
-  is a follow-up design (answer/judge calls gain nothing from it).
-- **`OpenAICompatExtractor` default `max_tokens` 400 → 2048**, matching
-  `DreamConfig.extractor_max_tokens` (lockstep-pinned by test). New
-  installs were unaffected (the daemon always passed the config value);
-  the stale default only reached direct constructors — including
-  `judge_ladder.py`, whose per-batch judge budget floor rises from 960 to
-  2048 (no behavioral change measured: verdicts are short and were never
-  truncating).
 
 ### Added (2026-08-17 — thinking-judge experiment knob)
 - **`OpenAICompatExtractor(judge_thinking=True)`** (daemon never passes it;

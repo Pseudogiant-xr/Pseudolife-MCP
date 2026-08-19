@@ -6643,6 +6643,10 @@ class MemoryService:
             from pseudolife_memory.memory.dream import OpenAICompatExtractor
             return OpenAICompatExtractor(
                 cfg.judge_url, cfg.judge_model or "judge",
+                # Explicit, not the constructor default: the judge endpoint
+                # follows the same config knob as the dream extractor, so a
+                # default change can never silently alter this shipped payload.
+                max_tokens=dream_cfg.extractor_max_tokens,
                 timeout_seconds=dream_cfg.extractor_timeout_seconds)
         if extractor is None:
             from pseudolife_memory.memory.dream import (

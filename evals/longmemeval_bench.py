@@ -158,7 +158,24 @@ _JUDGE_SYSTEM_GENERIC = (
 )
 
 
-_THINKING_LEVELS = ("low", "medium")
+_THINKING_LEVELS = ("low", "medium", "xhigh")
+# Fields the sampler knob may never override: the conversation itself, the
+# model id, and the thinking pin (the thinking knob is the one sanctioned
+# way to change that; a sampler JSON that clobbered it would silently turn a
+# "sampled, no-think" arm into a thinking arm).
+_SAMPLER_PROTECTED = ("messages", "model", "chat_template_kwargs")
+
+
+def bench_env_knobs() -> dict:
+    """The experiment-knob state, for stamping into artifacts — a judged
+    run whose config can't be audited afterwards is the failure mode the
+    reproducible-server discipline exists to prevent."""
+    return {
+        "thinking": os.environ.get("PSEUDOLIFE_BENCH_THINKING", "").strip()
+        or None,
+        "sampler": os.environ.get("PSEUDOLIFE_BENCH_SAMPLER", "").strip()
+        or None,
+    }
 
 
 def _chat(system: str, user: str, *, max_tokens: int = 256,
@@ -184,12 +201,16 @@ def _chat(system: str, user: str, *, max_tokens: int = 256,
         if thinking not in _THINKING_LEVELS:
             raise ValueError(
                 f"PSEUDOLIFE_BENCH_THINKING={thinking!r} — expected one of "
-                f"{_THINKING_LEVELS} (the 3.8 template rejects other levels)")
+                f"{_THINKING_LEVELS} (the 3.8 template accepts exactly "
+                f"these; only 'none' is rejected)")
         payload["chat_template_kwargs"] = {"reasoning_effort": thinking}
         payload["max_tokens"] = max_tokens + 4096
     sampler = os.environ.get("PSEUDOLIFE_BENCH_SAMPLER", "").strip()
     if sampler:
-        payload.update(json.loads(sampler))
+        overrides = json.loads(sampler)
+        for k in _SAMPLER_PROTECTED:
+            overrides.pop(k, None)
+        payload.update(overrides)
     body = json.dumps(payload).encode()
     req = urllib.request.Request(
         f"{QWEN_URL.rstrip('/')}/chat/completions", data=body,
@@ -742,6 +763,9 @@ def report(dataset: str, extractor_name: str, tag: str = "",
           f"{label} ({n} questions)")
     print(f"{'arm':<10}{'accuracy':>10}{'ctx tok/q':>12}")
     summary = {"dataset": dataset, "extractor": extractor_name, "n": n,
+               # Experiment-knob state at report time: a summary that can't
+               # say which config produced it is unauditable afterwards.
+               "bench_env": bench_env_knobs(),
                "arms": {}}
     # Variant arms (hybrid_ctg etc.) are detected from the rows so old
     # three-arm artifacts report identically.

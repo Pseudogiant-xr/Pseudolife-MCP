@@ -9,8 +9,8 @@ Shared Qwen-27B bench server control. Dot-source it:
 MODEL: Qwen3.8-27B-UD-Q4_K_XL (migrated 2026-08-17; previously Qwen3.6-27B —
 rollback copy of this file: qwen_server.ps1.bak-qwen36-20260817, and the 3.6
 model/engine remain on disk). Qwen3.8 is a hybrid DeltaNet architecture the
-old root llama-server.exe (b9371) cannot load; both configs now use the
-b10453 engine under engine-b10453\.
+old root llama-server.exe (b9371) cannot load; the engine build lives in
+$script:QwenEngine below — that variable, not this prose, is authoritative.
 
 TWO CONFIGS, AND THE CHOICE IS NOT A PREFERENCE
 -----------------------------------------------
@@ -21,11 +21,13 @@ a new architecture and engine: 3.8 determinism is re-verified by
 evals/results/judge-determinism-check-qwen38.json. Do not trust judged
 numbers unless that artifact exists and passes for the running config.
 
-Fast (-Fast): run-server-qwen38.bat = same engine, same GGUF, embedded-MTP
-speculative decoding ON (--spec-type draft-mtp). Unlike the retired 3.6
-turboq fork (fused TBQ4_0 KV, ~7% verdict flips), this shares the stock KV
-path, but its determinism is UNMEASURED — the fork precedent says assume
-non-reproducible until measured.
+Fast (-Fast): run-server-qwen38.bat = same GGUF, embedded-MTP speculative
+decoding ON (--spec-type draft-mtp). Measured 2026-08-19
+(evals/results/judge-determinism-check-qwen38-mtp.json): byte-deterministic
+run-to-run (0 flips, 0 response diffs) and verdict-lossless vs stock (0
+flips, swing 0.0) — but 3/234 responses differ textually, so it is a
+DISTINCT config for baseline purposes: judged baselines stay on the
+reproducible config, MTP is for throughput work.
 
 RULE (unchanged): anything whose output is JUDGED — an answerer or judge
 call, i.e. longmemeval_bench.py --phase answer/full, replicate.py,
@@ -48,9 +50,9 @@ $script:QwenEngine = "$script:QwenDir\engine-b10488"
 $script:QwenUrl    = "http://127.0.0.1:1234/v1/models"
 
 function Get-QwenModelPath {
-    param([switch]$Fast)
     # Qwen3.8 GGUFs embed the MTP head in the main file — one model for both
-    # configs (the 3.6 split between models\ and models\mtp\ is retired).
+    # configs (the 3.6 split between models\ and models\mtp\ is retired,
+    # and with it this function's old -Fast switch).
     return "$script:QwenDir\models\Qwen3.8-27B-UD-Q4_K_XL.gguf"
 }
 
@@ -64,20 +66,27 @@ function Wait-QwenEndpoint {
 }
 
 function Get-RunningQwenConfig {
-    <# Which config is actually serving :1234 — 'fast', 'reproducible', or
-       $null if nothing is up. Both configs bind the same port, so "something
-       answered the probe" is NOT enough: a harness that reused a leftover
-       fast server for a judged phase would silently produce ungated noise.
-       The MTP flag in the command line is the discriminator. #>
+    <# Which config is actually serving :1234 — 'fast', 'reproducible',
+       'foreign' (a llama-server NOT serving the expected GGUF — e.g. a
+       leftover 3.6 rollback server, which post-migration would otherwise
+       masquerade as reproducible and mislabel an entire judged campaign),
+       or $null if nothing is up. Both configs bind the same port, so
+       "something answered the probe" is NOT enough. Discriminators: the
+       model path in the command line first, then the MTP flag. #>
     $procs = Get-CimInstance Win32_Process -Filter "Name = 'llama-server.exe'" `
         -ErrorAction SilentlyContinue
     if (-not $procs) { return $null }
+    $model = Split-Path (Get-QwenModelPath) -Leaf
+    $sawExpected = $false
     foreach ($p in $procs) {
+        if ($p.CommandLine -notlike "*$model*") { continue }
+        $sawExpected = $true
         # Matches both the retired turboq fork's '--spec-type mtp' and the
-        # mainline b10453 '--spec-type draft-mtp' (run-server-qwen38.bat).
+        # mainline '--spec-type draft-mtp' (run-server-qwen38.bat).
         if ($p.CommandLine -match '--spec-type\s+(draft-)?mtp') { return 'fast' }
     }
-    return 'reproducible'
+    if ($sawExpected) { return 'reproducible' }
+    return 'foreign'
 }
 
 function Stop-Qwen {
@@ -113,17 +122,24 @@ function Start-Qwen {
 
        GPU-busy guard (2026-08-13): when anything is holding > 5 GB VRAM
        and the wanted server is not already the thing serving, this
-       REFUSES (returns $false) instead of launching or displacing —
-       Get-RunningQwenConfig's discriminator is MTP-only, so a foreign
-       llama-server (e.g. the daily driver) is indistinguishable from a
-       leftover bench server, and the safe default is to touch nothing.
-       That deliberately includes this helper's own leftover other-config
-       server: replacing it now takes an operator decision — run
-       Stop-Qwen first, or pass -Force. #>
+       REFUSES (returns $false) instead of launching or displacing.
+       A 'foreign' llama-server (wrong GGUF in its command line — e.g. a
+       leftover 3.6 rollback server or the daily driver) is refused
+       unconditionally, whatever its VRAM: reusing it mislabels a whole
+       campaign, displacing it breaks the never-displace rule. Clearing
+       one takes an operator decision — run Stop-Qwen deliberately. #>
     param([switch]$Fast, [switch]$Force, [int]$Ctx = 100000)
     $want = if ($Fast) { 'fast' } else { 'reproducible' }
 
     $running = Get-RunningQwenConfig
+    if ($running -eq 'foreign') {
+        Write-Host ("$(Get-Date -Format 'HH:mm:ss') FOREIGN llama-server on " +
+                    ":1234 — it is not serving $(Split-Path (Get-QwenModelPath) -Leaf); " +
+                    "refusing to reuse or displace it. Run Stop-Qwen to clear " +
+                    "it deliberately.")
+        Start-Sleep -Seconds 30   # same retry-loop pacing as the busy refusal
+        return $false
+    }
     if ($running -eq $want -and (Wait-QwenEndpoint -Seconds 5)) {
         Write-Host "$(Get-Date -Format 'HH:mm:ss') qwen server already up ($want)"
         return $true
@@ -196,6 +212,10 @@ function Start-Qwen {
         $env:CACHE_RAM = "0"
         $env:CTX_CHECKPOINTS = "0"
         $env:CTX = "$Ctx"
+        # Pin MTP explicitly too: the .bat's manual-use instructions suggest
+        # `set MTP=0` for stock mode, and a leftover MTP=0 in this session
+        # would otherwise launch a stock server under the -Fast label.
+        $env:MTP = "1"
         Start-Process -FilePath cmd.exe -WorkingDirectory $script:QwenDir `
             -WindowStyle Minimized `
             -ArgumentList '/c', "`"$script:QwenDir\run-server-qwen38.bat`" > qwen-server.log 2>&1"
@@ -203,16 +223,19 @@ function Start-Qwen {
     }
 
     Write-Host "$(Get-Date -Format 'HH:mm:ss') starting Qwen3.8 27B (reproducible q8_0, MTP off)"
-    # No CUDA-toolkit PATH surgery: the b10453 release engine bundles its own
-    # cudart/cublas 12.4 DLLs beside the exe, which Windows resolves first.
+    # No CUDA-toolkit PATH surgery: the llama.cpp release engines bundle their
+    # own cudart/cublas 12.4 DLLs beside the exe, which Windows resolves first
+    # (verified present in the $script:QwenEngine folder on each bump).
     # Flags mirror run-server-qwen38.bat EXCEPT the eval-protocol trio that
     # bat defaults differently: --cache-ram 0, --ctx-checkpoints 0, and no
-    # --spec-type (MTP off — speculative decoding stays out of judged runs
-    # until measured). Sampler is the official Qwen3.8 thinking set (temp 1.0,
-    # pp 0.0); the 3.6-era froggeric template and --reasoning-budget are
-    # retired — 3.8 uses its embedded template with reasoning_effort
-    # (xhigh|medium|low; 'none' is rejected by the template) and
-    # enable_thinking:false still works per-request (verified 2026-08-17).
+    # --spec-type (MTP measured deterministic AND verdict-lossless, but with
+    # 3/234 textual response diffs vs stock it is a distinct config — judged
+    # baselines stay here). Sampler is the official Qwen3.8 thinking set
+    # (temp 1.0, pp 0.0); the 3.6-era froggeric template and
+    # --reasoning-budget are retired — 3.8 uses its embedded template with
+    # reasoning_effort (xhigh default | medium | low; only 'none' is
+    # rejected by the template) and enable_thinking:false still works
+    # per-request (verified 2026-08-17).
     # -Ctx: KV-cache CAPACITY only, as before.
     $qwenArgs = @(
         "-m", (Get-QwenModelPath),
