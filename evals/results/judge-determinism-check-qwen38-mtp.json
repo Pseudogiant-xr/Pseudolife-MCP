@@ -1,0 +1,78 @@
+{
+  "extractor": "e4b-ft",
+  "configurations": {
+    "qwen38-mtp-repeat": {
+      "n_questions": 78,
+      "inputs_identical": true,
+      "arms": {
+        "cortex": {
+          "accuracy_pass_a": 0.692,
+          "accuracy_pass_b": 0.692,
+          "accuracy_swing": 0.0,
+          "verdict_flips": 0,
+          "response_diffs": 0
+        },
+        "hybrid": {
+          "accuracy_pass_a": 0.769,
+          "accuracy_pass_b": 0.769,
+          "accuracy_swing": 0.0,
+          "verdict_flips": 0,
+          "response_diffs": 0
+        },
+        "rag": {
+          "accuracy_pass_a": 0.59,
+          "accuracy_pass_b": 0.59,
+          "accuracy_swing": 0.0,
+          "verdict_flips": 0,
+          "response_diffs": 0
+        }
+      },
+      "verdict_flip_rate": 0.0,
+      "response_diff_rate": 0.0,
+      "max_accuracy_swing": 0.0,
+      "tags": [
+        "arm1-mtp",
+        "arm1-mtp-r2"
+      ]
+    },
+    "mtp-vs-stock": {
+      "n_questions": 78,
+      "inputs_identical": true,
+      "arms": {
+        "cortex": {
+          "accuracy_pass_a": 0.692,
+          "accuracy_pass_b": 0.692,
+          "accuracy_swing": 0.0,
+          "verdict_flips": 0,
+          "response_diffs": 1
+        },
+        "hybrid": {
+          "accuracy_pass_a": 0.769,
+          "accuracy_pass_b": 0.769,
+          "accuracy_swing": 0.0,
+          "verdict_flips": 0,
+          "response_diffs": 2
+        },
+        "rag": {
+          "accuracy_pass_a": 0.59,
+          "accuracy_pass_b": 0.59,
+          "accuracy_swing": 0.0,
+          "verdict_flips": 0,
+          "response_diffs": 0
+        }
+      },
+      "verdict_flip_rate": 0.0,
+      "response_diff_rate": 0.0128,
+      "max_accuracy_swing": 0.0,
+      "tags": [
+        "arm1-gate",
+        "arm1-mtp"
+      ]
+    }
+  },
+  "verdict": {
+    "reproducible": true,
+    "worst_accuracy_swing": 0.0,
+    "interpretation": "No benchmark delta smaller than worst_accuracy_swing is interpretable from a single pass; use paired replicates."
+  }
+}
