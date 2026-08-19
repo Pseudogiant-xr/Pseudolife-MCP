@@ -419,7 +419,12 @@ def run_infer(base_url: str, model: str) -> dict:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root
     from pseudolife_memory.memory.dream import OpenAICompatExtractor
 
-    extractor = OpenAICompatExtractor(base_url, model, timeout_seconds=150.0)
+    # max_tokens pinned to this bench's historical measured budget: the
+    # committed baselines were produced under the old 400-token constructor
+    # default, and against the CPU sidecar (~12-30 tok/s) the synced 2048
+    # default would both break comparability and overrun the 150s timeout.
+    extractor = OpenAICompatExtractor(base_url, model, max_tokens=400,
+                                      timeout_seconds=150.0)
     rows = []
     for fx in INFER_FIXTURES:
         try:

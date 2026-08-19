@@ -514,16 +514,27 @@ The documented procedure is Catalog then Requests (duplicate dropped).
 
 
 def judge_says_yes(verdict: str) -> bool:
-    """Parse the LLM judge's verdict, tolerating a ``\\boxed{}`` wrapper.
+    """Parse the LLM judge's verdict, tolerating LEADING ``\\boxed{}`` and
+    ``\\text{}`` wrappers only.
 
     Qwen3.8 boxes its verdict when the judged response itself carries boxed
     answers (the compose prompt primes it) — observed 2026-08-17, when the
-    bare startswith parse scored judge_acc 0.0 across arms. Bare 3.6-era
-    verdicts parse unchanged; a judge that echoes the answer instead of a
-    verdict still scores as a miss.
+    bare startswith parse scored judge_acc 0.0 across arms. Position is
+    load-bearing: an ``\\boxed{yes}`` echoed later in the text (e.g. "No —
+    the correct answer was \\boxed{yes}") is a quoted gold answer, not a
+    verdict, so only wrappers at position 0 are stripped. Stripping prefixes
+    (not matching a closing brace) also accepts a verdict the 8-token cap
+    truncated mid-box. Bare 3.6-era verdicts parse unchanged.
     """
-    text = _extract_boxed(verdict or "") or (verdict or "")
-    return text.strip().lower().startswith("yes")
+    text = (verdict or "").strip()
+    while True:
+        for prefix in ("\\boxed{", "\\text{"):
+            if text.startswith(prefix):
+                text = text[len(prefix):].lstrip()
+                break
+        else:
+            break
+    return text.lower().startswith("yes")
 
 
 def answer_judge_score(row: dict, answer_system: str | None = None) -> dict:

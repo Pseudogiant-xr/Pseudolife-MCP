@@ -39,3 +39,21 @@ def test_degenerate_answer_echo_fails():
     # The judge echoing the model's answer instead of a verdict is a miss,
     # not a yes — observed live on 2026-08-17 (hybrid arm, question 025db8ef).
     assert not S.judge_says_yes("\\boxed{Reports; Problems}")
+
+
+def test_nested_text_wrapper_passes():
+    # Qwen commonly emits \boxed{\text{yes}}; the old [^{}]* regex parse
+    # could not cross the inner brace (2026-08-19 review, empirically shown).
+    assert S.judge_says_yes("\\boxed{\\text{yes}}")
+
+
+def test_truncated_boxed_passes():
+    # The judge call is capped at 8 tokens; a box truncated before its
+    # closing brace is still a leading yes-verdict.
+    assert S.judge_says_yes("\\boxed{yes")
+
+
+def test_quoted_gold_answer_is_not_a_verdict():
+    # False-positive direction (2026-08-19 review, empirically shown): a
+    # boxed yes quoted mid-sentence is the gold answer, not the verdict.
+    assert not S.judge_says_yes("No - the correct answer was \\boxed{yes}")

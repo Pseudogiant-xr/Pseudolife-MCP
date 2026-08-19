@@ -52,9 +52,15 @@ if (Test-Path $src) {
     Check "wabl source run" $false "missing $src"
 }
 
-# 5  GPU + model server launcher
-$bat = "$env:USERPROFILE\ClaudeCode\llama.ccp\run-server-turboq.bat"
-Check "qwen server launcher" (Test-Path $bat) $bat
+# 5  GPU + model server stack — resolved from qwen_server.ps1 (the single
+#    owner of engine/model paths) so this check can never gate on a retired
+#    launcher again (it pointed at the turboq fork's .bat until 2026-08-19).
+. (Join-Path $PSScriptRoot "qwen_server.ps1")
+Check "qwen engine exe" (Test-Path "$script:QwenEngine\llama-server.exe") `
+    "$script:QwenEngine\llama-server.exe"
+Check "qwen 3.8 GGUF" (Test-Path (Get-QwenModelPath)) (Get-QwenModelPath)
+$fastBat = "$script:QwenDir\run-server-qwen38.bat"
+Check "-Fast launcher bat" (Test-Path $fastBat) $fastBat
 $smi = Get-Command nvidia-smi -ErrorAction SilentlyContinue
 Check "nvidia-smi present" ([bool]$smi)
 

@@ -56,6 +56,10 @@ def _chat(model: str, prompt: str, timeout: float = 120.0) -> str:
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0,
         "max_tokens": 2048,
+        # Qwen3.8 servers default thinking ON with no budget cap (the 3.6-era
+        # --reasoning-budget flag is retired); unpinned, the reasoning trace
+        # consumes the whole budget and _verdict gets empty content.
+        "chat_template_kwargs": {"enable_thinking": False},
         # Warm-cache determinism pin (2026-08-09 probe): identical
         # temperature-0 inputs drift on a warm llama-server cache.
         "cache_prompt": False,

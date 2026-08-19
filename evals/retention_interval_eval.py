@@ -317,6 +317,10 @@ def _chat(url: str, system: str, user: str, timeout: float = 120.0) -> str:
         "messages": [{"role": "system", "content": system},
                      {"role": "user", "content": user}],
         "temperature": 0,
+        # Qwen3.8 servers default thinking ON with no budget cap; this
+        # harness sends no max_tokens, so an unpinned request generates a
+        # reasoning trace toward the context limit before answering.
+        "chat_template_kwargs": {"enable_thinking": False},
     }).encode()
     req = urllib.request.Request(
         f"{url.rstrip('/')}/chat/completions", data=body,

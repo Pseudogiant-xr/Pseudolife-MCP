@@ -1,0 +1,27 @@
+{
+  "probe": "engine A/B on a fixed deterministic 16051-token extraction-shaped prompt, temp 0, no-think pin, cache_prompt false, warmup discarded",
+  "date": "2026-08-19",
+  "model": "Qwen3.8-27B-UD-Q4_K_XL.gguf",
+  "configs": {
+    "b10453-ub256-stock": {
+      "prompt_per_second": 2350,
+      "gen_per_second": 38.1,
+      "content_sha256_12": "6444B058CAAC"
+    },
+    "b10488-ub256-stock": {
+      "prompt_per_second": 2391,
+      "gen_per_second": 39.6,
+      "content_sha256_12": "6444B058CAAC"
+    },
+    "b10488-ub256-mtp-n2": {
+      "gen_per_second": 90.1,
+      "content_sha256_12": "6444B058CAAC"
+    }
+  },
+  "verdict": {
+    "engines_byte_identical_on_probe": true,
+    "b10488_decode_gain": "~4%",
+    "mtp_decode_gain_extraction_shaped": "2.3x",
+    "note": "prefill is not the bottleneck (2350+ t/s at ub 256); the gate canary on b10488 is regression_gate-2026-08-19-canary-b10488-n2.agg.json (PASS, std 0.0); MTP determinism and verdict-losslessness: judge-determinism-check-qwen38-mtp.json"
+  }
+}

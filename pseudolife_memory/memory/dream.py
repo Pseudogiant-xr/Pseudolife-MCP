@@ -687,10 +687,12 @@ class OpenAICompatExtractor:
     extractable claims returns ``[]``. Uses stdlib urllib — no new deps."""
 
     def __init__(self, base_url: str, model: str, *, api_key: str | None = None,
-                 # Default matches DreamConfig.extractor_max_tokens (kept in
-                 # lockstep by test_judge_thinking_payload) — the old 400 was
-                 # a pre-2026-06-22 remnant that only direct constructors hit.
-                 max_tokens: int = 2048, timeout_seconds: float = 20.0,
+                 # Defaults match DreamConfig.extractor_max_tokens/-timeout
+                 # (kept in lockstep by test_judge_thinking_payload) — the old
+                 # (400, 20s) pair was a pre-2026-06-22 remnant that only
+                 # direct constructors hit; syncing only max_tokens would
+                 # recreate the documented big-budget/tiny-timeout failure.
+                 max_tokens: int = 2048, timeout_seconds: float = 240.0,
                  system_prompt: str | None = None,
                  events_prompt: str | None = None,
                  extra_body: dict | None = None,
@@ -1011,7 +1013,8 @@ class OpenAICompatExtractor:
                 ],
                 "response_format": {"type": "json_object"},
                 # Verdict rows are short but one is needed PER proposal; the
-                # extraction budget (400) truncates a full batch of 8.
+                # 120/proposal floor protects large batches from a caller
+                # that constructed us with a small extraction budget.
                 "max_tokens": max(self.max_tokens, 120 * len(proposals)),
                 "temperature": 0,
                 "chat_template_kwargs": {"enable_thinking": False},
