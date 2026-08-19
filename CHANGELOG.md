@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-08-20 — the flat store default, the zero-config lite tier, and pull-not-build images
+
+### Changed (2026-08-20 — session briefing teaches contested-slot resolution)
+- **The served memory-loop briefing (and its `examples/CLAUDE.memory.md`
+  mirror) now tells agents how to settle a contested fact** — via
+  `memory_fact_resolve`, not a `memory_fact_set` re-assert (which only
+  contests the slot further). Surfaced by the 0.14.0 docs currency pass:
+  the briefing taught corrections but never the resolve path, while the
+  consolidation quarantine makes contenders more common.
+
 ### Changed (2026-08-20 — daemon container memory cap)
 - **The daemon container now ships with a hard memory cap** (`mem_limit`,
   default `4g`, override via `PSEUDOLIFE_DAEMON_MEM_LIMIT` in `ops/.env`;
@@ -320,7 +330,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **GHCR image publishing** (`images` job in `.github/workflows/release.yml`):
   publishing a GitHub release now also pushes
   `ghcr.io/pseudogiant-xr/pseudolife-daemon:{<version>,latest}` and
-  `ghcr.io/pseudogiant-xr/pseudolife-pg:{16,16-<version>}`, downstream of
+  `ghcr.io/pseudogiant-xr/pseudolife-pg:{18,18-<version>}` (16 at this
+  entry's writing; the same-day PG 18 bump moved the tags), downstream of
   the same human-approved `publish` gate as PyPI and the MCP registry —
   one release click still lands every surface. The new
   `ops/docker-compose.ghcr.yml` overlay consumes them

@@ -61,6 +61,14 @@ a reader to assume the value is live:
   floor with time since `last_confirmed`, and are flagged `stale: true`
   past twice their TTL. Re-asserting the same value confirms it and
   restores full confidence.
+- **`stance` records how the source *held* the value** (schema v29) —
+  a dream claim extracted from hedged or negated text ("probably X",
+  "no longer Y") carries that epistemic stance onto the fact, visible in
+  `memory_fact_get`, recall cortex blocks, and `history` when set. It
+  follows the latest asserting write (a plain restatement clears it), is
+  never an input to confidence, ranking, or supersession, and is not
+  settable via `memory_fact_set` — it exists so a hedge survives
+  consolidation instead of hardening into a flat assertion.
 
 Set it explicitly at write time: `memory_fact_set("pseudolife-mcp",
 "extractor-prompt-version", "v2", freshness_class="volatile")` — an
@@ -266,7 +274,10 @@ rule is what repaired it — the gated run landed the commit-gated cascade
 exactly at the op-less control while genuine sets still formed
 (`evals/results/c2op-count-verdict.json`, with sidecar-adoption and
 ladder-rung validation in the same artifact). The shipped prompt is
-byte-pinned to the measured artifact (`evals/prompts/ku_op_prompt_v5.txt`).
+byte-pinned to the measured artifact
+(`evals/prompts/ku_op_prompt_v10_stance_update.txt`, pinned by
+`test_op_prompt_artifact.py`); the op block was introduced at v5 and the
+pin has since moved through the v10 update-anchored stance revision.
 The aggregate-conversion guard (see [Conversion rules](#conversion-rules)
 above) remains the apply-time backstop: an `op:"add"` that does land on a
 stated-total scalar parks as a contender rather than converting, whether
@@ -353,6 +364,14 @@ memory_outcome("deploy engine to host", "success", about="tar --no-same-owner")
 memory_lesson_search("how do I deploy the engine to a host")
 # → [{task, aspect, lesson, about, polarity:"-"|"+", outcome, confidence, score}, ...]
 ```
+
+Not every synthesized lesson is written: one that near-matches an existing
+*current* lesson at a different key with the same polarity is skipped as a
+duplicate and counted (`lessons_deduped` in the dream-run row;
+`memory.lessons.synthesis_dedup_min_similarity`, default `0.88`, `0`
+disables). Opposite-polarity near-matches always write — a dead-end and a
+success about the same thing are both worth keeping — and explicit
+`lesson_write` calls are never gated.
 
 Lessons are also **traversable in the graph**: a task-type becomes an
 `etype='task-type'` entity, and each lesson adds a `prefers` (positive) or

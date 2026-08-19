@@ -94,16 +94,23 @@ ships two things instead:
 
 Never a silent half-migration at boot.
 
-A bump also touches five places, and they land in the same change or
-`tests/test_release_ux.py` goes red:
+A bump also touches seven places, and they land in the same change or the
+guard tests go red:
 
 - `SCHEMA_META_VERSION` in `pseudolife_memory/storage/schema.py`;
 - the capabilities table in `README.md`;
 - the DSN row *and* the schema version-history table in
-  `docs/guide/configuration.md`;
+  `docs/guide/configuration.md` (both pinned by `tests/test_release_ux.py`);
 - a new `tests/test_schema_vNN.py` pinning what the bump added (the existing
-  `test_schema_v*.py` files show the shape);
-- a `CHANGELOG.md` entry that names `vNN`.
+  `test_schema_v*.py` files show the shape; relax the previous newest one
+  to `>=`);
+- a `CHANGELOG.md` entry that names `vNN`;
+- `docs/atlas/atlas.json` `meta.schema` (pinned by
+  `tests/test_atlas_currency.py`) — re-verify the affected storage cards,
+  don't just renumber;
+- the two literal meta-version pins in `tests/test_migrate_embeddings.py`,
+  then `python ops/gen_llms_txt.py` if any doc changed
+  (`tests/test_llms_txt.py` pins the generated file).
 
 ## Licensing of contributions
 

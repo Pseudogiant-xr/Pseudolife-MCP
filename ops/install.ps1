@@ -15,7 +15,7 @@
 #
 # Extractor modes (spec: docs/superpowers/specs/
 # 2026-07-14-installer-extractor-choice-design.md):
-#   sonnet-only      Sonnet only — the 9.4 GB sidecar image is never built
+#   sonnet-only      Claude shim only — the ~11.8 GB sidecar image is never built
 #   sonnet-fallback  Claude Sonnet primary via the CLI shim, sidecar fallback
 #   sidecar          bundled local CPU extractor only (no Max plan needed)
 param(
@@ -57,9 +57,9 @@ if (-not $Extractor) {
     }
     Write-Host ""
     Write-Host "Which dream extractor should consolidate memories?"
-    Write-Host "  1) sonnet-only      - lightest: Sonnet only; sidecar never built (~9 GB lighter; needs logged-in Max-plan CLI; dreams pause when the shim is down)"
-    Write-Host "  2) sonnet-fallback  - Claude Sonnet primary, sidecar auto-fallback (Max-plan CLI plus the ~9 GB image)"
-    Write-Host "  3) sidecar          - bundled local CPU model (no Claude plan needed, works for everyone; ~9 GB image)"
+    Write-Host "  1) sonnet-only      - lightest: Claude shim only; sidecar never built (~11.8 GB lighter; needs logged-in Max-plan CLI; dreams pause when the shim is down)"
+    Write-Host "  2) sonnet-fallback  - Claude shim primary, sidecar auto-fallback (Max-plan CLI plus the ~11.8 GB image)"
+    Write-Host "  3) sidecar          - bundled local CPU model (no Claude plan needed, works for everyone; ~11.8 GB image)"
     while (-not $Extractor) {
         switch (Read-Host "Choose 1/2/3") {
             "1" { $Extractor = "sonnet-only" }

@@ -86,7 +86,7 @@ services:
       dockerfile: ops/Dockerfile.daemon
     # Keep this tag in step with the package version in pyproject.toml; the
     # update scripts read it from here (single source of truth for deploys).
-    image: pseudolife-daemon:0.13.0
+    image: pseudolife-daemon:0.14.0
     container_name: pseudolife-mcp-daemon
     restart: unless-stopped
     logging: *default-logging
@@ -142,7 +142,7 @@ services:
       # session can step its own tier up/down via memory_toolset. Shipped
       # default: core.
       PSEUDOLIFE_MCP_TOOLSET: ${PSEUDOLIFE_MCP_TOOLSET:-core}
-      # Per-writer default tiers, "writer:tier" CSV (e.g.
+      # Per-principal default tiers, "principal:tier" CSV (e.g.
       # "claude-desktop:minimal,claude-code:core"). Empty = everyone gets
       # the PSEUDOLIFE_MCP_TOOLSET default. Any session can step its own
       # tier up/down at runtime via the memory_toolset tool.

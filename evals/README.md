@@ -55,7 +55,7 @@ disagree.
 | `gemma-e4b-qat`  | Gemma 4 E4B QAT UD-Q4_K_XL (sidecar-swap candidate) | `http://127.0.0.1:8081/v1` |
 | `e4b-ft`         | **E4B QLoRA extractor fine-tune Q4_K_M — the shipped default** | `http://127.0.0.1:8081/v1` |
 | `qwen-a3b`       | Qwen3.6-35B-A3B (homelab 5800X3D)             | `$PSEUDOLIFE_BENCH_A3B_URL` (default `http://127.0.0.1:1236/v1`) |
-| `qwen-27b`       | Qwen3.6-27B (4090)                            | `$PSEUDOLIFE_BENCH_QWEN_URL` (default `http://127.0.0.1:1234/v1`) |
+| `qwen-27b`       | Qwen3.8-27B (4090; migrated 2026-08-17, previously Qwen3.6-27B) | `$PSEUDOLIFE_BENCH_QWEN_URL` (default `http://127.0.0.1:1234/v1`) |
 
 Three further rungs are **registered but deliberately outside `LADDER_ORDER`**,
 so the default sweep is sovereign-only. They are runnable — `--rung sonnet-5`
@@ -127,12 +127,14 @@ if (-not (Start-Qwen -Fast)) { throw "server did not come up" }   # throughput o
 ```
 
 The default is the stock `llama-server` with `--cache-type-k/v q8_0`, which is
-bit-reproducible. `-Fast` is the TurboQuant+MTP fork, whose fused `tbq4_0`
-flash-attention KV is **not** — it flips ~7% of judged verdicts on identical
-input — so `-Fast` is only for output that is never judged (a bank, a raw
-generation). Both configs bind `:1234`, so "something answered the probe" is
-not proof the right one is running; the helper checks which config is up and
-replaces it.
+bit-reproducible. `-Fast` now launches the mainline embedded-MTP build
+(`run-server-qwen38.bat`) — measured byte-deterministic and verdict-lossless
+on b10488 (2026-08-19), a 2.3× extraction-decode speedup. The retired
+TurboQuant fork (whose fused `tbq4_0` KV flipped ~7% of judged verdicts) is
+the reason the reproducible/q8_0 rule exists; judged runs still use the
+default config. Both configs bind `:1234`, so "something answered the probe"
+is not proof the right one is running; the helper checks which config is up,
+refuses a foreign server, and replaces its own.
 
 ## Running
 
@@ -306,17 +308,20 @@ Model roles are split so extraction quality is the **only** variable:
   bake — the shipped default is now the E4B v3 fine-tune — GPU-served for
   bench speed, ladder-verified identical output at temperature 0) = the
   **floor**; `qwen-27b` = the local **ceiling**.
-- **Answerer + judge** (constant): Qwen3.6-27B for every run, LongMemEval's
-  LLM-as-judge protocol. All calls request `temperature: 0`.
+- **Answerer + judge** (constant): Qwen3.8-27B for every run since the
+  2026-08-17 migration (published pre-migration tables were judged by
+  Qwen3.6-27B and say so), LongMemEval's LLM-as-judge protocol. All calls
+  request `temperature: 0`.
 
-Serving config: Qwen3.6-27B **Unsloth UD-Q4_K_XL** (~4.5bpw) on the **stock**
+Serving config: Qwen3.8-27B **Unsloth UD-Q4_K_XL** (~4.5bpw) on the **stock**
 `llama-server` with `--cache-type-k/v q8_0`, started via `Start-Qwen` from
 `evals/qwen_server.ps1`. That pairing is the reproducible one — byte-identical
-inputs give byte-identical outputs. Do **not** serve a judged run from the
-TurboQuant MTP fork with its 4.25-bit (`tbq4_0`) fused-attention KV: it is not
-bit-reproducible and flips ~7% of verdicts (see "Variance and replication"
-below). The weight quantization trades some fidelity for fitting 24GB — treat
-the ceiling as "27B-class local", not "27B at BF16".
+inputs give byte-identical outputs. Do **not** serve a judged run from a
+non-reproducible serving config: the retired TurboQuant fork's 4.25-bit
+(`tbq4_0`) fused-attention KV flipped ~7% of verdicts (see "Variance and
+replication" below), which is why `Start-Qwen` checks and replaces whatever
+is bound to `:1234`. The weight quantization trades some fidelity for
+fitting 24GB — treat the ceiling as "27B-class local", not "27B at BF16".
 
 Ingestion mirrors the product cadence: turns are stored session-by-session
 in chronological order and the dream consolidates after each session.
