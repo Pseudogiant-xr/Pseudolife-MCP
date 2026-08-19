@@ -54,12 +54,18 @@ entries, a cached view of the graph, a memoized score):
 
 ## Review discipline
 
+- Every PR gets a review pass before the merge click — `/code-review` medium,
+  or a reviewer subagent over the branch diff. The 2026-08-19 transcript audit
+  found 1 of 59 merges across seven weeks carried any in-transcript review;
+  the pass is not optional because CI was green.
 - Perf/cache/index changes get an independent review pass before commit
   (`/code-review` medium, or a reviewer subagent) — the 2026-07-12 slot-index
   audit found three of these classes post-deploy; the pass is cheaper.
-- TDD with a watched RED per the superpowers skill; for invalidation contracts,
-  spot-check that each hook is load-bearing by disabling it and confirming the
-  test goes red (a hook that never fires red is decoration, and worth saying so).
+- TDD with a watched RED — write the failing test and watch it fail before
+  writing the fix; never trust a test you have not seen red. For invalidation
+  contracts, spot-check that each hook is load-bearing by disabling it and
+  confirming the test goes red (a hook that never fires red is decoration, and
+  worth saying so).
 - **A tuning constant set or changed for a measured reason carries a comment
   naming the measurement** — what was measured, when, at what scale (the
   `recency_boost_enabled` comment in `utils/config.py` is the shape). Adopt

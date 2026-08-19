@@ -62,3 +62,6 @@ evals/results/*-gate-r*.jsonl
 evals/results/*-gate.agg.json
 evals/results/*-gate*.summary.json
 .superpowers/
+
+# hookify local rules (machine-local enforcement, never published)
+.claude/*.local.md
