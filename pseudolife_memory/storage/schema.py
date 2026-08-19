@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 30
+SCHEMA_META_VERSION = 31
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -641,6 +641,49 @@ def ensure_schema(conn) -> dict:
         # means "asserted plainly", exactly the pre-v29 behaviour, so this
         # migration is a no-op until an extractor emits a stance.
         cur.execute("ALTER TABLE facts ADD COLUMN IF NOT EXISTS stance TEXT")
+        # v31 additive: retrieval event log (learned-reranker Phase 0).
+        # retrieval_events = one append-only row per search that served
+        # entries (query text, the served list as JSONB with ids/scores/
+        # ranks, and the writer's session/episode); retrieval_uses = the
+        # implicit relevance labels, written when a served entry is later
+        # fetched or reinforced in the same session. Together they are the
+        # (query, served, used) training tuples for a future learned
+        # fusion/reranker stage. served carries NO FK to entries — entries
+        # are evictable (the memory_traces FK is the origin of the
+        # reflush-stall class); a training join tolerates dangling ids.
+        # retrieval_uses cascades from its event: pruning an event removes
+        # its labels.
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS retrieval_events (
+              id BIGSERIAL PRIMARY KEY,
+              query_text TEXT NOT NULL,
+              origin TEXT NOT NULL DEFAULT 'search',
+              session_id TEXT,
+              episode_id TEXT,
+              served JSONB NOT NULL DEFAULT '[]',
+              created_at DOUBLE PRECISION NOT NULL
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS retrieval_events_session_idx "
+            "ON retrieval_events (session_id, created_at DESC)")
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS retrieval_events_created_idx "
+            "ON retrieval_events (created_at)")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS retrieval_uses (
+              event_id BIGINT NOT NULL REFERENCES retrieval_events(id)
+                ON DELETE CASCADE,
+              entry_id BIGINT NOT NULL,
+              used_via TEXT NOT NULL,
+              created_at DOUBLE PRECISION NOT NULL,
+              PRIMARY KEY (event_id, entry_id, used_via)
+            )
+            """
+        )
         # One-time upgrade: drop the old episode FK only when it's actually
         # present. Guarding avoids taking an ACCESS EXCLUSIVE lock on every
         # init (which could block behind any open transaction on entries).

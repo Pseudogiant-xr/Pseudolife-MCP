@@ -22,11 +22,9 @@ from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
 
 
 def test_meta_version_is_30():
-    # The newest schema test carries the exact current-version pin — the
-    # deliberate tripwire that forces a bump author through the shipping
-    # checklist. On the v31 bump: relax this to >= 30 and pin == 31 in the
-    # new test_schema_v31.py (two-file touch, not ten).
-    assert SCHEMA_META_VERSION == 30
+    # Relaxed to >= on the v31 bump; the exact pin lives in the newest
+    # schema test (test_schema_v31.py), per the two-file-touch convention.
+    assert SCHEMA_META_VERSION >= 30
 
 
 def test_judge_columns_exist_and_are_nullable(pg_conn):
