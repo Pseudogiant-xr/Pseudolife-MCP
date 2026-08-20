@@ -25,6 +25,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   accrue passively until there is enough supervision to train a fusion
   head against the pre-registered pure-cosine gate.
 
+### Fixed (2026-08-20 — cache-retention task dead on Store-installed PowerShell)
+- **The weekly build-cache retention task never ran on hosts where
+  PowerShell 7 is a Store/MSIX install.** `ops/install-cache-retention.ps1`
+  registered the action as a bare `pwsh.exe`, which Task Scheduler resolves
+  against the machine `PATH` — where an MSIX install does not appear. The
+  task registered fine, reported Ready, and fired on schedule, but every
+  run exited `0x80070002` (file not found) before the retention script
+  started: a silent permanent failure, found live with the cache at 23.6 GB
+  against its 20 GB ceiling. The installer now registers an absolute path,
+  preferring the stable per-user app-execution alias
+  (`%LOCALAPPDATA%\Microsoft\WindowsApps\pwsh.exe`) over the versioned
+  `WindowsApps` package directory, which changes on every Store update and
+  would re-plant the same failure. Existing registrations need one
+  re-run of the installer to pick up the fix.
+
 ## [0.14.0] - 2026-08-20 — the flat store default, the zero-config lite tier, and pull-not-build images
 
 ### Changed (2026-08-20 — session briefing teaches contested-slot resolution)

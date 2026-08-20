@@ -1,4 +1,4 @@
-#Requires -Version 7
+#Requires -Version 7.2
 # Register a weekly Docker build-cache retention task (Windows Task Scheduler).
 #
 #   ops\install-cache-retention.ps1                       # Sunday 03:00, defaults
@@ -33,6 +33,29 @@ if ($Unregister) {
 $script = Join-Path $PSScriptRoot "prune-build-cache.ps1"
 if (-not (Test-Path $script)) { throw "not found: $script" }
 
+function Resolve-PwshForTaskScheduler {
+    # Task Scheduler resolves a bare "pwsh.exe" against the MACHINE path,
+    # which a Store/MSIX install of PowerShell 7 is absent from: the task
+    # registers fine, reports Ready, fires on schedule — and every run dies
+    # with 0x80070002 (file not found) before the retention script starts.
+    # Observed live 2026-08-20: no scheduled run had ever succeeded and the
+    # cache sat at 23.6GB against the 20GB ceiling. Register an absolute
+    # path instead. For an MSIX install Get-Command resolves into the
+    # versioned package directory (...\WindowsApps\Microsoft.PowerShell_
+    # <ver>_...), which changes on every Store update and would re-plant
+    # the same failure one update later; the per-user app-execution alias
+    # is the stable spelling of the same executable, so it wins when
+    # present.
+    $cmd = Get-Command pwsh -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    $source = if ($cmd) { $cmd.Source } else { [Environment]::ProcessPath }
+    if ($source -match '\\WindowsApps\\Microsoft\.PowerShell_' -and $env:LOCALAPPDATA) {
+        $alias = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\pwsh.exe'
+        if (Test-Path $alias) { return $alias }
+    }
+    return $source
+}
+
 # Base64 -EncodedCommand, as ops\install-autostart.ps1 does: it survives the
 # quoting round-trip through Task Scheduler's single argument string.
 # Escape embedded single quotes (PowerShell's quoting convention: '' inside
@@ -43,7 +66,7 @@ $escapedScript = $script -replace "'", "''"
 $inner = "& '$escapedScript' -MaxAgeHours $MaxAgeHours -MaxUsedSpaceGB $MaxUsedSpaceGB"
 $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
 
-$action = New-ScheduledTaskAction -Execute "pwsh.exe" `
+$action = New-ScheduledTaskAction -Execute (Resolve-PwshForTaskScheduler) `
     -Argument "-NoProfile -WindowStyle Hidden -EncodedCommand $encoded"
 $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $DayOfWeek -At $At
 # StartWhenAvailable is the point of this task: a desktop is often off at
