@@ -20,6 +20,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 | `PSEUDOLIFE_WRITER_ID` | `unknown` | Identifies this writer on every canonical write (schema v11). The shim forwards it as the `X-PL-Writer` header; the compose daemon defaults to `mcp-client`, and the installer pins `claude-code` / `codex` / `mcp-client` in `ops/.env` per the selected `--client`. Existing installs that predate the client selector should set `PSEUDOLIFE_WRITER_ID=claude-code` in `ops/.env` to keep their writer identity (and any `PSEUDOLIFE_MCP_TIER_MAP` keyed on it) stable. |
 | `PSEUDOLIFE_MCP_AUTOSAVE_SECONDS` | `30` | Interval of the file-mode autosave loop (weights/state cadence; Postgres-mode entries are transactional regardless). |
 | `PSEUDOLIFE_SESSION_REAP_SECONDS` | `300` | How often the idle-session reaper sweeps. The idle *threshold* it enforces is `PSEUDOLIFE_SESSION_IDLE_SECONDS` — see [Episodes](episodes.md). |
+| `PSEUDOLIFE_DAEMON_MEM_LIMIT` | `4g` | Docker tier only (read by compose, not the daemon): hard memory cap on the daemon container, with the memory+swap total pinned to the same value — no swap, so exceeding the cap is a clean container restart rather than a host-wide memory event. Steady state is ~2.8 GB with the default embedder; raise for very large banks. |
 
 For the Docker stack, set these in `ops/.env`
 (`cp ops/.env.example ops/.env` — the install/update scripts scaffold it too;
@@ -165,6 +166,27 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   without dropping; `"off"` disables. The batch-union corpus default
   exists because derived sums and cross-note values are measured
   false-drop classes under per-note (`"source"`) gating.
+- **Provenance-span gate off** (`memory.dream.span_gate = "off"`) — the
+  literal gate's sibling: where the literal gate checks digit-bearing
+  values, the span gate checks that a scalar claim's *quoted source span*
+  actually appears in the pull's notes — fidelity-to-source, not
+  trustworthiness-of-source. `"log"` counts without acting; `"contend"`
+  parks unbacked scalar claims as visible contenders with a
+  `span:unbacked` marker, resolvable via `memory_fact_resolve`. Ships off
+  because flipping it on requires the live extraction prompt to emit
+  quotes (the v10 prompt does not).
+- **Lesson-synthesis dedup on**
+  (`memory.lessons.synthesis_dedup_min_similarity = 0.88`) — a synthesized
+  lesson that near-matches an existing *current* lesson at a different key
+  with the same polarity is silently skipped and counted (`lessons_deduped`
+  beside `lesson_signals`/`lessons_written` in the dream-run row).
+  Opposite-polarity matches and explicit `lesson_write` callers are never
+  gated. `0` disables.
+- **Slot-index shadow verification on** (`memory.slot_index_shadow_rate =
+  0.01`) — ~1% of slot-pool queries recompute the index from scratch and
+  compare; divergences land in `stats()` as
+  `slot_index_shadow_divergences`. `0.0` disables, `1.0` checks every
+  query (dev/debug).
 - **Quarantine retype on** (`memory.dream.retype_quarantined_max = 3`) —
   per-dream cap on quarantined pairs re-offered to the extractor for
   typing, shown only the notes where both entities co-occur; a typed
@@ -238,7 +260,8 @@ a credential share a tier view). The filter is
 visibility, not auth (the bearer token is the security boundary) — but
 Claude clients gate calls against their own tool list, so in practice a
 session expands its tier before calling a hidden tool. Defaults:
-`PSEUDOLIFE_MCP_TOOLSET` (shipped: `core`) sets the baseline;
+`PSEUDOLIFE_MCP_TOOLSET` (unset → `full`; the Docker compose file ships
+`core`, so lite and host-process installs start at `full`) sets the baseline;
 `PSEUDOLIFE_MCP_TIER_MAP="claude-desktop:minimal,claude-code:core"` sets
 per-client defaults by principal (writer id). Any caller can step its tier
 up or down at runtime with `memory_toolset(action="expand"|"collapse"|"status")`
@@ -267,7 +290,7 @@ python -m venv .venv
 .venv\Scripts\activate
 pip install -e .
 
-# 1. Start Postgres 16 + pgvector (one-time build, then persistent).
+# 1. Start Postgres 18 + pgvector (one-time build, then persistent).
 docker compose -f ops/docker-compose.yml up -d --build pseudolife-pg
 
 # 2. Register the daemon to auto-start at logon (binds 127.0.0.1:8765).
@@ -470,8 +493,11 @@ vector *dimension* change on an existing column is not additive, so
 v24 or earlier instead of attempting an in-place ALTER — run the
 human-gated `ops/migrate_embeddings.py` first. Full step-by-step operator
 procedure (backup, stop, dry-run, apply, deploy, verify, rollback):
-[the v25 migration runbook](../runbooks/embedding-v25-migration.md). The
-milestones:
+[the v25 migration runbook](../runbooks/embedding-v25-migration.md).
+Separately from the schema meta version, Docker-tier installs created
+before 2026-08-14 also need the PostgreSQL 16 → 18 volume cutover —
+[the PostgreSQL 18 migration runbook](../runbooks/postgres-18-migration.md).
+The milestones:
 
 | Version | What it added |
 |---|---|

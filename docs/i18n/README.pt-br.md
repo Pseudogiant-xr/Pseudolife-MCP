@@ -1,8 +1,8 @@
-<!-- i18n-sync: v7 -->
+<!-- i18n-sync: v8 -->
 
 # Pseudolife-MCP
 
-[README original em inglês](../../README.md) — sincronizado: v7 (2026-08-01)
+[README original em inglês](../../README.md) — sincronizado: v8 (2026-08-20)
 
 **Memória de longo prazo persistente para Claude Code, Codex e outros clientes MCP.**
 
@@ -47,14 +47,14 @@ ops\install.ps1         # Windows (pwsh 7+)
 
 O instalador verifica os pré-requisitos (imprimindo uma linha exata de
 correção para qualquer item ausente) e pergunta qual extrator de sonhos
-usar — Claude Sonnet via seu plano Max (a instalação mais leve), Sonnet
-com o modelo local incluído como fallback automático, ou apenas o modelo
-local incluído, que não precisa de nenhum plano. Em seguida, ele sobe a
-stack, conecta os clientes selecionados (o hook de briefing no início da
-sessão, que entrega a orientação do loop de memória a cada sessão, e o
-registro do transporte MCP), e faz o health-check do daemon. Ele é
-idempotente: pode ser executado novamente a qualquer momento;
-`--extractor <mode>` alterna entre as configurações de extrator.
+usar — um modelo Claude via seu plano Max (a instalação mais leve), o
+shim do Claude com o modelo local incluído como fallback automático, ou
+apenas o modelo local incluído, que não precisa de nenhum plano. Em
+seguida, ele sobe a stack, conecta os clientes selecionados (o hook de
+briefing no início da sessão, que entrega a orientação do loop de memória
+a cada sessão, e o registro do transporte MCP), e faz o health-check do
+daemon. Ele é idempotente: pode ser executado novamente a qualquer
+momento; `--extractor <mode>` alterna entre as configurações de extrator.
 
 Com o daemon em execução, o **plugin** do Claude Code adiciona o briefing
 de memória no início da sessão, a orientação permanente do loop de

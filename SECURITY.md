@@ -22,8 +22,13 @@ The shipped configuration is deliberately conservative:
   only; the extractor sidecar is never published to the host at all. The
   network boundary — not the default Postgres password — is the guard.
 - **Token-gated off loopback.** A daemon run directly on a host *refuses* to
-  bind a non-loopback address without `PSEUDOLIFE_MCP_TOKEN` set — it logs
-  the refusal and exits.
+  bind a non-loopback address without `PSEUDOLIFE_MCP_TOKEN` (or a parsed
+  per-principal `PSEUDOLIFE_MCP_TOKENS` map) set — it logs the refusal and
+  exits. Per-principal tokens also *become* the writer identity of their
+  caller, which narrows the blast radius of a leaked credential: a
+  compromised principal token asserts only its own writer id, where the
+  singular shared token's holder may still assert any writer via
+  `X-PL-Writer`.
 - **`PSEUDOLIFE_MCP_TRUST_BIND` is the documented exception to that, and the
   shipped compose stack sets it.** In a container the daemon must bind
   `0.0.0.0` to be reachable at all, so the flag is the operator's assertion

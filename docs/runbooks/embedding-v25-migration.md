@@ -225,7 +225,9 @@ Expect roughly 2-4 minutes for a ~4k-text bank on CPU.
 
 Each of the four tables (`facts`, `world_facts`, `lessons`, `entries` — in
 that order, entries deliberately last) migrates in its own transaction;
-`SCHEMA_META_VERSION` is stamped 25 only after all four succeed. If it
+`SCHEMA_META_VERSION` is stamped only after all four succeed — the script
+stamps whatever the constant currently is (v30 as of this writing), not
+literally 25. If it
 fails partway, already-migrated tables stay committed and the daemon's
 dimension guard (below) will keep refusing to boot until you re-run this
 step — it is designed to fail loud, not to leave a half-migrated bank

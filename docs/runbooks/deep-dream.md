@@ -71,7 +71,10 @@ subagents for large batches — reuse the
 ## 3b. Step C — triage entity proposals (this session)
 
 **Near-duplicate merges.** Judge each `merge_proposals` item from its per-side
-snippets/scopes. Items sharing a `group` value pivot on one entity (the
+snippets/scopes. A proposal a background sweep has already judged carries a
+`judge` block (verdict/confidence/note/model, schema v30) — treat it as a
+lead, never a decision: read the evidence yourself and disagree freely.
+Items sharing a `group` value pivot on one entity (the
 write-dedup detector files up to three matches per mint) and are ONE
 where-does-it-belong decision — accept at most one; the first accept
 deletes the shared entity:
@@ -89,8 +92,14 @@ On `apply=true`, a pending junk proposal whose entity carries **no edges
 and at most the one fact slot it was minted from** is auto-deleted
 (`junk_deleted` in the result, recorded as a `dream-auto` decision in
 `merge_decisions`; the pre-apply graph snapshot is the undo, and the node
-simply re-mints on next mention). Anything evidence-bearing — any edge,
-more than one fact slot — sits pending until someone votes.
+simply re-mints on next mention). Accepting a junk proposal also writes a
+durable tombstone in `merge_decisions`: if the same name re-mints and is
+re-flagged, it is auto-deleted at the detector's own `junk_max_degree`
+bar rather than the stricter zero-structure guard above — so an
+`apply=true` deletes more than the zero-structure rule alone would;
+never-judged names keep the strict guard. Anything evidence-bearing —
+any edge, more than one fact slot — sits pending until someone votes.
+No merge proposal is filed whose side is junk-flagged.
 `merge_proposals` does NOT carry them: get their `proposal_id`s from
 `memory_graph_review(action="list")`, where they appear as `kind: "junk"`.
 - **Genuinely junk** (extraction noise: a fragment, a mis-parsed span, an

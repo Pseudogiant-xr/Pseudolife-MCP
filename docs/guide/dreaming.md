@@ -99,6 +99,11 @@ superseded:
   state or update the same fact, only the *current* value is emitted, under
   the same entity and attribute — so the cortex supersedes rather than
   accumulating near-duplicate slots.
+- **The source's epistemic stance, kept.** A hedged or negated claim
+  ("probably X", "no longer Y") lands with a `stance` marker on the fact
+  (schema v29; the v10 update-anchored prompt is the live one) instead of
+  hardening into a flat assertion — see
+  [memory-model — how current is this fact?](memory-model.md#how-current-is-this-fact).
 - **What a document prescribes.** When a note quotes or summarizes a spec,
   policy, protocol, runbook, or guide, its prescription is itself a durable
   fact, stored under the *document's* subject — and kept separate from what
@@ -289,6 +294,11 @@ What gets consolidated and when is configurable under `memory.dream`
 (`eligible_sources` / `exclude_sources`, and the `min_batch` /
 `idle_seconds` backlog+quiescence thresholds that
 `memory_dream(action="status")` reports).
+
+Dream runs are single-flight: a `memory_dream(action="run")` that lands
+while another run holds the guard returns `{"skipped":
+"dream_in_progress"}` instead of racing it — scripted callers should treat
+that as a normal outcome (the next sweep tick retries), not an error.
 
 The auto-sweep (Tier 2) fires when:
 
@@ -522,6 +532,16 @@ and sibling ids differing only by numeric tokens (`CT200`/`CT400`) or the
 pre/post pair — vetoed at both filing sites, with the rules gated by a
 replay of the 2026-08-11 full-queue triage (they suppress 12 of that
 pass's 101 rejected proposals and none of its 38 accepted ones).
+
+Two more queue-quality knobs shape what gets proposed at all. Link
+candidates skip pairs whose evidence-support overlap exceeds
+`memory.deep_dream.max_support_overlap` — measured as **containment**
+(`|shared| / min(|a|,|b|)`), a stricter test than the Jaccard ratio the
+same number would suggest — and exclude pairs with a pending link proposal
+or a junk-flagged side before top-k selection, so the queue refills with
+new work instead of settled work. The trace-less-entity fallback scan is
+capped at `memory.deep_dream.max_fallback_mentions` (default 30) per
+entity; trace-backed mentions are never capped.
 
 ## Consolidation workflow (agent-driven dedup)
 
