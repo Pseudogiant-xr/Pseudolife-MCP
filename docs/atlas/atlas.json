@@ -1,9 +1,9 @@
 {
  "meta": {
   "title": "PseudoLife-MCP System Atlas",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "schema": 30,
-  "verified": "2026-08-16"
+  "verified": "2026-08-20"
  },
  "groups": {
   "clients": {
@@ -978,7 +978,8 @@
     "pg (5433→5432) · daemon (8765) · extractor (internal 8081)",
     "Daemon depends_on pg healthy; extractor deliberately NOT depended on",
     "TRUST_BIND=1 is safe: compose publishes loopback-only — the port publish is the security boundary",
-    "Override file: swap extractor GGUF or disable the sidecar (profiles)"
+    "Override file: swap extractor GGUF or disable the sidecar (profiles)",
+    "Daemon mem_limit 4g (memswap pinned equal - no swap); fences the 2026-08-04 balloon incident"
    ]
   },
   {

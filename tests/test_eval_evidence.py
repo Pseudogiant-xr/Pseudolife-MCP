@@ -1559,6 +1559,35 @@ for _arm, _needle, _stated in [
         stated=_stated, places=4))
 
 
+# evals/README's -Fast description (rewritten at the 2026-08-20 docs pass)
+# publishes the mainline-MTP migration numbers: byte-determinism and
+# verdict-losslessness from the paired determinism check, and the 2.3x
+# extraction-shaped decode speedup from the engine A/B probe.
+EVALS_README = "evals/README.md"
+MTP_DETERMINISM = RESULTS + "judge-determinism-check-qwen38-mtp.json"
+B10488_PROBE = RESULTS + "engine-b10488-probe-20260819.json"
+CLAIMS.append(Claim(
+    id="mtp-byte-deterministic", doc=EVALS_README,
+    needle="byte-deterministic",
+    artifacts=(MTP_DETERMINISM,),
+    value=lambda d: d["configurations"]["qwen38-mtp-repeat"]
+                     ["response_diff_rate"],
+    stated=0.0, places=4))
+CLAIMS.append(Claim(
+    id="mtp-verdict-lossless", doc=EVALS_README,
+    needle="verdict-lossless",
+    artifacts=(MTP_DETERMINISM,),
+    value=lambda d: d["configurations"]["mtp-vs-stock"]["verdict_flip_rate"],
+    stated=0.0, places=4))
+CLAIMS.append(Claim(
+    id="mtp-decode-speedup", doc=EVALS_README,
+    needle="a 2.3× extraction-decode speedup",
+    artifacts=(B10488_PROBE,),
+    value=lambda d: (d["configs"]["b10488-ub256-mtp-n2"]["gen_per_second"]
+                     / d["configs"]["b10488-ub256-stock"]["gen_per_second"]),
+    stated=2.3, places=1))
+
+
 def test_every_published_number_names_a_committed_artifact():
     """A claim whose evidence is untracked cannot be checked by a reader.
 

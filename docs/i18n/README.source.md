@@ -1,4 +1,4 @@
-<!-- i18n-source: v7 (2026-08-01) — canonical English text for the translated
+<!-- i18n-source: v8 (2026-08-20) — canonical English text for the translated
      front doors in this directory. Translators: keep every fenced code block
      byte-identical (commands are never translated); keep "Pseudolife-MCP",
      "Claude Code", "Codex", "MCP", "Cortex Console", and tool names like
@@ -49,10 +49,10 @@ ops\install.ps1         # Windows (pwsh 7+)
 ```
 
 The installer checks prerequisites (printing one exact fix line for anything
-missing) and asks which dream extractor to use — Claude Sonnet via your Max
-plan (the lightest install), Sonnet with the bundled local model as
-automatic fallback, or the bundled local model alone, which needs no plan
-at all. It then brings the stack up, wires the selected clients (the
+missing) and asks which dream extractor to use — a Claude model via your
+Max plan (the lightest install), the Claude shim with the bundled local
+model as automatic fallback, or the bundled local model alone, which needs
+no plan at all. It then brings the stack up, wires the selected clients (the
 session-start briefing hook, which delivers the memory-loop guidance every
 session, and the MCP transport registration), and health-checks the
 daemon. It is idempotent: re-run it any time; `--extractor <mode>`

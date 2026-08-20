@@ -33,7 +33,7 @@ What you get:
   slot (or a member set, for slots that hold many concurrent values);
   corrections supersede rather than silently overwrite, and the full
   version history survives.
-- **Dreams** — a bundled extractor (or Claude Sonnet via your Max plan)
+- **Dreams** — a bundled extractor (or a Claude model via your Max plan)
   consolidates the memory stream into facts and a knowledge graph while
   you're not looking.
 - **Lessons from its own work** — successes, dead-ends, and your corrections
@@ -71,13 +71,14 @@ ops\install.ps1         # Windows (pwsh 7+)
 The installer runs the preflight (one exact fix line per missing
 prerequisite), asks which **dream extractor** should consolidate memories —
 
-- **sonnet-only** — the lightest install: Claude Sonnet via a CLI shim
-  (needs a logged-in Max-plan `claude` CLI); the sidecar image is **never
-  built or pulled** (~9 GB lighter; dreams pause while the shim is down);
-- **sonnet-fallback** — Sonnet primary, the bundled sidecar as automatic
-  fallback (Max-plan CLI plus the ~9 GB image);
+- **sonnet-only** — the lightest install: a Claude model via a CLI shim
+  (`claude-opus-5` by default; the mode name is historical. Needs a
+  logged-in Max-plan `claude` CLI); the sidecar image is **never built or
+  pulled** (~11.8 GB lighter; dreams pause while the shim is down);
+- **sonnet-fallback** — the Claude shim primary, the bundled sidecar as
+  automatic fallback (Max-plan CLI plus the ~11.8 GB image);
 - **sidecar** — the bundled local CPU model; no Claude plan needed, works
-  for everyone (~9 GB image) —
+  for everyone (~11.8 GB image) —
 
 then brings the stack up, installs the selected clients' session hooks,
 registers the MCP transport (the stdio shim by default, direct HTTP via
@@ -274,7 +275,7 @@ metadata. Full-table dumps and topology views live in the **Cortex Console**
 (`/api/*`) and the `pseudolife-mcp briefing` CLI.
 
 **Toolset tiers.** Three visibility tiers — `minimal` (9 tools), `core`
-(22, the shipped default), `full` (35) — filtered per principal at
+(22), `full` (35) — filtered per principal at
 `tools/list`; a principal (the named bearer-token identity, or the writer
 id for single-token installs) steps its own tier up or down with
 `memory_toolset` before calling a hidden tool. Defaults, per-client mapping, and weak-model
@@ -318,9 +319,10 @@ in CPU-only torch and the embedding weights — `Qwen/Qwen3-Embedding-0.6B`
 (the default retrieval backbone since schema v25) plus `all-MiniLM-L6-v2`
 (kept baked for the ONNX-parity test path) — so it runs identically on
 Windows / macOS / Linux. Requires only Docker; built once: ~5.0 GB daemon
-image (measured 2026-07-29 on the deployed build) + ~0.6 GB Postgres + ~9 GB
-extractor sidecar (skip the sidecar entirely with the installer's
-`sonnet-only` mode). The ~12.6 GB and ~10.4 GB figures published before
+image (measured 2026-07-29 on the deployed build) + ~0.6 GB Postgres +
+~11.8 GB extractor sidecar (measured 2026-08-20 with the v3 multi-task
+bake; skip the sidecar entirely with the installer's `sonnet-only` mode).
+The ~12.6 GB and ~10.4 GB figures published before
 2026-07-29 are retired: both were inflated by a CUDA torch build that a
 dependency-resolution bug pulled into the image (see the CHANGELOG); the
 daemon has always been CPU-only.
@@ -337,6 +339,17 @@ docker volume create pseudolife-mcp-state
 docker compose -f ops/docker-compose.yml up -d --build
 ```
 
+Or skip the ~5 GB daemon build entirely and **pull the prebuilt images**
+(releases ≥ 0.14.0):
+
+```bash
+docker compose -f ops/docker-compose.yml -f ops/docker-compose.ghcr.yml pull pseudolife-pg pseudolife-daemon
+docker compose -f ops/docker-compose.yml -f ops/docker-compose.ghcr.yml up -d
+```
+
+The extractor sidecar is not published and still builds locally; updates on
+the pull path are `pull` + `up -d`, not `ops/update.ps1`.
+
 > **Upgrading from a pre-rename install** (volumes `ops_pseudolife_pgdata` /
 > `ops_pseudolife_data`)? Don't rename those volumes — keep pointing at them by
 > creating `ops/.env` with `PSEUDOLIFE_BANK_VOLUME=ops_pseudolife_pgdata` and
@@ -346,7 +359,9 @@ docker compose -f ops/docker-compose.yml up -d --build
 > default; the stack needs ~6–7 GB under dream load with the default sidecar
 > (~2 GB in `sonnet-only` mode — the Qwen3 embedding backbone is the bulk of
 > it) — cap the VM via `ops/wslconfig.example`
-> (see [Troubleshooting](#troubleshooting)).
+> (see [Troubleshooting](#troubleshooting)). The daemon container itself is
+> hard-capped at 4 GB (`PSEUDOLIFE_DAEMON_MEM_LIMIT` in `ops/.env` raises it
+> for very large banks; hitting the cap restarts the daemon cleanly).
 
 The daemon serves MCP at `http://127.0.0.1:8765/mcp` and restarts with
 Docker — no logon task needed. First build downloads the model into the
@@ -398,6 +413,21 @@ weekly Scheduled Task and the manual `.vhdx` compact. Never run
 >
 > Full procedure, including the health check that confirms it took:
 > [the v25 migration runbook](docs/runbooks/embedding-v25-migration.md).
+
+> **Upgrading an existing Docker-tier bank past 2026-08-14 (PostgreSQL
+> 16 → 18) needs one manual step.** A Postgres *major* bump can't reuse the
+> old data volume (the on-disk format changed), and the compose mount moved
+> from `/var/lib/postgresql/data` to `/var/lib/postgresql` — reusing the old
+> path would silently land the cluster on an anonymous volume. Run the
+> cutover script (pwsh 7+, any OS):
+>
+> ```powershell
+> pwsh ops/migrate-pg18.ps1   # backup → quiesce → dump → new volume → restore → verify
+> ```
+>
+> The PG 16 volume is frozen and retained as the rollback; table counts are
+> verified to match exactly before the daemon restarts. Full procedure and
+> rollback: [the PostgreSQL 18 migration runbook](docs/runbooks/postgres-18-migration.md).
 
 ## Wire into your coding agent
 
@@ -575,8 +605,8 @@ Extraction is pluggable:
 
 | Tier | How it runs | Needs | Quality |
 |------|-------------|-------|---------|
-| **0 — baseline** | `memory_dream(action="run")` (regex floor) — headless, on-box, free | nothing | weak |
-| **1 — agent-driven** | the **agent itself** is the gateway: the `/dream` command | the agent you already run | highest |
+| **0 — none** | no extractor configured — the dream still runs, prunes, and advances its cursor, but writes no canonical facts | nothing | none (`memory_fact_set` is your only cortex writer) |
+| **1 — agent-driven** | the **agent itself** is the gateway: the `/dream` judgment session (its manual-extraction branch fires only when no endpoint is configured) | the agent you already run | highest |
 | **2 — shipped default** | daemon auto-sweep → the bundled CPU sidecar, or any OpenAI-compatible endpoint | nothing (sidecar) | high; free if local |
 
 The stack ships tier 2 preconfigured (the bespoke Gemma 4 E4B extractor
@@ -635,7 +665,9 @@ Episodes**, **Stream** (live search with rerank/BM25 toggles and a
 ranking-trace debugger), **Graph** (interactive force-directed visualiser, with a review drawer that
 can Accept/Reject merges or — for a source file and its own bare concept,
 `band.py` ↔ `band` — record an `implements` edge instead of forcing
-merge-or-dismiss), and **Console** (every safe `config.yaml` scalar with live-vs-restart
+merge-or-dismiss; proposals a background dream has already judged carry a
+verdict chip — accept/reject/leave with confidence, the model's reason in
+the tooltip — as a lead, never a decision), and **Console** (every safe `config.yaml` scalar with live-vs-restart
 badges, diff-preview, and atomic save).
 
 **Auth** mirrors `/mcp`: `/ui` (static shell) and `/health` are open; `/api/*`

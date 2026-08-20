@@ -82,6 +82,10 @@ moment you notice the mismatch, filling in the verified value (re-assert
 the same value if it checks out), then log
 `memory_outcome(..., "correction")`. Correcting is part of discovering —
 a contradiction you only narrate is work left undone.
+A cortex fact carrying `contested: true` has competing values parked
+against it — settle it with `memory_fact_resolve(entity, attribute, ...)`
+(accept or reject the contender), not by re-asserting `memory_fact_set`,
+which only contests the slot further.
 
 CAPTURE — as durable things arise (one claim per call):
 - Name the session EARLY: `memory_session_title("<project> - <topic>")`.

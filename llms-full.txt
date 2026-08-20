@@ -39,7 +39,7 @@ What you get:
   slot (or a member set, for slots that hold many concurrent values);
   corrections supersede rather than silently overwrite, and the full
   version history survives.
-- **Dreams** — a bundled extractor (or Claude Sonnet via your Max plan)
+- **Dreams** — a bundled extractor (or a Claude model via your Max plan)
   consolidates the memory stream into facts and a knowledge graph while
   you're not looking.
 - **Lessons from its own work** — successes, dead-ends, and your corrections
@@ -77,13 +77,14 @@ ops\install.ps1         # Windows (pwsh 7+)
 The installer runs the preflight (one exact fix line per missing
 prerequisite), asks which **dream extractor** should consolidate memories —
 
-- **sonnet-only** — the lightest install: Claude Sonnet via a CLI shim
-  (needs a logged-in Max-plan `claude` CLI); the sidecar image is **never
-  built or pulled** (~9 GB lighter; dreams pause while the shim is down);
-- **sonnet-fallback** — Sonnet primary, the bundled sidecar as automatic
-  fallback (Max-plan CLI plus the ~9 GB image);
+- **sonnet-only** — the lightest install: a Claude model via a CLI shim
+  (`claude-opus-5` by default; the mode name is historical. Needs a
+  logged-in Max-plan `claude` CLI); the sidecar image is **never built or
+  pulled** (~11.8 GB lighter; dreams pause while the shim is down);
+- **sonnet-fallback** — the Claude shim primary, the bundled sidecar as
+  automatic fallback (Max-plan CLI plus the ~11.8 GB image);
 - **sidecar** — the bundled local CPU model; no Claude plan needed, works
-  for everyone (~9 GB image) —
+  for everyone (~11.8 GB image) —
 
 then brings the stack up, installs the selected clients' session hooks,
 registers the MCP transport (the stdio shim by default, direct HTTP via
@@ -280,7 +281,7 @@ metadata. Full-table dumps and topology views live in the **Cortex Console**
 (`/api/*`) and the `pseudolife-mcp briefing` CLI.
 
 **Toolset tiers.** Three visibility tiers — `minimal` (9 tools), `core`
-(22, the shipped default), `full` (35) — filtered per principal at
+(22), `full` (35) — filtered per principal at
 `tools/list`; a principal (the named bearer-token identity, or the writer
 id for single-token installs) steps its own tier up or down with
 `memory_toolset` before calling a hidden tool. Defaults, per-client mapping, and weak-model
@@ -324,9 +325,10 @@ in CPU-only torch and the embedding weights — `Qwen/Qwen3-Embedding-0.6B`
 (the default retrieval backbone since schema v25) plus `all-MiniLM-L6-v2`
 (kept baked for the ONNX-parity test path) — so it runs identically on
 Windows / macOS / Linux. Requires only Docker; built once: ~5.0 GB daemon
-image (measured 2026-07-29 on the deployed build) + ~0.6 GB Postgres + ~9 GB
-extractor sidecar (skip the sidecar entirely with the installer's
-`sonnet-only` mode). The ~12.6 GB and ~10.4 GB figures published before
+image (measured 2026-07-29 on the deployed build) + ~0.6 GB Postgres +
+~11.8 GB extractor sidecar (measured 2026-08-20 with the v3 multi-task
+bake; skip the sidecar entirely with the installer's `sonnet-only` mode).
+The ~12.6 GB and ~10.4 GB figures published before
 2026-07-29 are retired: both were inflated by a CUDA torch build that a
 dependency-resolution bug pulled into the image (see the CHANGELOG); the
 daemon has always been CPU-only.
@@ -343,6 +345,17 @@ docker volume create pseudolife-mcp-state
 docker compose -f ops/docker-compose.yml up -d --build
 ```
 
+Or skip the ~5 GB daemon build entirely and **pull the prebuilt images**
+(releases ≥ 0.14.0):
+
+```bash
+docker compose -f ops/docker-compose.yml -f ops/docker-compose.ghcr.yml pull pseudolife-pg pseudolife-daemon
+docker compose -f ops/docker-compose.yml -f ops/docker-compose.ghcr.yml up -d
+```
+
+The extractor sidecar is not published and still builds locally; updates on
+the pull path are `pull` + `up -d`, not `ops/update.ps1`.
+
 > **Upgrading from a pre-rename install** (volumes `ops_pseudolife_pgdata` /
 > `ops_pseudolife_data`)? Don't rename those volumes — keep pointing at them by
 > creating `ops/.env` with `PSEUDOLIFE_BANK_VOLUME=ops_pseudolife_pgdata` and
@@ -352,7 +365,9 @@ docker compose -f ops/docker-compose.yml up -d --build
 > default; the stack needs ~6–7 GB under dream load with the default sidecar
 > (~2 GB in `sonnet-only` mode — the Qwen3 embedding backbone is the bulk of
 > it) — cap the VM via `ops/wslconfig.example`
-> (see [Troubleshooting](#troubleshooting)).
+> (see [Troubleshooting](#troubleshooting)). The daemon container itself is
+> hard-capped at 4 GB (`PSEUDOLIFE_DAEMON_MEM_LIMIT` in `ops/.env` raises it
+> for very large banks; hitting the cap restarts the daemon cleanly).
 
 The daemon serves MCP at `http://127.0.0.1:8765/mcp` and restarts with
 Docker — no logon task needed. First build downloads the model into the
@@ -404,6 +419,21 @@ weekly Scheduled Task and the manual `.vhdx` compact. Never run
 >
 > Full procedure, including the health check that confirms it took:
 > [the v25 migration runbook](docs/runbooks/embedding-v25-migration.md).
+
+> **Upgrading an existing Docker-tier bank past 2026-08-14 (PostgreSQL
+> 16 → 18) needs one manual step.** A Postgres *major* bump can't reuse the
+> old data volume (the on-disk format changed), and the compose mount moved
+> from `/var/lib/postgresql/data` to `/var/lib/postgresql` — reusing the old
+> path would silently land the cluster on an anonymous volume. Run the
+> cutover script (pwsh 7+, any OS):
+>
+> ```powershell
+> pwsh ops/migrate-pg18.ps1   # backup → quiesce → dump → new volume → restore → verify
+> ```
+>
+> The PG 16 volume is frozen and retained as the rollback; table counts are
+> verified to match exactly before the daemon restarts. Full procedure and
+> rollback: [the PostgreSQL 18 migration runbook](docs/runbooks/postgres-18-migration.md).
 
 ## Wire into your coding agent
 
@@ -581,8 +611,8 @@ Extraction is pluggable:
 
 | Tier | How it runs | Needs | Quality |
 |------|-------------|-------|---------|
-| **0 — baseline** | `memory_dream(action="run")` (regex floor) — headless, on-box, free | nothing | weak |
-| **1 — agent-driven** | the **agent itself** is the gateway: the `/dream` command | the agent you already run | highest |
+| **0 — none** | no extractor configured — the dream still runs, prunes, and advances its cursor, but writes no canonical facts | nothing | none (`memory_fact_set` is your only cortex writer) |
+| **1 — agent-driven** | the **agent itself** is the gateway: the `/dream` judgment session (its manual-extraction branch fires only when no endpoint is configured) | the agent you already run | highest |
 | **2 — shipped default** | daemon auto-sweep → the bundled CPU sidecar, or any OpenAI-compatible endpoint | nothing (sidecar) | high; free if local |
 
 The stack ships tier 2 preconfigured (the bespoke Gemma 4 E4B extractor
@@ -641,7 +671,9 @@ Episodes**, **Stream** (live search with rerank/BM25 toggles and a
 ranking-trace debugger), **Graph** (interactive force-directed visualiser, with a review drawer that
 can Accept/Reject merges or — for a source file and its own bare concept,
 `band.py` ↔ `band` — record an `implements` edge instead of forcing
-merge-or-dismiss), and **Console** (every safe `config.yaml` scalar with live-vs-restart
+merge-or-dismiss; proposals a background dream has already judged carry a
+verdict chip — accept/reject/leave with confidence, the model's reason in
+the tooltip — as a lead, never a decision), and **Console** (every safe `config.yaml` scalar with live-vs-restart
 badges, diff-preview, and atomic save).
 
 **Auth** mirrors `/mcp`: `/ui` (static shell) and `/health` are open; `/api/*`
@@ -819,6 +851,14 @@ a reader to assume the value is live:
   floor with time since `last_confirmed`, and are flagged `stale: true`
   past twice their TTL. Re-asserting the same value confirms it and
   restores full confidence.
+- **`stance` records how the source *held* the value** (schema v29) —
+  a dream claim extracted from hedged or negated text ("probably X",
+  "no longer Y") carries that epistemic stance onto the fact, visible in
+  `memory_fact_get`, recall cortex blocks, and `history` when set. It
+  follows the latest asserting write (a plain restatement clears it), is
+  never an input to confidence, ranking, or supersession, and is not
+  settable via `memory_fact_set` — it exists so a hedge survives
+  consolidation instead of hardening into a flat assertion.
 
 Set it explicitly at write time: `memory_fact_set("pseudolife-mcp",
 "extractor-prompt-version", "v2", freshness_class="volatile")` — an
@@ -1024,7 +1064,10 @@ rule is what repaired it — the gated run landed the commit-gated cascade
 exactly at the op-less control while genuine sets still formed
 (`evals/results/c2op-count-verdict.json`, with sidecar-adoption and
 ladder-rung validation in the same artifact). The shipped prompt is
-byte-pinned to the measured artifact (`evals/prompts/ku_op_prompt_v5.txt`).
+byte-pinned to the measured artifact
+(`evals/prompts/ku_op_prompt_v10_stance_update.txt`, pinned by
+`test_op_prompt_artifact.py`); the op block was introduced at v5 and the
+pin has since moved through the v10 update-anchored stance revision.
 The aggregate-conversion guard (see [Conversion rules](#conversion-rules)
 above) remains the apply-time backstop: an `op:"add"` that does land on a
 stated-total scalar parks as a contender rather than converting, whether
@@ -1111,6 +1154,14 @@ memory_outcome("deploy engine to host", "success", about="tar --no-same-owner")
 memory_lesson_search("how do I deploy the engine to a host")
 # → [{task, aspect, lesson, about, polarity:"-"|"+", outcome, confidence, score}, ...]
 ```
+
+Not every synthesized lesson is written: one that near-matches an existing
+*current* lesson at a different key with the same polarity is skipped as a
+duplicate and counted (`lessons_deduped` in the dream-run row;
+`memory.lessons.synthesis_dedup_min_similarity`, default `0.88`, `0`
+disables). Opposite-polarity near-matches always write — a dead-end and a
+success about the same thing are both worth keeping — and explicit
+`lesson_write` calls are never gated.
 
 Lessons are also **traversable in the graph**: a task-type becomes an
 `etype='task-type'` entity, and each lesson adds a `prefers` (positive) or
@@ -1526,6 +1577,11 @@ superseded:
   state or update the same fact, only the *current* value is emitted, under
   the same entity and attribute — so the cortex supersedes rather than
   accumulating near-duplicate slots.
+- **The source's epistemic stance, kept.** A hedged or negated claim
+  ("probably X", "no longer Y") lands with a `stance` marker on the fact
+  (schema v29; the v10 update-anchored prompt is the live one) instead of
+  hardening into a flat assertion — see
+  [memory-model — how current is this fact?](memory-model.md#how-current-is-this-fact).
 - **What a document prescribes.** When a note quotes or summarizes a spec,
   policy, protocol, runbook, or guide, its prescription is itself a durable
   fact, stored under the *document's* subject — and kept separate from what
@@ -1716,6 +1772,11 @@ What gets consolidated and when is configurable under `memory.dream`
 (`eligible_sources` / `exclude_sources`, and the `min_batch` /
 `idle_seconds` backlog+quiescence thresholds that
 `memory_dream(action="status")` reports).
+
+Dream runs are single-flight: a `memory_dream(action="run")` that lands
+while another run holds the guard returns `{"skipped":
+"dream_in_progress"}` instead of racing it — scripted callers should treat
+that as a normal outcome (the next sweep tick retries), not an error.
 
 The auto-sweep (Tier 2) fires when:
 
@@ -1949,6 +2010,16 @@ and sibling ids differing only by numeric tokens (`CT200`/`CT400`) or the
 pre/post pair — vetoed at both filing sites, with the rules gated by a
 replay of the 2026-08-11 full-queue triage (they suppress 12 of that
 pass's 101 rejected proposals and none of its 38 accepted ones).
+
+Two more queue-quality knobs shape what gets proposed at all. Link
+candidates skip pairs whose evidence-support overlap exceeds
+`memory.deep_dream.max_support_overlap` — measured as **containment**
+(`|shared| / min(|a|,|b|)`), a stricter test than the Jaccard ratio the
+same number would suggest — and exclude pairs with a pending link proposal
+or a junk-flagged side before top-k selection, so the queue refills with
+new work instead of settled work. The trace-less-entity fallback scan is
+capped at `memory.deep_dream.max_fallback_mentions` (default 30) per
+entity; trace-backed mentions are never capped.
 
 ## Consolidation workflow (agent-driven dedup)
 
@@ -2197,6 +2268,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 | `PSEUDOLIFE_WRITER_ID` | `unknown` | Identifies this writer on every canonical write (schema v11). The shim forwards it as the `X-PL-Writer` header; the compose daemon defaults to `mcp-client`, and the installer pins `claude-code` / `codex` / `mcp-client` in `ops/.env` per the selected `--client`. Existing installs that predate the client selector should set `PSEUDOLIFE_WRITER_ID=claude-code` in `ops/.env` to keep their writer identity (and any `PSEUDOLIFE_MCP_TIER_MAP` keyed on it) stable. |
 | `PSEUDOLIFE_MCP_AUTOSAVE_SECONDS` | `30` | Interval of the file-mode autosave loop (weights/state cadence; Postgres-mode entries are transactional regardless). |
 | `PSEUDOLIFE_SESSION_REAP_SECONDS` | `300` | How often the idle-session reaper sweeps. The idle *threshold* it enforces is `PSEUDOLIFE_SESSION_IDLE_SECONDS` — see [Episodes](episodes.md). |
+| `PSEUDOLIFE_DAEMON_MEM_LIMIT` | `4g` | Docker tier only (read by compose, not the daemon): hard memory cap on the daemon container, with the memory+swap total pinned to the same value — no swap, so exceeding the cap is a clean container restart rather than a host-wide memory event. Steady state is ~2.8 GB with the default embedder; raise for very large banks. |
 
 For the Docker stack, set these in `ops/.env`
 (`cp ops/.env.example ops/.env` — the install/update scripts scaffold it too;
@@ -2342,6 +2414,27 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   without dropping; `"off"` disables. The batch-union corpus default
   exists because derived sums and cross-note values are measured
   false-drop classes under per-note (`"source"`) gating.
+- **Provenance-span gate off** (`memory.dream.span_gate = "off"`) — the
+  literal gate's sibling: where the literal gate checks digit-bearing
+  values, the span gate checks that a scalar claim's *quoted source span*
+  actually appears in the pull's notes — fidelity-to-source, not
+  trustworthiness-of-source. `"log"` counts without acting; `"contend"`
+  parks unbacked scalar claims as visible contenders with a
+  `span:unbacked` marker, resolvable via `memory_fact_resolve`. Ships off
+  because flipping it on requires the live extraction prompt to emit
+  quotes (the v10 prompt does not).
+- **Lesson-synthesis dedup on**
+  (`memory.lessons.synthesis_dedup_min_similarity = 0.88`) — a synthesized
+  lesson that near-matches an existing *current* lesson at a different key
+  with the same polarity is silently skipped and counted (`lessons_deduped`
+  beside `lesson_signals`/`lessons_written` in the dream-run row).
+  Opposite-polarity matches and explicit `lesson_write` callers are never
+  gated. `0` disables.
+- **Slot-index shadow verification on** (`memory.slot_index_shadow_rate =
+  0.01`) — ~1% of slot-pool queries recompute the index from scratch and
+  compare; divergences land in `stats()` as
+  `slot_index_shadow_divergences`. `0.0` disables, `1.0` checks every
+  query (dev/debug).
 - **Quarantine retype on** (`memory.dream.retype_quarantined_max = 3`) —
   per-dream cap on quarantined pairs re-offered to the extractor for
   typing, shown only the notes where both entities co-occur; a typed
@@ -2415,7 +2508,8 @@ a credential share a tier view). The filter is
 visibility, not auth (the bearer token is the security boundary) — but
 Claude clients gate calls against their own tool list, so in practice a
 session expands its tier before calling a hidden tool. Defaults:
-`PSEUDOLIFE_MCP_TOOLSET` (shipped: `core`) sets the baseline;
+`PSEUDOLIFE_MCP_TOOLSET` (unset → `full`; the Docker compose file ships
+`core`, so lite and host-process installs start at `full`) sets the baseline;
 `PSEUDOLIFE_MCP_TIER_MAP="claude-desktop:minimal,claude-code:core"` sets
 per-client defaults by principal (writer id). Any caller can step its tier
 up or down at runtime with `memory_toolset(action="expand"|"collapse"|"status")`
@@ -2444,7 +2538,7 @@ python -m venv .venv
 .venv\Scripts\activate
 pip install -e .
 
-# 1. Start Postgres 16 + pgvector (one-time build, then persistent).
+# 1. Start Postgres 18 + pgvector (one-time build, then persistent).
 docker compose -f ops/docker-compose.yml up -d --build pseudolife-pg
 
 # 2. Register the daemon to auto-start at logon (binds 127.0.0.1:8765).
@@ -2647,8 +2741,11 @@ vector *dimension* change on an existing column is not additive, so
 v24 or earlier instead of attempting an in-place ALTER — run the
 human-gated `ops/migrate_embeddings.py` first. Full step-by-step operator
 procedure (backup, stop, dry-run, apply, deploy, verify, rollback):
-[the v25 migration runbook](../runbooks/embedding-v25-migration.md). The
-milestones:
+[the v25 migration runbook](../runbooks/embedding-v25-migration.md).
+Separately from the schema meta version, Docker-tier installs created
+before 2026-08-14 also need the PostgreSQL 16 → 18 volume cutover —
+[the PostgreSQL 18 migration runbook](../runbooks/postgres-18-migration.md).
+The milestones:
 
 | Version | What it added |
 |---|---|
