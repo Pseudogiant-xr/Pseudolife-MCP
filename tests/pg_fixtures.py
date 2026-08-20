@@ -49,6 +49,9 @@ _ALL_TABLES = (
     # Deliberately FK-free (src_entry_id references evictable entries) —
     # same leak class as above.
     "chronicle_events",
+    # No FK from any table above — its own CASCADE covers retrieval_uses,
+    # but nothing reaches retrieval_events itself; same leak class as above.
+    "retrieval_events",
 )
 
 

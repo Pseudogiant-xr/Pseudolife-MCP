@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-20 — retrieval event log, schema v31)
+- **Every search now feeds a training log for a future learned reranker.**
+  Schema **v31** adds `retrieval_events` (one append-only row per
+  `memory_search`: query text, the ranked served list as JSONB with entry
+  ids/scores/ranks, writer session/episode) and `retrieval_uses` (implicit
+  relevance labels: a `memory_get`/`memory_reinforce` on a served entry in
+  the same session credits the most recent event that served it, within
+  `memory.retrieval_log.use_window_seconds`, default 1 h). Purely
+  observational — no retrieval behaviour changes, and a logging failure
+  can never break the search or fetch it rides on. Served ids carry no FK
+  (entries are evictable); labels CASCADE from their event; events are
+  pruned on the dream-sweep tick after
+  `memory.retrieval_log.retention_days` (default 365). Kill-switch
+  `memory.retrieval_log.enabled` plus both knobs exposed in the Console
+  config panel (live, no restart). File mode skips silently. This is
+  Phase 0 of the learned-reranker plan: the (query, served, used) tuples
+  accrue passively until there is enough supervision to train a fusion
+  head against the pre-registered pure-cosine gate.
+
 ## [0.14.0] - 2026-08-20 — the flat store default, the zero-config lite tier, and pull-not-build images
 
 ### Changed (2026-08-20 — session briefing teaches contested-slot resolution)

@@ -1177,6 +1177,9 @@ class MemoryService:
                     # answer): lets the answerer do arithmetic over a
                     # long enumeration without recounting lines.
                     out["events_total"] = len(events_block)
+            # Retrieval event log (schema v31): purely observational —
+            # the (query, served) training tuple for a learned reranker.
+            self._log_retrieval_event(query, entries_out)
             return out
 
     # ------------------------------------------------------------------
@@ -3090,6 +3093,57 @@ class MemoryService:
             return {"found": True, "entity": display,
                     "count": len(events), "events": events}
 
+    def _log_retrieval_event(self, query: str,
+                             entries_out: list[dict]) -> None:
+        """Append a ``retrieval_events`` row (schema v31): the (query,
+        served) half of the learned-reranker training tuple. Rank = list
+        position in the served output. Entries without a storage id
+        (pre-persist) are dropped — they can't be joined to a later use.
+        Never raises: a logging failure must not break the search it
+        rides on."""
+        cfg = self.config.memory.retrieval_log
+        if self._storage is None or not cfg.enabled:
+            return
+        try:
+            served = [
+                {"entry_id": int(d["id"]), "score": d.get("score"),
+                 "rank": rank, "via": d.get("via"), "bank": d.get("bank")}
+                for rank, d in enumerate(entries_out)
+                if d.get("id") is not None
+            ]
+            _, session_id = self._resolve_writer()
+            self._storage.add_retrieval_event(
+                query, served, origin="search", session_id=session_id,
+                episode_id=self._current_episode_id())
+        except Exception:  # noqa: BLE001
+            logger.warning("retrieval-event log failed", exc_info=True)
+
+    def _record_retrieval_use(self, entry_id: int, used_via: str) -> None:
+        """Implicit relevance label (schema v31): the most recent search in
+        this session that served ``entry_id`` gains a ``retrieval_uses``
+        row. Never raises: a label failure must not break the fetch it
+        rides on."""
+        cfg = self.config.memory.retrieval_log
+        if self._storage is None or not cfg.enabled:
+            return
+        try:
+            _, session_id = self._resolve_writer()
+            self._storage.record_retrieval_use(
+                int(entry_id), session_id, used_via,
+                float(cfg.use_window_seconds))
+        except Exception:  # noqa: BLE001
+            logger.warning("retrieval-use label failed", exc_info=True)
+
+    def prune_retrieval_log(self) -> int:
+        """Drop retrieval events older than the configured retention (their
+        use labels CASCADE). Rides the dream-sweep tick, like the other
+        append-only logs."""
+        if self._storage is None:
+            return 0
+        cfg = self.config.memory.retrieval_log
+        cutoff = time.time() - cfg.retention_days * 86400
+        return self._storage.prune_retrieval_events(cutoff)
+
     def get_entry(self, entry_id: int) -> dict[str, Any]:
         """Dereference a trace pointer: the dense episode + the facts it formed.
         Bumps access_count (ambient reinforcement). {found: False, faded: True}
@@ -3105,6 +3159,7 @@ class MemoryService:
             if self._cms is not None:
                 self._cms.bump_entry_access_count(int(entry_id), 1)
             facts = self._storage.facts_for_entry(int(entry_id))
+            self._record_retrieval_use(int(entry_id), "get")
         return {"found": True, "entry_id": row["id"], "text": row["text"],
                 "source": row.get("source"),
                 "reinforcements": row.get("reinforcements", 0),
@@ -3121,6 +3176,7 @@ class MemoryService:
             self._storage.bump_reinforcements(int(entry_id), 1)
             if self._cms is not None:
                 self._cms.bump_entry_reinforcements(int(entry_id), 1)
+            self._record_retrieval_use(int(entry_id), "reinforce")
         return {"reinforced": True, "entry_id": int(entry_id)}
 
     def cortex_forget(self, entity: str, attribute: str | None = None) -> dict[str, Any]:

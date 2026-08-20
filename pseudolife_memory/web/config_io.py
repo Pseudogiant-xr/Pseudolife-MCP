@@ -106,6 +106,24 @@ KNOBS: list[dict[str, Any]] = [
              "(a decisive head can't be fixed by reranking). 0 = always "
              "rerank. CAUTION: skips return raw bi-encoder scores — don't "
              "combine with an abstention floor tuned to the fused scale."},
+    # ── Retrieval log (learned-reranker training data, schema v31) ─────────
+    {"path": "memory.retrieval_log.enabled", "group": "Retrieval log",
+     "label": "Retrieval event log", "type": "bool", "default": True,
+     "restart": False,
+     "help": "Log every search's query + served entries, and implicit "
+             "'used' labels when a served entry is later fetched/"
+             "reinforced. Training data for a learned reranker; purely "
+             "observational, no retrieval behaviour changes."},
+    {"path": "memory.retrieval_log.retention_days", "group": "Retrieval log",
+     "label": "Event retention (days)", "type": "int", "default": 365,
+     "min": 1, "max": 3650, "step": 1, "restart": False,
+     "help": "Events older than this are pruned on the dream-sweep tick "
+             "(their use labels cascade)."},
+    {"path": "memory.retrieval_log.use_window_seconds", "group": "Retrieval log",
+     "label": "Use-label window (s)", "type": "int", "default": 3600,
+     "min": 60, "max": 86400, "step": 60, "restart": False,
+     "help": "A get/reinforce this long after a search still labels that "
+             "search's served entry as used."},
     # ── Cortex ─────────────────────────────────────────────────────────────
     {"path": "memory.cortex.search_first", "group": "Cortex",
      "label": "Cortex-first search", "type": "bool", "default": True,

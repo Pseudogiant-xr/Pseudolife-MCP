@@ -538,6 +538,26 @@ class LessonsConfig:
 
 
 @dataclass
+class RetrievalLogConfig:
+    """Append-only per-query retrieval log (schema v31) — the training data
+    for a future learned fusion/reranker stage. Every ``memory_search``
+    writes one ``retrieval_events`` row (query text + the ranked served
+    list); a later ``memory_get``/``memory_reinforce`` on a served entry in
+    the same session writes an implicit relevance label to
+    ``retrieval_uses``. Purely observational: no retrieval behaviour
+    changes. Requires Postgres storage (file mode skips silently)."""
+    enabled: bool = True
+    # Events older than this are pruned on the dream-sweep tick (labels
+    # CASCADE), bounding growth. Generous by default: the log IS the
+    # training corpus, and rows are small (ids + scores, not texts).
+    retention_days: int = 365
+    # A get/reinforce this many seconds after a search still counts as a
+    # use of it. Bounds the implicit-label lookback so a stale id fetched
+    # much later doesn't credit an ancient query.
+    use_window_seconds: int = 3600
+
+
+@dataclass
 class CompactionConfig:
     """Superseded-row compaction over facts/world_facts/lessons (spec
     2026-07-14). Per slot: keep the newest ``keep_per_slot`` non-live
@@ -701,6 +721,9 @@ class MemoryConfig:
     graph_insight: GraphInsightConfig = field(default_factory=GraphInsightConfig)
     # Engram cross-index (provenance-as-link, schema v13).
     traces: TracesConfig = field(default_factory=TracesConfig)
+    # Retrieval event log — learned-reranker training data (schema v31).
+    retrieval_log: RetrievalLogConfig = field(
+        default_factory=RetrievalLogConfig)
     # Project-scope derivation — meta-source exclusions + umbrella rollups.
     scopes: ScopesConfig = field(default_factory=ScopesConfig)
     # Meta-statement filter on the store path (off in the MCP build).
@@ -891,6 +914,10 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
         if "compaction" in mem_raw:
             config.memory.compaction = _dict_to_dataclass(
                 CompactionConfig, mem_raw["compaction"],
+            )
+        if "retrieval_log" in mem_raw:
+            config.memory.retrieval_log = _dict_to_dataclass(
+                RetrievalLogConfig, mem_raw["retrieval_log"],
             )
         if "deep_dream" in mem_raw:
             config.memory.deep_dream = _dict_to_dataclass(

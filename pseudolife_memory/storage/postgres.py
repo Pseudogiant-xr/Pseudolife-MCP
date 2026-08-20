@@ -624,6 +624,88 @@ class PostgresStorage:
             )
         return cur.rowcount
 
+    # ── retrieval events (append-only search log; learned-reranker Phase 0) ─
+
+    def add_retrieval_event(self, query_text: str, served: list[dict],
+                            origin: str = "search",
+                            session_id: str | None = None,
+                            episode_id: str | None = None,
+                            now: float | None = None) -> int:
+        """One row per search that served entries.
+
+        ``served`` is the ranked list as dicts (``entry_id``/``score``/
+        ``rank``/``via``/``bank``). Entry ids carry no FK — entries are
+        evictable, and a training join tolerates dangling ids.
+        """
+        t = time.time() if now is None else float(now)
+        with self._txn():
+            row = self.conn.execute(
+                "INSERT INTO retrieval_events "
+                "(query_text, origin, session_id, episode_id, served, "
+                "created_at) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
+                (query_text, origin, session_id, episode_id, Jsonb(served), t),
+            ).fetchone()
+        return int(row[0])
+
+    def record_retrieval_use(self, entry_id: int, session_id: str | None,
+                             used_via: str, window_s: float,
+                             now: float | None = None) -> int:
+        """Implicit relevance label: the most recent event in this session's
+        window that served ``entry_id`` gains a use row. Session match is
+        strict (``IS NOT DISTINCT FROM`` — a None session only labels
+        None-session events, never another session's). Idempotent per
+        (event, entry, via). Returns rows written (0 or 1)."""
+        t = time.time() if now is None else float(now)
+        with self._txn():
+            row = self.conn.execute(
+                "SELECT id FROM retrieval_events "
+                "WHERE session_id IS NOT DISTINCT FROM %s "
+                "AND created_at >= %s AND served @> %s "
+                "ORDER BY created_at DESC, id DESC LIMIT 1",
+                (session_id, t - float(window_s),
+                 Jsonb([{"entry_id": int(entry_id)}])),
+            ).fetchone()
+            if row is None:
+                return 0
+            cur = self.conn.execute(
+                "INSERT INTO retrieval_uses "
+                "(event_id, entry_id, used_via, created_at) "
+                "VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING",
+                (int(row[0]), int(entry_id), used_via, t),
+            )
+        return cur.rowcount
+
+    def prune_retrieval_events(self, older_than_ts: float) -> int:
+        """Delete events older than the cutoff (their use labels CASCADE),
+        so the log can't grow unbounded."""
+        with self._txn():
+            cur = self.conn.execute(
+                "DELETE FROM retrieval_events WHERE created_at < %s",
+                (float(older_than_ts),),
+            )
+        return cur.rowcount
+
+    def retrieval_events_window(self, since_ts: float = 0.0,
+                                limit: int = 1000) -> list[dict]:
+        """Events (oldest first) with use labels aggregated — the training
+        export read. Read-only."""
+        rows = self.conn.execute(
+            "SELECT e.id, e.query_text, e.origin, e.session_id, "
+            "e.episode_id, e.served, e.created_at, "
+            "COALESCE(json_agg(json_build_object("
+            "'entry_id', u.entry_id, 'used_via', u.used_via, "
+            "'at', u.created_at)) "
+            "FILTER (WHERE u.entry_id IS NOT NULL), '[]') AS uses "
+            "FROM retrieval_events e "
+            "LEFT JOIN retrieval_uses u ON u.event_id = e.id "
+            "WHERE e.created_at >= %s "
+            "GROUP BY e.id ORDER BY e.created_at, e.id LIMIT %s",
+            (float(since_ts), int(limit)),
+        ).fetchall()
+        cols = ("id", "query_text", "origin", "session_id", "episode_id",
+                "served", "created_at", "uses")
+        return [dict(zip(cols, r)) for r in rows]
+
     def loop_health(self, window_s: float, now: float | None = None) -> dict:
         """Windowed loop-activity counts for the Console tile: current vs the
         immediately preceding window of stores + outcome signals, session

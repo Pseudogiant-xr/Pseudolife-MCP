@@ -1405,6 +1405,12 @@ def run_sweep_once(service) -> dict:
     # dream-run journal retention rides the same tick for the same reason.
     compacted = service.compact_superseded().get("total", 0)
     runs_pruned = service.prune_dream_runs()
+    # v31 retrieval-event retention rides the same unconditional tick —
+    # the log accrues on every search regardless of dream activity.
+    # getattr-guarded for older fakes/tests, like deep_dream_tick below.
+    prune_retrieval = getattr(service, "prune_retrieval_log", None)
+    if prune_retrieval is not None:
+        prune_retrieval()
     # Need-based deep-dream tick (mechanical Steps A/B only) rides the same
     # timer, independent of the shallow trigger — a quiet bank can still be
     # overdue for consolidation. getattr-guarded for older fakes/tests.

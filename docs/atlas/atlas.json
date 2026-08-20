@@ -2,7 +2,7 @@
  "meta": {
   "title": "PseudoLife-MCP System Atlas",
   "version": "0.14.0",
-  "schema": 30,
+  "schema": 31,
   "verified": "2026-08-20"
  },
  "groups": {
@@ -785,11 +785,11 @@
    "x": 1760,
    "y": 730,
    "t": "storage/schema.py",
-   "s": "DDL · SCHEMA_META_VERSION 29",
+   "s": "DDL · SCHEMA_META_VERSION 31",
    "p": "pseudolife_memory/storage/schema.py",
    "d": [
     "pgvector required; Apache AGE fully removed",
-    "entries(vector 1024) · facts · world_facts · lessons · entities/edges · episodes · memory_traces · communities · outcome_signals · entity_kinds · dream_runs/dream_run_slots · chronicle_events",
+    "entries(vector 1024) · facts · world_facts · lessons · entities/edges · episodes · memory_traces · communities · outcome_signals · entity_kinds · dream_runs/dream_run_slots · chronicle_events · retrieval_events/retrieval_uses",
     "Additive migrations: v23 fact freshness_class · v24 entity_kinds · v25 1024-d re-embed · v26 set-valued slots · v27 dream-run pre-image journal · v28 chronicle events (dated occurrences, additive-only) · v29 fact stance (labelled hedge field, NULL = plain)",
     "One-current-row-per-slot partial unique indexes"
    ]
