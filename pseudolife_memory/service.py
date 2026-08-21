@@ -3137,12 +3137,16 @@ class MemoryService:
     def prune_retrieval_log(self) -> int:
         """Drop retrieval events older than the configured retention (their
         use labels CASCADE). Rides the dream-sweep tick, like the other
-        append-only logs."""
+        append-only logs. The lock is load-bearing: the sweep thread calls
+        this concurrently with lock-holding writers, and an unlocked storage
+        call interleaves psycopg transaction blocks on the shared connection,
+        wedging it in-transaction (2026-08-21 daemon incident)."""
         if self._storage is None:
             return 0
         cfg = self.config.memory.retrieval_log
         cutoff = time.time() - cfg.retention_days * 86400
-        return self._storage.prune_retrieval_events(cutoff)
+        with self._lock:
+            return self._storage.prune_retrieval_events(cutoff)
 
     def get_entry(self, entry_id: int) -> dict[str, Any]:
         """Dereference a trace pointer: the dense episode + the facts it formed.
