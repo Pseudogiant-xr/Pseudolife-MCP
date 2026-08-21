@@ -6,6 +6,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-08-21 — hybrid arm budget-matched to the rag control by default)
+- **`HYBRID_TOP_K` is now 6 (was 3), equal to `RAG_TOP_K`, in the LME/BEAM
+  bench harness.** The hybrid arm previously served half the rag control's
+  raw-turn budget, so every hybrid-vs-rag comparison confounded the fact
+  spine with a halved turn window — the 2026-07-30 ceiling-e2e autopsy and
+  the 2026-08-21 BEAM review both traced hybrid "losses" to exactly this.
+  Hybrid is now a superset of the control by construction. Bench rows
+  record the effective `hybrid_top_k`; rows without the key predate the
+  flip and were served at 3. Pre-flip artifacts are NOT comparable to
+  post-flip hybrid numbers. The regression-gate arm1 pinned contexts were
+  built at 3 and splice raw blocks verbatim, so the gate is mechanically
+  unaffected — but its hybrid arm no longer represents the shipped
+  default until a fresh-extract re-baseline (`regression_gate.ps1
+  -Establish` after a new arm1 extract), noted at the constant.
+
+### Added (2026-08-21 — BEAM banks and served contexts persist)
+- **BEAM runs no longer discard their consolidated state.** Each row now
+  carries the exact served context per arm plus the structured serve
+  state (`parts`: pinned raw turns, memory turns, fact lines, events), and
+  each chat's consolidated fact bank (with per-slot history chains) is
+  dumped to `evals/results/banks/beam-<tier>-<extractor>-<tag>/`
+  (gitignored, like all bank dumps). A serving-knob rerun or re-judge now
+  recomposes from persisted state instead of re-paying the ~5h
+  ingest/extraction phase — the qwen38 rerun had to re-ingest precisely
+  because the first run kept nothing. Turns are not dumped (they are
+  verbatim in the static BEAM `chat.json`); chronicle event serving is
+  the one channel that still needs a live bank.
+
 ### Added (2026-08-21 — BEAM judge-transfer and budget-match instrumentation)
 - **`evals/beam_rejudge.py`: re-judge an existing BEAM run's recorded
   answers with a frontier judge** (headless `claude -p`, pooled workers,

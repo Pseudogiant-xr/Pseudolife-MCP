@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import gzip
 import json
 import os
 import re
@@ -241,6 +242,33 @@ def out_file(tier: str, extractor: str, tag: str) -> Path:
     return RESULTS_DIR / f"beam-{tier}-{extractor}-{tag}.jsonl"
 
 
+def beam_bank_dir(tier: str, extractor: str, tag: str) -> Path:
+    return RESULTS_DIR / "banks" / f"beam-{tier}-{extractor}-{tag}"
+
+
+def dump_chat_bank(svc, chat_id: str, tally: dict, path: Path) -> None:
+    """Persist a chat's consolidated fact bank (with per-slot history
+    chains), the LME dump_bank pattern per chat: fact embeddings are
+    encode_single over "entity attribute value" and cortex search is
+    cosine over them, so fact retrieval replays offline exactly. Turns are
+    NOT dumped — they come verbatim from the static BEAM chat.json, and
+    re-embedding them is CPU-cheap. Chronicle event serving is the one
+    channel a dump cannot replay (it rides the live search call)."""
+    facts = svc.cortex_dump().get("entries", [])
+    for f in facts:
+        f.pop("source_entries", None)             # bulky, not needed offline
+        try:
+            versions = svc.history(f.get("entity", ""),
+                                   f.get("attribute", "")).get("versions", [])
+            f["history"] = [v.get("value") for v in versions]  # oldest→newest
+        except Exception:  # noqa: BLE001 — history is garnish, never fatal
+            f["history"] = [f.get("value")]
+    payload = {"chat_id": chat_id, "consolidation": tally, "facts": facts}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with gzip.open(path, "wt", encoding="utf-8") as fh:
+        json.dump(payload, fh, ensure_ascii=False)
+
+
 def run(beam_root: Path, tier: str, extractor_name: str, tag: str,
         chats: str | None, limit_chats: int | None,
         chronicle: bool = False, arms_only: str | None = None,
@@ -301,18 +329,27 @@ def run(beam_root: Path, tier: str, extractor_name: str, tag: str,
         print(f"chat {chat_id}: ingested {tally['turns']} turns, "
               f"{tally['dreams']} dreams, {tally['claims']} claims "
               f"({ingest_s}s)", flush=True)
+        dump_chat_bank(svc, chat_id, tally,
+                       beam_bank_dir(tier, extractor_name, tag)
+                       / f"chat{chat_id}.json.gz")
         for q in pending:
             t1 = time.perf_counter()
-            contexts = build_contexts(svc, q["question"])
+            contexts = build_contexts(svc, q["question"], with_parts=True)
+            parts = contexts.pop("parts")
             row = {"chat_id": chat_id, "tier": tier, "type": q["type"],
                    "index": q["index"], "question": q["question"],
                    "reference_answer": q["answer"],
                    "difficulty": q["difficulty"], "rubric": q["rubric"],
                    "extractor": extractor_name,
                    "hybrid_top_k": lme.HYBRID_TOP_K,
-                   "consolidation": tally, "ingest_seconds": ingest_s}
+                   "consolidation": tally, "ingest_seconds": ingest_s,
+                   # Served contexts + structured serve state (2026-08-21):
+                   # serving-knob reruns and re-judges recompose from these
+                   # instead of re-paying the ingest/extraction phase.
+                   "contexts": {}, "parts": parts}
             for arm in arms:
                 ctx = contexts.get(arm, "")
+                row["contexts"][arm] = ctx
                 prompt = (f"Question: {q['question']}\n\n"
                           f"Memory context:\n{ctx or '(empty)'}")
                 response = _chat(_BEAM_ANSWER_SYSTEM, prompt,

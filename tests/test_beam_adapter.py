@@ -140,6 +140,60 @@ def test_report_omits_hybrid_top_k_for_legacy_rows(tmp_path, monkeypatch):
     assert "hybrid_top_k" not in summary
 
 
+class _ServeSvc:
+    """Stub service for context-building tests: search returns top_k texts,
+    cortex is empty, no history calls."""
+
+    def search(self, q, top_k, **kw):
+        return {"entries": [{"text": f"t{i}"} for i in range(top_k)]}
+
+    def cortex_search(self, q, **kw):
+        return {"entries": []}
+
+
+def test_hybrid_budget_matches_rag_by_default():
+    """The 2026-08-21 decision: the hybrid arm is a SUPERSET of the rag arm
+    by default, so hybrid-vs-rag deltas isolate the fact spine instead of
+    confounding it with a halved raw-turn budget."""
+    import longmemeval_bench as lme
+    assert lme.HYBRID_TOP_K == lme.RAG_TOP_K
+
+
+def test_build_contexts_with_parts_exposes_serve_state():
+    """Persisted BEAM rows carry the structured serve state so serving-knob
+    reruns recompose contexts offline instead of re-paying ingest."""
+    import longmemeval_bench as lme
+    ctx = lme.build_contexts(_ServeSvc(), "q?", with_parts=True)
+    parts = ctx["parts"]
+    assert parts["raw"] == [f"t{i}" for i in range(lme.RAG_TOP_K)]
+    assert parts["mem"] == parts["raw"]          # default knobs: same call
+    assert parts["facts"] == [] and parts["events"] == []
+    assert "parts" not in lme.build_contexts(_ServeSvc(), "q?")
+
+
+def test_dump_chat_bank_writes_facts_with_history(tmp_path):
+    import gzip
+    import json
+
+    class _Svc(_ServeSvc):
+        def cortex_dump(self):
+            return {"entries": [
+                {"entity": "user", "attribute": "city", "value": "Sydney",
+                 "source_entries": ["bulky"]}]}
+
+        def history(self, entity, attribute):
+            return {"versions": [{"value": "Perth"}, {"value": "Sydney"}]}
+
+    path = tmp_path / "chat1.json.gz"
+    tally = {"turns": 188, "dreams": 6}
+    beam_adapter.dump_chat_bank(_Svc(), "1", tally, path)
+    with gzip.open(path, "rt", encoding="utf-8") as fh:
+        bank = json.load(fh)
+    assert bank["chat_id"] == "1" and bank["consolidation"] == tally
+    assert bank["facts"][0]["history"] == ["Perth", "Sydney"]
+    assert "source_entries" not in bank["facts"][0]
+
+
 def test_hybrid_top_k_is_read_at_call_time():
     """beam_adapter --hybrid-top-k works by setting lme.HYBRID_TOP_K before
     questions are answered; that only holds if build_contexts reads the
