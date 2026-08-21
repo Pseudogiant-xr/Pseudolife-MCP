@@ -52,6 +52,18 @@ entries, a cached view of the graph, a memoized score):
   changes), live-object reads (supersession flags are read at query time).
   Preserve each one or change it consciously and say so in the commit.
 
+## Running tests (hook-enforced)
+
+A project hook blocks any test run piped through a pager (`pytest ... | tail`
+/ `head` / `Select-Object`) because the pipe masks the suite's exit code —
+that shipped two PRs on failing suites. Use the redirect form from the start:
+
+```bash
+python -m pytest tests/ > /tmp/pytest-last.log 2>&1; ec=$?; tail -60 /tmp/pytest-last.log; echo "pytest exit: $ec"
+```
+
+or `set -o pipefail; ... | tee /tmp/pytest-last.log | tail -60`.
+
 ## Review discipline
 
 - Every PR gets a review pass before the merge click — `/code-review` medium,
