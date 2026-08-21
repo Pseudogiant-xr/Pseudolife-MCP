@@ -6,6 +6,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-21 — BEAM judge-transfer and budget-match instrumentation)
+- **`evals/beam_rejudge.py`: re-judge an existing BEAM run's recorded
+  answers with a frontier judge** (headless `claude -p`, pooled workers,
+  never the production shim), using the same upstream
+  `unified_llm_judge_base_prompt`, one call per rubric item. Retrieval and
+  answering are not re-run, so any score movement is pure judge effect —
+  the judge-transfer measurement `beam-100k-verdict.json` (2026-08-03)
+  left as the open decision blocking any comparison against the
+  GPT-judged published numbers (Cognee 0.79 @ 100K etc.). Writes
+  `<source>.rejudge-<tag>.jsonl` + a paired summary carrying
+  original-vs-rejudged scores per arm/type and a seeded stability sample
+  (pairs judged twice) that bounds what a delta can claim, since a CLI
+  judge is not bit-reproducible. Resumable per row; the source artifact
+  is never modified.
+- **`beam_adapter.py --hybrid-top-k N` and `--arms a,b`**: the bench's
+  hybrid arm serves `HYBRID_TOP_K=3` raw turns against the rag arm's 6,
+  so hybrid-vs-rag deltas confound the fact spine with a halved turn
+  budget — the same asymmetry the 2026-07-30 ceiling-e2e diagnosis found
+  on LongMemEval. `--hybrid-top-k 6` budget-matches the arms (default
+  unchanged: prior artifacts stay byte-identical), `--arms` skips arms a
+  partial rerun doesn't need, and rows/summaries now record the
+  effective `hybrid_top_k` so artifacts self-describe.
+
 ### Added (2026-08-20 — retrieval event log, schema v31)
 - **Every search now feeds a training log for a future learned reranker.**
   Schema **v31** adds `retrieval_events` (one append-only row per

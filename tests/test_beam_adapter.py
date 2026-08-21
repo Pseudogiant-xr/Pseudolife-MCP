@@ -14,7 +14,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
 
 import beam_adapter  # noqa: E402
 from beam_adapter import (  # noqa: E402
-    arms_for, load_chat_turns, load_judge_prompt, parse_judge_score,
+    arms_for, judge_response, load_chat_turns, load_judge_prompt,
+    parse_judge_score,
 )
 
 
@@ -74,6 +75,93 @@ def test_report_derives_arms_from_rows(tmp_path, monkeypatch, capsys):
     assert summary["arms"]["hybrid_ev"]["score"] == 1.0
     assert summary["types"]["event_ordering"]["hybrid_ev"] == 1.0
     assert summary["arms"]["hybrid"]["score"] == 0.5
+
+
+def test_arms_for_only_filters_in_canonical_order():
+    assert arms_for(False, only="hybrid,rag") == ("rag", "hybrid")
+    assert arms_for(True, only="hybrid_ev") == ("hybrid_ev",)
+
+
+def test_arms_for_unknown_arm_is_loud():
+    with pytest.raises(SystemExit):
+        arms_for(False, only="rag,hybrid_ev")   # ev needs --chronicle
+    with pytest.raises(SystemExit):
+        arms_for(False, only="ragg")
+
+
+def test_judge_response_uses_injected_chat():
+    """The rejudge script swaps the local-server judge for a frontier CLI
+    judge by injecting ``chat``; the scoring/failure semantics must not
+    change with the transport."""
+    calls = []
+
+    def fake_chat(system, user, *, max_tokens=256, **_):
+        calls.append(user)
+        return '{"score": 0.5}' if len(calls) == 1 else "not json"
+
+    v = judge_response("judge <question> <rubric_item> <llm_response>",
+                       "q?", ["item one", "item two"], "an answer",
+                       chat=fake_chat)
+    assert v["llm_judge_score"] == 0.5           # mean over scored items only
+    assert v["llm_judge_score_intfaithful"] == 0.0
+    assert v["judge_failures"] == 1
+    assert "item one" in calls[0] and "an answer" in calls[0]
+
+
+def test_report_carries_hybrid_top_k_when_rows_do(tmp_path, monkeypatch):
+    import json
+    monkeypatch.setattr(beam_adapter, "RESULTS_DIR", tmp_path)
+    rows = [{"chat_id": "1", "type": "abstention", "index": i,
+             "hybrid_top_k": 6,
+             "hybrid_score": 1.0, "hybrid_score_intfaithful": 1.0}
+            for i in range(2)]
+    out = tmp_path / "beam-100K-qwen-27b-hyb6.jsonl"
+    out.write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
+    beam_adapter.report("100K", "qwen-27b", "hyb6")
+    summary = json.loads(
+        (tmp_path / "beam-100K-qwen-27b-hyb6.summary.json").read_text(
+            encoding="utf-8"))
+    assert summary["hybrid_top_k"] == 6
+
+
+def test_report_omits_hybrid_top_k_for_legacy_rows(tmp_path, monkeypatch):
+    """Pre-flag artifacts have no hybrid_top_k key; their summaries must not
+    grow a null field on a --report re-run."""
+    import json
+    monkeypatch.setattr(beam_adapter, "RESULTS_DIR", tmp_path)
+    rows = [{"chat_id": "1", "type": "abstention", "index": 0,
+             "hybrid_score": 1.0, "hybrid_score_intfaithful": 1.0}]
+    out = tmp_path / "beam-100K-qwen-27b-legacy.jsonl"
+    out.write_text(json.dumps(rows[0]), encoding="utf-8")
+    beam_adapter.report("100K", "qwen-27b", "legacy")
+    summary = json.loads(
+        (tmp_path / "beam-100K-qwen-27b-legacy.summary.json").read_text(
+            encoding="utf-8"))
+    assert "hybrid_top_k" not in summary
+
+
+def test_hybrid_top_k_is_read_at_call_time():
+    """beam_adapter --hybrid-top-k works by setting lme.HYBRID_TOP_K before
+    questions are answered; that only holds if build_contexts reads the
+    module global at call time rather than binding it at import."""
+    import longmemeval_bench as lme
+
+    class _Svc:
+        def search(self, q, top_k, **kw):
+            return {"entries": [{"text": f"t{i}"} for i in range(top_k)]}
+
+        def cortex_search(self, q, **kw):
+            return {"entries": []}
+
+    old = lme.HYBRID_TOP_K
+    try:
+        lme.HYBRID_TOP_K = 6
+        ctx = lme.build_contexts(_Svc(), "q?")
+        mems = ctx["hybrid"].split("Relevant memories:\n", 1)[1]
+        assert [m for m in mems.split("\n\n") if m] == [
+            f"t{i}" for i in range(6)]
+    finally:
+        lme.HYBRID_TOP_K = old
 
 
 def test_dream_tally_counts_events():
