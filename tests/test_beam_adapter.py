@@ -164,6 +164,21 @@ def test_hybrid_top_k_is_read_at_call_time():
         lme.HYBRID_TOP_K = old
 
 
+def test_hybrid_top_k_beyond_rag_budget_is_loud():
+    """build_contexts slices mems[:HYBRID_TOP_K] from a top_k=RAG_TOP_K
+    search, so a wider request is silently capped at 6 while the rows would
+    record the wider number — an artifact asserting a budget that was never
+    served (review finding 4). The validation must fire before any server
+    probe so a bad flag dies instantly."""
+    from pathlib import Path
+    with pytest.raises(SystemExit, match="exceeds"):
+        beam_adapter.run(Path("nowhere"), "100K", "qwen-27b", "t",
+                         None, None, hybrid_top_k=12)
+    with pytest.raises(SystemExit, match="positive"):
+        beam_adapter.run(Path("nowhere"), "100K", "qwen-27b", "t",
+                         None, None, hybrid_top_k=0)
+
+
 def test_dream_tally_counts_events():
     class _Svc:
         def __init__(self):

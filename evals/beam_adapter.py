@@ -247,6 +247,18 @@ def run(beam_root: Path, tier: str, extractor_name: str, tag: str,
         hybrid_top_k: int | None = None) -> None:
     lme.CHRONICLE = chronicle          # build_contexts reads its module global
     if hybrid_top_k is not None:
+        # Validate before any probe or global mutation: build_contexts
+        # slices the hybrid turns from a top_k=RAG_TOP_K search, so a wider
+        # budget would be silently capped at RAG_TOP_K while every row
+        # records the wider number — an artifact asserting a budget that
+        # was never served.
+        if hybrid_top_k < 1:
+            raise SystemExit("--hybrid-top-k must be positive")
+        if hybrid_top_k > lme.RAG_TOP_K:
+            raise SystemExit(
+                f"--hybrid-top-k {hybrid_top_k} exceeds "
+                f"RAG_TOP_K={lme.RAG_TOP_K}; the hybrid arm cannot serve "
+                "more turns than the search returns")
         # build_contexts reads the module global at call time (pinned by
         # test_hybrid_top_k_is_read_at_call_time). Default None keeps every
         # prior artifact's 3-turn hybrid budget byte-identical; 6 matches

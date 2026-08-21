@@ -128,6 +128,11 @@ def rejudge_row(row: dict, arms: tuple[str, ...], judge_prompt: str,
     beside the new ones so every downstream comparison pairs within-row."""
     out = {k: row.get(k) for k in ("chat_id", "tier", "type", "index",
                                    "question", "difficulty", "rubric")}
+    # Provenance carried when the source recorded it (a budget-matched run
+    # stamps hybrid_top_k); legacy rows stay legacy rather than gaining
+    # explicit-None keys.
+    out.update({k: row[k] for k in ("extractor", "hybrid_top_k")
+                if k in row})
     for arm in arms:
         try:
             v = judge_response(judge_prompt, row["question"], row["rubric"],
@@ -157,7 +162,16 @@ def summarize(rows: list[dict], arms: tuple[str, ...], judge_model: str,
                                 "the source run's local-judge scores over "
                                 "identical responses"),
                "arms": {}, "types": {}}
+    if rows[0].get("hybrid_top_k") is not None:
+        summary["hybrid_top_k"] = rows[0]["hybrid_top_k"]
     for arm in arms:
+        # A row whose items ALL failed to judge scores 0.0 by the
+        # max(len(scored), 1) convention — arithmetically identical to a
+        # genuine zero. Count those rows next to the mean they sit inside:
+        # a nonzero count says the delta carries judge outages, not just
+        # judge opinion.
+        dead = sum(1 for r in rows
+                   if r[f"{arm}_judge_failures"] >= len(r["rubric"]))
         summary["arms"][arm] = {
             "score": round(sum(r[f"{arm}_score"] for r in rows) / n, 4),
             "score_intfaithful": round(
@@ -167,6 +181,7 @@ def summarize(rows: list[dict], arms: tuple[str, ...], judge_model: str,
             "delta": round(sum(r[f"{arm}_score"] - r[f"{arm}_score_orig"]
                                for r in rows) / n, 4),
             "judge_failures": sum(r[f"{arm}_judge_failures"] for r in rows),
+            "rows_all_items_failed": dead,
         }
     by_type: dict[str, list[dict]] = {}
     for r in rows:
@@ -218,6 +233,27 @@ def stability_report(rows: list[dict], pairs: list[tuple], judge_prompt: str,
             "item_agreement": round(agree / total, 4) if total else None,
             "mean_abs_delta": round(deltas / total, 4) if total else None,
             "pairs": detail}
+
+
+def merge_stability(reports: list[dict], expected_items: int) -> dict:
+    """Weighted merge of per-pair stability reports. ``expected_items``
+    (the item count the sampled pairs SHOULD have compared) travels with
+    the result: a second-pass CLI failure drops its items from n_items,
+    and an agreement rate computed over a silent survivor subset would
+    otherwise read as clean."""
+    merged = {"n_pairs": sum(r["n_pairs"] for r in reports),
+              "n_items": sum(r["n_items"] for r in reports),
+              "expected_items": expected_items,
+              "pairs": [p for r in reports for p in r["pairs"]]}
+    items = agree = deltas = 0
+    for r in reports:
+        if r["n_items"]:
+            items += r["n_items"]
+            agree += r["item_agreement"] * r["n_items"]
+            deltas += r["mean_abs_delta"] * r["n_items"]
+    merged["item_agreement"] = round(agree / items, 4) if items else None
+    merged["mean_abs_delta"] = round(deltas / items, 4) if items else None
+    return merged
 
 
 def main() -> int:
@@ -283,30 +319,23 @@ def main() -> int:
 
     all_rows = load_rows(out_path)
     summary = summarize(all_rows, arms, args.judge_model, args.src.name)
-    summary["cli_calls"] = judge.calls
-    summary["cli_errors"] = judge.errors
     if args.stability_sample:
         print(f"beam_rejudge: stability sample "
               f"({args.stability_sample} pairs)...", flush=True)
         pairs = stability_pairs(all_rows, arms, args.stability_sample)
+        by_key = {(r["chat_id"], r["type"], r["index"]): r for r in all_rows}
+        expected = sum(len(by_key[p[:3]][f"{p[3]}_judge"]) for p in pairs)
         with ThreadPoolExecutor(max_workers=args.workers) as pool:
             # One future per pair keeps the pool busy; stability_report
             # itself is sequential, so fan out here instead.
             futs = [pool.submit(stability_report, all_rows, [p],
                                 judge_prompt, judge) for p in pairs]
             reports = [f.result() for f in futs]
-        merged = {"n_pairs": len(pairs),
-                  "n_items": sum(r["n_items"] for r in reports),
-                  "pairs": [p for r in reports for p in r["pairs"]]}
-        items = agree = deltas = 0
-        for r in reports:
-            if r["n_items"]:
-                items += r["n_items"]
-                agree += r["item_agreement"] * r["n_items"]
-                deltas += r["mean_abs_delta"] * r["n_items"]
-        merged["item_agreement"] = round(agree / items, 4) if items else None
-        merged["mean_abs_delta"] = round(deltas / items, 4) if items else None
-        summary["stability_sample"] = merged
+        summary["stability_sample"] = merge_stability(reports, expected)
+    # Counters land AFTER the stability pass so its several hundred calls
+    # (and any of their failures) are visible in the artifact.
+    summary["cli_calls"] = judge.calls
+    summary["cli_errors"] = judge.errors
     summary["date"] = time.strftime("%Y-%m-%d")
     sum_path = out_path.with_name(
         out_path.name.removesuffix(".jsonl") + ".summary.json")

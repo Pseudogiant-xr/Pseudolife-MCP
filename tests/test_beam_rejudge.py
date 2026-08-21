@@ -117,3 +117,56 @@ def test_stability_report_measures_item_agreement():
 def test_unknown_requested_arm_is_loud():
     with pytest.raises(SystemExit):
         beam_rejudge.detect_arms([_row()], only="rag,cortex")  # no cortex col
+
+
+def test_rejudge_row_carries_provenance_keys_when_present():
+    """A budget-matched source run records extractor + hybrid_top_k; the
+    re-judged artifact must not lose that provenance (review finding 3)."""
+    row = _row(extractor="qwen-27b", hybrid_top_k=6)
+    out = beam_rejudge.rejudge_row(row, ("rag",), "j",
+                                   lambda *a, **k: '{"score": 1.0}')
+    assert out["extractor"] == "qwen-27b" and out["hybrid_top_k"] == 6
+    legacy = beam_rejudge.rejudge_row(_row(), ("rag",), "j",
+                                      lambda *a, **k: '{"score": 1.0}')
+    assert "extractor" not in legacy and "hybrid_top_k" not in legacy
+
+
+def test_summarize_carries_hybrid_top_k_and_counts_dead_rows():
+    """A row where EVERY item failed is a 0.0 the judge never actually
+    awarded; the summary must say how many such rows sit inside each arm
+    mean (review finding 2) and keep the budget provenance (finding 3)."""
+    good = beam_rejudge.rejudge_row(_row(0, hybrid_top_k=6), ("rag",), "j",
+                                    lambda *a, **k: '{"score": 1.0}')
+    dead = beam_rejudge.rejudge_row(_row(1, hybrid_top_k=6), ("rag",), "j",
+                                    lambda *a, **k: "unparseable")
+    s = beam_rejudge.summarize([good, dead], ("rag",), "m", "src")
+    assert s["hybrid_top_k"] == 6
+    assert s["arms"]["rag"]["rows_all_items_failed"] == 1
+    legacy = beam_rejudge.summarize([good], ("rag",), "m", "src")
+    assert "hybrid_top_k" not in beam_rejudge.summarize(
+        [beam_rejudge.rejudge_row(_row(), ("rag",), "j",
+                                  lambda *a, **k: '{"score": 1.0}')],
+        ("rag",), "m", "src")
+    assert legacy["arms"]["rag"]["rows_all_items_failed"] == 0
+
+
+def test_merge_stability_weights_and_reports_shortfall():
+    reports = [
+        {"n_pairs": 1, "n_items": 2, "item_agreement": 1.0,
+         "mean_abs_delta": 0.0, "pairs": [{"key": ["1", "t", 0, "rag"]}]},
+        {"n_pairs": 1, "n_items": 1, "item_agreement": 0.0,
+         "mean_abs_delta": 0.5, "pairs": [{"key": ["1", "t", 1, "rag"]}]},
+    ]
+    m = beam_rejudge.merge_stability(reports, expected_items=4)
+    assert m["n_pairs"] == 2 and m["n_items"] == 3
+    assert m["expected_items"] == 4                      # shortfall visible
+    assert m["item_agreement"] == round(2 / 3, 4)
+    assert m["mean_abs_delta"] == round(0.5 / 3, 4)
+
+
+def test_merge_stability_all_failed_is_none_not_perfect():
+    m = beam_rejudge.merge_stability(
+        [{"n_pairs": 1, "n_items": 0, "item_agreement": None,
+          "mean_abs_delta": None, "pairs": []}], expected_items=2)
+    assert m["item_agreement"] is None and m["mean_abs_delta"] is None
+    assert m["n_items"] == 0 and m["expected_items"] == 2
