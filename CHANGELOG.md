@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-22 — BEAM reader/volume sweep, GPU-free)
+- **`evals/beam_reader_sweep.py`: measure the two unmeasured legs of the
+  Cognee-0.79 gap decomposition** — the answerer (frontier vs local 27B)
+  and the context volume (their ~24.7K served tokens/question vs our
+  ~3.2K) — without the GPU. The rag arm never touches the extractor, so
+  banks build extraction-free on the CPU embedder; one top-48 serve per
+  question is sliced into budget arms (rag6/rag16/rag48 — 48 turns ≈
+  26K tokens ≈ Cognee's budget), answered by a frontier CLI model under
+  the BEAM answer prompt and judged with the same instrument as the
+  `rejudge-opus5` artifact, so the existing opus-judged qwen-reader rag
+  row pairs directly against rag6 for a pure reader effect. Retrieval is
+  identical across budgets by construction. `beam_rejudge`'s CLI call
+  gains proper `--system-prompt` handling (argv-length fallback, the
+  claude_shim contract) shared by both scripts.
+
 ### Changed (2026-08-21 — hybrid arm budget-matched to the rag control by default)
 - **`HYBRID_TOP_K` is now 6 (was 3), equal to `RAG_TOP_K`, in the LME/BEAM
   bench harness.** The hybrid arm previously served half the rag control's

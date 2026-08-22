@@ -50,6 +50,25 @@ ALL_ARMS = (*ARMS, "hybrid_ev")
 DEFAULT_CLI = (os.environ.get("PSEUDOLIFE_SHIM_CLAUDE_CLI")
                or shutil.which("claude") or "claude")
 _FENCE_RE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL)
+# Windows CreateProcess caps the command line at 32767 chars; leave margin
+# (same constant as evals/claude_shim.py).
+_MAX_ARGV_SYSTEM = 24000
+
+
+def build_cli_call(cli: str, model: str, system: str,
+                   user: str) -> tuple[list[str], str]:
+    """The headless ``claude -p`` invocation for one pure completion —
+    the claude_shim contract: system goes to ``--system-prompt`` when it
+    fits argv, otherwise it is folded onto stdin ahead of the user text."""
+    cmd = [cli, "-p", "--model", model, "--output-format", "json",
+           "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
+           "--tools", ""]
+    if system and len(system) <= _MAX_ARGV_SYSTEM:
+        cmd += ["--system-prompt", system]
+        return cmd, user
+    if system:
+        return cmd, f"{system}\n\n{user}"
+    return cmd, user
 
 
 def out_path_for(src: Path, tag: str) -> Path:
@@ -89,11 +108,7 @@ class CliJudge:
         self.errors = 0
 
     def __call__(self, system: str, user: str, **_) -> str:
-        cmd = [self.cli, "-p", "--model", self.model,
-               "--output-format", "json",
-               "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
-               "--tools", ""]
-        payload = f"{system}\n\n{user}" if system else user
+        cmd, payload = build_cli_call(self.cli, self.model, system, user)
         with self._lock:
             self.calls += 1
         for attempt in (1, 2):
