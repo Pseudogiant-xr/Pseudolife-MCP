@@ -46,8 +46,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))          # evals/
 
 from beam_adapter import (  # noqa: E402
-    _BEAM_ANSWER_SYSTEM, iter_chats, judge_response, load_chat_turns,
-    load_judge_prompt, load_questions,
+    _BEAM_ANSWER_SYSTEM, format_turn, iter_chats, judge_response,
+    load_chat_turns, load_judge_prompt, load_questions,
 )
 from beam_rejudge import CliJudge, DEFAULT_CLI  # noqa: E402
 from longmemeval_bench import RESULTS_DIR, load_rows  # noqa: E402
@@ -89,11 +89,8 @@ def serve(beam_root: Path, tier: str, tag: str,
         t0 = time.perf_counter()
         import tempfile
         svc = build_service(Path(tempfile.mkdtemp(prefix="beamrs_")))
-        for turn in load_chat_turns(chat_dir):
-            anchor = (f"[{turn['time_anchor']}] " if turn["time_anchor"]
-                      else "")
-            svc.store(f"{anchor}{turn['role']}: {turn['content']}",
-                      source="beam")
+        for i, turn in enumerate(load_chat_turns(chat_dir), 1):
+            svc.store(format_turn(turn, i), source="beam")
         build_s = round(time.perf_counter() - t0, 1)
         for q in pending:
             entries = svc.search(q["question"], top_k=SERVE_TOP_K,

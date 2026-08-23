@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-08-23 — Phase-1 BEAM fixes from the reader-sweep verdict)
+- **The BEAM answer prompt now surfaces genuine contradictions instead of
+  silently resolving them.** BEAM plants conflicting claims and
+  rubric-checks that the answer says the record conflicts; the old prompt
+  ordered newest-wins resolution, so every arm retrieved the evidence and
+  scored 0-0.25 on contradiction_resolution (2026-08-22 autopsy). Value
+  updates still resolve to the current value. The LME answer prompt is
+  deliberately unchanged (the regression gate re-answers pinned contexts
+  with it).
+- **Stored BEAM turns now carry `[session N, turn M]` ordinals** — the
+  free ordering metadata event_ordering questions need, previously
+  discarded at ingest (Cognee's retrieved passages carry the equivalent
+  headers). Banks stored before the stamp are not byte-comparable.
+- **`beam_adapter.py --rag-top-k`** widens both arms together (the pinned
+  search serves rag and the hybrid raw block), so budget-matching
+  survives the knob; both knobs validate before either module global
+  mutates, and rows/summaries record the effective `rag_top_k`.
+
 ### Added (2026-08-22 — BEAM reader/volume sweep, GPU-free)
 - **`evals/beam_reader_sweep.py`: measure the two unmeasured legs of the
   Cognee-0.79 gap decomposition** — the answerer (frontier vs local 27B)
