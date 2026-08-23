@@ -56,6 +56,24 @@ BUDGETS = (6, 16, 48)
 SERVE_TOP_K = max(BUDGETS)
 
 
+def resolve_chat_fns(answerer: str, answer_model: str, judge_model: str,
+                     cli: str, call_timeout: float):
+    """(answer_fn, judge_fn) for the chosen transport. ``local`` runs both
+    through the bench Qwen server (zero subscription tokens; the
+    judge-transfer verdict measured local-vs-opus judge agreement within
+    0.02, so curves stay comparable across transports); ``cli`` is the
+    headless claude -p contract."""
+    if answerer == "local":
+        import longmemeval_bench as lme
+
+        def local_chat(system, user, *, max_tokens=1024, **_):
+            return lme._chat(system, user, max_tokens=max_tokens)
+
+        return local_chat, local_chat
+    return (CliJudge(cli, answer_model, call_timeout),
+            CliJudge(cli, judge_model, call_timeout))
+
+
 def serve_path(tag: str) -> Path:
     return RESULTS_DIR / f"beam-readersweep-{tag}.serve.jsonl"
 
@@ -180,7 +198,8 @@ def summarize(rows: list[dict], budgets: tuple[int, ...], answerer: str,
 def answer(beam_root: Path, tag: str, budgets: tuple[int, ...],
            answer_model: str, judge_model: str, cli: str, workers: int,
            call_timeout: float, limit: int | None,
-           baseline_summary: Path | None) -> None:
+           baseline_summary: Path | None, answerer_kind: str = "cli",
+           out_tag: str | None = None) -> None:
     src_rows = load_rows(serve_path(tag))
     if not src_rows:
         sys.exit(f"no serve rows — run --phase serve first "
@@ -188,11 +207,17 @@ def answer(beam_root: Path, tag: str, budgets: tuple[int, ...],
     if limit:
         src_rows = src_rows[:limit]
     judge_prompt = load_judge_prompt(beam_root)
-    answerer = CliJudge(cli, answer_model, call_timeout)
-    judge = CliJudge(cli, judge_model, call_timeout)
-    if "OK" not in judge("", "Reply with exactly: OK"):
+    answerer, judge = resolve_chat_fns(answerer_kind, answer_model,
+                                       judge_model, cli, call_timeout)
+    if answerer_kind == "local":
+        from ladder_sweep import probe
+        from longmemeval_bench import QWEN_URL
+        if not probe(QWEN_URL):
+            sys.exit(f"no local answer/judge server at {QWEN_URL}")
+        answer_model = judge_model = f"local ({QWEN_URL})"
+    elif "OK" not in judge("", "Reply with exactly: OK"):
         sys.exit("judge probe failed — CLI logged in and on PATH?")
-    out = result_path(tag)
+    out = result_path(out_tag or tag)
     done = {(r["chat_id"], r["type"], r["index"]) for r in load_rows(out)}
     pending = [r for r in src_rows
                if (r["chat_id"], r["type"], r["index"]) not in done]
@@ -230,7 +255,8 @@ def answer(beam_root: Path, tag: str, budgets: tuple[int, ...],
                     "source": baseline_summary.name}
     summary = summarize(all_rows, budgets, answer_model, baseline=baseline)
     summary["judge"] = judge_model
-    summary["cli_errors"] = answerer.errors + judge.errors
+    summary["cli_errors"] = (getattr(answerer, "errors", 0)
+                             + getattr(judge, "errors", 0))
     summary["date"] = time.strftime("%Y-%m-%d")
     sp = out.with_name(out.name.removesuffix(".jsonl") + ".summary.json")
     sp.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
@@ -244,6 +270,12 @@ def main() -> int:
     ap.add_argument("--tag", required=True)
     ap.add_argument("--phase", choices=("serve", "answer"), required=True)
     ap.add_argument("--budgets", default=",".join(map(str, BUDGETS)))
+    ap.add_argument("--answerer", choices=("cli", "local"), default="cli",
+                    help="local answers+judges via the bench Qwen server "
+                         "(zero subscription tokens)")
+    ap.add_argument("--out-tag", default=None,
+                    help="result-file tag when re-answering an existing "
+                         "serve under a new transport (default: --tag)")
     ap.add_argument("--answer-model", default="claude-opus-5")
     ap.add_argument("--judge-model", default="claude-opus-5")
     ap.add_argument("--cli", default=DEFAULT_CLI)
@@ -265,7 +297,8 @@ def main() -> int:
     else:
         answer(args.beam_root, args.tag, budgets, args.answer_model,
                args.judge_model, args.cli, args.workers, args.call_timeout,
-               args.limit, args.baseline_summary)
+               args.limit, args.baseline_summary,
+               answerer_kind=args.answerer, out_tag=args.out_tag)
     return 0
 
 

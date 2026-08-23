@@ -94,6 +94,21 @@ def test_summarize_reports_arms_types_and_baseline():
     assert s["baseline_qwen_reader_opus_judged"]["rag"]["score"] == 0.4989
 
 
+def test_resolve_chat_fns_local_uses_bench_server_not_cli():
+    """--answerer local answers AND judges through the bench Qwen server
+    (zero subscription tokens); cli keeps the claude -p contract. The
+    local pair must be plain callables with the (system, user) chat
+    signature so process_row stays transport-blind."""
+    a, j = brs.resolve_chat_fns("local", "claude-opus-5", "claude-opus-5",
+                                "claude", 60.0)
+    from beam_rejudge import CliJudge
+    assert not isinstance(a, CliJudge) and not isinstance(j, CliJudge)
+    assert callable(a) and callable(j)
+    ca, cj = brs.resolve_chat_fns("cli", "claude-opus-5", "claude-opus-5",
+                                  "claude", 60.0)
+    assert isinstance(ca, CliJudge) and isinstance(cj, CliJudge)
+
+
 def test_budget_beyond_recorded_serve_width_is_loud():
     """A budget wider than the row's serve_top_k would make the arm claim
     a retrieval width the serve never requested (the --hybrid-top-k
