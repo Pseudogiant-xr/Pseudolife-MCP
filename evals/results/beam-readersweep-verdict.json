@@ -1,0 +1,32 @@
+{
+  "verdict": "The Cognee-0.79 vs PseudoLife-0.50 BEAM-100K gap is mostly the reading stack, not the memory layer: swapping the 27B local reader for a frontier reader at identical 6-turn contexts is +0.120, and widening naive-RAG context from ~3.5K to ~22K tokens (Cognee's budget) adds another +0.130 - naive vector retrieval plus a frontier reader reaches 0.70 with no fact spine, no graph, no per-type prompts. Summarization (0.47) and event_ordering (0.52) stay broken at any budget, and abstention DEGRADES with volume (0.62 -> 0.50) - the three structural findings that survive the reading stack.",
+  "date": "2026-08-23",
+  "run": {
+    "harness": "evals/beam_reader_sweep.py (serve: CPU extraction-free banks, one top-48 serve sliced into budget arms; answer+judge: claude-opus-5 via headless CLI, same judge instrument as rejudge-opus5)",
+    "artifacts": [
+      "evals/results/beam-readersweep-opus-sweep.serve.jsonl",
+      "evals/results/beam-readersweep-opus-sweep.jsonl",
+      "evals/results/beam-readersweep-opus-sweep.summary.json"
+    ],
+    "partial": "116 of 400 rows (chats 1-7); a usage-window outage stopped the sweep and 10 outage-tainted trailing rows were dropped. Serve phase is complete for all 400 rows, so completion resumes without re-retrieval."
+  },
+  "paired_effects_n116": {
+    "note": "paired per-question against the qwen-reader rag row of rejudge-opus5 (identical questions, identical opus judge); 95% CIs",
+    "reader_qwen6_to_opus6": "+0.120 +/- 0.074",
+    "volume_opus6_to_opus16": "+0.084 +/- 0.068",
+    "volume_opus16_to_opus48": "+0.047 +/- 0.057 (not individually significant)",
+    "total_qwen6_to_opus48": "+0.250 +/- 0.085",
+    "arm_means": {"qwen_rag6": 0.4501, "opus_rag6": 0.5697, "opus_rag16": 0.6535, "opus_rag48": 0.7005}
+  },
+  "structural_findings": {
+    "summarization": "0.38 -> 0.47 across the full budget sweep; coverage of whole-chat rubrics needs a mid-density layer (session digests), not more turns",
+    "event_ordering": "0.21 -> 0.52; improves with volume but stays the weakest type; extraction coverage + ordinal metadata, not answer-time synthesis (autopsied dead-end)",
+    "abstention": "0.62 -> 0.50 as volume grows - wider context invites confabulation; the small-context cortex arm's 0.95 is the differentiator this quantifies"
+  },
+  "decision": "Stop the CLI sweep at n=116 (effects significant; remaining 284 rows would re-buy a table that gets re-measured anyway). Phase 1 (GPU-free code): contradiction-surfacing answer policy for BEAM, session/turn ordinals on stored turns, --rag-top-k knob. The single publishable full-tier measurement runs after the weekly usage reset with Phase-1 fixes in place; the hyb6 GPU run remains queued on user go-ahead.",
+  "caveats": [
+    "Single replicate; CLI answerer/judge is not bit-reproducible. Deltas below the rejudge stability floor (mean |item delta| 0.073) are not findings.",
+    "Chats 1-7 only; per-type rows are n=10-12 - directional, not stable per-ability estimates.",
+    "Cognee's 0.79 remains a 20-question single-conversation protocol with rubric-shaped gold-label prompts; 0.70-at-their-budget here is naive RAG, not a like-for-like system comparison."
+  ]
+}
