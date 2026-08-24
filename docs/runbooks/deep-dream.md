@@ -94,11 +94,15 @@ and at most the one fact slot it was minted from** is auto-deleted
 `merge_decisions`; the pre-apply graph snapshot is the undo, and the node
 simply re-mints on next mention). Accepting a junk proposal also writes a
 durable tombstone in `merge_decisions`: if the same name re-mints and is
-re-flagged, it is auto-deleted at the detector's own `junk_max_degree`
-bar rather than the stricter zero-structure guard above — so an
-`apply=true` deletes more than the zero-structure rule alone would;
-never-judged names keep the strict guard. Anything evidence-bearing —
-any edge, more than one fact slot — sits pending until someone votes.
+re-flagged, it is auto-deleted with the **degree** half of that guard
+relaxed to the detector's own `junk_max_degree` bar — so an `apply=true`
+deletes more than the zero-edge rule alone would; never-judged names keep
+the strict guard. The fact-count half holds either way: a tombstone is
+permanent (nothing removes a `merge_decisions` row), so a name that has
+since become a real, fact-bearing entity must not be deleted unattended
+on the strength of an old verdict. Anything evidence-bearing — an edge
+past the applicable bar, more than one fact slot — sits pending until
+someone votes.
 No merge proposal is filed whose side is junk-flagged.
 `merge_proposals` does NOT carry them: get their `proposal_id`s from
 `memory_graph_review(action="list")`, where they appear as `kind: "junk"`.

@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-08-25 — a junk tombstone can no longer delete a re-minted real entity)
+- **The deep dream's tombstone auto-delete now applies the fact-count half
+  of the evidence bar too** (#177). A junk verdict on a short name plants a
+  permanent tombstone — nothing removes a `merge_decisions` row — and the
+  tombstone branch consulted degree only, so months later the same name
+  standing for a real entity with a dozen cortex facts and one edge was
+  deleted unattended on `deep_dream(apply=true)`, taking its edges, aliases,
+  sources and the fact-to-entity cross-index with it (the fact rows survive
+  on entity text, the node re-mints on next mention, and the cycle repeats).
+  A tombstone now relaxes the **degree** bar only: an entity with more than
+  one current fact stays put and sits in the review queue as an ordinary junk
+  proposal for a human verdict. Zero-structure auto-delete of never-judged
+  names is unchanged. Supersedes the 2026-08-16 tombstone entry below.
+
 ### Added (2026-08-24 — answer-prompt attribution ablation)
 - **`evals/beam_attrib_ablation.py`: isolate the answer-prompt term of the
   Phase-1 lift.** The p1-b16 run changed budget, turn ordinals, and the
@@ -369,6 +383,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   second verdict. The deep dream now auto-deletes a re-minted, re-flagged
   tombstoned name at the detector's own degree bar (`junk_max_degree`),
   while never-judged names keep the zero-structure auto-delete guard.
+  *(Narrowed 2026-08-25, #177: the tombstone branch relaxes the degree bar
+  only — a fact-bearing entity is never auto-deleted. See the entry at the
+  top of `[Unreleased]`.)*
   `merge_decision_stats` excludes all junk rows (`into_display IS NULL`) so
   detector precision keeps measuring merges only.
 - **Lesson-synthesis tallies journaled into `dream_runs`**

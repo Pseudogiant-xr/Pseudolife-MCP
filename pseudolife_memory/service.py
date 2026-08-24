@@ -6555,9 +6555,18 @@ class MemoryService:
                     continue
                 eid = p["entity_id"]
                 display = disp_by_id.get(eid, p.get("entity") or "?")
-                zero_structure = (deg.get(eid, 0) == 0
-                                  and fact_counts.get(eid, 0) <= 1)
-                tombstoned = (_nn2(display) in tombstones
+                # A tombstone relaxes the DEGREE bar only; the fact-count
+                # half of the evidence bar holds either way. Tombstones are
+                # permanent (nothing removes a merge_decisions row), so a
+                # short name auto-deleted once stayed deletable forever —
+                # months later the same name can be a real entity with a
+                # dozen cortex facts and one edge, and the unattended delete
+                # would take its edges, aliases, sources and fact
+                # cross-index with it (#177).
+                contentless = fact_counts.get(eid, 0) <= 1
+                zero_structure = deg.get(eid, 0) == 0 and contentless
+                tombstoned = (contentless
+                              and _nn2(display) in tombstones
                               and deg.get(eid, 0) <= cfg.junk_max_degree)
                 if not (zero_structure or tombstoned):
                     continue
