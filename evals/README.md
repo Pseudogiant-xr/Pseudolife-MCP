@@ -1042,6 +1042,18 @@ Hybrid beat both single channels in *every* replicate under both prompts.
 Treat the absolute numbers as a pilot: 10 questions, one category, no paired
 testing.
 
+> **CORRECTED 2026-08-25 (scorer defect #173).** The multiple-choice
+> scorer's no-box fallback matched the English article "a" and scored it as
+> answer **A**. Re-scored
+> (`evals/results/lme-v2-smoke-slice1-rescored-strictmc.agg.json`, written
+> by `evals/rescore_strict_mc.py`): naive RAG
+> `0.300 [0.30–0.30] | 0.433 [0.40–0.50]`, cortex only
+> `0.167 [0.00–0.30] | 0.200 [0.10–0.30]`, hybrid
+> `0.500 [0.40–0.60] | 0.533 [0.50–0.60]`. Hybrid still leads on every
+> mean, but the "*every* replicate" claim above no longer holds: under the
+> composition-aware prompt one of the three replicates is now a tie with
+> naive RAG.
+
 Every arm scored **0.000** before five fixes, and the decisive one was
 self-inflicted — the trajectory extraction prompt said "extract exactly two
 kinds of claim and nothing else", so the extractor correctly discarded the

@@ -1588,6 +1588,77 @@ CLAIMS.append(Claim(
     stated=2.3, places=1))
 
 
+# ── the #173 multiple-choice re-score corrections (2026-08-25) ───────────
+# The MC scorer's no-box fallback read the article "a" as answer A, so
+# every lme-v2 number above is superseded. House rule "retire numbers at
+# the old site": the original artifacts and their rows stay exactly as
+# they were, and the correction is published beside them — which means the
+# corrected numbers are claims in their own right and pin here too.
+RESCORE = "-rescored-strictmc"
+LME_V2_RS = RESULTS + "lme-v2-smoke-slice1" + RESCORE + ".agg.json"
+LME_V2_FULL_RS = RESULTS + "lme-v2-smoke-slice2" + RESCORE + ".summary.json"
+LME_V2_FULL_COMPOSE_RS = (RESULTS + "lme-v2-smoke-slice2-compose" + RESCORE
+                          + ".summary.json")
+PAIRED56_RS = (RESULTS + "lme-v2-qwen38-vs-slice2-paired56" + RESCORE
+               + ".json")
+
+for _arm, _needle, _ku, _compose in [
+    ("rag", "| naive RAG (control) | 0.162 → **0.149** | 0.284 → **0.257** |",
+     0.149, 0.257),
+    ("cortex", "| cortex facts only | 0.068 → **0.068** | 0.216 → **0.176** |",
+     0.068, 0.176),
+    ("hybrid", "| hybrid | **0.243** → **0.203** | 0.284 → **0.270** |",
+     0.203, 0.270),
+]:
+    CLAIMS.append(Claim(
+        id=f"lmev2-full-ku-{_arm}-corrected", doc=BENCH, needle=_needle,
+        artifacts=(LME_V2_FULL_RS,),
+        value=lambda d, a=_arm: d["arms"][a]["eval_accuracy"],
+        stated=_ku, places=3))
+    CLAIMS.append(Claim(
+        id=f"lmev2-full-compose-{_arm}-corrected", doc=BENCH, needle=_needle,
+        artifacts=(LME_V2_FULL_COMPOSE_RS,),
+        value=lambda d, a=_arm: d["arms"][a]["eval_accuracy"],
+        stated=_compose, places=3))
+
+# The corrected pilot rows are quoted as inline code in the superseding
+# note, so each arm's needle is its own quoted fragment.
+for _arm, _needle, _ku, _compose in [
+    ("rag", "`0.300 [0.30–0.30] | 0.433 [0.40–0.50]`", 0.300, 0.433),
+    ("cortex", "`0.167 [0.00–0.30] | 0.200 [0.10–0.30]`", 0.167, 0.200),
+    ("hybrid", "`0.500 [0.40–0.60] | 0.533 [0.50–0.60]`", 0.500, 0.533),
+]:
+    CLAIMS.append(Claim(
+        id=f"lmev2-ku-{_arm}-corrected", doc=BENCH, needle=_needle,
+        artifacts=(LME_V2_RS,), value=_mean(f"KU.{_arm}"),
+        stated=_ku, places=3))
+    CLAIMS.append(Claim(
+        id=f"lmev2-compose-{_arm}-corrected", doc=BENCH, needle=_needle,
+        artifacts=(LME_V2_RS,), value=_mean(f"compose.{_arm}"),
+        stated=_compose, places=3))
+
+# The corrected paired verdict. The p-value has its own artifact per the
+# house rule, and the judge arm is pinned because "the judge arms
+# reproduce the superseded artifact exactly" is the sentence that licenses
+# reading the eval-arm movement as the scorer fix alone.
+for _cid, _needle, _key, _field, _stated, _places in [
+    ("paired56-corrected-cortex-delta",
+     "the cortex delta +0.089 → **+0.036**", "cortex_correct", "delta",
+     0.0357, 3),
+    ("paired56-corrected-cortex-p",
+     "sign-test p 0.125 → 0.625)", "cortex_correct", "sign_test_p", 0.625, 3),
+    ("paired56-corrected-hybrid-delta",
+     "hybrid −0.018 → **−0.036** (8W/9L →", "hybrid_correct", "delta",
+     -0.0357, 3),
+    ("paired56-judge-unchanged",
+     "The judge arms are unaffected and", "rag_judge", "delta", -0.1071, 4),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(PAIRED56_RS,),
+        value=lambda d, k=_key, f=_field: d["arms"][k][f],
+        stated=_stated, places=_places))
+
+
 def test_every_published_number_names_a_committed_artifact():
     """A claim whose evidence is untracked cannot be checked by a reader.
 

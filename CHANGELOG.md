@@ -6,6 +6,57 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-08-25 — the MC scorer read the article "a" as answer A; #173)
+- **`lme_v2_smoke.score_mc`'s no-box fallback is now anchored and
+  uppercase-only, and every LongMemEval-V2 number it produced is
+  corrected.** The fallback accepted any standalone `[A-Ha-h]` token and
+  upper-cased it, so an answerer that ran out of tokens mid-reasoning —
+  the dominant unboxed shape in every committed artifact — scored as
+  answer **A** on the English article "a". Measured over
+  `lme-v2-smoke-slice2.jsonl`: 57 of 105 MC arm-answers carry no box and
+  the old fallback's matched token was the article "a" 40 times, against 4
+  uppercase letters that were all option *enumerations* ("`*   A. Service
+  Catalog`") rather than stated answers. A letter now counts only when it
+  is the whole response or follows an explicit answer marker
+  ("Answer:", "the answer is", "the correct option is"); a bare "Option X"
+  is deliberately not a marker, because enumerations are the noise class
+  itself. Not one unboxed response in any committed artifact states an
+  answer, so the strict form loses nothing measurable. The boxed-answer
+  path is untouched.
+- **Corrections published beside the originals, which are left as the runs
+  wrote them** (`evals/rescore_strict_mc.py`, offline, no GPU). All 25
+  flips across the four artifacts run the same way — correct → wrong, 24
+  of them on gold **A** via the article "a" and one on gold **E** via a
+  quoted "option E says" mention. None went the other way, and no
+  non-multiple-choice row moved at all.
+  - Full 74-question `procedure` category
+    (`lme-v2-smoke-slice2{,-compose}-rescored-strictmc.summary.json`),
+    default prompt / compose prompt: rag 0.162 → **0.149** / 0.284 →
+    **0.257**; cortex 0.068 → **0.068** / 0.216 → **0.176**; hybrid
+    0.243 → **0.203** / 0.284 → **0.270**. The exact hybrid-vs-rag tie
+    under the compose prompt was an artifact of the defect; corrected it
+    is 0.270 vs 0.257, the same "no measurable difference".
+  - Replicated 10-question pilot
+    (`lme-v2-smoke-slice1-rescored-strictmc.agg.json`): KU hybrid
+    0.533 → **0.500**; compose rag 0.500 → **0.433**, cortex 0.233 →
+    **0.200**, hybrid 0.633 → **0.533**.
+  - Qwen3.6-vs-3.8 paired verdict of 2026-08-19
+    (`lme-v2-qwen38-vs-slice2-paired56-rescored-strictmc.json`): cortex
+    +0.089 (6W/1L, p 0.125) → **+0.036** (3W/1L, p 0.625); rag +0.018
+    (8W/7L) → **+0.018** (7W/6L); hybrid −0.018 (8W/9L) → **−0.036**
+    (7W/9L). The judge arms are untouched by the scorer and reproduce the
+    superseded artifact exactly, which is what licenses reading the
+    eval-arm movement as the fix and nothing else.
+- **A working-copy run is also affected, and deliberately gets no number
+  here.** The audit that found this was run against a 74-row working copy
+  of the 3.8 slice and its `paired74` comparison, neither of which is
+  committed. Re-scoring them moves that comparison's cortex arm from
+  significant to not significant — but publishing the figures would be a
+  claim with no artifact a reader can check, which is the rule this repo
+  wrote `tests/test_eval_evidence.py` to enforce. Whoever promotes those
+  rows must re-score them with `evals/rescore_strict_mc.py` before
+  quoting any number from them.
+
 ### Added (2026-08-24 — answer-prompt attribution ablation)
 - **`evals/beam_attrib_ablation.py`: isolate the answer-prompt term of the
   Phase-1 lift.** The p1-b16 run changed budget, turn ordinals, and the
@@ -210,6 +261,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   The secondary LLM-judge metric drops on rag/hybrid, consistent with the
   measured 3.8 no-think judge strictness and confounded by judge identity;
   the primary metric carries the verdict.
+  **CORRECTED 2026-08-25 (scorer defect #173): every eval-arm number in
+  this entry is superseded.** Re-scored with the anchored multiple-choice
+  fallback (`lme-v2-qwen38-vs-slice2-paired56-rescored-strictmc.json`):
+  the cortex delta +0.089 → **+0.036** (3.6 scores 0.054, 3.8 scores
+  0.089; 6W/1L → 3W/1L; sign-test p 0.125 → 0.625), rag +0.018 →
+  **+0.018** (8W/7L → 7W/6L), hybrid −0.018 → **−0.036** (8W/9L →
+  7W/9L). The judge arms are unaffected and reproduce this entry
+  exactly. The verdict's *direction* survives; its size does not.
 - **Operational finding: 3.8 extraction is ~3.5–4× slower than 3.6**
   (34 min vs ~10.6 min per extraction-heavy lme_v2 row; ladder extract
   33.0 s vs 9.0 s at 13.4 vs 1.4 tok/q). Scale all 3.6-era runtime
@@ -3282,6 +3341,11 @@ daemon, and re-embed offline with `ops/migrate_embeddings.py` — see
   (every arm roughly halves). Superseded at the site a reader meets it,
   per the retirement rule; the pilot numbers are retained inline as
   history.
+  **CORRECTED 2026-08-25 (scorer defect #173):** the full-category
+  numbers here are 0.203 vs rag 0.149 (default prompt) and 0.270 vs
+  0.257 (composition-aware). The "ties naive RAG" reading was an
+  artifact of the defect — corrected it is a 0.013 lead, one question,
+  which is still no measurable difference. The retirement itself stands.
 
 ### Added (2026-07-24 — write-side band ablation + overnight harness pair)
 - **evals**: `band_ablation.py` grew the write-side arm the read-side
@@ -3466,7 +3530,13 @@ either channel alone in every replicate).
 - **3-replicate aggregate (`slice1` / `-r2` / `-r3`, `slice1.agg.json`):**
   KU prompt rag 0.300 [0.30–0.30] / cortex 0.167 [0.00–0.30] / **hybrid
   0.533 [0.50–0.60]**; compose prompt rag 0.500 [0.40–0.60] / cortex 0.233
-  [0.10–0.30] / **hybrid 0.633 [0.60–0.70]**. Hybrid beats both single
+  [0.10–0.30] / **hybrid 0.633 [0.60–0.70]**.
+  (**CORRECTED 2026-08-25, scorer defect #173** — re-scored:
+  KU rag 0.300 / cortex 0.167 / **hybrid 0.500 [0.40–0.60]**; compose rag
+  0.433 [0.40–0.50] / cortex 0.200 [0.10–0.30] / **hybrid 0.533
+  [0.50–0.60]**. One compose replicate becomes a tie with rag, so the
+  "every replicate" claim below is corrected to "every mean".)
+  Hybrid beats both single
   channels in every replicate under both prompts; rag is the most stable
   arm, cortex the most run-to-run volatile (extraction nondeterminism —
   llama-server generation varies across runs even at temperature 0). A

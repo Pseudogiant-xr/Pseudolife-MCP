@@ -1,0 +1,165 @@
+{
+  "replicates": 3,
+  "questions": 10,
+  "arms": {
+    "KU.rag": {
+      "replicates": [
+        0.3,
+        0.3,
+        0.3
+      ],
+      "mean": 0.3,
+      "min": 0.3,
+      "max": 0.3
+    },
+    "KU.cortex": {
+      "replicates": [
+        0.3,
+        0.0,
+        0.2
+      ],
+      "mean": 0.167,
+      "min": 0.0,
+      "max": 0.3
+    },
+    "KU.hybrid": {
+      "replicates": [
+        0.6,
+        0.4,
+        0.5
+      ],
+      "mean": 0.5,
+      "min": 0.4,
+      "max": 0.6
+    },
+    "compose.rag": {
+      "replicates": [
+        0.4,
+        0.5,
+        0.4
+      ],
+      "mean": 0.433,
+      "min": 0.4,
+      "max": 0.5
+    },
+    "compose.cortex": {
+      "replicates": [
+        0.3,
+        0.2,
+        0.1
+      ],
+      "mean": 0.2,
+      "min": 0.1,
+      "max": 0.3
+    },
+    "compose.hybrid": {
+      "replicates": [
+        0.6,
+        0.5,
+        0.5
+      ],
+      "mean": 0.533,
+      "min": 0.5,
+      "max": 0.6
+    }
+  },
+  "rescore": {
+    "issue": 173,
+    "date": "2026-08-25",
+    "scorer": "score_mc no-box fallback: anchored uppercase A-H (whole-response letter or explicit answer marker) instead of any standalone [A-Ha-h]",
+    "supersedes": "evals/results/lme-v2-smoke-slice1.agg.json",
+    "sources": {
+      "KU": [
+        "lme-v2-smoke-slice1",
+        "lme-v2-smoke-slice1-r2",
+        "lme-v2-smoke-slice1-r3"
+      ],
+      "compose": [
+        "lme-v2-smoke-slice1-compose",
+        "lme-v2-smoke-slice1-r2-compose",
+        "lme-v2-smoke-slice1-r3-compose"
+      ]
+    },
+    "flips": [
+      {
+        "question_id": "507a0fe8",
+        "arm": "hybrid",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "needs reset (No).\nOption D: Photo (No), Active (Yes), Lock out (Yes).\nOption E: Lock out (Yes), Active (Yes), Language ("
+      },
+      {
+        "question_id": "507a0fe8",
+        "arm": "rag",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "s Business phone.\na279 is Active.\na266 is Locked out.\n\nIs it possible \"Mobile phone\" is a standard field that is *always"
+      },
+      {
+        "question_id": "507a0fe8",
+        "arm": "hybrid",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "contact info.\nOption A has \"Business phone\" and \"Mobile phone\".\nOption B has \"Title\".\n\nLet's try to find if \"Department\""
+      },
+      {
+        "question_id": "507a0fe8",
+        "arm": "rag",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "Locked out\" are checkboxes (toggling). The question asks for fields \"typically required for manual entry\". This phrasing"
+      },
+      {
+        "question_id": "507a0fe8",
+        "arm": "cortex",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "es used (in order): User New record`\n`onboard a new user \u2014 typical workflow (modules used (in order)): Users; New Record"
+      },
+      {
+        "question_id": "507a0fe8",
+        "arm": "hybrid",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "(Absent), Business phone (Present). -> Contains Absent.\nOption B: Title (Present), Department (Absent), Language (Absent"
+      },
+      {
+        "question_id": "507a0fe8",
+        "arm": "hybrid",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "\nA. Locked out, Mobile phone, Business phone\nB. Title, Department, Language\nC. Date format, Active, Password needs reset"
+      }
+    ],
+    "mean_before": {
+      "KU.rag": 0.3,
+      "KU.cortex": 0.167,
+      "KU.hybrid": 0.533,
+      "compose.rag": 0.5,
+      "compose.cortex": 0.233,
+      "compose.hybrid": 0.633
+    },
+    "mean_after": {
+      "KU.rag": 0.3,
+      "KU.cortex": 0.167,
+      "KU.hybrid": 0.5,
+      "compose.rag": 0.433,
+      "compose.cortex": 0.2,
+      "compose.hybrid": 0.533
+    }
+  }
+}
