@@ -85,6 +85,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `ops/preflight.sh` gains a pipx check that warns about the PEP 668
   fallback before anything is built. Guard test pins all four exit-checked
   install paths.
+### Fixed (2026-08-25 — a junk tombstone can no longer delete a re-minted real entity)
+- **The deep dream's tombstone auto-delete now applies the fact-count half
+  of the evidence bar too** (#177). A junk verdict on a short name plants a
+  permanent tombstone — nothing removes a `merge_decisions` row — and the
+  tombstone branch consulted degree only, so months later the same name
+  standing for a real entity with a dozen cortex facts and one edge was
+  deleted unattended on `deep_dream(apply=true)`, taking its edges, aliases,
+  sources and the fact-to-entity cross-index with it (the fact rows survive
+  on entity text, the node re-mints on next mention, and the cycle repeats).
+  A tombstone now relaxes the **degree** bar only: an entity with more than
+  one current fact stays put and sits in the review queue as an ordinary junk
+  proposal for a human verdict. That fact count is taken by subject **name**
+  as well as by `facts.entity_id`, because `delete_entity` NULLs the FK on
+  every fact of the deleted node and nothing re-links it — so on banks where
+  a name was already wrongly deleted, its surviving facts are orphaned and
+  the id-keyed count alone would still read the re-mint as contentless and
+  delete it again. Zero-structure auto-delete of never-judged names is
+  otherwise unchanged. Supersedes the 2026-08-16 tombstone entry below.
 
 ### Added (2026-08-24 — answer-prompt attribution ablation)
 - **`evals/beam_attrib_ablation.py`: isolate the answer-prompt term of the
@@ -451,6 +469,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   while never-judged names keep the zero-structure auto-delete guard.
   `merge_decision_stats` excludes all junk rows (`into_display IS NULL`) so
   detector precision keeps measuring merges only.
+  *(Narrowed 2026-08-25, #177: the tombstone branch relaxes the degree bar
+  only — a fact-bearing entity is never auto-deleted. See the entry at the
+  top of `[Unreleased]`.)*
 - **Lesson-synthesis tallies journaled into `dream_runs`**
   (`lesson_signals` / `lessons_written` / `lessons_deduped` merged into the
   run row's tallies post-commit): the dedup counter previously existed only

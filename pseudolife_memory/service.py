@@ -6412,6 +6412,7 @@ class MemoryService:
             pending_links = self._storage.pending_proposals()
             lesson_refs = self._storage.lesson_entity_ids()
             fact_counts = self._storage.entity_fact_counts()
+            fact_texts = self._storage.current_fact_counts_by_entity_text()
             lesson_recs = self._curation_records("lesson", cfg.snippet_max_chars)
             world_recs = self._curation_records("world", cfg.snippet_max_chars)
         entities, edges = g["entities"], g["edges"]
@@ -6540,6 +6541,7 @@ class MemoryService:
                         "junk", j["entity_id"], None, None, j["reason"], _t.time()) is not None:
                     junk_proposed += 1
             disp_by_id = {e["id"]: e["display"] for e in entities}
+            canon_by_id = {e["id"]: e["canonical"] for e in entities}
             # Junk tombstones: names a prior verdict (reviewed or auto)
             # already deleted. A re-mint of such a name that the detector
             # flags AGAIN is auto-deleted at the detector's own degree bar
@@ -6550,14 +6552,41 @@ class MemoryService:
             from pseudolife_memory.graph import norm_name as _nn2
             tombstones = {_nn2(d)
                           for d in self._storage.junk_accepted_displays()}
+            # Fact tally by graph-normalized subject NAME, folded from the raw
+            # cortex text. The entity_id cross-index reads zero for facts an
+            # earlier delete_entity orphaned (it NULLs facts.entity_id, and
+            # only a slot write re-links one), which is precisely the
+            # already-damaged population: a name deleted once WHILE carrying
+            # facts would otherwise look contentless on every later re-mint
+            # and be deleted again unattended. Folding here, not in SQL,
+            # because facts.entity_norm is the cortex norm and the entity
+            # side is the graph norm.
+            facts_by_norm: dict[str, int] = {}
+            for _text, _n in fact_texts.items():
+                _k = _nn2(_text)
+                if _k:
+                    facts_by_norm[_k] = facts_by_norm.get(_k, 0) + _n
             for p in self._storage.pending_entity_proposals():
                 if p.get("kind") != "junk":
                     continue
                 eid = p["entity_id"]
                 display = disp_by_id.get(eid, p.get("entity") or "?")
-                zero_structure = (deg.get(eid, 0) == 0
-                                  and fact_counts.get(eid, 0) <= 1)
-                tombstoned = (_nn2(display) in tombstones
+                # A tombstone relaxes the DEGREE bar only; the fact-count
+                # half of the evidence bar holds either way. Tombstones are
+                # permanent (nothing removes a merge_decisions row), so a
+                # short name auto-deleted once stayed deletable forever —
+                # months later the same name can be a real entity with a
+                # dozen cortex facts and one edge, and the unattended delete
+                # would take its edges, aliases, sources and fact
+                # cross-index with it (#177).
+                nd = _nn2(display)
+                contentless = max(fact_counts.get(eid, 0),
+                                  facts_by_norm.get(nd, 0),
+                                  facts_by_norm.get(
+                                      canon_by_id.get(eid, ""), 0)) <= 1
+                zero_structure = deg.get(eid, 0) == 0 and contentless
+                tombstoned = (contentless
+                              and nd in tombstones
                               and deg.get(eid, 0) <= cfg.junk_max_degree)
                 if not (zero_structure or tombstoned):
                     continue
