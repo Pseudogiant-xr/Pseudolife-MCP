@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -25,6 +26,13 @@ from typing import Callable
 import pytest
 
 REPO = Path(__file__).resolve().parents[1]
+
+# The commit-gated cascade's routing gate, imported from the harness rather
+# than re-implemented: the #188 abstention counts below describe the policy
+# the bench actually runs, and a local copy would drift away from it
+# silently. `replicate` is import-light by design (no bench, no torch).
+sys.path.insert(0, str(REPO / "evals"))
+from replicate import cortex_commits as _commits  # noqa: E402
 RESULTS = "evals/results/"
 
 # Artifact shorthands — every path is repo-relative so it can be checked
@@ -48,6 +56,25 @@ E2E = RESULTS + "longmemeval-ku-oracle-qwen-27b-ceiling-e2e.agg.json"
 E2E_SUMMARY = (
     RESULTS + "longmemeval-ku-oracle-qwen-27b-ceiling-e2e.summary.json")
 CASC_CONF = RESULTS + "casc-q8-confirmation.json"
+# The full six-type sweep (2026-08-03) — the front-door table since
+# 2026-08-25 (#188). Single pass, so no .agg.json exists: the summary IS
+# the artifact, and the docs say "single pass" beside it.
+ALLTYPES = (RESULTS +
+            "longmemeval-all-oracle-qwen-27b-alltypes-0803.summary.json")
+# The same 78 questions after the 2026-08-17 bench migration to Qwen3.8.
+CEILING_V38 = RESULTS + "longmemeval-ku-oracle-qwen-27b-ceiling-v38.agg.json"
+# Per-question rows, for the abstention / commit-precision counts that
+# explain WHY the cascade moved. Recomputed with the harness's own gate.
+# (The e2e side reuses the existing `E2E_ROWS` constant defined further
+# down, where the channel-union claim first needed it.)
+V38_ROWS_JSONL = RESULTS + "longmemeval-ku-oracle-qwen-27b-ceiling-v38.jsonl"
+# BEAM, documented in evals/README.md from 2026-08-25 (#188).
+_BEAM = RESULTS + "beam-100K-qwen-27b-"
+BEAM_Q38 = _BEAM + "beam100k-qwen38.summary.json"
+BEAM_OPUS = _BEAM + "beam100k-qwen38.rejudge-opus5.summary.json"
+BEAM_P1B16 = _BEAM + "p1-b16.summary.json"
+BEAM_GRID = RESULTS + "beam-reader-volume-grid-verdict.json"
+BEAM_SWEEP = RESULTS + "beam-readersweep-verdict.json"
 BM25_AB = RESULTS + "bm25-ab-confirmation.json"
 BM25_GATE = (RESULTS +
              "regression_gate-2026-07-30-cortex-bm25-enabled.agg.json")
@@ -121,6 +148,7 @@ def _delta(arm: str) -> Callable[[dict, dict], float]:
 BENCH = "docs/guide/benchmarks.md"
 READ_ME = "README.md"
 CHANGELOG = "CHANGELOG.md"
+EVALS = "evals/README.md"
 
 # ── the local-ceiling table (README front door + guide) ───────────────────
 # Re-based 2026-07-30 onto ceiling-v25 (reproducible q8_0 server). Its std
@@ -157,15 +185,22 @@ for _doc, _slug in ((BENCH, "guide"),):
 # extraction and turn selection at the 2026-07-19 configuration. The
 # cascade arm is DERIVED (replicate.cascade_correct) from the judged
 # rag/cortex arms — same artifacts, no fourth answered arm.
+# 2026-08-25 (#188): the README's copy moved to the 500-question table and
+# this one became the guide's "knowledge-update slice" section. The cascade
+# cell is RETIRED — the judge migration scores it 0.846 — and per the
+# retire-at-the-old-site rule it stays visible with strikethrough, so its
+# row stays here, pinned to the artifact that produced it.
 _E2E_ROWS = [
     ("rag", "| naive RAG (top-6 turns) | 0.859 | ~1237 |", 0.859, 1237),
     ("cortex", "| cortex facts only | 0.667 | **~259** |", 0.667, 259),
     ("hybrid", "| hybrid (facts + top-3 turns) | 0.833 | ~920 |",
      0.833, 920),
-    ("cascade", "| **commit-gated cascade** | **0.936** | ~702 |",
+    ("cascade",
+     "| **commit-gated cascade** | ~~**0.936**~~ (retired — see below) "
+     "| ~702 |",
      0.936, 702),
 ]
-for _doc, _slug in ((READ_ME, "readme"), (BENCH, "guide")):
+for _doc, _slug in ((BENCH, "guide"),):
     for _arm, _needle, _mean_v, _tokens in _E2E_ROWS:
         CLAIMS.append(Claim(
             id=f"e2e-{_slug}-{_arm}-mean", doc=_doc, needle=_needle,
@@ -197,31 +232,35 @@ for _cid, _needle, _val, _stated in [
         id=_cid, doc=BENCH, needle=_needle, artifacts=(CASC_CONF,),
         value=_val, stated=_stated, places=3))
 
-# ── the README scan-layer teaser (2026-08-14) ────────────────────────────
-# A two-row summary near the top of the README restates the headline
-# numbers from the tables pinned above; a restatement is a claim like any
-# other, so each cell is pinned to the same artifacts here.
-_TEASER_ORACLE = (
-    "| oracle slice (78 questions, reproducible server) "
-    "| 0.859 | **0.936** |")
-_TEASER_HAYSTACK = (
-    "| full haystack (~50 sessions/question, pre-registered) "
-    "| 0.346 | **0.462** (p = 0.011) |")
-for _cid, _needle, _arts, _val, _stated in [
-    ("teaser-oracle-rag", _TEASER_ORACLE, (E2E,),
-     _mean("rag"), 0.859),
-    ("teaser-oracle-cascade", _TEASER_ORACLE, (E2E,),
-     _mean("cascade"), 0.936),
-    ("teaser-haystack-rag", _TEASER_HAYSTACK, (CASC_CONF,),
-     lambda d: d["arm_means"]["rag"], 0.346),
-    ("teaser-haystack-cascade", _TEASER_HAYSTACK, (CASC_CONF,),
-     lambda d: d["arm_means"]["cascade"], 0.462),
-    ("teaser-haystack-p", _TEASER_HAYSTACK, (CASC_CONF,),
-     lambda d: d["paired_permutation"]["cascade_vs_rag"]["p_value"], 0.011),
+# ── the README scan-layer teaser (2026-08-14; re-based 2026-08-25) ───────
+# A summary near the top of the README restates the headline numbers from
+# the tables pinned elsewhere; a restatement is a claim like any other, so
+# each cell is pinned here too. Re-based on 2026-08-25 (#188) from the
+# 78-question knowledge-update slice to the full 500-question sweep; the
+# full-haystack row left the front door entirely (it is a 2026-07-30
+# measurement on the retired judge and has never been re-judged), and now
+# lives under a dated currency note in the guide — pinned below.
+_TEASER_ALL = "| accuracy, all six question types | 0.688 | 0.690 |"
+_TEASER_TOKENS = "| context tokens per question | ~1210 | **~883** |"
+_TEASER_KU = ("| knowledge-update slice (78 of the 500) "
+              "| 0.859 | ~~0.936~~ (retired — see below) |")
+for _cid, _needle, _val, _stated, _places in [
+    ("teaser-500-rag", _TEASER_ALL,
+     lambda d: d["arms"]["rag"]["accuracy"], 0.688, 3),
+    ("teaser-500-cascade", _TEASER_ALL,
+     lambda d: d["arms"]["cascade"]["accuracy"], 0.690, 3),
+    ("teaser-500-tokens-rag", _TEASER_TOKENS,
+     lambda d: d["arms"]["rag"]["context_tokens"], 1210, 0),
+    ("teaser-500-tokens-cascade", _TEASER_TOKENS,
+     lambda d: d["arms"]["cascade"]["context_tokens"], 883, 0),
+    ("teaser-500-ku-rag", _TEASER_KU,
+     lambda d: d["types"]["knowledge-update"]["arms"]["rag"], 0.859, 3),
+    ("teaser-500-ku-cascade-retired", _TEASER_KU,
+     lambda d: d["types"]["knowledge-update"]["cascade"], 0.936, 3),
 ]:
     CLAIMS.append(Claim(
-        id=_cid, doc=READ_ME, needle=_needle, artifacts=_arts,
-        value=_val, stated=_stated, places=3))
+        id=_cid, doc=READ_ME, needle=_needle, artifacts=(ALLTYPES,),
+        value=_val, stated=_stated, places=_places))
 
 # ── the replicated Arm-1 vs baseline table ───────────────────────────────
 for _arm, _needle, _a_mean, _b_mean in [
@@ -1228,7 +1267,7 @@ for _arm_key, _needle, _r10 in [
 E2E_ROWS = RESULTS + "longmemeval-ku-oracle-qwen-27b-ceiling-e2e.jsonl"
 CLAIMS.append(Claim(
     id="e2e-channel-union", doc=BENCH,
-    needle="per-question union is\n0.949",
+    needle="per-question union is 0.949",
     artifacts=(E2E_ROWS,),
     value=lambda rows: (sum(1 for r in rows
                             if r["rag_correct"] or r["cortex_correct"])
@@ -1683,6 +1722,286 @@ for _cid, _needle, _key, _field, _stated, _places in [
         id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(PAIRED56_RS,),
         value=lambda d, k=_key, f=_field: d["arms"][k][f],
         stated=_stated, places=_places))
+
+
+# ── #188: the full 500-question sweep replaces the KU slice up front ─────
+# The README led with cascade 0.936 on 78 of 500 questions — the slice the
+# supersession spine is built to win — while the committed six-type
+# superset said "wash". Both the superset and the retirement of 0.936 are
+# published claims now, so both pin here.
+_ALL500_ROWS = [
+    ("rag", "| naive RAG (top-6 turns) | 0.688 | ~1210 |", 0.688, 1210),
+    ("cortex", "| cortex facts only | 0.416 | **~158** |", 0.416, 158),
+    ("hybrid", "| hybrid (facts + top-3 turns) | 0.664 | ~842 |", 0.664, 842),
+    ("cascade", "| **commit-gated cascade** | **0.690** | ~883 |", 0.690, 883),
+]
+for _doc, _slug in ((READ_ME, "readme"), (BENCH, "guide")):
+    for _arm, _needle, _acc, _tokens in _ALL500_ROWS:
+        CLAIMS.append(Claim(
+            id=f"all500-{_slug}-{_arm}", doc=_doc, needle=_needle,
+            artifacts=(ALLTYPES,),
+            value=(lambda a: lambda d: d["arms"][a]["accuracy"])(_arm),
+            stated=_acc, places=3))
+        CLAIMS.append(Claim(
+            id=f"all500-{_slug}-tokens-{_arm}", doc=_doc, needle=_needle,
+            artifacts=(ALLTYPES,),
+            value=(lambda a: lambda d: d["arms"][a]["context_tokens"])(_arm),
+            stated=_tokens, places=0))
+
+# The per-type breakdown — the part that says where the memory loses. The
+# `cascade` column is a sibling key of `arms` in the summary, not a member
+# of it (it is derived), hence the two accessors.
+_PER_TYPE = [
+    ("knowledge-update",
+     "| knowledge-update | 78 | 0.859 | 0.756 | 0.910 | 0.936 |",
+     0.859, 0.756, 0.910, 0.936),
+    ("single-session-user",
+     "| single-session-user | 70 | 0.929 | 0.671 | 0.957 | 0.943 |",
+     0.929, 0.671, 0.957, 0.943),
+    ("single-session-assistant",
+     "| single-session-assistant | 56 | 0.911 | 0.571 | 0.964 | 0.929 |",
+     0.911, 0.571, 0.964, 0.929),
+    ("single-session-preference",
+     "| single-session-preference | 30 | 0.800 | 0.733 | 0.600 | 0.700 |",
+     0.800, 0.733, 0.600, 0.700),
+    ("temporal-reasoning",
+     "| temporal-reasoning | 133 | 0.526 | 0.150 | 0.534 | 0.526 |",
+     0.526, 0.150, 0.534, 0.526),
+    ("multi-session",
+     "| multi-session | 133 | 0.504 | 0.211 | 0.383 | 0.474 |",
+     0.504, 0.211, 0.383, 0.474),
+]
+for _type, _needle, _r, _c, _h, _casc in _PER_TYPE:
+    for _arm, _stated in (("rag", _r), ("cortex", _c), ("hybrid", _h)):
+        CLAIMS.append(Claim(
+            id=f"all500-type-{_type}-{_arm}", doc=BENCH, needle=_needle,
+            artifacts=(ALLTYPES,),
+            value=(lambda t, a: lambda d: d["types"][t]["arms"][a])(
+                _type, _arm),
+            stated=_stated, places=3))
+    CLAIMS.append(Claim(
+        id=f"all500-type-{_type}-cascade", doc=BENCH, needle=_needle,
+        artifacts=(ALLTYPES,),
+        value=(lambda t: lambda d: d["types"][t]["cascade"])(_type),
+        stated=_casc, places=3))
+
+# The README carries a narrower copy of the same breakdown (rag vs cascade
+# only). Its knowledge-update cascade cell is the retired 0.936, struck and
+# cross-referenced — pinned to the same artifact per the retire-at-the-old-
+# site rule.
+_PER_TYPE_README = [
+    ("knowledge-update",
+     "| knowledge-update (facts change) | 78 | 0.859 | ~~0.936~~ "
+     "(retired, above) |", 0.859, 0.936),
+    ("single-session-user",
+     "| single-session-user | 70 | 0.929 | 0.943 |", 0.929, 0.943),
+    ("single-session-assistant",
+     "| single-session-assistant | 56 | 0.911 | 0.929 |", 0.911, 0.929),
+    ("single-session-preference",
+     "| single-session-preference | 30 | 0.800 | 0.700 |", 0.800, 0.700),
+    ("temporal-reasoning",
+     "| temporal-reasoning | 133 | 0.526 | 0.526 |", 0.526, 0.526),
+    ("multi-session",
+     "| multi-session | 133 | 0.504 | 0.474 |", 0.504, 0.474),
+]
+for _type, _needle, _r, _casc in _PER_TYPE_README:
+    CLAIMS.append(Claim(
+        id=f"all500-readme-type-{_type}-rag", doc=READ_ME, needle=_needle,
+        artifacts=(ALLTYPES,),
+        value=(lambda t: lambda d: d["types"][t]["arms"]["rag"])(_type),
+        stated=_r, places=3))
+    CLAIMS.append(Claim(
+        id=f"all500-readme-type-{_type}-cascade", doc=READ_ME, needle=_needle,
+        artifacts=(ALLTYPES,),
+        value=(lambda t: lambda d: d["types"][t]["cascade"])(_type),
+        stated=_casc, places=3))
+
+# The two-stack table that retires 0.936: same 78 questions, Qwen3.6 stack
+# vs the Qwen3.8 stack the bench migrated to on 2026-08-17. Both sides of
+# every row are pinned, because the claim IS the pair.
+for _arm, _needle, _old, _new in [
+    ("rag", "| naive RAG (control) | 0.859 | 0.859 |", 0.859, 0.859),
+    ("cortex", "| cortex facts only | 0.667 | 0.667 |", 0.667, 0.667),
+    ("hybrid", "| hybrid (facts + top-3 turns) | 0.833 | 0.846 |",
+     0.833, 0.846),
+    ("cascade", "| **commit-gated cascade** | **0.936** | **0.846** |",
+     0.936, 0.846),
+]:
+    CLAIMS.append(Claim(
+        id=f"v38-transfer-{_arm}-old", doc=BENCH, needle=_needle,
+        artifacts=(E2E,), value=_mean(_arm), stated=_old, places=3))
+    CLAIMS.append(Claim(
+        id=f"v38-transfer-{_arm}-new", doc=BENCH, needle=_needle,
+        artifacts=(CEILING_V38,), value=_mean(_arm), stated=_new, places=3))
+    CLAIMS.append(Claim(
+        id=f"v38-transfer-{_arm}-new-std", doc=BENCH,
+        needle="std 0.0000). The naive-RAG control lands on 0.859",
+        artifacts=(CEILING_V38,), value=_std(_arm), stated=0.0, places=4))
+
+# The abstention mechanism, recomputed from the committed per-question rows
+# with the harness's OWN commit gate — a local re-implementation would let
+# the pin drift away from the policy it claims to describe.
+def _abstains(rows: list[dict]) -> float:
+    return float(sum(1 for r in rows if not _commits(r)))
+
+
+def _commits_n(rows: list[dict]) -> float:
+    return float(sum(1 for r in rows if _commits(r)))
+
+
+def _commit_precision(rows: list[dict]) -> float:
+    committed = [r for r in rows if _commits(r)]
+    return sum(1 for r in committed if r["cortex_correct"]) / len(committed)
+
+
+for _cid, _doc, _needle, _art, _val, _stated, _places in [
+    ("abstain-old-readme", READ_ME,
+     "abstention behaviour as much as the memory: 32/78 abstentions",
+     E2E_ROWS, _abstains, 32, 0),
+    ("abstain-old-precision-readme", READ_ME,
+     "at 46/46 commit precision on the old stack, 22/78 at 0.839 on the "
+     "new one.", E2E_ROWS, _commit_precision, 1.0, 3),
+    ("abstain-old-commits-readme", READ_ME,
+     "at 46/46 commit precision on the old stack, 22/78 at 0.839 on the "
+     "new one.", E2E_ROWS, _commits_n, 46, 0),
+    ("abstain-new-readme", READ_ME,
+     "at 46/46 commit precision on the old stack, 22/78 at 0.839 on the "
+     "new one.", V38_ROWS_JSONL, _abstains, 22, 0),
+    ("abstain-new-precision-readme", READ_ME,
+     "at 46/46 commit precision on the old stack, 22/78 at 0.839 on the "
+     "new one.", V38_ROWS_JSONL, _commit_precision, 0.839, 3),
+    ("abstain-old-guide", BENCH,
+     "cortex arm abstained on **32 of 78** questions and its 46 commits were",
+     E2E_ROWS, _abstains, 32, 0),
+    ("abstain-old-commits-guide", BENCH,
+     "cortex arm abstained on **32 of 78** questions and its 46 commits were",
+     E2E_ROWS, _commits_n, 46, 0),
+    ("abstain-old-precision-guide", BENCH,
+     "**46/46** correct; on the new stack it abstains **22 of 78** and its 56",
+     E2E_ROWS, _commit_precision, 1.0, 3),
+    ("abstain-new-guide", BENCH,
+     "**46/46** correct; on the new stack it abstains **22 of 78** and its 56",
+     V38_ROWS_JSONL, _abstains, 22, 0),
+    ("abstain-new-commits-guide", BENCH,
+     "**46/46** correct; on the new stack it abstains **22 of 78** and its 56",
+     V38_ROWS_JSONL, _commits_n, 56, 0),
+    ("abstain-new-precision-guide", BENCH,
+     "commits are **0.839** precise", V38_ROWS_JSONL, _commit_precision,
+     0.839, 3),
+    ("abstain-old-evals", EVALS,
+     "22/78 instead of 32/78 and its commit precision drops from 46/46 to "
+     "0.839,", E2E_ROWS, _abstains, 32, 0),
+    ("abstain-new-evals", EVALS,
+     "22/78 instead of 32/78 and its commit precision drops from 46/46 to "
+     "0.839,", V38_ROWS_JSONL, _abstains, 22, 0),
+    ("abstain-new-precision-evals", EVALS,
+     "22/78 instead of 32/78 and its commit precision drops from 46/46 to "
+     "0.839,", V38_ROWS_JSONL, _commit_precision, 0.839, 3),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(_art,),
+        value=_val, stated=_stated, places=_places))
+
+# The retirement restated at the README front door and in evals/README.
+for _cid, _doc, _needle, _art, _val, _stated in [
+    ("retire-readme-cascade-846", READ_ME,
+     "Qwen3.8-27B puts the cascade at **0.846**, below the naive-RAG control",
+     CEILING_V38, _mean("cascade"), 0.846),
+    ("retire-readme-control", READ_ME,
+     "which lands on 0.859 on both stacks", CEILING_V38, _mean("rag"), 0.859),
+    ("retire-evals-cascade-846", EVALS, "gives cascade **0.846**",
+     CEILING_V38, _mean("cascade"), 0.846),
+    ("retire-evals-control", EVALS,
+     "against an unchanged naive-RAG control of 0.859", CEILING_V38,
+     _mean("rag"), 0.859),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(_art,),
+        value=_val, stated=_stated, places=3))
+
+# ── BEAM, documented for the first time (2026-08-25, #188) ───────────────
+# The abstention row is the load-bearing one: it is the single published
+# claim that reproduces unchanged across two judge families, which is
+# exactly the property the retired 0.936 lacked.
+def _beam_abstention(arm: str) -> Callable[[dict], float]:
+    return lambda d: d["types"]["abstention"][arm]
+
+
+
+for _cid, _doc, _needle, _art, _arm, _stated in [
+    ("beam-abstain-cortex-readme-teaser", READ_ME,
+     "abstention questions the fact spine scores **0.950**",
+     BEAM_Q38, "cortex", 0.950),
+    ("beam-abstain-cortex-readme-teaser-opus", READ_ME,
+     "abstention questions the fact spine scores **0.950**",
+     BEAM_OPUS, "cortex", 0.950),
+    ("beam-abstain-rag-readme-teaser", READ_ME,
+     "0.775, unchanged under two independent judges", BEAM_Q38, "rag", 0.775),
+    ("beam-abstain-rag-readme-teaser-opus", READ_ME,
+     "0.775, unchanged under two independent judges", BEAM_OPUS, "rag", 0.775),
+    ("beam-abstain-cortex-readme-body", READ_ME,
+     "the fact-spine arm scores 0.950 against naive RAG's 0.775",
+     BEAM_Q38, "cortex", 0.950),
+    ("beam-abstain-rag-readme-body", READ_ME,
+     "the fact-spine arm scores 0.950 against naive RAG's 0.775",
+     BEAM_OPUS, "rag", 0.775),
+    ("beam-abstain-cortex-evals", EVALS,
+     "the cortex arm scores **0.950** against naive RAG's 0.775",
+     BEAM_Q38, "cortex", 0.950),
+    ("beam-abstain-cortex-evals-opus", EVALS,
+     "the cortex arm scores **0.950** against naive RAG's 0.775",
+     BEAM_OPUS, "cortex", 0.950),
+    ("beam-abstain-rag-evals-opus", EVALS,
+     "the cortex arm scores **0.950** against naive RAG's 0.775",
+     BEAM_OPUS, "rag", 0.775),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=_doc, needle=_needle, artifacts=(_art,),
+        value=_beam_abstention(_arm), stated=_stated, places=3))
+
+_BEAM_BUDGET = "rag 0.6425 vs hybrid 0.6226 (−0.020 ± 0.029, a wash)"
+_BEAM_TRANSFER = ("moved rag −0.002, cortex +0.007, hybrid −0.016, against a "
+                  "same-judge stability floor of mean \\|item delta\\| 0.073")
+for _cid, _needle, _art, _val, _stated, _places in [
+    ("beam-p1b16-rag", _BEAM_BUDGET, BEAM_P1B16,
+     lambda d: d["arms"]["rag"]["score"], 0.6425, 4),
+    ("beam-p1b16-hybrid", _BEAM_BUDGET, BEAM_P1B16,
+     lambda d: d["arms"]["hybrid"]["score"], 0.6226, 4),
+    ("beam-transfer-rag", _BEAM_TRANSFER, BEAM_OPUS,
+     lambda d: d["arms"]["rag"]["delta"], -0.002, 3),
+    ("beam-transfer-cortex", _BEAM_TRANSFER, BEAM_OPUS,
+     lambda d: d["arms"]["cortex"]["delta"], 0.007, 3),
+    ("beam-transfer-hybrid", _BEAM_TRANSFER, BEAM_OPUS,
+     lambda d: d["arms"]["hybrid"]["delta"], -0.016, 3),
+    ("beam-transfer-floor", _BEAM_TRANSFER, BEAM_OPUS,
+     lambda d: d["stability_sample"]["mean_abs_delta"], 0.073, 3),
+    ("beam-volume-rag48", "takes a local 27B reader to 0.665 full-tier",
+     BEAM_GRID, lambda d: d["qwen_full_n400"]["rag48"], 0.665, 3),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS, needle=_needle, artifacts=(_art,),
+        value=_val, stated=_stated, places=_places))
+
+# The BEAM findings table also quotes three RANGES that live in a verdict
+# file as strings, not floats — the Claim machinery only compares numbers,
+# so they get their own check rather than going unguarded.
+_BEAM_VERDICT_QUOTES = [
+    (BEAM_SWEEP, "summarization", "0.38 -> 0.47"),
+    (BEAM_SWEEP, "event_ordering", "0.21 -> 0.52"),
+    (BEAM_SWEEP, "abstention", "0.62 -> 0.50"),
+]
+
+
+def test_beam_range_quotes_match_the_committed_verdict():
+    """The evals README quotes three sweep ranges; they must be the
+    verdict file's, not a recollection of it."""
+    doc = (REPO / EVALS).read_text(encoding="utf-8")
+    for artifact, key, quoted in _BEAM_VERDICT_QUOTES:
+        verdict = json.loads((REPO / artifact).read_text(encoding="utf-8"))
+        assert quoted in verdict["structural_findings"][key], (
+            f"{artifact}:{key} no longer says {quoted!r}")
+        assert quoted.replace("->", "→") in doc, (
+            f"{EVALS} no longer quotes the {key} range {quoted!r}")
 
 
 def test_every_published_number_names_a_committed_artifact():

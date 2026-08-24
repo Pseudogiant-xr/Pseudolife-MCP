@@ -47,17 +47,35 @@ What you get:
 - **A web console to watch it think** — the Cortex Console above, plus cited
   world facts, session episodes, and document RAG.
 
-Measured, with receipts — on LongMemEval knowledge updates, routing
-answers through the fact spine beats naive RAG, and every number ships
-with its committed run artifact:
+Measured, with receipts — the **full 500-question LongMemEval sweep**, all
+six question types, and every number ships with its committed run artifact:
 
-| LongMemEval-KU | naive RAG | commit-gated cascade |
+| LongMemEval oracle, 500 questions | naive RAG | commit-gated cascade |
 |---|---:|---:|
-| oracle slice (78 questions, reproducible server) | 0.859 | **0.936** |
-| full haystack (~50 sessions/question, pre-registered) | 0.346 | **0.462** (p = 0.011) |
+| accuracy, all six question types | 0.688 | 0.690 |
+| context tokens per question | ~1210 | **~883** |
+| knowledge-update slice (78 of the 500) | 0.859 | ~~0.936~~ (retired — see below) |
 
-Graded by a local, byte-reproducible judge — compare within rows, never
-against GPT-judged leaderboards. Full tables, caveats, and every
+Equal accuracy to naive RAG across the whole benchmark on **~73% of the
+context**, and a large edge at knowing when it doesn't know: on BEAM-100K's
+abstention questions the fact spine scores **0.950** against naive RAG's
+0.775, unchanged under two independent judges. It loses where an answer has
+to be aggregated across sessions. Graded by a local, byte-reproducible
+judge (the cross-judge check names its second judge) — compare within rows,
+never against GPT-judged leaderboards.
+
+> **Retired 2026-08-25 (#188): the 0.936 knowledge-update headline.** It was
+> measured on the 2026-07-30 bench stack (Qwen3.6-27B answerer and judge).
+> Re-running the same 78 questions after the 2026-08-17 migration to
+> Qwen3.8-27B puts the cascade at **0.846**, below the naive-RAG control —
+> which lands on 0.859 on both stacks. The cascade serves the fact-spine
+> answer unless that channel says "I don't know", so it measures the
+> *answerer's* abstention behaviour as much as the memory: 32/78 abstentions
+> at 46/46 commit precision on the old stack, 22/78 at 0.839 on the new one.
+> The 500-question table above is on the older judge and has not been
+> re-judged, so read its cascade row as an upper bound.
+
+Full tables, the per-type breakdown, both stacks side by side, and every
 artifact: [Benchmarks](docs/guide/benchmarks.md).
 
 ## Quickstart
@@ -623,32 +641,46 @@ privacy/cost trade-offs: [Dreaming](docs/guide/dreaming.md).
 
 ## Benchmarks
 
-Measured **end to end on the current shipped stack** — fresh local-ceiling
-extraction under the v25 embedding backbone, BM25-on turn retrieval,
-reproducible serving (3 byte-identical replicates — std 0.0000) — on the
-knowledge-update subset of
-[LongMemEval](https://arxiv.org/abs/2410.10813) (oracle variant):
+The headline is the **whole benchmark, not a slice**: all six
+[LongMemEval](https://arxiv.org/abs/2410.10813) question types, 500
+questions, oracle variant, run end to end through the memory (qwen-27b
+extraction under the v25 embedding backbone, BM25-on turn retrieval).
+Single pass, graded by the local Qwen3.6-27B bench judge (2026-08-03):
 
 | arm | accuracy | context tokens/question |
 |-----|----------|------------------------|
-| naive RAG (top-6 turns) | 0.859 | ~1237 |
-| cortex facts only | 0.667 | **~259** |
-| hybrid (facts + top-3 turns) | 0.833 | ~920 |
-| **commit-gated cascade** | **0.936** | ~702 |
+| naive RAG (top-6 turns) | 0.688 | ~1210 |
+| cortex facts only | 0.416 | **~158** |
+| hybrid (facts + top-3 turns) | 0.664 | ~842 |
+| **commit-gated cascade** | **0.690** | ~883 |
 
 The **cascade** is a serving policy, not a fourth pipeline: answer from
 the consolidated facts when that channel *commits*, fall back to raw-turn
-RAG when it abstains. It beats naive RAG by ~8 points while reading ~57%
-of the context, and the margin survives the full ~50-session haystacks —
-0.462 vs 0.346, a pre-registered paired test at p = 0.011
-([details](docs/guide/benchmarks.md)). Read honestly: with the v25
-retriever, raw-turn selection improved enough that the *concatenation*
-hybrid no longer beats naive RAG on this slice — sequencing the channels
-is what restores the fact spine's edge. The fact spine alone reaches
-0.667 on ~21% of RAG's token budget. Setup, caveats, and the evidence
-that extraction quality is the dominant factor:
-[Benchmarks](docs/guide/benchmarks.md); full methodology:
-[`evals/README.md`](evals/README.md).
+RAG when it abstains. Overall this is **a wash on accuracy at ~73% of the
+context** — 0.690 vs 0.688 is one question in 500 on a single pass, and
+nobody should read it as a win. The fact spine alone answers at ~13% of
+RAG's token budget, at a large accuracy cost outside the types it is built
+for. The structure is per type:
+
+| question type | n | naive RAG | commit-gated cascade |
+|---|---:|---:|---:|
+| knowledge-update (facts change) | 78 | 0.859 | ~~0.936~~ (retired, above) |
+| single-session-user | 70 | 0.929 | 0.943 |
+| single-session-assistant | 56 | 0.911 | 0.929 |
+| single-session-preference | 30 | 0.800 | 0.700 |
+| temporal-reasoning | 133 | 0.526 | 0.526 |
+| multi-session | 133 | 0.504 | 0.474 |
+
+The consolidated spine helps where a fact changes and where the answer
+sits inside one session; it loses where the answer must be aggregated
+across sessions or ordered in time, because per-fact consolidation is
+exactly what discards that structure. BEAM-100K reproduces the same shape
+independently, and adds the one decisive win: on its abstention questions
+the fact-spine arm scores 0.950 against naive RAG's 0.775, identical under
+the local judge and under an independent Opus-class judge. Setup, caveats,
+both bench stacks side by side, and the evidence that extraction quality is
+the dominant factor: [Benchmarks](docs/guide/benchmarks.md); full
+methodology: [`evals/README.md`](evals/README.md).
 
 Retrieval itself was re-measured on the same corpus before the v25 backbone
 swap (150 questions, 74,183 haystack turns, 299 gold turns; pure recall — no
@@ -2834,30 +2866,45 @@ What the memory actually buys, measured. Part of the
 [user guide](../../README.md#documentation); the full methodology and every
 finding live in [`evals/README.md`](../../evals/README.md).
 
+**The bench instrument changed on 2026-08-17.** Every accuracy on this page
+was graded by a local **Qwen3.6-27B** answerer/judge; the bench stack has
+since migrated to **Qwen3.8-27B**, and only the knowledge-update slice has
+been re-run on it — the sole Qwen3.8 numbers here are that comparison's
+right-hand column
+([the knowledge-update slice](#the-knowledge-update-slice-78-of-the-500),
+where both stacks are published side by side).
+The instrument is a term in every number below: compare within a stack, and
+treat a claim that has not been reproduced across judge families as
+provisional.
+
 Nearly every number on this page was measured on the **pre-v25 stack**: the
 384-d MiniLM backbone, with the BM25 hybrid pool off. Both defaults have
 since changed — the backbone swapped at schema v25 and BM25 flipped on
 2026-07-25 — and the arms that read raw turns (naive RAG, hybrid) *select*
 those turns with the retriever that changed, whose measured R@10 moved
-0.572 → 0.809. The exception is the headline ceiling table below, re-judged
-2026-07-29 on the current reproducible server with its fact ranking under
-the v25 backbone — though even there extraction and raw-turn selection are
-held at the pre-v25 run (see the note under the table). Read the rest as
+0.572 → 0.809. The exceptions are the two tables at the top — the
+500-question sweep and the knowledge-update slice — which ran end to end
+on the post-v25 stack, and the held-fixed rebuild below them, re-judged
+2026-07-29 on the reproducible server with its fact ranking under the v25
+backbone (though even there extraction and raw-turn selection are held at
+the pre-v25 run — see the note under that table). Read the rest as
 historical measurements of the design, not as what the shipped
 configuration scores today.
 
-## LongMemEval — knowledge updates
+## LongMemEval
 
-Measured on the **knowledge-update subset of
-[LongMemEval](https://arxiv.org/abs/2410.10813)** (78 questions) — the
-"user's facts change over time" ability the HLC supersession spine exists
-for. (The harness can extend a run to all six LongMemEval question types —
-500 questions — via `--types`; the numbers below are the KU slice unless a
-row says otherwise.) Everything local: extraction, answering, and LLM-as-judge grading all
-run on the author's own hardware (judge = Qwen3.6-27B at temperature 0),
-so compare *within* the table, not against GPT-4o-judged leaderboards.
+[LongMemEval](https://arxiv.org/abs/2410.10813) has six question types and
+500 questions. The headline table below is the **whole benchmark**; the
+**knowledge-update** subset (78 questions — the "user's facts change over
+time" ability the HLC supersession spine exists for) is published under it
+as a named sub-slice, because it is the type this design is built to win
+and publishing it alone overstates the system. Sections after that hold
+older KU-only measurements and say so. Everything local: extraction,
+answering, and LLM-as-judge grading all run on the author's own hardware
+(judge = Qwen3.6-27B at temperature 0), so compare *within* the table, not
+against GPT-4o-judged leaderboards.
 
-> **Reading the numbers.** Except for the ceiling table directly below
+> **Reading the numbers.** Except for the ceiling tables below
 > (re-judged 2026-07-29 on the reproducible stock server), accuracies on
 > this page are single-run point estimates unless marked mean ± std, and
 > they were measured on a stack
@@ -2876,43 +2923,131 @@ so compare *within* the table, not against GPT-4o-judged leaderboards.
 > reinterpret; decision-grade comparisons use replicates and a paired test
 > — see [Variance and replication](../../evals/README.md#variance-and-replication).
 
-## End to end on the current stack — and the commit-gated cascade (2026-07-30)
+## The full 500-question sweep — all six question types (2026-08-03)
 
-The freshest measurement runs the **whole current pipeline** — fresh
-qwen-27b extraction under the v25 embedding backbone, BM25-on turn
-retrieval, reproducible q8_0 serving (`ceiling-e2e`: 3 byte-identical
-replicates — std 0.0000). Oracle variant, 78 questions:
+The headline table is the **whole benchmark, not a slice**: all six
+LongMemEval question types, 500 questions, oracle variant, run end to end
+through the memory (qwen-27b extraction under the v25 embedding backbone,
+BM25-on turn retrieval). Single pass — not replicated — graded by the local
+Qwen3.6-27B judge. Artifact:
+`evals/results/longmemeval-all-oracle-qwen-27b-alltypes-0803.summary.json`.
+
+| arm | accuracy | context tokens/question |
+|-----|----------|------------------------|
+| naive RAG (top-6 turns) | 0.688 | ~1210 |
+| cortex facts only | 0.416 | **~158** |
+| hybrid (facts + top-3 turns) | 0.664 | ~842 |
+| **commit-gated cascade** | **0.690** | ~883 |
+
+Overall this is **a wash on accuracy at ~73% of naive RAG's context**:
+0.690 vs 0.688 is one question in 500 on a single pass and carries no
+weight as a win. The fact spine alone answers at ~13% of RAG's token
+budget, at a large accuracy cost outside the types it is built for. The
+**cascade** is a serving policy, not a fourth pipeline — serve the cortex
+answer when that channel *commits*, fall back to RAG when it says "I don't
+know". Routing reads only the response text, never correctness, so the
+policy is deployable as-is; it is a *derived* metric
+(`replicate.py cascade_correct`) over the judged rag/cortex arms.
+
+Per type the picture is not uniform, and this is the honest shape of the
+result:
+
+| question type | n | naive RAG | cortex | hybrid | cascade |
+|---|---:|---:|---:|---:|---:|
+| knowledge-update | 78 | 0.859 | 0.756 | 0.910 | 0.936 |
+| single-session-user | 70 | 0.929 | 0.671 | 0.957 | 0.943 |
+| single-session-assistant | 56 | 0.911 | 0.571 | 0.964 | 0.929 |
+| single-session-preference | 30 | 0.800 | 0.733 | 0.600 | 0.700 |
+| temporal-reasoning | 133 | 0.526 | 0.150 | 0.534 | 0.526 |
+| multi-session | 133 | 0.504 | 0.211 | 0.383 | 0.474 |
+
+The consolidated spine helps where a fact changes and where the answer sits
+inside one session; it loses where the answer must be aggregated across
+sessions or ordered in time, because per-fact consolidation is exactly what
+discards that structure. BEAM-100K reproduces the same shape on a
+completely different corpus — see
+[BEAM](../../evals/README.md#beam-long-term-memory-benchmark-beam_adapterpy).
+
+Two limits on this table, both load-bearing. **(1)** The hybrid arm here
+served 3 raw turns against the rag control's 6; the bench default was
+budget-matched to 6/6 on 2026-08-21, so every hybrid row on this page is a
+half-budget arm and is not comparable to post-flip hybrid numbers. **(2)**
+It was graded by the Qwen3.6 judge and has not been re-judged since the
+2026-08-17 migration — and on the one slice that *was* re-run, the cascade
+row moved by −0.090 (below). Read the cascade row here as an upper bound.
+
+## The knowledge-update slice (78 of the 500)
+
+This is the slice the supersession spine is built for, measured on its own
+with fresh qwen-27b extraction under the v25 backbone and reproducible q8_0
+serving (`ceiling-e2e`, 2026-07-30: 3 byte-identical replicates —
+std 0.0000). It was the README's front-door table until 2026-08-25; it is a
+sub-slice of the 500-question sweep above and is published as one now.
 
 | arm | accuracy | context tokens/question |
 |-----|----------|------------------------|
 | naive RAG (top-6 turns) | 0.859 | ~1237 |
 | cortex facts only | 0.667 | **~259** |
 | hybrid (facts + top-3 turns) | 0.833 | ~920 |
-| **commit-gated cascade** | **0.936** | ~702 |
+| **commit-gated cascade** | ~~**0.936**~~ (retired — see below) | ~702 |
 
-Two findings, stated plainly. First, the v25 retriever + BM25 lifted
-raw-turn selection so much (R@10 0.572 → 0.809) that the **concatenation
-hybrid no longer beats naive RAG on this slice** — mixing facts and turns
-in one prompt costs stale-fact overrides and extra abstentions. Second,
-the channels remain strongly complementary (their per-question union is
-0.949), and the **commit-gated cascade** captures almost all of it: serve
-the cortex answer when that channel *commits*, fall back to RAG when it
-says "I don't know". Routing uses only the response text — correctness is
-never consulted — so the policy is deployable as-is. The cascade is a
-*derived* metric (`replicate.py cascade_correct`) over the judged
-rag/cortex arms: same artifacts, no fourth answered arm.
+> **RETIRED 2026-08-25 — the cascade's 0.936 does not survive the bench
+> instrument (#188).** The 2026-08-17 migration to a Qwen3.8-27B
+> answerer/judge re-ran the same 78 questions (`ceiling-v38`, also n=3 with
+> std 0.0000). The naive-RAG control lands on 0.859 on both stacks; the
+> cascade falls below it:
+>
+> | arm | Qwen3.6 stack (`ceiling-e2e`) | Qwen3.8 stack (`ceiling-v38`) |
+> |---|---:|---:|
+> | naive RAG (control) | 0.859 | 0.859 |
+> | cortex facts only | 0.667 | 0.667 |
+> | hybrid (facts + top-3 turns) | 0.833 | 0.846 |
+> | **commit-gated cascade** | **0.936** | **0.846** |
+>
+> The mechanism is the routing gate, not the memory. The cascade serves the
+> fact-spine answer unless that channel abstains, so its input is the
+> *answerer's* willingness to say "I don't know": on the old stack the
+> cortex arm abstained on **32 of 78** questions and its 46 commits were
+> **46/46** correct; on the new stack it abstains **22 of 78** and its 56
+> commits are **0.839** precise, so nine wrong answers are served where a
+> RAG fallback would have rescued them. An adopter running Claude or GPT as
+> the answerer has a different abstention rate and therefore a different
+> number — which is what disqualifies 0.936 as a published claim about the
+> memory system. (The migration moved extractor, answerer and judge
+> together and the two runs' fact contexts are not byte-identical, so the
+> artifacts do not isolate *which* term did it. That is the point: the
+> claim was never instrument-independent, and nobody had measured whether
+> it transferred.) Artifacts:
+> `evals/results/longmemeval-ku-oracle-qwen-27b-ceiling-e2e.agg.json`,
+> `evals/results/longmemeval-ku-oracle-qwen-27b-ceiling-v38.agg.json`
+> (abstention and commit-precision counts recomputed from the per-question
+> `…-ceiling-e2e.jsonl` / `…-ceiling-v38.jsonl` rows).
 
-**Full-haystack confirmation (pre-registered).** On the `_s` haystacks
-(~50 sessions/question, tag `casc-q8`, reproducible server verified by
-process inspection), the cascade scores **0.462 vs 0.346** for naive RAG —
-delta **+0.115** at **p = 0.011** (paired permutation, 10,000 draws,
-seed 0) — with **commit precision 0.714** on a 14/78 commit rate. Honest
-scoping: the margin over the concatenation hybrid there (+0.064) is
-directional only (p = 0.18), so the decision-grade claim is
-cascade-vs-RAG; and the commit rate is low — raising it is the current
-retrieval workstream. Artifacts:
-`evals/results/longmemeval-ku-oracle-qwen-27b-ceiling-e2e.agg.json`,
-`evals/results/casc-q8-confirmation.json`.
+Within the 2026-07-30 stack, two findings still stand. First, the v25
+retriever + BM25 lifted raw-turn selection so much (R@10 0.572 → 0.809)
+that the **concatenation hybrid no longer beats naive RAG on this slice** —
+mixing facts and turns in one prompt costs stale-fact overrides and extra
+abstentions. Second, the channels are strongly complementary (their
+per-question union is 0.949) — but how much of that a commit gate can
+capture is exactly what the judge migration showed to be
+instrument-dependent.
+
+> **Currency note (2026-08-25): the full-haystack confirmation is a
+> 2026-07-30 measurement and has never been re-judged.** On the `_s`
+> haystacks (~50 sessions/question, tag `casc-q8`, reproducible server
+> verified by process inspection), the cascade scored **0.462 vs 0.346**
+> for naive RAG — delta **+0.115** at **p = 0.011** (paired permutation,
+> 10,000 draws, seed 0) — with **commit precision 0.714** on a 14/78 commit
+> rate. It was graded by the Qwen3.6 answerer/judge, and its extraction
+> predates even the earliest committed op-prompt artifact (`v5`, committed
+> 2026-08-01) — the shipped pin has since moved to
+> `ku_op_prompt_v10_stance_update.txt`. The same cascade metric lost 0.090
+> on the oracle slice when the stack migrated. Until it is re-run, it
+> is an engineering-log result, not a front-door claim, and it was removed
+> from the README on 2026-08-25. Honest scoping at the time: the margin
+> over the concatenation hybrid there (+0.064) was directional only
+> (p = 0.18), and the commit rate was low. Artifact:
+> `evals/results/casc-q8-confirmation.json`.
 
 This table is **not comparable per-arm** to the held-fixed table below:
 it re-ran extraction and turn selection on the current stack, while the
@@ -2936,8 +3071,10 @@ RAG by ~10 points while reading **~67%** of the context — and the fact
 spine alone trails RAG by only ~4 points on **~11% of its token budget**.
 **Retired as a headline (2026-07-30):** on the current end-to-end stack
 (section above) the concatenation hybrid's margin over naive RAG does not
-survive the v25 retrieval upgrade; the commit-gated cascade is the
-posture that beats RAG there. This table remains valid for what it
+survive the v25 retrieval upgrade. The commit-gated cascade replaced it as
+the published posture and has since been retired too (2026-08-25) — on the
+current bench instrument no arm beats naive RAG on this slice. This table
+remains valid for what it
 isolates — the serving-stack offset and cortex fact ranking under v25
 with 2026-07-19 extraction and turn selection. Notably, the shipped E4B
 fine-tune's replicated hybrid (0.762 ± 0.027, table below) beat this

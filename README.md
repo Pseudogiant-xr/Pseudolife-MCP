@@ -41,17 +41,35 @@ What you get:
 - **A web console to watch it think** — the Cortex Console above, plus cited
   world facts, session episodes, and document RAG.
 
-Measured, with receipts — on LongMemEval knowledge updates, routing
-answers through the fact spine beats naive RAG, and every number ships
-with its committed run artifact:
+Measured, with receipts — the **full 500-question LongMemEval sweep**, all
+six question types, and every number ships with its committed run artifact:
 
-| LongMemEval-KU | naive RAG | commit-gated cascade |
+| LongMemEval oracle, 500 questions | naive RAG | commit-gated cascade |
 |---|---:|---:|
-| oracle slice (78 questions, reproducible server) | 0.859 | **0.936** |
-| full haystack (~50 sessions/question, pre-registered) | 0.346 | **0.462** (p = 0.011) |
+| accuracy, all six question types | 0.688 | 0.690 |
+| context tokens per question | ~1210 | **~883** |
+| knowledge-update slice (78 of the 500) | 0.859 | ~~0.936~~ (retired — see below) |
 
-Graded by a local, byte-reproducible judge — compare within rows, never
-against GPT-judged leaderboards. Full tables, caveats, and every
+Equal accuracy to naive RAG across the whole benchmark on **~73% of the
+context**, and a large edge at knowing when it doesn't know: on BEAM-100K's
+abstention questions the fact spine scores **0.950** against naive RAG's
+0.775, unchanged under two independent judges. It loses where an answer has
+to be aggregated across sessions. Graded by a local, byte-reproducible
+judge (the cross-judge check names its second judge) — compare within rows,
+never against GPT-judged leaderboards.
+
+> **Retired 2026-08-25 (#188): the 0.936 knowledge-update headline.** It was
+> measured on the 2026-07-30 bench stack (Qwen3.6-27B answerer and judge).
+> Re-running the same 78 questions after the 2026-08-17 migration to
+> Qwen3.8-27B puts the cascade at **0.846**, below the naive-RAG control —
+> which lands on 0.859 on both stacks. The cascade serves the fact-spine
+> answer unless that channel says "I don't know", so it measures the
+> *answerer's* abstention behaviour as much as the memory: 32/78 abstentions
+> at 46/46 commit precision on the old stack, 22/78 at 0.839 on the new one.
+> The 500-question table above is on the older judge and has not been
+> re-judged, so read its cascade row as an upper bound.
+
+Full tables, the per-type breakdown, both stacks side by side, and every
 artifact: [Benchmarks](docs/guide/benchmarks.md).
 
 ## Quickstart
@@ -617,32 +635,46 @@ privacy/cost trade-offs: [Dreaming](docs/guide/dreaming.md).
 
 ## Benchmarks
 
-Measured **end to end on the current shipped stack** — fresh local-ceiling
-extraction under the v25 embedding backbone, BM25-on turn retrieval,
-reproducible serving (3 byte-identical replicates — std 0.0000) — on the
-knowledge-update subset of
-[LongMemEval](https://arxiv.org/abs/2410.10813) (oracle variant):
+The headline is the **whole benchmark, not a slice**: all six
+[LongMemEval](https://arxiv.org/abs/2410.10813) question types, 500
+questions, oracle variant, run end to end through the memory (qwen-27b
+extraction under the v25 embedding backbone, BM25-on turn retrieval).
+Single pass, graded by the local Qwen3.6-27B bench judge (2026-08-03):
 
 | arm | accuracy | context tokens/question |
 |-----|----------|------------------------|
-| naive RAG (top-6 turns) | 0.859 | ~1237 |
-| cortex facts only | 0.667 | **~259** |
-| hybrid (facts + top-3 turns) | 0.833 | ~920 |
-| **commit-gated cascade** | **0.936** | ~702 |
+| naive RAG (top-6 turns) | 0.688 | ~1210 |
+| cortex facts only | 0.416 | **~158** |
+| hybrid (facts + top-3 turns) | 0.664 | ~842 |
+| **commit-gated cascade** | **0.690** | ~883 |
 
 The **cascade** is a serving policy, not a fourth pipeline: answer from
 the consolidated facts when that channel *commits*, fall back to raw-turn
-RAG when it abstains. It beats naive RAG by ~8 points while reading ~57%
-of the context, and the margin survives the full ~50-session haystacks —
-0.462 vs 0.346, a pre-registered paired test at p = 0.011
-([details](docs/guide/benchmarks.md)). Read honestly: with the v25
-retriever, raw-turn selection improved enough that the *concatenation*
-hybrid no longer beats naive RAG on this slice — sequencing the channels
-is what restores the fact spine's edge. The fact spine alone reaches
-0.667 on ~21% of RAG's token budget. Setup, caveats, and the evidence
-that extraction quality is the dominant factor:
-[Benchmarks](docs/guide/benchmarks.md); full methodology:
-[`evals/README.md`](evals/README.md).
+RAG when it abstains. Overall this is **a wash on accuracy at ~73% of the
+context** — 0.690 vs 0.688 is one question in 500 on a single pass, and
+nobody should read it as a win. The fact spine alone answers at ~13% of
+RAG's token budget, at a large accuracy cost outside the types it is built
+for. The structure is per type:
+
+| question type | n | naive RAG | commit-gated cascade |
+|---|---:|---:|---:|
+| knowledge-update (facts change) | 78 | 0.859 | ~~0.936~~ (retired, above) |
+| single-session-user | 70 | 0.929 | 0.943 |
+| single-session-assistant | 56 | 0.911 | 0.929 |
+| single-session-preference | 30 | 0.800 | 0.700 |
+| temporal-reasoning | 133 | 0.526 | 0.526 |
+| multi-session | 133 | 0.504 | 0.474 |
+
+The consolidated spine helps where a fact changes and where the answer
+sits inside one session; it loses where the answer must be aggregated
+across sessions or ordered in time, because per-fact consolidation is
+exactly what discards that structure. BEAM-100K reproduces the same shape
+independently, and adds the one decisive win: on its abstention questions
+the fact-spine arm scores 0.950 against naive RAG's 0.775, identical under
+the local judge and under an independent Opus-class judge. Setup, caveats,
+both bench stacks side by side, and the evidence that extraction quality is
+the dominant factor: [Benchmarks](docs/guide/benchmarks.md); full
+methodology: [`evals/README.md`](evals/README.md).
 
 Retrieval itself was re-measured on the same corpus before the v25 backbone
 swap (150 questions, 74,183 haystack turns, 299 gold turns; pure recall — no
