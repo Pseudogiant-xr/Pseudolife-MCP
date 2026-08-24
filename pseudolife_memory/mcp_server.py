@@ -1468,27 +1468,21 @@ def memory_recall(query: str, hops: int = 3, top_k: int = 5,
 
     Args:
         hops: Max graph hops (default 3, max 5).
-        top_k: Bounds only the SEED search — how many initial hits name
-            the entities the graph walk starts from. It does NOT bound the
-            result: graph expansion fans out from the seeds independently,
-            so ``entities``/``edges``/``texts`` are capped separately (see
-            Returns) regardless of ``top_k``. At least 3 of the ``texts``
-            slots (or fewer if ``top_k`` is smaller) go to this seed
-            search; the rest are reserved for hop-discovered support.
-        verbose: Full fact/edge provenance (origin, confidence, derivation)
-            and untruncated supporting texts. Default facts are
-            ``{attribute, value}`` (capped per entity — see Returns), edges
-            ``{src, relation, dst}``, and supporting texts are truncated to
-            a preview length.
+        top_k: Bounds only the SEED search — the initial hits naming the
+            entities the walk starts from — NOT the result: expansion fans
+            out independently and the result lists are capped separately.
+            At least 3 ``texts`` slots (fewer if ``top_k`` is smaller) go
+            to seed hits; the rest to hop-discovered support.
+        verbose: Full fact/edge provenance and untruncated texts. Default
+            facts are ``{attribute, value}``, edges ``{src, relation,
+            dst}``, texts truncated to a preview.
 
     Returns: ``{seeds, entities, edges, paths, texts, iterations}``.
-    ``entities``/``edges``/``texts`` are each capped (currently 10/15/6),
-    reserving a minimum per hop so a hub seed's own 1-hop ring can't crowd
-    out the deeper hops the graph walk exists to reach; ``edges`` prefers
-    connections between surviving entities; ``texts`` reserves budget for
-    hop-discovered support, not just the flat seed search. Each entity's
-    ``facts`` is separately capped (currently 5). See the caps' comment
-    above the module-level constants for the full rationale.
+    ``entities``/``edges``/``texts`` are capped (currently 10/15/6) with a
+    per-hop minimum so a hub seed's 1-hop ring can't crowd out the deeper
+    hops the walk exists to reach; ``edges`` prefers links between
+    surviving entities; each entity's ``facts`` is capped (currently 5).
+    Rationale at the module-level cap constants.
     """
     out = service.recall(query, hops=hops, top_k=top_k)
     entity_hop = out.get("entity_hop") or {}
