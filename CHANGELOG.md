@@ -288,6 +288,54 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `--force-rollback-tag` overrides. A stopped daemon cannot witness a
   mismatch and keeps the old behavior, and the happy path (IDs match) is
   unchanged.
+### Fixed (2026-08-25 — `memory_recall` no longer returns an unbounded payload, #186)
+- **`memory_recall` now caps `entities`/`edges`/`texts`/per-entity `facts`
+  and truncates supporting text — with a per-hop quota, not a flat
+  prefix slice.** `top_k` only ever bounded the seed search; graph
+  expansion fanned out from there with no bound of its own, and the
+  compact projection `memory_search` applies to entry text
+  (`_compact_entry`) was never applied on the recall path. Issue #186's
+  live audit (2026-08-21, real daemon) measured one 3-hop query
+  (`hops=3`, default `top_k=5`, `verbose=False`) at 93.7 KB total, enough
+  that the calling client refused it; a separate pass over that same
+  response reported 53 entities (38.6 KB), 75 edges (5.3 KB), and 45
+  uncapped full entry texts (51.9 KB) — those three figures sum to
+  95.8 KB, ~2% over the stated total, and are kept here exactly as
+  audited (that live response can't be re-measured without the daemon
+  and bank it ran against).
+  A first cut of this fix (same day) shipped a flat `[:N]` slice per
+  field, which review caught as wrong: `run_recall` appends seeds then
+  each hop's discoveries in turn, so a flat prefix is a breadth-first
+  window, not a relevance ranking — a hub seed's wide 1-hop ring could
+  fill the entire edge cap by itself and silently drop every hop-2/hop-3
+  bridge (the actual reason to call `memory_recall` over `memory_search`),
+  and `texts[:cap]` was purely the flat seed search's own window (zero
+  hop-discovered text survived once `top_k >= cap`). The shipped version
+  instead reserves a minimum per-hop quota for `entities`/`edges`
+  (`mcp_server._hop_quota_select`, favoring later hops on any leftover
+  budget), prefers `edges` whose src AND dst both survived the entity cap
+  before backfilling from the rest, and splits the `texts` budget between
+  the flat seed search (`min(3, top_k)` slots) and hop-discovered
+  support. Each surviving entity's `facts` list is separately capped (5,
+  matching the width `memory_search`'s cortex-first block already uses)
+  since survivors are disproportionately the fact-heavy hubs.
+  Caps: `entities`=10, `edges`=15, `texts`=6, `facts`=5,
+  text preview=200 chars (`mcp_server._RECALL_MAX_*`,
+  `_compact_recall_text`). A reproducible in-tree probe
+  (`evals/recall_cap_probe.py`, no DB/daemon) exercises the same capping
+  path on a synthetic 41-entity/40-edge fixture (root fanned out to 20
+  direct children, wider than the edges cap alone) and recorded a
+  24.5 KB → 3.8 KB (84.4%) reduction with deep-hop entities still present
+  in the result (`evals/results/recall-cap-186-payload-probe.json`,
+  pinned by `tests/test_eval_evidence.py`) — a different, smaller graph
+  than the live audit's, so the two byte counts aren't comparable to each
+  other, only each to its own before/after.
+  Docstring and `docs/guide/retrieval.md` now say `top_k` is a seed
+  bound, not a result bound, and describe the quota/backfill/split
+  algorithm instead of a false "existing relevance order" claim.
+  `evals/regression_gate.ps1` doesn't cover this path (it drives
+  `service.search`, never `memory_recall`), so it wasn't run — not an
+  omission, `memory_recall` isn't gated by it.
 
 ### Added (2026-08-24 — answer-prompt attribution ablation)
 - **`evals/beam_attrib_ablation.py`: isolate the answer-prompt term of the

@@ -1446,6 +1446,11 @@ path).
 by iteratively following the knowledge graph — things `memory_search`
 can't do with a single flat similarity pass.
 
+**`top_k` bounds the seed search only, not the result.** It caps how many
+initial hits name the entities the graph walk starts from; graph expansion
+then fans out from those seeds with no bound of its own. The response is
+kept bounded separately — see Return shape below.
+
 **When to use it vs `memory_search`:**
 
 - Use `memory_recall` for chain-of-links questions: "what does X ultimately
@@ -1462,6 +1467,29 @@ is **read-only** — it never writes to the bank or the graph.
 **Return shape:** `seeds`, `entities` (each with current canonical facts),
 `edges` (with a `derived` flag for inferred transitive/inverse links),
 `paths`, supporting `texts`, and `iterations`.
+
+**Output caps (issue #186).** A plain 3-hop query on a hub entity can
+return dozens of entities/edges and every matched entry's full text —
+issue #186's live audit (2026-08-21, real daemon) measured one such query
+at 93.7 KB, enough that the calling client refused it. `entities` /
+`edges` / `texts` are each capped (10 / 15 / 6 by default), and each
+entity's `facts` list is separately capped (5). These are NOT flat prefix
+slices — `entities`/`edges` reserve a minimum quota per graph hop so a
+hub seed's own crowded 1-hop ring can't silently push the deeper,
+harder-to-reach hops (the actual reason to call `memory_recall` over
+`memory_search`) out of the response; `edges` also prefers connections
+between two entities that both survived the entity cap; `texts` reserves
+budget for hop-discovered support so it isn't purely a copy of the flat
+seed search. With `verbose=False` (the default), `texts` are also
+truncated to a preview length; `verbose=True` returns full text (though
+the same entity/edge/text counts and per-entity fact cap still apply).
+A reproducible in-tree probe (`evals/recall_cap_probe.py`, no DB/daemon
+needed) exercises this same capping path on a synthetic 41-entity/40-edge
+fixture graph and recorded a 24.5 KB → 3.8 KB (84.4%) reduction with
+deep-hop entities still present in the result
+(`evals/results/recall-cap-186-payload-probe.json`) — a different, smaller
+graph than the live audit's, so the two byte counts aren't comparable
+to each other, only each to its own before/after.
 
 **`low_confidence: true`** means no seed entity matched the query — the
 graph had no starting point. In that case fall back to `memory_search`.

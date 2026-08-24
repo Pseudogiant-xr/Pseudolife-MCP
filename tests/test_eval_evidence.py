@@ -1587,6 +1587,32 @@ CLAIMS.append(Claim(
                      / d["configs"]["b10488-ub256-stock"]["gen_per_second"]),
     stated=2.3, places=1))
 
+# ── memory_recall output-cap size reduction (issue #186, 2026-08-25) ─────
+# The live 93.7 KB / 53-entity / 75-edge / 45-text audit number is NOT
+# pinned here: it's a one-off live-daemon measurement (2026-08-21) with no
+# artifact and cannot be regenerated in-tree, so both docs attribute it to
+# the audit in prose rather than publishing it as a checked claim. What IS
+# checked is the reproducible in-tree probe's own before/after numbers,
+# which appear verbatim in both docs.
+RETRIEVAL_GUIDE = "docs/guide/retrieval.md"
+RECALL_PROBE = RESULTS + "recall-cap-186-payload-probe.json"
+_RECALL_CAP_NEEDLE = "24.5 KB → 3.8 KB (84.4%)"
+for _doc in (RETRIEVAL_GUIDE, CHANGELOG):
+    _slug = "guide" if _doc == RETRIEVAL_GUIDE else "changelog"
+    CLAIMS.append(Claim(
+        id=f"recall-cap-186-uncapped-{_slug}", doc=_doc,
+        needle=_RECALL_CAP_NEEDLE, artifacts=(RECALL_PROBE,),
+        value=lambda d: d["uncapped_bytes"] / 1000, stated=24.5, places=1))
+    CLAIMS.append(Claim(
+        id=f"recall-cap-186-capped-{_slug}", doc=_doc,
+        needle=_RECALL_CAP_NEEDLE, artifacts=(RECALL_PROBE,),
+        value=lambda d: d["capped_bytes_compact"] / 1000, stated=3.8,
+        places=1))
+    CLAIMS.append(Claim(
+        id=f"recall-cap-186-reduction-pct-{_slug}", doc=_doc,
+        needle=_RECALL_CAP_NEEDLE, artifacts=(RECALL_PROBE,),
+        value=lambda d: d["reduction_pct_compact"], stated=84.4, places=1))
+
 
 # ── the #173 multiple-choice re-score corrections (2026-08-25) ───────────
 # The MC scorer's no-box fallback read the article "a" as answer A, so

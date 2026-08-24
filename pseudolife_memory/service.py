@@ -7182,8 +7182,8 @@ class MemoryService:
         edges/facts/paths single-shot search can't produce. ``low_confidence`` is
         True when no seed entity resolves (caller falls back to ``search``)."""
         from pseudolife_memory.memory.recall import (
-            LLMController, MechanicalController, run_recall, simple_complete,
-            _hub_threshold,
+            LLMController, MechanicalController, recall_state_to_dict,
+            run_recall, simple_complete, _hub_threshold,
         )
         cfg = self.config.memory.recall
         hops = (max(1, min(int(cfg.default_hops), 5)) if hops is None
@@ -7195,7 +7195,8 @@ class MemoryService:
         if not query:
             return {"query": "", "seeds": [], "entities": [], "edges": [],
                     "paths": [], "texts": [], "iterations": 0, "hops": hops,
-                    "low_confidence": True}
+                    "low_confidence": True, "entity_hop": {}, "edge_hop": [],
+                    "seed_text_count": 0}
         vocab = self._recall_vocab()
         if driver == "llm":
             dcfg = self.config.memory.dream
@@ -7212,16 +7213,5 @@ class MemoryService:
             hub_threshold=threshold,
             expand_budget=(cfg.expand_budget or None),
         )
-        return {
-            "query": query,
-            "seeds": state.seeds,
-            "entities": [{"entity": n, "facts": state.entity_facts.get(n, [])}
-                         for n in state.entities],
-            "edges": state.edges,
-            "paths": state.paths,
-            "texts": state.texts,
-            "iterations": state.iterations,
-            "hops": hops,
-            "low_confidence": state.low_confidence,
-        }
+        return recall_state_to_dict(state, query, hops)
 

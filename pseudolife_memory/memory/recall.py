@@ -12,7 +12,7 @@ import os  # noqa: E402
 import re
 import urllib.request  # noqa: E402
 from dataclasses import dataclass, field
-from typing import Callable, Protocol
+from typing import Any, Callable, Protocol
 
 
 def _mentions(text: str, name: str) -> bool:
@@ -30,8 +30,21 @@ class RecallState:
     seeds: list[str] = field(default_factory=list)
     entities: list[str] = field(default_factory=list)
     entity_facts: dict[str, list[dict]] = field(default_factory=dict)
+    # Discovery hop per entity (0 = seed, 1..hops = the iteration it first
+    # appeared in). Emission order alone doesn't carry this — entities within
+    # one hop arrive in _select_frontier's ascending-degree EXPANSION order,
+    # not a relevance order — so callers that want to preserve deep bridging
+    # hops under a size cap (issue #186) need the hop tag, not just position.
+    entity_hop: dict[str, int] = field(default_factory=dict)
     texts: list[str] = field(default_factory=list)
+    # How many of the leading entries in ``texts`` came from the flat SEED
+    # search (before any hop ran) vs. from hop-driven re-queries — the two
+    # phases have very different relevance characters and a caller capping
+    # ``texts`` needs to keep both, not just a prefix of the seed batch.
+    seed_text_count: int = 0
     edges: list[dict] = field(default_factory=list)
+    # Discovery hop per edge, parallel to ``edges`` (same index each).
+    edge_hop: list[int] = field(default_factory=list)
     paths: list[list[str]] = field(default_factory=list)
     iterations: int = 0
     low_confidence: bool = False
@@ -63,13 +76,14 @@ class MechanicalController:
         return [f"{query} {name}" for name in newly]
 
 
-def _add_edge(state: RecallState, ed: dict) -> None:
+def _add_edge(state: RecallState, ed: dict, hop: int) -> None:
     key = (ed.get("src"), ed.get("relation"), ed.get("dst"))
     for e in state.edges:
         if (e["src"], e["relation"], e["dst"]) == key:
             return
     state.edges.append({"src": ed.get("src"), "relation": ed.get("relation"),
                         "dst": ed.get("dst"), "derived": ed.get("derived", False)})
+    state.edge_hop.append(hop)
 
 
 def _select_frontier(frontier: list[str], seed_set: set[str],
@@ -120,6 +134,7 @@ def run_recall(search_fn: Callable, graph_fn: Callable, vocab: list[str],
     for t in hits:
         if t and t not in state.texts:
             state.texts.append(t)
+    state.seed_text_count = len(state.texts)
     seeds = controller.seed_entities(query, hits, vocab)
     if not seeds:
         state.low_confidence = True
@@ -131,10 +146,13 @@ def run_recall(search_fn: Callable, graph_fn: Callable, vocab: list[str],
         state.seeds = state.seeds[:max_entities]
         seen = set(state.seeds)
     state.entities.extend(state.seeds)
+    for s in state.seeds:
+        state.entity_hop[s] = 0
     seed_set = set(state.seeds)
     frontier = list(state.seeds)
     while frontier and state.iterations < hops and len(seen) < max_entities:
         state.iterations += 1
+        hop_num = state.iterations
         newly: list[str] = []
         for name in _select_frontier(frontier, seed_set, degree_fn,
                                       hub_threshold, expand_budget):
@@ -151,8 +169,9 @@ def run_recall(search_fn: Callable, graph_fn: Callable, vocab: list[str],
                     seen.add(en)
                     newly.append(en)
                     state.entities.append(en)
+                    state.entity_hop[en] = hop_num
             for ed in nb.get("edges", []):
-                _add_edge(state, ed)
+                _add_edge(state, ed, hop_num)
             for p in nb.get("paths", []):
                 if p not in state.paths:
                     state.paths.append(p)
@@ -165,6 +184,30 @@ def run_recall(search_fn: Callable, graph_fn: Callable, vocab: list[str],
                     state.texts.append(t)
         frontier = newly
     return state
+
+
+def recall_state_to_dict(state: RecallState, query: str, hops: int) -> dict[str, Any]:
+    """Wrap a finished ``RecallState`` into the public ``recall()`` response
+    shape. Shared by ``MemoryService.recall`` and ``evals/recall_cap_probe.py``
+    so both build the response the same way. Includes the per-hop provenance
+    (``entity_hop`` / ``edge_hop`` / ``seed_text_count``) the MCP layer's
+    output caps rely on (issue #186) to keep deep hops and hop-discovered
+    texts from being crowded out by a flat prefix cap."""
+    return {
+        "query": query,
+        "seeds": state.seeds,
+        "entities": [{"entity": n, "facts": state.entity_facts.get(n, [])}
+                     for n in state.entities],
+        "edges": state.edges,
+        "paths": state.paths,
+        "texts": state.texts,
+        "iterations": state.iterations,
+        "hops": hops,
+        "low_confidence": state.low_confidence,
+        "entity_hop": dict(state.entity_hop),
+        "edge_hop": list(state.edge_hop),
+        "seed_text_count": state.seed_text_count,
+    }
 
 
 def _parse_name_list(raw: str) -> list[str]:
