@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-08-25 — `memory_recall` no longer returns an unbounded payload, #186)
+- **`memory_recall` now caps `entities`/`edges`/`texts` and truncates
+  supporting text.** `top_k` only ever bounded the seed search; graph
+  expansion fanned out from there with no bound of its own, and the
+  compact projection `memory_search` applies to entry text
+  (`_compact_entry`) was never applied on the recall path. A live 3-hop
+  query (`hops=3`, default `top_k=5`, `verbose=False`) measured 93.7 KB —
+  53 entities (38.6 KB), 75 edges (5.3 KB), and 45 uncapped FULL entry
+  texts (51.9 KB, 55% of the payload) — enough that the calling client
+  refused it, on exactly the broad relational queries the tool is meant
+  for. `entities`/`edges`/`texts` are now capped (10/15/6 —
+  `mcp_server._RECALL_MAX_*`) to the highest-relevance items in the
+  traversal's own existing order (no new scoring), and non-verbose
+  supporting texts are truncated to a 200-char preview
+  (`_compact_recall_text`), matching the house `text_preview` convention.
+  `verbose=True` keeps full text content. Docstring and
+  `docs/guide/retrieval.md` now say `top_k` is a seed bound, not a result
+  bound.
+
 ### Added (2026-08-24 — answer-prompt attribution ablation)
 - **`evals/beam_attrib_ablation.py`: isolate the answer-prompt term of the
   Phase-1 lift.** The p1-b16 run changed budget, turn ordinals, and the

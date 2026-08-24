@@ -345,6 +345,89 @@ def test_memory_recall_tool_delegates(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Recall output-cap tests (issue #186 — 2026-08-21 audit: a plain 3-hop
+# query returned an uncapped 93.7 KB; see mcp_server._RECALL_MAX_* comment).
+# ---------------------------------------------------------------------------
+
+def _seed_recall_cap_fixture(svc, base_query: str) -> None:
+    """A wide 2-level tree under one seed entity: 1 + 5 + 15 = 21 entities,
+    5 + 15 = 20 edges — past the caps under test (10/15/6) with margin, and
+    deliberately no bigger than that: this is a real (if CPU-slow) dense
+    embedding search, not a stub, so every extra store/graph_relate call
+    costs real wall-clock time. Every stored entry repeats ``base_query``
+    verbatim plus long filler text (longer than the truncation cap), so
+    real dense search reliably surfaces well over the text cap too across
+    the many hop-driven re-queries — each newly discovered entity
+    re-triggers a search for "<base_query> <name>", and every entry shares
+    enough of that phrasing to be a plausible hit."""
+    filler = (
+        "This sentence exists purely to pad the stored memory past the "
+        "recall preview-length cap so the truncation path is exercised. "
+    )
+    root = "root-svc"
+    l1 = [f"svc-l1-{i}" for i in range(5)]
+    svc.store(f"{base_query} -- entity {root} is the fixture root. {filler * 2}",
+              source="bench")
+    for name in l1:
+        svc.graph_relate(root, "depends-on", name)
+        svc.store(f"{base_query} -- entity {name} is a level-1 fixture node. {filler * 2}",
+                  source="bench")
+    for parent in l1:
+        for j in range(3):
+            name = f"{parent}-{j}"
+            svc.graph_relate(parent, "depends-on", name)
+            svc.store(f"{base_query} -- entity {name} is a level-2 fixture leaf. {filler * 2}",
+                      source="bench")
+
+
+@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
+def test_memory_recall_caps_payload_non_verbose(monkeypatch, tmp_path):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
+    from ladder_sweep import build_service
+    import pseudolife_memory.mcp_server as srv
+    svc = build_service(tmp_path)
+    base_query = "what does root-svc connect to"
+    _seed_recall_cap_fixture(svc, base_query)
+
+    # Sanity: the fixture really is big enough that the UNCAPPED service
+    # layer blows past every cap under test — otherwise the caps below
+    # would pass vacuously.
+    raw = svc.recall(base_query, hops=3, top_k=5)
+    assert len(raw["entities"]) > srv._RECALL_MAX_ENTITIES
+    assert len(raw["edges"]) > srv._RECALL_MAX_EDGES
+    assert len(raw["texts"]) > srv._RECALL_MAX_TEXTS
+
+    monkeypatch.setattr(srv, "service", svc, raising=False)
+    out = srv.memory_recall(base_query, hops=3, top_k=5)
+    assert len(out["entities"]) <= srv._RECALL_MAX_ENTITIES
+    assert len(out["edges"]) <= srv._RECALL_MAX_EDGES
+    assert len(out["texts"]) <= srv._RECALL_MAX_TEXTS
+    # Compact text projection: each supporting text is truncated to the
+    # preview cap (+ 1 for the trailing ellipsis character).
+    assert all(len(t) <= srv._RECALL_TEXT_CHARS + 1 for t in out["texts"])
+    assert any(t.endswith("…") for t in out["texts"])  # cap actually bound
+
+
+@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
+def test_memory_recall_verbose_keeps_full_texts(monkeypatch, tmp_path):
+    # verbose=True is the escape hatch: entity/edge counts still cap the
+    # payload, but supporting text content must NOT be truncated.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
+    from ladder_sweep import build_service
+    import pseudolife_memory.mcp_server as srv
+    svc = build_service(tmp_path)
+    base_query = "what does root-svc connect to"
+    _seed_recall_cap_fixture(svc, base_query)
+    monkeypatch.setattr(srv, "service", svc, raising=False)
+    out = srv.memory_recall(base_query, hops=3, top_k=5, verbose=True)
+    assert len(out["entities"]) <= srv._RECALL_MAX_ENTITIES
+    assert len(out["edges"]) <= srv._RECALL_MAX_EDGES
+    assert len(out["texts"]) <= srv._RECALL_MAX_TEXTS
+    assert any(len(t) > srv._RECALL_TEXT_CHARS for t in out["texts"])
+    assert not any(t.endswith("…") for t in out["texts"])
+
+
+# ---------------------------------------------------------------------------
 # Hub-gating integration tests (PG-backed)
 # ---------------------------------------------------------------------------
 

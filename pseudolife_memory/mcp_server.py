@@ -1230,6 +1230,40 @@ def memory_graph(
     return out
 
 
+# ── Recall output caps (2026-08-21 audit, issue #186) ────────────────────
+# ``top_k`` bounds only the SEED search; graph expansion fans out from
+# there with no bound of its own, and the compact projection memory_search
+# applies to entry text was never applied on this path. Measured live:
+# memory_recall(query="what does the stdio shim connect to and what runs
+# the MCP tools", hops=3, top_k=5, verbose=False) returned 93.7 KB — 53
+# entities (38.6 KB, ~728 B/entity incl. facts), 75 edges (5.3 KB, ~70
+# B/edge), and 45 UNCAPPED FULL entry texts (51.9 KB, 55% of the payload)
+# — enough that the calling client refused it. Applying these caps'
+# per-item averages to that same audited response estimates roughly
+# 10 KB (~7.3 KB entities + ~1.1 KB edges + ~1.5 KB texts) — close to the
+# "a few KB" target — while keeping the highest-relevance items each list
+# already produces in its existing order: no new scoring. Entities/edges
+# are in the traversal's own hop order (seeds first, then breadth-first by
+# ascending degree, see recall.py's ``_select_frontier``); texts are in
+# the underlying search's own score order (original query hits before
+# hop-discovered supporting hits, see recall.py's ``run_recall``).
+_RECALL_MAX_ENTITIES = 10
+_RECALL_MAX_EDGES = 15
+_RECALL_MAX_TEXTS = 6
+# Preview length for a supporting text once the cap above binds — same
+# convention as the existing text_preview fields (cms.py, service.py use
+# 80-200 chars + ellipsis for internal previews).
+_RECALL_TEXT_CHARS = 200
+
+
+def _compact_recall_text(t: str) -> str:
+    """Truncate one recall supporting text to the preview cap, the same
+    shape _compact_entry gives memory_search's non-verbose entries."""
+    if len(t) <= _RECALL_TEXT_CHARS:
+        return t
+    return t[:_RECALL_TEXT_CHARS] + "…"
+
+
 @_tool(tier="core")
 def memory_recall(query: str, hops: int = 3, top_k: int = 5,
                   verbose: bool = False) -> dict[str, Any]:
@@ -1241,25 +1275,38 @@ def memory_recall(query: str, hops: int = 3, top_k: int = 5,
 
     Args:
         hops: Max graph hops (default 3, max 5).
-        verbose: Full fact/edge provenance (origin, confidence, derivation).
-            Default facts are ``{attribute, value}``, edges
-            ``{src, relation, dst}``.
+        top_k: Bounds only the SEED search — how many initial hits name
+            the entities the graph walk starts from. It does NOT bound the
+            result: graph expansion fans out from the seeds independently,
+            so ``entities``/``edges``/``texts`` are capped separately (see
+            Returns) regardless of ``top_k``.
+        verbose: Full fact/edge provenance (origin, confidence, derivation)
+            and untruncated supporting texts. Default facts are
+            ``{attribute, value}``, edges ``{src, relation, dst}``, and
+            supporting texts are truncated to a preview length.
 
     Returns: ``{seeds, entities, edges, paths, texts, iterations}``.
+    ``entities``/``edges``/``texts`` are each capped (currently 10/15/6) to
+    the highest-relevance items in the traversal's own existing ordering —
+    see the caps' comment above.
     """
     out = service.recall(query, hops=hops, top_k=top_k)
+    out["entities"] = out.get("entities", [])[:_RECALL_MAX_ENTITIES]
+    out["edges"] = out.get("edges", [])[:_RECALL_MAX_EDGES]
+    out["texts"] = out.get("texts", [])[:_RECALL_MAX_TEXTS]
     if not verbose:
         out["entities"] = [
             {"entity": n.get("entity"),
              "facts": [{"attribute": f.get("attribute"), "value": f.get("value")}
                        for f in n.get("facts", [])]}
-            for n in out.get("entities", [])
+            for n in out["entities"]
         ]
         out["edges"] = [
             {"src": e.get("src"), "relation": e.get("relation"),
              "dst": e.get("dst")}
-            for e in out.get("edges", [])
+            for e in out["edges"]
         ]
+        out["texts"] = [_compact_recall_text(t) for t in out["texts"]]
     return out
 
 
