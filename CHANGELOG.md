@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-24 — answer-prompt attribution ablation)
+- **`evals/beam_attrib_ablation.py`: isolate the answer-prompt term of the
+  Phase-1 lift.** The p1-b16 run changed budget, turn ordinals, and the
+  contradiction-surfacing answer prompt at once; this re-answers its
+  byte-persisted contexts with the literal pre-Phase-1 prompt (commit
+  44366163) under the same local judge, so the per-row paired delta is the
+  prompt effect alone and the ordinal term falls out of the grid by
+  subtraction. A pin test holds live-prompt == old-prompt + exactly the
+  contradiction sentence, so prompt drift breaks the instrument loudly
+  instead of silently widening the ablation. Per-row resumable, local-only
+  (zero subscription tokens).
+
 ### Changed (2026-08-23 — Phase-1 BEAM fixes from the reader-sweep verdict)
 - **The BEAM answer prompt now surfaces genuine contradictions instead of
   silently resolving them.** BEAM plants conflicting claims and
