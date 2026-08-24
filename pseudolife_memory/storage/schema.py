@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 31
+SCHEMA_META_VERSION = 32
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -666,6 +666,17 @@ def ensure_schema(conn) -> dict:
             )
             """
         )
+        # v32 additive: the ranking knobs in force for the query. The served
+        # list widened inside its existing JSONB column (per-entry fusion
+        # components — bi-encoder/cross-encoder/BM25 scores, recency, the
+        # multipliers), but the knob snapshot is per EVENT and needs its own
+        # column. Nullable: v31 rows predate it, and file-mode banks never
+        # reach here. Both halves exist because neither is reconstructable
+        # offline — config is mutable at runtime, and band recency /
+        # supersession / access counts mutate on every serve.
+        cur.execute(
+            "ALTER TABLE retrieval_events ADD COLUMN IF NOT EXISTS "
+            "params JSONB")
         cur.execute(
             "CREATE INDEX IF NOT EXISTS retrieval_events_session_idx "
             "ON retrieval_events (session_id, created_at DESC)")

@@ -6,6 +6,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-25 — retrieval log records the ranking components, schema v32)
+- **The retrieval event log now logs what the fusion *consumed*, not just
+  what it produced (#179).** Phase 0 recorded one fused score per served
+  entry — which is exactly the value a Phase-1 learned head is supposed to
+  predict, so the log could not train one. Each served entry now carries a
+  `components` blob with the inputs already computed at ranking time:
+  bi-encoder score, cross-encoder score, BM25 boost, surprise, recency
+  weight, the source/supersession multipliers, and the channel that
+  admitted the entry (`dense` / `slot` / `bm25` / `timeline` / `reference` /
+  `contiguity`). `ce: null` (key present) marks a head the margin gate
+  skipped — "served on the bi-encoder order alone" is signal, not a missing
+  value. Nothing new is computed at serve time: these numbers were in hand
+  and were being thrown away, and they are **not** reconstructable later —
+  config is mutable at runtime, and band recency, supersession flags and
+  access counts all mutate on every serve, so replaying a stored query
+  against tomorrow's bank reproduces neither the scores nor the pool.
+- **Schema v32 — `retrieval_events.params`:** the per-event snapshot of
+  the knobs in force (effective `top_k` and keep-threshold, recency ramp,
+  BM25 weight/scorer params, the reranker's fusion weight, margin gate and
+  whether it fired, timeline/contiguity settings, and the call's filters).
+  Additive, nullable (`NULL` = a v31-era row); the served list widened
+  inside its existing JSONB column and needed no DDL.
+- **`memory_stats` now reports retrieval-log liveness** — event count, use-
+  label count, last-event timestamp, the kill-switch state, and a
+  write-error counter. Both log-write paths swallow their exceptions by
+  design, and nothing else read the table, so a silently-failing log looked
+  exactly like an idle one: zero rows, green `/health`.
+
 ### Added (2026-08-24 — answer-prompt attribution ablation)
 - **`evals/beam_attrib_ablation.py`: isolate the answer-prompt term of the
   Phase-1 lift.** The p1-b16 run changed budget, turn ordinals, and the

@@ -439,6 +439,12 @@ class MemoryService:
         # re-reaped on the next sweep, firing a dream per resume cycle.
         # In-memory only: a restart re-fires the SessionStart hook anyway.
         self._episode_touches: dict[str, float] = {}
+        # Retrieval-log write failures since process start. Both log paths
+        # swallow their exceptions (a logging failure must not break the
+        # search it rides on), so without this counter a broken log is
+        # indistinguishable from an idle one: zero rows, green health.
+        # In-memory only, like the CMS's own tier counters.
+        self._retrieval_log_errors = 0
         # Resolve data directory first — that's where memory_state lives
         # AND where the default config sits (if config_path not given).
         self.data_dir = Path(data_dir) if data_dir else Path.cwd() / "data"
@@ -1101,34 +1107,42 @@ class MemoryService:
                      if contiguity_neighbors is None
                      else int(contiguity_neighbors))
             vias = result.via or [None] * len(result.entries)
-            ranked: list[tuple[Any, float | None, str | None]] = [
-                (e, s, v) for e, s, v in
-                zip(result.entries, result.scores, vias)
+            comps = result.components or [None] * len(result.entries)
+            ranked: list[tuple[Any, float | None, str | None, dict | None]] = [
+                (e, s, v, c) for e, s, v, c in
+                zip(result.entries, result.scores, vias, comps)
             ]
             if n_ctg > 0 and ranked:
                 # Direct hits are all pre-seen so a neighbor can never
                 # duplicate one; neighbors of later hits skip entries an
                 # earlier hit already surfaced.
-                seen = {e.text for e, _, _ in ranked}
-                expanded: list[tuple[Any, float | None, str | None]] = []
-                for e, s, via in ranked:
+                seen = {e.text for e, _, _, _ in ranked}
+                expanded: list[
+                    tuple[Any, float | None, str | None, dict | None]] = []
+                for e, s, via, comp in ranked:
                     before, after = self._cms.temporal_neighbors(e, n_ctg)
                     for nb in before:
                         if nb.text not in seen:
-                            expanded.append((nb, 0.0, "contiguity"))
+                            expanded.append(
+                                (nb, 0.0, "contiguity",
+                                 {"channel": "contiguity"}))
                             seen.add(nb.text)
-                    expanded.append((e, s, via))
+                    expanded.append((e, s, via, comp))
                     for nb in after:
                         if nb.text not in seen:
-                            expanded.append((nb, 0.0, "contiguity"))
+                            expanded.append(
+                                (nb, 0.0, "contiguity",
+                                 {"channel": "contiguity"}))
                             seen.add(nb.text)
                 ranked = expanded
             entries_out = []
-            for e, s, via in ranked:
+            served_components: list[dict | None] = []
+            for e, s, via, comp in ranked:
                 d = _entry_to_dict(e, s)
                 if via is not None:
                     d["via"] = via
                 entries_out.append(d)
+                served_components.append(comp)
             # Chronicle events (schema v28): a temporally-cued query also
             # serves matching live events, chronologically ascending.
             # Needs no knob — an empty table (chronicle extraction
@@ -1177,9 +1191,13 @@ class MemoryService:
                     # answer): lets the answerer do arithmetic over a
                     # long enumeration without recounting lines.
                     out["events_total"] = len(events_block)
-            # Retrieval event log (schema v31): purely observational —
-            # the (query, served) training tuple for a learned reranker.
-            self._log_retrieval_event(query, entries_out)
+            # Retrieval event log (schema v31/v32): purely observational —
+            # the (query, served, components, params) training tuple for a
+            # learned reranker.
+            params = dict(result.params or {})
+            params["contiguity_neighbors"] = n_ctg
+            self._log_retrieval_event(
+                query, entries_out, served_components, params)
             return out
 
     # ------------------------------------------------------------------
@@ -1454,6 +1472,22 @@ class MemoryService:
                 _c = self._storage.load_communities()["communities"]
                 result["communities"] = len(_c)
                 result["graph_digest_at"] = (self._storage.get_meta("graph_digest") or {}).get("computed_at")
+                # Retrieval log liveness: nothing else reads the table, and
+                # both write paths swallow their errors, so this is the only
+                # place a silently-dead log becomes visible. Guarded: a
+                # feature whose premise is "logging must never break the
+                # caller" must not break memory_stats either (stats() is on
+                # the session-start path).
+                try:
+                    log = self._storage.retrieval_log_health()
+                except Exception:  # noqa: BLE001
+                    logger.warning("retrieval-log health read failed",
+                                   exc_info=True)
+                    log = {"events": None, "uses": None,
+                           "last_event_at": None, "unavailable": True}
+                log["enabled"] = bool(self.config.memory.retrieval_log.enabled)
+                log["write_errors"] = self._retrieval_log_errors
+                result["retrieval_log"] = log
             return result
 
     # ------------------------------------------------------------------
@@ -3094,28 +3128,52 @@ class MemoryService:
                     "count": len(events), "events": events}
 
     def _log_retrieval_event(self, query: str,
-                             entries_out: list[dict]) -> None:
-        """Append a ``retrieval_events`` row (schema v31): the (query,
+                             entries_out: list[dict],
+                             components: list[dict | None] | None = None,
+                             params: dict | None = None) -> None:
+        """Append a ``retrieval_events`` row (schema v31/v32): the (query,
         served) half of the learned-reranker training tuple. Rank = list
         position in the served output. Entries without a storage id
         (pre-persist) are dropped — they can't be joined to a later use.
+
+        ``components`` (aligned with ``entries_out``) are the fusion inputs
+        already computed at ranking time — bi-encoder score, cross-encoder
+        score, BM25 boost, recency, the multipliers — and ``params`` is the
+        knob snapshot. Both are logged rather than re-derived because
+        neither survives to training time: config is mutable at runtime,
+        and band recency / supersession flags / access counts mutate on
+        every serve, so replaying this query against tomorrow's bank
+        reproduces neither the scores nor the pool they came from.
+
         Never raises: a logging failure must not break the search it
-        rides on."""
+        rides on. Failures bump ``_retrieval_log_errors``, which
+        ``stats()`` reports — the log is otherwise silent when broken."""
         cfg = self.config.memory.retrieval_log
         if self._storage is None or not cfg.enabled:
             return
         try:
-            served = [
-                {"entry_id": int(d["id"]), "score": d.get("score"),
-                 "rank": rank, "via": d.get("via"), "bank": d.get("bank")}
-                for rank, d in enumerate(entries_out)
-                if d.get("id") is not None
-            ]
+            # Length-guarded: a misaligned components list must not
+            # truncate the served list (zip stops at the shorter one).
+            comps = (components
+                     if components is not None
+                     and len(components) == len(entries_out)
+                     else [None] * len(entries_out))
+            served = []
+            for rank, (d, comp) in enumerate(zip(entries_out, comps)):
+                if d.get("id") is None:
+                    continue
+                row = {"entry_id": int(d["id"]), "score": d.get("score"),
+                       "rank": rank, "via": d.get("via"),
+                       "bank": d.get("bank")}
+                if comp is not None:
+                    row["components"] = comp
+                served.append(row)
             _, session_id = self._resolve_writer()
             self._storage.add_retrieval_event(
                 query, served, origin="search", session_id=session_id,
-                episode_id=self._current_episode_id())
+                episode_id=self._current_episode_id(), params=params)
         except Exception:  # noqa: BLE001
+            self._retrieval_log_errors += 1
             logger.warning("retrieval-event log failed", exc_info=True)
 
     def _record_retrieval_use(self, entry_id: int, used_via: str) -> None:
@@ -3132,6 +3190,7 @@ class MemoryService:
                 int(entry_id), session_id, used_via,
                 float(cfg.use_window_seconds))
         except Exception:  # noqa: BLE001
+            self._retrieval_log_errors += 1
             logger.warning("retrieval-use label failed", exc_info=True)
 
     def prune_retrieval_log(self) -> int:

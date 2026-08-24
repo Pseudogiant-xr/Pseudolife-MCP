@@ -119,11 +119,20 @@ class RetrievalResult:
     aligned with ``entries`` — e.g. ``"timeline"`` for entries the timeline
     channel injected. ``None`` (the default, and every pre-Phase-1 caller)
     means no markers; a list uses ``None`` for ordinary dense/slot/BM25
-    hits so consumers can tell structural context from scored hits."""
+    hits so consumers can tell structural context from scored hits.
+
+    ``components`` / ``params`` (retrieval-log Phase 1 features) are the
+    ranking inputs the fusion consumed: a per-entry dict aligned with
+    ``entries`` (bi-encoder score, recency, multipliers, BM25 boost,
+    cross-encoder score) and the per-query knob snapshot. Both are
+    ``None`` for band-level results — only :meth:`ContinuumMemorySystem.
+    retrieve` fuses, so only it can describe the fusion."""
     entries: list[MemoryEntry]
     scores: list[float]
     surprises: list[float]
     via: list[str | None] | None = None
+    components: list[dict | None] | None = None
+    params: dict | None = None
 
 
 # v0.5: the deprecated ``MemoryMLP`` / ``TitansMemoryBank`` compat shims were
