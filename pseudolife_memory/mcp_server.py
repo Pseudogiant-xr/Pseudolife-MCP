@@ -64,6 +64,7 @@ os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
 
 from anyio import to_thread  # noqa: E402
 from mcp.server.fastmcp import Context, FastMCP  # noqa: E402
+from mcp.server.transport_security import TransportSecuritySettings  # noqa: E402
 
 from pseudolife_memory.service import MemoryService  # noqa: E402
 
@@ -89,7 +90,66 @@ service = MemoryService(data_dir=_data_dir, config_path=_config_path)
 
 _MCP_INSTRUCTIONS = """Pseudolife is durable memory shared across sessions. At task start, call memory_search for relevant context and memory_lesson_search for prior outcomes. Store durable facts, decisions, corrections, and useful observations with memory_store (one claim per call); use memory_fact_set for canonical current values. At task end, record success, failure, or correction with memory_outcome. Use memory_toolset(action="expand") before calling tools outside the visible tier."""
 
-mcp = FastMCP("Pseudolife Memory", instructions=_MCP_INSTRUCTIONS)
+
+def transport_security_for(auth_configured: bool) -> TransportSecuritySettings:
+    """DNS-rebinding policy for the streamable-HTTP endpoint (``/mcp``).
+
+    Keyed on whether a bearer token gates the endpoint — deliberately NOT on
+    the bind host, and never left to the SDK's own heuristic. FastMCP's
+    constructor auto-enables protection only when handed a loopback ``host=``
+    and disables it entirely otherwise; this module has never passed one, so
+    both directions of that heuristic are wrong here. Inheriting the loopback
+    allowlist rejects every LAN, reverse-proxy, Tailscale-name and
+    compose-service-name client with ``421 Invalid Host header`` before auth
+    or any handler runs (the documented LAN recipe was dead this way, while
+    ``/health`` and ``/api`` kept working); forwarding the container's
+    ``0.0.0.0`` instead would silently switch the protection off.
+
+    * **Token configured** → permissive. ``Authorization`` already proves
+      intent — a browser cannot attach a bearer cross-origin without a
+      preflight that fails — so a Host allowlist can only break legitimate
+      remote clients. Same reasoning the Console's ``_browser_gate``
+      (:mod:`pseudolife_memory.web.api`) has applied to ``/api`` since the
+      2026-07-02 review.
+    * **No token** → loopback allowlist, protection on. The Console app
+      deliberately does not run ``_browser_gate`` on ``/mcp``, so this is the
+      only thing standing between a rebinding browser and an unauthenticated
+      bank. The shipped container default (``0.0.0.0`` +
+      ``PSEUDOLIFE_MCP_TRUST_BIND``, published to 127.0.0.1) lands here and
+      keeps exactly the protection it had before this policy existed — the
+      allowlist below is byte-identical to the SDK's.
+    """
+    if auth_configured:
+        return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=["127.0.0.1:*", "localhost:*", "[::1]:*"],
+        allowed_origins=["http://127.0.0.1:*", "http://localhost:*",
+                         "http://[::1]:*"],
+    )
+
+
+mcp = FastMCP(
+    "Pseudolife Memory",
+    instructions=_MCP_INSTRUCTIONS,
+    # Explicit, never inherited. The daemon replaces this with the
+    # token-aware policy via apply_transport_security() once it knows
+    # whether auth is configured; the protected variant is the safe start.
+    transport_security=transport_security_for(auth_configured=False),
+)
+
+
+def apply_transport_security(auth_configured: bool) -> TransportSecuritySettings:
+    """Install the transport-security policy on the shared FastMCP instance.
+
+    Must run BEFORE the first ``streamable_http_app()`` call: the SDK builds
+    the ``StreamableHTTPSessionManager`` lazily there and caches whatever
+    settings it was handed, so a later change would be a no-op.
+    """
+    settings = transport_security_for(auth_configured)
+    mcp.settings.transport_security = settings
+    return settings
+
 
 from pseudolife_memory.toolset_tiers import (
     PrincipalTierState, normalize_tier, parse_tier_map, rank as _tier_rank,

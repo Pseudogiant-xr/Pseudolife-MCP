@@ -197,7 +197,15 @@ async def _proxy(url: str, token: str | None, session_uid: str) -> None:
         async with _upstream() as remote:
             return (await remote.list_tools()).tools
 
-    @server.call_tool()
+    # validate_input=False: the DAEMON is the validating authority, not this
+    # proxy. The SDK's default (True) re-runs jsonschema against the RAW
+    # arguments using the upstream tool's own inputSchema, which rejects the
+    # JSON-in-a-string list/number params Claude Desktop/Code send
+    # (tags='["decision"]') — the very shape FastMCP registers with
+    # validate_input=False upstream so its pre_parse_json rescue can unwrap
+    # them. Validating here made the same call fail over stdio while
+    # succeeding over direct HTTP.
+    @server.call_tool(validate_input=False)
     async def _call_tool(name: str, arguments: dict | None):
         async with _upstream() as remote:
             result = await remote.call_tool(name, arguments or {})
