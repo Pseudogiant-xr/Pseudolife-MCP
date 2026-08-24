@@ -782,7 +782,12 @@ class PostgresStorage:
         etype: str | None = None,
     ) -> int:
         """Upsert by canonical name; first non-null etype wins (soft typing
-        is advisory, so a later conflicting hint must not silently retype)."""
+        is advisory, so a later conflicting hint must not silently retype).
+
+        A fresh mint also repairs the fact/lesson cross-index for its name —
+        see :meth:`_relink_orphaned_rows`. Mint-only (``xmax = 0`` is zero
+        exactly when ON CONFLICT took the INSERT arm), so the repeated-upsert
+        hot path (every ``memory_outcome`` log) pays nothing."""
         with self._txn():
             row = self.conn.execute(
                 """
@@ -790,11 +795,65 @@ class PostgresStorage:
                 VALUES (%s, %s, %s, %s)
                 ON CONFLICT (canonical) DO UPDATE
                   SET etype = COALESCE(entities.etype, EXCLUDED.etype)
-                RETURNING id
+                RETURNING id, (xmax = 0) AS minted
                 """,
                 (canonical, display or canonical, etype, time.time()),
             ).fetchone()
+            if row[1]:
+                self._relink_orphaned_rows(int(row[0]), canonical)
         return int(row[0])
+
+    def _relink_orphaned_rows(self, entity_id: int, canonical: str) -> None:
+        """Re-link orphaned fact/lesson rows to a freshly minted entity.
+
+        :meth:`delete_entity` NULLs ``facts``/``lessons`` ``entity_id`` and
+        ``object_entity_id`` (no cascade), and nothing else re-links those
+        rows until their slot is next written — so a deleted-then-re-minted
+        name under-counts everywhere the FK is read (fold-direction ranking,
+        ``backfill_entity_sources``, ``lesson_entity_ids``; the #177 damage).
+
+        Norm bridging, deliberately conservative: candidates are matched by
+        ``norm_name(raw stored text) == canonical`` — the exact rule
+        ``sync._link_entity_ids`` applies on slot writes (minus aliases,
+        which a fresh mint cannot have) — and each UPDATE matches the exact
+        stored text. The stored ``entity_norm`` column is the CORTEX norm
+        (``_norm_key``) and is never consulted: the two spaces disagree
+        (``"G:"`` → ``"g"`` vs ``"g:"``), and a cross-space match would
+        mis-link the cross-index.
+
+        Cost, measured 2026-08-25 (local PG16 in Docker, synthetic 120-char
+        values): ~120 ms per mint at 5k facts, ~420 ms at 50k. The
+        object-side columns are unlinked on almost every row (a value
+        rarely names an entity), so those two scans see the whole table;
+        the floor is this build's per-row string handling, not the plan or
+        the transfer (bare 50k-row scan: 8 ms; adding one lower()+regexp
+        per row: 340 ms — SQL prefilters were tried and measured
+        performance-neutral, so the simpler ship-everything-to-norm_name
+        form won). The live bank is ~750 entries today (≲1.5k facts,
+        ≈35 ms/mint), and mints are create-miss-only — a handful per dream
+        pass. If banks outgrow ~50k facts, escalate to a partial expression
+        index over a SQL-side norm (schema bump), not to a looser match.
+        Runs inside ensure_entity's transaction, mint-only."""
+        from pseudolife_memory.graph import norm_name
+        if not canonical:
+            return
+        for table, id_col, text_col in (
+            ("facts", "entity_id", "entity"),
+            ("facts", "object_entity_id", "value"),
+            ("lessons", "entity_id", "entity"),
+            ("lessons", "object_entity_id", "about"),
+        ):
+            texts = [r[0] for r in self.conn.execute(
+                f"SELECT DISTINCT {text_col} FROM {table} "
+                f"WHERE {id_col} IS NULL AND {text_col} IS NOT NULL"
+            ).fetchall()]
+            for t in texts:
+                if norm_name(t) != canonical:
+                    continue
+                self.conn.execute(
+                    f"UPDATE {table} SET {id_col} = %s "
+                    f"WHERE {id_col} IS NULL AND {text_col} = %s",
+                    (entity_id, t))
 
     def find_entity(self, name_norm: str) -> dict | None:
         """Resolve a normalized name via canonical first, then aliases."""

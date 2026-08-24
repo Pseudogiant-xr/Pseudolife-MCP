@@ -6,6 +6,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-08-25 — re-mint repairs the fact/lesson cross-index)
+- **A freshly minted entity re-links the orphaned fact and lesson rows of
+  its name.** `delete_entity` NULLs `facts`/`lessons` `entity_id` and
+  `object_entity_id` (no cascade), and nothing in the live daemon re-linked
+  those rows until their slot was next written — so a deleted-then-re-minted
+  name under-counted everywhere the FK is read: fold-direction ranking,
+  `backfill_entity_sources` (entity→project attribution), and
+  `lesson_entity_ids` (the lesson-only junk protection). This is the general
+  repair deferred from #177, whose guard-side workaround (counting current
+  facts by subject name) stands independently. The repair matches
+  conservatively — candidates by `norm_name(raw stored text) == canonical`,
+  the same rule slot-write linking applies (minus aliases, which a fresh
+  mint cannot have), updated by exact stored text;
+  the cortex-normed `entity_norm` column is never consulted (the two norm
+  spaces disagree, e.g. `"G:"` → `"g"` vs `"g:"`). Mint-only by an
+  `xmax = 0` insert check, so the repeated-upsert hot path (every
+  `memory_outcome` log) pays nothing; orphans whose entity already exists
+  still re-link on their next slot write, as before. `entity_sources`
+  attribution heals on the next backfill pass once the FK is restored.
+  Tombstone removal/expiry for `merge_decisions` remains deferred (third
+  deliberate deferral): those rows are the durable merge audit, so a removal
+  path should be a status flip with its own review surface, not a row
+  delete riding along here.
+
 ### Added (2026-08-24 — answer-prompt attribution ablation)
 - **`evals/beam_attrib_ablation.py`: isolate the answer-prompt term of the
   Phase-1 lift.** The p1-b16 run changed budget, turn ordinals, and the

@@ -136,6 +136,107 @@ def test_entity_alias_roundtrip(storage):
     assert storage.entity_id_map()["pg"] == eid
 
 
+def _insert_fact(storage, entity, value, *, attribute="attr",
+                 status="current", entity_id=None, object_entity_id=None):
+    from pseudolife_memory.memory.cortex import _norm_key
+    storage.conn.execute(
+        "INSERT INTO facts (entity, attribute, entity_norm, attribute_norm, "
+        "value, status, confidence, asserted_at, last_confirmed, "
+        "entity_id, object_entity_id) "
+        "VALUES (%s, %s, %s, %s, %s, %s, 0.9, 1.0, 1.0, %s, %s)",
+        (entity, attribute, _norm_key(entity), _norm_key(attribute), value,
+         status, entity_id, object_entity_id))
+
+
+def test_remint_relinks_orphaned_fact_rows(storage):
+    eid = storage.ensure_entity("dream-run", display="Dream Run")
+    other = storage.ensure_entity("other-node", display="other-node")
+    _insert_fact(storage, "Dream Run", "nightly", entity_id=eid)
+    _insert_fact(storage, "Dream Run", "old", status="superseded",
+                 entity_id=eid)
+    _insert_fact(storage, "other-node", "Dream Run",
+                 entity_id=other, object_entity_id=eid)
+    assert storage.delete_entity(eid)
+    # Premise (the #177 damage): the delete orphans the links; rows survive.
+    assert storage.conn.execute(
+        "SELECT COUNT(*) FROM facts WHERE entity = 'Dream Run' "
+        "AND entity_id IS NULL").fetchone() == (2,)
+    assert storage.conn.execute(
+        "SELECT object_entity_id FROM facts WHERE value = 'Dream Run'"
+    ).fetchone() == (None,)
+    # A second stored spelling of the same name — the repair must walk
+    # every distinct raw text that folds to the canonical, not just one.
+    _insert_fact(storage, "dream_run", "x", attribute="cadence")
+    new_id = storage.ensure_entity("dream-run", display="dream run")
+    assert new_id != eid
+    # Re-mint repairs the cross-index: every orphaned row of that name,
+    # current or superseded, both spellings, subject and object side alike.
+    assert storage.conn.execute(
+        "SELECT COUNT(*) FROM facts WHERE entity IN ('Dream Run', 'dream_run') "
+        "AND entity_id = %s", (new_id,)).fetchone() == (3,)
+    assert storage.conn.execute(
+        "SELECT entity_id, object_entity_id FROM facts "
+        "WHERE value = 'Dream Run'").fetchone() == (other, new_id)
+
+
+def test_remint_relink_uses_graph_norm_not_cortex_norm(storage):
+    # "G:" folds to "g" in the graph norm space (norm_name) but stays "g:"
+    # in facts.entity_norm (cortex _norm_key) — the repair must bridge via
+    # norm_name(raw stored text), never via the entity_norm column.
+    _insert_fact(storage, "G:", "capacity")
+    gid = storage.ensure_entity("g", display="G:")
+    assert storage.conn.execute(
+        "SELECT entity_id FROM facts WHERE entity = 'G:'"
+    ).fetchone() == (gid,)
+
+
+def test_remint_relink_leaves_non_matching_orphans(storage):
+    _insert_fact(storage, "alpha beta", "x")  # norm_name → "alpha-beta"
+    storage.ensure_entity("alphabeta", display="alphabeta")
+    assert storage.conn.execute(
+        "SELECT entity_id FROM facts WHERE entity = 'alpha beta'"
+    ).fetchone() == (None,)
+
+
+def test_existing_entity_upsert_does_not_relink(storage):
+    # Pins the perf gate deliberately: the repair runs on fresh mints only.
+    # ensure_entity is called unconditionally on hot paths (memory_outcome
+    # logs), and orphans of an already-existing node re-link on their next
+    # slot write via sync._link_entity_ids instead.
+    eid = storage.ensure_entity("hot-node", display="hot-node")
+    _insert_fact(storage, "hot-node", "x")
+    assert storage.ensure_entity("hot-node") == eid
+    assert storage.conn.execute(
+        "SELECT entity_id FROM facts WHERE entity = 'hot-node'"
+    ).fetchone() == (None,)
+
+
+def test_remint_relinks_orphaned_lesson_rows(storage):
+    # delete_entity NULLs lessons.entity_id in the same loop as facts, and an
+    # orphaned lesson row drops its re-minted task entity out of
+    # lesson_entity_ids() — losing the lesson-only junk protection. Object
+    # side of a lesson is `about`, not `value` (sync.snapshot_lessons).
+    tid = storage.ensure_entity("deploy-daemon", display="Deploy Daemon")
+    aid = storage.ensure_entity("update-ps1", display="update.ps1")
+    storage.conn.execute(
+        "INSERT INTO lessons (entity, attribute, entity_norm, attribute_norm, "
+        "value, about, status, confidence, asserted_at, last_confirmed, "
+        "entity_id, object_entity_id) "
+        "VALUES ('Deploy Daemon', 'approach', 'deploy-daemon', 'approach', "
+        "'x', 'update.ps1', 'current', 0.6, 1.0, 1.0, %s, %s)", (tid, aid))
+    assert storage.delete_entity(tid)
+    assert storage.delete_entity(aid)
+    assert storage.conn.execute(
+        "SELECT entity_id, object_entity_id FROM lessons "
+        "WHERE entity = 'Deploy Daemon'").fetchone() == (None, None)
+    new_tid = storage.ensure_entity("deploy-daemon", display="deploy-daemon")
+    new_aid = storage.ensure_entity("update-ps1", display="update.ps1")
+    assert storage.conn.execute(
+        "SELECT entity_id, object_entity_id FROM lessons "
+        "WHERE entity = 'Deploy Daemon'").fetchone() == (new_tid, new_aid)
+    assert new_tid in storage.lesson_entity_ids()
+
+
 def test_edge_upsert_bumps_confidence_and_revives(storage):
     a = storage.ensure_entity("a")
     b = storage.ensure_entity("b")
