@@ -498,6 +498,12 @@ class MemoryService:
         # exception still propagates to the caller; this is purely for
         # visibility.
         self._init_refusal: str | None = None
+        # Set by _ensure_init when the legacy .pt import left a partial
+        # bank behind (#187). Boot deliberately continues -- a half-imported
+        # bank is still usable -- but the state must not be silent, so it
+        # is logged at ERROR and surfaced via /health until a later boot
+        # resumes the import cleanly.
+        self._migration_partial: str | None = None
         # Last extractor selection made by dream_run_auto (sonnet-sidecar-cutover,
         # 2026-07-11): {"which": "primary"|"fallback", "base_url": str | None,
         # "at": float} — surfaced via dream_status. None until a dream has run.
@@ -761,8 +767,27 @@ class MemoryService:
                 )
                 if summary.get("migrated"):
                     logger.warning("legacy .pt bank migrated: %s", summary)
+                    self._migration_partial = None
+                elif summary.get("reason") in _migrate.PARTIAL_REASONS:
+                    self._migration_partial = summary["reason"]
+                    logger.error(
+                        "legacy .pt import is incomplete (%s) — the bank is "
+                        "SHORT. See the '%s' meta row; restore the original "
+                        ".pt sources under %s and restart to resume.",
+                        summary["reason"], _migrate.MIGRATION_META_KEY,
+                        self.data_dir)
             except Exception as exc:  # noqa: BLE001
-                logger.warning("legacy migration failed (continuing): %s", exc)
+                # Boot continues (a half-imported bank still serves), but
+                # the remainder is NOT lost any more: migrate_legacy has
+                # already recorded in_progress, so the next boot resumes.
+                # ERROR rather than WARNING because this line used to be the
+                # only trace of a bank that was permanently short (#187).
+                self._migration_partial = f"import_failed: {exc}"
+                logger.error(
+                    "legacy migration failed part-way (continuing with a "
+                    "SHORT bank): %s — progress is recorded in the '%s' meta "
+                    "row; fix the cause and restart to resume the import.",
+                    exc, _migrate.MIGRATION_META_KEY)
             n = _sync.hydrate_cms(self._cms, self._storage)
             logger.info("hydrated %d entries from storage", n)
             try:

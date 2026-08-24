@@ -61,6 +61,13 @@ def _build_health_payload(svc, token_present: bool) -> dict:
     if init_refusal:
         payload["status"] = "degraded"
         payload["init_refusal"] = init_refusal
+    # A legacy .pt import that stopped part-way leaves a bank that serves
+    # normally but is SHORT (#187). Nothing else on this payload would show
+    # it, and boot deliberately continues, so it surfaces here.
+    migration_partial = getattr(svc, "_migration_partial", None)
+    if migration_partial:
+        payload["status"] = "degraded"
+        payload["migration_partial"] = migration_partial
     # Honest DB liveness (2026-07-02 review fix): /health used to say
     # "ok" while a restarted Postgres had every memory tool failing.
     # ping() uses a dedicated short-lived connection so the probe can't

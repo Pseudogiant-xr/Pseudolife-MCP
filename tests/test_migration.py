@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 import torch
 
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
@@ -34,8 +35,11 @@ class _FakeEmbedder:
         return v / v.norm()
 
 
-def _build_legacy_bank(data_dir):
+def _build_legacy_bank(data_dir, suffix: str = ""):
     """Synthesize a v7 bank: entries + episode + supersession + cortex.
+
+    ``suffix`` distinguishes one synthetic bank from another (used by the
+    source-identity test, which needs two banks whose bytes differ).
 
     BOTH entries and the cortex fact embed at legacy 384-d — the only
     shape that exists in the wild (every real legacy .pt bank predates
@@ -46,19 +50,20 @@ def _build_legacy_bank(data_dir):
     (the idempotency guard blocks every retry once entries is non-empty).
     This fixture pins the fix: both branches must survive."""
     cms = ContinuumMemorySystem(MemoryConfig())
-    cms.episodes.start("legacy session")
-    cms.store("legacy fact alpha", _emb(1), source="legacy", tags=["old"])
-    cms.store("legacy fact beta", _emb(2), source="legacy")
+    cms.episodes.start("legacy session" + suffix)
+    cms.store("legacy fact alpha" + suffix, _emb(1), source="legacy",
+              tags=["old"])
+    cms.store("legacy fact beta" + suffix, _emb(2), source="legacy")
     cms.bands[0].entries and None  # entries may have promoted; that's fine
     # Mark one superseded the way the contradiction path would.
     target = next(e for b in cms.bands for e in b.entries
-                  if e.text == "legacy fact alpha")
+                  if e.text == "legacy fact alpha" + suffix)
     target.superseded_at = 123.0
-    target.superseded_by_text = "legacy fact beta"
+    target.superseded_by_text = "legacy fact beta" + suffix
     cms.save(data_dir / "memory_state")
 
     cortex = CortexStore()
-    cortex.write_fact(Slot("legacy-proj", "language", "rust"),
+    cortex.write_fact(Slot("legacy-proj" + suffix, "language", "rust"),
                       _emb(3, dim=384), confidence=0.9, support="user")
     cortex.save(data_dir / "cortex_state.pt")
     return cms
@@ -115,3 +120,252 @@ def test_migration_roundtrip(pg_conn, pg_url, tmp_path):
         assert len(storage.load_entries()) == 2
     finally:
         storage.close()
+
+
+# ── interrupted-import resume (#187) ────────────────────────────────────
+#
+# Before this, the only idempotency guard was "the entries table is
+# non-empty". Each insert_entry commits its own transaction and the
+# sources are renamed only at the very end, so an import that died
+# part-way durably committed rows, then every later boot saw a non-empty
+# entries table and returned ``storage_not_empty`` — the remainder and
+# ALL cortex facts were never imported, and the service caller swallowed
+# the exception to a single warning. These tests pin the progress record
+# and the resume.
+
+
+def _migration_state(storage):
+    from pseudolife_memory.storage.migrate import MIGRATION_META_KEY
+
+    return storage.meta_get(MIGRATION_META_KEY)
+
+
+def test_interrupted_migration_records_progress_and_resumes(
+        pg_conn, pg_url, tmp_path):
+    """Facts branch dies after the entries loop already committed."""
+    from pseudolife_memory.storage.migrate import migrate_legacy
+    from pseudolife_memory.storage.postgres import PostgresStorage
+
+    _build_legacy_bank(tmp_path)
+    storage = PostgresStorage(pg_url)
+    embedder = _FakeEmbedder()
+    try:
+        real_replace_facts = storage.replace_facts
+
+        def _boom(rows):
+            raise RuntimeError("connection dropped mid-import")
+
+        storage.replace_facts = _boom
+        with pytest.raises(RuntimeError, match="connection dropped"):
+            migrate_legacy(tmp_path, storage, embedder)
+
+        # Entries committed; the sources were NOT renamed; the progress
+        # record says so instead of the bank silently looking "migrated".
+        assert len(storage.load_entries()) == 2
+        assert (tmp_path / "memory_state" / "cms_state.pt").exists()
+        assert (tmp_path / "cortex_state.pt").exists()
+        state = _migration_state(storage)
+        assert state["status"] == "in_progress"
+        assert state["entries_done"] == 2
+        assert state["source"]  # fingerprint of the interrupted sources
+
+        # Rerun resumes rather than returning "storage not empty".
+        storage.replace_facts = real_replace_facts
+        summary = migrate_legacy(tmp_path, storage, embedder)
+        assert summary["migrated"] is True
+        assert summary["resumed"] is True
+        # Both entries were already present — skipped, not duplicated.
+        assert summary["entries"] == 0 and summary["entries_skipped"] == 2
+        assert summary["facts"] == 1
+        rows = storage.load_entries()
+        assert len(rows) == 2
+        assert len(storage.load_facts()) == 1
+        assert (tmp_path / "memory_state" / "cms_state.pt.pre-v8.bak").exists()
+        assert (tmp_path / "cortex_state.pt.pre-v8.bak").exists()
+        assert _migration_state(storage)["status"] == "done"
+    finally:
+        storage.close()
+
+
+def test_interrupted_entries_loop_resumes_without_duplicates(
+        pg_conn, pg_url, tmp_path):
+    """Death *inside* the entries loop — the half-imported case."""
+    from pseudolife_memory.storage.migrate import migrate_legacy
+    from pseudolife_memory.storage.postgres import PostgresStorage
+
+    _build_legacy_bank(tmp_path)
+    storage = PostgresStorage(pg_url)
+    embedder = _FakeEmbedder()
+    try:
+        real_insert = storage.insert_entry
+        calls = {"n": 0}
+
+        def _insert_once_then_die(e):
+            calls["n"] += 1
+            if calls["n"] > 1:
+                raise RuntimeError("disk full mid-import")
+            return real_insert(e)
+
+        storage.insert_entry = _insert_once_then_die
+        with pytest.raises(RuntimeError, match="disk full"):
+            migrate_legacy(tmp_path, storage, embedder)
+        assert len(storage.load_entries()) == 1
+        assert _migration_state(storage)["status"] == "in_progress"
+
+        storage.insert_entry = real_insert
+        summary = migrate_legacy(tmp_path, storage, embedder)
+        assert summary["migrated"] is True and summary["resumed"] is True
+        # One row was already there; exactly the remaining one was inserted.
+        assert summary["entries_skipped"] == 1 and summary["entries"] == 1
+        texts = [r["text"] for r in storage.load_entries()]
+        assert sorted(texts) == ["legacy fact alpha", "legacy fact beta"]
+        assert _migration_state(storage)["status"] == "done"
+    finally:
+        storage.close()
+
+
+def test_real_bank_without_migration_state_is_left_alone(
+        pg_conn, pg_url, tmp_path):
+    """A populated bank with no progress record keeps the old refusal —
+    resume must never merge a legacy .pt into somebody's live bank."""
+    from pseudolife_memory.storage.migrate import migrate_legacy
+    from pseudolife_memory.storage.postgres import PostgresStorage
+
+    _build_legacy_bank(tmp_path)
+    storage = PostgresStorage(pg_url)
+    embedder = _FakeEmbedder()
+    try:
+        storage.insert_entry({
+            "band": "working", "text": "a real memory",
+            "embedding": embedder.encode_single("a real memory"),
+            "surprise": 0.0, "ts": 1.0, "access_count": 0, "source": "user",
+            "tags": [], "slots": [],
+        })
+        summary = migrate_legacy(tmp_path, storage, embedder)
+        assert summary["migrated"] is False
+        assert summary["reason"] == "storage_not_empty"
+        assert len(storage.load_entries()) == 1
+        assert _migration_state(storage) is None
+        # Sources untouched — nothing was imported, nothing was renamed.
+        assert (tmp_path / "memory_state" / "cms_state.pt").exists()
+    finally:
+        storage.close()
+
+
+def test_partial_migration_refuses_a_different_legacy_source(
+        pg_conn, pg_url, tmp_path):
+    """The recorded fingerprint keeps an unrelated .pt bank from being
+    folded into the interrupted one's leftovers."""
+    from pseudolife_memory.storage.migrate import migrate_legacy
+    from pseudolife_memory.storage.postgres import PostgresStorage
+
+    _build_legacy_bank(tmp_path)
+    storage = PostgresStorage(pg_url)
+    embedder = _FakeEmbedder()
+    try:
+        def _boom(rows):
+            raise RuntimeError("connection dropped mid-import")
+
+        storage.replace_facts = _boom
+        with pytest.raises(RuntimeError):
+            migrate_legacy(tmp_path, storage, embedder)
+        assert _migration_state(storage)["status"] == "in_progress"
+
+        # Swap in a *different* legacy bank at the same paths.
+        other = tmp_path / "other"
+        other.mkdir()
+        _build_legacy_bank(other, suffix=" two")
+        for rel in ("memory_state/cms_state.pt", "cortex_state.pt"):
+            (tmp_path / rel).write_bytes((other / rel).read_bytes())
+
+        summary = migrate_legacy(tmp_path, storage, embedder)
+        assert summary["migrated"] is False
+        assert summary["reason"] == "partial_migration_source_mismatch"
+        assert len(storage.load_entries()) == 2  # nothing merged in
+        assert (tmp_path / "memory_state" / "cms_state.pt").exists()
+    finally:
+        storage.close()
+
+
+def test_rename_completed_before_the_status_write_is_reconciled(
+        pg_conn, pg_url, tmp_path):
+    """Crash in the one-``meta_set`` window between the source renames and
+    ``status=done`` must not leave a permanently-degraded record."""
+    from pseudolife_memory.storage.migrate import migrate_legacy
+    from pseudolife_memory.storage.postgres import PostgresStorage
+
+    _build_legacy_bank(tmp_path)
+    storage = PostgresStorage(pg_url)
+    embedder = _FakeEmbedder()
+    try:
+        summary = migrate_legacy(tmp_path, storage, embedder)
+        assert summary["migrated"] is True
+        # Rewind the record to the pre-``status=done`` state the crash
+        # would have left behind (renames already on disk).
+        from pseudolife_memory.storage.migrate import MIGRATION_META_KEY
+        state = storage.meta_get(MIGRATION_META_KEY)
+        state["status"] = "in_progress"
+        storage.meta_set(MIGRATION_META_KEY, state)
+
+        again = migrate_legacy(tmp_path, storage, embedder)
+        assert again["reason"] == "completed_at_rename"
+        assert _migration_state(storage)["status"] == "done"
+        assert len(storage.load_entries()) == 2
+    finally:
+        storage.close()
+
+
+def test_resume_survives_a_half_completed_rename(pg_conn, pg_url, tmp_path):
+    """The renames at the end are per-file, so a crash between them leaves
+    one source renamed. That must still read as *this* interrupted import,
+    not as a foreign bank."""
+    from pseudolife_memory.storage.migrate import migrate_legacy
+    from pseudolife_memory.storage.postgres import PostgresStorage
+
+    _build_legacy_bank(tmp_path)
+    storage = PostgresStorage(pg_url)
+    embedder = _FakeEmbedder()
+    try:
+        real_replace_facts = storage.replace_facts
+        storage.replace_facts = lambda rows: (_ for _ in ()).throw(
+            RuntimeError("dropped"))
+        with pytest.raises(RuntimeError):
+            migrate_legacy(tmp_path, storage, embedder)
+
+        # Only the entries source made it through the rename loop.
+        cms = tmp_path / "memory_state" / "cms_state.pt"
+        cms.rename(cms.with_name(cms.name + ".pre-v8.bak"))
+
+        storage.replace_facts = real_replace_facts
+        summary = migrate_legacy(tmp_path, storage, embedder)
+        assert summary["migrated"] is True and summary["resumed"] is True
+        assert summary["facts"] == 1 and summary["entries"] == 0
+        assert len(storage.load_entries()) == 2
+        assert (tmp_path / "cortex_state.pt.pre-v8.bak").exists()
+        assert _migration_state(storage)["status"] == "done"
+    finally:
+        storage.close()
+
+
+def test_health_reports_a_partial_legacy_import_as_degraded():
+    """Boot continues on a half-imported bank, so /health is the only place
+    an operator can see that the bank is short (#187)."""
+    from pseudolife_memory.daemon import _build_health_payload
+
+    class _Stub:
+        _db_url = "postgresql://fake"
+        _persist_errors = 0
+        _init_refusal = None
+        _storage = None
+        _migration_partial = "import_failed: disk full mid-import"
+
+    payload = _build_health_payload(_Stub(), token_present=False)
+    assert payload["status"] == "degraded"
+    assert payload["migration_partial"].startswith("import_failed")
+
+    class _Clean(_Stub):
+        _migration_partial = None
+
+    clean = _build_health_payload(_Clean(), token_present=False)
+    assert clean["status"] == "ok"
+    assert "migration_partial" not in clean

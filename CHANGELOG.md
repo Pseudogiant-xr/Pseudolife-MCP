@@ -6,6 +6,38 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-08-25 — interrupted legacy import resumes instead of blocking)
+- **A legacy `.pt` import that died part-way no longer permanently blocks
+  the retry and silently drops the remainder (#187).** `migrate_legacy`
+  commits per entry and renames the sources only at the very end, while its
+  only idempotency guard was "the entries table is non-empty" — so a
+  malformed row, embedder failure, dropped connection, full disk or killed
+  machine durably committed some rows, and every later boot then answered
+  `storage_not_empty`: the remaining entries and **all** cortex facts were
+  never imported, the sources never got their `.pre-v8.bak` rename, and the
+  service caller swallowed the exception to a single warning. Progress is
+  now *recorded* rather than inferred, in a `legacy_migration` meta row
+  (status, source fingerprint, entries-done count) — no schema change. A
+  later boot with `status=in_progress` and a matching source fingerprint
+  resumes the import, skipping rows already committed by identity
+  (band + text + timestamp, the only identity a legacy row carries — the
+  `entries.id` serial is minted at insert), so nothing is duplicated;
+  `status=done` is written only after the renames succeed. A populated bank
+  with no progress record keeps the old refusal, so a legacy `.pt` can
+  never be merged into somebody's live bank, and a *different* `.pt` bank
+  dropped in over an interrupted one is refused on the fingerprint instead
+  of being folded into its leftovers. Banks migrated before this change
+  have no meta row but do have renamed sources, so they never enter the
+  import path at all.
+- **A partial import is now loud.** `MemoryService._ensure_init` still
+  boots (a half-imported bank serves fine) but logs at ERROR naming the
+  resume path and the meta row, and `/health` reports
+  `status: "degraded"` with a `migration_partial` field — previously the
+  only trace was one `WARNING` line. The module docstring's claim that
+  this failure class was closed in 2026-07-28 is corrected: that fix
+  removed the commonest *cause* (embedding-dimension mismatch), not the
+  unrecoverability.
+
 ### Added (2026-08-24 — answer-prompt attribution ablation)
 - **`evals/beam_attrib_ablation.py`: isolate the answer-prompt term of the
   Phase-1 lift.** The p1-b16 run changed budget, turn ordinals, and the
