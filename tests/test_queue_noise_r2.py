@@ -198,6 +198,34 @@ def test_tombstoned_remint_with_facts_is_kept_for_review(svc):
     assert ent["id"] in pending                              # awaits review
 
 
+def test_tombstoned_remint_with_orphaned_facts_is_kept_for_review(svc):
+    # The already-damaged population: a name wrongly deleted while carrying
+    # facts. delete_entity NULLs facts.entity_id and nothing in the daemon
+    # re-links it, so the re-minted node reads zero facts through the
+    # cross-index while the cortex still holds them under the same name.
+    with svc._lock:
+        svc._ensure_init()
+        svc._storage.ensure_entity("42", display="42")
+    svc.cortex_write("42", "purpose", "the deployment cutover window",
+                     support="user")
+    svc.cortex_write("42", "owner", "the platform crew", support="user")
+    eid = svc._storage.find_entity("42")["id"]
+    assert svc._storage.entity_fact_counts().get(eid) == 2
+    pid = svc._storage.insert_entity_proposal(
+        "junk", eid, None, None, "bare-number", time.time())
+    assert svc.graph_accept_entity_junk(pid, decided_by="agent")["accepted"]
+    # The facts survive the delete, orphaned — the premise of the scenario.
+    assert svc._storage.entity_fact_counts() == {}
+    assert svc.cortex_lookup("42", "purpose") is not None
+    svc.graph_relate("42", "related-to", "daemon", origin="agent")
+    assert svc.deep_dream(apply=True)["applied"] is True
+    ent = svc._storage.find_entity("42")
+    assert ent is not None                                   # not re-deleted
+    pending = {p["entity_id"] for p in svc._storage.pending_entity_proposals()
+               if p.get("kind") == "junk"}
+    assert ent["id"] in pending                              # awaits review
+
+
 # ── 5. duplicate listing: veto parity + canonical-keyed dismissal ────────
 
 def test_duplicate_listing_applies_merge_veto():

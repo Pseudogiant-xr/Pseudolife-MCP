@@ -100,9 +100,11 @@ deletes more than the zero-edge rule alone would; never-judged names keep
 the strict guard. The fact-count half holds either way: a tombstone is
 permanent (nothing removes a `merge_decisions` row), so a name that has
 since become a real, fact-bearing entity must not be deleted unattended
-on the strength of an old verdict. Anything evidence-bearing — an edge
-past the applicable bar, more than one fact slot — sits pending until
-someone votes.
+on the strength of an old verdict. Fact slots are counted by subject name
+as well as through the fact-to-entity cross-index, so facts orphaned by an
+earlier deletion (which NULLs the link) still count as evidence. Anything
+evidence-bearing — an edge past the applicable bar, more than one fact
+slot — sits pending until someone votes.
 No merge proposal is filed whose side is junk-flagged.
 `merge_proposals` does NOT carry them: get their `proposal_id`s from
 `memory_graph_review(action="list")`, where they appear as `kind: "junk"`.

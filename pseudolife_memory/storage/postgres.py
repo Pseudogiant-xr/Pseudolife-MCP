@@ -1574,6 +1574,19 @@ class PostgresStorage:
             "WHERE status = 'current' AND entity_id IS NOT NULL "
             "GROUP BY entity_id").fetchall()}
 
+    def current_fact_counts_by_entity_text(self) -> dict[str, int]:
+        """Current-fact count per RAW subject text — the cross-index-free
+        companion to :meth:`entity_fact_counts`, which counts by
+        ``facts.entity_id`` and therefore reads zero for facts orphaned by
+        an earlier ``delete_entity`` (it NULLs the FK and nothing re-links
+        it). Returns the raw text so the caller normalizes into its own
+        space: ``facts.entity_norm`` is the cortex norm (``_norm_key``) and
+        the graph's ``norm_name`` is a different one — ``G:`` normalizes to
+        ``g:`` in the first and ``g`` in the second."""
+        return {str(ent): int(n) for ent, n in self.conn.execute(
+            "SELECT entity, COUNT(*) FROM facts WHERE status = 'current' "
+            "GROUP BY entity").fetchall()}
+
     def entity_sources_map(self) -> dict[int, list[str]]:
         out: dict[int, list[str]] = {}
         for eid, source in self.conn.execute(
