@@ -231,6 +231,10 @@ the same thing with the same word.
 - **dream** — the consolidation pass: pull the unconsolidated stream →
   extract `(entity, attribute, value)` claims → `fact_set` → advance the
   **cursor** (monotonic; each memory is processed once).
+- **session digest** — the mid-density layer: one narrative prose entry
+  per closed session episode (`source="digest"`), generated in the idle
+  dream cycle, competing in normal dense retrieval. Default-off
+  (`digest_enabled`) pending the sidecar quality probe + BEAM verdict.
 - **extractor / sidecar** — the model that does dream extraction: the
   bundled CPU sidecar, the Sonnet CLI shim, or any OpenAI-compatible
   endpoint.

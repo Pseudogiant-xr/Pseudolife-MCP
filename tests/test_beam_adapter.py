@@ -330,3 +330,126 @@ def test_load_chat_turns_flattens_batches(tmp_path):
     assert turns[0]["time_anchor"] == "March-15-2024"
     assert turns[1]["time_anchor"] == "March-15-2024"
     assert turns[2]["time_anchor"] == "April-01-2024"
+
+
+# ── session-digest arm (spec 2026-08-24) ─────────────────────────────────────
+
+
+def test_arms_for_digest_appends_hybrid_digest():
+    assert arms_for(False, digest=True) == (
+        "rag", "cortex", "hybrid", "hybrid_digest")
+    assert arms_for(True, digest=True) == (
+        "rag", "cortex", "hybrid", "hybrid_ev", "hybrid_digest")
+    assert "hybrid_digest" not in arms_for(False)
+
+
+class _DigestBankSvc:
+    """Stub of a bank whose digest outranks every turn: search returns the
+    digest at rank 0 followed by beam turns, sliced to top_k. Records each
+    call's kwargs."""
+
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    def search(self, q, top_k, **kw):
+        self.calls.append({"top_k": top_k, **kw})
+        digest = {"text": "Session digest: s1\n" + "d" * 80,
+                  "source": "digest"}
+        turns = [{"text": f"turn-{i}-" + "x" * 20, "source": "beam"}
+                 for i in range(20)]
+        return {"entries": ([digest] + turns)[:top_k]}
+
+    def cortex_search(self, q, **kw):
+        return {"entries": []}
+
+
+def test_build_contexts_off_is_byte_identical_call_shape():
+    """Byte-identity contract: with DIGEST_ARM off the search calls carry
+    no sources kwarg and the original top_k — the pre-digest shape."""
+    import longmemeval_bench as lme
+    svc = _DigestBankSvc()
+    ctx = lme.build_contexts(svc, "q?")
+    assert "hybrid_digest" not in ctx
+    assert all("sources" not in c for c in svc.calls)
+    assert all(c["top_k"] == lme.RAG_TOP_K for c in svc.calls[:2])
+
+
+def test_build_contexts_digest_arm_preserves_control_width(monkeypatch):
+    """The 2026-08-25 review finding: the service's sources= filter runs
+    post-top-k, so filtering would silently shorten the control. The fix
+    over-fetches by the bank's digest count and drops post-hoc — the rag
+    control must serve its FULL turn budget, digest-free, in the ranking
+    a digest-free bank would produce."""
+    import longmemeval_bench as lme
+    monkeypatch.setattr(lme, "DIGEST_ARM", True)
+    monkeypatch.setattr(lme, "DIGEST_COUNT", 1)
+    svc = _DigestBankSvc()
+    ctx = lme.build_contexts(svc, "q?", with_parts=True)
+    assert all(c["top_k"] == lme.RAG_TOP_K + 1 for c in svc.calls[:2])
+    assert all("sources" not in c for c in svc.calls)
+    # control preserved: the full budget of beam turns, digest excluded
+    assert ctx["parts"]["raw"] == [f"turn-{i}-" + "x" * 20
+                                   for i in range(lme.RAG_TOP_K)]
+    assert "Session digest:" not in ctx["rag"]
+    assert "Session digest:" not in ctx["hybrid"]
+    # the digest arm serves the digest, budget-matched by characters
+    served = ctx["parts"]["mem_digest"]
+    assert served[0].startswith("Session digest:")
+    budget = sum(len(t) for t in ctx["parts"]["mem"][:lme.HYBRID_TOP_K])
+    assert sum(len(t) for t in served) <= max(budget, len(served[0]))
+    assert len(served) <= lme.HYBRID_TOP_K
+    assert ctx["hybrid_digest"].endswith("\n\n".join(served))
+
+
+class _EpisodeIngestSvc:
+    """Records the episode/store/digest call sequence for ingest_chat."""
+
+    def __init__(self):
+        self.events: list[tuple] = []
+        self.digest_calls = 0
+
+    def episode_start_session(self, key, title):
+        self.events.append(("start", key))
+
+    def episode_end_session(self, key, run_dream=False):
+        self.events.append(("end", key))
+
+    def store(self, text, source):
+        self.events.append(("store", source))
+
+    def dream_run(self, extractor):
+        return {"pulled": 0}
+
+    def dream_status(self):
+        return {"backlog": 0}
+
+    def generate_digests_stage(self, extractor):
+        self.digest_calls += 1
+        if self.digest_calls == 1:
+            return {"scanned": 2, "written": 2}
+        return {"scanned": 0, "written": 0}
+
+
+_TWO_BATCH_TURNS = [
+    {"batch": 1, "time_anchor": None, "role": "user", "content": "a"},
+    {"batch": 1, "time_anchor": None, "role": "assistant", "content": "b"},
+    {"batch": 2, "time_anchor": None, "role": "user", "content": "c"},
+]
+
+
+def test_ingest_chat_digest_wraps_batches_in_episodes():
+    svc = _EpisodeIngestSvc()
+    tally = beam_adapter.ingest_chat(svc, None, _TWO_BATCH_TURNS,
+                                     digest=True)
+    assert [e for e in svc.events if e[0] != "store"] == [
+        ("start", "beam-1"), ("end", "beam-1"),
+        ("start", "beam-2"), ("end", "beam-2")]
+    assert tally["digests"] == 2
+    assert svc.digest_calls == 2          # drained until scanned == 0
+
+
+def test_ingest_chat_without_digest_touches_no_episodes():
+    svc = _EpisodeIngestSvc()
+    tally = beam_adapter.ingest_chat(svc, None, _TWO_BATCH_TURNS)
+    assert all(e[0] == "store" for e in svc.events)
+    assert "digests" not in tally

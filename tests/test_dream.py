@@ -134,7 +134,8 @@ def test_dream_config_defaults():
 
     c = DreamConfig()
     assert c.enabled is True
-    assert c.exclude_sources == ["consolidation", "reflection", "status", "log"]
+    assert c.exclude_sources == ["consolidation", "reflection", "status",
+                                 "log", "digest"]
     assert c.eligible_sources is None          # None => all-but-excluded
     assert c.min_batch == 8 and c.idle_seconds == 600.0
     assert MemoryConfig().dream.max_batch == 40

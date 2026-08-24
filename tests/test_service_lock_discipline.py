@@ -66,6 +66,12 @@ CALLER_HOLDS_LOCK = {
     "_load_infer_cursor",
     "_save_infer_cursor",
     "_pending_inference_candidates",
+    # Session-digest stage (spec 2026-08-24) — same locked-pull /
+    # locked-commit shape as the outcome-inference trio above.
+    "_load_digest_cursor",
+    "_save_digest_cursor",
+    "_pending_digest_candidates",
+    "_store_digest",
     "_delete_episode_row",
     "_retitle_locked",
     "_auto_title_locked",

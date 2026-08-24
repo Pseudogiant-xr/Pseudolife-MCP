@@ -247,8 +247,28 @@ class DreamConfig:
     # are not mined for facts/graph edges. "status"/"log" are the convention for
     # dense status dumps (recallable via memory_search, but no graph pollution).
     exclude_sources: list[str] = field(
-        default_factory=lambda: ["consolidation", "reflection", "status", "log"]
+        default_factory=lambda: ["consolidation", "reflection", "status",
+                                 "log", "digest"]
     )
+    # Session digests (spec 2026-08-24-session-digest-design.md): one
+    # narrative digest per closed session root, generated in the idle dream
+    # cycle and stored as a source="digest" band entry. Ships OFF until the
+    # budget-matched BEAM verdict and the sidecar quality spot-check
+    # (evals/digest_sidecar_probe.py) both pass — the known-facts-window
+    # precedent for dream-path features.
+    digest_enabled: bool = False
+    # Max session-context characters per summarize_session call; longer
+    # sessions are split on line boundaries and map-reduce merged. 24000
+    # chars ≈ 6K tokens — sized for the bundled CPU sidecar's context.
+    digest_context_chars: int = 24000
+    # Prose length target passed to the digest prompt. 800 matches the
+    # mid-density shape measured effective in the 2026-08-22 BEAM
+    # competitor analysis (~400-char distillation docs at k=20 retrieval,
+    # doubled for our smaller k).
+    digest_target_chars: int = 800
+    # Closed episodes digested per dream cycle — bounds the backfill sweep
+    # (the zero-start cursor digests all history when first enabled).
+    digest_max_per_cycle: int = 4
     # Backlog + quiescence trigger (consumed by dream_status + the daemon sweep).
     # idle_seconds is deliberately short-ish: consolidate ~10 min after the user
     # goes quiet, but NEVER mid-session (any store resets idle) — see

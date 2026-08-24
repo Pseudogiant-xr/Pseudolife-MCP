@@ -591,6 +591,26 @@ _OUTCOME_INFER_SYSTEM_PROMPT = (
 )
 
 
+_DIGEST_SYSTEM_PROMPT = (
+    "You write a factual narrative digest of one work session from its "
+    "stored record. Reply with JSON only: {{\"digest\": <the digest text>}}.\n"
+    "- Target length about {target_chars} characters of plain prose.\n"
+    "- Cover, in order: what the session set out to do; the phases or steps "
+    "it went through; key decisions and the stated reasons for them; "
+    "problems hit and how each was resolved; stated preferences or changes "
+    "of direction.\n"
+    "- Use ONLY events present in the record. Omit anything uncertain "
+    "rather than inferring it — a missing detail is cheap, an invented one "
+    "poisons later recall.\n"
+    "- Keep explicit dates, versions, and numbers exactly as recorded.\n"
+    "- Write in past tense anchored to the session (\"in this session…\", "
+    "\"the user then…\") so the digest reads as history, never as a claim "
+    "about the present.\n"
+    "- No headings, no bullet lists — one compact narrative paragraph "
+    "(two at most)."
+)
+
+
 _RELATIONS_PROMPT_HEAD = (
     "You extract durable RELATIONSHIPS between named entities from notes, as "
     'JSON: {"relations":[{"src":..,"relation":..,"dst":..}]}. Use ONLY these '
@@ -668,6 +688,60 @@ def _parse_outcome_claims(content: str, cap: int) -> list[dict] | None:
         if len(out) >= cap:
             break
     return out
+
+
+def _parse_digest(content: str) -> str | None:
+    """Parse a summarize_session reply. ``None`` = malformed (retryable);
+    a digest is mandatory prose, so an empty/blank string is malformed
+    too — there is no valid nothing-found for a non-empty session."""
+    import json as _json
+
+    s, e = content.find("{"), content.rfind("}")
+    if s == -1 or e <= s:
+        return None
+    try:
+        parsed = _json.loads(content[s:e + 1])
+    except ValueError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    digest = parsed.get("digest")
+    if not isinstance(digest, str) or not digest.strip():
+        return None
+    return digest.strip()
+
+
+def split_session_context(text: str, cap: int) -> list[str]:
+    """Split a session-context render into sequential segments of at most
+    ``cap`` characters, on line boundaries where possible (a single line
+    over the cap is hard-split). Order-preserving and lossless up to the
+    joining newlines: ``"\\n".join(parts)`` round-trips when no hard split
+    occurred. Used by the digest stage's map-reduce path — no middle
+    truncation, because the failure the digest layer fixes is exactly
+    "the middle of the arc went missing" (spec 2026-08-24, decision 3)."""
+    cap = max(1, int(cap))   # cap<=0 would spin forever on the hard split
+    if len(text) <= cap:
+        return [text]
+    parts: list[str] = []
+    current: list[str] = []
+    length = 0
+    for line in text.split("\n"):
+        while len(line) > cap:                 # pathological single line
+            if current:
+                parts.append("\n".join(current))
+                current, length = [], 0
+            parts.append(line[:cap])
+            line = line[cap:]
+        extra = len(line) + (1 if current else 0)
+        if length + extra > cap and current:
+            parts.append("\n".join(current))
+            current, length = [], 0
+            extra = len(line)
+        current.append(line)
+        length += extra
+    if current:
+        parts.append("\n".join(current))
+    return parts
 
 
 class ExtractorError(Exception):
@@ -1099,6 +1173,43 @@ class OpenAICompatExtractor:
         except Exception as exc:  # noqa: BLE001 — transport, not content
             raise ExtractorError(f"infer_outcomes failed: {exc}") from exc
         return _parse_outcome_claims(content, cap)
+
+    def summarize_session(self, context_text: str, *,
+                          target_chars: int = 800) -> str | None:
+        """Digest one closed session's stored record into narrative prose
+        (spec 2026-08-24). Transport failure raises ExtractorError (the
+        stage holds its cursor); malformed/empty content returns None
+        (bounded retry)."""
+        import json
+        import urllib.request
+
+        headers = {"content-type": "application/json"}
+        if self.api_key:
+            headers["authorization"] = f"Bearer {self.api_key}"
+        try:
+            body = json.dumps({**self.extra_body,
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content":
+                        _DIGEST_SYSTEM_PROMPT.format(
+                            target_chars=int(target_chars))},
+                    {"role": "user", "content": context_text},
+                ],
+                "response_format": {"type": "json_object"},
+                "max_tokens": self.max_tokens,
+                "temperature": 0,
+                "chat_template_kwargs": {"enable_thinking": False},
+            }).encode()
+            req = urllib.request.Request(
+                f"{self.base_url}/chat/completions", data=body,
+                headers=headers, method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                data = json.loads(resp.read().decode())
+            content = data["choices"][0]["message"]["content"] or ""
+        except Exception as exc:  # noqa: BLE001 — transport, not content
+            raise ExtractorError(f"summarize_session failed: {exc}") from exc
+        return _parse_digest(content)
 
 
 _EXTRACTOR_MODES = ("auto", "primary", "fallback")

@@ -2743,6 +2743,94 @@ class MemoryService:
                 self._save_infer_cursor(cur)
         return {"scanned": scanned, "written": written}
 
+    def generate_digests_stage(self, extractor) -> dict[str, Any]:
+        """Dream stage (spec 2026-08-24): one narrative digest per closed
+        session root, stored as a ``source="digest"`` band entry stamped to
+        the summarized episode. Same shape as :meth:`infer_outcomes_stage`:
+        locked pull -> unlocked summarize (map-reduce over
+        ``digest_context_chars``) -> locked re-check + write; transport
+        failure halts with cursor held; malformed output gets 2 attempts
+        then the cursor advances past the episode."""
+        import time as _time
+        cfg = self.config.memory.dream
+        if self._storage is None:
+            return {"scanned": 0, "written": 0, "skipped": "no-storage"}
+        if not cfg.digest_enabled:
+            return {"scanned": 0, "written": 0, "skipped": "disabled"}
+        fn = getattr(extractor, "summarize_session", None)
+        if fn is None:
+            return {"scanned": 0, "written": 0, "skipped": "no-extractor"}
+        from pseudolife_memory.memory.dream import split_session_context
+        target = int(cfg.digest_target_chars)
+        with self._lock:
+            self._ensure_init()
+            candidates = self._pending_digest_candidates()
+        scanned = written = 0
+        for cand in candidates:
+            try:                               # unlocked: extractor calls
+                parts = split_session_context(
+                    cand["context"], int(cfg.digest_context_chars))
+                if len(parts) == 1:
+                    digest = fn(parts[0], target_chars=target)
+                else:
+                    seg_digests: list[str] = []
+                    digest = None
+                    for part in parts:
+                        seg = fn(part, target_chars=target)
+                        if seg is None:
+                            seg_digests = []
+                            break
+                        seg_digests.append(seg)
+                    if seg_digests:            # reduce over the part digests
+                        digest = fn("\n\n".join(seg_digests),
+                                    target_chars=target)
+            except Exception as exc:  # noqa: BLE001 — transport: hold cursor
+                logger.warning("session digest halted (%s); cursor held", exc)
+                break
+            scanned += 1
+            with self._lock:
+                cur = self._load_digest_cursor()
+                rid = cand["root_id"]
+                # A concurrent dream (fire-and-forget vs sweep) may have
+                # digested this episode while our extractor call ran
+                # unlocked: re-check before writing. STRICTLY greater on
+                # the cursor — same-tick siblings share ended_at (see
+                # infer_outcomes_stage).
+                existing = any(
+                    e.source == "digest" and e.episode_id == rid
+                    for band in self._cms.bands for e in band.entries)
+                if cur["ts"] > cand["ended_at"] or existing:
+                    continue
+                if digest is None:             # malformed: bounded retry
+                    attempts = int(cur["retry"].get(rid, 0)) + 1
+                    if attempts >= 2:
+                        cur["retry"].pop(rid, None)
+                        cur["ts"] = cand["ended_at"]
+                        self._save_digest_cursor(cur)
+                        logger.warning(
+                            "session digest: advancing past episode %s "
+                            "after %d malformed attempts", rid, attempts)
+                        continue
+                    cur["retry"][rid] = attempts
+                    self._save_digest_cursor(cur)
+                    logger.warning(
+                        "session digest: malformed output for episode %s "
+                        "(attempt %d); will retry next dream", rid, attempts)
+                    break                      # keep episode order
+                d0 = _time.strftime("%Y-%m-%d", _time.gmtime(
+                    cand["started_at"] or cand["ended_at"]))
+                d1 = _time.strftime("%Y-%m-%d",
+                                    _time.gmtime(cand["ended_at"]))
+                span = d0 if d0 == d1 else f"{d0}–{d1}"
+                header = (f"Session digest: {cand['title']} "
+                          f"({span}, {cand['n_entries']} entries)")
+                self._store_digest(f"{header}\n{digest}", rid, cand["title"])
+                written += 1
+                cur["retry"].pop(rid, None)
+                cur["ts"] = cand["ended_at"]
+                self._save_digest_cursor(cur)
+        return {"scanned": scanned, "written": written}
+
     def synthesize_lessons(self, extractor, *, limit: int | None = None) -> dict[str, Any]:
         """Drain pending outcome signals and synthesise lessons via ``extractor``.
 
@@ -3450,6 +3538,7 @@ class MemoryService:
             # digest so manual graph edits (cleanup, direct graph_relate) are
             # reflected even when there is no memory backlog.
             outcome_inference = self.infer_outcomes_stage(extractor)
+            digests = self.generate_digests_stage(extractor)
             lessons = self.synthesize_lessons(extractor)
             graph_insight = self._safe_refresh_graph_insight()
             # Quarantined pairs may still be pending for the same reason
@@ -3468,6 +3557,7 @@ class MemoryService:
                     "events_pass_failed": False,
                     "cursor": pulled["cursor"], "lessons": lessons,
                     "outcome_inference": outcome_inference,
+                    "digests": digests,
                     "graph_insight": graph_insight, "retyped": retyped}
         from pseudolife_memory.memory.cortex import (_TIER_RANK, _norm_key,
                                                      _norm_value)
@@ -4410,18 +4500,26 @@ class MemoryService:
                 retry_pending = len(self._load_infer_cursor()["retry"])
             else:
                 infer_pending = retry_pending = 0
+            if cfg.digest_enabled and _has_extractor:
+                digest_pending = len(self._pending_digest_candidates())
+                digest_retry = len(self._load_digest_cursor()["retry"])
+            else:
+                digest_pending = digest_retry = 0
 
         idle = (_t.time() - latest) if latest else 0.0
         would_fire = bool(cfg.enabled and (
             backlog >= cfg.min_batch
             or (backlog >= 1 and idle >= cfg.idle_seconds)
             or infer_pending >= 1
+            or digest_pending >= 1
         ))
         from pseudolife_memory.memory.dream import _status_extractor_fields
         return {"backlog": backlog, "idle_seconds": idle,
                 "dream_cursor": cursor, "would_fire": would_fire,
                 "infer_outcomes": {"pending": infer_pending,
                                    "retry_pending": retry_pending},
+                "digests": {"pending": digest_pending,
+                            "retry_pending": digest_retry},
                 # Harness-agnostic deep-dream nudge: any MCP client polling
                 # status (or a SessionStart hook) can surface this to its
                 # user. Computed outside the lock above — deep_dream_need
@@ -4775,6 +4873,87 @@ class MemoryService:
             if len(out) >= limit:
                 break
         return out
+
+    _DIGEST_CURSOR_KEY = "session_digest_cursor"
+
+    def _load_digest_cursor(self) -> dict:
+        """Meta-backed cursor for the session-digest scan (spec 2026-08-24).
+        Shape ``{"ts": float, "retry": {episode_id: attempt_count}}``. The
+        zero start is load-bearing: enabling the feature backfills every
+        historical closed session (ratified decision 2)."""
+        raw = self._storage.get_meta(self._DIGEST_CURSOR_KEY) \
+            if self._storage else None
+        if isinstance(raw, dict):
+            return {"ts": float(raw.get("ts", 0.0)),
+                    "retry": dict(raw.get("retry", {}))}
+        return {"ts": 0.0, "retry": {}}
+
+    def _save_digest_cursor(self, cur: dict) -> None:
+        if self._storage is not None:
+            self._storage.set_meta(self._DIGEST_CURSOR_KEY, cur)
+
+    def _pending_digest_candidates(
+            self, *, limit: int | None = None) -> list[dict]:
+        """Caller MUST hold the lock. Closed session roots past the digest
+        cursor with >=1 subtree entry and no existing digest entry, oldest
+        first, capped at ``digest_max_per_cycle`` (bounds the backfill)."""
+        assert self._cms is not None
+        if self._storage is None:
+            return []
+        cfg = self.config.memory.dream
+        cap = int(limit if limit is not None else cfg.digest_max_per_cycle)
+        cur = self._load_digest_cursor()
+        em = self._cms.episodes
+        counts = self._episode_entry_counts()
+        digested = {e.episode_id for band in self._cms.bands
+                    for e in band.entries
+                    if e.source == "digest" and e.episode_id}
+        roots = sorted(
+            (e for e in em.episodes.values()
+             if e.parent_id is None and e.session_key
+             and e.ended_at is not None and e.ended_at > cur["ts"]),
+            key=lambda e: e.ended_at)
+        out: list[dict] = []
+        for root in roots:
+            if root.id in digested:
+                continue
+            subtree = {root.id} | {
+                e.id for e in em.episodes.values()
+                if em._descends_from(e, root.id)}
+            n_entries = sum(counts.get(i, 0) for i in subtree)
+            if n_entries == 0:
+                continue
+            out.append({"root_id": root.id, "ended_at": root.ended_at,
+                        "started_at": root.started_at,
+                        "title": root.title or "(untitled)",
+                        "n_entries": n_entries,
+                        "context": self._episode_inference_context(
+                            root, subtree)})
+            if len(out) >= cap:
+                break
+        return out
+
+    def _store_digest(self, text: str, episode_id: str,
+                      episode_title: str) -> None:
+        """Write one digest entry OUTSIDE the CMS gate pipeline (spec
+        2026-08-24, decision 4): no surprise gate (a digest restates
+        session content, so it is low-surprise by construction), no
+        contradiction decay (it must never supersede the turns it
+        summarizes), no slot extraction (narrative, not a fact source).
+        Stamps the SUMMARIZED episode, not the currently open one — retitle
+        and merge then treat it like the episode's other entries. Caller
+        MUST hold the lock."""
+        assert self._cms is not None
+        emb = self._embedder.encode_single(text)
+        band = self._cms.bands[0]
+        band.store(text, emb, source="digest", surprise=1.0)
+        entry = band.entries[-1]
+        entry.episode_id = episode_id
+        entry.episode_title = episode_title
+        entry.tags = ["digest"]
+        if self._storage is not None:
+            from pseudolife_memory.storage.sync import entry_to_row
+            entry.db_id = self._storage.insert_entry(entry_to_row(entry))
 
     def _delete_episode_row(self, episode_id: str) -> None:
         """Best-effort persistent delete of one episode row. No-op in file mode."""
@@ -6311,6 +6490,12 @@ class MemoryService:
         for e in eps:  # episode_list is newest-first
             if (e.get("entry_count") or 0) > 0:
                 recap = {"title": e.get("title"), "entry_count": e.get("entry_count")}
+                # Session digest (spec 2026-08-24, decision 7): attach the
+                # narrative body when the dream pass has digested this
+                # session; absent, the recap stays the bare title/count.
+                summary = self._episode_digest_body(e.get("id"))
+                if summary:
+                    recap["summary"] = summary
                 break
 
         markdown = format_briefing(surprises, questions, lessons,
@@ -6323,6 +6508,26 @@ class MemoryService:
             "world": world,
             "recap": recap,
         }
+
+    def _episode_digest_body(self, episode_id: str | None) -> str | None:
+        """The narrative body (header line stripped) of ``episode_id``'s
+        digest entry, or None. Takes the lock itself — callers (the
+        briefing orchestrator) must NOT hold it. Band scan only, same cost
+        profile as ``_episode_entry_counts``."""
+        if not episode_id:
+            return None
+        with self._lock:
+            self._ensure_init()
+            assert self._cms is not None
+            for band in self._cms.bands:
+                for en in band.entries:
+                    if (en.source == "digest"
+                            and en.episode_id == episode_id
+                            and en.superseded_at is None):
+                        split = en.text.split("\n", 1)
+                        return (split[1] if len(split) > 1
+                                else split[0]).strip() or None
+        return None
 
     def communities(self, community_id: int | None = None) -> dict[str, Any]:
         """List communities, or the members of one when community_id is given."""

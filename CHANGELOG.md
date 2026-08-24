@@ -6,6 +6,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-24 — session digests: a mid-density layer between raw turns and atomic facts)
+- **One narrative digest per closed session episode, generated during the
+  idle dream cycle and stored as a retrievable `source="digest"` band
+  entry.** Ships default-OFF (`memory.dream.digest_enabled`): enablement
+  gates on the sidecar quality probe (`evals/digest_sidecar_probe.py`)
+  and a budget-matched BEAM verdict. Motivation: BEAM p1-b16 measured
+  summarization as the local stack's floor (rag 0.4147 / hybrid 0.3823)
+  and the reader×volume grid showed neither budget nor a frontier reader
+  fixes it (0.47 at 48 turns) — arc-shaped questions need a coverage
+  layer, not a wider window. Mechanics: digest scope is the closed
+  session root (`generate_digests_stage`, cursor-tracked like outcome
+  inference; the zero-start cursor backfills history when first enabled,
+  capped per cycle); long sessions map-reduce over
+  `digest_context_chars`; the digest write bypasses the surprise gate,
+  contradiction decay, and slot extraction, and `digest` joins
+  `dream.exclude_sources` so digests are never re-mined for facts. The
+  session briefing's recap now renders the digest body. Eval side:
+  `beam_adapter.py --digest` wraps each BEAM batch in an episode and
+  answers a `hybrid_digest` arm char-budget-matched to hybrid; with the
+  flag off every search call keeps the pre-digest byte-identical shape.
+
 ### Added (2026-08-24 — answer-prompt attribution ablation)
 - **`evals/beam_attrib_ablation.py`: isolate the answer-prompt term of the
   Phase-1 lift.** The p1-b16 run changed budget, turn ordinals, and the

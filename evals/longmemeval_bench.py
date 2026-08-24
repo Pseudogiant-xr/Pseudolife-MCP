@@ -125,6 +125,25 @@ HYBRID_TOP_K = 6     # raw turns added to cortex facts in the hybrid arm
 CORTEX_TOP_K = 24
 CORTEX_MIN_SCORE = 0.2
 ARMS = ("rag", "cortex", "hybrid")
+# Session-digest arm (spec 2026-08-24). OFF: every search call in
+# build_contexts is byte-identical to the pre-digest protocol, so all
+# prior artifacts pair exactly. ON (beam_adapter --digest): the searches
+# OVER-FETCH by DIGEST_COUNT (the bank's exact digest population, set by
+# the adapter after ingest) and the control/comparator arms drop digest
+# entries post-hoc, then truncate to the original budget. This is the
+# only exclusion that preserves the control: the service's ``sources=``
+# filter runs AFTER each band's top-k (cms.retrieve), so filtered-out
+# digests would silently SHORTEN the served context instead of being
+# replaced (2026-08-25 review finding) — and post-hoc dropping also
+# covers channels the filter never sees (contiguity neighbors reach the
+# result via episode scope). With top_k widened by the full digest count,
+# at least the original budget of beam turns survives the drop, in
+# exactly the ranking a digest-free bank would produce. The
+# hybrid_digest arm reuses the same widened call with digests kept,
+# budget-matched BY CHARACTERS to the hybrid arm's mem block (coverage
+# pays for itself, never rides on a bigger window).
+DIGEST_ARM = False
+DIGEST_COUNT = 0
 
 _ANSWER_SYSTEM = (
     "You answer questions about a user from their memory context. Use ONLY the "
@@ -523,17 +542,30 @@ def build_contexts(svc, question: str, variants: bool = False,
     # control call: byte-identical baseline by construction), +contiguity,
     # +timeline, +enumerated facts, and all three combined — so knob
     # deltas pair within-question over an identical bank.
-    pinned = svc.search(question, top_k=RAG_TOP_K,
+    # DIGEST_ARM over-fetches by the bank's digest count and drops digest
+    # entries post-hoc (see the DIGEST_ARM comment for why the service's
+    # sources= filter cannot do this); OFF adds 0 and drops nothing —
+    # byte-identical pre-digest behavior.
+    _over = DIGEST_COUNT if DIGEST_ARM else 0
+
+    def _nondigest(entries: list[dict], cap: int) -> list[dict]:
+        if not DIGEST_ARM:
+            return entries
+        return [e for e in entries if e.get("source") != "digest"][:cap]
+
+    pinned = svc.search(question, top_k=RAG_TOP_K + _over,
                         contiguity_neighbors=0, timeline=False)
-    raw = pinned.get("entries", [])
+    raw = _nondigest(pinned.get("entries", []), RAG_TOP_K)
     raw_texts = [e.get("text", "") for e in raw]
     if variants:
         mem_texts = raw_texts
+        mem_mixed: list[dict] = []
     else:
-        mem = svc.search(question, top_k=RAG_TOP_K,
-                         contiguity_neighbors=HYBRID_CONTIG,
-                         timeline=HYBRID_TIMELINE).get("entries", [])
-        mem_texts = [e.get("text", "") for e in mem]
+        mem_mixed = svc.search(question, top_k=RAG_TOP_K + _over,
+                               contiguity_neighbors=HYBRID_CONTIG,
+                               timeline=HYBRID_TIMELINE).get("entries", [])
+        mem_texts = [e.get("text", "")
+                     for e in _nondigest(mem_mixed, RAG_TOP_K)]
     cortex = svc.cortex_search(question, top_k=CORTEX_TOP_K,
                                min_score=CORTEX_MIN_SCORE).get("entries", [])
     # Facts carry their supersession chain: knowledge-update asks about BOTH
@@ -561,6 +593,25 @@ def build_contexts(svc, question: str, variants: bool = False,
         "cortex": "\n".join(fact_lines),
         "hybrid": _hyb(fact_lines, mem_texts),
     }
+    digest_texts: list[str] = []
+    if DIGEST_ARM and not variants:
+        # The digest-eligible arm reuses the widened mem call WITH digests
+        # kept, budget-matched BY CHARACTERS to the hybrid arm's served
+        # mem block: take ranked beam+digest entries while they fit the
+        # byte budget the hybrid block actually used (always at least
+        # one, so the arm can never serve empty against a non-empty
+        # comparator).
+        budget = sum(len(t) for t in mem_texts[:HYBRID_TOP_K])
+        used = 0
+        for e in mem_mixed:
+            t = e.get("text", "")
+            if digest_texts and used + len(t) > budget:
+                break
+            digest_texts.append(t)
+            used += len(t)
+            if len(digest_texts) >= HYBRID_TOP_K:
+                break
+        ctx["hybrid_digest"] = _hyb(fact_lines, digest_texts)
     if with_parts:
         # Structured serve state, persisted with the row by the BEAM
         # adapter: a serving-knob rerun (hybrid_top_k slice, fact render)
@@ -568,6 +619,8 @@ def build_contexts(svc, question: str, variants: bool = False,
         # ingest. The chronicle branch below fills events when active.
         ctx["parts"] = {"raw": raw_texts, "mem": mem_texts,
                         "facts": fact_lines, "events": []}
+        if DIGEST_ARM and not variants:
+            ctx["parts"]["mem_digest"] = digest_texts
     if variants:
         def _texts(**kw) -> list[str]:
             got = svc.search(question, top_k=RAG_TOP_K, **kw)

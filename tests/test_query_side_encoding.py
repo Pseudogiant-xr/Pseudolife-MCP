@@ -62,6 +62,10 @@ EMBEDDER_CALL_SITE_INVENTORY = frozenset({
     ("search_documents", "encode_query"),
     ("set_add", "encode_single"),
     ("store", "encode_single"),
+    # Session digest (spec 2026-08-24): document-side on purpose — the
+    # digest is stored content embedded for later retrieval, the same
+    # classification as store()'s entry embedding.
+    ("_store_digest", "encode_single"),
     ("supersede", "encode_query"),
     ("supersede", "encode_single"),
     ("trace", "encode_query"),
