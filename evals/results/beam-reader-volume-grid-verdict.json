@@ -1,0 +1,16 @@
+{
+  "verdict": "Context volume, not reader quality, is the dominant term for the local stack: qwen 6->48 turns is +0.186 +/- 0.041 (full 400), and the frontier reader's edge SHRINKS as context widens (+0.088 at 6 turns -> +0.043, not significant, at 48). A 27B local reader given ~22K tokens of naive-RAG context reaches 0.665 full-tier; a frontier reader over the same contexts adds only ~+0.04. The sovereign stack's honest ceiling is therefore close to the frontier one at wide serving, and the publishable two-row table (local ~0.64-0.67, frontier ~0.70) is a full-tier, judge-transfer-validated result standing against Cognee's 20-question 0.79.",
+  "date": "2026-08-24",
+  "grid_paired_n116": {
+    "note": "byte-identical old-stack contexts (beam-readersweep-opus-sweep.serve.jsonl); qwen judged locally, opus judged by opus — judge transfer measured at <0.02 (rejudge-opus5)",
+    "qwen": {"rag6": 0.4814, "rag16": 0.5913, "rag48": 0.6574},
+    "opus": {"rag6": 0.5697, "rag16": 0.6535, "rag48": 0.7005},
+    "reader_effect": {"rag6": "+0.088 +/- 0.064", "rag16": "+0.062 +/- 0.075", "rag48": "+0.043 +/- 0.056 (ns)"}
+  },
+  "qwen_full_n400": {"rag6": 0.4783, "rag16": 0.6117, "rag48": 0.6646,
+                     "volume_6_to_48": "+0.186 +/- 0.041"},
+  "instrument": "0 CLI/server errors, 0 all-items-failed rows across 1200 answered arms",
+  "companion": "beam-100K-qwen-27b-p1-b16 (Phase-1 stack, ordinals+prompt, budget-matched 16/16): rag16 0.6425 / hybrid16 0.6226 full-tier; hybrid-rag -0.020 +/- 0.029 (wash)",
+  "pending": "attribution ablation (old-prompt re-answer over p1-b16 contexts) deferred; sweep note: qwen rag6 here (0.478) ran under the Phase-1 prompt over pre-ordinal contexts vs the original run's 0.5005 under the old prompt - small prompt/replicate drift, not a finding",
+  "next": "Publishable post-Friday table: full-tier two rows (sovereign local at wide serving; frontier reader over identical contexts), inferred type-router optional, then Phase-2 session digests targeting the summarization floor (0.415 at best budget)."
+}

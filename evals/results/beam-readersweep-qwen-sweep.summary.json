@@ -1,0 +1,110 @@
+{
+  "benchmark": "BEAM-readersweep",
+  "answerer": "local (http://127.0.0.1:1234/v1)",
+  "n_questions": 400,
+  "budgets": [
+    6,
+    16,
+    48
+  ],
+  "scoring_note": "paper-faithful float mean; identical retrieval across budgets by construction (one serve, sliced); single replicate \u2014 CLI answerer is not bit-reproducible",
+  "arms": {
+    "rag6": {
+      "score": 0.4783,
+      "score_intfaithful": 0.4561,
+      "mean_context_chars": 12616,
+      "judge_failures": 0,
+      "rows_all_items_failed": 0
+    },
+    "rag16": {
+      "score": 0.6117,
+      "score_intfaithful": 0.5707,
+      "mean_context_chars": 29969,
+      "judge_failures": 0,
+      "rows_all_items_failed": 0
+    },
+    "rag48": {
+      "score": 0.6646,
+      "score_intfaithful": 0.6279,
+      "mean_context_chars": 68261,
+      "judge_failures": 0,
+      "rows_all_items_failed": 0
+    }
+  },
+  "types": {
+    "abstention": {
+      "n": 40,
+      "rag6": 0.75,
+      "rag16": 0.675,
+      "rag48": 0.575
+    },
+    "contradiction_resolution": {
+      "n": 40,
+      "rag6": 0.3844,
+      "rag16": 0.4313,
+      "rag48": 0.4562
+    },
+    "event_ordering": {
+      "n": 40,
+      "rag6": 0.2271,
+      "rag16": 0.4824,
+      "rag48": 0.5252
+    },
+    "information_extraction": {
+      "n": 40,
+      "rag6": 0.6854,
+      "rag16": 0.7604,
+      "rag48": 0.85
+    },
+    "instruction_following": {
+      "n": 40,
+      "rag6": 0.5062,
+      "rag16": 0.6937,
+      "rag48": 0.7937
+    },
+    "knowledge_update": {
+      "n": 40,
+      "rag6": 0.425,
+      "rag16": 0.5625,
+      "rag48": 0.6
+    },
+    "multi_session_reasoning": {
+      "n": 40,
+      "rag6": 0.5128,
+      "rag16": 0.662,
+      "rag48": 0.6614
+    },
+    "preference_following": {
+      "n": 40,
+      "rag6": 0.6625,
+      "rag16": 0.8063,
+      "rag48": 0.9125
+    },
+    "summarization": {
+      "n": 40,
+      "rag6": 0.2733,
+      "rag16": 0.3938,
+      "rag48": 0.5099
+    },
+    "temporal_reasoning": {
+      "n": 40,
+      "rag6": 0.3563,
+      "rag16": 0.65,
+      "rag48": 0.7625
+    }
+  },
+  "baseline_qwen_reader_opus_judged": {
+    "rag": {
+      "score": 0.4989,
+      "score_intfaithful": 0.4691,
+      "score_orig": 0.5005,
+      "delta": -0.0017,
+      "judge_failures": 0,
+      "rows_all_items_failed": 0
+    },
+    "source": "beam-100K-qwen-27b-beam100k-qwen38.rejudge-opus5.summary.json"
+  },
+  "judge": "local (http://127.0.0.1:1234/v1)",
+  "cli_errors": 0,
+  "date": "2026-08-24"
+}
