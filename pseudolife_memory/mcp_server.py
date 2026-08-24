@@ -1903,8 +1903,12 @@ def start_dream_sweep() -> None:
             logger.warning(
                 "dream enabled but no extractor LLM configured "
                 "(PSEUDOLIFE_DREAM_BASE_URL/_MODEL unset): cortex auto-population is "
-                "disabled; only memory_fact_set writes canonical facts. Configure the "
-                "extractor sidecar to populate the cortex."
+                "disabled; only memory_fact_set writes canonical facts. Point the "
+                "daemon at any OpenAI-compatible endpoint to fix it, e.g. "
+                "PSEUDOLIFE_DREAM_BASE_URL=http://localhost:11434/v1 "
+                "PSEUDOLIFE_DREAM_MODEL=qwen2.5:7b (a local Ollama); the Docker "
+                "tier ships an extractor sidecar instead. /health reports this as "
+                "extractor: \"none\"."
             )
         for warning in startup_extractor_warnings(dream_cfg):
             logger.warning("dream extractor config: %s", warning)
