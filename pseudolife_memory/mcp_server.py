@@ -1401,28 +1401,16 @@ def _compact_recall_text(t: str) -> str:
 def memory_recall(query: str, hops: int = 3, top_k: int = 5,
                   verbose: bool = False) -> dict[str, Any]:
     """Multi-hop retrieval over the knowledge graph, for RELATIONAL
-    questions whose answer is reached by following links — "what does X
-    ultimately run on?", "how does A reach C?" — which single-shot
-    ``memory_search`` can't chain. Read-only. ``low_confidence: true``
-    means no seed entity matched — fall back to ``memory_search``.
+    questions answered by following links ("what does X ultimately run
+    on?") that single-shot ``memory_search`` can't chain. Read-only.
+    ``low_confidence: true`` means no seed entity matched — fall back to
+    ``memory_search``.
 
-    Args:
-        hops: Max graph hops (default 3, max 5).
-        top_k: Bounds only the SEED search — the initial hits naming the
-            entities the walk starts from — NOT the result: expansion fans
-            out independently and the result lists are capped separately.
-            At least 3 ``texts`` slots (fewer if ``top_k`` is smaller) go
-            to seed hits; the rest to hop-discovered support.
-        verbose: Full fact/edge provenance and untruncated texts. Default
-            facts are ``{attribute, value}``, edges ``{src, relation,
-            dst}``, texts truncated to a preview.
-
-    Returns: ``{seeds, entities, edges, paths, texts, iterations}``.
-    ``entities``/``edges``/``texts`` are capped (currently 10/15/6) with a
-    per-hop minimum so a hub seed's 1-hop ring can't crowd out the deeper
-    hops the walk exists to reach; ``edges`` prefers links between
-    surviving entities; each entity's ``facts`` is capped (currently 5).
-    Rationale at the module-level cap constants.
+    ``top_k`` bounds only the seed search, not the result:
+    ``entities``/``edges``/``texts`` (and per-entity ``facts``) are capped
+    separately, reserving slots per hop so a hub seed's 1-hop ring can't
+    crowd out deeper hops. ``verbose=True`` returns full provenance and
+    untruncated texts. Details: docs/guide/retrieval.md.
     """
     out = service.recall(query, hops=hops, top_k=top_k)
     entity_hop = out.get("entity_hop") or {}
