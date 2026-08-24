@@ -127,6 +127,48 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pins both `server.json` version fields and the `ops/docker-compose.yml`
   daemon image tag (which the compose file already documented as the deploy
   source of truth, but nothing checked it) against `pyproject.toml`.
+### Fixed (2026-08-25 — interrupted legacy import resumes instead of blocking)
+- **A legacy `.pt` import that died part-way no longer permanently blocks
+  the retry and silently drops the remainder (#187).** `migrate_legacy`
+  commits per entry and renames the sources only at the very end, while its
+  only idempotency guard was "the entries table is non-empty" — so a
+  malformed row, embedder failure, dropped connection, full disk or killed
+  machine durably committed some rows, and every later boot then answered
+  `storage_not_empty`: the remaining entries and **all** cortex facts were
+  never imported, the sources never got their `.pre-v8.bak` rename, and the
+  service caller swallowed the exception to a single warning. Progress is
+  now *recorded* rather than inferred, in a `legacy_migration` meta row
+  (status, source fingerprint, entries-done count) — no schema change. A
+  later boot with `status=in_progress` and a matching source fingerprint
+  resumes the import, skipping rows already committed by identity
+  (`text` + `timestamp` — the `entries.id` serial is minted at insert, and
+  `band` is deliberately excluded because `hydrate_cms` rewrites it to the
+  live preset on the same boot that imported the row), so nothing is
+  duplicated. A resume MERGES the cortex rather than replacing it: only
+  slots nobody has written yet take legacy rows, the dream cursor only
+  moves forward, and the supersession log is seeded only when empty — the
+  daemon keeps serving through the degraded window, so a snapshot rewrite
+  would destroy whatever landed there. `status=done` is written only after
+  the renames succeed, and a recorded source that vanished without being
+  renamed refuses the resume instead of marking a short bank done. A
+  populated bank
+  with no progress record keeps the old refusal, so a legacy `.pt` can
+  never be merged into somebody's live bank, and a *different* `.pt` bank
+  dropped in over an interrupted one is refused on the fingerprint instead
+  of being folded into its leftovers. Banks migrated before this change
+  have no meta row but do have renamed sources, so they never enter the
+  import path at all.
+- **A partial import is now loud.** `MemoryService._ensure_init` still
+  boots (a half-imported bank serves fine) but logs at ERROR naming the
+  resume path and the meta row, and `/health` grows a `migration_partial`
+  field — previously the only trace was one `WARNING` line. `status` stays
+  `"ok"` deliberately: `web/api.py` serves any non-ok payload as HTTP 503,
+  which the Docker healthcheck and the install/update scripts treat as
+  fatal, so flagging it there would turn a non-fatal partial import into a
+  bricked deploy loop. The module docstring's claim that
+  this failure class was closed in 2026-07-28 is corrected: that fix
+  removed the commonest *cause* (embedding-dimension mismatch), not the
+  unrecoverability.
 
 ### Added (2026-08-24 — answer-prompt attribution ablation)
 - **`evals/beam_attrib_ablation.py`: isolate the answer-prompt term of the

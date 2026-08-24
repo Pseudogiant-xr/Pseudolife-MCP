@@ -344,7 +344,17 @@ The shim is torch-free, so sessions attach near-instantly; the daemon pays
 the one-time embedder warmup once for everyone. On first run with a v≤0.1
 `cms_state.pt` present in `PSEUDOLIFE_MCP_DATA_DIR`, the daemon
 auto-migrates it into Postgres and renames the originals `*.pre-v8.bak`
-(never deletes them).
+(never deletes them). The import records its progress in a
+`legacy_migration` meta row, so one that fails part-way resumes on the next
+start instead of leaving a short bank behind. While it is unfinished the
+daemon keeps serving and `/health` stays `status: "ok"` (so healthchecks and
+`ops/update.ps1` are not tripped by it) but carries an extra
+`migration_partial` field; the matching ERROR lines in the daemon log name
+the resume path. A resume merges rather than overwrites — cortex facts
+written during that window are kept, and only slots nobody has written land
+from the legacy bank. Leave the original `.pt` files in place until it
+completes: the resume reads them, and deleting one makes the bank
+unfinishable.
 
 ## Session identity
 

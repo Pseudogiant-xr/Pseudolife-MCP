@@ -817,7 +817,8 @@
    "s": "legacy .pt import",
    "p": "pseudolife_memory/storage/migrate.py",
    "d": [
-    "Empty-bank-only, idempotent; weights_only=True (CWE-502 guard)",
+    "Empty bank or a recorded resume; weights_only=True (CWE-502 guard)",
+    "Progress in the legacy_migration meta row — partial imports resume",
     "Renames sources *.pre-v8.bak — never deletes"
    ]
   },

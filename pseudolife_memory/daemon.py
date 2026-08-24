@@ -61,6 +61,17 @@ def _build_health_payload(svc, token_present: bool) -> dict:
     if init_refusal:
         payload["status"] = "degraded"
         payload["init_refusal"] = init_refusal
+    # A legacy .pt import that stopped part-way leaves a bank that serves
+    # normally but is SHORT (#187). Nothing else on this payload would show
+    # it, so it surfaces here — but deliberately WITHOUT touching `status`:
+    # web/api.py serves any non-ok payload as HTTP 503, which the Docker
+    # healthcheck and the install/update scripts all treat as fatal, so
+    # "degraded" here would turn a non-fatal partial import into a bricked
+    # deploy loop. The daemon is serving; loudness lives in the ERROR logs
+    # this flag mirrors.
+    migration_partial = getattr(svc, "_migration_partial", None)
+    if migration_partial:
+        payload["migration_partial"] = migration_partial
     # Honest DB liveness (2026-07-02 review fix): /health used to say
     # "ok" while a restarted Postgres had every memory tool failing.
     # ping() uses a dedicated short-lived connection so the probe can't
