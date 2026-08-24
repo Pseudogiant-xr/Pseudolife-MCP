@@ -134,3 +134,28 @@ def test_service_search_logs_and_get_reinforce_label(pg_conn, pg_url,
     svc.config.memory.retrieval_log.retention_days = 0
     assert svc.prune_retrieval_log() >= 1
     assert svc._storage.retrieval_events_window() == []
+
+
+def test_prune_retrieval_log_holds_service_lock(pg_conn, pg_url, tmp_path):
+    """prune_retrieval_events opens a psycopg transaction block on the shared
+    connection; the dream-sweep thread calls prune_retrieval_log concurrently
+    with lock-holding writers, so an unlocked call can interleave transaction
+    blocks and wedge the connection INTRANS (2026-08-21 daemon incident:
+    "transaction commit at the wrong nesting level"). The service lock must
+    be held around the storage call, as prune_dream_runs does."""
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    with svc._lock:
+        svc._ensure_init()
+    assert svc._storage is not None
+    seen: dict[str, bool] = {}
+
+    def _probe(cutoff: float) -> int:
+        seen["locked"] = svc._lock.locked()
+        return 0
+
+    svc._storage.prune_retrieval_events = _probe  # type: ignore[method-assign]
+    svc.prune_retrieval_log()
+    assert seen.get("locked"), \
+        "prune_retrieval_log must call storage under self._lock"

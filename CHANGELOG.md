@@ -102,6 +102,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   partial rerun doesn't need, and rows/summaries now record the
   effective `hybrid_top_k` so artifacts self-describe.
 
+### Fixed (2026-08-21 — sweep-thread storage call could wedge the Postgres connection)
+- **`prune_retrieval_log` (the v31 retrieval-log retention pass) now takes
+  the service lock around its storage call.** It was the one storage
+  mutation on the dream-sweep tick that ran unlocked, so the sweep thread
+  could interleave its psycopg transaction block with a lock-holding
+  writer's on the shared connection. psycopg then raises "transaction
+  commit at the wrong nesting level" and the connection is left
+  permanently in-transaction: every subsequent dream sweep and episode
+  write-through fails, `/health` still reports ok, and the episode
+  write-through spins INSERTs inside the dead transaction — in the
+  2026-08-21 incident this pinned a Postgres core for 2½ hours until a
+  daemon restart. A new static guard test
+  (`tests/test_service_lock_discipline.py`) walks `service.py` and fails
+  on any storage/graph call outside `with self._lock` that is not in the
+  audited caller-holds-lock allowlist, so the next unlocked addition
+  fails in CI instead of in production.
+
 ### Added (2026-08-20 — retrieval event log, schema v31)
 - **Every search now feeds a training log for a future learned reranker.**
   Schema **v31** adds `retrieval_events` (one append-only row per
