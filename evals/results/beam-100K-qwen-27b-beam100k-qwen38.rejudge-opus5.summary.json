@@ -1,0 +1,1225 @@
+{
+  "benchmark": "BEAM-rejudge",
+  "source": "beam-100K-qwen-27b-beam100k-qwen38.jsonl",
+  "judge": "claude-opus-5",
+  "n_questions": 400,
+  "scoring_note": "paper-faithful float mean; _orig fields are the source run's local-judge scores over identical responses",
+  "arms": {
+    "rag": {
+      "score": 0.4989,
+      "score_intfaithful": 0.4691,
+      "score_orig": 0.5005,
+      "delta": -0.0017,
+      "judge_failures": 0,
+      "rows_all_items_failed": 0
+    },
+    "cortex": {
+      "score": 0.2985,
+      "score_intfaithful": 0.2734,
+      "score_orig": 0.2918,
+      "delta": 0.0066,
+      "judge_failures": 0,
+      "rows_all_items_failed": 0
+    },
+    "hybrid": {
+      "score": 0.452,
+      "score_intfaithful": 0.4165,
+      "score_orig": 0.4682,
+      "delta": -0.0162,
+      "judge_failures": 0,
+      "rows_all_items_failed": 0
+    }
+  },
+  "types": {
+    "abstention": {
+      "n": 40,
+      "rag": 0.775,
+      "rag_orig": 0.775,
+      "cortex": 0.95,
+      "cortex_orig": 0.95,
+      "hybrid": 0.8,
+      "hybrid_orig": 0.8
+    },
+    "contradiction_resolution": {
+      "n": 40,
+      "rag": 0.3937,
+      "rag_orig": 0.2781,
+      "cortex": 0.2,
+      "cortex_orig": 0.1281,
+      "hybrid": 0.3438,
+      "hybrid_orig": 0.2531
+    },
+    "event_ordering": {
+      "n": 40,
+      "rag": 0.3092,
+      "rag_orig": 0.3533,
+      "cortex": 0.0096,
+      "cortex_orig": 0.0142,
+      "hybrid": 0.0881,
+      "hybrid_orig": 0.1335
+    },
+    "information_extraction": {
+      "n": 40,
+      "rag": 0.5844,
+      "rag_orig": 0.5865,
+      "cortex": 0.25,
+      "cortex_orig": 0.2562,
+      "hybrid": 0.526,
+      "hybrid_orig": 0.5219
+    },
+    "instruction_following": {
+      "n": 40,
+      "rag": 0.5563,
+      "rag_orig": 0.55,
+      "cortex": 0.3063,
+      "cortex_orig": 0.2625,
+      "hybrid": 0.5687,
+      "hybrid_orig": 0.625
+    },
+    "knowledge_update": {
+      "n": 40,
+      "rag": 0.4188,
+      "rag_orig": 0.4188,
+      "cortex": 0.2875,
+      "cortex_orig": 0.2875,
+      "hybrid": 0.3875,
+      "hybrid_orig": 0.4375
+    },
+    "multi_session_reasoning": {
+      "n": 40,
+      "rag": 0.5251,
+      "rag_orig": 0.5163,
+      "cortex": 0.19,
+      "cortex_orig": 0.2025,
+      "hybrid": 0.5346,
+      "hybrid_orig": 0.5721
+    },
+    "preference_following": {
+      "n": 40,
+      "rag": 0.7063,
+      "rag_orig": 0.775,
+      "cortex": 0.5312,
+      "cortex_orig": 0.5312,
+      "hybrid": 0.6813,
+      "hybrid_orig": 0.7063
+    },
+    "summarization": {
+      "n": 40,
+      "rag": 0.2512,
+      "rag_orig": 0.2525,
+      "cortex": 0.1725,
+      "cortex_orig": 0.1612,
+      "hybrid": 0.2087,
+      "hybrid_orig": 0.2389
+    },
+    "temporal_reasoning": {
+      "n": 40,
+      "rag": 0.4688,
+      "rag_orig": 0.5,
+      "cortex": 0.0875,
+      "cortex_orig": 0.125,
+      "hybrid": 0.3812,
+      "hybrid_orig": 0.3937
+    }
+  },
+  "stability_sample": {
+    "n_pairs": 60,
+    "n_items": 184,
+    "expected_items": 184,
+    "pairs": [
+      {
+        "key": [
+          "3",
+          "contradiction_resolution",
+          0,
+          "rag"
+        ],
+        "first": [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "second": [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "key": [
+          "4",
+          "information_extraction",
+          1,
+          "cortex"
+        ],
+        "first": [
+          0.0,
+          0.0
+        ],
+        "second": [
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "key": [
+          "10",
+          "information_extraction",
+          1,
+          "hybrid"
+        ],
+        "first": [
+          1.0,
+          1.0,
+          0.0,
+          1.0,
+          0.5,
+          0.5
+        ],
+        "second": [
+          1.0,
+          1.0,
+          0.0,
+          1.0,
+          0.0,
+          0.5
+        ]
+      },
+      {
+        "key": [
+          "17",
+          "summarization",
+          0,
+          "rag"
+        ],
+        "first": [
+          0.0,
+          0.5,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "second": [
+          0.5,
+          0.5,
+          1.0,
+          0.0,
+          1.0
+        ]
+      },
+      {
+        "key": [
+          "7",
+          "instruction_following",
+          1,
+          "cortex"
+        ],
+        "first": [
+          0.0,
+          0.0
+        ],
+        "second": [
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "key": [
+          "6",
+          "knowledge_update",
+          1,
+          "rag"
+        ],
+        "first": [
+          0.0
+        ],
+        "second": [
+          0.0
+        ]
+      },
+      {
+        "key": [
+          "3",
+          "summarization",
+          0,
+          "hybrid"
+        ],
+        "first": [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "second": [
+          1.0,
+          0.0,
+          0.5,
+          0.0
+        ]
+      },
+      {
+        "key": [
+          "19",
+          "information_extraction",
+          1,
+          "cortex"
+        ],
+        "first": [
+          1.0
+        ],
+        "second": [
+          1.0
+        ]
+      },
+      {
+        "key": [
+          "6",
+          "event_ordering",
+          1,
+          "hybrid"
+        ],
+        "first": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "second": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "key": [
+          "20",
+          "event_ordering",
+          0,
+          "hybrid"
+        ],
+        "first": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "second": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "key": [
+          "9",
+          "temporal_reasoning",
+          0,
+          "cortex"
+        ],
+        "first": [
+          0.0,
+          0.0
+        ],
+        "second": [
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "key": [
+          "16",
+          "instruction_following",
+          1,
+          "cortex"
+        ],
+        "first": [
+          0.0
+        ],
+        "second": [
+          0.0
+        ]
+      },
+      {
+        "key": [
+          "7",
+          "event_ordering",
+          0,
+          "hybrid"
+        ],
+        "first": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "second": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "key": [
+          "13",
+          "preference_following",
+          1,
+          "cortex"
+        ],
+        "first": [
+          0.0,
+          0.0
+        ],
+        "second": [
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "key": [
+          "18",
+          "multi_session_reasoning",
+          0,
+          "hybrid"
+        ],
+        "first": [
+          0.0
+        ],
+        "second": [
+          0.0
+        ]
+      },
+      {
+        "key": [
+          "13",
+          "preference_following",
+          1,
+          "hybrid"
+        ],
+        "first": [
+          0.0,
+          0.0
+        ],
+        "second": [
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "key": [
+          "12",
+          "event_ordering",
+          0,
+          "rag"
+        ],
+        "first": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "second": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "key": [
+          "17",
+          "knowledge_update",
+          1,
+          "cortex"
+        ],
+        "first": [
+          0.0
+        ],
+        "second": [
+          0.0
+        ]
+      },
+      {
+        "key": [
+          "8",
+          "contradiction_resolution",
+          1,
+          "hybrid"
+        ],
+        "first": [
+          0.0,
+          1.0,
+          0.0,
+          0.5
+        ],
+        "second": [
+          0.0,
+          1.0,
+          0.0,
+          0.5
+        ]
+      },
+      {
+        "key": [
+          "14",
+          "abstention",
+          0,
+          "cortex"
+        ],
+        "first": [
+          1.0
+        ],
+        "second": [
+          1.0
+        ]
+      },
+      {
+        "key": [
+          "19",
+          "knowledge_update",
+          1,
+          "rag"
+        ],
+        "first": [
+          1.0
+        ],
+        "second": [
+          1.0
+        ]
+      },
+      {
+        "key": [
+          "12",
+          "information_extraction",
+          1,
+          "hybrid"
+        ],
+        "first": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "second": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      {
+        "key": [
+          "11",
+          "knowledge_update",
+          0,
+          "hybrid"
+        ],
+        "first": [
+          0.0
+        ],
+        "second": [
+          0.0
+        ]
+      },
+      {
+        "key": [
+          "2",
+          "event_ordering",
+          1,
+          "hybrid"
+        ],
+        "first": [
+          1.0,
+          1.0,
+          0.0,
+          0.5,
+          0.0
+        ],
+        "second": [
+          1.0,
+          1.0,
+          0.0,
+          0.5,
+          0.0
+        ]
+      },
+      {
+        "key": [
+          "6",
+          "contradiction_resolution",
+          0,
+          "cortex"
+        ],
+        "first": [
+          0.0,
+          1.0,
+          0.0,
+          1.0
+        ],
+        "second": [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "key": [
+          "9",
+          "contradiction_resolution",
+          0,
+          "cortex"
+        ],
+        "first": [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "second": [
+          0.0,
+          0.5,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "key": [
+          "12",
+          "instruction_following",
+          0,
+          "rag"
+        ],
+        "first": [
+          0.0,
+          0.0
+        ],
+        "second": [
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "key": [
+          "20",
+          "abstention",
+          1,
+          "hybrid"
+        ],
+        "first": [
+          1.0
+        ],
+        "second": [
+          1.0
+        ]
+      },
+      {
+        "key": [
+          "4",
+          "summarization",
+          0,
+          "hybrid"
+        ],
+        "first": [
+          1.0,
+          0.5,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "second": [
+          1.0,
+          1.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      {
+        "key": [
+          "19",
+          "preference_following",
+          1,
+          "rag"
+        ],
+        "first": [
+          1.0,
+          0.0
+        ],
+        "second": [
+          1.0,
+          0.0
+        ]
+      },
+      {
+        "key": [
+          "15",
+          "temporal_reasoning",
+          1,
+          "hybrid"
+        ],
+        "first": [
+          1.0,
+          0.0
+        ],
+        "second": [
+          1.0,
+          0.5
+        ]
+      },
+      {
+        "key": [
+          "8",
+          "summarization",
+          1,
+          "cortex"
+        ],
+        "first": [
+          0.0,
+          0.0,
+          0.5,
+          0.0,
+          0.5
+        ],
+        "second": [
+          0.0,
+          0.0,
+          0.5,
+          0.0,
+          0.5
+        ]
+      },
+      {
+        "key": [
+          "5",
+          "contradiction_resolution",
+          0,
+          "cortex"
+        ],
+        "first": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "second": [
+          0.0,
+          0.5,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "key": [
+          "7",
+          "preference_following",
+          1,
+          "rag"
+        ],
+        "first": [
+          0.0,
+          1.0
+        ],
+        "second": [
+          0.0,
+          1.0
+        ]
+      },
+      {
+        "key": [
+          "17",
+          "summarization",
+          1,
+          "rag"
+        ],
+        "first": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "second": [
+          0.0,
+          0.0,
+          0.5,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "key": [
+          "11",
+          "contradiction_resolution",
+          0,
+          "hybrid"
+        ],
+        "first": [
+          0.0,
+          1.0,
+          0.0,
+          1.0
+        ],
+        "second": [
+          0.0,
+          1.0,
+          0.0,
+          1.0
+        ]
+      },
+      {
+        "key": [
+          "8",
+          "preference_following",
+          0,
+          "hybrid"
+        ],
+        "first": [
+          1.0,
+          1.0
+        ],
+        "second": [
+          1.0,
+          1.0
+        ]
+      },
+      {
+        "key": [
+          "1",
+          "instruction_following",
+          1,
+          "hybrid"
+        ],
+        "first": [
+          1.0
+        ],
+        "second": [
+          0.5
+        ]
+      },
+      {
+        "key": [
+          "12",
+          "contradiction_resolution",
+          1,
+          "rag"
+        ],
+        "first": [
+          0.0,
+          0.0,
+          1.0,
+          0.5
+        ],
+        "second": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ]
+      },
+      {
+        "key": [
+          "3",
+          "multi_session_reasoning",
+          0,
+          "cortex"
+        ],
+        "first": [
+          1.0
+        ],
+        "second": [
+          1.0
+        ]
+      },
+      {
+        "key": [
+          "1",
+          "abstention",
+          0,
+          "rag"
+        ],
+        "first": [
+          1.0
+        ],
+        "second": [
+          1.0
+        ]
+      },
+      {
+        "key": [
+          "6",
+          "summarization",
+          0,
+          "rag"
+        ],
+        "first": [
+          0.5,
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "second": [
+          0.5,
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "key": [
+          "2",
+          "information_extraction",
+          1,
+          "hybrid"
+        ],
+        "first": [
+          0.5,
+          1.0,
+          1.0
+        ],
+        "second": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      {
+        "key": [
+          "17",
+          "information_extraction",
+          0,
+          "hybrid"
+        ],
+        "first": [
+          1.0
+        ],
+        "second": [
+          1.0
+        ]
+      },
+      {
+        "key": [
+          "2",
+          "contradiction_resolution",
+          0,
+          "cortex"
+        ],
+        "first": [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "second": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      {
+        "key": [
+          "11",
+          "contradiction_resolution",
+          0,
+          "rag"
+        ],
+        "first": [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        "second": [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ]
+      },
+      {
+        "key": [
+          "15",
+          "knowledge_update",
+          0,
+          "hybrid"
+        ],
+        "first": [
+          1.0
+        ],
+        "second": [
+          1.0
+        ]
+      },
+      {
+        "key": [
+          "9",
+          "information_extraction",
+          1,
+          "hybrid"
+        ],
+        "first": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "second": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "key": [
+          "16",
+          "knowledge_update",
+          1,
+          "hybrid"
+        ],
+        "first": [
+          0.0
+        ],
+        "second": [
+          0.0
+        ]
+      },
+      {
+        "key": [
+          "17",
+          "contradiction_resolution",
+          0,
+          "rag"
+        ],
+        "first": [
+          0.5,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "second": [
+          0.5,
+          1.0,
+          1.0,
+          0.0
+        ]
+      },
+      {
+        "key": [
+          "13",
+          "summarization",
+          1,
+          "cortex"
+        ],
+        "first": [
+          0.5,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        "second": [
+          0.5,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "key": [
+          "8",
+          "knowledge_update",
+          0,
+          "rag"
+        ],
+        "first": [
+          0.0
+        ],
+        "second": [
+          0.0
+        ]
+      },
+      {
+        "key": [
+          "5",
+          "event_ordering",
+          1,
+          "rag"
+        ],
+        "first": [
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "second": [
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "key": [
+          "12",
+          "contradiction_resolution",
+          0,
+          "cortex"
+        ],
+        "first": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "second": [
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "key": [
+          "11",
+          "preference_following",
+          0,
+          "rag"
+        ],
+        "first": [
+          0.0,
+          0.0
+        ],
+        "second": [
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "key": [
+          "19",
+          "temporal_reasoning",
+          0,
+          "hybrid"
+        ],
+        "first": [
+          1.0,
+          1.0
+        ],
+        "second": [
+          1.0,
+          1.0
+        ]
+      },
+      {
+        "key": [
+          "7",
+          "information_extraction",
+          0,
+          "rag"
+        ],
+        "first": [
+          1.0
+        ],
+        "second": [
+          1.0
+        ]
+      },
+      {
+        "key": [
+          "6",
+          "preference_following",
+          0,
+          "cortex"
+        ],
+        "first": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "second": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "key": [
+          "12",
+          "preference_following",
+          0,
+          "hybrid"
+        ],
+        "first": [
+          0.5,
+          0.0
+        ],
+        "second": [
+          0.5,
+          0.0
+        ]
+      },
+      {
+        "key": [
+          "19",
+          "event_ordering",
+          1,
+          "rag"
+        ],
+        "first": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          0.5,
+          0.0
+        ],
+        "second": [
+          0.0,
+          0.0,
+          1.0,
+          1.0,
+          0.5,
+          0.0,
+          0.0
+        ]
+      }
+    ],
+    "item_agreement": 0.8913,
+    "mean_abs_delta": 0.0734
+  },
+  "cli_calls": 1145,
+  "cli_errors": 0,
+  "date": "2026-08-22"
+}

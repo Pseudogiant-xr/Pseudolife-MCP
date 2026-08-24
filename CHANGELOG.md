@@ -6,6 +6,57 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-08-21 — hybrid arm budget-matched to the rag control by default)
+- **`HYBRID_TOP_K` is now 6 (was 3), equal to `RAG_TOP_K`, in the LME/BEAM
+  bench harness.** The hybrid arm previously served half the rag control's
+  raw-turn budget, so every hybrid-vs-rag comparison confounded the fact
+  spine with a halved turn window — the 2026-07-30 ceiling-e2e autopsy and
+  the 2026-08-21 BEAM review both traced hybrid "losses" to exactly this.
+  Hybrid is now a superset of the control by construction. Bench rows
+  record the effective `hybrid_top_k`; rows without the key predate the
+  flip and were served at 3. Pre-flip artifacts are NOT comparable to
+  post-flip hybrid numbers. The regression-gate arm1 pinned contexts were
+  built at 3 and splice raw blocks verbatim, so the gate is mechanically
+  unaffected — but its hybrid arm no longer represents the shipped
+  default until a fresh-extract re-baseline (`regression_gate.ps1
+  -Establish` after a new arm1 extract), noted at the constant.
+
+### Added (2026-08-21 — BEAM banks and served contexts persist)
+- **BEAM runs no longer discard their consolidated state.** Each row now
+  carries the exact served context per arm plus the structured serve
+  state (`parts`: pinned raw turns, memory turns, fact lines, events), and
+  each chat's consolidated fact bank (with per-slot history chains) is
+  dumped to `evals/results/banks/beam-<tier>-<extractor>-<tag>/`
+  (gitignored, like all bank dumps). A serving-knob rerun or re-judge now
+  recomposes from persisted state instead of re-paying the ~5h
+  ingest/extraction phase — the qwen38 rerun had to re-ingest precisely
+  because the first run kept nothing. Turns are not dumped (they are
+  verbatim in the static BEAM `chat.json`); chronicle event serving is
+  the one channel that still needs a live bank.
+
+### Added (2026-08-21 — BEAM judge-transfer and budget-match instrumentation)
+- **`evals/beam_rejudge.py`: re-judge an existing BEAM run's recorded
+  answers with a frontier judge** (headless `claude -p`, pooled workers,
+  never the production shim), using the same upstream
+  `unified_llm_judge_base_prompt`, one call per rubric item. Retrieval and
+  answering are not re-run, so any score movement is pure judge effect —
+  the judge-transfer measurement `beam-100k-verdict.json` (2026-08-03)
+  left as the open decision blocking any comparison against the
+  GPT-judged published numbers (Cognee 0.79 @ 100K etc.). Writes
+  `<source>.rejudge-<tag>.jsonl` + a paired summary carrying
+  original-vs-rejudged scores per arm/type and a seeded stability sample
+  (pairs judged twice) that bounds what a delta can claim, since a CLI
+  judge is not bit-reproducible. Resumable per row; the source artifact
+  is never modified.
+- **`beam_adapter.py --hybrid-top-k N` and `--arms a,b`**: the bench's
+  hybrid arm serves `HYBRID_TOP_K=3` raw turns against the rag arm's 6,
+  so hybrid-vs-rag deltas confound the fact spine with a halved turn
+  budget — the same asymmetry the 2026-07-30 ceiling-e2e diagnosis found
+  on LongMemEval. `--hybrid-top-k 6` budget-matches the arms (default
+  unchanged: prior artifacts stay byte-identical), `--arms` skips arms a
+  partial rerun doesn't need, and rows/summaries now record the
+  effective `hybrid_top_k` so artifacts self-describe.
+
 ### Fixed (2026-08-21 — sweep-thread storage call could wedge the Postgres connection)
 - **`prune_retrieval_log` (the v31 retrieval-log retention pass) now takes
   the service lock around its storage call.** It was the one storage

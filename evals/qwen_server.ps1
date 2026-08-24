@@ -43,7 +43,8 @@ environment — the LLAMA_ARG_* env vars alone are NOT enough for the .bat
 path because its explicit command-line flags would override them.
 #>
 
-$script:QwenDir    = "$env:USERPROFILE\ClaudeCode\llama.ccp"
+# Directory renamed llama.ccp -> llama.cpp on 2026-08-21 (typo fix).
+$script:QwenDir    = "$env:USERPROFILE\ClaudeCode\llama.cpp"
 # b10488 (2026-08-19): byte-identical output to b10453 on the fixed probe
 # (hash 6444B058CAAC both) and ~4% faster decode; gate canary re-run on bump.
 $script:QwenEngine = "$script:QwenDir\engine-b10488"

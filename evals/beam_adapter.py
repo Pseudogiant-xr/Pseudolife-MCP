@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import gzip
 import json
 import os
 import re
@@ -54,11 +55,23 @@ from longmemeval_bench import (  # noqa: E402
 )
 
 
-def arms_for(chronicle: bool) -> tuple[str, ...]:
+def arms_for(chronicle: bool, only: str | None = None) -> tuple[str, ...]:
     """The answered/judged arms: --chronicle adds hybrid_ev (vanilla
     hybrid + the served events block, same pinned search call — the LME
-    ev2 arm contract)."""
-    return (*ARMS, "hybrid_ev") if chronicle else ARMS
+    ev2 arm contract). ``only`` (--arms) keeps a comma-separated subset in
+    canonical order — a partial rerun (e.g. rag,hybrid for the
+    budget-matched arm, with rag as the identical-input control) skips
+    arms whose answers the question at hand does not need."""
+    arms = (*ARMS, "hybrid_ev") if chronicle else ARMS
+    if only:
+        keep = {a.strip() for a in only.split(",") if a.strip()}
+        unknown = keep - set(arms)
+        if unknown:
+            raise SystemExit(
+                f"--arms names {sorted(unknown)} not in {arms} "
+                "(hybrid_ev needs --chronicle)")
+        arms = tuple(a for a in arms if a in keep)
+    return arms
 
 # BEAM answers are rubric-judged per nugget, and several abilities
 # (summarization, event ordering, instruction following) need multi-part
@@ -162,16 +175,19 @@ def parse_judge_score(raw: str) -> float | None:
 
 
 def judge_response(judge_prompt: str, question: str, rubric: list[str],
-                   response: str) -> dict:
+                   response: str, chat=None) -> dict:
     """BEAM's per-item rubric judging: mean over items. Records the
-    paper-faithful float and the code-faithful int per item."""
+    paper-faithful float and the code-faithful int per item. ``chat``
+    swaps the transport (beam_rejudge.py injects a frontier CLI judge);
+    scoring and failure semantics stay identical."""
+    chat = chat or _chat
     items = []
     for item in rubric:
         prompt = (judge_prompt
                   .replace("<question>", question)
                   .replace("<rubric_item>", item)
                   .replace("<llm_response>", response or "(empty)"))
-        raw = _chat("", prompt, max_tokens=512)
+        raw = chat("", prompt, max_tokens=512)
         score = parse_judge_score(raw)
         items.append({"rubric_item": item, "score": score,
                       "score_int": None if score is None else int(score)})
@@ -226,11 +242,57 @@ def out_file(tier: str, extractor: str, tag: str) -> Path:
     return RESULTS_DIR / f"beam-{tier}-{extractor}-{tag}.jsonl"
 
 
+def beam_bank_dir(tier: str, extractor: str, tag: str) -> Path:
+    return RESULTS_DIR / "banks" / f"beam-{tier}-{extractor}-{tag}"
+
+
+def dump_chat_bank(svc, chat_id: str, tally: dict, path: Path) -> None:
+    """Persist a chat's consolidated fact bank (with per-slot history
+    chains), the LME dump_bank pattern per chat: fact embeddings are
+    encode_single over "entity attribute value" and cortex search is
+    cosine over them, so fact retrieval replays offline exactly. Turns are
+    NOT dumped — they come verbatim from the static BEAM chat.json, and
+    re-embedding them is CPU-cheap. Chronicle event serving is the one
+    channel a dump cannot replay (it rides the live search call)."""
+    facts = svc.cortex_dump().get("entries", [])
+    for f in facts:
+        f.pop("source_entries", None)             # bulky, not needed offline
+        try:
+            versions = svc.history(f.get("entity", ""),
+                                   f.get("attribute", "")).get("versions", [])
+            f["history"] = [v.get("value") for v in versions]  # oldest→newest
+        except Exception:  # noqa: BLE001 — history is garnish, never fatal
+            f["history"] = [f.get("value")]
+    payload = {"chat_id": chat_id, "consolidation": tally, "facts": facts}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with gzip.open(path, "wt", encoding="utf-8") as fh:
+        json.dump(payload, fh, ensure_ascii=False)
+
+
 def run(beam_root: Path, tier: str, extractor_name: str, tag: str,
         chats: str | None, limit_chats: int | None,
-        chronicle: bool = False) -> None:
+        chronicle: bool = False, arms_only: str | None = None,
+        hybrid_top_k: int | None = None) -> None:
     lme.CHRONICLE = chronicle          # build_contexts reads its module global
-    arms = arms_for(chronicle)
+    if hybrid_top_k is not None:
+        # Validate before any probe or global mutation: build_contexts
+        # slices the hybrid turns from a top_k=RAG_TOP_K search, so a wider
+        # budget would be silently capped at RAG_TOP_K while every row
+        # records the wider number — an artifact asserting a budget that
+        # was never served.
+        if hybrid_top_k < 1:
+            raise SystemExit("--hybrid-top-k must be positive")
+        if hybrid_top_k > lme.RAG_TOP_K:
+            raise SystemExit(
+                f"--hybrid-top-k {hybrid_top_k} exceeds "
+                f"RAG_TOP_K={lme.RAG_TOP_K}; the hybrid arm cannot serve "
+                "more turns than the search returns")
+        # build_contexts reads the module global at call time (pinned by
+        # test_hybrid_top_k_is_read_at_call_time). Default None keeps every
+        # prior artifact's 3-turn hybrid budget byte-identical; 6 matches
+        # the rag arm's raw-turn budget so hybrid becomes a superset arm.
+        lme.HYBRID_TOP_K = hybrid_top_k
+    arms = arms_for(chronicle, arms_only)
     ex_url = EXTRACTORS[extractor_name]
     if not probe(ex_url):
         sys.exit(f"no extractor server at {ex_url} — start it first")
@@ -267,17 +329,27 @@ def run(beam_root: Path, tier: str, extractor_name: str, tag: str,
         print(f"chat {chat_id}: ingested {tally['turns']} turns, "
               f"{tally['dreams']} dreams, {tally['claims']} claims "
               f"({ingest_s}s)", flush=True)
+        dump_chat_bank(svc, chat_id, tally,
+                       beam_bank_dir(tier, extractor_name, tag)
+                       / f"chat{chat_id}.json.gz")
         for q in pending:
             t1 = time.perf_counter()
-            contexts = build_contexts(svc, q["question"])
+            contexts = build_contexts(svc, q["question"], with_parts=True)
+            parts = contexts.pop("parts")
             row = {"chat_id": chat_id, "tier": tier, "type": q["type"],
                    "index": q["index"], "question": q["question"],
                    "reference_answer": q["answer"],
                    "difficulty": q["difficulty"], "rubric": q["rubric"],
                    "extractor": extractor_name,
-                   "consolidation": tally, "ingest_seconds": ingest_s}
+                   "hybrid_top_k": lme.HYBRID_TOP_K,
+                   "consolidation": tally, "ingest_seconds": ingest_s,
+                   # Served contexts + structured serve state (2026-08-21):
+                   # serving-knob reruns and re-judges recompose from these
+                   # instead of re-paying the ingest/extraction phase.
+                   "contexts": {}, "parts": parts}
             for arm in arms:
                 ctx = contexts.get(arm, "")
+                row["contexts"][arm] = ctx
                 prompt = (f"Question: {q['question']}\n\n"
                           f"Memory context:\n{ctx or '(empty)'}")
                 response = _chat(_BEAM_ANSWER_SYSTEM, prompt,
@@ -314,6 +386,10 @@ def report(tier: str, extractor_name: str, tag: str) -> None:
                "scoring_note": ("paper-faithful float mean; _intfaithful "
                                 "mirrors upstream int() flooring of 0.5"),
                "arms": {}, "types": {}}
+    # Self-describing artifacts: rows written since the --hybrid-top-k flag
+    # carry the effective budget; legacy artifacts (no key) stay untouched.
+    if "hybrid_top_k" in rows[0]:
+        summary["hybrid_top_k"] = rows[0]["hybrid_top_k"]
     for arm in arms:
         summary["arms"][arm] = {
             "score": round(sum(r[f"{arm}_score"] for r in rows)
@@ -353,13 +429,21 @@ def main() -> int:
                     help="enable chronicle event extraction on the bench "
                          "service and answer/judge the hybrid_ev arm "
                          "(hybrid + served events block)")
+    ap.add_argument("--arms", default=None,
+                    help="comma-separated subset of arms to answer/judge "
+                         "(default: all)")
+    ap.add_argument("--hybrid-top-k", type=int, default=None,
+                    help="raw-turn budget for the hybrid arm (default: the "
+                         "bench's HYBRID_TOP_K=3; 6 budget-matches the rag "
+                         "arm)")
     ap.add_argument("--report", action="store_true")
     args = ap.parse_args()
     if args.report:
         report(args.tier, args.extractor, args.out_tag)
         return 0
     run(Path(args.beam_root), args.tier, args.extractor, args.out_tag,
-        args.chats, args.limit_chats, chronicle=args.chronicle)
+        args.chats, args.limit_chats, chronicle=args.chronicle,
+        arms_only=args.arms, hybrid_top_k=args.hybrid_top_k)
     report(args.tier, args.extractor, args.out_tag)
     return 0
 

@@ -73,7 +73,8 @@ TRUNCATE_DIM = {"nemotron-1b-d1024": 1024}
 # recall rather than erroring). out_dim < native uses the same slice+renorm
 # rule as Matryoshka. Truncation to --max-seq-length happens client-side
 # with the real Qwen3 tokenizer so token budgets match the ST arms.
-LLAMA_SERVER = Path.home() / "ClaudeCode" / "llama.ccp" / "llama-server.exe"
+# Directory renamed llama.ccp -> llama.cpp on 2026-08-21 (typo fix).
+LLAMA_SERVER = Path.home() / "ClaudeCode" / "llama.cpp" / "llama-server.exe"
 MODELS_DIR = Path(__file__).resolve().parent / "models"
 GGUF_CANDIDATES = {
     "qwen3-0.6b-q8-gguf": ("Qwen3-Embedding-0.6B Q8_0 (gguf)",

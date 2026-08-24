@@ -107,7 +107,16 @@ EXTRACTORS = {
 # Answerer + judge — constant across runs, so extractor is the only variable.
 QWEN_URL = os.environ.get("PSEUDOLIFE_BENCH_QWEN_URL", "http://127.0.0.1:1234/v1")
 RAG_TOP_K = 6        # raw-turn context width for the rag + hybrid arms
-HYBRID_TOP_K = 3     # raw turns added to cortex facts in the hybrid arm
+# 6 (was 3 until 2026-08-21): budget-matched to RAG_TOP_K so the hybrid arm
+# is a SUPERSET of the rag control and a hybrid-vs-rag delta isolates the
+# fact spine. The 2026-07-30 ceiling-e2e autopsy and the 2026-08-21 BEAM
+# review both traced hybrid "losses to rag" to the halved raw-turn budget,
+# not the facts. Every artifact row records its effective value
+# (hybrid_top_k); rows without the key predate the flip and were served
+# at 3. The regression-gate arm1 pinned contexts were also built at 3 —
+# re-baseline with a fresh extract before reading the gate's hybrid arm as
+# the shipped default.
+HYBRID_TOP_K = 6     # raw turns added to cortex facts in the hybrid arm
 # 24 @ min_score 0.2 (was 8 @ 0.3): the 2026-07-06 retrieval_sweep.py replay on
 # the s-qwen-27b-diag banks showed 0.3 starves 60% of questions outright vs 28%
 # at 0.2, with identical judged accuracy (rebuild_contexts.py before/after).
@@ -500,7 +509,8 @@ def _compose_fact_line(f: dict, versions: list[dict],
     return line
 
 
-def build_contexts(svc, question: str, variants: bool = False) -> dict[str, str]:
+def build_contexts(svc, question: str, variants: bool = False,
+                   with_parts: bool = False) -> dict[str, str]:
     # Control-arm contract (spec 2026-08-03): the rag arm ALWAYS uses
     # vanilla retrieval — Phase-1 knobs pinned off per-call — so a rag
     # delta between runs signals harness/era drift, never a knob under
@@ -551,6 +561,13 @@ def build_contexts(svc, question: str, variants: bool = False) -> dict[str, str]
         "cortex": "\n".join(fact_lines),
         "hybrid": _hyb(fact_lines, mem_texts),
     }
+    if with_parts:
+        # Structured serve state, persisted with the row by the BEAM
+        # adapter: a serving-knob rerun (hybrid_top_k slice, fact render)
+        # recomposes contexts offline from these instead of re-paying
+        # ingest. The chronicle branch below fills events when active.
+        ctx["parts"] = {"raw": raw_texts, "mem": mem_texts,
+                        "facts": fact_lines, "events": []}
     if variants:
         def _texts(**kw) -> list[str]:
             got = svc.search(question, top_k=RAG_TOP_K, **kw)
@@ -589,6 +606,8 @@ def build_contexts(svc, question: str, variants: bool = False) -> dict[str, str]
             return block
 
         old_gate = events[:6] if has_temporal_cue(question) else []
+        if with_parts:
+            ctx["parts"]["events"] = old_gate
         ctx["hybrid_ev"] = ctx["hybrid"] + _ev_block(old_gate)
         if EV_VARIANTS:
             # agg: either cue (the service already gated), full list.
