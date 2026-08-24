@@ -664,11 +664,10 @@ def memory_reinforce(
 @_tool(tier="minimal")
 def memory_fact_get(
     entity: Annotated[str, Field(
-        description="The slot's subject; matched case- and "
-                    "separator-insensitively.")],
+        description="The slot's subject; the (entity, attribute) match "
+                    "is case- and separator-insensitive.")],
     attribute: Annotated[str, Field(
-        description="The slot's attribute; matched case- and "
-                    "separator-insensitively.")],
+        description="The slot's attribute.")],
 ) -> dict[str, Any]:
     """Look up the one CURRENT value at an ``(entity, attribute)`` slot.
     One value per slot. A null record means EMPTY, not unknown —
@@ -716,11 +715,10 @@ def memory_fact_get(
 @_tool(tier="minimal")
 def memory_fact_set(
     entity: Annotated[str, Field(
-        description="The slot's subject; matched case- and "
-                    "separator-insensitively.")],
+        description="The slot's subject; the (entity, attribute) match "
+                    "is case- and separator-insensitive.")],
     attribute: Annotated[str, Field(
-        description="The slot's attribute; matched case- and "
-                    "separator-insensitively.")],
+        description="The slot's attribute.")],
     value: Annotated[str, Field(
         description="The value that is canonical NOW.")],
     origin: Annotated[Literal["user", "action", "agent"] | None, Field(
@@ -1065,7 +1063,8 @@ def memory_dream(
             ``memory_fact_set``, then ``commit``.
         ``run``: a server-side dream with the configured extractor
             (loop to drain).
-        ``deep``: full-corpus graph consolidation. Settle candidates via
+        ``deep``: full-corpus graph consolidation; dry run unless
+        ``apply``. Settle candidates via
             ``memory_graph_review``; duplicate lesson/world slots are
             listed for hand curation.
         ``runs``: recent dream passes (tallies, status).
@@ -1618,9 +1617,9 @@ def memory_recall(
     top_k: Annotated[int, Field(
         description="Bounds only the SEED search — the initial hits naming "
                     "the entities the walk starts from — NOT the result, "
-                    "which is capped separately. At least 3 ``texts`` "
-                    "slots (fewer if ``top_k`` is smaller) go to seed "
-                    "hits; the rest to hop-discovered support.")] = 5,
+                    "which is capped separately. Up to 3 ``texts`` slots "
+                    "go to seed hits; the rest to hop-discovered "
+                    "support.")] = 5,
     verbose: Annotated[bool, Field(
         description="Full fact/edge provenance and untruncated texts. "
                     "Default facts are ``{attribute, value}``, edges "
