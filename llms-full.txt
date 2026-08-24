@@ -358,7 +358,9 @@ deployments:
 
 One **memory daemon** owns the bank and serves MCP over streamable HTTP
 at `/mcp`; every Claude Code session (and any LAN agent) attaches to it.
-**Postgres 18 + pgvector** (in Docker) is the durable source of truth —
+**Postgres 18 + pgvector** (in Docker on the durable tier; the lite tier
+runs the same Postgres embedded, no container) is the durable source of
+truth —
 the in-memory store is a write-through cache hydrated at startup
 (a small `weights.pt` persists only counters — there are no MLP weights).
 
@@ -449,8 +451,14 @@ logon autostart task:
 
 ## Updating
 
-After a `git pull` (or local code change), redeploy the **daemon only** — safely,
-without touching Postgres or the extractor:
+**Lite tier:** one command, bank untouched:
+
+```bash
+pip install -U "pseudolife-mcp[lite]"
+```
+
+**Docker tier:** after a `git pull` (or local code change), redeploy the
+**daemon only** — safely, without touching Postgres or the extractor:
 
 ```powershell
 .\ops\update.ps1        # Windows
@@ -509,7 +517,7 @@ registers a thin stdio shim — one shim process per session, so every
 session carries its own tier-1 identity. The same wiring by hand:
 
 ```bash
-pip install pseudolife-mcp
+pip install pseudolife-mcp    # daemon in Docker; add [lite] for the pip tier
 claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
 ```
 
@@ -694,7 +702,7 @@ for. The structure is per type:
 
 | question type | n | naive RAG | commit-gated cascade |
 |---|---:|---:|---:|
-| knowledge-update (facts change) | 78 | 0.859 | ~~0.936~~ (retired, above) |
+| knowledge-update (facts change) | 78 | 0.859 | ~~0.936~~ (retired — [why](docs/guide/benchmarks.md#the-knowledge-update-slice-78-of-the-500)) |
 | single-session-user | 70 | 0.929 | 0.943 |
 | single-session-assistant | 56 | 0.911 | 0.929 |
 | single-session-preference | 30 | 0.800 | 0.700 |
@@ -815,7 +823,15 @@ pseudolife-mcp-daemon`).
 
 ## Uninstall
 
-Deletion is deliberate at every step:
+**Lite tier:** remove the MCP registration (`claude mcp remove
+pseudolife-memory` / `codex mcp remove pseudolife-memory`), then
+`pip uninstall pseudolife-mcp`. If you also want the bank gone, delete
+the per-user data directory (`%LOCALAPPDATA%\pseudolife-mcp` on Windows,
+`~/.local/share/pseudolife-mcp` on Linux, `~/Library/Application
+Support/pseudolife-mcp` on macOS — or wherever `PSEUDOLIFE_MCP_DATA_DIR`
+points). Back it up first: `pseudolife-mcp backup` works on lite too.
+
+**Docker tier** — deletion is deliberate at every step:
 
 ```bash
 # 1. Optional: take a final backup first (ops/backup.ps1 or ops/backup.sh).
@@ -3039,7 +3055,7 @@ result:
 
 | question type | n | naive RAG | cortex | hybrid | cascade |
 |---|---:|---:|---:|---:|---:|
-| knowledge-update | 78 | 0.859 | 0.756 | 0.910 | 0.936 |
+| knowledge-update | 78 | 0.859 | 0.756 | 0.910 | ~~0.936~~ (retired — [below](#the-knowledge-update-slice-78-of-the-500)) |
 | single-session-user | 70 | 0.929 | 0.671 | 0.957 | 0.943 |
 | single-session-assistant | 56 | 0.911 | 0.571 | 0.964 | 0.929 |
 | single-session-preference | 30 | 0.800 | 0.733 | 0.600 | 0.700 |
@@ -3597,10 +3613,14 @@ go check.
 
 ### Zero-egress extraction, and how to verify it
 
-The precise claim: **your memory text never leaves the machine.** The
-Docker tier ships a local CPU extractor **sidecar**, so **dream**
-consolidation — the step that reads your memory stream and turns it into
-facts — runs on your box with no API key and no outbound request.
+The precise claim: **your memory text never leaves the machine — on the
+sidecar extractor mode.** The Docker tier's default ships a local CPU
+extractor **sidecar**, so **dream** consolidation — the step that reads
+your memory stream and turns it into facts — runs on your box with no
+API key and no outbound request. The installer's `sonnet-only` and
+`sonnet-fallback` modes trade this away deliberately: they route dream
+extraction through the Claude CLI, which sends the extracted stream to
+Anthropic.
 Retrieval embeddings are local too, and the weights are baked into the
 image. (Not the same as "never touches the network": the first pip install
 downloads an embedding model, and image pulls are image pulls. Those carry
@@ -3673,10 +3693,11 @@ add-oriented, with retrieval expected to surface the right version. If your
 workload is conversational personalization at volume and you want a managed
 service, this is the mainstream choice and we are not it.
 
-**Memori** — a lightweight, SQL-first memory layer that appeals for the
-same reason a notes file does: you can read the database. Good fit if you
-want minimal machinery and full visibility, and are content to own the
-policy questions (what supersedes what, what goes stale) yourself.
+**Memori** — the sweep read it as a lightweight, SQL-first memory layer
+that appeals for the same reason a notes file does: you can read the
+database. Good fit if you want minimal machinery and full visibility,
+and are content to own the policy questions (what supersedes what, what
+goes stale) yourself.
 
 **memU** — oriented toward companion and personal-assistant memory, with an
 emphasis on rich profile-style recall. Different target user; if you are

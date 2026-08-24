@@ -352,7 +352,9 @@ deployments:
 
 One **memory daemon** owns the bank and serves MCP over streamable HTTP
 at `/mcp`; every Claude Code session (and any LAN agent) attaches to it.
-**Postgres 18 + pgvector** (in Docker) is the durable source of truth —
+**Postgres 18 + pgvector** (in Docker on the durable tier; the lite tier
+runs the same Postgres embedded, no container) is the durable source of
+truth —
 the in-memory store is a write-through cache hydrated at startup
 (a small `weights.pt` persists only counters — there are no MLP weights).
 
@@ -443,8 +445,14 @@ logon autostart task:
 
 ## Updating
 
-After a `git pull` (or local code change), redeploy the **daemon only** — safely,
-without touching Postgres or the extractor:
+**Lite tier:** one command, bank untouched:
+
+```bash
+pip install -U "pseudolife-mcp[lite]"
+```
+
+**Docker tier:** after a `git pull` (or local code change), redeploy the
+**daemon only** — safely, without touching Postgres or the extractor:
 
 ```powershell
 .\ops\update.ps1        # Windows
@@ -503,7 +511,7 @@ registers a thin stdio shim — one shim process per session, so every
 session carries its own tier-1 identity. The same wiring by hand:
 
 ```bash
-pip install pseudolife-mcp
+pip install pseudolife-mcp    # daemon in Docker; add [lite] for the pip tier
 claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
 ```
 
@@ -688,7 +696,7 @@ for. The structure is per type:
 
 | question type | n | naive RAG | commit-gated cascade |
 |---|---:|---:|---:|
-| knowledge-update (facts change) | 78 | 0.859 | ~~0.936~~ (retired, above) |
+| knowledge-update (facts change) | 78 | 0.859 | ~~0.936~~ (retired — [why](docs/guide/benchmarks.md#the-knowledge-update-slice-78-of-the-500)) |
 | single-session-user | 70 | 0.929 | 0.943 |
 | single-session-assistant | 56 | 0.911 | 0.929 |
 | single-session-preference | 30 | 0.800 | 0.700 |
@@ -809,7 +817,15 @@ pseudolife-mcp-daemon`).
 
 ## Uninstall
 
-Deletion is deliberate at every step:
+**Lite tier:** remove the MCP registration (`claude mcp remove
+pseudolife-memory` / `codex mcp remove pseudolife-memory`), then
+`pip uninstall pseudolife-mcp`. If you also want the bank gone, delete
+the per-user data directory (`%LOCALAPPDATA%\pseudolife-mcp` on Windows,
+`~/.local/share/pseudolife-mcp` on Linux, `~/Library/Application
+Support/pseudolife-mcp` on macOS — or wherever `PSEUDOLIFE_MCP_DATA_DIR`
+points). Back it up first: `pseudolife-mcp backup` works on lite too.
+
+**Docker tier** — deletion is deliberate at every step:
 
 ```bash
 # 1. Optional: take a final backup first (ops/backup.ps1 or ops/backup.sh).

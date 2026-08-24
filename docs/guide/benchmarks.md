@@ -92,7 +92,7 @@ result:
 
 | question type | n | naive RAG | cortex | hybrid | cascade |
 |---|---:|---:|---:|---:|---:|
-| knowledge-update | 78 | 0.859 | 0.756 | 0.910 | 0.936 |
+| knowledge-update | 78 | 0.859 | 0.756 | 0.910 | ~~0.936~~ (retired — [below](#the-knowledge-update-slice-78-of-the-500)) |
 | single-session-user | 70 | 0.929 | 0.671 | 0.957 | 0.943 |
 | single-session-assistant | 56 | 0.911 | 0.571 | 0.964 | 0.929 |
 | single-session-preference | 30 | 0.800 | 0.733 | 0.600 | 0.700 |

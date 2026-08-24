@@ -1753,7 +1753,8 @@ for _doc, _slug in ((READ_ME, "readme"), (BENCH, "guide")):
 # of it (it is derived), hence the two accessors.
 _PER_TYPE = [
     ("knowledge-update",
-     "| knowledge-update | 78 | 0.859 | 0.756 | 0.910 | 0.936 |",
+     "| knowledge-update | 78 | 0.859 | 0.756 | 0.910 | ~~0.936~~ "
+     "(retired — [below](#the-knowledge-update-slice-78-of-the-500)) |",
      0.859, 0.756, 0.910, 0.936),
     ("single-session-user",
      "| single-session-user | 70 | 0.929 | 0.671 | 0.957 | 0.943 |",
@@ -1792,7 +1793,8 @@ for _type, _needle, _r, _c, _h, _casc in _PER_TYPE:
 _PER_TYPE_README = [
     ("knowledge-update",
      "| knowledge-update (facts change) | 78 | 0.859 | ~~0.936~~ "
-     "(retired, above) |", 0.859, 0.936),
+     "(retired — [why](docs/guide/benchmarks.md"
+     "#the-knowledge-update-slice-78-of-the-500)) |", 0.859, 0.936),
     ("single-session-user",
      "| single-session-user | 70 | 0.929 | 0.943 |", 0.929, 0.943),
     ("single-session-assistant",

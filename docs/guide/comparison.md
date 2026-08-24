@@ -141,10 +141,14 @@ go check.
 
 ### Zero-egress extraction, and how to verify it
 
-The precise claim: **your memory text never leaves the machine.** The
-Docker tier ships a local CPU extractor **sidecar**, so **dream**
-consolidation — the step that reads your memory stream and turns it into
-facts — runs on your box with no API key and no outbound request.
+The precise claim: **your memory text never leaves the machine — on the
+sidecar extractor mode.** The Docker tier's default ships a local CPU
+extractor **sidecar**, so **dream** consolidation — the step that reads
+your memory stream and turns it into facts — runs on your box with no
+API key and no outbound request. The installer's `sonnet-only` and
+`sonnet-fallback` modes trade this away deliberately: they route dream
+extraction through the Claude CLI, which sends the extracted stream to
+Anthropic.
 Retrieval embeddings are local too, and the weights are baked into the
 image. (Not the same as "never touches the network": the first pip install
 downloads an embedding model, and image pulls are image pulls. Those carry
@@ -217,10 +221,11 @@ add-oriented, with retrieval expected to surface the right version. If your
 workload is conversational personalization at volume and you want a managed
 service, this is the mainstream choice and we are not it.
 
-**Memori** — a lightweight, SQL-first memory layer that appeals for the
-same reason a notes file does: you can read the database. Good fit if you
-want minimal machinery and full visibility, and are content to own the
-policy questions (what supersedes what, what goes stale) yourself.
+**Memori** — the sweep read it as a lightweight, SQL-first memory layer
+that appeals for the same reason a notes file does: you can read the
+database. Good fit if you want minimal machinery and full visibility,
+and are content to own the policy questions (what supersedes what, what
+goes stale) yourself.
 
 **memU** — oriented toward companion and personal-assistant memory, with an
 emphasis on rich profile-style recall. Different target user; if you are
