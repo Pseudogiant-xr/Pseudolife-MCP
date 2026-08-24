@@ -282,9 +282,13 @@ done
 # Runs even with the plugin installed: the plugin is the hooks/commands layer
 # only, so the MCP transport (shim by default) always comes from here.
 # The shim install itself is client-agnostic; memoize one attempt so
-# --client both doesn't run pipx/pip twice. Called as a plain statement (not
-# in an `if` condition) so `set -e` stays live inside — a failed pipx/pip
-# aborts the run, exactly as the previous inline version did.
+# --client both doesn't run pipx/pip twice. Every install command runs as an
+# `if` condition so `set -e` is suspended around it: a failed pipx/pip —
+# PEP 668 externally-managed-environment on Ubuntu 24.04 / Debian 12 /
+# Fedora 40 / Arch is the common case — leaves SHIM_OK unset so the
+# per-client HTTP fallback and its remediation text fire, instead of
+# aborting the run after the images are already built (issue #176;
+# install.ps1 has always exit-checked these same paths).
 SHIM_TRIED=""
 SHIM_OK=""
 ensure_shim() {
@@ -292,17 +296,14 @@ ensure_shim() {
     SHIM_TRIED=1
     if command -v pipx >/dev/null 2>&1; then
         if pipx list 2>/dev/null | grep -q "package pseudolife-mcp "; then
-            pipx upgrade pseudolife-mcp
+            if pipx upgrade pseudolife-mcp; then SHIM_OK=1; fi
         else
-            pipx install pseudolife-mcp
+            if pipx install pseudolife-mcp; then SHIM_OK=1; fi
         fi
-        SHIM_OK=1
     elif command -v python3 >/dev/null 2>&1 && python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
-        python3 -m pip install --user pseudolife-mcp
-        SHIM_OK=1
+        if python3 -m pip install --user pseudolife-mcp; then SHIM_OK=1; fi
     elif command -v python >/dev/null 2>&1 && python -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
-        python -m pip install --user pseudolife-mcp
-        SHIM_OK=1
+        if python -m pip install --user pseudolife-mcp; then SHIM_OK=1; fi
     fi
     return 0
 }
@@ -335,9 +336,9 @@ for selected_client in $clients; do
             claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
             echo "==> Wired into Claude Code via the pseudolife-mcp shim — per-session identity (required for correct episodes with concurrent sessions)."
         else
-            echo "WARNING: neither pipx nor a suitable python3 (>=3.10) was found — cannot install the pseudolife-mcp shim." >&2
+            echo "WARNING: the pseudolife-mcp shim is unavailable — tooling missing (pipx / python3 >=3.10) or the install failed (see the pip/pipx output above; on PEP 668 distros 'pip install --user' refuses with externally-managed-environment)." >&2
             echo "  Without the shim, concurrent Claude Code sessions share one episode identity." >&2
-            echo "  Install pipx or python3 >=3.10 and re-run, or pass --transport http to silence this." >&2
+            echo "  Install pipx and re-run (pipx sidesteps externally-managed distros), or pass --transport http to silence this." >&2
             claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
             echo "==> Wired into Claude Code via HTTP (fallback — shim tooling not found)."
         fi
