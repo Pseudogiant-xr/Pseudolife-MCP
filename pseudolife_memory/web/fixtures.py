@@ -327,6 +327,13 @@ class FixtureService:
             n("Console", "concept"), n("Auth flow", "concept"),
             n("config.py dataclasses", "concept"), n("<data_dir>/config.yaml", "concept"),
             n("tool run_in_background", "concept"), n("docker compose", "concept"),
+            # Issue #171 (stored XSS via graph entity names -> galaxy tooltip
+            # innerHTML). Nothing upstream filters markup out of an entity
+            # name (junk_name_reason() screens junk shapes, not HTML), so a
+            # prompt-injected ingested document could land one like this.
+            # Kept in the demo bank so an operator can eyeball the fix live:
+            # it must render as an inert star label on hover, never execute.
+            n("<img src=x onerror=alert(document.domain)>", "concept"),
         ]
         hub = "Cortex Console web frontend"
         tabs = ["Observatory", "Cortex", "World", "Lessons", "Stream", "Graph", "Episodes", "Console"]
@@ -348,6 +355,10 @@ class FixtureService:
             {"src": "pseudolife-daemon", "relation": "started-via", "dst": "tool run_in_background", "derived": False, "confidence": 0.6},
             {"src": "docker-desktop", "relation": "runs", "dst": "docker compose", "derived": False, "confidence": 0.7},
             {"src": "Console", "relation": "guards", "dst": "Auth flow", "derived": True, "via": ["inferred"]},
+            # Wired to the hub (not isolated) so the #171 XSS-probe node above
+            # is reachable in the default galaxy view, not orphaned off-screen.
+            {"src": hub, "relation": "flagged-name", "dst": "<img src=x onerror=alert(document.domain)>",
+             "derived": False, "confidence": 0.5},
         ] + [{"src": hub, "relation": "tab", "dst": t, "derived": False, "confidence": 0.9} for t in tabs]
         # Deterministically spread demo nodes across the advertised projects so
         # every scope in graph_projects() has matching members (coherent demo).

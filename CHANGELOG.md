@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security (2026-08-25 — stored XSS in the galaxy view's node tooltip)
+- **Graph entity names reached the 3D galaxy view's tooltip via innerHTML
+  (#171).** `galaxy.js` handed the vendored `3d-force-graph` bundle each
+  entity's raw name as a plain STRING via `.nodeLabel((n) => n.id)`; the
+  bundle's tooltip module renders string content with `.html(content)`, so
+  a hostile entity name (e.g. an `<img onerror=...>` payload, plausible via
+  a prompt-injected ingested document reaching the extractor — write-time
+  `junk_name_reason()` screens junk shapes, not markup) executed on hover.
+  On the shipped tokenless default, same-origin JS reaches `/api`
+  unauthenticated, so the payload could drive every mutation route.
+  `nodeLabel` now returns a DOM node (`el("span", {}, n.id)`, text set via
+  `document.createTextNode`) instead of a string — verified against the
+  vendored bundle's tooltip `update()`: an `HTMLElement` content value takes
+  the safe `.append(() => content)` branch (d3 inserts the live node as-is,
+  never through `.html()`), while a string still takes the vulnerable
+  branch. No other label/tooltip path in `galaxy.js` (`linkLabel`, etc.)
+  sets a string accessor. A markup-shaped entity stays in the Console dev
+  server's demo graph fixture so the fix is eyeball-checkable live.
+
 ### Added (2026-08-24 — answer-prompt attribution ablation)
 - **`evals/beam_attrib_ablation.py`: isolate the answer-prompt term of the
   Phase-1 lift.** The p1-b16 run changed budget, turn ordinals, and the
