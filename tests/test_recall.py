@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 from pathlib import Path
@@ -90,6 +91,44 @@ def test_run_recall_respects_max_entities():
                        "what does alpha run on", rc.MechanicalController(),
                        max_entities=1)
     assert len(st.entities) <= 1
+
+
+# ---------------------------------------------------------------------------
+# Per-hop provenance (issue #186): the MCP layer's output caps need to know
+# WHICH hop discovered each entity/edge, and how many texts came from the
+# flat seed search vs. hop-driven re-queries, to avoid a flat prefix slice
+# silently dropping deep hops or hop-discovered text (2026-08-25 review).
+# ---------------------------------------------------------------------------
+
+def test_run_recall_tags_entity_and_edge_hops():
+    svc = _two_hop()
+    st = rc.run_recall(svc.search, svc.graph, ["alpha", "beta", "gamma"],
+                       "what does alpha run on", rc.MechanicalController())
+    assert st.entity_hop["alpha"] == 0     # seed
+    assert st.entity_hop["beta"] == 1      # first hop
+    assert st.entity_hop["gamma"] == 2     # bridged via the second hop
+    assert len(st.edge_hop) == len(st.edges)   # parallel arrays, same length
+    assert st.edge_hop == [1, 2]           # alpha-beta then beta-gamma
+
+
+def test_run_recall_seed_text_count_bounds_texts():
+    svc = _two_hop()
+    st = rc.run_recall(svc.search, svc.graph, ["alpha", "beta", "gamma"],
+                       "what does alpha run on", rc.MechanicalController())
+    assert 0 <= st.seed_text_count <= len(st.texts)
+
+
+def test_recall_state_to_dict_carries_hop_metadata():
+    svc = _two_hop()
+    st = rc.run_recall(svc.search, svc.graph, ["alpha", "beta", "gamma"],
+                       "what does alpha run on", rc.MechanicalController())
+    d = rc.recall_state_to_dict(st, "what does alpha run on", 3)
+    assert d["entity_hop"] == st.entity_hop
+    assert d["edge_hop"] == st.edge_hop
+    assert d["seed_text_count"] == st.seed_text_count
+    # And the pre-existing shape is unchanged.
+    assert d["entities"] == [{"entity": n, "facts": st.entity_facts.get(n, [])}
+                             for n in st.entities]
 
 
 def test_llm_controller_seeds_from_completion_filtered_to_vocab():
@@ -347,6 +386,13 @@ def test_memory_recall_tool_delegates(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 # Recall output-cap tests (issue #186 — 2026-08-21 audit: a plain 3-hop
 # query returned an uncapped 93.7 KB; see mcp_server._RECALL_MAX_* comment).
+# These exercise the REAL service.recall() -> mcp_server.memory_recall()
+# pipeline end to end (real hop tagging, real embedding search) against a
+# modest fixture; tests/test_mcp_server.py's
+# test_memory_recall_caps_preserve_deep_hops_and_bound_size is the fast,
+# PG-free unit test that specifically reproduces the wide-hub crowd-out
+# bug the 2026-08-25 review of this fix caught (a flat prefix slice
+# entirely dropping hop-2 behind a hub's own 1-hop ring).
 # ---------------------------------------------------------------------------
 
 def _seed_recall_cap_fixture(svc, base_query: str) -> None:
@@ -359,7 +405,16 @@ def _seed_recall_cap_fixture(svc, base_query: str) -> None:
     real dense search reliably surfaces well over the text cap too across
     the many hop-driven re-queries — each newly discovered entity
     re-triggers a search for "<base_query> <name>", and every entry shares
-    enough of that phrasing to be a plausible hit."""
+    enough of that phrasing to be a plausible hit.
+
+    Uses the ``uses`` relation, NOT ``depends-on``: ``depends-on`` is a
+    TRANSITIVE builtin (storage/postgres.py's _BUILTIN_RELATIONS), so
+    chaining it root->L1->L2 derives a root->L2 edge and collapses the
+    intended 2-level tree into a single hop from graph_neighborhood's
+    point of view (found via a real hop2_raw assertion going unexpectedly
+    empty against this fixture, 2026-08-25) — the fixture would then never
+    exercise the deep-hop preservation this test exists to check.
+    """
     filler = (
         "This sentence exists purely to pad the stored memory past the "
         "recall preview-length cap so the truncation path is exercised. "
@@ -369,13 +424,13 @@ def _seed_recall_cap_fixture(svc, base_query: str) -> None:
     svc.store(f"{base_query} -- entity {root} is the fixture root. {filler * 2}",
               source="bench")
     for name in l1:
-        svc.graph_relate(root, "depends-on", name)
+        svc.graph_relate(root, "uses", name)
         svc.store(f"{base_query} -- entity {name} is a level-1 fixture node. {filler * 2}",
                   source="bench")
     for parent in l1:
         for j in range(3):
             name = f"{parent}-{j}"
-            svc.graph_relate(parent, "depends-on", name)
+            svc.graph_relate(parent, "uses", name)
             svc.store(f"{base_query} -- entity {name} is a level-2 fixture leaf. {filler * 2}",
                       source="bench")
 
@@ -396,16 +451,30 @@ def test_memory_recall_caps_payload_non_verbose(monkeypatch, tmp_path):
     assert len(raw["entities"]) > srv._RECALL_MAX_ENTITIES
     assert len(raw["edges"]) > srv._RECALL_MAX_EDGES
     assert len(raw["texts"]) > srv._RECALL_MAX_TEXTS
+    # The fixture's leaves are all hop 2 (root=hop0, svc-l1-*=hop1,
+    # svc-l1-*-*=hop2) — real service.recall() must tag them that way for
+    # the per-hop quota to have anything to preserve.
+    hop2_raw = {n for n, h in raw["entity_hop"].items() if h == 2}
+    assert hop2_raw, "fixture produced no hop-2 entities to preserve"
 
     monkeypatch.setattr(srv, "service", svc, raising=False)
     out = srv.memory_recall(base_query, hops=3, top_k=5)
     assert len(out["entities"]) <= srv._RECALL_MAX_ENTITIES
     assert len(out["edges"]) <= srv._RECALL_MAX_EDGES
     assert len(out["texts"]) <= srv._RECALL_MAX_TEXTS
+    # Per-hop quota: the deep (hop-2) bridge must survive the cap, not just
+    # the seed and its immediate ring (issue #186 review finding 1).
+    kept = {e["entity"] for e in out["entities"]}
+    assert kept & hop2_raw, "hop-2 entities dropped by the entity cap"
     # Compact text projection: each supporting text is truncated to the
     # preview cap (+ 1 for the trailing ellipsis character).
     assert all(len(t) <= srv._RECALL_TEXT_CHARS + 1 for t in out["texts"])
     assert any(t.endswith("…") for t in out["texts"])  # cap actually bound
+    # Serialized-size regression guard (issue #186 finding 3): this
+    # fixture's uncapped response runs several KB (21 entities, 20 edges,
+    # 20+ full-length texts); assert the capped compact payload stays a
+    # small fraction of that rather than drifting back toward it.
+    assert len(json.dumps(out)) < len(json.dumps(raw)) // 2
 
 
 @pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
@@ -424,6 +493,9 @@ def test_memory_recall_verbose_keeps_full_texts(monkeypatch, tmp_path):
     assert len(out["edges"]) <= srv._RECALL_MAX_EDGES
     assert len(out["texts"]) <= srv._RECALL_MAX_TEXTS
     assert any(len(t) > srv._RECALL_TEXT_CHARS for t in out["texts"])
+    # Facts per entity are capped even in verbose mode (issue #186 finding 3).
+    assert all(len(e.get("facts", [])) <= srv._RECALL_MAX_FACTS_PER_ENTITY
+              for e in out["entities"])
     assert not any(t.endswith("…") for t in out["texts"])
 
 

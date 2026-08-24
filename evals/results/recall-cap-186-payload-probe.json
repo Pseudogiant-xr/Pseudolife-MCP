@@ -1,0 +1,31 @@
+{
+  "issue": 186,
+  "date": "2026-08-25",
+  "description": "In-tree reproduction of the memory_recall output-cap size reduction on a synthetic fixture graph (no DB/daemon) -- NOT a reproduction of issue #186's live 93.7 KB audit number, which needs the live daemon and bank it was measured against and cannot be regenerated here.",
+  "params": {
+    "hops": 3,
+    "top_k": 5,
+    "entities_cap": 10,
+    "edges_cap": 15,
+    "texts_cap": 6,
+    "facts_per_entity_cap": 5,
+    "text_chars": 200
+  },
+  "fixture": {
+    "entities": 41,
+    "edges": 40,
+    "texts": 41,
+    "hops_reached": 3,
+    "note": "root has 20 direct (hop-1) children by construction -- wider than the edges cap alone, so a naive flat edges[:N] would be entirely consumed by hop 1."
+  },
+  "uncapped_bytes": 24456,
+  "capped_bytes_compact": 3808,
+  "capped_bytes_verbose": 5437,
+  "reduction_pct_compact": 84.4,
+  "hop2_entities_survive_compact": true,
+  "facts_per_entity": {
+    "uncapped_avg": 1.34,
+    "uncapped_max": 8,
+    "capped_max": 5
+  }
+}
