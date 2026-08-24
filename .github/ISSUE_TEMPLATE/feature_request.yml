@@ -1,0 +1,66 @@
+name: Feature request
+description: Something you needed and could not do
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Solo-maintained and deliberately small — most requests are answered
+        with a design discussion rather than code, and some are answered
+        with "that is a non-goal, here is what to use instead"
+        ([Comparison](../blob/master/docs/guide/comparison.md#use-something-else-if)).
+        Both are real answers; neither means the request was unwelcome.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What were you trying to do
+      description: >-
+        The task, not the feature. What did you want the agent to remember,
+        retrieve, or decide — and where did that break down?
+    validations:
+      required: true
+
+  - type: textarea
+    id: today
+    attributes:
+      label: What you do today instead
+      description: The workaround, if any, and what it costs you.
+    validations:
+      required: false
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you have in mind
+      description: >-
+        A tool, a knob, a doc — whatever shape you imagine. Rough is fine;
+        the problem statement above matters more.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: tier
+    attributes:
+      label: Install tier
+      description: Some features only make sense on one tier.
+      options:
+        - lite (pip, embedded Postgres)
+        - Docker
+        - host process
+        - not tier-specific
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before filing
+      options:
+        - label: >-
+            I checked [what's not built yet](../blob/master/README.md#whats-not-built-yet)
+            and the [non-goals](../blob/master/docs/guide/comparison.md#use-something-else-if).
+          required: false
+        - label: I searched existing issues.
+          required: false

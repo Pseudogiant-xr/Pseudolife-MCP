@@ -468,6 +468,23 @@ just documents via `data/chromadb/`; wipe just the associative store via
 `data/memory_state/`. (In containerized mode these files are not the source
 of truth — see the volume note above.)
 
+## Windows / WSL2 memory (Docker tier)
+
+Docker Desktop's WSL2 VM (`Vmmem`) claims up to **~50% of host RAM** by
+default, which is far more than the stack needs. Under dream load the whole
+stack wants ~6–7 GB with the default extractor sidecar, or ~2 GB in
+`sonnet-only` mode — where the Qwen3 embedding backbone is the bulk of it.
+Cap the VM by copying `ops/wslconfig.example` to
+`%USERPROFILE%\.wslconfig`, tuning `memory=`, then `wsl --shutdown`.
+
+The daemon container is separately hard-capped at 4 GB, with memory+swap
+pinned to the same value so exceeding it is a clean container restart rather
+than a host-wide memory event. `PSEUDOLIFE_DAEMON_MEM_LIMIT` in `ops/.env`
+raises it for very large banks.
+
+After `wsl --shutdown` the host port forward is gone; `docker restart
+pseudolife-mcp-daemon` re-establishes it.
+
 ## Backups
 
 `ops\backup.ps1` (Windows) / `ops/backup.sh` (Linux/macOS) runs `pg_dump`

@@ -74,8 +74,81 @@ artifact: [Benchmarks](docs/guide/benchmarks.md).
 
 ## Quickstart
 
-Requires Docker and Claude Code, Codex, or both. One command from clone to
-first memory (Claude remains the compatibility default):
+Two commands. No Docker, no database to set up, no container runtime:
+
+```bash
+pip install "pseudolife-mcp[lite]"
+claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
+```
+
+Codex instead of Claude Code — same shape:
+
+```bash
+pip install "pseudolife-mcp[lite]"
+codex mcp add pseudolife-memory -- pseudolife-mcp
+```
+
+Then in either coding agent: *"remember that my staging box is haze-02"* →
+the agent calls `memory_store`; next session, *"which box is staging?"* →
+`memory_search` finds it. Browse everything at the Cortex Console:
+<http://127.0.0.1:8765/ui/>.
+
+The first session auto-starts the daemon, which provisions an **embedded
+PostgreSQL 18** (pgvector included, via `pg0-embedded`) under a stable
+per-user data dir and downloads the embedding model (~1.2 GB, one-time).
+It is a real Postgres bank, not a cut-down one: `pseudolife-mcp backup`
+writes a standard owner-free `pg_dump` archive (plus a state archive, 7-day
+rotation) that restores into any PostgreSQL 18 target regardless of role —
+the Docker tier included — so outgrowing lite is a dump/restore, not a
+migration project ([backups](docs/guide/configuration.md#backups)).
+Windows needs an ASCII-only data path
+([`PSEUDOLIFE_MCP_DATA_DIR`](docs/guide/configuration.md#connection--deployment-env-vars)).
+
+### What lite gives you, and the one thing it doesn't
+
+| | lite (pip) | durable (Docker) |
+|---|---|---|
+| Associative store, hybrid search, supersession, version history | yes | yes |
+| Cortex facts, knowledge graph, lessons, world facts, episodes | yes | yes |
+| Cortex Console, document RAG, `pseudolife-mcp backup` | yes | yes |
+| **Dream consolidation filling the cortex on its own** | **no extractor ships** | yes — bundled local CPU sidecar |
+| External volumes, health-checked services, deploy/rollback tooling | no | yes |
+
+**The gap, stated plainly.** Lite ships no **extractor**, so the **dream**
+pass still runs, prunes, and advances its **cursor**, but writes no
+canonical facts: on this path `memory_fact_set` is the only **cortex**
+writer. Everything else above works. Nothing about this is silent —
+`curl http://127.0.0.1:8765/health` reports `"extractor": "none"`, and the
+stdio shim says the same on stderr at session start.
+
+Any OpenAI-compatible endpoint closes it. The daemon inherits the
+environment it starts from, so two variables are the whole fix — with a
+local Ollama:
+
+```bash
+export PSEUDOLIFE_DREAM_BASE_URL=http://localhost:11434/v1
+export PSEUDOLIFE_DREAM_MODEL=qwen2.5:7b
+pseudolife-mcp serve
+```
+
+```powershell
+$env:PSEUDOLIFE_DREAM_BASE_URL = "http://localhost:11434/v1"
+$env:PSEUDOLIFE_DREAM_MODEL    = "qwen2.5:7b"
+pseudolife-mcp serve
+```
+
+`/health` then reports `"extractor": "configured"`. One gotcha: a daemon
+that is already running keeps the environment it started with, and the shim
+reattaches to it rather than spawning a new one — stop the old daemon
+first. A hosted endpoint works too, and costs you the zero-egress
+property: memory text leaves the machine. Extractor tiers, quality, and the
+trade-offs: [Dreaming](docs/guide/dreaming.md).
+
+## Durable tier — Docker (recommended for a long-lived bank)
+
+Everything above plus the bundled extractor, external volumes,
+health-checked services, and backup/rollback tooling. Requires Docker and
+Claude Code, Codex, or both; one command from clone to first memory:
 
 ```bash
 git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
@@ -89,14 +162,14 @@ ops\install.ps1         # Windows (pwsh 7+)
 The installer runs the preflight (one exact fix line per missing
 prerequisite), asks which **dream extractor** should consolidate memories —
 
+- **sidecar** — the bundled local CPU model; no Claude plan needed, works
+  for everyone, and keeps every memory on the box (~11.8 GB image);
 - **sonnet-only** — the lightest install: a Claude model via a CLI shim
   (`claude-opus-5` by default; the mode name is historical. Needs a
   logged-in Max-plan `claude` CLI); the sidecar image is **never built or
   pulled** (~11.8 GB lighter; dreams pause while the shim is down);
 - **sonnet-fallback** — the Claude shim primary, the bundled sidecar as
-  automatic fallback (Max-plan CLI plus the ~11.8 GB image);
-- **sidecar** — the bundled local CPU model; no Claude plan needed, works
-  for everyone (~11.8 GB image) —
+  automatic fallback (Max-plan CLI plus the ~11.8 GB image) —
 
 then brings the stack up, installs the selected clients' session hooks,
 registers the MCP transport (the stdio shim by default, direct HTTP via
@@ -112,33 +185,8 @@ setups. Non-interactive example:
 Linux (Docker Engine): your user must be in the `docker` group —
 `sudo usermod -aG docker $USER`, then log out/in (the preflight checks this).
 
-### Zero-config lite tier (no Docker)
-
-The smallest possible start — one pip install, no Docker, no database to
-set up:
-
-```bash
-pip install "pseudolife-mcp[lite]"
-claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
-```
-
-The first session auto-starts the daemon, which provisions an **embedded
-PostgreSQL 18** (pgvector included, via `pg0-embedded`) under a stable
-per-user data dir and downloads the embedding model (~1.2 GB, one-time).
-The full Postgres feature set applies — cortex facts, graph, lessons —
-and the bank is plain Postgres data: `pseudolife-mcp backup` writes a
-standard owner-free `pg_dump` archive (plus a state archive) with 7-day
-rotation, restorable into any PostgreSQL 18 target regardless of role —
-including the Docker tier (PostgreSQL 18 since 0.14), so outgrowing
-lite is a dump/restore, not a migration project. Two honest
-limits: dream consolidation needs an extractor endpoint (the Docker
-tier's bundled sidecar is not part of lite — without one, canonical
-facts come from `memory_fact_set` only), and on Windows the embedded
-runtime needs an ASCII-only data path (the daemon refuses non-ASCII
-with a clear message; set `PSEUDOLIFE_MCP_DATA_DIR`, e.g.
-`C:\pseudolife-data`). The Docker stack remains the recommended durable
-tier: external volumes, health-checked services, deploy/rollback
-tooling.
+Image sizes, the Windows WSL2 memory cap, and what the installer automates:
+[the containerized install](#install--containerized-any-os) below.
 
 <details>
 <summary>Manual install (the steps the installer automates)</summary>
@@ -176,11 +224,6 @@ install/update scripts scaffold it too; every value is commented, a missing
 file runs entirely on defaults).
 </details>
 
-Then in either coding agent: *"remember that my staging box is
-haze-02"* → the agent calls `memory_store`; next session, *"which box is
-staging?"* → `memory_search` finds it. Browse everything at the Cortex
-Console: <http://127.0.0.1:8765/ui/>.
-
 ## What this is
 
 A memory engine exposed over MCP. There's no chat UI and no LLM doing the
@@ -203,7 +246,10 @@ one answers*, not who's wrong:
 | Benchmark numbers ship with their raw run artifacts | — | typically no | typically no | every published number, test-enforced |
 
 Auto-journaling records what the agent *did*; Pseudolife curates what it
-*learned*. Both are useful — they answer different questions.
+*learned*. Both are useful — they answer different questions. Named
+alternatives — Mem0, Zep/Graphiti, Letta, Cognee, memU, Memori — and the
+cases where one of them is the better pick:
+[Comparison](docs/guide/comparison.md).
 
 It layers several complementary stores: the **associative store** (a flat
 embedding store ranked by cosine similarity fused with a BM25 lexical pool
@@ -238,6 +284,8 @@ deep material lives in the user guide:
 | [Episodes & sessions](docs/guide/episodes.md) | Daemon-owned session episodes, the briefing hook, nested sub-episodes, tags |
 | [The memory model](docs/guide/memory-model.md) | Cortex slots, provenance contenders, world cortex, lessons, temporal/HLC stamps |
 | [Benchmarks](docs/guide/benchmarks.md) | LongMemEval results; why extraction quality dominates |
+| [Comparison](docs/guide/comparison.md) | Mem0, Zep/Graphiti, Letta, Cognee, memU, Memori — the axes, and when to use something else |
+| [Security posture](docs/guide/security-posture.md) | Memory poisoning (ASI06): every shipped mitigation, and what is not defended |
 
 Plus [`evals/README.md`](evals/README.md) (full benchmark methodology) and
 [CONTRIBUTING](CONTRIBUTING.md).
@@ -329,9 +377,10 @@ canonical layers — cortex, world facts, lessons, temporal/HLC stamps
 knowledge graph walkable via `memory_graph` and multi-hop `memory_recall`
 ([retrieval & the graph](docs/guide/retrieval.md)).
 
-## Install — containerized (recommended, any OS)
+## Install — containerized (any OS)
 
-The whole stack — Postgres **and** the memory daemon — runs in Docker.
+What [the durable tier](#durable-tier--docker-recommended-for-a-long-lived-bank)
+installer above does, by hand. The whole stack — Postgres **and** the memory daemon — runs in Docker.
 No host Python, no torch install, no version skew; the daemon image bakes
 in CPU-only torch and the embedding weights — `Qwen/Qwen3-Embedding-0.6B`
 (the default retrieval backbone since schema v25) plus `all-MiniLM-L6-v2`
@@ -373,13 +422,10 @@ the pull path are `pull` + `up -d`, not `ops/update.ps1`.
 > creating `ops/.env` with `PSEUDOLIFE_BANK_VOLUME=ops_pseudolife_pgdata` and
 > `PSEUDOLIFE_STATE_VOLUME=ops_pseudolife_data` before `up`. See the compose header.
 
-> **Windows:** Docker Desktop's WSL2 VM claims up to ~50% of host RAM by
-> default; the stack needs ~6–7 GB under dream load with the default sidecar
-> (~2 GB in `sonnet-only` mode — the Qwen3 embedding backbone is the bulk of
-> it) — cap the VM via `ops/wslconfig.example`
-> (see [Troubleshooting](#troubleshooting)). The daemon container itself is
-> hard-capped at 4 GB (`PSEUDOLIFE_DAEMON_MEM_LIMIT` in `ops/.env` raises it
-> for very large banks; hitting the cap restarts the daemon cleanly).
+> **Windows:** cap Docker Desktop's WSL2 VM, which otherwise claims up to
+> ~50% of host RAM — how much the stack actually needs, the
+> `ops/wslconfig.example` template, and the daemon container's own memory
+> cap: [Configuration — Windows / WSL2 memory](docs/guide/configuration.md#windows--wsl2-memory-docker-tier).
 
 The daemon serves MCP at `http://127.0.0.1:8765/mcp` and restarts with
 Docker — no logon task needed. First build downloads the model into the
@@ -417,35 +463,19 @@ every healthy deploy; see
 weekly Scheduled Task and the manual `.vhdx` compact. Never run
 `docker system prune --volumes`, which deletes volumes.
 
-> **Upgrading an existing bank to 0.11.0 (schema v25) needs one manual step.**
-> The default embedding backbone changed to `Qwen/Qwen3-Embedding-0.6B` and every
-> embedding column moved from `vector(384)` to `vector(1024)` — not an additive
-> migration. The daemon **refuses to start** against an older-dimensioned bank
-> (`/health` reports `status: "degraded"` with `init_refusal`) rather than
-> half-migrating it. Back up, stop the daemon, then re-embed offline:
+> **Two upgrades are not automatic**, because neither can be done safely
+> in place. Both have a step-by-step runbook — backup, dry run, apply,
+> verify, roll back — and a fresh install needs neither:
 >
-> ```bash
-> python ops/migrate_embeddings.py                            # dry run (default — writes nothing)
-> python ops/migrate_embeddings.py --apply --backup-verified  # commit
-> ```
->
-> Full procedure, including the health check that confirms it took:
-> [the v25 migration runbook](docs/runbooks/embedding-v25-migration.md).
-
-> **Upgrading an existing Docker-tier bank past 2026-08-14 (PostgreSQL
-> 16 → 18) needs one manual step.** A Postgres *major* bump can't reuse the
-> old data volume (the on-disk format changed), and the compose mount moved
-> from `/var/lib/postgresql/data` to `/var/lib/postgresql` — reusing the old
-> path would silently land the cluster on an anonymous volume. Run the
-> cutover script (pwsh 7+, any OS):
->
-> ```powershell
-> pwsh ops/migrate-pg18.ps1   # backup → quiesce → dump → new volume → restore → verify
-> ```
->
-> The PG 16 volume is frozen and retained as the rollback; table counts are
-> verified to match exactly before the daemon restarts. Full procedure and
-> rollback: [the PostgreSQL 18 migration runbook](docs/runbooks/postgres-18-migration.md).
+> - **A bank older than 0.11.0 (schema v25)**: every embedding column moved
+>   from `vector(384)` to `vector(1024)`, so the daemon refuses to start
+>   rather than half-migrate. Re-embed offline with
+>   `ops/migrate_embeddings.py` —
+>   [the v25 migration runbook](docs/runbooks/embedding-v25-migration.md).
+> - **A Docker-tier bank created before 2026-08-14 (PostgreSQL 16 → 18)**:
+>   a Postgres major bump cannot reuse the old data volume. Run
+>   `pwsh ops/migrate-pg18.ps1` —
+>   [the PostgreSQL 18 migration runbook](docs/runbooks/postgres-18-migration.md).
 
 ## Wire into your coding agent
 
@@ -739,6 +769,19 @@ version, storage backend, auth state, and `persist_errors` (non-zero means
 writes are failing to reach Postgres; check `docker logs
 pseudolife-mcp-daemon`).
 
+- **The cortex stays empty** (canonical facts never appear on their own).
+  `/health` reporting `"extractor": "none"` means no extractor is
+  configured, so the dream writes no facts and `memory_fact_set` is the
+  only cortex writer — expected on the lite tier. Point the daemon at an
+  OpenAI-compatible endpoint
+  ([Quickstart](#what-lite-gives-you-and-the-one-thing-it-doesnt)) or use
+  the Docker tier's bundled sidecar. `"extractor": "disabled"` instead
+  means dreaming itself is switched off in config.
+- **Lite daemon refuses to start on Windows** with a message about the data
+  path: the embedded Postgres runtime needs an **ASCII-only** data
+  directory. Set `PSEUDOLIFE_MCP_DATA_DIR` to one (e.g.
+  `C:\pseudolife-data`) —
+  [Configuration](docs/guide/configuration.md#connection--deployment-env-vars).
 - **First build is slow / big.** The daemon image (~5.0 GB, several
   minutes to build) bakes in CPU torch and the embedding weights (Qwen3-Embedding-0.6B
   plus MiniLM); the extractor sidecar
@@ -805,6 +848,31 @@ Full dev setup: [CONTRIBUTING](CONTRIBUTING.md).
   from the live web needs a web-fetch tool the standalone server doesn't
   ship; an agent with web access can automate the fetch+cite step today
   via `memory_world_set`.
+
+## Support
+
+**Solo-maintained, best-effort.** One person builds, tests, and runs this;
+there is no support contract and no response-time commitment. That said,
+issues are read and most get an answer.
+
+- **Something is broken** → open a
+  [bug report](https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues/new?template=bug_report.yml).
+  The form asks for your `/health` output, schema version, install tier,
+  and client, because those four answer most questions before any
+  back-and-forth.
+- **Something is missing** → open a
+  [feature request](https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues/new?template=feature_request.yml).
+  Say what you were trying to do, not only what to add.
+- **A security problem** → do **not** open a public issue. Use GitHub's
+  private vulnerability reporting — [SECURITY.md](SECURITY.md). Memory
+  integrity specifically: [security posture](docs/guide/security-posture.md).
+- **Sending a patch** → [CONTRIBUTING](CONTRIBUTING.md) and
+  [CODE_OF_CONDUCT](CODE_OF_CONDUCT.md). The bar is "surgical, tested, and
+  explained", not "big".
+
+If you need someone to call, [Comparison — use something else
+if](docs/guide/comparison.md#use-something-else-if) names vendors who sell
+support.
 
 ## License
 

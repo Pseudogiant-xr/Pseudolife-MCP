@@ -95,6 +95,73 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (computed from the committed per-question JSONL rows), the BEAM findings,
   and retired-marker rows that keep the struck 0.936 pinned to the artifact
   that produced it.
+### Added (2026-08-25 — adoption surfaces: install front door, comparison, security posture, support) [#189]
+- **The README now leads with the two-command lite path instead of a git
+  clone and a multi-GB image.** The first screen is `pip install
+  "pseudolife-mcp[lite]"` plus one client-registration command (Claude
+  Code or Codex), the try-it line, and an honest lite-vs-durable
+  inventory; the Docker stack is demoted to a clearly-labelled durable
+  tier below it. Nothing was deleted — the WSL2 memory guidance moved to
+  a new **Configuration → Windows / WSL2 memory** section, the two
+  manual-migration blockquotes (schema v25 re-embed, PostgreSQL 16→18
+  cutover) collapsed to pointers at their existing runbooks, and the
+  Windows ASCII-data-path caveat moved from the quickstart into
+  Troubleshooting. Rationale: every competitor's fastest credible path is
+  under two minutes with no container runtime, and ours already was — it
+  just sat ~100 lines down under a hedged heading.
+- **The lite tier's missing extractor is now stated where a user meets
+  it, not only in a log line nobody reads.** Lite ships no **extractor**,
+  so the **dream** pass advances its **cursor** but writes no canonical
+  facts and `memory_fact_set` is the only **cortex** writer — previously
+  indistinguishable from a broken cortex. `/health` gains an additive
+  `extractor` field (`none` / `configured` / `disabled`; omitted when the
+  service carries no resolvable dream config, and deliberately *not*
+  reflected in `status`, since `web/api.py` serves any non-ok payload as
+  a 503 that the Docker healthcheck and `ops/update.*` treat as fatal).
+  The stdio shim prints what is and is not working, plus the fix, once
+  per session when the daemon it attached to reports `extractor: "none"` —
+  the daemon's own startup warning is invisible on this path because
+  `shim.spawn_daemon` discards its stderr. That warning now also names the
+  fix command. Only an explicit `"none"` fires the notice: a configured
+  extractor, a deliberately dream-disabled bank, and an older daemon whose
+  `/health` predates the field all stay quiet.
+- **`docs/guide/comparison.md`** — the first named-competitor comparison:
+  Mem0, Zep/Graphiti, Letta, Cognee, memU and Memori, on the axes this
+  project is built around (one current value per **slot**, **supersession**
+  with version history, **provenance** tiers and **contender** parking,
+  human-reviewed merges with audit-stamped decisions, staleness as a
+  serving decision, zero-egress extraction, artifact-pinned numbers) — led
+  by the honest baseline of a markdown file plus grep, and closing with a
+  "use something else if" table that concedes multi-tenant SaaS, SSO and
+  compliance, managed hosting, agent-framework runtime, and non-MCP
+  clients by name. Every external claim is dated to the 2026-08 sweep it
+  came from and phrased as an observation of that project's docs at that
+  time, never as a present-tense absence; the page says so at the top and
+  asks readers to check current docs. It states no benchmark numbers of
+  its own, deferring to Benchmarks.
+- **`docs/guide/security-posture.md`** — the memory-integrity half of the
+  security story, framed against OWASP's persistent-memory-poisoning
+  entry (ASI06, December 2025). Maps each shipped mechanism to the
+  poisoning step it contains (provenance tiers, contender parking, the
+  opt-in **consolidation quarantine** two-man rule, the human-gated
+  **review queue** with `merge_decisions` audit rows, the v27 dream
+  rollback journal, the engram cross-index, supersession history, writer
+  keying, `source="status"` exclusion, the `stale_policy` *serving-side*
+  quarantine) with each one's default, and states flatly what is **not**
+  defended — prompt injection against the agent, content screening (the
+  MAFIA evaded class, including this project's own literal-faithfulness
+  gate), cryptographic writer authentication, ranking as a defense,
+  volume anomaly detection, unverified world-fact citations, and the host
+  itself. SECURITY.md keeps vulnerability reporting and gains a pointer.
+- **Support surface for external users**: `.github/ISSUE_TEMPLATE/`
+  issue forms (bug report asking for `/health` output, version + schema,
+  install tier, client and transport, with a redact-secrets warning and a
+  security-reports-go-elsewhere banner; feature request asking what you
+  were trying to do), `.github/ISSUE_TEMPLATE/config.yml` routing security
+  reports to private advisories, `.github/PULL_REQUEST_TEMPLATE.md`
+  carrying the repo's actual shipping checklist, a standard Contributor
+  Covenant 2.1 `CODE_OF_CONDUCT.md`, and a README **Support** section
+  stating solo-maintained and best-effort in as many words.
 
 ### Fixed (2026-08-25 — retrieval-log/compaction/dream-run retention never ran with dreaming disabled)
 - **A bank with `memory.dream.enabled=false` (a documented, first-class

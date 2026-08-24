@@ -1,0 +1,124 @@
+name: Bug report
+description: Something behaves differently from what the docs say
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. This is a solo-maintained project, so the
+        fastest path to a fix is a filled-in form — the four fields below
+        answer most questions before any back-and-forth.
+
+        **Security problems do not belong here.** Use GitHub's private
+        vulnerability reporting instead (Security tab → "Report a
+        vulnerability"). See [SECURITY.md](../blob/master/SECURITY.md).
+
+        **No secrets or personal data**, please: `/health` output, logs, and
+        memory text can carry tokens, hostnames, and file paths. Redact
+        before pasting.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what you got instead.
+      placeholder: |
+        I asked the agent to store a fact, then searched for it next session.
+        Expected: memory_search returns it. Got: no results.
+    validations:
+      required: true
+
+  - type: textarea
+    id: health
+    attributes:
+      label: "`/health` output"
+      description: >-
+        `curl http://127.0.0.1:8765/health` (Docker/host tiers), or
+        `curl http://127.0.0.1:8765/health` after the lite daemon has started.
+        Redact anything sensitive. This reports the schema version, storage
+        backend, auth state, `persist_errors`, and whether an extractor is
+        configured.
+      render: json
+      placeholder: |
+        {"status": "ok", "schema": 32, "storage": "postgres", "auth": false,
+         "persist_errors": 0, "extractor": "none", "db": "ok"}
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version and schema
+      description: >-
+        `pip show pseudolife-mcp` (or the release tag / commit you deployed),
+        plus the `schema` number from `/health` if it differs from above.
+      placeholder: "pseudolife-mcp 0.14.0, schema v32"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: tier
+    attributes:
+      label: Install tier
+      options:
+        - lite (pip install "pseudolife-mcp[lite]", embedded Postgres)
+        - Docker (ops/install.sh / ops/install.ps1, compose stack)
+        - host process (Postgres in Docker, daemon on host Python)
+        - file mode (no Postgres — /health says storage "files")
+        - other / not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: client
+    attributes:
+      label: MCP client
+      options:
+        - Claude Code
+        - Codex
+        - both
+        - other MCP client
+    validations:
+      required: true
+
+  - type: dropdown
+    id: transport
+    attributes:
+      label: Transport
+      description: How the client reaches the daemon (the installer's default is the stdio shim).
+      options:
+        - stdio shim (`-- pseudolife-mcp`)
+        - direct HTTP (`--transport http` / `--url`)
+        - not sure
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS and Python
+      placeholder: "Windows 11 / Python 3.12, or Ubuntu 24.04 / Python 3.11"
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: >-
+        Docker tier: `docker logs pseudolife-mcp-daemon --tail 100`. Pip
+        tiers: run `pseudolife-mcp serve` in a terminal — the shim spawns the
+        daemon with its stderr discarded, so this is where the reason lives.
+        Redact before pasting.
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Config overrides, a minimal reproduction, when it last worked.
+    validations:
+      required: false

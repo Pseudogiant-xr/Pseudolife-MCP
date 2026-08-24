@@ -1,0 +1,12 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability (do not open a public issue)
+    url: https://github.com/Pseudogiant-xr/Pseudolife-MCP/security/advisories/new
+    about: >-
+      Report privately via GitHub's private vulnerability reporting. You'll
+      get an acknowledgement within 7 days.
+  - name: Documentation
+    url: https://github.com/Pseudogiant-xr/Pseudolife-MCP#documentation
+    about: >-
+      Configuration, retrieval, dreaming, episodes, the memory model,
+      benchmarks, comparison, and security posture.
