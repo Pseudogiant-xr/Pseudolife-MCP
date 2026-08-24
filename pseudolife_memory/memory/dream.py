@@ -1398,19 +1398,29 @@ def run_sweep_once(service) -> dict:
     agnostic by construction (it keys on the cursor, not on session lifecycle).
     Returns ``{"fired": bool, ...}``; never raises into the daemon's timer."""
     cfg = service.config.memory.dream
-    if not cfg.enabled:
-        return {"fired": False, "reason": "disabled"}
-    # Superseded-row compaction rides every tick (spec 2026-07-14) — it must
-    # run even when no dream fires, or a quiet bank never compacts. The v27
-    # dream-run journal retention rides the same tick for the same reason.
+    # Superseded-row compaction (spec 2026-07-14), the v27 dream-run
+    # journal, and the v31 retrieval-event log all run BEFORE the
+    # dream.enabled check below — none of the three is actually fed only
+    # by the automatic backlog-triggered dream trigger that flag gates.
+    # memory_fact_set/memory_world_set (compaction's feed) are a separate,
+    # always-live write API; a manual `memory_dream` run/deep call and the
+    # end-of-session dream (`_fire_and_forget_dream` → `dream_run_auto`,
+    # neither of which checks cfg.enabled) both still write dream-run
+    # journal rows; and the retrieval log accrues on every memory_search
+    # regardless of dream activity. A dream-disabled bank (a first-class,
+    # documented knob) still needs all three reapers, or these tables grow
+    # unbounded with nothing else to prune them (issue #178, previously
+    # true only for the retrieval log because this whole block used to sit
+    # after the disabled-return).
     compacted = service.compact_superseded().get("total", 0)
     runs_pruned = service.prune_dream_runs()
-    # v31 retrieval-event retention rides the same unconditional tick —
-    # the log accrues on every search regardless of dream activity.
     # getattr-guarded for older fakes/tests, like deep_dream_tick below.
     prune_retrieval = getattr(service, "prune_retrieval_log", None)
     if prune_retrieval is not None:
         prune_retrieval()
+    if not cfg.enabled:
+        return {"fired": False, "reason": "disabled", "compacted": compacted,
+                "runs_pruned": runs_pruned}
     # Need-based deep-dream tick (mechanical Steps A/B only) rides the same
     # timer, independent of the shallow trigger — a quiet bank can still be
     # overdue for consolidation. getattr-guarded for older fakes/tests.

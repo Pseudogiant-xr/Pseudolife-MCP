@@ -6,6 +6,33 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-08-25 — retrieval-log/compaction/dream-run retention never ran with dreaming disabled)
+- **A bank with `memory.dream.enabled=false` (a documented, first-class
+  knob) never pruned `retrieval_events`, superseded cortex/world/lesson
+  rows, or the v27 dream-run journal — all three grew unbounded.**
+  `start_dream_sweep()` only started the sweep thread when
+  `dream.enabled` was true, so on a dream-disabled bank the thread that
+  runs `run_sweep_once` (and therefore every retention call inside it)
+  never existed at all; `run_sweep_once` itself then compounded this by
+  returning `{"fired": false, "reason": "disabled"}` before reaching its
+  own prune/compact block. The 2026-08-20 v31 entry above says retention
+  "rides the same unconditional tick" — true only of whether a *dream
+  fires*, not of whether dreaming is *enabled*, and the retrieval log has
+  no other reaper: it accrues on every `memory_search` regardless.
+  `start_dream_sweep()` now starts whenever EITHER `dream.enabled` OR
+  `memory.retrieval_log.enabled` is true (the latter defaults on), and
+  `run_sweep_once` now runs compaction, dream-run-journal pruning, and
+  retrieval-log pruning before the disabled check, not after — all three
+  tables are fed by write paths (`memory_fact_set`/`memory_world_set`, a
+  manual `memory_dream` run, and the end-of-session
+  `dream_run_auto` fired by `_fire_and_forget_dream`) that never check
+  `dream.enabled` in the first place, so a dream-disabled bank can still
+  accumulate rows in all three without a periodic reaper. Hardening: the
+  sweep-tick fake in `tests/test_dream.py` now also implements
+  `prune_retrieval_log` (the real method name, not a stand-in), so a
+  future rename that silently broke the `getattr`-guarded call would fail
+  a test instead of quietly disabling retention again.
+
 ### Added (2026-08-24 — answer-prompt attribution ablation)
 - **`evals/beam_attrib_ablation.py`: isolate the answer-prompt term of the
   Phase-1 lift.** The p1-b16 run changed budget, turn ordinals, and the

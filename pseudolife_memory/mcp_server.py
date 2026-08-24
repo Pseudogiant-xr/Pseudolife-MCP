@@ -1447,27 +1447,35 @@ _dream_sweep_started = False
 
 
 def start_dream_sweep() -> None:
-    """Idempotent: start the headless dream sweep (Tier 0/2). Off when the
-    bank is empty or unconfigured — ``run_sweep_once`` gates on backlog +
-    quiescence each tick, so an idle bank does no LLM work. Daemon-only."""
+    """Idempotent: start the headless dream sweep (Tier 0/2). The same
+    thread also runs ``run_sweep_once``'s compaction/dream-run-journal/
+    retrieval-log reapers, none of which are actually gated on
+    ``dream.enabled`` (issue #178) — so this starts whenever EITHER
+    dreaming OR the retrieval log is enabled; a dream-disabled bank with
+    the (default-on) retrieval log still needs its own reaper, or
+    ``retrieval_events`` grows unbounded. ``run_sweep_once`` itself still
+    gates the automatic dream trigger on backlog + quiescence each tick,
+    so an idle bank does no LLM work. Daemon-only."""
     global _dream_sweep_started
     if _dream_sweep_started:
         return
-    if not service.config.memory.dream.enabled:
+    dream_cfg = service.config.memory.dream
+    if not (dream_cfg.enabled or service.config.memory.retrieval_log.enabled):
         return
-    from pseudolife_memory.memory.dream import (build_extractor, NoOpExtractor,
-                                                startup_extractor_warnings)
-    if isinstance(build_extractor(service.config.memory.dream), NoOpExtractor):
-        logger.warning(
-            "dream enabled but no extractor LLM configured "
-            "(PSEUDOLIFE_DREAM_BASE_URL/_MODEL unset): cortex auto-population is "
-            "disabled; only memory_fact_set writes canonical facts. Configure the "
-            "extractor sidecar to populate the cortex."
-        )
-    for warning in startup_extractor_warnings(service.config.memory.dream):
-        logger.warning("dream extractor config: %s", warning)
+    if dream_cfg.enabled:
+        from pseudolife_memory.memory.dream import (build_extractor, NoOpExtractor,
+                                                    startup_extractor_warnings)
+        if isinstance(build_extractor(dream_cfg), NoOpExtractor):
+            logger.warning(
+                "dream enabled but no extractor LLM configured "
+                "(PSEUDOLIFE_DREAM_BASE_URL/_MODEL unset): cortex auto-population is "
+                "disabled; only memory_fact_set writes canonical facts. Configure the "
+                "extractor sidecar to populate the cortex."
+            )
+        for warning in startup_extractor_warnings(dream_cfg):
+            logger.warning("dream extractor config: %s", warning)
     _dream_sweep_started = True
-    interval = float(service.config.memory.dream.sweep_interval_seconds)
+    interval = float(dream_cfg.sweep_interval_seconds)
     threading.Thread(
         target=_dream_sweep_loop, args=(interval,), daemon=True, name="pl-dream",
     ).start()

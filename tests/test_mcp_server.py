@@ -245,6 +245,39 @@ def test_start_dream_sweep_warns_without_extractor(tmp_path: Path, monkeypatch, 
     assert "extractor" in msgs and "cortex" in msgs
 
 
+def test_start_dream_sweep_starts_for_retrieval_log_when_dream_disabled(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """Issue #178: the retrieval-event log (default-on, schema v31) has no
+    reaper besides the sweep tick, and it accrues on every memory_search
+    regardless of dream state. Disabling dream must not also silently
+    disable retrieval-log retention by never starting the thread that
+    runs it."""
+    import importlib
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
+    import pseudolife_memory.mcp_server as mod
+    importlib.reload(mod)
+    mod.service.config.memory.dream.enabled = False
+    mod.service.config.memory.retrieval_log.enabled = True
+    mod.start_dream_sweep()
+    assert mod._dream_sweep_started is True
+
+
+def test_start_dream_sweep_skips_when_dream_and_retrieval_log_both_disabled(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """Negative case for the same condition: with nothing riding the tick,
+    the thread must stay off (unchanged from before #178)."""
+    import importlib
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
+    import pseudolife_memory.mcp_server as mod
+    importlib.reload(mod)
+    mod.service.config.memory.dream.enabled = False
+    mod.service.config.memory.retrieval_log.enabled = False
+    mod.start_dream_sweep()
+    assert mod._dream_sweep_started is False
+
+
 def test_memory_store_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:
     """Tool calls reach the service and produce the expected shape.
 
