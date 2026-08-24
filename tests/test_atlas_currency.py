@@ -98,3 +98,72 @@ def test_viewer_loads_canonical_json() -> None:
         "viewer must not embed a second copy of the node data — "
         "atlas.json is the single source of truth"
     )
+
+
+def test_migration_list_covers_every_schema_version(atlas: dict) -> None:
+    """The schema.py storage card's "Additive migrations: vNN ..." line must
+    name every version from where the list starts through the version the
+    codebase actually ships (SCHEMA_META_VERSION) — otherwise a schema bump
+    that forgets to touch the atlas (issue #184: v30/v31 went missing)
+    silently stops being caught."""
+    from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
+
+    node = next(n for n in atlas["nodes"] if n["id"] == "schemaN")
+    migrations_line = next(
+        (line for line in node["d"] if line.startswith("Additive migrations:")),
+        None,
+    )
+    assert migrations_line is not None, (
+        "schemaN card lost its 'Additive migrations: ...' line"
+    )
+    versions = sorted(int(v) for v in re.findall(r"\bv(\d+)\b", migrations_line))
+    assert versions, "no vNN entries found in the migrations line"
+    expected = list(range(versions[0], SCHEMA_META_VERSION + 1))
+    missing = [v for v in expected if v not in versions]
+    assert not missing, (
+        f"schemaN migration list is missing v{missing} (SCHEMA_META_VERSION="
+        f"{SCHEMA_META_VERSION}) — describe the migration(s) from "
+        "pseudolife_memory/storage/schema.py and add them to docs/atlas/"
+        "atlas.json"
+    )
+
+
+def test_extractor_size_figure_matches_authoritative_doc(atlas: dict) -> None:
+    """README.md is the authoritative site for the extractor-sidecar image
+    size (currently ~11.8 GB, measured 2026-08-20 — retired the earlier
+    ~9 GB / ~10.4 GB / ~12.6 GB figures). The atlas must quote the same
+    figure, not a retired one, wherever it states the sonnet-only
+    lighter-by size."""
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    match = re.search(r"~([\d.]+ GB) lighter", readme)
+    assert match, (
+        "README.md no longer states a '~N GB lighter' figure for "
+        "sonnet-only — update this test's authoritative source"
+    )
+    canonical = match.group(1)
+    atlas_text = json.dumps(atlas)
+    assert f"~{canonical} lighter" in atlas_text, (
+        f"docs/atlas/atlas.json does not carry the current ~{canonical} "
+        "lighter figure from README.md — it may still publish a retired "
+        "extractor image size"
+    )
+
+
+REMOVED_TOOLS = ["memory_trace"]
+
+
+def test_no_removed_tool_references(atlas: dict) -> None:
+    """Tools that have been folded away or dropped from the MCP surface
+    must not linger in the atlas (memory_trace was folded into
+    memory_search(explain=True) — see CHANGELOG 'Tool-surface gate +
+    redundancy trim'). Word-boundary matched so this doesn't false-positive
+    on the still-live memory_traces database table."""
+    atlas_text = json.dumps(atlas)
+    hits = [
+        name for name in REMOVED_TOOLS
+        if re.search(rf"\b{re.escape(name)}\b", atlas_text)
+    ]
+    assert not hits, (
+        f"docs/atlas/atlas.json still references removed tool(s) {hits} — "
+        "point the description at the current tool surface instead"
+    )

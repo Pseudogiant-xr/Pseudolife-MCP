@@ -54,6 +54,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   branch. No other label/tooltip path in `galaxy.js` (`linkLabel`, etc.)
   sets a string accessor. A markup-shaped entity stays in the Console dev
   server's demo graph fixture so the fix is eyeball-checkable live.
+### Fixed (2026-08-25 — System Atlas currency: migration list, extractor size, removed tool)
+- **`docs/atlas/atlas.json` had drifted on three points** (#184): the
+  `storage/schema.py` card's migration list stopped at v29 even though
+  `SCHEMA_META_VERSION` had moved to 31 — v30 (merge-proposal judge
+  verdict) and v31 (retrieval event log) were missing; the installer card
+  still quoted the retired ~9 GB `sonnet-only` savings figure instead of
+  the current ~11.8 GB; and the CMS card still named the removed
+  `memory_trace` tool instead of `memory_search(explain=True)`, which it
+  was folded into. `meta.verified` restamped 2026-08-25.
+- **`tests/test_atlas_currency.py` gained three guards** so these rot
+  classes fail CI instead of drifting quietly: the migration list is
+  pinned against `SCHEMA_META_VERSION` (every version from the list's
+  start through current must appear), the extractor-size figure is pinned
+  against README.md's authoritative `~N GB lighter` figure, and a
+  removed-tool-name list (starting with `memory_trace`) is checked
+  word-boundary-matched against the whole atlas so it can't false-positive
+  on the still-live `memory_traces` table. All three watched RED against
+  the pre-fix atlas.json before the fix landed.
 
 ### Added (2026-08-24 — answer-prompt attribution ablation)
 - **`evals/beam_attrib_ablation.py`: isolate the answer-prompt term of the
