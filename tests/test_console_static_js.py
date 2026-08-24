@@ -79,6 +79,14 @@ def test_galaxy_node_label_returns_dom_node_not_raw_string():
         "nodeLabel callback uses a template literal — that's a string, "
         "which the tooltip renders via innerHTML. Return a DOM element."
     )
+    # el()'s `html:` prop is an innerHTML escape hatch (util.js) — building
+    # the element with it would reintroduce the sink while satisfying the
+    # asserts above.
+    assert "html" not in arg, (
+        "nodeLabel callback passes an html: prop to el() — that path sets "
+        ".innerHTML (util.js) and reopens the stored-XSS sink. Set the name "
+        "as text content instead."
+    )
 
 
 def test_galaxy_link_label_not_set_to_raw_string():
