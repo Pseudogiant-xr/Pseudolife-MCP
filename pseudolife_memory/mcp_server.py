@@ -725,7 +725,8 @@ def memory_fact_set(
         description="The value that is canonical NOW.")],
     origin: Annotated[Literal["user", "action", "agent"] | None, Field(
         description='Who asserted it: "user" = the human told you; '
-                    'otherwise "action"/"agent".')] = None,
+                    'otherwise "action"/"agent". Omitted records '
+                    '"agent".')] = None,
     confidence: Annotated[float, Field(
         description="How sure you are, 0..1.")] = 0.8,
     episode: Annotated[str | None, Field(
@@ -1357,11 +1358,13 @@ def memory_graph_relate(
     confidence: Annotated[float, Field(
         description="How sure you are, 0..1.")] = 0.8,
     src_type: Annotated[str | None, Field(
-        description="Entity kind for ``src``, used when the node is "
-                    "created.")] = None,
+        description="Entity kind for ``src``: set when the node is "
+                    "created, or filled in on an existing node that has "
+                    "none.")] = None,
     dst_type: Annotated[str | None, Field(
-        description="Entity kind for ``dst``, used when the node is "
-                    "created.")] = None,
+        description="Entity kind for ``dst``: set when the node is "
+                    "created, or filled in on an existing node that has "
+                    "none.")] = None,
 ) -> dict[str, Any]:
     """Assert a typed relation between two entities, e.g. ``("web-app",
     "runs-on", "host-1")``. Entities auto-create and resolve through
@@ -1414,8 +1417,9 @@ def memory_graph(
     include_facts: Annotated[bool, Field(
         description="False omits each node's canonical facts.")] = True,
     to: Annotated[str | None, Field(
-        description="Return the shortest path from ``entity`` to this "
-                    "entity instead of a plain neighborhood.")] = None,
+        description="Also return the shortest path from ``entity`` to "
+                    "this entity under ``paths``; its nodes are folded "
+                    "into the neighborhood.")] = None,
     relation_filter: Annotated[str | None, Field(
         description="Keep only edges whose relation contains this "
                     "substring.")] = None,

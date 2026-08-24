@@ -384,6 +384,25 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
         assert total <= cap, (
             f"{tier} param-description total {total} chars exceeds {cap}")
 
+    # Floor beside the ceiling: everything above is an upper bound, so if
+    # the Annotated[..., Field(description=...)] -> inputSchema rendering
+    # ever breaks (the mcp pin is wide, and the mechanism leans on
+    # inspect.signature(eval_str=True) preserving Annotated extras), all
+    # 35 tools would silently lose every argument contract while the caps
+    # stayed green. One concrete pin plus a per-tier floor makes that
+    # regression loud.
+    hops = {t.name: t for t in tools}["memory_recall"].inputSchema[
+        "properties"]["hops"]
+    assert "1..5" in (hops.get("description") or ""), (
+        "param descriptions are not reaching inputSchema — the "
+        "Field(description=) rendering path has broken")
+    param_floors = {"minimal": 1500, "core": 3500, "full": 6000}
+    for tier, floor in param_floors.items():
+        total = sum(param_sizes[n] for n in mod._visible_tool_names(tier))
+        assert total >= floor, (
+            f"{tier} param-description total collapsed to {total} chars "
+            f"(floor {floor}) — argument contracts are no longer shipping")
+
 
 def test_graph_review_dismiss_slot_pair_routes_to_service(tmp_path: Path, monkeypatch) -> None:
     # Step-3c driver verb: an agent triaging the deep response's
