@@ -87,17 +87,53 @@ try {
         $live = Get-Counts $Db
         $restored = Get-Counts $scratch
         Write-Host ("{0,-14} {1,10} {2,10}" -f "table", "live", "restored")
-        $anyLost = $false
+        # Materiality threshold for the partial-loss check below. A dump is
+        # always OLDER than the live bank, so restored < live is normal drift
+        # — but losing most of a table is not drift. 0.5 is deliberately
+        # loose, and the check only applies from 20 live rows up, because a
+        # ratio over single-digit counts says nothing: 4 episodes vs 1 is
+        # three sessions since the dump, not corruption.
+        #
+        # It is NOT drift-proof, and deliberately so: rehearsing a
+        # deliberately old artifact (-BackupFile, a DR drill against the
+        # mirror copy) against a table that has more than DOUBLED since it
+        # was taken trips this. The alarm text says so, because a rehearsal
+        # that stays quiet about a halved table is the failure this whole
+        # check exists to stop; a loud, self-explaining false alarm is the
+        # cheaper mistake.
+        $partialRatio = 0.5
+        $partialMinRows = 20
+        $alarms = @()
         foreach ($t in $tables) {
             Write-Host ("{0,-14} {1,10} {2,10}" -f $t, $live[$t], $restored[$t])
             # Alarm only when the LIVE bank has rows the backup lost — an
             # absolute-zero check false-fails on a young bank (no dreams run
             # yet = legitimately 0 facts) and teaches users to distrust a
-            # perfectly good backup.
-            if ($t -in @("entries", "facts") -and $live[$t] -gt 0 -and $restored[$t] -le 0) { $anyLost = $true }
+            # perfectly good backup. Every counted table is checked, not just
+            # entries/facts: those two are the first and largest sections of
+            # the dump, so a truncated artifact keeps them and loses every
+            # lesson, episode, entity, edge and world fact behind them — and
+            # that rehearsed "PASSED" until 2026-08-25.
+            if ($live[$t] -lt 0 -or $restored[$t] -lt 0) {
+                # -1 is Get-Counts' "the query failed" sentinel. Silence here
+                # would be the original defect wearing a different hat: a
+                # PASSED verdict for a comparison that never ran.
+                $alarms += "$t (live=$($live[$t]) restored=$($restored[$t]): the row count failed, so nothing was compared)"
+            }
+            elseif ($live[$t] -gt 0 -and $restored[$t] -eq 0) {
+                $alarms += "$t (live=$($live[$t]) restored=$($restored[$t]): the whole table is gone)"
+            }
+            elseif ($live[$t] -ge $partialMinRows -and
+                    $restored[$t] -lt [math]::Floor($live[$t] * $partialRatio)) {
+                $alarms += "$t (live=$($live[$t]) restored=$($restored[$t]): more than half the rows are missing)"
+            }
         }
         docker exec $Container psql -q -U $User -d postgres -c "DROP DATABASE $scratch"
-        if ($anyLost) { throw "live bank has entries/facts but the restored copy has none - investigate before trusting this backup" }
+        if ($alarms.Count -gt 0) {
+            throw ("the restored copy does not match the live bank: " +
+                   ($alarms -join "; ") +
+                   " - investigate before trusting this backup. (Rehearsing a deliberately OLD artifact? A table that more than doubled since the dump trips the 'more than half' check legitimately.)")
+        }
 
         if ($StateArchive) {
             # Integrity-check the state tar (listing decompresses everything).
@@ -123,8 +159,22 @@ try {
         docker stop $DaemonContainer | Out-Null
 
         Write-Host "==> Dropping + recreating $Db..."
+        # Evict leftover sessions first: DROP DATABASE fails outright while
+        # ANY client is connected (a psql window left open, a Console tab, a
+        # daemon connection that outlived `docker stop`). Both calls used to
+        # run with their exit status ignored, so a blocked drop surfaced two
+        # steps later as "restore failed mid-way" against the OLD database —
+        # alarming, and about the wrong thing. pg_backend_pid() excludes this
+        # very session; nothing outside the target database is touched.
+        docker exec $Container psql -q -U $User -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$Db' AND pid <> pg_backend_pid()" *> $null
         docker exec $Container psql -q -U $User -d postgres -c "DROP DATABASE IF EXISTS $Db"
+        if ($LASTEXITCODE -ne 0) {
+            throw "DROP DATABASE $Db failed (something is still connected to it). The live bank is UNTOUCHED; restart the daemon with 'docker start $DaemonContainer' when you are done investigating."
+        }
         docker exec $Container psql -q -U $User -d postgres -c "CREATE DATABASE $Db"
+        if ($LASTEXITCODE -ne 0) {
+            throw "CREATE DATABASE $Db failed after the drop - the bank no longer exists in Postgres. Re-run this restore (the dump is still at $BackupFile) before starting the daemon."
+        }
         docker exec $Container sh -c "gunzip -c $tmp | psql -q -v ON_ERROR_STOP=1 -U $User -d $Db > /dev/null"
         if ($LASTEXITCODE -ne 0) { throw "RESTORE FAILED mid-way; daemon left stopped. The pre-restore safety dump is in data\backups." }
 

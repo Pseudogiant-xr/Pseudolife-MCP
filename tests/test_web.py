@@ -54,6 +54,18 @@ def test_write_config_restart_classification(svc):
     assert "memory.dream.sweep_interval_seconds" not in res["applied"]
 
 
+def test_write_config_retrieval_log_enabled_requires_restart(svc):
+    """Issue #178: toggling memory.retrieval_log.enabled now changes whether
+    the sweep thread starts (start_dream_sweep runs once at boot and is
+    ``_dream_sweep_started``-guarded — no config-apply path re-evaluates it).
+    Mirrors the memory.dream.enabled precedent just below it in KNOBS: a
+    live-apply here would leave a dream-disabled+retrieval-log-disabled bank
+    with logging turned on in the Console but no reaper started."""
+    res = config_io.write_config(svc, {"memory.retrieval_log.enabled": False})
+    assert "memory.retrieval_log.enabled" in res["restart_required"]
+    assert "memory.retrieval_log.enabled" not in res["applied"]
+
+
 def test_write_config_makes_backup_on_second_write(svc):
     config_io.write_config(svc, {"memory.top_k": 9})
     res = config_io.write_config(svc, {"memory.top_k": 10})

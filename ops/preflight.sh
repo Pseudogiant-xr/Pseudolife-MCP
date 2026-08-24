@@ -98,6 +98,17 @@ else
          "https://www.python.org/downloads/ (Arch: sudo pacman -S python)"
 fi
 
+# ── pipx (preferred installer for the stdio MCP shim) ──────────────────────
+# Without pipx the installer falls back to `pip install --user`, which PEP
+# 668 distros (Ubuntu 24.04+, Debian 12+, Fedora, Arch) refuse — the shim is
+# then skipped and the MCP transport is wired over HTTP instead (issue #176).
+if command -v pipx >/dev/null 2>&1; then
+    ok "pipx (stdio shim install)"
+else
+    warn "pipx not found — shim install falls back to 'pip --user', which PEP 668 distros refuse; the installer then wires the HTTP transport" \
+         "https://pipx.pypa.io/stable/installation/ (Debian/Ubuntu: sudo apt install pipx; Arch: sudo pacman -S python-pipx)"
+fi
+
 # ── claude CLI: installed + logged in ──────────────────────────────────────
 if [ "$CLIENT" = claude ] || [ "$CLIENT" = both ]; then
     if ! command -v claude >/dev/null 2>&1; then

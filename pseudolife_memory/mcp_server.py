@@ -64,6 +64,7 @@ os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
 
 from anyio import to_thread  # noqa: E402
 from mcp.server.fastmcp import Context, FastMCP  # noqa: E402
+from mcp.server.transport_security import TransportSecuritySettings  # noqa: E402
 
 from pseudolife_memory.service import MemoryService  # noqa: E402
 
@@ -89,7 +90,66 @@ service = MemoryService(data_dir=_data_dir, config_path=_config_path)
 
 _MCP_INSTRUCTIONS = """Pseudolife is durable memory shared across sessions. At task start, call memory_search for relevant context and memory_lesson_search for prior outcomes. Store durable facts, decisions, corrections, and useful observations with memory_store (one claim per call); use memory_fact_set for canonical current values. At task end, record success, failure, or correction with memory_outcome. Use memory_toolset(action="expand") before calling tools outside the visible tier."""
 
-mcp = FastMCP("Pseudolife Memory", instructions=_MCP_INSTRUCTIONS)
+
+def transport_security_for(auth_configured: bool) -> TransportSecuritySettings:
+    """DNS-rebinding policy for the streamable-HTTP endpoint (``/mcp``).
+
+    Keyed on whether a bearer token gates the endpoint — deliberately NOT on
+    the bind host, and never left to the SDK's own heuristic. FastMCP's
+    constructor auto-enables protection only when handed a loopback ``host=``
+    and disables it entirely otherwise; this module has never passed one, so
+    both directions of that heuristic are wrong here. Inheriting the loopback
+    allowlist rejects every LAN, reverse-proxy, Tailscale-name and
+    compose-service-name client with ``421 Invalid Host header`` before auth
+    or any handler runs (the documented LAN recipe was dead this way, while
+    ``/health`` and ``/api`` kept working); forwarding the container's
+    ``0.0.0.0`` instead would silently switch the protection off.
+
+    * **Token configured** → permissive. ``Authorization`` already proves
+      intent — a browser cannot attach a bearer cross-origin without a
+      preflight that fails — so a Host allowlist can only break legitimate
+      remote clients. Same reasoning the Console's ``_browser_gate``
+      (:mod:`pseudolife_memory.web.api`) has applied to ``/api`` since the
+      2026-07-02 review.
+    * **No token** → loopback allowlist, protection on. The Console app
+      deliberately does not run ``_browser_gate`` on ``/mcp``, so this is the
+      only thing standing between a rebinding browser and an unauthenticated
+      bank. The shipped container default (``0.0.0.0`` +
+      ``PSEUDOLIFE_MCP_TRUST_BIND``, published to 127.0.0.1) lands here and
+      keeps exactly the protection it had before this policy existed — the
+      allowlist below is byte-identical to the SDK's.
+    """
+    if auth_configured:
+        return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=["127.0.0.1:*", "localhost:*", "[::1]:*"],
+        allowed_origins=["http://127.0.0.1:*", "http://localhost:*",
+                         "http://[::1]:*"],
+    )
+
+
+mcp = FastMCP(
+    "Pseudolife Memory",
+    instructions=_MCP_INSTRUCTIONS,
+    # Explicit, never inherited. The daemon replaces this with the
+    # token-aware policy via apply_transport_security() once it knows
+    # whether auth is configured; the protected variant is the safe start.
+    transport_security=transport_security_for(auth_configured=False),
+)
+
+
+def apply_transport_security(auth_configured: bool) -> TransportSecuritySettings:
+    """Install the transport-security policy on the shared FastMCP instance.
+
+    Must run BEFORE the first ``streamable_http_app()`` call: the SDK builds
+    the ``StreamableHTTPSessionManager`` lazily there and caches whatever
+    settings it was handed, so a later change would be a no-op.
+    """
+    settings = transport_security_for(auth_configured)
+    mcp.settings.transport_security = settings
+    return settings
+
 
 from pseudolife_memory.toolset_tiers import (
     PrincipalTierState, normalize_tier, parse_tier_map, rank as _tier_rank,
@@ -1230,36 +1290,224 @@ def memory_graph(
     return out
 
 
+# ── Recall output caps (issue #186) ───────────────────────────────────────
+# ``top_k`` bounds only the SEED search; graph expansion fans out from
+# there with no bound of its own, and the compact projection memory_search
+# applies to entry text was never applied on this path. Issue #186's live
+# audit (2026-08-21, real daemon — not reproducible in-tree) measured
+# memory_recall(query="what does the stdio shim connect to and what runs
+# the MCP tools", hops=3, top_k=5, verbose=False) at 93.7 KB total, enough
+# that the calling client refused it. A separate pass over that same
+# response reported a per-field breakdown: 53 entities (38.6 KB), 75 edges
+# (5.3 KB), 45 uncapped full entry texts (51.9 KB). Those three components
+# sum to 95.8 KB, ~2% over the stated 93.7 KB total; both figures are
+# reproduced here exactly as audited rather than smoothed, since that live
+# response can't be re-measured without the daemon and bank it ran
+# against. What IS reproducible in-tree: evals/recall_cap_probe.py builds
+# a synthetic hub graph (no DB, no daemon) and records this repo's own
+# pre-cap vs post-cap serialized size to
+# evals/results/recall-cap-186-payload-probe.json (pinned by
+# tests/test_eval_evidence.py — see docs/guide/retrieval.md for that
+# number).
+#
+# A flat prefix slice (``out["entities"][:N]``) is NOT a relevance
+# ordering: (1) run_recall appends seeds, then each hop's
+# newly-discovered entities in turn, so ``entities[:N]`` is a
+# breadth-first PREFIX, not a ranking; (2) within one hop, nodes come back
+# sorted by internal entity id (service.py's ``graph_neighborhood``), and
+# edges are the graph's global edge list filtered to that neighborhood
+# (graph.py's ``build_subgraph``) — storage order, not relevance; (3)
+# ``paths`` is always empty on this path (``graph_fn`` is called without
+# ``to=``), so ``edges`` is the ONLY connectivity representation — a naive
+# ``edges[:N]`` can be entirely consumed by the seed's own 1-hop ring,
+# silently dropping the hop-2/hop-3 bridges that are the actual reason to
+# call memory_recall instead of memory_search. (``_select_frontier``'s
+# ascending-degree sort is real, but it decides which non-hub entities get
+# EXPANDED THROUGH next during the walk — it says nothing about the order
+# results are later emitted in.)
+#
+# The caps below instead: reserve a minimum per-hop quota for entities and
+# edges (each hop present gets a floor(cap/hops-present) share, with the
+# remainder handed to the LATEST hops one each so the reservation itself
+# never exceeds the cap; a hop needing fewer releases its unused slots to
+# hops that need more, later hops first — ``_hop_quota_select``), prefer
+# edges whose src AND dst both survived the entity cap and backfill from
+# the rest only if that pool falls short (``_cap_recall_edges``), and
+# split the texts budget between the flat seed search and hop-discovered
+# support so a hop-discovered text always survives even at top_k >= the
+# texts cap (``_cap_recall_texts``). Facts per surviving entity are capped
+# separately (``_RECALL_MAX_FACTS_PER_ENTITY``) — the entities that
+# survive the cap are disproportionately the fact-heavy hubs, and their
+# facts list was otherwise still unbounded.
+_RECALL_MAX_ENTITIES = 10
+_RECALL_MAX_EDGES = 15
+_RECALL_MAX_TEXTS = 6
+# memory_search's cortex-first block already treats 5 as the standard
+# facts-serving width (this module's cortex_search(query, top_k=5, ...)
+# call); reusing it here keeps one recall entity's fact list comparable to
+# what search already treats as a normal-sized answer.
+# evals/recall_cap_probe.py's synthetic hub entities carry more than this
+# by construction, so the probe artifact also records the pre/post
+# fact-count this cap produces on that fixture.
+_RECALL_MAX_FACTS_PER_ENTITY = 5
+# Of _RECALL_MAX_TEXTS, how many slots the flat seed search gets — the
+# rest goes to hop-discovered support. min(3, top_k) so a small top_k
+# doesn't reserve more than it actually returns. Without this split,
+# texts[:cap] is just the seed search's own top_k window: at the default
+# top_k=5 and cap=6 exactly one hop-discovered text can ever survive, and
+# at top_k >= cap, zero can — every text hop expansion turns up would be
+# silently invisible.
+_RECALL_SEED_TEXT_BUDGET = 3
+# Preview length for a supporting text once the cap above binds — same
+# 80/120/200-char + ellipsis convention as the existing text_preview
+# fields (cms.py, service.py).
+_RECALL_TEXT_CHARS = 200
+
+
+def _hop_quota_select(items: list[tuple[Any, int]], cap: int) -> list[Any]:
+    """Cap a (item, hop) sequence to ``cap`` items so no single hop's ring
+    can crowd out deeper hops. Reserves ``cap // H`` slots per distinct hop
+    present (H = number of distinct hops), handing the ``cap % H``
+    remainder to the LATEST hops one each — ``cap // H`` per bucket alone
+    can undershoot ``cap`` by up to H-1 items, and a NAIVE ``ceil(cap/H)``
+    per bucket overshoots it whenever every bucket is full (e.g. cap=15,
+    H=2 gives 8+8=16), so the reservation itself must sum to exactly
+    ``cap`` — never more, so the return value never exceeds ``cap``
+    regardless of how full any bucket is. A hop that needs fewer than its
+    reservation releases the unused slots to hops that need more, granting
+    the LATER hops first (the ones a flat prefix cap would otherwise
+    starve first). Within a hop, keeps that hop's earliest-discovered
+    items (their relative order is unchanged)."""
+    if cap <= 0 or not items:
+        return []
+    buckets: dict[int, list[Any]] = {}
+    for item, hop in items:
+        buckets.setdefault(hop, []).append(item)
+    hop_order = sorted(buckets)
+    H = len(hop_order)
+    base, extra = divmod(cap, H)
+    quota = {h: base for h in hop_order}
+    for h in hop_order[H - extra:]:            # the last `extra` hops
+        quota[h] += 1
+    take = {h: min(quota[h], len(buckets[h])) for h in hop_order}
+    remaining = cap - sum(take.values())
+    for h in reversed(hop_order):
+        if remaining <= 0:
+            break
+        spare = len(buckets[h]) - take[h]
+        if spare <= 0:
+            continue
+        grant = min(spare, remaining)
+        take[h] += grant
+        remaining -= grant
+    return [item for h in hop_order for item in buckets[h][:take[h]]]
+
+
+def _cap_recall_entities(entities: list[dict],
+                         entity_hop: dict[str, int]) -> list[dict]:
+    tagged = [(e, entity_hop.get(e.get("entity"), 0)) for e in entities]
+    return _hop_quota_select(tagged, _RECALL_MAX_ENTITIES)
+
+
+def _cap_recall_edges(edges: list[dict], edge_hop: list[int],
+                      surviving_entities: set[str]) -> list[dict]:
+    """Prefer edges whose src AND dst both survived the entity cap (only
+    those connect two entities the caller can actually see); backfill from
+    the rest only if that pool doesn't fill the cap. Each pool is itself
+    hop-quota'd."""
+    if len(edge_hop) != len(edges):        # legacy/stub caller: no hop info
+        edge_hop = [0] * len(edges)
+    both: list[tuple[dict, int]] = []
+    rest: list[tuple[dict, int]] = []
+    for e, h in zip(edges, edge_hop):
+        pool = both if (e.get("src") in surviving_entities
+                        and e.get("dst") in surviving_entities) else rest
+        pool.append((e, h))
+    picked = _hop_quota_select(both, _RECALL_MAX_EDGES)
+    if len(picked) < _RECALL_MAX_EDGES:
+        picked += _hop_quota_select(rest, _RECALL_MAX_EDGES - len(picked))
+    return picked
+
+
+def _cap_recall_texts(texts: list[str], seed_text_count: int,
+                      top_k: int) -> list[str]:
+    """Split the cap between the flat seed search and hop-discovered
+    support so a hop-discovered text always survives (see the module
+    comment above) instead of ``texts[:cap]`` being purely the seed
+    window."""
+    seed_texts = texts[:seed_text_count]
+    hop_texts = texts[seed_text_count:]
+    seed_budget = min(_RECALL_SEED_TEXT_BUDGET, top_k, _RECALL_MAX_TEXTS)
+    seed_take = min(seed_budget, len(seed_texts))
+    hop_take = min(_RECALL_MAX_TEXTS - seed_take, len(hop_texts))
+    short = (_RECALL_MAX_TEXTS - seed_take) - hop_take
+    if short > 0:  # hop pool ran short -- backfill from unused seed texts
+        seed_take = min(seed_take + short, len(seed_texts))
+    return seed_texts[:seed_take] + hop_texts[:hop_take]
+
+
+def _compact_recall_text(t: str) -> str:
+    """Truncate one recall supporting text to the preview cap — same
+    80/120/200-char + ellipsis convention as the existing text_preview
+    fields (cms.py, service.py). ``_compact_entry`` itself only projects
+    fields and does not truncate; this is a distinct, recall-specific
+    truncation step."""
+    if len(t) <= _RECALL_TEXT_CHARS:
+        return t
+    return t[:_RECALL_TEXT_CHARS] + "…"
+
+
 @_tool(tier="core")
 def memory_recall(query: str, hops: int = 3, top_k: int = 5,
                   verbose: bool = False) -> dict[str, Any]:
     """Multi-hop retrieval over the knowledge graph, for RELATIONAL
-    questions whose answer is reached by following links — "what does X
-    ultimately run on?", "how does A reach C?" — which single-shot
-    ``memory_search`` can't chain. Read-only. ``low_confidence: true``
-    means no seed entity matched — fall back to ``memory_search``.
+    questions answered by following links ("what does X ultimately run
+    on?") that single-shot ``memory_search`` can't chain. Read-only.
+    ``low_confidence: true`` means no seed entity matched — fall back to
+    ``memory_search``.
 
-    Args:
-        hops: Max graph hops (default 3, max 5).
-        verbose: Full fact/edge provenance (origin, confidence, derivation).
-            Default facts are ``{attribute, value}``, edges
-            ``{src, relation, dst}``.
-
-    Returns: ``{seeds, entities, edges, paths, texts, iterations}``.
+    ``top_k`` bounds only the seed search, not the result:
+    ``entities``/``edges``/``texts`` (and per-entity ``facts``) are capped
+    separately, reserving slots per hop so a hub seed's 1-hop ring can't
+    crowd out deeper hops. ``verbose=True`` returns full provenance and
+    untruncated texts. Details: docs/guide/retrieval.md.
     """
     out = service.recall(query, hops=hops, top_k=top_k)
+    entity_hop = out.get("entity_hop") or {}
+    seed_text_count = out.get("seed_text_count")
+    if seed_text_count is None:            # legacy/stub caller: no hop info
+        seed_text_count = min(top_k, len(out.get("texts", [])))
+
+    capped_entities = _cap_recall_entities(out.get("entities", []), entity_hop)
+    capped_entities = [
+        {**e, "facts": (e.get("facts") or [])[:_RECALL_MAX_FACTS_PER_ENTITY]}
+        for e in capped_entities
+    ]
+    surviving = {e.get("entity") for e in capped_entities}
+    out["entities"] = capped_entities
+    out["edges"] = _cap_recall_edges(
+        out.get("edges", []), out.get("edge_hop", []), surviving)
+    out["texts"] = _cap_recall_texts(
+        out.get("texts", []), seed_text_count, top_k)
+    # Internal bookkeeping only — stale once entities/edges are capped
+    # above, and not part of the documented return shape.
+    out.pop("entity_hop", None)
+    out.pop("edge_hop", None)
+    out.pop("seed_text_count", None)
+
     if not verbose:
         out["entities"] = [
             {"entity": n.get("entity"),
              "facts": [{"attribute": f.get("attribute"), "value": f.get("value")}
                        for f in n.get("facts", [])]}
-            for n in out.get("entities", [])
+            for n in out["entities"]
         ]
         out["edges"] = [
             {"src": e.get("src"), "relation": e.get("relation"),
              "dst": e.get("dst")}
-            for e in out.get("edges", [])
+            for e in out["edges"]
         ]
+        out["texts"] = [_compact_recall_text(t) for t in out["texts"]]
     return out
 
 
@@ -1447,27 +1695,35 @@ _dream_sweep_started = False
 
 
 def start_dream_sweep() -> None:
-    """Idempotent: start the headless dream sweep (Tier 0/2). Off when the
-    bank is empty or unconfigured — ``run_sweep_once`` gates on backlog +
-    quiescence each tick, so an idle bank does no LLM work. Daemon-only."""
+    """Idempotent: start the headless dream sweep (Tier 0/2). The same
+    thread also runs ``run_sweep_once``'s compaction/dream-run-journal/
+    retrieval-log reapers, none of which are actually gated on
+    ``dream.enabled`` (issue #178) — so this starts whenever EITHER
+    dreaming OR the retrieval log is enabled; a dream-disabled bank with
+    the (default-on) retrieval log still needs its own reaper, or
+    ``retrieval_events`` grows unbounded. ``run_sweep_once`` itself still
+    gates the automatic dream trigger on backlog + quiescence each tick,
+    so an idle bank does no LLM work. Daemon-only."""
     global _dream_sweep_started
     if _dream_sweep_started:
         return
-    if not service.config.memory.dream.enabled:
+    dream_cfg = service.config.memory.dream
+    if not (dream_cfg.enabled or service.config.memory.retrieval_log.enabled):
         return
-    from pseudolife_memory.memory.dream import (build_extractor, NoOpExtractor,
-                                                startup_extractor_warnings)
-    if isinstance(build_extractor(service.config.memory.dream), NoOpExtractor):
-        logger.warning(
-            "dream enabled but no extractor LLM configured "
-            "(PSEUDOLIFE_DREAM_BASE_URL/_MODEL unset): cortex auto-population is "
-            "disabled; only memory_fact_set writes canonical facts. Configure the "
-            "extractor sidecar to populate the cortex."
-        )
-    for warning in startup_extractor_warnings(service.config.memory.dream):
-        logger.warning("dream extractor config: %s", warning)
+    if dream_cfg.enabled:
+        from pseudolife_memory.memory.dream import (build_extractor, NoOpExtractor,
+                                                    startup_extractor_warnings)
+        if isinstance(build_extractor(dream_cfg), NoOpExtractor):
+            logger.warning(
+                "dream enabled but no extractor LLM configured "
+                "(PSEUDOLIFE_DREAM_BASE_URL/_MODEL unset): cortex auto-population is "
+                "disabled; only memory_fact_set writes canonical facts. Configure the "
+                "extractor sidecar to populate the cortex."
+            )
+        for warning in startup_extractor_warnings(dream_cfg):
+            logger.warning("dream extractor config: %s", warning)
     _dream_sweep_started = True
-    interval = float(service.config.memory.dream.sweep_interval_seconds)
+    interval = float(dream_cfg.sweep_interval_seconds)
     threading.Thread(
         target=_dream_sweep_loop, args=(interval,), daemon=True, name="pl-dream",
     ).start()

@@ -439,6 +439,12 @@ class MemoryService:
         # re-reaped on the next sweep, firing a dream per resume cycle.
         # In-memory only: a restart re-fires the SessionStart hook anyway.
         self._episode_touches: dict[str, float] = {}
+        # Retrieval-log write failures since process start. Both log paths
+        # swallow their exceptions (a logging failure must not break the
+        # search it rides on), so without this counter a broken log is
+        # indistinguishable from an idle one: zero rows, green health.
+        # In-memory only, like the CMS's own tier counters.
+        self._retrieval_log_errors = 0
         # Resolve data directory first — that's where memory_state lives
         # AND where the default config sits (if config_path not given).
         self.data_dir = Path(data_dir) if data_dir else Path.cwd() / "data"
@@ -498,6 +504,12 @@ class MemoryService:
         # exception still propagates to the caller; this is purely for
         # visibility.
         self._init_refusal: str | None = None
+        # Set by _ensure_init when the legacy .pt import left a partial
+        # bank behind (#187). Boot deliberately continues -- a half-imported
+        # bank is still usable -- but the state must not be silent, so it
+        # is logged at ERROR and surfaced via /health until a later boot
+        # resumes the import cleanly.
+        self._migration_partial: str | None = None
         # Last extractor selection made by dream_run_auto (sonnet-sidecar-cutover,
         # 2026-07-11): {"which": "primary"|"fallback", "base_url": str | None,
         # "at": float} — surfaced via dream_status. None until a dream has run.
@@ -761,8 +773,27 @@ class MemoryService:
                 )
                 if summary.get("migrated"):
                     logger.warning("legacy .pt bank migrated: %s", summary)
+                    self._migration_partial = None
+                elif summary.get("reason") in _migrate.PARTIAL_REASONS:
+                    self._migration_partial = summary["reason"]
+                    logger.error(
+                        "legacy .pt import is incomplete (%s) — the bank is "
+                        "SHORT. See the '%s' meta row; restore the original "
+                        ".pt sources under %s and restart to resume.",
+                        summary["reason"], _migrate.MIGRATION_META_KEY,
+                        self.data_dir)
             except Exception as exc:  # noqa: BLE001
-                logger.warning("legacy migration failed (continuing): %s", exc)
+                # Boot continues (a half-imported bank still serves), but
+                # the remainder is NOT lost any more: migrate_legacy has
+                # already recorded in_progress, so the next boot resumes.
+                # ERROR rather than WARNING because this line used to be the
+                # only trace of a bank that was permanently short (#187).
+                self._migration_partial = f"import_failed: {exc}"
+                logger.error(
+                    "legacy migration failed part-way (continuing with a "
+                    "SHORT bank): %s — progress is recorded in the '%s' meta "
+                    "row; fix the cause and restart to resume the import.",
+                    exc, _migrate.MIGRATION_META_KEY)
             n = _sync.hydrate_cms(self._cms, self._storage)
             logger.info("hydrated %d entries from storage", n)
             try:
@@ -1101,34 +1132,42 @@ class MemoryService:
                      if contiguity_neighbors is None
                      else int(contiguity_neighbors))
             vias = result.via or [None] * len(result.entries)
-            ranked: list[tuple[Any, float | None, str | None]] = [
-                (e, s, v) for e, s, v in
-                zip(result.entries, result.scores, vias)
+            comps = result.components or [None] * len(result.entries)
+            ranked: list[tuple[Any, float | None, str | None, dict | None]] = [
+                (e, s, v, c) for e, s, v, c in
+                zip(result.entries, result.scores, vias, comps)
             ]
             if n_ctg > 0 and ranked:
                 # Direct hits are all pre-seen so a neighbor can never
                 # duplicate one; neighbors of later hits skip entries an
                 # earlier hit already surfaced.
-                seen = {e.text for e, _, _ in ranked}
-                expanded: list[tuple[Any, float | None, str | None]] = []
-                for e, s, via in ranked:
+                seen = {e.text for e, _, _, _ in ranked}
+                expanded: list[
+                    tuple[Any, float | None, str | None, dict | None]] = []
+                for e, s, via, comp in ranked:
                     before, after = self._cms.temporal_neighbors(e, n_ctg)
                     for nb in before:
                         if nb.text not in seen:
-                            expanded.append((nb, 0.0, "contiguity"))
+                            expanded.append(
+                                (nb, 0.0, "contiguity",
+                                 {"channel": "contiguity"}))
                             seen.add(nb.text)
-                    expanded.append((e, s, via))
+                    expanded.append((e, s, via, comp))
                     for nb in after:
                         if nb.text not in seen:
-                            expanded.append((nb, 0.0, "contiguity"))
+                            expanded.append(
+                                (nb, 0.0, "contiguity",
+                                 {"channel": "contiguity"}))
                             seen.add(nb.text)
                 ranked = expanded
             entries_out = []
-            for e, s, via in ranked:
+            served_components: list[dict | None] = []
+            for e, s, via, comp in ranked:
                 d = _entry_to_dict(e, s)
                 if via is not None:
                     d["via"] = via
                 entries_out.append(d)
+                served_components.append(comp)
             # Chronicle events (schema v28): a temporally-cued query also
             # serves matching live events, chronologically ascending.
             # Needs no knob — an empty table (chronicle extraction
@@ -1177,9 +1216,13 @@ class MemoryService:
                     # answer): lets the answerer do arithmetic over a
                     # long enumeration without recounting lines.
                     out["events_total"] = len(events_block)
-            # Retrieval event log (schema v31): purely observational —
-            # the (query, served) training tuple for a learned reranker.
-            self._log_retrieval_event(query, entries_out)
+            # Retrieval event log (schema v31/v32): purely observational —
+            # the (query, served, components, params) training tuple for a
+            # learned reranker.
+            params = dict(result.params or {})
+            params["contiguity_neighbors"] = n_ctg
+            self._log_retrieval_event(
+                query, entries_out, served_components, params)
             return out
 
     # ------------------------------------------------------------------
@@ -1454,6 +1497,22 @@ class MemoryService:
                 _c = self._storage.load_communities()["communities"]
                 result["communities"] = len(_c)
                 result["graph_digest_at"] = (self._storage.get_meta("graph_digest") or {}).get("computed_at")
+                # Retrieval log liveness: nothing else reads the table, and
+                # both write paths swallow their errors, so this is the only
+                # place a silently-dead log becomes visible. Guarded: a
+                # feature whose premise is "logging must never break the
+                # caller" must not break memory_stats either (stats() is on
+                # the session-start path).
+                try:
+                    log = self._storage.retrieval_log_health()
+                except Exception:  # noqa: BLE001
+                    logger.warning("retrieval-log health read failed",
+                                   exc_info=True)
+                    log = {"events": None, "uses": None,
+                           "last_event_at": None, "unavailable": True}
+                log["enabled"] = bool(self.config.memory.retrieval_log.enabled)
+                log["write_errors"] = self._retrieval_log_errors
+                result["retrieval_log"] = log
             return result
 
     # ------------------------------------------------------------------
@@ -3094,28 +3153,52 @@ class MemoryService:
                     "count": len(events), "events": events}
 
     def _log_retrieval_event(self, query: str,
-                             entries_out: list[dict]) -> None:
-        """Append a ``retrieval_events`` row (schema v31): the (query,
+                             entries_out: list[dict],
+                             components: list[dict | None] | None = None,
+                             params: dict | None = None) -> None:
+        """Append a ``retrieval_events`` row (schema v31/v32): the (query,
         served) half of the learned-reranker training tuple. Rank = list
         position in the served output. Entries without a storage id
         (pre-persist) are dropped — they can't be joined to a later use.
+
+        ``components`` (aligned with ``entries_out``) are the fusion inputs
+        already computed at ranking time — bi-encoder score, cross-encoder
+        score, BM25 boost, recency, the multipliers — and ``params`` is the
+        knob snapshot. Both are logged rather than re-derived because
+        neither survives to training time: config is mutable at runtime,
+        and band recency / supersession flags / access counts mutate on
+        every serve, so replaying this query against tomorrow's bank
+        reproduces neither the scores nor the pool they came from.
+
         Never raises: a logging failure must not break the search it
-        rides on."""
+        rides on. Failures bump ``_retrieval_log_errors``, which
+        ``stats()`` reports — the log is otherwise silent when broken."""
         cfg = self.config.memory.retrieval_log
         if self._storage is None or not cfg.enabled:
             return
         try:
-            served = [
-                {"entry_id": int(d["id"]), "score": d.get("score"),
-                 "rank": rank, "via": d.get("via"), "bank": d.get("bank")}
-                for rank, d in enumerate(entries_out)
-                if d.get("id") is not None
-            ]
+            # Length-guarded: a misaligned components list must not
+            # truncate the served list (zip stops at the shorter one).
+            comps = (components
+                     if components is not None
+                     and len(components) == len(entries_out)
+                     else [None] * len(entries_out))
+            served = []
+            for rank, (d, comp) in enumerate(zip(entries_out, comps)):
+                if d.get("id") is None:
+                    continue
+                row = {"entry_id": int(d["id"]), "score": d.get("score"),
+                       "rank": rank, "via": d.get("via"),
+                       "bank": d.get("bank")}
+                if comp is not None:
+                    row["components"] = comp
+                served.append(row)
             _, session_id = self._resolve_writer()
             self._storage.add_retrieval_event(
                 query, served, origin="search", session_id=session_id,
-                episode_id=self._current_episode_id())
+                episode_id=self._current_episode_id(), params=params)
         except Exception:  # noqa: BLE001
+            self._retrieval_log_errors += 1
             logger.warning("retrieval-event log failed", exc_info=True)
 
     def _record_retrieval_use(self, entry_id: int, used_via: str) -> None:
@@ -3132,6 +3215,7 @@ class MemoryService:
                 int(entry_id), session_id, used_via,
                 float(cfg.use_window_seconds))
         except Exception:  # noqa: BLE001
+            self._retrieval_log_errors += 1
             logger.warning("retrieval-use label failed", exc_info=True)
 
     def prune_retrieval_log(self) -> int:
@@ -6412,6 +6496,7 @@ class MemoryService:
             pending_links = self._storage.pending_proposals()
             lesson_refs = self._storage.lesson_entity_ids()
             fact_counts = self._storage.entity_fact_counts()
+            fact_texts = self._storage.current_fact_counts_by_entity_text()
             lesson_recs = self._curation_records("lesson", cfg.snippet_max_chars)
             world_recs = self._curation_records("world", cfg.snippet_max_chars)
         entities, edges = g["entities"], g["edges"]
@@ -6540,6 +6625,7 @@ class MemoryService:
                         "junk", j["entity_id"], None, None, j["reason"], _t.time()) is not None:
                     junk_proposed += 1
             disp_by_id = {e["id"]: e["display"] for e in entities}
+            canon_by_id = {e["id"]: e["canonical"] for e in entities}
             # Junk tombstones: names a prior verdict (reviewed or auto)
             # already deleted. A re-mint of such a name that the detector
             # flags AGAIN is auto-deleted at the detector's own degree bar
@@ -6550,14 +6636,41 @@ class MemoryService:
             from pseudolife_memory.graph import norm_name as _nn2
             tombstones = {_nn2(d)
                           for d in self._storage.junk_accepted_displays()}
+            # Fact tally by graph-normalized subject NAME, folded from the raw
+            # cortex text. The entity_id cross-index reads zero for facts an
+            # earlier delete_entity orphaned (it NULLs facts.entity_id, and
+            # only a slot write re-links one), which is precisely the
+            # already-damaged population: a name deleted once WHILE carrying
+            # facts would otherwise look contentless on every later re-mint
+            # and be deleted again unattended. Folding here, not in SQL,
+            # because facts.entity_norm is the cortex norm and the entity
+            # side is the graph norm.
+            facts_by_norm: dict[str, int] = {}
+            for _text, _n in fact_texts.items():
+                _k = _nn2(_text)
+                if _k:
+                    facts_by_norm[_k] = facts_by_norm.get(_k, 0) + _n
             for p in self._storage.pending_entity_proposals():
                 if p.get("kind") != "junk":
                     continue
                 eid = p["entity_id"]
                 display = disp_by_id.get(eid, p.get("entity") or "?")
-                zero_structure = (deg.get(eid, 0) == 0
-                                  and fact_counts.get(eid, 0) <= 1)
-                tombstoned = (_nn2(display) in tombstones
+                # A tombstone relaxes the DEGREE bar only; the fact-count
+                # half of the evidence bar holds either way. Tombstones are
+                # permanent (nothing removes a merge_decisions row), so a
+                # short name auto-deleted once stayed deletable forever —
+                # months later the same name can be a real entity with a
+                # dozen cortex facts and one edge, and the unattended delete
+                # would take its edges, aliases, sources and fact
+                # cross-index with it (#177).
+                nd = _nn2(display)
+                contentless = max(fact_counts.get(eid, 0),
+                                  facts_by_norm.get(nd, 0),
+                                  facts_by_norm.get(
+                                      canon_by_id.get(eid, ""), 0)) <= 1
+                zero_structure = deg.get(eid, 0) == 0 and contentless
+                tombstoned = (contentless
+                              and nd in tombstones
                               and deg.get(eid, 0) <= cfg.junk_max_degree)
                 if not (zero_structure or tombstoned):
                     continue
@@ -7128,8 +7241,8 @@ class MemoryService:
         edges/facts/paths single-shot search can't produce. ``low_confidence`` is
         True when no seed entity resolves (caller falls back to ``search``)."""
         from pseudolife_memory.memory.recall import (
-            LLMController, MechanicalController, run_recall, simple_complete,
-            _hub_threshold,
+            LLMController, MechanicalController, recall_state_to_dict,
+            run_recall, simple_complete, _hub_threshold,
         )
         cfg = self.config.memory.recall
         hops = (max(1, min(int(cfg.default_hops), 5)) if hops is None
@@ -7141,7 +7254,8 @@ class MemoryService:
         if not query:
             return {"query": "", "seeds": [], "entities": [], "edges": [],
                     "paths": [], "texts": [], "iterations": 0, "hops": hops,
-                    "low_confidence": True}
+                    "low_confidence": True, "entity_hop": {}, "edge_hop": [],
+                    "seed_text_count": 0}
         vocab = self._recall_vocab()
         if driver == "llm":
             dcfg = self.config.memory.dream
@@ -7158,16 +7272,5 @@ class MemoryService:
             hub_threshold=threshold,
             expand_budget=(cfg.expand_budget or None),
         )
-        return {
-            "query": query,
-            "seeds": state.seeds,
-            "entities": [{"entity": n, "facts": state.entity_facts.get(n, [])}
-                         for n in state.entities],
-            "edges": state.edges,
-            "paths": state.paths,
-            "texts": state.texts,
-            "iterations": state.iterations,
-            "hops": hops,
-            "low_confidence": state.low_confidence,
-        }
+        return recall_state_to_dict(state, query, hops)
 

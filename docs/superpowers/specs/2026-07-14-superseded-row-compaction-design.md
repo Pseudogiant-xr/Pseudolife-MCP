@@ -205,6 +205,10 @@ pruning already makes (`prune_signals` runs inside the dream). Manual path:
 `service.compact_superseded()` is a public service method; the console/REST
 can grow a button later if wanted (YAGNI now).
 
+(Superseded 2026-08-25, issue #178: the reapers now run on the sweep tick
+regardless of dream.enabled, and the thread starts when dream OR
+retrieval_log is enabled.)
+
 ### 5.4 Config
 
 New block on `MemoryConfig` (utils/config.py), mirroring the existing nested

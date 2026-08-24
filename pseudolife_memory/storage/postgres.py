@@ -630,20 +630,25 @@ class PostgresStorage:
                             origin: str = "search",
                             session_id: str | None = None,
                             episode_id: str | None = None,
+                            params: dict | None = None,
                             now: float | None = None) -> int:
         """One row per search that served entries.
 
         ``served`` is the ranked list as dicts (``entry_id``/``score``/
-        ``rank``/``via``/``bank``). Entry ids carry no FK — entries are
-        evictable, and a training join tolerates dangling ids.
+        ``rank``/``via``/``bank``/``components``). Entry ids carry no FK —
+        entries are evictable, and a training join tolerates dangling ids.
+        ``params`` (v32) is the per-query knob snapshot the fusion ran
+        under; None for callers that don't rank (and for v31 rows).
         """
         t = time.time() if now is None else float(now)
         with self._txn():
             row = self.conn.execute(
                 "INSERT INTO retrieval_events "
                 "(query_text, origin, session_id, episode_id, served, "
-                "created_at) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
-                (query_text, origin, session_id, episode_id, Jsonb(served), t),
+                "params, created_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                (query_text, origin, session_id, episode_id, Jsonb(served),
+                 None if params is None else Jsonb(params), t),
             ).fetchone()
         return int(row[0])
 
@@ -691,7 +696,7 @@ class PostgresStorage:
         export read. Read-only."""
         rows = self.conn.execute(
             "SELECT e.id, e.query_text, e.origin, e.session_id, "
-            "e.episode_id, e.served, e.created_at, "
+            "e.episode_id, e.served, e.params, e.created_at, "
             "COALESCE(json_agg(json_build_object("
             "'entry_id', u.entry_id, 'used_via', u.used_via, "
             "'at', u.created_at)) "
@@ -703,8 +708,34 @@ class PostgresStorage:
             (float(since_ts), int(limit)),
         ).fetchall()
         cols = ("id", "query_text", "origin", "session_id", "episode_id",
-                "served", "created_at", "uses")
+                "served", "params", "created_at", "uses")
         return [dict(zip(cols, r)) for r in rows]
+
+    def retrieval_log_health(self) -> dict:
+        """Row counts + newest event timestamp for ``memory_stats``.
+
+        Both log-write paths are exception-guarded, so a broken log is
+        otherwise invisible (zero rows, green /health). Two aggregate
+        queries, computed on demand rather than cached: the MAX is O(1) off
+        ``retrieval_events_created_idx``, but the COUNTs are honestly
+        O(rows) (an index-only scan at best — PG has no cheap exact count).
+        Retention is the only bound on that cost: at the 365-day default a
+        heavily-searched bank reaches six figures of rows, and this runs
+        under the service lock on every ``memory_stats`` /
+        ``/api/overview`` call. Lower ``retention_days`` (or trade the
+        count for a ``pg_class.reltuples`` estimate) if it ever shows up in
+        a latency profile.
+        """
+        ev = self.conn.execute(
+            "SELECT COUNT(*), MAX(created_at) FROM retrieval_events"
+        ).fetchone()
+        uses = self.conn.execute(
+            "SELECT COUNT(*) FROM retrieval_uses").fetchone()
+        return {
+            "events": int(ev[0]),
+            "last_event_at": None if ev[1] is None else float(ev[1]),
+            "uses": int(uses[0]),
+        }
 
     def loop_health(self, window_s: float, now: float | None = None) -> dict:
         """Windowed loop-activity counts for the Console tile: current vs the
@@ -1573,6 +1604,19 @@ class PostgresStorage:
             "SELECT entity_id, COUNT(*) FROM facts "
             "WHERE status = 'current' AND entity_id IS NOT NULL "
             "GROUP BY entity_id").fetchall()}
+
+    def current_fact_counts_by_entity_text(self) -> dict[str, int]:
+        """Current-fact count per RAW subject text — the cross-index-free
+        companion to :meth:`entity_fact_counts`, which counts by
+        ``facts.entity_id`` and therefore reads zero for facts orphaned by
+        an earlier ``delete_entity`` (it NULLs the FK and nothing re-links
+        it). Returns the raw text so the caller normalizes into its own
+        space: ``facts.entity_norm`` is the cortex norm (``_norm_key``) and
+        the graph's ``norm_name`` is a different one — ``G:`` normalizes to
+        ``g:`` in the first and ``g`` in the second."""
+        return {str(ent): int(n) for ent, n in self.conn.execute(
+            "SELECT entity, COUNT(*) FROM facts WHERE status = 'current' "
+            "GROUP BY entity").fetchall()}
 
     def entity_sources_map(self) -> dict[int, list[str]]:
         out: dict[int, list[str]] = {}

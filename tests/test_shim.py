@@ -208,6 +208,131 @@ def test_shim_forwards_list_changed_on_toolset_expand(tmp_path):
         _reap_daemon(port)
 
 
+def test_shim_forwards_stringified_list_param(tmp_path):
+    """A JSON-in-a-string list param must survive the shim (#175).
+
+    Claude Desktop/Code send `tags` as `'["decision"]'` rather than a real
+    array. FastMCP registers its call-tool handler with `validate_input=False`
+    precisely so its `pre_parse_json` rescue can unwrap that before the model
+    binds — which is why the same call has always worked over direct HTTP.
+    The shim registered a bare `@server.call_tool()`, taking the SDK's
+    `validate_input=True` default, so it re-validated the RAW arguments
+    against the daemon's own inputSchema and failed the call before it was
+    ever forwarded. This is the mechanism behind the project's long-standing
+    "MCP anyOf-param stringification" note; the daemon is the validating
+    authority, not the proxy.
+    """
+    import asyncio
+
+    url = resolve_test_db_url()
+    if not _pg_reachable(url):
+        pytest.skip("no test Postgres reachable")
+
+    port = _free_port()
+    env = {
+        **os.environ,
+        "PSEUDOLIFE_MCP_DAEMON_URL": f"http://127.0.0.1:{port}",
+        "PSEUDOLIFE_MCP_HOST": "127.0.0.1",
+        "PSEUDOLIFE_MCP_PORT": str(port),
+        "PSEUDOLIFE_MCP_DATABASE_URL": url,
+        "PSEUDOLIFE_MCP_DATA_DIR": str(tmp_path),
+    }
+    env.pop("PSEUDOLIFE_MCP_TOKEN", None)  # loopback, no token needed
+
+    async def _drive():
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
+
+        params = StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "pseudolife_memory.cli"],  # no arg -> shim
+            env=env,
+        )
+        async with stdio_client(params) as (r, w):
+            async with ClientSession(r, w) as s:
+                await s.initialize()
+                res = await s.call_tool("memory_store", {
+                    "text": "stringified-tags probe: the shim must forward "
+                            "JSON-in-a-string list params untouched",
+                    "source": "shim-stringify-test",
+                    "tags": json.dumps(["decision"]),  # '["decision"]'
+                })
+                text = " ".join(getattr(c, "text", "") for c in res.content)
+                assert not res.isError, (
+                    f"shim rejected a stringified list param: {text}")
+                assert "validation error" not in text.lower()
+                assert '"stored":true' in text.replace(" ", "").lower()
+
+    try:
+        asyncio.run(asyncio.wait_for(_drive(), timeout=_OUTER_TIMEOUT_S))
+    finally:
+        _reap_daemon(port)
+
+
+def test_shim_surfaces_the_daemons_real_error_message(tmp_path):
+    """An upstream tool error must reach the client verbatim (#175 follow-up).
+
+    Dropping the shim's own input validation means genuinely bad arguments —
+    the ones `pre_parse_json` cannot rescue, like an int param given a
+    non-numeric string — now travel to the daemon and come back as an error
+    `CallToolResult`: `isError=True`, a TextContent carrying the real reason,
+    and `structuredContent=None`. The old return path handed that
+    content-without-structured to the shim's OWN output validation, and since
+    every tool is annotated `-> dict` the shim has an outputSchema, so the
+    client saw "Output validation error: outputSchema defined but no
+    structured output returned" — a message about the proxy's plumbing,
+    masking the daemon's actual diagnosis. An error result is now passed
+    through as-is (the SDK's lowlevel server returns a `types.CallToolResult`
+    unchanged, preserving `isError` and text).
+    """
+    import asyncio
+
+    url = resolve_test_db_url()
+    if not _pg_reachable(url):
+        pytest.skip("no test Postgres reachable")
+
+    port = _free_port()
+    env = {
+        **os.environ,
+        "PSEUDOLIFE_MCP_DAEMON_URL": f"http://127.0.0.1:{port}",
+        "PSEUDOLIFE_MCP_HOST": "127.0.0.1",
+        "PSEUDOLIFE_MCP_PORT": str(port),
+        "PSEUDOLIFE_MCP_DATABASE_URL": url,
+        "PSEUDOLIFE_MCP_DATA_DIR": str(tmp_path),
+    }
+    env.pop("PSEUDOLIFE_MCP_TOKEN", None)  # loopback, no token needed
+
+    async def _drive():
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
+
+        params = StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "pseudolife_memory.cli"],  # no arg -> shim
+            env=env,
+        )
+        async with stdio_client(params) as (r, w):
+            async with ClientSession(r, w) as s:
+                await s.initialize()
+                # memory_recent(n: int); "many" is not JSON, so pre_parse_json
+                # cannot rescue it and the daemon rejects it on the merits.
+                res = await s.call_tool("memory_recent", {"n": "many"})
+                text = " ".join(getattr(c, "text", "") for c in res.content)
+                assert res.isError, (
+                    f"an unrescuable bad arg must surface as an error: {text}")
+                assert "output validation error" not in text.lower(), (
+                    f"the shim's own outputSchema masked the daemon's real "
+                    f"error message: {text}")
+                assert "integer" in text.lower(), (
+                    f"the daemon's real validation message should name the "
+                    f"expected type: {text}")
+
+    try:
+        asyncio.run(asyncio.wait_for(_drive(), timeout=_OUTER_TIMEOUT_S))
+    finally:
+        _reap_daemon(port)
+
+
 # ── Session identity + lifecycle (unit; no daemon) ────────────────────────────
 
 

@@ -245,6 +245,61 @@ def test_start_dream_sweep_warns_without_extractor(tmp_path: Path, monkeypatch, 
     assert "extractor" in msgs and "cortex" in msgs
 
 
+def test_start_dream_sweep_starts_for_retrieval_log_when_dream_disabled(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """Issue #178: the retrieval-event log (default-on, schema v31) has no
+    reaper besides the sweep tick, and it accrues on every memory_search
+    regardless of dream state. Disabling dream must not also silently
+    disable retrieval-log retention by never starting the thread that
+    runs it.
+
+    Asserts the decision, not a live thread: a real ``pl-dream`` thread
+    (600s default interval) left running past this test could wake mid-
+    suite and touch the shared bench bank, so ``threading.Thread`` is
+    monkeypatched to record its construction args instead of actually
+    starting."""
+    import importlib
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
+    import pseudolife_memory.mcp_server as mod
+    importlib.reload(mod)
+    mod.service.config.memory.dream.enabled = False
+    mod.service.config.memory.retrieval_log.enabled = True
+
+    calls: list[tuple[tuple, dict]] = []
+
+    class _FakeThread:
+        def __init__(self, *args, **kwargs):
+            calls.append((args, kwargs))
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(mod.threading, "Thread", _FakeThread)
+    mod.start_dream_sweep()
+    assert mod._dream_sweep_started is True
+    assert len(calls) == 1, "start_dream_sweep must construct exactly one thread"
+    _, kwargs = calls[0]
+    assert kwargs["target"] is mod._dream_sweep_loop
+    assert kwargs["name"] == "pl-dream"
+    assert kwargs["daemon"] is True
+
+
+def test_start_dream_sweep_skips_when_dream_and_retrieval_log_both_disabled(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """Negative case for the same condition: with nothing riding the tick,
+    the thread must stay off (unchanged from before #178)."""
+    import importlib
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
+    import pseudolife_memory.mcp_server as mod
+    importlib.reload(mod)
+    mod.service.config.memory.dream.enabled = False
+    mod.service.config.memory.retrieval_log.enabled = False
+    mod.start_dream_sweep()
+    assert mod._dream_sweep_started is False
+
+
 def test_memory_store_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:
     """Tool calls reach the service and produce the expected shape.
 
@@ -757,6 +812,91 @@ def test_memory_recall_compact_by_default(monkeypatch) -> None:
                                      "verbose": True})
     assert full["entities"][0]["facts"][0]["confidence"] == 0.8
     assert full["edges"][0]["tag"] == "confirmed"
+
+
+def _oversized_recall_fixture() -> dict:
+    """A stub ``service.recall()`` payload shaped like the PG-backed one in
+    evals/recall_cap_probe.py, but hand-built (no DB, no embedder) so the
+    output-cap guarantees run everywhere: a hub seed (hop 0) with a WIDE
+    1-hop ring (20 children, hop 1) and a small hop-2 bridge (6 entities) —
+    exactly the shape where a flat ``[:N]`` slice would let hop 1 crowd out
+    hop 2 entirely (the bug the 2026-08-25 review of #186 caught)."""
+    root = "root-svc"
+    h1 = [f"h1-{i}" for i in range(20)]
+    h2 = [f"h2-{i}" for i in range(6)]
+
+    def facts(n: int) -> list[dict]:
+        return [{"attribute": f"attr{i}", "value": f"v{i}"} for i in range(n)]
+
+    entities = ([{"entity": root, "facts": facts(8)}]
+                + [{"entity": n, "facts": facts(8 if n == h1[0] else 1)}
+                   for n in h1]
+                + [{"entity": n, "facts": facts(1)} for n in h2])
+    entity_hop = {root: 0, **{n: 1 for n in h1}, **{n: 2 for n in h2}}
+
+    edges = [{"src": root, "relation": "depends-on", "dst": n,
+              "derived": False} for n in h1]
+    edges += [{"src": h1[0], "relation": "depends-on", "dst": n,
+               "derived": False} for n in h2]
+    edge_hop = [1] * len(h1) + [2] * len(h2)
+
+    seed_texts = [f"seed hit {i}: {root} overview" for i in range(3)]
+    hop_texts = [f"hop hit {i}: {name} detail " + ("x" * 250)
+                for i, name in enumerate(h1 + h2)]
+    texts = seed_texts + hop_texts
+
+    return {
+        "query": "what does root-svc connect to", "seeds": [root],
+        "entities": entities, "entity_hop": entity_hop,
+        "edges": edges, "edge_hop": edge_hop,
+        "paths": [], "texts": texts, "seed_text_count": len(seed_texts),
+        "iterations": 2, "hops": 3, "low_confidence": False,
+    }
+
+
+def test_memory_recall_caps_preserve_deep_hops_and_bound_size(monkeypatch) -> None:
+    """Stub-service twin of the PG-backed capping tests in
+    tests/test_recall.py — same guarantees, no bench Postgres required, so
+    the regression runs everywhere (issue #186 review finding 4)."""
+    from pseudolife_memory import mcp_server  # noqa: PLC0415
+    fixture = _oversized_recall_fixture()
+    monkeypatch.setattr(mcp_server.service, "recall",
+                        lambda *a, **k: dict(fixture))
+
+    out = _invoke("memory_recall", {"query": "what does root-svc connect to"})
+
+    assert len(out["entities"]) <= mcp_server._RECALL_MAX_ENTITIES
+    assert len(out["edges"]) <= mcp_server._RECALL_MAX_EDGES
+    assert len(out["texts"]) <= mcp_server._RECALL_MAX_TEXTS
+
+    # The whole point of #186's fix: a hub's wide 1-hop ring must not crowd
+    # the hop-2 bridge out of the response.
+    kept_entities = {e["entity"] for e in out["entities"]}
+    assert any(n.startswith("h2-") for n in kept_entities), (
+        "hop-2 entities were entirely dropped -- flat-prefix regression")
+    kept_edges = {(e["src"], e["dst"]) for e in out["edges"]}
+    assert any(dst.startswith("h2-") for (_src, dst) in kept_edges), (
+        "hop-2 edges were entirely dropped -- flat-prefix regression")
+
+    # texts: both the flat seed search AND hop-discovered support survive.
+    assert any(t.startswith("seed hit") for t in out["texts"])
+    assert any("hop hit" in t for t in out["texts"])
+
+    # Per-entity facts are capped even for the hub entities that survive.
+    assert all(len(e["facts"]) <= mcp_server._RECALL_MAX_FACTS_PER_ENTITY
+              for e in out["entities"])
+
+    # Serialized-size regression guard (issue #186 finding 3): this
+    # fixture's uncapped payload is 27 entities (incl. an 8-fact hub), 26
+    # edges, and 29 texts at 250+ chars each -- 12,451 bytes uncapped; the
+    # capped compact payload measured 2,818 bytes when this bound was
+    # written. 4000 gives headroom for incidental field growth without
+    # masking a real regression back toward the uncapped size.
+    assert len(json.dumps(out)) < 4000
+
+    # Internal hop-tracking bookkeeping must not leak into the tool result.
+    assert "entity_hop" not in out and "edge_hop" not in out
+    assert "seed_text_count" not in out
 
 
 # ---------------------------------------------------------------------------

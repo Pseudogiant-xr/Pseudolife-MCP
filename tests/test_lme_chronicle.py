@@ -20,14 +20,18 @@ import longmemeval_bench as lmb  # noqa: E402
 
 
 def test_bench_reset_truncates_served_tables():
-    """Regression lock (2026-08-04): ``ladder_sweep._ALL_TABLES`` is the
-    BENCH reset's truncate list — a second mutation path beside
-    ``pg_fixtures._ALL_TABLES``. ``chronicle_events`` has no FKs, so
-    nothing cascades into it; leaving it off the list let events
-    accumulate across all 266 questions of the ev-weak-0804 run and
-    contaminate every served events block (verdict corrected in
-    agg-recall-phase2-weak-verdict.json). Any future FK-free SERVED
-    table must land in both lists."""
+    """Regression lock (2026-08-04): ``chronicle_events`` has no FKs, so
+    nothing cascades into it; leaving it off the bench reset's truncate
+    list let events accumulate across all 266 questions of the ev-weak-0804
+    run and contaminate every served events block (verdict corrected in
+    agg-recall-phase2-weak-verdict.json).
+
+    The list ``ladder_sweep`` truncates was a second copy beside
+    ``pg_fixtures._ALL_TABLES``, and the same class recurred on the tables
+    that copy never grew (#181, 2026-08-25). Both now bind the one
+    ``schema.BENCH_RESET_TABLES``; completeness is enforced against the DDL
+    in ``tests/test_bench_reset_tables.py``. This keeps the served table
+    named where the incident is recorded."""
     import ladder_sweep
     assert "chronicle_events" in ladder_sweep._ALL_TABLES
 

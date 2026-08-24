@@ -193,9 +193,32 @@ deterministic eval functions (single pass per prompt):
 | cortex facts only | 0.068 | 0.216 |
 | hybrid | **0.243** | 0.284 |
 
+> **CORRECTED 2026-08-25 (scorer defect #173).** Every number in the table
+> above is superseded. The multiple-choice scorer's no-box fallback
+> accepted any standalone `[A-Ha-h]` token, so the English article "a" in a
+> truncated reasoning trace scored as answer **A**. Re-scoring the same
+> committed run under the anchored scorer
+> (`evals/results/lme-v2-smoke-slice2-rescored-strictmc.summary.json` and
+> `…-slice2-compose-rescored-strictmc.summary.json`, produced offline by
+> `evals/rescore_strict_mc.py`):
+>
+> | arm | default answer prompt | composition-aware prompt |
+> |-----|----------------------|--------------------------|
+> | naive RAG (control) | 0.162 → **0.149** | 0.284 → **0.257** |
+> | cortex facts only | 0.068 → **0.068** | 0.216 → **0.176** |
+> | hybrid | **0.243** → **0.203** | 0.284 → **0.270** |
+>
+> All ten flips are the same defect in the same direction (gold answer
+> **A**, previously-correct → wrong); no row moved the other way. The
+> ordering is unchanged, but the exact compose-prompt tie below was an
+> artifact of it: corrected, hybrid leads naive RAG there by 0.013 — one
+> question, which is still no measurable difference.
+
 Hybrid leads under the default prompt. Under the composition-aware prompt
 it **ties naive RAG** — so the complementarity is real but
-prompt-dependent, not universal.
+prompt-dependent, not universal. (The tie is a superseded number; see the
+correction above — 0.270 vs 0.257 on the corrected scorer, which is the
+same "no measurable difference" reading.)
 
 > **Superseding the pilot.** An earlier 10-question slice (3 replicates)
 > reported — and this table now supersedes —
@@ -209,6 +232,16 @@ prompt-dependent, not universal.
 > whole — every arm scores roughly half as well across all 74. This is
 > what a selection-biased pilot looks like from the other side, and it is
 > the reason for running the expansion at all.
+>
+> **CORRECTED 2026-08-25 (scorer defect #173).** The three quoted pilot
+> rows are superseded by the same re-score
+> (`evals/results/lme-v2-smoke-slice1-rescored-strictmc.agg.json`): naive
+> RAG `0.300 [0.30–0.30] | 0.433 [0.40–0.50]`, cortex
+> `0.167 [0.00–0.30] | 0.200 [0.10–0.30]`, hybrid
+> `0.500 [0.40–0.60] | 0.533 [0.50–0.60]`. Seven flips, all gold **A**.
+> The pilot's own conclusion weakens further: under the composition-aware
+> prompt hybrid now *ties* naive RAG in one of the three replicates rather
+> than beating both channels in all three.
 
 Read honestly: these are single-pass point estimates, not replicated, so
 small differences between arms carry no weight — the hybrid-vs-rag tie

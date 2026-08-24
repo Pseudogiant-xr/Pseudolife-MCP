@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import heapq
 import logging
+import math
 import random
 import re
 import time
@@ -759,6 +760,14 @@ class ContinuumMemorySystem:
         seen_texts: set[str] = set()
         n = len(self.bands)
         hit_band_names: set[str] = set()
+        # Per-entry ranking components, keyed by text like ``via_map`` below
+        # (texts are deduped by ``seen_texts``, so the key is unique within
+        # a result). These are the fusion's INPUTS — the retrieval log
+        # persists them because they cannot be recovered later: band
+        # recency, supersession flags and access counts all mutate between
+        # the serve and any offline replay. Built unconditionally: a dict of
+        # floats per *kept* candidate, nothing recomputed.
+        comps: dict[str, dict] = {}
 
         for depth, band in enumerate(self.bands):
             if band_filter is not None and band.name not in band_filter:
@@ -872,6 +881,17 @@ class ContinuumMemorySystem:
                     neural.append((entry, adjusted, surprise))
                     seen_texts.add(entry.text)
                     hit_band_names.add(band.name)
+                    comps[entry.text] = {
+                        "channel": "dense",
+                        "dense": float(score),
+                        "recency": float(recency),
+                        "recency_boost": float(boost),
+                        "source_mult": float(src_mult),
+                        "supersession_mult": float(supersession_mult),
+                        "surprise": float(surprise),
+                        "band": band.name,
+                        "band_depth": depth,
+                    }
                     if cand is not None:
                         cand["kept"] = True
                 else:
@@ -916,6 +936,15 @@ class ContinuumMemorySystem:
                     continue
                 neural.append((entry, score, surprise))
                 seen_texts.add(entry.text)
+                # Slot hits carry their own 0.55-0.95 confidence scale, not a
+                # cosine — logged under its own key so a learned head never
+                # reads it as a bi-encoder score.
+                comps[entry.text] = {
+                    "channel": "slot",
+                    "slot": float(score),
+                    "surprise": float(surprise),
+                    "band": entry.bank,
+                }
                 if entry.bank:
                     hit_band_names.add(entry.bank)
 
@@ -996,6 +1025,15 @@ class ContinuumMemorySystem:
                         boosted.append((entry, score + bm25_cfg.weight * boost, surprise))
                     else:
                         boosted.append((entry, score, surprise))
+                    # Set even at 0.0: "the lexical channel scored this
+                    # entry at nothing" is a different feature from "the
+                    # channel never looked at it" (key absent). Absent is
+                    # NOT the same as "bm25 disabled" — reference-pool
+                    # entries and the empty-candidate-pool path never get
+                    # the key either; ``params.bm25.enabled`` is the
+                    # authority on whether the channel ran at all.
+                    if entry.text in comps:
+                        comps[entry.text]["bm25"] = float(boost)
                 neural = boosted
 
                 # Inject BM25-only matches not yet in the pool.
@@ -1013,6 +1051,12 @@ class ContinuumMemorySystem:
                         continue
                     neural.append((entry, injected_score, 0.0))
                     seen_texts.add(entry.text)
+                    comps[entry.text] = {
+                        "channel": "bm25",
+                        "bm25": float(norm_score),
+                        "surprise": 0.0,
+                        "band": entry.bank,
+                    }
                     if entry.bank:
                         hit_band_names.add(entry.bank)
                     bm25_only_added.append({
@@ -1073,6 +1117,14 @@ class ContinuumMemorySystem:
                     continue
                 neural.append((entry, injected_score, 0.0))
                 seen_texts.add(entry.text)
+                # Scored by the BM25 index too, but at the timeline
+                # channel's own weight — the channel marker says which.
+                comps[entry.text] = {
+                    "channel": "timeline",
+                    "bm25": float(norm_score),
+                    "surprise": 0.0,
+                    "band": entry.bank,
+                }
                 via_map[entry.text] = "timeline"
                 if entry.bank:
                     hit_band_names.add(entry.bank)
@@ -1107,6 +1159,12 @@ class ContinuumMemorySystem:
                 if entry.text not in seen_texts and score >= MIN_SCORE:
                     ref_pool.append((entry, score, surprise))
                     seen_texts.add(entry.text)
+                    comps[entry.text] = {
+                        "channel": "reference",
+                        "dense": float(score),
+                        "surprise": float(surprise),
+                        "band": entry.bank,
+                    }
             ref_pool = ref_pool[:ref_k]
             if _trace is not None:
                 _trace["reference_pool"] = [
@@ -1134,6 +1192,12 @@ class ContinuumMemorySystem:
             if hasattr(self.config, "reranker")
             else False
         )
+        # Knob snapshot for the retrieval log. ``fired``/``skip_reason``
+        # explain the per-entry ``ce: None`` a reader will meet below.
+        rerank_log: dict = {
+            "enabled": bool(rerank_enabled), "fired": False,
+            "skip_reason": None,
+        }
         if (
             rerank_enabled
             and self._reranker is not None
@@ -1158,14 +1222,28 @@ class ContinuumMemorySystem:
                 else 0.0
             )
             skip_for_margin = False
+            rerank_log.update({
+                "top_n": top_n,
+                "skip_margin": skip_margin,
+                "fusion_weight": getattr(
+                    self.config.reranker, "fusion_weight", None),
+                "model": getattr(self.config.reranker, "model_name", None),
+            })
             if skip_margin > 0.0:
                 ranked = sorted(head_orig_scores, reverse=True)
                 margin = (
                     ranked[0] - ranked[1] if len(ranked) >= 2 else float("inf")
                 )
                 skip_for_margin = margin >= skip_margin
+                # isfinite, not `!= inf`: a NaN would serialise as a bare
+                # `NaN` literal that PG's jsonb input rejects, losing the
+                # whole event row into the write-error counter.
+                rerank_log["margin"] = (
+                    float(margin) if math.isfinite(margin) else None
+                )
             if skip_for_margin:
                 ce_scores: list[float] = []
+                rerank_log["skip_reason"] = "unambiguous_margin"
                 if _trace is not None:
                     _trace["reranker"] = {
                         "fired": False,
@@ -1177,7 +1255,18 @@ class ContinuumMemorySystem:
                     }
             else:
                 ce_scores = self._reranker.rerank(query_text, head_texts)
+            # ``ce`` is set on every head entry either way: a float when the
+            # pass ran, an explicit None when the margin gate (or an
+            # unavailable model) skipped it — "the bi-encoder order was
+            # served unrefined" is training signal, not a missing value.
+            # Tail entries beyond top_n never had a ce score and get no key.
+            for i, (entry, _, _) in enumerate(head):
+                c = comps.get(entry.text)
+                if c is not None:
+                    c["ce"] = (float(ce_scores[i])
+                               if i < len(ce_scores) else None)
             if ce_scores:
+                rerank_log["fired"] = True
                 fused = self._reranker.fuse(head_orig_scores, ce_scores)
                 reranked = [
                     (entry, fused_s, surprise)
@@ -1209,11 +1298,60 @@ class ContinuumMemorySystem:
                             )
                         ],
                     }
-            elif _trace is not None and not skip_for_margin:
-                _trace["reranker"] = {
-                    "fired": False,
-                    "reason": "rerank_failed_or_unavailable",
-                }
+            elif not skip_for_margin:
+                rerank_log["skip_reason"] = "rerank_failed_or_unavailable"
+                if _trace is not None:
+                    _trace["reranker"] = {
+                        "fired": False,
+                        "reason": "rerank_failed_or_unavailable",
+                    }
+        elif rerank_enabled:
+            # Enabled but the gate above never opened: no model, no query
+            # text, or nothing to rerank.
+            rerank_log["skip_reason"] = "unavailable"
+
+        # Knobs in force for THIS query — config is mutable at runtime, so
+        # a training reader cannot recover them from today's config.
+        params: dict = {
+            "top_k": int(k),
+            "min_score": float(MIN_SCORE),
+            "min_score_explicit": explicit_floor,
+            # band_count, not "bands" — ``filters.bands`` below is the
+            # band-NAME filter, and one key meaning two things in a blob
+            # read offline months later is a trap.
+            "band_count": n,
+            # getattr guards mirror the bm25/reranker idiom above: eval
+            # harnesses pass config objects predating these fields.
+            "recency_boost": bool(
+                n > 1 and not disable_recency_boost
+                and getattr(self.config, "recency_boost_enabled", False)),
+            "recency_base_half_life_s": float(
+                getattr(self.config, "recency_base_half_life_s", 0.0)),
+            "hide_superseded": hide_superseded,
+            "bm25": {"enabled": bool(bm25_enabled)},
+            "reranker": rerank_log,
+            "timeline": {"enabled": bool(timeline_enabled),
+                         "fired": bool(timeline_fired)},
+            # Filters shape the candidate set the fusion ranked over; a
+            # replay of the bare query text would rank a different pool.
+            "filters": {
+                "bands": list(bands) if bands else None,
+                "sources": list(sources) if sources else None,
+                # sorted: the episode subtree arrives from a set, so an
+                # unsorted copy makes two identical queries diff.
+                "episodes": sorted(episodes) if episodes else None,
+                "tags": normalize_tags(tags) if tags else None,
+                "min_logical_turn": min_logical_turn,
+            },
+        }
+        if bm25_enabled and hasattr(self.config, "bm25"):
+            params["bm25"].update({
+                "weight": float(self.config.bm25.weight),
+                "min_score": float(self.config.bm25.min_score),
+                "k1": float(self.config.bm25.k1),
+                "b": float(self.config.bm25.b),
+                "top_n": int(self.config.bm25.top_n),
+            })
 
         if _trace is not None:
             _trace["final_topk"] = [
@@ -1227,7 +1365,8 @@ class ContinuumMemorySystem:
             ]
 
         if not combined:
-            return RetrievalResult(entries=[], scores=[], surprises=[])
+            return RetrievalResult(entries=[], scores=[], surprises=[],
+                                   params=params)
 
         # Timeline presentation: when the channel fired, the MEMORY portion
         # of the final result is ordered by stream position — (timestamp,
@@ -1252,6 +1391,8 @@ class ContinuumMemorySystem:
             scores=list(scores),
             surprises=list(surprises),
             via=([via_map.get(e.text) for e in entries] if via_map else None),
+            components=[comps.get(e.text) for e in entries],
+            params=params,
         )
 
     def compute_surprise(self, embedding: torch.Tensor) -> float:

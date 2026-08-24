@@ -1,0 +1,79 @@
+{
+  "category": "procedure",
+  "n": 74,
+  "arms": {
+    "rag": {
+      "eval_accuracy": 0.149,
+      "judge_accuracy": 0.122,
+      "context_tokens": 914.1,
+      "answer_seconds": 1.2
+    },
+    "cortex": {
+      "eval_accuracy": 0.068,
+      "judge_accuracy": 0.054,
+      "context_tokens": 1169.7,
+      "answer_seconds": 1.48
+    },
+    "hybrid": {
+      "eval_accuracy": 0.203,
+      "judge_accuracy": 0.189,
+      "context_tokens": 1652.6,
+      "answer_seconds": 1.91
+    }
+  },
+  "rescore": {
+    "issue": 173,
+    "date": "2026-08-25",
+    "scorer": "score_mc no-box fallback: anchored uppercase A-H (whole-response letter or explicit answer marker) instead of any standalone [A-Ha-h]",
+    "source": "evals/results/lme-v2-smoke-slice2.jsonl",
+    "supersedes": "evals/results/lme-v2-smoke-slice2.summary.json",
+    "eval_accuracy_before": {
+      "rag": 0.162,
+      "cortex": 0.068,
+      "hybrid": 0.243
+    },
+    "eval_accuracy_after": {
+      "rag": 0.149,
+      "cortex": 0.068,
+      "hybrid": 0.203
+    },
+    "flips": [
+      {
+        "question_id": "507a0fe8",
+        "arm": "hybrid",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "ent (Not mentioned), Language (Not mentioned).\nOption C: Date format (Not mentioned), Active (Yes), Password needs reset"
+      },
+      {
+        "question_id": "52dd33bb",
+        "arm": "rag",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "e revenue... The returns are written in their short description.\"\nActually, looking at similar WorkArena tasks, usually,"
+      },
+      {
+        "question_id": "52dd33bb",
+        "arm": "hybrid",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": " says \"Set the Investment field on every expense line item.\" This aligns with the goal of \"allocating investments.\"\n\nLet"
+      },
+      {
+        "question_id": "07fff330",
+        "arm": "hybrid",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "imum actions needed to display search results sorted by highest price first versus sorted by product name alphabetically"
+      }
+    ]
+  }
+}
