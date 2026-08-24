@@ -17,6 +17,11 @@ rows and then permanently blocked every retry: the remaining entries and
 ALL cortex facts were lost silently, and the sources never got their
 ``.pre-v8.bak`` rename (#187).
 
+The resume is a MERGE, not a replay: the daemon deliberately keeps serving
+between the failed boot and the resume (the partial state is non-fatal), so
+entries already committed are skipped and cortex facts only fill slots
+nobody has written in the meantime.
+
 Both the entries branch AND the cortex-facts branch re-embed any row whose
 stored embedding dim doesn't match the live schema's before inserting it
 (2026-07-28, embedding-backbone-v25 review escalation) — a real legacy
@@ -80,13 +85,24 @@ def _already_imported(rows: list[dict]) -> Counter:
     """Multiset of the stable identity legacy entry rows carry.
 
     Legacy rows have no id that survives the import (``entries.id`` is a
-    fresh serial), so the identity is the tuple the legacy record itself
-    defines: band + text + timestamp. A Counter rather than a set so a
-    legacy bank that genuinely holds the same text twice at the same
-    instant still gets both copies on resume.
+    fresh serial), so the identity is ``(text, ts)`` — the two fields no
+    write-through path mutates.
+
+    ``band`` is deliberately NOT part of the key. The boot sequence runs
+    ``sync.hydrate_cms`` immediately after this import, and hydrate
+    REWRITES the band column of every row whose band is absent from the
+    live preset (its stale-band-stamp reconcile). A legacy v<=7 bank
+    carries continuum band names while the live default preset is the
+    single ``flat`` band, so the rows this function has to recognise on
+    the next boot come back under a different band than they were
+    inserted with — keying on it would match nothing and re-insert the
+    entire imported prefix.
+
+    A Counter rather than a set so a legacy bank that genuinely holds the
+    same text twice at the same instant still gets both copies on resume.
     """
     return Counter(
-        (r.get("band"), r.get("text"), float(r.get("ts") or 0.0)) for r in rows
+        (r.get("text"), float(r.get("ts") or 0.0)) for r in rows
     )
 
 
@@ -137,15 +153,26 @@ def migrate_legacy(data_dir: str | Path, storage, embedder) -> dict:
             return {"migrated": False, "reason": "legacy_source_missing"}
         return {"migrated": False, "reason": "no_legacy_state"}
 
-    fingerprint = _fingerprint({"cms": cms_path, "cortex": cortex_path})
+    sources = {"cms": cms_path, "cortex": cortex_path}
+    fingerprint = _fingerprint(sources)
     resuming = False
     if record.get("status") == "in_progress":
-        # "Every source still on disk matches what we recorded" rather than
-        # set equality: the renames at the bottom are per-file, so a crash
-        # between them leaves one source renamed and the other not, and set
-        # equality would misread that as a foreign bank.
+        # Two halves, because the renames at the bottom are per-file and a
+        # crash between them legitimately leaves one source renamed:
+        #   (a) every source still on disk must match what we recorded, and
+        #   (b) every source we recorded that is NOT on disk must have been
+        #       renamed to .pre-v8.bak, i.e. this import is the reason it is
+        #       gone. Without (b) a recorded source that simply vanished
+        #       would pass (a) vacuously and the resume would mark a
+        #       permanently short bank done.
         recorded = record.get("source") or {}
-        if all(recorded.get(name) == fp for name, fp in fingerprint.items()):
+        on_disk_matches = all(
+            recorded.get(name) == fp for name, fp in fingerprint.items())
+        vanished_were_renamed = all(
+            sources[name].with_name(sources[name].name + ".pre-v8.bak").exists()
+            for name in recorded if name not in fingerprint and name in sources
+        )
+        if on_disk_matches and vanished_were_renamed:
             resuming = True
         else:
             # Refuse rather than merge: the bank holds the leftovers of a
@@ -166,7 +193,11 @@ def migrate_legacy(data_dir: str | Path, storage, embedder) -> dict:
 
     import torch
 
-    from pseudolife_memory.storage.sync import _record_to_row
+    # Same meta keys the live cortex persistence writes — imported rather
+    # than re-spelled so a rename cannot silently orphan the resume path.
+    from pseudolife_memory.storage.sync import (
+        _CORTEX_CURSOR_KEY, _CORTEX_LOG_KEY, _record_to_row,
+    )
 
     started_at = record.get("started_at") if resuming else time.time()
     storage.meta_set(MIGRATION_META_KEY, {
@@ -209,7 +240,7 @@ def migrate_legacy(data_dir: str | Path, storage, embedder) -> dict:
         for band_name, band_state in (state.get("bands") or {}).items():
             for e in band_state.get("entries", []):
                 ts = float(e.get("timestamp", 0.0))
-                key = (band_name, e["text"], ts)
+                key = (e["text"], ts)
                 if already[key]:
                     # Committed by an earlier, interrupted pass.
                     already[key] -= 1
@@ -247,7 +278,7 @@ def migrate_legacy(data_dir: str | Path, storage, embedder) -> dict:
                          int(state.get("interaction_count", 0)))
         _checkpoint()
 
-    reembedded_facts = 0
+    reembedded_facts = facts_skipped = 0
     if cortex_path.exists():
         from pseudolife_memory.memory.cortex import CortexStore
         cortex = CortexStore()
@@ -266,12 +297,42 @@ def migrate_legacy(data_dir: str | Path, storage, embedder) -> dict:
                 r.embedding = embedder.encode_single(claim)
                 reembedded_facts += 1
         rows = [_record_to_row(r) for r in cortex.records]
-        # A wholesale replace, so this branch needs no skip logic — a
-        # resume simply rewrites the same snapshot.
-        storage.replace_facts(rows)
-        storage.meta_set("cortex_supersession_log", cortex.supersession_log[-200:])
-        storage.meta_set("cortex_dream_cursor", cortex.dream_cursor)
-        facts = len(rows)
+        if not resuming:
+            # Fresh import: the guard above proved the bank was empty, so
+            # the snapshot rewrite has nothing to destroy.
+            storage.replace_facts(rows)
+            storage.meta_set(_CORTEX_LOG_KEY, cortex.supersession_log[-200:])
+            storage.meta_set(_CORTEX_CURSOR_KEY, cortex.dream_cursor)
+            facts = len(rows)
+        else:
+            # Resume: the daemon has been SERVING since the failed boot (the
+            # partial state is deliberately non-fatal), so dream and
+            # fact_set writes may have landed in the meantime. A snapshot
+            # rewrite would DELETE them. Merge instead — fill only the slots
+            # nobody has written yet, and leave every occupied slot alone.
+            occupied = {(f["entity_norm"], f["attribute_norm"])
+                        for f in storage.load_facts()}
+            keep = [r for r in rows
+                    if (r["entity_norm"], r["attribute_norm"]) not in occupied]
+            slots = {(r["entity_norm"], r["attribute_norm"]) for r in keep}
+            if slots:
+                # Per-slot replace touches only these (empty) slots — the
+                # same primitive the live per-write path uses.
+                storage.replace_slot_facts(slots, keep)
+            facts = len(keep)
+            facts_skipped = len(rows) - len(keep)
+            # The dream cursor is monotonic by contract; a legacy value is
+            # necessarily older than anything the degraded window advanced
+            # it to, and moving it backwards would force re-extraction of
+            # every memory since.
+            current_cursor = float(storage.meta_get(_CORTEX_CURSOR_KEY, 0.0) or 0.0)
+            storage.meta_set(_CORTEX_CURSOR_KEY,
+                             max(current_cursor, float(cortex.dream_cursor or 0.0)))
+            # Same reasoning for the supersession log: only seed it if the
+            # live one is still empty, never overwrite real audit history.
+            if not (storage.meta_get(_CORTEX_LOG_KEY) or []):
+                storage.meta_set(_CORTEX_LOG_KEY,
+                                 cortex.supersession_log[-200:])
 
     # Rename sources — migration is read-only on content, rename-only on
     # the filesystem, and never deletes.
@@ -290,7 +351,8 @@ def migrate_legacy(data_dir: str | Path, storage, embedder) -> dict:
 
     summary = {"migrated": True, "resumed": resuming, "entries": entries,
                "entries_skipped": skipped, "episodes": episodes,
-               "facts": facts, "reembedded": reembedded,
+               "facts": facts, "facts_skipped": facts_skipped,
+               "reembedded": reembedded,
                "reembedded_facts": reembedded_facts}
     logger.warning("legacy bank migrated to schema v8: %s", summary)
     return summary

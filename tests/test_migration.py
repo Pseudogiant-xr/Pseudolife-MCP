@@ -35,11 +35,17 @@ class _FakeEmbedder:
         return v / v.norm()
 
 
-def _build_legacy_bank(data_dir, suffix: str = ""):
+def _build_legacy_bank(data_dir, suffix: str = "", config=None):
     """Synthesize a v7 bank: entries + episode + supersession + cortex.
 
     ``suffix`` distinguishes one synthetic bank from another (used by the
     source-identity test, which needs two banks whose bytes differ).
+
+    ``config`` selects the band preset the legacy bank was written under.
+    The default here is the *live* default (``flat``), which is the least
+    realistic case for a v<=7 bank — every real one predates the
+    2026-08-15 flat-band cutover and carries continuum band names. Tests
+    that care about the band column must pass ``preset="continuum"``.
 
     BOTH entries and the cortex fact embed at legacy 384-d — the only
     shape that exists in the wild (every real legacy .pt bank predates
@@ -49,7 +55,7 @@ def _build_legacy_bank(data_dir, suffix: str = ""):
     up AFTER entries had already committed, permanently losing the facts
     (the idempotency guard blocks every retry once entries is non-empty).
     This fixture pins the fix: both branches must survive."""
-    cms = ContinuumMemorySystem(MemoryConfig())
+    cms = ContinuumMemorySystem(config or MemoryConfig())
     cms.episodes.start("legacy session" + suffix)
     cms.store("legacy fact alpha" + suffix, _emb(1), source="legacy",
               tags=["old"])
@@ -347,9 +353,148 @@ def test_resume_survives_a_half_completed_rename(pg_conn, pg_url, tmp_path):
         storage.close()
 
 
-def test_health_reports_a_partial_legacy_import_as_degraded():
+def test_resume_after_hydrate_rewrote_band_stamps_does_not_duplicate(
+        pg_conn, pg_url, tmp_path):
+    """The real boot sequence runs hydrate_cms right after migrate_legacy,
+    and hydrate REWRITES the band column of every row whose band is not in
+    the live preset (sync.hydrate_cms's stale-stamp reconcile). A legacy
+    v<=7 bank carries continuum band names while the live default preset is
+    the single ``flat`` band, so boot 1's imported rows come back with
+    band='flat'. A skip identity that included ``band`` would therefore
+    match nothing on boot 2 and re-insert the whole imported prefix."""
+    from pseudolife_memory.storage.migrate import migrate_legacy
+    from pseudolife_memory.storage.postgres import PostgresStorage
+    from pseudolife_memory.storage.sync import hydrate_cms
+    from pseudolife_memory.utils.config import MIRASConfig
+
+    legacy_cfg = MemoryConfig(miras=MIRASConfig(preset="continuum"))
+    _build_legacy_bank(tmp_path, config=legacy_cfg)
+    storage = PostgresStorage(pg_url)
+    embedder = _FakeEmbedder()
+    try:
+        real_replace_facts = storage.replace_facts
+        storage.replace_facts = lambda rows: (_ for _ in ()).throw(
+            RuntimeError("dropped mid-import"))
+        with pytest.raises(RuntimeError):
+            migrate_legacy(tmp_path, storage, embedder)
+        imported = storage.load_entries()
+        assert len(imported) == 2
+        # The legacy bank really did use continuum band names.
+        assert {r["band"] for r in imported} != {"flat"}
+
+        # ...and the rest of boot 1 runs, rewriting those stamps to the
+        # live preset's single band.
+        hydrate_cms(ContinuumMemorySystem(MemoryConfig()), storage)
+        assert {r["band"] for r in storage.load_entries()} == {"flat"}
+
+        # Boot 2 resumes. The prefix must be recognised despite the rewrite.
+        storage.replace_facts = real_replace_facts
+        summary = migrate_legacy(tmp_path, storage, embedder)
+        assert summary["migrated"] is True and summary["resumed"] is True
+        assert summary["entries_skipped"] == 2 and summary["entries"] == 0
+        assert len(storage.load_entries()) == 2
+    finally:
+        storage.close()
+
+
+def _write_live_fact(storage, embedder, entity, attribute, value):
+    """Commit one fact the way the service's per-write path does — a
+    per-slot replace, not a snapshot rewrite."""
+    from pseudolife_memory.memory.cortex import CortexStore
+    from pseudolife_memory.storage.sync import _record_to_row
+
+    cortex = CortexStore()
+    cortex.write_fact(Slot(entity, attribute, value),
+                      embedder.encode_single(f"{entity} {attribute} {value}"),
+                      confidence=0.9, support="user")
+    rows = [_record_to_row(r) for r in cortex.records]
+    slots = {(r["entity_norm"], r["attribute_norm"]) for r in rows}
+    storage.replace_slot_facts(slots, rows)
+
+
+def test_resume_merges_facts_instead_of_replacing_live_writes(
+        pg_conn, pg_url, tmp_path):
+    """The daemon deliberately keeps serving between the failed import and
+    the resume, so anything written into the cortex during that degraded
+    window must survive the resume. A snapshot ``replace_facts`` would
+    DELETE it, and resetting the dream cursor backwards would force
+    re-extraction of everything since."""
+    from pseudolife_memory.storage.migrate import migrate_legacy
+    from pseudolife_memory.storage.postgres import PostgresStorage
+
+    _build_legacy_bank(tmp_path)
+    storage = PostgresStorage(pg_url)
+    embedder = _FakeEmbedder()
+    try:
+        real_replace_facts = storage.replace_facts
+        storage.replace_facts = lambda rows: (_ for _ in ()).throw(
+            RuntimeError("dropped mid-import"))
+        with pytest.raises(RuntimeError):
+            migrate_legacy(tmp_path, storage, embedder)
+        assert storage.load_facts() == []
+
+        # The degraded window: a real write lands, and a dream advances the
+        # cursor well past the legacy bank's.
+        _write_live_fact(storage, embedder, "live-proj", "language", "python")
+        storage.meta_set("cortex_dream_cursor", 9_999.0)
+        storage.meta_set("cortex_supersession_log", [{"slot": "live"}])
+
+        storage.replace_facts = real_replace_facts
+        summary = migrate_legacy(tmp_path, storage, embedder)
+        assert summary["migrated"] is True and summary["resumed"] is True
+
+        by_slot = {(f["entity"], f["attribute"]): f for f in storage.load_facts()}
+        # The live write survived...
+        assert by_slot[("live-proj", "language")]["value"] == "python"
+        # ...and the legacy fact landed in its own, empty slot.
+        assert by_slot[("legacy-proj", "language")]["value"] == "rust"
+        # The cursor only ever moves forward.
+        assert float(storage.meta_get("cortex_dream_cursor")) == 9_999.0
+        # The live supersession log was not clobbered by the legacy one.
+        assert storage.meta_get("cortex_supersession_log") == [{"slot": "live"}]
+    finally:
+        storage.close()
+
+
+def test_resume_refuses_when_a_recorded_source_vanished(
+        pg_conn, pg_url, tmp_path):
+    """Matching only the sources still ON DISK would let a recorded source
+    that simply disappeared pass the check — and the resume would then mark
+    a permanently short bank ``done``."""
+    from pseudolife_memory.storage.migrate import migrate_legacy
+    from pseudolife_memory.storage.postgres import PostgresStorage
+
+    _build_legacy_bank(tmp_path)
+    storage = PostgresStorage(pg_url)
+    embedder = _FakeEmbedder()
+    try:
+        storage.replace_facts = lambda rows: (_ for _ in ()).throw(
+            RuntimeError("dropped mid-import"))
+        with pytest.raises(RuntimeError):
+            migrate_legacy(tmp_path, storage, embedder)
+        state = _migration_state(storage)
+        assert set(state["source"]) == {"cms", "cortex"}
+
+        # The cortex source is deleted rather than renamed — its facts were
+        # never imported, so this bank can never be completed.
+        (tmp_path / "cortex_state.pt").unlink()
+
+        summary = migrate_legacy(tmp_path, storage, embedder)
+        assert summary["migrated"] is False
+        assert summary["reason"] == "partial_migration_source_mismatch"
+        assert _migration_state(storage)["status"] == "in_progress"
+    finally:
+        storage.close()
+
+
+def test_health_flags_a_partial_legacy_import_without_going_degraded():
     """Boot continues on a half-imported bank, so /health is the only place
-    an operator can see that the bank is short (#187)."""
+    an operator can see that the bank is short (#187). It must stay
+    ``status: "ok"`` while saying so: web/api.py serves any non-ok payload
+    as HTTP 503, which the Docker healthcheck and the install/update
+    scripts all treat as fatal — that would turn a deliberately non-fatal
+    partial import into a bricked deploy loop. The loudness lives in the
+    ERROR logs and this flag, not in the status field."""
     from pseudolife_memory.daemon import _build_health_payload
 
     class _Stub:
@@ -360,7 +505,7 @@ def test_health_reports_a_partial_legacy_import_as_degraded():
         _migration_partial = "import_failed: disk full mid-import"
 
     payload = _build_health_payload(_Stub(), token_present=False)
-    assert payload["status"] == "degraded"
+    assert payload["status"] == "ok"
     assert payload["migration_partial"].startswith("import_failed")
 
     class _Clean(_Stub):
