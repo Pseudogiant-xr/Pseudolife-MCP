@@ -704,7 +704,7 @@ renders the real frontend against canned data:
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
 | Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); ONNX embedding backend (`pip install .[onnx]` — ~3x faster CPU encode, bit-identical, auto-enabled when installed; the default Qwen3-Embedding-0.6B has no ONNX export and falls back to torch, so this currently only speeds up MiniLM-family models); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, graph visualiser, search/trace, config editor (read-mostly, token-gated like `/mcp`) |
-| Schema version | v31 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
+| Schema version | v32 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
 
 ## Troubleshooting
 
@@ -1446,6 +1446,11 @@ path).
 by iteratively following the knowledge graph — things `memory_search`
 can't do with a single flat similarity pass.
 
+**`top_k` bounds the seed search only, not the result.** It caps how many
+initial hits name the entities the graph walk starts from; graph expansion
+then fans out from those seeds with no bound of its own. The response is
+kept bounded separately — see Return shape below.
+
 **When to use it vs `memory_search`:**
 
 - Use `memory_recall` for chain-of-links questions: "what does X ultimately
@@ -1462,6 +1467,29 @@ is **read-only** — it never writes to the bank or the graph.
 **Return shape:** `seeds`, `entities` (each with current canonical facts),
 `edges` (with a `derived` flag for inferred transitive/inverse links),
 `paths`, supporting `texts`, and `iterations`.
+
+**Output caps (issue #186).** A plain 3-hop query on a hub entity can
+return dozens of entities/edges and every matched entry's full text —
+issue #186's live audit (2026-08-21, real daemon) measured one such query
+at 93.7 KB, enough that the calling client refused it. `entities` /
+`edges` / `texts` are each capped (10 / 15 / 6 by default), and each
+entity's `facts` list is separately capped (5). These are NOT flat prefix
+slices — `entities`/`edges` reserve a minimum quota per graph hop so a
+hub seed's own crowded 1-hop ring can't silently push the deeper,
+harder-to-reach hops (the actual reason to call `memory_recall` over
+`memory_search`) out of the response; `edges` also prefers connections
+between two entities that both survived the entity cap; `texts` reserves
+budget for hop-discovered support so it isn't purely a copy of the flat
+seed search. With `verbose=False` (the default), `texts` are also
+truncated to a preview length; `verbose=True` returns full text (though
+the same entity/edge/text counts and per-entity fact cap still apply).
+A reproducible in-tree probe (`evals/recall_cap_probe.py`, no DB/daemon
+needed) exercises this same capping path on a synthetic 41-entity/40-edge
+fixture graph and recorded a 24.5 KB → 3.8 KB (84.4%) reduction with
+deep-hop entities still present in the result
+(`evals/results/recall-cap-186-payload-probe.json`) — a different, smaller
+graph than the live audit's, so the two byte counts aren't comparable
+to each other, only each to its own before/after.
 
 **`low_confidence: true`** means no seed entity matched the query — the
 graph had no starting point. In that case fall back to `memory_search`.
@@ -2256,7 +2284,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v31). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v32). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
 | `PSEUDOLIFE_MCP_STORAGE` | `auto` | `files` opts the daemon out of the `[lite]` embedded Postgres (file mode even when pg0-embedded is installed). Only consulted when no DSN is set. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). |
 | `PSEUDOLIFE_MCP_HOST` / `_PORT` | `127.0.0.1` / `8765` | Daemon bind address. |
@@ -2592,7 +2620,17 @@ The shim is torch-free, so sessions attach near-instantly; the daemon pays
 the one-time embedder warmup once for everyone. On first run with a v≤0.1
 `cms_state.pt` present in `PSEUDOLIFE_MCP_DATA_DIR`, the daemon
 auto-migrates it into Postgres and renames the originals `*.pre-v8.bak`
-(never deletes them).
+(never deletes them). The import records its progress in a
+`legacy_migration` meta row, so one that fails part-way resumes on the next
+start instead of leaving a short bank behind. While it is unfinished the
+daemon keeps serving and `/health` stays `status: "ok"` (so healthchecks and
+`ops/update.ps1` are not tripped by it) but carries an extra
+`migration_partial` field; the matching ERROR lines in the daemon log name
+the resume path. A resume merges rather than overwrites — cortex facts
+written during that window are kept, and only slots nobody has written land
+from the legacy bank. Leave the original `.pt` files in place until it
+completes: the resume reads them, and deleting one makes the bank
+unfinishable.
 
 ## Session identity
 
@@ -2659,6 +2697,16 @@ Run the daemon with `PSEUDOLIFE_MCP_HOST=0.0.0.0` and a
 `PSEUDOLIFE_MCP_DAEMON_URL` + `PSEUDOLIFE_MCP_TOKEN`. The daemon **refuses
 to bind a non-loopback host without a token**, and Postgres itself stays
 loopback-only — the LAN only ever sees the daemon.
+
+The token is also what relaxes the MCP endpoint's DNS-rebinding guard. With
+a token set, `/mcp` accepts any `Host` header — a LAN address, a
+reverse-proxy hostname, a Tailscale name, a compose service name — because
+`Authorization` already proves intent. Tokenless (loopback use, or a
+container published to 127.0.0.1 via `PSEUDOLIFE_MCP_TRUST_BIND`), `/mcp`
+serves loopback `Host` values only and answers anything else with
+`421 Invalid Host header`; that is the guard against a rebinding browser
+reaching an unauthenticated bank. So: fronting the daemon with a reverse
+proxy under a real hostname means setting a token.
 
 ## Data layout
 
@@ -2733,7 +2781,7 @@ deletes files the tool itself wrote.
 
 ## Schema version history
 
-The current Postgres meta version is **v31**; migrations are additive
+The current Postgres meta version is **v32**; migrations are additive
 `ADD COLUMN IF NOT EXISTS` on daemon start, and legacy file-mode `.pt`
 banks auto-migrate into Postgres. The one exception is v25 itself: a
 vector *dimension* change on an existing column is not additive, so
@@ -2770,6 +2818,7 @@ The milestones:
 | v29 | `facts.stance` — epistemic stance as a labelled field: the source's own hedge words ("probably", "per the runbook"), kept verbatim and separate from `value` so consolidation cannot silently turn a hedged claim into a confident canonical fact (the labelled-field-vs-inline retention result is arXiv:2608.06953). `NULL` = asserted plainly, exactly the pre-v29 behaviour, so the migration is a no-op on existing banks. Stance follows the latest asserting write (a plain restatement clears the hedge), surfaces in `memory_fact_get`/recall/history only when set, and is never an input to confidence, ranking, or supersession. Written by the dream path since the v10 update-anchored stance prompt shipped its gates (2026-08-14); not exposed on the `memory_fact_set` tool surface. Additive/idempotent |
 | v30 | `entity_proposals.judge_verdict` / `judge_confidence` / `judge_note` / `judge_model` / `judged_at` — the autonomous Step-C judge's shadow verdict on a pending merge proposal, recorded by the sweep (`memory.deep_dream.judge_mode`: `off` \| `shadow` \| `auto-reject`) and surfaced beside the evidence in review payloads. The verdict is an opinion on the pending row; the durable decision record stays `merge_decisions`, written only when a decision path (human, agent, or the confidence-gated auto-reject) ratifies it. `NULL` = not yet judged, exactly the pre-v30 behaviour, so the migration is a no-op on existing banks. Judge-model floor measured by `evals/judge_ladder.py` (`evals/results/judge-ladder-20260816.json`). Additive/idempotent |
 | v31 | `retrieval_events` + `retrieval_uses` — the retrieval event log (learned-reranker Phase 0). Every `memory_search` appends one event row (query text, the ranked served list as JSONB with entry ids/scores/ranks, writer session/episode); a later `memory_get`/`memory_reinforce` on a served entry in the same session writes an implicit relevance label (most-recent serving event wins, bounded by `memory.retrieval_log.use_window_seconds`). Together they are the (query, served, used) training tuples for a future learned fusion/reranker stage — purely observational, no retrieval behaviour changes. Served ids carry no FK (entries are evictable; training joins tolerate dangling ids); labels CASCADE from their event; events are pruned on the dream-sweep tick after `memory.retrieval_log.retention_days` (default 365). Kill-switch: `memory.retrieval_log.enabled`. Additive/idempotent |
+| v32 | `retrieval_events.params` — the ranking knobs in force for the query (effective `top_k` / keep-threshold, the recency ramp, BM25 weight and scorer params, the reranker's fusion weight + margin gate and whether it actually fired, timeline/contiguity settings, and the call's filters), logged beside a widened `served` list whose per-entry `components` blob carries the fusion INPUTS: bi-encoder score, cross-encoder score (`null` when the margin gate skipped the pass — a distinction a learned head needs), BM25 boost, surprise, recency and the source/supersession multipliers. Phase 0 logged only the fused score, which is the output a Phase-1 learned head is supposed to predict; the inputs are not recoverable afterwards, because config is mutable at runtime and band recency, supersession flags and access counts all mutate on every serve. Nothing new is computed at serve time — these values were already in hand and were being discarded. `NULL` params = a v31-era row. Additive/idempotent |
 
 After running the entity-kind backfill (`evals/apply_entity_kinds.py --apply`), the daemon must be restarted for inference to take effect — it caches the entity-kind map for the life of its process.
 
@@ -2974,9 +3023,32 @@ deterministic eval functions (single pass per prompt):
 | cortex facts only | 0.068 | 0.216 |
 | hybrid | **0.243** | 0.284 |
 
+> **CORRECTED 2026-08-25 (scorer defect #173).** Every number in the table
+> above is superseded. The multiple-choice scorer's no-box fallback
+> accepted any standalone `[A-Ha-h]` token, so the English article "a" in a
+> truncated reasoning trace scored as answer **A**. Re-scoring the same
+> committed run under the anchored scorer
+> (`evals/results/lme-v2-smoke-slice2-rescored-strictmc.summary.json` and
+> `…-slice2-compose-rescored-strictmc.summary.json`, produced offline by
+> `evals/rescore_strict_mc.py`):
+>
+> | arm | default answer prompt | composition-aware prompt |
+> |-----|----------------------|--------------------------|
+> | naive RAG (control) | 0.162 → **0.149** | 0.284 → **0.257** |
+> | cortex facts only | 0.068 → **0.068** | 0.216 → **0.176** |
+> | hybrid | **0.243** → **0.203** | 0.284 → **0.270** |
+>
+> All ten flips are the same defect in the same direction (gold answer
+> **A**, previously-correct → wrong); no row moved the other way. The
+> ordering is unchanged, but the exact compose-prompt tie below was an
+> artifact of it: corrected, hybrid leads naive RAG there by 0.013 — one
+> question, which is still no measurable difference.
+
 Hybrid leads under the default prompt. Under the composition-aware prompt
 it **ties naive RAG** — so the complementarity is real but
-prompt-dependent, not universal.
+prompt-dependent, not universal. (The tie is a superseded number; see the
+correction above — 0.270 vs 0.257 on the corrected scorer, which is the
+same "no measurable difference" reading.)
 
 > **Superseding the pilot.** An earlier 10-question slice (3 replicates)
 > reported — and this table now supersedes —
@@ -2990,6 +3062,16 @@ prompt-dependent, not universal.
 > whole — every arm scores roughly half as well across all 74. This is
 > what a selection-biased pilot looks like from the other side, and it is
 > the reason for running the expansion at all.
+>
+> **CORRECTED 2026-08-25 (scorer defect #173).** The three quoted pilot
+> rows are superseded by the same re-score
+> (`evals/results/lme-v2-smoke-slice1-rescored-strictmc.agg.json`): naive
+> RAG `0.300 [0.30–0.30] | 0.433 [0.40–0.50]`, cortex
+> `0.167 [0.00–0.30] | 0.200 [0.10–0.30]`, hybrid
+> `0.500 [0.40–0.60] | 0.533 [0.50–0.60]`. Seven flips, all gold **A**.
+> The pilot's own conclusion weakens further: under the composition-aware
+> prompt hybrid now *ties* naive RAG in one of the three replicates rather
+> than beating both channels in all three.
 
 Read honestly: these are single-pass point estimates, not replicated, so
 small differences between arms carry no weight — the hybrid-vs-rag tie

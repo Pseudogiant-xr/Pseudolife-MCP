@@ -15,6 +15,7 @@ Postgres is needed — ``docker cp`` just materializes a dummy artifact.
 
 from __future__ import annotations
 
+import gzip
 import os
 import shutil
 import subprocess
@@ -41,6 +42,22 @@ def _find_bash() -> str | None:
 
 BASH = _find_bash()
 
+def _dump_fixture(tmp_path: Path) -> Path:
+    """What ``docker cp`` materializes: a COMPLETE dump artifact.
+
+    A plain "dummy-backup" text file used to do here, but the backup scripts
+    now verify the artifact they copied out (issue #172) — gzip that carries
+    PostgreSQL's end-of-dump marker. Retention is what these tests are about,
+    so the artifact has to be one the scripts accept.
+    """
+    art = tmp_path / "artifact.sql.gz"
+    art.write_bytes(gzip.compress(
+        b"--\n-- PostgreSQL database dump\n--\n"
+        b"CREATE TABLE entries (id bigint);\n"
+        b"--\n-- PostgreSQL database dump complete\n--\n"))
+    return art
+
+
 OLD_MIRROR_FILES = [
     "pseudolife_memory-20260701-000000.sql.gz",
     "pseudolife_memory-20260705-090000.sql.gz",
@@ -50,13 +67,14 @@ OLD_MIRROR_FILES = [
 
 def _run_ps1(tmp_path: Path, *args: str, env=None):
     driver = tmp_path / "driver.ps1"
+    artifact = _dump_fixture(tmp_path)
     driver.write_text(
         f'''
 function global:docker {{
     $global:LASTEXITCODE = 0
     $a = @($args | ForEach-Object {{ "$_" }})
     if ($a[0] -eq "exec" -and $a[2] -eq "sh") {{ return }}
-    if ($a[0] -eq "cp") {{ Set-Content -Path $a[2] -Value "dummy-backup"; return }}
+    if ($a[0] -eq "cp") {{ Copy-Item -LiteralPath "{artifact.as_posix()}" -Destination $a[2] -Force; return }}
     if ($a[0] -eq "exec" -and $a[2] -eq "rm") {{ return }}
     throw "unexpected docker call: $($a -join ' ')"
 }}
@@ -72,12 +90,13 @@ function global:docker {{
 
 def _run_sh(tmp_path: Path, *args: str, env=None):
     driver = tmp_path / "driver.sh"
+    artifact = _dump_fixture(tmp_path)
     driver.write_text(
         f'''#!/usr/bin/env bash
 set -u
 docker() {{
     if [ "$1" = "exec" ] && [ "$3" = "sh" ]; then return 0
-    elif [ "$1" = "cp" ]; then echo dummy-backup > "$3"
+    elif [ "$1" = "cp" ]; then cp "{artifact.as_posix()}" "$3"
     elif [ "$1" = "exec" ] && [ "$3" = "rm" ]; then return 0
     else echo "unexpected docker call: $*" >&2; return 1; fi
 }}

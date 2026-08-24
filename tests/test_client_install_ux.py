@@ -85,3 +85,23 @@ def test_preflight_checks_the_selected_client_only() -> None:
         assert "claude" in text
         assert "codex" in text
         assert "both" in text
+
+
+def test_install_sh_shim_failure_falls_back_instead_of_aborting() -> None:
+    """A failed shim install must leave SHIM_OK unset so the HTTP fallback
+    fires — not kill the run via errexit (issue #176). On PEP 668 distros
+    (Ubuntu 24.04, Debian 12, Fedora 40, Arch) ``pip install --user`` exits 1
+    with externally-managed-environment; a bare call under ``set -e`` aborted
+    the installer after the multi-GB image build with no remediation text.
+    install.ps1 already exit-checks both paths; this pins install.sh to the
+    same contract."""
+    sh = _read("ops/install.sh")
+    # Every install command is the condition of an `if`, so errexit is
+    # suspended and failure reaches the fallback branch instead of aborting.
+    assert "if pipx install pseudolife-mcp; then" in sh
+    assert "if pipx upgrade pseudolife-mcp; then" in sh
+    assert "if python3 -m pip install --user pseudolife-mcp; then" in sh
+    assert "if python -m pip install --user pseudolife-mcp; then" in sh
+    # The failure-mode hint names the PEP 668 cause and the recovery paths.
+    assert "externally-managed" in sh
+    assert "pipx" in _read("ops/preflight.sh")

@@ -37,19 +37,74 @@ New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $out = Join-Path $OutDir "pseudolife_memory-$stamp.sql.gz"
 
-Write-Host "Dumping $Db from container $Container -> $out"
-# Dump + gzip INSIDE the container, then copy the artifact out. This avoids
-# piping binary through PowerShell entirely — `Set-Content -Encoding Byte`
-# was removed in PowerShell 7, and `>` redirection mangles bytes as UTF-16.
-# -Fc would be smaller but plain+gzip is trivially restorable with psql.
-$tmp = "/tmp/pl_backup-$stamp.sql.gz"
-docker exec $Container sh -c "pg_dump -U $User -d $Db | gzip -9 > $tmp"
-if ($LASTEXITCODE -ne 0) { throw "pg_dump failed inside container $Container" }
-docker cp "${Container}:$tmp" $out
-docker exec $Container rm -f $tmp
-if (-not (Test-Path $out) -or (Get-Item $out).Length -eq 0) {
-    throw "backup artifact missing or empty: $out"
+# PostgreSQL writes this as the last line of every plain-format dump.
+$dumpMarker = "PostgreSQL database dump complete"
+
+function Test-DumpComplete([string]$Path) {
+    # Checked on the HOST artifact, after the copy out of the container, so
+    # one test covers three failure modes: the gzip decompresses, pg_dump
+    # ran to completion, and `docker cp` did not truncate it. The stream
+    # cannot be seeked, so it is read through in full but only a rolling
+    # tail is kept — one decompression pass, constant memory.
+    try {
+        $tail = ""
+        $fs = [System.IO.File]::OpenRead($Path)
+        try {
+            $gz = [System.IO.Compression.GZipStream]::new(
+                $fs, [System.IO.Compression.CompressionMode]::Decompress)
+            try {
+                $reader = [System.IO.StreamReader]::new($gz)
+                $buf = [char[]]::new(8192)
+                while (($n = $reader.Read($buf, 0, $buf.Length)) -gt 0) {
+                    $tail += [string]::new($buf, 0, $n)
+                    if ($tail.Length -gt 4096) {
+                        $tail = $tail.Substring($tail.Length - 4096)
+                    }
+                }
+            } finally { $gz.Dispose() }
+        } finally { $fs.Dispose() }
+        return $tail.Contains($dumpMarker)
+    } catch {
+        # A corrupt gzip (the other shape of a killed dump) is not complete.
+        Write-Warning "could not read back the dump artifact: $_"
+        return $false
+    }
 }
+
+Write-Host "Dumping $Db from container $Container -> $out"
+# Dump + compress INSIDE the container, then copy the artifact out. This
+# avoids piping binary through PowerShell entirely — `Set-Content -Encoding
+# Byte` was removed in PowerShell 7, and `>` redirection mangles bytes as
+# UTF-16. -Fc would be smaller but plain+gzip is trivially restorable with
+# psql.
+#
+# pg_dump writes the gzip ITSELF (-Z9, plain format) rather than being piped
+# into a separate gzip: the container's POSIX sh has no `pipefail`, so a
+# pipeline hands `docker exec` the LAST command's status, and a pg_dump that
+# died partway still produced a non-empty, perfectly valid gzip of a
+# truncated dump — which passed the only other guard here, a zero-length
+# check. One process means the status really is pg_dump's, and (unlike
+# dumping to a temp file first) it costs no uncompressed scratch space
+# inside the container.
+$tmp = "/tmp/pl_backup-$stamp.sql.gz"
+docker exec $Container sh -c "pg_dump -U $User -d $Db -Z9 > $tmp"
+if ($LASTEXITCODE -ne 0) { throw "pg_dump failed inside container $Container" }
+# Land on a .part name and promote only once the artifact verifies: a
+# rejected dump must never sit in the backup folder looking like the newest
+# good backup (restore.ps1 and the rotation below both glob *.sql.gz).
+$part = "$out.part"
+docker cp "${Container}:$tmp" $part
+docker exec $Container rm -f $tmp
+if (-not (Test-Path $part) -or (Get-Item $part).Length -eq 0) {
+    throw "backup artifact missing or empty: $part"
+}
+if (-not (Test-DumpComplete $part)) {
+    # Kept, not deleted: a truncated dump is the evidence for whatever went
+    # wrong, and the previous good backups sit untouched beside it.
+    throw ("backup is INCOMPLETE - the dump is truncated ('$dumpMarker' " +
+           "missing). Nothing was promoted; the rejected artifact is at $part")
+}
+Move-Item -LiteralPath $part -Destination $out -Force
 
 # State volume (ChromaDB reference documents + cortex snapshot + graph
 # snapshots), tarred from inside the daemon container — the only place those
@@ -71,8 +126,13 @@ try {
     Write-Warning "STATE VOLUME NOT BACKED UP (ingested documents + cortex/graph snapshots live there; is the daemon running?): $_"
 }
 
-# Rotation.
-foreach ($pat in "pseudolife_memory-*.sql.gz", "pseudolife_state-*.tgz") {
+# Rotation. Rejected .part artifacts age out on the same window: they are
+# kept as evidence (see the completeness check above), but a dump that keeps
+# failing must not pile up full-size files forever on a machine that is
+# already having a bad day. Listed explicitly because the Windows filter
+# `*.sql.gz` does NOT match `*.sql.gz.part` — which is also why a rejected
+# artifact cannot masquerade as a backup.
+foreach ($pat in "pseudolife_memory-*.sql.gz", "pseudolife_memory-*.sql.gz.part", "pseudolife_state-*.tgz") {
     Get-ChildItem $OutDir -Filter $pat |
         Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-$KeepDays) } |
         Remove-Item -Force

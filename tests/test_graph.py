@@ -306,7 +306,8 @@ def test_lesson_entity_ids_unions_subject_and_object(storage):
 def svc(pg_url, tmp_path_factory):
     """Module-scoped service against a wiped DB — embedder loads once."""
     import psycopg as _psy
-    from pseudolife_memory.storage.schema import ensure_schema
+    from pseudolife_memory.storage.schema import (BENCH_RESET_TABLES,
+                                                  ensure_schema)
 
     with _psy.connect(pg_url) as conn:
         # Pin to public first (see pg_fixtures.pg_conn) — mirrors PostgresStorage.
@@ -314,10 +315,9 @@ def svc(pg_url, tmp_path_factory):
         conn.commit()
         ensure_schema(conn)
         with conn.cursor() as cur:
-            cur.execute(
-                "TRUNCATE edges, entity_aliases, relations, facts, world_facts, "
-                "entries, episodes, entities, meta RESTART IDENTITY CASCADE",
-            )
+            # Was a third hand-written nine-table copy of this list (#181).
+            cur.execute("TRUNCATE " + ", ".join(BENCH_RESET_TABLES)
+                        + " RESTART IDENTITY CASCADE")
         conn.commit()
         ensure_schema(conn)
 

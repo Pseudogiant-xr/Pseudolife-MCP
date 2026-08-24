@@ -1,0 +1,178 @@
+{
+  "comparison": "lme-v2 procedure, paired by question_id",
+  "a": "lme-v2-smoke-slice2",
+  "b": "lme-v2-smoke-qwen38-slice",
+  "paired_n": 56,
+  "primary_metric": "eval (deterministic scorer)",
+  "arms": {
+    "rag_correct": {
+      "acc_36": 0.1607,
+      "acc_38": 0.1786,
+      "delta": 0.0179,
+      "wins": 7,
+      "losses": 6,
+      "sign_test_p": 1.0
+    },
+    "rag_judge": {
+      "acc_36": 0.1429,
+      "acc_38": 0.0357,
+      "delta": -0.1071,
+      "wins": 1,
+      "losses": 7,
+      "sign_test_p": 0.0703
+    },
+    "cortex_correct": {
+      "acc_36": 0.0536,
+      "acc_38": 0.0893,
+      "delta": 0.0357,
+      "wins": 3,
+      "losses": 1,
+      "sign_test_p": 0.625
+    },
+    "cortex_judge": {
+      "acc_36": 0.0536,
+      "acc_38": 0.0714,
+      "delta": 0.0179,
+      "wins": 3,
+      "losses": 2,
+      "sign_test_p": 1.0
+    },
+    "hybrid_correct": {
+      "acc_36": 0.2321,
+      "acc_38": 0.1964,
+      "delta": -0.0357,
+      "wins": 7,
+      "losses": 9,
+      "sign_test_p": 0.8036
+    },
+    "hybrid_judge": {
+      "acc_36": 0.2143,
+      "acc_38": 0.0714,
+      "delta": -0.1429,
+      "wins": 3,
+      "losses": 11,
+      "sign_test_p": 0.0574
+    }
+  },
+  "flips": {
+    "a": [
+      {
+        "question_id": "507a0fe8",
+        "arm": "hybrid",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "ent (Not mentioned), Language (Not mentioned).\nOption C: Date format (Not mentioned), Active (Yes), Password needs reset"
+      },
+      {
+        "question_id": "52dd33bb",
+        "arm": "rag",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "e revenue... The returns are written in their short description.\"\nActually, looking at similar WorkArena tasks, usually,"
+      },
+      {
+        "question_id": "52dd33bb",
+        "arm": "hybrid",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": " says \"Set the Investment field on every expense line item.\" This aligns with the goal of \"allocating investments.\"\n\nLet"
+      },
+      {
+        "question_id": "07fff330",
+        "arm": "hybrid",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "imum actions needed to display search results sorted by highest price first versus sorted by product name alphabetically"
+      }
+    ],
+    "b": [
+      {
+        "question_id": "507a0fe8",
+        "arm": "hybrid",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "red for manual entry**\".\n\nThe context in step 8 says: \"Please provide: 1) User ID (user_name) 2) First name 3) Last name"
+      },
+      {
+        "question_id": "52dd33bb",
+        "arm": "cortex",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "cks the status of the expense management task and allows marking it as Closed - Complete\"\nThe question asks: \"Before the"
+      },
+      {
+        "question_id": "58c34839",
+        "arm": "hybrid",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "ng the two:\n*   Onboarding: 1 surface\n*   Offboarding: 2 surfaces\n\nOffboarding requires one more major work surface than"
+      },
+      {
+        "question_id": "73cbefdc",
+        "arm": "hybrid",
+        "eval_function": "mc_choice_match",
+        "gold": "E",
+        "was": true,
+        "now": false,
+        "response_tail": " 1 hour, honor risk-based durations.\n    *   F: ignore gap.\n\n    The memory explicitly states: \"There should not be more"
+      },
+      {
+        "question_id": "bfb3bcc4",
+        "arm": "cortex",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "**B**: Navigate to user profile -> Delete user -> Clear assets -> Close task. This puts Users first and deletes the user"
+      },
+      {
+        "question_id": "bfb3bcc4",
+        "arm": "hybrid",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "the effect is similar. However, the order is Hardware then Users.\n*   **D:** Starts with deleting the profile. Incorrect"
+      },
+      {
+        "question_id": "07fff330",
+        "arm": "rag",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "site and I am on the home page.\"\n\nThe context provided shows steps where the user is *already* on search result pages (`"
+      },
+      {
+        "question_id": "07fff330",
+        "arm": "cortex",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "anks, if a sort option isn't listed or supported, it might be considered impossible or not available. Given the explicit"
+      }
+    ]
+  },
+  "supersedes": "evals/results/lme-v2-qwen38-vs-slice2-paired56.json",
+  "rescore": {
+    "issue": 173,
+    "date": "2026-08-25",
+    "scorer": "score_mc no-box fallback: anchored uppercase A-H (whole-response letter or explicit answer marker) instead of any standalone [A-Ha-h]"
+  },
+  "note": "Both sides re-scored. The judge arms are untouched by the scorer change and reproduce the superseded artifact exactly, which is what licenses reading the eval-arm movement as the scorer fix and nothing else."
+}

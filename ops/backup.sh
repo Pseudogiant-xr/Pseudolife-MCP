@@ -51,17 +51,48 @@ stamp="$(date +%Y%m%d-%H%M%S)"
 out="$OUT_DIR/pseudolife_memory-$stamp.sql.gz"
 
 echo "Dumping $DB from container $CONTAINER -> $out"
-# Dump + gzip INSIDE the container, then copy the artifact out (mirrors the
-# .ps1: no binary piping through the host shell). -Fc would be smaller but
-# plain+gzip is trivially restorable with psql.
+# Dump + compress INSIDE the container, then copy the artifact out (mirrors
+# the .ps1: no binary piping through the host shell). -Fc would be smaller
+# but plain+gzip is trivially restorable with psql.
+#
+# pg_dump writes the gzip ITSELF (-Z9, plain format) rather than being piped
+# into a separate gzip: the container's POSIX sh has no `pipefail`, so a
+# pipeline hands `docker exec` the LAST command's status, and a pg_dump that
+# died partway still produced a non-empty, perfectly valid gzip of a
+# truncated dump — which passed the only other guard here, a zero-length
+# check. One process means the status really is pg_dump's, and (unlike
+# dumping to a temp file first) it costs no uncompressed scratch space
+# inside the container.
 tmp="/tmp/pl_backup-$stamp.sql.gz"
-docker exec "$CONTAINER" sh -c "pg_dump -U $DB_USER -d $DB | gzip -9 > $tmp"
-docker cp "$CONTAINER:$tmp" "$out"
-docker exec "$CONTAINER" rm -f "$tmp"
-if [ ! -s "$out" ]; then
-    echo "backup artifact missing or empty: $out" >&2
+if ! docker exec "$CONTAINER" sh -c "pg_dump -U $DB_USER -d $DB -Z9 > $tmp"; then
+    echo "pg_dump failed inside container $CONTAINER" >&2
     exit 1
 fi
+# Land on a .part name and promote only once the artifact verifies: a
+# rejected dump must never sit in the backup folder looking like the newest
+# good backup (restore.sh and the rotation below both glob *.sql.gz).
+part="$out.part"
+docker cp "$CONTAINER:$tmp" "$part"
+docker exec "$CONTAINER" rm -f "$tmp"
+if [ ! -s "$part" ]; then
+    echo "backup artifact missing or empty: $part" >&2
+    exit 1
+fi
+# PostgreSQL's own end-of-dump marker, read back from the HOST artifact, so
+# one test covers three failure modes: the gzip decompresses, pg_dump ran to
+# completion, and `docker cp` did not truncate it. The `|| true` keeps the
+# script's `pipefail` from turning gzip's expected error on a corrupt
+# artifact into a bare exit with no explanation.
+dump_tail="$(gzip -dc "$part" 2>/dev/null | tail -c 4096 || true)"
+case "$dump_tail" in
+    *"PostgreSQL database dump complete"*) ;;
+    *)
+        # Kept, not deleted: a truncated dump is the evidence for whatever
+        # went wrong, and the previous good backups sit untouched beside it.
+        echo "backup is INCOMPLETE - the dump is truncated (end-of-dump marker missing). Nothing was promoted; the rejected artifact is at $part" >&2
+        exit 1 ;;
+esac
+mv "$part" "$out"
 
 # State volume (ChromaDB reference documents + cortex snapshot + graph
 # snapshots), tarred from inside the daemon container — the only place those
@@ -79,8 +110,11 @@ else
     echo "WARNING: STATE VOLUME NOT BACKED UP (ingested documents + cortex/graph snapshots live there; is the daemon running?)" >&2
 fi
 
-# Rotation.
-find "$OUT_DIR" -maxdepth 1 \( -name 'pseudolife_memory-*.sql.gz' -o -name 'pseudolife_state-*.tgz' \) -mtime +"$KEEP_DAYS" -delete
+# Rotation. Rejected .part artifacts age out on the same window: they are
+# kept as evidence (see the completeness check above), but a dump that keeps
+# failing must not pile up full-size files forever on a machine that is
+# already having a bad day.
+find "$OUT_DIR" -maxdepth 1 \( -name 'pseudolife_memory-*.sql.gz' -o -name 'pseudolife_memory-*.sql.gz.part' -o -name 'pseudolife_state-*.tgz' \) -mtime +"$KEEP_DAYS" -delete
 
 # Off-disk mirror (opt-in; --keep-days retention, or newest-N per kind with
 # --mirror-keep). Mirrors both artifacts: the DB dump and the state tar.

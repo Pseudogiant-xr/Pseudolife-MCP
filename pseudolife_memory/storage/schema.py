@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 31
+SCHEMA_META_VERSION = 32
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -356,6 +356,36 @@ CREATE TABLE IF NOT EXISTS entity_sources (
 CREATE INDEX IF NOT EXISTS entity_sources_source_idx ON entity_sources (source);
 """
 
+# Every table this schema declares — the ONE list a bench/test reset
+# truncates. It lives here, beside the DDL, because it has to grow in the
+# same edit that adds a table; `tests/test_bench_reset_tables.py` fails the
+# suite if it does not.
+#
+# Listing all of them (not just the FK-free roots) is deliberate.
+# `TRUNCATE ... CASCADE` only reaches tables holding a foreign key INTO the
+# named set, so 14 of these are roots nothing cascades into —
+# retrieval_events, entity_kinds, outcome_signals, dismissed_pairs,
+# merge_decisions, communities, dream_runs, chronicle_events, meta,
+# episodes, entries, entities, relations, world_facts. Naming every table
+# means a future FK change cannot silently drop one out of the reset: the
+# 2026-08-04 chronicle_events incident (events accumulated across all 266
+# questions of the ev-weak run and its serving-side verdict was
+# invalidated) and the 2026-08-25 audit (#181: leaked entity_kinds rows
+# flip a later question's freshness_class, changing what stale_policy
+# serves) were both this class, found once per list.
+#
+# Order is schema source order, so the list diffs against the DDL above.
+# A multi-table TRUNCATE is order-independent in Postgres.
+BENCH_RESET_TABLES = (
+    "meta", "episodes", "entries", "entities", "entity_aliases", "relations",
+    "edges", "edge_proposals", "entity_proposals", "entity_kinds",
+    "dismissed_pairs", "facts", "world_facts", "lessons", "outcome_signals",
+    "communities", "entity_communities", "memory_traces", "entity_sources",
+    # Declared by the additive-migration tail of ensure_schema, not SCHEMA_SQL.
+    "merge_decisions", "dream_runs", "dream_run_slots", "chronicle_events",
+    "retrieval_events", "retrieval_uses",
+)
+
 # The dimension every embedding column is declared at (schema v25). Not
 # derived from EmbeddingConfig on purpose: ensure_schema must refuse based
 # on what THIS BUILD's schema.py demands, independent of whatever model a
@@ -666,6 +696,17 @@ def ensure_schema(conn) -> dict:
             )
             """
         )
+        # v32 additive: the ranking knobs in force for the query. The served
+        # list widened inside its existing JSONB column (per-entry fusion
+        # components — bi-encoder/cross-encoder/BM25 scores, recency, the
+        # multipliers), but the knob snapshot is per EVENT and needs its own
+        # column. Nullable: v31 rows predate it, and file-mode banks never
+        # reach here. Both halves exist because neither is reconstructable
+        # offline — config is mutable at runtime, and band recency /
+        # supersession / access counts mutate on every serve.
+        cur.execute(
+            "ALTER TABLE retrieval_events ADD COLUMN IF NOT EXISTS "
+            "params JSONB")
         cur.execute(
             "CREATE INDEX IF NOT EXISTS retrieval_events_session_idx "
             "ON retrieval_events (session_id, created_at DESC)")

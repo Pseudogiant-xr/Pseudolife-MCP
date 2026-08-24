@@ -354,15 +354,51 @@ def _split_phrases(text: str, separators: str) -> list[str]:
     return re.split(pattern, text or "")
 
 
+# No-box fallback (tightened 2026-08-25, issue #173). The old fallback took
+# any standalone ``[A-Ha-h]`` and upper-cased it, so the English article "a"
+# in a truncated reasoning trace scored as answer **A**. Measured over the
+# committed lme-v2 artifacts: in ``lme-v2-smoke-slice2.jsonl`` 57 of 105 MC
+# arm-answers carry no box and the old fallback matched the article "a" 40
+# times (vs 4 uppercase letters, every one of them an option *enumeration*
+# like "*   A. Service Catalog" rather than a stated answer). Not a single
+# unboxed response in ANY committed artifact states an answer, so the strict
+# form below loses nothing measurable and the loose one was pure noise.
+#
+# "Option X" alone is deliberately NOT a marker: option enumerations are the
+# noise class itself. A bare letter must be the WHOLE response — a trailing
+# letter on its own line is indistinguishable from a truncated enumeration.
+_MC_BARE_LETTER_RE = re.compile(r"^\W*([A-H])\W*$")
+_MC_ANSWER_MARKER_RE = re.compile(
+    r"(?:final\s+answer|answer|correct\s+(?:option|choice|answer))"
+    r"\**\s*(?:is\s*:?|:|=)\s*\**\s*[(\[\"'“‘]?([A-Za-z])\b",
+    re.IGNORECASE)
+
+
+def _fallback_letter(response: str) -> str | None:
+    """The answer letter of an unboxed response, or None if it states none."""
+    text = (response or "").strip()
+    m = _MC_BARE_LETTER_RE.match(text)
+    if m:
+        return m.group(1)
+    # Uppercase-only: the marker regex is case-insensitive so it can match
+    # "Answer:"/"answer is", but a lowercase letter after it is prose
+    # continuing into a sentence ("the answer is not A", "answer: a report
+    # with the tag"). Discard those FIRST, then take the last survivor —
+    # last wins mirrors _extract_boxed's last-box rule, for a trace that
+    # revises itself.
+    hits = [h.group(1) for h in _MC_ANSWER_MARKER_RE.finditer(text)
+            if h.group(1).isupper()]
+    return hits[-1] if hits else None
+
+
 def score_mc(response: str, answer, flags: dict[str, str]) -> bool:
     boxed = _extract_boxed(response)
     pred = None
     if boxed:
         m = re.search(r"[A-Za-z]", boxed)
         pred = m.group(0).upper() if m else None
-    if pred is None:  # no box — fall back to a standalone A-H letter
-        m = re.search(r"\b([A-Ha-h])\b", response or "")
-        pred = m.group(1).upper() if m else None
+    if pred is None:  # no box — only an anchored, uppercase letter counts
+        pred = _fallback_letter(response)
     if flags.get("require_non_empty") == "true" and not pred:
         return False
     return pred is not None and pred == str(answer).strip().upper()

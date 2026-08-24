@@ -136,6 +136,136 @@ def test_service_search_logs_and_get_reinforce_label(pg_conn, pg_url,
     assert svc._storage.retrieval_events_window() == []
 
 
+class _StubReranker:
+    """Cross-encoder stand-in (mirrors tests/test_reranker_margin_gate.py) —
+    the component log must record ce scores without loading a model."""
+
+    def is_available(self) -> bool:
+        return True
+
+    def rerank(self, query: str, candidates: list[str]) -> list[float]:
+        return [0.9] * len(candidates)
+
+    def fuse(self, originals: list[float],
+             ce_scores: list[float]) -> list[float]:
+        if not ce_scores:
+            return list(originals)
+        return [0.7 * ce + 0.3 * orig
+                for orig, ce in zip(originals, ce_scores)]
+
+
+def test_served_entries_carry_ranking_components(pg_conn, pg_url, tmp_path):
+    """Phase 1 trains a learned head on the fusion INPUTS; the fused score
+    alone is the output it is supposed to predict. The components are not
+    reconstructable after the fact (band recency, supersession flags and
+    access counts all mutate on every serve), so they must be logged at
+    serve time."""
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    text = "the quick brown fox jumps over the lazy dog"
+    svc.store(text, source="test")
+    svc.search(text, bm25=True)
+
+    ev = svc._storage.retrieval_events_window()[-1]
+    served = ev["served"][0]
+    comp = served["components"]
+    assert comp["channel"] == "dense"
+    assert isinstance(comp["dense"], float)
+    assert isinstance(comp["surprise"], float)
+    assert comp["source_mult"] == 1.0
+    assert comp["supersession_mult"] == 1.0
+    assert "recency" in comp
+    # BM25 participation: the query is the entry text verbatim, so the
+    # lexical channel must have contributed a boost. Strictly > 0 only
+    # because there is exactly ONE bm25 hit here (normalize_scores returns
+    # 1.0 for a single hit); with two or more, the weakest min-max
+    # normalises to 0.0, so a second store would need a different assert.
+    assert isinstance(comp["bm25"], float) and comp["bm25"] > 0.0
+
+    params = ev["params"]
+    assert params["top_k"] >= 1
+    assert isinstance(params["min_score"], float)
+    assert params["bm25"]["enabled"] is True
+    assert params["bm25"]["weight"] == svc._cms.config.bm25.weight
+    assert params["reranker"]["enabled"] is False
+    assert params["recency_boost"] is False  # flat preset, ramp off
+    assert params["contiguity_neighbors"] == 0
+    # Filters shape the candidate set the fusion ran over — an unfiltered
+    # replay of the query would not reproduce this row's context.
+    assert params["filters"] == {
+        "bands": None, "sources": None, "episodes": None, "tags": None,
+        "min_logical_turn": None,
+    }
+
+
+def test_cross_encoder_component_null_when_margin_gate_skips(
+        pg_conn, pg_url, tmp_path):
+    """A skipped cross-encoder pass is informative training signal: the
+    served order came from the bi-encoder alone. ``ce: None`` (key present)
+    records that, and the params blob says why."""
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    text = "the quick brown fox jumps over the lazy dog"
+    svc.store(text, source="test")
+    svc.search(text)  # warm the CMS
+    svc._cms._reranker = _StubReranker()
+    svc._cms.config.reranker.enabled = True
+    svc._cms.config.reranker.skip_margin = 0.3
+
+    # A single-candidate head is trivially unambiguous → gate skips.
+    svc.search(text)
+    ev = svc._storage.retrieval_events_window()[-1]
+    assert ev["params"]["reranker"]["fired"] is False
+    assert ev["params"]["reranker"]["skip_reason"] == "unambiguous_margin"
+    comp = ev["served"][0]["components"]
+    assert "ce" in comp and comp["ce"] is None
+
+    # Gate off → the pass runs and its score is logged.
+    svc._cms.config.reranker.skip_margin = 0.0
+    svc.search(text)
+    ev = svc._storage.retrieval_events_window()[-1]
+    assert ev["params"]["reranker"]["fired"] is True
+    assert ev["served"][0]["components"]["ce"] == 0.9
+
+
+def test_stats_reports_retrieval_log_health(pg_conn, pg_url, tmp_path):
+    """Both log-write paths are exception-guarded, so a broken log is
+    invisible: zero rows, green /health. memory_stats surfaces the counts."""
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    text = "the quick brown fox jumps over the lazy dog"
+    svc.store(text, source="test")
+    res = svc.search(text)
+    svc.get_entry(res["entries"][0]["id"])
+
+    log = svc.stats()["retrieval_log"]
+    assert log["events"] == 1
+    assert log["uses"] == 1
+    assert isinstance(log["last_event_at"], float)
+    assert log["write_errors"] == 0
+
+
+def test_stats_counts_retrieval_log_write_failures(pg_conn, pg_url, tmp_path):
+    from pseudolife_memory.service import MemoryService
+
+    svc = MemoryService(data_dir=tmp_path, database_url=pg_url)
+    text = "the quick brown fox jumps over the lazy dog"
+    svc.store(text, source="test")
+    svc.search(text)  # warm + one good event
+
+    def _boom(*a, **kw):
+        raise RuntimeError("simulated log write failure")
+
+    svc._storage.add_retrieval_event = _boom  # type: ignore[method-assign]
+    svc.search(text)
+    log = svc.stats()["retrieval_log"]
+    assert log["events"] == 1, "the failed write must not have landed"
+    assert log["write_errors"] == 1
+
+
 def test_prune_retrieval_log_holds_service_lock(pg_conn, pg_url, tmp_path):
     """prune_retrieval_events opens a psycopg transaction block on the shared
     connection; the dream-sweep thread calls prune_retrieval_log concurrently
