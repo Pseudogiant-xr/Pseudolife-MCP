@@ -209,6 +209,19 @@ async def _proxy(url: str, token: str | None, session_uid: str) -> None:
     async def _call_tool(name: str, arguments: dict | None):
         async with _upstream() as remote:
             result = await remote.call_tool(name, arguments or {})
+        # An upstream ERROR travels back verbatim. A daemon-side failure
+        # carries isError=True, the real reason as text, and NO
+        # structuredContent — and since every tool is annotated `-> dict`,
+        # this shim has an outputSchema of its own, so returning bare content
+        # would trip the SDK's output validation and replace the daemon's
+        # diagnosis ("Input should be a valid integer") with a message about
+        # the proxy's plumbing ("outputSchema defined but no structured
+        # output returned"). Returning the CallToolResult itself short-
+        # circuits that check: the lowlevel server passes one straight
+        # through. A failed call also cannot have changed the tier, so the
+        # list_changed re-emit below is correctly skipped.
+        if result.isError:
+            return result
         # The daemon's tools/list_changed lands on the per-call upstream
         # session above and dies with it, so a tier change would be invisible
         # to the real client — re-emit it on the downstream stdio session.

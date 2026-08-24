@@ -251,9 +251,23 @@ def test_transport_security_policy_is_explicit_not_inherited():
     authenticated = mcp_server.transport_security_for(auth_configured=True)
     assert authenticated.enable_dns_rebinding_protection is False
 
-    # And the shipped default the daemon carries before configuration is the
-    # protected one — never whatever the SDK inferred.
-    assert mcp_server.mcp.settings.transport_security is not None
+    # And our policy must SURVIVE a non-loopback host — the discriminating
+    # case. Asserting on the module-global `mcp` proves nothing here: the SDK
+    # heuristic would install an identical object (its host defaults to
+    # 127.0.0.1), daemon.py overwrites it at startup anyway, and other tests
+    # mutate it. A fresh instance built the way a future tidy-up might build
+    # one — passing the configured bind through — is what pins the fix: drop
+    # the explicit `transport_security=` and the heuristic silently disarms
+    # protection for this host.
+    from mcp.server.fastmcp import FastMCP
+
+    probe = FastMCP(
+        "probe", host="0.0.0.0",
+        transport_security=mcp_server.transport_security_for(
+            auth_configured=False),
+    )
+    assert probe.settings.transport_security.enable_dns_rebinding_protection \
+        is True
 
 
 @pytest.fixture(scope="module")

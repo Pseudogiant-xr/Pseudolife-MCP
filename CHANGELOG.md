@@ -39,7 +39,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   direct HTTP. This is the mechanism behind the long-standing "MCP
   anyOf-param stringification" note. The shim now registers
   `@server.call_tool(validate_input=False)`; the daemon is the validating
-  authority.
+  authority. Arguments `pre_parse_json` genuinely cannot rescue (an int param
+  given a non-numeric string) now reach the daemon and come back as an error
+  result, so the shim also passes an upstream error through verbatim —
+  returning its content alone would have tripped the shim's *own*
+  `outputSchema` and replaced the daemon's real diagnosis with "Output
+  validation error: outputSchema defined but no structured output returned".
 
 ### Added (2026-08-24 — answer-prompt attribution ablation)
 - **`evals/beam_attrib_ablation.py`: isolate the answer-prompt term of the
