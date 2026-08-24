@@ -288,6 +288,46 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `--force-rollback-tag` overrides. A stopped daemon cannot witness a
   mismatch and keeps the old behavior, and the happy path (IDs match) is
   unchanged.
+### Changed (2026-08-25 — argument contracts moved into the tool schemas)
+- **Every MCP tool now documents its arguments in the tool's own
+  `inputSchema` instead of cramming them into the description string.**
+  Nothing on the surface carried parameter descriptions before: an
+  argument's range, units, format, or "this bounds the seed search, not
+  the result" all had to live in the one description blob, which is the
+  string the per-tier manifest budget meters. That budget had been bumped
+  three times in six weeks (2026-07-18, 07-31, 08-05), each time after
+  trimming descriptions "to the minimum", and it still stood at 14 chars
+  of headroom on `minimal` and 20 on `core` — with the result that real
+  behavioral contracts were competing for characters. The #186
+  `memory_recall` fix landed the day before had lost its `hops` ceiling
+  and its cap numbers to exactly that wall.
+  Each argument's own contract now ships as an `Annotated[T,
+  Field(description=...)]` on the tool signature, which FastMCP renders
+  into `inputSchema.properties[arg].description`; the tool description
+  keeps what the tool is for, the contracts that span several arguments,
+  and the return shape. Tool-call behavior is unchanged — argument names,
+  types, defaults, optionality, enum values, `outputSchema` and
+  annotations are byte-identical across all 35 tools with descriptions
+  stripped; `Field` carries a description and nothing else.
+- **`memory_recall`'s full contract is documented again.** Its purpose and
+  `low_confidence` fallback and the caps/per-hop-reservation return
+  contract are back in the description, and the `hops` ceiling (clamped
+  to 1..5) plus the `top_k` seed-bound-not-result-bound rule now sit on
+  those two parameters. The description is smaller than the pre-trim
+  original because the argument text moved to the schema.
+- **The manifest budget now meters the schema too**, so the newly-used
+  space is accounted rather than becoming an unmetered escape hatch:
+  `tests/test_tool_consolidation.py::test_descriptions_fit_tier_budgets`
+  raises the description budgets to 5,000 / 11,500 / 17,000 chars
+  (minimal / core / full) and adds a per-tier cap on the sum of
+  param-description chars (2,600 / 5,100 / 8,200, measured 1,826 / 4,304
+  / 7,413 the day it landed) plus a 300-char cap per parameter beside the
+  existing 1,600 per tool. Post-change descriptions measure 3,232 /
+  7,289 / 11,941.
+- `pydantic>=2.11,<3` is now a declared dependency — `mcp_server.py`
+  imports `pydantic.Field` directly rather than relying on it arriving
+  through `mcp`.
+
 ### Fixed (2026-08-25 — `memory_recall` no longer returns an unbounded payload, #186)
 - **`memory_recall` now caps `entities`/`edges`/`texts`/per-entity `facts`
   and truncates supporting text — with a per-hop quota, not a flat

@@ -53,7 +53,7 @@ import signal
 import threading
 import time
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 # Silence torch._dynamo's noisy fall-back warnings on systems without
 # Triton (i.e. every Windows install). The embedder forward pass works
@@ -65,6 +65,14 @@ os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
 from anyio import to_thread  # noqa: E402
 from mcp.server.fastmcp import Context, FastMCP  # noqa: E402
 from mcp.server.transport_security import TransportSecuritySettings  # noqa: E402
+# ``Annotated[T, Field(description=...)]`` on a tool signature is how a
+# per-argument contract reaches the client: FastMCP builds each tool's
+# inputSchema from a pydantic model derived from the signature
+# (mcp/server/fastmcp/utilities/func_metadata.py), so the Field description
+# lands in ``inputSchema.properties[arg].description``. Defaults stay plain
+# signature defaults — Field carries description ONLY, so coercion and
+# optionality are untouched.
+from pydantic import Field  # noqa: E402
 
 from pseudolife_memory.service import MemoryService  # noqa: E402
 
@@ -213,24 +221,22 @@ def _tool(*, tier: str = "full"):
 
 @_tool(tier="minimal")
 def memory_store(
-    text: str,
-    source: str = "agent",
-    tags: list[str] | None = None,
-    origin: Literal["user", "action", "agent"] | None = None,
-    episode: str | None = None,
+    text: Annotated[str, Field(
+        description="The claim to remember.")],
+    source: Annotated[str, Field(
+        description="Stable per-project/topic tag for later filtering.")] = "agent",
+    tags: Annotated[list[str] | None, Field(
+        description='Optional labels, e.g. ["decision", "blocker"].')] = None,
+    origin: Annotated[Literal["user", "action", "agent"] | None, Field(
+        description="Who asserted the claim.")] = None,
+    episode: Annotated[str | None, Field(
+        description="Episode handle for attribution.")] = None,
 ) -> dict[str, Any]:
     """Store one durable fact, decision, or observation. Use proactively
     for anything worth keeping — one claim per call. Near-duplicates are
     dropped, not erred (``stored=False``,
     ``reason="below_surprise_threshold"``). For canonical NOW use
     ``memory_fact_set``.
-
-    Args:
-        text: The claim to remember.
-        source: Stable per-project/topic tag for later filtering.
-        tags: Optional labels, e.g. ``["decision", "blocker"]``.
-        origin: Who asserted it — ``"user"`` / ``"action"`` / ``"agent"``.
-        episode: Episode handle for attribution.
 
     Returns: ``{stored, surprise, reason, cortex_promoted}``.
     """
@@ -353,18 +359,35 @@ def _world_correct_with(e: dict[str, Any]) -> str | None:
 
 @_tool(tier="minimal")
 def memory_search(
-    query: str,
-    top_k: int = 8,
-    sources: list[str] | None = None,
-    bands: list[str] | None = None,
-    episodes: list[str] | None = None,
-    tags: list[str] | None = None,
-    min_score: float | None = None,
-    disable_recency_boost: bool = False,
-    rerank: bool | None = None,
-    bm25: bool | None = None,
-    explain: bool = False,
-    verbose: bool = False,
+    query: Annotated[str, Field(
+        description="Natural-language description; specific beats vague.")],
+    top_k: Annotated[int, Field(
+        description="Max entries returned.")] = 8,
+    sources: Annotated[list[str] | None, Field(
+        description="Keep only entries with one of these source tags.")] = None,
+    bands: Annotated[list[str] | None, Field(
+        description="Keep only entries held by one of these bands.")] = None,
+    episodes: Annotated[list[str] | None, Field(
+        description="Keep only entries stamped with one of these episode "
+                    "ids.")] = None,
+    tags: Annotated[list[str] | None, Field(
+        description="Keep only entries carrying one of these tags.")] = None,
+    min_score: Annotated[float | None, Field(
+        description="Override the 0.25 relevance floor.")] = None,
+    disable_recency_boost: Annotated[bool, Field(
+        description="True to score without the recency bias.")] = False,
+    rerank: Annotated[bool | None, Field(
+        description="Tri-state override for cross-encoder reranking "
+                    "(~200ms); None follows config.")] = None,
+    bm25: Annotated[bool | None, Field(
+        description="Tri-state override for keyword scoring, which aids "
+                    "exact-term queries; None follows config.")] = None,
+    explain: Annotated[bool, Field(
+        description="Attach a ranking ``trace``; implies verbose.")] = False,
+    verbose: Annotated[bool, Field(
+        description="Full per-entry metadata; the default is compact "
+                    "``{id, text, source, tags, score}`` plus supersession "
+                    "when set.")] = False,
 ) -> dict[str, Any]:
     """Retrieve memories for a query — associative recall plus canonical
     facts. Call at task start or when context may apply. ``cortex``
@@ -372,20 +395,8 @@ def memory_search(
     (``contested: true`` awaits ``memory_fact_resolve``).
     ``low_confidence=True``: no confident match, prefer abstaining. On a
     superseded entry, prefer ``superseded_by_text``. Temporal cues may
-    add ``events`` (oldest first).
-
-    Args:
-        query: Natural-language description; specific beats vague.
-        top_k: Max results (default 8).
-        sources / bands / episodes / tags: Optional filters (AND across
-            kinds, OR within list).
-        min_score: Override the 0.25 relevance floor.
-        disable_recency_boost: True to disable recency bias.
-        rerank / bm25: Tri-state overrides; ``bm25`` aids keyword
-            queries, ``rerank`` cross-encodes (~200ms).
-        explain: Attach a ranking ``trace``; implies verbose.
-        verbose: Full per-entry metadata; default compact ``{id, text,
-            source, tags, score}`` + supersession when set.
+    add ``events`` (oldest first). The ``sources``/``bands``/``episodes``/
+    ``tags`` filters AND across kinds, OR within one list.
 
     Returns: ``{query, count, entries, cortex, low_confidence}``.
     """
@@ -502,17 +513,23 @@ def memory_search(
 
 @_tool()
 def memory_recent(
-    n: int = 10,
-    sources: list[str] | None = None,
-    episodes: list[str] | None = None,
-    tags: list[str] | None = None,
-    verbose: bool = False,
+    n: Annotated[int, Field(
+        description="How many entries to return.")] = 10,
+    sources: Annotated[list[str] | None, Field(
+        description="Keep only entries with one of these source tags.")] = None,
+    episodes: Annotated[list[str] | None, Field(
+        description="Keep only entries stamped with one of these episode "
+                    "ids.")] = None,
+    tags: Annotated[list[str] | None, Field(
+        description="Keep only entries carrying one of these tags.")] = None,
+    verbose: Annotated[bool, Field(
+        description="Full per-entry metadata; default entries are "
+                    "compact.")] = False,
 ) -> dict[str, Any]:
     """List the N most recently stored memories, newest first — timestamp
     order, not relevance. Useful for "what did I just store?" and for
-    catching up at the start of a session. Optional ``sources`` /
-    ``episodes`` / ``tags`` filters (AND-combined). ``verbose=True`` for
-    full per-entry metadata (default entries are compact).
+    catching up at the start of a session. The ``sources``/``episodes``/
+    ``tags`` filters AND-combine.
     """
     result = service.recent(
         n=n, sources=sources, episodes=episodes, tags=tags,
@@ -521,11 +538,17 @@ def memory_recent(
 
 
 @_tool()
-def memory_supersede(old_text: str, new_text: str) -> dict[str, Any]:
+def memory_supersede(
+    old_text: Annotated[str, Field(
+        description="The memory now obsolete. Matched exact-text first, "
+                    "then by nearest embedding — a close paraphrase "
+                    "works.")],
+    new_text: Annotated[str, Field(
+        description="The replacement claim; stored fresh.")],
+) -> dict[str, Any]:
     """Mark a stored memory obsolete and record its replacement. The old
     entry is kept but flagged superseded, so retrieval ranks the correction
-    higher and shows both together. Matching is exact-text first, then
-    nearest-embedding fallback — a close paraphrase of ``old_text`` works.
+    higher and shows both together.
 
     Returns: ``{superseded_count, superseded_texts, new_memory_stored}``.
     """
@@ -610,9 +633,12 @@ mcp.tool()(memory_toolset)
 # core memory_fact_get returns source_entries ids —
 # core mode must be able to dereference them.
 @_tool(tier="core")
-def memory_get(entry_id: int) -> dict[str, Any]:
-    """Dereference a memory id (from search results or a fact's
-    ``source_entries``) to the full stored episode plus
+def memory_get(
+    entry_id: Annotated[int, Field(
+        description="A memory id, as returned by search results or by a "
+                    "fact's ``source_entries``.")],
+) -> dict[str, Any]:
+    """Dereference a memory id to the full stored episode plus
     ``consolidated_into`` — the canonical facts it produced. Reading it
     gently reinforces it. Returns ``{found: false, faded: true}`` when the
     episode has since been forgotten.
@@ -621,7 +647,10 @@ def memory_get(entry_id: int) -> dict[str, Any]:
 
 
 @_tool()
-def memory_reinforce(entry_id: int) -> dict[str, Any]:
+def memory_reinforce(
+    entry_id: Annotated[int, Field(
+        description="The id of the memory to strengthen.")],
+) -> dict[str, Any]:
     """Strengthen one memory after reading it via ``memory_get`` and finding
     it genuinely useful — a deliberate "this mattered" signal that helps it
     resist forgetting. Read first, then reinforce.
@@ -633,12 +662,19 @@ def memory_reinforce(entry_id: int) -> dict[str, Any]:
 
 
 @_tool(tier="minimal")
-def memory_fact_get(entity: str, attribute: str) -> dict[str, Any]:
+def memory_fact_get(
+    entity: Annotated[str, Field(
+        description="The slot's subject; matched case- and "
+                    "separator-insensitively.")],
+    attribute: Annotated[str, Field(
+        description="The slot's attribute; matched case- and "
+                    "separator-insensitively.")],
+) -> dict[str, Any]:
     """Look up the one CURRENT value at an ``(entity, attribute)`` slot.
-    One value per slot, case/separator-insensitive. A null record means
-    EMPTY, not unknown — ``memory_search`` still finds context. A
-    set-valued slot returns ``{kind: "set", members, removed}`` instead —
-    ``members: []`` means EMPTY too.
+    One value per slot. A null record means EMPTY, not unknown —
+    ``memory_search`` still finds context. A set-valued slot returns
+    ``{kind: "set", members, removed}`` instead — ``members: []`` means
+    EMPTY too.
 
     Returns: ``{record | null, contenders}`` (+ ``entity_ref`` when the
     entity has a graph node). Non-empty ``contenders`` = unsettled
@@ -679,13 +715,25 @@ def memory_fact_get(entity: str, attribute: str) -> dict[str, Any]:
 
 @_tool(tier="minimal")
 def memory_fact_set(
-    entity: str,
-    attribute: str,
-    value: str,
-    origin: Literal["user", "action", "agent"] | None = None,
-    confidence: float = 0.8,
-    episode: str | None = None,
-    freshness_class: Literal["auto", "evergreen", "slow", "volatile"] = "auto",
+    entity: Annotated[str, Field(
+        description="The slot's subject; matched case- and "
+                    "separator-insensitively.")],
+    attribute: Annotated[str, Field(
+        description="The slot's attribute; matched case- and "
+                    "separator-insensitively.")],
+    value: Annotated[str, Field(
+        description="The value that is canonical NOW.")],
+    origin: Annotated[Literal["user", "action", "agent"] | None, Field(
+        description='Who asserted it: "user" = the human told you; '
+                    'otherwise "action"/"agent".')] = None,
+    confidence: Annotated[float, Field(
+        description="How sure you are, 0..1.")] = 0.8,
+    episode: Annotated[str | None, Field(
+        description="Episode handle for attribution.")] = None,
+    freshness_class: Annotated[
+        Literal["auto", "evergreen", "slow", "volatile"], Field(
+            description='How fast the value rots. "auto" infers the decay '
+                        "rate from the entity kind.")] = "auto",
 ) -> dict[str, Any]:
     """Assert a canonical fact — insert, confirm, or correct a slot.
 
@@ -693,11 +741,6 @@ def memory_fact_set(
     A conflicting write parks as a contender (``action="contested"``,
     winner under ``current``) — check with the human, settle via
     ``memory_fact_resolve``.
-
-    Args:
-        origin: ``"user"`` = human told you; else ``"action"``/``"agent"`` (default).
-        confidence: 0..1, default 0.8. episode: attribution handle.
-        freshness_class: ``"auto"`` infers decay from entity kind.
 
     Returns: ``{action: inserted|confirmed|superseded|contested, ...record}``.
     """
@@ -709,7 +752,12 @@ def memory_fact_set(
 
 
 @_tool(tier="minimal")
-def memory_set_add(entity: str, attribute: str, member: str) -> dict[str, Any]:
+def memory_set_add(
+    entity: Annotated[str, Field(description="The slot's subject.")],
+    attribute: Annotated[str, Field(description="The slot's attribute.")],
+    member: Annotated[str, Field(
+        description="The member to add or re-confirm.")],
+) -> dict[str, Any]:
     """Add/confirm a member of a set-valued slot (many concurrent values,
     not one NOW value). A scalar there converts to a set on first call —
     one-way — except number-led scalars ("32", "$1,500"), which are
@@ -722,7 +770,12 @@ def memory_set_add(entity: str, attribute: str, member: str) -> dict[str, Any]:
 
 
 @_tool(tier="minimal")
-def memory_set_remove(entity: str, attribute: str, member: str) -> dict[str, Any]:
+def memory_set_remove(
+    entity: Annotated[str, Field(description="The slot's subject.")],
+    attribute: Annotated[str, Field(description="The slot's attribute.")],
+    member: Annotated[str, Field(
+        description="The current member to retract.")],
+) -> dict[str, Any]:
     """Retract one current set member (audit row kept). Read with
     memory_fact_get.
 
@@ -732,11 +785,17 @@ def memory_set_remove(entity: str, attribute: str, member: str) -> dict[str, Any
 
 
 @_tool(tier="core")
-def memory_fact_resolve(entity: str, attribute: str, accept: bool) -> dict[str, Any]:
+def memory_fact_resolve(
+    entity: Annotated[str, Field(description="The contested slot's subject.")],
+    attribute: Annotated[str, Field(
+        description="The contested slot's attribute.")],
+    accept: Annotated[bool, Field(
+        description="True adopts the parked contender as the new current "
+                    "value (the old value is kept as history); False "
+                    "discards the contender and keeps the current "
+                    "value.")],
+) -> dict[str, Any]:
     """Settle a CONTESTED fact slot after checking with the human.
-    ``accept=true`` adopts the parked contender as the new current value
-    (old value kept as history); ``accept=false`` discards the contender
-    and keeps the current value.
 
     Returns: ``{resolved, accepted, action, current, record}`` or
     ``{resolved: false, reason: "no_contender"}``.
@@ -745,16 +804,21 @@ def memory_fact_resolve(entity: str, attribute: str, accept: bool) -> dict[str, 
 
 
 @_tool()
-def memory_history(entity: str, attribute: str | None = None,
-                   as_of: str | float | None = None) -> dict[str, Any]:
-    """With ``attribute``: change history of that canonical fact slot —
-    every version, oldest→newest, each with writer/session, tx/valid time,
-    and age ("what did this used to be? who set it?"). ``as_of`` (ISO or
-    epoch): only versions written by then (compaction thins chains past
-    ~30d).
-
-    Without ``attribute``: the entity's causal CHAIN — dated
-    fact/entry/edge/lesson events merged oldest→newest ("what led to X?").
+def memory_history(
+    entity: Annotated[str, Field(
+        description="The subject whose past to read.")],
+    attribute: Annotated[str | None, Field(
+        description="The fact slot to read; omit for chain mode.")] = None,
+    as_of: Annotated[str | float | None, Field(
+        description="Slot mode only: ISO-8601 or epoch seconds; returns "
+                    "only versions written by then.")] = None,
+) -> dict[str, Any]:
+    """Read an entity's past. SLOT mode (``attribute`` given): every
+    version of that canonical fact slot, oldest→newest, each with
+    writer/session, tx/valid time, and age ("what did this used to be?
+    who set it?") — compaction thins chains past ~30d. CHAIN mode
+    (``attribute`` omitted): the entity's dated fact/entry/edge/lesson
+    events merged oldest→newest ("what led to X?").
 
     Returns: ``{entity, attribute, count, versions}`` (slot mode) or
     ``{found, entity, count, events}`` (chain mode).
@@ -769,28 +833,31 @@ def memory_history(entity: str, attribute: str | None = None,
 
 @_tool(tier="core")
 def memory_world_set(
-    entity: str,
-    attribute: str,
-    value: str,
-    source_url: str = "",
-    source_quote: str = "",
-    freshness_class: Literal["evergreen", "slow", "volatile"] = "volatile",
-    confidence: float = 0.85,
-    retrieved_at: float | None = None,
-    content_hash: str | None = None,
+    entity: Annotated[str, Field(description="The slot's subject.")],
+    attribute: Annotated[str, Field(description="The slot's attribute.")],
+    value: Annotated[str, Field(
+        description="The externally-sourced value.")],
+    source_url: Annotated[str, Field(
+        description="http(s) citation URL; any other scheme is "
+                    "rejected.")] = "",
+    source_quote: Annotated[str, Field(
+        description="The 1-2 sentences the claim was extracted from.")] = "",
+    freshness_class: Annotated[
+        Literal["evergreen", "slow", "volatile"], Field(
+            description="Trust decay applied at read time: ``evergreen`` "
+                        "never decays, ``slow`` is months, ``volatile`` is "
+                        "weeks.")] = "volatile",
+    confidence: Annotated[float, Field(
+        description="Source confidence, 0..1.")] = 0.85,
+    retrieved_at: Annotated[float | None, Field(
+        description="Epoch seconds the source was fetched.")] = None,
+    content_hash: Annotated[str | None, Field(
+        description="Hash of the fetched source, for change detection.")] = None,
 ) -> dict[str, Any]:
     """Assert a canonical WORLD fact — sourced EXTERNAL knowledge (versions,
     prices, who-holds-a-role, research findings), kept separate from
     user/project facts. Route verified web/docs findings here, with the
     citation. A newer source supersedes an older value at the same slot.
-
-    Args:
-        source_url: http(s) citation URL (any other scheme is rejected).
-        source_quote: The 1–2 sentences the claim was extracted from.
-        freshness_class: ``evergreen`` (never decays) | ``slow`` (months) |
-            ``volatile`` (weeks, default) — sets trust decay at read time.
-        confidence: 0..1 source confidence (default 0.85).
-        retrieved_at / content_hash: Optional fetch time + source hash.
 
     Returns: ``{action: inserted|confirmed|superseded|rejected, ...record}``.
     """
@@ -802,14 +869,20 @@ def memory_world_set(
 
 
 @_tool(tier="core")
-def memory_world_search(query: str, top_k: int = 5,
-                        verbose: bool = False) -> dict[str, Any]:
+def memory_world_search(
+    query: Annotated[str, Field(
+        description="Natural-language description of the external fact "
+                    "needed.")],
+    top_k: Annotated[int, Field(description="Max entries returned.")] = 5,
+    verbose: Annotated[bool, Field(
+        description="Full provenance metadata; default entries are "
+                    "compact.")] = False,
+) -> dict[str, Any]:
     """Search current WORLD facts (sourced external knowledge) by
     similarity. Use when a task turns on an external fact your training
     data may have stale. Entries carry ``effective_confidence``
     (age-decayed), a ``stale`` flag (re-verify before relying on it), and
-    their ``source_url`` / ``source_quote`` for citation. ``verbose=True``
-    for full provenance metadata (default entries are compact).
+    their ``source_url`` / ``source_quote`` for citation.
 
     Returns: ``{count, entries}``.
     """
@@ -850,24 +923,24 @@ def _compact_world(e: dict[str, Any]) -> dict[str, Any]:
 
 @_tool(tier="minimal")
 def memory_outcome(
-    task: str,
-    outcome: Literal["success", "failure", "correction"],
-    about: str | None = None,
-    detail: str | None = None,
-    polarity: str | None = None,
-    episode: str | None = None,
+    task: Annotated[str, Field(
+        description='Kind of task, in stable wording ("deploy engine to '
+                    'host") so signals for the same work group.')],
+    outcome: Annotated[Literal["success", "failure", "correction"], Field(
+        description="What happened.")],
+    about: Annotated[str | None, Field(
+        description="The tool or approach concerned; aids traversal.")] = None,
+    detail: Annotated[str | None, Field(
+        description="What worked, or what the dead-end was.")] = None,
+    polarity: Annotated[str | None, Field(
+        description='"+" do-this or "-" avoid; usually omit — it is '
+                    "inferred from the outcome.")] = None,
+    episode: Annotated[str | None, Field(
+        description="Episode handle for attribution.")] = None,
 ) -> dict[str, Any]:
     """Record a procedural outcome — what worked, failed, or was
     corrected. Dream synthesises signals into lessons surfaced next
     session; logging stops repeated mistakes.
-
-    Args:
-        task: Kind of task, stable wording ("deploy engine to host").
-        outcome: ``success`` | ``failure`` | ``correction``.
-        about: The tool/approach concerned (aids traversal).
-        detail: What worked / what the dead-end was.
-        polarity: ``+`` do-this | ``-`` avoid; usually omit (inferred).
-        episode: Episode handle for attribution.
 
     Returns: ``{recorded, signal_id, task, outcome}``; needs Postgres.
     """
@@ -877,13 +950,18 @@ def memory_outcome(
 
 
 @_tool(tier="core")
-def memory_lesson_search(query: str, top_k: int = 5,
-                         verbose: bool = False) -> dict[str, Any]:
+def memory_lesson_search(
+    query: Annotated[str, Field(
+        description="The task at hand, described the way it would have "
+                    "been logged.")],
+    top_k: Annotated[int, Field(description="Max entries returned.")] = 5,
+    verbose: Annotated[bool, Field(
+        description="Full provenance metadata; default entries are "
+                    "compact.")] = False,
+) -> dict[str, Any]:
     """Search learned lessons (procedural memory) by similarity to the task
     at hand. Call at the START of a task: what worked, what to avoid, what
     the user corrected before. Heed polarity ``-`` entries — known dead-ends.
-    ``verbose=True`` for full provenance metadata (default entries are
-    compact).
 
     Returns: ``{count, entries: [{task, aspect, lesson, about, polarity,
     outcome, confidence, score}]}``.
@@ -904,28 +982,36 @@ def memory_lesson_search(query: str, top_k: int = 5,
 
 @_tool()
 def memory_forget(
-    scope: Literal["memory", "fact", "world", "lesson"],
-    entity: str | None = None,
-    attribute: str | None = None,
-    text: str | None = None,
-    substring: str | None = None,
-    source: str | None = None,
-    episode: str | None = None,
-    tag: str | None = None,
+    scope: Annotated[Literal["memory", "fact", "world", "lesson"], Field(
+        description="Which store to delete from.")],
+    entity: Annotated[str | None, Field(
+        description="fact/world scope: the slot's subject. lesson scope: "
+                    "the task.")] = None,
+    attribute: Annotated[str | None, Field(
+        description="fact/world scope: one slot's attribute; omit to purge "
+                    "the whole entity. lesson scope: the aspect.")] = None,
+    text: Annotated[str | None, Field(
+        description="memory scope: delete entries whose text matches this "
+                    "exactly.")] = None,
+    substring: Annotated[str | None, Field(
+        description="memory scope: delete entries whose text contains "
+                    "this.")] = None,
+    source: Annotated[str | None, Field(
+        description="memory scope: delete entries with this source "
+                    "tag.")] = None,
+    episode: Annotated[str | None, Field(
+        description="memory scope: delete entries stamped with this "
+                    "episode id.")] = None,
+    tag: Annotated[str | None, Field(
+        description="memory scope: delete entries carrying this tag.")] = None,
 ) -> dict[str, Any]:
     """Hard-delete from one memory store. Cleanup for junk/test data — no
     audit trail. For "now wrong, keep history" use ``memory_fact_set``
     (facts) or ``memory_supersede`` (memories) instead.
 
-    Scopes:
-        ``memory``: entries matching ``text`` / ``substring`` / ``source``
-            / ``episode`` / ``tag`` (at least one; filters OR-combine —
-            ANY match deletes, unlike memory_search's AND).
-        ``fact``: canonical slots — ``entity`` required; omit
-            ``attribute`` to purge the whole entity.
-        ``world``: world facts — ``entity`` (+ optional ``attribute``).
-        ``lesson``: pass the task as ``entity``, the aspect as
-            ``attribute``.
+    ``scope="memory"`` needs at least one of ``text``/``substring``/
+    ``source``/``episode``/``tag``, and those OR-combine — ANY match
+    deletes, unlike memory_search's AND. The other scopes need ``entity``.
 
     Returns: ``{deleted_count | removed, ...}``; ``{error}`` on bad input.
     """
@@ -953,30 +1039,37 @@ def memory_forget(
 def memory_dream(
     action: Literal["status", "pull", "commit", "run", "deep", "runs",
                     "rollback"],
-    limit: int | None = None,
-    cursor: float | None = None,
-    apply: bool = False,
-    snippets: bool = True,
-    run_id: int | None = None,
+    limit: Annotated[int | None, Field(
+        description="pull/run: how many memories to process (pull defaults "
+                    "to 40). runs: how many passes to list (defaults to "
+                    "10).")] = None,
+    cursor: Annotated[float | None, Field(
+        description="commit: the newest pulled timestamp. Required for "
+                    "that action.")] = None,
+    apply: Annotated[bool, Field(
+        description="deep: True writes the consolidation (graph tables are "
+                    "snapshotted first); the default is a dry run.")] = False,
+    snippets: Annotated[bool, Field(
+        description="deep: False omits the evidence snippets.")] = True,
+    run_id: Annotated[int | None, Field(
+        description="rollback: which pass to revert; defaults to the "
+                    "newest committed pass.")] = None,
 ) -> dict[str, Any]:
     """Drive the dream — consolidation of recent memories into canonical
     facts and graph structure.
 
     Actions:
         ``status``: backlog + whether a sweep would fire. Read-only.
-        ``pull``: unconsolidated memories (oldest-first, up to ``limit``);
-            write facts via ``memory_fact_set``, then ``commit`` with the
-            newest pulled timestamp as ``cursor``.
+        ``pull``: unconsolidated memories, oldest first; write facts via
+            ``memory_fact_set``, then ``commit``.
         ``run``: a server-side dream with the configured extractor
             (loop to drain).
-        ``deep``: full-corpus graph consolidation, dry-run unless
-            ``apply=true`` (snapshots graph tables first). Settle
-            candidates via ``memory_graph_review``; ``snippets=false``
-            omits evidence; duplicate lesson/world slots listed for
-            hand curation.
+        ``deep``: full-corpus graph consolidation. Settle candidates via
+            ``memory_graph_review``; duplicate lesson/world slots are
+            listed for hand curation.
         ``runs``: recent dream passes (tallies, status).
-        ``rollback``: revert the newest committed pass from its journal
-            (facts + events; traces/cursor kept). ``run_id`` optional.
+        ``rollback``: revert a committed pass from its journal (facts +
+            events; traces/cursor kept).
 
     Returns: per-action dict; ``{error}`` on bad input.
     """
@@ -1025,33 +1118,45 @@ def memory_graph_review(
     action: Literal["list", "propose", "relate", "dismiss_pair",
                     "dismiss_slot_pair", "accept_link", "reject_link",
                     "accept_merge", "accept_junk", "reject_entity"] = "list",
-    proposal_id: int | None = None,
-    proposal_ids: list[int] | None = None,
-    proposals: list[dict] | None = None,
-    scope: str | None = None,
-    src: str | None = None,
-    dst: str | None = None,
-    relation: str | None = None,
-    store: str | None = None,
+    proposal_id: Annotated[int | None, Field(
+        description="Id actions: the one proposal to settle.")] = None,
+    proposal_ids: Annotated[list[int] | None, Field(
+        description="Id actions: settle many proposals in one call, "
+                    "instead of ``proposal_id``.")] = None,
+    proposals: Annotated[list[dict] | None, Field(
+        description="propose: ``[{src, relation, dst, similarity?, "
+                    "rationale?}]``.")] = None,
+    scope: Annotated[str | None, Field(
+        description="list: keep only findings of this kind.")] = None,
+    src: Annotated[str | None, Field(
+        description="relate/dismiss_pair: the first entity. "
+                    'dismiss_slot_pair: an "entity|attribute" key from the '
+                    "deep response.")] = None,
+    dst: Annotated[str | None, Field(
+        description="relate/dismiss_pair: the second entity. "
+                    'dismiss_slot_pair: an "entity|attribute" key from the '
+                    "deep response.")] = None,
+    relation: Annotated[str | None, Field(
+        description="relate: the edge relation to write, from the graph "
+                    "vocabulary.")] = None,
+    store: Annotated[str | None, Field(
+        description='dismiss_slot_pair: which duplicate listing the keys '
+                    'came from — "lesson" or "world".')] = None,
 ) -> dict[str, Any]:
     """Work the graph review queue — deep-dream proposals that need a
     verdict before they touch the graph.
 
     Actions:
-        ``list``: pending findings/proposals (``scope`` filters).
-        ``propose``: file link proposals ``[{src, relation, dst,
-            similarity?, rationale?}]`` for review.
+        ``list``: pending findings/proposals.
+        ``propose``: file link proposals for review.
         ``relate``: related-not-duplicate verdict — writes the
             ``relation`` edge and dismisses the pair.
         ``dismiss_pair``: mark ``src``/``dst`` genuinely distinct.
-        ``dismiss_slot_pair``: same for lesson/world duplicate
-            listings (``store``; keys are "entity|attribute").
+        ``dismiss_slot_pair``: same for lesson/world duplicate listings.
         ``accept_link``/``reject_link``: settle an edge proposal by id.
         ``accept_merge``: fold a near-duplicate into its twin.
         ``accept_junk``: delete an over-extraction artifact.
         ``reject_entity``: keep the entity, dismiss the proposal.
-
-    Id actions accept ``proposal_ids`` for batch triage.
 
     Returns: per-action dict; ``{error}`` on bad input.
     """
@@ -1117,7 +1222,10 @@ def memory_graph_review(
 
 @_tool(tier="core")  # the CLAUDE.md workflow opens sub-episodes for big tasks.
 def memory_episode_start(
-    title: str, hint: str | None = None,
+    title: Annotated[str, Field(
+        description="Short name for the task, used in later recaps.")],
+    hint: Annotated[str | None, Field(
+        description="Optional note on what the task is about.")] = None,
 ) -> dict[str, Any]:
     """Open a named sub-episode for a substantial multi-step task. It nests
     under the auto-managed session episode; memories stored while it is open
@@ -1139,44 +1247,59 @@ def memory_episode_end() -> dict[str, Any]:
 
 
 @_tool(tier="minimal")  # the recommended workflow names the session early.
-def memory_session_title(title: str) -> dict[str, Any]:
+def memory_session_title(
+    title: Annotated[str, Field(
+        description='What this session is about, e.g. "Pseudolife-MCP" or '
+                    '"auth-refactor".')],
+) -> dict[str, Any]:
     """Name THIS session's auto-opened episode (default titles are
-    generic). Call once at the start of work — e.g. ``"Pseudolife-MCP"`` or
-    ``"auth-refactor"`` — so session recaps read meaningfully. Idempotent;
-    call again to rename.
+    generic). Call once at the start of work so session recaps read
+    meaningfully. Idempotent; call again to rename.
     """
     return service.set_session_title(title=title)
 
 
 @_tool()
-def memory_episode_summary(id: str) -> dict[str, Any]:
+def memory_episode_summary(
+    id: Annotated[str, Field(
+        description="An episode id, as it appears on search/recent "
+                    "results.")],
+) -> dict[str, Any]:
     """Stats, tag/source distribution, and recent entries for one episode —
-    "summarise what we worked on". Episode ids appear on search/recent
-    results. Returns ``{found: false}`` for an unknown id.
+    "summarise what we worked on". Returns ``{found: false}`` for an
+    unknown id.
     """
     return service.episode_summary(id=id)
 
 
 @_tool()
 def memory_consolidation_candidates(
-    query: str | None = None,
-    episode: str | None = None,
-    sources: list[str] | None = None,
-    tags: list[str] | None = None,
-    top_k: int = 20,
-    min_cohesion: float = 0.6,
-    min_cluster_size: int = 2,
-    max_clusters: int = 10,
+    query: Annotated[str | None, Field(
+        description="Topic-driven anchor: cluster memories near this "
+                    "description.")] = None,
+    episode: Annotated[str | None, Field(
+        description="Session-driven anchor: cluster within this episode "
+                    "id.")] = None,
+    sources: Annotated[list[str] | None, Field(
+        description="Consider only entries with one of these source "
+                    "tags.")] = None,
+    tags: Annotated[list[str] | None, Field(
+        description="Consider only entries carrying one of these "
+                    "tags.")] = None,
+    top_k: Annotated[int, Field(
+        description="How many candidate entries to cluster over.")] = 20,
+    min_cohesion: Annotated[float, Field(
+        description="Minimum intra-cluster cosine — raise it to flag only "
+                    "near-duplicates.")] = 0.6,
+    min_cluster_size: Annotated[int, Field(
+        description="Drop clusters with fewer members than this.")] = 2,
+    max_clusters: Annotated[int, Field(
+        description="Max clusters returned.")] = 10,
 ) -> dict[str, Any]:
     """Find clusters of near-duplicate memories ripe for consolidation —
     the same thing phrased five ways across five sessions. Anchor with a
-    ``query`` (topic-driven) or an ``episode`` id (session-driven); read
-    the clusters, synthesise one canonical note, then commit it via
-    ``memory_consolidate``.
-
-    Args:
-        min_cohesion: Minimum intra-cluster cosine (default 0.6) — raise to
-            flag only near-duplicates.
+    ``query`` or an ``episode``; read the clusters, synthesise one
+    canonical note, then commit it via ``memory_consolidate``.
 
     Returns: ``{count, clusters: [{cohesion, size, members}]}``.
     """
@@ -1194,15 +1317,20 @@ def memory_consolidation_candidates(
 
 @_tool()
 def memory_consolidate(
-    replaces: list[str],
-    new_text: str,
-    source: str | None = None,
-    tags: list[str] | None = None,
+    replaces: Annotated[list[str], Field(
+        description="The memories being folded in; each is matched by "
+                    "exact text or close paraphrase.")],
+    new_text: Annotated[str, Field(
+        description="The canonical note that replaces them.")],
+    source: Annotated[str | None, Field(
+        description="Source tag for the new note.")] = None,
+    tags: Annotated[list[str] | None, Field(
+        description="Labels for the new note.")] = None,
 ) -> dict[str, Any]:
     """Replace a cluster of near-duplicate memories with one canonical note.
-    Every entry matching ``replaces`` (exact text or close paraphrase) is
-    marked superseded by ``new_text``, which is stored fresh — the bank gets
-    shorter without losing the audit trail.
+    Every entry matching ``replaces`` is marked superseded by ``new_text``,
+    which is stored fresh — the bank gets shorter without losing the audit
+    trail.
 
     Returns: ``{superseded_count, superseded_texts, new_memory_stored}``.
     """
@@ -1216,21 +1344,29 @@ def memory_consolidate(
 
 @_tool(tier="core")
 def memory_graph_relate(
-    src: str,
-    relation: str,
-    dst: str,
-    origin: str | None = None,
-    confidence: float = 0.8,
-    src_type: str | None = None,
-    dst_type: str | None = None,
+    src: Annotated[str, Field(description="The subject entity.")],
+    relation: Annotated[str, Field(
+        description="From the closed registry: ``depends-on``, "
+                    "``part-of``, ``runs-on``, ``hosts``, ``uses``, "
+                    "``configures``, ``stores-data-in``, ``related-to``. "
+                    "Separator variants normalise; an unknown name is "
+                    "rejected WITH the closest matches.")],
+    dst: Annotated[str, Field(description="The object entity.")],
+    origin: Annotated[str | None, Field(
+        description="Who asserted the edge.")] = None,
+    confidence: Annotated[float, Field(
+        description="How sure you are, 0..1.")] = 0.8,
+    src_type: Annotated[str | None, Field(
+        description="Entity kind for ``src``, used when the node is "
+                    "created.")] = None,
+    dst_type: Annotated[str | None, Field(
+        description="Entity kind for ``dst``, used when the node is "
+                    "created.")] = None,
 ) -> dict[str, Any]:
     """Assert a typed relation between two entities, e.g. ``("web-app",
     "runs-on", "host-1")``. Entities auto-create and resolve through
-    aliases; re-asserting an edge bumps its confidence. Relations come from
-    a closed registry (``depends-on``, ``part-of``, ``runs-on``, ``hosts``,
-    ``uses``, ``configures``, ``stores-data-in``, ``related-to``);
-    separator variants normalise, and an unknown name is rejected WITH the
-    closest matches — pick one, fall back to ``related-to``, or grow the
+    aliases; re-asserting an edge bumps its confidence. On a rejected
+    relation, pick a suggestion, fall back to ``related-to``, or grow the
     vocabulary deliberately via ``memory_relation_define``.
 
     Returns: ``{src, relation, dst, confidence, warnings}`` or
@@ -1243,7 +1379,11 @@ def memory_graph_relate(
 
 
 @_tool()
-def memory_graph_unrelate(src: str, relation: str, dst: str) -> dict[str, Any]:
+def memory_graph_unrelate(
+    src: Annotated[str, Field(description="The edge's subject entity.")],
+    relation: Annotated[str, Field(description="The edge's relation.")],
+    dst: Annotated[str, Field(description="The edge's object entity.")],
+) -> dict[str, Any]:
     """Retract a relation — the edge is marked superseded (kept for audit)
     and leaves ``memory_graph`` results. Re-asserting the same triple later
     revives it.
@@ -1252,7 +1392,12 @@ def memory_graph_unrelate(src: str, relation: str, dst: str) -> dict[str, Any]:
 
 
 @_tool()
-def memory_alias(entity: str, alias: str) -> dict[str, Any]:
+def memory_alias(
+    entity: Annotated[str, Field(
+        description="The canonical entity to bind onto.")],
+    alias: Annotated[str, Field(
+        description="The alternative name.")],
+) -> dict[str, Any]:
     """Bind an alternative name to an entity (e.g. ``pg`` → ``postgres``)
     so facts and graph lookups under either name land on the same node.
     Returns the entity's full alias list.
@@ -1262,20 +1407,22 @@ def memory_alias(entity: str, alias: str) -> dict[str, Any]:
 
 @_tool(tier="core")
 def memory_graph(
-    entity: str,
-    depth: int = 1,
-    include_facts: bool = True,
-    to: str | None = None,
-    relation_filter: str | None = None,
+    entity: Annotated[str, Field(
+        description="The root entity to read out from.")],
+    depth: Annotated[int, Field(
+        description="Hops from the root. Max 3.")] = 1,
+    include_facts: Annotated[bool, Field(
+        description="False omits each node's canonical facts.")] = True,
+    to: Annotated[str | None, Field(
+        description="Return the shortest path from ``entity`` to this "
+                    "entity instead of a plain neighborhood.")] = None,
+    relation_filter: Annotated[str | None, Field(
+        description="Keep only edges whose relation contains this "
+                    "substring.")] = None,
 ) -> dict[str, Any]:
     """Read an entity's graph neighborhood: nodes, typed edges, and each
     node's canonical facts. Transitive/inverse edges arrive pre-derived
-    (marked ``derived: true`` with rule provenance). Pass ``to`` for the
-    shortest path between two entities; ``relation_filter`` keeps only
-    edges whose relation contains the substring.
-
-    Args:
-        depth: Hops from the root (default 1, max 3).
+    (marked ``derived: true`` with rule provenance).
 
     Returns: ``{found, entity, nodes, edges, paths}``.
     """
@@ -1458,19 +1605,36 @@ def _compact_recall_text(t: str) -> str:
 
 
 @_tool(tier="core")
-def memory_recall(query: str, hops: int = 3, top_k: int = 5,
-                  verbose: bool = False) -> dict[str, Any]:
+def memory_recall(
+    query: Annotated[str, Field(
+        description="Natural-language relational question; its top hits "
+                    "seed the graph walk.")],
+    hops: Annotated[int, Field(
+        description="Max graph hops. Clamped to 1..5.")] = 3,
+    top_k: Annotated[int, Field(
+        description="Bounds only the SEED search — the initial hits naming "
+                    "the entities the walk starts from — NOT the result, "
+                    "which is capped separately. At least 3 ``texts`` "
+                    "slots (fewer if ``top_k`` is smaller) go to seed "
+                    "hits; the rest to hop-discovered support.")] = 5,
+    verbose: Annotated[bool, Field(
+        description="Full fact/edge provenance and untruncated texts. "
+                    "Default facts are ``{attribute, value}``, edges "
+                    "``{src, relation, dst}``, texts truncated to a "
+                    "preview.")] = False,
+) -> dict[str, Any]:
     """Multi-hop retrieval over the knowledge graph, for RELATIONAL
-    questions answered by following links ("what does X ultimately run
-    on?") that single-shot ``memory_search`` can't chain. Read-only.
-    ``low_confidence: true`` means no seed entity matched — fall back to
-    ``memory_search``.
+    questions whose answer is reached by following links — "what does X
+    ultimately run on?", "how does A reach C?" — which single-shot
+    ``memory_search`` can't chain. Read-only. ``low_confidence: true``
+    means no seed entity matched — fall back to ``memory_search``.
 
-    ``top_k`` bounds only the seed search, not the result:
-    ``entities``/``edges``/``texts`` (and per-entity ``facts``) are capped
-    separately, reserving slots per hop so a hub seed's 1-hop ring can't
-    crowd out deeper hops. ``verbose=True`` returns full provenance and
-    untruncated texts. Details: docs/guide/retrieval.md.
+    Returns: ``{seeds, entities, edges, paths, texts, iterations}``.
+    ``entities``/``edges``/``texts`` are capped (currently 10/15/6) with a
+    per-hop reservation, so a hub seed's own 1-hop ring can't crowd out
+    the deeper hops the walk exists to reach; ``edges`` prefers links
+    between surviving entities; each entity's ``facts`` is capped
+    (currently 5). Details: docs/guide/retrieval.md.
     """
     out = service.recall(query, hops=hops, top_k=top_k)
     entity_hop = out.get("entity_hop") or {}
@@ -1513,19 +1677,27 @@ def memory_recall(query: str, hops: int = 3, top_k: int = 5,
 
 @_tool()
 def memory_relation_define(
-    name: str,
-    description: str,
-    transitive: bool = False,
-    inverse_of: str | None = None,
-    src_type: str | None = None,
-    dst_type: str | None = None,
+    name: Annotated[str, Field(
+        description="The new relation name, hyphenated like the "
+                    "builtins.")],
+    description: Annotated[str, Field(
+        description="What the relation means, for later readers.")],
+    transitive: Annotated[bool, Field(
+        description="True closes the relation transitively, so chained "
+                    "edges arrive pre-derived.")] = False,
+    inverse_of: Annotated[str | None, Field(
+        description="Pair with an existing relation, as ``runs-on`` is the "
+                    "inverse of ``hosts``.")] = None,
+    src_type: Annotated[str | None, Field(
+        description="Soft entity-kind expectation for the subject; a "
+                    "mismatch warns, never rejects.")] = None,
+    dst_type: Annotated[str | None, Field(
+        description="Soft entity-kind expectation for the object; a "
+                    "mismatch warns, never rejects.")] = None,
 ) -> dict[str, Any]:
     """Add a relation to the closed graph vocabulary — a deliberate, rare
     act. Prefer the builtins; define one only when a recurring connection
-    genuinely fits none of them. Supports transitive closure
-    (``transitive=true``) and inverse pairing (``inverse_of``, like
-    ``runs-on`` ↔ ``hosts``); soft ``src_type``/``dst_type`` expectations
-    warn on mismatch but never reject.
+    genuinely fits none of them.
     """
     return service.relation_define(
         name=name, description=description, transitive=transitive,
@@ -1537,13 +1709,19 @@ def memory_relation_define(
 
 
 @_tool(tier="core")
-def document_ingest(path: str, source: str | None = None) -> dict[str, Any]:
-    """Index a file (.txt / .md / .pdf) into the reference bank — a
-    separate store for background documents (papers, manuals, codebases)
-    retrieved by pure cosine similarity, kept apart from conversational
-    memory. ``source`` defaults to the filename. ``path`` resolves on the
-    SERVER's filesystem — with the Docker daemon, use a path visible inside
-    the container (e.g. a mounted volume), not a host path.
+def document_ingest(
+    path: Annotated[str, Field(
+        description="Path to a .txt / .md / .pdf file, resolved on the "
+                    "SERVER's filesystem — with the Docker daemon, a path "
+                    "visible inside the container (e.g. a mounted volume), "
+                    "not a host path.")],
+    source: Annotated[str | None, Field(
+        description="Source tag for the chunks; defaults to the "
+                    "filename.")] = None,
+) -> dict[str, Any]:
+    """Index a file into the reference bank — a separate store for
+    background documents (papers, manuals, codebases) retrieved by pure
+    cosine similarity, kept apart from conversational memory.
 
     Returns: ``{source, chunks_stored, chunks_total}``.
     """
@@ -1551,7 +1729,12 @@ def document_ingest(path: str, source: str | None = None) -> dict[str, Any]:
 
 
 @_tool(tier="core")
-def document_search(query: str, top_k: int = 5) -> dict[str, Any]:
+def document_search(
+    query: Annotated[str, Field(
+        description="Natural-language description of the passage "
+                    "wanted.")],
+    top_k: Annotated[int, Field(description="Max chunks returned.")] = 5,
+) -> dict[str, Any]:
     """Search the reference bank only — ingested documents, no
     conversational memories mixed in. For docs AND memories together, use
     ``memory_search``.
