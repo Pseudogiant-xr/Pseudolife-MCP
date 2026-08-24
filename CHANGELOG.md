@@ -72,6 +72,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   word-boundary-matched against the whole atlas so it can't false-positive
   on the still-live `memory_traces` table. All three watched RED against
   the pre-fix atlas.json before the fix landed.
+### Fixed (2026-08-25 — install.sh no longer aborts mid-install on PEP 668 distros, #176)
+- **A failed shim install now falls back to the HTTP transport instead of
+  killing the installer.** On PEP 668 distros (Ubuntu 24.04+, Debian 12+,
+  Fedora 40, Arch) with no pipx, `pip install --user` exits 1 with
+  `externally-managed-environment`; under `set -e` that aborted
+  `ops/install.sh` at step 10 — after the multi-GB image build — with a raw
+  pip traceback, no MCP transport registered, and the `--transport http`
+  hint unreachable. `ensure_shim` now exit-checks every pipx/pip invocation
+  (as `ops/install.ps1` always has), so failure leaves the shim flag unset
+  and the existing per-client HTTP fallback plus remediation text fire.
+  `ops/preflight.sh` gains a pipx check that warns about the PEP 668
+  fallback before anything is built. Guard test pins all four exit-checked
+  install paths.
 
 ### Added (2026-08-24 — answer-prompt attribution ablation)
 - **`evals/beam_attrib_ablation.py`: isolate the answer-prompt term of the
