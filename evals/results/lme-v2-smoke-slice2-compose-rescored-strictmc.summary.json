@@ -1,0 +1,97 @@
+{
+  "category": "procedure",
+  "n": 74,
+  "arms": {
+    "rag": {
+      "eval_accuracy": 0.257,
+      "judge_accuracy": 0.243,
+      "context_tokens": 914.1,
+      "answer_seconds": 6.91
+    },
+    "cortex": {
+      "eval_accuracy": 0.176,
+      "judge_accuracy": 0.149,
+      "context_tokens": 1169.7,
+      "answer_seconds": 13.16
+    },
+    "hybrid": {
+      "eval_accuracy": 0.27,
+      "judge_accuracy": 0.162,
+      "context_tokens": 1652.6,
+      "answer_seconds": 11.01
+    }
+  },
+  "rescore": {
+    "issue": 173,
+    "date": "2026-08-25",
+    "scorer": "score_mc no-box fallback: anchored uppercase A-H (whole-response letter or explicit answer marker) instead of any standalone [A-Ha-h]",
+    "source": "evals/results/lme-v2-smoke-slice2-compose.jsonl",
+    "supersedes": "evals/results/lme-v2-smoke-slice2-compose.summary.json",
+    "eval_accuracy_before": {
+      "rag": 0.284,
+      "cortex": 0.216,
+      "hybrid": 0.284
+    },
+    "eval_accuracy_after": {
+      "rag": 0.257,
+      "cortex": 0.176,
+      "hybrid": 0.27
+    },
+    "flips": [
+      {
+        "question_id": "507a0fe8",
+        "arm": "rag",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "he fields are *most likely* to be the ones mentioned or standard:\nThe thought mentions **Active** and **Locked out**.\nIt"
+      },
+      {
+        "question_id": "507a0fe8",
+        "arm": "cortex",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "m's required fields in the provided memory, I cannot determine the correct answer from the context alone.\n\nI don't know."
+      },
+      {
+        "question_id": "507a0fe8",
+        "arm": "hybrid",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "s 2 confirmed checkbox fields.\nE has 2 confirmed checkbox fields.\n\nIs there a clue in \"important fields\"?\nUsually, Name,"
+      },
+      {
+        "question_id": "58c34839",
+        "arm": "rag",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "aces involved in such processes. Therefore, I cannot compare the number of work surfaces for these tasks.\n\nI don't know."
+      },
+      {
+        "question_id": "58c34839",
+        "arm": "cortex",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "orkflows generally?\nOr maybe I am missing a surface in Onboarding?\n`Users` -> `New Record | User`.\nIs `Users` a surface?"
+      },
+      {
+        "question_id": "92642fe7",
+        "arm": "cortex",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": ".\nIf the trace is `Content; Themes; Theme: Magento Blank`, it means the user clicked Content, then Themes, then the item"
+      }
+    ]
+  }
+}
