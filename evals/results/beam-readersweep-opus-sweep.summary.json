@@ -1,0 +1,111 @@
+{
+  "benchmark": "BEAM-readersweep",
+  "answerer": "claude-opus-5",
+  "n_questions": 116,
+  "budgets": [
+    6,
+    16,
+    48
+  ],
+  "scoring_note": "paper-faithful float mean; identical retrieval across budgets by construction (one serve, sliced); single replicate \u2014 CLI answerer is not bit-reproducible",
+  "arms": {
+    "rag6": {
+      "score": 0.5697,
+      "score_intfaithful": 0.5254,
+      "mean_context_chars": 12844,
+      "judge_failures": 0,
+      "rows_all_items_failed": 0
+    },
+    "rag16": {
+      "score": 0.6535,
+      "score_intfaithful": 0.6261,
+      "mean_context_chars": 33096,
+      "judge_failures": 0,
+      "rows_all_items_failed": 0
+    },
+    "rag48": {
+      "score": 0.7005,
+      "score_intfaithful": 0.6697,
+      "mean_context_chars": 80802,
+      "judge_failures": 2,
+      "rows_all_items_failed": 0
+    }
+  },
+  "types": {
+    "abstention": {
+      "n": 12,
+      "rag6": 0.625,
+      "rag16": 0.5,
+      "rag48": 0.5
+    },
+    "contradiction_resolution": {
+      "n": 12,
+      "rag6": 0.4062,
+      "rag16": 0.5,
+      "rag48": 0.5312
+    },
+    "event_ordering": {
+      "n": 12,
+      "rag6": 0.2065,
+      "rag16": 0.4912,
+      "rag48": 0.5204
+    },
+    "information_extraction": {
+      "n": 12,
+      "rag6": 0.7569,
+      "rag16": 0.8333,
+      "rag48": 0.9167
+    },
+    "instruction_following": {
+      "n": 12,
+      "rag6": 0.8542,
+      "rag16": 0.8333,
+      "rag48": 0.9167
+    },
+    "knowledge_update": {
+      "n": 12,
+      "rag6": 0.75,
+      "rag16": 0.8958,
+      "rag48": 1.0
+    },
+    "multi_session_reasoning": {
+      "n": 12,
+      "rag6": 0.4917,
+      "rag16": 0.6646,
+      "rag48": 0.6063
+    },
+    "preference_following": {
+      "n": 12,
+      "rag6": 0.8472,
+      "rag16": 0.8958,
+      "rag48": 0.8472
+    },
+    "summarization": {
+      "n": 10,
+      "rag6": 0.3833,
+      "rag16": 0.3692,
+      "rag48": 0.47
+    },
+    "temporal_reasoning": {
+      "n": 10,
+      "rag6": 0.3,
+      "rag16": 0.475,
+      "rag48": 0.65
+    }
+  },
+  "baseline_qwen_reader_opus_judged": {
+    "rag": {
+      "score": 0.4989,
+      "score_intfaithful": 0.4691,
+      "score_orig": 0.5005,
+      "delta": -0.0017,
+      "judge_failures": 0,
+      "rows_all_items_failed": 0
+    },
+    "source": "beam-100K-qwen-27b-beam100k-qwen38.rejudge-opus5.summary.json"
+  },
+  "judge": "claude-opus-5",
+  "partial": true,
+  "partial_note": "116 of 400 rows (chats 1-7, usage-window outage stopped the sweep; 10 outage-tainted trailing rows dropped before this summary). Paired effects vs the qwen-reader baseline are significant at this n; completion deferred to the post-reset full-tier measurement.",
+  "date": "2026-08-23"
+}

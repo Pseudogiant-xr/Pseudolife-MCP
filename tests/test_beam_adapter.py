@@ -140,6 +140,62 @@ def test_report_omits_hybrid_top_k_for_legacy_rows(tmp_path, monkeypatch):
     assert "hybrid_top_k" not in summary
 
 
+def test_beam_answer_policy_surfaces_contradictions():
+    """BEAM plants deliberate contradictions and rubric-checks that the
+    answer SAYS the record conflicts; the old prompt ordered silent
+    newest-wins resolution, so every arm retrieved the evidence and
+    scored 0 (2026-08-22 autopsy). Value updates still resolve to the
+    current value — only genuine conflicts get surfaced. The LME answer
+    prompt is deliberately NOT changed (the regression gate re-answers
+    pinned contexts with it)."""
+    s = beam_adapter._BEAM_ANSWER_SYSTEM
+    assert "contradict" in s.lower()
+    assert "both" in s.lower()
+    assert "most CURRENT value" in s          # update semantics retained
+    import longmemeval_bench as lme
+    assert "contradict" not in lme._ANSWER_SYSTEM.lower()
+
+
+def test_format_turn_stamps_session_and_turn_ordinals():
+    """Ordering metadata rides the stored text (session = BEAM batch,
+    turn = per-chat ordinal) — the free signal event_ordering questions
+    need, previously discarded at ingest."""
+    turn = {"batch": 3, "time_anchor": "March-15-2024", "role": "user",
+            "content": "hello"}
+    assert beam_adapter.format_turn(turn, 41) == \
+        "[March-15-2024] [session 3, turn 41] user: hello"
+    bare = {"batch": 1, "time_anchor": None, "role": "assistant",
+            "content": "hi"}
+    assert beam_adapter.format_turn(bare, 2) == \
+        "[session 1, turn 2] assistant: hi"
+
+
+def test_report_carries_rag_top_k_when_rows_do(tmp_path, monkeypatch):
+    import json
+    monkeypatch.setattr(beam_adapter, "RESULTS_DIR", tmp_path)
+    rows = [{"chat_id": "1", "type": "abstention", "index": 0,
+             "rag_top_k": 16, "hybrid_top_k": 16,
+             "rag_score": 1.0, "rag_score_intfaithful": 1.0}]
+    out = tmp_path / "beam-100K-qwen-27b-r16.jsonl"
+    out.write_text(json.dumps(rows[0]), encoding="utf-8")
+    beam_adapter.report("100K", "qwen-27b", "r16")
+    summary = json.loads(
+        (tmp_path / "beam-100K-qwen-27b-r16.summary.json").read_text(
+            encoding="utf-8"))
+    assert summary["rag_top_k"] == 16
+
+
+def test_rag_top_k_validation_is_loud():
+    from pathlib import Path
+    with pytest.raises(SystemExit, match="positive"):
+        beam_adapter.run(Path("nowhere"), "100K", "qwen-27b", "t",
+                         None, None, rag_top_k=0)
+    # hybrid budget is validated against the EFFECTIVE rag width
+    with pytest.raises(SystemExit, match="exceeds"):
+        beam_adapter.run(Path("nowhere"), "100K", "qwen-27b", "t",
+                         None, None, rag_top_k=8, hybrid_top_k=12)
+
+
 class _ServeSvc:
     """Stub service for context-building tests: search returns top_k texts,
     cortex is empty, no history calls."""

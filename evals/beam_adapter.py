@@ -82,9 +82,13 @@ _BEAM_ANSWER_SYSTEM = (
     "You answer questions about a long-running conversation from its "
     "memory context. Use ONLY the provided context. When the context shows "
     "a fact was updated, use the most CURRENT value unless the question "
-    "asks about an earlier state. Answer completely — include every part "
-    "the question asks for; lists and multi-step answers are fine. If the "
-    "context does not contain the information, say exactly: I don't know."
+    "asks about an earlier state. When the context contains genuinely "
+    "CONTRADICTORY claims — statements that conflict about whether "
+    "something happened or is true, not a value that was simply updated — "
+    "say so explicitly and present both sides instead of silently picking "
+    "one. Answer completely — include every part the question asks for; "
+    "lists and multi-step answers are fine. If the context does not "
+    "contain the information, say exactly: I don't know."
 )
 
 TIERS = ("100K", "500K", "1M", "10M")
@@ -220,6 +224,18 @@ def _dream_until_drained(svc, extractor, tally: dict) -> None:
             return
 
 
+def format_turn(turn: dict, ordinal: int) -> str:
+    """One stored turn, with ordering metadata riding the text: session
+    (the BEAM batch) and a per-chat turn ordinal. Cognee's retrieved
+    passages carry literal Session:/Turn: headers and their reader gets
+    ordering for free; ours discarded it at ingest — the 2026-08-22
+    reader-sweep verdict left event_ordering weakest at every context
+    budget. Banks stored before this stamp are not byte-comparable."""
+    anchor = f"[{turn['time_anchor']}] " if turn["time_anchor"] else ""
+    return (f"{anchor}[session {turn['batch']}, turn {ordinal}] "
+            f"{turn['role']}: {turn['content']}")
+
+
 def ingest_chat(svc, extractor, turns: list[dict]) -> dict:
     """Store every turn; drain the dream backlog at each BEAM batch
     boundary (the production between-sessions cadence) and at the end."""
@@ -227,12 +243,11 @@ def ingest_chat(svc, extractor, turns: list[dict]) -> dict:
              "literal_dropped": 0, "events_inserted": 0,
              "events_pass_failures": 0}
     current_batch = None
-    for turn in turns:
+    for i, turn in enumerate(turns, 1):
         if current_batch is not None and turn["batch"] != current_batch:
             _dream_until_drained(svc, extractor, tally)
         current_batch = turn["batch"]
-        anchor = f"[{turn['time_anchor']}] " if turn["time_anchor"] else ""
-        svc.store(f"{anchor}{turn['role']}: {turn['content']}", source="beam")
+        svc.store(format_turn(turn, i), source="beam")
         tally["turns"] += 1
     _dream_until_drained(svc, extractor, tally)
     return tally
@@ -272,25 +287,37 @@ def dump_chat_bank(svc, chat_id: str, tally: dict, path: Path) -> None:
 def run(beam_root: Path, tier: str, extractor_name: str, tag: str,
         chats: str | None, limit_chats: int | None,
         chronicle: bool = False, arms_only: str | None = None,
-        hybrid_top_k: int | None = None) -> None:
+        hybrid_top_k: int | None = None,
+        rag_top_k: int | None = None) -> None:
     lme.CHRONICLE = chronicle          # build_contexts reads its module global
+    # Validate BOTH budget knobs before mutating EITHER module global:
+    # build_contexts slices the hybrid turns from a top_k=RAG_TOP_K
+    # search, so a hybrid budget wider than the effective rag width would
+    # be silently capped while every row records the wider number — an
+    # artifact asserting a budget that was never served. A validation
+    # failure must also not leave a half-applied global behind.
+    effective_rag = rag_top_k if rag_top_k is not None else lme.RAG_TOP_K
+    if rag_top_k is not None and rag_top_k < 1:
+        raise SystemExit("--rag-top-k must be positive")
     if hybrid_top_k is not None:
-        # Validate before any probe or global mutation: build_contexts
-        # slices the hybrid turns from a top_k=RAG_TOP_K search, so a wider
-        # budget would be silently capped at RAG_TOP_K while every row
-        # records the wider number — an artifact asserting a budget that
-        # was never served.
         if hybrid_top_k < 1:
             raise SystemExit("--hybrid-top-k must be positive")
-        if hybrid_top_k > lme.RAG_TOP_K:
+        if hybrid_top_k > effective_rag:
             raise SystemExit(
-                f"--hybrid-top-k {hybrid_top_k} exceeds "
-                f"RAG_TOP_K={lme.RAG_TOP_K}; the hybrid arm cannot serve "
+                f"--hybrid-top-k {hybrid_top_k} exceeds the effective "
+                f"rag width {effective_rag}; the hybrid arm cannot serve "
                 "more turns than the search returns")
+    if rag_top_k is not None:
+        # Both arms widen together (the pinned search serves rag AND the
+        # hybrid raw block), so budget-matching survives the knob. The
+        # 2026-08-23 reader-sweep verdict: naive rag at 16 turns is
+        # +0.084 over 6 under a frontier reader; this knob measures the
+        # same curve on the local stack for free on the GPU.
+        lme.RAG_TOP_K = rag_top_k
+    if hybrid_top_k is not None:
         # build_contexts reads the module global at call time (pinned by
         # test_hybrid_top_k_is_read_at_call_time). Default None keeps every
-        # prior artifact's 3-turn hybrid budget byte-identical; 6 matches
-        # the rag arm's raw-turn budget so hybrid becomes a superset arm.
+        # prior artifact's hybrid budget byte-identical.
         lme.HYBRID_TOP_K = hybrid_top_k
     arms = arms_for(chronicle, arms_only)
     ex_url = EXTRACTORS[extractor_name]
@@ -341,6 +368,7 @@ def run(beam_root: Path, tier: str, extractor_name: str, tag: str,
                    "reference_answer": q["answer"],
                    "difficulty": q["difficulty"], "rubric": q["rubric"],
                    "extractor": extractor_name,
+                   "rag_top_k": lme.RAG_TOP_K,
                    "hybrid_top_k": lme.HYBRID_TOP_K,
                    "consolidation": tally, "ingest_seconds": ingest_s,
                    # Served contexts + structured serve state (2026-08-21):
@@ -390,6 +418,8 @@ def report(tier: str, extractor_name: str, tag: str) -> None:
     # carry the effective budget; legacy artifacts (no key) stay untouched.
     if "hybrid_top_k" in rows[0]:
         summary["hybrid_top_k"] = rows[0]["hybrid_top_k"]
+    if "rag_top_k" in rows[0]:
+        summary["rag_top_k"] = rows[0]["rag_top_k"]
     for arm in arms:
         summary["arms"][arm] = {
             "score": round(sum(r[f"{arm}_score"] for r in rows)
@@ -434,8 +464,12 @@ def main() -> int:
                          "(default: all)")
     ap.add_argument("--hybrid-top-k", type=int, default=None,
                     help="raw-turn budget for the hybrid arm (default: the "
-                         "bench's HYBRID_TOP_K=3; 6 budget-matches the rag "
-                         "arm)")
+                         "bench's HYBRID_TOP_K; must not exceed the "
+                         "effective rag width)")
+    ap.add_argument("--rag-top-k", type=int, default=None,
+                    help="raw-turn budget for the rag arm and the hybrid "
+                         "raw block's search (default: the bench's "
+                         "RAG_TOP_K)")
     ap.add_argument("--report", action="store_true")
     args = ap.parse_args()
     if args.report:
@@ -443,7 +477,8 @@ def main() -> int:
         return 0
     run(Path(args.beam_root), args.tier, args.extractor, args.out_tag,
         args.chats, args.limit_chats, chronicle=args.chronicle,
-        arms_only=args.arms, hybrid_top_k=args.hybrid_top_k)
+        arms_only=args.arms, hybrid_top_k=args.hybrid_top_k,
+        rag_top_k=args.rag_top_k)
     report(args.tier, args.extractor, args.out_tag)
     return 0
 

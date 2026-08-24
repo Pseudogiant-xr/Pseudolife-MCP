@@ -320,6 +320,11 @@ def test_tracked_tree_carries_no_maintainer_identifiers() -> None:
         r"\b(?:ghp_[a-z0-9]{20,}|github_pat_[a-z0-9_]{20,}"
         r"|akia[a-z0-9]{16}|xox[bpars]-[a-z0-9-]{10,}"
         r"|sk-ant-[a-z0-9-]{8,})\b")
+    # BEAM's synthetic conversation corpus contains this documentation
+    # placeholder inside a code sample; the recorded serve/answer artifacts
+    # reproduce it verbatim and must stay byte-identical. Exact strings
+    # only — any other credential-shaped match still fails the guard.
+    allowed_credential_placeholders = ("xoxb-your-slack-token",)
     repo = Path(__file__).resolve().parents[1]
     try:
         proc = subprocess.run(["git", "ls-files"], cwd=repo, check=True,
@@ -339,7 +344,9 @@ def test_tracked_tree_carries_no_maintainer_identifiers() -> None:
         if username_pat.search(text):
             hits.append((rel, "windows username path"))
             continue
-        if credential_pat.search(text):
+        cred_hits = [m.group(0) for m in credential_pat.finditer(text)
+                     if m.group(0) not in allowed_credential_placeholders]
+        if cred_hits:
             hits.append((rel, "credential-shaped string"))
             continue
         for m in rfc1918_pat.finditer(text):
