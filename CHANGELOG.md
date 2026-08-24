@@ -103,6 +103,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the id-keyed count alone would still read the re-mint as contentless and
   delete it again. Zero-structure auto-delete of never-judged names is
   otherwise unchanged. Supersedes the 2026-08-16 tombstone entry below.
+### Fixed (2026-08-25 — release-integrity audit: stale `__version__` + late server.json guard)
+- **`pseudolife_memory.__version__` no longer drifts from `pyproject.toml`
+  (issue #180).** It was a hand-maintained literal stuck at `0.6.0` against
+  `pyproject.toml`'s `0.14.0` — eight releases of drift, nothing pinned it.
+  It now derives from the installed distribution's metadata via
+  `importlib.metadata.version("pseudolife-mcp")`, falling back to a
+  `0.0.0+unknown` sentinel only when no metadata is installed at all. Every
+  build backend stamps dist-info from `pyproject.toml` at build time, so
+  this is correct for anything actually shipped. Guarded by
+  `tests/test_plugin_packaging.py::test_package_version_matches_pyproject`
+  (skips, with a stated reason, only when the local dev install's dist-info
+  itself is stale — not a real release path).
+- **The MCP registry's `server.json` version guard now runs before the PyPI
+  publish, not after (issue #185).** It previously lived in the `registry`
+  job of `.github/workflows/release.yml`, which only runs downstream of the
+  irreversible `publish` job — a version-field mismatch failed only after
+  the upload, burning a release number (PyPI never accepts a same-version
+  re-upload). The guard moved into the `build` job, alongside the existing
+  tag↔pyproject guard, so both fail before anything builds or uploads.
+  Locally guarded too:
+  `tests/test_plugin_packaging.py::test_server_json_versions_match_pyproject`
+  pins both `server.json` version fields and the `ops/docker-compose.yml`
+  daemon image tag (which the compose file already documented as the deploy
+  source of truth, but nothing checked it) against `pyproject.toml`.
 
 ### Added (2026-08-24 — answer-prompt attribution ablation)
 - **`evals/beam_attrib_ablation.py`: isolate the answer-prompt term of the

@@ -1,18 +1,22 @@
 # PyPI release via Trusted Publishing (OIDC — no stored token).
 #
 # Trigger: publishing a GitHub release (a deliberate act, not a raw tag
-# push). Flow: guard that the release tag matches pyproject.toml → build
-# sdist+wheel → twine check → publish, gated on the `pypi` environment
-# (configure it in Settings → Environments with a required reviewer, so
-# every upload pauses for one-click human approval).
+# push). Flow: guard that the release tag matches pyproject.toml AND
+# server.json (both version fields) → build sdist+wheel → twine check →
+# publish, gated on the `pypi` environment (configure it in Settings →
+# Environments with a required reviewer, so every upload pauses for
+# one-click human approval).
 #
 # PyPI side (one-time): project pseudolife-mcp → Settings → Publishing →
 # add Trusted Publisher: owner Pseudogiant-xr, repo Pseudolife-MCP,
 # workflow release.yml, environment pypi. Then retire the API token.
 #
 # PyPI never accepts a same-version re-upload — a failed run after upload
-# or a version mistake means cutting a .postN, so the guard below fails
-# fast BEFORE anything is built.
+# or a version mistake means cutting a .postN, so BOTH version guards live
+# in the `build` job and fail fast BEFORE anything is built or uploaded
+# (moved server.json's guard here from the `registry` job, issue #185 — it
+# used to run after the irreversible publish, so a mismatch burned a
+# release number instead of failing before anything shipped).
 #
 # The `registry` job then publishes to the MCP registry, authenticated by
 # GitHub Actions OIDC (`mcp-publisher login github-oidc`) — same trust model
@@ -44,6 +48,22 @@ jobs:
           echo "tag=$TAG pyproject=$VERSION"
           if [ "$TAG" != "$VERSION" ]; then
             echo "::error::release tag v$TAG does not match pyproject.toml version $VERSION — fix the tag or the version cut before publishing" >&2
+            exit 1
+          fi
+
+      - name: Guard — server.json versions must match the release tag
+        # Moved here from the `registry` job (issue #185): that job runs
+        # AFTER the irreversible PyPI publish, so a server.json mismatch used
+        # to fail only once the version number was already burned. server.json
+        # carries the version in two places that drift independently — check
+        # both, before anything downstream builds or uploads.
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          SERVER_V="$(python3 -c "import json;print(json.load(open('server.json'))['version'])")"
+          PKG_V="$(python3 -c "import json;print(json.load(open('server.json'))['packages'][0]['version'])")"
+          echo "tag=$TAG server.json=$SERVER_V package=$PKG_V"
+          if [ "$TAG" != "$SERVER_V" ] || [ "$TAG" != "$PKG_V" ]; then
+            echo "::error::server.json versions ($SERVER_V / $PKG_V) do not both match release tag v$TAG" >&2
             exit 1
           fi
 
@@ -167,19 +187,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Guard — server.json versions must match the release tag
-        run: |
-          TAG="${GITHUB_REF_NAME#v}"
-          # BOTH version fields: the top-level server version and the pypi
-          # package version. They drift independently; the registry accepts a
-          # mismatch silently and then advertises the wrong package version.
-          SERVER_V="$(python3 -c "import json;print(json.load(open('server.json'))['version'])")"
-          PKG_V="$(python3 -c "import json;print(json.load(open('server.json'))['packages'][0]['version'])")"
-          echo "tag=$TAG server.json=$SERVER_V package=$PKG_V"
-          if [ "$TAG" != "$SERVER_V" ] || [ "$TAG" != "$PKG_V" ]; then
-            echo "::error::server.json versions ($SERVER_V / $PKG_V) do not both match release tag v$TAG" >&2
-            exit 1
-          fi
+      # The server.json version guard now runs in the `build` job, before the
+      # PyPI publish (issue #185) — it used to run here, downstream of the
+      # irreversible upload, so a mismatch burned a release number instead of
+      # failing fast.
 
       - name: Wait for PyPI to serve this version
         # Registry validation fetches the LATEST PyPI release and looks for the

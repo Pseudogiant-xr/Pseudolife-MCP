@@ -60,7 +60,11 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    this repo, so bumping it is also what ships plugin updates), and
    `docs/atlas/atlas.json` `meta` (pinned by `tests/test_atlas_currency.py`;
    re-verify the map's claims, don't just renumber it — update
-   `meta.verified` to the date you actually checked).
+   `meta.verified` to the date you actually checked). `server.json` (both
+   fields) and the compose daemon image tag are also pinned locally by
+   `tests/test_plugin_packaging.py::test_server_json_versions_match_pyproject`
+   (issue #185) — run it as part of the cut, before tagging, so a missed
+   field fails in the suite rather than mid-CI.
    Tag `vN.N.N` at the exact commit the artifacts build from.
 2. **Build + inspect before upload**: `python -m build`, `twine check dist/*`,
    then open the wheel — Console static assets present (33 files under
@@ -68,19 +72,23 @@ them in this order (first done 2026-07-16, v0.8.0; GHCR images added
    no identifiers (grep the METADATA for the guard list).
 3. **PyPI**: publishing the GitHub release triggers
    `.github/workflows/release.yml` (Trusted Publishing — OIDC, no token):
-   it guards tag == pyproject version, builds, twine-checks, then waits for
-   the user's one-click approval on the `pypi` environment. Manual
-   `twine upload dist/*` remains the fallback. PyPI never accepts a
-   same-version re-upload — metadata-only fixes are a `.postN`.
+   the `build` job guards tag == pyproject version **and** both `server.json`
+   version fields == tag (issue #185 moved the server.json guard here, from
+   the `registry` job below, so a mismatch fails before anything builds or
+   uploads — it used to run after the irreversible PyPI publish and burn a
+   release number), then builds, twine-checks, and waits for the user's
+   one-click approval on the `pypi` environment. Manual `twine upload
+   dist/*` remains the fallback. PyPI never accepts a same-version
+   re-upload — metadata-only fixes are a `.postN`.
 4. **MCP registry — automated.** The `registry` job in `release.yml` runs
    after the PyPI job and authenticates with `mcp-publisher login
    github-oidc` (same trust model as Trusted Publishing: a short-lived token
-   minted per run, nothing stored, nothing to expire between cuts). It
-   guards **both** `server.json` version fields against the tag, waits for
-   PyPI to actually serve the new version, checks the marker survived into
-   the published description, publishes, then confirms the registry serves
-   it as latest. Publishing the GitHub release is now the single action that
-   lands all four surfaces.
+   minted per run, nothing stored, nothing to expire between cuts). It waits
+   for PyPI to actually serve the new version, checks the marker survived
+   into the published description, publishes, then confirms the registry
+   serves it as latest — the `server.json` version check itself already
+   happened in `build`, above. Publishing the GitHub release is now the
+   single action that lands all four surfaces.
    *Manual fallback* (`mcp-publisher login github` then `publish`, from the
    repo root) if the job is ever broken — note the binary is often not on
    `PATH`; resolve it with `Get-Command mcp-publisher` rather than assuming.
