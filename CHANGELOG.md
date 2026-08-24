@@ -57,6 +57,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   rows must re-score them with `evals/rescore_strict_mc.py` before
   quoting any number from them.
 
+### Fixed (2026-08-25 — bench reset leaked FK-free tables between questions; #181)
+- **The eval harness's bench reset now truncates every table in the
+  schema, not the eleven someone remembered.** `TRUNCATE … CASCADE`
+  reaches only tables with a foreign key into the truncated set, so
+  `retrieval_events`, `entity_kinds`, `outcome_signals`,
+  `dismissed_pairs`, `merge_decisions` and `communities` survived
+  `ladder_sweep.reset_bench()` and carried rows from one bench question
+  into the next. Leaked `entity_kinds` rows are the sharp end: they flip a
+  later question's `freshness_class` (evergreen → volatile) and so change
+  what the `stale_policy` serves — the same contamination class as the
+  2026-08-04 `chronicle_events` incident, whose fix taught the lesson to
+  exactly one of the two lists.
+- **One list, defined beside the DDL:** `storage.schema.BENCH_RESET_TABLES`
+  is now the single source of truth, consumed by
+  `evals/ladder_sweep.py`, `tests/pg_fixtures.py` and `tests/test_graph.py`
+  (which carried a third, nine-table inline copy). The test fixture's own
+  list was missing `communities`; the shared list closes that too. A guard
+  test parses every `CREATE TABLE IF NOT EXISTS` out of `schema.py` and
+  fails if any table is absent from the list, so the next schema bump
+  cannot reopen the gap silently.
+
 ### Added (2026-08-24 — answer-prompt attribution ablation)
 - **`evals/beam_attrib_ablation.py`: isolate the answer-prompt term of the
   Phase-1 lift.** The p1-b16 run changed budget, turn ordinals, and the

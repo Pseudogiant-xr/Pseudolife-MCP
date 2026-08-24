@@ -32,26 +32,14 @@ _DEFAULT_ADMIN = "postgresql://pseudolife:pseudolife@127.0.0.1:5433/postgres"
 # reintroduce the concurrent-run reaper crossfire.
 _TEST_DB = f"pseudolife_memory_test_{os.getpid()}"
 
-_ALL_TABLES = (
-    "edges", "entity_aliases", "relations", "facts", "world_facts", "lessons",
-    "outcome_signals", "entries", "episodes", "entities", "meta",
-    # No FK to entities, so the CASCADE above never reaches it — truncate
-    # explicitly or dismissals leak across test runs.
-    "dismissed_pairs",
-    # Deliberately FK-free (durable merge audit) — same leak class as above.
-    "merge_decisions",
-    # Deliberately keyed on entity_norm, not entity_id (no FK) — same leak
-    # class as above.
-    "entity_kinds",
-    # No FK from any table above — its own CASCADE covers dream_run_slots,
-    # but nothing reaches dream_runs itself; same leak class as above.
-    "dream_runs",
-    # Deliberately FK-free (src_entry_id references evictable entries) —
-    # same leak class as above.
-    "chronicle_events",
-    # No FK from any table above — its own CASCADE covers retrieval_uses,
-    # but nothing reaches retrieval_events itself; same leak class as above.
-    "retrieval_events",
+# The truncate list. Was a hand-maintained copy of the FK-free tables
+# CASCADE cannot reach — which is a list that has to be re-derived on every
+# schema bump, and it had already drifted (`communities` was missing) while
+# the eval harness's own copy had drifted much further (#181, 2026-08-25).
+# One list now, defined beside the DDL and completeness-checked by
+# tests/test_bench_reset_tables.py.
+from pseudolife_memory.storage.schema import (  # noqa: E402
+    BENCH_RESET_TABLES as _ALL_TABLES,
 )
 
 

@@ -284,16 +284,18 @@ def bench_url() -> str:
     return base.rsplit("/", 1)[0] + "/" + _bench_db_name()
 
 
-_ALL_TABLES = (
-    "edges", "entity_aliases", "relations", "facts", "world_facts", "entries",
-    "episodes", "entities", "meta",
-    # FK-free tables nothing cascades into. chronicle_events is SERVED
-    # (memory_search events block), so a leftover row contaminates the
-    # next question's contexts — the 2026-08-04 ev-weak run accumulated
-    # events across all 266 questions this way and its serving-side
-    # verdict had to be invalidated. dream_runs (CASCADE covers
-    # dream_run_slots) is audit-only but grows unboundedly across a run.
-    "chronicle_events", "dream_runs",
+# The bench reset's truncate list. It used to be a hand-maintained
+# nine-table copy here, and CASCADE reaches only tables with an FK into the
+# truncated set, so entity_kinds, retrieval_events, outcome_signals,
+# dismissed_pairs, merge_decisions and communities leaked across bench
+# questions until 2026-08-25 (#181). One list now, defined beside the DDL
+# and completeness-checked by tests/test_bench_reset_tables.py.
+#
+# Safe above the lazy service imports below: schema.py imports only
+# `logging`, and neither package __init__ pulls in torch — the
+# CUDA_VISIBLE_DEVICES setup at the top of this module is unaffected.
+from pseudolife_memory.storage.schema import (  # noqa: E402
+    BENCH_RESET_TABLES as _ALL_TABLES,
 )
 
 
