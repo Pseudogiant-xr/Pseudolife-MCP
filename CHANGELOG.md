@@ -15,12 +15,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   runs `run_sweep_once` (and therefore every retention call inside it)
   never existed at all; `run_sweep_once` itself then compounded this by
   returning `{"fired": false, "reason": "disabled"}` before reaching its
-  own prune/compact block. The 2026-08-20 v31 entry above says retention
-  "rides the same unconditional tick" — true only of whether a *dream
-  fires*, not of whether dreaming is *enabled*, and the retrieval log has
-  no other reaper: it accrues on every `memory_search` regardless.
-  `start_dream_sweep()` now starts whenever EITHER `dream.enabled` OR
-  `memory.retrieval_log.enabled` is true (the latter defaults on), and
+  own prune/compact block. The `run_sweep_once` code comment (not this
+  CHANGELOG — the 2026-08-20 v31 entry below only says events "are pruned
+  on the dream-sweep tick," which is accurate as far as it goes) claimed
+  the retrieval-log retention "rides the same unconditional tick," true
+  only of whether a *dream fires*, not of whether dreaming is *enabled*;
+  the retrieval log has no other reaper and accrues on every
+  `memory_search` regardless. `start_dream_sweep()` now starts whenever
+  EITHER `dream.enabled` OR `memory.retrieval_log.enabled` is true (the
+  latter defaults on and also now flags `restart: true` in the Console
+  config panel, for the same reason), and
   `run_sweep_once` now runs compaction, dream-run-journal pruning, and
   retrieval-log pruning before the disabled check, not after — all three
   tables are fed by write paths (`memory_fact_set`/`memory_world_set`, a

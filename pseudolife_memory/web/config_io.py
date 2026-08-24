@@ -109,11 +109,14 @@ KNOBS: list[dict[str, Any]] = [
     # ── Retrieval log (learned-reranker training data, schema v31) ─────────
     {"path": "memory.retrieval_log.enabled", "group": "Retrieval log",
      "label": "Retrieval event log", "type": "bool", "default": True,
-     "restart": False,
+     "restart": True,
      "help": "Log every search's query + served entries, and implicit "
              "'used' labels when a served entry is later fetched/"
              "reinforced. Training data for a learned reranker; purely "
-             "observational, no retrieval behaviour changes."},
+             "observational, no retrieval behaviour changes. Also gates "
+             "the sweep-thread startup condition alongside dream.enabled "
+             "(issue #178) — sweep thread starts at boot, so toggling "
+             "needs a restart."},
     {"path": "memory.retrieval_log.retention_days", "group": "Retrieval log",
      "label": "Event retention (days)", "type": "int", "default": 365,
      "min": 1, "max": 3650, "step": 1, "restart": False,

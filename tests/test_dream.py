@@ -377,21 +377,48 @@ def test_run_sweep_once_disabled_still_prunes_retrieval_log():
         "prune_retrieval_log must fire even when dream disabled — the "
         "retrieval log has no other reaper"
     )
+    assert out["retrieval_pruned"] == 3, (
+        "the sweep result must surface that retention ran, not just the "
+        "fake's internal call count"
+    )
 
 
 def test_run_sweep_once_prunes_retrieval_log():
     """v31 retrieval-event retention rides every sweep tick beside
     compaction/dream-run pruning — including ticks where no dream fires
-    (the log accrues on every search, independent of dream activity)."""
+    (the log accrues on every search, independent of dream activity). The
+    sweep result surfaces the prune count under "retrieval_pruned" in
+    every branch (disabled/below_threshold/fired)."""
     from pseudolife_memory.memory.dream import run_sweep_once
 
     quiet = _FakeService(would_fire=False)
-    run_sweep_once(quiet)
-    assert quiet.retrieval_pruned == 1
+    out = run_sweep_once(quiet)
+    assert quiet.retrieval_pruned == 1 and out["retrieval_pruned"] == 3
 
     firing = _FakeService(would_fire=True)
-    run_sweep_once(firing)
-    assert firing.retrieval_pruned == 1
+    out = run_sweep_once(firing)
+    assert firing.retrieval_pruned == 1 and out["retrieval_pruned"] == 3
+
+
+class _NoRetrievalPruneFake(_FakeService):
+    """A fake predating ``prune_retrieval_log`` — the getattr guard's
+    "absent" branch, simulated by shadowing the inherited method with a
+    plain ``None`` class attribute (so ``getattr(svc, name, None)``
+    returns ``None`` exactly as it would for a real object with no such
+    attribute)."""
+    prune_retrieval_log = None
+
+
+def test_run_sweep_once_retrieval_pruned_none_without_prune_method():
+    """retrieval_pruned must be ``None`` (not ``0``) when the getattr guard
+    finds no ``prune_retrieval_log`` — ``None`` means "no reaper wired,"
+    ``0`` means "the reaper ran and found nothing." Conflating the two
+    would hide a future rename that silently dropped the guard's match."""
+    from pseudolife_memory.memory.dream import run_sweep_once
+
+    svc = _NoRetrievalPruneFake(enabled=False)
+    out = run_sweep_once(svc)
+    assert out["retrieval_pruned"] is None
 
 
 def test_run_sweep_once_below_threshold():
