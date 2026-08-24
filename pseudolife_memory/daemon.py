@@ -194,6 +194,11 @@ def run_daemon(host: str | None = None, port: int | None = None) -> None:
     mcp_server.start_dream_sweep()
     mcp_server.start_session_reaper()
 
+    # DNS-rebinding policy for /mcp (see mcp_server.transport_security_for).
+    # MUST precede streamable_http_app() below — the SDK caches these settings
+    # into its session manager on that first call.
+    mcp_server.apply_transport_security(auth_configured)
+
     # Compose the Cortex Console (static SPA at /ui + REST at /api) in front of
     # the MCP app. /health and the static shell stay open; /api joins /mcp
     # behind the bearer-token gate. See pseudolife_memory/web/.

@@ -363,6 +363,45 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   write-error counter. Both log-write paths swallow their exceptions by
   design, and nothing else read the table, so a silently-failing log looked
   exactly like an idle one: zero rows, green `/health`.
+### Fixed (2026-08-25 — MCP transport reachability + shim param passthrough)
+- **The documented LAN recipe actually works: `/mcp` no longer answers a
+  non-loopback `Host` with `421` (#174).** `FastMCP(...)` was constructed
+  with neither `host=` nor `transport_security=`, so the SDK's heuristic saw
+  its default `127.0.0.1` and installed a loopback-only DNS-rebinding
+  allowlist — while the daemon passed its own configured bind straight to
+  uvicorn, never touching that setting. An operator running
+  `PSEUDOLIFE_MCP_HOST=0.0.0.0` with a token got `421 Invalid Host header`
+  on every MCP call before auth or any handler ran, with `/health` and
+  `/api` still working so only MCP looked dead; reverse-proxy, Tailscale,
+  hostname and compose-service-name access failed the same way. The policy
+  is now **explicit** in `mcp_server.transport_security_for()` and keyed on
+  whether a bearer token gates the endpoint — the same reasoning the
+  Console's `_browser_gate` has applied to `/api` since 2026-07-02. With a
+  token, `Authorization` proves intent and any `Host` is served; tokenless,
+  the loopback allowlist stays on, because the Console app deliberately does
+  not `_browser_gate` `/mcp` and that allowlist is then the only guard
+  between a rebinding browser and an unauthenticated bank. Explicit in both
+  directions: naively forwarding the container's `0.0.0.0` to `FastMCP`
+  would have flipped the same heuristic to *no* protection, quietly
+  disarming the shipped loopback-published Docker default. That default is
+  unchanged, and is now pinned by a test.
+- **The stdio shim stops rejecting stringified list params the daemon would
+  accept (#175).** The shim registered a bare `@server.call_tool()`, taking
+  the SDK's `validate_input=True` default, which re-ran jsonschema against
+  the RAW arguments using the upstream tool's own `inputSchema`. FastMCP
+  registers with `validate_input=False` on purpose so its `pre_parse_json`
+  rescue can first unwrap the JSON-in-a-string list/number params Claude
+  Desktop/Code send, so `memory_store(text=…, tags='["decision"]')` failed
+  through the shim — the default install transport — while succeeding over
+  direct HTTP. This is the mechanism behind the long-standing "MCP
+  anyOf-param stringification" note. The shim now registers
+  `@server.call_tool(validate_input=False)`; the daemon is the validating
+  authority. Arguments `pre_parse_json` genuinely cannot rescue (an int param
+  given a non-numeric string) now reach the daemon and come back as an error
+  result, so the shim also passes an upstream error through verbatim —
+  returning its content alone would have tripped the shim's *own*
+  `outputSchema` and replaced the daemon's real diagnosis with "Output
+  validation error: outputSchema defined but no structured output returned".
 
 ### Added (2026-08-24 — answer-prompt attribution ablation)
 - **`evals/beam_attrib_ablation.py`: isolate the answer-prompt term of the
