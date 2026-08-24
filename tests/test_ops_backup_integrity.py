@@ -39,6 +39,10 @@ import pytest
 REPO = Path(__file__).resolve().parents[1]
 BACKUP_PS1 = REPO / "ops" / "backup.ps1"
 BACKUP_SH = REPO / "ops" / "backup.sh"
+# Carries the same cutover-dump pipeline shape; covered by the no-pipeline
+# check only — it has no end-of-dump marker check (the migration's exact
+# table-count verification is its completion guard).
+MIGRATE_PG18_PS1 = REPO / "ops" / "migrate-pg18.ps1"
 PWSH = shutil.which("pwsh") or shutil.which("powershell")
 
 # The last line PostgreSQL writes into a plain-format dump.
@@ -94,7 +98,8 @@ def _fixture(tmp_path: Path, sql: str) -> Path:
 # Static shape: the pipeline is gone, the marker check is there
 # ----------------------------------------------------------------------
 
-@pytest.mark.parametrize("script", [BACKUP_PS1, BACKUP_SH], ids=["ps1", "sh"])
+@pytest.mark.parametrize("script", [BACKUP_PS1, BACKUP_SH, MIGRATE_PG18_PS1],
+                         ids=["ps1", "sh", "migrate-pg18"])
 def test_dump_is_not_piped_into_gzip(script):
     """A ``pg_dump ... | gzip`` pipeline inside ``sh -c`` reports gzip's exit
     status, so pg_dump's failure is invisible to the caller."""
