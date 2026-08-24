@@ -240,6 +240,54 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   test parses every `CREATE TABLE IF NOT EXISTS` out of `schema.py` and
   fails if any table is absent from the list, so the next schema bump
   cannot reopen the gap silently.
+### Fixed (2026-08-25 — ops-script audit: three ways a backup or a rollback quietly wasn't one)
+- **A pg_dump that died partway produced a "good" backup (#172).**
+  `ops/backup.ps1|.sh` ran `pg_dump` piped into `gzip` inside the container;
+  the container's POSIX `sh` has no `pipefail`, so the status `docker exec`
+  returned was gzip's — a dump killed halfway still landed as a non-empty,
+  valid gzip of a truncated dump, which passed the only other guard (a
+  zero-length check; gzip of empty input is ~20 bytes). `update.ps1` then
+  deployed believing it had a backup, and age-based rotation eventually
+  deleted the last good one. pg_dump now writes the gzip itself (`-Z9`,
+  plain format), so the status really is pg_dump's and no uncompressed
+  scratch file is needed inside the container; the artifact is then read
+  back on the HOST and must carry PostgreSQL's end-of-dump marker, which
+  covers a truncated `docker cp` too. Artifacts land on a `.part` name and
+  are promoted only after they verify, so a rejected dump can never sit in
+  `data/backups` looking like the newest good backup (it is kept, not
+  deleted — it is the evidence).
+- **The restore rehearsal passed a backup that had lost every lesson,
+  episode, entity and edge (#182).** `ops/restore.ps1|.sh` printed a
+  live-vs-restored count table for seven tables but set its failure flag
+  from `entries`/`facts` alone — the first and largest sections of a dump —
+  so an artifact truncated after them rehearsed "PASSED" while everything
+  behind them came back empty. The whole-table alarm (live > 0, restored
+  == 0) now covers every counted table, and a restored count materially
+  below live alarms too (partial truncation is the likelier outcome): below
+  half, and only from 20 live rows up, since a dump is always older than
+  the live bank and a ratio over single-digit counts is meaningless. A row
+  count that could not be READ alarms as well, instead of silently
+  switching the comparison off for that table. The young-bank false
+  positive stays impossible — the live count still gates every check.
+- **A real restore ignored whether its DROP/CREATE DATABASE worked (#182).**
+  One leftover session blocks `DROP DATABASE`, and the failure surfaced two
+  steps later as "restore failed mid-way" — against the OLD database.
+  Straggler sessions on the target are now terminated deliberately
+  (`pg_terminate_backend`, excluding this session), and both statements are
+  status-checked with a message naming what actually happened and what state
+  the bank is in.
+- **Re-running `update.ps1` after a failed deploy destroyed the rollback
+  image (#183).** The rollback tag was moved onto whatever the version tag
+  pointed at, at the start of every run — but `docker compose up --build`
+  builds first and the deploy is validated after, so a run that aborted in
+  between left the version tag on a freshly built, never-validated image.
+  The natural next move — re-run — then tagged THAT as the rollback (seen
+  live 2026-08-13). Both scripts now resolve the RUNNING daemon container's
+  image ID and refuse to move the tag when it disagrees with the version
+  tag's, keeping the existing rollback and saying why; `-ForceRollbackTag` /
+  `--force-rollback-tag` overrides. A stopped daemon cannot witness a
+  mismatch and keeps the old behavior, and the happy path (IDs match) is
+  unchanged.
 
 ### Added (2026-08-24 — answer-prompt attribution ablation)
 - **`evals/beam_attrib_ablation.py`: isolate the answer-prompt term of the
