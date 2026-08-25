@@ -852,22 +852,39 @@ class PostgresStorage:
         (``"G:"`` → ``"g"`` vs ``"g:"``), and a cross-space match would
         mis-link the cross-index.
 
+        The ILIKE prefilter is a sound NECESSARY condition: ``norm_name``
+        only lowercases and folds separator/hyphen runs to ``-``, so the
+        characters inside any hyphen-free segment of the canonical were
+        contiguous in the raw text — every true match contains the longest
+        such segment as a case-insensitive literal substring. PG vs Python
+        case-folding (non-C collation, exotic unicode) can only DROP a
+        match — which heals on the next slot write — never add one; the
+        Python ``norm_name`` check below stays the authority.
+
         Cost, measured 2026-08-25 (local PG16 in Docker, synthetic 120-char
-        values): ~120 ms per mint at 5k facts, ~420 ms at 50k. The
-        object-side columns are unlinked on almost every row (a value
-        rarely names an entity), so those two scans see the whole table;
-        the floor is this build's per-row string handling, not the plan or
-        the transfer (bare 50k-row scan: 8 ms; adding one lower()+regexp
-        per row: 340 ms — SQL prefilters were tried and measured
-        performance-neutral, so the simpler ship-everything-to-norm_name
-        form won). The live bank is ~750 entries today (≲1.5k facts,
-        ≈35 ms/mint), and mints are create-miss-only — a handful per dream
-        pass. If banks outgrow ~50k facts, escalate to a partial expression
-        index over a SQL-side norm (schema bump), not to a looser match.
-        Runs inside ensure_entity's transaction, mint-only."""
+        values): ~50 ms per mint at 5k facts, ~65 ms at 50k with the ILIKE
+        prefilter (~120 ms and ~420 ms without it — the object-side columns
+        are unlinked on almost every row, so those two scans see the whole
+        table and every distinct value shipped to Python; regexp_replace
+        prefilters measured no better than Python, ILIKE substring search
+        does). The live bank is ~750 entries today; mints are
+        create-miss-only, so bulk mints (a dream pass, a bench bank build)
+        pay per fresh name — if banks outgrow ~50k facts, escalate to a
+        pg_trgm index on the text columns or a partial expression index
+        over a SQL-side norm (schema bump), not to a looser match. Runs
+        inside ensure_entity's transaction, mint-only, under the service
+        lock; the enlarged transaction can newly hit the connection's 5s
+        ``lock_timeout`` on facts/lessons row locks (external writers only —
+        the daemon is single-writer), which aborts and rolls back the whole
+        mint rather than leaving a partial repair."""
         from pseudolife_memory.graph import norm_name
         if not canonical:
             return
+        seg = max(canonical.split("-"), key=len)
+        # "%"/"_"/"\" escaped for LIKE; only "%" can survive norm_name, the
+        # other two are folded to "-", but escape all three for robustness.
+        like = ("%" + seg.replace("\\", r"\\").replace("%", r"\%")
+                         .replace("_", r"\_") + "%")
         for table, id_col, text_col in (
             ("facts", "entity_id", "entity"),
             ("facts", "object_entity_id", "value"),
@@ -876,7 +893,9 @@ class PostgresStorage:
         ):
             texts = [r[0] for r in self.conn.execute(
                 f"SELECT DISTINCT {text_col} FROM {table} "
-                f"WHERE {id_col} IS NULL AND {text_col} IS NOT NULL"
+                f"WHERE {id_col} IS NULL AND {text_col} IS NOT NULL "
+                f"AND {text_col} ILIKE %s",
+                (like,),
             ).fetchall()]
             for t in texts:
                 if norm_name(t) != canonical:

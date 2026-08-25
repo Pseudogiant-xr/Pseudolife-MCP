@@ -200,9 +200,11 @@ def test_tombstoned_remint_with_facts_is_kept_for_review(svc):
 
 def test_tombstoned_remint_with_orphaned_facts_is_kept_for_review(svc):
     # The already-damaged population: a name wrongly deleted while carrying
-    # facts. delete_entity NULLs facts.entity_id and nothing in the daemon
-    # re-links it, so the re-minted node reads zero facts through the
-    # cross-index while the cortex still holds them under the same name.
+    # facts. delete_entity NULLs facts.entity_id, so until the name is
+    # re-minted (which now re-links the orphaned rows — ensure_entity's
+    # mint-time repair) the node reads zero facts through the cross-index
+    # while the cortex still holds them under the same name. The name-keyed
+    # count below stays load-bearing for names never re-minted.
     with svc._lock:
         svc._ensure_init()
         svc._storage.ensure_entity("42", display="42")
