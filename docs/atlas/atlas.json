@@ -254,7 +254,7 @@
    "x": 940,
    "y": 160,
    "t": "mcp_server.py",
-   "s": "FastMCP · 35 tools",
+   "s": "MCPServer (SDK v2) · 35 tools",
    "p": "pseudolife_memory/mcp_server.py",
    "d": [
     "Every tool is a thin tier-tagged wrapper over MemoryService",

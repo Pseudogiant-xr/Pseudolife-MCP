@@ -365,9 +365,9 @@ through one chokepoint, evaluated in strict precedence order:
 | tier | source | scope | notes |
 |---|---|---|---|
 | 1 | `X-PL-Session` header | per shim process = per session | the stdio shim sends this on every call; any integrator can |
-| 2 | explicit `episode` argument | per call | pass an open episode id (or its unambiguous ≥8-char prefix) on `memory_store` / `memory_outcome` / `memory_fact_set`; the daemon mints it and advertises it in the SessionStart briefing |
-| 3 | hook-registered active session | machine-scoped pointer | the SessionStart hook forwards Claude Code's own `session_id`; a SessionEnd hook closes it |
-| 4 | `mcp-session-id` header | per connection | legacy fallback — the MCP 2026-07-28 revision (SEP-2567, "Sessionless") removes this header and protocol sessions entirely, so treat this tier as a dead end, not something to build on |
+| 2 | explicit `episode` argument | per call | pass an open episode id (or its unambiguous ≥8-char prefix) on `memory_store` / `memory_outcome` / `memory_fact_set`, and on the lifecycle tools `memory_episode_start` / `memory_episode_end` / `memory_session_title` — where a resolved handle wins outright (they never consult the header tiers); the daemon mints it and advertises it in the SessionStart briefing |
+| 3 | hook-registered active session | machine-scoped pointer | the SessionStart hook forwards Claude Code's own `session_id`; a SessionEnd hook closes it. A singleton — concurrent sessions race it, which is why the lifecycle tools take the per-call handle |
+| 4 | `mcp-session-id` header | per connection | **retired** — the header names the connection (concurrent sessions share it) and the MCP 2026-07-28 revision (SEP-2567, "Sessionless") removes it from the protocol. `PSEUDOLIFE_LEGACY_TRANSPORT_SESSION=1` restores it for one release as a rollback hatch |
 | 5 | none | — | writer id + idle-gap sessionization (the reaper) — the documented floor when nothing above resolved |
 
 **Why the header outranks the handle when both are present.** A shim

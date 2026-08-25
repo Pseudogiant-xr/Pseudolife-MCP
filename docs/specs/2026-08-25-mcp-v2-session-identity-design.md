@@ -109,4 +109,4 @@ tools/list on both protocol revisions.
 Phase 1: `PSEUDOLIFE_LEGACY_TRANSPORT_SESSION=1` restores tier 4; the new
 `episode=` params are optional so old hooks keep working. Phase 2: rollback
 tag per `ops/update.ps1` standard practice; v1 pin restorable from the tag
-since no schema change is involved (schema meta stays 30).
+since no schema change is involved (schema meta stays 32).

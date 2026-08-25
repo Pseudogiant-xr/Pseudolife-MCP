@@ -1,4 +1,4 @@
-"""Writer/session attribution seam (v0.4 T4).
+"""Writer/session attribution seam (v0.4 T4; reworked for SDK v2 2026-08-25).
 
 A single chokepoint for "who wrote this version". Resolution order:
 
@@ -7,14 +7,17 @@ A single chokepoint for "who wrote this version". Resolution order:
 2. A NAMED principal from the request's bearer token
    (``PSEUDOLIFE_MCP_TOKENS``, spec 2026-08-10) — the credential outranks
    the client-asserted header below.
-3. The live MCP request. When the service runs inside the daemon, the MCP
-   SDK binds the originating Starlette request (headers and all) to a
-   contextvar *inside the handler's task* (``request_ctx`` in
-   ``mcp.server.lowlevel.server``). That is the same task the tool runs
-   in, so the ``X-PL-Writer`` header set by the shim survives the
-   streamable-HTTP session-task boundary — the integration risk the plan
-   flagged. ``session_id`` reuses the transport's ``mcp-session-id``
-   header, which is stable per connection.
+3. The live MCP request's headers. SDK v2 removed the ambient
+   ``request_ctx`` contextvar, so the daemon binds each request's headers
+   itself at its dispatch wrap (``mcp_server._wire_transport_tiering`` →
+   :func:`bind_request_headers`); ``anyio.to_thread`` copies the context,
+   so worker-thread tool bodies resolve the same binding. ``X-PL-Writer``
+   attributes the writer; ``X-PL-Session`` (shim-asserted) is the session.
+   The transport's ``mcp-session-id`` is RETIRED — it named the
+   connection, not the session, and MCP 2026-07-28 removes it; the
+   ``PSEUDOLIFE_LEGACY_TRANSPORT_SESSION`` hatch restores it for one
+   release. Session identity for hook-registered clients rides the
+   episode handle passed as a tool argument instead (spec 2026-08-25).
 4. The process default (``PSEUDOLIFE_WRITER_ID`` env, or ``"unknown"``),
    supplied by the caller.
 
@@ -103,7 +106,10 @@ def _legacy_transport_session_enabled() -> bool:
     ``PSEUDOLIFE_LEGACY_TRANSPORT_SESSION=1`` restores it for one release
     as a rollback hatch; first use logs a warning."""
     global _legacy_transport_warned
-    if not os.environ.get("PSEUDOLIFE_LEGACY_TRANSPORT_SESSION"):
+    # Repo env-flag convention (daemon.py, web/routes.py): explicit truthy
+    # values only — "0"/"false" must mean OFF, not "set, therefore on".
+    raw = os.environ.get("PSEUDOLIFE_LEGACY_TRANSPORT_SESSION", "")
+    if raw.strip().lower() not in ("1", "true", "yes", "on"):
         return False
     if not _legacy_transport_warned:
         _legacy_transport_warned = True

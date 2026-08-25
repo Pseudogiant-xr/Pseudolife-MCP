@@ -581,6 +581,58 @@ def test_episode_start_with_bad_handle_warns_and_degrades(pg_service):
     svc.set_active_session(None)
 
 
+def test_episode_end_with_handle_does_not_resurrect_closed_root(pg_service):
+    # The resume side effect belongs to WRITE paths (a store must not be
+    # lost); a lifecycle end on a closed session must refuse without
+    # reopening the root (review finding, 2026-08-25).
+    svc = pg_service
+    a = svc.episode_start_session("hook-key-R", "session R")
+    svc.store("keep me", source="t")           # survives prune-on-empty
+    svc.episode_end_session("hook-key-R", run_dream=False)
+    res = svc.episode_end(episode=a["id"][:12])
+    assert res == {"closed": None,
+                   "reason": "unknown or closed episode handle"}
+    with svc._lock:
+        assert svc._cms.episodes.episodes[a["id"]].ended_at is not None
+
+
+def test_episode_start_with_handle_stays_inside_handle_subtree(pg_service):
+    # Two open roots can share one session_key (a handle-resume while a
+    # newer root holds the key): the nest must anchor within the HANDLE's
+    # subtree, never the foreign root that open_leaf_for would pick.
+    svc = pg_service
+    a = svc.episode_start_session("hook-key-S", "session S old")
+    svc.store("anchor", source="t", episode=a["id"][:12])
+    # Construct the shared-key state directly: A closed long ago (outside
+    # the resume window, so start_session mints a NEW root), then reopened
+    # the way a handle-resume does — two open roots, one key.
+    import time as _t
+    with svc._lock:
+        svc._cms.episodes.episodes[a["id"]].ended_at = _t.time() - 10 * 86400
+    b = svc.episode_start_session("hook-key-S", "session S new")
+    assert b["id"] != a["id"]
+    with svc._lock:
+        svc._cms.episodes.episodes[a["id"]].ended_at = None
+    sub = svc.episode_start("A subtask", episode=a["id"][:12])
+    with svc._lock:
+        em = svc._cms.episodes
+        assert em._descends_from(em.get(sub["id"]), a["id"])
+        assert not em._descends_from(em.get(sub["id"]), b["id"])
+
+
+def test_episode_lifecycle_empty_handle_degrades_like_none(pg_service):
+    # Claude clients fill optional string params with "" — treat it as
+    # "no handle", not as an unknown handle (warn/refuse would be wrong).
+    svc = pg_service
+    a, b = _two_hook_roots(svc)
+    sub = svc.episode_start("task", episode="")
+    assert "episode_warning" not in sub
+    assert sub["parent_id"] == b["id"]
+    closed = svc.episode_end(episode="")
+    assert closed.get("id") == sub["id"]
+    svc.set_active_session(None)
+
+
 def test_transport_session_fallback_retired(monkeypatch):
     from pseudolife_memory import writer_context as wc
     monkeypatch.setattr(wc, "_http_request_headers",

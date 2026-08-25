@@ -199,6 +199,8 @@ async def _proxy(url: str, token: str | None, session_uid: str) -> None:
     from mcp.server import Server
     from mcp.server.lowlevel.server import NotificationOptions
     from mcp.server.stdio import stdio_server
+    from mcp.server.subscriptions import (
+        InMemorySubscriptionBus, ListenHandler, ToolsListChanged)
 
     headers = _session_headers(token, session_uid)
 
@@ -231,28 +233,47 @@ async def _proxy(url: str, token: str | None, session_uid: str) -> None:
     # that; v2's pass-through result types make it the default).
 
     async def _list_tools(ctx, params):
+        # Forward pagination params verbatim — swallowing a client cursor
+        # would replay page 1 forever if the daemon ever paginates.
         async with _upstream() as remote:
-            return await remote.list_tools()
+            return await remote.list_tools(params=params)
 
     async def _call_tool(ctx, params):
         async with _upstream() as remote:
+            # Seed the output-schema cache: v2's call_tool otherwise fetches
+            # the full 35-tool manifest (list_tools) on every call to
+            # revalidate structured output — and this session is fresh per
+            # call by design. None = known, no schema, no validation; the
+            # DAEMON is the validating authority, exactly as on v1.
+            remote._tool_output_schemas[params.name] = None
             result = await remote.call_tool(params.name, params.arguments or {})
         # The daemon's tools/list_changed lands on the per-call upstream
         # session above and dies with it, so a tier change would be invisible
-        # to the real client — re-emit it on the downstream stdio session.
-        # A failed call cannot have changed the tier.
+        # to the real client — re-emit it downstream on BOTH eras: the
+        # subscription bus for 2026-07-28 clients (whose outbound path drops
+        # plain session notifications) and the session send for handshake-era
+        # clients. A failed call cannot have changed the tier.
         if (not result.is_error and params.name == "memory_toolset"
                 and _toolset_changed(result)):
+            try:
+                await bus.publish(ToolsListChanged())
+            except Exception:  # noqa: BLE001 — notify is best-effort
+                pass
             try:
                 await ctx.session.send_tool_list_changed()
             except Exception:  # noqa: BLE001 — notify is best-effort
                 pass
         return result
 
+    # Serving subscriptions/listen is ALSO what makes 2026-07-28 capability
+    # derivation advertise tools.listChanged — without it, modern clients
+    # are told the list never changes and the bus has no outlet.
+    bus = InMemorySubscriptionBus()
     server = Server(
         "pseudolife-memory",
         on_list_tools=_list_tools,
         on_call_tool=_call_tool,
+        on_subscriptions_listen=ListenHandler(bus),
     )
 
     async with stdio_server() as (r, w):

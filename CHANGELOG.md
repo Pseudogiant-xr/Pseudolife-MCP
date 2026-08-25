@@ -27,7 +27,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   forced initialization option). Behavior note: `memory_toolset`'s
   `list_changed_sent` now reports "published" (subscription bus) rather
   than "a live session received it". Lockfile adds `httpx2`/`httpcore2`/
-  `mcp-types`/`truststore`. No schema change (meta stays v30).
+  `mcp-types`/`truststore`. No schema change (meta stays v32).
 
 ### Changed (2026-08-25 — session identity: episode handle becomes the primary anchor; transport fallback retired)
 - **Concurrent Claude Code sessions share one streamable-HTTP connection,
@@ -44,7 +44,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   The `mcp-session-id` fallback (identity tier 4) is retired — the MCP
   2026-07-28 revision (SEP-2567) removes the header from the protocol
   entirely; `PSEUDOLIFE_LEGACY_TRANSPORT_SESSION=1` restores it for one
-  release as a rollback hatch and logs a warning on first use. Design:
+  release as a rollback hatch and logs a warning on first use (explicit
+  truthy values only — `0`/`false` mean off). Review hardening
+  (2026-08-25 eight-angle pass): `episode_end` resolves without the
+  resume side effect, so a late end on a reaped session refuses instead
+  of resurrecting the root; the handle-anchored nest/pop pins to the
+  handle's own subtree even when two open roots share a session key
+  (`Episodes.end_episode` closes exactly the found leaf); an empty-string
+  handle (a known client quirk for optional params) degrades like "no
+  handle"; keyless roots are rejected inside the resolver so every handle
+  consumer shares one contract; `memory_session_title` also takes
+  `episode=` (the only identity a hook-registered direct-HTTP client has
+  now); and the session-start briefing tells agents to pass the handle on
+  the lifecycle tools, not just writes. Design:
   `docs/specs/2026-08-25-mcp-v2-session-identity-design.md`.
 ### Fixed (2026-08-25 — re-mint repairs the fact/lesson cross-index)
 - **A freshly minted entity re-links the orphaned fact and lesson rows of

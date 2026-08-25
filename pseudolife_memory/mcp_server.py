@@ -582,11 +582,12 @@ _TIER_ADDS = {
 
 
 async def _notify_list_changed(ctx: Context) -> bool:
-    """Best-effort tools/list_changed. False when there is no live
-    transport session (tests, embedded stdio) — the memory_toolset result
-    names the newly visible tools, and calls are ungated regardless.
-    ``notify_tools_changed`` publishes on 2026-07-28 subscription streams;
-    the session send covers legacy handshake-era clients."""
+    """Best-effort tools/list_changed on BOTH eras: ``notify_tools_changed``
+    publishes on the 2026-07-28 subscription bus (succeeds even with zero
+    subscribers, so the returned flag means "published", not "a client
+    received it"); the session send covers legacy handshake-era clients.
+    The memory_toolset result names the newly visible tools regardless,
+    and calls are ungated either way."""
     sent = False
     try:
         await ctx.notify_tools_changed()
@@ -1271,12 +1272,16 @@ def memory_session_title(
     title: Annotated[str, Field(
         description='What this session is about, e.g. "Pseudolife-MCP" or '
                     '"auth-refactor".')],
+    episode: Annotated[str | None, Field(
+        description="Your session handle — names that session's root "
+                    "directly (the identity a hook-registered client "
+                    "has).")] = None,
 ) -> dict[str, Any]:
     """Name THIS session's auto-opened episode (default titles are
     generic). Call once at the start of work so session recaps read
     meaningfully. Idempotent; call again to rename.
     """
-    return service.set_session_title(title=title)
+    return service.set_session_title(title=title, episode=episode)
 
 
 @_tool()

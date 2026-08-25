@@ -110,8 +110,10 @@ CAPTURE — as durable things arise (one claim per call):
 - `memory_world_set(entity, attribute, value, source_url=, source_quote=)`
   for any EXTERNAL fact you verified via web/docs — route research findings
   here (cited), not into plain `memory_store`.
-- Open a named sub-episode with `memory_episode_start(title)` for a big
-  multi-step task; `memory_episode_end` pops back.
+- Open a named sub-episode with `memory_episode_start(title,
+  episode=<your session handle>)` for a big multi-step task;
+  `memory_episode_end(episode=<handle>)` pops back. The handle anchors
+  both to YOUR session when several run concurrently.
 - Route verbose status/progress/logs under `source="status"` — searchable,
   but excluded from fact/graph extraction so they don't pollute the graph.
 - Never store secrets: no tokens, API keys, passwords, or credentials.
@@ -199,8 +201,9 @@ def _episode_advertisement(session_id: str, source: str | None, service: Any) ->
         if not short:
             return ""
         return (f'Session episode: {short} — pass episode="{short}" on every '
-                f"memory write (keeps attribution correct even when other "
-                f"sessions are open).")
+                f"memory write AND on memory_episode_start/end and "
+                f"memory_session_title (keeps attribution correct even when "
+                f"other sessions are open).")
     except Exception:  # noqa: BLE001 — never break a session start
         logger.exception(
             "session-start identity registration failed for session_id=%r "

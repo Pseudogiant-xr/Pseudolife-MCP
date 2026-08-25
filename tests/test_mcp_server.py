@@ -929,9 +929,14 @@ class _FakeReqCtx:
 async def _transport_list(mod, headers: dict[str, str] | None = None) -> list:
     """Drive the wrapped v2 tools/list entry with a fake request context —
     the wrap reads headers from the ctx itself (no ambient request state
-    under the 2026-07-28 SDK)."""
+    under the 2026-07-28 SDK). The fake mirrors the REAL runtime shape:
+    ServerRequestContext carries the Starlette request (``ctx.request``),
+    NOT a ``headers`` attribute — the double must exercise the branch
+    production takes (review finding, 2026-08-25)."""
     entry = mod.mcp._lowlevel_server._request_handlers["tools/list"]
-    ctx = SimpleNamespace(headers=headers, request=None, session=None,
+    request = (SimpleNamespace(headers=headers)
+               if headers is not None else None)
+    ctx = SimpleNamespace(request=request, session=None,
                           request_id=1, meta=None, method="tools/list")
     result = await entry.handler(ctx, None)
     return result.tools

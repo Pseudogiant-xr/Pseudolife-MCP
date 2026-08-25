@@ -259,16 +259,26 @@ def test_transport_security_policy_is_explicit_not_inherited():
 
     # And the selected policy must actually reach the transport. SDK v2 takes
     # the settings at streamable_http_app() build time, so the seam to pin is
-    # apply_transport_security() -> build_streamable_http_app(): the module
-    # global the builder forwards must be exactly the selected policy (a
-    # future tidy-up that rebuilds the app without passing it would silently
-    # fall back to the SDK default).
+    # apply_transport_security() -> build_streamable_http_app(): capture the
+    # kwarg the builder hands the SDK and require it to be exactly the
+    # selected policy — asserting on the module global alone would stay green
+    # if a tidy-up rebuilt the app without forwarding it (review, 2026-08-25).
     prior = mcp_server._TRANSPORT_SECURITY
+    seen = {}
+    orig_app = mcp_server.mcp.streamable_http_app
+
+    def _capture(**kwargs):
+        seen.update(kwargs)
+        return orig_app(**kwargs)
+
     try:
         selected = mcp_server.apply_transport_security(auth_configured=False)
-        assert mcp_server._TRANSPORT_SECURITY is selected
+        mcp_server.mcp.streamable_http_app = _capture
+        mcp_server.build_streamable_http_app()
+        assert seen.get("transport_security") is selected
         assert selected.enable_dns_rebinding_protection is True
     finally:
+        mcp_server.mcp.streamable_http_app = orig_app
         mcp_server._TRANSPORT_SECURITY = prior
 
 
