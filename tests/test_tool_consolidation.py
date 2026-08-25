@@ -368,7 +368,7 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # like the tool description does, so it is metered on the same terms.
     param_sizes: dict[str, int] = {}
     for t in tools:
-        props = (t.inputSchema or {}).get("properties", {}) or {}
+        props = (t.input_schema or {}).get("properties", {}) or {}
         param_sizes[t.name] = sum(
             len(p.get("description") or "") for p in props.values())
         over = [(f"{t.name}.{pn}", len(p.get("description") or ""))
@@ -392,7 +392,7 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # 35 tools would silently lose every argument contract while the caps
     # stayed green. One concrete pin plus a per-tier floor makes that
     # regression loud.
-    hops = {t.name: t for t in tools}["memory_recall"].inputSchema[
+    hops = {t.name: t for t in tools}["memory_recall"].input_schema[
         "properties"]["hops"]
     assert "1..5" in (hops.get("description") or ""), (
         "param descriptions are not reaching inputSchema — the "
