@@ -47,23 +47,114 @@ What you get:
 - **A web console to watch it think** — the Cortex Console above, plus cited
   world facts, session episodes, and document RAG.
 
-Measured, with receipts — on LongMemEval knowledge updates, routing
-answers through the fact spine beats naive RAG, and every number ships
-with its committed run artifact:
+Measured, with receipts — the **full 500-question LongMemEval sweep**, all
+six question types, and every number ships with its committed run artifact:
 
-| LongMemEval-KU | naive RAG | commit-gated cascade |
+| LongMemEval oracle, 500 questions | naive RAG | commit-gated cascade |
 |---|---:|---:|
-| oracle slice (78 questions, reproducible server) | 0.859 | **0.936** |
-| full haystack (~50 sessions/question, pre-registered) | 0.346 | **0.462** (p = 0.011) |
+| accuracy, all six question types | 0.688 | 0.690 |
+| context tokens per question | ~1210 | **~883** |
+| knowledge-update slice (78 of the 500) | 0.859 | ~~0.936~~ (retired — see below) |
 
-Graded by a local, byte-reproducible judge — compare within rows, never
-against GPT-judged leaderboards. Full tables, caveats, and every
+Equal accuracy to naive RAG across the whole benchmark on **~73% of the
+context**, and a large edge at knowing when it doesn't know: on BEAM-100K's
+abstention questions the fact spine scores **0.950** against naive RAG's
+0.775, unchanged under two independent judges. It loses where an answer has
+to be aggregated across sessions. Graded by a local, byte-reproducible
+judge (the cross-judge check names its second judge) — compare within rows,
+never against GPT-judged leaderboards.
+
+> **Retired 2026-08-25 (#188): the 0.936 knowledge-update headline.** It was
+> measured on the 2026-07-30 bench stack (Qwen3.6-27B answerer and judge).
+> Re-running the same 78 questions after the 2026-08-17 migration to
+> Qwen3.8-27B puts the cascade at **0.846**, below the naive-RAG control —
+> which lands on 0.859 on both stacks. The cascade serves the fact-spine
+> answer unless that channel says "I don't know", so it measures the
+> *answerer's* abstention behaviour as much as the memory: 32/78 abstentions
+> at 46/46 commit precision on the old stack, 22/78 at 0.839 on the new one.
+> The 500-question table above is on the older judge and has not been
+> re-judged, so read its cascade row as an upper bound.
+
+Full tables, the per-type breakdown, both stacks side by side, and every
 artifact: [Benchmarks](docs/guide/benchmarks.md).
 
 ## Quickstart
 
-Requires Docker and Claude Code, Codex, or both. One command from clone to
-first memory (Claude remains the compatibility default):
+Two commands. No Docker, no database to set up, no container runtime:
+
+```bash
+pip install "pseudolife-mcp[lite]"
+claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
+```
+
+Codex instead of Claude Code — same shape:
+
+```bash
+pip install "pseudolife-mcp[lite]"
+codex mcp add pseudolife-memory -- pseudolife-mcp
+```
+
+Then in either coding agent: *"remember that my staging box is haze-02"* →
+the agent calls `memory_store`; next session, *"which box is staging?"* →
+`memory_search` finds it. Browse everything at the Cortex Console:
+<http://127.0.0.1:8765/ui/>.
+
+The first session auto-starts the daemon, which provisions an **embedded
+PostgreSQL 18** (pgvector included, via `pg0-embedded`) under a stable
+per-user data dir and downloads the embedding model (~1.2 GB, one-time).
+It is a real Postgres bank, not a cut-down one: `pseudolife-mcp backup`
+writes a standard owner-free `pg_dump` archive (plus a state archive, 7-day
+rotation) that restores into any PostgreSQL 18 target regardless of role —
+the Docker tier included — so outgrowing lite is a dump/restore, not a
+migration project ([backups](docs/guide/configuration.md#backups)).
+Windows needs an ASCII-only data path
+([`PSEUDOLIFE_MCP_DATA_DIR`](docs/guide/configuration.md#connection--deployment-env-vars)).
+
+### What lite gives you, and the one thing it doesn't
+
+| | lite (pip) | durable (Docker) |
+|---|---|---|
+| Associative store, hybrid search, supersession, version history | yes | yes |
+| Cortex facts, knowledge graph, lessons, world facts, episodes | yes | yes |
+| Cortex Console, document RAG, `pseudolife-mcp backup` | yes | yes |
+| **Dream consolidation filling the cortex on its own** | **no extractor ships** | yes — bundled local CPU sidecar |
+| External volumes, health-checked services, deploy/rollback tooling | no | yes |
+
+**The gap, stated plainly.** Lite ships no **extractor**, so the **dream**
+pass still runs, prunes, and advances its **cursor**, but writes no
+canonical facts: on this path `memory_fact_set` is the only **cortex**
+writer. Everything else above works. Nothing about this is silent —
+`curl http://127.0.0.1:8765/health` reports `"extractor": "none"`, and the
+stdio shim says the same on stderr at session start.
+
+Any OpenAI-compatible endpoint closes it. The daemon inherits the
+environment it starts from, so two variables are the whole fix — with a
+local Ollama:
+
+```bash
+export PSEUDOLIFE_DREAM_BASE_URL=http://localhost:11434/v1
+export PSEUDOLIFE_DREAM_MODEL=qwen2.5:7b
+pseudolife-mcp serve
+```
+
+```powershell
+$env:PSEUDOLIFE_DREAM_BASE_URL = "http://localhost:11434/v1"
+$env:PSEUDOLIFE_DREAM_MODEL    = "qwen2.5:7b"
+pseudolife-mcp serve
+```
+
+`/health` then reports `"extractor": "configured"`. One gotcha: a daemon
+that is already running keeps the environment it started with, and the shim
+reattaches to it rather than spawning a new one — stop the old daemon
+first. A hosted endpoint works too, and costs you the zero-egress
+property: memory text leaves the machine. Extractor tiers, quality, and the
+trade-offs: [Dreaming](docs/guide/dreaming.md).
+
+## Durable tier — Docker (recommended for a long-lived bank)
+
+Everything above plus the bundled extractor, external volumes,
+health-checked services, and backup/rollback tooling. Requires Docker and
+Claude Code, Codex, or both; one command from clone to first memory:
 
 ```bash
 git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
@@ -77,14 +168,14 @@ ops\install.ps1         # Windows (pwsh 7+)
 The installer runs the preflight (one exact fix line per missing
 prerequisite), asks which **dream extractor** should consolidate memories —
 
+- **sidecar** — the bundled local CPU model; no Claude plan needed, works
+  for everyone, and keeps every memory on the box (~11.8 GB image);
 - **sonnet-only** — the lightest install: a Claude model via a CLI shim
   (`claude-opus-5` by default; the mode name is historical. Needs a
   logged-in Max-plan `claude` CLI); the sidecar image is **never built or
   pulled** (~11.8 GB lighter; dreams pause while the shim is down);
 - **sonnet-fallback** — the Claude shim primary, the bundled sidecar as
-  automatic fallback (Max-plan CLI plus the ~11.8 GB image);
-- **sidecar** — the bundled local CPU model; no Claude plan needed, works
-  for everyone (~11.8 GB image) —
+  automatic fallback (Max-plan CLI plus the ~11.8 GB image) —
 
 then brings the stack up, installs the selected clients' session hooks,
 registers the MCP transport (the stdio shim by default, direct HTTP via
@@ -100,33 +191,8 @@ setups. Non-interactive example:
 Linux (Docker Engine): your user must be in the `docker` group —
 `sudo usermod -aG docker $USER`, then log out/in (the preflight checks this).
 
-### Zero-config lite tier (no Docker)
-
-The smallest possible start — one pip install, no Docker, no database to
-set up:
-
-```bash
-pip install "pseudolife-mcp[lite]"
-claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
-```
-
-The first session auto-starts the daemon, which provisions an **embedded
-PostgreSQL 18** (pgvector included, via `pg0-embedded`) under a stable
-per-user data dir and downloads the embedding model (~1.2 GB, one-time).
-The full Postgres feature set applies — cortex facts, graph, lessons —
-and the bank is plain Postgres data: `pseudolife-mcp backup` writes a
-standard owner-free `pg_dump` archive (plus a state archive) with 7-day
-rotation, restorable into any PostgreSQL 18 target regardless of role —
-including the Docker tier (PostgreSQL 18 since 0.14), so outgrowing
-lite is a dump/restore, not a migration project. Two honest
-limits: dream consolidation needs an extractor endpoint (the Docker
-tier's bundled sidecar is not part of lite — without one, canonical
-facts come from `memory_fact_set` only), and on Windows the embedded
-runtime needs an ASCII-only data path (the daemon refuses non-ASCII
-with a clear message; set `PSEUDOLIFE_MCP_DATA_DIR`, e.g.
-`C:\pseudolife-data`). The Docker stack remains the recommended durable
-tier: external volumes, health-checked services, deploy/rollback
-tooling.
+Image sizes, the Windows WSL2 memory cap, and what the installer automates:
+[the containerized install](#install--containerized-any-os) below.
 
 <details>
 <summary>Manual install (the steps the installer automates)</summary>
@@ -164,11 +230,6 @@ install/update scripts scaffold it too; every value is commented, a missing
 file runs entirely on defaults).
 </details>
 
-Then in either coding agent: *"remember that my staging box is
-haze-02"* → the agent calls `memory_store`; next session, *"which box is
-staging?"* → `memory_search` finds it. Browse everything at the Cortex
-Console: <http://127.0.0.1:8765/ui/>.
-
 ## What this is
 
 A memory engine exposed over MCP. There's no chat UI and no LLM doing the
@@ -191,7 +252,10 @@ one answers*, not who's wrong:
 | Benchmark numbers ship with their raw run artifacts | — | typically no | typically no | every published number, test-enforced |
 
 Auto-journaling records what the agent *did*; Pseudolife curates what it
-*learned*. Both are useful — they answer different questions.
+*learned*. Both are useful — they answer different questions. Named
+alternatives — Mem0, Zep/Graphiti, Letta, Cognee, memU, Memori — and the
+cases where one of them is the better pick:
+[Comparison](docs/guide/comparison.md).
 
 It layers several complementary stores: the **associative store** (a flat
 embedding store ranked by cosine similarity fused with a BM25 lexical pool
@@ -226,6 +290,8 @@ deep material lives in the user guide:
 | [Episodes & sessions](docs/guide/episodes.md) | Daemon-owned session episodes, the briefing hook, nested sub-episodes, tags |
 | [The memory model](docs/guide/memory-model.md) | Cortex slots, provenance contenders, world cortex, lessons, temporal/HLC stamps |
 | [Benchmarks](docs/guide/benchmarks.md) | LongMemEval results; why extraction quality dominates |
+| [Comparison](docs/guide/comparison.md) | Mem0, Zep/Graphiti, Letta, Cognee, memU, Memori — the axes, and when to use something else |
+| [Security posture](docs/guide/security-posture.md) | Memory poisoning (ASI06): every shipped mitigation, and what is not defended |
 
 Plus [`evals/README.md`](evals/README.md) (full benchmark methodology) and
 [CONTRIBUTING](CONTRIBUTING.md).
@@ -292,7 +358,9 @@ deployments:
 
 One **memory daemon** owns the bank and serves MCP over streamable HTTP
 at `/mcp`; every Claude Code session (and any LAN agent) attaches to it.
-**Postgres 18 + pgvector** (in Docker) is the durable source of truth —
+**Postgres 18 + pgvector** (in Docker on the durable tier; the lite tier
+runs the same Postgres embedded, no container) is the durable source of
+truth —
 the in-memory store is a write-through cache hydrated at startup
 (a small `weights.pt` persists only counters — there are no MLP weights).
 
@@ -317,9 +385,10 @@ canonical layers — cortex, world facts, lessons, temporal/HLC stamps
 knowledge graph walkable via `memory_graph` and multi-hop `memory_recall`
 ([retrieval & the graph](docs/guide/retrieval.md)).
 
-## Install — containerized (recommended, any OS)
+## Install — containerized (any OS)
 
-The whole stack — Postgres **and** the memory daemon — runs in Docker.
+What [the durable tier](#durable-tier--docker-recommended-for-a-long-lived-bank)
+installer above does, by hand. The whole stack — Postgres **and** the memory daemon — runs in Docker.
 No host Python, no torch install, no version skew; the daemon image bakes
 in CPU-only torch and the embedding weights — `Qwen/Qwen3-Embedding-0.6B`
 (the default retrieval backbone since schema v25) plus `all-MiniLM-L6-v2`
@@ -361,13 +430,10 @@ the pull path are `pull` + `up -d`, not `ops/update.ps1`.
 > creating `ops/.env` with `PSEUDOLIFE_BANK_VOLUME=ops_pseudolife_pgdata` and
 > `PSEUDOLIFE_STATE_VOLUME=ops_pseudolife_data` before `up`. See the compose header.
 
-> **Windows:** Docker Desktop's WSL2 VM claims up to ~50% of host RAM by
-> default; the stack needs ~6–7 GB under dream load with the default sidecar
-> (~2 GB in `sonnet-only` mode — the Qwen3 embedding backbone is the bulk of
-> it) — cap the VM via `ops/wslconfig.example`
-> (see [Troubleshooting](#troubleshooting)). The daemon container itself is
-> hard-capped at 4 GB (`PSEUDOLIFE_DAEMON_MEM_LIMIT` in `ops/.env` raises it
-> for very large banks; hitting the cap restarts the daemon cleanly).
+> **Windows:** cap Docker Desktop's WSL2 VM, which otherwise claims up to
+> ~50% of host RAM — how much the stack actually needs, the
+> `ops/wslconfig.example` template, and the daemon container's own memory
+> cap: [Configuration — Windows / WSL2 memory](docs/guide/configuration.md#windows--wsl2-memory-docker-tier).
 
 The daemon serves MCP at `http://127.0.0.1:8765/mcp` and restarts with
 Docker — no logon task needed. First build downloads the model into the
@@ -385,8 +451,14 @@ logon autostart task:
 
 ## Updating
 
-After a `git pull` (or local code change), redeploy the **daemon only** — safely,
-without touching Postgres or the extractor:
+**Lite tier:** one command, bank untouched:
+
+```bash
+pip install -U "pseudolife-mcp[lite]"
+```
+
+**Docker tier:** after a `git pull` (or local code change), redeploy the
+**daemon only** — safely, without touching Postgres or the extractor:
 
 ```powershell
 .\ops\update.ps1        # Windows
@@ -405,35 +477,19 @@ every healthy deploy; see
 weekly Scheduled Task and the manual `.vhdx` compact. Never run
 `docker system prune --volumes`, which deletes volumes.
 
-> **Upgrading an existing bank to 0.11.0 (schema v25) needs one manual step.**
-> The default embedding backbone changed to `Qwen/Qwen3-Embedding-0.6B` and every
-> embedding column moved from `vector(384)` to `vector(1024)` — not an additive
-> migration. The daemon **refuses to start** against an older-dimensioned bank
-> (`/health` reports `status: "degraded"` with `init_refusal`) rather than
-> half-migrating it. Back up, stop the daemon, then re-embed offline:
+> **Two upgrades are not automatic**, because neither can be done safely
+> in place. Both have a step-by-step runbook — backup, dry run, apply,
+> verify, roll back — and a fresh install needs neither:
 >
-> ```bash
-> python ops/migrate_embeddings.py                            # dry run (default — writes nothing)
-> python ops/migrate_embeddings.py --apply --backup-verified  # commit
-> ```
->
-> Full procedure, including the health check that confirms it took:
-> [the v25 migration runbook](docs/runbooks/embedding-v25-migration.md).
-
-> **Upgrading an existing Docker-tier bank past 2026-08-14 (PostgreSQL
-> 16 → 18) needs one manual step.** A Postgres *major* bump can't reuse the
-> old data volume (the on-disk format changed), and the compose mount moved
-> from `/var/lib/postgresql/data` to `/var/lib/postgresql` — reusing the old
-> path would silently land the cluster on an anonymous volume. Run the
-> cutover script (pwsh 7+, any OS):
->
-> ```powershell
-> pwsh ops/migrate-pg18.ps1   # backup → quiesce → dump → new volume → restore → verify
-> ```
->
-> The PG 16 volume is frozen and retained as the rollback; table counts are
-> verified to match exactly before the daemon restarts. Full procedure and
-> rollback: [the PostgreSQL 18 migration runbook](docs/runbooks/postgres-18-migration.md).
+> - **A bank older than 0.11.0 (schema v25)**: every embedding column moved
+>   from `vector(384)` to `vector(1024)`, so the daemon refuses to start
+>   rather than half-migrate. Re-embed offline with
+>   `ops/migrate_embeddings.py` —
+>   [the v25 migration runbook](docs/runbooks/embedding-v25-migration.md).
+> - **A Docker-tier bank created before 2026-08-14 (PostgreSQL 16 → 18)**:
+>   a Postgres major bump cannot reuse the old data volume. Run
+>   `pwsh ops/migrate-pg18.ps1` —
+>   [the PostgreSQL 18 migration runbook](docs/runbooks/postgres-18-migration.md).
 
 ## Wire into your coding agent
 
@@ -461,7 +517,7 @@ registers a thin stdio shim — one shim process per session, so every
 session carries its own tier-1 identity. The same wiring by hand:
 
 ```bash
-pip install pseudolife-mcp
+pip install pseudolife-mcp    # daemon in Docker; add [lite] for the pip tier
 claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
 ```
 
@@ -623,32 +679,46 @@ privacy/cost trade-offs: [Dreaming](docs/guide/dreaming.md).
 
 ## Benchmarks
 
-Measured **end to end on the current shipped stack** — fresh local-ceiling
-extraction under the v25 embedding backbone, BM25-on turn retrieval,
-reproducible serving (3 byte-identical replicates — std 0.0000) — on the
-knowledge-update subset of
-[LongMemEval](https://arxiv.org/abs/2410.10813) (oracle variant):
+The headline is the **whole benchmark, not a slice**: all six
+[LongMemEval](https://arxiv.org/abs/2410.10813) question types, 500
+questions, oracle variant, run end to end through the memory (qwen-27b
+extraction under the v25 embedding backbone, BM25-on turn retrieval).
+Single pass, graded by the local Qwen3.6-27B bench judge (2026-08-03):
 
 | arm | accuracy | context tokens/question |
 |-----|----------|------------------------|
-| naive RAG (top-6 turns) | 0.859 | ~1237 |
-| cortex facts only | 0.667 | **~259** |
-| hybrid (facts + top-3 turns) | 0.833 | ~920 |
-| **commit-gated cascade** | **0.936** | ~702 |
+| naive RAG (top-6 turns) | 0.688 | ~1210 |
+| cortex facts only | 0.416 | **~158** |
+| hybrid (facts + top-3 turns) | 0.664 | ~842 |
+| **commit-gated cascade** | **0.690** | ~883 |
 
 The **cascade** is a serving policy, not a fourth pipeline: answer from
 the consolidated facts when that channel *commits*, fall back to raw-turn
-RAG when it abstains. It beats naive RAG by ~8 points while reading ~57%
-of the context, and the margin survives the full ~50-session haystacks —
-0.462 vs 0.346, a pre-registered paired test at p = 0.011
-([details](docs/guide/benchmarks.md)). Read honestly: with the v25
-retriever, raw-turn selection improved enough that the *concatenation*
-hybrid no longer beats naive RAG on this slice — sequencing the channels
-is what restores the fact spine's edge. The fact spine alone reaches
-0.667 on ~21% of RAG's token budget. Setup, caveats, and the evidence
-that extraction quality is the dominant factor:
-[Benchmarks](docs/guide/benchmarks.md); full methodology:
-[`evals/README.md`](evals/README.md).
+RAG when it abstains. Overall this is **a wash on accuracy at ~73% of the
+context** — 0.690 vs 0.688 is one question in 500 on a single pass, and
+nobody should read it as a win. The fact spine alone answers at ~13% of
+RAG's token budget, at a large accuracy cost outside the types it is built
+for. The structure is per type:
+
+| question type | n | naive RAG | commit-gated cascade |
+|---|---:|---:|---:|
+| knowledge-update (facts change) | 78 | 0.859 | ~~0.936~~ (retired — [why](docs/guide/benchmarks.md#the-knowledge-update-slice-78-of-the-500)) |
+| single-session-user | 70 | 0.929 | 0.943 |
+| single-session-assistant | 56 | 0.911 | 0.929 |
+| single-session-preference | 30 | 0.800 | 0.700 |
+| temporal-reasoning | 133 | 0.526 | 0.526 |
+| multi-session | 133 | 0.504 | 0.474 |
+
+The consolidated spine helps where a fact changes and where the answer
+sits inside one session; it loses where the answer must be aggregated
+across sessions or ordered in time, because per-fact consolidation is
+exactly what discards that structure. BEAM-100K reproduces the same shape
+independently, and adds the one decisive win: on its abstention questions
+the fact-spine arm scores 0.950 against naive RAG's 0.775, identical under
+the local judge and under an independent Opus-class judge. Setup, caveats,
+both bench stacks side by side, and the evidence that extraction quality is
+the dominant factor: [Benchmarks](docs/guide/benchmarks.md); full
+methodology: [`evals/README.md`](evals/README.md).
 
 Retrieval itself was re-measured on the same corpus before the v25 backbone
 swap (150 questions, 74,183 haystack turns, 299 gold turns; pure recall — no
@@ -713,6 +783,19 @@ version, storage backend, auth state, and `persist_errors` (non-zero means
 writes are failing to reach Postgres; check `docker logs
 pseudolife-mcp-daemon`).
 
+- **The cortex stays empty** (canonical facts never appear on their own).
+  `/health` reporting `"extractor": "none"` means no extractor is
+  configured, so the dream writes no facts and `memory_fact_set` is the
+  only cortex writer — expected on the lite tier. Point the daemon at an
+  OpenAI-compatible endpoint
+  ([Quickstart](#what-lite-gives-you-and-the-one-thing-it-doesnt)) or use
+  the Docker tier's bundled sidecar. `"extractor": "disabled"` instead
+  means dreaming itself is switched off in config.
+- **Lite daemon refuses to start on Windows** with a message about the data
+  path: the embedded Postgres runtime needs an **ASCII-only** data
+  directory. Set `PSEUDOLIFE_MCP_DATA_DIR` to one (e.g.
+  `C:\pseudolife-data`) —
+  [Configuration](docs/guide/configuration.md#connection--deployment-env-vars).
 - **First build is slow / big.** The daemon image (~5.0 GB, several
   minutes to build) bakes in CPU torch and the embedding weights (Qwen3-Embedding-0.6B
   plus MiniLM); the extractor sidecar
@@ -740,7 +823,15 @@ pseudolife-mcp-daemon`).
 
 ## Uninstall
 
-Deletion is deliberate at every step:
+**Lite tier:** remove the MCP registration (`claude mcp remove
+pseudolife-memory` / `codex mcp remove pseudolife-memory`), then
+`pip uninstall pseudolife-mcp`. If you also want the bank gone, delete
+the per-user data directory (`%LOCALAPPDATA%\pseudolife-mcp` on Windows,
+`~/.local/share/pseudolife-mcp` on Linux, `~/Library/Application
+Support/pseudolife-mcp` on macOS — or wherever `PSEUDOLIFE_MCP_DATA_DIR`
+points). Back it up first: `pseudolife-mcp backup` works on lite too.
+
+**Docker tier** — deletion is deliberate at every step:
 
 ```bash
 # 1. Optional: take a final backup first (ops/backup.ps1 or ops/backup.sh).
@@ -779,6 +870,31 @@ Full dev setup: [CONTRIBUTING](CONTRIBUTING.md).
   from the live web needs a web-fetch tool the standalone server doesn't
   ship; an agent with web access can automate the fetch+cite step today
   via `memory_world_set`.
+
+## Support
+
+**Solo-maintained, best-effort.** One person builds, tests, and runs this;
+there is no support contract and no response-time commitment. That said,
+issues are read and most get an answer.
+
+- **Something is broken** → open a
+  [bug report](https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues/new?template=bug_report.yml).
+  The form asks for your `/health` output, schema version, install tier,
+  and client, because those four answer most questions before any
+  back-and-forth.
+- **Something is missing** → open a
+  [feature request](https://github.com/Pseudogiant-xr/Pseudolife-MCP/issues/new?template=feature_request.yml).
+  Say what you were trying to do, not only what to add.
+- **A security problem** → do **not** open a public issue. Use GitHub's
+  private vulnerability reporting — [SECURITY.md](SECURITY.md). Memory
+  integrity specifically: [security posture](docs/guide/security-posture.md).
+- **Sending a patch** → [CONTRIBUTING](CONTRIBUTING.md) and
+  [CODE_OF_CONDUCT](CODE_OF_CONDUCT.md). The bar is "surgical, tested, and
+  explained", not "big".
+
+If you need someone to call, [Comparison — use something else
+if](docs/guide/comparison.md#use-something-else-if) names vendors who sell
+support.
 
 ## License
 
@@ -2744,6 +2860,23 @@ just documents via `data/chromadb/`; wipe just the associative store via
 `data/memory_state/`. (In containerized mode these files are not the source
 of truth — see the volume note above.)
 
+## Windows / WSL2 memory (Docker tier)
+
+Docker Desktop's WSL2 VM (`Vmmem`) claims up to **~50% of host RAM** by
+default, which is far more than the stack needs. Under dream load the whole
+stack wants ~6–7 GB with the default extractor sidecar, or ~2 GB in
+`sonnet-only` mode — where the Qwen3 embedding backbone is the bulk of it.
+Cap the VM by copying `ops/wslconfig.example` to
+`%USERPROFILE%\.wslconfig`, tuning `memory=`, then `wsl --shutdown`.
+
+The daemon container is separately hard-capped at 4 GB, with memory+swap
+pinned to the same value so exceeding it is a clean container restart rather
+than a host-wide memory event. `PSEUDOLIFE_DAEMON_MEM_LIMIT` in `ops/.env`
+raises it for very large banks.
+
+After `wsl --shutdown` the host port forward is gone; `docker restart
+pseudolife-mcp-daemon` re-establishes it.
+
 ## Backups
 
 `ops\backup.ps1` (Windows) / `ops/backup.sh` (Linux/macOS) runs `pg_dump`
@@ -2834,30 +2967,45 @@ What the memory actually buys, measured. Part of the
 [user guide](../../README.md#documentation); the full methodology and every
 finding live in [`evals/README.md`](../../evals/README.md).
 
+**The bench instrument changed on 2026-08-17.** Every accuracy on this page
+was graded by a local **Qwen3.6-27B** answerer/judge; the bench stack has
+since migrated to **Qwen3.8-27B**, and only the knowledge-update slice has
+been re-run on it — the sole Qwen3.8 numbers here are that comparison's
+right-hand column
+([the knowledge-update slice](#the-knowledge-update-slice-78-of-the-500),
+where both stacks are published side by side).
+The instrument is a term in every number below: compare within a stack, and
+treat a claim that has not been reproduced across judge families as
+provisional.
+
 Nearly every number on this page was measured on the **pre-v25 stack**: the
 384-d MiniLM backbone, with the BM25 hybrid pool off. Both defaults have
 since changed — the backbone swapped at schema v25 and BM25 flipped on
 2026-07-25 — and the arms that read raw turns (naive RAG, hybrid) *select*
 those turns with the retriever that changed, whose measured R@10 moved
-0.572 → 0.809. The exception is the headline ceiling table below, re-judged
-2026-07-29 on the current reproducible server with its fact ranking under
-the v25 backbone — though even there extraction and raw-turn selection are
-held at the pre-v25 run (see the note under the table). Read the rest as
+0.572 → 0.809. The exceptions are the two tables at the top — the
+500-question sweep and the knowledge-update slice — which ran end to end
+on the post-v25 stack, and the held-fixed rebuild below them, re-judged
+2026-07-29 on the reproducible server with its fact ranking under the v25
+backbone (though even there extraction and raw-turn selection are held at
+the pre-v25 run — see the note under that table). Read the rest as
 historical measurements of the design, not as what the shipped
 configuration scores today.
 
-## LongMemEval — knowledge updates
+## LongMemEval
 
-Measured on the **knowledge-update subset of
-[LongMemEval](https://arxiv.org/abs/2410.10813)** (78 questions) — the
-"user's facts change over time" ability the HLC supersession spine exists
-for. (The harness can extend a run to all six LongMemEval question types —
-500 questions — via `--types`; the numbers below are the KU slice unless a
-row says otherwise.) Everything local: extraction, answering, and LLM-as-judge grading all
-run on the author's own hardware (judge = Qwen3.6-27B at temperature 0),
-so compare *within* the table, not against GPT-4o-judged leaderboards.
+[LongMemEval](https://arxiv.org/abs/2410.10813) has six question types and
+500 questions. The headline table below is the **whole benchmark**; the
+**knowledge-update** subset (78 questions — the "user's facts change over
+time" ability the HLC supersession spine exists for) is published under it
+as a named sub-slice, because it is the type this design is built to win
+and publishing it alone overstates the system. Sections after that hold
+older KU-only measurements and say so. Everything local: extraction,
+answering, and LLM-as-judge grading all run on the author's own hardware
+(judge = Qwen3.6-27B at temperature 0), so compare *within* the table, not
+against GPT-4o-judged leaderboards.
 
-> **Reading the numbers.** Except for the ceiling table directly below
+> **Reading the numbers.** Except for the ceiling tables below
 > (re-judged 2026-07-29 on the reproducible stock server), accuracies on
 > this page are single-run point estimates unless marked mean ± std, and
 > they were measured on a stack
@@ -2876,43 +3024,131 @@ so compare *within* the table, not against GPT-4o-judged leaderboards.
 > reinterpret; decision-grade comparisons use replicates and a paired test
 > — see [Variance and replication](../../evals/README.md#variance-and-replication).
 
-## End to end on the current stack — and the commit-gated cascade (2026-07-30)
+## The full 500-question sweep — all six question types (2026-08-03)
 
-The freshest measurement runs the **whole current pipeline** — fresh
-qwen-27b extraction under the v25 embedding backbone, BM25-on turn
-retrieval, reproducible q8_0 serving (`ceiling-e2e`: 3 byte-identical
-replicates — std 0.0000). Oracle variant, 78 questions:
+The headline table is the **whole benchmark, not a slice**: all six
+LongMemEval question types, 500 questions, oracle variant, run end to end
+through the memory (qwen-27b extraction under the v25 embedding backbone,
+BM25-on turn retrieval). Single pass — not replicated — graded by the local
+Qwen3.6-27B judge. Artifact:
+`evals/results/longmemeval-all-oracle-qwen-27b-alltypes-0803.summary.json`.
+
+| arm | accuracy | context tokens/question |
+|-----|----------|------------------------|
+| naive RAG (top-6 turns) | 0.688 | ~1210 |
+| cortex facts only | 0.416 | **~158** |
+| hybrid (facts + top-3 turns) | 0.664 | ~842 |
+| **commit-gated cascade** | **0.690** | ~883 |
+
+Overall this is **a wash on accuracy at ~73% of naive RAG's context**:
+0.690 vs 0.688 is one question in 500 on a single pass and carries no
+weight as a win. The fact spine alone answers at ~13% of RAG's token
+budget, at a large accuracy cost outside the types it is built for. The
+**cascade** is a serving policy, not a fourth pipeline — serve the cortex
+answer when that channel *commits*, fall back to RAG when it says "I don't
+know". Routing reads only the response text, never correctness, so the
+policy is deployable as-is; it is a *derived* metric
+(`replicate.py cascade_correct`) over the judged rag/cortex arms.
+
+Per type the picture is not uniform, and this is the honest shape of the
+result:
+
+| question type | n | naive RAG | cortex | hybrid | cascade |
+|---|---:|---:|---:|---:|---:|
+| knowledge-update | 78 | 0.859 | 0.756 | 0.910 | ~~0.936~~ (retired — [below](#the-knowledge-update-slice-78-of-the-500)) |
+| single-session-user | 70 | 0.929 | 0.671 | 0.957 | 0.943 |
+| single-session-assistant | 56 | 0.911 | 0.571 | 0.964 | 0.929 |
+| single-session-preference | 30 | 0.800 | 0.733 | 0.600 | 0.700 |
+| temporal-reasoning | 133 | 0.526 | 0.150 | 0.534 | 0.526 |
+| multi-session | 133 | 0.504 | 0.211 | 0.383 | 0.474 |
+
+The consolidated spine helps where a fact changes and where the answer sits
+inside one session; it loses where the answer must be aggregated across
+sessions or ordered in time, because per-fact consolidation is exactly what
+discards that structure. BEAM-100K reproduces the same shape on a
+completely different corpus — see
+[BEAM](../../evals/README.md#beam-long-term-memory-benchmark-beam_adapterpy).
+
+Two limits on this table, both load-bearing. **(1)** The hybrid arm here
+served 3 raw turns against the rag control's 6; the bench default was
+budget-matched to 6/6 on 2026-08-21, so every hybrid row on this page is a
+half-budget arm and is not comparable to post-flip hybrid numbers. **(2)**
+It was graded by the Qwen3.6 judge and has not been re-judged since the
+2026-08-17 migration — and on the one slice that *was* re-run, the cascade
+row moved by −0.090 (below). Read the cascade row here as an upper bound.
+
+## The knowledge-update slice (78 of the 500)
+
+This is the slice the supersession spine is built for, measured on its own
+with fresh qwen-27b extraction under the v25 backbone and reproducible q8_0
+serving (`ceiling-e2e`, 2026-07-30: 3 byte-identical replicates —
+std 0.0000). It was the README's front-door table until 2026-08-25; it is a
+sub-slice of the 500-question sweep above and is published as one now.
 
 | arm | accuracy | context tokens/question |
 |-----|----------|------------------------|
 | naive RAG (top-6 turns) | 0.859 | ~1237 |
 | cortex facts only | 0.667 | **~259** |
 | hybrid (facts + top-3 turns) | 0.833 | ~920 |
-| **commit-gated cascade** | **0.936** | ~702 |
+| **commit-gated cascade** | ~~**0.936**~~ (retired — see below) | ~702 |
 
-Two findings, stated plainly. First, the v25 retriever + BM25 lifted
-raw-turn selection so much (R@10 0.572 → 0.809) that the **concatenation
-hybrid no longer beats naive RAG on this slice** — mixing facts and turns
-in one prompt costs stale-fact overrides and extra abstentions. Second,
-the channels remain strongly complementary (their per-question union is
-0.949), and the **commit-gated cascade** captures almost all of it: serve
-the cortex answer when that channel *commits*, fall back to RAG when it
-says "I don't know". Routing uses only the response text — correctness is
-never consulted — so the policy is deployable as-is. The cascade is a
-*derived* metric (`replicate.py cascade_correct`) over the judged
-rag/cortex arms: same artifacts, no fourth answered arm.
+> **RETIRED 2026-08-25 — the cascade's 0.936 does not survive the bench
+> instrument (#188).** The 2026-08-17 migration to a Qwen3.8-27B
+> answerer/judge re-ran the same 78 questions (`ceiling-v38`, also n=3 with
+> std 0.0000). The naive-RAG control lands on 0.859 on both stacks; the
+> cascade falls below it:
+>
+> | arm | Qwen3.6 stack (`ceiling-e2e`) | Qwen3.8 stack (`ceiling-v38`) |
+> |---|---:|---:|
+> | naive RAG (control) | 0.859 | 0.859 |
+> | cortex facts only | 0.667 | 0.667 |
+> | hybrid (facts + top-3 turns) | 0.833 | 0.846 |
+> | **commit-gated cascade** | **0.936** | **0.846** |
+>
+> The mechanism is the routing gate, not the memory. The cascade serves the
+> fact-spine answer unless that channel abstains, so its input is the
+> *answerer's* willingness to say "I don't know": on the old stack the
+> cortex arm abstained on **32 of 78** questions and its 46 commits were
+> **46/46** correct; on the new stack it abstains **22 of 78** and its 56
+> commits are **0.839** precise, so nine wrong answers are served where a
+> RAG fallback would have rescued them. An adopter running Claude or GPT as
+> the answerer has a different abstention rate and therefore a different
+> number — which is what disqualifies 0.936 as a published claim about the
+> memory system. (The migration moved extractor, answerer and judge
+> together and the two runs' fact contexts are not byte-identical, so the
+> artifacts do not isolate *which* term did it. That is the point: the
+> claim was never instrument-independent, and nobody had measured whether
+> it transferred.) Artifacts:
+> `evals/results/longmemeval-ku-oracle-qwen-27b-ceiling-e2e.agg.json`,
+> `evals/results/longmemeval-ku-oracle-qwen-27b-ceiling-v38.agg.json`
+> (abstention and commit-precision counts recomputed from the per-question
+> `…-ceiling-e2e.jsonl` / `…-ceiling-v38.jsonl` rows).
 
-**Full-haystack confirmation (pre-registered).** On the `_s` haystacks
-(~50 sessions/question, tag `casc-q8`, reproducible server verified by
-process inspection), the cascade scores **0.462 vs 0.346** for naive RAG —
-delta **+0.115** at **p = 0.011** (paired permutation, 10,000 draws,
-seed 0) — with **commit precision 0.714** on a 14/78 commit rate. Honest
-scoping: the margin over the concatenation hybrid there (+0.064) is
-directional only (p = 0.18), so the decision-grade claim is
-cascade-vs-RAG; and the commit rate is low — raising it is the current
-retrieval workstream. Artifacts:
-`evals/results/longmemeval-ku-oracle-qwen-27b-ceiling-e2e.agg.json`,
-`evals/results/casc-q8-confirmation.json`.
+Within the 2026-07-30 stack, two findings still stand. First, the v25
+retriever + BM25 lifted raw-turn selection so much (R@10 0.572 → 0.809)
+that the **concatenation hybrid no longer beats naive RAG on this slice** —
+mixing facts and turns in one prompt costs stale-fact overrides and extra
+abstentions. Second, the channels are strongly complementary (their
+per-question union is 0.949) — but how much of that a commit gate can
+capture is exactly what the judge migration showed to be
+instrument-dependent.
+
+> **Currency note (2026-08-25): the full-haystack confirmation is a
+> 2026-07-30 measurement and has never been re-judged.** On the `_s`
+> haystacks (~50 sessions/question, tag `casc-q8`, reproducible server
+> verified by process inspection), the cascade scored **0.462 vs 0.346**
+> for naive RAG — delta **+0.115** at **p = 0.011** (paired permutation,
+> 10,000 draws, seed 0) — with **commit precision 0.714** on a 14/78 commit
+> rate. It was graded by the Qwen3.6 answerer/judge, and its extraction
+> predates even the earliest committed op-prompt artifact (`v5`, committed
+> 2026-08-01) — the shipped pin has since moved to
+> `ku_op_prompt_v10_stance_update.txt`. The same cascade metric lost 0.090
+> on the oracle slice when the stack migrated. Until it is re-run, it
+> is an engineering-log result, not a front-door claim, and it was removed
+> from the README on 2026-08-25. Honest scoping at the time: the margin
+> over the concatenation hybrid there (+0.064) was directional only
+> (p = 0.18), and the commit rate was low. Artifact:
+> `evals/results/casc-q8-confirmation.json`.
 
 This table is **not comparable per-arm** to the held-fixed table below:
 it re-ran extraction and turn selection on the current stack, while the
@@ -2936,8 +3172,10 @@ RAG by ~10 points while reading **~67%** of the context — and the fact
 spine alone trails RAG by only ~4 points on **~11% of its token budget**.
 **Retired as a headline (2026-07-30):** on the current end-to-end stack
 (section above) the concatenation hybrid's margin over naive RAG does not
-survive the v25 retrieval upgrade; the commit-gated cascade is the
-posture that beats RAG there. This table remains valid for what it
+survive the v25 retrieval upgrade. The commit-gated cascade replaced it as
+the published posture and has since been retired too (2026-08-25) — on the
+current bench instrument no arm beats naive RAG on this slice. This table
+remains valid for what it
 isolates — the serving-stack offset and cortex fact ranking under v25
 with 2026-07-19 extraction and turn selection. Notably, the shipped E4B
 fine-tune's replicated hybrid (0.762 ± 0.027, table below) beat this
@@ -3227,5 +3465,465 @@ decision-grade under the same standard the tables above are held to.
 The harder full-haystack (`_s`) results, the extractor-ladder screen used
 to choose the default sidecar model, and the abstention-calibration sweep
 are all in [`evals/README.md`](../../evals/README.md).
+
+---
+
+<!-- source: docs/guide/comparison.md -->
+
+# Comparison — where this sits among agent-memory projects
+
+Agent memory is a crowded category and most of the projects in it are good
+at something real. This page says what *this* one is built around, names
+the alternatives people actually evaluate against it, and — the part that
+makes the rest worth reading — says plainly when you should pick one of
+them instead. Part of the [user guide](../../README.md#documentation).
+
+## How to read this page
+
+**Claims about this project are checkable.** Every mechanism below names
+the tool, config knob, or table that implements it, and the
+[Benchmarks](benchmarks.md) page ships the run artifact behind every
+number. If something here does not match the code, that is a bug — please
+open an issue.
+
+**Claims about other projects are dated and second-hand.** They come from a
+competitive sweep run in **August 2026** against each project's own public
+documentation. Open-source projects move fast; any of these may have
+shipped the thing described as missing since. So the sections below are
+written as *"here is our mechanism, concretely"* rather than *"they don't
+have one"*, and anything specific is stamped with when it was read. If you
+are choosing between tools, check the other project's current docs — do not
+take a comparison table written by one of the vendors as current fact,
+including this one.
+
+## The honest baseline: a markdown file plus grep
+
+Before any of this, the real competition: a curated `CLAUDE.md` (or
+`AGENTS.md`, or a notes file) that you maintain by hand. It is free, it has
+no daemon, it survives every session, and for a lot of projects it is
+genuinely enough. Any memory system that cannot beat it is overhead.
+
+What a hand-maintained file cannot do is answer four questions at once:
+
+- **What is X *now*?** A file accumulates statements; nothing marks which
+  one is current. Grep returns all of them.
+- **What did X used to be, and when did it change?** Edits destroy the
+  previous value. `git log -p` on the notes file is the closest thing, and
+  it is a diff, not a timeline of a fact.
+- **Who asserted this?** A line in a file has no writer, no origin tier,
+  and no link back to the conversation that produced it.
+- **Has it rotted?** Nothing in a file knows that a staging hostname is
+  six months old and worth re-checking before you act on it.
+
+Those four are what this project is built to answer, and they are the axes
+below. If none of them is a problem you have, use the file.
+
+## The axes
+
+### One current value per slot
+
+The **cortex** is slot-keyed: one *current* value per `(entity, attribute)`
+pair. `memory_fact_get("staging", "host")` returns one answer, not a
+ranked list of everything ever said about staging. Slots that genuinely
+hold many concurrent values are **set-valued slots** — an explicit,
+one-way conversion with add/remove semantics, not an accident of
+accumulation ([memory model](memory-model.md#set-valued-slots-schema-v26)).
+
+This is the axis the field is most split on. The 2026-08 sweep found the
+common design to be *accumulate and rank at retrieval*: corrections are
+stored alongside the value they correct, and the retriever is expected to
+prefer the newer one. That works until it doesn't, and when it doesn't it
+fails silently — the old value is still in the index, still similar to the
+query, still winning some fraction of the time. Accumulation is a
+legitimate design choice (nothing is ever lost), but "nothing is
+overwritten" and "there is one current answer" are different products.
+
+### Supersession with version history
+
+A correction **supersedes**: the new value becomes current, the old one is
+retained as a dated version with its writer and its **HLC** stamp, and
+`memory_history(entity, attribute)` prints the timeline. Nothing is
+silently overwritten and nothing is silently duplicated —
+[memory model](memory-model.md#canonical-facts--the-cortex-schema-v8).
+
+The word is worth being precise about, because three different behaviours
+get marketed with the same vocabulary:
+
+| Behaviour | What you get afterwards |
+|---|---|
+| Append-only | Old and new both live; retrieval decides which you see |
+| Destructive update | New value only; the old one is gone, unauditable |
+| **Supersession** (this project) | New value is current; old one retained, dated, attributable, and queryable |
+
+At the time of the sweep, the closest comparable behaviour in the field was
+Zep/Graphiti's temporal edge invalidation, which does keep a history — the
+difference we found was in *what decides* a supersession and *what happens
+to a doubtful one*, which is the next axis.
+
+### Provenance tiers, contenders, and a human gate
+
+Not every claim deserves to become canonical. Three mechanisms decide:
+
+- **Provenance tiers.** Writes carry an origin: `user` > `action` >
+  `agent`. A lower-tier claim cannot silently overwrite a higher-tier
+  value.
+- **Contender parking.** A competing value is parked *against* the slot
+  instead of taking `current`. `memory_fact_get` shows both, search flags
+  the slot `contested`, and `memory_fact_resolve` settles it.
+- **Consolidation quarantine** (the two-man rule, opt-in via
+  `memory.dream.quarantine_low_trust`): an untrusted agent-tier **dream**
+  claim parks as a contender, promotable only by an explicit human resolve
+  or an independent second witness
+  ([dreaming](dreaming.md#consolidation-quarantine--the-two-man-rule-opt-in)).
+
+The sweep did not find this combination elsewhere — the usual arrangement
+is an LLM judging which of two conflicting values is newer or more
+trustworthy, and then acting on that judgement unattended. We do that too
+(the dream extractor is an LLM making judgements), but the judgement lands
+in a contender, not in `current`, when trust is low.
+
+### Human-reviewed merges, with the decision recorded
+
+Entity dedup is where an automatic graph quietly eats itself: fold
+`band.py` into `band` once and every fact attached to either becomes
+ambiguous. Merges here are **proposals**, not actions. They queue in the
+**review queue** (the Console's Atlas Review view, or
+`memory_graph_review`), carry their evidence, and are subject to
+**merge vetoes** — name-shape rules that block a bad **fold direction** at
+filing time. Accepting or rejecting one writes an audit-stamped row in
+`merge_decisions`, marked `decided_by=agent` over MCP or `human` via the
+Console. A background judge may attach a *verdict* to a pending proposal;
+the verdict is a lead, never a decision
+([dreaming — deep dream](dreaming.md#deep-dream--full-corpus-graph-consolidation)).
+
+### Staleness as a serving decision
+
+Every cortex fact is dated and carries a `freshness_class` —
+`evergreen` / `slow` / `volatile`, inferred from the entity's kind unless
+you set it. Age decays `effective_confidence`; past twice the TTL the fact
+flags `stale`, which means *re-verify at the source before acting*, never
+"this value is wrong". The `stale_policy` knob can additionally withhold a
+stale value at serving time (*serving-side quarantine*)
+([how current is this fact?](memory-model.md#how-current-is-this-fact)).
+
+The sweep found decay elsewhere mostly as a *retrieval* weight — older
+memories rank lower. That is a different thing: a downranked fact still
+gets served, and it gets served without the flag that tells the agent to
+go check.
+
+### Zero-egress extraction, and how to verify it
+
+The precise claim: **your memory text never leaves the machine — on the
+sidecar extractor mode.** The Docker tier's default ships a local CPU
+extractor **sidecar**, so **dream** consolidation — the step that reads
+your memory stream and turns it into facts — runs on your box with no
+API key and no outbound request. The installer's `sonnet-only` and
+`sonnet-fallback` modes trade this away deliberately: they route dream
+extraction through the Claude CLI, which sends the extracted stream to
+Anthropic.
+Retrieval embeddings are local too, and the weights are baked into the
+image. (Not the same as "never touches the network": the first pip install
+downloads an embedding model, and image pulls are image pulls. Those carry
+no memory content.)
+
+This one is checkable rather than assertable, which is the point. Pull the
+network, run a dream, and watch it produce facts. Or read
+`ops/docker-compose.yml`: the extractor container is never published to
+the host, and the only endpoint the daemon calls is the one you configure.
+Point `PSEUDOLIFE_DREAM_BASE_URL` at a hosted model and you have traded the
+property away deliberately — that is a supported configuration, and
+[Dreaming](dreaming.md) says so where you make the choice.
+
+Two honest caveats. First, the **lite** tier ships *no* extractor at all
+(`pip install "pseudolife-mcp[lite]"`) — zero egress by default there,
+because nothing extracts anything until you point it at an endpoint; see
+the README's quickstart for exactly what that costs you. Second, the agent
+calling these tools is usually a hosted model, so "no egress" describes
+this server's behaviour, not your whole stack.
+
+At the time of the sweep, free-tier extraction elsewhere generally required
+an external LLM key. Self-hosting the extraction step was usually possible
+with configuration; what differs is what happens when you install and
+change nothing.
+
+### Numbers that ship with their artifacts
+
+Every published benchmark number in these docs has a committed run file
+under `evals/results/`, and `tests/test_eval_evidence.py` fails the suite
+if a claim loses its artifact. Retired numbers are marked retired at the
+place a reader meets them, not only where they were replaced. Judging is
+done by a local, byte-reproducible judge, so results are comparable within
+a table and deliberately **not** comparable against GPT-judged
+leaderboards ([Benchmarks](benchmarks.md)).
+
+This project publishes **no LoCoMo score**, on purpose. Its ground truth
+has been repeatedly reported as unreliable, and the same system has been
+scored wildly differently by different parties — a spread far larger than
+the differences anyone claims from it. A number produced under those
+conditions tells you nothing about whether a system will remember your
+staging host, and publishing one anyway would contradict everything above.
+The refusal is the position, and this is where it is documented.
+
+## The projects people ask about
+
+Alphabetical. Each is described by what it appeared built for during the
+**2026-08** sweep of its public documentation — not by a feature scorecard,
+because a scorecard written by a competitor ages badly and flatters the
+author. Read these as "why you might pick that instead", and check their
+current docs.
+
+**Cognee** — a memory pipeline built around ECL (extract, cognify, load)
+that turns documents and conversation into a queryable graph. Strong fit if
+your problem is *ingesting a corpus* and reasoning over its structure. The
+sweep's note: corrections tended to enter as additional nodes rather than
+replacing a prior value, which is the accumulate-and-rank design discussed
+above.
+
+**Letta** (formerly MemGPT) — an agent *runtime* with memory as one of its
+subsystems: self-editing context, agent state, tool loops, a server and
+SDK. If you want the framework to own the agent, Letta is doing something
+this project deliberately isn't. Pseudolife-MCP has no agent, no chat UI,
+and no opinion about your loop — it is tools your existing coding agent
+calls.
+
+**Mem0** — the most common thing people compare against, and the easiest
+on-ramp in the category: hosted or self-hosted, a small API, broad
+framework integrations. The sweep read its v3 memory design as
+add-oriented, with retrieval expected to surface the right version. If your
+workload is conversational personalization at volume and you want a managed
+service, this is the mainstream choice and we are not it.
+
+**Memori** — the sweep read it as a lightweight, SQL-first memory layer
+that appeals for the same reason a notes file does: you can read the
+database. Good fit if you want minimal machinery and full visibility,
+and are content to own the policy questions (what supersedes what, what
+goes stale) yourself.
+
+**memU** — oriented toward companion and personal-assistant memory, with an
+emphasis on rich profile-style recall. Different target user; if you are
+building a companion app rather than instrumenting a coding agent, that
+orientation will fit better than this one.
+
+**Zep / Graphiti** — the closest thing to a peer on the temporal axis: a
+bi-temporal knowledge graph with edge invalidation, so it genuinely keeps
+history rather than overwriting. The differences the sweep surfaced are the
+ones in the sections above — which claim gets to become current, whether a
+doubtful one parks as a contender, and whether a human ever sees a merge
+before it happens. Zep also offered a managed cloud service at the time of
+the sweep, which this project does not and will not.
+
+**LangMem / framework memory modules** — memory as a component of a larger
+agent framework. Convenient when you already live in that framework; the
+sweep's note was that update semantics there were commonly destructive
+(the new value replaces the old with no retained version), which is the
+distinction drawn in the supersession table above.
+
+## Use something else if
+
+This is the section that makes the rest credible. These are not
+roadmap items being coy — they are deliberate non-goals, and a project
+whose entire pitch is auditability should not fudge its own boundaries.
+
+| If you need | Use | Why not this |
+|---|---|---|
+| **Multi-tenant SaaS memory** — one deployment serving many customers with tenant isolation | Mem0, Zep Cloud | One daemon owns one **bank**, single-writer by construction. Principals are bearer-token identities for *your* agents, not tenants; there is no tenant boundary in the schema |
+| **SSO, RBAC, audit compliance** — SOC 2, SAML/OIDC, org-wide access policy | A commercial hosted platform (Mem0, Zep Cloud) | Auth is a bearer token, loopback by default. There are no roles, no directory integration, and no compliance attestations |
+| **Managed hosting** — someone else runs it, patches it, backs it up | Mem0, Zep Cloud | There is no cloud tier and there will not be one: a hosted service would dilute the zero-egress claim and add a business to run |
+| **An agent framework** — runtime, planner, tool loop, agent state | Letta, LangGraph | This is a memory server with no agent in it. Your coding agent is the intelligence |
+| **Memory for a non-MCP application** — a web app, a chatbot backend | Mem0, Cognee, Memori | The interface is MCP plus a REST console. There is no general-purpose SDK, and the tool docstrings are written for a coding agent to read |
+| **Cross-machine sync out of the box** | A hosted service | Memory lives on one machine's disk; syncing is left to rclone/syncthing |
+| **A LoCoMo leaderboard number to put in a deck** | Anyone who publishes one | We publish a documented refusal instead — see above |
+
+Also worth saying: this is **solo-maintained, best-effort** software. It is
+carefully tested and deployed daily by its author, and that is not the same
+as a support contract. If your organization needs someone to call, buy from
+someone who sells support.
+
+## Checking any of this yourself
+
+```bash
+# One current value per slot, with its provenance and age:
+memory_fact_get("staging", "host")
+
+# The version timeline behind that value:
+memory_history("staging", "host")
+
+# Is this bank extracting locally, or at all?
+curl http://127.0.0.1:8765/health     # -> "extractor": none | configured | disabled
+
+# Every published number's run artifact:
+ls evals/results/
+```
+
+The version timeline is the one to try first. It is the artifact that most
+directly shows the difference between "the system stored my correction" and
+"the system knows what the value is now, what it was, and who changed it".
+
+---
+
+<!-- source: docs/guide/security-posture.md -->
+
+# Security posture — memory poisoning (ASI06)
+
+A memory system has an attack surface ordinary tools don't: content the
+agent *reads* can try to get itself *stored*, and anything stored shapes
+every later session. OWASP's agentic-threat catalogue lists persistent
+memory poisoning as **ASI06** (published December 2025), and it is the
+threat class that decides whether a self-hosted memory server is safe to
+put in front of a working codebase.
+
+This page states the threat model and maps every **shipped** mechanism to
+the part of it that mechanism actually mitigates — and, at least as
+importantly, names what is **not** defended. Vulnerability *reporting*,
+the network/auth boundary, and scope live in
+[SECURITY.md](../../SECURITY.md); this is the memory-integrity half.
+Part of the [user guide](../../README.md#documentation).
+
+Read the mitigations as *containment*, not prevention. None of them stops
+a model from being talked into a bad `memory_store`. What they do is bound
+how much authority that store can acquire, how visibly, and how cheaply it
+can be undone.
+
+## The threat model
+
+**The write path is the agent.** Nothing writes to the **bank** except MCP
+tool calls made by your model. A hostile web page, README, or ingested
+document cannot write directly — it can only try to convince the model to
+call `memory_store` or `memory_fact_set` on its behalf. That
+instruction-following boundary belongs to the model and its host, not to
+this server. Assume it fails occasionally.
+
+**Dreams amplify.** The **dream** pass promotes episodic text into
+canonical **cortex** facts, and cortex facts outrank raw entries at recall
+time. A poisoned entry that survives to a dream becomes a poisoned *fact*
+with elevated authority, cited to your own memory rather than to the web
+page it came from. Consolidation is therefore the privilege-escalation
+step, and most of the mechanisms below sit exactly there.
+
+**Correction does not remediate.** The 2026 literature (MINJA,
+arXiv 2601.05504) shows query-only injection against agent memories
+succeeding at high rates, and shows that agents cannot be *talked* out of
+a poisoned memory — conversational correction relapses. Deletion is the
+remediation.
+
+**Content inspection is in the evaded class.** MAFIA (arXiv 2608.03844)
+defeats *audited* memory stores from the query interface alone: "factual
+cloaks" preserve high semantic similarity and malicious effect while
+dropping audit detection from ~83% to under 8% at ~90% attack success.
+Anything that reasons about *what the text says* is in that class,
+including this project's literal-faithfulness gate — which checks fidelity
+to the source note, not trustworthiness of the source. The same work
+optimizes *placement* so poisoned records win retrieval competition
+against a large benign pool, which makes ranking machinery part of the
+attack surface rather than a defense. Defenses that key on *who wrote*
+are the class this attack does not straightforwardly evade, and that is
+why the mechanisms below are provenance-shaped.
+
+## Mechanism → threat map
+
+Every row ships today. "Default" says what a fresh install does, because a
+mitigation that is off by default is a mitigation you have not got yet.
+
+| Mechanism | Poisoning step it mitigates | Default |
+|---|---|---|
+| **Provenance tiers** (`user` > `action` > `agent` origin on every write) | A planted `agent`-origin claim cannot silently supersede a user-stated value. Keys on *who asserted*, not on what the text says | On |
+| **Contender parking** | A conflicting value is parked *against* the **slot** rather than taking `current`: `memory_fact_get` shows both, `memory_search` flags the slot `contested`, and `memory_fact_resolve` settles it. Poison must win an explicit decision, not a similarity contest | On |
+| **Consolidation quarantine** (the two-man rule, `memory.dream.quarantine_low_trust`) | The dream's privilege-escalation step: an untrusted agent-tier claim parks as a **contender** instead of taking `current`, promotable only by an explicit human resolve or an independent second witness | **Off** — opt-in |
+| **Human-reviewed merge queue** | Entity-level poisoning: folding a hostile entity into a trusted one would inherit its facts. Merges are **proposals** carrying their evidence; **merge vetoes** block bad **fold directions** at filing; accept/reject writes an audit-stamped `merge_decisions` row (`decided_by=agent` over MCP, `human` via the Console). A background judge's verdict is a lead, never a decision | On (review required; nothing auto-folds) |
+| **Dream rollback journal** (schema v27) | Blast radius of one bad consolidation pass. Every dream records a run row plus a per-claim pre-image of what each slot held before the write; `memory_dream(action="rollback")` replays it to revert the latest committed pass | On |
+| **Engram cross-index** | Attribution and cleanup: every cortex fact links back to the source entries that produced it, so a bad fact is traceable to the entry that fed it and the rest of that entry's output can be found | On |
+| **Supersession history** (**HLC**-ordered) | Audit. Nothing is silently overwritten, so "when did this value change, and which writer changed it" is answerable after the fact via `memory_history` | On |
+| **Writer keying / per-principal tokens** | Narrows the blast radius of a leaked credential: a matched per-principal token *becomes* its caller's writer id, where the singular shared token's holder may assert any writer via `X-PL-Writer` | Single token / open loopback |
+| **Source exclusion from consolidation** (`memory.dream.exclude_sources`, default `consolidation` / `reflection` / `status` / `log`) | Keeps high-volume, low-value chatter out of the dream's input entirely — those entries stay searchable but are never mined for facts or graph edges, shrinking the surface that can reach canonical authority | On |
+| **Serving-side quarantine** (`stale_policy`: `annotate` \| `demote` \| `quarantine`) | Not poisoning per se, but the same family: a fact past twice its TTL is flagged `stale`, can be demoted below fresh records, or — at `quarantine` — has its `value` replaced by a wrapper with the original moved to `last_known_value`, so a rotted value cannot be read as current. `stale: true` means *re-verify at the source*, never "the value is wrong" | `annotate` (flag only) |
+| **`memory_forget` + engram links** | Remediation. Deletion is the only reliable remedy; the links tell you what else to retire | On |
+
+Two of these deserve their exact claim restated, because overselling them
+would be the same failure this page is about:
+
+- The **consolidation quarantine** does not stop a poisoned entry from
+  being *stored* or *retrieved* — episodic search still surfaces it. It
+  stops poison from silently gaining *canonical* authority. And writer
+  identity is self-reported over MCP, so the two-man rule raises the bar
+  from "one convinced model call" to "two independent-looking writes or
+  one human act". That is a mitigation, not an authentication scheme. Its
+  preregistration is
+  `docs/superpowers/specs/2026-08-09-consolidation-quarantine-design.md`.
+- The **merge queue** gates *folds*, not writes. A hostile fact attached
+  to a correctly-named entity never goes near it.
+
+## What is NOT defended
+
+Stated flatly, because an inaccurate boundary claim is a worse trust
+problem than the limitation it hides.
+
+- **Prompt injection against your agent.** If a hostile document convinces
+  the model to call `memory_store`, the store happens. This server has no
+  view of the model's context and cannot arbitrate it.
+- **Content screening.** There is none, deliberately — see the evaded-class
+  note above. Do not read the literal-faithfulness gate, the novelty gate,
+  or the contradiction detector as trust filters. In particular the
+  **surprise gate** is an *admission* filter that drops near-duplicates:
+  novel malicious content passes it preferentially.
+- **Cryptographic writer authentication.** Writer identity is
+  self-reported over MCP. Per-principal bearer tokens improve on this
+  (the token determines the writer id) but there is no signing, no
+  attestation, and no way to prove after the fact that a given writer
+  really made a given write. This is roadmap, not a promise.
+- **Ranking as a defense.** Retrieval scoring is optimizable by an
+  attacker who can influence stored text. Treat rank as convenience, not
+  as a trust signal.
+- **Rate or volume anomaly detection.** Nothing notices that one session
+  wrote four hundred facts about one entity. The **review queue** and the
+  Console's counts are how a human would notice, and only if they look.
+- **Ingested-document provenance.** `document_ingest` indexes what you
+  point it at; the reference bank carries no trust tier of its own.
+- **World-fact citations are not verified.** A **world fact** carries a
+  source URL and a quote because someone asserted them. Nothing fetches
+  the URL to confirm the quote is there.
+- **The host.** Anything with local file or Postgres access owns the bank
+  outright. The **bank** is as sensitive as the codebase it remembers, and
+  `/health` is deliberately unauthenticated and verbose — reasons not to
+  publish the port.
+- **The quarantine ships off.** The strongest consolidation-side
+  mitigation is opt-in. Turning it on costs you unattended promotion of
+  agent-tier claims, which is the trade it exists to offer.
+
+## If you think a memory is poisoned
+
+1. **Do not try to correct it conversationally.** That leaves live poison
+   with a correction beside it.
+2. **Find it and delete it** — `memory_forget(scope="memory", ...)` for the
+   entry.
+3. **Follow the engram links** — `memory_fact_get` reports `source_entries`;
+   retire any cortex facts derived from the entry
+   (`memory_forget(scope="fact", ...)`).
+4. **If a dream did it, roll the pass back** —
+   `memory_dream(action="runs")` to find it, then
+   `memory_dream(action="rollback")`, which restores each touched slot's
+   pre-image.
+5. **Read the history** — `memory_history(entity)` gives the dated causal
+   chain, which is how you find what else arrived alongside it.
+
+## Hardening checklist
+
+- Turn on the consolidation quarantine
+  (`memory.dream.quarantine_low_trust`) if unattended agents write to this
+  bank.
+- Keep the daemon loopback-bound. If it must be reachable, set
+  `PSEUDOLIFE_MCP_TOKEN` — the daemon refuses a non-loopback bind without
+  one — and prefer a `PSEUDOLIFE_MCP_TOKENS` map so each caller's token
+  *is* its writer id.
+- Prefer a local extractor. Consolidation reads everything in the memory
+  stream; a hosted extractor endpoint sends it off the machine.
+- Back up before you need to. Supersession history and the rollback
+  journal are your audit trail, and both live in the bank
+  ([backups](configuration.md#backups)).
+- Work the **review queue**. Merge proposals accumulate; an unread queue is
+  where an entity-level fold eventually gets accepted by whoever is in a
+  hurry.
+
+Reporting a break in any of the boundaries above:
+[SECURITY.md](../../SECURITY.md).
 
 ---

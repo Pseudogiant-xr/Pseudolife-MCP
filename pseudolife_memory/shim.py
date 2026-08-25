@@ -76,10 +76,39 @@ def spawn_daemon() -> subprocess.Popen:
     )
 
 
+def _notice_if_cortex_is_inert(health: dict) -> dict:
+    """Say, once per session, when the bank cannot fill its own cortex.
+
+    The lite tier (``pip install "pseudolife-mcp[lite]"``) ships no
+    extractor, so dream consolidation writes no canonical facts —
+    ``memory_fact_set`` becomes the only cortex writer. The daemon logs
+    that at startup, but :func:`spawn_daemon` sends its stderr to DEVNULL,
+    so this is the one place the user can meet it. Silence here reads as
+    "the cortex is broken"; the note is short and names the fix.
+
+    Only fires on an explicit ``extractor: "none"`` — a daemon predating
+    the field, a configured extractor, and a deliberately dream-disabled
+    bank all stay quiet.
+    """
+    if health.get("extractor") == "none":
+        print(
+            "[shim] no dream extractor configured: memories are stored and "
+            "searchable, but consolidation writes no canonical facts — "
+            "memory_fact_set is the only cortex writer.\n"
+            "  Fix with any OpenAI-compatible endpoint, e.g. a local Ollama:\n"
+            "    PSEUDOLIFE_DREAM_BASE_URL=http://localhost:11434/v1\n"
+            "    PSEUDOLIFE_DREAM_MODEL=qwen2.5:7b\n"
+            "  (set both in the daemon's environment, then restart it; the "
+            "Docker tier ships an extractor sidecar instead)",
+            file=sys.stderr,
+        )
+    return health
+
+
 def ensure_daemon(url: str) -> dict:
     health = probe_health(url)
     if health is not None:
-        return health
+        return _notice_if_cortex_is_inert(health)
     print(f"[shim] no daemon at {url} — starting one...", file=sys.stderr)
     child = spawn_daemon()
     start = time.time()
@@ -99,7 +128,7 @@ def ensure_daemon(url: str) -> dict:
         time.sleep(0.5)
         health = probe_health(url, timeout=0.5)
         if health is not None:
-            return health
+            return _notice_if_cortex_is_inert(health)
     print(
         f"[shim] FAILED to reach the memory daemon at {url}.\n"
         f"  Docker tier:  docker compose -f ops/docker-compose.yml up -d\n"

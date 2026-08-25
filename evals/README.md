@@ -298,9 +298,21 @@ served when that arm commits, with fallback to the rag answer when it says
 `replicate.py compare --arm cascade` all report it, including retroactively
 on old JSONLs. Motivation: on the 2026-07-30 `ceiling-e2e` run the cortex
 arm's commit precision was 46/46, making the commit signal a strong router —
-cascade 0.936 vs rag 0.859 at ~57% of the tokens (out-of-sample check on the
+cascade ~~0.936~~ vs rag 0.859 at ~57% of the tokens (out-of-sample check on the
 five `_s` Phase-A replicates: cascade 0.428±0.023 vs hybrid 0.367±0.015 vs
 rag 0.321±0.027, commit precision 0.76±0.05).
+
+> **The 0.936 is retired as a published claim (2026-08-25, #188).** The
+> router's input is the *answerer's* abstention behaviour, so it does not
+> transfer across bench instruments. Re-running the same 78 questions on the
+> Qwen3.8 stack (`ceiling-v38`, n=3, std 0.0000) gives cascade **0.846**
+> against an unchanged naive-RAG control of 0.859: the cortex arm abstains
+> 22/78 instead of 32/78 and its commit precision drops from 46/46 to 0.839,
+> so nine wrong answers are served where RAG would have rescued them. The
+> derived metric stays in the harness — it is a real serving policy and
+> worth measuring — but any cascade number must name the answerer it was
+> measured with. See
+> [the benchmarks guide](../docs/guide/benchmarks.md#the-knowledge-update-slice-78-of-the-500).
 
 Model roles are split so extraction quality is the **only** variable:
 
@@ -639,6 +651,72 @@ test over the 78 questions:
   byte-identical replicates, std 0.0000) and is what the README and guide
   tables now show. The v2 figures remain the same-stack baseline for
   everything else measured on the TurboQuant fork.
+
+---
+
+# BEAM long-term-memory benchmark (`beam_adapter.py`)
+
+The second external benchmark, and the one that keeps LongMemEval honest:
+**BEAM** ([arXiv 2510.27246](https://arxiv.org/abs/2510.27246), ICLR 2026;
+MIT) probes ten memory *abilities* — abstention, contradiction resolution,
+event ordering, information extraction, instruction following, knowledge
+update, multi-session reasoning, preference following, summarization,
+temporal reasoning — over procedurally generated conversations at 100K to
+10M tokens, scored by an LLM judge against per-question rubric items rather
+than a single gold string. Only the **100K tier** (20 chats, 400 questions)
+is measured here.
+
+The BEAM checkout (data + prompts) stays **outside** this repo; the
+adapter extracts BEAM's own `unified_llm_judge_base_prompt` from the
+harness clone with `ast` at runtime and never vendors it. Each chat is
+ingested turn by turn into a fresh bench service, dreaming after every
+BEAM batch (the production cadence), and each question is answered through
+the same `rag` / `cortex` / `hybrid` arms as LongMemEval — `rag` again
+doubling as the extraction-independent control.
+
+```bash
+PYTHONPATH=. python evals/beam_adapter.py --beam-root <path-to-BEAM> \
+    --tier 100K --extractor qwen-27b --out-tag beam100k-qwen
+# re-judge an existing run's recorded answers with a frontier judge
+# (retrieval and answering are NOT re-run, so any movement is judge effect)
+PYTHONPATH=. python evals/beam_rejudge.py --in evals/results/<run>.jsonl \
+    --beam-root <path-to-BEAM> --tag opus5
+# reader/volume sweep: budget arms answered by a frontier CLI model, no GPU
+PYTHONPATH=. python evals/beam_reader_sweep.py --beam-root <path-to-BEAM> \
+    --tag opus-sweep --phase serve      # then --phase answer
+```
+
+Scoring note recorded in every artifact: BEAM's paper defines a
+1.0/0.5/0.0 per-item scale, but the reference code `int()`-floors the
+judge's score, turning 0.5 into 0. Both readings are recorded (`score` =
+paper-faithful float, `score_intfaithful` = code-faithful).
+
+**These numbers are not comparable to published BEAM leaderboard results**
+(Cognee, Mem0, Hindsight): those are GPT-judged, and the runs below are
+judged locally or by an Opus-class CLI judge. Cognee's 0.79 is also a
+20-question single-conversation protocol. Compare within a row.
+
+## Findings — 2026-08-03 to 2026-08-24
+
+| finding | evidence |
+|---|---|
+| **The fact spine's one decisive win is abstention.** On BEAM's abstention questions the cortex arm scores **0.950** against naive RAG's 0.775 — a small curated fact context refuses where a raw-turn context confabulates. The number is **identical under two independent judges** (local Qwen3.8 and an Opus-class CLI judge over the same recorded answers), which is what makes it the most transferable claim the memory has. | `beam-100K-qwen-27b-beam100k-qwen38.summary.json`, `beam-100K-qwen-27b-beam100k-qwen38.rejudge-opus5.summary.json` |
+| **Budget-matched, the hybrid arm ties the raw-turn control — it does not lose.** The hybrid arm (facts + turns) historically served 3 raw turns against rag's 6; at a matched 16/16 budget with the Phase-1 fixes, rag 0.6425 vs hybrid 0.6226 (−0.020 ± 0.029, a wash). Earlier "hybrid loses" readings were the halved turn window. | `beam-100K-qwen-27b-p1-b16.summary.json`, `beam-reader-volume-grid-verdict.json` |
+| **Judge transfer on BEAM is small — measured, not assumed.** Re-judging 400 identical responses with an Opus-class judge moved rag −0.002, cortex +0.007, hybrid −0.016, against a same-judge stability floor of mean \|item delta\| 0.073. Deltas below that floor are not findings. | `beam-100K-qwen-27b-beam100k-qwen38.rejudge-opus5.summary.json` |
+| **Most of the gap to published leaderboard numbers is the reading stack, not the memory layer.** Context volume dominates: widening naive-RAG context from 6 to 48 turns (roughly the published systems' budget) is +0.186 ± 0.041 and takes a local 27B reader to 0.665 full-tier, while swapping in a frontier reader over byte-identical contexts adds only ~+0.04 (not significant at 48 turns). | `beam-readersweep-verdict.json`, `beam-reader-volume-grid-verdict.json` |
+| **Three weaknesses survive any reading stack**: summarization (0.38 → 0.47 across the whole budget sweep — a whole-chat rubric needs a mid-density layer, not more turns), event ordering (0.21 → 0.52, still the weakest type), and abstention *degrading* with volume (0.62 → 0.50 — wider context invites confabulation, which is exactly what the small-context fact channel avoids). | `beam-readersweep-verdict.json` |
+| **Cross-bench agreement.** BEAM's per-ability shape matches the LongMemEval 500-question per-type shape: strong on canonical-fact abilities, weak wherever an answer must be aggregated across sessions or ordered in time. Two independent benchmarks say the gap is cross-session aggregation, not fact fidelity. | `beam-100k-verdict.json` (`cross_bench_convergence`) |
+
+Caveats that bound all of the above: single replicate per configuration
+(no significance claims except where a verdict file states a CI); the
+reader sweep is 116 of 400 rows, chats 1–7, so per-type rows are n=10–12
+and directional only; a CLI answerer/judge is not bit-reproducible; and
+only the 100K tier has been run — 500K/1M/10M are unmeasured.
+
+Bank dumps and served contexts persist per run under
+`evals/results/banks/beam-<tier>-<extractor>-<tag>/` (gitignored), so a
+serving-knob rerun or a re-judge recomposes from persisted state instead of
+re-paying the ~5h ingest/extraction phase.
 
 ---
 

@@ -163,6 +163,19 @@ add a row there in the same change that adds the claim to the docs.
 - **Never overwrite a canonical result file on a rerun** — tag the run and
   promote deliberately. A v2 prompt run silently rewrote `sonnet-5.json`
   while also writing its own tagged file (2026-07-21).
+- **A bench-instrument migration blocks the release gate until the
+  docs-currency pass lands.** The judge and the answerer are terms in every
+  published accuracy, so swapping either invalidates the docs the way a
+  schema bump invalidates the version tables. The 2026-08-17 Qwen3.6→3.8
+  migration shipped with the docs promotion deliberately deferred, and
+  v0.14.0 then went out with a README headline (cascade 0.936) that the new
+  instrument scores 0.846 — below its own control (#188).
+- **Before promoting a claim to the README, run the headline slice under two
+  independent judge families.** Determinism is not validity: the 0.936 run
+  replicated at std 0.0000 three times and still did not survive a judge
+  swap, because reproducibility measures the instrument's steadiness, not
+  its agreement with any other instrument. A conclusion that moves when the
+  judge moves is a finding about the bench, not about the memory.
 
 ## Release / publish procedure (four public surfaces)
 

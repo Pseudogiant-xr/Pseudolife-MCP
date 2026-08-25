@@ -4,6 +4,10 @@ Thanks for wanting to improve Pseudolife-MCP. This is a small, carefully
 tested codebase — the bar for merging is "surgical, tested, and explained",
 not "big".
 
+Participation is covered by the [Code of Conduct](CODE_OF_CONDUCT.md). The
+project is solo-maintained and best-effort: issues are read and most get an
+answer, but there is no response-time commitment.
+
 ## Dev setup
 
 Python 3.10+ and a Postgres with pgvector (the bundled compose stack provides
