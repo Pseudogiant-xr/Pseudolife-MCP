@@ -12,7 +12,9 @@ These tests pin the consolidated contract:
 * dump/introspection tools left the MCP surface — the Cortex Console and the
   ``pseudolife-mcp briefing`` CLI cover them; ``memory_path`` folded into
   ``memory_graph(to=...)``;
-* every remaining description is terse: <=1600 chars each, <=18k total.
+* every remaining description is terse: <=1600 chars each, and both the
+  descriptions and the inputSchema param descriptions are metered per
+  toolset tier (see ``test_descriptions_fit_tier_budgets``).
 """
 
 from __future__ import annotations
@@ -345,10 +347,62 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # and proposal_ids batching; 16250 left zero headroom after trimming.
     # Full tier is opt-in (sessions start minimal/core), so it carries the
     # slack; the default surfaces stay tight.
-    budgets = {"minimal": 4800, "core": 10250, "full": 17000}
+    #
+    # Restructured 2026-08-25. Three bumps in six weeks (2026-07-18 /
+    # 07-31 / 08-05), each after trimming descriptions "to the minimum",
+    # had left minimal at 4786/4800 and core at 10230/10250 — 14 and 20
+    # chars. Issue #186's recall fix then lost its hops-ceiling and
+    # cap-number documentation to that wall, which is the budget deciding
+    # what the surface may promise rather than the other way round.
+    # Maintainer decision: raise the description budgets AND move
+    # arg-level contracts out of the description string into inputSchema
+    # param descriptions (nothing on the surface used them before), with
+    # schema accounting added below so the newly-used space stays metered
+    # rather than becoming an unmetered escape hatch.
+    budgets = {"minimal": 5000, "core": 11500, "full": 17000}
     for tier, cap in budgets.items():
         total = sum(sizes[n] for n in mod._visible_tool_names(tier))
         assert total <= cap, f"{tier} manifest {total} chars exceeds {cap}"
+
+    # Schema accounting: a param description ships in the manifest exactly
+    # like the tool description does, so it is metered on the same terms.
+    param_sizes: dict[str, int] = {}
+    for t in tools:
+        props = (t.inputSchema or {}).get("properties", {}) or {}
+        param_sizes[t.name] = sum(
+            len(p.get("description") or "") for p in props.values())
+        over = [(f"{t.name}.{pn}", len(p.get("description") or ""))
+                for pn, p in props.items()
+                if len(p.get("description") or "") > 300]
+        assert over == [], f"over-long param descriptions: {over}"
+    # Measured 2026-08-25 immediately after the migration above:
+    # minimal 1826, core 4304, full 7413. Caps are those plus ~775 of
+    # headroom each — room for a real contract to land without a bump,
+    # not room to drift.
+    param_budgets = {"minimal": 2600, "core": 5100, "full": 8200}
+    for tier, cap in param_budgets.items():
+        total = sum(param_sizes[n] for n in mod._visible_tool_names(tier))
+        assert total <= cap, (
+            f"{tier} param-description total {total} chars exceeds {cap}")
+
+    # Floor beside the ceiling: everything above is an upper bound, so if
+    # the Annotated[..., Field(description=...)] -> inputSchema rendering
+    # ever breaks (the mcp pin is wide, and the mechanism leans on
+    # inspect.signature(eval_str=True) preserving Annotated extras), all
+    # 35 tools would silently lose every argument contract while the caps
+    # stayed green. One concrete pin plus a per-tier floor makes that
+    # regression loud.
+    hops = {t.name: t for t in tools}["memory_recall"].inputSchema[
+        "properties"]["hops"]
+    assert "1..5" in (hops.get("description") or ""), (
+        "param descriptions are not reaching inputSchema — the "
+        "Field(description=) rendering path has broken")
+    param_floors = {"minimal": 1500, "core": 3500, "full": 6000}
+    for tier, floor in param_floors.items():
+        total = sum(param_sizes[n] for n in mod._visible_tool_names(tier))
+        assert total >= floor, (
+            f"{tier} param-description total collapsed to {total} chars "
+            f"(floor {floor}) — argument contracts are no longer shipping")
 
 
 def test_graph_review_dismiss_slot_pair_routes_to_service(tmp_path: Path, monkeypatch) -> None:

@@ -35,6 +35,40 @@ _LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 # Cortex Console landed, leaving this wrapper dead code.)
 
 
+def _extractor_status(svc) -> str | None:
+    """One word for "can this bank fill its own cortex?".
+
+    ``"none"`` is the lite tier's default shape: ``pip install
+    "pseudolife-mcp[lite]"`` brings a full Postgres bank but no dream
+    extractor, so consolidation writes no canonical facts and
+    ``memory_fact_set`` is the only cortex writer. The daemon logs that at
+    startup, but the shim spawns it with ``stderr=DEVNULL``, so ``/health``
+    is the only place a lite user can actually read it.
+
+    Returns ``None`` — key omitted — when the service carries no resolvable
+    dream config, so the bare stubs this builder is called with elsewhere
+    keep working. Never probes the network: this is a config reading, not a
+    liveness check (``memory_dream(action="status")`` owns the probe).
+    """
+    dream_cfg = getattr(
+        getattr(getattr(svc, "config", None), "memory", None), "dream", None)
+    if dream_cfg is None:
+        return None
+    if not getattr(dream_cfg, "enabled", False):
+        return "disabled"
+    try:
+        from pseudolife_memory.memory.dream import resolve_endpoints
+
+        r = resolve_endpoints(dream_cfg)
+    except Exception:  # noqa: BLE001 — /health must never fail on this
+        return None
+    # Matches build_extractor_with_fallback: a fallback-only setup does
+    # extract, so calling it "none" would be a lie.
+    configured = (r.get("primary_url") and r.get("primary_model")) or (
+        r.get("fallback_url") and r.get("fallback_model"))
+    return "configured" if configured else "none"
+
+
 def _build_health_payload(svc, token_present: bool) -> dict:
     """Compose the ``/health`` payload from a live ``MemoryService``.
 
@@ -54,6 +88,12 @@ def _build_health_payload(svc, token_present: bool) -> dict:
         # >0 means writes succeeded in memory but a snapshot did not persist.
         "persist_errors": getattr(svc, "_persist_errors", 0),
     }
+    # Deliberately does NOT touch `status`: a bank with no extractor is
+    # serving correctly, and web/api.py turns any non-ok payload into a
+    # 503 that the Docker healthcheck and ops/update.* treat as fatal.
+    extractor = _extractor_status(svc)
+    if extractor is not None:
+        payload["extractor"] = extractor
     # Schema v25's dim-mismatch refusal is otherwise invisible here: it
     # fires lazily on the first tool call, so a daemon whose every memory
     # tool is dead would still report "ok" without this (2026-07-28 review).

@@ -46,6 +46,162 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   entirely; `PSEUDOLIFE_LEGACY_TRANSPORT_SESSION=1` restores it for one
   release as a rollback hatch and logs a warning on first use. Design:
   `docs/specs/2026-08-25-mcp-v2-session-identity-design.md`.
+### Fixed (2026-08-25 — re-mint repairs the fact/lesson cross-index)
+- **A freshly minted entity re-links the orphaned fact and lesson rows of
+  its name.** `delete_entity` NULLs `facts`/`lessons` `entity_id` and
+  `object_entity_id` (no cascade), and nothing in the live daemon re-linked
+  those rows until their slot was next written — so a deleted-then-re-minted
+  name under-counted everywhere the FK is read: fold-direction ranking,
+  `backfill_entity_sources` (entity→project attribution), and
+  `lesson_entity_ids` (the lesson-only junk protection). This is the general
+  repair deferred from #177, whose guard-side workaround (counting current
+  facts by subject name) stands independently. The repair matches
+  conservatively — candidates by `norm_name(raw stored text) == canonical`,
+  the same rule slot-write linking applies (minus aliases, which a fresh
+  mint cannot have), updated by exact stored text;
+  the cortex-normed `entity_norm` column is never consulted (the two norm
+  spaces disagree, e.g. `"G:"` → `"g"` vs `"g:"`). Mint-only by an
+  `xmax = 0` insert check, so the repeated-upsert hot path (every
+  `memory_outcome` log) pays nothing; orphans whose entity already exists
+  still re-link on their next slot write, as before. `entity_sources`
+  attribution heals on the next backfill pass once the FK is restored.
+  Tombstone removal/expiry for `merge_decisions` remains deferred (third
+  deliberate deferral): those rows are the durable merge audit, so a removal
+  path should be a status flip with its own review surface, not a row
+  delete riding along here.
+### Changed (2026-08-25 — benchmark docs re-framed on the full 500-question run; the 0.936 headline retired)
+- **The README led with a number the current bench instrument does not
+  reproduce, drawn from the most favourable 78 of 500 questions (#188).**
+  Both halves are fixed at their sites. **(1) Retired: cascade 0.936 on
+  LongMemEval knowledge-update.** It was measured on the 2026-07-30 stack
+  (Qwen3.6-27B answerer and judge). Re-running the
+  same 78 questions after the 2026-08-17 migration to Qwen3.8-27B
+  (`ceiling-v38`, n=3, std 0.0000, like `ceiling-e2e` before it) gives
+  **cascade 0.936 → 0.846** against a naive-RAG control that is **0.859 on
+  both stacks** — the published posture now sits *below* its own control.
+  Root cause, recomputed from the committed per-question rows: the cascade
+  routes on whether the cortex arm abstains, so its input is the answerer's
+  abstention behaviour, not a property of the memory — **32/78 abstentions
+  at 46/46 commit precision** on the old stack versus **22/78 at 0.839** on
+  the new one, so nine wrong answers are served where a RAG fallback used to
+  rescue them. The two runs' fact contexts are not byte-identical and the
+  migration moved extractor, answerer and judge together, so the artifacts
+  do not isolate which term did it — which is the finding, not a caveat: the
+  claim was never measured for instrument transfer. The number stays visible
+  with strikethrough and this explanation at every site that published it
+  (README front door and Benchmarks section, `docs/guide/benchmarks.md`,
+  `evals/README.md`), per the retire-at-the-old-site rule.
+  **(2) The front door now leads with the full six-type run**
+  (`longmemeval-all-oracle-qwen-27b-alltypes-0803`, 500 questions, single
+  pass, Qwen3.6 judge), with the knowledge-update slice as a named sub-row:
+  overall **rag 0.688 / cortex 0.416 / hybrid 0.664 / cascade 0.690** at
+  **~1210 / ~158 / ~842 / ~883** context tokens per question — equal
+  accuracy to naive RAG at ~73% of the context, i.e. a wash (one question in
+  500), not the ~8-point win the KU slice alone suggested. The per-type
+  breakdown ships with it and states the losses plainly (multi-session 0.474
+  vs 0.504, single-session-preference 0.700 vs 0.800, temporal-reasoning a
+  tie). The one claim that survives a judge swap unchanged is the abstention
+  edge: BEAM-100K abstention **cortex 0.950 vs rag 0.775**, identical under
+  the local Qwen3.8 judge and an independent Opus-class re-judge.
+- **The full-haystack teaser row left the README front door** (cascade 0.462
+  vs rag 0.346, p = 0.011). It is a 2026-07-30 measurement on the retired
+  judge, its extraction predates the earliest committed op-prompt artifact
+  (`v5`, 2026-08-01; the shipped pin is now `v10`), and it has never
+  been re-judged, while the same metric lost 0.090 on the oracle slice when
+  the stack migrated. It survives in `docs/guide/benchmarks.md` under a
+  dated currency note as an engineering-log result.
+- **BEAM is documented in `evals/README.md` for the first time** — what the
+  benchmark is (ten memory abilities, 100K–10M-token procedurally generated
+  chats, rubric-item judging), how to run the adapter/re-judge/reader-sweep,
+  and a findings table over the committed artifacts from PRs #191–#192:
+  budget-matched hybrid is a wash rather than a loss (rag 0.6425 vs hybrid
+  0.6226 at 16/16, −0.020 ± 0.029), BEAM judge transfer is small and
+  measured (≤0.016 per arm against a 0.073 stability floor), most of the gap
+  to published leaderboard numbers is context volume in the reading stack
+  (6→48 turns is +0.186 ± 0.041; a frontier reader over identical contexts
+  adds only ~0.04), and three weaknesses survive any reading stack
+  (summarization, event ordering, and abstention degrading with volume).
+  An undocumented benchmark with committed artifacts was a gap in the same
+  evidence discipline the rest of the tree enforces.
+- **Two standing rules added to `CLAUDE.md`** under "Publishing a benchmark
+  number": a bench-instrument migration (judge or answerer) blocks the
+  release gate until the docs-currency pass lands, and a claim is only
+  promoted to the README after the headline slice runs under two independent
+  judge families. The 0.936 run replicated at std 0.0000 three times —
+  determinism was read as validity, and judge transfer was never measured.
+- **`tests/test_eval_evidence.py`** gains rows for every number added or
+  moved: the 500-question table and its per-type breakdown, the
+  `ceiling-v38` side-by-side, the abstention/commit-precision counts
+  (computed from the committed per-question JSONL rows), the BEAM findings,
+  and retired-marker rows that keep the struck 0.936 pinned to the artifact
+  that produced it.
+### Added (2026-08-25 — adoption surfaces: install front door, comparison, security posture, support) [#189]
+- **The README now leads with the two-command lite path instead of a git
+  clone and a multi-GB image.** The first screen is `pip install
+  "pseudolife-mcp[lite]"` plus one client-registration command (Claude
+  Code or Codex), the try-it line, and an honest lite-vs-durable
+  inventory; the Docker stack is demoted to a clearly-labelled durable
+  tier below it. Nothing was deleted — the WSL2 memory guidance moved to
+  a new **Configuration → Windows / WSL2 memory** section, the two
+  manual-migration blockquotes (schema v25 re-embed, PostgreSQL 16→18
+  cutover) collapsed to pointers at their existing runbooks, and the
+  Windows ASCII-data-path caveat moved from the quickstart into
+  Troubleshooting. Rationale: every competitor's fastest credible path is
+  under two minutes with no container runtime, and ours already was — it
+  just sat ~100 lines down under a hedged heading.
+- **The lite tier's missing extractor is now stated where a user meets
+  it, not only in a log line nobody reads.** Lite ships no **extractor**,
+  so the **dream** pass advances its **cursor** but writes no canonical
+  facts and `memory_fact_set` is the only **cortex** writer — previously
+  indistinguishable from a broken cortex. `/health` gains an additive
+  `extractor` field (`none` / `configured` / `disabled`; omitted when the
+  service carries no resolvable dream config, and deliberately *not*
+  reflected in `status`, since `web/api.py` serves any non-ok payload as
+  a 503 that the Docker healthcheck and `ops/update.*` treat as fatal).
+  The stdio shim prints what is and is not working, plus the fix, once
+  per session when the daemon it attached to reports `extractor: "none"` —
+  the daemon's own startup warning is invisible on this path because
+  `shim.spawn_daemon` discards its stderr. That warning now also names the
+  fix command. Only an explicit `"none"` fires the notice: a configured
+  extractor, a deliberately dream-disabled bank, and an older daemon whose
+  `/health` predates the field all stay quiet.
+- **`docs/guide/comparison.md`** — the first named-competitor comparison:
+  Mem0, Zep/Graphiti, Letta, Cognee, memU and Memori, on the axes this
+  project is built around (one current value per **slot**, **supersession**
+  with version history, **provenance** tiers and **contender** parking,
+  human-reviewed merges with audit-stamped decisions, staleness as a
+  serving decision, zero-egress extraction, artifact-pinned numbers) — led
+  by the honest baseline of a markdown file plus grep, and closing with a
+  "use something else if" table that concedes multi-tenant SaaS, SSO and
+  compliance, managed hosting, agent-framework runtime, and non-MCP
+  clients by name. Every external claim is dated to the 2026-08 sweep it
+  came from and phrased as an observation of that project's docs at that
+  time, never as a present-tense absence; the page says so at the top and
+  asks readers to check current docs. It states no benchmark numbers of
+  its own, deferring to Benchmarks.
+- **`docs/guide/security-posture.md`** — the memory-integrity half of the
+  security story, framed against OWASP's persistent-memory-poisoning
+  entry (ASI06, December 2025). Maps each shipped mechanism to the
+  poisoning step it contains (provenance tiers, contender parking, the
+  opt-in **consolidation quarantine** two-man rule, the human-gated
+  **review queue** with `merge_decisions` audit rows, the v27 dream
+  rollback journal, the engram cross-index, supersession history, writer
+  keying, `source="status"` exclusion, the `stale_policy` *serving-side*
+  quarantine) with each one's default, and states flatly what is **not**
+  defended — prompt injection against the agent, content screening (the
+  MAFIA evaded class, including this project's own literal-faithfulness
+  gate), cryptographic writer authentication, ranking as a defense,
+  volume anomaly detection, unverified world-fact citations, and the host
+  itself. SECURITY.md keeps vulnerability reporting and gains a pointer.
+- **Support surface for external users**: `.github/ISSUE_TEMPLATE/`
+  issue forms (bug report asking for `/health` output, version + schema,
+  install tier, client and transport, with a redact-secrets warning and a
+  security-reports-go-elsewhere banner; feature request asking what you
+  were trying to do), `.github/ISSUE_TEMPLATE/config.yml` routing security
+  reports to private advisories, `.github/PULL_REQUEST_TEMPLATE.md`
+  carrying the repo's actual shipping checklist, a standard Contributor
+  Covenant 2.1 `CODE_OF_CONDUCT.md`, and a README **Support** section
+  stating solo-maintained and best-effort in as many words.
 
 ### Fixed (2026-08-25 — retrieval-log/compaction/dream-run retention never ran with dreaming disabled)
 - **A bank with `memory.dream.enabled=false` (a documented, first-class
@@ -281,6 +437,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   test parses every `CREATE TABLE IF NOT EXISTS` out of `schema.py` and
   fails if any table is absent from the list, so the next schema bump
   cannot reopen the gap silently.
+### Fixed (2026-08-25 — PG18 cutover dump: the same pipefail defect as #172, follow-up)
+- **`ops/migrate-pg18.ps1` guarded its cutover dump with gzip's exit status,
+  not pg_dump's.** The PG 16 → 18 migration script still carried the exact
+  `pg_dump | gzip` shape fixed in `ops/backup.ps1|.sh` below: the container's
+  POSIX `sh` has no `pipefail`, so a pg_dump that died partway would have
+  passed the "cutover pg_dump failed" check. Blast radius was limited — the
+  migration's exact table-count verification would catch a truncated dump
+  before the daemon restarted, and the old PG 16 volume is retained as the
+  rollback — which is why it was deferred out of the audit change rather
+  than fixed inline. pg_dump now writes the gzip itself (`-Z9`, plain
+  format; verified PG 18's pg_dump accepts a bare `-Z9`, and the output
+  stays a normal single-member gzip so the `gunzip -c` restore step is
+  unchanged), and the script joins the no-pipeline guard test
+  (`tests/test_ops_backup_integrity.py::test_dump_is_not_piped_into_gzip`).
+  It deliberately does NOT get the end-of-dump marker check — the count
+  verification is its completion guard.
+
 ### Fixed (2026-08-25 — ops-script audit: three ways a backup or a rollback quietly wasn't one)
 - **A pg_dump that died partway produced a "good" backup (#172).**
   `ops/backup.ps1|.sh` ran `pg_dump` piped into `gzip` inside the container;
@@ -329,6 +502,46 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `--force-rollback-tag` overrides. A stopped daemon cannot witness a
   mismatch and keeps the old behavior, and the happy path (IDs match) is
   unchanged.
+### Changed (2026-08-25 — argument contracts moved into the tool schemas)
+- **Every MCP tool now documents its arguments in the tool's own
+  `inputSchema` instead of cramming them into the description string.**
+  Nothing on the surface carried parameter descriptions before: an
+  argument's range, units, format, or "this bounds the seed search, not
+  the result" all had to live in the one description blob, which is the
+  string the per-tier manifest budget meters. That budget had been bumped
+  three times in six weeks (2026-07-18, 07-31, 08-05), each time after
+  trimming descriptions "to the minimum", and it still stood at 14 chars
+  of headroom on `minimal` and 20 on `core` — with the result that real
+  behavioral contracts were competing for characters. The #186
+  `memory_recall` fix landed the day before had lost its `hops` ceiling
+  and its cap numbers to exactly that wall.
+  Each argument's own contract now ships as an `Annotated[T,
+  Field(description=...)]` on the tool signature, which FastMCP renders
+  into `inputSchema.properties[arg].description`; the tool description
+  keeps what the tool is for, the contracts that span several arguments,
+  and the return shape. Tool-call behavior is unchanged — argument names,
+  types, defaults, optionality, enum values, `outputSchema` and
+  annotations are byte-identical across all 35 tools with descriptions
+  stripped; `Field` carries a description and nothing else.
+- **`memory_recall`'s full contract is documented again.** Its purpose and
+  `low_confidence` fallback and the caps/per-hop-reservation return
+  contract are back in the description, and the `hops` ceiling (clamped
+  to 1..5) plus the `top_k` seed-bound-not-result-bound rule now sit on
+  those two parameters. The description is smaller than the pre-trim
+  original because the argument text moved to the schema.
+- **The manifest budget now meters the schema too**, so the newly-used
+  space is accounted rather than becoming an unmetered escape hatch:
+  `tests/test_tool_consolidation.py::test_descriptions_fit_tier_budgets`
+  raises the description budgets to 5,000 / 11,500 / 17,000 chars
+  (minimal / core / full) and adds a per-tier cap on the sum of
+  param-description chars (2,600 / 5,100 / 8,200, measured 1,826 / 4,304
+  / 7,413 the day it landed) plus a 300-char cap per parameter beside the
+  existing 1,600 per tool. Post-change descriptions measure 3,232 /
+  7,289 / 11,941.
+- `pydantic>=2.11,<3` is now a declared dependency — `mcp_server.py`
+  imports `pydantic.Field` directly rather than relying on it arriving
+  through `mcp`.
+
 ### Fixed (2026-08-25 — `memory_recall` no longer returns an unbounded payload, #186)
 - **`memory_recall` now caps `entities`/`edges`/`texts`/per-entity `facts`
   and truncates supporting text — with a per-hop quota, not a flat
@@ -2524,6 +2737,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a fusion change that lands in only one place goes red.
 
 ### Changed (2026-07-30 — front door re-based to the end-to-end run; cascade published)
+> **RETIRED 2026-08-25 (#188): the cascade 0.936 headline and the
+> full-haystack confirmation below are no longer published claims.** The
+> 2026-08-17 bench-instrument migration scores the same 78 questions at
+> cascade 0.846 against an unchanged 0.859 control; the `_s` confirmation
+> has never been re-judged. See the `[Unreleased]` re-framing entry at the
+> top of this file.
 - **The README benchmark table now shows the fresh end-to-end measurement**
   (`ceiling-e2e`: fresh qwen-27b extraction under the v25 backbone, BM25-on
   turn retrieval, reproducible q8_0 serving, 3 byte-identical replicates) —
@@ -2613,6 +2832,11 @@ the three REST endpoints, which had no caller in the console or anywhere else.
   `evals/lme_v2_check_fixd.py`.
 
 ### Added (2026-07-30 — the eval harness reports the commit-gated cascade)
+> **RETIRED 2026-08-25 (#188): the oracle 0.936 quoted below.** The derived
+> metric stays in the harness, but its router reads the answerer's
+> abstention behaviour, which does not transfer across bench instruments —
+> on the Qwen3.8 stack the same slice scores 0.846. See the `[Unreleased]`
+> re-framing entry.
 - **`cascade` derived metric across the LongMemEval tooling.** Every judged
   run already answers the `cortex` and `rag` arms, and per-question analysis
   of the `ceiling-e2e` artifacts showed the cortex arm's *commitment* (not

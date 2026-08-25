@@ -813,7 +813,12 @@ class PostgresStorage:
         etype: str | None = None,
     ) -> int:
         """Upsert by canonical name; first non-null etype wins (soft typing
-        is advisory, so a later conflicting hint must not silently retype)."""
+        is advisory, so a later conflicting hint must not silently retype).
+
+        A fresh mint also repairs the fact/lesson cross-index for its name —
+        see :meth:`_relink_orphaned_rows`. Mint-only (``xmax = 0`` is zero
+        exactly when ON CONFLICT took the INSERT arm), so the repeated-upsert
+        hot path (every ``memory_outcome`` log) pays nothing."""
         with self._txn():
             row = self.conn.execute(
                 """
@@ -821,11 +826,84 @@ class PostgresStorage:
                 VALUES (%s, %s, %s, %s)
                 ON CONFLICT (canonical) DO UPDATE
                   SET etype = COALESCE(entities.etype, EXCLUDED.etype)
-                RETURNING id
+                RETURNING id, (xmax = 0) AS minted
                 """,
                 (canonical, display or canonical, etype, time.time()),
             ).fetchone()
+            if row[1]:
+                self._relink_orphaned_rows(int(row[0]), canonical)
         return int(row[0])
+
+    def _relink_orphaned_rows(self, entity_id: int, canonical: str) -> None:
+        """Re-link orphaned fact/lesson rows to a freshly minted entity.
+
+        :meth:`delete_entity` NULLs ``facts``/``lessons`` ``entity_id`` and
+        ``object_entity_id`` (no cascade), and nothing else re-links those
+        rows until their slot is next written — so a deleted-then-re-minted
+        name under-counts everywhere the FK is read (fold-direction ranking,
+        ``backfill_entity_sources``, ``lesson_entity_ids``; the #177 damage).
+
+        Norm bridging, deliberately conservative: candidates are matched by
+        ``norm_name(raw stored text) == canonical`` — the exact rule
+        ``sync._link_entity_ids`` applies on slot writes (minus aliases,
+        which a fresh mint cannot have) — and each UPDATE matches the exact
+        stored text. The stored ``entity_norm`` column is the CORTEX norm
+        (``_norm_key``) and is never consulted: the two spaces disagree
+        (``"G:"`` → ``"g"`` vs ``"g:"``), and a cross-space match would
+        mis-link the cross-index.
+
+        The ILIKE prefilter is a sound NECESSARY condition: ``norm_name``
+        only lowercases and folds separator/hyphen runs to ``-``, so the
+        characters inside any hyphen-free segment of the canonical were
+        contiguous in the raw text — every true match contains the longest
+        such segment as a case-insensitive literal substring. PG vs Python
+        case-folding (non-C collation, exotic unicode) can only DROP a
+        match — which heals on the next slot write — never add one; the
+        Python ``norm_name`` check below stays the authority.
+
+        Cost, measured 2026-08-25 (local PG16 in Docker, synthetic 120-char
+        values): ~50 ms per mint at 5k facts, ~65 ms at 50k with the ILIKE
+        prefilter (~120 ms and ~420 ms without it — the object-side columns
+        are unlinked on almost every row, so those two scans see the whole
+        table and every distinct value shipped to Python; regexp_replace
+        prefilters measured no better than Python, ILIKE substring search
+        does). The live bank is ~750 entries today; mints are
+        create-miss-only, so bulk mints (a dream pass, a bench bank build)
+        pay per fresh name — if banks outgrow ~50k facts, escalate to a
+        pg_trgm index on the text columns or a partial expression index
+        over a SQL-side norm (schema bump), not to a looser match. Runs
+        inside ensure_entity's transaction, mint-only, under the service
+        lock; the enlarged transaction can newly hit the connection's 5s
+        ``lock_timeout`` on facts/lessons row locks (external writers only —
+        the daemon is single-writer), which aborts and rolls back the whole
+        mint rather than leaving a partial repair."""
+        from pseudolife_memory.graph import norm_name
+        if not canonical:
+            return
+        seg = max(canonical.split("-"), key=len)
+        # "%"/"_"/"\" escaped for LIKE; only "%" can survive norm_name, the
+        # other two are folded to "-", but escape all three for robustness.
+        like = ("%" + seg.replace("\\", r"\\").replace("%", r"\%")
+                         .replace("_", r"\_") + "%")
+        for table, id_col, text_col in (
+            ("facts", "entity_id", "entity"),
+            ("facts", "object_entity_id", "value"),
+            ("lessons", "entity_id", "entity"),
+            ("lessons", "object_entity_id", "about"),
+        ):
+            texts = [r[0] for r in self.conn.execute(
+                f"SELECT DISTINCT {text_col} FROM {table} "
+                f"WHERE {id_col} IS NULL AND {text_col} IS NOT NULL "
+                f"AND {text_col} ILIKE %s",
+                (like,),
+            ).fetchall()]
+            for t in texts:
+                if norm_name(t) != canonical:
+                    continue
+                self.conn.execute(
+                    f"UPDATE {table} SET {id_col} = %s "
+                    f"WHERE {id_col} IS NULL AND {text_col} = %s",
+                    (entity_id, t))
 
     def find_entity(self, name_norm: str) -> dict | None:
         """Resolve a normalized name via canonical first, then aliases."""
