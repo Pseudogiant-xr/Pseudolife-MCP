@@ -445,6 +445,9 @@ class MemoryService:
         # indistinguishable from an idle one: zero rows, green health.
         # In-memory only, like the CMS's own tier counters.
         self._retrieval_log_errors = 0
+        # Same hazard, same remedy for the v33 slot-read counter: a dead
+        # counter reads as "no fact is ever used" unless failures surface.
+        self._slot_read_errors = 0
         # Resolve data directory first — that's where memory_state lives
         # AND where the default config sits (if config_path not given).
         self.data_dir = Path(data_dir) if data_dir else Path.cwd() / "data"
@@ -1513,6 +1516,20 @@ class MemoryService:
                 log["enabled"] = bool(self.config.memory.retrieval_log.enabled)
                 log["write_errors"] = self._retrieval_log_errors
                 result["retrieval_log"] = log
+                # Read audit (schema v33): never-read fractions + the
+                # read/write balance. Same guard rationale as the retrieval
+                # log — stats() is on the session-start path and must not
+                # break on a telemetry read.
+                try:
+                    audit = self._storage.read_audit()
+                except Exception:  # noqa: BLE001
+                    logger.warning("read-audit computation failed",
+                                   exc_info=True)
+                    audit = {"unavailable": True}
+                audit["slot_tracking_enabled"] = bool(getattr(
+                    self.config.memory.cortex, "read_tracking", True))
+                audit["slot_read_write_errors"] = self._slot_read_errors
+                result["read_audit"] = audit
             return result
 
     # ------------------------------------------------------------------
@@ -1920,8 +1937,29 @@ class MemoryService:
         (``memory.search.stale_policy``; "annotate" = today's behavior)."""
         return getattr(self.config.memory.search, "stale_policy", "annotate")
 
-    def cortex_lookup(self, entity: str, attribute: str) -> dict[str, Any] | None:
+    def _track_slot_reads(self, slots: list[tuple[str, str]]) -> None:
+        """Slot read telemetry (schema v33): count each slot SERVED as an
+        answer. Never raises — telemetry must not break the read it rides
+        on (the retrieval-log contract). Called under ``self._lock``; the
+        storage connection is shared, so an unlocked call would interleave
+        transaction blocks (the 2026-08-21 wedge class)."""
+        if (self._storage is None or not slots
+                or not getattr(self.config.memory.cortex,
+                               "read_tracking", True)):
+            return
+        try:
+            self._storage.bump_slot_reads(slots)
+        except Exception:  # noqa: BLE001
+            self._slot_read_errors += 1
+            logger.warning("slot-read telemetry failed", exc_info=True)
+
+    def cortex_lookup(self, entity: str, attribute: str,
+                      track: bool = True) -> dict[str, Any] | None:
         """Exact slot lookup — the one ``current`` fact, or ``None``.
+
+        ``track=False`` skips the slot-read telemetry bump — for internal
+        callers whose lookup is verification, not serving (the dream
+        rollback's post-revert check).
 
         Alias-aware: on a direct slot miss, the entity name is resolved through
         the graph's ``entity_aliases`` (Postgres) and the canonical name is
@@ -1958,6 +1996,13 @@ class MemoryService:
                             if r.status == "removed"
                         ]
                         sp = self._stale_policy
+                        # Gate on live members: a fully-emptied set slot is
+                        # routed down the miss path by callers, so serving
+                        # it is not an answer and must not count.
+                        if track and members:
+                            from pseudolife_memory.memory.cortex import _norm_key
+                            self._track_slot_reads(
+                                [(_norm_key(name), _norm_key(attribute))])
                         return {
                             "kind": "set", "entity": name, "attribute": attribute,
                             "members": [_cortex_record_to_dict(
@@ -1974,6 +2019,10 @@ class MemoryService:
                 from pseudolife_memory.memory.cortex import _norm_key
                 d["source_entries"] = self._storage.traces_for_slot(
                     _norm_key(rec.entity), _norm_key(rec.attribute))
+            if track:
+                from pseudolife_memory.memory.cortex import _norm_key
+                self._track_slot_reads(
+                    [(_norm_key(rec.entity), _norm_key(rec.attribute))])
             return d
 
     def cortex_contenders(self, entity: str, attribute: str) -> dict[str, Any]:
@@ -2189,6 +2238,10 @@ class MemoryService:
                         "age": _relative_time(anchor) if anchor else None,
                     })
             _demote_stale(entries, self._stale_policy)
+            from pseudolife_memory.memory.cortex import _norm_key
+            self._track_slot_reads(sorted({
+                (_norm_key(e["entity"]), _norm_key(e["attribute"]))
+                for e in entries}))
             return {"count": len(entries), "entries": entries}
 
     def _cortex_bm25_fuse(self, query, hits, cfg, top_k):
@@ -3251,6 +3304,7 @@ class MemoryService:
         return {"found": True, "entry_id": row["id"], "text": row["text"],
                 "source": row.get("source"),
                 "reinforcements": row.get("reinforcements", 0),
+                "explicit_reinforcements": row.get("explicit_reinforcements", 0),
                 "access_count": row.get("access_count", 0) + 1,  # +1 for the bump just applied
                 "consolidated_into": facts}
 
@@ -3261,7 +3315,11 @@ class MemoryService:
             self._ensure_init()
             if self._storage is None or self._storage.get_entry(int(entry_id)) is None:
                 return {"reinforced": False, "faded": True}
-            self._storage.bump_reinforcements(int(entry_id), 1)
+            # v33 split: explicit=True moves the explicit counter ONLY here,
+            # atomically with the shared one — the dream's trace path bumps
+            # the shared counter alone, so usefulness stays separable from
+            # consolidation yield.
+            self._storage.bump_reinforcements(int(entry_id), 1, explicit=True)
             if self._cms is not None:
                 self._cms.bump_entry_reinforcements(int(entry_id), 1)
             self._record_retrieval_use(int(entry_id), "reinforce")
@@ -3276,6 +3334,20 @@ class MemoryService:
             removed = self._cortex.forget(entity, attribute)
             if removed:
                 self._save_cortex()
+                # Drop the slot's read counters too — an orphaned counter
+                # would let slot coverage exceed 100% and leak a stale
+                # count into a later re-created slot. Guarded: counter
+                # hygiene must not fail the forget that already happened.
+                if self._storage is not None:
+                    from pseudolife_memory.memory.cortex import _norm_key
+                    try:
+                        self._storage.delete_slot_reads(
+                            _norm_key(entity),
+                            None if attribute is None else _norm_key(attribute))
+                    except Exception:  # noqa: BLE001
+                        self._slot_read_errors += 1
+                        logger.warning("slot-read cleanup failed",
+                                       exc_info=True)
             return {"removed": removed, "entity": entity, "attribute": attribute}
 
     # ------------------------------------------------------------------
@@ -4316,7 +4388,10 @@ class MemoryService:
                 # exists for).
                 self.cortex_resolve(row["entity"], row["attribute"],
                                     accept=True)
-            cur = self.cortex_lookup(row["entity"], row["attribute"])
+            # track=False: this lookup verifies the rollback took — it is
+            # not a serve, and counting it would pollute the read signal.
+            cur = self.cortex_lookup(row["entity"], row["attribute"],
+                                     track=False)
             if cur and _norm_value(cur.get("value", "")) == _norm_value(
                     row["prev_value"]):
                 return "reverted"

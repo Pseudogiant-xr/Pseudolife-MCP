@@ -62,6 +62,7 @@ CALLER_HOLDS_LOCK = {
     "_annotate_lesson_staleness",
     "_log_retrieval_event",
     "_record_retrieval_use",
+    "_track_slot_reads",
     "_persist_episodes",
     "_load_infer_cursor",
     "_save_infer_cursor",

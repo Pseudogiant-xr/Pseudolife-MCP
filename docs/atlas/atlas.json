@@ -2,7 +2,7 @@
  "meta": {
   "title": "PseudoLife-MCP System Atlas",
   "version": "0.14.0",
-  "schema": 32,
+  "schema": 33,
   "verified": "2026-08-25"
  },
  "groups": {
@@ -789,8 +789,8 @@
    "p": "pseudolife_memory/storage/schema.py",
    "d": [
     "pgvector required; Apache AGE fully removed",
-    "entries(vector 1024) · facts · world_facts · lessons · entities/edges · episodes · memory_traces · communities · outcome_signals · entity_kinds · dream_runs/dream_run_slots · chronicle_events · retrieval_events/retrieval_uses",
-    "Additive migrations: v23 fact freshness_class · v24 entity_kinds · v25 1024-d re-embed · v26 set-valued slots · v27 dream-run pre-image journal · v28 chronicle events (dated occurrences, additive-only) · v29 fact stance (labelled hedge field, NULL = plain) · v30 merge-proposal judge verdict (five nullable entity_proposals.judge_* columns, an opinion until a decision path ratifies it) · v31 retrieval event log (retrieval_events/retrieval_uses append-only query/served/used tuples for a future learned reranker; observational only) · v32 retrieval-log ranking params + per-entry fusion components (nullable retrieval_events.params JSONB; NULL = a v31-era row)",
+    "entries(vector 1024) · facts · world_facts · lessons · entities/edges · episodes · memory_traces · communities · outcome_signals · entity_kinds · dream_runs/dream_run_slots · chronicle_events · retrieval_events/retrieval_uses · slot_reads",
+    "Additive migrations: v23 fact freshness_class · v24 entity_kinds · v25 1024-d re-embed · v26 set-valued slots · v27 dream-run pre-image journal · v28 chronicle events (dated occurrences, additive-only) · v29 fact stance (labelled hedge field, NULL = plain) · v30 merge-proposal judge verdict (five nullable entity_proposals.judge_* columns, an opinion until a decision path ratifies it) · v31 retrieval event log (retrieval_events/retrieval_uses append-only query/served/used tuples for a future learned reranker; observational only) · v32 retrieval-log ranking params + per-entry fusion components (nullable retrieval_events.params JSONB; NULL = a v31-era row) · v33 read telemetry (slot_reads per-slot serve counters, slot-keyed so cortex snapshots don't reset them; entries.explicit_reinforcements splits deliberate reinforces from dream-trace links; feeds memory_stats read_audit)",
     "One-current-row-per-slot partial unique indexes"
    ]
   },

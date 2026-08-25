@@ -737,6 +737,89 @@ class PostgresStorage:
             "uses": int(uses[0]),
         }
 
+    def read_audit(self, now: float | None = None) -> dict:
+        """Never-read fractions and read/write balance for ``memory_stats``
+        (schema v33) — the audit that distinguishes a bank that is consulted
+        from one that only accumulates. Age buckets are fixed at 14/45 days:
+        young entries are expected to be unread, so only the old-and-unread
+        tail is a hygiene signal. Like ``retrieval_log_health`` this is
+        computed on demand; the entries scans are O(rows) and run under the
+        service lock on every ``memory_stats`` call — fine at 10^3..10^4
+        entries, revisit if a bank grows past that."""
+        t = time.time() if now is None else float(now)
+        agg = self.conn.execute(
+            "SELECT count(*), count(*) FILTER (WHERE access_count = 0), "
+            "COALESCE(sum(access_count), 0), "
+            "COALESCE(percentile_cont(0.5) WITHIN GROUP "
+            "(ORDER BY access_count), 0) "
+            "FROM entries").fetchone()
+        total, never, reads_total, median = (
+            int(agg[0]), int(agg[1]), int(agg[2]), float(agg[3]))
+        by_age = {}
+        for key, lo, hi in (("lt_14d", t - 14 * 86400, None),
+                            ("d14_45", t - 45 * 86400, t - 14 * 86400),
+                            ("gt_45d", None, t - 45 * 86400)):
+            cond, params = [], []
+            if lo is not None:
+                cond.append("ts >= %s")
+                params.append(lo)
+            if hi is not None:
+                cond.append("ts < %s")
+                params.append(hi)
+            row = self.conn.execute(
+                "SELECT count(*), count(*) FILTER (WHERE access_count = 0) "
+                f"FROM entries WHERE {' AND '.join(cond)}",
+                tuple(params)).fetchone()
+            by_age[key] = {"n": int(row[0]), "never_read": int(row[1])}
+        worst = [
+            {"source": r[0], "n": int(r[1]), "never_read": int(r[2]),
+             "never_read_pct": round(100.0 * r[2] / r[1], 1)}
+            for r in self.conn.execute(
+                "SELECT source, count(*) AS n, "
+                "count(*) FILTER (WHERE access_count = 0) AS never "
+                "FROM entries GROUP BY source HAVING count(*) >= 5 "
+                "ORDER BY count(*) FILTER (WHERE access_count = 0)::float "
+                "/ count(*) DESC LIMIT 5").fetchall()
+        ]
+        top_share = self.conn.execute(
+            "SELECT COALESCE(sum(access_count), 0) FROM ("
+            "SELECT access_count FROM entries ORDER BY access_count DESC "
+            "LIMIT GREATEST(1, (SELECT count(*) / 10 FROM entries))) d"
+        ).fetchone()[0]
+        slots = self.conn.execute(
+            "SELECT (SELECT count(DISTINCT (entity_norm, attribute_norm)) "
+            "FROM facts WHERE status = 'current'), "
+            "(SELECT count(*) FROM slot_reads), "
+            "(SELECT COALESCE(sum(read_count), 0) FROM slot_reads)"
+        ).fetchone()
+        reinf = self.conn.execute(
+            "SELECT COALESCE(sum(reinforcements), 0), "
+            "COALESCE(sum(explicit_reinforcements), 0) FROM entries"
+        ).fetchone()
+        return {
+            "entries": {
+                "total": total,
+                "never_read": never,
+                "never_read_pct": round(100.0 * never / total, 1) if total else 0.0,
+                "reads_total": reads_total,
+                "reads_median": median,
+                "top_decile_read_share": (
+                    round(float(top_share) / reads_total, 3)
+                    if reads_total else None),
+                "by_age": by_age,
+            },
+            "worst_sources": worst,
+            "slots": {
+                "current_slots": int(slots[0]),
+                "slots_read": int(slots[1]),
+                "reads_total": int(slots[2]),
+            },
+            "reinforcements": {
+                "total": int(reinf[0]),
+                "explicit": int(reinf[1]),
+            },
+        }
+
     def loop_health(self, window_s: float, now: float | None = None) -> dict:
         """Windowed loop-activity counts for the Console tile: current vs the
         immediately preceding window of stores + outcome signals, session
@@ -1785,9 +1868,11 @@ class PostgresStorage:
             "ORDER BY f.entity_norm, f.attribute_norm", (entry_id,)).fetchall()]
 
     def get_entry(self, entry_id: int) -> dict | None:
-        cols = ("id", "text", "source", "ts", "reinforcements", "access_count")
+        cols = ("id", "text", "source", "ts", "reinforcements",
+                "explicit_reinforcements", "access_count")
         row = self.conn.execute(
-            "SELECT id, text, source, ts, reinforcements, access_count "
+            "SELECT id, text, source, ts, reinforcements, "
+            "explicit_reinforcements, access_count "
             "FROM entries WHERE id = %s",
             (entry_id,)).fetchone()
         return dict(zip(cols, row)) if row else None
@@ -1803,11 +1888,54 @@ class PostgresStorage:
             "SELECT id FROM entries WHERE id = ANY(%s)", (ids,)).fetchall()
         return {int(r[0]) for r in rows}
 
-    def bump_reinforcements(self, entry_id: int, delta: int) -> None:
+    def bump_reinforcements(self, entry_id: int, delta: int,
+                            explicit: bool = False) -> None:
+        """``explicit=True`` (the v33 split) additionally bumps
+        ``explicit_reinforcements`` in the SAME statement — one transaction,
+        so a connection loss cannot commit one counter without the other.
+        The dream's trace path calls this with the default, so the shared
+        counter (the retention formula's input) keeps its pre-v33 meaning."""
+        extra = (", explicit_reinforcements = explicit_reinforcements + %s"
+                 if explicit else "")
+        params = (delta, delta, entry_id) if explicit else (delta, entry_id)
         with self._txn():
             self.conn.execute(
-                "UPDATE entries SET reinforcements = reinforcements + %s WHERE id = %s",
-                (delta, entry_id))
+                f"UPDATE entries SET reinforcements = reinforcements + %s"
+                f"{extra} WHERE id = %s",
+                params)
+
+    def bump_slot_reads(self, slots: list[tuple[str, str]],
+                        now: float | None = None) -> None:
+        """Count one serve for each ``(entity_norm, attribute_norm)`` slot.
+        Upsert-increment; a slot row exists only once something read it."""
+        if not slots:
+            return
+        t = time.time() if now is None else float(now)
+        with self._txn(), self.conn.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO slot_reads "
+                "(entity_norm, attribute_norm, read_count, last_read_at) "
+                "VALUES (%s, %s, 1, %s) "
+                "ON CONFLICT (entity_norm, attribute_norm) DO UPDATE SET "
+                "read_count = slot_reads.read_count + 1, "
+                "last_read_at = EXCLUDED.last_read_at",
+                [(e, a, t) for e, a in slots])
+
+    def delete_slot_reads(self, entity_norm: str,
+                          attribute_norm: str | None = None) -> None:
+        """Drop read counters for a forgotten entity (or one exact slot) —
+        called by ``cortex_forget`` so an orphaned counter cannot make slot
+        coverage exceed 100% or leak a stale count into a re-created slot."""
+        with self._txn():
+            if attribute_norm is None:
+                self.conn.execute(
+                    "DELETE FROM slot_reads WHERE entity_norm = %s",
+                    (entity_norm,))
+            else:
+                self.conn.execute(
+                    "DELETE FROM slot_reads WHERE entity_norm = %s "
+                    "AND attribute_norm = %s",
+                    (entity_norm, attribute_norm))
 
     def bump_access_count(self, entry_id: int, delta: int) -> None:
         with self._txn():

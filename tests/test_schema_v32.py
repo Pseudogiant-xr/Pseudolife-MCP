@@ -15,11 +15,9 @@ from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
 
 
 def test_meta_version_is_32():
-    # The newest schema test carries the exact current-version pin — the
-    # deliberate tripwire that forces a bump author through the shipping
-    # checklist. On the v33 bump: relax this to >= 32 and pin == 33 in the
-    # new test_schema_v33.py (two-file touch, not ten).
-    assert SCHEMA_META_VERSION == 32
+    # Relaxed on the v33 bump — only the newest schema test carries the
+    # exact pin (see test_schema_v33.py).
+    assert SCHEMA_META_VERSION >= 32
 
 
 def test_retrieval_events_params_column_exists(pg_conn):

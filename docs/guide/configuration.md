@@ -8,7 +8,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v32). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v33). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
 | `PSEUDOLIFE_MCP_STORAGE` | `auto` | `files` opts the daemon out of the `[lite]` embedded Postgres (file mode even when pg0-embedded is installed). Only consulted when no DSN is set. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). |
 | `PSEUDOLIFE_MCP_HOST` / `_PORT` | `127.0.0.1` / `8765` | Daemon bind address. |
@@ -136,6 +136,16 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   false-merge risk in mind. See
   [the single-writer cortex design](../specs/2026-06-19-single-writer-cortex-design.md)
   for the structural fix.
+- **Slot read telemetry on** (`memory.cortex.read_tracking = true`, schema
+  v33) — every cortex slot served as an answer (`memory_fact_get` and the
+  cortex-first block of `memory_search`) bumps its `slot_reads` counter,
+  one small upsert per fact-serving call. Feeds the `read_audit` section
+  of `memory_stats` (never-read fractions, slot coverage). Deliberately
+  uncounted: internal verification lookups, and the facts attached to
+  `memory_recall`/`memory_graph` neighborhoods (context, not a direct
+  answer) — treat a slot's never-read status as a lower bound. Set
+  `false` to disable the write; the audit section stays available either
+  way (it just stops moving).
 - **No HyDE / no reflection** — both rely on an LLM callback. Claude *is*
   the LLM, so the natural way to reflect is for Claude to call
   `memory_store` with a self-composed summary.
@@ -523,7 +533,7 @@ deletes files the tool itself wrote.
 
 ## Schema version history
 
-The current Postgres meta version is **v32**; migrations are additive
+The current Postgres meta version is **v33**; migrations are additive
 `ADD COLUMN IF NOT EXISTS` on daemon start, and legacy file-mode `.pt`
 banks auto-migrate into Postgres. The one exception is v25 itself: a
 vector *dimension* change on an existing column is not additive, so
@@ -561,6 +571,7 @@ The milestones:
 | v30 | `entity_proposals.judge_verdict` / `judge_confidence` / `judge_note` / `judge_model` / `judged_at` — the autonomous Step-C judge's shadow verdict on a pending merge proposal, recorded by the sweep (`memory.deep_dream.judge_mode`: `off` \| `shadow` \| `auto-reject`) and surfaced beside the evidence in review payloads. The verdict is an opinion on the pending row; the durable decision record stays `merge_decisions`, written only when a decision path (human, agent, or the confidence-gated auto-reject) ratifies it. `NULL` = not yet judged, exactly the pre-v30 behaviour, so the migration is a no-op on existing banks. Judge-model floor measured by `evals/judge_ladder.py` (`evals/results/judge-ladder-20260816.json`). Additive/idempotent |
 | v31 | `retrieval_events` + `retrieval_uses` — the retrieval event log (learned-reranker Phase 0). Every `memory_search` appends one event row (query text, the ranked served list as JSONB with entry ids/scores/ranks, writer session/episode); a later `memory_get`/`memory_reinforce` on a served entry in the same session writes an implicit relevance label (most-recent serving event wins, bounded by `memory.retrieval_log.use_window_seconds`). Together they are the (query, served, used) training tuples for a future learned fusion/reranker stage — purely observational, no retrieval behaviour changes. Served ids carry no FK (entries are evictable; training joins tolerate dangling ids); labels CASCADE from their event; events are pruned on the dream-sweep tick after `memory.retrieval_log.retention_days` (default 365). Kill-switch: `memory.retrieval_log.enabled`. Additive/idempotent |
 | v32 | `retrieval_events.params` — the ranking knobs in force for the query (effective `top_k` / keep-threshold, the recency ramp, BM25 weight and scorer params, the reranker's fusion weight + margin gate and whether it actually fired, timeline/contiguity settings, and the call's filters), logged beside a widened `served` list whose per-entry `components` blob carries the fusion INPUTS: bi-encoder score, cross-encoder score (`null` when the margin gate skipped the pass — a distinction a learned head needs), BM25 boost, surprise, recency and the source/supersession multipliers. Phase 0 logged only the fused score, which is the output a Phase-1 learned head is supposed to predict; the inputs are not recoverable afterwards, because config is mutable at runtime and band recency, supersession flags and access counts all mutate on every serve. Nothing new is computed at serve time — these values were already in hand and were being discarded. `NULL` params = a v31-era row. Additive/idempotent |
+| v33 | `slot_reads` + `entries.explicit_reinforcements` — read telemetry. `slot_reads` counts how many times each cortex slot was *served as an answer* (`memory_fact_get` and `memory_search`'s cortex-first block), keyed on the stable `(entity_norm, attribute_norm)` slot like `memory_traces` so counters survive cortex snapshot saves; deliberately uncounted are internal verification lookups (e.g. the dream rollback's post-revert check) and the facts attached to `memory_recall`/`memory_graph` neighborhoods (context, not a direct answer), so never-read is a lower bound. `explicit_reinforcements` moves only on `memory_reinforce`, splitting the deliberate "this was useful" signal out of the shared `reinforcements` counter, which also counts dream-trace links (and still feeds the retention formula unchanged). Both feed the new `read_audit` section of `memory_stats` (never-read fractions by age and source, read/write balance, slot coverage) — motivated by the 2026-08-26 bank audit, where entry reads were measurable but the 4.6k fact slots had no read signal at all. Kill-switch: `memory.cortex.read_tracking`. Additive/idempotent |
 
 After running the entity-kind backfill (`evals/apply_entity_kinds.py --apply`), the daemon must be restarted for inference to take effect — it caches the entity-kind map for the life of its process.
 
