@@ -159,13 +159,15 @@ def test_tool_call_requires_token(daemon):
 
 async def _call(url: str, tool: str, args: dict):
     from mcp.client.session import ClientSession
-    from mcp.client.streamable_http import streamablehttp_client
+    from mcp.client.streamable_http import (
+        create_mcp_http_client, streamable_http_client)
 
     headers = {"Authorization": f"Bearer {_TOKEN}"}
-    async with streamablehttp_client(url + "/mcp", headers=headers) as (r, w, _):
-        async with ClientSession(r, w) as s:
-            await s.initialize()
-            return await s.call_tool(tool, args)
+    async with create_mcp_http_client(headers=headers) as http:
+        async with streamable_http_client(url + "/mcp", http_client=http) as (r, w):
+            async with ClientSession(r, w) as s:
+                await s.initialize()
+                return await s.call_tool(tool, args)
 
 
 def _result_text(result) -> str:
@@ -192,18 +194,22 @@ def test_two_clients_no_lost_writes(daemon):
 
     async def _interleave():
         from mcp.client.session import ClientSession
-        from mcp.client.streamable_http import streamablehttp_client
+        from mcp.client.streamable_http import (
+            create_mcp_http_client, streamable_http_client)
         headers = {"Authorization": f"Bearer {_TOKEN}"}
 
         async def session_stores(tag: str, n: int):
-            async with streamablehttp_client(url + "/mcp", headers=headers) as (r, w, _):
-                async with ClientSession(r, w) as s:
-                    await s.initialize()
-                    for i in range(n):
-                        await s.call_tool("memory_store", {
-                            "text": f"concurrency probe {tag} item {i}",
-                            "source": "concurrency",
-                        })
+            async with create_mcp_http_client(headers=headers) as http:
+                async with streamable_http_client(
+                    url + "/mcp", http_client=http,
+                ) as (r, w):
+                    async with ClientSession(r, w) as s:
+                        await s.initialize()
+                        for i in range(n):
+                            await s.call_tool("memory_store", {
+                                "text": f"concurrency probe {tag} item {i}",
+                                "source": "concurrency",
+                            })
 
         await asyncio.gather(session_stores("A", 6), session_stores("B", 6))
 
@@ -251,23 +257,19 @@ def test_transport_security_policy_is_explicit_not_inherited():
     authenticated = mcp_server.transport_security_for(auth_configured=True)
     assert authenticated.enable_dns_rebinding_protection is False
 
-    # And our policy must SURVIVE a non-loopback host — the discriminating
-    # case. Asserting on the module-global `mcp` proves nothing here: the SDK
-    # heuristic would install an identical object (its host defaults to
-    # 127.0.0.1), daemon.py overwrites it at startup anyway, and other tests
-    # mutate it. A fresh instance built the way a future tidy-up might build
-    # one — passing the configured bind through — is what pins the fix: drop
-    # the explicit `transport_security=` and the heuristic silently disarms
-    # protection for this host.
-    from mcp.server.fastmcp import FastMCP
-
-    probe = FastMCP(
-        "probe", host="0.0.0.0",
-        transport_security=mcp_server.transport_security_for(
-            auth_configured=False),
-    )
-    assert probe.settings.transport_security.enable_dns_rebinding_protection \
-        is True
+    # And the selected policy must actually reach the transport. SDK v2 takes
+    # the settings at streamable_http_app() build time, so the seam to pin is
+    # apply_transport_security() -> build_streamable_http_app(): the module
+    # global the builder forwards must be exactly the selected policy (a
+    # future tidy-up that rebuilds the app without passing it would silently
+    # fall back to the SDK default).
+    prior = mcp_server._TRANSPORT_SECURITY
+    try:
+        selected = mcp_server.apply_transport_security(auth_configured=False)
+        assert mcp_server._TRANSPORT_SECURITY is selected
+        assert selected.enable_dns_rebinding_protection is True
+    finally:
+        mcp_server._TRANSPORT_SECURITY = prior
 
 
 @pytest.fixture(scope="module")

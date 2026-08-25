@@ -26,7 +26,7 @@ dependencies = [
     # distribution agree with it. Lifting the bound is a real migration —
     # the SDK is used across fastmcp, lowlevel, client.session,
     # streamable_http and stdio_server — not a version bump.
-    "mcp>=1.0.0,<2",
+    "mcp>=2.1,<3",
     "pypdf>=4.0",
     "psycopg[binary]>=3.1",
     "pgvector>=0.3",

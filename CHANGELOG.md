@@ -6,6 +6,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-08-25 — MCP SDK v2 / protocol 2026-07-28: stateless core, per-request identity)
+- **The daemon, shim, and toolset tiering now run on MCP Python SDK v2
+  (`mcp>=2.1,<3`), serving protocol revision 2026-07-28 alongside every
+  earlier revision from the same server — Claude Code negotiates the new
+  stateless protocol; Claude Desktop and other handshake-era clients are
+  unaffected.** What moved: `FastMCP` → `MCPServer`; transport-security
+  settings now ride `build_streamable_http_app()` (v2 takes them at app
+  build, not construction); the tiering transport hook collapsed from
+  three v1 private-internals patches to one wrap of the v2 dispatch
+  registry, which also binds each request's headers into the
+  `writer_context` seam (v2 removed the ambient `request_ctx` the identity
+  resolution rode on — no per-tool signature changes needed); the shim
+  moved to `streamable_http_client` + an `httpx2` client carrying the
+  `X-PL-Writer`/`X-PL-Session` headers, and its v1 content/validation
+  juggling is gone — v2 constructor handlers pass `CallToolResult` through
+  verbatim. Verified retained: the stringified-JSON parameter rescue
+  (Claude clients' `tags='["…"]'` quirk) and `tools.listChanged` (modern
+  clients derive it from `subscriptions/listen`; legacy clients keep the
+  forced initialization option). Behavior note: `memory_toolset`'s
+  `list_changed_sent` now reports "published" (subscription bus) rather
+  than "a live session received it". Lockfile adds `httpx2`/`httpcore2`/
+  `mcp-types`/`truststore`. No schema change (meta stays v30).
+
 ### Changed (2026-08-25 — session identity: episode handle becomes the primary anchor; transport fallback retired)
 - **Concurrent Claude Code sessions share one streamable-HTTP connection,
   so the transport's `mcp-session-id` header identifies the connection,

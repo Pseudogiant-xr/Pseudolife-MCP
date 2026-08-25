@@ -143,8 +143,9 @@ def _post_episode(url: str, token: str | None, path: str, payload: dict) -> None
 def _toolset_changed(result) -> bool:
     """True when a memory_toolset call actually moved the tier (its result
     carries ``changed: true``). Reads structured content first, falls back
-    to the JSON text block."""
-    structured = getattr(result, "structuredContent", None)
+    to the JSON text block. (v2 types are snake_case: ``structured_content``.)"""
+    structured = (getattr(result, "structured_content", None)
+                  or getattr(result, "structuredContent", None))
     if isinstance(structured, dict):
         inner = structured.get("result")
         target = inner if isinstance(inner, dict) else structured
@@ -163,14 +164,15 @@ def _toolset_changed(result) -> bool:
 async def _proxy(url: str, token: str | None, session_uid: str) -> None:
     import contextlib
 
-    import mcp.types as types
     from mcp.client.session import ClientSession
-    from mcp.client.streamable_http import streamablehttp_client
-    from mcp.server.lowlevel import Server
+    from mcp.client.streamable_http import (
+        create_mcp_http_client, streamable_http_client)
+    from mcp.server import Server
     from mcp.server.lowlevel.server import NotificationOptions
     from mcp.server.stdio import stdio_server
 
     headers = _session_headers(token, session_uid)
+
     @contextlib.asynccontextmanager
     async def _upstream():
         # A FRESH upstream connection per call. The shim owns no state and the
@@ -180,63 +182,49 @@ async def _proxy(url: str, token: str | None, session_uid: str) -> None:
         # Docker's loopback proxy both drop idle connections — and the mcp client
         # has no reconnect, so the first call after an idle pause hung on a dead
         # stream until the client timeout (~4 min). Per-call connect sidesteps
-        # that whole failure class. Writer attribution (X-PL-Writer) rides every
-        # connection's headers, so it survives; only the daemon-side session_id
-        # (audit granularity, not correctness) becomes per-call.
-        async with streamablehttp_client(url + "/mcp", headers=headers or None) as (
-            read, write, _get_session_id,
-        ):
-            async with ClientSession(read, write) as remote:
-                await remote.initialize()
-                yield remote
+        # that whole failure class; under the 2026-07-28 stateless protocol a
+        # connection is nothing but the HTTP exchange anyway. Writer/session
+        # attribution (X-PL-Writer / X-PL-Session) rides the httpx client's
+        # headers on every request (SDK v2 moved headers off the transport
+        # helper onto the http_client).
+        async with create_mcp_http_client(headers=headers or None) as http:
+            async with streamable_http_client(
+                url + "/mcp", http_client=http,
+            ) as (read, write):
+                async with ClientSession(read, write) as remote:
+                    await remote.initialize()
+                    yield remote
 
-    server: Server = Server("pseudolife-memory")
+    # v2 low-level handlers are constructor params taking (ctx, params) and
+    # returning result types verbatim. The proxy registers NO tool schemas of
+    # its own — the DAEMON is the validating authority (v1 needed
+    # validate_input=False plus content/structured juggling to preserve
+    # that; v2's pass-through result types make it the default).
 
-    @server.list_tools()
-    async def _list_tools() -> list[types.Tool]:
+    async def _list_tools(ctx, params):
         async with _upstream() as remote:
-            return (await remote.list_tools()).tools
+            return await remote.list_tools()
 
-    # validate_input=False: the DAEMON is the validating authority, not this
-    # proxy. The SDK's default (True) re-runs jsonschema against the RAW
-    # arguments using the upstream tool's own inputSchema, which rejects the
-    # JSON-in-a-string list/number params Claude Desktop/Code send
-    # (tags='["decision"]') — the very shape FastMCP registers with
-    # validate_input=False upstream so its pre_parse_json rescue can unwrap
-    # them. Validating here made the same call fail over stdio while
-    # succeeding over direct HTTP.
-    @server.call_tool(validate_input=False)
-    async def _call_tool(name: str, arguments: dict | None):
+    async def _call_tool(ctx, params):
         async with _upstream() as remote:
-            result = await remote.call_tool(name, arguments or {})
-        # An upstream ERROR travels back verbatim. A daemon-side failure
-        # carries isError=True, the real reason as text, and NO
-        # structuredContent — and since every tool is annotated `-> dict`,
-        # this shim has an outputSchema of its own, so returning bare content
-        # would trip the SDK's output validation and replace the daemon's
-        # diagnosis ("Input should be a valid integer") with a message about
-        # the proxy's plumbing ("outputSchema defined but no structured
-        # output returned"). Returning the CallToolResult itself short-
-        # circuits that check: the lowlevel server passes one straight
-        # through. A failed call also cannot have changed the tier, so the
-        # list_changed re-emit below is correctly skipped.
-        if result.isError:
-            return result
+            result = await remote.call_tool(params.name, params.arguments or {})
         # The daemon's tools/list_changed lands on the per-call upstream
         # session above and dies with it, so a tier change would be invisible
         # to the real client — re-emit it on the downstream stdio session.
-        if name == "memory_toolset" and _toolset_changed(result):
+        # A failed call cannot have changed the tier.
+        if (not result.is_error and params.name == "memory_toolset"
+                and _toolset_changed(result)):
             try:
-                await server.request_context.session.send_tool_list_changed()
+                await ctx.session.send_tool_list_changed()
             except Exception:  # noqa: BLE001 — notify is best-effort
                 pass
-        # Forward structured output too — the tools advertise an
-        # outputSchema, so a content-only proxy would trip the
-        # downstream client's structured-output validation.
-        structured = getattr(result, "structuredContent", None)
-        if structured is not None:
-            return result.content, structured
-        return result.content
+        return result
+
+    server = Server(
+        "pseudolife-memory",
+        on_list_tools=_list_tools,
+        on_call_tool=_call_tool,
+    )
 
     async with stdio_server() as (r, w):
         await server.run(

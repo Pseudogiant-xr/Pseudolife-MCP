@@ -120,16 +120,19 @@ def _invoke(tool_name: str, args: dict) -> dict:
     from pseudolife_memory import mcp_server  # noqa: PLC0415
 
     result = asyncio.run(mcp_server.mcp.call_tool(tool_name, args))
-    # FastMCP returns a tuple in newer versions: (content_list, structured_dict).
-    # Older versions return just content_list. Handle both.
+    # SDK v1 FastMCP returned (content_list, structured_dict) (or bare
+    # content); v2 MCPServer returns a CallToolResult. Handle all three.
     if isinstance(result, tuple):
         content, structured = result
+    elif hasattr(result, "content"):
+        content = result.content
+        structured = getattr(result, "structured_content", None)
     else:
         content, structured = result, None
     # Structured payload is what an MCP client uses — prefer it when present.
     if structured is not None:
         return structured
-    # Fall back to text-content JSON parse for older SDK shapes.
+    # Fall back to text-content JSON parse.
     text_parts = [
         item.text for item in content if hasattr(item, "text")
     ]
@@ -907,25 +910,31 @@ from types import SimpleNamespace
 
 
 class _FakeReqCtx:
-    """Bind fake HTTP headers into the SDK's request_ctx for one test."""
+    """Bind fake request headers into the writer_context seam for one test.
+    SDK v2 has no ambient request state — the daemon binds headers at its
+    transport wrap; tools invoked directly via ``mcp.call_tool`` need the
+    same binding for identity/tier resolution."""
     def __init__(self, headers: dict[str, str]):
         self._headers = headers
         self._token = None
     def __enter__(self):
-        from mcp.server.lowlevel.server import request_ctx
-        self._token = request_ctx.set(
-            SimpleNamespace(request=SimpleNamespace(headers=self._headers)))
+        from pseudolife_memory import writer_context as wc
+        self._token = wc.bind_request_headers(self._headers)
         return self
     def __exit__(self, *exc):
-        from mcp.server.lowlevel.server import request_ctx
-        request_ctx.reset(self._token)
+        from pseudolife_memory import writer_context as wc
+        wc.unbind_request_headers(self._token)
 
 
-async def _transport_list(mod) -> list:
-    import mcp.types as mtypes
-    handler = mod.mcp._mcp_server.request_handlers[mtypes.ListToolsRequest]
-    result = await handler(None)
-    return result.root.tools
+async def _transport_list(mod, headers: dict[str, str] | None = None) -> list:
+    """Drive the wrapped v2 tools/list entry with a fake request context —
+    the wrap reads headers from the ctx itself (no ambient request state
+    under the 2026-07-28 SDK)."""
+    entry = mod.mcp._lowlevel_server._request_handlers["tools/list"]
+    ctx = SimpleNamespace(headers=headers, request=None, session=None,
+                          request_id=1, meta=None, method="tools/list")
+    result = await entry.handler(ctx, None)
+    return result.tools
 
 
 def _reload_tiered(tmp_path, monkeypatch, **env):
@@ -943,12 +952,11 @@ def test_transport_list_filters_by_writer_map(tmp_path: Path, monkeypatch) -> No
     mod = _reload_tiered(tmp_path, monkeypatch,
                          PSEUDOLIFE_MCP_TOOLSET="core",
                          PSEUDOLIFE_MCP_TIER_MAP="claude-desktop:minimal")
-    with _FakeReqCtx({"x-pl-writer": "claude-desktop", "x-pl-session": "d1"}):
-        names = {t.name for t in asyncio.run(_transport_list(mod))}
+    names = {t.name for t in asyncio.run(_transport_list(
+        mod, {"x-pl-writer": "claude-desktop", "x-pl-session": "d1"}))}
     assert names == mod._visible_tool_names("minimal")
     # No headers (stdio/tests) -> env default tier
-    with _FakeReqCtx({}):
-        names = {t.name for t in asyncio.run(_transport_list(mod))}
+    names = {t.name for t in asyncio.run(_transport_list(mod, {}))}
     assert names == mod._visible_tool_names("core")
 
 
@@ -959,8 +967,8 @@ def test_transport_list_env_writer_fallback(tmp_path: Path, monkeypatch) -> None
                          PSEUDOLIFE_MCP_TOOLSET="full",
                          PSEUDOLIFE_MCP_TIER_MAP="claude-code:core",
                          PSEUDOLIFE_WRITER_ID="claude-code")
-    with _FakeReqCtx({"x-pl-session": "c1"}):
-        names = {t.name for t in asyncio.run(_transport_list(mod))}
+    names = {t.name for t in asyncio.run(_transport_list(
+        mod, {"x-pl-session": "c1"}))}
     assert names == mod._visible_tool_names("core")
 
 
@@ -975,8 +983,8 @@ def test_hidden_tools_stay_callable(tmp_path: Path, monkeypatch) -> None:
 
 def test_initialization_advertises_list_changed(tmp_path: Path, monkeypatch) -> None:
     mod = _reload_tiered(tmp_path, monkeypatch)
-    opts = mod.mcp._mcp_server.create_initialization_options()
-    assert opts.capabilities.tools.listChanged is True
+    opts = mod.mcp._lowlevel_server.create_initialization_options()
+    assert opts.capabilities.tools.list_changed is True
 
 
 def test_list_changed_forced_even_with_explicit_options(tmp_path: Path, monkeypatch) -> None:
@@ -984,18 +992,21 @@ def test_list_changed_forced_even_with_explicit_options(tmp_path: Path, monkeypa
     with tools_changed=False must not silently disable it."""
     from mcp.server.lowlevel.server import NotificationOptions
     mod = _reload_tiered(tmp_path, monkeypatch)
-    opts = mod.mcp._mcp_server.create_initialization_options(
+    opts = mod.mcp._lowlevel_server.create_initialization_options(
         notification_options=NotificationOptions())
-    assert opts.capabilities.tools.listChanged is True
+    assert opts.capabilities.tools.list_changed is True
 
 
 def test_tool_cache_prefilled_with_full_set(tmp_path: Path, monkeypatch) -> None:
     """Hidden tools keep call-time input validation: the SDK tool cache is
-    fed the FULL registry, not the filtered view."""
+    fed the FULL registry, not the filtered view. v2: the transport filter
+    never touches the MCPServer tool registry, so a hidden tool's call-time
+    input validation must still fire after a filtered list."""
+    from mcp.server.mcpserver.exceptions import ToolError
     mod = _reload_tiered(tmp_path, monkeypatch, PSEUDOLIFE_MCP_TOOLSET="minimal")
-    with _FakeReqCtx({"x-pl-session": "m1"}):
-        asyncio.run(_transport_list(mod))
-    assert set(mod.mcp._mcp_server._tool_cache) == set(mod._TOOL_TIERS)
+    asyncio.run(_transport_list(mod, {"x-pl-session": "m1"}))
+    with pytest.raises(ToolError, match="valid integer"):
+        asyncio.run(mod.mcp.call_tool("memory_recent", {"n": "not-an-int"}))
 
 
 def test_memory_toolset_ladder_and_status(tmp_path: Path, monkeypatch) -> None:
@@ -1011,7 +1022,10 @@ def test_memory_toolset_ladder_and_status(tmp_path: Path, monkeypatch) -> None:
         up = _invoke("memory_toolset", {"action": "expand"})
         assert up["changed"] is True and up["current"] == "core"
         assert "memory_recall" in up["visible_tools_added"]
-        assert up["list_changed_sent"] is False   # no live transport session here
+        # v2: notify_tools_changed publishes on the subscription bus, which
+        # succeeds with zero subscribers — the flag now means "published",
+        # not "a live session received it".
+        assert up["list_changed_sent"] is True
 
         up2 = _invoke("memory_toolset", {"action": "expand"})
         assert up2["current"] == "full"

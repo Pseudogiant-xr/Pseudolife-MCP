@@ -23,10 +23,13 @@ class _Ctx:
 
 
 def _with_request(headers: dict):
-    """Bind a fake live MCP request into the contextvar the resolver reads."""
-    import mcp.server.lowlevel.server as srv
+    """Bind fake request headers into the seam the resolver reads. SDK v2
+    removed the ambient request_ctx; the daemon binds headers itself via
+    writer_context.bind_request_headers, and tests set the same contextvar
+    (the returned pair keeps the ``tok = ctxvar.set(value)`` call sites)."""
+    from pseudolife_memory import writer_context as wc
 
-    return srv.request_ctx, _Ctx(_Req(headers))
+    return wc._REQUEST_HEADERS, {k.lower(): v for k, v in headers.items()}
 
 
 def test_prefers_x_pl_session_over_mcp_session_id():

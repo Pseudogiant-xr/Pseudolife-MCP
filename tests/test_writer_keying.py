@@ -128,13 +128,15 @@ def daemon(tmp_path_factory):
 
 async def _call_with_writer(url: str, writer: str, tool: str, args: dict):
     from mcp.client.session import ClientSession
-    from mcp.client.streamable_http import streamablehttp_client
+    from mcp.client.streamable_http import (
+        create_mcp_http_client, streamable_http_client)
 
     headers = {"Authorization": f"Bearer {_TOKEN}", "X-PL-Writer": writer}
-    async with streamablehttp_client(url + "/mcp", headers=headers) as (r, w, _):
-        async with ClientSession(r, w) as s:
-            await s.initialize()
-            return await s.call_tool(tool, args)
+    async with create_mcp_http_client(headers=headers) as http:
+        async with streamable_http_client(url + "/mcp", http_client=http) as (r, w):
+            async with ClientSession(r, w) as s:
+                await s.initialize()
+                return await s.call_tool(tool, args)
 
 
 def _fact_row(db_url: str, entity: str) -> dict | None:

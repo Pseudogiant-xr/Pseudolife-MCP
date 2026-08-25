@@ -56,10 +56,34 @@ def _http_writer_session() -> tuple[str | None, str | None]:
     return (w, hs or ts)
 
 
+# Headers of the live MCP request, bound by the daemon's transport wrap
+# (mcp_server._wire_transport_tiering) around every tools/call and
+# tools/list dispatch. SDK v2 removed the ambient request_ctx contextvar,
+# so the daemon asserts the headers itself at its one dispatch seam;
+# anyio.to_thread copies the context, so worker-thread tool bodies resolve
+# the same binding.
+_REQUEST_HEADERS: contextvars.ContextVar = contextvars.ContextVar(
+    "pl_request_headers", default=None)
+
+
+def bind_request_headers(headers):
+    """Bind the live request's headers for the current context; returns the
+    token for ``unbind_request_headers``. ``None`` clears (binds nothing)."""
+    return _REQUEST_HEADERS.set(headers)
+
+
+def unbind_request_headers(token) -> None:
+    _REQUEST_HEADERS.reset(token)
+
+
 def _http_request_headers():
     """Best-effort headers of the live MCP request, or ``None`` outside one.
-    Isolates the SDK read (and its v1 ``request_ctx`` dependency) to one
-    place — the v2 port swaps this body for ``ctx.headers``."""
+    Single seam for request-header reads: the daemon-bound contextvar first
+    (SDK v2 path), then the v1 SDK's ambient ``request_ctx`` (absent under
+    v2 — the import fails harmlessly)."""
+    bound = _REQUEST_HEADERS.get()
+    if bound is not None:
+        return bound
     try:
         from mcp.server.lowlevel.server import request_ctx
 
