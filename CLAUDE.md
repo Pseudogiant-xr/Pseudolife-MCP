@@ -217,6 +217,17 @@ only feeder for the lessons surfaced at session start. Deploys and eval results
 get a `memory_store` with source `pseudolife-mcp` (status chatter →
 `source="status"`).
 
+**In-flight work is written, not remembered.** Any session launching
+long-running work (an eval run, a training job, a deploy, a sweep) writes a
+`source="status"` entry at launch — what was launched, where it runs, when it
+should finish — and another when it completes or is abandoned. "What is in
+progress" exists only in the bank; the repo cannot answer it. The read side is
+symmetric: any question about current status, in-progress work, or what other
+sessions are doing is a memory question — `memory_search` (include
+`sources=["status"]`) before or alongside git, which only answers what has
+landed. This convention is harness-agnostic on purpose: it must hold for any
+agent with the MCP tools, not only ones with reminder hooks.
+
 ## Glossary
 
 Use these terms — and only these — when describing work back to the
