@@ -2234,12 +2234,15 @@ reliably — without the agent having to remember:
    (full table + rationale:
    [Configuration — session identity](configuration.md#session-identity)):
    a stdio shim's per-process `X-PL-Session` header outranks an explicit
-   `episode` handle passed on a write, which outranks the SessionStart-hook-
-   registered active session, which outranks the legacy transport
-   `mcp-session-id` (per-**connection**, not per-session, and removed
-   entirely by the MCP 2026-07-28 revision — SEP-2567, "Sessionless" — so
-   treat it as a dying fallback, not something to depend on), which falls
-   back to writer id + idle-gap sessionization when nothing above resolved.
+   `episode` handle passed on a write (on the lifecycle tools —
+   `memory_episode_start`/`_end`, `memory_session_title` — a resolved
+   handle wins outright), which outranks the SessionStart-hook-registered
+   active session. The legacy transport `mcp-session-id` tier is
+   **retired** (per-**connection**, not per-session, and removed entirely
+   by the MCP 2026-07-28 revision — SEP-2567, "Sessionless";
+   `PSEUDOLIFE_LEGACY_TRANSPORT_SESSION=1` is a one-release rollback
+   hatch), leaving writer id + idle-gap sessionization as the floor when
+   nothing above resolved.
    - **Hook-registered identity.** The plugin's SessionStart hook forwards
      Claude Code's own `session_id` to the daemon, which opens (or
      resumes) that session's root episode immediately — no longer lazily
@@ -2412,6 +2415,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 | `PSEUDOLIFE_WRITER_ID` | `unknown` | Identifies this writer on every canonical write (schema v11). The shim forwards it as the `X-PL-Writer` header; the compose daemon defaults to `mcp-client`, and the installer pins `claude-code` / `codex` / `mcp-client` in `ops/.env` per the selected `--client`. Existing installs that predate the client selector should set `PSEUDOLIFE_WRITER_ID=claude-code` in `ops/.env` to keep their writer identity (and any `PSEUDOLIFE_MCP_TIER_MAP` keyed on it) stable. |
 | `PSEUDOLIFE_MCP_AUTOSAVE_SECONDS` | `30` | Interval of the file-mode autosave loop (weights/state cadence; Postgres-mode entries are transactional regardless). |
 | `PSEUDOLIFE_SESSION_REAP_SECONDS` | `300` | How often the idle-session reaper sweeps. The idle *threshold* it enforces is `PSEUDOLIFE_SESSION_IDLE_SECONDS` — see [Episodes](episodes.md). |
+| `PSEUDOLIFE_LEGACY_TRANSPORT_SESSION` | _(unset)_ | Set `1` to restore the retired `mcp-session-id` transport-session fallback for one release (rollback hatch; logs a warning on first use). The header names the HTTP *connection*, not the session — concurrent sessions share it — and the MCP 2026-07-28 revision removes it from the protocol. Session identity rides the hook-registered episode handle and `X-PL-Session` instead — see [Episodes](episodes.md). |
 | `PSEUDOLIFE_DAEMON_MEM_LIMIT` | `4g` | Docker tier only (read by compose, not the daemon): hard memory cap on the daemon container, with the memory+swap total pinned to the same value — no swap, so exceeding the cap is a clean container restart rather than a host-wide memory event. Steady state is ~2.8 GB with the default embedder; raise for very large banks. |
 
 For the Docker stack, set these in `ops/.env`
@@ -2756,9 +2760,9 @@ through one chokepoint, evaluated in strict precedence order:
 | tier | source | scope | notes |
 |---|---|---|---|
 | 1 | `X-PL-Session` header | per shim process = per session | the stdio shim sends this on every call; any integrator can |
-| 2 | explicit `episode` argument | per call | pass an open episode id (or its unambiguous ≥8-char prefix) on `memory_store` / `memory_outcome` / `memory_fact_set`; the daemon mints it and advertises it in the SessionStart briefing |
-| 3 | hook-registered active session | machine-scoped pointer | the SessionStart hook forwards Claude Code's own `session_id`; a SessionEnd hook closes it |
-| 4 | `mcp-session-id` header | per connection | legacy fallback — the MCP 2026-07-28 revision (SEP-2567, "Sessionless") removes this header and protocol sessions entirely, so treat this tier as a dead end, not something to build on |
+| 2 | explicit `episode` argument | per call | pass an open episode id (or its unambiguous ≥8-char prefix) on `memory_store` / `memory_outcome` / `memory_fact_set`, and on the lifecycle tools `memory_episode_start` / `memory_episode_end` / `memory_session_title` — where a resolved handle wins outright (they never consult the header tiers); the daemon mints it and advertises it in the SessionStart briefing |
+| 3 | hook-registered active session | machine-scoped pointer | the SessionStart hook forwards Claude Code's own `session_id`; a SessionEnd hook closes it. A singleton — concurrent sessions race it, which is why the lifecycle tools take the per-call handle |
+| 4 | `mcp-session-id` header | per connection | **retired** — the header names the connection (concurrent sessions share it) and the MCP 2026-07-28 revision (SEP-2567, "Sessionless") removes it from the protocol. `PSEUDOLIFE_LEGACY_TRANSPORT_SESSION=1` restores it for one release as a rollback hatch |
 | 5 | none | — | writer id + idle-gap sessionization (the reaper) — the documented floor when nothing above resolved |
 
 **Why the header outranks the handle when both are present.** A shim

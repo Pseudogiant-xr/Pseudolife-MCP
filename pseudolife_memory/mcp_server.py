@@ -1,6 +1,6 @@
 """MCP tool surface — exposes the Pseudolife memory tools to MCP clients.
 
-Built on the FastMCP decorator API from the official ``mcp`` Python SDK.
+Built on the MCPServer decorator API from the official ``mcp`` Python SDK (v2).
 Each ``@_tool()`` becomes a JSON-RPC tool. The surface (consolidated
 2026-07-02, 55 → 32 tools; 35 as of v26's set-slot pair) spans the associative stream (``memory_store`` /
 ``memory_search`` / ``memory_recent``), the canonical-fact cortex
@@ -63,7 +63,7 @@ from typing import Annotated, Any, Literal
 os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
 
 from anyio import to_thread  # noqa: E402
-from mcp.server.fastmcp import Context, FastMCP  # noqa: E402
+from mcp.server.mcpserver import Context, MCPServer  # noqa: E402
 from mcp.server.transport_security import TransportSecuritySettings  # noqa: E402
 # ``Annotated[T, Field(description=...)]`` on a tool signature is how a
 # per-argument contract reaches the client: FastMCP builds each tool's
@@ -137,26 +137,35 @@ def transport_security_for(auth_configured: bool) -> TransportSecuritySettings:
     )
 
 
-mcp = FastMCP(
+mcp = MCPServer(
     "Pseudolife Memory",
     instructions=_MCP_INSTRUCTIONS,
-    # Explicit, never inherited. The daemon replaces this with the
-    # token-aware policy via apply_transport_security() once it knows
-    # whether auth is configured; the protected variant is the safe start.
-    transport_security=transport_security_for(auth_configured=False),
 )
+
+# Explicit, never inherited. The daemon replaces this with the token-aware
+# policy via apply_transport_security() once it knows whether auth is
+# configured; the protected variant is the safe start. SDK v2 takes the
+# settings at streamable_http_app() build time (no constructor kwarg), so
+# the module holds them until build_streamable_http_app() is called.
+_TRANSPORT_SECURITY = transport_security_for(auth_configured=False)
 
 
 def apply_transport_security(auth_configured: bool) -> TransportSecuritySettings:
-    """Install the transport-security policy on the shared FastMCP instance.
+    """Select the transport-security policy for the streamable-HTTP app.
 
-    Must run BEFORE the first ``streamable_http_app()`` call: the SDK builds
-    the ``StreamableHTTPSessionManager`` lazily there and caches whatever
-    settings it was handed, so a later change would be a no-op.
+    Must run BEFORE ``build_streamable_http_app()`` — the settings are handed
+    to the SDK at app construction and cached in its session manager.
     """
-    settings = transport_security_for(auth_configured)
-    mcp.settings.transport_security = settings
-    return settings
+    global _TRANSPORT_SECURITY
+    _TRANSPORT_SECURITY = transport_security_for(auth_configured)
+    return _TRANSPORT_SECURITY
+
+
+def build_streamable_http_app():
+    """Build the SDK's streamable-HTTP Starlette app with the selected
+    transport-security policy (v2 moved the setting from the server
+    constructor to this call)."""
+    return mcp.streamable_http_app(transport_security=_TRANSPORT_SECURITY)
 
 
 from pseudolife_memory.toolset_tiers import (
@@ -188,7 +197,7 @@ def _async_offload(fn):
     long tool call (a dream run, document_ingest, first-call model init) froze
     every other session, /health, and the console (2026-07-02 review, H1).
     ``functools.wraps`` preserves name/docstring/signature (via
-    ``__wrapped__``) so FastMCP still derives the tool schema from the real
+    ``__wrapped__``) so MCPServer still derives the tool schema from the real
     parameter list, and AnyIO copies the calling context into the worker
     thread so the per-request writer/session contextvars still resolve.
 
@@ -573,15 +582,24 @@ _TIER_ADDS = {
 
 
 async def _notify_list_changed(ctx: Context) -> bool:
-    """Best-effort tools/list_changed. False when there is no live
-    transport session (tests, embedded stdio) — the memory_toolset result
-    names the newly visible tools, and calls are ungated regardless."""
+    """Best-effort tools/list_changed on BOTH eras: ``notify_tools_changed``
+    publishes on the 2026-07-28 subscription bus (succeeds even with zero
+    subscribers, so the returned flag means "published", not "a client
+    received it"); the session send covers legacy handshake-era clients.
+    The memory_toolset result names the newly visible tools regardless,
+    and calls are ungated either way."""
+    sent = False
+    try:
+        await ctx.notify_tools_changed()
+        sent = True
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("tools/list_changed publish skipped: %s", exc)
     try:
         await ctx.session.send_tool_list_changed()
-        return True
+        sent = True
     except Exception as exc:  # noqa: BLE001
-        logger.debug("tools/list_changed not sent: %s", exc)
-        return False
+        logger.debug("tools/list_changed legacy send skipped: %s", exc)
+    return sent
 
 
 async def memory_toolset(
@@ -1226,24 +1244,27 @@ def memory_episode_start(
         description="Short name for the task, used in later recaps.")],
     hint: Annotated[str | None, Field(
         description="Optional note on what the task is about.")] = None,
+    episode: Annotated[str | None, Field(
+        description="Your session handle (from the session-start briefing) — "
+                    "anchors the sub-episode to YOUR session when several "
+                    "run concurrently.")] = None,
 ) -> dict[str, Any]:
-    """Open a named sub-episode for a substantial multi-step task. It nests
-    under the auto-managed session episode; memories stored while it is open
-    carry its id + title, enabling episode-scoped search and summaries
-    later. ``memory_episode_end`` closes it and pops back to the session.
-
-    Returns: ``{id, title, started_at, parent_id, ...}``.
+    """Open a named sub-episode; it nests under the session episode, and
+    memories stored while it is open carry its id + title for episode-scoped
+    search. ``memory_episode_end`` closes it and pops back.
     """
-    return service.episode_start(title=title, hint=hint)
+    return service.episode_start(title=title, hint=hint, episode=episode)
 
 
 @_tool(tier="core")  # pairs with memory_episode_start.
-def memory_episode_end() -> dict[str, Any]:
-    """Close the current open episode and pop back to its parent (the
-    session). Returns the closed episode dict, or ``{}`` when nothing is
-    open.
-    """
-    return service.episode_end()
+def memory_episode_end(
+    episode: Annotated[str | None, Field(
+        description="Your session handle — pops only within your own "
+                    "session's subtree; the session root is never "
+                    "closed.")] = None,
+) -> dict[str, Any]:
+    """Close the current open sub-episode and pop back to its parent."""
+    return service.episode_end(episode=episode)
 
 
 @_tool(tier="minimal")  # the recommended workflow names the session early.
@@ -1251,12 +1272,16 @@ def memory_session_title(
     title: Annotated[str, Field(
         description='What this session is about, e.g. "Pseudolife-MCP" or '
                     '"auth-refactor".')],
+    episode: Annotated[str | None, Field(
+        description="Your session handle — names that session's root "
+                    "directly (the identity a hook-registered client "
+                    "has).")] = None,
 ) -> dict[str, Any]:
     """Name THIS session's auto-opened episode (default titles are
     generic). Call once at the start of work so session recaps read
     meaningfully. Idempotent; call again to rename.
     """
-    return service.set_session_title(title=title)
+    return service.set_session_title(title=title, episode=episode)
 
 
 @_tool()
@@ -1774,35 +1799,75 @@ def _resolve_principal_tier() -> str:
 
 
 def _wire_transport_tiering() -> None:
-    """Replace the transport tools/list handler with the tier-filtered view
-    and advertise tools.listChanged (the SDK default omits it, verified on
-    mcp 1.27.2). The raw handler bypasses the SDK's caching wrapper — that
-    wrapper CLEARS the tool cache and refills it with whatever the handler
-    returns, which would strip hidden tools of call-time validation. We
-    feed the cache the full registry instead."""
-    import mcp.types as mtypes
+    """Wrap the transport dispatch seam (SDK v2): one wrap of the low-level
+    ``tools/list`` entry filters by the caller's per-request tier — the
+    per-authorization axis the 2026-07-28 tools spec sanctions (per-CONNECTION
+    variance is banned) — and both ``tools/list`` and ``tools/call`` wraps
+    bind the request headers into :mod:`writer_context` for the duration of
+    the dispatch (v2 removed the ambient ``request_ctx`` contextvar this
+    module's identity resolution rode on; ``anyio.to_thread`` copies the
+    context, so ``_async_offload`` worker threads inherit the binding).
+    Legacy handshake-era clients additionally need ``tools.listChanged``
+    forced into the initialization options, exactly as on v1; 2026-07-28
+    clients derive it from the served ``subscriptions/listen`` method and
+    ignore the options."""
+    import dataclasses
+
     from mcp.server.lowlevel.server import NotificationOptions
+    from pseudolife_memory.writer_context import (
+        bind_request_headers, unbind_request_headers)
 
-    server = mcp._mcp_server
+    server = mcp._lowlevel_server
+    handlers = server._request_handlers
 
-    async def _filtered_list(_req) -> mtypes.ServerResult:
-        tools = await FastMCP.list_tools(mcp)   # full registry, mcp.types.Tool
-        server._tool_cache.update({t.name: t for t in tools})
+    def _headers_of(ctx):
+        headers = getattr(ctx, "headers", None)
+        if headers is None:
+            req = getattr(ctx, "request", None)
+            headers = getattr(req, "headers", None)
+        return headers
+
+    def _bound(handler):
+        async def _dispatch(ctx, params):
+            # Bind only when the transport carried headers — a headerless ctx
+            # (embedded stdio, tests) must not mask an ambient binding.
+            headers = _headers_of(ctx)
+            token = bind_request_headers(headers) if headers is not None else None
+            try:
+                return await handler(ctx, params)
+            finally:
+                if token is not None:
+                    unbind_request_headers(token)
+        return _dispatch
+
+    list_entry = handlers["tools/list"]
+    _orig_list = list_entry.handler
+
+    async def _list_filtered(ctx, params):
+        result = await _orig_list(ctx, params)
         names = _visible_tool_names(_resolve_principal_tier())
-        return mtypes.ServerResult(mtypes.ListToolsResult(
-            tools=[t for t in tools if t.name in names]))
+        return result.model_copy(update={
+            "tools": [t for t in result.tools if t.name in names]})
 
-    server.request_handlers[mtypes.ListToolsRequest] = _filtered_list
+    _filtered_list = _bound(_list_filtered)
 
-    _orig = server.create_initialization_options
+    handlers["tools/list"] = dataclasses.replace(
+        list_entry, handler=_filtered_list)
+    call_entry = handlers["tools/call"]
+    handlers["tools/call"] = dataclasses.replace(
+        call_entry, handler=_bound(call_entry.handler))
 
-    def _init_opts(notification_options=None, experimental_capabilities=None):
+    _orig_init = server.create_initialization_options
+
+    def _init_opts(notification_options=None, experimental_capabilities=None,
+                   extensions=None):
         # memory_toolset depends on the listChanged capability: force it on
         # whatever options arrive rather than only defaulting the None case.
         opts = notification_options or NotificationOptions()
         opts.tools_changed = True
-        return _orig(notification_options=opts,
-                     experimental_capabilities=experimental_capabilities)
+        return _orig_init(notification_options=opts,
+                          experimental_capabilities=experimental_capabilities,
+                          extensions=extensions)
 
     server.create_initialization_options = _init_opts
 

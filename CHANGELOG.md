@@ -6,6 +6,58 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-08-25 — MCP SDK v2 / protocol 2026-07-28: stateless core, per-request identity)
+- **The daemon, shim, and toolset tiering now run on MCP Python SDK v2
+  (`mcp>=2.1,<3`), serving protocol revision 2026-07-28 alongside every
+  earlier revision from the same server — Claude Code negotiates the new
+  stateless protocol; Claude Desktop and other handshake-era clients are
+  unaffected.** What moved: `FastMCP` → `MCPServer`; transport-security
+  settings now ride `build_streamable_http_app()` (v2 takes them at app
+  build, not construction); the tiering transport hook collapsed from
+  three v1 private-internals patches to one wrap of the v2 dispatch
+  registry, which also binds each request's headers into the
+  `writer_context` seam (v2 removed the ambient `request_ctx` the identity
+  resolution rode on — no per-tool signature changes needed); the shim
+  moved to `streamable_http_client` + an `httpx2` client carrying the
+  `X-PL-Writer`/`X-PL-Session` headers, and its v1 content/validation
+  juggling is gone — v2 constructor handlers pass `CallToolResult` through
+  verbatim. Verified retained: the stringified-JSON parameter rescue
+  (Claude clients' `tags='["…"]'` quirk) and `tools.listChanged` (modern
+  clients derive it from `subscriptions/listen`; legacy clients keep the
+  forced initialization option). Behavior note: `memory_toolset`'s
+  `list_changed_sent` now reports "published" (subscription bus) rather
+  than "a live session received it". Lockfile adds `httpx2`/`httpcore2`/
+  `mcp-types`/`truststore`. No schema change (meta stays v32).
+
+### Changed (2026-08-25 — session identity: episode handle becomes the primary anchor; transport fallback retired)
+- **Concurrent Claude Code sessions share one streamable-HTTP connection,
+  so the transport's `mcp-session-id` header identifies the connection,
+  not the session — sub-episodes and lifecycle calls could land on a
+  different session's episode tree (diagnosed 2026-07-18).**
+  `memory_episode_start` and `memory_episode_end` now take an optional
+  `episode` parameter (the session handle the session-start briefing
+  already advertises): `episode_start` nests under that handle's session
+  root, and `episode_end` pops strictly within the handle's subtree —
+  never the session root itself, which stays owned by the hook lifecycle
+  (SessionEnd / idle reaper). An unknown or closed handle degrades to the
+  previous behavior and adds `episode_warning`, mirroring `memory_store`.
+  The `mcp-session-id` fallback (identity tier 4) is retired — the MCP
+  2026-07-28 revision (SEP-2567) removes the header from the protocol
+  entirely; `PSEUDOLIFE_LEGACY_TRANSPORT_SESSION=1` restores it for one
+  release as a rollback hatch and logs a warning on first use (explicit
+  truthy values only — `0`/`false` mean off). Review hardening
+  (2026-08-25 eight-angle pass): `episode_end` resolves without the
+  resume side effect, so a late end on a reaped session refuses instead
+  of resurrecting the root; the handle-anchored nest/pop pins to the
+  handle's own subtree even when two open roots share a session key
+  (`Episodes.end_episode` closes exactly the found leaf); an empty-string
+  handle (a known client quirk for optional params) degrades like "no
+  handle"; keyless roots are rejected inside the resolver so every handle
+  consumer shares one contract; `memory_session_title` also takes
+  `episode=` (the only identity a hook-registered direct-HTTP client has
+  now); and the session-start briefing tells agents to pass the handle on
+  the lifecycle tools, not just writes. Design:
+  `docs/specs/2026-08-25-mcp-v2-session-identity-design.md`.
 ### Fixed (2026-08-25 — re-mint repairs the fact/lesson cross-index)
 - **A freshly minted entity re-links the orphaned fact and lesson rows of
   its name.** `delete_entity` NULLs `facts`/`lessons` `entity_id` and

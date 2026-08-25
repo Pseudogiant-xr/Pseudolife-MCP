@@ -19,19 +19,15 @@ dependencies = [
     "numpy>=1.24.0",
     "pyyaml>=6.0",
     "chromadb>=0.5.0",
-    # Upper-bounded 2026-07-29: mcp 2.0.0 relocated `mcp.server.fastmcp`,
-    # which `pseudolife_memory/mcp_server.py` imports at module scope, so an
-    # unbounded pin made every fresh install fail at import. The lockfile has
-    # always pinned a 1.x (currently 1.28.1); this makes the source
-    # distribution agree with it. Lifting the bound is a real migration —
-    # the SDK is used across fastmcp, lowlevel, client.session,
-    # streamable_http and stdio_server — not a version bump.
-    "mcp>=1.0.0,<2",
+    # Migrated to SDK v2 (2026-08-25, spec 2026-08-25-mcp-v2-session-identity):
+    # serves protocol 2026-07-28 plus every earlier revision. Floor 2.1 —
+    # 2.0.x shipped with the ping regression (#3273) fixed only in 2.1.0.
+    "mcp>=2.1,<3",
     # Declared 2026-08-25: `mcp_server.py` imports `pydantic.Field` directly
     # to attach per-argument descriptions to the tool inputSchemas, so it is
     # a first-party import now, not merely mcp's transitive dependency. The
-    # floor matches what mcp 1.x already requires.
-    "pydantic>=2.11,<3",
+    # floor matches what the mcp SDK already requires.
+    "pydantic>=2.12,<3",
     "pypdf>=4.0",
     "psycopg[binary]>=3.1",
     "pgvector>=0.3",

@@ -188,7 +188,7 @@ def test_shim_forwards_list_changed_on_toolset_expand(tmp_path):
         async with stdio_client(params) as (r, w):
             async with ClientSession(r, w, message_handler=_on_message) as s:
                 init = await s.initialize()
-                assert init.capabilities.tools.listChanged is True
+                assert init.capabilities.tools.list_changed is True
 
                 tools = {t.name for t in (await s.list_tools()).tools}
                 assert "memory_world_search" not in tools  # minimal tier
@@ -258,7 +258,7 @@ def test_shim_forwards_stringified_list_param(tmp_path):
                     "tags": json.dumps(["decision"]),  # '["decision"]'
                 })
                 text = " ".join(getattr(c, "text", "") for c in res.content)
-                assert not res.isError, (
+                assert not res.is_error, (
                     f"shim rejected a stringified list param: {text}")
                 assert "validation error" not in text.lower()
                 assert '"stored":true' in text.replace(" ", "").lower()
@@ -318,7 +318,7 @@ def test_shim_surfaces_the_daemons_real_error_message(tmp_path):
                 # cannot rescue it and the daemon rejects it on the merits.
                 res = await s.call_tool("memory_recent", {"n": "many"})
                 text = " ".join(getattr(c, "text", "") for c in res.content)
-                assert res.isError, (
+                assert res.is_error, (
                     f"an unrescuable bad arg must surface as an error: {text}")
                 assert "output validation error" not in text.lower(), (
                     f"the shim's own outputSchema masked the daemon's real "

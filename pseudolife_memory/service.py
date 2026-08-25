@@ -919,7 +919,7 @@ class MemoryService:
             embedding = self._embedder.encode_single(text)
             _, session_id = self._resolve_writer()
             resolved = self._resolve_episode_handle(episode)
-            episode_warning = episode is not None and resolved is None
+            episode_warning = bool(episode) and resolved is None
             if resolved is not None:
                 _, header_session, _ = resolve_writer_detailed(self._writer_id)
                 if not header_session:
@@ -1786,7 +1786,7 @@ class MemoryService:
             slot_emb = self._embedder.encode_single(f"{entity} {attribute}".strip())
             writer_id, session_id = self._resolve_writer()
             resolved = self._resolve_episode_handle(episode)
-            episode_warning = episode is not None and resolved is None
+            episode_warning = bool(episode) and resolved is None
             if resolved is not None:
                 _, header_session, _ = resolve_writer_detailed(self._writer_id)
                 if not header_session:
@@ -2369,7 +2369,7 @@ class MemoryService:
             if not self.config.memory.lessons.enabled:
                 return {"recorded": False, "reason": "lessons disabled"}
             resolved = self._resolve_episode_handle(episode)
-            episode_warning = episode is not None and resolved is None
+            episode_warning = bool(episode) and resolved is None
             episode_id = resolved[0] if resolved is not None else self._current_episode_id()
             sid = self._storage.add_signal(
                 task=task, outcome=outcome, about=about, detail=detail,
@@ -4570,38 +4570,85 @@ class MemoryService:
 
     def episode_start(
         self, title: str, hint: str | None = None,
+        episode: str | None = None,
     ) -> dict[str, Any]:
         """Open a NESTED sub-episode under the CALLER's open session episode;
-        the parent stays open. The caller's session is the request's
-        ``X-PL-Session`` (resolved via the writer seam); without one it nests
-        under the global current leaf. Falls back to a root when nothing open."""
+        the parent stays open. ``episode`` (spec 2026-08-25) anchors the nest
+        to that handle's session root explicitly — the multi-session-safe
+        path, since concurrent sessions share both the transport connection
+        and the active-session pointer. Without a handle the caller's session
+        resolves as before (``X-PL-Session`` header, then the pointer);
+        without either it nests under the global current leaf. An unknown/
+        closed/keyless handle degrades to the no-handle path and adds
+        ``episode_warning``, mirroring ``store``."""
         with self._lock:
             self._ensure_init()
             assert self._cms is not None
-            _, session_id = self._resolve_writer()
-            # A sub-episode opened before the first store must still nest
-            # under a session root — lazily open one exactly like store does.
-            self._ensure_session_episode(session_id)
+            episode = episode or None      # "" from clients means "no handle"
+            # Keyless roots are rejected inside the resolver itself now, so
+            # every handle consumer shares one contract.
+            resolved = self._resolve_episode_handle(episode)
+            episode_warning = bool(episode) and resolved is None
+            parent = None
+            if resolved is not None:
+                root_id, session_id = resolved
+                em = self._cms.episodes
+                # Pin the parent inside the HANDLE's subtree: two open roots
+                # can share a session_key (handle-resume beside a newer
+                # root), and the key-based leaf lookup could cross trees.
+                parent = em.open_subtree_leaf(root_id, session_id) or em.get(root_id)
+            else:
+                _, session_id = self._resolve_writer()
+                # A sub-episode opened before the first store must still nest
+                # under a session root — lazily open one exactly like store does.
+                self._ensure_session_episode(session_id)
             ep = self._cms.episodes.start_nested(
-                title=title, hint=hint, session_key=session_id)
+                title=title, hint=hint, session_key=session_id, parent=parent)
             self._persist_episodes()
-            return self._episode_to_dict(ep)
+            out = self._episode_to_dict(ep)
+            if episode_warning:
+                out["episode_warning"] = "unknown or closed episode handle"
+            return out
 
-    def episode_end(self) -> dict[str, Any]:
+    def episode_end(self, episode: str | None = None) -> dict[str, Any]:
         """Close the caller's currently-open leaf episode and pop to its parent.
         ``{}`` when nothing is open for the caller.
 
-        Ownership guard (spec 2026-07-18): with no resolved session identity,
-        ``Episodes.end_leaf`` falls back to whichever episode is globally
-        "current" — which may belong to a different, still-active session.
-        Before closing, the candidate leaf's ``session_key`` is compared
-        against the resolved identity; a mismatch (including "something is
-        open but I have no identity") is refused as a no-op rather than
-        popping a foreign session's episode."""
+        ``episode`` (spec 2026-08-25): with a handle, ownership is the
+        handle's subtree — strictly narrower than the shared connection key.
+        Only an open sub-episode BELOW that root is popped; the session root
+        itself belongs to the hook lifecycle (SessionEnd / idle reaper) and
+        is never closed here. A subtree with no open sub-episode is a plain
+        no-op ``{}``; an unknown/closed handle is refused.
+
+        Ownership guard (spec 2026-07-18, handle-less path): with no resolved
+        session identity, ``Episodes.end_leaf`` falls back to whichever
+        episode is globally "current" — which may belong to a different,
+        still-active session. Before closing, the candidate leaf's
+        ``session_key`` is compared against the resolved identity; a mismatch
+        (including "something is open but I have no identity") is refused as
+        a no-op rather than popping a foreign session's episode."""
         with self._lock:
             self._ensure_init()
             assert self._cms is not None
             em = self._cms.episodes
+            episode = episode or None      # "" from clients means "no handle"
+            if episode is not None:
+                # resume=False: an end on a reaped/closed session must refuse,
+                # not resurrect the root (write paths keep the resume).
+                resolved = self._resolve_episode_handle(episode, resume=False)
+                if resolved is None:
+                    return {"closed": None,
+                            "reason": "unknown or closed episode handle"}
+                root_id, skey = resolved
+                leaf = em.open_subtree_leaf(root_id, skey)
+                if leaf is None:
+                    return {}
+                # Close exactly the subtree leaf — end_leaf(session_key)
+                # could pick a foreign leaf when two open roots share a key.
+                closed = em.end_episode(leaf)
+                self._persist_episodes()
+                return self._episode_to_dict(closed)
             _, session_id = self._resolve_writer()
             ep = (em.open_leaf_for(session_id) if session_id is not None
                   else em.open_episode())
@@ -4870,7 +4917,8 @@ class MemoryService:
             logger.warning("episode delete failed: %s", exc)
 
     def _resolve_episode_handle(
-            self, handle: str | None) -> tuple[str, str | None] | None:
+            self, handle: str | None, *,
+            resume: bool = True) -> tuple[str, str | None] | None:
         """Identity tier 2 (spec 2026-07-18): match ``handle`` (a daemon-minted
         episode id or an unambiguous prefix, >=8 chars) against an OPEN root
         episode — or a recently-reaped one (within
@@ -4888,13 +4936,24 @@ class MemoryService:
                    if e.parent_id is None and e.ended_at is None
                    and e.id.startswith(handle)]
         if len(matches) == 1:
+            if matches[0].session_key is None:
+                # Keyless roots (global/embedded fallbacks) are not session
+                # roots — resolving one would give callers a (id, None) pair
+                # each call site patches differently (review, 2026-08-25).
+                # Both branches now require a key; callers warn-and-degrade.
+                return None
             self._episode_touches[matches[0].id] = time.time()
             return (matches[0].id, matches[0].session_key)
         if len(matches) > 1:
             return None
-        resume = float(os.environ.get(
+        # The reopen side effect belongs to WRITE paths (a store must never
+        # be lost to a reaped root); lifecycle calls pass resume=False so an
+        # end on a closed session refuses instead of resurrecting it.
+        if not resume:
+            return None
+        resume_window = float(os.environ.get(
             "PSEUDOLIFE_SESSION_RESUME_SECONDS", "21600"))
-        if resume <= 0:
+        if resume_window <= 0:
             return None
         closed = [e for e in self._cms.episodes.episodes.values()
                   if e.parent_id is None and e.ended_at is not None
@@ -4902,7 +4961,7 @@ class MemoryService:
         if len(closed) != 1:
             return None
         ep = closed[0]
-        if time.time() - ep.ended_at > resume:
+        if time.time() - ep.ended_at > resume_window:
             return None
         ep.ended_at = None
         ep.closed_by_new_start = False
@@ -4979,12 +5038,16 @@ class MemoryService:
                     last.id, session_key)
         return last
 
-    def set_session_title(self, title: str) -> dict[str, Any]:
+    def set_session_title(self, title: str,
+                          episode: str | None = None) -> dict[str, Any]:
         """Rename THIS request's session episode (the root keyed by the caller's
-        session id). The daemon can't see the client's project directory, so
-        session titles default to a generic ``session - <date> <time>``; an
-        agent that knows its project calls this to name the session. Opens a
-        session episode if none is open yet (so it can be called up front).
+        session id, or the ``episode`` handle's root when one is passed — the
+        handle is the only identity a hook-registered direct-HTTP client has
+        now that the transport fallback is retired). The daemon can't see the
+        client's project directory, so session titles default to a generic
+        ``session - <date> <time>``; an agent that knows its project calls
+        this to name the session. Opens a session episode if none is open yet
+        (so it can be called up front).
         Returns ``{"ok": bool, "id": str, "title": str}`` or
         ``{"ok": False, "reason": ...}``."""
         title = (title or "").strip()
@@ -4993,6 +5056,15 @@ class MemoryService:
         with self._lock:
             self._ensure_init()
             assert self._cms is not None
+            resolved = self._resolve_episode_handle(episode or None)
+            if resolved is not None:
+                root = self._cms.episodes.get(resolved[0])
+                root.title = title
+                self._persist_episodes()
+                return {"ok": True, "id": root.id, "title": title}
+            if episode:
+                return {"ok": False,
+                        "reason": "unknown or closed episode handle"}
             _, session_id = self._resolve_writer()
             if not session_id:
                 return {"ok": False, "reason": "no session id on this request"}

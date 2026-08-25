@@ -133,13 +133,18 @@ class EpisodeManager:
         return self.start_session(title, session_key=session_key, hint=hint)
 
     def start_nested(self, title: str, hint: str | None = None,
-                     session_key: str | None = None) -> Episode:
+                     session_key: str | None = None,
+                     parent: Episode | None = None) -> Episode:
         """Open a sub-episode under the caller's open leaf (which stays open).
-        With a ``session_key`` it nests under THAT session's leaf and inherits
-        the key; without one it uses the global ``current_id`` leaf. Falls back
-        to a root episode when nothing is open."""
-        parent = (self.open_leaf_for(session_key) if session_key is not None
-                  else self.open_episode())
+        An explicit ``parent`` pins the nest (the handle-anchored path — two
+        open roots can share a ``session_key``, so key-based leaf lookup could
+        cross into a foreign subtree). Otherwise, with a ``session_key`` it
+        nests under THAT session's leaf and inherits the key; without one it
+        uses the global ``current_id`` leaf. Falls back to a root episode
+        when nothing is open."""
+        if parent is None:
+            parent = (self.open_leaf_for(session_key)
+                      if session_key is not None else self.open_episode())
         ep = Episode(
             id=uuid.uuid4().hex,
             title=title,
@@ -153,6 +158,17 @@ class EpisodeManager:
         self.current_id = ep.id
         return ep
 
+    def end_episode(self, ep: Episode) -> Episode:
+        """Close exactly ``ep`` and pop ``current_id`` to its parent if it
+        was current — the precise-close primitive for handle-anchored ends
+        (a key-based lookup could pick a foreign leaf under a shared key)."""
+        ep.ended_at = time.time()
+        parent = self.episodes.get(ep.parent_id) if ep.parent_id else None
+        new_leaf = parent if (parent and parent.ended_at is None) else None
+        if self.current_id == ep.id:
+            self.current_id = new_leaf.id if new_leaf else None
+        return ep
+
     def end_leaf(self, session_key: str | None = None) -> Episode | None:
         """Close the open leaf (for ``session_key`` when given, else the global
         ``current_id`` leaf) and pop to its parent if still open."""
@@ -162,12 +178,7 @@ class EpisodeManager:
             if session_key is None:
                 self.current_id = None
             return None
-        ep.ended_at = time.time()
-        parent = self.episodes.get(ep.parent_id) if ep.parent_id else None
-        new_leaf = parent if (parent and parent.ended_at is None) else None
-        if self.current_id == ep.id:
-            self.current_id = new_leaf.id if new_leaf else None
-        return ep
+        return self.end_episode(ep)
 
     def end(self) -> Episode | None:
         """Legacy: close the global current leaf. Equivalent to ``end_leaf()``."""
@@ -189,6 +200,20 @@ class EpisodeManager:
         leaves = [e for e in open_eps if e.id not in parent_ids]
         candidates = leaves or open_eps
         return max(candidates, key=lambda e: e.started_at)
+
+    def open_subtree_leaf(self, root_id: str,
+                          session_key: str | None) -> Episode | None:
+        """The open leaf under ``root_id`` for ``session_key``, excluding the
+        root itself — ``None`` when the subtree has no open sub-episode.
+        Lets a caller holding a session-root handle operate strictly within
+        that root's subtree (spec 2026-08-25)."""
+        if session_key is None:
+            return None
+        leaf = self.open_leaf_for(session_key)
+        if (leaf is None or leaf.id == root_id
+                or not self._descends_from(leaf, root_id)):
+            return None
+        return leaf
 
     def remove(self, id: str) -> None:
         """Drop an episode from the log (used by prune-on-empty / cleanup)."""

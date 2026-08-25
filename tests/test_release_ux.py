@@ -71,7 +71,7 @@ def test_enum_params_are_enums_in_the_input_schema(tmp_path: Path, monkeypatch) 
     mod = _reload(tmp_path, monkeypatch)
     tools = {t.name: t for t in asyncio.run(mod.mcp.list_tools())}
     for tool_name, param, values in _EXPECTED_ENUMS:
-        schema = json.dumps(tools[tool_name].inputSchema["properties"][param])
+        schema = json.dumps(tools[tool_name].input_schema["properties"][param])
         for v in values:
             assert f'"{v}"' in schema, (
                 f"{tool_name}.{param}: {v!r} not in schema — dispatch values "

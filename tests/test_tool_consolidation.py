@@ -38,10 +38,11 @@ def _invoke(tool_name: str, args: dict) -> dict:
     from pseudolife_memory import mcp_server  # noqa: PLC0415
 
     result = asyncio.run(mcp_server.mcp.call_tool(tool_name, args))
-    if isinstance(result, tuple):
+    if isinstance(result, tuple):                     # SDK v1 shape
         content, structured = result
-    else:
-        content, structured = result, None
+    else:                                             # v2 CallToolResult
+        content = result.content
+        structured = getattr(result, "structured_content", None)
     if structured is not None:
         return structured
     return json.loads("".join(i.text for i in content if hasattr(i, "text")))
@@ -90,7 +91,7 @@ def test_dream_unknown_action_is_rejected(tmp_path: Path, monkeypatch) -> None:
     """Over MCP the ``Literal`` schema rejects a bad action with a message
     that lists the legal values; direct (in-process) callers still get the
     structured ``unknown_action`` fallback."""
-    from mcp.server.fastmcp.exceptions import ToolError
+    from mcp.server.mcpserver.exceptions import ToolError
 
     mod = _reload(tmp_path, monkeypatch)
     with pytest.raises(ToolError, match="'status'"):
@@ -136,7 +137,7 @@ def test_forget_scope_world_and_lesson(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_forget_validates_scope_and_required_args(tmp_path: Path, monkeypatch) -> None:
-    from mcp.server.fastmcp.exceptions import ToolError
+    from mcp.server.mcpserver.exceptions import ToolError
 
     mod = _reload(tmp_path, monkeypatch)
     with pytest.raises(ToolError, match="'memory'"):  # Literal schema gate
@@ -190,7 +191,7 @@ def test_graph_review_actions_route_to_the_right_service_calls(
 
 
 def test_graph_review_validates_inputs(tmp_path: Path, monkeypatch) -> None:
-    from mcp.server.fastmcp.exceptions import ToolError
+    from mcp.server.mcpserver.exceptions import ToolError
 
     mod = _reload(tmp_path, monkeypatch)
     with pytest.raises(ToolError, match="'list'"):  # Literal schema gate
@@ -367,7 +368,7 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # like the tool description does, so it is metered on the same terms.
     param_sizes: dict[str, int] = {}
     for t in tools:
-        props = (t.inputSchema or {}).get("properties", {}) or {}
+        props = (t.input_schema or {}).get("properties", {}) or {}
         param_sizes[t.name] = sum(
             len(p.get("description") or "") for p in props.values())
         over = [(f"{t.name}.{pn}", len(p.get("description") or ""))
@@ -391,7 +392,7 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     # 35 tools would silently lose every argument contract while the caps
     # stayed green. One concrete pin plus a per-tier floor makes that
     # regression loud.
-    hops = {t.name: t for t in tools}["memory_recall"].inputSchema[
+    hops = {t.name: t for t in tools}["memory_recall"].input_schema[
         "properties"]["hops"]
     assert "1..5" in (hops.get("description") or ""), (
         "param descriptions are not reaching inputSchema — the "

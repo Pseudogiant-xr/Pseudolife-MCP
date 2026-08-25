@@ -14,7 +14,7 @@ def _read(rel: str) -> str:
 def test_mcp_initialization_advertises_memory_workflow() -> None:
     from pseudolife_memory import mcp_server
 
-    instructions = mcp_server.mcp._mcp_server.instructions
+    instructions = mcp_server.mcp._lowlevel_server.instructions
     assert instructions
     assert "task start" in instructions.lower()
     assert "memory_search" in instructions

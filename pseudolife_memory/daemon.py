@@ -245,8 +245,8 @@ def run_daemon(host: str | None = None, port: int | None = None) -> None:
     from pseudolife_memory.web import build_console_app
 
     app = build_console_app(
-        mcp_server.mcp.streamable_http_app(), token, _health, mcp_server.service,
-        token_map=token_map,
+        mcp_server.build_streamable_http_app(), token, _health,
+        mcp_server.service, token_map=token_map,
     )
     logger.info("daemon: listening on %s:%s (auth=%s, principals=%d, "
                 "storage=%s) — console at /ui/",
