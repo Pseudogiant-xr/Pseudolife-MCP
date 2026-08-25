@@ -27,6 +27,11 @@ dependencies = [
     # the SDK is used across fastmcp, lowlevel, client.session,
     # streamable_http and stdio_server — not a version bump.
     "mcp>=1.0.0,<2",
+    # Declared 2026-08-25: `mcp_server.py` imports `pydantic.Field` directly
+    # to attach per-argument descriptions to the tool inputSchemas, so it is
+    # a first-party import now, not merely mcp's transitive dependency. The
+    # floor matches what mcp 1.x already requires.
+    "pydantic>=2.11,<3",
     "pypdf>=4.0",
     "psycopg[binary]>=3.1",
     "pgvector>=0.3",
