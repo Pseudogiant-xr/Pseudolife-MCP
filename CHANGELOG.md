@@ -240,6 +240,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   test parses every `CREATE TABLE IF NOT EXISTS` out of `schema.py` and
   fails if any table is absent from the list, so the next schema bump
   cannot reopen the gap silently.
+### Fixed (2026-08-25 — PG18 cutover dump: the same pipefail defect as #172, follow-up)
+- **`ops/migrate-pg18.ps1` guarded its cutover dump with gzip's exit status,
+  not pg_dump's.** The PG 16 → 18 migration script still carried the exact
+  `pg_dump | gzip` shape fixed in `ops/backup.ps1|.sh` below: the container's
+  POSIX `sh` has no `pipefail`, so a pg_dump that died partway would have
+  passed the "cutover pg_dump failed" check. Blast radius was limited — the
+  migration's exact table-count verification would catch a truncated dump
+  before the daemon restarted, and the old PG 16 volume is retained as the
+  rollback — which is why it was deferred out of the audit change rather
+  than fixed inline. pg_dump now writes the gzip itself (`-Z9`, plain
+  format; verified PG 18's pg_dump accepts a bare `-Z9`, and the output
+  stays a normal single-member gzip so the `gunzip -c` restore step is
+  unchanged), and the script joins the no-pipeline guard test
+  (`tests/test_ops_backup_integrity.py::test_dump_is_not_piped_into_gzip`).
+  It deliberately does NOT get the end-of-dump marker check — the count
+  verification is its completion guard.
+
 ### Fixed (2026-08-25 — ops-script audit: three ways a backup or a rollback quietly wasn't one)
 - **A pg_dump that died partway produced a "good" backup (#172).**
   `ops/backup.ps1|.sh` ran `pg_dump` piped into `gzip` inside the container;

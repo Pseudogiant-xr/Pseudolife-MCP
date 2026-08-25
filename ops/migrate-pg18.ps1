@@ -77,7 +77,12 @@ $before = docker exec $PgContainer psql -U $User -d $Database -t -A -F ':' -c $c
 if ($LASTEXITCODE -ne 0) { docker start $DaemonContainer | Out-Null; Fail "count query failed." }
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $cutDump = "pseudolife_memory-pg18cut-$stamp.sql.gz"
-docker exec $PgContainer sh -c "pg_dump -U $User -d $Database | gzip -9 > /tmp/$cutDump"
+# pg_dump writes the gzip ITSELF (-Z9, plain format) rather than being piped
+# into a separate gzip: the container's POSIX sh has no `pipefail`, so a
+# pipeline would hand `docker exec` gzip's status, not pg_dump's (the
+# ops/backup.ps1 defect, issue #172). Same single-member gzip output, so the
+# `gunzip -c` restore below is unchanged.
+docker exec $PgContainer sh -c "pg_dump -U $User -d $Database -Z9 > /tmp/$cutDump"
 if ($LASTEXITCODE -ne 0) { docker start $DaemonContainer | Out-Null; Fail "cutover pg_dump failed." }
 New-Item -ItemType Directory -Force $backups | Out-Null
 docker cp "${PgContainer}:/tmp/$cutDump" (Join-Path $backups $cutDump)
