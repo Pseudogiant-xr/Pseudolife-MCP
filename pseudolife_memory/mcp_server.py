@@ -420,7 +420,13 @@ def memory_search(
         disable_recency_boost=disable_recency_boost,
         rerank=rerank,
         bm25=bm25,
+        return_event_id=True,
     )
+    # Training plumbing (schema v34), not response payload: the event id
+    # lets the cortex-first block below attach its served facts to the
+    # retrieval-log row this search just wrote. Popped unconditionally so
+    # it never leaks into the tool result.
+    _evt_id = result.pop("retrieval_event_id", None)
     # Cortex-first: surface canonical facts above associative recall, and drop
     # any recall hit that merely restates a surfaced fact (currency, not noise).
     # ``cortex`` is part of the documented return shape, so it is always
@@ -430,6 +436,8 @@ def memory_search(
     if cc.enabled and cc.search_first and (query or "").strip():
         facts = service.cortex_search(query, top_k=5, min_score=cc.guard_min_score).get("entries", [])
         if facts:
+            if _evt_id is not None:
+                service.attach_served_facts(_evt_id, facts)
             result["cortex"] = [
                 {
                     "entity": f["entity"], "attribute": f["attribute"],

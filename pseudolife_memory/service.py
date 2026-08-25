@@ -1060,8 +1060,17 @@ class MemoryService:
         bm25: bool | None = None,
         contiguity_neighbors: int | None = None,
         timeline: bool | None = None,
+        return_event_id: bool = False,
     ) -> dict[str, Any]:
         """Retrieve relevant memories ranked by associative similarity.
+
+        ``return_event_id=True`` adds ``retrieval_event_id`` (the id of the
+        retrieval-log row this search wrote) to the result, so the caller
+        can attach the fact half of the response via
+        :meth:`attach_served_facts`. Opt-in on purpose: the id is training
+        plumbing, not part of the public search shape, and must not leak
+        through recall/Console callers. Absent when the log is disabled or
+        the write failed.
 
         ``sources`` and ``bands`` filter the result set: only entries whose
         ``source`` / ``bank`` match the supplied list survive. ``None`` means
@@ -1224,8 +1233,10 @@ class MemoryService:
             # learned reranker.
             params = dict(result.params or {})
             params["contiguity_neighbors"] = n_ctg
-            self._log_retrieval_event(
+            evt_id = self._log_retrieval_event(
                 query, entries_out, served_components, params)
+            if return_event_id and evt_id is not None:
+                out["retrieval_event_id"] = evt_id
             return out
 
     # ------------------------------------------------------------------
@@ -1526,6 +1537,21 @@ class MemoryService:
                     logger.warning("read-audit computation failed",
                                    exc_info=True)
                     audit = {"unavailable": True}
+                # Graduation candidates: entries the retrieval layer
+                # re-serves in most sessions are static-context
+                # ("promote to CLAUDE.md") candidates — paying per
+                # query for what could be standing context. Empty
+                # until the event log holds enough distinct sessions.
+                # Guarded SEPARATELY from read_audit: an advisory report
+                # must not destroy the audit it rides in (the same rule
+                # that keeps both out of the search path).
+                try:
+                    audit["graduation_candidates"] = (
+                        self._storage.graduation_report())
+                except Exception:  # noqa: BLE001
+                    logger.warning("graduation report failed",
+                                   exc_info=True)
+                    audit["graduation_candidates"] = []
                 audit["slot_tracking_enabled"] = bool(getattr(
                     self.config.memory.cortex, "read_tracking", True))
                 audit["slot_read_write_errors"] = self._slot_read_errors
@@ -3208,11 +3234,14 @@ class MemoryService:
     def _log_retrieval_event(self, query: str,
                              entries_out: list[dict],
                              components: list[dict | None] | None = None,
-                             params: dict | None = None) -> None:
+                             params: dict | None = None) -> int | None:
         """Append a ``retrieval_events`` row (schema v31/v32): the (query,
         served) half of the learned-reranker training tuple. Rank = list
         position in the served output. Entries without a storage id
         (pre-persist) are dropped — they can't be joined to a later use.
+        A zero-result search still writes its (empty-served) row — misses
+        are training signal too, and ``graduation_report`` documents the
+        session-count consequence.
 
         ``components`` (aligned with ``entries_out``) are the fusion inputs
         already computed at ranking time — bi-encoder score, cross-encoder
@@ -3228,7 +3257,7 @@ class MemoryService:
         ``stats()`` reports — the log is otherwise silent when broken."""
         cfg = self.config.memory.retrieval_log
         if self._storage is None or not cfg.enabled:
-            return
+            return None
         try:
             # Length-guarded: a misaligned components list must not
             # truncate the served list (zip stops at the shorter one).
@@ -3247,12 +3276,48 @@ class MemoryService:
                     row["components"] = comp
                 served.append(row)
             _, session_id = self._resolve_writer()
-            self._storage.add_retrieval_event(
+            return self._storage.add_retrieval_event(
                 query, served, origin="search", session_id=session_id,
                 episode_id=self._current_episode_id(), params=params)
         except Exception:  # noqa: BLE001
             self._retrieval_log_errors += 1
             logger.warning("retrieval-event log failed", exc_info=True)
+            return None
+
+    def attach_served_facts(self, event_id: int,
+                            facts: list[dict]) -> None:
+        """Record the cortex slots a search's cortex-first block served
+        (schema v34) on the exact event row that search wrote — the fact
+        half of the (query, served, used) training tuple. Called by the
+        MCP search handler after it builds the cortex block, with the id
+        ``search(return_event_id=True)`` returned. Never raises: training
+        plumbing must not break the search response it rides on."""
+        cfg = self.config.memory.retrieval_log
+        if (self._storage is None or not cfg.enabled or not facts
+                or event_id is None):
+            return
+        try:
+            from pseudolife_memory.memory.cortex import _norm_key
+            payload = [
+                {"entity_norm": _norm_key(f.get("entity", "")),
+                 "attribute_norm": _norm_key(f.get("attribute", "")),
+                 "rank": rank,
+                 "score": f.get("score"),
+                 "kind": f.get("kind", "scalar"),
+                 "contested": bool(f.get("contested", False))}
+                for rank, f in enumerate(facts)
+            ]
+            with self._lock:
+                updated = self._storage.attach_served_facts(
+                    int(event_id), payload)
+            if not updated:
+                self._retrieval_log_errors += 1
+                logger.warning(
+                    "served-facts attach matched no event row (id=%s)",
+                    event_id)
+        except Exception:  # noqa: BLE001
+            self._retrieval_log_errors += 1
+            logger.warning("served-facts attach failed", exc_info=True)
 
     def _record_retrieval_use(self, entry_id: int, used_via: str) -> None:
         """Implicit relevance label (schema v31): the most recent search in

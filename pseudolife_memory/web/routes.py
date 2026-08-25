@@ -273,12 +273,20 @@ class ConsoleRoutes:
             sources=_list(q, "source"), bands=_list(q, "band"),
             tags=_list(q, "tag"), min_score=_f(q, "min_score", None),
             disable_recency_boost=_tribool(q, "disable_recency_boost") is True,
-            rerank=_tribool(q, "rerank"), bm25=_tribool(q, "bm25"))
+            rerank=_tribool(q, "rerank"), bm25=_tribool(q, "bm25"),
+            return_event_id=True)
+        # Training plumbing (schema v34): this path serves facts too, so it
+        # must attach them — an event left NULL here would read as "no
+        # facts served" to the reranker trainer, a mislabelled negative.
+        # Popped unconditionally so the id never reaches the Console.
+        evt_id = result.pop("retrieval_event_id", None)
         cc = self.svc.config.memory.cortex
         if cc.enabled and cc.search_first and query.strip():
             facts = self.svc.cortex_search(
                 query, top_k=5, min_score=cc.guard_min_score).get("entries", [])
             if facts:
+                if evt_id is not None:
+                    self.svc.attach_served_facts(evt_id, facts)
                 result["cortex"] = facts
         return result
 
