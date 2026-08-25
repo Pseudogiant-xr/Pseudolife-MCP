@@ -6,6 +6,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-26 — read telemetry: slot reads, the explicit-reinforce split, and a `read_audit` stats section; schema v33)
+- **A memory bank could not answer "which of my facts are ever actually
+  read?" — entries carried `access_count`, but the cortex's fact slots had
+  no read signal at all, and the `reinforcements` counter conflated the
+  deliberate "this was useful" signal with the dream's automatic trace
+  links.** Schema v33 (additive/idempotent) adds `slot_reads` — one
+  counter row per `(entity_norm, attribute_norm)` slot, bumped when a
+  fact is *served as an answer* (`memory_fact_get` and `memory_search`'s
+  cortex-first block; slot-keyed like `memory_traces`, so cortex
+  snapshot saves don't reset it). Deliberately uncounted: internal
+  verification lookups (the dream rollback's post-revert check) and the
+  facts attached to `memory_recall`/`memory_graph` neighborhoods, which
+  are context rather than a direct answer — so a slot's never-read
+  status is a lower bound, not proof it is unused — and
+  `entries.explicit_reinforcements`, bumped only by `memory_reinforce`
+  (the shared `reinforcements` counter is unchanged and still feeds the
+  retention formula). `memory_stats` gains a `read_audit` section:
+  never-read counts and fractions (overall, by age bucket, worst
+  sources), total/median reads and top-decile read share, slot coverage,
+  the explicit-vs-total reinforcement split, and a write-error counter
+  (a silently-dead telemetry write must not read as "no fact is ever
+  used"). Motivated by the 2026-08-26 live-bank audit
+  (`evals/results/read-audit-20260826.json`: 12.7% of entries never
+  surfaced, vs the 58% never-read Theo/t3.gg measured for Claude Code's
+  built-in auto-memory in youtube.com/watch?v=Jf54k7tFeEc — different
+  instrument, directionally comparable only). Kill-switch:
+  `memory.cortex.read_tracking` (default on; one small upsert per
+  fact-serving call, PG-only).
+
 ### Changed (2026-08-25 — MCP SDK v2 / protocol 2026-07-28: stateless core, per-request identity)
 - **The daemon, shim, and toolset tiering now run on MCP Python SDK v2
   (`mcp>=2.1,<3`), serving protocol revision 2026-07-28 alongside every

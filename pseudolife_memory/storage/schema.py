@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 32
+SCHEMA_META_VERSION = 33
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -383,7 +383,7 @@ BENCH_RESET_TABLES = (
     "communities", "entity_communities", "memory_traces", "entity_sources",
     # Declared by the additive-migration tail of ensure_schema, not SCHEMA_SQL.
     "merge_decisions", "dream_runs", "dream_run_slots", "chronicle_events",
-    "retrieval_events", "retrieval_uses",
+    "retrieval_events", "retrieval_uses", "slot_reads",
 )
 
 # The dimension every embedding column is declared at (schema v25). Not
@@ -724,6 +724,35 @@ def ensure_schema(conn) -> dict:
               PRIMARY KEY (event_id, entry_id, used_via)
             )
             """
+        )
+        # v33 additive: read telemetry. slot_reads counts how many times a
+        # cortex slot was SERVED as an answer (fact_get / cortex-first
+        # search) — keyed on the stable (entity_norm, attribute_norm) slot
+        # like memory_traces, NOT facts.id, which is regenerated on every
+        # cortex snapshot save. No FK for the same reason. The 2026-08-26
+        # bank audit motivated it: entries carry access_count, but the 4.6k
+        # fact slots had no read signal at all, so dead agent-inferred
+        # slots were indistinguishable from load-bearing ones.
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS slot_reads (
+              entity_norm    TEXT NOT NULL,
+              attribute_norm TEXT NOT NULL,
+              read_count     BIGINT NOT NULL DEFAULT 0,
+              last_read_at   DOUBLE PRECISION,
+              PRIMARY KEY (entity_norm, attribute_norm)
+            )
+            """
+        )
+        # v33 additive: split the explicit "this was useful" reinforce from
+        # the shared counter. `reinforcements` keeps counting BOTH explicit
+        # reinforces and dream-trace links (the Phase-2 retention formula
+        # reads it and its meaning must not change under an existing bank);
+        # `explicit_reinforcements` moves only on memory_reinforce, so the
+        # usefulness signal is separable from consolidation yield.
+        cur.execute(
+            "ALTER TABLE entries ADD COLUMN IF NOT EXISTS "
+            "explicit_reinforcements INTEGER NOT NULL DEFAULT 0"
         )
         # One-time upgrade: drop the old episode FK only when it's actually
         # present. Guarding avoids taking an ACCESS EXCLUSIVE lock on every

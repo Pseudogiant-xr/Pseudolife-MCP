@@ -1,0 +1,43 @@
+{
+  "name": "live-bank read audit",
+  "date": "2026-08-26",
+  "method": "Read-only SQL against the live production bank (Postgres 127.0.0.1:5433, db pseudolife_memory) via docker exec psql. Ad-hoc queries; this audit motivated the schema v33 read-telemetry change that productizes them as memory_stats read_audit.",
+  "caveats": [
+    "access_count counts an entry surfacing in a final memory_search/memory_get result set (cms.py access accrual), not proof the agent used it; every search bumps its full served top-k.",
+    "Counts sync to PG on the save cadence, so very recent accesses may lag.",
+    "Eviction had never fired (765 of 5000 flat-band capacity), so the age gradient is genuine recall traffic, not survivorship.",
+    "External comparison baseline: Theo (t3.gg), 'Turn off Claude Code's Memory', 2026-08, https://www.youtube.com/watch?v=Jf54k7tFeEc - 45 auto-memories in one project clone, 26 (58%) never read once, 19 sessions read vs 80 wrote (~1:3 read:write). Different instrument (file opens vs search surfacing), so directionally comparable only."
+  ],
+  "entries": {
+    "total": 765,
+    "never_surfaced": 97,
+    "never_surfaced_pct": 12.7,
+    "reads_total": 7616,
+    "reads_mean": 10.0,
+    "reads_median": 5,
+    "reads_max": 137,
+    "reinforced_gt0": 562,
+    "superseded": 209,
+    "top_decile_read_share_pct": 48.2,
+    "by_age": {
+      "lt_14d": {"n": 121, "never_read": 49, "pct_never": 40.5, "mean_reads": 4.0},
+      "d14_45": {"n": 344, "never_read": 46, "pct_never": 13.4, "mean_reads": 5.7},
+      "gt_45d": {"n": 300, "never_read": 2, "pct_never": 0.7, "mean_reads": 17.3}
+    },
+    "worst_sources": [
+      {"source": "discord-denoise", "n": 7, "never_read": 5, "pct_never": 71.4},
+      {"source": "re-evidence-hub", "n": 11, "never_read": 5, "pct_never": 45.5},
+      {"source": "llama-turboq", "n": 26, "never_read": 6, "pct_never": 23.1},
+      {"source": "gnd-share", "n": 14, "never_read": 3, "pct_never": 21.4},
+      {"source": "hermes-infra", "n": 40, "never_read": 7, "pct_never": 17.5}
+    ]
+  },
+  "facts": {
+    "rows_total": 5058,
+    "rows_current": 4639,
+    "rows_history": 419,
+    "slots": 4682,
+    "read_signal": "none - fact slot reads were untracked pre-v33 (memory_traces is provenance, last_confirmed is write-side); this gap is what slot_reads closes"
+  },
+  "reinforcements_note": "entries.reinforcements conflated explicit memory_reinforce with automatic dream-trace bumps (service.py dream_run trace path), so 562 reinforced entries measured consolidation yield (73% of entries fed at least one cortex fact), not usefulness; the v33 explicit_reinforcements column splits this going forward."
+}

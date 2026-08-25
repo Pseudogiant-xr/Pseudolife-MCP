@@ -501,6 +501,10 @@ class CortexConfig:
     # current slot when its value-free slot embedding cosine >= this. <=0 disables
     # (exact-key only = today's behaviour). Positive = the cosine floor.
     dream_slot_match_threshold: float = 0.0
+    # Slot read telemetry (schema v33): count each slot served by fact_get /
+    # cortex search into slot_reads. Kill switch, not a tuning constant —
+    # one small upsert per fact-serving call, PG-only.
+    read_tracking: bool = True
 
 
 @dataclass
