@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-08-25 — session identity: episode handle becomes the primary anchor; transport fallback retired)
+- **Concurrent Claude Code sessions share one streamable-HTTP connection,
+  so the transport's `mcp-session-id` header identifies the connection,
+  not the session — sub-episodes and lifecycle calls could land on a
+  different session's episode tree (diagnosed 2026-07-18).**
+  `memory_episode_start` and `memory_episode_end` now take an optional
+  `episode` parameter (the session handle the session-start briefing
+  already advertises): `episode_start` nests under that handle's session
+  root, and `episode_end` pops strictly within the handle's subtree —
+  never the session root itself, which stays owned by the hook lifecycle
+  (SessionEnd / idle reaper). An unknown or closed handle degrades to the
+  previous behavior and adds `episode_warning`, mirroring `memory_store`.
+  The `mcp-session-id` fallback (identity tier 4) is retired — the MCP
+  2026-07-28 revision (SEP-2567) removes the header from the protocol
+  entirely; `PSEUDOLIFE_LEGACY_TRANSPORT_SESSION=1` restores it for one
+  release as a rollback hatch and logs a warning on first use. Design:
+  `docs/specs/2026-08-25-mcp-v2-session-identity-design.md`.
+
 ### Fixed (2026-08-25 — retrieval-log/compaction/dream-run retention never ran with dreaming disabled)
 - **A bank with `memory.dream.enabled=false` (a documented, first-class
   knob) never pruned `retrieval_events`, superseded cortex/world/lesson

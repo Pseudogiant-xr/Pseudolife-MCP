@@ -40,11 +40,17 @@ def test_prefers_x_pl_session_over_mcp_session_id():
         ctxvar.reset(tok)
 
 
-def test_falls_back_to_mcp_session_id():
+def test_mcp_session_id_fallback_retired(monkeypatch):
+    # Spec 2026-08-25: the transport header names the CONNECTION, not the
+    # session (and MCP 2026-07-28 removes it) — ignored unless the one-release
+    # legacy hatch is set.
     ctxvar, ctx = _with_request(
         {"x-pl-writer": "w1", "mcp-session-id": "per-call-9"})
     tok = ctxvar.set(ctx)
+    monkeypatch.delenv("PSEUDOLIFE_LEGACY_TRANSPORT_SESSION", raising=False)
     try:
+        assert wc._http_writer_session() == ("w1", None)
+        monkeypatch.setenv("PSEUDOLIFE_LEGACY_TRANSPORT_SESSION", "1")
         assert wc._http_writer_session() == ("w1", "per-call-9")
     finally:
         ctxvar.reset(tok)

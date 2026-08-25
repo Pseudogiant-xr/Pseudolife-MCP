@@ -190,6 +190,20 @@ class EpisodeManager:
         candidates = leaves or open_eps
         return max(candidates, key=lambda e: e.started_at)
 
+    def open_subtree_leaf(self, root_id: str,
+                          session_key: str | None) -> Episode | None:
+        """The open leaf under ``root_id`` for ``session_key``, excluding the
+        root itself — ``None`` when the subtree has no open sub-episode.
+        Lets a caller holding a session-root handle operate strictly within
+        that root's subtree (spec 2026-08-25)."""
+        if session_key is None:
+            return None
+        leaf = self.open_leaf_for(session_key)
+        if (leaf is None or leaf.id == root_id
+                or not self._descends_from(leaf, root_id)):
+            return None
+        return leaf
+
     def remove(self, id: str) -> None:
         """Drop an episode from the log (used by prune-on-empty / cleanup)."""
         self.episodes.pop(id, None)

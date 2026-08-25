@@ -205,4 +205,7 @@ def test_fact_write_attributes_writer_from_header(daemon):
     row = _fact_row(daemon["db"], "keying-probe")
     assert row is not None, "fact row not persisted"
     assert row["writer_id"] == "codex-test", row
-    assert row["session_id"], "session_id should be non-null (per-connection)"
+    # Spec 2026-08-25: no X-PL-Session and no episode handle means no session
+    # identity — the retired mcp-session-id fallback must NOT stamp the
+    # connection id here.
+    assert not row["session_id"], row

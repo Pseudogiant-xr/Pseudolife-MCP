@@ -4570,38 +4570,74 @@ class MemoryService:
 
     def episode_start(
         self, title: str, hint: str | None = None,
+        episode: str | None = None,
     ) -> dict[str, Any]:
         """Open a NESTED sub-episode under the CALLER's open session episode;
-        the parent stays open. The caller's session is the request's
-        ``X-PL-Session`` (resolved via the writer seam); without one it nests
-        under the global current leaf. Falls back to a root when nothing open."""
+        the parent stays open. ``episode`` (spec 2026-08-25) anchors the nest
+        to that handle's session root explicitly — the multi-session-safe
+        path, since concurrent sessions share both the transport connection
+        and the active-session pointer. Without a handle the caller's session
+        resolves as before (``X-PL-Session`` header, then the pointer);
+        without either it nests under the global current leaf. An unknown/
+        closed/keyless handle degrades to the no-handle path and adds
+        ``episode_warning``, mirroring ``store``."""
         with self._lock:
             self._ensure_init()
             assert self._cms is not None
-            _, session_id = self._resolve_writer()
-            # A sub-episode opened before the first store must still nest
-            # under a session root — lazily open one exactly like store does.
-            self._ensure_session_episode(session_id)
+            resolved = self._resolve_episode_handle(episode)
+            if resolved is not None and resolved[1] is None:
+                resolved = None            # keyless root: unaddressable as a session
+            episode_warning = episode is not None and resolved is None
+            if resolved is not None:
+                session_id = resolved[1]
+            else:
+                _, session_id = self._resolve_writer()
+                # A sub-episode opened before the first store must still nest
+                # under a session root — lazily open one exactly like store does.
+                self._ensure_session_episode(session_id)
             ep = self._cms.episodes.start_nested(
                 title=title, hint=hint, session_key=session_id)
             self._persist_episodes()
-            return self._episode_to_dict(ep)
+            out = self._episode_to_dict(ep)
+            if episode_warning:
+                out["episode_warning"] = "unknown or closed episode handle"
+            return out
 
-    def episode_end(self) -> dict[str, Any]:
+    def episode_end(self, episode: str | None = None) -> dict[str, Any]:
         """Close the caller's currently-open leaf episode and pop to its parent.
         ``{}`` when nothing is open for the caller.
 
-        Ownership guard (spec 2026-07-18): with no resolved session identity,
-        ``Episodes.end_leaf`` falls back to whichever episode is globally
-        "current" — which may belong to a different, still-active session.
-        Before closing, the candidate leaf's ``session_key`` is compared
-        against the resolved identity; a mismatch (including "something is
-        open but I have no identity") is refused as a no-op rather than
-        popping a foreign session's episode."""
+        ``episode`` (spec 2026-08-25): with a handle, ownership is the
+        handle's subtree — strictly narrower than the shared connection key.
+        Only an open sub-episode BELOW that root is popped; the session root
+        itself belongs to the hook lifecycle (SessionEnd / idle reaper) and
+        is never closed here. A subtree with no open sub-episode is a plain
+        no-op ``{}``; an unknown/closed handle is refused.
+
+        Ownership guard (spec 2026-07-18, handle-less path): with no resolved
+        session identity, ``Episodes.end_leaf`` falls back to whichever
+        episode is globally "current" — which may belong to a different,
+        still-active session. Before closing, the candidate leaf's
+        ``session_key`` is compared against the resolved identity; a mismatch
+        (including "something is open but I have no identity") is refused as
+        a no-op rather than popping a foreign session's episode."""
         with self._lock:
             self._ensure_init()
             assert self._cms is not None
             em = self._cms.episodes
+            if episode is not None:
+                resolved = self._resolve_episode_handle(episode)
+                if resolved is None:
+                    return {"closed": None,
+                            "reason": "unknown or closed episode handle"}
+                root_id, skey = resolved
+                leaf = em.open_subtree_leaf(root_id, skey)
+                if leaf is None:
+                    return {}
+                closed = em.end_leaf(session_key=skey)
+                self._persist_episodes()
+                return (self._episode_to_dict(closed)
+                        if closed is not None else {})
             _, session_id = self._resolve_writer()
             ep = (em.open_leaf_for(session_id) if session_id is not None
                   else em.open_episode())

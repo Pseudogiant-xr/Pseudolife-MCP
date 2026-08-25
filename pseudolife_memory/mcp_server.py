@@ -1117,25 +1117,31 @@ def memory_graph_review(
 
 @_tool(tier="core")  # the CLAUDE.md workflow opens sub-episodes for big tasks.
 def memory_episode_start(
-    title: str, hint: str | None = None,
+    title: str, hint: str | None = None, episode: str | None = None,
 ) -> dict[str, Any]:
     """Open a named sub-episode for a substantial multi-step task. It nests
     under the auto-managed session episode; memories stored while it is open
     carry its id + title, enabling episode-scoped search and summaries
     later. ``memory_episode_end`` closes it and pops back to the session.
 
+    Pass ``episode`` (this session's handle, from the session-start
+    briefing) to anchor the nest to YOUR session — required for correct
+    attribution when several sessions run concurrently.
+
     Returns: ``{id, title, started_at, parent_id, ...}``.
     """
-    return service.episode_start(title=title, hint=hint)
+    return service.episode_start(title=title, hint=hint, episode=episode)
 
 
 @_tool(tier="core")  # pairs with memory_episode_start.
-def memory_episode_end() -> dict[str, Any]:
+def memory_episode_end(episode: str | None = None) -> dict[str, Any]:
     """Close the current open episode and pop back to its parent (the
     session). Returns the closed episode dict, or ``{}`` when nothing is
-    open.
+    open. Pass ``episode`` (this session's handle) to pop strictly within
+    your own session's subtree — the session root itself is never closed
+    here.
     """
-    return service.episode_end()
+    return service.episode_end(episode=episode)
 
 
 @_tool(tier="minimal")  # the recommended workflow names the session early.

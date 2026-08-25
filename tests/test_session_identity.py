@@ -524,3 +524,68 @@ def test_keyless_root_never_resumes_via_handle(pg_service):
     res = svc.store("keyless resume", source="t", episode=ep["id"][:12])
     assert res["episode_warning"] == "unknown or closed episode handle"
     assert root.ended_at is not None
+
+
+# ── `episode` handle on the episode lifecycle tools (spec 2026-08-25) ────────
+# Two concurrent Claude Code sessions share one transport connection; only
+# the hook-minted handle distinguishes them. The lifecycle tools must accept
+# it as an explicit anchor so a per-call assertion beats the global pointer.
+
+
+def _two_hook_roots(svc):
+    a = svc.episode_start_session("hook-key-A", "session A")
+    b = svc.episode_start_session("hook-key-B", "session B")
+    svc.set_active_session("hook-key-B")   # pointer last written by B's hook
+    return a, b
+
+
+def test_episode_start_with_handle_nests_under_handle_root(pg_service):
+    svc = pg_service
+    a, b = _two_hook_roots(svc)
+    sub = svc.episode_start("A subtask", episode=a["id"][:12])
+    assert sub["parent_id"] == a["id"]
+    assert sub["session_key"] == "hook-key-A"
+    svc.set_active_session(None)
+
+
+def test_episode_start_without_handle_keeps_pointer_behavior(pg_service):
+    svc = pg_service
+    a, b = _two_hook_roots(svc)
+    sub = svc.episode_start("B subtask")
+    assert sub["parent_id"] == b["id"]
+    svc.set_active_session(None)
+
+
+def test_episode_end_with_handle_pops_only_within_subtree(pg_service):
+    svc = pg_service
+    a, b = _two_hook_roots(svc)
+    sub = svc.episode_start("A subtask", episode=a["id"][:12])
+    # A handle owning no open sub-leaf is a no-op — never touches A's leaf.
+    assert svc.episode_end(episode=b["id"][:12]) == {}
+    closed = svc.episode_end(episode=a["id"][:12])
+    assert closed.get("id") == sub["id"]
+    # The handle never closes the session root itself — that belongs to the
+    # hook lifecycle (SessionEnd / idle reaper).
+    assert svc.episode_end(episode=a["id"][:12]) == {}
+    with svc._lock:
+        assert svc._cms.episodes.episodes[a["id"]].ended_at is None
+    svc.set_active_session(None)
+
+
+def test_episode_start_with_bad_handle_warns_and_degrades(pg_service):
+    svc = pg_service
+    a, b = _two_hook_roots(svc)
+    sub = svc.episode_start("subtask", episode="ffffffffffff")
+    assert sub["episode_warning"] == "unknown or closed episode handle"
+    assert sub["parent_id"] == b["id"]     # degraded to pointer behavior
+    svc.set_active_session(None)
+
+
+def test_transport_session_fallback_retired(monkeypatch):
+    from pseudolife_memory import writer_context as wc
+    monkeypatch.setattr(wc, "_http_request_headers",
+                        lambda: {"mcp-session-id": "conn-1"})
+    monkeypatch.delenv("PSEUDOLIFE_LEGACY_TRANSPORT_SESSION", raising=False)
+    assert wc.resolve_writer_detailed("d") == ("d", None, None)
+    monkeypatch.setenv("PSEUDOLIFE_LEGACY_TRANSPORT_SESSION", "1")
+    assert wc.resolve_writer_detailed("d") == ("d", None, "conn-1")

@@ -69,18 +69,42 @@ def _http_request_headers():
         return None
 
 
+_legacy_transport_warned = False
+
+
+def _legacy_transport_session_enabled() -> bool:
+    """The ``mcp-session-id`` fallback is RETIRED (spec 2026-08-25): the
+    header names the connection, not the session, and the 2026-07-28 MCP
+    revision (SEP-2567) removes it from the protocol entirely.
+    ``PSEUDOLIFE_LEGACY_TRANSPORT_SESSION=1`` restores it for one release
+    as a rollback hatch; first use logs a warning."""
+    global _legacy_transport_warned
+    if not os.environ.get("PSEUDOLIFE_LEGACY_TRANSPORT_SESSION"):
+        return False
+    if not _legacy_transport_warned:
+        _legacy_transport_warned = True
+        import logging
+
+        logging.getLogger("pseudolife-mcp").warning(
+            "PSEUDOLIFE_LEGACY_TRANSPORT_SESSION set — the retired "
+            "mcp-session-id transport fallback (per-connection, removed by "
+            "MCP 2026-07-28) is active; migrate callers to episode handles")
+    return True
+
+
 def _http_writer_session_detailed() -> tuple[str | None, str | None, str | None]:
     """Best-effort ``(writer_id, header_session, transport_session)`` from the
     live MCP request. ``header_session`` is the integrator-asserted
     ``X-PL-Session`` (identity tier 1); ``transport_session`` is the
     transport's ``mcp-session-id`` — per-CONNECTION in multiplexing clients,
-    and REMOVED from the MCP spec in the 2026-07-28 revision (SEP-2567), so
-    it is a legacy fallback only."""
+    REMOVED from the MCP spec in the 2026-07-28 revision (SEP-2567), and
+    retired here (always ``None`` unless the legacy escape hatch is set)."""
     headers = _http_request_headers()
     if headers is None:
         return (None, None, None)
-    return (headers.get("x-pl-writer"), headers.get("x-pl-session"),
-            headers.get("mcp-session-id"))
+    transport = (headers.get("mcp-session-id")
+                 if _legacy_transport_session_enabled() else None)
+    return (headers.get("x-pl-writer"), headers.get("x-pl-session"), transport)
 
 
 @lru_cache(maxsize=8)
