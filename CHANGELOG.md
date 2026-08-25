@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-26 — reranker training sees facts, and the audit nominates graduation candidates; schema v34)
+- **The learned-reranker training log recorded only half of every search
+  response: served entries, never the cortex facts served above them —
+  and nothing turned the new read telemetry into an actionable list.**
+  Schema v34 (additive/idempotent) adds `retrieval_events.served_facts`:
+  the `memory_search` handler attaches the cortex-first block's served
+  slots (`entity_norm`/`attribute_norm`/rank/score/kind/contested) to
+  the exact event row that search wrote, keyed by the event id
+  `search(return_event_id=True)` returns (opt-in, popped before the tool
+  result — never part of the public search shape). `NULL` = pre-v34 row
+  or no facts served; `retrieval_events_window()` exports the column for
+  the Phase-1 trainer. Separately (no DDL), `read_audit` gains
+  `graduation_candidates`: entries served in ≥60% of the last 30 days'
+  distinct sessions (gated until ≥8 sessions are on record) — static
+  context being re-paid for per query, i.e. "promote to CLAUDE.md"
+  candidates, the follow-up PR #200 deferred.
+
 ### Added (2026-08-26 — read telemetry: slot reads, the explicit-reinforce split, and a `read_audit` stats section; schema v33)
 - **A memory bank could not answer "which of my facts are ever actually
   read?" — entries carried `access_count`, but the cortex's fact slots had

@@ -680,6 +680,86 @@ class PostgresStorage:
             )
         return cur.rowcount
 
+    def attach_served_facts(self, event_id: int,
+                            served_facts: list[dict]) -> int:
+        """Record the cortex slots a search's cortex-first block served
+        (schema v34), on the exact event row the search returned the id
+        of. A plain UPDATE by primary key — no session-window guessing.
+        Returns rows updated (0 = the event was pruned or the id is bogus;
+        the caller surfaces that, since a silent zero would be invisible
+        exactly the way a dead log is)."""
+        with self._txn():
+            cur = self.conn.execute(
+                "UPDATE retrieval_events SET served_facts = %s "
+                "WHERE id = %s",
+                (Jsonb(served_facts), int(event_id)))
+        return cur.rowcount
+
+    def graduation_report(self, window_days: float = 30.0,
+                          min_sessions: int = 8, min_share: float = 0.6,
+                          limit: int = 10,
+                          now: float | None = None) -> list[dict]:
+        """Entries served in a high share of recent distinct sessions —
+        static-context ("graduate to CLAUDE.md") candidates: an entry the
+        retrieval layer re-serves in nearly every session is effectively
+        standing context being paid for per query. Heuristic defaults, not
+        measured constants: 30-day window matches a working set's horizon,
+        the 8-session floor keeps a young log from nominating on noise,
+        0.6 share means "most sessions". Sessions with a NULL session_id
+        are excluded (no identity to count). Entries whose row is gone
+        (evicted) are dropped — nothing to promote.
+
+        Semantics caveats, per the log's own shape: "served" means ranked
+        into the event log, which is written BEFORE the MCP handler's
+        cortex-dedup — an entry repeatedly dropped from responses for
+        restating a fact still accrues share, so vet a candidate against
+        the cortex before promoting it. ``sessions_total`` counts distinct
+        sessions that SEARCHED (zero-result searches log too), not
+        sessions that were served anything — this biases share downward,
+        the conservative direction. Read-only; cost is one scan of the
+        WINDOW (the 30-day filter rides retrieval_events_created_idx —
+        retention only bounds the table, not this query), but the LATERAL
+        jsonb expansion detoasts every windowed event's served blob, and
+        like read_audit this runs under the service lock on every
+        ``memory_stats`` / ``/api/overview`` call — shrink the window
+        before blaming the bank if it ever shows in a latency profile."""
+        t = time.time() if now is None else float(now)
+        rows = self.conn.execute(
+            """
+            WITH ev AS (
+              SELECT id, session_id, served FROM retrieval_events
+              WHERE created_at >= %s AND session_id IS NOT NULL
+            ),
+            tot AS (SELECT COUNT(DISTINCT session_id) AS n FROM ev),
+            hits AS (
+              SELECT DISTINCT (elem->>'entry_id')::bigint AS entry_id,
+                     ev.session_id
+              FROM ev, LATERAL jsonb_array_elements(ev.served) AS elem
+              WHERE elem ? 'entry_id'
+            )
+            SELECT h.entry_id, COUNT(*) AS sessions_served, t.n,
+                   e.source, e.access_count, e.text
+            FROM hits h
+            CROSS JOIN tot t
+            JOIN entries e ON e.id = h.entry_id
+            WHERE t.n >= %s
+            GROUP BY h.entry_id, t.n, e.source, e.access_count, e.text
+            HAVING COUNT(*) >= %s * t.n
+            ORDER BY COUNT(*) DESC, h.entry_id
+            LIMIT %s
+            """,
+            (t - float(window_days) * 86400, int(min_sessions),
+             float(min_share), int(limit)),
+        ).fetchall()
+        return [
+            {"entry_id": int(r[0]), "sessions_served": int(r[1]),
+             "sessions_total": int(r[2]),
+             "share": round(float(r[1]) / float(r[2]), 3),
+             "source": r[3], "access_count": int(r[4]),
+             "text": (r[5] or "")[:200]}
+            for r in rows
+        ]
+
     def prune_retrieval_events(self, older_than_ts: float) -> int:
         """Delete events older than the cutoff (their use labels CASCADE),
         so the log can't grow unbounded."""
@@ -696,7 +776,8 @@ class PostgresStorage:
         export read. Read-only."""
         rows = self.conn.execute(
             "SELECT e.id, e.query_text, e.origin, e.session_id, "
-            "e.episode_id, e.served, e.params, e.created_at, "
+            "e.episode_id, e.served, e.served_facts, e.params, "
+            "e.created_at, "
             "COALESCE(json_agg(json_build_object("
             "'entry_id', u.entry_id, 'used_via', u.used_via, "
             "'at', u.created_at)) "
@@ -708,7 +789,7 @@ class PostgresStorage:
             (float(since_ts), int(limit)),
         ).fetchall()
         cols = ("id", "query_text", "origin", "session_id", "episode_id",
-                "served", "params", "created_at", "uses")
+                "served", "served_facts", "params", "created_at", "uses")
         return [dict(zip(cols, r)) for r in rows]
 
     def retrieval_log_health(self) -> dict:

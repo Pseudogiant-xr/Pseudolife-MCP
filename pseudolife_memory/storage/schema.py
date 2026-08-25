@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 33
+SCHEMA_META_VERSION = 34
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -754,6 +754,15 @@ def ensure_schema(conn) -> dict:
             "ALTER TABLE entries ADD COLUMN IF NOT EXISTS "
             "explicit_reinforcements INTEGER NOT NULL DEFAULT 0"
         )
+        # v34 additive: the fact half of the training tuple. The v31 event
+        # log recorded only the served ENTRIES; the cortex-first block's
+        # facts — served ABOVE those entries in every search response —
+        # were invisible to a future learned reranker. Attached by an
+        # UPDATE keyed on the event id the search returned (exact, no
+        # session-window guessing). NULL = pre-v34 row or no facts served.
+        cur.execute(
+            "ALTER TABLE retrieval_events ADD COLUMN IF NOT EXISTS "
+            "served_facts JSONB")
         # One-time upgrade: drop the old episode FK only when it's actually
         # present. Guarding avoids taking an ACCESS EXCLUSIVE lock on every
         # init (which could block behind any open transaction on entries).

@@ -249,7 +249,8 @@ class FixtureService:
         return {"count": len(items[:n]), "entries": items[:n]}
 
     def search(self, query, top_k=12, sources=None, bands=None, tags=None,
-               min_score=None, disable_recency_boost=False, rerank=None, bm25=None):
+               min_score=None, disable_recency_boost=False, rerank=None,
+               bm25=None, return_event_id=False):
         q = (query or "").lower()
         items = [_stream_dict(t, i) for i, t in enumerate(_STREAM)
                  if not q or q in t[0].lower() or any(q in tg for tg in t[3])]
