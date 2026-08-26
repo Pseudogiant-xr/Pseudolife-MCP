@@ -3122,7 +3122,7 @@ class MemoryService(DreamOps):
             return {"removed": removed, "entity": entity, "attribute": attribute}
 
     # ------------------------------------------------------------------
-    # Dream pass — episode cursor + regex floor (LLM step is gateway-side)
+    # Cortex maintenance + startup warmup (dream pass: service_dream.py)
     # ------------------------------------------------------------------
 
     def cortex_dedup(self, threshold: float = 0.90, dry_run: bool = True) -> dict[str, Any]:
@@ -3162,8 +3162,6 @@ class MemoryService(DreamOps):
             "merged": sum(len(c["retired"]) for c in report),
         }
 
-    # Post-pass caps: screen at most this many freshly-minted entities per
-    # cycle, one best-match proposal each — the queue stays reviewable.
     def warmup(self):
         """Eagerly load embedder + reranker + NLI so the first real tool call
         is warm. Safe to run in a background thread at startup."""

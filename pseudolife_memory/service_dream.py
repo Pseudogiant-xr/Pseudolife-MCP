@@ -14,10 +14,7 @@ for standalone use.
 
 from __future__ import annotations
 
-import json
 import logging
-import threading
-import time
 from typing import Any
 
 from pseudolife_memory.memory.titans_memory import MemoryEntry
@@ -28,6 +25,8 @@ logger = logging.getLogger(__name__)
 class DreamOps:
     """Dream section of ``MemoryService`` (see module docstring)."""
 
+    # Post-pass caps: screen at most this many freshly-minted entities per
+    # cycle, one best-match proposal each — the queue stays reviewable.
     _ALIAS_SCAN_MAX = 20
     _INFER_CURSOR_KEY = "outcome_inference_cursor"
     _DIGEST_CURSOR_KEY = "session_digest_cursor"

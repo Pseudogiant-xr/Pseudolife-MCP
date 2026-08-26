@@ -10,8 +10,9 @@ incident was exactly this — the sweep thread's unlocked
 for hours (the episode write-through then spun INSERTs inside the dead
 transaction, pinning a Postgres core).
 
-The invariant: every use of ``self._storage`` / ``self._graph`` in
-``service.py`` — attribute access, mutation, aliasing, or passing the
+The invariant: every use of ``self._storage`` / ``self._graph`` in the
+MemoryService sources (``service.py`` and the ``DreamOps`` mixin in
+``service_dream.py``) — attribute access, mutation, aliasing, or passing the
 object to a callee — happens while ``self._lock`` is held. Two tests
 enforce it:
 
@@ -96,8 +97,8 @@ _STORAGE_ROOTS = {"_storage", "_graph"}
 
 
 class _Scan:
-    """One pass over service.py collecting both unlocked storage sites and
-    every ``self.<name>(...)`` call site with its lock state."""
+    """One pass over a single source file collecting both unlocked storage
+    sites and every ``self.<name>(...)`` call site with its lock state."""
 
     def __init__(self) -> None:
         # (enclosing_func, lineno) for storage uses outside the lock.
