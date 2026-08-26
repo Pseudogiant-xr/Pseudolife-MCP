@@ -249,7 +249,8 @@ class FixtureService:
         return {"count": len(items[:n]), "entries": items[:n]}
 
     def search(self, query, top_k=12, sources=None, bands=None, tags=None,
-               min_score=None, disable_recency_boost=False, rerank=None, bm25=None):
+               min_score=None, disable_recency_boost=False, rerank=None,
+               bm25=None, return_event_id=False):
         q = (query or "").lower()
         items = [_stream_dict(t, i) for i, t in enumerate(_STREAM)
                  if not q or q in t[0].lower() or any(q in tg for tg in t[3])]
@@ -327,6 +328,13 @@ class FixtureService:
             n("Console", "concept"), n("Auth flow", "concept"),
             n("config.py dataclasses", "concept"), n("<data_dir>/config.yaml", "concept"),
             n("tool run_in_background", "concept"), n("docker compose", "concept"),
+            # Issue #171 (stored XSS via graph entity names -> galaxy tooltip
+            # innerHTML). Nothing upstream filters markup out of an entity
+            # name (junk_name_reason() screens junk shapes, not HTML), so a
+            # prompt-injected ingested document could land one like this.
+            # Kept in the demo bank so an operator can eyeball the fix live:
+            # it must render as an inert star label on hover, never execute.
+            n("<img src=x onerror=alert(document.domain)>", "concept"),
         ]
         hub = "Cortex Console web frontend"
         tabs = ["Observatory", "Cortex", "World", "Lessons", "Stream", "Graph", "Episodes", "Console"]
@@ -348,6 +356,10 @@ class FixtureService:
             {"src": "pseudolife-daemon", "relation": "started-via", "dst": "tool run_in_background", "derived": False, "confidence": 0.6},
             {"src": "docker-desktop", "relation": "runs", "dst": "docker compose", "derived": False, "confidence": 0.7},
             {"src": "Console", "relation": "guards", "dst": "Auth flow", "derived": True, "via": ["inferred"]},
+            # Wired to the hub (not isolated) so the #171 XSS-probe node above
+            # is reachable in the default galaxy view, not orphaned off-screen.
+            {"src": hub, "relation": "flagged-name", "dst": "<img src=x onerror=alert(document.domain)>",
+             "derived": False, "confidence": 0.5},
         ] + [{"src": hub, "relation": "tab", "dst": t, "derived": False, "confidence": 0.9} for t in tabs]
         # Deterministically spread demo nodes across the advertised projects so
         # every scope in graph_projects() has matching members (coherent demo).

@@ -8,6 +8,8 @@
 #   ops/update.sh --keep-rollbacks 5  # rollback tags to retain (default 2)
 #   ops/update.sh --keep-cache-hours 24  # build cache to retain, hours (default 168)
 #   ops/update.sh --no-cache-prune    # skip build-cache retention entirely
+#   ops/update.sh --force-rollback-tag # tag the rollback even when the version
+#                                      # tag is not the running daemon's image
 #
 # Rebuilds + recreates ONLY the daemon container (`--no-deps`), so Postgres and
 # the extractor are never touched. The bank lives in EXTERNAL volumes; this never
@@ -19,6 +21,9 @@ NO_BACKUP=0
 KEEP_ROLLBACKS=2
 KEEP_CACHE_HOURS=168
 NO_CACHE_PRUNE=0
+# Override for the "a build already ran without a completed deploy" guard in
+# step 2 — see the comment there before reaching for it.
+FORCE_ROLLBACK_TAG=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -27,6 +32,7 @@ while [ $# -gt 0 ]; do
         --keep-rollbacks) KEEP_ROLLBACKS="$2"; shift 2 ;;
         --keep-cache-hours) KEEP_CACHE_HOURS="$2"; shift 2 ;;
         --no-cache-prune)   NO_CACHE_PRUNE=1; shift ;;
+        --force-rollback-tag) FORCE_ROLLBACK_TAG=1; shift ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
@@ -62,14 +68,43 @@ image_tag="$(sed -n 's/^[[:space:]]*image:[[:space:]]*\(pseudolife-daemon:[^[:sp
 stamp="$(date +%Y%m%d-%H%M%S)"
 [ -n "$TAG" ] || TAG="pre-update-$stamp"
 rollback="$image_tag-$TAG"
-if docker image inspect "$image_tag" >/dev/null 2>&1; then
-    docker tag "$image_tag" "$rollback"
-    rollback_ready=1
-    echo "==> Tagged rollback image: $rollback"
-else
-    rollback_ready=0
+daemon_container="pseudolife-mcp-daemon"
+# The rollback tag is only worth anything if it points at the LAST-GOOD
+# image, and the version tag alone is not proof of that: `docker compose up
+# --build` below builds FIRST and the deploy is validated AFTER, so a run
+# that aborts in between leaves the version tag on a freshly built, never
+# validated image. Re-running update.sh — the obvious next move — then tagged
+# THAT as the rollback and destroyed the only pointer to the last-good image
+# (this happened live on the Windows side on 2026-08-13).
+#
+# The daemon container still holds the image that was actually deployed, so
+# the two IDs disagreeing IS that situation. `inspect` answers for a STOPPED
+# container too, so deploying from a stopped stack is still guarded; only a
+# container that does not exist at all (fresh install, or it was removed)
+# leaves nothing to compare and keeps the pre-guard behavior. Known blind
+# spot: a build that recreated the container and then failed its health check
+# leaves both IDs on the new image — that path exits with the rollback
+# instructions already printed, and is meant to be acted on then.
+tag_image_id="$(docker image inspect -f '{{.Id}}' "$image_tag" 2>/dev/null || true)"
+running_image_id="$(docker inspect -f '{{.Image}}' "$daemon_container" 2>/dev/null || true)"
+rollback_state=none
+if [ -z "$tag_image_id" ]; then
     echo "WARNING: no current $image_tag image to tag (first build, or the version was bumped before this image was ever built)." >&2
     echo "WARNING: this deploy has NO rollback image. Rolling back means rebuilding the previous code." >&2
+elif [ -n "$running_image_id" ] && [ "$running_image_id" != "$tag_image_id" ] \
+    && [ "$FORCE_ROLLBACK_TAG" != "1" ]; then
+    rollback_state=kept
+    echo "WARNING: REFUSING to move the rollback tag: $image_tag is NOT the image the running daemon deployed ($running_image_id vs $tag_image_id)." >&2
+    echo "WARNING: that means a build already ran without a completed deploy, so tagging it now would overwrite the last-good rollback with an unvalidated image." >&2
+    echo "WARNING: existing rollback tags are untouched. Re-run with --force-rollback-tag once you are sure $image_tag IS the image you would want to roll back to." >&2
+else
+    docker tag "$image_tag" "$rollback"
+    rollback_state=tagged
+    echo "==> Tagged rollback image: $rollback"
+    if [ "$FORCE_ROLLBACK_TAG" = "1" ] && [ -n "$running_image_id" ] \
+        && [ "$running_image_id" != "$tag_image_id" ]; then
+        echo "WARNING: --force-rollback-tag: tagged $image_tag even though the running daemon deployed a different image." >&2
+    fi
 fi
 
 # Rollback instructions follow whether the tag actually exists. They used to
@@ -77,8 +112,14 @@ fi
 # worst on the unhealthy path below, where the operator reaches for it
 # precisely because the deploy just broke.
 print_rollback() {
-    if [ "$rollback_ready" = "1" ]; then
+    if [ "$rollback_state" = "tagged" ]; then
         echo "      docker tag $rollback $image_tag"
+        echo "      docker compose -f \"$compose_file\" up -d --no-deps pseudolife-daemon"
+    elif [ "$rollback_state" = "kept" ]; then
+        echo "      (the rollback tag was NOT moved this run - see the warning above)"
+        echo "      Pick the newest surviving rollback tag and redeploy it:"
+        echo "      docker image ls ${image_tag%%:*}"
+        echo "      docker tag <that tag> $image_tag"
         echo "      docker compose -f \"$compose_file\" up -d --no-deps pseudolife-daemon"
     else
         echo "      (no rollback image exists for this deploy - nothing was tagged)"

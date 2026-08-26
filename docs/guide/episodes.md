@@ -21,12 +21,15 @@ reliably — without the agent having to remember:
    (full table + rationale:
    [Configuration — session identity](configuration.md#session-identity)):
    a stdio shim's per-process `X-PL-Session` header outranks an explicit
-   `episode` handle passed on a write, which outranks the SessionStart-hook-
-   registered active session, which outranks the legacy transport
-   `mcp-session-id` (per-**connection**, not per-session, and removed
-   entirely by the MCP 2026-07-28 revision — SEP-2567, "Sessionless" — so
-   treat it as a dying fallback, not something to depend on), which falls
-   back to writer id + idle-gap sessionization when nothing above resolved.
+   `episode` handle passed on a write (on the lifecycle tools —
+   `memory_episode_start`/`_end`, `memory_session_title` — a resolved
+   handle wins outright), which outranks the SessionStart-hook-registered
+   active session. The legacy transport `mcp-session-id` tier is
+   **retired** (per-**connection**, not per-session, and removed entirely
+   by the MCP 2026-07-28 revision — SEP-2567, "Sessionless";
+   `PSEUDOLIFE_LEGACY_TRANSPORT_SESSION=1` is a one-release rollback
+   hatch), leaving writer id + idle-gap sessionization as the floor when
+   nothing above resolved.
    - **Hook-registered identity.** The plugin's SessionStart hook forwards
      Claude Code's own `session_id` to the daemon, which opens (or
      resumes) that session's root episode immediately — no longer lazily

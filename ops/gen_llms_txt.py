@@ -51,6 +51,12 @@ PAGES: list[tuple[str, str]] = [
     ("docs/guide/benchmarks.md",
      "LongMemEval methodology and results, with the committed evidence "
      "artifacts behind each number"),
+    ("docs/guide/comparison.md",
+     "Where this sits among agent-memory projects, the axes it is built "
+     "around, and when to use something else instead"),
+    ("docs/guide/security-posture.md",
+     "Memory poisoning (ASI06): the threat model, every shipped "
+     "mitigation mapped to it, and what is not defended"),
 ]
 
 

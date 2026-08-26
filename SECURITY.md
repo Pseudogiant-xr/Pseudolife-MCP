@@ -57,9 +57,17 @@ The shipped configuration is deliberately conservative:
 
 ## Memory poisoning
 
+> **Full threat model and mechanism map:**
+> [Security posture — memory poisoning (ASI06)](docs/guide/security-posture.md).
+> It maps every shipped mitigation to the step it contains, states what is
+> *not* defended, and carries the remediation and hardening checklists. The
+> summary below is the part that bears on what we want reported.
+
 A memory system has an attack surface ordinary tools don't: content the
 agent *reads* can try to get itself *stored*, and anything stored shapes
-every later session. The 2026 literature (MINJA, arXiv 2601.05504) shows
+every later session. OWASP's agentic-threat catalogue lists persistent
+memory poisoning as **ASI06** (December 2025). The 2026 literature
+(MINJA, arXiv 2601.05504) shows
 query-only injection against agent memories succeeding at high rates — and
 that agents cannot be *talked* out of a poisoned memory (conversational
 correction relapses; deletion is the only remediation).

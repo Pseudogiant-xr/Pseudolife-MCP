@@ -34,6 +34,18 @@ DAY = 86400.0
 QUERY_OFFSET = 90 * DAY   # volatile (2x21d TTL) is stale; slow (270d) is not
 
 
+def _result_json(raw) -> dict:
+    """Parse a call_tool result across SDK shapes: v1 (content, structured)
+    tuple, or v2 CallToolResult (structured when present, else text JSON)."""
+    if isinstance(raw, tuple):
+        return raw[1]
+    structured = getattr(raw, "structured_content", None)
+    if structured is not None:
+        return structured
+    return json.loads("".join(
+        c.text for c in raw.content if hasattr(c, "text")))
+
+
 class _FrozenClock:
     def __init__(self, now: float) -> None:
         self._now = float(now)
@@ -220,8 +232,7 @@ def test_compact_search_block_propagates_policy_fields(tmp_path, monkeypatch):
     with _frozen(time.time() + QUERY_OFFSET):
         raw = asyncio.run(mod.mcp.call_tool(
             "memory_search", {"query": "deploy status"}))
-    structured = raw[1] if isinstance(raw, tuple) else None
-    assert structured is not None
+    structured = _result_json(raw)
     facts = [f for f in structured["cortex"] if f["entity"] == "deploy"]
     assert facts, structured["cortex"]
     f = facts[0]
@@ -251,8 +262,7 @@ def test_world_search_compact_projection_carries_policy_fields(tmp_path,
     with _frozen(time.time() + QUERY_OFFSET):
         raw = asyncio.run(mod.mcp.call_tool(
             "memory_world_search", {"query": "edge-proxy tls cert serial"}))
-    structured = raw[1] if isinstance(raw, tuple) else None
-    assert structured is not None
+    structured = _result_json(raw)
     stale = [e for e in structured["entries"] if e.get("stale")]
     assert stale, structured["entries"]
     assert stale[0]["value"] == "(stale — re-verify; last known value below)"
@@ -262,7 +272,7 @@ def test_world_search_compact_projection_carries_policy_fields(tmp_path,
     with _frozen(time.time() + QUERY_OFFSET):
         raw = asyncio.run(mod.mcp.call_tool(
             "memory_world_search", {"query": "edge-proxy tls cert serial"}))
-    structured = raw[1] if isinstance(raw, tuple) else None
+    structured = _result_json(raw)
     stale = [e for e in structured["entries"] if e.get("stale")]
     assert stale[0]["warning"] == (
         "stale — re-verify before relying on this value")
@@ -289,8 +299,7 @@ def test_search_restatement_dedup_keys_on_underlying_value(tmp_path,
     with _frozen(time.time() + QUERY_OFFSET):
         raw = asyncio.run(mod.mcp.call_tool(
             "memory_search", {"query": "cache tier deployed engine"}))
-    structured = raw[1] if isinstance(raw, tuple) else None
-    assert structured is not None
+    structured = _result_json(raw)
     facts = [f for f in structured["cortex"] if f["entity"] == "cache-tier"]
     assert facts and facts[0]["last_known_value"] == "keydb-engine"
     leaked = [e for e in structured.get("entries", [])

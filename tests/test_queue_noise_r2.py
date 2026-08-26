@@ -15,7 +15,8 @@ triage). Five independent fixes, one contract each:
    not absorb the new junk rows.
 4. Junk tombstones — a name already accepted as junk, re-minted and
    junk-flagged again, auto-deletes at detector degree instead of waiting
-   for a second review.
+   for a second review. The tombstone relaxes the degree bar only: a
+   re-mint carrying real facts still goes to the review queue (#177).
 5. The stateless duplicate listing applies the same ``merge_veto`` the
    filing paths apply (PR #137) and dismissals key on the ENTITY's stored
    canonical, not ``norm_name(display)`` — the Console pair
@@ -156,9 +157,10 @@ def test_tombstoned_remint_autodeletes_at_detector_degree(svc):
     pid = _file_junk(svc, "42", "42")
     assert svc.graph_accept_entity_junk(pid, decided_by="agent")["accepted"]
     assert svc._storage.find_entity("42") is None
-    # Round 2: the name re-mints WITH an edge (degree 1) — previously this
-    # re-queued for a second human verdict. "43" is the never-judged
-    # control at the same degree: it must stay a pending proposal.
+    # Round 2: the name re-mints WITH an edge (degree 1) and no facts —
+    # previously this re-queued for a second human verdict. "43" is the
+    # never-judged control at the same degree: it must stay a pending
+    # proposal. (Fact-bearing re-mints are the case below.)
     with svc._lock:
         svc._ensure_init()
         svc._storage.ensure_entity("42", display="42")
@@ -173,6 +175,57 @@ def test_tombstoned_remint_autodeletes_at_detector_degree(svc):
                if p.get("kind") == "junk"]
     ids = {p["entity_id"] for p in pending}
     assert svc._storage.find_entity("43")["id"] in ids       # awaits review
+
+
+def test_tombstoned_remint_with_facts_is_kept_for_review(svc):
+    # A tombstone is permanent and has no removal path, so the degree bar
+    # alone let a once-junked short name stay deletable forever: months
+    # later the same name can be a real entity with accumulated cortex
+    # facts (#177). The fact-count half of the evidence bar still applies.
+    pid = _file_junk(svc, "42", "42")
+    assert svc.graph_accept_entity_junk(pid, decided_by="agent")["accepted"]
+    # The node re-mints from a relation (a fact write alone never mints a
+    # junk-shaped subject), then real facts accumulate against it.
+    svc.graph_relate("42", "related-to", "daemon", origin="agent")
+    svc.cortex_write("42", "purpose", "the deployment cutover window",
+                     support="user")
+    svc.cortex_write("42", "owner", "the platform crew", support="user")
+    assert svc.deep_dream(apply=True)["applied"] is True
+    ent = svc._storage.find_entity("42")
+    assert ent is not None                                   # not auto-deleted
+    pending = {p["entity_id"] for p in svc._storage.pending_entity_proposals()
+               if p.get("kind") == "junk"}
+    assert ent["id"] in pending                              # awaits review
+
+
+def test_tombstoned_remint_with_orphaned_facts_is_kept_for_review(svc):
+    # The already-damaged population: a name wrongly deleted while carrying
+    # facts. delete_entity NULLs facts.entity_id, so until the name is
+    # re-minted (which now re-links the orphaned rows — ensure_entity's
+    # mint-time repair) the node reads zero facts through the cross-index
+    # while the cortex still holds them under the same name. The name-keyed
+    # count below stays load-bearing for names never re-minted.
+    with svc._lock:
+        svc._ensure_init()
+        svc._storage.ensure_entity("42", display="42")
+    svc.cortex_write("42", "purpose", "the deployment cutover window",
+                     support="user")
+    svc.cortex_write("42", "owner", "the platform crew", support="user")
+    eid = svc._storage.find_entity("42")["id"]
+    assert svc._storage.entity_fact_counts().get(eid) == 2
+    pid = svc._storage.insert_entity_proposal(
+        "junk", eid, None, None, "bare-number", time.time())
+    assert svc.graph_accept_entity_junk(pid, decided_by="agent")["accepted"]
+    # The facts survive the delete, orphaned — the premise of the scenario.
+    assert svc._storage.entity_fact_counts() == {}
+    assert svc.cortex_lookup("42", "purpose") is not None
+    svc.graph_relate("42", "related-to", "daemon", origin="agent")
+    assert svc.deep_dream(apply=True)["applied"] is True
+    ent = svc._storage.find_entity("42")
+    assert ent is not None                                   # not re-deleted
+    pending = {p["entity_id"] for p in svc._storage.pending_entity_proposals()
+               if p.get("kind") == "junk"}
+    assert ent["id"] in pending                              # awaits review
 
 
 # ── 5. duplicate listing: veto parity + canonical-keyed dismissal ────────

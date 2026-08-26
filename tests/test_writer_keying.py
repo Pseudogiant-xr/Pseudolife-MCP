@@ -128,13 +128,15 @@ def daemon(tmp_path_factory):
 
 async def _call_with_writer(url: str, writer: str, tool: str, args: dict):
     from mcp.client.session import ClientSession
-    from mcp.client.streamable_http import streamablehttp_client
+    from mcp.client.streamable_http import (
+        create_mcp_http_client, streamable_http_client)
 
     headers = {"Authorization": f"Bearer {_TOKEN}", "X-PL-Writer": writer}
-    async with streamablehttp_client(url + "/mcp", headers=headers) as (r, w, _):
-        async with ClientSession(r, w) as s:
-            await s.initialize()
-            return await s.call_tool(tool, args)
+    async with create_mcp_http_client(headers=headers) as http:
+        async with streamable_http_client(url + "/mcp", http_client=http) as (r, w):
+            async with ClientSession(r, w) as s:
+                await s.initialize()
+                return await s.call_tool(tool, args)
 
 
 def _fact_row(db_url: str, entity: str) -> dict | None:
@@ -205,4 +207,7 @@ def test_fact_write_attributes_writer_from_header(daemon):
     row = _fact_row(daemon["db"], "keying-probe")
     assert row is not None, "fact row not persisted"
     assert row["writer_id"] == "codex-test", row
-    assert row["session_id"], "session_id should be non-null (per-connection)"
+    # Spec 2026-08-25: no X-PL-Session and no episode handle means no session
+    # identity — the retired mcp-session-id fallback must NOT stamp the
+    # connection id here.
+    assert not row["session_id"], row

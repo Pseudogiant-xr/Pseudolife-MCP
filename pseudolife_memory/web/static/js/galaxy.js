@@ -168,7 +168,15 @@ export async function createGalaxy(host, data, opts = {}) {
     .graphData({ nodes, links })
     .backgroundColor("rgba(0,0,0,0)")
     .nodeId("id")
-    .nodeLabel((n) => n.id)
+    // Entity names are attacker-influenceable (e.g. a prompt-injected
+    // ingested document reaching the extractor) and NOT markup-filtered at
+    // write time (junk_name_reason() screens junk shapes, not HTML). The
+    // vendored tooltip renders a string label via innerHTML, so this must
+    // stay a DOM node with textContent — never a bare string built from
+    // n.id (verified against galaxy.bundle.js's float-tooltip `update()`:
+    // an HTMLElement content value takes the `.append(() => content)`
+    // branch, a string takes `.html(content)`).
+    .nodeLabel((n) => el("span", {}, n.id))
     .nodeColor((n) => nodeColor(n))
     .nodeVal(nodeVal)
     .nodeThreeObjectExtend(true)

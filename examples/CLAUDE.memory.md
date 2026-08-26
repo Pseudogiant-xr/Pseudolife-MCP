@@ -85,8 +85,10 @@ CAPTURE — as durable things arise (one claim per call):
 - `memory_world_set(entity, attribute, value, source_url=, source_quote=)`
   for any EXTERNAL fact you verified via web/docs — route research findings
   here (cited), not into plain `memory_store`.
-- Open a named sub-episode with `memory_episode_start(title)` for a big
-  multi-step task; `memory_episode_end` pops back.
+- Open a named sub-episode with `memory_episode_start(title,
+  episode=<your session handle>)` for a big multi-step task;
+  `memory_episode_end(episode=<handle>)` pops back. The handle anchors
+  both to YOUR session when several run concurrently.
 - Route verbose status/progress/logs under `source="status"` — searchable,
   but excluded from fact/graph extraction so they don't pollute the graph.
 - Never store secrets: no tokens, API keys, passwords, or credentials.

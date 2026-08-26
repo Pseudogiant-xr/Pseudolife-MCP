@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import json
 import re
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -44,6 +47,65 @@ def test_plugin_manifest_version_matches_pyproject():
     version = re.search(r'^version\s*=\s*"([^"]+)"', _read("pyproject.toml"),
                         re.M).group(1)
     assert manifest["version"] == version
+
+
+def test_package_version_matches_pyproject():
+    """``pseudolife_memory.__version__`` used to be a second hand-maintained
+    literal that drifted eight releases behind pyproject.toml with nothing
+    to catch it (issue #180). It now derives from the installed
+    distribution's metadata via ``importlib.metadata``, so it is correct for
+    anything actually built/shipped (every build backend stamps dist-info
+    from pyproject.toml at build time).
+
+    That derivation is only as fresh as the *installed* dist-info, though —
+    a local editable install that was never reinstalled after a version bump
+    can carry stale metadata. That happens in this dev environment; it never
+    happens for a real `pip install` or a CI build. Skip (with a clear
+    reason) only in that stale-local-install case; the equality against
+    whatever metadata *is* installed is always asserted, since a drift there
+    would be a real code bug."""
+    pyproject_version = re.search(r'^version\s*=\s*"([^"]+)"',
+                                   _read("pyproject.toml"), re.M).group(1)
+
+    try:
+        installed_version = version("pseudolife-mcp")
+    except PackageNotFoundError:
+        pytest.skip("pseudolife-mcp is not installed in this environment — "
+                     "cannot compare __version__ against package metadata")
+
+    from pseudolife_memory import __version__
+    assert __version__ == installed_version
+
+    if installed_version != pyproject_version:
+        pytest.skip(
+            f"installed dist-info reports {installed_version!r} but "
+            f"pyproject.toml says {pyproject_version!r} — stale editable "
+            "install in this dev environment (reinstall with "
+            "`pip install -e .` to refresh); not a code bug")
+
+    assert __version__ == pyproject_version
+
+
+def test_server_json_versions_match_pyproject():
+    """The MCP registry's version guard used to run in the `registry` GitHub
+    Actions job, which only executes AFTER the irreversible PyPI publish
+    (issue #185) — a version-field mismatch burned a release number instead
+    of failing before anything uploaded. server.json carries the version in
+    two places that drift independently, and the compose daemon image tag
+    (`ops/docker-compose.yml`) calls itself the deploy source of truth but
+    was unguarded against pyproject.toml too. Pin all three here so a bad
+    version cut fails locally, before any workflow runs."""
+    pyproject_version = re.search(r'^version\s*=\s*"([^"]+)"',
+                                   _read("pyproject.toml"), re.M).group(1)
+
+    server = json.loads(_read("server.json"))
+    assert server["version"] == pyproject_version
+    assert server["packages"][0]["version"] == pyproject_version
+
+    compose = _read("ops/docker-compose.yml")
+    match = re.search(r"^\s*image:\s*pseudolife-daemon:(\S+)$", compose, re.M)
+    assert match, "ops/docker-compose.yml must pin the daemon image tag to a version"
+    assert match.group(1) == pyproject_version
 
 
 def test_plugin_ships_no_mcp_server():

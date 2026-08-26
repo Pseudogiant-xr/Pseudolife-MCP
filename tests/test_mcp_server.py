@@ -120,16 +120,19 @@ def _invoke(tool_name: str, args: dict) -> dict:
     from pseudolife_memory import mcp_server  # noqa: PLC0415
 
     result = asyncio.run(mcp_server.mcp.call_tool(tool_name, args))
-    # FastMCP returns a tuple in newer versions: (content_list, structured_dict).
-    # Older versions return just content_list. Handle both.
+    # SDK v1 FastMCP returned (content_list, structured_dict) (or bare
+    # content); v2 MCPServer returns a CallToolResult. Handle all three.
     if isinstance(result, tuple):
         content, structured = result
+    elif hasattr(result, "content"):
+        content = result.content
+        structured = getattr(result, "structured_content", None)
     else:
         content, structured = result, None
     # Structured payload is what an MCP client uses — prefer it when present.
     if structured is not None:
         return structured
-    # Fall back to text-content JSON parse for older SDK shapes.
+    # Fall back to text-content JSON parse.
     text_parts = [
         item.text for item in content if hasattr(item, "text")
     ]
@@ -243,6 +246,61 @@ def test_start_dream_sweep_warns_without_extractor(tmp_path: Path, monkeypatch, 
         mod.start_dream_sweep()   # dream enabled by default, no extractor configured
     msgs = " ".join(r.getMessage().lower() for r in caplog.records)
     assert "extractor" in msgs and "cortex" in msgs
+
+
+def test_start_dream_sweep_starts_for_retrieval_log_when_dream_disabled(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """Issue #178: the retrieval-event log (default-on, schema v31) has no
+    reaper besides the sweep tick, and it accrues on every memory_search
+    regardless of dream state. Disabling dream must not also silently
+    disable retrieval-log retention by never starting the thread that
+    runs it.
+
+    Asserts the decision, not a live thread: a real ``pl-dream`` thread
+    (600s default interval) left running past this test could wake mid-
+    suite and touch the shared bench bank, so ``threading.Thread`` is
+    monkeypatched to record its construction args instead of actually
+    starting."""
+    import importlib
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
+    import pseudolife_memory.mcp_server as mod
+    importlib.reload(mod)
+    mod.service.config.memory.dream.enabled = False
+    mod.service.config.memory.retrieval_log.enabled = True
+
+    calls: list[tuple[tuple, dict]] = []
+
+    class _FakeThread:
+        def __init__(self, *args, **kwargs):
+            calls.append((args, kwargs))
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(mod.threading, "Thread", _FakeThread)
+    mod.start_dream_sweep()
+    assert mod._dream_sweep_started is True
+    assert len(calls) == 1, "start_dream_sweep must construct exactly one thread"
+    _, kwargs = calls[0]
+    assert kwargs["target"] is mod._dream_sweep_loop
+    assert kwargs["name"] == "pl-dream"
+    assert kwargs["daemon"] is True
+
+
+def test_start_dream_sweep_skips_when_dream_and_retrieval_log_both_disabled(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """Negative case for the same condition: with nothing riding the tick,
+    the thread must stay off (unchanged from before #178)."""
+    import importlib
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
+    import pseudolife_memory.mcp_server as mod
+    importlib.reload(mod)
+    mod.service.config.memory.dream.enabled = False
+    mod.service.config.memory.retrieval_log.enabled = False
+    mod.start_dream_sweep()
+    assert mod._dream_sweep_started is False
 
 
 def test_memory_store_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:
@@ -759,6 +817,91 @@ def test_memory_recall_compact_by_default(monkeypatch) -> None:
     assert full["edges"][0]["tag"] == "confirmed"
 
 
+def _oversized_recall_fixture() -> dict:
+    """A stub ``service.recall()`` payload shaped like the PG-backed one in
+    evals/recall_cap_probe.py, but hand-built (no DB, no embedder) so the
+    output-cap guarantees run everywhere: a hub seed (hop 0) with a WIDE
+    1-hop ring (20 children, hop 1) and a small hop-2 bridge (6 entities) —
+    exactly the shape where a flat ``[:N]`` slice would let hop 1 crowd out
+    hop 2 entirely (the bug the 2026-08-25 review of #186 caught)."""
+    root = "root-svc"
+    h1 = [f"h1-{i}" for i in range(20)]
+    h2 = [f"h2-{i}" for i in range(6)]
+
+    def facts(n: int) -> list[dict]:
+        return [{"attribute": f"attr{i}", "value": f"v{i}"} for i in range(n)]
+
+    entities = ([{"entity": root, "facts": facts(8)}]
+                + [{"entity": n, "facts": facts(8 if n == h1[0] else 1)}
+                   for n in h1]
+                + [{"entity": n, "facts": facts(1)} for n in h2])
+    entity_hop = {root: 0, **{n: 1 for n in h1}, **{n: 2 for n in h2}}
+
+    edges = [{"src": root, "relation": "depends-on", "dst": n,
+              "derived": False} for n in h1]
+    edges += [{"src": h1[0], "relation": "depends-on", "dst": n,
+               "derived": False} for n in h2]
+    edge_hop = [1] * len(h1) + [2] * len(h2)
+
+    seed_texts = [f"seed hit {i}: {root} overview" for i in range(3)]
+    hop_texts = [f"hop hit {i}: {name} detail " + ("x" * 250)
+                for i, name in enumerate(h1 + h2)]
+    texts = seed_texts + hop_texts
+
+    return {
+        "query": "what does root-svc connect to", "seeds": [root],
+        "entities": entities, "entity_hop": entity_hop,
+        "edges": edges, "edge_hop": edge_hop,
+        "paths": [], "texts": texts, "seed_text_count": len(seed_texts),
+        "iterations": 2, "hops": 3, "low_confidence": False,
+    }
+
+
+def test_memory_recall_caps_preserve_deep_hops_and_bound_size(monkeypatch) -> None:
+    """Stub-service twin of the PG-backed capping tests in
+    tests/test_recall.py — same guarantees, no bench Postgres required, so
+    the regression runs everywhere (issue #186 review finding 4)."""
+    from pseudolife_memory import mcp_server  # noqa: PLC0415
+    fixture = _oversized_recall_fixture()
+    monkeypatch.setattr(mcp_server.service, "recall",
+                        lambda *a, **k: dict(fixture))
+
+    out = _invoke("memory_recall", {"query": "what does root-svc connect to"})
+
+    assert len(out["entities"]) <= mcp_server._RECALL_MAX_ENTITIES
+    assert len(out["edges"]) <= mcp_server._RECALL_MAX_EDGES
+    assert len(out["texts"]) <= mcp_server._RECALL_MAX_TEXTS
+
+    # The whole point of #186's fix: a hub's wide 1-hop ring must not crowd
+    # the hop-2 bridge out of the response.
+    kept_entities = {e["entity"] for e in out["entities"]}
+    assert any(n.startswith("h2-") for n in kept_entities), (
+        "hop-2 entities were entirely dropped -- flat-prefix regression")
+    kept_edges = {(e["src"], e["dst"]) for e in out["edges"]}
+    assert any(dst.startswith("h2-") for (_src, dst) in kept_edges), (
+        "hop-2 edges were entirely dropped -- flat-prefix regression")
+
+    # texts: both the flat seed search AND hop-discovered support survive.
+    assert any(t.startswith("seed hit") for t in out["texts"])
+    assert any("hop hit" in t for t in out["texts"])
+
+    # Per-entity facts are capped even for the hub entities that survive.
+    assert all(len(e["facts"]) <= mcp_server._RECALL_MAX_FACTS_PER_ENTITY
+              for e in out["entities"])
+
+    # Serialized-size regression guard (issue #186 finding 3): this
+    # fixture's uncapped payload is 27 entities (incl. an 8-fact hub), 26
+    # edges, and 29 texts at 250+ chars each -- 12,451 bytes uncapped; the
+    # capped compact payload measured 2,818 bytes when this bound was
+    # written. 4000 gives headroom for incidental field growth without
+    # masking a real regression back toward the uncapped size.
+    assert len(json.dumps(out)) < 4000
+
+    # Internal hop-tracking bookkeeping must not leak into the tool result.
+    assert "entity_hop" not in out and "edge_hop" not in out
+    assert "seed_text_count" not in out
+
+
 # ---------------------------------------------------------------------------
 # Session-scoped tier visibility at the transport (spec 2026-07-11)
 # ---------------------------------------------------------------------------
@@ -767,25 +910,36 @@ from types import SimpleNamespace
 
 
 class _FakeReqCtx:
-    """Bind fake HTTP headers into the SDK's request_ctx for one test."""
+    """Bind fake request headers into the writer_context seam for one test.
+    SDK v2 has no ambient request state — the daemon binds headers at its
+    transport wrap; tools invoked directly via ``mcp.call_tool`` need the
+    same binding for identity/tier resolution."""
     def __init__(self, headers: dict[str, str]):
         self._headers = headers
         self._token = None
     def __enter__(self):
-        from mcp.server.lowlevel.server import request_ctx
-        self._token = request_ctx.set(
-            SimpleNamespace(request=SimpleNamespace(headers=self._headers)))
+        from pseudolife_memory import writer_context as wc
+        self._token = wc.bind_request_headers(self._headers)
         return self
     def __exit__(self, *exc):
-        from mcp.server.lowlevel.server import request_ctx
-        request_ctx.reset(self._token)
+        from pseudolife_memory import writer_context as wc
+        wc.unbind_request_headers(self._token)
 
 
-async def _transport_list(mod) -> list:
-    import mcp.types as mtypes
-    handler = mod.mcp._mcp_server.request_handlers[mtypes.ListToolsRequest]
-    result = await handler(None)
-    return result.root.tools
+async def _transport_list(mod, headers: dict[str, str] | None = None) -> list:
+    """Drive the wrapped v2 tools/list entry with a fake request context —
+    the wrap reads headers from the ctx itself (no ambient request state
+    under the 2026-07-28 SDK). The fake mirrors the REAL runtime shape:
+    ServerRequestContext carries the Starlette request (``ctx.request``),
+    NOT a ``headers`` attribute — the double must exercise the branch
+    production takes (review finding, 2026-08-25)."""
+    entry = mod.mcp._lowlevel_server._request_handlers["tools/list"]
+    request = (SimpleNamespace(headers=headers)
+               if headers is not None else None)
+    ctx = SimpleNamespace(request=request, session=None,
+                          request_id=1, meta=None, method="tools/list")
+    result = await entry.handler(ctx, None)
+    return result.tools
 
 
 def _reload_tiered(tmp_path, monkeypatch, **env):
@@ -803,12 +957,11 @@ def test_transport_list_filters_by_writer_map(tmp_path: Path, monkeypatch) -> No
     mod = _reload_tiered(tmp_path, monkeypatch,
                          PSEUDOLIFE_MCP_TOOLSET="core",
                          PSEUDOLIFE_MCP_TIER_MAP="claude-desktop:minimal")
-    with _FakeReqCtx({"x-pl-writer": "claude-desktop", "x-pl-session": "d1"}):
-        names = {t.name for t in asyncio.run(_transport_list(mod))}
+    names = {t.name for t in asyncio.run(_transport_list(
+        mod, {"x-pl-writer": "claude-desktop", "x-pl-session": "d1"}))}
     assert names == mod._visible_tool_names("minimal")
     # No headers (stdio/tests) -> env default tier
-    with _FakeReqCtx({}):
-        names = {t.name for t in asyncio.run(_transport_list(mod))}
+    names = {t.name for t in asyncio.run(_transport_list(mod, {}))}
     assert names == mod._visible_tool_names("core")
 
 
@@ -819,8 +972,8 @@ def test_transport_list_env_writer_fallback(tmp_path: Path, monkeypatch) -> None
                          PSEUDOLIFE_MCP_TOOLSET="full",
                          PSEUDOLIFE_MCP_TIER_MAP="claude-code:core",
                          PSEUDOLIFE_WRITER_ID="claude-code")
-    with _FakeReqCtx({"x-pl-session": "c1"}):
-        names = {t.name for t in asyncio.run(_transport_list(mod))}
+    names = {t.name for t in asyncio.run(_transport_list(
+        mod, {"x-pl-session": "c1"}))}
     assert names == mod._visible_tool_names("core")
 
 
@@ -835,8 +988,8 @@ def test_hidden_tools_stay_callable(tmp_path: Path, monkeypatch) -> None:
 
 def test_initialization_advertises_list_changed(tmp_path: Path, monkeypatch) -> None:
     mod = _reload_tiered(tmp_path, monkeypatch)
-    opts = mod.mcp._mcp_server.create_initialization_options()
-    assert opts.capabilities.tools.listChanged is True
+    opts = mod.mcp._lowlevel_server.create_initialization_options()
+    assert opts.capabilities.tools.list_changed is True
 
 
 def test_list_changed_forced_even_with_explicit_options(tmp_path: Path, monkeypatch) -> None:
@@ -844,18 +997,21 @@ def test_list_changed_forced_even_with_explicit_options(tmp_path: Path, monkeypa
     with tools_changed=False must not silently disable it."""
     from mcp.server.lowlevel.server import NotificationOptions
     mod = _reload_tiered(tmp_path, monkeypatch)
-    opts = mod.mcp._mcp_server.create_initialization_options(
+    opts = mod.mcp._lowlevel_server.create_initialization_options(
         notification_options=NotificationOptions())
-    assert opts.capabilities.tools.listChanged is True
+    assert opts.capabilities.tools.list_changed is True
 
 
 def test_tool_cache_prefilled_with_full_set(tmp_path: Path, monkeypatch) -> None:
     """Hidden tools keep call-time input validation: the SDK tool cache is
-    fed the FULL registry, not the filtered view."""
+    fed the FULL registry, not the filtered view. v2: the transport filter
+    never touches the MCPServer tool registry, so a hidden tool's call-time
+    input validation must still fire after a filtered list."""
+    from mcp.server.mcpserver.exceptions import ToolError
     mod = _reload_tiered(tmp_path, monkeypatch, PSEUDOLIFE_MCP_TOOLSET="minimal")
-    with _FakeReqCtx({"x-pl-session": "m1"}):
-        asyncio.run(_transport_list(mod))
-    assert set(mod.mcp._mcp_server._tool_cache) == set(mod._TOOL_TIERS)
+    asyncio.run(_transport_list(mod, {"x-pl-session": "m1"}))
+    with pytest.raises(ToolError, match="valid integer"):
+        asyncio.run(mod.mcp.call_tool("memory_recent", {"n": "not-an-int"}))
 
 
 def test_memory_toolset_ladder_and_status(tmp_path: Path, monkeypatch) -> None:
@@ -871,7 +1027,10 @@ def test_memory_toolset_ladder_and_status(tmp_path: Path, monkeypatch) -> None:
         up = _invoke("memory_toolset", {"action": "expand"})
         assert up["changed"] is True and up["current"] == "core"
         assert "memory_recall" in up["visible_tools_added"]
-        assert up["list_changed_sent"] is False   # no live transport session here
+        # v2: notify_tools_changed publishes on the subscription bus, which
+        # succeeds with zero subscribers — the flag now means "published",
+        # not "a live session received it".
+        assert up["list_changed_sent"] is True
 
         up2 = _invoke("memory_toolset", {"action": "expand"})
         assert up2["current"] == "full"

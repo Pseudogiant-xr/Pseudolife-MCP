@@ -630,20 +630,25 @@ class PostgresStorage:
                             origin: str = "search",
                             session_id: str | None = None,
                             episode_id: str | None = None,
+                            params: dict | None = None,
                             now: float | None = None) -> int:
         """One row per search that served entries.
 
         ``served`` is the ranked list as dicts (``entry_id``/``score``/
-        ``rank``/``via``/``bank``). Entry ids carry no FK — entries are
-        evictable, and a training join tolerates dangling ids.
+        ``rank``/``via``/``bank``/``components``). Entry ids carry no FK —
+        entries are evictable, and a training join tolerates dangling ids.
+        ``params`` (v32) is the per-query knob snapshot the fusion ran
+        under; None for callers that don't rank (and for v31 rows).
         """
         t = time.time() if now is None else float(now)
         with self._txn():
             row = self.conn.execute(
                 "INSERT INTO retrieval_events "
                 "(query_text, origin, session_id, episode_id, served, "
-                "created_at) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
-                (query_text, origin, session_id, episode_id, Jsonb(served), t),
+                "params, created_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                (query_text, origin, session_id, episode_id, Jsonb(served),
+                 None if params is None else Jsonb(params), t),
             ).fetchone()
         return int(row[0])
 
@@ -675,6 +680,86 @@ class PostgresStorage:
             )
         return cur.rowcount
 
+    def attach_served_facts(self, event_id: int,
+                            served_facts: list[dict]) -> int:
+        """Record the cortex slots a search's cortex-first block served
+        (schema v34), on the exact event row the search returned the id
+        of. A plain UPDATE by primary key — no session-window guessing.
+        Returns rows updated (0 = the event was pruned or the id is bogus;
+        the caller surfaces that, since a silent zero would be invisible
+        exactly the way a dead log is)."""
+        with self._txn():
+            cur = self.conn.execute(
+                "UPDATE retrieval_events SET served_facts = %s "
+                "WHERE id = %s",
+                (Jsonb(served_facts), int(event_id)))
+        return cur.rowcount
+
+    def graduation_report(self, window_days: float = 30.0,
+                          min_sessions: int = 8, min_share: float = 0.6,
+                          limit: int = 10,
+                          now: float | None = None) -> list[dict]:
+        """Entries served in a high share of recent distinct sessions —
+        static-context ("graduate to CLAUDE.md") candidates: an entry the
+        retrieval layer re-serves in nearly every session is effectively
+        standing context being paid for per query. Heuristic defaults, not
+        measured constants: 30-day window matches a working set's horizon,
+        the 8-session floor keeps a young log from nominating on noise,
+        0.6 share means "most sessions". Sessions with a NULL session_id
+        are excluded (no identity to count). Entries whose row is gone
+        (evicted) are dropped — nothing to promote.
+
+        Semantics caveats, per the log's own shape: "served" means ranked
+        into the event log, which is written BEFORE the MCP handler's
+        cortex-dedup — an entry repeatedly dropped from responses for
+        restating a fact still accrues share, so vet a candidate against
+        the cortex before promoting it. ``sessions_total`` counts distinct
+        sessions that SEARCHED (zero-result searches log too), not
+        sessions that were served anything — this biases share downward,
+        the conservative direction. Read-only; cost is one scan of the
+        WINDOW (the 30-day filter rides retrieval_events_created_idx —
+        retention only bounds the table, not this query), but the LATERAL
+        jsonb expansion detoasts every windowed event's served blob, and
+        like read_audit this runs under the service lock on every
+        ``memory_stats`` / ``/api/overview`` call — shrink the window
+        before blaming the bank if it ever shows in a latency profile."""
+        t = time.time() if now is None else float(now)
+        rows = self.conn.execute(
+            """
+            WITH ev AS (
+              SELECT id, session_id, served FROM retrieval_events
+              WHERE created_at >= %s AND session_id IS NOT NULL
+            ),
+            tot AS (SELECT COUNT(DISTINCT session_id) AS n FROM ev),
+            hits AS (
+              SELECT DISTINCT (elem->>'entry_id')::bigint AS entry_id,
+                     ev.session_id
+              FROM ev, LATERAL jsonb_array_elements(ev.served) AS elem
+              WHERE elem ? 'entry_id'
+            )
+            SELECT h.entry_id, COUNT(*) AS sessions_served, t.n,
+                   e.source, e.access_count, e.text
+            FROM hits h
+            CROSS JOIN tot t
+            JOIN entries e ON e.id = h.entry_id
+            WHERE t.n >= %s
+            GROUP BY h.entry_id, t.n, e.source, e.access_count, e.text
+            HAVING COUNT(*) >= %s * t.n
+            ORDER BY COUNT(*) DESC, h.entry_id
+            LIMIT %s
+            """,
+            (t - float(window_days) * 86400, int(min_sessions),
+             float(min_share), int(limit)),
+        ).fetchall()
+        return [
+            {"entry_id": int(r[0]), "sessions_served": int(r[1]),
+             "sessions_total": int(r[2]),
+             "share": round(float(r[1]) / float(r[2]), 3),
+             "source": r[3], "access_count": int(r[4]),
+             "text": (r[5] or "")[:200]}
+            for r in rows
+        ]
+
     def prune_retrieval_events(self, older_than_ts: float) -> int:
         """Delete events older than the cutoff (their use labels CASCADE),
         so the log can't grow unbounded."""
@@ -691,7 +776,8 @@ class PostgresStorage:
         export read. Read-only."""
         rows = self.conn.execute(
             "SELECT e.id, e.query_text, e.origin, e.session_id, "
-            "e.episode_id, e.served, e.created_at, "
+            "e.episode_id, e.served, e.served_facts, e.params, "
+            "e.created_at, "
             "COALESCE(json_agg(json_build_object("
             "'entry_id', u.entry_id, 'used_via', u.used_via, "
             "'at', u.created_at)) "
@@ -703,8 +789,117 @@ class PostgresStorage:
             (float(since_ts), int(limit)),
         ).fetchall()
         cols = ("id", "query_text", "origin", "session_id", "episode_id",
-                "served", "created_at", "uses")
+                "served", "served_facts", "params", "created_at", "uses")
         return [dict(zip(cols, r)) for r in rows]
+
+    def retrieval_log_health(self) -> dict:
+        """Row counts + newest event timestamp for ``memory_stats``.
+
+        Both log-write paths are exception-guarded, so a broken log is
+        otherwise invisible (zero rows, green /health). Two aggregate
+        queries, computed on demand rather than cached: the MAX is O(1) off
+        ``retrieval_events_created_idx``, but the COUNTs are honestly
+        O(rows) (an index-only scan at best — PG has no cheap exact count).
+        Retention is the only bound on that cost: at the 365-day default a
+        heavily-searched bank reaches six figures of rows, and this runs
+        under the service lock on every ``memory_stats`` /
+        ``/api/overview`` call. Lower ``retention_days`` (or trade the
+        count for a ``pg_class.reltuples`` estimate) if it ever shows up in
+        a latency profile.
+        """
+        ev = self.conn.execute(
+            "SELECT COUNT(*), MAX(created_at) FROM retrieval_events"
+        ).fetchone()
+        uses = self.conn.execute(
+            "SELECT COUNT(*) FROM retrieval_uses").fetchone()
+        return {
+            "events": int(ev[0]),
+            "last_event_at": None if ev[1] is None else float(ev[1]),
+            "uses": int(uses[0]),
+        }
+
+    def read_audit(self, now: float | None = None) -> dict:
+        """Never-read fractions and read/write balance for ``memory_stats``
+        (schema v33) — the audit that distinguishes a bank that is consulted
+        from one that only accumulates. Age buckets are fixed at 14/45 days:
+        young entries are expected to be unread, so only the old-and-unread
+        tail is a hygiene signal. Like ``retrieval_log_health`` this is
+        computed on demand; the entries scans are O(rows) and run under the
+        service lock on every ``memory_stats`` call — fine at 10^3..10^4
+        entries, revisit if a bank grows past that."""
+        t = time.time() if now is None else float(now)
+        agg = self.conn.execute(
+            "SELECT count(*), count(*) FILTER (WHERE access_count = 0), "
+            "COALESCE(sum(access_count), 0), "
+            "COALESCE(percentile_cont(0.5) WITHIN GROUP "
+            "(ORDER BY access_count), 0) "
+            "FROM entries").fetchone()
+        total, never, reads_total, median = (
+            int(agg[0]), int(agg[1]), int(agg[2]), float(agg[3]))
+        by_age = {}
+        for key, lo, hi in (("lt_14d", t - 14 * 86400, None),
+                            ("d14_45", t - 45 * 86400, t - 14 * 86400),
+                            ("gt_45d", None, t - 45 * 86400)):
+            cond, params = [], []
+            if lo is not None:
+                cond.append("ts >= %s")
+                params.append(lo)
+            if hi is not None:
+                cond.append("ts < %s")
+                params.append(hi)
+            row = self.conn.execute(
+                "SELECT count(*), count(*) FILTER (WHERE access_count = 0) "
+                f"FROM entries WHERE {' AND '.join(cond)}",
+                tuple(params)).fetchone()
+            by_age[key] = {"n": int(row[0]), "never_read": int(row[1])}
+        worst = [
+            {"source": r[0], "n": int(r[1]), "never_read": int(r[2]),
+             "never_read_pct": round(100.0 * r[2] / r[1], 1)}
+            for r in self.conn.execute(
+                "SELECT source, count(*) AS n, "
+                "count(*) FILTER (WHERE access_count = 0) AS never "
+                "FROM entries GROUP BY source HAVING count(*) >= 5 "
+                "ORDER BY count(*) FILTER (WHERE access_count = 0)::float "
+                "/ count(*) DESC LIMIT 5").fetchall()
+        ]
+        top_share = self.conn.execute(
+            "SELECT COALESCE(sum(access_count), 0) FROM ("
+            "SELECT access_count FROM entries ORDER BY access_count DESC "
+            "LIMIT GREATEST(1, (SELECT count(*) / 10 FROM entries))) d"
+        ).fetchone()[0]
+        slots = self.conn.execute(
+            "SELECT (SELECT count(DISTINCT (entity_norm, attribute_norm)) "
+            "FROM facts WHERE status = 'current'), "
+            "(SELECT count(*) FROM slot_reads), "
+            "(SELECT COALESCE(sum(read_count), 0) FROM slot_reads)"
+        ).fetchone()
+        reinf = self.conn.execute(
+            "SELECT COALESCE(sum(reinforcements), 0), "
+            "COALESCE(sum(explicit_reinforcements), 0) FROM entries"
+        ).fetchone()
+        return {
+            "entries": {
+                "total": total,
+                "never_read": never,
+                "never_read_pct": round(100.0 * never / total, 1) if total else 0.0,
+                "reads_total": reads_total,
+                "reads_median": median,
+                "top_decile_read_share": (
+                    round(float(top_share) / reads_total, 3)
+                    if reads_total else None),
+                "by_age": by_age,
+            },
+            "worst_sources": worst,
+            "slots": {
+                "current_slots": int(slots[0]),
+                "slots_read": int(slots[1]),
+                "reads_total": int(slots[2]),
+            },
+            "reinforcements": {
+                "total": int(reinf[0]),
+                "explicit": int(reinf[1]),
+            },
+        }
 
     def loop_health(self, window_s: float, now: float | None = None) -> dict:
         """Windowed loop-activity counts for the Console tile: current vs the
@@ -782,7 +977,12 @@ class PostgresStorage:
         etype: str | None = None,
     ) -> int:
         """Upsert by canonical name; first non-null etype wins (soft typing
-        is advisory, so a later conflicting hint must not silently retype)."""
+        is advisory, so a later conflicting hint must not silently retype).
+
+        A fresh mint also repairs the fact/lesson cross-index for its name —
+        see :meth:`_relink_orphaned_rows`. Mint-only (``xmax = 0`` is zero
+        exactly when ON CONFLICT took the INSERT arm), so the repeated-upsert
+        hot path (every ``memory_outcome`` log) pays nothing."""
         with self._txn():
             row = self.conn.execute(
                 """
@@ -790,11 +990,84 @@ class PostgresStorage:
                 VALUES (%s, %s, %s, %s)
                 ON CONFLICT (canonical) DO UPDATE
                   SET etype = COALESCE(entities.etype, EXCLUDED.etype)
-                RETURNING id
+                RETURNING id, (xmax = 0) AS minted
                 """,
                 (canonical, display or canonical, etype, time.time()),
             ).fetchone()
+            if row[1]:
+                self._relink_orphaned_rows(int(row[0]), canonical)
         return int(row[0])
+
+    def _relink_orphaned_rows(self, entity_id: int, canonical: str) -> None:
+        """Re-link orphaned fact/lesson rows to a freshly minted entity.
+
+        :meth:`delete_entity` NULLs ``facts``/``lessons`` ``entity_id`` and
+        ``object_entity_id`` (no cascade), and nothing else re-links those
+        rows until their slot is next written — so a deleted-then-re-minted
+        name under-counts everywhere the FK is read (fold-direction ranking,
+        ``backfill_entity_sources``, ``lesson_entity_ids``; the #177 damage).
+
+        Norm bridging, deliberately conservative: candidates are matched by
+        ``norm_name(raw stored text) == canonical`` — the exact rule
+        ``sync._link_entity_ids`` applies on slot writes (minus aliases,
+        which a fresh mint cannot have) — and each UPDATE matches the exact
+        stored text. The stored ``entity_norm`` column is the CORTEX norm
+        (``_norm_key``) and is never consulted: the two spaces disagree
+        (``"G:"`` → ``"g"`` vs ``"g:"``), and a cross-space match would
+        mis-link the cross-index.
+
+        The ILIKE prefilter is a sound NECESSARY condition: ``norm_name``
+        only lowercases and folds separator/hyphen runs to ``-``, so the
+        characters inside any hyphen-free segment of the canonical were
+        contiguous in the raw text — every true match contains the longest
+        such segment as a case-insensitive literal substring. PG vs Python
+        case-folding (non-C collation, exotic unicode) can only DROP a
+        match — which heals on the next slot write — never add one; the
+        Python ``norm_name`` check below stays the authority.
+
+        Cost, measured 2026-08-25 (local PG16 in Docker, synthetic 120-char
+        values): ~50 ms per mint at 5k facts, ~65 ms at 50k with the ILIKE
+        prefilter (~120 ms and ~420 ms without it — the object-side columns
+        are unlinked on almost every row, so those two scans see the whole
+        table and every distinct value shipped to Python; regexp_replace
+        prefilters measured no better than Python, ILIKE substring search
+        does). The live bank is ~750 entries today; mints are
+        create-miss-only, so bulk mints (a dream pass, a bench bank build)
+        pay per fresh name — if banks outgrow ~50k facts, escalate to a
+        pg_trgm index on the text columns or a partial expression index
+        over a SQL-side norm (schema bump), not to a looser match. Runs
+        inside ensure_entity's transaction, mint-only, under the service
+        lock; the enlarged transaction can newly hit the connection's 5s
+        ``lock_timeout`` on facts/lessons row locks (external writers only —
+        the daemon is single-writer), which aborts and rolls back the whole
+        mint rather than leaving a partial repair."""
+        from pseudolife_memory.graph import norm_name
+        if not canonical:
+            return
+        seg = max(canonical.split("-"), key=len)
+        # "%"/"_"/"\" escaped for LIKE; only "%" can survive norm_name, the
+        # other two are folded to "-", but escape all three for robustness.
+        like = ("%" + seg.replace("\\", r"\\").replace("%", r"\%")
+                         .replace("_", r"\_") + "%")
+        for table, id_col, text_col in (
+            ("facts", "entity_id", "entity"),
+            ("facts", "object_entity_id", "value"),
+            ("lessons", "entity_id", "entity"),
+            ("lessons", "object_entity_id", "about"),
+        ):
+            texts = [r[0] for r in self.conn.execute(
+                f"SELECT DISTINCT {text_col} FROM {table} "
+                f"WHERE {id_col} IS NULL AND {text_col} IS NOT NULL "
+                f"AND {text_col} ILIKE %s",
+                (like,),
+            ).fetchall()]
+            for t in texts:
+                if norm_name(t) != canonical:
+                    continue
+                self.conn.execute(
+                    f"UPDATE {table} SET {id_col} = %s "
+                    f"WHERE {id_col} IS NULL AND {text_col} = %s",
+                    (entity_id, t))
 
     def find_entity(self, name_norm: str) -> dict | None:
         """Resolve a normalized name via canonical first, then aliases."""
@@ -1574,6 +1847,19 @@ class PostgresStorage:
             "WHERE status = 'current' AND entity_id IS NOT NULL "
             "GROUP BY entity_id").fetchall()}
 
+    def current_fact_counts_by_entity_text(self) -> dict[str, int]:
+        """Current-fact count per RAW subject text — the cross-index-free
+        companion to :meth:`entity_fact_counts`, which counts by
+        ``facts.entity_id`` and therefore reads zero for facts orphaned by
+        an earlier ``delete_entity`` (it NULLs the FK and nothing re-links
+        it). Returns the raw text so the caller normalizes into its own
+        space: ``facts.entity_norm`` is the cortex norm (``_norm_key``) and
+        the graph's ``norm_name`` is a different one — ``G:`` normalizes to
+        ``g:`` in the first and ``g`` in the second."""
+        return {str(ent): int(n) for ent, n in self.conn.execute(
+            "SELECT entity, COUNT(*) FROM facts WHERE status = 'current' "
+            "GROUP BY entity").fetchall()}
+
     def entity_sources_map(self) -> dict[int, list[str]]:
         out: dict[int, list[str]] = {}
         for eid, source in self.conn.execute(
@@ -1663,9 +1949,11 @@ class PostgresStorage:
             "ORDER BY f.entity_norm, f.attribute_norm", (entry_id,)).fetchall()]
 
     def get_entry(self, entry_id: int) -> dict | None:
-        cols = ("id", "text", "source", "ts", "reinforcements", "access_count")
+        cols = ("id", "text", "source", "ts", "reinforcements",
+                "explicit_reinforcements", "access_count")
         row = self.conn.execute(
-            "SELECT id, text, source, ts, reinforcements, access_count "
+            "SELECT id, text, source, ts, reinforcements, "
+            "explicit_reinforcements, access_count "
             "FROM entries WHERE id = %s",
             (entry_id,)).fetchone()
         return dict(zip(cols, row)) if row else None
@@ -1681,11 +1969,54 @@ class PostgresStorage:
             "SELECT id FROM entries WHERE id = ANY(%s)", (ids,)).fetchall()
         return {int(r[0]) for r in rows}
 
-    def bump_reinforcements(self, entry_id: int, delta: int) -> None:
+    def bump_reinforcements(self, entry_id: int, delta: int,
+                            explicit: bool = False) -> None:
+        """``explicit=True`` (the v33 split) additionally bumps
+        ``explicit_reinforcements`` in the SAME statement — one transaction,
+        so a connection loss cannot commit one counter without the other.
+        The dream's trace path calls this with the default, so the shared
+        counter (the retention formula's input) keeps its pre-v33 meaning."""
+        extra = (", explicit_reinforcements = explicit_reinforcements + %s"
+                 if explicit else "")
+        params = (delta, delta, entry_id) if explicit else (delta, entry_id)
         with self._txn():
             self.conn.execute(
-                "UPDATE entries SET reinforcements = reinforcements + %s WHERE id = %s",
-                (delta, entry_id))
+                f"UPDATE entries SET reinforcements = reinforcements + %s"
+                f"{extra} WHERE id = %s",
+                params)
+
+    def bump_slot_reads(self, slots: list[tuple[str, str]],
+                        now: float | None = None) -> None:
+        """Count one serve for each ``(entity_norm, attribute_norm)`` slot.
+        Upsert-increment; a slot row exists only once something read it."""
+        if not slots:
+            return
+        t = time.time() if now is None else float(now)
+        with self._txn(), self.conn.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO slot_reads "
+                "(entity_norm, attribute_norm, read_count, last_read_at) "
+                "VALUES (%s, %s, 1, %s) "
+                "ON CONFLICT (entity_norm, attribute_norm) DO UPDATE SET "
+                "read_count = slot_reads.read_count + 1, "
+                "last_read_at = EXCLUDED.last_read_at",
+                [(e, a, t) for e, a in slots])
+
+    def delete_slot_reads(self, entity_norm: str,
+                          attribute_norm: str | None = None) -> None:
+        """Drop read counters for a forgotten entity (or one exact slot) —
+        called by ``cortex_forget`` so an orphaned counter cannot make slot
+        coverage exceed 100% or leak a stale count into a re-created slot."""
+        with self._txn():
+            if attribute_norm is None:
+                self.conn.execute(
+                    "DELETE FROM slot_reads WHERE entity_norm = %s",
+                    (entity_norm,))
+            else:
+                self.conn.execute(
+                    "DELETE FROM slot_reads WHERE entity_norm = %s "
+                    "AND attribute_norm = %s",
+                    (entity_norm, attribute_norm))
 
     def bump_access_count(self, entry_id: int, delta: int) -> None:
         with self._txn():

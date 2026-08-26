@@ -8,7 +8,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v31). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v34). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
 | `PSEUDOLIFE_MCP_STORAGE` | `auto` | `files` opts the daemon out of the `[lite]` embedded Postgres (file mode even when pg0-embedded is installed). Only consulted when no DSN is set. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). |
 | `PSEUDOLIFE_MCP_HOST` / `_PORT` | `127.0.0.1` / `8765` | Daemon bind address. |
@@ -20,6 +20,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 | `PSEUDOLIFE_WRITER_ID` | `unknown` | Identifies this writer on every canonical write (schema v11). The shim forwards it as the `X-PL-Writer` header; the compose daemon defaults to `mcp-client`, and the installer pins `claude-code` / `codex` / `mcp-client` in `ops/.env` per the selected `--client`. Existing installs that predate the client selector should set `PSEUDOLIFE_WRITER_ID=claude-code` in `ops/.env` to keep their writer identity (and any `PSEUDOLIFE_MCP_TIER_MAP` keyed on it) stable. |
 | `PSEUDOLIFE_MCP_AUTOSAVE_SECONDS` | `30` | Interval of the file-mode autosave loop (weights/state cadence; Postgres-mode entries are transactional regardless). |
 | `PSEUDOLIFE_SESSION_REAP_SECONDS` | `300` | How often the idle-session reaper sweeps. The idle *threshold* it enforces is `PSEUDOLIFE_SESSION_IDLE_SECONDS` — see [Episodes](episodes.md). |
+| `PSEUDOLIFE_LEGACY_TRANSPORT_SESSION` | _(unset)_ | Set `1` to restore the retired `mcp-session-id` transport-session fallback for one release (rollback hatch; logs a warning on first use). The header names the HTTP *connection*, not the session — concurrent sessions share it — and the MCP 2026-07-28 revision removes it from the protocol. Session identity rides the hook-registered episode handle and `X-PL-Session` instead — see [Episodes](episodes.md). |
 | `PSEUDOLIFE_DAEMON_MEM_LIMIT` | `4g` | Docker tier only (read by compose, not the daemon): hard memory cap on the daemon container, with the memory+swap total pinned to the same value — no swap, so exceeding the cap is a clean container restart rather than a host-wide memory event. Steady state is ~2.8 GB with the default embedder; raise for very large banks. |
 
 For the Docker stack, set these in `ops/.env`
@@ -135,6 +136,20 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   false-merge risk in mind. See
   [the single-writer cortex design](../specs/2026-06-19-single-writer-cortex-design.md)
   for the structural fix.
+- **Slot read telemetry on** (`memory.cortex.read_tracking = true`, schema
+  v33) — every cortex slot served as an answer (`memory_fact_get` and the
+  cortex-first block of `memory_search`) bumps its `slot_reads` counter,
+  one small upsert per fact-serving call. Feeds the `read_audit` section
+  of `memory_stats` (never-read fractions, slot coverage). Deliberately
+  uncounted: internal verification lookups, and the facts attached to
+  `memory_recall`/`memory_graph` neighborhoods (context, not a direct
+  answer) — treat a slot's never-read status as a lower bound. Set
+  `false` to disable the write; the audit section stays available either
+  way (it just stops moving). Since v34 the section also carries
+  `graduation_candidates`: entries served in ≥60% of the last 30 days'
+  distinct sessions (once ≥8 sessions are on record) — static-context
+  ("promote to CLAUDE.md") candidates; vet against the cortex before
+  promoting, since the log counts serves before the handler's fact-dedup.
 - **No HyDE / no reflection** — both rely on an LLM callback. Claude *is*
   the LLM, so the natural way to reflect is for Claude to call
   `memory_store` with a self-composed summary.
@@ -344,7 +359,17 @@ The shim is torch-free, so sessions attach near-instantly; the daemon pays
 the one-time embedder warmup once for everyone. On first run with a v≤0.1
 `cms_state.pt` present in `PSEUDOLIFE_MCP_DATA_DIR`, the daemon
 auto-migrates it into Postgres and renames the originals `*.pre-v8.bak`
-(never deletes them).
+(never deletes them). The import records its progress in a
+`legacy_migration` meta row, so one that fails part-way resumes on the next
+start instead of leaving a short bank behind. While it is unfinished the
+daemon keeps serving and `/health` stays `status: "ok"` (so healthchecks and
+`ops/update.ps1` are not tripped by it) but carries an extra
+`migration_partial` field; the matching ERROR lines in the daemon log name
+the resume path. A resume merges rather than overwrites — cortex facts
+written during that window are kept, and only slots nobody has written land
+from the legacy bank. Leave the original `.pt` files in place until it
+completes: the resume reads them, and deleting one makes the bank
+unfinishable.
 
 ## Session identity
 
@@ -354,9 +379,9 @@ through one chokepoint, evaluated in strict precedence order:
 | tier | source | scope | notes |
 |---|---|---|---|
 | 1 | `X-PL-Session` header | per shim process = per session | the stdio shim sends this on every call; any integrator can |
-| 2 | explicit `episode` argument | per call | pass an open episode id (or its unambiguous ≥8-char prefix) on `memory_store` / `memory_outcome` / `memory_fact_set`; the daemon mints it and advertises it in the SessionStart briefing |
-| 3 | hook-registered active session | machine-scoped pointer | the SessionStart hook forwards Claude Code's own `session_id`; a SessionEnd hook closes it |
-| 4 | `mcp-session-id` header | per connection | legacy fallback — the MCP 2026-07-28 revision (SEP-2567, "Sessionless") removes this header and protocol sessions entirely, so treat this tier as a dead end, not something to build on |
+| 2 | explicit `episode` argument | per call | pass an open episode id (or its unambiguous ≥8-char prefix) on `memory_store` / `memory_outcome` / `memory_fact_set`, and on the lifecycle tools `memory_episode_start` / `memory_episode_end` / `memory_session_title` — where a resolved handle wins outright (they never consult the header tiers); the daemon mints it and advertises it in the SessionStart briefing |
+| 3 | hook-registered active session | machine-scoped pointer | the SessionStart hook forwards Claude Code's own `session_id`; a SessionEnd hook closes it. A singleton — concurrent sessions race it, which is why the lifecycle tools take the per-call handle |
+| 4 | `mcp-session-id` header | per connection | **retired** — the header names the connection (concurrent sessions share it) and the MCP 2026-07-28 revision (SEP-2567, "Sessionless") removes it from the protocol. `PSEUDOLIFE_LEGACY_TRANSPORT_SESSION=1` restores it for one release as a rollback hatch |
 | 5 | none | — | writer id + idle-gap sessionization (the reaper) — the documented floor when nothing above resolved |
 
 **Why the header outranks the handle when both are present.** A shim
@@ -412,6 +437,16 @@ Run the daemon with `PSEUDOLIFE_MCP_HOST=0.0.0.0` and a
 to bind a non-loopback host without a token**, and Postgres itself stays
 loopback-only — the LAN only ever sees the daemon.
 
+The token is also what relaxes the MCP endpoint's DNS-rebinding guard. With
+a token set, `/mcp` accepts any `Host` header — a LAN address, a
+reverse-proxy hostname, a Tailscale name, a compose service name — because
+`Authorization` already proves intent. Tokenless (loopback use, or a
+container published to 127.0.0.1 via `PSEUDOLIFE_MCP_TRUST_BIND`), `/mcp`
+serves loopback `Host` values only and answers anything else with
+`421 Invalid Host header`; that is the guard against a rebinding browser
+reaching an unauthenticated bank. So: fronting the daemon with a reverse
+proxy under a real hostname means setting a token.
+
 ## Data layout
 
 **Containerized / daemon mode (recommended).** The durable source of truth
@@ -447,6 +482,23 @@ In **file mode only**, wipe memory by deleting `data/` and restarting; wipe
 just documents via `data/chromadb/`; wipe just the associative store via
 `data/memory_state/`. (In containerized mode these files are not the source
 of truth — see the volume note above.)
+
+## Windows / WSL2 memory (Docker tier)
+
+Docker Desktop's WSL2 VM (`Vmmem`) claims up to **~50% of host RAM** by
+default, which is far more than the stack needs. Under dream load the whole
+stack wants ~6–7 GB with the default extractor sidecar, or ~2 GB in
+`sonnet-only` mode — where the Qwen3 embedding backbone is the bulk of it.
+Cap the VM by copying `ops/wslconfig.example` to
+`%USERPROFILE%\.wslconfig`, tuning `memory=`, then `wsl --shutdown`.
+
+The daemon container is separately hard-capped at 4 GB, with memory+swap
+pinned to the same value so exceeding it is a clean container restart rather
+than a host-wide memory event. `PSEUDOLIFE_DAEMON_MEM_LIMIT` in `ops/.env`
+raises it for very large banks.
+
+After `wsl --shutdown` the host port forward is gone; `docker restart
+pseudolife-mcp-daemon` re-establishes it.
 
 ## Backups
 
@@ -485,7 +537,7 @@ deletes files the tool itself wrote.
 
 ## Schema version history
 
-The current Postgres meta version is **v31**; migrations are additive
+The current Postgres meta version is **v34**; migrations are additive
 `ADD COLUMN IF NOT EXISTS` on daemon start, and legacy file-mode `.pt`
 banks auto-migrate into Postgres. The one exception is v25 itself: a
 vector *dimension* change on an existing column is not additive, so
@@ -522,6 +574,9 @@ The milestones:
 | v29 | `facts.stance` — epistemic stance as a labelled field: the source's own hedge words ("probably", "per the runbook"), kept verbatim and separate from `value` so consolidation cannot silently turn a hedged claim into a confident canonical fact (the labelled-field-vs-inline retention result is arXiv:2608.06953). `NULL` = asserted plainly, exactly the pre-v29 behaviour, so the migration is a no-op on existing banks. Stance follows the latest asserting write (a plain restatement clears the hedge), surfaces in `memory_fact_get`/recall/history only when set, and is never an input to confidence, ranking, or supersession. Written by the dream path since the v10 update-anchored stance prompt shipped its gates (2026-08-14); not exposed on the `memory_fact_set` tool surface. Additive/idempotent |
 | v30 | `entity_proposals.judge_verdict` / `judge_confidence` / `judge_note` / `judge_model` / `judged_at` — the autonomous Step-C judge's shadow verdict on a pending merge proposal, recorded by the sweep (`memory.deep_dream.judge_mode`: `off` \| `shadow` \| `auto-reject`) and surfaced beside the evidence in review payloads. The verdict is an opinion on the pending row; the durable decision record stays `merge_decisions`, written only when a decision path (human, agent, or the confidence-gated auto-reject) ratifies it. `NULL` = not yet judged, exactly the pre-v30 behaviour, so the migration is a no-op on existing banks. Judge-model floor measured by `evals/judge_ladder.py` (`evals/results/judge-ladder-20260816.json`). Additive/idempotent |
 | v31 | `retrieval_events` + `retrieval_uses` — the retrieval event log (learned-reranker Phase 0). Every `memory_search` appends one event row (query text, the ranked served list as JSONB with entry ids/scores/ranks, writer session/episode); a later `memory_get`/`memory_reinforce` on a served entry in the same session writes an implicit relevance label (most-recent serving event wins, bounded by `memory.retrieval_log.use_window_seconds`). Together they are the (query, served, used) training tuples for a future learned fusion/reranker stage — purely observational, no retrieval behaviour changes. Served ids carry no FK (entries are evictable; training joins tolerate dangling ids); labels CASCADE from their event; events are pruned on the dream-sweep tick after `memory.retrieval_log.retention_days` (default 365). Kill-switch: `memory.retrieval_log.enabled`. Additive/idempotent |
+| v32 | `retrieval_events.params` — the ranking knobs in force for the query (effective `top_k` / keep-threshold, the recency ramp, BM25 weight and scorer params, the reranker's fusion weight + margin gate and whether it actually fired, timeline/contiguity settings, and the call's filters), logged beside a widened `served` list whose per-entry `components` blob carries the fusion INPUTS: bi-encoder score, cross-encoder score (`null` when the margin gate skipped the pass — a distinction a learned head needs), BM25 boost, surprise, recency and the source/supersession multipliers. Phase 0 logged only the fused score, which is the output a Phase-1 learned head is supposed to predict; the inputs are not recoverable afterwards, because config is mutable at runtime and band recency, supersession flags and access counts all mutate on every serve. Nothing new is computed at serve time — these values were already in hand and were being discarded. `NULL` params = a v31-era row. Additive/idempotent |
+| v33 | `slot_reads` + `entries.explicit_reinforcements` — read telemetry. `slot_reads` counts how many times each cortex slot was *served as an answer* (`memory_fact_get` and `memory_search`'s cortex-first block), keyed on the stable `(entity_norm, attribute_norm)` slot like `memory_traces` so counters survive cortex snapshot saves; deliberately uncounted are internal verification lookups (e.g. the dream rollback's post-revert check) and the facts attached to `memory_recall`/`memory_graph` neighborhoods (context, not a direct answer), so never-read is a lower bound. `explicit_reinforcements` moves only on `memory_reinforce`, splitting the deliberate "this was useful" signal out of the shared `reinforcements` counter, which also counts dream-trace links (and still feeds the retention formula unchanged). Both feed the new `read_audit` section of `memory_stats` (never-read fractions by age and source, read/write balance, slot coverage) — motivated by the 2026-08-26 bank audit, where entry reads were measurable but the 4.6k fact slots had no read signal at all. Kill-switch: `memory.cortex.read_tracking`. Additive/idempotent |
+| v34 | `retrieval_events.served_facts` — the fact half of the reranker training tuple. The v31 event log recorded only served *entries*; the cortex-first block's facts, served above those entries in every `memory_search` response, were invisible to a future learned reranker. The search handler now attaches them (`[{entity_norm, attribute_norm, rank, score, kind, contested}]`) to the exact event row that search wrote, keyed by the event id `search(return_event_id=True)` hands back — no session-window guessing. `NULL` = a pre-v34 row or a search that served no facts. Also (no DDL): `memory_stats` `read_audit` gains `graduation_candidates` — entries served in ≥60% of the last 30 days' distinct sessions (once ≥8 sessions are on record), i.e. static-context ("promote to CLAUDE.md") candidates that retrieval keeps re-paying for per query. Additive/idempotent |
 
 After running the entity-kind backfill (`evals/apply_entity_kinds.py --apply`), the daemon must be restarted for inference to take effect — it caches the entity-kind map for the life of its process.
 

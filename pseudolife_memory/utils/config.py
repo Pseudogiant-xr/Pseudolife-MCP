@@ -521,6 +521,10 @@ class CortexConfig:
     # current slot when its value-free slot embedding cosine >= this. <=0 disables
     # (exact-key only = today's behaviour). Positive = the cosine floor.
     dream_slot_match_threshold: float = 0.0
+    # Slot read telemetry (schema v33): count each slot served by fact_get /
+    # cortex search into slot_reads. Kill switch, not a tuning constant —
+    # one small upsert per fact-serving call, PG-only.
+    read_tracking: bool = True
 
 
 @dataclass
@@ -559,17 +563,26 @@ class LessonsConfig:
 
 @dataclass
 class RetrievalLogConfig:
-    """Append-only per-query retrieval log (schema v31) — the training data
-    for a future learned fusion/reranker stage. Every ``memory_search``
-    writes one ``retrieval_events`` row (query text + the ranked served
-    list); a later ``memory_get``/``memory_reinforce`` on a served entry in
-    the same session writes an implicit relevance label to
-    ``retrieval_uses``. Purely observational: no retrieval behaviour
-    changes. Requires Postgres storage (file mode skips silently)."""
+    """Append-only per-query retrieval log (schema v31/v32) — the training
+    data for a future learned fusion/reranker stage. Every ``memory_search``
+    writes one ``retrieval_events`` row: query text, the ranked served list
+    with each entry's ranking *components* (bi-encoder / cross-encoder /
+    BM25 scores, surprise, recency, multipliers), and the ``params``
+    snapshot of the knobs in force. A later ``memory_get``/
+    ``memory_reinforce`` on a served entry in the same session writes an
+    implicit relevance label to ``retrieval_uses``. Purely observational:
+    no retrieval behaviour changes, and nothing is computed for the log
+    that ranking did not already compute. Requires Postgres storage (file
+    mode skips silently); ``memory_stats`` reports the row counts and
+    write-failure count."""
     enabled: bool = True
     # Events older than this are pruned on the dream-sweep tick (labels
     # CASCADE), bounding growth. Generous by default: the log IS the
-    # training corpus, and rows are small (ids + scores, not texts).
+    # training corpus, and rows carry no texts — only ids, scores and the
+    # per-entry component floats. The v32 components/params widened a row
+    # from roughly a few hundred bytes to a couple of KB at a full top-k
+    # serve, so retention is now the only thing bounding a busy bank's
+    # log; lower it if the table outgrows its usefulness.
     retention_days: int = 365
     # A get/reinforce this many seconds after a search still counts as a
     # use of it. Bounds the implicit-label lookback so a stale id fetched

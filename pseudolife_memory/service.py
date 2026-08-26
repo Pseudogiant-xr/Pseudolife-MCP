@@ -439,6 +439,15 @@ class MemoryService:
         # re-reaped on the next sweep, firing a dream per resume cycle.
         # In-memory only: a restart re-fires the SessionStart hook anyway.
         self._episode_touches: dict[str, float] = {}
+        # Retrieval-log write failures since process start. Both log paths
+        # swallow their exceptions (a logging failure must not break the
+        # search it rides on), so without this counter a broken log is
+        # indistinguishable from an idle one: zero rows, green health.
+        # In-memory only, like the CMS's own tier counters.
+        self._retrieval_log_errors = 0
+        # Same hazard, same remedy for the v33 slot-read counter: a dead
+        # counter reads as "no fact is ever used" unless failures surface.
+        self._slot_read_errors = 0
         # Resolve data directory first — that's where memory_state lives
         # AND where the default config sits (if config_path not given).
         self.data_dir = Path(data_dir) if data_dir else Path.cwd() / "data"
@@ -498,6 +507,12 @@ class MemoryService:
         # exception still propagates to the caller; this is purely for
         # visibility.
         self._init_refusal: str | None = None
+        # Set by _ensure_init when the legacy .pt import left a partial
+        # bank behind (#187). Boot deliberately continues -- a half-imported
+        # bank is still usable -- but the state must not be silent, so it
+        # is logged at ERROR and surfaced via /health until a later boot
+        # resumes the import cleanly.
+        self._migration_partial: str | None = None
         # Last extractor selection made by dream_run_auto (sonnet-sidecar-cutover,
         # 2026-07-11): {"which": "primary"|"fallback", "base_url": str | None,
         # "at": float} — surfaced via dream_status. None until a dream has run.
@@ -761,8 +776,27 @@ class MemoryService:
                 )
                 if summary.get("migrated"):
                     logger.warning("legacy .pt bank migrated: %s", summary)
+                    self._migration_partial = None
+                elif summary.get("reason") in _migrate.PARTIAL_REASONS:
+                    self._migration_partial = summary["reason"]
+                    logger.error(
+                        "legacy .pt import is incomplete (%s) — the bank is "
+                        "SHORT. See the '%s' meta row; restore the original "
+                        ".pt sources under %s and restart to resume.",
+                        summary["reason"], _migrate.MIGRATION_META_KEY,
+                        self.data_dir)
             except Exception as exc:  # noqa: BLE001
-                logger.warning("legacy migration failed (continuing): %s", exc)
+                # Boot continues (a half-imported bank still serves), but
+                # the remainder is NOT lost any more: migrate_legacy has
+                # already recorded in_progress, so the next boot resumes.
+                # ERROR rather than WARNING because this line used to be the
+                # only trace of a bank that was permanently short (#187).
+                self._migration_partial = f"import_failed: {exc}"
+                logger.error(
+                    "legacy migration failed part-way (continuing with a "
+                    "SHORT bank): %s — progress is recorded in the '%s' meta "
+                    "row; fix the cause and restart to resume the import.",
+                    exc, _migrate.MIGRATION_META_KEY)
             n = _sync.hydrate_cms(self._cms, self._storage)
             logger.info("hydrated %d entries from storage", n)
             try:
@@ -888,7 +922,7 @@ class MemoryService:
             embedding = self._embedder.encode_single(text)
             _, session_id = self._resolve_writer()
             resolved = self._resolve_episode_handle(episode)
-            episode_warning = episode is not None and resolved is None
+            episode_warning = bool(episode) and resolved is None
             if resolved is not None:
                 _, header_session, _ = resolve_writer_detailed(self._writer_id)
                 if not header_session:
@@ -1026,8 +1060,17 @@ class MemoryService:
         bm25: bool | None = None,
         contiguity_neighbors: int | None = None,
         timeline: bool | None = None,
+        return_event_id: bool = False,
     ) -> dict[str, Any]:
         """Retrieve relevant memories ranked by associative similarity.
+
+        ``return_event_id=True`` adds ``retrieval_event_id`` (the id of the
+        retrieval-log row this search wrote) to the result, so the caller
+        can attach the fact half of the response via
+        :meth:`attach_served_facts`. Opt-in on purpose: the id is training
+        plumbing, not part of the public search shape, and must not leak
+        through recall/Console callers. Absent when the log is disabled or
+        the write failed.
 
         ``sources`` and ``bands`` filter the result set: only entries whose
         ``source`` / ``bank`` match the supplied list survive. ``None`` means
@@ -1101,34 +1144,42 @@ class MemoryService:
                      if contiguity_neighbors is None
                      else int(contiguity_neighbors))
             vias = result.via or [None] * len(result.entries)
-            ranked: list[tuple[Any, float | None, str | None]] = [
-                (e, s, v) for e, s, v in
-                zip(result.entries, result.scores, vias)
+            comps = result.components or [None] * len(result.entries)
+            ranked: list[tuple[Any, float | None, str | None, dict | None]] = [
+                (e, s, v, c) for e, s, v, c in
+                zip(result.entries, result.scores, vias, comps)
             ]
             if n_ctg > 0 and ranked:
                 # Direct hits are all pre-seen so a neighbor can never
                 # duplicate one; neighbors of later hits skip entries an
                 # earlier hit already surfaced.
-                seen = {e.text for e, _, _ in ranked}
-                expanded: list[tuple[Any, float | None, str | None]] = []
-                for e, s, via in ranked:
+                seen = {e.text for e, _, _, _ in ranked}
+                expanded: list[
+                    tuple[Any, float | None, str | None, dict | None]] = []
+                for e, s, via, comp in ranked:
                     before, after = self._cms.temporal_neighbors(e, n_ctg)
                     for nb in before:
                         if nb.text not in seen:
-                            expanded.append((nb, 0.0, "contiguity"))
+                            expanded.append(
+                                (nb, 0.0, "contiguity",
+                                 {"channel": "contiguity"}))
                             seen.add(nb.text)
-                    expanded.append((e, s, via))
+                    expanded.append((e, s, via, comp))
                     for nb in after:
                         if nb.text not in seen:
-                            expanded.append((nb, 0.0, "contiguity"))
+                            expanded.append(
+                                (nb, 0.0, "contiguity",
+                                 {"channel": "contiguity"}))
                             seen.add(nb.text)
                 ranked = expanded
             entries_out = []
-            for e, s, via in ranked:
+            served_components: list[dict | None] = []
+            for e, s, via, comp in ranked:
                 d = _entry_to_dict(e, s)
                 if via is not None:
                     d["via"] = via
                 entries_out.append(d)
+                served_components.append(comp)
             # Chronicle events (schema v28): a temporally-cued query also
             # serves matching live events, chronologically ascending.
             # Needs no knob — an empty table (chronicle extraction
@@ -1177,9 +1228,15 @@ class MemoryService:
                     # answer): lets the answerer do arithmetic over a
                     # long enumeration without recounting lines.
                     out["events_total"] = len(events_block)
-            # Retrieval event log (schema v31): purely observational —
-            # the (query, served) training tuple for a learned reranker.
-            self._log_retrieval_event(query, entries_out)
+            # Retrieval event log (schema v31/v32): purely observational —
+            # the (query, served, components, params) training tuple for a
+            # learned reranker.
+            params = dict(result.params or {})
+            params["contiguity_neighbors"] = n_ctg
+            evt_id = self._log_retrieval_event(
+                query, entries_out, served_components, params)
+            if return_event_id and evt_id is not None:
+                out["retrieval_event_id"] = evt_id
             return out
 
     # ------------------------------------------------------------------
@@ -1454,6 +1511,51 @@ class MemoryService:
                 _c = self._storage.load_communities()["communities"]
                 result["communities"] = len(_c)
                 result["graph_digest_at"] = (self._storage.get_meta("graph_digest") or {}).get("computed_at")
+                # Retrieval log liveness: nothing else reads the table, and
+                # both write paths swallow their errors, so this is the only
+                # place a silently-dead log becomes visible. Guarded: a
+                # feature whose premise is "logging must never break the
+                # caller" must not break memory_stats either (stats() is on
+                # the session-start path).
+                try:
+                    log = self._storage.retrieval_log_health()
+                except Exception:  # noqa: BLE001
+                    logger.warning("retrieval-log health read failed",
+                                   exc_info=True)
+                    log = {"events": None, "uses": None,
+                           "last_event_at": None, "unavailable": True}
+                log["enabled"] = bool(self.config.memory.retrieval_log.enabled)
+                log["write_errors"] = self._retrieval_log_errors
+                result["retrieval_log"] = log
+                # Read audit (schema v33): never-read fractions + the
+                # read/write balance. Same guard rationale as the retrieval
+                # log — stats() is on the session-start path and must not
+                # break on a telemetry read.
+                try:
+                    audit = self._storage.read_audit()
+                except Exception:  # noqa: BLE001
+                    logger.warning("read-audit computation failed",
+                                   exc_info=True)
+                    audit = {"unavailable": True}
+                # Graduation candidates: entries the retrieval layer
+                # re-serves in most sessions are static-context
+                # ("promote to CLAUDE.md") candidates — paying per
+                # query for what could be standing context. Empty
+                # until the event log holds enough distinct sessions.
+                # Guarded SEPARATELY from read_audit: an advisory report
+                # must not destroy the audit it rides in (the same rule
+                # that keeps both out of the search path).
+                try:
+                    audit["graduation_candidates"] = (
+                        self._storage.graduation_report())
+                except Exception:  # noqa: BLE001
+                    logger.warning("graduation report failed",
+                                   exc_info=True)
+                    audit["graduation_candidates"] = []
+                audit["slot_tracking_enabled"] = bool(getattr(
+                    self.config.memory.cortex, "read_tracking", True))
+                audit["slot_read_write_errors"] = self._slot_read_errors
+                result["read_audit"] = audit
             return result
 
     # ------------------------------------------------------------------
@@ -1727,7 +1829,7 @@ class MemoryService:
             slot_emb = self._embedder.encode_single(f"{entity} {attribute}".strip())
             writer_id, session_id = self._resolve_writer()
             resolved = self._resolve_episode_handle(episode)
-            episode_warning = episode is not None and resolved is None
+            episode_warning = bool(episode) and resolved is None
             if resolved is not None:
                 _, header_session, _ = resolve_writer_detailed(self._writer_id)
                 if not header_session:
@@ -1861,8 +1963,29 @@ class MemoryService:
         (``memory.search.stale_policy``; "annotate" = today's behavior)."""
         return getattr(self.config.memory.search, "stale_policy", "annotate")
 
-    def cortex_lookup(self, entity: str, attribute: str) -> dict[str, Any] | None:
+    def _track_slot_reads(self, slots: list[tuple[str, str]]) -> None:
+        """Slot read telemetry (schema v33): count each slot SERVED as an
+        answer. Never raises — telemetry must not break the read it rides
+        on (the retrieval-log contract). Called under ``self._lock``; the
+        storage connection is shared, so an unlocked call would interleave
+        transaction blocks (the 2026-08-21 wedge class)."""
+        if (self._storage is None or not slots
+                or not getattr(self.config.memory.cortex,
+                               "read_tracking", True)):
+            return
+        try:
+            self._storage.bump_slot_reads(slots)
+        except Exception:  # noqa: BLE001
+            self._slot_read_errors += 1
+            logger.warning("slot-read telemetry failed", exc_info=True)
+
+    def cortex_lookup(self, entity: str, attribute: str,
+                      track: bool = True) -> dict[str, Any] | None:
         """Exact slot lookup — the one ``current`` fact, or ``None``.
+
+        ``track=False`` skips the slot-read telemetry bump — for internal
+        callers whose lookup is verification, not serving (the dream
+        rollback's post-revert check).
 
         Alias-aware: on a direct slot miss, the entity name is resolved through
         the graph's ``entity_aliases`` (Postgres) and the canonical name is
@@ -1899,6 +2022,13 @@ class MemoryService:
                             if r.status == "removed"
                         ]
                         sp = self._stale_policy
+                        # Gate on live members: a fully-emptied set slot is
+                        # routed down the miss path by callers, so serving
+                        # it is not an answer and must not count.
+                        if track and members:
+                            from pseudolife_memory.memory.cortex import _norm_key
+                            self._track_slot_reads(
+                                [(_norm_key(name), _norm_key(attribute))])
                         return {
                             "kind": "set", "entity": name, "attribute": attribute,
                             "members": [_cortex_record_to_dict(
@@ -1915,6 +2045,10 @@ class MemoryService:
                 from pseudolife_memory.memory.cortex import _norm_key
                 d["source_entries"] = self._storage.traces_for_slot(
                     _norm_key(rec.entity), _norm_key(rec.attribute))
+            if track:
+                from pseudolife_memory.memory.cortex import _norm_key
+                self._track_slot_reads(
+                    [(_norm_key(rec.entity), _norm_key(rec.attribute))])
             return d
 
     def cortex_contenders(self, entity: str, attribute: str) -> dict[str, Any]:
@@ -2130,6 +2264,10 @@ class MemoryService:
                         "age": _relative_time(anchor) if anchor else None,
                     })
             _demote_stale(entries, self._stale_policy)
+            from pseudolife_memory.memory.cortex import _norm_key
+            self._track_slot_reads(sorted({
+                (_norm_key(e["entity"]), _norm_key(e["attribute"]))
+                for e in entries}))
             return {"count": len(entries), "entries": entries}
 
     def _cortex_bm25_fuse(self, query, hits, cfg, top_k):
@@ -2310,7 +2448,7 @@ class MemoryService:
             if not self.config.memory.lessons.enabled:
                 return {"recorded": False, "reason": "lessons disabled"}
             resolved = self._resolve_episode_handle(episode)
-            episode_warning = episode is not None and resolved is None
+            episode_warning = bool(episode) and resolved is None
             episode_id = resolved[0] if resolved is not None else self._current_episode_id()
             sid = self._storage.add_signal(
                 task=task, outcome=outcome, about=about, detail=detail,
@@ -3182,29 +3320,92 @@ class MemoryService:
                     "count": len(events), "events": events}
 
     def _log_retrieval_event(self, query: str,
-                             entries_out: list[dict]) -> None:
-        """Append a ``retrieval_events`` row (schema v31): the (query,
+                             entries_out: list[dict],
+                             components: list[dict | None] | None = None,
+                             params: dict | None = None) -> int | None:
+        """Append a ``retrieval_events`` row (schema v31/v32): the (query,
         served) half of the learned-reranker training tuple. Rank = list
         position in the served output. Entries without a storage id
         (pre-persist) are dropped — they can't be joined to a later use.
+        A zero-result search still writes its (empty-served) row — misses
+        are training signal too, and ``graduation_report`` documents the
+        session-count consequence.
+
+        ``components`` (aligned with ``entries_out``) are the fusion inputs
+        already computed at ranking time — bi-encoder score, cross-encoder
+        score, BM25 boost, recency, the multipliers — and ``params`` is the
+        knob snapshot. Both are logged rather than re-derived because
+        neither survives to training time: config is mutable at runtime,
+        and band recency / supersession flags / access counts mutate on
+        every serve, so replaying this query against tomorrow's bank
+        reproduces neither the scores nor the pool they came from.
+
         Never raises: a logging failure must not break the search it
-        rides on."""
+        rides on. Failures bump ``_retrieval_log_errors``, which
+        ``stats()`` reports — the log is otherwise silent when broken."""
         cfg = self.config.memory.retrieval_log
         if self._storage is None or not cfg.enabled:
+            return None
+        try:
+            # Length-guarded: a misaligned components list must not
+            # truncate the served list (zip stops at the shorter one).
+            comps = (components
+                     if components is not None
+                     and len(components) == len(entries_out)
+                     else [None] * len(entries_out))
+            served = []
+            for rank, (d, comp) in enumerate(zip(entries_out, comps)):
+                if d.get("id") is None:
+                    continue
+                row = {"entry_id": int(d["id"]), "score": d.get("score"),
+                       "rank": rank, "via": d.get("via"),
+                       "bank": d.get("bank")}
+                if comp is not None:
+                    row["components"] = comp
+                served.append(row)
+            _, session_id = self._resolve_writer()
+            return self._storage.add_retrieval_event(
+                query, served, origin="search", session_id=session_id,
+                episode_id=self._current_episode_id(), params=params)
+        except Exception:  # noqa: BLE001
+            self._retrieval_log_errors += 1
+            logger.warning("retrieval-event log failed", exc_info=True)
+            return None
+
+    def attach_served_facts(self, event_id: int,
+                            facts: list[dict]) -> None:
+        """Record the cortex slots a search's cortex-first block served
+        (schema v34) on the exact event row that search wrote — the fact
+        half of the (query, served, used) training tuple. Called by the
+        MCP search handler after it builds the cortex block, with the id
+        ``search(return_event_id=True)`` returned. Never raises: training
+        plumbing must not break the search response it rides on."""
+        cfg = self.config.memory.retrieval_log
+        if (self._storage is None or not cfg.enabled or not facts
+                or event_id is None):
             return
         try:
-            served = [
-                {"entry_id": int(d["id"]), "score": d.get("score"),
-                 "rank": rank, "via": d.get("via"), "bank": d.get("bank")}
-                for rank, d in enumerate(entries_out)
-                if d.get("id") is not None
+            from pseudolife_memory.memory.cortex import _norm_key
+            payload = [
+                {"entity_norm": _norm_key(f.get("entity", "")),
+                 "attribute_norm": _norm_key(f.get("attribute", "")),
+                 "rank": rank,
+                 "score": f.get("score"),
+                 "kind": f.get("kind", "scalar"),
+                 "contested": bool(f.get("contested", False))}
+                for rank, f in enumerate(facts)
             ]
-            _, session_id = self._resolve_writer()
-            self._storage.add_retrieval_event(
-                query, served, origin="search", session_id=session_id,
-                episode_id=self._current_episode_id())
+            with self._lock:
+                updated = self._storage.attach_served_facts(
+                    int(event_id), payload)
+            if not updated:
+                self._retrieval_log_errors += 1
+                logger.warning(
+                    "served-facts attach matched no event row (id=%s)",
+                    event_id)
         except Exception:  # noqa: BLE001
-            logger.warning("retrieval-event log failed", exc_info=True)
+            self._retrieval_log_errors += 1
+            logger.warning("served-facts attach failed", exc_info=True)
 
     def _record_retrieval_use(self, entry_id: int, used_via: str) -> None:
         """Implicit relevance label (schema v31): the most recent search in
@@ -3220,6 +3421,7 @@ class MemoryService:
                 int(entry_id), session_id, used_via,
                 float(cfg.use_window_seconds))
         except Exception:  # noqa: BLE001
+            self._retrieval_log_errors += 1
             logger.warning("retrieval-use label failed", exc_info=True)
 
     def prune_retrieval_log(self) -> int:
@@ -3255,6 +3457,7 @@ class MemoryService:
         return {"found": True, "entry_id": row["id"], "text": row["text"],
                 "source": row.get("source"),
                 "reinforcements": row.get("reinforcements", 0),
+                "explicit_reinforcements": row.get("explicit_reinforcements", 0),
                 "access_count": row.get("access_count", 0) + 1,  # +1 for the bump just applied
                 "consolidated_into": facts}
 
@@ -3265,7 +3468,11 @@ class MemoryService:
             self._ensure_init()
             if self._storage is None or self._storage.get_entry(int(entry_id)) is None:
                 return {"reinforced": False, "faded": True}
-            self._storage.bump_reinforcements(int(entry_id), 1)
+            # v33 split: explicit=True moves the explicit counter ONLY here,
+            # atomically with the shared one — the dream's trace path bumps
+            # the shared counter alone, so usefulness stays separable from
+            # consolidation yield.
+            self._storage.bump_reinforcements(int(entry_id), 1, explicit=True)
             if self._cms is not None:
                 self._cms.bump_entry_reinforcements(int(entry_id), 1)
             self._record_retrieval_use(int(entry_id), "reinforce")
@@ -3280,6 +3487,20 @@ class MemoryService:
             removed = self._cortex.forget(entity, attribute)
             if removed:
                 self._save_cortex()
+                # Drop the slot's read counters too — an orphaned counter
+                # would let slot coverage exceed 100% and leak a stale
+                # count into a later re-created slot. Guarded: counter
+                # hygiene must not fail the forget that already happened.
+                if self._storage is not None:
+                    from pseudolife_memory.memory.cortex import _norm_key
+                    try:
+                        self._storage.delete_slot_reads(
+                            _norm_key(entity),
+                            None if attribute is None else _norm_key(attribute))
+                    except Exception:  # noqa: BLE001
+                        self._slot_read_errors += 1
+                        logger.warning("slot-read cleanup failed",
+                                       exc_info=True)
             return {"removed": removed, "entity": entity, "attribute": attribute}
 
     # ------------------------------------------------------------------
@@ -4322,7 +4543,10 @@ class MemoryService:
                 # exists for).
                 self.cortex_resolve(row["entity"], row["attribute"],
                                     accept=True)
-            cur = self.cortex_lookup(row["entity"], row["attribute"])
+            # track=False: this lookup verifies the rollback took — it is
+            # not a serve, and counting it would pollute the read signal.
+            cur = self.cortex_lookup(row["entity"], row["attribute"],
+                                     track=False)
             if cur and _norm_value(cur.get("value", "")) == _norm_value(
                     row["prev_value"]):
                 return "reverted"
@@ -4584,38 +4808,85 @@ class MemoryService:
 
     def episode_start(
         self, title: str, hint: str | None = None,
+        episode: str | None = None,
     ) -> dict[str, Any]:
         """Open a NESTED sub-episode under the CALLER's open session episode;
-        the parent stays open. The caller's session is the request's
-        ``X-PL-Session`` (resolved via the writer seam); without one it nests
-        under the global current leaf. Falls back to a root when nothing open."""
+        the parent stays open. ``episode`` (spec 2026-08-25) anchors the nest
+        to that handle's session root explicitly — the multi-session-safe
+        path, since concurrent sessions share both the transport connection
+        and the active-session pointer. Without a handle the caller's session
+        resolves as before (``X-PL-Session`` header, then the pointer);
+        without either it nests under the global current leaf. An unknown/
+        closed/keyless handle degrades to the no-handle path and adds
+        ``episode_warning``, mirroring ``store``."""
         with self._lock:
             self._ensure_init()
             assert self._cms is not None
-            _, session_id = self._resolve_writer()
-            # A sub-episode opened before the first store must still nest
-            # under a session root — lazily open one exactly like store does.
-            self._ensure_session_episode(session_id)
+            episode = episode or None      # "" from clients means "no handle"
+            # Keyless roots are rejected inside the resolver itself now, so
+            # every handle consumer shares one contract.
+            resolved = self._resolve_episode_handle(episode)
+            episode_warning = bool(episode) and resolved is None
+            parent = None
+            if resolved is not None:
+                root_id, session_id = resolved
+                em = self._cms.episodes
+                # Pin the parent inside the HANDLE's subtree: two open roots
+                # can share a session_key (handle-resume beside a newer
+                # root), and the key-based leaf lookup could cross trees.
+                parent = em.open_subtree_leaf(root_id, session_id) or em.get(root_id)
+            else:
+                _, session_id = self._resolve_writer()
+                # A sub-episode opened before the first store must still nest
+                # under a session root — lazily open one exactly like store does.
+                self._ensure_session_episode(session_id)
             ep = self._cms.episodes.start_nested(
-                title=title, hint=hint, session_key=session_id)
+                title=title, hint=hint, session_key=session_id, parent=parent)
             self._persist_episodes()
-            return self._episode_to_dict(ep)
+            out = self._episode_to_dict(ep)
+            if episode_warning:
+                out["episode_warning"] = "unknown or closed episode handle"
+            return out
 
-    def episode_end(self) -> dict[str, Any]:
+    def episode_end(self, episode: str | None = None) -> dict[str, Any]:
         """Close the caller's currently-open leaf episode and pop to its parent.
         ``{}`` when nothing is open for the caller.
 
-        Ownership guard (spec 2026-07-18): with no resolved session identity,
-        ``Episodes.end_leaf`` falls back to whichever episode is globally
-        "current" — which may belong to a different, still-active session.
-        Before closing, the candidate leaf's ``session_key`` is compared
-        against the resolved identity; a mismatch (including "something is
-        open but I have no identity") is refused as a no-op rather than
-        popping a foreign session's episode."""
+        ``episode`` (spec 2026-08-25): with a handle, ownership is the
+        handle's subtree — strictly narrower than the shared connection key.
+        Only an open sub-episode BELOW that root is popped; the session root
+        itself belongs to the hook lifecycle (SessionEnd / idle reaper) and
+        is never closed here. A subtree with no open sub-episode is a plain
+        no-op ``{}``; an unknown/closed handle is refused.
+
+        Ownership guard (spec 2026-07-18, handle-less path): with no resolved
+        session identity, ``Episodes.end_leaf`` falls back to whichever
+        episode is globally "current" — which may belong to a different,
+        still-active session. Before closing, the candidate leaf's
+        ``session_key`` is compared against the resolved identity; a mismatch
+        (including "something is open but I have no identity") is refused as
+        a no-op rather than popping a foreign session's episode."""
         with self._lock:
             self._ensure_init()
             assert self._cms is not None
             em = self._cms.episodes
+            episode = episode or None      # "" from clients means "no handle"
+            if episode is not None:
+                # resume=False: an end on a reaped/closed session must refuse,
+                # not resurrect the root (write paths keep the resume).
+                resolved = self._resolve_episode_handle(episode, resume=False)
+                if resolved is None:
+                    return {"closed": None,
+                            "reason": "unknown or closed episode handle"}
+                root_id, skey = resolved
+                leaf = em.open_subtree_leaf(root_id, skey)
+                if leaf is None:
+                    return {}
+                # Close exactly the subtree leaf — end_leaf(session_key)
+                # could pick a foreign leaf when two open roots share a key.
+                closed = em.end_episode(leaf)
+                self._persist_episodes()
+                return self._episode_to_dict(closed)
             _, session_id = self._resolve_writer()
             ep = (em.open_leaf_for(session_id) if session_id is not None
                   else em.open_episode())
@@ -4965,7 +5236,8 @@ class MemoryService:
             logger.warning("episode delete failed: %s", exc)
 
     def _resolve_episode_handle(
-            self, handle: str | None) -> tuple[str, str | None] | None:
+            self, handle: str | None, *,
+            resume: bool = True) -> tuple[str, str | None] | None:
         """Identity tier 2 (spec 2026-07-18): match ``handle`` (a daemon-minted
         episode id or an unambiguous prefix, >=8 chars) against an OPEN root
         episode — or a recently-reaped one (within
@@ -4983,13 +5255,24 @@ class MemoryService:
                    if e.parent_id is None and e.ended_at is None
                    and e.id.startswith(handle)]
         if len(matches) == 1:
+            if matches[0].session_key is None:
+                # Keyless roots (global/embedded fallbacks) are not session
+                # roots — resolving one would give callers a (id, None) pair
+                # each call site patches differently (review, 2026-08-25).
+                # Both branches now require a key; callers warn-and-degrade.
+                return None
             self._episode_touches[matches[0].id] = time.time()
             return (matches[0].id, matches[0].session_key)
         if len(matches) > 1:
             return None
-        resume = float(os.environ.get(
+        # The reopen side effect belongs to WRITE paths (a store must never
+        # be lost to a reaped root); lifecycle calls pass resume=False so an
+        # end on a closed session refuses instead of resurrecting it.
+        if not resume:
+            return None
+        resume_window = float(os.environ.get(
             "PSEUDOLIFE_SESSION_RESUME_SECONDS", "21600"))
-        if resume <= 0:
+        if resume_window <= 0:
             return None
         closed = [e for e in self._cms.episodes.episodes.values()
                   if e.parent_id is None and e.ended_at is not None
@@ -4997,7 +5280,7 @@ class MemoryService:
         if len(closed) != 1:
             return None
         ep = closed[0]
-        if time.time() - ep.ended_at > resume:
+        if time.time() - ep.ended_at > resume_window:
             return None
         ep.ended_at = None
         ep.closed_by_new_start = False
@@ -5074,12 +5357,16 @@ class MemoryService:
                     last.id, session_key)
         return last
 
-    def set_session_title(self, title: str) -> dict[str, Any]:
+    def set_session_title(self, title: str,
+                          episode: str | None = None) -> dict[str, Any]:
         """Rename THIS request's session episode (the root keyed by the caller's
-        session id). The daemon can't see the client's project directory, so
-        session titles default to a generic ``session - <date> <time>``; an
-        agent that knows its project calls this to name the session. Opens a
-        session episode if none is open yet (so it can be called up front).
+        session id, or the ``episode`` handle's root when one is passed — the
+        handle is the only identity a hook-registered direct-HTTP client has
+        now that the transport fallback is retired). The daemon can't see the
+        client's project directory, so session titles default to a generic
+        ``session - <date> <time>``; an agent that knows its project calls
+        this to name the session. Opens a session episode if none is open yet
+        (so it can be called up front).
         Returns ``{"ok": bool, "id": str, "title": str}`` or
         ``{"ok": False, "reason": ...}``."""
         title = (title or "").strip()
@@ -5088,6 +5375,15 @@ class MemoryService:
         with self._lock:
             self._ensure_init()
             assert self._cms is not None
+            resolved = self._resolve_episode_handle(episode or None)
+            if resolved is not None:
+                root = self._cms.episodes.get(resolved[0])
+                root.title = title
+                self._persist_episodes()
+                return {"ok": True, "id": root.id, "title": title}
+            if episode:
+                return {"ok": False,
+                        "reason": "unknown or closed episode handle"}
             _, session_id = self._resolve_writer()
             if not session_id:
                 return {"ok": False, "reason": "no session id on this request"}
@@ -6617,6 +6913,7 @@ class MemoryService:
             pending_links = self._storage.pending_proposals()
             lesson_refs = self._storage.lesson_entity_ids()
             fact_counts = self._storage.entity_fact_counts()
+            fact_texts = self._storage.current_fact_counts_by_entity_text()
             lesson_recs = self._curation_records("lesson", cfg.snippet_max_chars)
             world_recs = self._curation_records("world", cfg.snippet_max_chars)
         entities, edges = g["entities"], g["edges"]
@@ -6745,6 +7042,7 @@ class MemoryService:
                         "junk", j["entity_id"], None, None, j["reason"], _t.time()) is not None:
                     junk_proposed += 1
             disp_by_id = {e["id"]: e["display"] for e in entities}
+            canon_by_id = {e["id"]: e["canonical"] for e in entities}
             # Junk tombstones: names a prior verdict (reviewed or auto)
             # already deleted. A re-mint of such a name that the detector
             # flags AGAIN is auto-deleted at the detector's own degree bar
@@ -6755,14 +7053,41 @@ class MemoryService:
             from pseudolife_memory.graph import norm_name as _nn2
             tombstones = {_nn2(d)
                           for d in self._storage.junk_accepted_displays()}
+            # Fact tally by graph-normalized subject NAME, folded from the raw
+            # cortex text. The entity_id cross-index reads zero for facts an
+            # earlier delete_entity orphaned (it NULLs facts.entity_id, and
+            # only a slot write re-links one), which is precisely the
+            # already-damaged population: a name deleted once WHILE carrying
+            # facts would otherwise look contentless on every later re-mint
+            # and be deleted again unattended. Folding here, not in SQL,
+            # because facts.entity_norm is the cortex norm and the entity
+            # side is the graph norm.
+            facts_by_norm: dict[str, int] = {}
+            for _text, _n in fact_texts.items():
+                _k = _nn2(_text)
+                if _k:
+                    facts_by_norm[_k] = facts_by_norm.get(_k, 0) + _n
             for p in self._storage.pending_entity_proposals():
                 if p.get("kind") != "junk":
                     continue
                 eid = p["entity_id"]
                 display = disp_by_id.get(eid, p.get("entity") or "?")
-                zero_structure = (deg.get(eid, 0) == 0
-                                  and fact_counts.get(eid, 0) <= 1)
-                tombstoned = (_nn2(display) in tombstones
+                # A tombstone relaxes the DEGREE bar only; the fact-count
+                # half of the evidence bar holds either way. Tombstones are
+                # permanent (nothing removes a merge_decisions row), so a
+                # short name auto-deleted once stayed deletable forever —
+                # months later the same name can be a real entity with a
+                # dozen cortex facts and one edge, and the unattended delete
+                # would take its edges, aliases, sources and fact
+                # cross-index with it (#177).
+                nd = _nn2(display)
+                contentless = max(fact_counts.get(eid, 0),
+                                  facts_by_norm.get(nd, 0),
+                                  facts_by_norm.get(
+                                      canon_by_id.get(eid, ""), 0)) <= 1
+                zero_structure = deg.get(eid, 0) == 0 and contentless
+                tombstoned = (contentless
+                              and nd in tombstones
                               and deg.get(eid, 0) <= cfg.junk_max_degree)
                 if not (zero_structure or tombstoned):
                     continue
@@ -7333,8 +7658,8 @@ class MemoryService:
         edges/facts/paths single-shot search can't produce. ``low_confidence`` is
         True when no seed entity resolves (caller falls back to ``search``)."""
         from pseudolife_memory.memory.recall import (
-            LLMController, MechanicalController, run_recall, simple_complete,
-            _hub_threshold,
+            LLMController, MechanicalController, recall_state_to_dict,
+            run_recall, simple_complete, _hub_threshold,
         )
         cfg = self.config.memory.recall
         hops = (max(1, min(int(cfg.default_hops), 5)) if hops is None
@@ -7346,7 +7671,8 @@ class MemoryService:
         if not query:
             return {"query": "", "seeds": [], "entities": [], "edges": [],
                     "paths": [], "texts": [], "iterations": 0, "hops": hops,
-                    "low_confidence": True}
+                    "low_confidence": True, "entity_hop": {}, "edge_hop": [],
+                    "seed_text_count": 0}
         vocab = self._recall_vocab()
         if driver == "llm":
             dcfg = self.config.memory.dream
@@ -7363,16 +7689,5 @@ class MemoryService:
             hub_threshold=threshold,
             expand_budget=(cfg.expand_budget or None),
         )
-        return {
-            "query": query,
-            "seeds": state.seeds,
-            "entities": [{"entity": n, "facts": state.entity_facts.get(n, [])}
-                         for n in state.entities],
-            "edges": state.edges,
-            "paths": state.paths,
-            "texts": state.texts,
-            "iterations": state.iterations,
-            "hops": hops,
-            "low_confidence": state.low_confidence,
-        }
+        return recall_state_to_dict(state, query, hops)
 

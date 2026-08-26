@@ -6,6 +6,715 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-26 — reranker training sees facts, and the audit nominates graduation candidates; schema v34)
+- **The learned-reranker training log recorded only half of every search
+  response: served entries, never the cortex facts served above them —
+  and nothing turned the new read telemetry into an actionable list.**
+  Schema v34 (additive/idempotent) adds `retrieval_events.served_facts`:
+  the `memory_search` handler attaches the cortex-first block's served
+  slots (`entity_norm`/`attribute_norm`/rank/score/kind/contested) to
+  the exact event row that search wrote, keyed by the event id
+  `search(return_event_id=True)` returns (opt-in, popped before the tool
+  result — never part of the public search shape). `NULL` = pre-v34 row
+  or no facts served; `retrieval_events_window()` exports the column for
+  the Phase-1 trainer. Separately (no DDL), `read_audit` gains
+  `graduation_candidates`: entries served in ≥60% of the last 30 days'
+  distinct sessions (gated until ≥8 sessions are on record) — static
+  context being re-paid for per query, i.e. "promote to CLAUDE.md"
+  candidates, the follow-up PR #200 deferred.
+
+### Added (2026-08-26 — read telemetry: slot reads, the explicit-reinforce split, and a `read_audit` stats section; schema v33)
+- **A memory bank could not answer "which of my facts are ever actually
+  read?" — entries carried `access_count`, but the cortex's fact slots had
+  no read signal at all, and the `reinforcements` counter conflated the
+  deliberate "this was useful" signal with the dream's automatic trace
+  links.** Schema v33 (additive/idempotent) adds `slot_reads` — one
+  counter row per `(entity_norm, attribute_norm)` slot, bumped when a
+  fact is *served as an answer* (`memory_fact_get` and `memory_search`'s
+  cortex-first block; slot-keyed like `memory_traces`, so cortex
+  snapshot saves don't reset it). Deliberately uncounted: internal
+  verification lookups (the dream rollback's post-revert check) and the
+  facts attached to `memory_recall`/`memory_graph` neighborhoods, which
+  are context rather than a direct answer — so a slot's never-read
+  status is a lower bound, not proof it is unused — and
+  `entries.explicit_reinforcements`, bumped only by `memory_reinforce`
+  (the shared `reinforcements` counter is unchanged and still feeds the
+  retention formula). `memory_stats` gains a `read_audit` section:
+  never-read counts and fractions (overall, by age bucket, worst
+  sources), total/median reads and top-decile read share, slot coverage,
+  the explicit-vs-total reinforcement split, and a write-error counter
+  (a silently-dead telemetry write must not read as "no fact is ever
+  used"). Motivated by the 2026-08-26 live-bank audit
+  (`evals/results/read-audit-20260826.json`: 12.7% of entries never
+  surfaced, vs the 58% never-read Theo/t3.gg measured for Claude Code's
+  built-in auto-memory in youtube.com/watch?v=Jf54k7tFeEc — different
+  instrument, directionally comparable only). Kill-switch:
+  `memory.cortex.read_tracking` (default on; one small upsert per
+  fact-serving call, PG-only).
+
+### Changed (2026-08-25 — MCP SDK v2 / protocol 2026-07-28: stateless core, per-request identity)
+- **The daemon, shim, and toolset tiering now run on MCP Python SDK v2
+  (`mcp>=2.1,<3`), serving protocol revision 2026-07-28 alongside every
+  earlier revision from the same server — Claude Code negotiates the new
+  stateless protocol; Claude Desktop and other handshake-era clients are
+  unaffected.** What moved: `FastMCP` → `MCPServer`; transport-security
+  settings now ride `build_streamable_http_app()` (v2 takes them at app
+  build, not construction); the tiering transport hook collapsed from
+  three v1 private-internals patches to one wrap of the v2 dispatch
+  registry, which also binds each request's headers into the
+  `writer_context` seam (v2 removed the ambient `request_ctx` the identity
+  resolution rode on — no per-tool signature changes needed); the shim
+  moved to `streamable_http_client` + an `httpx2` client carrying the
+  `X-PL-Writer`/`X-PL-Session` headers, and its v1 content/validation
+  juggling is gone — v2 constructor handlers pass `CallToolResult` through
+  verbatim. Verified retained: the stringified-JSON parameter rescue
+  (Claude clients' `tags='["…"]'` quirk) and `tools.listChanged` (modern
+  clients derive it from `subscriptions/listen`; legacy clients keep the
+  forced initialization option). Behavior note: `memory_toolset`'s
+  `list_changed_sent` now reports "published" (subscription bus) rather
+  than "a live session received it". Lockfile adds `httpx2`/`httpcore2`/
+  `mcp-types`/`truststore`. No schema change (meta stays v32).
+
+### Changed (2026-08-25 — session identity: episode handle becomes the primary anchor; transport fallback retired)
+- **Concurrent Claude Code sessions share one streamable-HTTP connection,
+  so the transport's `mcp-session-id` header identifies the connection,
+  not the session — sub-episodes and lifecycle calls could land on a
+  different session's episode tree (diagnosed 2026-07-18).**
+  `memory_episode_start` and `memory_episode_end` now take an optional
+  `episode` parameter (the session handle the session-start briefing
+  already advertises): `episode_start` nests under that handle's session
+  root, and `episode_end` pops strictly within the handle's subtree —
+  never the session root itself, which stays owned by the hook lifecycle
+  (SessionEnd / idle reaper). An unknown or closed handle degrades to the
+  previous behavior and adds `episode_warning`, mirroring `memory_store`.
+  The `mcp-session-id` fallback (identity tier 4) is retired — the MCP
+  2026-07-28 revision (SEP-2567) removes the header from the protocol
+  entirely; `PSEUDOLIFE_LEGACY_TRANSPORT_SESSION=1` restores it for one
+  release as a rollback hatch and logs a warning on first use (explicit
+  truthy values only — `0`/`false` mean off). Review hardening
+  (2026-08-25 eight-angle pass): `episode_end` resolves without the
+  resume side effect, so a late end on a reaped session refuses instead
+  of resurrecting the root; the handle-anchored nest/pop pins to the
+  handle's own subtree even when two open roots share a session key
+  (`Episodes.end_episode` closes exactly the found leaf); an empty-string
+  handle (a known client quirk for optional params) degrades like "no
+  handle"; keyless roots are rejected inside the resolver so every handle
+  consumer shares one contract; `memory_session_title` also takes
+  `episode=` (the only identity a hook-registered direct-HTTP client has
+  now); and the session-start briefing tells agents to pass the handle on
+  the lifecycle tools, not just writes. Design:
+  `docs/specs/2026-08-25-mcp-v2-session-identity-design.md`.
+### Fixed (2026-08-25 — re-mint repairs the fact/lesson cross-index)
+- **A freshly minted entity re-links the orphaned fact and lesson rows of
+  its name.** `delete_entity` NULLs `facts`/`lessons` `entity_id` and
+  `object_entity_id` (no cascade), and nothing in the live daemon re-linked
+  those rows until their slot was next written — so a deleted-then-re-minted
+  name under-counted everywhere the FK is read: fold-direction ranking,
+  `backfill_entity_sources` (entity→project attribution), and
+  `lesson_entity_ids` (the lesson-only junk protection). This is the general
+  repair deferred from #177, whose guard-side workaround (counting current
+  facts by subject name) stands independently. The repair matches
+  conservatively — candidates by `norm_name(raw stored text) == canonical`,
+  the same rule slot-write linking applies (minus aliases, which a fresh
+  mint cannot have), updated by exact stored text;
+  the cortex-normed `entity_norm` column is never consulted (the two norm
+  spaces disagree, e.g. `"G:"` → `"g"` vs `"g:"`). Mint-only by an
+  `xmax = 0` insert check, so the repeated-upsert hot path (every
+  `memory_outcome` log) pays nothing; orphans whose entity already exists
+  still re-link on their next slot write, as before. `entity_sources`
+  attribution heals on the next backfill pass once the FK is restored.
+  Tombstone removal/expiry for `merge_decisions` remains deferred (third
+  deliberate deferral): those rows are the durable merge audit, so a removal
+  path should be a status flip with its own review surface, not a row
+  delete riding along here.
+### Changed (2026-08-25 — benchmark docs re-framed on the full 500-question run; the 0.936 headline retired)
+- **The README led with a number the current bench instrument does not
+  reproduce, drawn from the most favourable 78 of 500 questions (#188).**
+  Both halves are fixed at their sites. **(1) Retired: cascade 0.936 on
+  LongMemEval knowledge-update.** It was measured on the 2026-07-30 stack
+  (Qwen3.6-27B answerer and judge). Re-running the
+  same 78 questions after the 2026-08-17 migration to Qwen3.8-27B
+  (`ceiling-v38`, n=3, std 0.0000, like `ceiling-e2e` before it) gives
+  **cascade 0.936 → 0.846** against a naive-RAG control that is **0.859 on
+  both stacks** — the published posture now sits *below* its own control.
+  Root cause, recomputed from the committed per-question rows: the cascade
+  routes on whether the cortex arm abstains, so its input is the answerer's
+  abstention behaviour, not a property of the memory — **32/78 abstentions
+  at 46/46 commit precision** on the old stack versus **22/78 at 0.839** on
+  the new one, so nine wrong answers are served where a RAG fallback used to
+  rescue them. The two runs' fact contexts are not byte-identical and the
+  migration moved extractor, answerer and judge together, so the artifacts
+  do not isolate which term did it — which is the finding, not a caveat: the
+  claim was never measured for instrument transfer. The number stays visible
+  with strikethrough and this explanation at every site that published it
+  (README front door and Benchmarks section, `docs/guide/benchmarks.md`,
+  `evals/README.md`), per the retire-at-the-old-site rule.
+  **(2) The front door now leads with the full six-type run**
+  (`longmemeval-all-oracle-qwen-27b-alltypes-0803`, 500 questions, single
+  pass, Qwen3.6 judge), with the knowledge-update slice as a named sub-row:
+  overall **rag 0.688 / cortex 0.416 / hybrid 0.664 / cascade 0.690** at
+  **~1210 / ~158 / ~842 / ~883** context tokens per question — equal
+  accuracy to naive RAG at ~73% of the context, i.e. a wash (one question in
+  500), not the ~8-point win the KU slice alone suggested. The per-type
+  breakdown ships with it and states the losses plainly (multi-session 0.474
+  vs 0.504, single-session-preference 0.700 vs 0.800, temporal-reasoning a
+  tie). The one claim that survives a judge swap unchanged is the abstention
+  edge: BEAM-100K abstention **cortex 0.950 vs rag 0.775**, identical under
+  the local Qwen3.8 judge and an independent Opus-class re-judge.
+- **The full-haystack teaser row left the README front door** (cascade 0.462
+  vs rag 0.346, p = 0.011). It is a 2026-07-30 measurement on the retired
+  judge, its extraction predates the earliest committed op-prompt artifact
+  (`v5`, 2026-08-01; the shipped pin is now `v10`), and it has never
+  been re-judged, while the same metric lost 0.090 on the oracle slice when
+  the stack migrated. It survives in `docs/guide/benchmarks.md` under a
+  dated currency note as an engineering-log result.
+- **BEAM is documented in `evals/README.md` for the first time** — what the
+  benchmark is (ten memory abilities, 100K–10M-token procedurally generated
+  chats, rubric-item judging), how to run the adapter/re-judge/reader-sweep,
+  and a findings table over the committed artifacts from PRs #191–#192:
+  budget-matched hybrid is a wash rather than a loss (rag 0.6425 vs hybrid
+  0.6226 at 16/16, −0.020 ± 0.029), BEAM judge transfer is small and
+  measured (≤0.016 per arm against a 0.073 stability floor), most of the gap
+  to published leaderboard numbers is context volume in the reading stack
+  (6→48 turns is +0.186 ± 0.041; a frontier reader over identical contexts
+  adds only ~0.04), and three weaknesses survive any reading stack
+  (summarization, event ordering, and abstention degrading with volume).
+  An undocumented benchmark with committed artifacts was a gap in the same
+  evidence discipline the rest of the tree enforces.
+- **Two standing rules added to `CLAUDE.md`** under "Publishing a benchmark
+  number": a bench-instrument migration (judge or answerer) blocks the
+  release gate until the docs-currency pass lands, and a claim is only
+  promoted to the README after the headline slice runs under two independent
+  judge families. The 0.936 run replicated at std 0.0000 three times —
+  determinism was read as validity, and judge transfer was never measured.
+- **`tests/test_eval_evidence.py`** gains rows for every number added or
+  moved: the 500-question table and its per-type breakdown, the
+  `ceiling-v38` side-by-side, the abstention/commit-precision counts
+  (computed from the committed per-question JSONL rows), the BEAM findings,
+  and retired-marker rows that keep the struck 0.936 pinned to the artifact
+  that produced it.
+### Added (2026-08-25 — adoption surfaces: install front door, comparison, security posture, support) [#189]
+- **The README now leads with the two-command lite path instead of a git
+  clone and a multi-GB image.** The first screen is `pip install
+  "pseudolife-mcp[lite]"` plus one client-registration command (Claude
+  Code or Codex), the try-it line, and an honest lite-vs-durable
+  inventory; the Docker stack is demoted to a clearly-labelled durable
+  tier below it. Nothing was deleted — the WSL2 memory guidance moved to
+  a new **Configuration → Windows / WSL2 memory** section, the two
+  manual-migration blockquotes (schema v25 re-embed, PostgreSQL 16→18
+  cutover) collapsed to pointers at their existing runbooks, and the
+  Windows ASCII-data-path caveat moved from the quickstart into
+  Troubleshooting. Rationale: every competitor's fastest credible path is
+  under two minutes with no container runtime, and ours already was — it
+  just sat ~100 lines down under a hedged heading.
+- **The lite tier's missing extractor is now stated where a user meets
+  it, not only in a log line nobody reads.** Lite ships no **extractor**,
+  so the **dream** pass advances its **cursor** but writes no canonical
+  facts and `memory_fact_set` is the only **cortex** writer — previously
+  indistinguishable from a broken cortex. `/health` gains an additive
+  `extractor` field (`none` / `configured` / `disabled`; omitted when the
+  service carries no resolvable dream config, and deliberately *not*
+  reflected in `status`, since `web/api.py` serves any non-ok payload as
+  a 503 that the Docker healthcheck and `ops/update.*` treat as fatal).
+  The stdio shim prints what is and is not working, plus the fix, once
+  per session when the daemon it attached to reports `extractor: "none"` —
+  the daemon's own startup warning is invisible on this path because
+  `shim.spawn_daemon` discards its stderr. That warning now also names the
+  fix command. Only an explicit `"none"` fires the notice: a configured
+  extractor, a deliberately dream-disabled bank, and an older daemon whose
+  `/health` predates the field all stay quiet.
+- **`docs/guide/comparison.md`** — the first named-competitor comparison:
+  Mem0, Zep/Graphiti, Letta, Cognee, memU and Memori, on the axes this
+  project is built around (one current value per **slot**, **supersession**
+  with version history, **provenance** tiers and **contender** parking,
+  human-reviewed merges with audit-stamped decisions, staleness as a
+  serving decision, zero-egress extraction, artifact-pinned numbers) — led
+  by the honest baseline of a markdown file plus grep, and closing with a
+  "use something else if" table that concedes multi-tenant SaaS, SSO and
+  compliance, managed hosting, agent-framework runtime, and non-MCP
+  clients by name. Every external claim is dated to the 2026-08 sweep it
+  came from and phrased as an observation of that project's docs at that
+  time, never as a present-tense absence; the page says so at the top and
+  asks readers to check current docs. It states no benchmark numbers of
+  its own, deferring to Benchmarks.
+- **`docs/guide/security-posture.md`** — the memory-integrity half of the
+  security story, framed against OWASP's persistent-memory-poisoning
+  entry (ASI06, December 2025). Maps each shipped mechanism to the
+  poisoning step it contains (provenance tiers, contender parking, the
+  opt-in **consolidation quarantine** two-man rule, the human-gated
+  **review queue** with `merge_decisions` audit rows, the v27 dream
+  rollback journal, the engram cross-index, supersession history, writer
+  keying, `source="status"` exclusion, the `stale_policy` *serving-side*
+  quarantine) with each one's default, and states flatly what is **not**
+  defended — prompt injection against the agent, content screening (the
+  MAFIA evaded class, including this project's own literal-faithfulness
+  gate), cryptographic writer authentication, ranking as a defense,
+  volume anomaly detection, unverified world-fact citations, and the host
+  itself. SECURITY.md keeps vulnerability reporting and gains a pointer.
+- **Support surface for external users**: `.github/ISSUE_TEMPLATE/`
+  issue forms (bug report asking for `/health` output, version + schema,
+  install tier, client and transport, with a redact-secrets warning and a
+  security-reports-go-elsewhere banner; feature request asking what you
+  were trying to do), `.github/ISSUE_TEMPLATE/config.yml` routing security
+  reports to private advisories, `.github/PULL_REQUEST_TEMPLATE.md`
+  carrying the repo's actual shipping checklist, a standard Contributor
+  Covenant 2.1 `CODE_OF_CONDUCT.md`, and a README **Support** section
+  stating solo-maintained and best-effort in as many words.
+
+### Fixed (2026-08-25 — retrieval-log/compaction/dream-run retention never ran with dreaming disabled)
+- **A bank with `memory.dream.enabled=false` (a documented, first-class
+  knob) never pruned `retrieval_events`, superseded cortex/world/lesson
+  rows, or the v27 dream-run journal — all three grew unbounded.**
+  `start_dream_sweep()` only started the sweep thread when
+  `dream.enabled` was true, so on a dream-disabled bank the thread that
+  runs `run_sweep_once` (and therefore every retention call inside it)
+  never existed at all; `run_sweep_once` itself then compounded this by
+  returning `{"fired": false, "reason": "disabled"}` before reaching its
+  own prune/compact block. The `run_sweep_once` code comment (not this
+  CHANGELOG — the 2026-08-20 v31 entry below only says events "are pruned
+  on the dream-sweep tick," which is accurate as far as it goes) claimed
+  the retrieval-log retention "rides the same unconditional tick," true
+  only of whether a *dream fires*, not of whether dreaming is *enabled*;
+  the retrieval log has no other reaper and accrues on every
+  `memory_search` regardless. `start_dream_sweep()` now starts whenever
+  EITHER `dream.enabled` OR `memory.retrieval_log.enabled` is true (the
+  latter defaults on and also now flags `restart: true` in the Console
+  config panel, for the same reason), and
+  `run_sweep_once` now runs compaction, dream-run-journal pruning, and
+  retrieval-log pruning before the disabled check, not after — all three
+  tables are fed by write paths (`memory_fact_set`/`memory_world_set`, a
+  manual `memory_dream` run, and the end-of-session
+  `dream_run_auto` fired by `_fire_and_forget_dream`) that never check
+  `dream.enabled` in the first place, so a dream-disabled bank can still
+  accumulate rows in all three without a periodic reaper. Hardening: the
+  sweep-tick fake in `tests/test_dream.py` now also implements
+  `prune_retrieval_log` (the real method name, not a stand-in), so a
+  future rename that silently broke the `getattr`-guarded call would fail
+  a test instead of quietly disabling retention again.
+### Security (2026-08-25 — stored XSS in the galaxy view's node tooltip)
+- **Graph entity names reached the 3D galaxy view's tooltip via innerHTML
+  (#171).** `galaxy.js` handed the vendored `3d-force-graph` bundle each
+  entity's raw name as a plain STRING via `.nodeLabel((n) => n.id)`; the
+  bundle's tooltip module renders string content with `.html(content)`, so
+  a hostile entity name (e.g. an `<img onerror=...>` payload, plausible via
+  a prompt-injected ingested document reaching the extractor — write-time
+  `junk_name_reason()` screens junk shapes, not markup) executed on hover.
+  On the shipped tokenless default, same-origin JS reaches `/api`
+  unauthenticated, so the payload could drive every mutation route.
+  `nodeLabel` now returns a DOM node (`el("span", {}, n.id)`, text set via
+  `document.createTextNode`) instead of a string — verified against the
+  vendored bundle's tooltip `update()`: an `HTMLElement` content value takes
+  the safe `.append(() => content)` branch (d3 inserts the live node as-is,
+  never through `.html()`), while a string still takes the vulnerable
+  branch. No other label/tooltip path in `galaxy.js` (`linkLabel`, etc.)
+  sets a string accessor. A markup-shaped entity stays in the Console dev
+  server's demo graph fixture so the fix is eyeball-checkable live.
+### Fixed (2026-08-25 — System Atlas currency: migration list, extractor size, removed tool)
+- **`docs/atlas/atlas.json` had drifted on three points** (#184): the
+  `storage/schema.py` card's migration list stopped at v29 even though
+  `SCHEMA_META_VERSION` had moved to 31 — v30 (merge-proposal judge
+  verdict) and v31 (retrieval event log) were missing; the installer card
+  still quoted the retired ~9 GB `sonnet-only` savings figure instead of
+  the current ~11.8 GB; and the CMS card still named the removed
+  `memory_trace` tool instead of `memory_search(explain=True)`, which it
+  was folded into. `meta.verified` restamped 2026-08-25.
+- **`tests/test_atlas_currency.py` gained three guards** so these rot
+  classes fail CI instead of drifting quietly: the migration list is
+  pinned against `SCHEMA_META_VERSION` (every version from the list's
+  start through current must appear), the extractor-size figure is pinned
+  against README.md's authoritative `~N GB lighter` figure, and a
+  removed-tool-name list (starting with `memory_trace`) is checked
+  word-boundary-matched against the whole atlas so it can't false-positive
+  on the still-live `memory_traces` table. All three watched RED against
+  the pre-fix atlas.json before the fix landed.
+### Fixed (2026-08-25 — install.sh no longer aborts mid-install on PEP 668 distros, #176)
+- **A failed shim install now falls back to the HTTP transport instead of
+  killing the installer.** On PEP 668 distros (Ubuntu 24.04+, Debian 12+,
+  Fedora 40, Arch) with no pipx, `pip install --user` exits 1 with
+  `externally-managed-environment`; under `set -e` that aborted
+  `ops/install.sh` at step 10 — after the multi-GB image build — with a raw
+  pip traceback, no MCP transport registered, and the `--transport http`
+  hint unreachable. `ensure_shim` now exit-checks every pipx/pip invocation
+  (as `ops/install.ps1` always has), so failure leaves the shim flag unset
+  and the existing per-client HTTP fallback plus remediation text fire.
+  `ops/preflight.sh` gains a pipx check that warns about the PEP 668
+  fallback before anything is built. Guard test pins all four exit-checked
+  install paths.
+### Fixed (2026-08-25 — a junk tombstone can no longer delete a re-minted real entity)
+- **The deep dream's tombstone auto-delete now applies the fact-count half
+  of the evidence bar too** (#177). A junk verdict on a short name plants a
+  permanent tombstone — nothing removes a `merge_decisions` row — and the
+  tombstone branch consulted degree only, so months later the same name
+  standing for a real entity with a dozen cortex facts and one edge was
+  deleted unattended on `deep_dream(apply=true)`, taking its edges, aliases,
+  sources and the fact-to-entity cross-index with it (the fact rows survive
+  on entity text, the node re-mints on next mention, and the cycle repeats).
+  A tombstone now relaxes the **degree** bar only: an entity with more than
+  one current fact stays put and sits in the review queue as an ordinary junk
+  proposal for a human verdict. That fact count is taken by subject **name**
+  as well as by `facts.entity_id`, because `delete_entity` NULLs the FK on
+  every fact of the deleted node and nothing re-links it — so on banks where
+  a name was already wrongly deleted, its surviving facts are orphaned and
+  the id-keyed count alone would still read the re-mint as contentless and
+  delete it again. Zero-structure auto-delete of never-judged names is
+  otherwise unchanged. Supersedes the 2026-08-16 tombstone entry below.
+### Fixed (2026-08-25 — release-integrity audit: stale `__version__` + late server.json guard)
+- **`pseudolife_memory.__version__` no longer drifts from `pyproject.toml`
+  (issue #180).** It was a hand-maintained literal stuck at `0.6.0` against
+  `pyproject.toml`'s `0.14.0` — eight releases of drift, nothing pinned it.
+  It now derives from the installed distribution's metadata via
+  `importlib.metadata.version("pseudolife-mcp")`, falling back to a
+  `0.0.0+unknown` sentinel only when no metadata is installed at all. Every
+  build backend stamps dist-info from `pyproject.toml` at build time, so
+  this is correct for anything actually shipped. Guarded by
+  `tests/test_plugin_packaging.py::test_package_version_matches_pyproject`
+  (skips, with a stated reason, only when the local dev install's dist-info
+  itself is stale — not a real release path).
+- **The MCP registry's `server.json` version guard now runs before the PyPI
+  publish, not after (issue #185).** It previously lived in the `registry`
+  job of `.github/workflows/release.yml`, which only runs downstream of the
+  irreversible `publish` job — a version-field mismatch failed only after
+  the upload, burning a release number (PyPI never accepts a same-version
+  re-upload). The guard moved into the `build` job, alongside the existing
+  tag↔pyproject guard, so both fail before anything builds or uploads.
+  Locally guarded too:
+  `tests/test_plugin_packaging.py::test_server_json_versions_match_pyproject`
+  pins both `server.json` version fields and the `ops/docker-compose.yml`
+  daemon image tag (which the compose file already documented as the deploy
+  source of truth, but nothing checked it) against `pyproject.toml`.
+### Fixed (2026-08-25 — interrupted legacy import resumes instead of blocking)
+- **A legacy `.pt` import that died part-way no longer permanently blocks
+  the retry and silently drops the remainder (#187).** `migrate_legacy`
+  commits per entry and renames the sources only at the very end, while its
+  only idempotency guard was "the entries table is non-empty" — so a
+  malformed row, embedder failure, dropped connection, full disk or killed
+  machine durably committed some rows, and every later boot then answered
+  `storage_not_empty`: the remaining entries and **all** cortex facts were
+  never imported, the sources never got their `.pre-v8.bak` rename, and the
+  service caller swallowed the exception to a single warning. Progress is
+  now *recorded* rather than inferred, in a `legacy_migration` meta row
+  (status, source fingerprint, entries-done count) — no schema change. A
+  later boot with `status=in_progress` and a matching source fingerprint
+  resumes the import, skipping rows already committed by identity
+  (`text` + `timestamp` — the `entries.id` serial is minted at insert, and
+  `band` is deliberately excluded because `hydrate_cms` rewrites it to the
+  live preset on the same boot that imported the row), so nothing is
+  duplicated. A resume MERGES the cortex rather than replacing it: only
+  slots nobody has written yet take legacy rows, the dream cursor only
+  moves forward, and the supersession log is seeded only when empty — the
+  daemon keeps serving through the degraded window, so a snapshot rewrite
+  would destroy whatever landed there. `status=done` is written only after
+  the renames succeed, and a recorded source that vanished without being
+  renamed refuses the resume instead of marking a short bank done. A
+  populated bank
+  with no progress record keeps the old refusal, so a legacy `.pt` can
+  never be merged into somebody's live bank, and a *different* `.pt` bank
+  dropped in over an interrupted one is refused on the fingerprint instead
+  of being folded into its leftovers. Banks migrated before this change
+  have no meta row but do have renamed sources, so they never enter the
+  import path at all.
+- **A partial import is now loud.** `MemoryService._ensure_init` still
+  boots (a half-imported bank serves fine) but logs at ERROR naming the
+  resume path and the meta row, and `/health` grows a `migration_partial`
+  field — previously the only trace was one `WARNING` line. `status` stays
+  `"ok"` deliberately: `web/api.py` serves any non-ok payload as HTTP 503,
+  which the Docker healthcheck and the install/update scripts treat as
+  fatal, so flagging it there would turn a non-fatal partial import into a
+  bricked deploy loop. The module docstring's claim that
+  this failure class was closed in 2026-07-28 is corrected: that fix
+  removed the commonest *cause* (embedding-dimension mismatch), not the
+  unrecoverability.
+### Fixed (2026-08-25 — the MC scorer read the article "a" as answer A; #173)
+- **`lme_v2_smoke.score_mc`'s no-box fallback is now anchored and
+  uppercase-only, and every LongMemEval-V2 number it produced is
+  corrected.** The fallback accepted any standalone `[A-Ha-h]` token and
+  upper-cased it, so an answerer that ran out of tokens mid-reasoning —
+  the dominant unboxed shape in every committed artifact — scored as
+  answer **A** on the English article "a". Measured over
+  `lme-v2-smoke-slice2.jsonl`: 57 of 105 MC arm-answers carry no box and
+  the old fallback's matched token was the article "a" 40 times, against 4
+  uppercase letters that were all option *enumerations* ("`*   A. Service
+  Catalog`") rather than stated answers. A letter now counts only when it
+  is the whole response or follows an explicit answer marker
+  ("Answer:", "the answer is", "the correct option is"); a bare "Option X"
+  is deliberately not a marker, because enumerations are the noise class
+  itself. Not one unboxed response in any committed artifact states an
+  answer, so the strict form loses nothing measurable. The boxed-answer
+  path is untouched.
+- **Corrections published beside the originals, which are left as the runs
+  wrote them** (`evals/rescore_strict_mc.py`, offline, no GPU). All 25
+  flips across the four artifacts run the same way — correct → wrong, 24
+  of them on gold **A** via the article "a" and one on gold **E** via a
+  quoted "option E says" mention. None went the other way, and no
+  non-multiple-choice row moved at all.
+  - Full 74-question `procedure` category
+    (`lme-v2-smoke-slice2{,-compose}-rescored-strictmc.summary.json`),
+    default prompt / compose prompt: rag 0.162 → **0.149** / 0.284 →
+    **0.257**; cortex 0.068 → **0.068** / 0.216 → **0.176**; hybrid
+    0.243 → **0.203** / 0.284 → **0.270**. The exact hybrid-vs-rag tie
+    under the compose prompt was an artifact of the defect; corrected it
+    is 0.270 vs 0.257, the same "no measurable difference".
+  - Replicated 10-question pilot
+    (`lme-v2-smoke-slice1-rescored-strictmc.agg.json`): KU hybrid
+    0.533 → **0.500**; compose rag 0.500 → **0.433**, cortex 0.233 →
+    **0.200**, hybrid 0.633 → **0.533**.
+  - Qwen3.6-vs-3.8 paired verdict of 2026-08-19
+    (`lme-v2-qwen38-vs-slice2-paired56-rescored-strictmc.json`): cortex
+    +0.089 (6W/1L, p 0.125) → **+0.036** (3W/1L, p 0.625); rag +0.018
+    (8W/7L) → **+0.018** (7W/6L); hybrid −0.018 (8W/9L) → **−0.036**
+    (7W/9L). The judge arms are untouched by the scorer and reproduce the
+    superseded artifact exactly, which is what licenses reading the
+    eval-arm movement as the fix and nothing else.
+- **A working-copy run is also affected, and deliberately gets no number
+  here.** The audit that found this was run against a 74-row working copy
+  of the 3.8 slice and its `paired74` comparison, neither of which is
+  committed. Re-scoring them moves that comparison's cortex arm from
+  significant to not significant — but publishing the figures would be a
+  claim with no artifact a reader can check, which is the rule this repo
+  wrote `tests/test_eval_evidence.py` to enforce. Whoever promotes those
+  rows must re-score them with `evals/rescore_strict_mc.py` before
+  quoting any number from them.
+
+### Fixed (2026-08-25 — bench reset leaked FK-free tables between questions; #181)
+- **The eval harness's bench reset now truncates every table in the
+  schema, not the eleven someone remembered.** `TRUNCATE … CASCADE`
+  reaches only tables with a foreign key into the truncated set, so
+  `retrieval_events`, `entity_kinds`, `outcome_signals`,
+  `dismissed_pairs`, `merge_decisions` and `communities` survived
+  `ladder_sweep.reset_bench()` and carried rows from one bench question
+  into the next. Leaked `entity_kinds` rows are the sharp end: they flip a
+  later question's `freshness_class` (evergreen → volatile) and so change
+  what the `stale_policy` serves — the same contamination class as the
+  2026-08-04 `chronicle_events` incident, whose fix taught the lesson to
+  exactly one of the two lists.
+- **One list, defined beside the DDL:** `storage.schema.BENCH_RESET_TABLES`
+  is now the single source of truth, consumed by
+  `evals/ladder_sweep.py`, `tests/pg_fixtures.py` and `tests/test_graph.py`
+  (which carried a third, nine-table inline copy). The test fixture's own
+  list was missing `communities`; the shared list closes that too. A guard
+  test parses every `CREATE TABLE IF NOT EXISTS` out of `schema.py` and
+  fails if any table is absent from the list, so the next schema bump
+  cannot reopen the gap silently.
+### Fixed (2026-08-25 — PG18 cutover dump: the same pipefail defect as #172, follow-up)
+- **`ops/migrate-pg18.ps1` guarded its cutover dump with gzip's exit status,
+  not pg_dump's.** The PG 16 → 18 migration script still carried the exact
+  `pg_dump | gzip` shape fixed in `ops/backup.ps1|.sh` below: the container's
+  POSIX `sh` has no `pipefail`, so a pg_dump that died partway would have
+  passed the "cutover pg_dump failed" check. Blast radius was limited — the
+  migration's exact table-count verification would catch a truncated dump
+  before the daemon restarted, and the old PG 16 volume is retained as the
+  rollback — which is why it was deferred out of the audit change rather
+  than fixed inline. pg_dump now writes the gzip itself (`-Z9`, plain
+  format; verified PG 18's pg_dump accepts a bare `-Z9`, and the output
+  stays a normal single-member gzip so the `gunzip -c` restore step is
+  unchanged), and the script joins the no-pipeline guard test
+  (`tests/test_ops_backup_integrity.py::test_dump_is_not_piped_into_gzip`).
+  It deliberately does NOT get the end-of-dump marker check — the count
+  verification is its completion guard.
+
+### Fixed (2026-08-25 — ops-script audit: three ways a backup or a rollback quietly wasn't one)
+- **A pg_dump that died partway produced a "good" backup (#172).**
+  `ops/backup.ps1|.sh` ran `pg_dump` piped into `gzip` inside the container;
+  the container's POSIX `sh` has no `pipefail`, so the status `docker exec`
+  returned was gzip's — a dump killed halfway still landed as a non-empty,
+  valid gzip of a truncated dump, which passed the only other guard (a
+  zero-length check; gzip of empty input is ~20 bytes). `update.ps1` then
+  deployed believing it had a backup, and age-based rotation eventually
+  deleted the last good one. pg_dump now writes the gzip itself (`-Z9`,
+  plain format), so the status really is pg_dump's and no uncompressed
+  scratch file is needed inside the container; the artifact is then read
+  back on the HOST and must carry PostgreSQL's end-of-dump marker, which
+  covers a truncated `docker cp` too. Artifacts land on a `.part` name and
+  are promoted only after they verify, so a rejected dump can never sit in
+  `data/backups` looking like the newest good backup (it is kept, not
+  deleted — it is the evidence).
+- **The restore rehearsal passed a backup that had lost every lesson,
+  episode, entity and edge (#182).** `ops/restore.ps1|.sh` printed a
+  live-vs-restored count table for seven tables but set its failure flag
+  from `entries`/`facts` alone — the first and largest sections of a dump —
+  so an artifact truncated after them rehearsed "PASSED" while everything
+  behind them came back empty. The whole-table alarm (live > 0, restored
+  == 0) now covers every counted table, and a restored count materially
+  below live alarms too (partial truncation is the likelier outcome): below
+  half, and only from 20 live rows up, since a dump is always older than
+  the live bank and a ratio over single-digit counts is meaningless. A row
+  count that could not be READ alarms as well, instead of silently
+  switching the comparison off for that table. The young-bank false
+  positive stays impossible — the live count still gates every check.
+- **A real restore ignored whether its DROP/CREATE DATABASE worked (#182).**
+  One leftover session blocks `DROP DATABASE`, and the failure surfaced two
+  steps later as "restore failed mid-way" — against the OLD database.
+  Straggler sessions on the target are now terminated deliberately
+  (`pg_terminate_backend`, excluding this session), and both statements are
+  status-checked with a message naming what actually happened and what state
+  the bank is in.
+- **Re-running `update.ps1` after a failed deploy destroyed the rollback
+  image (#183).** The rollback tag was moved onto whatever the version tag
+  pointed at, at the start of every run — but `docker compose up --build`
+  builds first and the deploy is validated after, so a run that aborted in
+  between left the version tag on a freshly built, never-validated image.
+  The natural next move — re-run — then tagged THAT as the rollback (seen
+  live 2026-08-13). Both scripts now resolve the RUNNING daemon container's
+  image ID and refuse to move the tag when it disagrees with the version
+  tag's, keeping the existing rollback and saying why; `-ForceRollbackTag` /
+  `--force-rollback-tag` overrides. A stopped daemon cannot witness a
+  mismatch and keeps the old behavior, and the happy path (IDs match) is
+  unchanged.
+### Changed (2026-08-25 — argument contracts moved into the tool schemas)
+- **Every MCP tool now documents its arguments in the tool's own
+  `inputSchema` instead of cramming them into the description string.**
+  Nothing on the surface carried parameter descriptions before: an
+  argument's range, units, format, or "this bounds the seed search, not
+  the result" all had to live in the one description blob, which is the
+  string the per-tier manifest budget meters. That budget had been bumped
+  three times in six weeks (2026-07-18, 07-31, 08-05), each time after
+  trimming descriptions "to the minimum", and it still stood at 14 chars
+  of headroom on `minimal` and 20 on `core` — with the result that real
+  behavioral contracts were competing for characters. The #186
+  `memory_recall` fix landed the day before had lost its `hops` ceiling
+  and its cap numbers to exactly that wall.
+  Each argument's own contract now ships as an `Annotated[T,
+  Field(description=...)]` on the tool signature, which FastMCP renders
+  into `inputSchema.properties[arg].description`; the tool description
+  keeps what the tool is for, the contracts that span several arguments,
+  and the return shape. Tool-call behavior is unchanged — argument names,
+  types, defaults, optionality, enum values, `outputSchema` and
+  annotations are byte-identical across all 35 tools with descriptions
+  stripped; `Field` carries a description and nothing else.
+- **`memory_recall`'s full contract is documented again.** Its purpose and
+  `low_confidence` fallback and the caps/per-hop-reservation return
+  contract are back in the description, and the `hops` ceiling (clamped
+  to 1..5) plus the `top_k` seed-bound-not-result-bound rule now sit on
+  those two parameters. The description is smaller than the pre-trim
+  original because the argument text moved to the schema.
+- **The manifest budget now meters the schema too**, so the newly-used
+  space is accounted rather than becoming an unmetered escape hatch:
+  `tests/test_tool_consolidation.py::test_descriptions_fit_tier_budgets`
+  raises the description budgets to 5,000 / 11,500 / 17,000 chars
+  (minimal / core / full) and adds a per-tier cap on the sum of
+  param-description chars (2,600 / 5,100 / 8,200, measured 1,826 / 4,304
+  / 7,413 the day it landed) plus a 300-char cap per parameter beside the
+  existing 1,600 per tool. Post-change descriptions measure 3,232 /
+  7,289 / 11,941.
+- `pydantic>=2.11,<3` is now a declared dependency — `mcp_server.py`
+  imports `pydantic.Field` directly rather than relying on it arriving
+  through `mcp`.
+
+### Fixed (2026-08-25 — `memory_recall` no longer returns an unbounded payload, #186)
+- **`memory_recall` now caps `entities`/`edges`/`texts`/per-entity `facts`
+  and truncates supporting text — with a per-hop quota, not a flat
+  prefix slice.** `top_k` only ever bounded the seed search; graph
+  expansion fanned out from there with no bound of its own, and the
+  compact projection `memory_search` applies to entry text
+  (`_compact_entry`) was never applied on the recall path. Issue #186's
+  live audit (2026-08-21, real daemon) measured one 3-hop query
+  (`hops=3`, default `top_k=5`, `verbose=False`) at 93.7 KB total, enough
+  that the calling client refused it; a separate pass over that same
+  response reported 53 entities (38.6 KB), 75 edges (5.3 KB), and 45
+  uncapped full entry texts (51.9 KB) — those three figures sum to
+  95.8 KB, ~2% over the stated total, and are kept here exactly as
+  audited (that live response can't be re-measured without the daemon
+  and bank it ran against).
+  A first cut of this fix (same day) shipped a flat `[:N]` slice per
+  field, which review caught as wrong: `run_recall` appends seeds then
+  each hop's discoveries in turn, so a flat prefix is a breadth-first
+  window, not a relevance ranking — a hub seed's wide 1-hop ring could
+  fill the entire edge cap by itself and silently drop every hop-2/hop-3
+  bridge (the actual reason to call `memory_recall` over `memory_search`),
+  and `texts[:cap]` was purely the flat seed search's own window (zero
+  hop-discovered text survived once `top_k >= cap`). The shipped version
+  instead reserves a minimum per-hop quota for `entities`/`edges`
+  (`mcp_server._hop_quota_select`, favoring later hops on any leftover
+  budget), prefers `edges` whose src AND dst both survived the entity cap
+  before backfilling from the rest, and splits the `texts` budget between
+  the flat seed search (`min(3, top_k)` slots) and hop-discovered
+  support. Each surviving entity's `facts` list is separately capped (5,
+  matching the width `memory_search`'s cortex-first block already uses)
+  since survivors are disproportionately the fact-heavy hubs.
+  Caps: `entities`=10, `edges`=15, `texts`=6, `facts`=5,
+  text preview=200 chars (`mcp_server._RECALL_MAX_*`,
+  `_compact_recall_text`). A reproducible in-tree probe
+  (`evals/recall_cap_probe.py`, no DB/daemon) exercises the same capping
+  path on a synthetic 41-entity/40-edge fixture (root fanned out to 20
+  direct children, wider than the edges cap alone) and recorded a
+  24.5 KB → 3.8 KB (84.4%) reduction with deep-hop entities still present
+  in the result (`evals/results/recall-cap-186-payload-probe.json`,
+  pinned by `tests/test_eval_evidence.py`) — a different, smaller graph
+  than the live audit's, so the two byte counts aren't comparable to each
+  other, only each to its own before/after.
+  Docstring and `docs/guide/retrieval.md` now say `top_k` is a seed
+  bound, not a result bound, and describe the quota/backfill/split
+  algorithm instead of a false "existing relevance order" claim.
+  `evals/regression_gate.ps1` doesn't cover this path (it drives
+  `service.search`, never `memory_recall`), so it wasn't run — not an
+  omission, `memory_recall` isn't gated by it.
+### Added (2026-08-25 — retrieval log records the ranking components, schema v32)
+- **The retrieval event log now logs what the fusion *consumed*, not just
+  what it produced (#179).** Phase 0 recorded one fused score per served
+  entry — which is exactly the value a Phase-1 learned head is supposed to
+  predict, so the log could not train one. Each served entry now carries a
+  `components` blob with the inputs already computed at ranking time:
+  bi-encoder score, cross-encoder score, BM25 boost, surprise, recency
+  weight, the source/supersession multipliers, and the channel that
+  admitted the entry (`dense` / `slot` / `bm25` / `timeline` / `reference` /
+  `contiguity`). `ce: null` (key present) marks a head the margin gate
+  skipped — "served on the bi-encoder order alone" is signal, not a missing
+  value. Nothing new is computed at serve time: these numbers were in hand
+  and were being thrown away, and they are **not** reconstructable later —
+  config is mutable at runtime, and band recency, supersession flags and
+  access counts all mutate on every serve, so replaying a stored query
+  against tomorrow's bank reproduces neither the scores nor the pool.
+- **Schema v32 — `retrieval_events.params`:** the per-event snapshot of
+  the knobs in force (effective `top_k` and keep-threshold, recency ramp,
+  BM25 weight/scorer params, the reranker's fusion weight, margin gate and
+  whether it fired, timeline/contiguity settings, and the call's filters).
+  Additive, nullable (`NULL` = a v31-era row); the served list widened
+  inside its existing JSONB column and needed no DDL.
+- **`memory_stats` now reports retrieval-log liveness** — event count, use-
+  label count, last-event timestamp, the kill-switch state, and a
+  write-error counter. Both log-write paths swallow their exceptions by
+  design, and nothing else read the table, so a silently-failing log looked
+  exactly like an idle one: zero rows, green `/health`.
+### Fixed (2026-08-25 — MCP transport reachability + shim param passthrough)
+- **The documented LAN recipe actually works: `/mcp` no longer answers a
+  non-loopback `Host` with `421` (#174).** `FastMCP(...)` was constructed
+  with neither `host=` nor `transport_security=`, so the SDK's heuristic saw
+  its default `127.0.0.1` and installed a loopback-only DNS-rebinding
+  allowlist — while the daemon passed its own configured bind straight to
+  uvicorn, never touching that setting. An operator running
+  `PSEUDOLIFE_MCP_HOST=0.0.0.0` with a token got `421 Invalid Host header`
+  on every MCP call before auth or any handler ran, with `/health` and
+  `/api` still working so only MCP looked dead; reverse-proxy, Tailscale,
+  hostname and compose-service-name access failed the same way. The policy
+  is now **explicit** in `mcp_server.transport_security_for()` and keyed on
+  whether a bearer token gates the endpoint — the same reasoning the
+  Console's `_browser_gate` has applied to `/api` since 2026-07-02. With a
+  token, `Authorization` proves intent and any `Host` is served; tokenless,
+  the loopback allowlist stays on, because the Console app deliberately does
+  not `_browser_gate` `/mcp` and that allowlist is then the only guard
+  between a rebinding browser and an unauthenticated bank. Explicit in both
+  directions: naively forwarding the container's `0.0.0.0` to `FastMCP`
+  would have flipped the same heuristic to *no* protection, quietly
+  disarming the shipped loopback-published Docker default. That default is
+  unchanged, and is now pinned by a test.
+- **The stdio shim stops rejecting stringified list params the daemon would
+  accept (#175).** The shim registered a bare `@server.call_tool()`, taking
+  the SDK's `validate_input=True` default, which re-ran jsonschema against
+  the RAW arguments using the upstream tool's own `inputSchema`. FastMCP
+  registers with `validate_input=False` on purpose so its `pre_parse_json`
+  rescue can first unwrap the JSON-in-a-string list/number params Claude
+  Desktop/Code send, so `memory_store(text=…, tags='["decision"]')` failed
+  through the shim — the default install transport — while succeeding over
+  direct HTTP. This is the mechanism behind the long-standing "MCP
+  anyOf-param stringification" note. The shim now registers
+  `@server.call_tool(validate_input=False)`; the daemon is the validating
+  authority. Arguments `pre_parse_json` genuinely cannot rescue (an int param
+  given a non-numeric string) now reach the daemon and come back as an error
+  result, so the shim also passes an upstream error through verbatim —
+  returning its content alone would have tripped the shim's *own*
+  `outputSchema` and replaced the daemon's real diagnosis with "Output
+  validation error: outputSchema defined but no structured output returned".
+
 ### Added (2026-08-24 — session digests: a mid-density layer between raw turns and atomic facts)
 - **One narrative digest per closed session episode, generated during the
   idle dream cycle and stored as a retrievable `source="digest"` band
@@ -231,6 +940,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   The secondary LLM-judge metric drops on rag/hybrid, consistent with the
   measured 3.8 no-think judge strictness and confounded by judge identity;
   the primary metric carries the verdict.
+  **CORRECTED 2026-08-25 (scorer defect #173): every eval-arm number in
+  this entry is superseded.** Re-scored with the anchored multiple-choice
+  fallback (`lme-v2-qwen38-vs-slice2-paired56-rescored-strictmc.json`):
+  the cortex delta +0.089 → **+0.036** (3.6 scores 0.054, 3.8 scores
+  0.089; 6W/1L → 3W/1L; sign-test p 0.125 → 0.625), rag +0.018 →
+  **+0.018** (8W/7L → 7W/6L), hybrid −0.018 → **−0.036** (8W/9L →
+  7W/9L). The judge arms are unaffected and reproduce this entry
+  exactly. The verdict's *direction* survives; its size does not.
 - **Operational finding: 3.8 extraction is ~3.5–4× slower than 3.6**
   (34 min vs ~10.6 min per extraction-heavy lme_v2 row; ladder extract
   33.0 s vs 9.0 s at 13.4 vs 1.4 tok/q). Scale all 3.6-era runtime
@@ -392,6 +1109,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   while never-judged names keep the zero-structure auto-delete guard.
   `merge_decision_stats` excludes all junk rows (`into_display IS NULL`) so
   detector precision keeps measuring merges only.
+  *(Narrowed 2026-08-25, #177: the tombstone branch relaxes the degree bar
+  only — a fact-bearing entity is never auto-deleted. See the entry at the
+  top of `[Unreleased]`.)*
 - **Lesson-synthesis tallies journaled into `dream_runs`**
   (`lesson_signals` / `lessons_written` / `lessons_deduped` merged into the
   run row's tallies post-commit): the dedup counter previously existed only
@@ -2096,6 +2816,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a fusion change that lands in only one place goes red.
 
 ### Changed (2026-07-30 — front door re-based to the end-to-end run; cascade published)
+> **RETIRED 2026-08-25 (#188): the cascade 0.936 headline and the
+> full-haystack confirmation below are no longer published claims.** The
+> 2026-08-17 bench-instrument migration scores the same 78 questions at
+> cascade 0.846 against an unchanged 0.859 control; the `_s` confirmation
+> has never been re-judged. See the `[Unreleased]` re-framing entry at the
+> top of this file.
 - **The README benchmark table now shows the fresh end-to-end measurement**
   (`ceiling-e2e`: fresh qwen-27b extraction under the v25 backbone, BM25-on
   turn retrieval, reproducible q8_0 serving, 3 byte-identical replicates) —
@@ -2185,6 +2911,11 @@ the three REST endpoints, which had no caller in the console or anywhere else.
   `evals/lme_v2_check_fixd.py`.
 
 ### Added (2026-07-30 — the eval harness reports the commit-gated cascade)
+> **RETIRED 2026-08-25 (#188): the oracle 0.936 quoted below.** The derived
+> metric stays in the harness, but its router reads the answerer's
+> abstention behaviour, which does not transfer across bench instruments —
+> on the Qwen3.8 stack the same slice scores 0.846. See the `[Unreleased]`
+> re-framing entry.
 - **`cascade` derived metric across the LongMemEval tooling.** Every judged
   run already answers the `cortex` and `rag` arms, and per-question analysis
   of the `ceiling-e2e` artifacts showed the cortex arm's *commitment* (not
@@ -3303,6 +4034,11 @@ daemon, and re-embed offline with `ops/migrate_embeddings.py` — see
   (every arm roughly halves). Superseded at the site a reader meets it,
   per the retirement rule; the pilot numbers are retained inline as
   history.
+  **CORRECTED 2026-08-25 (scorer defect #173):** the full-category
+  numbers here are 0.203 vs rag 0.149 (default prompt) and 0.270 vs
+  0.257 (composition-aware). The "ties naive RAG" reading was an
+  artifact of the defect — corrected it is a 0.013 lead, one question,
+  which is still no measurable difference. The retirement itself stands.
 
 ### Added (2026-07-24 — write-side band ablation + overnight harness pair)
 - **evals**: `band_ablation.py` grew the write-side arm the read-side
@@ -3487,7 +4223,13 @@ either channel alone in every replicate).
 - **3-replicate aggregate (`slice1` / `-r2` / `-r3`, `slice1.agg.json`):**
   KU prompt rag 0.300 [0.30–0.30] / cortex 0.167 [0.00–0.30] / **hybrid
   0.533 [0.50–0.60]**; compose prompt rag 0.500 [0.40–0.60] / cortex 0.233
-  [0.10–0.30] / **hybrid 0.633 [0.60–0.70]**. Hybrid beats both single
+  [0.10–0.30] / **hybrid 0.633 [0.60–0.70]**.
+  (**CORRECTED 2026-08-25, scorer defect #173** — re-scored:
+  KU rag 0.300 / cortex 0.167 / **hybrid 0.500 [0.40–0.60]**; compose rag
+  0.433 [0.40–0.50] / cortex 0.200 [0.10–0.30] / **hybrid 0.533
+  [0.50–0.60]**. One compose replicate becomes a tie with rag, so the
+  "every replicate" claim below is corrected to "every mean".)
+  Hybrid beats both single
   channels in every replicate under both prompts; rag is the most stable
   arm, cortex the most run-to-run volatile (extraction nondeterminism —
   llama-server generation varies across runs even at temperature 0). A

@@ -1,6 +1,6 @@
 """MCP tool surface — exposes the Pseudolife memory tools to MCP clients.
 
-Built on the FastMCP decorator API from the official ``mcp`` Python SDK.
+Built on the MCPServer decorator API from the official ``mcp`` Python SDK (v2).
 Each ``@_tool()`` becomes a JSON-RPC tool. The surface (consolidated
 2026-07-02, 55 → 32 tools; 35 as of v26's set-slot pair) spans the associative stream (``memory_store`` /
 ``memory_search`` / ``memory_recent``), the canonical-fact cortex
@@ -53,7 +53,7 @@ import signal
 import threading
 import time
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 # Silence torch._dynamo's noisy fall-back warnings on systems without
 # Triton (i.e. every Windows install). The embedder forward pass works
@@ -63,7 +63,16 @@ from typing import Any, Literal
 os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
 
 from anyio import to_thread  # noqa: E402
-from mcp.server.fastmcp import Context, FastMCP  # noqa: E402
+from mcp.server.mcpserver import Context, MCPServer  # noqa: E402
+from mcp.server.transport_security import TransportSecuritySettings  # noqa: E402
+# ``Annotated[T, Field(description=...)]`` on a tool signature is how a
+# per-argument contract reaches the client: FastMCP builds each tool's
+# inputSchema from a pydantic model derived from the signature
+# (mcp/server/fastmcp/utilities/func_metadata.py), so the Field description
+# lands in ``inputSchema.properties[arg].description``. Defaults stay plain
+# signature defaults — Field carries description ONLY, so coercion and
+# optionality are untouched.
+from pydantic import Field  # noqa: E402
 
 from pseudolife_memory.service import MemoryService  # noqa: E402
 
@@ -89,7 +98,75 @@ service = MemoryService(data_dir=_data_dir, config_path=_config_path)
 
 _MCP_INSTRUCTIONS = """Pseudolife is durable memory shared across sessions. At task start, call memory_search for relevant context and memory_lesson_search for prior outcomes. Store durable facts, decisions, corrections, and useful observations with memory_store (one claim per call); use memory_fact_set for canonical current values. At task end, record success, failure, or correction with memory_outcome. Use memory_toolset(action="expand") before calling tools outside the visible tier."""
 
-mcp = FastMCP("Pseudolife Memory", instructions=_MCP_INSTRUCTIONS)
+
+def transport_security_for(auth_configured: bool) -> TransportSecuritySettings:
+    """DNS-rebinding policy for the streamable-HTTP endpoint (``/mcp``).
+
+    Keyed on whether a bearer token gates the endpoint — deliberately NOT on
+    the bind host, and never left to the SDK's own heuristic. FastMCP's
+    constructor auto-enables protection only when handed a loopback ``host=``
+    and disables it entirely otherwise; this module has never passed one, so
+    both directions of that heuristic are wrong here. Inheriting the loopback
+    allowlist rejects every LAN, reverse-proxy, Tailscale-name and
+    compose-service-name client with ``421 Invalid Host header`` before auth
+    or any handler runs (the documented LAN recipe was dead this way, while
+    ``/health`` and ``/api`` kept working); forwarding the container's
+    ``0.0.0.0`` instead would silently switch the protection off.
+
+    * **Token configured** → permissive. ``Authorization`` already proves
+      intent — a browser cannot attach a bearer cross-origin without a
+      preflight that fails — so a Host allowlist can only break legitimate
+      remote clients. Same reasoning the Console's ``_browser_gate``
+      (:mod:`pseudolife_memory.web.api`) has applied to ``/api`` since the
+      2026-07-02 review.
+    * **No token** → loopback allowlist, protection on. The Console app
+      deliberately does not run ``_browser_gate`` on ``/mcp``, so this is the
+      only thing standing between a rebinding browser and an unauthenticated
+      bank. The shipped container default (``0.0.0.0`` +
+      ``PSEUDOLIFE_MCP_TRUST_BIND``, published to 127.0.0.1) lands here and
+      keeps exactly the protection it had before this policy existed — the
+      allowlist below is byte-identical to the SDK's.
+    """
+    if auth_configured:
+        return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=["127.0.0.1:*", "localhost:*", "[::1]:*"],
+        allowed_origins=["http://127.0.0.1:*", "http://localhost:*",
+                         "http://[::1]:*"],
+    )
+
+
+mcp = MCPServer(
+    "Pseudolife Memory",
+    instructions=_MCP_INSTRUCTIONS,
+)
+
+# Explicit, never inherited. The daemon replaces this with the token-aware
+# policy via apply_transport_security() once it knows whether auth is
+# configured; the protected variant is the safe start. SDK v2 takes the
+# settings at streamable_http_app() build time (no constructor kwarg), so
+# the module holds them until build_streamable_http_app() is called.
+_TRANSPORT_SECURITY = transport_security_for(auth_configured=False)
+
+
+def apply_transport_security(auth_configured: bool) -> TransportSecuritySettings:
+    """Select the transport-security policy for the streamable-HTTP app.
+
+    Must run BEFORE ``build_streamable_http_app()`` — the settings are handed
+    to the SDK at app construction and cached in its session manager.
+    """
+    global _TRANSPORT_SECURITY
+    _TRANSPORT_SECURITY = transport_security_for(auth_configured)
+    return _TRANSPORT_SECURITY
+
+
+def build_streamable_http_app():
+    """Build the SDK's streamable-HTTP Starlette app with the selected
+    transport-security policy (v2 moved the setting from the server
+    constructor to this call)."""
+    return mcp.streamable_http_app(transport_security=_TRANSPORT_SECURITY)
+
 
 from pseudolife_memory.toolset_tiers import (
     PrincipalTierState, normalize_tier, parse_tier_map, rank as _tier_rank,
@@ -120,7 +197,7 @@ def _async_offload(fn):
     long tool call (a dream run, document_ingest, first-call model init) froze
     every other session, /health, and the console (2026-07-02 review, H1).
     ``functools.wraps`` preserves name/docstring/signature (via
-    ``__wrapped__``) so FastMCP still derives the tool schema from the real
+    ``__wrapped__``) so MCPServer still derives the tool schema from the real
     parameter list, and AnyIO copies the calling context into the worker
     thread so the per-request writer/session contextvars still resolve.
 
@@ -153,24 +230,22 @@ def _tool(*, tier: str = "full"):
 
 @_tool(tier="minimal")
 def memory_store(
-    text: str,
-    source: str = "agent",
-    tags: list[str] | None = None,
-    origin: Literal["user", "action", "agent"] | None = None,
-    episode: str | None = None,
+    text: Annotated[str, Field(
+        description="The claim to remember.")],
+    source: Annotated[str, Field(
+        description="Stable per-project/topic tag for later filtering.")] = "agent",
+    tags: Annotated[list[str] | None, Field(
+        description='Optional labels, e.g. ["decision", "blocker"].')] = None,
+    origin: Annotated[Literal["user", "action", "agent"] | None, Field(
+        description="Who asserted the claim.")] = None,
+    episode: Annotated[str | None, Field(
+        description="Episode handle for attribution.")] = None,
 ) -> dict[str, Any]:
     """Store one durable fact, decision, or observation. Use proactively
     for anything worth keeping — one claim per call. Near-duplicates are
     dropped, not erred (``stored=False``,
     ``reason="below_surprise_threshold"``). For canonical NOW use
     ``memory_fact_set``.
-
-    Args:
-        text: The claim to remember.
-        source: Stable per-project/topic tag for later filtering.
-        tags: Optional labels, e.g. ``["decision", "blocker"]``.
-        origin: Who asserted it — ``"user"`` / ``"action"`` / ``"agent"``.
-        episode: Episode handle for attribution.
 
     Returns: ``{stored, surprise, reason, cortex_promoted}``.
     """
@@ -293,18 +368,35 @@ def _world_correct_with(e: dict[str, Any]) -> str | None:
 
 @_tool(tier="minimal")
 def memory_search(
-    query: str,
-    top_k: int = 8,
-    sources: list[str] | None = None,
-    bands: list[str] | None = None,
-    episodes: list[str] | None = None,
-    tags: list[str] | None = None,
-    min_score: float | None = None,
-    disable_recency_boost: bool = False,
-    rerank: bool | None = None,
-    bm25: bool | None = None,
-    explain: bool = False,
-    verbose: bool = False,
+    query: Annotated[str, Field(
+        description="Natural-language description; specific beats vague.")],
+    top_k: Annotated[int, Field(
+        description="Max entries returned.")] = 8,
+    sources: Annotated[list[str] | None, Field(
+        description="Keep only entries with one of these source tags.")] = None,
+    bands: Annotated[list[str] | None, Field(
+        description="Keep only entries held by one of these bands.")] = None,
+    episodes: Annotated[list[str] | None, Field(
+        description="Keep only entries stamped with one of these episode "
+                    "ids.")] = None,
+    tags: Annotated[list[str] | None, Field(
+        description="Keep only entries carrying one of these tags.")] = None,
+    min_score: Annotated[float | None, Field(
+        description="Override the 0.25 relevance floor.")] = None,
+    disable_recency_boost: Annotated[bool, Field(
+        description="True to score without the recency bias.")] = False,
+    rerank: Annotated[bool | None, Field(
+        description="Tri-state override for cross-encoder reranking "
+                    "(~200ms); None follows config.")] = None,
+    bm25: Annotated[bool | None, Field(
+        description="Tri-state override for keyword scoring, which aids "
+                    "exact-term queries; None follows config.")] = None,
+    explain: Annotated[bool, Field(
+        description="Attach a ranking ``trace``; implies verbose.")] = False,
+    verbose: Annotated[bool, Field(
+        description="Full per-entry metadata; the default is compact "
+                    "``{id, text, source, tags, score}`` plus supersession "
+                    "when set.")] = False,
 ) -> dict[str, Any]:
     """Retrieve memories for a query — associative recall plus canonical
     facts. Call at task start or when context may apply. ``cortex``
@@ -312,20 +404,8 @@ def memory_search(
     (``contested: true`` awaits ``memory_fact_resolve``).
     ``low_confidence=True``: no confident match, prefer abstaining. On a
     superseded entry, prefer ``superseded_by_text``. Temporal cues may
-    add ``events`` (oldest first).
-
-    Args:
-        query: Natural-language description; specific beats vague.
-        top_k: Max results (default 8).
-        sources / bands / episodes / tags: Optional filters (AND across
-            kinds, OR within list).
-        min_score: Override the 0.25 relevance floor.
-        disable_recency_boost: True to disable recency bias.
-        rerank / bm25: Tri-state overrides; ``bm25`` aids keyword
-            queries, ``rerank`` cross-encodes (~200ms).
-        explain: Attach a ranking ``trace``; implies verbose.
-        verbose: Full per-entry metadata; default compact ``{id, text,
-            source, tags, score}`` + supersession when set.
+    add ``events`` (oldest first). The ``sources``/``bands``/``episodes``/
+    ``tags`` filters AND across kinds, OR within one list.
 
     Returns: ``{query, count, entries, cortex, low_confidence}``.
     """
@@ -340,7 +420,13 @@ def memory_search(
         disable_recency_boost=disable_recency_boost,
         rerank=rerank,
         bm25=bm25,
+        return_event_id=True,
     )
+    # Training plumbing (schema v34), not response payload: the event id
+    # lets the cortex-first block below attach its served facts to the
+    # retrieval-log row this search just wrote. Popped unconditionally so
+    # it never leaks into the tool result.
+    _evt_id = result.pop("retrieval_event_id", None)
     # Cortex-first: surface canonical facts above associative recall, and drop
     # any recall hit that merely restates a surfaced fact (currency, not noise).
     # ``cortex`` is part of the documented return shape, so it is always
@@ -350,6 +436,8 @@ def memory_search(
     if cc.enabled and cc.search_first and (query or "").strip():
         facts = service.cortex_search(query, top_k=5, min_score=cc.guard_min_score).get("entries", [])
         if facts:
+            if _evt_id is not None:
+                service.attach_served_facts(_evt_id, facts)
             result["cortex"] = [
                 {
                     "entity": f["entity"], "attribute": f["attribute"],
@@ -442,17 +530,23 @@ def memory_search(
 
 @_tool()
 def memory_recent(
-    n: int = 10,
-    sources: list[str] | None = None,
-    episodes: list[str] | None = None,
-    tags: list[str] | None = None,
-    verbose: bool = False,
+    n: Annotated[int, Field(
+        description="How many entries to return.")] = 10,
+    sources: Annotated[list[str] | None, Field(
+        description="Keep only entries with one of these source tags.")] = None,
+    episodes: Annotated[list[str] | None, Field(
+        description="Keep only entries stamped with one of these episode "
+                    "ids.")] = None,
+    tags: Annotated[list[str] | None, Field(
+        description="Keep only entries carrying one of these tags.")] = None,
+    verbose: Annotated[bool, Field(
+        description="Full per-entry metadata; default entries are "
+                    "compact.")] = False,
 ) -> dict[str, Any]:
     """List the N most recently stored memories, newest first — timestamp
     order, not relevance. Useful for "what did I just store?" and for
-    catching up at the start of a session. Optional ``sources`` /
-    ``episodes`` / ``tags`` filters (AND-combined). ``verbose=True`` for
-    full per-entry metadata (default entries are compact).
+    catching up at the start of a session. The ``sources``/``episodes``/
+    ``tags`` filters AND-combine.
     """
     result = service.recent(
         n=n, sources=sources, episodes=episodes, tags=tags,
@@ -461,11 +555,17 @@ def memory_recent(
 
 
 @_tool()
-def memory_supersede(old_text: str, new_text: str) -> dict[str, Any]:
+def memory_supersede(
+    old_text: Annotated[str, Field(
+        description="The memory now obsolete. Matched exact-text first, "
+                    "then by nearest embedding — a close paraphrase "
+                    "works.")],
+    new_text: Annotated[str, Field(
+        description="The replacement claim; stored fresh.")],
+) -> dict[str, Any]:
     """Mark a stored memory obsolete and record its replacement. The old
     entry is kept but flagged superseded, so retrieval ranks the correction
-    higher and shows both together. Matching is exact-text first, then
-    nearest-embedding fallback — a close paraphrase of ``old_text`` works.
+    higher and shows both together.
 
     Returns: ``{superseded_count, superseded_texts, new_memory_stored}``.
     """
@@ -490,15 +590,24 @@ _TIER_ADDS = {
 
 
 async def _notify_list_changed(ctx: Context) -> bool:
-    """Best-effort tools/list_changed. False when there is no live
-    transport session (tests, embedded stdio) — the memory_toolset result
-    names the newly visible tools, and calls are ungated regardless."""
+    """Best-effort tools/list_changed on BOTH eras: ``notify_tools_changed``
+    publishes on the 2026-07-28 subscription bus (succeeds even with zero
+    subscribers, so the returned flag means "published", not "a client
+    received it"); the session send covers legacy handshake-era clients.
+    The memory_toolset result names the newly visible tools regardless,
+    and calls are ungated either way."""
+    sent = False
+    try:
+        await ctx.notify_tools_changed()
+        sent = True
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("tools/list_changed publish skipped: %s", exc)
     try:
         await ctx.session.send_tool_list_changed()
-        return True
+        sent = True
     except Exception as exc:  # noqa: BLE001
-        logger.debug("tools/list_changed not sent: %s", exc)
-        return False
+        logger.debug("tools/list_changed legacy send skipped: %s", exc)
+    return sent
 
 
 async def memory_toolset(
@@ -550,9 +659,12 @@ mcp.tool()(memory_toolset)
 # core memory_fact_get returns source_entries ids —
 # core mode must be able to dereference them.
 @_tool(tier="core")
-def memory_get(entry_id: int) -> dict[str, Any]:
-    """Dereference a memory id (from search results or a fact's
-    ``source_entries``) to the full stored episode plus
+def memory_get(
+    entry_id: Annotated[int, Field(
+        description="A memory id, as returned by search results or by a "
+                    "fact's ``source_entries``.")],
+) -> dict[str, Any]:
+    """Dereference a memory id to the full stored episode plus
     ``consolidated_into`` — the canonical facts it produced. Reading it
     gently reinforces it. Returns ``{found: false, faded: true}`` when the
     episode has since been forgotten.
@@ -561,7 +673,10 @@ def memory_get(entry_id: int) -> dict[str, Any]:
 
 
 @_tool()
-def memory_reinforce(entry_id: int) -> dict[str, Any]:
+def memory_reinforce(
+    entry_id: Annotated[int, Field(
+        description="The id of the memory to strengthen.")],
+) -> dict[str, Any]:
     """Strengthen one memory after reading it via ``memory_get`` and finding
     it genuinely useful — a deliberate "this mattered" signal that helps it
     resist forgetting. Read first, then reinforce.
@@ -573,12 +688,18 @@ def memory_reinforce(entry_id: int) -> dict[str, Any]:
 
 
 @_tool(tier="minimal")
-def memory_fact_get(entity: str, attribute: str) -> dict[str, Any]:
+def memory_fact_get(
+    entity: Annotated[str, Field(
+        description="The slot's subject; the (entity, attribute) match "
+                    "is case- and separator-insensitive.")],
+    attribute: Annotated[str, Field(
+        description="The slot's attribute.")],
+) -> dict[str, Any]:
     """Look up the one CURRENT value at an ``(entity, attribute)`` slot.
-    One value per slot, case/separator-insensitive. A null record means
-    EMPTY, not unknown — ``memory_search`` still finds context. A
-    set-valued slot returns ``{kind: "set", members, removed}`` instead —
-    ``members: []`` means EMPTY too.
+    One value per slot. A null record means EMPTY, not unknown —
+    ``memory_search`` still finds context. A set-valued slot returns
+    ``{kind: "set", members, removed}`` instead — ``members: []`` means
+    EMPTY too.
 
     Returns: ``{record | null, contenders}`` (+ ``entity_ref`` when the
     entity has a graph node). Non-empty ``contenders`` = unsettled
@@ -619,13 +740,25 @@ def memory_fact_get(entity: str, attribute: str) -> dict[str, Any]:
 
 @_tool(tier="minimal")
 def memory_fact_set(
-    entity: str,
-    attribute: str,
-    value: str,
-    origin: Literal["user", "action", "agent"] | None = None,
-    confidence: float = 0.8,
-    episode: str | None = None,
-    freshness_class: Literal["auto", "evergreen", "slow", "volatile"] = "auto",
+    entity: Annotated[str, Field(
+        description="The slot's subject; the (entity, attribute) match "
+                    "is case- and separator-insensitive.")],
+    attribute: Annotated[str, Field(
+        description="The slot's attribute.")],
+    value: Annotated[str, Field(
+        description="The value that is canonical NOW.")],
+    origin: Annotated[Literal["user", "action", "agent"] | None, Field(
+        description='Who asserted it: "user" = the human told you; '
+                    'otherwise "action"/"agent". Omitted records '
+                    '"agent".')] = None,
+    confidence: Annotated[float, Field(
+        description="How sure you are, 0..1.")] = 0.8,
+    episode: Annotated[str | None, Field(
+        description="Episode handle for attribution.")] = None,
+    freshness_class: Annotated[
+        Literal["auto", "evergreen", "slow", "volatile"], Field(
+            description='How fast the value rots. "auto" infers the decay '
+                        "rate from the entity kind.")] = "auto",
 ) -> dict[str, Any]:
     """Assert a canonical fact — insert, confirm, or correct a slot.
 
@@ -633,11 +766,6 @@ def memory_fact_set(
     A conflicting write parks as a contender (``action="contested"``,
     winner under ``current``) — check with the human, settle via
     ``memory_fact_resolve``.
-
-    Args:
-        origin: ``"user"`` = human told you; else ``"action"``/``"agent"`` (default).
-        confidence: 0..1, default 0.8. episode: attribution handle.
-        freshness_class: ``"auto"`` infers decay from entity kind.
 
     Returns: ``{action: inserted|confirmed|superseded|contested, ...record}``.
     """
@@ -649,7 +777,12 @@ def memory_fact_set(
 
 
 @_tool(tier="minimal")
-def memory_set_add(entity: str, attribute: str, member: str) -> dict[str, Any]:
+def memory_set_add(
+    entity: Annotated[str, Field(description="The slot's subject.")],
+    attribute: Annotated[str, Field(description="The slot's attribute.")],
+    member: Annotated[str, Field(
+        description="The member to add or re-confirm.")],
+) -> dict[str, Any]:
     """Add/confirm a member of a set-valued slot (many concurrent values,
     not one NOW value). A scalar there converts to a set on first call —
     one-way — except number-led scalars ("32", "$1,500"), which are
@@ -662,7 +795,12 @@ def memory_set_add(entity: str, attribute: str, member: str) -> dict[str, Any]:
 
 
 @_tool(tier="minimal")
-def memory_set_remove(entity: str, attribute: str, member: str) -> dict[str, Any]:
+def memory_set_remove(
+    entity: Annotated[str, Field(description="The slot's subject.")],
+    attribute: Annotated[str, Field(description="The slot's attribute.")],
+    member: Annotated[str, Field(
+        description="The current member to retract.")],
+) -> dict[str, Any]:
     """Retract one current set member (audit row kept). Read with
     memory_fact_get.
 
@@ -672,11 +810,17 @@ def memory_set_remove(entity: str, attribute: str, member: str) -> dict[str, Any
 
 
 @_tool(tier="core")
-def memory_fact_resolve(entity: str, attribute: str, accept: bool) -> dict[str, Any]:
+def memory_fact_resolve(
+    entity: Annotated[str, Field(description="The contested slot's subject.")],
+    attribute: Annotated[str, Field(
+        description="The contested slot's attribute.")],
+    accept: Annotated[bool, Field(
+        description="True adopts the parked contender as the new current "
+                    "value (the old value is kept as history); False "
+                    "discards the contender and keeps the current "
+                    "value.")],
+) -> dict[str, Any]:
     """Settle a CONTESTED fact slot after checking with the human.
-    ``accept=true`` adopts the parked contender as the new current value
-    (old value kept as history); ``accept=false`` discards the contender
-    and keeps the current value.
 
     Returns: ``{resolved, accepted, action, current, record}`` or
     ``{resolved: false, reason: "no_contender"}``.
@@ -685,16 +829,21 @@ def memory_fact_resolve(entity: str, attribute: str, accept: bool) -> dict[str, 
 
 
 @_tool()
-def memory_history(entity: str, attribute: str | None = None,
-                   as_of: str | float | None = None) -> dict[str, Any]:
-    """With ``attribute``: change history of that canonical fact slot —
-    every version, oldest→newest, each with writer/session, tx/valid time,
-    and age ("what did this used to be? who set it?"). ``as_of`` (ISO or
-    epoch): only versions written by then (compaction thins chains past
-    ~30d).
-
-    Without ``attribute``: the entity's causal CHAIN — dated
-    fact/entry/edge/lesson events merged oldest→newest ("what led to X?").
+def memory_history(
+    entity: Annotated[str, Field(
+        description="The subject whose past to read.")],
+    attribute: Annotated[str | None, Field(
+        description="The fact slot to read; omit for chain mode.")] = None,
+    as_of: Annotated[str | float | None, Field(
+        description="Slot mode only: ISO-8601 or epoch seconds; returns "
+                    "only versions written by then.")] = None,
+) -> dict[str, Any]:
+    """Read an entity's past. SLOT mode (``attribute`` given): every
+    version of that canonical fact slot, oldest→newest, each with
+    writer/session, tx/valid time, and age ("what did this used to be?
+    who set it?") — compaction thins chains past ~30d. CHAIN mode
+    (``attribute`` omitted): the entity's dated fact/entry/edge/lesson
+    events merged oldest→newest ("what led to X?").
 
     Returns: ``{entity, attribute, count, versions}`` (slot mode) or
     ``{found, entity, count, events}`` (chain mode).
@@ -709,28 +858,31 @@ def memory_history(entity: str, attribute: str | None = None,
 
 @_tool(tier="core")
 def memory_world_set(
-    entity: str,
-    attribute: str,
-    value: str,
-    source_url: str = "",
-    source_quote: str = "",
-    freshness_class: Literal["evergreen", "slow", "volatile"] = "volatile",
-    confidence: float = 0.85,
-    retrieved_at: float | None = None,
-    content_hash: str | None = None,
+    entity: Annotated[str, Field(description="The slot's subject.")],
+    attribute: Annotated[str, Field(description="The slot's attribute.")],
+    value: Annotated[str, Field(
+        description="The externally-sourced value.")],
+    source_url: Annotated[str, Field(
+        description="http(s) citation URL; any other scheme is "
+                    "rejected.")] = "",
+    source_quote: Annotated[str, Field(
+        description="The 1-2 sentences the claim was extracted from.")] = "",
+    freshness_class: Annotated[
+        Literal["evergreen", "slow", "volatile"], Field(
+            description="Trust decay applied at read time: ``evergreen`` "
+                        "never decays, ``slow`` is months, ``volatile`` is "
+                        "weeks.")] = "volatile",
+    confidence: Annotated[float, Field(
+        description="Source confidence, 0..1.")] = 0.85,
+    retrieved_at: Annotated[float | None, Field(
+        description="Epoch seconds the source was fetched.")] = None,
+    content_hash: Annotated[str | None, Field(
+        description="Hash of the fetched source, for change detection.")] = None,
 ) -> dict[str, Any]:
     """Assert a canonical WORLD fact — sourced EXTERNAL knowledge (versions,
     prices, who-holds-a-role, research findings), kept separate from
     user/project facts. Route verified web/docs findings here, with the
     citation. A newer source supersedes an older value at the same slot.
-
-    Args:
-        source_url: http(s) citation URL (any other scheme is rejected).
-        source_quote: The 1–2 sentences the claim was extracted from.
-        freshness_class: ``evergreen`` (never decays) | ``slow`` (months) |
-            ``volatile`` (weeks, default) — sets trust decay at read time.
-        confidence: 0..1 source confidence (default 0.85).
-        retrieved_at / content_hash: Optional fetch time + source hash.
 
     Returns: ``{action: inserted|confirmed|superseded|rejected, ...record}``.
     """
@@ -742,14 +894,20 @@ def memory_world_set(
 
 
 @_tool(tier="core")
-def memory_world_search(query: str, top_k: int = 5,
-                        verbose: bool = False) -> dict[str, Any]:
+def memory_world_search(
+    query: Annotated[str, Field(
+        description="Natural-language description of the external fact "
+                    "needed.")],
+    top_k: Annotated[int, Field(description="Max entries returned.")] = 5,
+    verbose: Annotated[bool, Field(
+        description="Full provenance metadata; default entries are "
+                    "compact.")] = False,
+) -> dict[str, Any]:
     """Search current WORLD facts (sourced external knowledge) by
     similarity. Use when a task turns on an external fact your training
     data may have stale. Entries carry ``effective_confidence``
     (age-decayed), a ``stale`` flag (re-verify before relying on it), and
-    their ``source_url`` / ``source_quote`` for citation. ``verbose=True``
-    for full provenance metadata (default entries are compact).
+    their ``source_url`` / ``source_quote`` for citation.
 
     Returns: ``{count, entries}``.
     """
@@ -790,24 +948,24 @@ def _compact_world(e: dict[str, Any]) -> dict[str, Any]:
 
 @_tool(tier="minimal")
 def memory_outcome(
-    task: str,
-    outcome: Literal["success", "failure", "correction"],
-    about: str | None = None,
-    detail: str | None = None,
-    polarity: str | None = None,
-    episode: str | None = None,
+    task: Annotated[str, Field(
+        description='Kind of task, in stable wording ("deploy engine to '
+                    'host") so signals for the same work group.')],
+    outcome: Annotated[Literal["success", "failure", "correction"], Field(
+        description="What happened.")],
+    about: Annotated[str | None, Field(
+        description="The tool or approach concerned; aids traversal.")] = None,
+    detail: Annotated[str | None, Field(
+        description="What worked, or what the dead-end was.")] = None,
+    polarity: Annotated[str | None, Field(
+        description='"+" do-this or "-" avoid; usually omit — it is '
+                    "inferred from the outcome.")] = None,
+    episode: Annotated[str | None, Field(
+        description="Episode handle for attribution.")] = None,
 ) -> dict[str, Any]:
     """Record a procedural outcome — what worked, failed, or was
     corrected. Dream synthesises signals into lessons surfaced next
     session; logging stops repeated mistakes.
-
-    Args:
-        task: Kind of task, stable wording ("deploy engine to host").
-        outcome: ``success`` | ``failure`` | ``correction``.
-        about: The tool/approach concerned (aids traversal).
-        detail: What worked / what the dead-end was.
-        polarity: ``+`` do-this | ``-`` avoid; usually omit (inferred).
-        episode: Episode handle for attribution.
 
     Returns: ``{recorded, signal_id, task, outcome}``; needs Postgres.
     """
@@ -817,13 +975,18 @@ def memory_outcome(
 
 
 @_tool(tier="core")
-def memory_lesson_search(query: str, top_k: int = 5,
-                         verbose: bool = False) -> dict[str, Any]:
+def memory_lesson_search(
+    query: Annotated[str, Field(
+        description="The task at hand, described the way it would have "
+                    "been logged.")],
+    top_k: Annotated[int, Field(description="Max entries returned.")] = 5,
+    verbose: Annotated[bool, Field(
+        description="Full provenance metadata; default entries are "
+                    "compact.")] = False,
+) -> dict[str, Any]:
     """Search learned lessons (procedural memory) by similarity to the task
     at hand. Call at the START of a task: what worked, what to avoid, what
     the user corrected before. Heed polarity ``-`` entries — known dead-ends.
-    ``verbose=True`` for full provenance metadata (default entries are
-    compact).
 
     Returns: ``{count, entries: [{task, aspect, lesson, about, polarity,
     outcome, confidence, score}]}``.
@@ -844,28 +1007,36 @@ def memory_lesson_search(query: str, top_k: int = 5,
 
 @_tool()
 def memory_forget(
-    scope: Literal["memory", "fact", "world", "lesson"],
-    entity: str | None = None,
-    attribute: str | None = None,
-    text: str | None = None,
-    substring: str | None = None,
-    source: str | None = None,
-    episode: str | None = None,
-    tag: str | None = None,
+    scope: Annotated[Literal["memory", "fact", "world", "lesson"], Field(
+        description="Which store to delete from.")],
+    entity: Annotated[str | None, Field(
+        description="fact/world scope: the slot's subject. lesson scope: "
+                    "the task.")] = None,
+    attribute: Annotated[str | None, Field(
+        description="fact/world scope: one slot's attribute; omit to purge "
+                    "the whole entity. lesson scope: the aspect.")] = None,
+    text: Annotated[str | None, Field(
+        description="memory scope: delete entries whose text matches this "
+                    "exactly.")] = None,
+    substring: Annotated[str | None, Field(
+        description="memory scope: delete entries whose text contains "
+                    "this.")] = None,
+    source: Annotated[str | None, Field(
+        description="memory scope: delete entries with this source "
+                    "tag.")] = None,
+    episode: Annotated[str | None, Field(
+        description="memory scope: delete entries stamped with this "
+                    "episode id.")] = None,
+    tag: Annotated[str | None, Field(
+        description="memory scope: delete entries carrying this tag.")] = None,
 ) -> dict[str, Any]:
     """Hard-delete from one memory store. Cleanup for junk/test data — no
     audit trail. For "now wrong, keep history" use ``memory_fact_set``
     (facts) or ``memory_supersede`` (memories) instead.
 
-    Scopes:
-        ``memory``: entries matching ``text`` / ``substring`` / ``source``
-            / ``episode`` / ``tag`` (at least one; filters OR-combine —
-            ANY match deletes, unlike memory_search's AND).
-        ``fact``: canonical slots — ``entity`` required; omit
-            ``attribute`` to purge the whole entity.
-        ``world``: world facts — ``entity`` (+ optional ``attribute``).
-        ``lesson``: pass the task as ``entity``, the aspect as
-            ``attribute``.
+    ``scope="memory"`` needs at least one of ``text``/``substring``/
+    ``source``/``episode``/``tag``, and those OR-combine — ANY match
+    deletes, unlike memory_search's AND. The other scopes need ``entity``.
 
     Returns: ``{deleted_count | removed, ...}``; ``{error}`` on bad input.
     """
@@ -893,30 +1064,38 @@ def memory_forget(
 def memory_dream(
     action: Literal["status", "pull", "commit", "run", "deep", "runs",
                     "rollback"],
-    limit: int | None = None,
-    cursor: float | None = None,
-    apply: bool = False,
-    snippets: bool = True,
-    run_id: int | None = None,
+    limit: Annotated[int | None, Field(
+        description="pull/run: how many memories to process (pull defaults "
+                    "to 40). runs: how many passes to list (defaults to "
+                    "10).")] = None,
+    cursor: Annotated[float | None, Field(
+        description="commit: the newest pulled timestamp. Required for "
+                    "that action.")] = None,
+    apply: Annotated[bool, Field(
+        description="deep: True writes the consolidation (graph tables are "
+                    "snapshotted first); the default is a dry run.")] = False,
+    snippets: Annotated[bool, Field(
+        description="deep: False omits the evidence snippets.")] = True,
+    run_id: Annotated[int | None, Field(
+        description="rollback: which pass to revert; defaults to the "
+                    "newest committed pass.")] = None,
 ) -> dict[str, Any]:
     """Drive the dream — consolidation of recent memories into canonical
     facts and graph structure.
 
     Actions:
         ``status``: backlog + whether a sweep would fire. Read-only.
-        ``pull``: unconsolidated memories (oldest-first, up to ``limit``);
-            write facts via ``memory_fact_set``, then ``commit`` with the
-            newest pulled timestamp as ``cursor``.
+        ``pull``: unconsolidated memories, oldest first; write facts via
+            ``memory_fact_set``, then ``commit``.
         ``run``: a server-side dream with the configured extractor
             (loop to drain).
-        ``deep``: full-corpus graph consolidation, dry-run unless
-            ``apply=true`` (snapshots graph tables first). Settle
-            candidates via ``memory_graph_review``; ``snippets=false``
-            omits evidence; duplicate lesson/world slots listed for
-            hand curation.
+        ``deep``: full-corpus graph consolidation; dry run unless
+        ``apply``. Settle candidates via
+            ``memory_graph_review``; duplicate lesson/world slots are
+            listed for hand curation.
         ``runs``: recent dream passes (tallies, status).
-        ``rollback``: revert the newest committed pass from its journal
-            (facts + events; traces/cursor kept). ``run_id`` optional.
+        ``rollback``: revert a committed pass from its journal (facts +
+            events; traces/cursor kept).
 
     Returns: per-action dict; ``{error}`` on bad input.
     """
@@ -965,33 +1144,45 @@ def memory_graph_review(
     action: Literal["list", "propose", "relate", "dismiss_pair",
                     "dismiss_slot_pair", "accept_link", "reject_link",
                     "accept_merge", "accept_junk", "reject_entity"] = "list",
-    proposal_id: int | None = None,
-    proposal_ids: list[int] | None = None,
-    proposals: list[dict] | None = None,
-    scope: str | None = None,
-    src: str | None = None,
-    dst: str | None = None,
-    relation: str | None = None,
-    store: str | None = None,
+    proposal_id: Annotated[int | None, Field(
+        description="Id actions: the one proposal to settle.")] = None,
+    proposal_ids: Annotated[list[int] | None, Field(
+        description="Id actions: settle many proposals in one call, "
+                    "instead of ``proposal_id``.")] = None,
+    proposals: Annotated[list[dict] | None, Field(
+        description="propose: ``[{src, relation, dst, similarity?, "
+                    "rationale?}]``.")] = None,
+    scope: Annotated[str | None, Field(
+        description="list: keep only findings of this kind.")] = None,
+    src: Annotated[str | None, Field(
+        description="relate/dismiss_pair: the first entity. "
+                    'dismiss_slot_pair: an "entity|attribute" key from the '
+                    "deep response.")] = None,
+    dst: Annotated[str | None, Field(
+        description="relate/dismiss_pair: the second entity. "
+                    'dismiss_slot_pair: an "entity|attribute" key from the '
+                    "deep response.")] = None,
+    relation: Annotated[str | None, Field(
+        description="relate: the edge relation to write, from the graph "
+                    "vocabulary.")] = None,
+    store: Annotated[str | None, Field(
+        description='dismiss_slot_pair: which duplicate listing the keys '
+                    'came from — "lesson" or "world".')] = None,
 ) -> dict[str, Any]:
     """Work the graph review queue — deep-dream proposals that need a
     verdict before they touch the graph.
 
     Actions:
-        ``list``: pending findings/proposals (``scope`` filters).
-        ``propose``: file link proposals ``[{src, relation, dst,
-            similarity?, rationale?}]`` for review.
+        ``list``: pending findings/proposals.
+        ``propose``: file link proposals for review.
         ``relate``: related-not-duplicate verdict — writes the
             ``relation`` edge and dismisses the pair.
         ``dismiss_pair``: mark ``src``/``dst`` genuinely distinct.
-        ``dismiss_slot_pair``: same for lesson/world duplicate
-            listings (``store``; keys are "entity|attribute").
+        ``dismiss_slot_pair``: same for lesson/world duplicate listings.
         ``accept_link``/``reject_link``: settle an edge proposal by id.
         ``accept_merge``: fold a near-duplicate into its twin.
         ``accept_junk``: delete an over-extraction artifact.
         ``reject_entity``: keep the entity, dismiss the proposal.
-
-    Id actions accept ``proposal_ids`` for batch triage.
 
     Returns: per-action dict; ``{error}`` on bad input.
     """
@@ -1057,66 +1248,91 @@ def memory_graph_review(
 
 @_tool(tier="core")  # the CLAUDE.md workflow opens sub-episodes for big tasks.
 def memory_episode_start(
-    title: str, hint: str | None = None,
+    title: Annotated[str, Field(
+        description="Short name for the task, used in later recaps.")],
+    hint: Annotated[str | None, Field(
+        description="Optional note on what the task is about.")] = None,
+    episode: Annotated[str | None, Field(
+        description="Your session handle (from the session-start briefing) — "
+                    "anchors the sub-episode to YOUR session when several "
+                    "run concurrently.")] = None,
 ) -> dict[str, Any]:
-    """Open a named sub-episode for a substantial multi-step task. It nests
-    under the auto-managed session episode; memories stored while it is open
-    carry its id + title, enabling episode-scoped search and summaries
-    later. ``memory_episode_end`` closes it and pops back to the session.
-
-    Returns: ``{id, title, started_at, parent_id, ...}``.
+    """Open a named sub-episode; it nests under the session episode, and
+    memories stored while it is open carry its id + title for episode-scoped
+    search. ``memory_episode_end`` closes it and pops back.
     """
-    return service.episode_start(title=title, hint=hint)
+    return service.episode_start(title=title, hint=hint, episode=episode)
 
 
 @_tool(tier="core")  # pairs with memory_episode_start.
-def memory_episode_end() -> dict[str, Any]:
-    """Close the current open episode and pop back to its parent (the
-    session). Returns the closed episode dict, or ``{}`` when nothing is
-    open.
-    """
-    return service.episode_end()
+def memory_episode_end(
+    episode: Annotated[str | None, Field(
+        description="Your session handle — pops only within your own "
+                    "session's subtree; the session root is never "
+                    "closed.")] = None,
+) -> dict[str, Any]:
+    """Close the current open sub-episode and pop back to its parent."""
+    return service.episode_end(episode=episode)
 
 
 @_tool(tier="minimal")  # the recommended workflow names the session early.
-def memory_session_title(title: str) -> dict[str, Any]:
+def memory_session_title(
+    title: Annotated[str, Field(
+        description='What this session is about, e.g. "Pseudolife-MCP" or '
+                    '"auth-refactor".')],
+    episode: Annotated[str | None, Field(
+        description="Your session handle — names that session's root "
+                    "directly (the identity a hook-registered client "
+                    "has).")] = None,
+) -> dict[str, Any]:
     """Name THIS session's auto-opened episode (default titles are
-    generic). Call once at the start of work — e.g. ``"Pseudolife-MCP"`` or
-    ``"auth-refactor"`` — so session recaps read meaningfully. Idempotent;
-    call again to rename.
+    generic). Call once at the start of work so session recaps read
+    meaningfully. Idempotent; call again to rename.
     """
-    return service.set_session_title(title=title)
+    return service.set_session_title(title=title, episode=episode)
 
 
 @_tool()
-def memory_episode_summary(id: str) -> dict[str, Any]:
+def memory_episode_summary(
+    id: Annotated[str, Field(
+        description="An episode id, as it appears on search/recent "
+                    "results.")],
+) -> dict[str, Any]:
     """Stats, tag/source distribution, and recent entries for one episode —
-    "summarise what we worked on". Episode ids appear on search/recent
-    results. Returns ``{found: false}`` for an unknown id.
+    "summarise what we worked on". Returns ``{found: false}`` for an
+    unknown id.
     """
     return service.episode_summary(id=id)
 
 
 @_tool()
 def memory_consolidation_candidates(
-    query: str | None = None,
-    episode: str | None = None,
-    sources: list[str] | None = None,
-    tags: list[str] | None = None,
-    top_k: int = 20,
-    min_cohesion: float = 0.6,
-    min_cluster_size: int = 2,
-    max_clusters: int = 10,
+    query: Annotated[str | None, Field(
+        description="Topic-driven anchor: cluster memories near this "
+                    "description.")] = None,
+    episode: Annotated[str | None, Field(
+        description="Session-driven anchor: cluster within this episode "
+                    "id.")] = None,
+    sources: Annotated[list[str] | None, Field(
+        description="Consider only entries with one of these source "
+                    "tags.")] = None,
+    tags: Annotated[list[str] | None, Field(
+        description="Consider only entries carrying one of these "
+                    "tags.")] = None,
+    top_k: Annotated[int, Field(
+        description="How many candidate entries to cluster over.")] = 20,
+    min_cohesion: Annotated[float, Field(
+        description="Minimum intra-cluster cosine — raise it to flag only "
+                    "near-duplicates.")] = 0.6,
+    min_cluster_size: Annotated[int, Field(
+        description="Drop clusters with fewer members than this.")] = 2,
+    max_clusters: Annotated[int, Field(
+        description="Max clusters returned.")] = 10,
 ) -> dict[str, Any]:
     """Find clusters of near-duplicate memories ripe for consolidation —
     the same thing phrased five ways across five sessions. Anchor with a
-    ``query`` (topic-driven) or an ``episode`` id (session-driven); read
-    the clusters, synthesise one canonical note, then commit it via
-    ``memory_consolidate``.
-
-    Args:
-        min_cohesion: Minimum intra-cluster cosine (default 0.6) — raise to
-            flag only near-duplicates.
+    ``query`` or an ``episode``; read the clusters, synthesise one
+    canonical note, then commit it via ``memory_consolidate``.
 
     Returns: ``{count, clusters: [{cohesion, size, members}]}``.
     """
@@ -1134,15 +1350,20 @@ def memory_consolidation_candidates(
 
 @_tool()
 def memory_consolidate(
-    replaces: list[str],
-    new_text: str,
-    source: str | None = None,
-    tags: list[str] | None = None,
+    replaces: Annotated[list[str], Field(
+        description="The memories being folded in; each is matched by "
+                    "exact text or close paraphrase.")],
+    new_text: Annotated[str, Field(
+        description="The canonical note that replaces them.")],
+    source: Annotated[str | None, Field(
+        description="Source tag for the new note.")] = None,
+    tags: Annotated[list[str] | None, Field(
+        description="Labels for the new note.")] = None,
 ) -> dict[str, Any]:
     """Replace a cluster of near-duplicate memories with one canonical note.
-    Every entry matching ``replaces`` (exact text or close paraphrase) is
-    marked superseded by ``new_text``, which is stored fresh — the bank gets
-    shorter without losing the audit trail.
+    Every entry matching ``replaces`` is marked superseded by ``new_text``,
+    which is stored fresh — the bank gets shorter without losing the audit
+    trail.
 
     Returns: ``{superseded_count, superseded_texts, new_memory_stored}``.
     """
@@ -1156,21 +1377,31 @@ def memory_consolidate(
 
 @_tool(tier="core")
 def memory_graph_relate(
-    src: str,
-    relation: str,
-    dst: str,
-    origin: str | None = None,
-    confidence: float = 0.8,
-    src_type: str | None = None,
-    dst_type: str | None = None,
+    src: Annotated[str, Field(description="The subject entity.")],
+    relation: Annotated[str, Field(
+        description="From the closed registry: ``depends-on``, "
+                    "``part-of``, ``runs-on``, ``hosts``, ``uses``, "
+                    "``configures``, ``stores-data-in``, ``related-to``. "
+                    "Separator variants normalise; an unknown name is "
+                    "rejected WITH the closest matches.")],
+    dst: Annotated[str, Field(description="The object entity.")],
+    origin: Annotated[str | None, Field(
+        description="Who asserted the edge.")] = None,
+    confidence: Annotated[float, Field(
+        description="How sure you are, 0..1.")] = 0.8,
+    src_type: Annotated[str | None, Field(
+        description="Entity kind for ``src``: set when the node is "
+                    "created, or filled in on an existing node that has "
+                    "none.")] = None,
+    dst_type: Annotated[str | None, Field(
+        description="Entity kind for ``dst``: set when the node is "
+                    "created, or filled in on an existing node that has "
+                    "none.")] = None,
 ) -> dict[str, Any]:
     """Assert a typed relation between two entities, e.g. ``("web-app",
     "runs-on", "host-1")``. Entities auto-create and resolve through
-    aliases; re-asserting an edge bumps its confidence. Relations come from
-    a closed registry (``depends-on``, ``part-of``, ``runs-on``, ``hosts``,
-    ``uses``, ``configures``, ``stores-data-in``, ``related-to``);
-    separator variants normalise, and an unknown name is rejected WITH the
-    closest matches — pick one, fall back to ``related-to``, or grow the
+    aliases; re-asserting an edge bumps its confidence. On a rejected
+    relation, pick a suggestion, fall back to ``related-to``, or grow the
     vocabulary deliberately via ``memory_relation_define``.
 
     Returns: ``{src, relation, dst, confidence, warnings}`` or
@@ -1183,7 +1414,11 @@ def memory_graph_relate(
 
 
 @_tool()
-def memory_graph_unrelate(src: str, relation: str, dst: str) -> dict[str, Any]:
+def memory_graph_unrelate(
+    src: Annotated[str, Field(description="The edge's subject entity.")],
+    relation: Annotated[str, Field(description="The edge's relation.")],
+    dst: Annotated[str, Field(description="The edge's object entity.")],
+) -> dict[str, Any]:
     """Retract a relation — the edge is marked superseded (kept for audit)
     and leaves ``memory_graph`` results. Re-asserting the same triple later
     revives it.
@@ -1192,7 +1427,12 @@ def memory_graph_unrelate(src: str, relation: str, dst: str) -> dict[str, Any]:
 
 
 @_tool()
-def memory_alias(entity: str, alias: str) -> dict[str, Any]:
+def memory_alias(
+    entity: Annotated[str, Field(
+        description="The canonical entity to bind onto.")],
+    alias: Annotated[str, Field(
+        description="The alternative name.")],
+) -> dict[str, Any]:
     """Bind an alternative name to an entity (e.g. ``pg`` → ``postgres``)
     so facts and graph lookups under either name land on the same node.
     Returns the entity's full alias list.
@@ -1202,20 +1442,23 @@ def memory_alias(entity: str, alias: str) -> dict[str, Any]:
 
 @_tool(tier="core")
 def memory_graph(
-    entity: str,
-    depth: int = 1,
-    include_facts: bool = True,
-    to: str | None = None,
-    relation_filter: str | None = None,
+    entity: Annotated[str, Field(
+        description="The root entity to read out from.")],
+    depth: Annotated[int, Field(
+        description="Hops from the root. Max 3.")] = 1,
+    include_facts: Annotated[bool, Field(
+        description="False omits each node's canonical facts.")] = True,
+    to: Annotated[str | None, Field(
+        description="Also return the shortest path from ``entity`` to "
+                    "this entity under ``paths``; its nodes are folded "
+                    "into the neighborhood.")] = None,
+    relation_filter: Annotated[str | None, Field(
+        description="Keep only edges whose relation contains this "
+                    "substring.")] = None,
 ) -> dict[str, Any]:
     """Read an entity's graph neighborhood: nodes, typed edges, and each
     node's canonical facts. Transitive/inverse edges arrive pre-derived
-    (marked ``derived: true`` with rule provenance). Pass ``to`` for the
-    shortest path between two entities; ``relation_filter`` keeps only
-    edges whose relation contains the substring.
-
-    Args:
-        depth: Hops from the root (default 1, max 3).
+    (marked ``derived: true`` with rule provenance).
 
     Returns: ``{found, entity, nodes, edges, paths}``.
     """
@@ -1230,54 +1473,267 @@ def memory_graph(
     return out
 
 
+# ── Recall output caps (issue #186) ───────────────────────────────────────
+# ``top_k`` bounds only the SEED search; graph expansion fans out from
+# there with no bound of its own, and the compact projection memory_search
+# applies to entry text was never applied on this path. Issue #186's live
+# audit (2026-08-21, real daemon — not reproducible in-tree) measured
+# memory_recall(query="what does the stdio shim connect to and what runs
+# the MCP tools", hops=3, top_k=5, verbose=False) at 93.7 KB total, enough
+# that the calling client refused it. A separate pass over that same
+# response reported a per-field breakdown: 53 entities (38.6 KB), 75 edges
+# (5.3 KB), 45 uncapped full entry texts (51.9 KB). Those three components
+# sum to 95.8 KB, ~2% over the stated 93.7 KB total; both figures are
+# reproduced here exactly as audited rather than smoothed, since that live
+# response can't be re-measured without the daemon and bank it ran
+# against. What IS reproducible in-tree: evals/recall_cap_probe.py builds
+# a synthetic hub graph (no DB, no daemon) and records this repo's own
+# pre-cap vs post-cap serialized size to
+# evals/results/recall-cap-186-payload-probe.json (pinned by
+# tests/test_eval_evidence.py — see docs/guide/retrieval.md for that
+# number).
+#
+# A flat prefix slice (``out["entities"][:N]``) is NOT a relevance
+# ordering: (1) run_recall appends seeds, then each hop's
+# newly-discovered entities in turn, so ``entities[:N]`` is a
+# breadth-first PREFIX, not a ranking; (2) within one hop, nodes come back
+# sorted by internal entity id (service.py's ``graph_neighborhood``), and
+# edges are the graph's global edge list filtered to that neighborhood
+# (graph.py's ``build_subgraph``) — storage order, not relevance; (3)
+# ``paths`` is always empty on this path (``graph_fn`` is called without
+# ``to=``), so ``edges`` is the ONLY connectivity representation — a naive
+# ``edges[:N]`` can be entirely consumed by the seed's own 1-hop ring,
+# silently dropping the hop-2/hop-3 bridges that are the actual reason to
+# call memory_recall instead of memory_search. (``_select_frontier``'s
+# ascending-degree sort is real, but it decides which non-hub entities get
+# EXPANDED THROUGH next during the walk — it says nothing about the order
+# results are later emitted in.)
+#
+# The caps below instead: reserve a minimum per-hop quota for entities and
+# edges (each hop present gets a floor(cap/hops-present) share, with the
+# remainder handed to the LATEST hops one each so the reservation itself
+# never exceeds the cap; a hop needing fewer releases its unused slots to
+# hops that need more, later hops first — ``_hop_quota_select``), prefer
+# edges whose src AND dst both survived the entity cap and backfill from
+# the rest only if that pool falls short (``_cap_recall_edges``), and
+# split the texts budget between the flat seed search and hop-discovered
+# support so a hop-discovered text always survives even at top_k >= the
+# texts cap (``_cap_recall_texts``). Facts per surviving entity are capped
+# separately (``_RECALL_MAX_FACTS_PER_ENTITY``) — the entities that
+# survive the cap are disproportionately the fact-heavy hubs, and their
+# facts list was otherwise still unbounded.
+_RECALL_MAX_ENTITIES = 10
+_RECALL_MAX_EDGES = 15
+_RECALL_MAX_TEXTS = 6
+# memory_search's cortex-first block already treats 5 as the standard
+# facts-serving width (this module's cortex_search(query, top_k=5, ...)
+# call); reusing it here keeps one recall entity's fact list comparable to
+# what search already treats as a normal-sized answer.
+# evals/recall_cap_probe.py's synthetic hub entities carry more than this
+# by construction, so the probe artifact also records the pre/post
+# fact-count this cap produces on that fixture.
+_RECALL_MAX_FACTS_PER_ENTITY = 5
+# Of _RECALL_MAX_TEXTS, how many slots the flat seed search gets — the
+# rest goes to hop-discovered support. min(3, top_k) so a small top_k
+# doesn't reserve more than it actually returns. Without this split,
+# texts[:cap] is just the seed search's own top_k window: at the default
+# top_k=5 and cap=6 exactly one hop-discovered text can ever survive, and
+# at top_k >= cap, zero can — every text hop expansion turns up would be
+# silently invisible.
+_RECALL_SEED_TEXT_BUDGET = 3
+# Preview length for a supporting text once the cap above binds — same
+# 80/120/200-char + ellipsis convention as the existing text_preview
+# fields (cms.py, service.py).
+_RECALL_TEXT_CHARS = 200
+
+
+def _hop_quota_select(items: list[tuple[Any, int]], cap: int) -> list[Any]:
+    """Cap a (item, hop) sequence to ``cap`` items so no single hop's ring
+    can crowd out deeper hops. Reserves ``cap // H`` slots per distinct hop
+    present (H = number of distinct hops), handing the ``cap % H``
+    remainder to the LATEST hops one each — ``cap // H`` per bucket alone
+    can undershoot ``cap`` by up to H-1 items, and a NAIVE ``ceil(cap/H)``
+    per bucket overshoots it whenever every bucket is full (e.g. cap=15,
+    H=2 gives 8+8=16), so the reservation itself must sum to exactly
+    ``cap`` — never more, so the return value never exceeds ``cap``
+    regardless of how full any bucket is. A hop that needs fewer than its
+    reservation releases the unused slots to hops that need more, granting
+    the LATER hops first (the ones a flat prefix cap would otherwise
+    starve first). Within a hop, keeps that hop's earliest-discovered
+    items (their relative order is unchanged)."""
+    if cap <= 0 or not items:
+        return []
+    buckets: dict[int, list[Any]] = {}
+    for item, hop in items:
+        buckets.setdefault(hop, []).append(item)
+    hop_order = sorted(buckets)
+    H = len(hop_order)
+    base, extra = divmod(cap, H)
+    quota = {h: base for h in hop_order}
+    for h in hop_order[H - extra:]:            # the last `extra` hops
+        quota[h] += 1
+    take = {h: min(quota[h], len(buckets[h])) for h in hop_order}
+    remaining = cap - sum(take.values())
+    for h in reversed(hop_order):
+        if remaining <= 0:
+            break
+        spare = len(buckets[h]) - take[h]
+        if spare <= 0:
+            continue
+        grant = min(spare, remaining)
+        take[h] += grant
+        remaining -= grant
+    return [item for h in hop_order for item in buckets[h][:take[h]]]
+
+
+def _cap_recall_entities(entities: list[dict],
+                         entity_hop: dict[str, int]) -> list[dict]:
+    tagged = [(e, entity_hop.get(e.get("entity"), 0)) for e in entities]
+    return _hop_quota_select(tagged, _RECALL_MAX_ENTITIES)
+
+
+def _cap_recall_edges(edges: list[dict], edge_hop: list[int],
+                      surviving_entities: set[str]) -> list[dict]:
+    """Prefer edges whose src AND dst both survived the entity cap (only
+    those connect two entities the caller can actually see); backfill from
+    the rest only if that pool doesn't fill the cap. Each pool is itself
+    hop-quota'd."""
+    if len(edge_hop) != len(edges):        # legacy/stub caller: no hop info
+        edge_hop = [0] * len(edges)
+    both: list[tuple[dict, int]] = []
+    rest: list[tuple[dict, int]] = []
+    for e, h in zip(edges, edge_hop):
+        pool = both if (e.get("src") in surviving_entities
+                        and e.get("dst") in surviving_entities) else rest
+        pool.append((e, h))
+    picked = _hop_quota_select(both, _RECALL_MAX_EDGES)
+    if len(picked) < _RECALL_MAX_EDGES:
+        picked += _hop_quota_select(rest, _RECALL_MAX_EDGES - len(picked))
+    return picked
+
+
+def _cap_recall_texts(texts: list[str], seed_text_count: int,
+                      top_k: int) -> list[str]:
+    """Split the cap between the flat seed search and hop-discovered
+    support so a hop-discovered text always survives (see the module
+    comment above) instead of ``texts[:cap]`` being purely the seed
+    window."""
+    seed_texts = texts[:seed_text_count]
+    hop_texts = texts[seed_text_count:]
+    seed_budget = min(_RECALL_SEED_TEXT_BUDGET, top_k, _RECALL_MAX_TEXTS)
+    seed_take = min(seed_budget, len(seed_texts))
+    hop_take = min(_RECALL_MAX_TEXTS - seed_take, len(hop_texts))
+    short = (_RECALL_MAX_TEXTS - seed_take) - hop_take
+    if short > 0:  # hop pool ran short -- backfill from unused seed texts
+        seed_take = min(seed_take + short, len(seed_texts))
+    return seed_texts[:seed_take] + hop_texts[:hop_take]
+
+
+def _compact_recall_text(t: str) -> str:
+    """Truncate one recall supporting text to the preview cap — same
+    80/120/200-char + ellipsis convention as the existing text_preview
+    fields (cms.py, service.py). ``_compact_entry`` itself only projects
+    fields and does not truncate; this is a distinct, recall-specific
+    truncation step."""
+    if len(t) <= _RECALL_TEXT_CHARS:
+        return t
+    return t[:_RECALL_TEXT_CHARS] + "…"
+
+
 @_tool(tier="core")
-def memory_recall(query: str, hops: int = 3, top_k: int = 5,
-                  verbose: bool = False) -> dict[str, Any]:
+def memory_recall(
+    query: Annotated[str, Field(
+        description="Natural-language relational question; its top hits "
+                    "seed the graph walk.")],
+    hops: Annotated[int, Field(
+        description="Max graph hops. Clamped to 1..5.")] = 3,
+    top_k: Annotated[int, Field(
+        description="Bounds only the SEED search — the initial hits naming "
+                    "the entities the walk starts from — NOT the result, "
+                    "which is capped separately. Up to 3 ``texts`` slots "
+                    "go to seed hits; the rest to hop-discovered "
+                    "support.")] = 5,
+    verbose: Annotated[bool, Field(
+        description="Full fact/edge provenance and untruncated texts. "
+                    "Default facts are ``{attribute, value}``, edges "
+                    "``{src, relation, dst}``, texts truncated to a "
+                    "preview.")] = False,
+) -> dict[str, Any]:
     """Multi-hop retrieval over the knowledge graph, for RELATIONAL
     questions whose answer is reached by following links — "what does X
     ultimately run on?", "how does A reach C?" — which single-shot
     ``memory_search`` can't chain. Read-only. ``low_confidence: true``
     means no seed entity matched — fall back to ``memory_search``.
 
-    Args:
-        hops: Max graph hops (default 3, max 5).
-        verbose: Full fact/edge provenance (origin, confidence, derivation).
-            Default facts are ``{attribute, value}``, edges
-            ``{src, relation, dst}``.
-
     Returns: ``{seeds, entities, edges, paths, texts, iterations}``.
+    ``entities``/``edges``/``texts`` are capped (currently 10/15/6) with a
+    per-hop reservation, so a hub seed's own 1-hop ring can't crowd out
+    the deeper hops the walk exists to reach; ``edges`` prefers links
+    between surviving entities; each entity's ``facts`` is capped
+    (currently 5). Details: docs/guide/retrieval.md.
     """
     out = service.recall(query, hops=hops, top_k=top_k)
+    entity_hop = out.get("entity_hop") or {}
+    seed_text_count = out.get("seed_text_count")
+    if seed_text_count is None:            # legacy/stub caller: no hop info
+        seed_text_count = min(top_k, len(out.get("texts", [])))
+
+    capped_entities = _cap_recall_entities(out.get("entities", []), entity_hop)
+    capped_entities = [
+        {**e, "facts": (e.get("facts") or [])[:_RECALL_MAX_FACTS_PER_ENTITY]}
+        for e in capped_entities
+    ]
+    surviving = {e.get("entity") for e in capped_entities}
+    out["entities"] = capped_entities
+    out["edges"] = _cap_recall_edges(
+        out.get("edges", []), out.get("edge_hop", []), surviving)
+    out["texts"] = _cap_recall_texts(
+        out.get("texts", []), seed_text_count, top_k)
+    # Internal bookkeeping only — stale once entities/edges are capped
+    # above, and not part of the documented return shape.
+    out.pop("entity_hop", None)
+    out.pop("edge_hop", None)
+    out.pop("seed_text_count", None)
+
     if not verbose:
         out["entities"] = [
             {"entity": n.get("entity"),
              "facts": [{"attribute": f.get("attribute"), "value": f.get("value")}
                        for f in n.get("facts", [])]}
-            for n in out.get("entities", [])
+            for n in out["entities"]
         ]
         out["edges"] = [
             {"src": e.get("src"), "relation": e.get("relation"),
              "dst": e.get("dst")}
-            for e in out.get("edges", [])
+            for e in out["edges"]
         ]
+        out["texts"] = [_compact_recall_text(t) for t in out["texts"]]
     return out
 
 
 @_tool()
 def memory_relation_define(
-    name: str,
-    description: str,
-    transitive: bool = False,
-    inverse_of: str | None = None,
-    src_type: str | None = None,
-    dst_type: str | None = None,
+    name: Annotated[str, Field(
+        description="The new relation name, hyphenated like the "
+                    "builtins.")],
+    description: Annotated[str, Field(
+        description="What the relation means, for later readers.")],
+    transitive: Annotated[bool, Field(
+        description="True closes the relation transitively, so chained "
+                    "edges arrive pre-derived.")] = False,
+    inverse_of: Annotated[str | None, Field(
+        description="Pair with an existing relation, as ``runs-on`` is the "
+                    "inverse of ``hosts``.")] = None,
+    src_type: Annotated[str | None, Field(
+        description="Soft entity-kind expectation for the subject; a "
+                    "mismatch warns, never rejects.")] = None,
+    dst_type: Annotated[str | None, Field(
+        description="Soft entity-kind expectation for the object; a "
+                    "mismatch warns, never rejects.")] = None,
 ) -> dict[str, Any]:
     """Add a relation to the closed graph vocabulary — a deliberate, rare
     act. Prefer the builtins; define one only when a recurring connection
-    genuinely fits none of them. Supports transitive closure
-    (``transitive=true``) and inverse pairing (``inverse_of``, like
-    ``runs-on`` ↔ ``hosts``); soft ``src_type``/``dst_type`` expectations
-    warn on mismatch but never reject.
+    genuinely fits none of them.
     """
     return service.relation_define(
         name=name, description=description, transitive=transitive,
@@ -1289,13 +1745,19 @@ def memory_relation_define(
 
 
 @_tool(tier="core")
-def document_ingest(path: str, source: str | None = None) -> dict[str, Any]:
-    """Index a file (.txt / .md / .pdf) into the reference bank — a
-    separate store for background documents (papers, manuals, codebases)
-    retrieved by pure cosine similarity, kept apart from conversational
-    memory. ``source`` defaults to the filename. ``path`` resolves on the
-    SERVER's filesystem — with the Docker daemon, use a path visible inside
-    the container (e.g. a mounted volume), not a host path.
+def document_ingest(
+    path: Annotated[str, Field(
+        description="Path to a .txt / .md / .pdf file, resolved on the "
+                    "SERVER's filesystem — with the Docker daemon, a path "
+                    "visible inside the container (e.g. a mounted volume), "
+                    "not a host path.")],
+    source: Annotated[str | None, Field(
+        description="Source tag for the chunks; defaults to the "
+                    "filename.")] = None,
+) -> dict[str, Any]:
+    """Index a file into the reference bank — a separate store for
+    background documents (papers, manuals, codebases) retrieved by pure
+    cosine similarity, kept apart from conversational memory.
 
     Returns: ``{source, chunks_stored, chunks_total}``.
     """
@@ -1303,7 +1765,12 @@ def document_ingest(path: str, source: str | None = None) -> dict[str, Any]:
 
 
 @_tool(tier="core")
-def document_search(query: str, top_k: int = 5) -> dict[str, Any]:
+def document_search(
+    query: Annotated[str, Field(
+        description="Natural-language description of the passage "
+                    "wanted.")],
+    top_k: Annotated[int, Field(description="Max chunks returned.")] = 5,
+) -> dict[str, Any]:
     """Search the reference bank only — ingested documents, no
     conversational memories mixed in. For docs AND memories together, use
     ``memory_search``.
@@ -1340,35 +1807,75 @@ def _resolve_principal_tier() -> str:
 
 
 def _wire_transport_tiering() -> None:
-    """Replace the transport tools/list handler with the tier-filtered view
-    and advertise tools.listChanged (the SDK default omits it, verified on
-    mcp 1.27.2). The raw handler bypasses the SDK's caching wrapper — that
-    wrapper CLEARS the tool cache and refills it with whatever the handler
-    returns, which would strip hidden tools of call-time validation. We
-    feed the cache the full registry instead."""
-    import mcp.types as mtypes
+    """Wrap the transport dispatch seam (SDK v2): one wrap of the low-level
+    ``tools/list`` entry filters by the caller's per-request tier — the
+    per-authorization axis the 2026-07-28 tools spec sanctions (per-CONNECTION
+    variance is banned) — and both ``tools/list`` and ``tools/call`` wraps
+    bind the request headers into :mod:`writer_context` for the duration of
+    the dispatch (v2 removed the ambient ``request_ctx`` contextvar this
+    module's identity resolution rode on; ``anyio.to_thread`` copies the
+    context, so ``_async_offload`` worker threads inherit the binding).
+    Legacy handshake-era clients additionally need ``tools.listChanged``
+    forced into the initialization options, exactly as on v1; 2026-07-28
+    clients derive it from the served ``subscriptions/listen`` method and
+    ignore the options."""
+    import dataclasses
+
     from mcp.server.lowlevel.server import NotificationOptions
+    from pseudolife_memory.writer_context import (
+        bind_request_headers, unbind_request_headers)
 
-    server = mcp._mcp_server
+    server = mcp._lowlevel_server
+    handlers = server._request_handlers
 
-    async def _filtered_list(_req) -> mtypes.ServerResult:
-        tools = await FastMCP.list_tools(mcp)   # full registry, mcp.types.Tool
-        server._tool_cache.update({t.name: t for t in tools})
+    def _headers_of(ctx):
+        headers = getattr(ctx, "headers", None)
+        if headers is None:
+            req = getattr(ctx, "request", None)
+            headers = getattr(req, "headers", None)
+        return headers
+
+    def _bound(handler):
+        async def _dispatch(ctx, params):
+            # Bind only when the transport carried headers — a headerless ctx
+            # (embedded stdio, tests) must not mask an ambient binding.
+            headers = _headers_of(ctx)
+            token = bind_request_headers(headers) if headers is not None else None
+            try:
+                return await handler(ctx, params)
+            finally:
+                if token is not None:
+                    unbind_request_headers(token)
+        return _dispatch
+
+    list_entry = handlers["tools/list"]
+    _orig_list = list_entry.handler
+
+    async def _list_filtered(ctx, params):
+        result = await _orig_list(ctx, params)
         names = _visible_tool_names(_resolve_principal_tier())
-        return mtypes.ServerResult(mtypes.ListToolsResult(
-            tools=[t for t in tools if t.name in names]))
+        return result.model_copy(update={
+            "tools": [t for t in result.tools if t.name in names]})
 
-    server.request_handlers[mtypes.ListToolsRequest] = _filtered_list
+    _filtered_list = _bound(_list_filtered)
 
-    _orig = server.create_initialization_options
+    handlers["tools/list"] = dataclasses.replace(
+        list_entry, handler=_filtered_list)
+    call_entry = handlers["tools/call"]
+    handlers["tools/call"] = dataclasses.replace(
+        call_entry, handler=_bound(call_entry.handler))
 
-    def _init_opts(notification_options=None, experimental_capabilities=None):
+    _orig_init = server.create_initialization_options
+
+    def _init_opts(notification_options=None, experimental_capabilities=None,
+                   extensions=None):
         # memory_toolset depends on the listChanged capability: force it on
         # whatever options arrive rather than only defaulting the None case.
         opts = notification_options or NotificationOptions()
         opts.tools_changed = True
-        return _orig(notification_options=opts,
-                     experimental_capabilities=experimental_capabilities)
+        return _orig_init(notification_options=opts,
+                          experimental_capabilities=experimental_capabilities,
+                          extensions=extensions)
 
     server.create_initialization_options = _init_opts
 
@@ -1447,27 +1954,39 @@ _dream_sweep_started = False
 
 
 def start_dream_sweep() -> None:
-    """Idempotent: start the headless dream sweep (Tier 0/2). Off when the
-    bank is empty or unconfigured — ``run_sweep_once`` gates on backlog +
-    quiescence each tick, so an idle bank does no LLM work. Daemon-only."""
+    """Idempotent: start the headless dream sweep (Tier 0/2). The same
+    thread also runs ``run_sweep_once``'s compaction/dream-run-journal/
+    retrieval-log reapers, none of which are actually gated on
+    ``dream.enabled`` (issue #178) — so this starts whenever EITHER
+    dreaming OR the retrieval log is enabled; a dream-disabled bank with
+    the (default-on) retrieval log still needs its own reaper, or
+    ``retrieval_events`` grows unbounded. ``run_sweep_once`` itself still
+    gates the automatic dream trigger on backlog + quiescence each tick,
+    so an idle bank does no LLM work. Daemon-only."""
     global _dream_sweep_started
     if _dream_sweep_started:
         return
-    if not service.config.memory.dream.enabled:
+    dream_cfg = service.config.memory.dream
+    if not (dream_cfg.enabled or service.config.memory.retrieval_log.enabled):
         return
-    from pseudolife_memory.memory.dream import (build_extractor, NoOpExtractor,
-                                                startup_extractor_warnings)
-    if isinstance(build_extractor(service.config.memory.dream), NoOpExtractor):
-        logger.warning(
-            "dream enabled but no extractor LLM configured "
-            "(PSEUDOLIFE_DREAM_BASE_URL/_MODEL unset): cortex auto-population is "
-            "disabled; only memory_fact_set writes canonical facts. Configure the "
-            "extractor sidecar to populate the cortex."
-        )
-    for warning in startup_extractor_warnings(service.config.memory.dream):
-        logger.warning("dream extractor config: %s", warning)
+    if dream_cfg.enabled:
+        from pseudolife_memory.memory.dream import (build_extractor, NoOpExtractor,
+                                                    startup_extractor_warnings)
+        if isinstance(build_extractor(dream_cfg), NoOpExtractor):
+            logger.warning(
+                "dream enabled but no extractor LLM configured "
+                "(PSEUDOLIFE_DREAM_BASE_URL/_MODEL unset): cortex auto-population is "
+                "disabled; only memory_fact_set writes canonical facts. Point the "
+                "daemon at any OpenAI-compatible endpoint to fix it, e.g. "
+                "PSEUDOLIFE_DREAM_BASE_URL=http://localhost:11434/v1 "
+                "PSEUDOLIFE_DREAM_MODEL=qwen2.5:7b (a local Ollama); the Docker "
+                "tier ships an extractor sidecar instead. /health reports this as "
+                "extractor: \"none\"."
+            )
+        for warning in startup_extractor_warnings(dream_cfg):
+            logger.warning("dream extractor config: %s", warning)
     _dream_sweep_started = True
-    interval = float(service.config.memory.dream.sweep_interval_seconds)
+    interval = float(dream_cfg.sweep_interval_seconds)
     threading.Thread(
         target=_dream_sweep_loop, args=(interval,), daemon=True, name="pl-dream",
     ).start()

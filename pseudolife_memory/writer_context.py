@@ -1,4 +1,4 @@
-"""Writer/session attribution seam (v0.4 T4).
+"""Writer/session attribution seam (v0.4 T4; reworked for SDK v2 2026-08-25).
 
 A single chokepoint for "who wrote this version". Resolution order:
 
@@ -7,14 +7,17 @@ A single chokepoint for "who wrote this version". Resolution order:
 2. A NAMED principal from the request's bearer token
    (``PSEUDOLIFE_MCP_TOKENS``, spec 2026-08-10) — the credential outranks
    the client-asserted header below.
-3. The live MCP request. When the service runs inside the daemon, the MCP
-   SDK binds the originating Starlette request (headers and all) to a
-   contextvar *inside the handler's task* (``request_ctx`` in
-   ``mcp.server.lowlevel.server``). That is the same task the tool runs
-   in, so the ``X-PL-Writer`` header set by the shim survives the
-   streamable-HTTP session-task boundary — the integration risk the plan
-   flagged. ``session_id`` reuses the transport's ``mcp-session-id``
-   header, which is stable per connection.
+3. The live MCP request's headers. SDK v2 removed the ambient
+   ``request_ctx`` contextvar, so the daemon binds each request's headers
+   itself at its dispatch wrap (``mcp_server._wire_transport_tiering`` →
+   :func:`bind_request_headers`); ``anyio.to_thread`` copies the context,
+   so worker-thread tool bodies resolve the same binding. ``X-PL-Writer``
+   attributes the writer; ``X-PL-Session`` (shim-asserted) is the session.
+   The transport's ``mcp-session-id`` is RETIRED — it named the
+   connection, not the session, and MCP 2026-07-28 removes it; the
+   ``PSEUDOLIFE_LEGACY_TRANSPORT_SESSION`` hatch restores it for one
+   release. Session identity for hook-registered clients rides the
+   episode handle passed as a tool argument instead (spec 2026-08-25).
 4. The process default (``PSEUDOLIFE_WRITER_ID`` env, or ``"unknown"``),
    supplied by the caller.
 
@@ -56,10 +59,34 @@ def _http_writer_session() -> tuple[str | None, str | None]:
     return (w, hs or ts)
 
 
+# Headers of the live MCP request, bound by the daemon's transport wrap
+# (mcp_server._wire_transport_tiering) around every tools/call and
+# tools/list dispatch. SDK v2 removed the ambient request_ctx contextvar,
+# so the daemon asserts the headers itself at its one dispatch seam;
+# anyio.to_thread copies the context, so worker-thread tool bodies resolve
+# the same binding.
+_REQUEST_HEADERS: contextvars.ContextVar = contextvars.ContextVar(
+    "pl_request_headers", default=None)
+
+
+def bind_request_headers(headers):
+    """Bind the live request's headers for the current context; returns the
+    token for ``unbind_request_headers``. ``None`` clears (binds nothing)."""
+    return _REQUEST_HEADERS.set(headers)
+
+
+def unbind_request_headers(token) -> None:
+    _REQUEST_HEADERS.reset(token)
+
+
 def _http_request_headers():
     """Best-effort headers of the live MCP request, or ``None`` outside one.
-    Isolates the SDK read (and its v1 ``request_ctx`` dependency) to one
-    place — the v2 port swaps this body for ``ctx.headers``."""
+    Single seam for request-header reads: the daemon-bound contextvar first
+    (SDK v2 path), then the v1 SDK's ambient ``request_ctx`` (absent under
+    v2 — the import fails harmlessly)."""
+    bound = _REQUEST_HEADERS.get()
+    if bound is not None:
+        return bound
     try:
         from mcp.server.lowlevel.server import request_ctx
 
@@ -69,18 +96,45 @@ def _http_request_headers():
         return None
 
 
+_legacy_transport_warned = False
+
+
+def _legacy_transport_session_enabled() -> bool:
+    """The ``mcp-session-id`` fallback is RETIRED (spec 2026-08-25): the
+    header names the connection, not the session, and the 2026-07-28 MCP
+    revision (SEP-2567) removes it from the protocol entirely.
+    ``PSEUDOLIFE_LEGACY_TRANSPORT_SESSION=1`` restores it for one release
+    as a rollback hatch; first use logs a warning."""
+    global _legacy_transport_warned
+    # Repo env-flag convention (daemon.py, web/routes.py): explicit truthy
+    # values only — "0"/"false" must mean OFF, not "set, therefore on".
+    raw = os.environ.get("PSEUDOLIFE_LEGACY_TRANSPORT_SESSION", "")
+    if raw.strip().lower() not in ("1", "true", "yes", "on"):
+        return False
+    if not _legacy_transport_warned:
+        _legacy_transport_warned = True
+        import logging
+
+        logging.getLogger("pseudolife-mcp").warning(
+            "PSEUDOLIFE_LEGACY_TRANSPORT_SESSION set — the retired "
+            "mcp-session-id transport fallback (per-connection, removed by "
+            "MCP 2026-07-28) is active; migrate callers to episode handles")
+    return True
+
+
 def _http_writer_session_detailed() -> tuple[str | None, str | None, str | None]:
     """Best-effort ``(writer_id, header_session, transport_session)`` from the
     live MCP request. ``header_session`` is the integrator-asserted
     ``X-PL-Session`` (identity tier 1); ``transport_session`` is the
     transport's ``mcp-session-id`` — per-CONNECTION in multiplexing clients,
-    and REMOVED from the MCP spec in the 2026-07-28 revision (SEP-2567), so
-    it is a legacy fallback only."""
+    REMOVED from the MCP spec in the 2026-07-28 revision (SEP-2567), and
+    retired here (always ``None`` unless the legacy escape hatch is set)."""
     headers = _http_request_headers()
     if headers is None:
         return (None, None, None)
-    return (headers.get("x-pl-writer"), headers.get("x-pl-session"),
-            headers.get("mcp-session-id"))
+    transport = (headers.get("mcp-session-id")
+                 if _legacy_transport_session_enabled() else None)
+    return (headers.get("x-pl-writer"), headers.get("x-pl-session"), transport)
 
 
 @lru_cache(maxsize=8)

@@ -2,8 +2,8 @@
  "meta": {
   "title": "PseudoLife-MCP System Atlas",
   "version": "0.14.0",
-  "schema": 31,
-  "verified": "2026-08-20"
+  "schema": 34,
+  "verified": "2026-08-25"
  },
  "groups": {
   "clients": {
@@ -254,7 +254,7 @@
    "x": 940,
    "y": 160,
    "t": "mcp_server.py",
-   "s": "FastMCP · 35 tools",
+   "s": "MCPServer (SDK v2) · 35 tools",
    "p": "pseudolife_memory/mcp_server.py",
    "d": [
     "Every tool is a thin tier-tagged wrapper over MemoryService",
@@ -400,7 +400,7 @@
    "d": [
     "store(): flat band by default (2026-08-15); promotion walk only under multi-band presets",
     "retrieve(): neural + slot-index + BM25 + reference + rerank pools",
-    "retrieve_with_trace() powers the memory_trace diagnostics tool",
+    "retrieve_with_trace() powers memory_search(explain=True) diagnostics",
     "Write-through to Postgres; .pt fallback schema v6 with migration"
    ]
   },
@@ -785,12 +785,12 @@
    "x": 1760,
    "y": 730,
    "t": "storage/schema.py",
-   "s": "DDL · SCHEMA_META_VERSION 31",
+   "s": "DDL · SCHEMA_META_VERSION 32",
    "p": "pseudolife_memory/storage/schema.py",
    "d": [
     "pgvector required; Apache AGE fully removed",
-    "entries(vector 1024) · facts · world_facts · lessons · entities/edges · episodes · memory_traces · communities · outcome_signals · entity_kinds · dream_runs/dream_run_slots · chronicle_events · retrieval_events/retrieval_uses",
-    "Additive migrations: v23 fact freshness_class · v24 entity_kinds · v25 1024-d re-embed · v26 set-valued slots · v27 dream-run pre-image journal · v28 chronicle events (dated occurrences, additive-only) · v29 fact stance (labelled hedge field, NULL = plain)",
+    "entries(vector 1024) · facts · world_facts · lessons · entities/edges · episodes · memory_traces · communities · outcome_signals · entity_kinds · dream_runs/dream_run_slots · chronicle_events · retrieval_events/retrieval_uses · slot_reads",
+    "Additive migrations: v23 fact freshness_class · v24 entity_kinds · v25 1024-d re-embed · v26 set-valued slots · v27 dream-run pre-image journal · v28 chronicle events (dated occurrences, additive-only) · v29 fact stance (labelled hedge field, NULL = plain) · v30 merge-proposal judge verdict (five nullable entity_proposals.judge_* columns, an opinion until a decision path ratifies it) · v31 retrieval event log (retrieval_events/retrieval_uses append-only query/served/used tuples for a future learned reranker; observational only) · v32 retrieval-log ranking params + per-entry fusion components (nullable retrieval_events.params JSONB; NULL = a v31-era row) · v33 read telemetry (slot_reads per-slot serve counters, slot-keyed so cortex snapshots don't reset them; entries.explicit_reinforcements splits deliberate reinforces from dream-trace links; feeds memory_stats read_audit) · v34 served facts on the retrieval log (nullable retrieval_events.served_facts JSONB — the cortex-first block's slots attached to the exact event row by returned id, completing the reranker training tuple; read_audit gains graduation_candidates, no DDL)",
     "One-current-row-per-slot partial unique indexes"
    ]
   },
@@ -817,7 +817,8 @@
    "s": "legacy .pt import",
    "p": "pseudolife_memory/storage/migrate.py",
    "d": [
-    "Empty-bank-only, idempotent; weights_only=True (CWE-502 guard)",
+    "Empty bank or a recorded resume; weights_only=True (CWE-502 guard)",
+    "Progress in the legacy_migration meta row — partial imports resume",
     "Renames sources *.pre-v8.bak — never deletes"
    ]
   },
@@ -884,7 +885,7 @@
    "d": [
     "preflight → extractor mode → volumes → managed .env block",
     "compose up --build → hooks → MCP registration → /health poll",
-    "Modes: sidecar / sonnet-fallback / sonnet-only (~9 GB lighter)"
+    "Modes: sidecar / sonnet-fallback / sonnet-only (~11.8 GB lighter)"
    ]
   },
   {

@@ -6,6 +6,14 @@ channels in every replicate under both answer prompts (agg: hybrid 0.633
 [0.60-0.70] vs rag 0.500 / cortex 0.233 compose). These tests pin the config
 defaults that make ``memory_search`` hybrid out of the box, so a future
 default flip is a deliberate, test-visible decision — not a silent edit.
+
+Corrected 2026-08-25 (scorer defect #173 — the MC scorer read the article
+"a" as answer A): the compose figures above are hybrid 0.533 vs rag 0.433 /
+cortex 0.200, and one of the three compose replicates is a tie rather than
+a win. The default still holds — hybrid leads on every mean here, and on
+the full 74-question category the correction turns the previously exact
+hybrid-vs-rag compose tie into a hybrid lead (0.270 vs 0.257) — but "every
+replicate" is no longer the reason.
 """
 from __future__ import annotations
 
