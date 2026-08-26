@@ -1,0 +1,47 @@
+{
+  "probe": "digest-sidecar",
+  "endpoint": {
+    "base_url": "http://127.0.0.1:18081/v1",
+    "model": "extractor"
+  },
+  "target_chars": 800,
+  "context_chars_cap": 24000,
+  "n_sessions": 3,
+  "n_malformed": 0,
+  "n_errors": 0,
+  "mean_digest_chars": 1380,
+  "mean_seconds": 877.95,
+  "date": "2026-08-27",
+  "rows": [
+    {
+      "label": "BEAM 100K chat 3 session 1",
+      "digest": "The session began with the user needing to schedule a meeting for March 15, 2024, at 09:00 AM CET for international team members, and the assistant provided five time-zone handling steps, leading the user to choose a time-zone converter tool and the Sydney (AEST) conversion, which was 06:00 PM AEST on the same day. The session then shifted to building a portfolio website, starting with a color palette generator section for the user's Colour Technologist skills, built with HTML5, CSS3, and Bootstrap v5.3.0; the assistant filled in the Python Tkinter skeleton's missing methods and provided the corresponding HTML/Bootstrap display structure and JavaScript. The user provided a basic single-page HTML structure with About, Skills, Projects, and Contact sections, targeting a 1200x800px desktop layout, which the assistant enhanced with Bootstrap classes, a footer, and a separate styles.css file, concluding with a review of semantic HTML5 and SEO best practices including meta tags, aria-labels, and schema markup.",
+      "malformed": false,
+      "segments": 8,
+      "calls": 9,
+      "context_chars": 172369,
+      "digest_chars": 1019,
+      "seconds": 855.25
+    },
+    {
+      "label": "BEAM 100K chat 3 session 2",
+      "digest": "The session began with the user working on three front-end components—the project gallery, the contact form, and overall site responsiveness—all built with Bootstrap 5.3.0. The user first provided the project gallery HTML and CSS, which used Bootstrap's `col-lg-4 col-md-6 col-sm-12` grid and a fixed 150px image height; the assistant suggested adding `mb-4` to the columns and changing the image class to `card-img-top` with `height: auto;` in the CSS. The user then switched to implementing the gallery with 8 cards using `card-deck` and modal popups, noting the modals failed to display; the assistant corrected this by replacing the deprecated `card-deck` with a `row row-cols-1 row-cols-md-2 row-cols-lg-4` structure, updating the modal toggles to use `data-bs-toggle` and `data-bs-target`, and changing the close button class to `btn-close`. Next, the user reported images failing to load with a 404 error in the React `ProjectGallery.js` component, and the assistant advised checking the Network tab, verifying the build output, and adding an `onError` handler to the `CardImg` to display a default image. Finally, the user presented the contact form HTML and JavaScript for HTML5 validation with a custom JS fallback; the assistant improved it by adding `invalid-feedback` divs to the HTML, refactoring the JS into a `validateForm` function that checks each field and returns a boolean, and adding an `isValidEmail` helper function.",
+      "malformed": false,
+      "segments": 8,
+      "calls": 9,
+      "context_chars": 171673,
+      "digest_chars": 1440,
+      "seconds": 888.72
+    },
+    {
+      "label": "BEAM 100K chat 3 session 3",
+      "digest": "The session began with the user finalizing deployment and optimization for a portfolio site launching May 10, 2024, and implementing lazy loading for project gallery images with lazysizes while keeping the bundle under 100KB, plus adding aria-labels and role attributes to Bootstrap 5.3.0 modal dialogs for accessibility. The assistant provided the three-step lazysizes implementation (CDN link, `data-src` attribute, `lazyload` class) and a full modal example with `aria-labelledby`, `aria-hidden`, `role=\"dialog\"`, and an `aria-label` on the close button. The user confirmed initial optimizations—compressing images and minifying CSS/JS with PostCSS v8.4.21, reducing the page size from 1.8MB to 1.2MB—and asked for further size reduction techniques that wouldn't affect functionality, leveraging the GitHub Actions CI/CD pipeline v2.4.1 that deploys to GitHub Pages on commit with 99.9% uptime. The assistant suggested PurgeCSS, critical CSS, font subsetting, browser caching, a CDN, combining files, and automating these tasks within the GitHub Actions workflow, including a full YAML example. The user then asked about low-risk info disclosure warnings from an OWASP ZAP scan, and the assistant reviewed the user's manual Flask header setting, recommending `flask-helmet` instead, showing how to initialize it and customize headers, and how to add custom analytics headers after Helmet initialization to avoid conflicts. Finally, the user reported a \"Form submission blocked due to missing CSRF token\" error on the contact form and asked for a substantial code snippet showing how to generate and add a hidden CSRF token field, using a setup similar to the bug-fixing example.",
+      "malformed": false,
+      "segments": 8,
+      "calls": 9,
+      "context_chars": 171620,
+      "digest_chars": 1681,
+      "seconds": 889.89
+    }
+  ]
+}

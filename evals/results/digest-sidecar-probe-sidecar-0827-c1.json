@@ -1,0 +1,47 @@
+{
+  "probe": "digest-sidecar",
+  "endpoint": {
+    "base_url": "http://127.0.0.1:18081/v1",
+    "model": "extractor"
+  },
+  "target_chars": 800,
+  "context_chars_cap": 24000,
+  "n_sessions": 3,
+  "n_malformed": 0,
+  "n_errors": 0,
+  "mean_digest_chars": 1363,
+  "mean_seconds": 871.13,
+  "date": "2026-08-27",
+  "rows": [
+    {
+      "label": "BEAM 100K chat 1 session 1",
+      "digest": "The session began with the user, Craig, a hands-on developer building a personal budget tracker with Python and Flask, setting a Time Anchor of March 15, 2024, for the final deadline. The initial plan was a milestone breakdown: Nov 1-15 for Flask setup and initial database schema; Nov 16-Dec 15 for user authentication; Dec 16-Jan 15 for transaction management; Jan 16-Feb 15 for basic analytics; and Feb 16-Mar 15 for final adjustments, testing, and deployment. The user provided a starting Flask/SQLAlchemy code skeleton and asked for help implementing core functionality and adding data visualization with Matplotlib. The assistant filled in placeholder routes for registration, login, and expense tracking, and added a visualization route generating a base64-encoded bar chart of expenses by category. The user then asked for a review of a separate SQLite-based version of the code, which the assistant improved by switching to SQLAlchemy, calling `db.create_all()` within an application context, and adding proper session management and error handling. Finally, the user updated the deadline to April 15, 2024, for the MVP scope—income/expense tracking, user login, and basic analytics—and asked for a revised schedule to meet that new target.",
+      "malformed": false,
+      "segments": 7,
+      "calls": 8,
+      "context_chars": 161102,
+      "digest_chars": 1249,
+      "seconds": 835.51
+    },
+    {
+      "label": "BEAM 100K chat 1 session 2",
+      "digest": "The session began with the user building a personal budget tracker with transaction CRUD and analytics integration, having already completed user registration and login modules using Flask 2.3.1, Python 3.11, and SQLite 3.39. The user first asked for a try-except block around the transaction creation POST /transactions route to catch exceptions and return meaningful error messages; the assistant provided a version catching KeyError, ValueError, and a general Exception, confirming the 201 status code on success. The user then posted the POST /transactions route, which used request.get_json() and returned 201, and the assistant improved it with field validation, date parsing, session rollback, and returning the new transaction ID. A problem arose when the user reported an sqlite3.IntegrityError: UNIQUE constraint failed: transactions.id, despite using UUID keys; the assistant revised the code to wrap the insertion in a try-except block catching sqlite3.IntegrityError and added print statements to debug existing data. Finally, the user asked to integrate Flask-Login v0.6.2 to replace manual session handling, and the assistant provided a complete example including user registration, login, logout, and error handlers, refactoring the transaction CRUD into a blueprint using @login_required and current_user. The user stated a deadline of April 15, a preference for minimal dependencies, and a plan to modularize the app into auth, transactions, and analytics blueprints.",
+      "malformed": false,
+      "segments": 8,
+      "calls": 9,
+      "context_chars": 180811,
+      "digest_chars": 1485,
+      "seconds": 888.38
+    },
+    {
+      "label": "BEAM 100K chat 1 session 3",
+      "digest": "The session began with the user finalizing deployment preparations for a Flask application, aiming to improve UI/UX, add security hardening, and review the Gunicorn configuration and test suite. The assistant first suggested migrating from basic `flask_login` to JWT token authentication, using `werkzeug.security` for password hashing, implementing Role-Based Access Control, Marshmallow input validation, and configuring CORS and HTTPS. The user then shifted focus to deployment issues on Render.com, presenting a Gunicorn config of 3 workers on port 10000 and a pytest suite with a 95% pass rate. The assistant updated the Gunicorn config to calculate workers via `multiprocessing.cpu_count()`, switch to the `gevent` worker class, set a 120-second timeout, and customize the access log format. For the test suite, it added tests for error handling, concurrency, and security (SQL injection and XSS), and provided a full pytest fixture setup. The user accepted the Gunicorn changes and the additional security tests, stating he would add SQL injection and XSS coverage. Finally, the user asked about implementing HTTPS with Let's Encrypt SSL and Flask-Talisman 1.0.0 for security headers; the assistant advised using Certbot and configuring Gunicorn to read the `fullchain.pem` and `privkey.pem` files, and setting `force_https=True` on Flask-Talisman.",
+      "malformed": false,
+      "segments": 8,
+      "calls": 9,
+      "context_chars": 188761,
+      "digest_chars": 1355,
+      "seconds": 889.51
+    }
+  ]
+}

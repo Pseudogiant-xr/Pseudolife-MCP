@@ -1,0 +1,47 @@
+{
+  "probe": "digest-sidecar",
+  "endpoint": {
+    "base_url": "http://127.0.0.1:18081/v1",
+    "model": "extractor"
+  },
+  "target_chars": 800,
+  "context_chars_cap": 24000,
+  "n_sessions": 3,
+  "n_malformed": 0,
+  "n_errors": 0,
+  "mean_digest_chars": 1560,
+  "mean_seconds": 833.15,
+  "date": "2026-08-27",
+  "rows": [
+    {
+      "label": "BEAM 100K chat 2 session 1",
+      "digest": "The session began with the user, Christina, a color technologist, needing help structuring a weather app built with vanilla JavaScript ES2021, HTML5, and CSS3 using the OpenWeather API v2.5. The user first asked for help scheduling a meeting for March 15, 2024, at 09:00 CET; the assistant provided general scheduling best practices and time zone conversions for New York (EDT), Tokyo (JST), and Sydney (AEST) — 03:00 AM EDT, 18:00 PM JST, and 19:00 PM AEST, respectively. The conversation pivoted to the weather app, where the user provided initial code using axios, which the assistant refactored by moving the API key and endpoint into a configuration object, adding input validation, and improving error handling with the axios parameter object. The user then asked about adding an autocomplete feature with a debounce delay, and the assistant provided the debounce function, the autocomplete function using the OpenWeather find endpoint, and the HTML structure with an event listener, all wrapped in a complete HTML file. Finally, the user provided a second code snippet using ES2021 imports and asked to complete the TODO to display temperature in °C, humidity in %, and weather conditions with icons; the assistant completed the JavaScript by adding a displayWeatherData function that updates the DOM elements with the extracted data and provided the corresponding HTML and CSS structure.",
+      "malformed": false,
+      "segments": 8,
+      "calls": 9,
+      "context_chars": 171963,
+      "digest_chars": 1395,
+      "seconds": 844.62
+    },
+    {
+      "label": "BEAM 100K chat 2 session 2",
+      "digest": "The session began with the user working on improving error handling and robustness across three parts of a weather app: the OpenWeather API v2.5 weather fetch, the OpenWeather Geocoding API v1 autocomplete, and the dynamic DOM rendering of weather data. The user's existing `getWeather` function, which used a basic try-catch block, was improved by checking `response.ok` and throwing specific errors for HTTP 404 (City not found) and 400 (Invalid request), plus handling network-level `TypeError`s, re-throwing them with user-friendly messages. Next, the autocomplete implementation with a 300ms debounce was refactored into a `fetchCities` function, adding specific 401 Unauthorized handling and displaying the city's country alongside its name. A third function, `fetchWeatherData`, was given the same 401/404 error handling structure. The `weatherDisplay.js` file, which rendered temperature, humidity, and the weather icon, was wrapped in a `handleError` function with a data validity check in the `.then()` block. On CSS, the assistant reviewed the 320px, 768px, 1440px, and 1441px breakpoints, suggesting using `rem` units on the `html` element as the base font size for better scalability. The session concluded with the user asking for a loading spinner, and the assistant provided the HTML, CSS, and JavaScript to show and hide a spinner around the `fetchCities` call.",
+      "malformed": false,
+      "segments": 7,
+      "calls": 8,
+      "context_chars": 167261,
+      "digest_chars": 1378,
+      "seconds": 811.51
+    },
+    {
+      "label": "BEAM 100K chat 2 session 3",
+      "digest": "The session covered three distinct technical topics: JavaScript error handling, CSS layout shifts, and Git commit message conventions. On error handling, the user presented a basic try-catch deployment block and an async fetch function using OpenWeather API v2.5; the assistant refined it with specific error message logic for TypeError and HTTP status codes (404, 401, 429). The user then showed a React-styled ErrorBoundary component, which the assistant rewrote in vanilla JavaScript to work with a container element, including a retry button and a separate updateUI method. The user added a GitHub Actions CI pipeline to lint, test with Jest v29, and deploy on push to main, hitting an `Error: Cannot find module 'eslint'` which the assistant diagnosed as missing dependencies, recommending `eslint` be listed as a dev dependency. For deployment, the user was guided to install `gh-pages` as a dev dependency, update `package.json` with a `deploy` script, and configure the GitHub Actions workflow. For the custom domain `weather-christina.com`, the plan was to set the domain in GitHub Pages settings, add a CNAME record to `<username>.github.io`, and add A records for the GitHub Pages IP addresses, with HTTPS enforced by a protocol redirect in `index.html`. On testing, the user reported reaching 85% coverage as of April 9, 2024, and test cases were written for the remaining 15%, covering empty responses, network errors, and the debounce logic for the autocomplete feature. API latency was optimized to 220ms using caching, and further reductions were suggested via prefetching common cities, batch requests, CDN integration, and local storage caching. Finally, an hourly uptime and API quota monitoring script using `axios` and `@slack/web-api` was drafted, to be scheduled into the GitHub Actions CI pipeline to alert the Slack channel if uptime dropped below 99% or if the quota fell below 100.",
+      "malformed": false,
+      "segments": 7,
+      "calls": 8,
+      "context_chars": 162093,
+      "digest_chars": 1908,
+      "seconds": 843.31
+    }
+  ]
+}
