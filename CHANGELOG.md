@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-08-26 — the dream section moves out of service.py)
+- **`service.py` had grown to 7.4k lines — a quarter of the package — with
+  every dream-cycle feature since June accreting onto `MemoryService`.**
+  Pure code motion, no behavior change: the dream consolidation cycle
+  (pull/extract/commit and its stages — outcome inference, lesson
+  synthesis, session digests), the deep-dream pass with its judge, and
+  their dream-only private helpers (41 methods, ~2.3k lines) now live in
+  `service_dream.py` as the `DreamOps` mixin that `MemoryService`
+  inherits. Every method keeps its name, signature, and lock discipline;
+  callers are unaffected. The lock-discipline guard
+  (`tests/test_service_lock_discipline.py`) now scans both files and
+  merges their call graphs before the fixpoint — red-checked against a
+  doctored mixin to prove the extended scan is load-bearing. Moved code
+  logs under `pseudolife_memory.service_dream` (was `.service`).
+
 ### Added (2026-08-26 — reranker training sees facts, and the audit nominates graduation candidates; schema v34)
 - **The learned-reranker training log recorded only half of every search
   response: served entries, never the cortex facts served above them —

@@ -28,9 +28,11 @@ today; noted so nobody mistakes a green run for proof against them):
 lambdas inherit the lock state of their definition site even if invoked
 later; a nested ``def`` resets to unlocked and flags under the inner
 name; allowlist matching is by bare function name; manual
-``self._lock.acquire()``/``release()`` is not recognized as locking; only
-``service.py`` is scanned, so a mixin split of the class needs a second
-guard.
+``self._lock.acquire()``/``release()`` is not recognized as locking; the
+scan covers ``service.py`` plus the ``DreamOps`` mixin in
+``service_dream.py`` (their call graphs are merged before the fixpoint,
+since the mixin's methods run on the same instance) — any further split
+of the class must be added to ``SERVICE_FILES``.
 
 If ``test_storage_calls_hold_service_lock`` fails on a NEW method: either
 wrap the storage use in ``with self._lock:``, or add the helper to
@@ -44,8 +46,12 @@ import ast
 import textwrap
 from pathlib import Path
 
-SERVICE_PY = (Path(__file__).resolve().parent.parent
-              / "pseudolife_memory" / "service.py")
+_PKG = Path(__file__).resolve().parent.parent / "pseudolife_memory"
+# Every file that contributes methods to the MemoryService instance. The
+# lock-discipline contract spans the whole class, so all parts are scanned
+# and their call graphs merged before the fixpoint.
+SERVICE_FILES = (_PKG / "service.py", _PKG / "service_dream.py")
+SERVICE_PY = SERVICE_FILES[0]
 
 # Private helpers whose callers hold the lock (verified mechanically by
 # test_allowlisted_helpers_only_called_under_lock, seeded by the
@@ -228,14 +234,20 @@ def find_unlocked_storage_sites(source: str) -> list[tuple[str, int]]:
     return scan_source(source).unlocked_sites
 
 
-def find_unlocked_helper_paths(source: str) -> list[str]:
+def find_unlocked_helper_paths(*sources: str) -> list[str]:
     """Fixpoint over call sites: a function is lock-held when every
     ``self.<name>()`` call of it is either lexically under the lock or
     made from a function that is itself lock-held. Returns the
     allowlisted helpers for which that fails, with the offending callers.
     Functions never called via ``self.`` (public API entry points) are
-    treated as NOT lock-held, which is the safe direction."""
-    scan = scan_source(source)
+    treated as NOT lock-held, which is the safe direction. Multiple
+    sources (the mixin split) are scanned separately and their call
+    sites merged, since all methods share one instance and one lock."""
+    scan = _Scan()
+    for source in sources:
+        part = scan_source(source)
+        scan.unlocked_sites.extend(part.unlocked_sites)
+        scan.call_sites.extend(part.call_sites)
     callers: dict[str, list[tuple[bool, str | None]]] = {}
     for callee, under_lock, func in scan.call_sites:
         callers.setdefault(callee, []).append((under_lock, func))
@@ -286,8 +298,10 @@ def find_unlocked_helper_paths(source: str) -> list[str]:
 
 
 def test_storage_calls_hold_service_lock():
-    sites = find_unlocked_storage_sites(
-        SERVICE_PY.read_text(encoding="utf-8"))
+    sites = [site
+             for path in SERVICE_FILES
+             for site in find_unlocked_storage_sites(
+                 path.read_text(encoding="utf-8"))]
     assert not sites, (
         "storage/graph used outside self._lock (add the lock, or add the "
         "helper to CALLER_HOLDS_LOCK — the fixpoint test will then verify "
@@ -296,7 +310,8 @@ def test_storage_calls_hold_service_lock():
 
 
 def test_allowlisted_helpers_only_called_under_lock():
-    bad = find_unlocked_helper_paths(SERVICE_PY.read_text(encoding="utf-8"))
+    bad = find_unlocked_helper_paths(
+        *(path.read_text(encoding="utf-8") for path in SERVICE_FILES))
     assert not bad, (
         "CALLER_HOLDS_LOCK entries reachable without the lock: "
         + "; ".join(bad))

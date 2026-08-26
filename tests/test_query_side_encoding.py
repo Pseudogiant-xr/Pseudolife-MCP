@@ -24,7 +24,10 @@ from pathlib import Path
 import pytest
 import torch
 
-_SERVICE_PY = Path(__file__).resolve().parent.parent / "pseudolife_memory" / "service.py"
+_PKG = Path(__file__).resolve().parent.parent / "pseudolife_memory"
+# Both halves of the MemoryService class: service.py and the DreamOps
+# mixin in service_dream.py. Any further split must be added here.
+_SERVICE_FILES = (_PKG / "service.py", _PKG / "service_dream.py")
 
 # Every (enclosing function, embedder method) pair behind a ``self._embedder.<method>(...)``
 # call in pseudolife_memory/service.py, per the call-site rule in this file's module
@@ -107,14 +110,18 @@ def _collect_embedder_call_sites(source_path: Path) -> set[tuple[str, str]]:
 
 
 def test_embedder_call_site_inventory_pinned():
-    """AST guard scoped to pseudolife_memory/service.py ONLY -- it does not walk
+    """AST guard scoped to the MemoryService class sources (service.py plus the
+    DreamOps mixin in service_dream.py) ONLY -- it does not walk
     reference_bank.py:124 or storage/migrate.py:73; extend ``_collect_embedder_call_sites``
     callers to those files if this test should also cover them. A new
-    ``self._embedder.<method>()`` call in service.py is a (function, method) pair not
+    ``self._embedder.<method>()`` call in either file is a (function, method) pair not
     already in EMBEDDER_CALL_SITE_INVENTORY, so this fails RED naming the unclassified
     site until its author adds a row there under the module docstring's query/document
     rule -- the same forcing function the original 23-site enumeration applied."""
-    assert _collect_embedder_call_sites(_SERVICE_PY) == EMBEDDER_CALL_SITE_INVENTORY
+    found = set()
+    for path in _SERVICE_FILES:
+        found |= _collect_embedder_call_sites(path)
+    assert found == EMBEDDER_CALL_SITE_INVENTORY
 
 
 class RecordingEmbedder:

@@ -595,7 +595,7 @@ def test_dream_run_scalar_claim_dropped_on_set_slot(svc, caplog):
     before = sorted(m["value"] for m in
                     svc.cortex_lookup("user", "restaurants tried")["members"])
     svc.store("the restaurant tried is Rosa's Diner v2", source="notes")
-    with caplog.at_level("INFO", logger="pseudolife_memory.service"):
+    with caplog.at_level("INFO", logger="pseudolife_memory.service_dream"):
         out = svc.dream_run(_StubExtractor([{
             "entity": "user", "attribute": "restaurants tried",
             "value": "Rosa's Diner v2", "confidence": 0.8, "origin": "agent"}]))
@@ -613,7 +613,7 @@ def test_dream_run_malformed_op_falls_back_to_scalar_with_warning(svc, caplog):
     """A malformed op value must not crash the dream — it degrades to the
     scalar path (bit-identical to no op) with a warning naming the value."""
     svc.store("the team mascot is a fox", source="notes")
-    with caplog.at_level("WARNING", logger="pseudolife_memory.service"):
+    with caplog.at_level("WARNING", logger="pseudolife_memory.service_dream"):
         out = svc.dream_run(_StubExtractor([{
             "entity": "team", "attribute": "mascot", "value": "fox",
             "confidence": 0.8, "origin": "agent", "op": "update"}]))
@@ -673,8 +673,8 @@ def test_dream_run_member_invalid_skips_trace_and_reinforcement(svc):
 
 def test_dream_run_scalar_conflict_skips_trace_and_reinforcement(svc):
     """Regression pin (review minor 1): the trace-skip tuple in
-    dream_run's claim-apply loop (`pseudolife_memory/service.py` ~line
-    3175) was deliberately broadened to cover EVERY `action="contested"`
+    dream_run's claim-apply loop (`pseudolife_memory/service_dream.py`,
+    `_dream_run_locked`) was deliberately broadened to cover EVERY `action="contested"`
     result, not just the aggregate-conversion guard's blocked add — a
     plain weaker-tier scalar conflict from write_fact's own tier guard
     (`CortexStore.write_fact`, `tier_ok = ... _rank(sup) >= _rank(cur.origin)`)

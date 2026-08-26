@@ -1,0 +1,37 @@
+{
+  "comparison": "dream-split refactor equivalence gate",
+  "method": "paired arms, same reproducible Start-Qwen server, same session, sequential runs against the bench DB; pre arm from a git worktree at merge commit b205f797 (pre-move), post arm from the refactor tree",
+  "rungs": {
+    "floor": {
+      "pre": {
+        "gold_recoverable": 0.1,
+        "stale_leak": 0.1,
+        "tokens_per_query": 3.4,
+        "status": "ok"
+      },
+      "post": {
+        "gold_recoverable": 0.1,
+        "stale_leak": 0.1,
+        "tokens_per_query": 3.4,
+        "status": "ok"
+      },
+      "identical_excluding_timing": true
+    },
+    "qwen-27b": {
+      "pre": {
+        "gold_recoverable": 1.0,
+        "stale_leak": 0.0,
+        "tokens_per_query": 13.4,
+        "status": "ok"
+      },
+      "post": {
+        "gold_recoverable": 1.0,
+        "stale_leak": 0.0,
+        "tokens_per_query": 13.4,
+        "status": "ok"
+      },
+      "identical_excluding_timing": true
+    }
+  },
+  "verdict": "PASS \u2014 arms verdict-identical on both rungs"
+}
