@@ -128,6 +128,11 @@ def main() -> int:
     extractor = OpenAICompatExtractor(
         base_url, model,
         max_tokens=max(cfg.extractor_max_tokens, target),
+        # The resolved ops-contract timeout (PSEUDOLIFE_DREAM_TIMEOUT_SECONDS
+        # honoured) — the 240s constructor default trips on full-size
+        # segments: the E4B sidecar prompt-processes ~24 tok/s, so a 24K-char
+        # segment is ~260s+ before generation (measured 2026-08-27).
+        timeout_seconds=r["timeout"],
         # The eval-harness convention: pin the llama-server prompt cache
         # off so repeated probes are comparable (see DreamConfig notes).
         extra_body={"cache_prompt": False})

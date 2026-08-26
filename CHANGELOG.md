@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-08-27 — the sidecar probe timed out on full-size segments)
+- **`evals/digest_sidecar_probe.py` built its extractor with the 240s
+  constructor default instead of the resolved ops-contract timeout**
+  (`PSEUDOLIFE_DREAM_TIMEOUT_SECONDS` honoured, the same resolution the
+  daemon uses — the Docker stack ships 480s for the E4B sidecar for this
+  reason). The default E4B sidecar prompt-processes ~24 tok/s (measured
+  2026-08-27), so every segment at the 24,000-char cap costs ~260s+ before
+  generation and the probe recorded a timeout `ExtractorError` per session
+  instead of a digest.
+
 ### Changed (2026-08-26 — the dream section moves out of service.py)
 - **`service.py` had grown to 7.7k lines — a quarter of the package — with
   every dream-cycle feature since June accreting onto `MemoryService`.**
