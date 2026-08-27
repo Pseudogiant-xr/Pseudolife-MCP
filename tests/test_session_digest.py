@@ -39,7 +39,7 @@ def test_digest_config_defaults():
     cfg = DreamConfig()
     assert cfg.digest_enabled is False          # ships off (design decision 6)
     assert cfg.digest_context_chars == 24000
-    assert cfg.digest_target_chars == 800       # the ratified knob
+    assert cfg.digest_target_chars == 1200      # re-targeted 2026-08-27
     assert cfg.digest_max_per_cycle == 4
     assert "digest" in cfg.exclude_sources      # never re-mined for facts
 

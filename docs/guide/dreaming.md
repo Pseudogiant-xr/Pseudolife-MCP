@@ -355,8 +355,9 @@ closed episode, transport failures hold the cursor, malformed or
 unwritable digests get two attempts before the cursor advances past the
 episode. Long sessions are split on line boundaries at
 `digest_context_chars` (default 24,000) and map-reduce merged; the prose
-length target is `digest_target_chars` (default 800 — the bundled E4B
-sidecar overshoots it ~1.8x in practice). When first enabled, the
+length target is `digest_target_chars` (default 1,200 — re-targeted from
+800 to the length the extractor naturally writes, measured in the
+2026-08-27 sidecar probe). When first enabled, the
 zero-start cursor backfills all history, `digest_max_per_cycle` (default
 4) episodes per dream pass. Default-off: enablement gates on a human
 review of what the configured extractor actually writes —
