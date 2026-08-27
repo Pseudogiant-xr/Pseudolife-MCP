@@ -222,6 +222,21 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   2026-08-05..08-12 production soak reviewed clean. Needs Postgres; an
   events-pass failure never stalls claims. Set `false` to opt out — see
   [Chronicle events](dreaming.md#chronicle-events-schema-v28--dated-occurrences-beside-facts).
+- **Session digests off** (`memory.dream.digest_enabled = false`) — when
+  on, the idle dream cycle writes one narrative prose digest per closed
+  session episode as a retrievable `source="digest"` band entry (never
+  re-mined for facts — `digest` is in `exclude_sources`), and the
+  session briefing's recap renders the digest body. The zero-start
+  cursor backfills history when first enabled,
+  `memory.dream.digest_max_per_cycle` (default `4`) episodes per dream
+  pass. `memory.dream.digest_target_chars` (default `800`) is the prose
+  length target passed to the extractor — the bundled E4B sidecar
+  overshoots it ~1.8x in practice (probe, 2026-08-27) — and
+  `memory.dream.digest_context_chars` (default `24000`) caps the
+  per-call session context, with longer sessions split on line
+  boundaries and map-reduce merged. Default-off pending human review of
+  the sidecar quality probe
+  (`evals/digest_sidecar_probe.py`).
 - **Consolidation quarantine off** (`memory.dream.quarantine_low_trust =
   false`) — when on, a scalar dream claim whose backing entry is
   agent-tier (its `source` maps to origin `agent`) and outside

@@ -312,11 +312,24 @@ def test_briefing_recap_carries_digest_summary(closed_episode):
     assert recap["summary"] == "Hashing was implemented and tested."
 
 
+def _drain_dream_backlog(svc):
+    """Pull/commit until empty (pull's "cursor" is the PRE-pull cursor —
+    commit the max pulled timestamp; bounded so a regression fails loud)."""
+    for _ in range(50):
+        pulled = svc.dream_pull(limit=100)
+        if not pulled["entries"]:
+            return
+        svc.dream_commit(max(e["timestamp"] for e in pulled["entries"]))
+    pytest.fail("dream backlog did not drain in 50 pulls")
+
+
 def test_dream_status_counts_digest_pending_and_fires(closed_episode):
-    """The sweep gates dream_run on would_fire — a digest backlog must
-    count, or a quiet bank never backfills. Gated on a configured
+    """The sweep gates dream_run on would_fire — a digest backlog on a
+    QUIET bank must count, or it never backfills. Gated on a configured
     extractor endpoint, like infer_outcomes."""
     svc, _root = closed_episode
+    svc.config.memory.lessons.infer_outcomes = False     # isolate digests
+    _drain_dream_backlog(svc)
     st = svc.dream_status()
     assert st["digests"]["pending"] == 0          # no endpoint configured
     svc.config.memory.dream.extractor_base_url = "http://example.test/v1"
@@ -327,6 +340,45 @@ def test_dream_status_counts_digest_pending_and_fires(closed_episode):
     svc.config.memory.dream.digest_enabled = False
     st = svc.dream_status()
     assert st["digests"]["pending"] == 0
+
+
+def test_digest_backlog_defers_to_consolidation_cadence(closed_episode):
+    """Digests run only on the empty-pull branch, so a digest backlog must
+    NOT fire the sweep while entries are pending below the normal cadence
+    thresholds — that would consolidate a partial batch every tick and
+    make zero digest progress (pre-PR review finding, 2026-08-27)."""
+    svc, _root = closed_episode
+    svc.config.memory.lessons.infer_outcomes = False     # isolate digests
+    svc.config.memory.dream.extractor_base_url = "http://example.test/v1"
+    svc.config.memory.dream.extractor_model = "test-model"
+    st = svc.dream_status()
+    assert st["digests"]["pending"] == 1
+    assert 1 <= st["backlog"] < svc.config.memory.dream.min_batch
+    assert st["idle_seconds"] < svc.config.memory.dream.idle_seconds
+    assert st["would_fire"] is False
+
+
+def test_stage_write_failure_bounded_and_never_breaks_dream(closed_episode):
+    """A failing digest write must not escape the stage (it would abort
+    the stages after it and re-pay the map-reduce every dream): bounded
+    like the malformed path — one held-cursor retry, then advance past."""
+    svc, root_id = closed_episode
+
+    def _boom(text, episode_id, title):
+        raise RuntimeError("insert_entry: connection is broken")
+
+    svc._store_digest = _boom
+    assert svc.generate_digests_stage(
+        _FakeDigestExtractor(["The digest."])) == {"scanned": 1, "written": 0}
+    with svc._lock:
+        assert svc._load_digest_cursor()["retry"] == {root_id: 1}
+        assert len(svc._pending_digest_candidates()) == 1   # cursor held
+    assert svc.generate_digests_stage(
+        _FakeDigestExtractor(["The digest."])) == {"scanned": 1, "written": 0}
+    with svc._lock:
+        assert svc._load_digest_cursor()["retry"] == {}
+        assert svc._pending_digest_candidates() == []       # advanced past
+    assert _digest_entries(svc, root_id) == []
 
 
 def test_dream_run_idle_cycle_runs_digest_stage(closed_episode):

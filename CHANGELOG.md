@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-08-27 — digest-stage hardening from the pre-PR review)
+- **A failing digest write escaped `generate_digests_stage`, aborting the
+  dream stages after it and re-paying the full map-reduce every dream
+  while the failure persisted** (the 2026-07-06 dream-stall shape: a
+  broken connection fails deterministically, and neither the cursor nor
+  the retry ledger was touched). The write is now bounded like the
+  malformed path — one held-cursor retry, then the cursor advances past
+  the episode with a warning.
+- **A pending session digest pinned the sweep trigger unconditionally,
+  so during a backfill every 10-minute tick fired a dream that
+  consolidated a partial batch (backlog 1, mid-session) and made zero
+  digest progress** — digests run only on the empty-pull branch of the
+  cycle, by design. `would_fire` now counts the digest backlog only when
+  the pull would be empty; the normal `min_batch`/`idle_seconds` cadence
+  drains entries first and the digest backlog fires the quiet ticks. The
+  claims-branch dream result now carries the `digests` key too, so the
+  result shape is stable for observers.
+
 ### Fixed (2026-08-27 — the sidecar probe timed out on full-size segments)
 - **`evals/digest_sidecar_probe.py` built its extractor with the 240s
   constructor default instead of the resolved ops-contract timeout**

@@ -306,7 +306,32 @@ class DreamOps:
                 span = d0 if d0 == d1 else f"{d0}–{d1}"
                 header = (f"Session digest: {cand['title']} "
                           f"({span}, {cand['n_entries']} entries)")
-                self._store_digest(f"{header}\n{digest}", rid, cand["title"])
+                try:
+                    self._store_digest(f"{header}\n{digest}", rid,
+                                       cand["title"])
+                except Exception as exc:  # noqa: BLE001 — never break a dream
+                    # Storage/embedder failure: bounded like the malformed
+                    # path — one held-cursor retry, then advance past. An
+                    # unguarded raise here aborts the stages after this one
+                    # and re-pays the full map-reduce every dream while the
+                    # failure persists (the 2026-07-06 dream-stall shape: a
+                    # broken connection fails deterministically).
+                    attempts = int(cur["retry"].get(rid, 0)) + 1
+                    if attempts >= 2:
+                        cur["retry"].pop(rid, None)
+                        cur["ts"] = cand["ended_at"]
+                        self._save_digest_cursor(cur)
+                        logger.warning(
+                            "session digest: advancing past episode %s "
+                            "after %d failed writes (%s)", rid, attempts, exc)
+                        continue
+                    cur["retry"][rid] = attempts
+                    self._save_digest_cursor(cur)
+                    logger.warning(
+                        "session digest: write failed for episode %s "
+                        "(attempt %d): %s; will retry next dream",
+                        rid, attempts, exc)
+                    break                      # keep episode order
                 written += 1
                 cur["retry"].pop(rid, None)
                 cur["ts"] = cand["ended_at"]
@@ -1265,6 +1290,11 @@ class DreamOps:
         return {"pulled": len(entries), "claims": sum(tally.values()),
                 "cursor": newest, "relations": relations_n, **tally,
                 "alias_candidates": alias_candidates,
+                # Digests run only on the empty-pull branch (idle cycle);
+                # the key is present on both exits so the result shape is
+                # stable for observers.
+                "digests": {"scanned": 0, "written": 0,
+                            "skipped": "claims-branch"},
                 "lessons": lessons, "outcome_inference": outcome_inference,
                 "graph_insight": graph_insight,
                 "literal_flagged": literal_flagged,
@@ -1606,7 +1636,12 @@ class DreamOps:
             backlog >= cfg.min_batch
             or (backlog >= 1 and idle >= cfg.idle_seconds)
             or infer_pending >= 1
-            or digest_pending >= 1
+            # Digests run only on the empty-pull branch (idle cycle, by
+            # design), so a digest backlog fires the sweep only once the
+            # pull would be empty. Unconditional firing consolidated a
+            # partial batch every tick while entries were pending — zero
+            # digest progress at broken cadence (pre-PR review, 2026-08-27).
+            or (digest_pending >= 1 and backlog == 0)
         ))
         from pseudolife_memory.memory.dream import _status_extractor_fields
         return {"backlog": backlog, "idle_seconds": idle,

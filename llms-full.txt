@@ -1928,7 +1928,15 @@ The auto-sweep (Tier 2) fires when:
 backlog ≥ min_batch (8)
   OR  (backlog ≥ 1 AND idle ≥ idle_seconds (600s))
   OR  an episode is awaiting outcome inference
+  OR  (an episode is awaiting a session digest AND backlog = 0)
 ```
+
+The digest condition is gated on an empty backlog because the digest
+stage runs only on the empty-pull (idle) branch of the dream cycle: with
+entries still pending, firing on digest backlog alone would consolidate a
+partial batch every sweep tick without making digest progress. The normal
+cadence drains the entries first; the digest backlog then fires the quiet
+ticks.
 
 `idle` is time since the newest band entry, not since the last request — a
 session that only *reads* stays quiescent. Polled every
@@ -1951,6 +1959,30 @@ the entire time regardless.
 tokens you already pay for (a scheduled daily dream is small but non-zero).
 Tier 2 with a *cloud* endpoint sends memory text off-box — a local model
 (e.g. Ollama) keeps it on-machine.
+
+## Session digests (opt-in) — one prose memory per closed session
+
+With `memory.dream.digest_enabled` on, the idle dream cycle writes one
+narrative prose digest per closed session episode — a mid-density layer
+between raw turns and atomic facts, aimed at arc-shaped questions ("how
+did the deadline change and why") that no single entry answers. Each
+digest is a normal `source="digest"` band entry stamped to the episode it
+summarizes: it competes in ordinary dense retrieval, is filterable like
+any source, and is never re-mined for facts (`digest` is in
+`exclude_sources`). The session briefing's recap renders the digest body
+for the most recently closed session.
+
+Mechanics mirror outcome inference: a cursor advances monotonically per
+closed episode, transport failures hold the cursor, malformed or
+unwritable digests get two attempts before the cursor advances past the
+episode. Long sessions are split on line boundaries at
+`digest_context_chars` (default 24,000) and map-reduce merged; the prose
+length target is `digest_target_chars` (default 800 — the bundled E4B
+sidecar overshoots it ~1.8x in practice). When first enabled, the
+zero-start cursor backfills all history, `digest_max_per_cycle` (default
+4) episodes per dream pass. Default-off: enablement gates on a human
+review of what the configured extractor actually writes —
+`evals/digest_sidecar_probe.py` generates that evidence.
 
 ## Dream runs — audit and rollback (schema v27)
 
@@ -2617,6 +2649,21 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   2026-08-05..08-12 production soak reviewed clean. Needs Postgres; an
   events-pass failure never stalls claims. Set `false` to opt out — see
   [Chronicle events](dreaming.md#chronicle-events-schema-v28--dated-occurrences-beside-facts).
+- **Session digests off** (`memory.dream.digest_enabled = false`) — when
+  on, the idle dream cycle writes one narrative prose digest per closed
+  session episode as a retrievable `source="digest"` band entry (never
+  re-mined for facts — `digest` is in `exclude_sources`), and the
+  session briefing's recap renders the digest body. The zero-start
+  cursor backfills history when first enabled,
+  `memory.dream.digest_max_per_cycle` (default `4`) episodes per dream
+  pass. `memory.dream.digest_target_chars` (default `800`) is the prose
+  length target passed to the extractor — the bundled E4B sidecar
+  overshoots it ~1.8x in practice (probe, 2026-08-27) — and
+  `memory.dream.digest_context_chars` (default `24000`) caps the
+  per-call session context, with longer sessions split on line
+  boundaries and map-reduce merged. Default-off pending human review of
+  the sidecar quality probe
+  (`evals/digest_sidecar_probe.py`).
 - **Consolidation quarantine off** (`memory.dream.quarantine_low_trust =
   false`) — when on, a scalar dream claim whose backing entry is
   agent-tier (its `source` maps to origin `agent`) and outside
@@ -3854,7 +3901,7 @@ mitigation that is off by default is a mitigation you have not got yet.
 | **Engram cross-index** | Attribution and cleanup: every cortex fact links back to the source entries that produced it, so a bad fact is traceable to the entry that fed it and the rest of that entry's output can be found | On |
 | **Supersession history** (**HLC**-ordered) | Audit. Nothing is silently overwritten, so "when did this value change, and which writer changed it" is answerable after the fact via `memory_history` | On |
 | **Writer keying / per-principal tokens** | Narrows the blast radius of a leaked credential: a matched per-principal token *becomes* its caller's writer id, where the singular shared token's holder may assert any writer via `X-PL-Writer` | Single token / open loopback |
-| **Source exclusion from consolidation** (`memory.dream.exclude_sources`, default `consolidation` / `reflection` / `status` / `log`) | Keeps high-volume, low-value chatter out of the dream's input entirely — those entries stay searchable but are never mined for facts or graph edges, shrinking the surface that can reach canonical authority | On |
+| **Source exclusion from consolidation** (`memory.dream.exclude_sources`, default `consolidation` / `reflection` / `status` / `log` / `digest`) | Keeps high-volume, low-value chatter out of the dream's input entirely — those entries stay searchable but are never mined for facts or graph edges, shrinking the surface that can reach canonical authority | On |
 | **Serving-side quarantine** (`stale_policy`: `annotate` \| `demote` \| `quarantine`) | Not poisoning per se, but the same family: a fact past twice its TTL is flagged `stale`, can be demoted below fresh records, or — at `quarantine` — has its `value` replaced by a wrapper with the original moved to `last_known_value`, so a rotted value cannot be read as current. `stale: true` means *re-verify at the source*, never "the value is wrong" | `annotate` (flag only) |
 | **`memory_forget` + engram links** | Remediation. Deletion is the only reliable remedy; the links tell you what else to retire | On |
 
