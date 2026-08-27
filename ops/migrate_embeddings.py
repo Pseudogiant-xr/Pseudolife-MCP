@@ -73,8 +73,8 @@ the ``facts`` table DDL in ``storage/schema.py``, and
 read or write it). It is a pure in-memory, lazily-recomputed field:
 ``hydrate_cortex`` always sets it to ``None`` for every restored record,
 and the two call sites that need it backfill on demand
-(``MemoryService.cortex_dedup``, service.py ~line 2576;
-``MemoryService._resolve_dream_slot``, service.py ~line 2605) via
+(``MemoryService.cortex_dedup`` in service.py;
+``DreamOps._resolve_dream_slot`` in service_dream.py) via
 ``encode_single(f"{entity} {attribute}".strip())`` against whatever
 embedder is live at the time. This already happens on every daemon
 restart today, dimension change or not — there is nothing stored to

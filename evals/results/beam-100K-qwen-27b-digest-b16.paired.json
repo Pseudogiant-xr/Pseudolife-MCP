@@ -1,0 +1,106 @@
+{
+  "source": "beam-100K-qwen-27b-digest-b16.jsonl",
+  "comparison": "hybrid_digest minus hybrid (paired per row)",
+  "overall": {
+    "n": 400,
+    "delta_mean": -0.0098,
+    "delta_se": 0.0099,
+    "ci95": [
+      -0.0292,
+      0.0097
+    ]
+  },
+  "types": {
+    "abstention": {
+      "n": 40,
+      "delta_mean": -0.05,
+      "delta_se": 0.0349,
+      "ci95": [
+        -0.1184,
+        0.0184
+      ]
+    },
+    "contradiction_resolution": {
+      "n": 40,
+      "delta_mean": 0.0063,
+      "delta_se": 0.0341,
+      "ci95": [
+        -0.0605,
+        0.073
+      ]
+    },
+    "event_ordering": {
+      "n": 40,
+      "delta_mean": -0.0143,
+      "delta_se": 0.0187,
+      "ci95": [
+        -0.0509,
+        0.0223
+      ]
+    },
+    "information_extraction": {
+      "n": 40,
+      "delta_mean": -0.0187,
+      "delta_se": 0.0151,
+      "ci95": [
+        -0.0483,
+        0.0108
+      ]
+    },
+    "instruction_following": {
+      "n": 40,
+      "delta_mean": -0.025,
+      "delta_se": 0.025,
+      "ci95": [
+        -0.074,
+        0.024
+      ]
+    },
+    "knowledge_update": {
+      "n": 40,
+      "delta_mean": -0.0125,
+      "delta_se": 0.0456,
+      "ci95": [
+        -0.1019,
+        0.0769
+      ]
+    },
+    "multi_session_reasoning": {
+      "n": 40,
+      "delta_mean": -0.0233,
+      "delta_se": 0.0288,
+      "ci95": [
+        -0.0799,
+        0.0332
+      ]
+    },
+    "preference_following": {
+      "n": 40,
+      "delta_mean": 0.0,
+      "delta_se": 0.0,
+      "ci95": [
+        0.0,
+        0.0
+      ]
+    },
+    "summarization": {
+      "n": 40,
+      "delta_mean": 0.0464,
+      "delta_se": 0.02,
+      "ci95": [
+        0.0072,
+        0.0855
+      ]
+    },
+    "temporal_reasoning": {
+      "n": 40,
+      "delta_mean": -0.0063,
+      "delta_se": 0.0555,
+      "ci95": [
+        -0.1151,
+        0.1026
+      ]
+    }
+  },
+  "control_note": "rag arm is the no-digest control at identical width; its cross-run movement bounds any cross-run claim"
+}

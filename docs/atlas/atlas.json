@@ -369,7 +369,8 @@
    "s": "one instance · coarse lock",
    "p": "pseudolife_memory/service.py",
    "d": [
-    "Owns CMS, cortex, world, lessons, graph, refbank, episodes (~5,100 lines)",
+    "Owns CMS, cortex, world, lessons, graph, refbank, episodes (~5,300 lines)",
+    "Dream + deep-dream methods live in service_dream.py (DreamOps mixin — one class, one lock at runtime)",
     "_resolve_writer: X-PL-Session → hook pointer (6h TTL) → legacy header",
     "PersistenceError counter surfaces save failures via /health",
     "No LLM inside — deterministic Python; the dream is the only LLM path"

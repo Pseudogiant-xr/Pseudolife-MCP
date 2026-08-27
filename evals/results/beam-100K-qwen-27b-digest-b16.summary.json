@@ -1,0 +1,86 @@
+{
+  "benchmark": "BEAM",
+  "tier": "100K",
+  "extractor": "qwen-27b",
+  "n_questions": 400,
+  "n_chats": 20,
+  "scoring_note": "paper-faithful float mean; _intfaithful mirrors upstream int() flooring of 0.5",
+  "arms": {
+    "rag": {
+      "score": 0.627,
+      "score_intfaithful": 0.6009
+    },
+    "hybrid": {
+      "score": 0.6349,
+      "score_intfaithful": 0.6071
+    },
+    "hybrid_digest": {
+      "score": 0.6251,
+      "score_intfaithful": 0.5958
+    }
+  },
+  "types": {
+    "abstention": {
+      "n": 40,
+      "rag": 0.725,
+      "hybrid": 0.65,
+      "hybrid_digest": 0.6
+    },
+    "contradiction_resolution": {
+      "n": 40,
+      "rag": 0.4656,
+      "hybrid": 0.525,
+      "hybrid_digest": 0.5312
+    },
+    "event_ordering": {
+      "n": 40,
+      "rag": 0.4898,
+      "hybrid": 0.5242,
+      "hybrid_digest": 0.5099
+    },
+    "information_extraction": {
+      "n": 40,
+      "rag": 0.7448,
+      "hybrid": 0.7646,
+      "hybrid_digest": 0.7458
+    },
+    "instruction_following": {
+      "n": 40,
+      "rag": 0.675,
+      "hybrid": 0.6937,
+      "hybrid_digest": 0.6687
+    },
+    "knowledge_update": {
+      "n": 40,
+      "rag": 0.6125,
+      "hybrid": 0.6438,
+      "hybrid_digest": 0.6312
+    },
+    "multi_session_reasoning": {
+      "n": 40,
+      "rag": 0.5605,
+      "hybrid": 0.6618,
+      "hybrid_digest": 0.6384
+    },
+    "preference_following": {
+      "n": 40,
+      "rag": 0.8688,
+      "hybrid": 0.8438,
+      "hybrid_digest": 0.8438
+    },
+    "summarization": {
+      "n": 40,
+      "rag": 0.416,
+      "hybrid": 0.4108,
+      "hybrid_digest": 0.4572
+    },
+    "temporal_reasoning": {
+      "n": 40,
+      "rag": 0.7125,
+      "hybrid": 0.6312,
+      "hybrid_digest": 0.625
+    }
+  },
+  "hybrid_top_k": 16,
+  "rag_top_k": 16
+}

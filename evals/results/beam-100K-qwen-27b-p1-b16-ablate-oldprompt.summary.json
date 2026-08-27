@@ -1,0 +1,93 @@
+{
+  "ablation": "answer prompt (old vs Phase-1 contradiction)",
+  "source_run": "beam-100K-qwen-27b-p1-b16",
+  "n_questions": 400,
+  "n_chats": 20,
+  "note": "paired per-row: identical contexts (budget + ordinals), identical local judge; delta is the prompt term alone",
+  "arms": {
+    "hybrid": {
+      "score": 0.5951,
+      "source_score": 0.6226,
+      "paired_delta_new_minus_old": 0.0274,
+      "paired_delta_se": 0.0116
+    },
+    "rag": {
+      "score": 0.6163,
+      "source_score": 0.6425,
+      "paired_delta_new_minus_old": 0.0261,
+      "paired_delta_se": 0.0127
+    }
+  },
+  "types": {
+    "abstention": {
+      "n": 40,
+      "hybrid": 0.65,
+      "hybrid_delta": 0.0,
+      "rag": 0.7,
+      "rag_delta": 0.025
+    },
+    "contradiction_resolution": {
+      "n": 40,
+      "hybrid": 0.3344,
+      "hybrid_delta": 0.1625,
+      "rag": 0.325,
+      "rag_delta": 0.175
+    },
+    "event_ordering": {
+      "n": 40,
+      "hybrid": 0.4564,
+      "hybrid_delta": 0.0421,
+      "rag": 0.4892,
+      "rag_delta": -0.0174
+    },
+    "information_extraction": {
+      "n": 40,
+      "hybrid": 0.6948,
+      "hybrid_delta": 0.0802,
+      "rag": 0.7344,
+      "rag_delta": 0.0646
+    },
+    "instruction_following": {
+      "n": 40,
+      "hybrid": 0.6813,
+      "hybrid_delta": 0.0187,
+      "rag": 0.7063,
+      "rag_delta": 0.0375
+    },
+    "knowledge_update": {
+      "n": 40,
+      "hybrid": 0.6,
+      "hybrid_delta": 0.0063,
+      "rag": 0.5625,
+      "rag_delta": 0.0625
+    },
+    "multi_session_reasoning": {
+      "n": 40,
+      "hybrid": 0.6238,
+      "hybrid_delta": -0.0133,
+      "rag": 0.6463,
+      "rag_delta": -0.0508
+    },
+    "preference_following": {
+      "n": 40,
+      "hybrid": 0.9,
+      "hybrid_delta": -0.0437,
+      "rag": 0.9125,
+      "rag_delta": -0.0063
+    },
+    "summarization": {
+      "n": 40,
+      "hybrid": 0.4105,
+      "hybrid_delta": -0.0282,
+      "rag": 0.4184,
+      "rag_delta": -0.0037
+    },
+    "temporal_reasoning": {
+      "n": 40,
+      "hybrid": 0.6,
+      "hybrid_delta": 0.05,
+      "rag": 0.6687,
+      "rag_delta": -0.025
+    }
+  }
+}

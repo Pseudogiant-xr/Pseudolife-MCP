@@ -306,7 +306,15 @@ The auto-sweep (Tier 2) fires when:
 backlog ≥ min_batch (8)
   OR  (backlog ≥ 1 AND idle ≥ idle_seconds (600s))
   OR  an episode is awaiting outcome inference
+  OR  (an episode is awaiting a session digest AND backlog = 0)
 ```
+
+The digest condition is gated on an empty backlog because the digest
+stage runs only on the empty-pull (idle) branch of the dream cycle: with
+entries still pending, firing on digest backlog alone would consolidate a
+partial batch every sweep tick without making digest progress. The normal
+cadence drains the entries first; the digest backlog then fires the quiet
+ticks.
 
 `idle` is time since the newest band entry, not since the last request — a
 session that only *reads* stays quiescent. Polled every
@@ -329,6 +337,30 @@ the entire time regardless.
 tokens you already pay for (a scheduled daily dream is small but non-zero).
 Tier 2 with a *cloud* endpoint sends memory text off-box — a local model
 (e.g. Ollama) keeps it on-machine.
+
+## Session digests (opt-in) — one prose memory per closed session
+
+With `memory.dream.digest_enabled` on, the idle dream cycle writes one
+narrative prose digest per closed session episode — a mid-density layer
+between raw turns and atomic facts, aimed at arc-shaped questions ("how
+did the deadline change and why") that no single entry answers. Each
+digest is a normal `source="digest"` band entry stamped to the episode it
+summarizes: it competes in ordinary dense retrieval, is filterable like
+any source, and is never re-mined for facts (`digest` is in
+`exclude_sources`). The session briefing's recap renders the digest body
+for the most recently closed session.
+
+Mechanics mirror outcome inference: a cursor advances monotonically per
+closed episode, transport failures hold the cursor, malformed or
+unwritable digests get two attempts before the cursor advances past the
+episode. Long sessions are split on line boundaries at
+`digest_context_chars` (default 24,000) and map-reduce merged; the prose
+length target is `digest_target_chars` (default 800 — the bundled E4B
+sidecar overshoots it ~1.8x in practice). When first enabled, the
+zero-start cursor backfills all history, `digest_max_per_cycle` (default
+4) episodes per dream pass. Default-off: enablement gates on a human
+review of what the configured extractor actually writes —
+`evals/digest_sidecar_probe.py` generates that evidence.
 
 ## Dream runs — audit and rollback (schema v27)
 

@@ -55,21 +55,27 @@ from longmemeval_bench import (  # noqa: E402
 )
 
 
-def arms_for(chronicle: bool, only: str | None = None) -> tuple[str, ...]:
+def arms_for(chronicle: bool, only: str | None = None,
+             digest: bool = False) -> tuple[str, ...]:
     """The answered/judged arms: --chronicle adds hybrid_ev (vanilla
     hybrid + the served events block, same pinned search call — the LME
-    ev2 arm contract). ``only`` (--arms) keeps a comma-separated subset in
-    canonical order — a partial rerun (e.g. rag,hybrid for the
-    budget-matched arm, with rag as the identical-input control) skips
-    arms whose answers the question at hand does not need."""
+    ev2 arm contract); --digest adds hybrid_digest (spec 2026-08-24: the
+    digest-eligible mem block, char-budget-matched to hybrid). ``only``
+    (--arms) keeps a comma-separated subset in canonical order — a
+    partial rerun (e.g. rag,hybrid for the budget-matched arm, with rag
+    as the identical-input control) skips arms whose answers the question
+    at hand does not need."""
     arms = (*ARMS, "hybrid_ev") if chronicle else ARMS
+    if digest:
+        arms = (*arms, "hybrid_digest")
     if only:
         keep = {a.strip() for a in only.split(",") if a.strip()}
         unknown = keep - set(arms)
         if unknown:
             raise SystemExit(
                 f"--arms names {sorted(unknown)} not in {arms} "
-                "(hybrid_ev needs --chronicle)")
+                "(hybrid_ev needs --chronicle; hybrid_digest needs "
+                "--digest)")
         arms = tuple(a for a in arms if a in keep)
     return arms
 
@@ -236,20 +242,45 @@ def format_turn(turn: dict, ordinal: int) -> str:
             f"{turn['role']}: {turn['content']}")
 
 
-def ingest_chat(svc, extractor, turns: list[dict]) -> dict:
+def ingest_chat(svc, extractor, turns: list[dict],
+                digest: bool = False) -> dict:
     """Store every turn; drain the dream backlog at each BEAM batch
-    boundary (the production between-sessions cadence) and at the end."""
+    boundary (the production between-sessions cadence) and at the end.
+
+    ``digest`` (spec 2026-08-24): each BEAM batch becomes one session
+    episode — the digest scope matches the benchmark's session structure —
+    and after the final drain the digest backlog is drained by calling the
+    stage directly (the bench extractor is built directly, not via the
+    PSEUDOLIFE_DREAM_* config, so dream_status's endpoint-gated pending
+    count reads 0 here and cannot drive the drain). Episode header dates
+    are ingest-time wall clock; the chat's own time anchors ride the turn
+    texts inside the digest body."""
     tally = {"turns": 0, "dreams": 0, "claims": 0, "superseded": 0,
              "literal_dropped": 0, "events_inserted": 0,
              "events_pass_failures": 0}
     current_batch = None
     for i, turn in enumerate(turns, 1):
         if current_batch is not None and turn["batch"] != current_batch:
+            if digest:
+                svc.episode_end_session(f"beam-{current_batch}",
+                                        run_dream=False)
             _dream_until_drained(svc, extractor, tally)
+        if digest and turn["batch"] != current_batch:
+            svc.episode_start_session(f"beam-{turn['batch']}",
+                                      f"session {turn['batch']}")
         current_batch = turn["batch"]
         svc.store(format_turn(turn, i), source="beam")
         tally["turns"] += 1
+    if digest and current_batch is not None:
+        svc.episode_end_session(f"beam-{current_batch}", run_dream=False)
     _dream_until_drained(svc, extractor, tally)
+    if digest:
+        tally["digests"] = 0
+        while True:
+            d = svc.generate_digests_stage(extractor)
+            tally["digests"] += d.get("written", 0)
+            if d.get("scanned", 0) == 0:
+                break
     return tally
 
 
@@ -288,8 +319,10 @@ def run(beam_root: Path, tier: str, extractor_name: str, tag: str,
         chats: str | None, limit_chats: int | None,
         chronicle: bool = False, arms_only: str | None = None,
         hybrid_top_k: int | None = None,
-        rag_top_k: int | None = None) -> None:
+        rag_top_k: int | None = None,
+        digest: bool = False) -> None:
     lme.CHRONICLE = chronicle          # build_contexts reads its module global
+    lme.DIGEST_ARM = digest            # same module-global contract
     # Validate BOTH budget knobs before mutating EITHER module global:
     # build_contexts slices the hybrid turns from a top_k=RAG_TOP_K
     # search, so a hybrid budget wider than the effective rag width would
@@ -319,7 +352,7 @@ def run(beam_root: Path, tier: str, extractor_name: str, tag: str,
         # test_hybrid_top_k_is_read_at_call_time). Default None keeps every
         # prior artifact's hybrid budget byte-identical.
         lme.HYBRID_TOP_K = hybrid_top_k
-    arms = arms_for(chronicle, arms_only)
+    arms = arms_for(chronicle, arms_only, digest)
     ex_url = EXTRACTORS[extractor_name]
     if not probe(ex_url):
         sys.exit(f"no extractor server at {ex_url} — start it first")
@@ -350,8 +383,13 @@ def run(beam_root: Path, tier: str, extractor_name: str, tag: str,
         svc = build_service(tmp)
         svc.config.memory.dream.extract_relations = False
         svc.config.memory.dream.chronicle = chronicle
+        svc.config.memory.dream.digest_enabled = digest
         extractor = _make_extractor(ex_url, None)
-        tally = ingest_chat(svc, extractor, load_chat_turns(chat_dir))
+        tally = ingest_chat(svc, extractor, load_chat_turns(chat_dir),
+                            digest=digest)
+        # Per-chat over-fetch width for build_contexts: the exact digest
+        # population of THIS bank (see lme.DIGEST_COUNT for the why).
+        lme.DIGEST_COUNT = tally.get("digests", 0) if digest else 0
         ingest_s = round(time.perf_counter() - t0, 1)
         print(f"chat {chat_id}: ingested {tally['turns']} turns, "
               f"{tally['dreams']} dreams, {tally['claims']} claims "
@@ -370,6 +408,9 @@ def run(beam_root: Path, tier: str, extractor_name: str, tag: str,
                    "extractor": extractor_name,
                    "rag_top_k": lme.RAG_TOP_K,
                    "hybrid_top_k": lme.HYBRID_TOP_K,
+                   # Self-describing rows: only digest runs carry the key,
+                   # so legacy artifacts stay byte-shape-identical.
+                   **({"digest_arm": True} if digest else {}),
                    "consolidation": tally, "ingest_seconds": ingest_s,
                    # Served contexts + structured serve state (2026-08-21):
                    # serving-knob reruns and re-judges recompose from these
@@ -407,7 +448,8 @@ def report(tier: str, extractor_name: str, tag: str) -> None:
         sys.exit(f"no results in {out_path}")
     # Arms come off the rows, not a static tuple: a --chronicle run's
     # summary carries hybrid_ev, a vanilla run's does not.
-    arms = [a for a in arms_for(True) if f"{a}_score" in rows[0]]
+    arms = [a for a in arms_for(True, digest=True)
+            if f"{a}_score" in rows[0]]
     summary = {"benchmark": "BEAM", "tier": tier, "extractor": extractor_name,
                "n_questions": len(rows),
                "n_chats": len({r["chat_id"] for r in rows}),
@@ -470,6 +512,11 @@ def main() -> int:
                     help="raw-turn budget for the rag arm and the hybrid "
                          "raw block's search (default: the bench's "
                          "RAG_TOP_K)")
+    ap.add_argument("--digest", action="store_true",
+                    help="enable session digests on the bench service "
+                         "(one episode per BEAM batch, digested at ingest) "
+                         "and answer/judge the hybrid_digest arm — "
+                         "char-budget-matched to hybrid (spec 2026-08-24)")
     ap.add_argument("--report", action="store_true")
     args = ap.parse_args()
     if args.report:
@@ -478,7 +525,7 @@ def main() -> int:
     run(Path(args.beam_root), args.tier, args.extractor, args.out_tag,
         args.chats, args.limit_chats, chronicle=args.chronicle,
         arms_only=args.arms, hybrid_top_k=args.hybrid_top_k,
-        rag_top_k=args.rag_top_k)
+        rag_top_k=args.rag_top_k, digest=args.digest)
     report(args.tier, args.extractor, args.out_tag)
     return 0
 

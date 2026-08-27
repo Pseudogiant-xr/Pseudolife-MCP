@@ -73,6 +73,21 @@ def test_recap_block_renders_last_session():
     assert "Auth refactor" in md
 
 
+def test_recap_block_renders_digest_summary():
+    recap = {"title": "Auth refactor", "entry_count": 7,
+             "summary": "In this session the auth module\nwas refactored."}
+    md = format_briefing([], [], [], world=None, recap=recap)
+    assert "Auth refactor (7 memories)" in md
+    # digest body follows, newlines collapsed for the one-block render
+    assert "In this session the auth module was refactored." in md
+
+
+def test_recap_block_degrades_without_summary():
+    recap = {"title": "Auth refactor", "entry_count": 7}
+    md = format_briefing([], [], [], world=None, recap=recap)
+    assert md.strip().endswith("Auth refactor (7 memories)")
+
+
 def test_empty_inputs_render_nothing():
     assert format_briefing([], [], [], world=[], recap=None) == ""
 

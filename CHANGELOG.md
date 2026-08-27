@@ -6,6 +6,49 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-08-27 — digest-stage hardening from the pre-PR review)
+- **A failing digest write escaped `generate_digests_stage`, aborting the
+  dream stages after it and re-paying the full map-reduce every dream
+  while the failure persisted** (the 2026-07-06 dream-stall shape: a
+  broken connection fails deterministically, and neither the cursor nor
+  the retry ledger was touched). The write is now bounded like the
+  malformed path — one held-cursor retry, then the cursor advances past
+  the episode with a warning.
+- **A pending session digest pinned the sweep trigger unconditionally,
+  so during a backfill every 10-minute tick fired a dream that
+  consolidated a partial batch (backlog 1, mid-session) and made zero
+  digest progress** — digests run only on the empty-pull branch of the
+  cycle, by design. `would_fire` now counts the digest backlog only when
+  the pull would be empty; the normal `min_batch`/`idle_seconds` cadence
+  drains entries first and the digest backlog fires the quiet ticks. The
+  claims-branch dream result now carries the `digests` key too, so the
+  result shape is stable for observers.
+
+### Fixed (2026-08-27 — the sidecar probe timed out on full-size segments)
+- **`evals/digest_sidecar_probe.py` built its extractor with the 240s
+  constructor default instead of the resolved ops-contract timeout**
+  (`PSEUDOLIFE_DREAM_TIMEOUT_SECONDS` honoured, the same resolution the
+  daemon uses — the Docker stack ships 480s for the E4B sidecar for this
+  reason). The default E4B sidecar prompt-processes ~24 tok/s (measured
+  2026-08-27), so every segment at the 24,000-char cap costs ~260s+ before
+  generation and the probe recorded a timeout `ExtractorError` per session
+  instead of a digest.
+
+### Changed (2026-08-26 — the dream section moves out of service.py)
+- **`service.py` had grown to 7.7k lines — a quarter of the package — with
+  every dream-cycle feature since June accreting onto `MemoryService`.**
+  Pure code motion, no behavior change: the dream consolidation cycle
+  (pull/extract/commit and its stages — outcome inference, lesson
+  synthesis, session digests), the deep-dream pass with its judge, and
+  their dream-only private helpers (41 methods, ~2.4k lines) now live in
+  `service_dream.py` as the `DreamOps` mixin that `MemoryService`
+  inherits. Every method keeps its name, signature, and lock discipline;
+  callers are unaffected. The lock-discipline guard
+  (`tests/test_service_lock_discipline.py`) now scans both files and
+  merges their call graphs before the fixpoint — red-checked against a
+  doctored mixin to prove the extended scan is load-bearing. Moved code
+  logs under `pseudolife_memory.service_dream` (was `.service`).
+
 ### Added (2026-08-26 — reranker training sees facts, and the audit nominates graduation candidates; schema v34)
 - **The learned-reranker training log recorded only half of every search
   response: served entries, never the cortex facts served above them —
@@ -714,6 +757,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   returning its content alone would have tripped the shim's *own*
   `outputSchema` and replaced the daemon's real diagnosis with "Output
   validation error: outputSchema defined but no structured output returned".
+
+### Added (2026-08-24 — session digests: a mid-density layer between raw turns and atomic facts)
+- **One narrative digest per closed session episode, generated during the
+  idle dream cycle and stored as a retrievable `source="digest"` band
+  entry.** Ships default-OFF (`memory.dream.digest_enabled`): enablement
+  gates on the sidecar quality probe (`evals/digest_sidecar_probe.py`)
+  and a budget-matched BEAM verdict. Motivation: BEAM p1-b16 measured
+  summarization as the local stack's floor (rag 0.4147 / hybrid 0.3823)
+  and the reader×volume grid showed neither budget nor a frontier reader
+  fixes it (0.47 at 48 turns) — arc-shaped questions need a coverage
+  layer, not a wider window. Mechanics: digest scope is the closed
+  session root (`generate_digests_stage`, cursor-tracked like outcome
+  inference; the zero-start cursor backfills history when first enabled,
+  capped per cycle); long sessions map-reduce over
+  `digest_context_chars`; the digest write bypasses the surprise gate,
+  contradiction decay, and slot extraction, and `digest` joins
+  `dream.exclude_sources` so digests are never re-mined for facts. The
+  session briefing's recap now renders the digest body. Eval side:
+  `beam_adapter.py --digest` wraps each BEAM batch in an episode and
+  answers a `hybrid_digest` arm char-budget-matched to hybrid; with the
+  flag off every search call keeps the pre-digest byte-identical shape.
 
 ### Added (2026-08-24 — answer-prompt attribution ablation)
 - **`evals/beam_attrib_ablation.py`: isolate the answer-prompt term of the

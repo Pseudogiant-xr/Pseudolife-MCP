@@ -66,7 +66,14 @@ def _fmt_recap(r: dict) -> str:
     if not title:
         return ""
     n = r.get("entry_count") or 0
-    return f"- {title} ({n} memories)"
+    line = f"- {title} ({n} memories)"
+    # Session digest (spec 2026-08-24): the narrative body, when the dream
+    # pass has digested the session. Newlines collapsed — the recap is one
+    # indented block under the title line.
+    summary = " ".join((r.get("summary") or "").split())
+    if summary:
+        line += f"\n  {summary}"
+    return line
 
 
 def format_briefing(surprises: list[dict], questions: list[dict],
