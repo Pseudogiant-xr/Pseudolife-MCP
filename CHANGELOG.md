@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-08-27 — the digest length target states what the model writes)
+- **`memory.dream.digest_target_chars` default raised from `800` to
+  `1200`.** The 2026-08-27 sidecar quality probe (three runs, nine
+  digests, `evals/results/digest-sidecar-probe-sidecar-0827-c{1,2,3}.json`)
+  showed the extractor steadily writing 1019–1908 chars (mean ~1435)
+  against the 800 target, with the overrun carrying retrievable
+  specifics — version pins, deadline changes, exact error names — rather
+  than padding. No enforcement machinery added: the target is honest
+  now instead of aspirational. `summarize_session`'s signature default
+  moves in lockstep.
+
 ### Fixed (2026-08-27 — digest-stage hardening from the pre-PR review)
 - **A failing digest write escaped `generate_digests_stage`, aborting the
   dream stages after it and re-paying the full map-reduce every dream

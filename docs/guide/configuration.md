@@ -229,9 +229,9 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
   session briefing's recap renders the digest body. The zero-start
   cursor backfills history when first enabled,
   `memory.dream.digest_max_per_cycle` (default `4`) episodes per dream
-  pass. `memory.dream.digest_target_chars` (default `800`) is the prose
-  length target passed to the extractor — the bundled E4B sidecar
-  overshoots it ~1.8x in practice (probe, 2026-08-27) — and
+  pass. `memory.dream.digest_target_chars` (default `1200`) is the prose
+  length target passed to the extractor — re-targeted from `800` to the
+  length the extractor naturally writes (probe, 2026-08-27) — and
   `memory.dream.digest_context_chars` (default `24000`) caps the
   per-call session context, with longer sessions split on line
   boundaries and map-reduce merged. Default-off pending human review of

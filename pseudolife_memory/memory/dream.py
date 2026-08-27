@@ -1175,7 +1175,8 @@ class OpenAICompatExtractor:
         return _parse_outcome_claims(content, cap)
 
     def summarize_session(self, context_text: str, *,
-                          target_chars: int = 800) -> str | None:
+                          # Default matches DreamConfig.digest_target_chars
+                          target_chars: int = 1200) -> str | None:
         """Digest one closed session's stored record into narrative prose
         (spec 2026-08-24). Transport failure raises ExtractorError (the
         stage holds its cursor); malformed/empty content returns None

@@ -261,11 +261,14 @@ class DreamConfig:
     # sessions are split on line boundaries and map-reduce merged. 24000
     # chars ≈ 6K tokens — sized for the bundled CPU sidecar's context.
     digest_context_chars: int = 24000
-    # Prose length target passed to the digest prompt. 800 matches the
-    # mid-density shape measured effective in the 2026-08-22 BEAM
-    # competitor analysis (~400-char distillation docs at k=20 retrieval,
-    # doubled for our smaller k).
-    digest_target_chars: int = 800
+    # Prose length target passed to the digest prompt. Originally 800
+    # (the 2026-08-22 BEAM competitor analysis shape); re-targeted to
+    # 1200 after the 2026-08-27 sidecar probe (9 digests, 3 runs) showed
+    # the model steadily writing 1019–1908 chars (mean ~1435) against
+    # 800, with the tail carrying retrievable specifics (versions,
+    # deadline changes, error names) — the target now states the
+    # observed natural length instead of fighting it.
+    digest_target_chars: int = 1200
     # Closed episodes digested per dream cycle — bounds the backfill sweep
     # (the zero-start cursor digests all history when first enabled).
     digest_max_per_cycle: int = 4
