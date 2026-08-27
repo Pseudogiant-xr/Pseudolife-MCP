@@ -81,6 +81,30 @@ def test_chronicle_knob_surfaced_default_on():
     assert knob["restart"] is False
 
 
+def test_session_digest_knobs_surfaced_default_off():
+    # Surfaced 2026-08-27 (maintainer-directed): PR #202 shipped the digest
+    # stage config-only, so the only way to flip it on a live daemon was
+    # hand-editing /data/config.yaml inside the container. Exposure here is
+    # about operability (flipping the soak on/off without a container
+    # exec), not a gate verdict — the default stays the shipped False and
+    # the console must present it.
+    knob = _knob("memory.dream.digest_enabled")
+    assert knob["type"] == "bool"
+    assert knob["default"] is False
+    # generate_digests_stage re-reads service.config on every dream cycle.
+    assert knob["restart"] is False
+
+    target = _knob("memory.dream.digest_target_chars")
+    assert target["type"] == "int" and target["default"] == 800
+    assert target["restart"] is False
+    ctx = _knob("memory.dream.digest_context_chars")
+    assert ctx["type"] == "int" and ctx["default"] == 24000
+    assert ctx["restart"] is False
+    # digest_max_per_cycle is deliberately NOT surfaced — a backfill pacing
+    # constant, not an operator dial; config.yaml still reaches it.
+    assert "memory.dream.digest_max_per_cycle" not in _BY_PATH
+
+
 def test_gated_off_capabilities_stay_out_of_console():
     # known_facts_window failed its gate; the agg-recall search knobs
     # have not passed theirs. None may appear until a preregistered gate

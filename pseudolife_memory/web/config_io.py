@@ -243,6 +243,29 @@ KNOBS: list[dict[str, Any]] = [
              "chronicle_events; temporally-cued searches serve them. On by "
              "default since the 2026-08-12 soak review. Needs Postgres; an "
              "events-pass failure never stalls claims."},
+    {"path": "memory.dream.digest_enabled", "group": "Dream",
+     "label": "Session digests", "type": "bool", "default": False,
+     "restart": False,
+     "help": "Idle dream cycle writes one narrative prose digest per closed "
+             "session episode (a source=\"digest\" band entry; never re-mined "
+             "for facts). Off by default pending human review of the sidecar "
+             "quality probe (evals/digest_sidecar_probe.py). First enable "
+             "backfills all history, digest_max_per_cycle (4) episodes per "
+             "dream."},
+    {"path": "memory.dream.digest_target_chars", "group": "Dream",
+     "label": "Digest length target (chars)", "type": "int", "default": 800,
+     "min": 200, "max": 4000, "step": 100, "restart": False,
+     "help": "Prose length target passed to the digest prompt (the bundled "
+             "E4B sidecar overshoots it ~1.8x in practice — 2026-08-27 "
+             "probe). 800 doubles the ~400-char distillation shape from the "
+             "2026-08-22 BEAM competitor analysis for our smaller top-k."},
+    {"path": "memory.dream.digest_context_chars", "group": "Dream",
+     "label": "Digest context cap (chars)", "type": "int", "default": 24000,
+     "min": 1000, "max": 200000, "step": 1000, "restart": False,
+     "help": "Max session-context characters per summarize call; longer "
+             "sessions split on line boundaries and map-reduce merge. 24000 "
+             "≈ 6K tokens, sized for the bundled CPU sidecar — raise it on "
+             "a large-context GPU endpoint to avoid the split."},
     # ── Extractor ──────────────────────────────────────────────────────────
     # All live: build_extractor() constructs the client fresh on every dream
     # invocation from service.config.

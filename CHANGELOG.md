@@ -6,6 +6,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-27 — session-digest knobs reach the Console)
+- **The session-digest feature (PR #202) shipped config-only: its knobs were
+  never added to the Console registry, so the only way to enable digests on
+  a live daemon was hand-editing `/data/config.yaml` inside the container.**
+  The Dream group now surfaces `memory.dream.digest_enabled` (default stays
+  off — enablement still gates on human review of the sidecar quality
+  probe) plus the two tuning scalars an operator actually adjusts:
+  `digest_target_chars` (prose length target) and `digest_context_chars`
+  (per-call session-context cap, sized for the bundled CPU sidecar). All
+  three are live knobs — the digest stage re-reads `service.config` every
+  dream cycle, no restart needed. `digest_max_per_cycle` stays
+  config.yaml-only (a backfill pacing constant, not an operator dial).
+
 ### Fixed (2026-08-27 — digest-stage hardening from the pre-PR review)
 - **A failing digest write escaped `generate_digests_stage`, aborting the
   dream stages after it and re-paying the full map-reduce every dream
