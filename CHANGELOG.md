@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-08-28 — Codex hook trust is an explicit install step)
+- **Codex now requires every new or changed lifecycle hook to be reviewed and
+  trusted before it runs, but the hook installers reported success without
+  mentioning that gate.** Both installer variants and the README now tell the
+  user to approve the exact `~/.codex/hooks.json` definition on the next Codex
+  start, and accurately explain that the richer session briefing is skipped
+  until then (MCP tools and server `instructions` remain available).
+- **The Codex HTTP example no longer inherits Claude's JSON-only `headers`
+  advice.** Its TOML now uses Codex's supported `bearer_token_env_var` setting,
+  keeping `PSEUDOLIFE_MCP_TOKEN` out of `config.toml` while allowing a
+  token-protected daemon to connect.
+
 ### Security (2026-08-27 — Dependabot triage: three chromadb server CVEs, all unreachable, no patched release)
 - Triaged the three open Dependabot alerts on `ops/requirements.lock.txt`,
   all against chromadb ≤ 1.5.9 with **no patched release** (1.5.9 is still

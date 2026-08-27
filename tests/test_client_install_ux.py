@@ -49,6 +49,24 @@ def test_hook_installers_support_codex_hook_store() -> None:
         assert "AGENTS.md" in text
 
 
+def test_codex_hook_install_explains_required_trust_review() -> None:
+    """Codex skips new or changed hooks until the user reviews and trusts
+    their exact definition. A successful file write must not imply that the
+    briefing is already active (Codex hooks security model, 2026-08-28)."""
+    readme = " ".join(_read("README.md").lower().split())
+    assert "review and trust" in readme
+    assert "open `/hooks`" in readme
+    for rel in ("ops/install-hook.ps1", "ops/install-hook.sh"):
+        text = " ".join(_read(rel).lower().split())
+        assert "review and trust" in text, rel
+        assert "open /hooks" in text, rel
+
+
+def test_codex_http_auth_uses_supported_token_configuration() -> None:
+    readme = _read("README.md")
+    assert 'bearer_token_env_var = "PSEUDOLIFE_MCP_TOKEN"' in readme
+
+
 def test_installers_offer_dreamer_model_choice() -> None:
     """Claude-shim installs prompt for the dreamer model (2026-08-04): all
     four current Anthropic tiers are offered, Opus is the recommended

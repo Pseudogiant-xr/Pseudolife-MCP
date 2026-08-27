@@ -104,6 +104,12 @@ with open(path, "w", encoding="utf-8") as f:
     f.write("\n")
 PY
 
+if [ "$CLIENT" = codex ]; then
+  echo ""
+  echo "IMPORTANT: Codex will skip this new or changed hook until you review and trust its exact definition."
+  echo "  Start Codex, open /hooks, review the definition from $SETTINGS_PATH, and approve it."
+fi
+
 # The hooks wire the session lifecycle, but the memory LOOP only fires if a
 # standing instruction tells the agent to use the tools (issue #12: an install
 # with healthy hooks + daemon still never called memory_* because no standing
