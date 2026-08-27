@@ -23,6 +23,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   alongside the 2026-07-16 CVE-2026-45829 note (same server-side class);
   re-check on the next chromadb release.
 
+### Changed (2026-08-27 — the digest length target states what the model writes)
+- **`memory.dream.digest_target_chars` default raised from `800` to
+  `1200`.** The 2026-08-27 sidecar quality probe (three runs, nine
+  digests, `evals/results/digest-sidecar-probe-sidecar-0827-c{1,2,3}.json`)
+  showed the extractor steadily writing 1019–1908 chars (mean ~1435)
+  against the 800 target, with the overrun carrying retrievable
+  specifics — version pins, deadline changes, exact error names — rather
+  than padding. No enforcement machinery added: the target is honest
+  now instead of aspirational. `summarize_session`'s signature default
+  moves in lockstep.
+
+### Added (2026-08-27 — session-digest knobs reach the Console)
+- **The session-digest feature (PR #202) shipped config-only: its knobs were
+  never added to the Console registry, so the only way to enable digests on
+  a live daemon was hand-editing `/data/config.yaml` inside the container.**
+  The Dream group now surfaces `memory.dream.digest_enabled` (default stays
+  off — enablement still gates on human review of the sidecar quality
+  probe) plus the two tuning scalars an operator actually adjusts:
+  `digest_target_chars` (prose length target) and `digest_context_chars`
+  (per-call session-context cap, sized for the bundled CPU sidecar). All
+  three are live knobs — the digest stage re-reads `service.config` every
+  dream cycle, no restart needed. `digest_max_per_cycle` stays
+  config.yaml-only (a backfill pacing constant, not an operator dial).
+
 ### Fixed (2026-08-27 — digest-stage hardening from the pre-PR review)
 - **A failing digest write escaped `generate_digests_stage`, aborting the
   dream stages after it and re-paying the full map-reduce every dream
