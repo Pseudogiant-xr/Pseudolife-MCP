@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security (2026-08-27 — Dependabot triage: three chromadb server CVEs, all unreachable, no patched release)
+- Triaged the three open Dependabot alerts on `ops/requirements.lock.txt`,
+  all against chromadb ≤ 1.5.9 with **no patched release** (1.5.9 is still
+  the latest on PyPI, so no bump is possible): **CVE-2026-45833** (critical,
+  authenticated RCE via `trust_remote_code` on the collection-update
+  endpoint), **CVE-2026-45830** (high, any authenticated user can
+  read/write any tenant's collections), **CVE-2026-45831** (high,
+  `SimpleRBACAuthorizationProvider` never checks which tenant/database/
+  collection a permission applies to). All three live in the Chroma HTTP
+  server and its auth layer; the daemon's only chromadb use is the embedded
+  `chromadb.PersistentClient` in `pseudolife_memory/memory/reference_bank.py`
+  — no `HttpClient`, no Chroma server, no auth providers anywhere in the
+  tree — so the vulnerable paths do not exist at runtime. Dismissed as
+  *vulnerable code not used*, reasoning carried in the lockfile header
+  alongside the 2026-07-16 CVE-2026-45829 note (same server-side class);
+  re-check on the next chromadb release.
+
 ### Fixed (2026-08-27 — digest-stage hardening from the pre-PR review)
 - **A failing digest write escaped `generate_digests_stage`, aborting the
   dream stages after it and re-paying the full map-reduce every dream

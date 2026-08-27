@@ -31,6 +31,16 @@
 #   Chroma HTTP server API — the daemon only embeds chromadb.PersistentClient
 #   and never runs that server, so the path is unreachable. Bump the moment a
 #   patched release exists.
+#   2026-08-27: three more server-side chromadb CVEs, same verdict, still no
+#   patched release (1.5.9 remains latest): CVE-2026-45833 (critical,
+#   authenticated RCE via trust_remote_code on the collection-update
+#   endpoint), CVE-2026-45830 (cross-tenant read/write for any authenticated
+#   user), CVE-2026-45831 (SimpleRBACAuthorizationProvider ignores
+#   tenant/database/collection scope). All three live in the Chroma HTTP
+#   server and its auth providers; the daemon's only chromadb use is the
+#   embedded PersistentClient in pseudolife_memory/memory/reference_bank.py
+#   (no HttpClient, no server, no auth providers anywhere in the tree), so
+#   none of the paths exist at runtime. Re-check on the next chromadb release.
 # - transformers is held at 4.57.6 (the last 4.x release): the fixes for
 #   CVE-2026-1839 / CVE-2026-4372 / CVE-2026-5241 are 5.x-only, but
 #   optimum-onnx (the ONNX embedding backend the image ships as its default)
