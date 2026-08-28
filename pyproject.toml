@@ -39,6 +39,7 @@ dependencies = [
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
+    "pytest-xdist>=3.5",
 ]
 # NLI contradiction scorer — heavy (~278 MB DeBERTa-xsmall checkpoint).
 # Off by default; the four-path contradiction detector still runs without it.
