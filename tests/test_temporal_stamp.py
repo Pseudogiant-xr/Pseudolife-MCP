@@ -26,7 +26,6 @@ def test_stamp_columns_present(pg_conn):
 def test_meta_version_is_current(pg_conn):
     from pseudolife_memory.storage.schema import SCHEMA_META_VERSION, ensure_schema
 
-    assert SCHEMA_META_VERSION >= 11  # temporal stamps landed at v11; persist into later schemas
     # Simulate a stale recorded version, then re-ensure: it must update to current.
     pg_conn.execute("UPDATE meta SET value = '8'::jsonb WHERE key = 'schema_version'")
     pg_conn.commit()

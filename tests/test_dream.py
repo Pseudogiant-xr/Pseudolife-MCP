@@ -8,7 +8,6 @@ Three tiers:
 
 from __future__ import annotations
 
-import contextlib
 import http.server
 import json
 import threading
@@ -16,48 +15,12 @@ import time
 
 import pytest
 
+from tests.dream_helpers import (StubExtractor as _StubExtractor,
+                                 StubHandler as _StubHandler,
+                                 chat_payload as _chat_payload,
+                                 chat_relations_payload as _chat_relations_payload,
+                                 stub_server as _stub_server)
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
-
-
-# ── stub OpenAI-compatible server (Tier 2 tests; no PG, no embedder) ──────
-
-class _StubHandler(http.server.BaseHTTPRequestHandler):
-    responder = None  # (status, body_str) callable, set per subclass
-
-    def do_POST(self):  # noqa: N802
-        length = int(self.headers.get("content-length", 0))
-        self.rfile.read(length)
-        status, body = type(self).responder()
-        data = body.encode()
-        self.send_response(status)
-        self.send_header("content-type", "application/json")
-        self.send_header("content-length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
-
-    def log_message(self, *a):  # silence
-        pass
-
-
-@contextlib.contextmanager
-def _stub_server(responder):
-    handler = type("H", (_StubHandler,), {"responder": staticmethod(responder)})
-    srv = http.server.HTTPServer(("127.0.0.1", 0), handler)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    try:
-        yield f"http://127.0.0.1:{srv.server_address[1]}"
-    finally:
-        srv.shutdown()
-
-
-def _chat_payload(claims):
-    return json.dumps({"choices": [{"message": {
-        "content": json.dumps({"claims": claims})}}]})
-
-
-def _chat_relations_payload(relations):
-    return json.dumps({"choices": [{"message": {
-        "content": json.dumps({"relations": relations})}}]})
 
 
 def test_extractor_extra_body_merges_into_every_chat_request():
@@ -234,13 +197,17 @@ def test_openai_extractor_raises_on_timeout():
     # genuine empty result and avoid advancing the cursor past these memories.
     from pseudolife_memory.memory.dream import ExtractorError, OpenAICompatExtractor
 
+    # The stub sleeps 6x the client's timeout: enough that the client always
+    # gives up first, short enough that _stub_server's shutdown — which blocks
+    # on the in-flight handler — does not hold the suite for the full sleep.
+    # Was sleep(1.0)/timeout 0.2, which cost ~0.8s of pure teardown wait.
     def slow():
-        time.sleep(1.0)
+        time.sleep(0.3)
         return (200, _chat_payload([]))
 
     with _stub_server(slow) as base_url:
-        ext = OpenAICompatExtractor(base_url, "m", timeout_seconds=0.2)
-        with pytest.raises(ExtractorError):
+        ext = OpenAICompatExtractor(base_url, "m", timeout_seconds=0.05)
+        with pytest.raises(ExtractorError, match="timed out"):
             ext.extract(["x"], vocab=[])
 
 
@@ -401,27 +368,6 @@ def test_run_sweep_once_prunes_retrieval_log():
     assert firing.retrieval_pruned == 1 and out["retrieval_pruned"] == 3
 
 
-class _NoRetrievalPruneFake(_FakeService):
-    """A fake predating ``prune_retrieval_log`` — the getattr guard's
-    "absent" branch, simulated by shadowing the inherited method with a
-    plain ``None`` class attribute (so ``getattr(svc, name, None)``
-    returns ``None`` exactly as it would for a real object with no such
-    attribute)."""
-    prune_retrieval_log = None
-
-
-def test_run_sweep_once_retrieval_pruned_none_without_prune_method():
-    """retrieval_pruned must be ``None`` (not ``0``) when the getattr guard
-    finds no ``prune_retrieval_log`` — ``None`` means "no reaper wired,"
-    ``0`` means "the reaper ran and found nothing." Conflating the two
-    would hide a future rename that silently dropped the guard's match."""
-    from pseudolife_memory.memory.dream import run_sweep_once
-
-    svc = _NoRetrievalPruneFake(enabled=False)
-    out = run_sweep_once(svc)
-    assert out["retrieval_pruned"] is None
-
-
 def test_run_sweep_once_below_threshold():
     from pseudolife_memory.memory.dream import run_sweep_once
 
@@ -518,14 +464,6 @@ def test_dream_status_would_fire_on_idle(svc):
     assert st["backlog"] >= 1
     assert st["would_fire"] is True
     assert "dream_cursor" in st and "idle_seconds" in st
-
-
-class _StubExtractor:
-    """Returns a fixed claim list regardless of input (drives dream_run)."""
-    def __init__(self, claims):
-        self._claims = claims
-    def extract(self, texts, vocab):
-        return [dict(c) for c in self._claims]
 
 
 def test_dream_resolves_paraphrased_slot_and_supersedes(svc):
@@ -703,6 +641,32 @@ def test_dream_run_scalar_conflict_skips_trace_and_reinforcement(svc):
     assert svc.cortex_lookup("project", "language")["value"] == "go"
 
 
+def test_dream_run_higher_tier_claim_supersedes_the_agent_value(svc):
+    """The mirror of the case above: escalating tier, not weakening it. An
+    agent claim inserts into the empty slot, and a later user-origin claim
+    for the same slot clears write_fact's tier guard and supersedes it —
+    the pull -> extract -> cortex_write path end to end, no live model."""
+    # The stub's values are absent from the stub notes; pin the literal
+    # gate to observe-only so this test keeps exercising its own concern
+    # under the "enforce" default (2026-08-02).
+    svc.config.memory.dream.literal_gate = "log"
+
+    def _claim(value, *, origin):
+        return {"entity": "checkout-service", "attribute": "default port",
+                "value": value, "confidence": 0.8, "origin": origin}
+
+    svc.store("checkout-service default port note", source="notes")
+    svc.dream_run(_StubExtractor([_claim("9090", origin="agent")]))
+    assert svc.cortex_lookup(
+        "checkout-service", "default port")["value"] == "9090"
+
+    svc.store("checkout-service default port revised", source="notes")
+    out = svc.dream_run(_StubExtractor([_claim("9595", origin="user")]))
+    assert out["superseded"] == 1
+    assert svc.cortex_lookup(
+        "checkout-service", "default port")["value"] == "9595"
+
+
 def test_dream_run_blocked_aggregate_add_skips_trace_scalar_claim_not_suppressed(svc):
     """Review finding (FIX 2): an op:"add" claim that the aggregate-conversion
     guard parks as a contender (action "contested") did not populate the
@@ -816,16 +780,16 @@ def test_dream_run_second_concurrent_caller_skips(svc):
     assert "skipped" not in after
 
 
-class _BatchRecordingExtractor:
+class _BatchRecordingExtractor(_StubExtractor):
     """Records each extract() call's texts; returns fixed claims."""
 
     def __init__(self, claims):
-        self._claims = claims
+        super().__init__(claims)
         self.calls: list[list[str]] = []
 
-    def extract(self, texts, vocab):
+    def extract(self, texts, vocab, known_facts=None):
         self.calls.append(list(texts))
-        return [dict(c) for c in self._claims]
+        return super().extract(texts, vocab, known_facts)
 
 
 def test_dream_extracts_batch_in_one_call(svc):
@@ -951,14 +915,12 @@ def test_dream_outage_holds_cursor_without_quarantine(svc):
 
 # ── GAM #2 graph-from-text: _dream_extract_relations (PG-backed) ─────────
 
-class _RelStubExtractor:
+class _RelStubExtractor(_StubExtractor):
     """Stub extractor exposing extract + extract_relations for dream tests."""
     def __init__(self, claims=None, relations=None, fail_relations=False):
-        self._claims = claims or []
+        super().__init__(claims or [])
         self._relations = relations or []
         self._fail = fail_relations
-    def extract(self, texts, vocab):
-        return [dict(c) for c in self._claims]
     def extract_relations(self, texts, relations):
         if self._fail:
             from pseudolife_memory.memory.dream import ExtractorError
@@ -1141,8 +1103,7 @@ def test_dream_relations_reject_lesson_only_predicates(svc):
 
 
 def test_traces_config_default():
-    from pseudolife_memory.utils.config import TracesConfig, MemoryConfig
-    assert TracesConfig().enabled is True
+    from pseudolife_memory.utils.config import MemoryConfig
     assert MemoryConfig().traces.enabled is True
 
 

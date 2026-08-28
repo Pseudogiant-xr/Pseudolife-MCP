@@ -26,30 +26,21 @@ no ``stance`` parameter on the MCP ``memory_fact_set`` surface.
 """
 from __future__ import annotations
 
-import tempfile
-
 import pytest
 
-from pseudolife_memory.service import MemoryService
-
-from tests.test_dream import _chat_payload, _stub_server
-
-
-class _StubExtractor:
-    """Returns a fixed claim list regardless of input (drives dream_run)."""
-
-    def __init__(self, claims):
-        self._claims = claims
-
-    def extract(self, texts, vocab):
-        return [dict(c) for c in self._claims]
+from tests.dream_helpers import (StubExtractor as _StubExtractor,
+                                 chat_payload as _chat_payload,
+                                 stub_server as _stub_server)
+from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
 
 
 @pytest.fixture()
-def svc():
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        s = MemoryService(data_dir=d)
-        yield s
+def svc(pristine_service):
+    """Conftest's module-scoped service with the bank (CMS + cortex) cleared
+    per test — every test here writes the slots it reads, so the shared
+    service is equivalent to a private one at a seventh of the construction
+    cost."""
+    return pristine_service
 
 
 # ── parse boundary ────────────────────────────────────────────────────────
@@ -209,3 +200,50 @@ def test_serving_dict_includes_stance_only_when_set(svc):
     plain = svc._cortex.lookup("svc", "port")
     assert _cortex_record_to_dict(hedged)["stance"] == "probably"
     assert "stance" not in _cortex_record_to_dict(plain)
+
+
+# ── persistence in a live database (schema v29) ───────────────────────────
+# PG-backed; skips without the bench server.
+
+
+def test_stance_round_trips_through_storage(pg_url):  # noqa: F811
+    from pseudolife_memory.storage.postgres import PostgresStorage
+
+    storage = PostgresStorage(pg_url)
+    row = {
+        "entity": "user", "attribute": "database plan",
+        "entity_norm": "user", "attribute_norm": "database plan",
+        "value": "Postgres 18", "polarity": "+", "status": "current",
+        "confidence": 0.6, "origin": "agent", "support": ["agent"],
+        "provenance": [], "asserted_at": 1.0, "last_confirmed": 1.0,
+        "supersedes_value": None, "superseded_by_value": None,
+        "superseded_at": None, "embedding": None, "entity_id": None,
+        "object_entity_id": None, "freshness_class": "evergreen",
+        "kind": "scalar", "value_norm": None, "stance": "probably",
+    }
+    storage.upsert_fact(row)
+    facts = [f for f in storage.load_facts()
+             if f["attribute_norm"] == "database plan"]
+    assert facts and facts[-1]["stance"] == "probably"
+
+
+def test_stance_null_on_unhedged_insert(pg_url):  # noqa: F811
+    """A row inserted without the key stores NULL — pre-v29 writer code and
+    plainly asserted facts are indistinguishable, by design."""
+    from pseudolife_memory.storage.postgres import PostgresStorage
+
+    storage = PostgresStorage(pg_url)
+    row = {
+        "entity": "svc", "attribute": "port",
+        "entity_norm": "svc", "attribute_norm": "port",
+        "value": "8080", "polarity": "+", "status": "current",
+        "confidence": 0.9, "origin": "agent", "support": ["agent"],
+        "provenance": [], "asserted_at": 1.0, "last_confirmed": 1.0,
+        "supersedes_value": None, "superseded_by_value": None,
+        "superseded_at": None, "embedding": None, "entity_id": None,
+        "object_entity_id": None, "freshness_class": "evergreen",
+        "kind": "scalar", "value_norm": None,
+    }
+    storage.upsert_fact(row)
+    facts = [f for f in storage.load_facts() if f["attribute_norm"] == "port"]
+    assert facts and facts[-1]["stance"] is None

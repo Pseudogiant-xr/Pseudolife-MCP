@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import pytest
 
+from tests.dream_helpers import StubExtractor as _Stub
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
 
 from pseudolife_memory.memory.dream import events_from_parsed
@@ -30,16 +31,6 @@ def svc(pg_conn, pg_url, tmp_path):  # noqa: F811
     s.flush()
 
 
-class _Stub:
-    """Fixed claims/events regardless of input."""
-
-    def __init__(self, items):
-        self._items = items
-
-    def extract(self, texts, vocab, known_facts=None):
-        return [dict(c) for c in self._items]
-
-
 def _event(description, date=None, phrase=None, source=0, actor="user"):
     return {"kind": "event", "description": description, "actor": actor,
             "date": date, "date_phrase": phrase, "source": source}
@@ -49,6 +40,55 @@ def _chronicle_rows(svc):
     return svc._storage.conn.execute(
         "SELECT description, to_char(occurred_at, 'YYYY-MM-DD'), "
         "occurred_phrase FROM chronicle_events ORDER BY id").fetchall()
+
+
+# ── the bitemporal record shape ──────────────────────────────────────────
+# Direct SQL: the storability and ordering contracts the serving layer
+# assumes, pinned independently of whether any extractor happens to emit
+# an undated or an invalidated event.
+
+
+def test_occurred_at_is_nullable_and_orders_after_dated_rows(pg_conn):  # noqa: F811
+    """Undated events (phrase-only) must be storable and sort AFTER dated
+    ones under the serving order (occurred_at ASC NULLS LAST)."""
+    pg_conn.execute(
+        "INSERT INTO chronicle_events (occurred_at, occurred_phrase, "
+        "recorded_at, actor, actor_norm, description, description_norm) "
+        "VALUES ('2023-05-14', 'on May 14', 1.0, 'user', 'user', "
+        "'adopted a kitten', 'adopted a kitten')")
+    pg_conn.execute(
+        "INSERT INTO chronicle_events (occurred_at, occurred_phrase, "
+        "recorded_at, actor, actor_norm, description, description_norm) "
+        "VALUES (NULL, 'a while back', 2.0, 'user', 'user', "
+        "'visited Lisbon', 'visited lisbon')")
+    pg_conn.commit()
+    rows = pg_conn.execute(
+        "SELECT description, occurred_at FROM chronicle_events "
+        "ORDER BY occurred_at ASC NULLS LAST, recorded_at ASC").fetchall()
+    assert [r[0] for r in rows] == ["adopted a kitten", "visited Lisbon"]
+    assert rows[1][1] is None
+
+
+def test_invalidated_at_defaults_null_and_round_trips(pg_conn):  # noqa: F811
+    """Contradiction handling is additive-only: invalidate, never delete."""
+    pg_conn.execute(
+        "INSERT INTO chronicle_events (occurred_phrase, recorded_at, actor, "
+        "actor_norm, description, description_norm) "
+        "VALUES ('yesterday', 3.0, 'user', 'user', 'sold the road bike', "
+        "'sold the road bike')")
+    pg_conn.commit()
+    ev_id, inv = pg_conn.execute(
+        "SELECT id, invalidated_at FROM chronicle_events "
+        "ORDER BY id DESC LIMIT 1").fetchone()
+    assert inv is None
+    pg_conn.execute(
+        "UPDATE chronicle_events SET invalidated_at = 4.0 WHERE id = %s",
+        (ev_id,))
+    pg_conn.commit()
+    inv = pg_conn.execute(
+        "SELECT invalidated_at FROM chronicle_events WHERE id = %s",
+        (ev_id,)).fetchone()[0]
+    assert inv == 4.0
 
 
 # ── the pure parser ──────────────────────────────────────────────────────

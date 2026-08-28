@@ -12,10 +12,13 @@ exactly; they exist because each one was violated at least once.
    `pseudolife_memory/storage/schema.py`, the doc mentions (README
    capabilities table + the DSN row and version-history table in
    `docs/guide/configuration.md` — both pinned by `tests/test_release_ux.py`,
-   the history table including gap detection), the version-pin tests (a new
-   `test_schema_vNN.py` asserting `== NN` for the addition itself, and relax
-   the previous newest one to `>=` its own version — only the newest file
-   carries the exact pin; older schema tests assert `>=` and need no touch),
+   the history table including gap detection), the version pin (the single
+   `CURRENT_SCHEMA` literal in `tests/test_schema_version.py` — no
+   per-version file, no `>=` relaxation pass; the ladder is gap-checked by
+   `test_release_ux.py` and `test_atlas_currency.py`. Whatever behavior the
+   bump adds gets a test beside its consumer, or a row in
+   `tests/test_schema_ddl_shape.py` if it is pure DDL shape — never a new
+   `test_schema_vNN.py`),
    a CHANGELOG mention of `vNN` (pinned by `test_release_ux.py`), and
    `docs/atlas/atlas.json` `meta.schema` (pinned by
    `tests/test_atlas_currency.py` — re-verify the affected storage cards,

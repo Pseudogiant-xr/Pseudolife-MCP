@@ -54,7 +54,14 @@ def test_reset_list_names_no_table_the_schema_does_not_declare():
 
 def test_the_previously_leaking_tables_are_covered():
     """Named explicitly so a future edit that trims the list by FK
-    reasoning has to argue with the two incidents by name."""
+    reasoning has to argue with the two incidents by name.
+
+    ``chronicle_events`` has no FKs, so nothing cascades into it: leaving it
+    off the truncate list let events accumulate across all 266 questions of
+    the ev-weak-0804 run and contaminate every served events block (verdict
+    corrected in agg-recall-phase2-weak-verdict.json). The rest came off the
+    second copy of the list in ``ladder_sweep``, which never grew the tables
+    ``pg_fixtures`` had (#181, 2026-08-25)."""
     for table in ("chronicle_events", "entity_kinds", "retrieval_events",
                   "outcome_signals", "dismissed_pairs", "merge_decisions",
                   "communities"):

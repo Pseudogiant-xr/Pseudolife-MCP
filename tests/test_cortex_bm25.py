@@ -14,12 +14,14 @@ normalised `bm25.min_score`, NOT by the caller's dense `min_score` floor,
 so a fact the dense channel scores below the floor can still be served
 when the query names it exactly.
 
-Like test_cortex_service.py this builds a real MemoryService (offline
-embedder) against a throwaway data dir.
+Like test_cortex_contenders.py this runs against a real MemoryService
+(offline embedder). Most tests here only READ an identical seeded corpus, so
+they share one module-scoped seeded service; the two that seed a different
+corpus take conftest's ``pristine_service`` instead.
 """
 from __future__ import annotations
 
-import tempfile
+import pytest
 
 from pseudolife_memory.service import MemoryService
 
@@ -48,37 +50,50 @@ def _seed(svc: MemoryService) -> None:
                      provenance=["seed"])
 
 
-def test_bm25_serves_lexical_fact_the_dense_floor_drops():
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        svc = MemoryService(data_dir=d)
-        _seed(svc)
-        # min_score=0.99: no dense cosine hit survives, so anything
-        # returned came through the lexical channel.
-        got = svc.cortex_search("redistribute PRB052840832", top_k=5,
-                                min_score=0.99, bm25=True)["entries"]
-        assert any("PRB052840832" in e["entity"] for e in got), got
-        # Same call without the lexical channel: starved.
-        got_off = svc.cortex_search("redistribute PRB052840832", top_k=5,
-                                    min_score=0.99, bm25=False)["entries"]
-        assert got_off == []
+@pytest.fixture(scope="module")
+def seeded_service(tmp_path_factory):
+    """One service per module, seeded ONCE with ``_seed``'s six facts, for the
+    tests that only READ that corpus.
+
+    Deliberately its own service rather than conftest's ``warm_service``: the
+    two set-slot tests below take ``pristine_service``, which empties
+    warm_service's bank, so sharing one service would make this corpus depend
+    on file order. Any test that WRITES must take ``pristine_service``, not
+    this fixture — a write here leaks into every later reader.
+    """
+    svc = MemoryService(data_dir=tmp_path_factory.mktemp("cortex-bm25"))
+    _seed(svc)
+    return svc
 
 
-def test_bm25_cortex_defaults_off_even_when_turn_pool_is_on():
+def test_bm25_serves_lexical_fact_the_dense_floor_drops(seeded_service):
+    svc = seeded_service
+    # min_score=0.99: no dense cosine hit survives, so anything
+    # returned came through the lexical channel.
+    got = svc.cortex_search("redistribute PRB052840832", top_k=5,
+                            min_score=0.99, bm25=True)["entries"]
+    assert any("PRB052840832" in e["entity"] for e in got), got
+    # Same call without the lexical channel: starved.
+    got_off = svc.cortex_search("redistribute PRB052840832", top_k=5,
+                                min_score=0.99, bm25=False)["entries"]
+    assert got_off == []
+
+
+def test_bm25_cortex_defaults_off_even_when_turn_pool_is_on(seeded_service):
     """The 2026-07-30 pre-registered _s A/B failed (bm25-ab-confirmation.json:
     56/78 contexts changed, zero accuracy/commit-rate movement, ~1 question
     cost on the oracle gate slice), so the cortex-side channel ships OPT-IN:
     `memory.bm25.cortex_enabled = False` by default, independent of the turn
     pool's `enabled = True`."""
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        svc = MemoryService(data_dir=d)
-        _seed(svc)
-        assert svc.config.memory.bm25.enabled is True          # turn pool on
-        assert svc.config.memory.bm25.cortex_enabled is False  # facts off
-        # Default call: dense only — the lexical fact channel must not fire.
-        assert svc.cortex_search("redistribute PRB052850000 PRB052840832",
-                                 top_k=5, min_score=0.99)["entries"] == []
-        # Config opt-in turns it on without a per-call override.
-        svc.config.memory.bm25.cortex_enabled = True
+    svc = seeded_service
+    assert svc.config.memory.bm25.enabled is True          # turn pool on
+    assert svc.config.memory.bm25.cortex_enabled is False  # facts off
+    # Default call: dense only — the lexical fact channel must not fire.
+    assert svc.cortex_search("redistribute PRB052850000 PRB052840832",
+                             top_k=5, min_score=0.99)["entries"] == []
+    # Config opt-in turns it on without a per-call override.
+    svc.config.memory.bm25.cortex_enabled = True
+    try:
         got = svc.cortex_search("redistribute PRB052850000 PRB052840832",
                                 top_k=5, min_score=0.99)["entries"]
         assert any("PRB052840832" in e["entity"] for e in got)
@@ -86,45 +101,44 @@ def test_bm25_cortex_defaults_off_even_when_turn_pool_is_on():
         assert svc.cortex_search("redistribute PRB052850000 PRB052840832",
                                  top_k=5, min_score=0.99,
                                  bm25=False)["entries"] == []
+    finally:
+        # The service is module-scoped: leaving the opt-in on would silently
+        # change the channel default for every later test in this file.
+        svc.config.memory.bm25.cortex_enabled = False
 
 
-def test_bm25_boost_raises_score_of_lexical_match():
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        svc = MemoryService(data_dir=d)
-        _seed(svc)
-        query = "workflow for ticket PRB052840832"
+def test_bm25_boost_raises_score_of_lexical_match(seeded_service):
+    svc = seeded_service
+    query = "workflow for ticket PRB052840832"
 
-        def score_of(entries):
-            for e in entries:
-                if "PRB052840832" in e["entity"]:
-                    return e["score"]
-            return None
+    def score_of(entries):
+        for e in entries:
+            if "PRB052840832" in e["entity"]:
+                return e["score"]
+        return None
 
-        on = score_of(svc.cortex_search(query, top_k=6, bm25=True)["entries"])
-        off = score_of(svc.cortex_search(query, top_k=6,
-                                         bm25=False)["entries"])
-        assert on is not None
-        # Load-bearing check: with the channel disabled the fused boost
-        # disappears — the same fact scores strictly lower (or is absent).
-        assert off is None or on > off
+    on = score_of(svc.cortex_search(query, top_k=6, bm25=True)["entries"])
+    off = score_of(svc.cortex_search(query, top_k=6,
+                                     bm25=False)["entries"])
+    assert on is not None
+    # Load-bearing check: with the channel disabled the fused boost
+    # disappears — the same fact scores strictly lower (or is absent).
+    assert off is None or on > off
 
 
-def test_bm25_entries_keep_cortex_shape():
+def test_bm25_entries_keep_cortex_shape(seeded_service):
     """Lexically-injected entries carry the same dict shape as dense hits
     (entity/attribute/value/score/contested), so consumers cannot tell
     the channels apart structurally."""
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        svc = MemoryService(data_dir=d)
-        _seed(svc)
-        got = svc.cortex_search("PRB052840832", top_k=3, min_score=0.99,
-                                bm25=True)["entries"]
-        assert got, "lexical channel should have served the identifier fact"
-        entry = got[0]
-        for key in ("entity", "attribute", "value", "score", "contested"):
-            assert key in entry, f"missing {key!r} in {entry}"
+    got = seeded_service.cortex_search("PRB052840832", top_k=3,
+                                       min_score=0.99, bm25=True)["entries"]
+    assert got, "lexical channel should have served the identifier fact"
+    entry = got[0]
+    for key in ("entity", "attribute", "value", "score", "contested"):
+        assert key in entry, f"missing {key!r} in {entry}"
 
 
-def test_rebuild_fact_ranking_matches_service_fusion():
+def test_rebuild_fact_ranking_matches_service_fusion(seeded_service):
     """Lockstep guard: evals/rebuild_contexts.py re-implements cortex fact
     ranking offline (it ranks dumped banks, not a live store). The 2026-07-30
     regression-gate run proved why this must be pinned: the gate 'passed'
@@ -144,33 +158,32 @@ def test_rebuild_fact_ranking_matches_service_fusion():
           "history": ["Knowledge Search; Problems; Private Task"]}]
     query = "workflow for ticket PRB052840832"
 
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        svc = MemoryService(data_dir=d)
-        _seed(svc)
-        res = svc.cortex_search(query, top_k=4, min_score=0.2, bm25=True)
-        want = [e["entity"] for e in res["entries"]]
-        # Knife-edge guard on the FIXTURE (2026-08-09): this test flapped on
-        # CI because two fillers fused within ~1.2e-3 of each other — inside
-        # cross-environment embedding-numerics noise, so the compared order
-        # was decided by BLAS rounding, not by the fusion under test. The
-        # lockstep assertion below needs well-separated scores to mean
-        # anything; if a fixture edit re-creates a near-tie, fail HERE with
-        # the pair named instead of flapping on CI.
-        scores = [e["score"] for e in res["entries"]]
-        for a, b, ea, eb in zip(scores, scores[1:], want, want[1:]):
-            assert a - b > 0.005, (
-                f"fixture knife-edge: {ea!r} ({a}) vs {eb!r} ({b}) fused "
-                "within 0.005 — separate the filler facts, don't loosen "
-                "the lockstep assertion")
-        emb = svc._embedder  # same pipeline the service ranks with
-        lines = rebuild_fact_lines(
-            {"facts": facts, "question": query}, emb,
-            top_k=4, min_score=0.2, bm25=True)
-        got = [ln.split(" — ")[0] for ln in lines]
+    svc = seeded_service
+    res = svc.cortex_search(query, top_k=4, min_score=0.2, bm25=True)
+    want = [e["entity"] for e in res["entries"]]
+    # Knife-edge guard on the FIXTURE (2026-08-09): this test flapped on
+    # CI because two fillers fused within ~1.2e-3 of each other — inside
+    # cross-environment embedding-numerics noise, so the compared order
+    # was decided by BLAS rounding, not by the fusion under test. The
+    # lockstep assertion below needs well-separated scores to mean
+    # anything; if a fixture edit re-creates a near-tie, fail HERE with
+    # the pair named instead of flapping on CI.
+    scores = [e["score"] for e in res["entries"]]
+    for a, b, ea, eb in zip(scores, scores[1:], want, want[1:]):
+        assert a - b > 0.005, (
+            f"fixture knife-edge: {ea!r} ({a}) vs {eb!r} ({b}) fused "
+            "within 0.005 — separate the filler facts, don't loosen "
+            "the lockstep assertion")
+    emb = svc._embedder  # same pipeline the service ranks with
+    lines = rebuild_fact_lines(
+        {"facts": facts, "question": query}, emb,
+        top_k=4, min_score=0.2, bm25=True)
+    got = [ln.split(" — ")[0] for ln in lines]
     assert got == want, f"rebuild={got} service={want}"
 
 
-def test_rebuild_fact_ranking_matches_service_fusion_set_slot():
+def test_rebuild_fact_ranking_matches_service_fusion_set_slot(
+        pristine_service):
     """Task 6 extension of the lockstep guard above: a set-valued slot must
     collapse to ONE grouped entry identically on both paths. The bank's
     member facts carry ``"kind": "member"`` (what ``svc.cortex_dump()`` now
@@ -216,47 +229,46 @@ def test_rebuild_fact_ranking_matches_service_fusion_set_slot():
     query = ("recommend the best option for a beginner cyclist SNHHH999 "
              "SNHHH999 SNHHH999 SNGGG111 SNGGG111 SNRRR555")
 
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        svc = MemoryService(data_dir=d)
-        # One unrelated scalar in the corpus (nit, re-review): the isolated
-        # 3-member-only universe above proved the order-divergence fix in
-        # the tightest possible reproduction, but never exercised the
-        # grouped entry's position AMONG scalars — restore one so the
-        # grouping/lockstep logic is proven against a mixed corpus too, not
-        # just a set-slot vacuum. Scores nowhere near this query (verified:
-        # 0.0 dense/lexical), so it must NOT appear in the results — the
-        # assertion below pins that the set entry still lands as the sole,
-        # first-position entry despite scalar competition existing.
-        svc.cortex_write("payments-db", "host", "10.0.0.7", provenance=["seed"])
-        svc.set_add("user", "bikes owned", "road bike SNRRR555")
-        svc.set_add("user", "bikes owned", "gravel bike SNGGG111")
-        svc.set_add("user", "bikes owned", "hybrid bike SNHHH999")
+    svc = pristine_service
+    # One unrelated scalar in the corpus (nit, re-review): the isolated
+    # 3-member-only universe above proved the order-divergence fix in
+    # the tightest possible reproduction, but never exercised the
+    # grouped entry's position AMONG scalars — restore one so the
+    # grouping/lockstep logic is proven against a mixed corpus too, not
+    # just a set-slot vacuum. Scores nowhere near this query (verified:
+    # 0.0 dense/lexical), so it must NOT appear in the results — the
+    # assertion below pins that the set entry still lands as the sole,
+    # first-position entry despite scalar competition existing.
+    svc.cortex_write("payments-db", "host", "10.0.0.7", provenance=["seed"])
+    svc.set_add("user", "bikes owned", "road bike SNRRR555")
+    svc.set_add("user", "bikes owned", "gravel bike SNGGG111")
+    svc.set_add("user", "bikes owned", "hybrid bike SNHHH999")
 
-        want_entries = svc.cortex_search(query, top_k=6, min_score=0.7,
-                                         bm25=True)["entries"]
-        set_entries = [e for e in want_entries if e.get("kind") == "set"]
-        assert set_entries, "the set slot should have ranked for this query"
-        assert want_entries[0]["kind"] == "set", (
-            "the grouped set entry must be pinned at position 0 even with "
-            "an (excluded) scalar in the corpus")
-        # The full line each path SHOULD serve — entity, attribute, and the
-        # (for a set) score-ordered composed value — not just the entity.
-        want_lines = [f"{e['entity']} — {e['attribute']}: {e['value']}"
-                      for e in want_entries]
+    want_entries = svc.cortex_search(query, top_k=6, min_score=0.7,
+                                     bm25=True)["entries"]
+    set_entries = [e for e in want_entries if e.get("kind") == "set"]
+    assert set_entries, "the set slot should have ranked for this query"
+    assert want_entries[0]["kind"] == "set", (
+        "the grouped set entry must be pinned at position 0 even with "
+        "an (excluded) scalar in the corpus")
+    # The full line each path SHOULD serve — entity, attribute, and the
+    # (for a set) score-ordered composed value — not just the entity.
+    want_lines = [f"{e['entity']} — {e['attribute']}: {e['value']}"
+                  for e in want_entries]
 
-        facts = [
-            {"entity": "payments-db", "attribute": "host", "value": "10.0.0.7",
-             "history": ["10.0.0.7"]},
-        ] + [
-            {"entity": "user", "attribute": "bikes owned", "value": member,
-             "kind": "member"}
-            for member in ("road bike SNRRR555", "gravel bike SNGGG111",
-                            "hybrid bike SNHHH999")
-        ]
-        emb = svc._embedder
-        got_lines = rebuild_fact_lines(
-            {"facts": facts, "question": query}, emb,
-            top_k=6, min_score=0.7, bm25=True)
+    facts = [
+        {"entity": "payments-db", "attribute": "host", "value": "10.0.0.7",
+         "history": ["10.0.0.7"]},
+    ] + [
+        {"entity": "user", "attribute": "bikes owned", "value": member,
+         "kind": "member"}
+        for member in ("road bike SNRRR555", "gravel bike SNGGG111",
+                        "hybrid bike SNHHH999")
+    ]
+    emb = svc._embedder
+    got_lines = rebuild_fact_lines(
+        {"facts": facts, "question": query}, emb,
+        top_k=6, min_score=0.7, bm25=True)
 
     assert got_lines == want_lines, f"rebuild={got_lines} service={want_lines}"
     assert len(want_lines) == 1, (
@@ -270,7 +282,8 @@ def test_rebuild_fact_ranking_matches_service_fusion_set_slot():
     ], want_lines
 
 
-def test_rebuild_fact_ranking_matches_service_fusion_set_slot_mixed_corpus():
+def test_rebuild_fact_ranking_matches_service_fusion_set_slot_mixed_corpus(
+        pristine_service):
     """Companion to the engineered-order-divergence scenario above
     (coordinator follow-up after Task 6 approval): that test deliberately
     isolates a 3-member-only universe at ``min_score=0.7`` to force the F1
@@ -293,40 +306,39 @@ def test_rebuild_fact_ranking_matches_service_fusion_set_slot_mixed_corpus():
 
     query = "what bikes does the user own"
 
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        svc = MemoryService(data_dir=d)
-        _seed(svc)
-        svc.set_add("user", "bikes owned", "road bike")
-        svc.set_add("user", "bikes owned", "gravel bike")
-        svc.set_add("user", "bikes owned", "hybrid bike")
+    svc = pristine_service
+    _seed(svc)
+    svc.set_add("user", "bikes owned", "road bike")
+    svc.set_add("user", "bikes owned", "gravel bike")
+    svc.set_add("user", "bikes owned", "hybrid bike")
 
-        want_entries = svc.cortex_search(query, top_k=6, min_score=0.1,
-                                         bm25=True)["entries"]
-        assert len(want_entries) == 4, want_entries
-        assert want_entries[0]["kind"] == "set", (
-            "the grouped set entry must rank at position 0")
-        want_lines = [f"{e['entity']} — {e['attribute']}: {e['value']}"
-                      for e in want_entries]
+    want_entries = svc.cortex_search(query, top_k=6, min_score=0.1,
+                                     bm25=True)["entries"]
+    assert len(want_entries) == 4, want_entries
+    assert want_entries[0]["kind"] == "set", (
+        "the grouped set entry must rank at position 0")
+    want_lines = [f"{e['entity']} — {e['attribute']}: {e['value']}"
+                  for e in want_entries]
 
-        facts = [
-            {"entity": e, "attribute": a, "value": v, "history": [v]}
-            for e, a, v in _FILLER
-        ] + [{"entity": "ticket PRB052840832", "attribute": "workflow",
-              "value": "Knowledge Search; Problems; Private Task",
-              "history": ["Knowledge Search; Problems; Private Task"]}] + [
-            {"entity": "user", "attribute": "bikes owned", "value": member,
-             "kind": "member"}
-            for member in ("road bike", "gravel bike", "hybrid bike")
-        ]
-        emb = svc._embedder
-        got_lines = rebuild_fact_lines(
-            {"facts": facts, "question": query}, emb,
-            top_k=6, min_score=0.1, bm25=True)
+    facts = [
+        {"entity": e, "attribute": a, "value": v, "history": [v]}
+        for e, a, v in _FILLER
+    ] + [{"entity": "ticket PRB052840832", "attribute": "workflow",
+          "value": "Knowledge Search; Problems; Private Task",
+          "history": ["Knowledge Search; Problems; Private Task"]}] + [
+        {"entity": "user", "attribute": "bikes owned", "value": member,
+         "kind": "member"}
+        for member in ("road bike", "gravel bike", "hybrid bike")
+    ]
+    emb = svc._embedder
+    got_lines = rebuild_fact_lines(
+        {"facts": facts, "question": query}, emb,
+        top_k=6, min_score=0.1, bm25=True)
 
     assert got_lines == want_lines, f"rebuild={got_lines} service={want_lines}"
 
 
-def test_rebuild_fact_lines_legacy_bank_byte_identical():
+def test_rebuild_fact_lines_legacy_bank_byte_identical(seeded_service):
     """Hard regression requirement (Task 6): a bank dumped before set slots
     existed carries no ``"kind"`` key on any fact — rebuild_fact_lines must
     treat every one of them as scalar and rebuild BYTE-IDENTICALLY to
@@ -366,10 +378,10 @@ def test_rebuild_fact_lines_legacy_bank_byte_identical():
     assert any(len(f.get("history") or []) >= 2 for f in bank["facts"]), (
         "fixture must exercise the earlier-values garnish branch")
 
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        svc = MemoryService(data_dir=d)
-        svc._ensure_init()
-        emb = svc._embedder
+    # Only the embedder is needed — the bank under test comes from the
+    # fixture file, not from the service — so this borrows the module's
+    # seeded service rather than building one. It writes nothing.
+    emb = seeded_service._embedder
 
     lines = rebuild_fact_lines(bank, emb, top_k=8, min_score=0.0, bm25=False)
     assert lines == [

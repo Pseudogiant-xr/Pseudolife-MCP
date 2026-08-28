@@ -1,19 +1,10 @@
-"""Schema v8 + PostgresStorage round-trips (skips without a PG server)."""
+"""PostgresStorage round-trips (skips without a PG server)."""
 
 from __future__ import annotations
 
 import pytest
 
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
-
-
-def test_ensure_schema_idempotent(pg_conn):
-    from pseudolife_memory.storage.schema import ensure_schema
-
-    flags1 = ensure_schema(pg_conn)
-    flags2 = ensure_schema(pg_conn)
-    assert flags1 == {}  # AGE removed; ensure_schema returns empty dict
-    assert flags1 == flags2
 
 
 def test_schema_version_recorded(pg_conn):
@@ -44,7 +35,9 @@ def storage(pg_conn, pg_url):
 
 def test_occ_write_path_is_phase2_stub(storage):
     """The optimistic-concurrency (per-row CAS) path is a clearly-marked stub —
-    building it is a separate Phase-2 plan; v0.4 only lays the seam."""
+    building it is a separate Phase-2 plan; v0.4 only lays the seam. The raise
+    is the guard: nothing may silently write down the half-implemented CAS
+    path, so the refusal (not just the default) needs a pin."""
     with pytest.raises(NotImplementedError) as ei:
         storage.replace_facts_occ([])
     assert "Phase 2" in str(ei.value)

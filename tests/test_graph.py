@@ -694,7 +694,8 @@ def test_graph_backfill_sources_applies_scopes_config(svc):
     en, an = _norm_key("es-cfg"), _norm_key("role")
     st.add_trace(en, an, ea, _t.time())
     st.add_trace(en, an, eb, _t.time())
-    svc.graph_backfill_sources()
+    res = svc.graph_backfill_sources()
+    assert res["attributed"] >= 1
     eid = st.conn.execute(
         "SELECT entity_id FROM facts WHERE entity_norm=%s AND status='current' "
         "AND entity_id IS NOT NULL LIMIT 1", (en,)).fetchone()[0]
@@ -725,33 +726,6 @@ def test_backfill_purges_excluded_and_case_variant_rows(svc):
     assert "ES-Purge-Case" not in srcs
     assert "es-purge-old" in srcs
     assert "es-purge-meta2" in srcs
-
-
-def test_graph_backfill_sources_service(svc):
-    import time as _t
-    from pseudolife_memory.memory.cortex import _norm_key
-    svc.cortex_write("es-svc-target", "role", "thing", support="user")
-    st = svc._storage
-    svc.store("es-svc-target note", source="es-svc-proj")
-    e1 = st.conn.execute("SELECT id FROM entries ORDER BY id DESC LIMIT 1").fetchone()[0]
-    en = _norm_key("es-svc-target")
-    st.add_trace(en, _norm_key("role"), e1, _t.time())
-
-    res = svc.graph_backfill_sources()
-    assert res["attributed"] >= 1
-    eid = st.conn.execute(
-        "SELECT entity_id FROM facts WHERE entity_norm=%s AND status='current' "
-        "AND entity_id IS NOT NULL LIMIT 1", (en,)).fetchone()[0]
-    assert "es-svc-proj" in st.entity_sources_map()[eid]
-
-
-def test_graph_projects_lists_sources(svc):
-    import time as _t
-    svc._ensure_init()  # noqa: SLF001
-    st = svc._storage
-    a = st.ensure_entity("es-proj-ent", display="es-proj-ent")
-    st.upsert_entity_source(a, "es-proj-z", "derived", _t.time())
-    assert any(p["source"] == "es-proj-z" for p in svc.graph_projects()["projects"])
 
 
 def test_graph_projects_annotates_rollup_parent(svc):

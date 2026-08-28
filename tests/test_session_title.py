@@ -25,6 +25,20 @@ def test_git_project_name_none_outside_repo(tmp_path):
     assert git_project_name(str(tmp_path)) is None
 
 
+def test_title_ignores_home_dir(tmp_path, monkeypatch):
+    # SessionStart sometimes fires with cwd=home; don't title after the
+    # home-dir basename (the noisy "<user> - <date>" case).
+    import os
+
+    home = tmp_path / "home" / "someuser"
+    home.mkdir(parents=True)
+    monkeypatch.setattr(os.path, "expanduser",
+                        lambda p: str(home) if p == "~" else p)
+    title = title_from_cwd(str(home))
+    assert title.startswith("session - ")
+    assert "someuser" not in title
+
+
 def test_system_dir_is_not_a_project_title():
     # GUI clients (e.g. Claude Desktop) launch the shim with cwd = System32;
     # that's not a project, so the title must fall back to "session", not

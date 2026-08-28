@@ -10,10 +10,14 @@ control arm to vanilla retrieval.
 """
 from __future__ import annotations
 
-import tempfile
-
 from pseudolife_memory.memory.cms import has_temporal_cue
 from pseudolife_memory.service import MemoryService
+
+# The service-backed tests only store and search, so they share conftest's
+# module-scoped ``warm_service`` via ``pristine_service`` (bank cleared per
+# test, embedder stays warm) instead of building a service apiece. Seeding
+# stays per-test; the saving is the construction. A test that mutates
+# ``svc.config`` restores it in a ``finally`` — the config outlives the clear.
 
 SEQ = [
     "booked the venue for the launch party",
@@ -42,24 +46,22 @@ def test_temporal_cue_detection():
     assert not has_temporal_cue("may I bring a guest?")
 
 
-def test_timeline_off_by_default():
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        svc = MemoryService(data_dir=d)
-        _seed(svc)
-        got = svc.search("when did the caterer confirm the launch party?",
-                         top_k=5)
-        assert all(e.get("via") != "timeline" for e in got["entries"])
+def test_timeline_off_by_default(pristine_service):
+    svc = pristine_service
+    _seed(svc)
+    got = svc.search("when did the caterer confirm the launch party?",
+                     top_k=5)
+    assert all(e.get("via") != "timeline" for e in got["entries"])
 
 
-def test_timeline_orders_memories_chronologically():
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        svc = MemoryService(data_dir=d)
-        _seed(svc)
-        got = svc.search("what order did the launch party planning happen in?",
-                         top_k=5, timeline=True)
-        texts = [e["text"] for e in got["entries"] if e["text"] in SEQ]
-        assert len(texts) >= 3, texts
-        assert texts == sorted(texts, key=SEQ.index), texts
+def test_timeline_orders_memories_chronologically(pristine_service):
+    svc = pristine_service
+    _seed(svc)
+    got = svc.search("what order did the launch party planning happen in?",
+                     top_k=5, timeline=True)
+    texts = [e["text"] for e in got["entries"] if e["text"] in SEQ]
+    assert len(texts) >= 3, texts
+    assert texts == sorted(texts, key=SEQ.index), texts
 
 
 def test_timeline_injects_lexical_matches_with_via_marker():
@@ -107,20 +109,20 @@ def test_timeline_injects_lexical_matches_with_via_marker():
         e.text for e in res_off.entries]
 
 
-def test_timeline_non_temporal_query_does_not_fire():
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        svc = MemoryService(data_dir=d)
-        _seed(svc)
-        got = svc.search("tell me about the zanzibar quartet booking",
-                         top_k=5, timeline=True)
-        assert all(e.get("via") != "timeline" for e in got["entries"])
+def test_timeline_non_temporal_query_does_not_fire(pristine_service):
+    svc = pristine_service
+    _seed(svc)
+    got = svc.search("tell me about the zanzibar quartet booking",
+                     top_k=5, timeline=True)
+    assert all(e.get("via") != "timeline" for e in got["entries"])
 
 
-def test_timeline_config_default_applies_and_call_override_wins():
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        svc = MemoryService(data_dir=d)
-        _seed(svc)
-        svc.config.memory.search.timeline_channel = True
+def test_timeline_config_default_applies_and_call_override_wins(
+        pristine_service):
+    svc = pristine_service
+    _seed(svc)
+    svc.config.memory.search.timeline_channel = True
+    try:
         got = svc.search("what order did the launch party planning happen in?",
                          top_k=5)
         texts = [e["text"] for e in got["entries"] if e["text"] in SEQ]
@@ -129,3 +131,7 @@ def test_timeline_config_default_applies_and_call_override_wins():
         got_off = svc.search("when was the quote confirmed for the party?",
                              top_k=5, timeline=False)
         assert all(e.get("via") != "timeline" for e in got_off["entries"])
+    finally:
+        # The shared service's config survives the bank clear — restore it or
+        # every later test in this module runs with the channel on.
+        svc.config.memory.search.timeline_channel = False

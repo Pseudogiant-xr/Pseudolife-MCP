@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import pytest
 
+from tests.helpers import reload_mcp_filemode as _reload_mcp_filemode
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
 
 
@@ -126,16 +127,7 @@ def test_service_attach_failure_is_swallowed(svc, monkeypatch):
 # test_abstain.py's reload pattern)
 # ------------------------------------------------------------------
 
-def _reload_mcp_filemode(tmp_path, monkeypatch):
-    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
-    monkeypatch.delenv("PSEUDOLIFE_MCP_DATABASE_URL", raising=False)
-    import importlib
-    import pseudolife_memory.mcp_server as mod
-    importlib.reload(mod)
-    return mod
-
-
-_FACT = {"entity": "checkout-service", "attribute": "default port",
+_FACT ={"entity": "checkout-service", "attribute": "default port",
          "value": "9090", "origin": "agent", "confidence": 0.8,
          "score": 0.7}
 

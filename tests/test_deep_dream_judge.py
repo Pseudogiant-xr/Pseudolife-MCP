@@ -66,6 +66,38 @@ def _row(svc, pid):
                  if p["id"] == pid), None)
 
 
+# ── the storage-level gate under the sweep (schema v30) ──────────────────
+
+def test_judgment_round_trips_and_gates_on_pending(pg_url):  # noqa: F811
+    """The verdict is an OPINION recorded on a PENDING row. Once a decision
+    path ratifies the row, the verdict freezes with it — a later judge call
+    must be refused rather than rewriting the history of a decided merge."""
+    import time
+
+    from pseudolife_memory.storage.postgres import PostgresStorage
+
+    st = PostgresStorage(pg_url)
+    st.ensure_entity("alpha", display="alpha")
+    st.ensure_entity("alpha service", display="alpha service")
+    a = st.find_entity("alpha")["id"]
+    b = st.find_entity("alpha service")["id"]
+    pid = st.insert_entity_proposal("merge", a, b, 0.9, "test", time.time())
+    assert st.set_entity_proposal_judgment(
+        pid, verdict="reject", confidence=0.9, note="siblings",
+        model="stub", at=time.time())
+    row = next(p for p in st.pending_entity_proposals() if p["id"] == pid)
+    assert row["judge_verdict"] == "reject"
+    assert row["judge_confidence"] == 0.9
+    assert row["judge_note"] == "siblings"
+    # A decided row can no longer be re-judged (the verdict froze with it).
+    st.set_entity_proposal_status(pid, "rejected")
+    assert not st.set_entity_proposal_judgment(
+        pid, verdict="accept", confidence=0.5, note=None, model="stub",
+        at=time.time())
+
+
+# ── judge modes ──────────────────────────────────────────────────────────
+
 def test_shadow_mode_records_and_applies_nothing(svc):
     svc.config.memory.deep_dream.judge_mode = "shadow"
     pid = _propose(svc, "alpha svc", "alpha service")

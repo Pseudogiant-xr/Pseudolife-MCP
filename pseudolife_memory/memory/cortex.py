@@ -1180,6 +1180,34 @@ class CortexStore:
                     self._current[r.key] = i
         return removed
 
+    def clear(self) -> None:
+        """Empty the store in memory — records, both slot indexes, the
+        supersession log, the dirty-slot set, and the dream cursor.
+
+        Test-support API: ``tests/conftest.py``'s ``pristine_service`` calls it
+        to hand each test an empty cortex on a module-scoped service (the
+        embedder stays warm). Production code supersedes, retires, or
+        :meth:`forget`s instead — this leaves no audit trail whatsoever.
+
+        In-memory only, by design. It DROPS ``dirty_slots`` rather than filling
+        it, so a later ``sync_cortex_slots`` deletes nothing: on a PG-backed
+        service the rows survive in storage and the next hydration brings them
+        back. Durable deletion is :meth:`forget`.
+
+        ``dream_cursor`` IS reset to 0.0. It is a high-water mark over the
+        episodic turns that produced these records; leaving it set past an
+        emptied store would silently skip consolidation of anything re-seeded
+        afterwards at an older timestamp. The construction knobs
+        (``supersede_confidence_margin``, ``reinforce_rate``,
+        ``protect_provenance``) are configuration, not state, and are kept.
+        """
+        self.records = []
+        self._reindex_current()   # rebuilds _current + _members — both empty
+        self.supersession_log = []
+        self.dirty_slots = set()
+        self.meta_dirty = False
+        self.dream_cursor = 0.0
+
     def search(
         self,
         query_embedding: torch.Tensor,

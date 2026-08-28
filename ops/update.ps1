@@ -9,6 +9,7 @@
 #   ops\update.ps1 -KeepRollbacks 5  # rollback tags to retain (default 2)
 #   ops\update.ps1 -KeepCacheHours 24 # build cache to retain, hours (default 168)
 #   ops\update.ps1 -NoCachePrune     # skip build-cache retention entirely
+#   ops\update.ps1 -HealthRetries 30 -HealthDelayMs 1500  # health-wait budget
 #   ops\update.ps1 -ForceRollbackTag # tag the rollback even when the version
 #                                    # tag is not the running daemon's image
 #
@@ -23,7 +24,14 @@ param(
     [switch]$ForceRollbackTag,
     [int]$KeepRollbacks = 2,
     [int]$KeepCacheHours = 168,
-    [switch]$NoCachePrune
+    [switch]$NoCachePrune,
+    # Health-wait budget (step 4). The defaults reproduce the previously
+    # hard-coded loop exactly — 30 attempts, 1.5s apart, so ~45s before a
+    # deploy is called unhealthy. Exposed so the unhealthy branch can be
+    # driven in a test without spending 45 seconds per scenario; there is no
+    # reason to lower them on a real deploy.
+    [int]$HealthRetries = 30,
+    [int]$HealthDelayMs = 1500
 )
 
 $ErrorActionPreference = "Stop"
@@ -144,11 +152,11 @@ if ($LASTEXITCODE -ne 0) { throw "daemon rebuild failed" }
 # 4. Wait for health.
 Write-Host "==> Waiting for the daemon to report healthy..."
 $h = $null
-for ($i = 0; $i -lt 30; $i++) {
+for ($i = 0; $i -lt $HealthRetries; $i++) {
     try {
         $h = Invoke-RestMethod -Uri "http://127.0.0.1:8765/health" -TimeoutSec 3
         if ($h.status -eq "ok") { break }
-    } catch { Start-Sleep -Milliseconds 1500 }
+    } catch { Start-Sleep -Milliseconds $HealthDelayMs }
     $h = $null
 }
 if ($h) {

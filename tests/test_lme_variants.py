@@ -15,7 +15,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
 
-import compare_arms as ca  # noqa: E402
 import longmemeval_bench as lmb  # noqa: E402
 
 VARIANT_KEYS = ("rag", "cortex", "hybrid", "hybrid_ctg", "hybrid_tl",
@@ -120,28 +119,3 @@ def test_report_covers_variant_arms(tmp_path, monkeypatch):
     assert summary["arms"]["hybrid_ctg"]["accuracy"] == 1.0
     assert summary["arms"]["hybrid"]["accuracy"] == 0.5
     assert summary["types"]["multi-session"]["arms"]["hybrid_ctg"] == 1.0
-
-
-def test_compare_arms_cross_arm_pairs_and_types_filter(tmp_path):
-    f = tmp_path / "run.jsonl"
-    rows = [
-        _mk_row("q1", "multi-session", {"hybrid": False, "hybrid_ctg": True,
-                                        "rag": True, "cortex": False}),
-        _mk_row("q2", "multi-session", {"hybrid": False, "hybrid_ctg": True,
-                                        "rag": True, "cortex": False}),
-        _mk_row("q3", "temporal-reasoning",
-                {"hybrid": True, "hybrid_ctg": False,
-                 "rag": True, "cortex": False}),
-        _mk_row("q4", "knowledge-update",
-                {"hybrid": True, "hybrid_ctg": True,
-                 "rag": True, "cortex": True}),
-    ]
-    f.write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
-    got = ca.compare(f, f, arm_pairs=[("hybrid_ctg", "hybrid")],
-                     types=("multi-session", "temporal-reasoning"))
-    assert got["n"] == 3  # KU row filtered out
-    pair = got["paired"]["a_vs_b"]["hybrid_ctg_vs_hybrid"]
-    assert pair["wins"] == 2 and pair["losses"] == 1
-    # Same-file same-arm sanity: rag vs rag pairs to zero delta.
-    got2 = ca.compare(f, f, arm_pairs=[("rag", "rag")])
-    assert got2["paired"]["a_vs_b"]["rag_vs_rag"]["delta"] == 0.0

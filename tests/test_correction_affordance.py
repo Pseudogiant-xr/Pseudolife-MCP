@@ -16,20 +16,13 @@ evergreen -> never), plus always on stale or contested facts.
 
 from __future__ import annotations
 
-import importlib
 import time
 
 import pytest
 
+from tests.helpers import reload_mcp_filemode as _reload_mcp_filemode
+
 DAY = 86400.0
-
-
-def _reload_mcp_filemode(tmp_path, monkeypatch):
-    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
-    monkeypatch.delenv("PSEUDOLIFE_MCP_DATABASE_URL", raising=False)
-    import pseudolife_memory.mcp_server as mod
-    importlib.reload(mod)
-    return mod
 
 
 def _cortex_fact(entity, attribute, value, *, age_days, freshness_class=None,

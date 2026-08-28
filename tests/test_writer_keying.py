@@ -16,22 +16,13 @@ The integration test mirrors ``test_daemon_http.py`` (spawns the real
 from __future__ import annotations
 
 import asyncio
-import json
-import os
-import socket
-import subprocess
-import sys
-import time
-
-# Keep spawned daemons off the desktop: without this flag, a child
-# python.exe launched from a hidden/detached parent (pytest under an
-# agent harness or CI wrapper) allocates its OWN console window and
-# steals foreground focus on Windows.
-_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
-import urllib.request
 
 import pytest
 
+from tests.helpers import (free_port as _free_port,
+                           pg_reachable as _pg_reachable,
+                           spawn_serve as _spawn_serve,
+                           stop_daemon as _stop_daemon)
 from tests.pg_fixtures import resolve_test_db_url
 
 psycopg = pytest.importorskip("psycopg")
@@ -60,70 +51,35 @@ def test_supersession_log_records_writer():
 
 # ── integration: header → persisted writer_id + session_id ───────────────
 
-def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
-def _pg_reachable(url: str) -> bool:
-    try:
-        with psycopg.connect(url, connect_timeout=3):
-            return True
-    except Exception:  # noqa: BLE001
-        return False
-
-
-def _health(port: int, timeout: float = 1.0) -> dict | None:
-    try:
-        with urllib.request.urlopen(
-            f"http://127.0.0.1:{port}/health", timeout=timeout
-        ) as r:
-            return json.loads(r.read().decode())
-    except Exception:  # noqa: BLE001
-        return None
-
-
 @pytest.fixture(scope="module")
 def daemon(tmp_path_factory):
+    """Its OWN daemon, not a shared one: the assertion under test is that a
+    per-request ``X-PL-Writer`` header beats the daemon's configured
+    ``PSEUDOLIFE_WRITER_ID`` default, and it authenticates with a token — a
+    daemon booted without both would make the test vacuous. It does share
+    the spawn/teardown helper (``tests/helpers.spawn_serve``) that
+    tests/test_shim.py's module daemon uses.
+    """
     url = resolve_test_db_url()
     if not _pg_reachable(url):
         pytest.skip("no test Postgres reachable")
     port = _free_port()
-    data_dir = tmp_path_factory.mktemp("keying_data")
-    env = {
-        **os.environ,
-        "PSEUDOLIFE_MCP_HOST": "127.0.0.1",
-        "PSEUDOLIFE_MCP_PORT": str(port),
-        "PSEUDOLIFE_MCP_DATABASE_URL": url,
-        "PSEUDOLIFE_MCP_DATA_DIR": str(data_dir),
-        "PSEUDOLIFE_MCP_TOKEN": _TOKEN,
-        # The daemon's own default — the per-request header must override this.
-        "PSEUDOLIFE_WRITER_ID": "daemon-default",
-    }
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "pseudolife_memory.cli", "serve"],
-        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        creationflags=_NO_WINDOW,
-    )
-    deadline = time.time() + 60
-    health = None
-    while time.time() < deadline:
-        health = _health(port)
-        if health is not None:
-            break
-        if proc.poll() is not None:
-            pytest.fail(f"daemon exited early ({proc.returncode})")
-        time.sleep(0.5)
-    if health is None:
-        proc.terminate()
-        pytest.fail("daemon never became healthy")
-    yield {"port": port, "url": f"http://127.0.0.1:{port}", "db": url}
-    proc.terminate()
     try:
-        proc.wait(timeout=10)
-    except subprocess.TimeoutExpired:
-        proc.kill()
+        proc, _health_payload = _spawn_serve(
+            port, tmp_path_factory.mktemp("keying_data"), url,
+            env_extra={
+                "PSEUDOLIFE_MCP_TOKEN": _TOKEN,
+                # The daemon's own default — the per-request header must
+                # override this.
+                "PSEUDOLIFE_WRITER_ID": "daemon-default",
+            },
+        )
+    except RuntimeError as exc:
+        pytest.fail(str(exc))
+    try:
+        yield {"port": port, "url": f"http://127.0.0.1:{port}", "db": url}
+    finally:
+        _stop_daemon(proc)
 
 
 async def _call_with_writer(url: str, writer: str, tool: str, args: dict):

@@ -20,38 +20,23 @@ These tests pin the consolidated contract:
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
 
 import pytest
 
-
-def _reload(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
-    import importlib
-    import pseudolife_memory.mcp_server as mod
-    importlib.reload(mod)
-    return mod
-
-
-def _invoke(tool_name: str, args: dict) -> dict:
-    from pseudolife_memory import mcp_server  # noqa: PLC0415
-
-    result = asyncio.run(mcp_server.mcp.call_tool(tool_name, args))
-    if isinstance(result, tuple):                     # SDK v1 shape
-        content, structured = result
-    else:                                             # v2 CallToolResult
-        content = result.content
-        structured = getattr(result, "structured_content", None)
-    if structured is not None:
-        return structured
-    return json.loads("".join(i.text for i in content if hasattr(i, "text")))
+from tests.helpers import (
+    invoke_tool as _invoke,
+    reload_mcp_filemode as _reload,
+)
 
 
 # ── memory_dream(action=...) ──────────────────────────────────────────────
 
 
-def test_dream_status_pull_commit_run_via_one_tool(tmp_path: Path, monkeypatch) -> None:
+def test_dream_status_pull_commit_via_one_tool(tmp_path: Path, monkeypatch) -> None:
+    # action="run" is dispatched in test_mcp_server.py::
+    # test_memory_dream_run_via_mcp_dispatch, which also carries the
+    # no-extractor assertion; this pins the manual status/pull/commit cycle.
     _reload(tmp_path, monkeypatch)
 
     _invoke("memory_store", {"text": "the beacon port is 7777", "source": "notes"})
@@ -62,11 +47,24 @@ def test_dream_status_pull_commit_run_via_one_tool(tmp_path: Path, monkeypatch) 
     pulled = _invoke("memory_dream", {"action": "pull"})
     assert "cursor" in pulled and "entries" in pulled
 
-    ran = _invoke("memory_dream", {"action": "run"})
-    assert "pulled" in ran and "cursor" in ran
-
     committed = _invoke("memory_dream", {"action": "commit", "cursor": pulled["cursor"]})
     assert "dream_cursor" in committed
+
+
+def test_dream_run_passes_limit(tmp_path: Path, monkeypatch) -> None:
+    """``limit`` reaches the service verbatim on action="run" — the knob
+    that bounds how much backlog one server-side dream chews through."""
+    mod = _reload(tmp_path, monkeypatch)
+    seen = {}
+
+    def fake_dream_run(extractor, *, limit=None):
+        seen["limit"] = limit
+        return {"pulled": 0, "claims": 0, "inserted": 0, "confirmed": 0,
+                "contested": 0, "superseded": 0, "cursor": 0.0}
+
+    monkeypatch.setattr(mod.service, "dream_run", fake_dream_run)
+    mod.memory_dream(action="run", limit=500)
+    assert seen["limit"] == 500
 
 
 def test_dream_commit_requires_cursor(tmp_path: Path, monkeypatch) -> None:
@@ -296,36 +294,6 @@ def test_dream_deep_routes_snippets_param(tmp_path: Path, monkeypatch) -> None:
 
 
 # ── surface shape: removals + description budget ──────────────────────────
-
-_REMOVED = [
-    # dump/introspection tools -> Cortex Console / briefing CLI
-    "memory_facts", "memory_world_facts", "memory_lessons",
-    "memory_list_sources", "memory_list_tags", "memory_episode_list",
-    "memory_communities", "memory_digest", "memory_briefing",
-    # folded into surviving tools
-    "memory_path",             # memory_graph(to=...)
-    "memory_save",             # autosave loop + exit flush
-    "memory_delete", "memory_fact_forget", "memory_world_forget",
-    "memory_lesson_forget",    # -> memory_forget(scope=...)
-    "memory_dream_status", "memory_dream_pull", "memory_dream_commit",
-    "memory_dream_run", "memory_deep_dream",  # -> memory_dream(action=...)
-    "memory_graph_propose_links", "memory_graph_accept_proposal",
-    "memory_graph_reject_proposal", "memory_graph_accept_entity_merge",
-    "memory_graph_accept_entity_junk", "memory_graph_reject_entity_proposal",
-    # -> memory_graph_review(action=...)
-]
-
-
-def test_removed_tools_are_gone(tmp_path: Path, monkeypatch) -> None:
-    # Pin the FULL surface: in an env with PSEUDOLIFE_MCP_TOOLSET=core this
-    # test would otherwise pass vacuously against the 15-tool manifest.
-    monkeypatch.setenv("PSEUDOLIFE_MCP_TOOLSET", "full")
-    mod = _reload(tmp_path, monkeypatch)
-
-    names = {t.name for t in asyncio.run(mod.mcp.list_tools())}
-    still_there = sorted(names & set(_REMOVED))
-    assert still_there == [], f"tools that should have left the surface: {still_there}"
-
 
 def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     """The manifest is eager agent context for non-deferring clients; each

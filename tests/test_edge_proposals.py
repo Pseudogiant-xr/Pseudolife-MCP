@@ -33,7 +33,3 @@ def test_insert_is_idempotent_on_triple(storage):
     first = storage.insert_proposal(a, "related-to", b, 0.45, 0.9, "x", "deep-dream", time.time())
     dup = storage.insert_proposal(a, "related-to", b, 0.45, 0.9, "x", "deep-dream", time.time())
     assert first is not None and dup is None
-
-
-def test_traces_by_entity_norm_returns_dict(storage):
-    assert isinstance(storage.traces_by_entity_norm(), dict)

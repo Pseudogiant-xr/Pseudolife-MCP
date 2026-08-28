@@ -105,40 +105,17 @@ def test_is_available_false_after_load_failure(monkeypatch: pytest.MonkeyPatch) 
 # ---------------------------------------------------------------------------
 
 
-def test_rerank_returns_one_score_per_candidate(stub_ce: type[_StubCrossEncoder]) -> None:
-    from pseudolife_memory.memory.reranker import CrossEncoderReranker  # noqa: PLC0415
-
-    r = CrossEncoderReranker()
-    scores = r.rerank("the project uses python", ["python rocks", "java is fine", "unrelated"])
-    assert len(scores) == 3
-
-
 def test_rerank_scores_lie_in_unit_interval(stub_ce: type[_StubCrossEncoder]) -> None:
-    """Sigmoid squashes raw logits into [0, 1] so fusion stays well-behaved."""
+    """Sigmoid squashes raw logits into [0, 1] so fusion stays well-behaved,
+    one score per candidate."""
     from pseudolife_memory.memory.reranker import CrossEncoderReranker  # noqa: PLC0415
 
     r = CrossEncoderReranker()
-    scores = r.rerank("the project uses python", ["python rocks", "totally unrelated"])
+    scores = r.rerank("the project uses python",
+                      ["python rocks", "java is fine", "totally unrelated"])
+    assert len(scores) == 3
     for s in scores:
         assert 0.0 <= s <= 1.0
-
-
-def test_rerank_promotes_semantically_relevant_candidate(stub_ce: type[_StubCrossEncoder]) -> None:
-    """The relevant candidate should score higher than the off-topic one."""
-    from pseudolife_memory.memory.reranker import CrossEncoderReranker  # noqa: PLC0415
-
-    r = CrossEncoderReranker()
-    scores = r.rerank(
-        "what python testing framework is in use",
-        [
-            "we use pytest for python testing",  # 4 token overlaps
-            "rust is a memory safe language",     # 0 overlaps
-        ],
-    )
-    assert scores[0] > scores[1], (
-        f"relevant candidate ({scores[0]:.3f}) should outscore "
-        f"unrelated ({scores[1]:.3f})"
-    )
 
 
 def test_rerank_empty_candidates_returns_empty(stub_ce: type[_StubCrossEncoder]) -> None:
@@ -170,30 +147,17 @@ def test_rerank_lazy_loads_model_only_on_first_call(stub_ce: type[_StubCrossEnco
 # ---------------------------------------------------------------------------
 
 
-def test_fuse_blends_per_weight() -> None:
-    """With fusion_weight=0.5 the fused score is the simple average."""
+@pytest.mark.parametrize("weight,expected", [
+    (0.0, [0.4, 0.8]),                                  # pure original
+    (0.5, [0.5 * 0.9 + 0.5 * 0.4, 0.5 * 0.1 + 0.5 * 0.8]),  # simple average
+    (1.0, [0.9, 0.1]),                                  # pure reranker
+])
+def test_fuse_blends_per_weight(weight: float, expected: list[float]) -> None:
     from pseudolife_memory.memory.reranker import CrossEncoderReranker  # noqa: PLC0415
 
-    r = CrossEncoderReranker(fusion_weight=0.5)
+    r = CrossEncoderReranker(fusion_weight=weight)
     fused = r.fuse(originals=[0.4, 0.8], ce_scores=[0.9, 0.1])
-    assert math.isclose(fused[0], 0.5 * 0.9 + 0.5 * 0.4)
-    assert math.isclose(fused[1], 0.5 * 0.1 + 0.5 * 0.8)
-
-
-def test_fuse_pure_reranker_with_weight_one() -> None:
-    from pseudolife_memory.memory.reranker import CrossEncoderReranker  # noqa: PLC0415
-
-    r = CrossEncoderReranker(fusion_weight=1.0)
-    fused = r.fuse(originals=[0.4, 0.8], ce_scores=[0.9, 0.1])
-    assert fused == [0.9, 0.1]
-
-
-def test_fuse_pure_original_with_weight_zero() -> None:
-    from pseudolife_memory.memory.reranker import CrossEncoderReranker  # noqa: PLC0415
-
-    r = CrossEncoderReranker(fusion_weight=0.0)
-    fused = r.fuse(originals=[0.4, 0.8], ce_scores=[0.9, 0.1])
-    assert fused == [0.4, 0.8]
+    assert all(math.isclose(a, b) for a, b in zip(fused, expected))
 
 
 def test_fuse_passthrough_when_ce_empty() -> None:

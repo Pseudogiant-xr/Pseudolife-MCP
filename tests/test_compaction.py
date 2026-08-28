@@ -242,8 +242,9 @@ def test_service_compact_disabled_is_noop(pristine_service):
         out = svc.compact_superseded()
         assert out["total"] == 0 and out.get("skipped") == "disabled"
     finally:
+        # Only the config knob needs restoring — ``pristine_service`` clears
+        # the cortex, so the seeded "proj" slot cannot reach the next test.
         svc.config.memory.compaction.enabled = True
-        svc.cortex_forget("proj")
 
 
 def test_service_compact_purges_and_preserves_history(pristine_service):
@@ -263,7 +264,6 @@ def test_service_compact_purges_and_preserves_history(pristine_service):
         assert idx["proj"] == T0 + 50
     finally:
         cfg.keep_per_slot, cfg.min_age_days = 3, 30.0
-        svc.cortex_forget("proj")
 
 
 # ── PG persistence (the dirty-slots hook is load-bearing) ───────────────

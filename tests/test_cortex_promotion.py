@@ -5,92 +5,58 @@ curate), with ``origin`` defaulted from ``source`` and overridable.
 Uses a real MemoryService (offline embedder); slot extraction is deterministic
 (``slots.extract_slots``), so the documented "Ragdoll cat named Jacque" example
 yields a stable (Jacque, type, cat) slot.
+
+Shares conftest's service via ``pristine_service`` — the bank (CMS + cortex) is
+emptied per test, so nothing survives between the parametrized cases. The
+``auto_promote`` flip does NOT: ``svc.config`` outlives the clear, so every
+test that sets it restores it in a ``finally``.
 """
 from __future__ import annotations
 
-import tempfile
-
-from pseudolife_memory.service import MemoryService
+import pytest
 
 _SENTENCE = "I have a Ragdoll cat named Jacque"
 
 
-def test_store_auto_promotes_slot_to_cortex():
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        svc = MemoryService(data_dir=d)
-        svc.config.memory.cortex.auto_promote = True   # opt-in (default off)
-        svc.store(_SENTENCE, source="conversation")
+@pytest.mark.parametrize("source,origin,field,expected", [
+    ("conversation", None, "value", "cat"),     # deterministic slot extraction
+    ("conversation", None, "origin", "user"),   # source conversation -> user tier
+    ("claude", None, "origin", "agent"),        # source claude -> agent tier
+    ("claude", "user", "origin", "user"),       # explicit origin wins
+])
+def test_store_auto_promotes_slot_to_cortex(pristine_service, source, origin,
+                                            field, expected):
+    svc = pristine_service
+    svc.config.memory.cortex.auto_promote = True   # opt-in (default off)
+    try:
+        svc.store(_SENTENCE, source=source, origin=origin)
         rec = svc.cortex_lookup("Jacque", "type")
         assert rec is not None
-        assert rec["value"] == "cat"
-        assert rec["origin"] == "user"          # source conversation -> user tier
-
-
-def test_origin_defaults_to_agent_for_claude_source():
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        svc = MemoryService(data_dir=d)
-        svc.config.memory.cortex.auto_promote = True   # opt-in (default off)
-        svc.store(_SENTENCE, source="claude")
-        rec = svc.cortex_lookup("Jacque", "type")
-        assert rec is not None and rec["origin"] == "agent"
-
-
-def test_explicit_origin_overrides_source_default():
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        svc = MemoryService(data_dir=d)
-        svc.config.memory.cortex.auto_promote = True   # opt-in (default off)
-        svc.store(_SENTENCE, source="claude", origin="user")
-        rec = svc.cortex_lookup("Jacque", "type")
-        assert rec is not None and rec["origin"] == "user"
-
-
-def test_store_does_not_auto_promote_by_default():
-    # Single-writer cortex: auto_promote ships OFF, so a plain store() writes
-    # nothing to the cortex (the LLM dream / memory_fact_set are the writers).
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        svc = MemoryService(data_dir=d)
-        out = svc.store(_SENTENCE, source="conversation")
-        assert out["cortex_promoted"] == 0
-        assert svc.cortex_lookup("Jacque", "type") is None
-
-
-def test_auto_promote_disabled_writes_nothing_to_cortex():
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        svc = MemoryService(data_dir=d)
+        assert rec[field] == expected
+    finally:
         svc.config.memory.cortex.auto_promote = False
-        svc.store(_SENTENCE, source="conversation")
-        assert svc.cortex_lookup("Jacque", "type") is None
-        assert svc.cortex_stats()["current"] == 0
 
 
-def test_promoted_fact_is_low_confidence_floor():
+def test_store_does_not_auto_promote_by_default(pristine_service):
+    # Single-writer cortex: auto_promote ships OFF (and setting it False is the
+    # same path), so a plain store() writes nothing to the cortex — the LLM
+    # dream / memory_fact_set are the writers.
+    svc = pristine_service
+    assert svc.config.memory.cortex.auto_promote is False  # no leak from above
+    out = svc.store(_SENTENCE, source="conversation")
+    assert out["cortex_promoted"] == 0
+    assert svc.cortex_lookup("Jacque", "type") is None
+    assert svc.cortex_stats()["current"] == 0
+
+
+def test_promoted_fact_is_low_confidence_floor(pristine_service):
     # Auto-promoted facts sit at the floor so a deliberate fact_set / user
     # assertion can out-rank them via the supersede margin.
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        svc = MemoryService(data_dir=d)
-        svc.config.memory.cortex.auto_promote = True   # opt-in (default off)
+    svc = pristine_service
+    svc.config.memory.cortex.auto_promote = True   # opt-in (default off)
+    try:
         svc.store(_SENTENCE, source="conversation")
         rec = svc.cortex_lookup("Jacque", "type")
         assert rec is not None and rec["confidence"] <= 0.55
-
-
-if __name__ == "__main__":
-    import sys
-    import traceback
-
-    tests = sorted(
-        (n, o) for n, o in dict(globals()).items()
-        if n.startswith("test_") and callable(o)
-    )
-    failures = 0
-    for name, fn in tests:
-        try:
-            fn()
-        except Exception:  # noqa: BLE001
-            failures += 1
-            print(f"FAIL {name}")
-            traceback.print_exc()
-        else:
-            print(f"ok   {name}")
-    print(f"\n{len(tests) - failures}/{len(tests)} passed")
-    sys.exit(1 if failures else 0)
+    finally:
+        svc.config.memory.cortex.auto_promote = False

@@ -46,7 +46,7 @@ These are in `pseudolife_memory/` (shared) and port to the MCP branch verbatim b
   `cortex_search` / `cortex_stats` / `cortex_vocab` / `cortex_dump` /
   `cortex_forget`, `extract_slots_regex`, **cortex co-persistence already folded
   into `save()` / `flush()` / `autosave_if_changed()` / `_entry_fingerprint()`**.
-- `tests/test_cortex.py` (15) + `tests/test_cortex_service.py` (3) — core, run under
+- `tests/test_cortex.py` (15) + `tests/test_cortex_contenders.py` (3) — core, run under
   the repo's existing pytest.
 
 So persistence + the whole store + the service API are **done**. The MCP port is
@@ -161,7 +161,7 @@ process is long-lived per session (it is — warm service, autosave thread).
 
 ## 8. Tests (TDD, pytest — repo has pytest + pytest-asyncio)
 
-Port (run as-is): `tests/test_cortex.py` (15), `tests/test_cortex_service.py` (3).
+Port (run as-is): `tests/test_cortex.py` (15), `tests/test_cortex_contenders.py` (3).
 
 New:
 - `test_store_auto_promotes_slot_to_cortex` — `store("I have a Ragdoll cat named
@@ -182,7 +182,7 @@ New:
    core-only — no external-agent dir).
 2. Bring the landed core files:
    `git checkout d65c540 -- pseudolife_memory/memory/cortex.py
-   pseudolife_memory/service.py tests/test_cortex.py tests/test_cortex_service.py`.
+   pseudolife_memory/service.py tests/test_cortex.py tests/test_cortex_contenders.py`.
 3. Implement §3 (promotion + `_origin_from_source`), §4 (origin params), §5
    (`mcp_server.py` tools + cortex-aware search), §7 (config).
 4. `pytest -q`. Then commit + push to `origin` (Pseudolife-MCP). PR/merge per repo
@@ -209,3 +209,4 @@ New:
 origin machinery are **already in core**. New code is one promotion hook, an origin
 defaulter, ~4 thin FastMCP tool wrappers + cortex-aware search, config, and ~6 tests.
 No daemon, no provider, no buffer, no dream, no vocab-feed.
+

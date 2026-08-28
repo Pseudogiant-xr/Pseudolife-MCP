@@ -1,6 +1,7 @@
-"""Schema v25 -- vector(1024), Qwen3-Embedding-0.6B default.
+"""``ensure_schema``'s embedding-dimension refusal, and the vector(1024)
+contract it defends (schema v25, Qwen3-Embedding-0.6B default).
 
-Four embedding columns (entries/facts/world_facts/lessons) move from
+Four embedding columns (entries/facts/world_facts/lessons) moved from
 vector(384) to vector(1024) for the measured-best backbone (PR #59
 artifacts: R@10 0.809 vs bge-base 0.742, +81/-6 vs shipped MiniLM). See
 docs/superpowers/specs/2026-07-28-embedding-backbone-v25-design.md.
@@ -12,8 +13,7 @@ than this build expects -- see
 :func:`pseudolife_memory.storage.schema._refuse_on_embedding_dim_mismatch`.
 The real migration is the human-gated ``ops/migrate_embeddings.py``.
 
-Skips cleanly without a PG server (mirrors test_pg_storage.py /
-test_schema_v24.py).
+Skips cleanly without a PG server (mirrors test_pg_storage.py).
 """
 from __future__ import annotations
 
@@ -23,13 +23,7 @@ import pytest
 
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
 
-from pseudolife_memory.storage import schema
-
 _EMBEDDING_TABLES = ("entries", "facts", "world_facts", "lessons")
-
-
-def test_schema_version_is_25():
-    assert schema.SCHEMA_META_VERSION >= 25  # 1024-dim embeddings landed at v25; persist into later schemas
 
 
 def test_all_four_embedding_columns_report_dim_1024(pg_conn):
@@ -129,13 +123,10 @@ def test_refusal_fires_on_dim_mismatch_and_names_the_migration_script(pg_conn):
         pg_conn.commit()
 
 
-def test_refusal_does_not_fire_when_dims_already_match(pg_conn):
-    """Sanity companion to the refusal test: ensure_schema on an untouched
-    (already vector(1024)) bank must not raise -- the guard is dimension-
-    specific, not a blanket refusal on every call."""
-    from pseudolife_memory.storage.schema import ensure_schema
-
-    ensure_schema(pg_conn)  # must not raise
+# The "guard does not fire on a matching bank" case needs no test of its
+# own: the pg_conn fixture calls ensure_schema on an already-vector(1024)
+# bank before EVERY PG-backed test in the suite, so a blanket refusal would
+# fail several hundred tests at setup.
 
 
 # ---------------------------------------------------------------------------

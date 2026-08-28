@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import socket
 import subprocess
 import sys
 import time
@@ -25,25 +24,12 @@ import urllib.request
 
 import pytest
 
+from tests.helpers import free_port as _free_port, pg_reachable as _pg_reachable
 from tests.pg_fixtures import resolve_test_db_url
 
-psycopg = pytest.importorskip("psycopg")
+pytest.importorskip("psycopg")
 
 _TOKEN = "test-secret-token"
-
-
-def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
-def _pg_reachable(url: str) -> bool:
-    try:
-        with psycopg.connect(url, connect_timeout=3):
-            return True
-    except Exception:  # noqa: BLE001
-        return False
 
 
 def _health(port: int, timeout: float = 1.0) -> dict | None:
@@ -144,6 +130,39 @@ def test_health_unauthenticated(daemon):
     assert h["persist_errors"] == 0  # healthy: no swallowed save failures
 
 
+def test_health_flags_a_partial_legacy_import_without_going_degraded():
+    """Boot continues on a half-imported bank, so /health is the only place
+    an operator can see that the bank is short (#187). It must stay
+    ``status: "ok"`` while saying so: web/api.py serves any non-ok payload
+    as HTTP 503, which the Docker healthcheck and the install/update
+    scripts all treat as fatal — that would turn a deliberately non-fatal
+    partial import into a bricked deploy loop. The loudness lives in the
+    ERROR logs and this flag, not in the status field.
+
+    Payload-shape test against a stub, so it takes no ``daemon`` fixture —
+    it touches no migration code, which is why it does not live in
+    tests/test_migration.py."""
+    from pseudolife_memory.daemon import _build_health_payload
+
+    class _Stub:
+        _db_url = "postgresql://fake"
+        _persist_errors = 0
+        _init_refusal = None
+        _storage = None
+        _migration_partial = "import_failed: disk full mid-import"
+
+    payload = _build_health_payload(_Stub(), token_present=False)
+    assert payload["status"] == "ok"
+    assert payload["migration_partial"].startswith("import_failed")
+
+    class _Clean(_Stub):
+        _migration_partial = None
+
+    clean = _build_health_payload(_Clean(), token_present=False)
+    assert clean["status"] == "ok"
+    assert "migration_partial" not in clean
+
+
 def test_tool_call_requires_token(daemon):
     req = urllib.request.Request(
         daemon["url"] + "/mcp",
@@ -237,49 +256,11 @@ def test_non_loopback_without_token_refused():
     assert proc.returncode == 2
 
 
-def test_transport_security_policy_is_explicit_not_inherited():
-    """The Host allowlist must be OUR decision, not the SDK's heuristic (#174).
-
-    FastMCP auto-enables DNS-rebinding protection when it sees a loopback
-    `host=` and disables it entirely otherwise. We pass neither host nor
-    settings today, so the daemon inherits the loopback allowlist no matter
-    what it actually binds — and naively forwarding the container's 0.0.0.0
-    would flip the same heuristic to "no protection at all". Both directions
-    are wrong; the policy keys on whether a bearer token gates the endpoint.
-    """
-    from pseudolife_memory import mcp_server
-
-    tokenless = mcp_server.transport_security_for(auth_configured=False)
-    assert tokenless.enable_dns_rebinding_protection is True
-    assert "127.0.0.1:*" in tokenless.allowed_hosts
-
-    # The documented LAN recipe: PSEUDOLIFE_MCP_HOST=0.0.0.0 + a token.
-    authenticated = mcp_server.transport_security_for(auth_configured=True)
-    assert authenticated.enable_dns_rebinding_protection is False
-
-    # And the selected policy must actually reach the transport. SDK v2 takes
-    # the settings at streamable_http_app() build time, so the seam to pin is
-    # apply_transport_security() -> build_streamable_http_app(): capture the
-    # kwarg the builder hands the SDK and require it to be exactly the
-    # selected policy — asserting on the module global alone would stay green
-    # if a tidy-up rebuilt the app without forwarding it (review, 2026-08-25).
-    prior = mcp_server._TRANSPORT_SECURITY
-    seen = {}
-    orig_app = mcp_server.mcp.streamable_http_app
-
-    def _capture(**kwargs):
-        seen.update(kwargs)
-        return orig_app(**kwargs)
-
-    try:
-        selected = mcp_server.apply_transport_security(auth_configured=False)
-        mcp_server.mcp.streamable_http_app = _capture
-        mcp_server.build_streamable_http_app()
-        assert seen.get("transport_security") is selected
-        assert selected.enable_dns_rebinding_protection is True
-    finally:
-        mcp_server.mcp.streamable_http_app = orig_app
-        mcp_server._TRANSPORT_SECURITY = prior
+# The in-process half of the #174 policy — transport_security_for() /
+# build_streamable_http_app() with no daemon and no DB — lives in
+# tests/test_mcp_server.py::test_transport_security_policy_is_explicit_not_inherited,
+# which this module's `importorskip("psycopg")` would otherwise skip along
+# with everything else here.
 
 
 @pytest.fixture(scope="module")

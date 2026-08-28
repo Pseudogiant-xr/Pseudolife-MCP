@@ -8,7 +8,6 @@ so these tests require torch installed and run under ``.venv``.
 
 from __future__ import annotations
 
-import asyncio
 import json
 
 import pytest
@@ -18,6 +17,7 @@ from pseudolife_memory.web import config_io
 from pseudolife_memory.web.api import build_console_app
 from pseudolife_memory.web.fixtures import FixtureService
 from pseudolife_memory.web.routes import ConsoleRoutes
+from tests.asgi_helpers import call, call_with_headers, stub_mcp
 
 
 @pytest.fixture
@@ -188,61 +188,42 @@ def test_graph_review_route(svc):
     assert any(f["action"] == "merge" for f in out["findings"])
 
 
-def test_assign_scope_and_unrelate_routes(svc):
-    r = ConsoleRoutes(svc)
-    a = r.dispatch("POST", "/api/graph/assign-scope", {}, {"entity": "x", "source": "p"})
-    assert a["assigned"] is True
-    u = r.dispatch("POST", "/api/graph/unrelate", {}, {"src": "a", "relation": "uses", "dst": "b"})
-    assert u["removed"] is True
-
-
-def test_bless_edge_route(svc):
-    r = ConsoleRoutes(svc)
-    out = r.dispatch("POST", "/api/graph/bless-edge", {},
-                     {"src": "a", "relation": "uses", "dst": "b"})
-    assert out["blessed"] is True
-
-
-def test_dismiss_duplicate_route(svc):
-    r = ConsoleRoutes(svc)
-    out = r.dispatch("POST", "/api/graph/dismiss-duplicate", {},
-                     {"a": "postgres", "b": "postgres.py"})
-    assert out["dismissed"] is True
-
-
-def test_delete_entity_route(svc):
-    r = ConsoleRoutes(svc)
-    out = r.dispatch("POST", "/api/graph/delete-entity", {}, {"entity": "junk"})
-    assert out["deleted"] is True
-
-
-def test_merge_route(svc):
-    r = ConsoleRoutes(svc)
-    out = r.dispatch("POST", "/api/graph/merge", {}, {"from": "dup", "into": "canonical"})
-    assert out["merged"] is True and out["into"] == "canonical"
-
-
-def test_relate_route(svc):
-    # Backs the duplicate finding's `relate` action (2026-07-26): a file and
-    # the concept it implements are neither a merge nor an unrelated pair, so
-    # the queue needs a way to record the edge instead of discarding the link.
-    r = ConsoleRoutes(svc)
-    out = r.dispatch("POST", "/api/graph/relate", {},
-                     {"src": "band.py", "relation": "implements", "dst": "band"})
-    assert out["src"] == "band.py" and out["relation"] == "implements"
-    assert out["dst"] == "band"
-
-
-def test_accept_reject_proposal_routes(svc):
-    r = ConsoleRoutes(svc)
-    assert r.dispatch("POST", "/api/graph/accept-proposal", {}, {"id": 1})["accepted"]
-    assert r.dispatch("POST", "/api/graph/reject-proposal", {}, {"id": 1})["rejected"]
-
-
-def test_routes_has(svc):
-    r = ConsoleRoutes(svc)
-    assert r.has("/api/facts")
-    assert not r.has("/api/bogus")
+@pytest.mark.parametrize("path,body,expected", [
+    ("/api/graph/bless-edge", {"src": "a", "relation": "uses", "dst": "b"},
+     {"blessed": True}),
+    ("/api/graph/dismiss-duplicate", {"a": "postgres", "b": "postgres.py"},
+     {"dismissed": True}),
+    ("/api/graph/delete-entity", {"entity": "junk"}, {"deleted": True}),
+    ("/api/graph/merge", {"from": "dup", "into": "canonical"},
+     {"merged": True, "into": "canonical"}),
+    # `relate` backs the duplicate finding's third verdict (2026-07-26): a file
+    # and the concept it implements are neither a merge nor an unrelated pair,
+    # so the queue needs a way to record the edge instead of discarding it.
+    ("/api/graph/relate",
+     {"src": "band.py", "relation": "implements", "dst": "band"},
+     {"src": "band.py", "relation": "implements", "dst": "band"}),
+    ("/api/graph/assign-scope", {"entity": "x", "source": "p"},
+     {"assigned": True}),
+    ("/api/graph/unrelate", {"src": "a", "relation": "uses", "dst": "b"},
+     {"removed": True}),
+    ("/api/graph/accept-proposal", {"id": 1}, {"accepted": True}),
+    ("/api/graph/reject-proposal", {"id": 1}, {"rejected": True}),
+    ("/api/graph/accept-entity-merge", {"id": 1}, {"accepted": True}),
+    ("/api/graph/accept-entity-junk", {"id": 2}, {"accepted": True}),
+    ("/api/graph/reject-entity-proposal", {"id": 3}, {"rejected": True}),
+    ("/api/curation/dismiss-duplicate",
+     {"store": "lesson", "a_entity": "deploy daemon", "a_attribute": "approach",
+      "b_entity": "deploy host", "b_attribute": "pitfall"},
+     {"dismissed": True}),
+])
+def test_post_verdict_route_dispatches_and_returns_the_service_result(
+        svc, path, body, expected):
+    """Every write verdict the Console can issue is registered and reaches the
+    service with its body intact. The values are whatever FixtureService
+    returns, so this pins routing and shape, not behaviour — the real
+    semantics live in the storage/service tests for each verb."""
+    out = ConsoleRoutes(svc).dispatch("POST", path, {}, body)
+    assert {k: out[k] for k in expected} == expected
 
 
 def test_routes_config_write_via_dispatch(svc):
@@ -266,39 +247,12 @@ def test_dreamer_model_override_knob_applies_live(svc):
 
 # ── ASGI app ────────────────────────────────────────────────────────────────
 
-async def _stub_mcp(scope, receive, send):
-    await send({"type": "http.response.start", "status": 501, "headers": []})
-    await send({"type": "http.response.body", "body": b""})
-
-
 def _app(svc, token=None):
-    return build_console_app(_stub_mcp, token, lambda: {"status": "ok"}, svc)
-
-
-def _call(app, method, path, headers=None, body=b""):
-    async def run():
-        scope = {"type": "http", "method": method, "path": path,
-                 "query_string": b"", "headers": headers or []}
-
-        async def receive():
-            return {"type": "http.request", "body": body, "more_body": False}
-
-        out = {"status": None, "body": bytearray()}
-
-        async def send(m):
-            if m["type"] == "http.response.start":
-                out["status"] = m["status"]
-            elif m["type"] == "http.response.body":
-                out["body"].extend(m.get("body", b""))
-
-        await app(scope, receive, send)
-        return out["status"], bytes(out["body"])
-
-    return asyncio.run(run())
+    return build_console_app(stub_mcp, token, lambda: {"status": "ok"}, svc)
 
 
 def test_asgi_health_open(svc):
-    st, _ = _call(_app(svc), "GET", "/health")
+    st, _ = call(_app(svc), "GET", "/health")
     assert st == 200
 
 
@@ -309,10 +263,10 @@ def test_asgi_health_degraded_returns_503(svc):
     import json
 
     app = build_console_app(
-        _stub_mcp, None,
+        stub_mcp, None,
         lambda: {"status": "degraded", "db": "error: connection refused"},
         svc)
-    st, body = _call(app, "GET", "/health")
+    st, body = call(app, "GET", "/health")
     assert st == 503
     assert json.loads(body)["db"].startswith("error")
 
@@ -323,13 +277,13 @@ def test_devserver_health_reports_real_schema():
     from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
     from pseudolife_memory.web.devserver import build_dev_app
 
-    st, body = _call(build_dev_app(), "GET", "/health")
+    st, body = call(build_dev_app(), "GET", "/health")
     assert st == 200
     assert json.loads(body)["schema"] == SCHEMA_META_VERSION
 
 
 def test_asgi_api_overview(svc):
-    st, body = _call(_app(svc), "GET", "/api/overview")
+    st, body = call(_app(svc), "GET", "/api/overview")
     assert st == 200 and b"counts" in body
 
 
@@ -338,7 +292,7 @@ def test_overview_carries_loop_health(svc):
     side of the memory-loop instructions."""
     import json
 
-    st, body = _call(_app(svc), "GET", "/api/overview")
+    st, body = call(_app(svc), "GET", "/api/overview")
     assert st == 200
     loop = json.loads(body)["loop"]
     assert loop["available"] is True
@@ -347,44 +301,44 @@ def test_overview_carries_loop_health(svc):
 
 
 def test_asgi_unknown_api_404(svc):
-    st, _ = _call(_app(svc), "GET", "/api/bogus")
+    st, _ = call(_app(svc), "GET", "/api/bogus")
     assert st == 404
 
 
 def test_asgi_wrong_verb_405(svc):
     # /api/facts is GET-only
-    st, _ = _call(_app(svc), "POST", "/api/facts")
+    st, _ = call(_app(svc), "POST", "/api/facts")
     assert st == 405
 
 
 def test_asgi_auth_gate(svc):
     app = _app(svc, token="secret")
-    assert _call(app, "GET", "/api/overview")[0] == 401
-    assert _call(app, "GET", "/api/overview",
+    assert call(app, "GET", "/api/overview")[0] == 401
+    assert call(app, "GET", "/api/overview",
                  headers=[(b"authorization", b"Bearer secret")])[0] == 200
     # static + health stay open even with a token set
-    assert _call(app, "GET", "/health")[0] == 200
+    assert call(app, "GET", "/health")[0] == 200
 
 
 def test_asgi_auth_gate_token_map(svc):
     """Spec 2026-08-10: per-principal tokens authenticate alongside the
     singular token; unknown bearers stay rejected."""
-    app = build_console_app(_stub_mcp, "single-tok", lambda: {"status": "ok"},
+    app = build_console_app(stub_mcp, "single-tok", lambda: {"status": "ok"},
                             svc, token_map={"tokA": "hermes-box"})
-    assert _call(app, "GET", "/api/overview",
+    assert call(app, "GET", "/api/overview",
                  headers=[(b"authorization", b"Bearer tokA")])[0] == 200
-    assert _call(app, "GET", "/api/overview",
+    assert call(app, "GET", "/api/overview",
                  headers=[(b"authorization", b"Bearer single-tok")])[0] == 200
-    assert _call(app, "GET", "/api/overview",
+    assert call(app, "GET", "/api/overview",
                  headers=[(b"authorization", b"Bearer nope")])[0] == 401
-    assert _call(app, "GET", "/api/overview")[0] == 401
+    assert call(app, "GET", "/api/overview")[0] == 401
 
 
 def test_asgi_auth_gate_non_ascii_bearer_is_401_not_500(svc):
     """Review 2026-08-10 finding 1: compare_digest rejects non-ASCII str;
     the gate must answer 401, never propagate a TypeError to uvicorn."""
     app = _app(svc, token="secret")
-    st, _ = _call(app, "GET", "/api/overview",
+    st, _ = call(app, "GET", "/api/overview",
                   headers=[(b"authorization", "Bearer café".encode("utf-8"))])
     assert st == 401
 
@@ -392,27 +346,27 @@ def test_asgi_auth_gate_non_ascii_bearer_is_401_not_500(svc):
 def test_asgi_auth_gate_map_only_closes_gate(svc):
     """A token map with no singular token still closes the gate — auth is
     configured, so anonymous callers are rejected."""
-    app = build_console_app(_stub_mcp, None, lambda: {"status": "ok"},
+    app = build_console_app(stub_mcp, None, lambda: {"status": "ok"},
                             svc, token_map={"tokA": "hermes-box"})
-    assert _call(app, "GET", "/api/overview")[0] == 401
-    assert _call(app, "GET", "/api/overview",
+    assert call(app, "GET", "/api/overview")[0] == 401
+    assert call(app, "GET", "/api/overview",
                  headers=[(b"authorization", b"Bearer tokA")])[0] == 200
-    assert _call(app, "GET", "/health")[0] == 200   # liveness stays open
-    assert _call(app, "GET", "/ui/")[0] == 200
+    assert call(app, "GET", "/health")[0] == 200   # liveness stays open
+    assert call(app, "GET", "/ui/")[0] == 200
 
 
 def test_asgi_static_index(svc):
-    st, body = _call(_app(svc), "GET", "/ui/")
+    st, body = call(_app(svc), "GET", "/ui/")
     assert st == 200 and b"Cortex Console" in body
 
 
 def test_asgi_static_traversal_blocked(svc):
-    st, _ = _call(_app(svc), "GET", "/ui/../../../etc/passwd")
+    st, _ = call(_app(svc), "GET", "/ui/../../../etc/passwd")
     assert st == 403
 
 
 def test_asgi_root_redirects(svc):
-    st, _ = _call(_app(svc), "GET", "/")
+    st, _ = call(_app(svc), "GET", "/")
     assert st == 307
 
 
@@ -421,31 +375,8 @@ def test_asgi_root_redirects(svc):
 # Claude Code plugin's curl hook. Contract: 200 always, instructions always,
 # memory content only when authorized, capped under the 10k hook stdout limit.
 
-def _call_with_headers(app, method, path, headers=None):
-    async def run():
-        scope = {"type": "http", "method": method, "path": path,
-                 "query_string": b"", "headers": headers or []}
-
-        async def receive():
-            return {"type": "http.request", "body": b"", "more_body": False}
-
-        out = {"status": None, "headers": [], "body": bytearray()}
-
-        async def send(m):
-            if m["type"] == "http.response.start":
-                out["status"] = m["status"]
-                out["headers"] = m.get("headers", [])
-            elif m["type"] == "http.response.body":
-                out["body"].extend(m.get("body", b""))
-
-        await app(scope, receive, send)
-        return out["status"], dict(out["headers"]), bytes(out["body"])
-
-    return asyncio.run(run())
-
-
 def test_hook_session_start_serves_instructions_as_text(svc):
-    st, headers, body = _call_with_headers(_app(svc), "GET",
+    st, headers, body = call_with_headers(_app(svc), "GET",
                                            "/api/hook/session-start")
     assert st == 200
     assert headers[b"content-type"].startswith(b"text/plain")
@@ -454,7 +385,7 @@ def test_hook_session_start_serves_instructions_as_text(svc):
 
 
 def test_hook_session_start_appends_briefing(svc):
-    st, body = _call(_app(svc), "GET", "/api/hook/session-start")
+    st, body = call(_app(svc), "GET", "/api/hook/session-start")
     assert st == 200 and b"(fixture)" in body
 
 
@@ -462,7 +393,7 @@ def test_hook_session_start_token_set_no_bearer_instructions_only(svc):
     """Token set + unauthorized: standing instructions are public repo
     content and still serve, but the briefing (memory content) must not."""
     app = _app(svc, token="secret")
-    st, body = _call(app, "GET", "/api/hook/session-start")
+    st, body = call(app, "GET", "/api/hook/session-start")
     assert st == 200
     assert b"memory_search" in body
     assert b"(fixture)" not in body
@@ -470,7 +401,7 @@ def test_hook_session_start_token_set_no_bearer_instructions_only(svc):
 
 def test_hook_session_start_token_with_bearer_appends_briefing(svc):
     app = _app(svc, token="secret")
-    st, body = _call(app, "GET", "/api/hook/session-start",
+    st, body = call(app, "GET", "/api/hook/session-start",
                      headers=[(b"authorization", b"Bearer secret")])
     assert st == 200 and b"(fixture)" in body
 
@@ -479,19 +410,19 @@ def test_hook_session_start_briefing_failure_still_serves(svc):
     def boom(**kw):
         raise RuntimeError("boom")
     svc.session_briefing = boom
-    st, body = _call(_app(svc), "GET", "/api/hook/session-start")
+    st, body = call(_app(svc), "GET", "/api/hook/session-start")
     assert st == 200 and b"memory_search" in body
 
 
 def test_hook_session_start_capped_under_hook_stdout_limit(svc):
     svc.session_briefing = lambda **kw: {"markdown": "x" * 20000}
-    st, body = _call(_app(svc), "GET", "/api/hook/session-start")
+    st, body = call(_app(svc), "GET", "/api/hook/session-start")
     assert st == 200
     assert len(body.decode("utf-8")) <= 9_500
 
 
 def test_hook_session_start_post_rejected(svc):
-    st, _ = _call(_app(svc), "POST", "/api/hook/session-start")
+    st, _ = call(_app(svc), "POST", "/api/hook/session-start")
     assert st == 405
 
 
@@ -500,7 +431,7 @@ def test_hook_session_start_override_file_replaces_instructions(svc):
     instructions instead of the shipped block (briefing still appended)."""
     (svc.data_dir / "hook-instructions.md").write_text(
         "## My house rules\nAlways check the runbook first.", encoding="utf-8")
-    st, body = _call(_app(svc), "GET", "/api/hook/session-start")
+    st, body = call(_app(svc), "GET", "/api/hook/session-start")
     text = body.decode("utf-8")
     assert st == 200
     assert "My house rules" in text
@@ -510,7 +441,7 @@ def test_hook_session_start_override_file_replaces_instructions(svc):
 
 def test_hook_session_start_blank_override_falls_back(svc):
     (svc.data_dir / "hook-instructions.md").write_text("  \n", encoding="utf-8")
-    st, body = _call(_app(svc), "GET", "/api/hook/session-start")
+    st, body = call(_app(svc), "GET", "/api/hook/session-start")
     assert st == 200 and b"memory_search" in body
 
 
@@ -518,7 +449,7 @@ def test_hook_session_start_cold_bank_gets_onboarding(svc):
     """An empty bank appends seeding guidance — first-run must not be
     instructions + silence."""
     svc.stats = lambda: {"total_memories": 0}
-    st, body = _call(_app(svc), "GET", "/api/hook/session-start")
+    st, body = call(_app(svc), "GET", "/api/hook/session-start")
     assert st == 200
     assert b"memory bank is EMPTY" in body
     assert b"memory_search" in body      # instructions still lead
@@ -526,7 +457,7 @@ def test_hook_session_start_cold_bank_gets_onboarding(svc):
 
 def test_hook_session_start_warm_bank_no_onboarding(svc):
     # FixtureService reports 1840 memories — no onboarding noise
-    st, body = _call(_app(svc), "GET", "/api/hook/session-start")
+    st, body = call(_app(svc), "GET", "/api/hook/session-start")
     assert st == 200
     assert b"memory bank is EMPTY" not in body
 
@@ -535,7 +466,7 @@ def test_hook_session_start_stats_failure_no_onboarding(svc):
     def boom():
         raise RuntimeError("db down")
     svc.stats = boom
-    st, body = _call(_app(svc), "GET", "/api/hook/session-start")
+    st, body = call(_app(svc), "GET", "/api/hook/session-start")
     assert st == 200
     assert b"memory_search" in body
     assert b"memory bank is EMPTY" not in body
@@ -546,16 +477,9 @@ def test_hook_session_start_unauthorized_no_onboarding(svc):
     the static instructions only."""
     svc.stats = lambda: {"total_memories": 0}
     app = _app(svc, token="secret")
-    st, body = _call(app, "GET", "/api/hook/session-start")
+    st, body = call(app, "GET", "/api/hook/session-start")
     assert st == 200
     assert b"memory bank is EMPTY" not in body
-
-
-def test_entity_proposal_routes(svc):
-    r = ConsoleRoutes(svc)
-    assert r.dispatch("POST", "/api/graph/accept-entity-merge", {}, {"id": 1})["accepted"]
-    assert r.dispatch("POST", "/api/graph/accept-entity-junk", {}, {"id": 2})["accepted"]
-    assert r.dispatch("POST", "/api/graph/reject-entity-proposal", {}, {"id": 3})["rejected"]
 
 
 def test_graph_entity_verdicts_pass_decided_by(svc):
@@ -582,7 +506,7 @@ def test_entity_provenance_route(svc):
 def test_tokenless_api_rejects_cross_site_origin(svc):
     """A web page the operator visits can fire fetch() at 127.0.0.1 —
     browsers stamp the attacker's Origin on it. Foreign Origin = CSRF."""
-    st, _ = _call(_app(svc), "POST", "/api/episodes/prune",
+    st, _ = call(_app(svc), "POST", "/api/episodes/prune",
                   headers=[(b"host", b"127.0.0.1:8765"),
                            (b"origin", b"https://evil.example")])
     assert st == 403
@@ -591,13 +515,13 @@ def test_tokenless_api_rejects_cross_site_origin(svc):
 def test_tokenless_api_rejects_foreign_host(svc):
     """DNS rebinding re-resolves an attacker domain to 127.0.0.1 — the Host
     header keeps the attacker's name and must be rejected."""
-    st, _ = _call(_app(svc), "GET", "/api/stats",
+    st, _ = call(_app(svc), "GET", "/api/stats",
                   headers=[(b"host", b"rebind.evil.example:8765")])
     assert st == 403
 
 
 def test_tokenless_api_allows_loopback_browser(svc):
-    st, _ = _call(_app(svc), "GET", "/api/stats",
+    st, _ = call(_app(svc), "GET", "/api/stats",
                   headers=[(b"host", b"127.0.0.1:8765"),
                            (b"origin", b"http://127.0.0.1:8765")])
     assert st == 200
@@ -606,14 +530,14 @@ def test_tokenless_api_allows_loopback_browser(svc):
 def test_tokenless_api_allows_headerless_clients(svc):
     # curl / scripts / the MCP transport send no Origin (and the test rig
     # no Host) — they are not browsers and must keep working.
-    st, _ = _call(_app(svc), "GET", "/api/stats")
+    st, _ = call(_app(svc), "GET", "/api/stats")
     assert st == 200
 
 
 def test_api_post_with_body_requires_json_content_type(svc):
     """A cross-site form/fetch can send text/plain or urlencoded without a
     CORS preflight — application/json cannot. 415 forces the preflight."""
-    st, _ = _call(_app(svc), "POST", "/api/facts/set",
+    st, _ = call(_app(svc), "POST", "/api/facts/set",
                   headers=[(b"host", b"127.0.0.1"),
                            (b"content-type", b"text/plain")],
                   body=b'{"entity":"e","attribute":"a","value":"v"}')
@@ -626,7 +550,7 @@ def test_facts_set_threads_freshness_class(svc):
     can. Shipping v23 through the tool alone left this route silently pinning
     every REST-written fact to the evergreen default."""
     app = _app(svc)
-    st, body = _call(app, "POST", "/api/facts/set",
+    st, body = call(app, "POST", "/api/facts/set",
                      headers=[(b"host", b"127.0.0.1"),
                               (b"content-type", b"application/json")],
                      body=b'{"entity":"srv","attribute":"deploy-status",'
@@ -639,7 +563,7 @@ def test_facts_set_defaults_freshness_class_to_evergreen(svc):
     """Omitting the field must not become volatile — the personal cortex
     defaults durable, unlike the world cortex."""
     app = _app(svc)
-    st, body = _call(app, "POST", "/api/facts/set",
+    st, body = call(app, "POST", "/api/facts/set",
                      headers=[(b"host", b"127.0.0.1"),
                               (b"content-type", b"application/json")],
                      body=b'{"entity":"proj","attribute":"language","value":"python"}')
@@ -651,7 +575,7 @@ def test_tokened_api_skips_host_gate(svc):
     """With a token set, Authorization already proves intent (it cannot be
     attached cross-origin without a failing preflight) — remote/LAN hosts
     are legitimate."""
-    st, _ = _call(_app(svc, token="s3cret"), "GET", "/api/stats",
+    st, _ = call(_app(svc, token="s3cret"), "GET", "/api/stats",
                   headers=[(b"host", b"192.168.1.20:8765"),
                            (b"authorization", b"Bearer s3cret")])
     assert st == 200
@@ -677,10 +601,3 @@ def test_curation_duplicates_route(svc):
     assert "lesson_duplicates" in out and "world_duplicates" in out
 
 
-def test_curation_dismiss_duplicate_route(svc):
-    r = ConsoleRoutes(svc)
-    out = r.dispatch("POST", "/api/curation/dismiss-duplicate", {},
-                     {"store": "lesson",
-                      "a_entity": "deploy daemon", "a_attribute": "approach",
-                      "b_entity": "deploy host", "b_attribute": "pitfall"})
-    assert out["dismissed"] is True

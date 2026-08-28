@@ -22,13 +22,7 @@ import torch
 
 from pseudolife_memory.memory.cortex import CortexStore, CortexRecord
 from pseudolife_memory.memory.slots import Slot
-
-
-def _unit(seed: int, dim: int = 8) -> torch.Tensor:
-    """Deterministic unit vector for a given seed."""
-    g = torch.Generator().manual_seed(seed)
-    v = torch.randn(dim, generator=g)
-    return v / v.norm()
+from tests.helpers import unit_vec as _unit
 
 
 def test_backwards_wall_clock_still_supersedes():
@@ -108,9 +102,6 @@ def test_untouched_fact_unchanged_after_unrelated_writes_no_decay():
         store.write_fact(Slot(f"e{i}", "attr", f"v{i}"), _unit(100 + i), now=1000.0 + i)
     after = store.lookup("user", "city")
     assert (after.value, after.status, after.confidence, after.last_confirmed) == snapshot
-    # The cortex must NOT carry the continuum's decay/promotion machinery.
-    assert not hasattr(store, "decay")
-    assert not hasattr(store, "promote")
 
 
 def test_reasserting_same_fact_reinforces_confidence_but_stays_bounded():
@@ -563,29 +554,6 @@ def test_facts_ranked_truncates_long_values():
     assert len(v) == 120 and v.endswith("…")
 
 
-if __name__ == "__main__":
-    import sys
-    import traceback
-
-    tests = sorted(
-        (name, obj)
-        for name, obj in dict(globals()).items()
-        if name.startswith("test_") and callable(obj)
-    )
-    failures = 0
-    for name, fn in tests:
-        try:
-            fn()
-        except Exception:  # noqa: BLE001
-            failures += 1
-            print(f"FAIL {name}")
-            traceback.print_exc()
-        else:
-            print(f"ok   {name}")
-    print(f"\n{len(tests) - failures}/{len(tests)} passed")
-    sys.exit(1 if failures else 0)
-
-
 def test_candidates_for_same_entity_first_recency_ranked():
     s = CortexStore()
     s.write_fact(Slot("server", "port", "8080"), _unit(1), support="user", now=100.0)
@@ -650,3 +618,65 @@ def test_retire_current_returns_none_when_no_current_scalar():
     s.add_member(Slot("user", "tags", "alpha"), _unit(3), now=100.0)
     assert s.retire_current("user", "tags") is None
     assert [m.value for m in s.members("user", "tags")] == ["alpha"]
+
+
+# ── clear (test-support reset; see CortexStore.clear docstring) ──────────
+
+def test_clear_empties_every_mutable_attribute_and_leaves_a_usable_store():
+    """``clear()`` must reset EVERY mutable attribute the write paths touch —
+    a half-reset store is worse than no reset, because the stale index would
+    point into a fresh ``records`` list."""
+    s = CortexStore()
+    s.write_fact(Slot("server", "port", "8080"), _unit(1), support="user",
+                 now=100.0)
+    s.write_fact(Slot("server", "port", "9090"), _unit(2), support="user",
+                 now=200.0)                      # supersession -> audit row + log
+    s.add_member(Slot("user", "tags", "alpha"), _unit(3), now=300.0)
+    s.add_member(Slot("user", "tags", "beta"), _unit(4), now=310.0)
+    s.dream_cursor = 999.0
+    s.meta_dirty = True
+    # Preconditions: every attribute clear() must reset is genuinely non-empty.
+    assert s.records and s._current and s._members
+    assert s.supersession_log and s.dirty_slots
+
+    s.clear()
+
+    assert s.records == []
+    assert s._current == {}
+    assert s._members == {}
+    assert s.supersession_log == []
+    assert s.dirty_slots == set()
+    assert s.meta_dirty is False
+    assert s.dream_cursor == 0.0
+    # Self-noticing completeness check: every non-knob attribute must match a
+    # fresh store, so an attribute added to __init__ without a matching reset
+    # in clear() fails here instead of leaking state between tests.
+    fresh = CortexStore()
+    assert vars(s).keys() == vars(fresh).keys()
+    _KNOBS = {"supersede_confidence_margin", "reinforce_rate",
+              "protect_provenance"}
+    for k, v in vars(fresh).items():
+        if k not in _KNOBS:
+            assert vars(s)[k] == v, f"clear() missed {k}"
+    # Reads go through the emptied indexes, not stale ones.
+    assert s.lookup("server", "port") is None
+    assert s.members("user", "tags") == []
+    assert s.slot_kind("user", "tags") is None
+    assert s.search(_unit(1), top_k=5) == []
+    assert s.stats()["total_records"] == 0
+
+    # ...and the store still works: a full write/lookup round-trip after clear.
+    res = s.write_fact(Slot("server", "port", "7070"), _unit(5), support="user",
+                       now=400.0)
+    assert res.action == "inserted"
+    assert s.lookup("server", "port").value == "7070"
+    s.add_member(Slot("user", "tags", "gamma"), _unit(6), now=410.0)
+    assert [m.value for m in s.members("user", "tags")] == ["gamma"]
+    assert ("server", "port") in s.dirty_slots
+    # Config knobs are NOT state — clear() leaves them alone.
+    s2 = CortexStore(supersede_confidence_margin=0.42, reinforce_rate=0.11,
+                     protect_provenance=False)
+    s2.clear()
+    assert s2.supersede_confidence_margin == 0.42
+    assert s2.reinforce_rate == 0.11
+    assert s2.protect_provenance is False

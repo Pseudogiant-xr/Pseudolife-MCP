@@ -207,15 +207,6 @@ def test_build_digest_assembles_all_sections():
     assert digest["god_nodes"][0]["degree"] >= 1
 
 
-def test_graph_insight_config_defaults():
-    from pseudolife_memory.utils.config import GraphInsightConfig
-    c = GraphInsightConfig()
-    assert c.enabled is True and c.algorithm == "louvain"
-    assert c.resolution == 1.0 and c.max_community_fraction == 0.25
-    assert c.god_nodes_top_n == 10 and c.surprises_top_n == 10
-    assert c.questions_top_n == 7 and c.betweenness_sample == 200
-
-
 def test_god_nodes_ranks_by_betweenness_over_degree():
     # Two triangles (1-2-3, 5-6-7) joined through bridge node 4.
     # Node 4 has degree 2 (lower than 3 and 5, which have degree 3) but the

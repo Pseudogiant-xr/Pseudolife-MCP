@@ -139,11 +139,24 @@ def pristine_service(warm_service: MemoryService) -> MemoryService:
     """Function-scoped wrapper that clears the warm service's banks.
 
     Re-uses the loaded embedder + torch graphs but guarantees each test
-    starts with an empty bank.
+    starts with an empty bank: the CMS bands (and their episode log), the
+    reference bank, and the cortex.
+
+    NOT cleared, deliberately: the world cortex and the lesson store have no
+    equivalent reset — ``WorldCortexStore``/``LessonStore`` expose only
+    per-entity ``forget()`` — and no test in the tree reads world or lesson
+    state it did not itself write (surveyed 2026-08-28 across all thirteen
+    fixture-consuming files). Also not reset: ``svc.config``, which outlives
+    the bank clear, so a test that flips a config knob must restore it.
     """
     warm_service._ensure_init()  # noqa: SLF001 — fixture wiring.
     assert warm_service._cms is not None
     warm_service._cms.clear()
+    # Slot-keyed facts survive a CMS clear — without this, cortex writes leak
+    # between tests sharing the module-scoped service, and files compensated
+    # by hand-rolling ``cortex_forget`` cleanup in finally blocks.
+    if warm_service._cortex is not None:
+        warm_service._cortex.clear()
     if warm_service._reference is not None:
         try:
             warm_service._reference.clear()

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import pytest
 
+from tests.dream_helpers import StubExtractor as _Stub
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
 
 
@@ -19,16 +20,6 @@ def svc(pg_conn, pg_url, tmp_path):  # noqa: F811
     s = MemoryService(data_dir=tmp_path, database_url=pg_url)
     yield s
     s.flush()
-
-
-class _Stub:
-    """Fixed claims regardless of input (drives dream_run's claim loop)."""
-
-    def __init__(self, claims):
-        self._claims = claims
-
-    def extract(self, texts, vocab, known_facts=None):
-        return [dict(c) for c in self._claims]
 
 
 def _scalar(entity, attribute, value, source=0, **kw):
@@ -42,6 +33,59 @@ def _runs(svc):
 
 def _journal(svc, run_id):
     return svc._storage.dream_run_journal(run_id)
+
+
+# ── storage shape the journal depends on ─────────────────────────────────
+# Direct SQL rather than through the service: these pin the DDL contracts
+# rollback rests on (CASCADE, the JSONB tallies blob, the nullable
+# pre-image) independently of whether dream_run happens to exercise them.
+
+
+def test_run_delete_cascades_to_journal(pg_conn):  # noqa: F811
+    """Pruning a run must take its journal with it — the FK is ON DELETE
+    CASCADE precisely so pruning cannot orphan pre-images."""
+    pg_conn.execute(
+        "INSERT INTO dream_runs (started_at, cursor_before, pulled, status) "
+        "VALUES (1.0, 0.0, 3, 'committed')")
+    run_id = pg_conn.execute(
+        "SELECT id FROM dream_runs ORDER BY id DESC LIMIT 1").fetchone()[0]
+    pg_conn.execute(
+        "INSERT INTO dream_run_slots (run_id, seq, entity, attribute, "
+        "entity_norm, attribute_norm, kind, action, at) "
+        "VALUES (%s, 0, 'proj', 'lang', 'proj', 'lang', 'scalar', "
+        "'inserted', 1.0)", (run_id,))
+    pg_conn.commit()
+    pg_conn.execute("DELETE FROM dream_runs WHERE id = %s", (run_id,))
+    pg_conn.commit()
+    left = pg_conn.execute(
+        "SELECT count(*) FROM dream_run_slots WHERE run_id = %s",
+        (run_id,)).fetchone()[0]
+    assert left == 0
+
+
+def test_null_prev_status_and_jsonb_tallies_round_trip(pg_conn):  # noqa: F811
+    """``tallies`` must read back as a dict (JSONB, not text), and a slot
+    with no pre-image — an insert — must store NULL rather than a sentinel
+    string that rollback would then try to restore."""
+    pg_conn.execute(
+        "INSERT INTO dream_runs (started_at, cursor_before, pulled, status, "
+        "tallies) VALUES (1.0, 0.0, 2, 'committed', "
+        "'{\"inserted\": 2, \"literal_dropped\": 1}'::jsonb)")
+    run_id = pg_conn.execute(
+        "SELECT id FROM dream_runs ORDER BY id DESC LIMIT 1").fetchone()[0]
+    pg_conn.execute(
+        "INSERT INTO dream_run_slots (run_id, seq, entity, attribute, "
+        "entity_norm, attribute_norm, kind, prev_status, action, at) "
+        "VALUES (%s, 0, 'p', 'a', 'p', 'a', 'scalar', NULL, 'inserted', "
+        "1.0)", (run_id,))
+    pg_conn.commit()
+    tallies = pg_conn.execute(
+        "SELECT tallies FROM dream_runs WHERE id = %s", (run_id,)).fetchone()[0]
+    assert tallies == {"inserted": 2, "literal_dropped": 1}
+    prev = pg_conn.execute(
+        "SELECT prev_status FROM dream_run_slots WHERE run_id = %s",
+        (run_id,)).fetchone()[0]
+    assert prev is None
 
 
 # ── run rows ─────────────────────────────────────────────────────────────
@@ -383,51 +427,3 @@ def test_rollback_requires_postgres(tmp_path):
 
     s = MemoryService(data_dir=tmp_path)          # file mode, no PG
     assert s.dream_rollback().get("error") == "requires_postgres"
-
-
-# ── memory_history as_of (per-slot point-in-time read) ───────────────────
-
-def test_history_as_of_filters_versions(svc):
-    import time as _t
-
-    svc.cortex_write("team", "mascot", "fox", confidence=0.9, support="user")
-    _t.sleep(0.02)
-    mid = _t.time()
-    _t.sleep(0.02)
-    svc.cortex_write("team", "mascot", "owl", confidence=0.9, support="user")
-
-    full = svc.history("team", "mascot")
-    assert full["count"] == 2 and "as_of" not in full
-
-    at_mid = svc.history("team", "mascot", as_of=mid)
-    assert at_mid["count"] == 1
-    assert at_mid["versions"][0]["value"] == "fox"
-    assert at_mid["as_of"] == mid
-
-    later = svc.history("team", "mascot", as_of=_t.time())
-    assert later["count"] == 2
-
-
-def test_history_as_of_accepts_iso_string(svc):
-    from datetime import datetime, timedelta
-
-    svc.cortex_write("team", "mascot", "fox", confidence=0.9, support="user")
-    tomorrow = (datetime.now() + timedelta(days=1)).isoformat()
-    out = svc.history("team", "mascot", as_of=tomorrow)
-    assert out["count"] == 1
-    yesterday = (datetime.now() - timedelta(days=1)).isoformat()
-    out = svc.history("team", "mascot", as_of=yesterday)
-    assert out["count"] == 0
-
-
-def test_history_as_of_set_slot(svc):
-    import time as _t
-
-    svc.set_add("user", "tags", "alpha")
-    _t.sleep(0.02)
-    mid = _t.time()
-    _t.sleep(0.02)
-    svc.set_add("user", "tags", "beta")
-    out = svc.history("user", "tags", as_of=mid)
-    assert out["kind"] == "set"
-    assert [v["value"] for v in out["versions"]] == ["alpha"]

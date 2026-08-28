@@ -25,18 +25,11 @@ projecting them away. Showing them is what makes the staleness visible.
 
 from __future__ import annotations
 
-import importlib
 import time
 
 import pytest
 
-
-def _reload_mcp_filemode(tmp_path, monkeypatch):
-    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
-    monkeypatch.delenv("PSEUDOLIFE_MCP_DATABASE_URL", raising=False)
-    import pseudolife_memory.mcp_server as mod
-    importlib.reload(mod)
-    return mod
+from tests.helpers import reload_mcp_filemode as _reload_mcp_filemode
 
 
 def _fact(entity, attribute, value, *, age_days):

@@ -183,21 +183,37 @@ _BENCH_PG = os.environ.get(
 )
 
 
+# Memoized, and probed lazily: as a ``skipif`` argument this ran at import
+# (i.e. collection) time, so every pytest invocation that merely *collected*
+# this file paid the probe — up to the full connect timeout with the bench
+# server down, even when no test here was selected. 1s is ample for a
+# loopback container; an unreachable one is what the skip is for.
+_PG_REACHABLE: bool | None = None
+
+
 def _pg_reachable() -> bool:
-    try:
-        import psycopg
-        with psycopg.connect(_BENCH_PG, connect_timeout=3):
-            return True
-    except Exception:
-        return False
+    global _PG_REACHABLE
+    if _PG_REACHABLE is None:
+        try:
+            import psycopg
+            with psycopg.connect(_BENCH_PG, connect_timeout=1):
+                _PG_REACHABLE = True
+        except Exception:
+            _PG_REACHABLE = False
+    return _PG_REACHABLE
 
 
-@pytest.mark.skipif(not _pg_reachable(), reason="bench Postgres not reachable")
-def test_run_all_arm_graph_beats_baseline_on_a_two_hop_case():
+@pytest.fixture()
+def bench_pg() -> None:
+    if not _pg_reachable():
+        pytest.skip("bench Postgres not reachable")
+
+
+def test_run_all_arm_graph_beats_baseline_on_a_two_hop_case(bench_pg):
     import tempfile
     from ladder_sweep import build_service
     with tempfile.TemporaryDirectory(prefix="plmemcot_", ignore_cleanup_errors=True) as td:
-        svc = mb.build_service(Path(td)) if hasattr(mb, "build_service") else build_service(Path(td))
+        svc = build_service(Path(td))
         mb.seed_bench(svc)
         results = mb.run_all(svc)
     # structural (arms: baseline / recall_nogate / recall_gate — the hub-gating

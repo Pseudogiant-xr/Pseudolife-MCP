@@ -28,6 +28,7 @@ import time
 import pytest
 
 from pseudolife_memory.memory import freshness
+from tests.helpers import reload_mcp_filemode as _reload_mcp_filemode
 from pseudolife_memory.service import MemoryService
 
 DAY = 86400.0
@@ -219,11 +220,7 @@ def test_compact_search_block_propagates_policy_fields(tmp_path, monkeypatch):
     """memory_search's cortex-first block re-selects keys from cortex_search
     output; the quarantine fields must survive that selection, or the
     most-used read surface silently serves the wrapper with no original."""
-    import importlib
-
-    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
-    import pseudolife_memory.mcp_server as mod
-    importlib.reload(mod)
+    mod = _reload_mcp_filemode(tmp_path, monkeypatch)
 
     mod.service.config.memory.search.stale_policy = "quarantine"
     mod.service.cortex_write("deploy", "status", "pending",
@@ -249,11 +246,8 @@ def test_world_search_compact_projection_carries_policy_fields(tmp_path,
     the quarantine wrapper with the original value destroyed, violating
     'data moved, never hidden' on the shipping world surface."""
     import asyncio
-    import importlib
 
-    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
-    import pseudolife_memory.mcp_server as mod
-    importlib.reload(mod)
+    mod = _reload_mcp_filemode(tmp_path, monkeypatch)
 
     mod.service.config.memory.search.stale_policy = "quarantine"
     mod.service.world_write("edge-proxy", "tls-cert-serial", "5c31f2",
@@ -286,11 +280,8 @@ def test_search_restatement_dedup_keys_on_underlying_value(tmp_path,
     ``entries`` right below the quarantined fact — the exact leak the
     policy exists to prevent."""
     import asyncio
-    import importlib
 
-    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
-    import pseudolife_memory.mcp_server as mod
-    importlib.reload(mod)
+    mod = _reload_mcp_filemode(tmp_path, monkeypatch)
 
     mod.service.config.memory.search.stale_policy = "quarantine"
     mod.service.store("keydb-engine", source="notes")

@@ -60,19 +60,9 @@ def test_lessons_config_defaults():
 # Postgres. The session-episode API itself (episode_start_session / store /
 # episode_end_session) is the same one tests/test_episode_service.py uses.
 
-from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
-
-
-@pytest.fixture
-def pg_service(pg_url, pg_conn, tmp_path, monkeypatch):
-    """A MemoryService bound to the real bench Postgres (schema ensured +
-    tables truncated by ``pg_conn``)."""
-    from pseudolife_memory.service import MemoryService
-
-    monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", pg_url)
-    svc = MemoryService(data_dir=tmp_path)
-    svc._ensure_init()
-    return svc
+from tests.pg_fixtures import (  # noqa: F401  (fixtures)
+    pg_conn, pg_service, pg_url,
+)
 
 
 @pytest.fixture
