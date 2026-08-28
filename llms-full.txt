@@ -545,6 +545,9 @@ a `.mcp.json` at a project root for project scope:
 }
 ```
 
+For a token-protected daemon, add a `headers` key to that Claude JSON entry:
+`"headers": { "Authorization": "Bearer <your-token>" }`.
+
 Codex — the installer's default (shim mode) wires the same stdio shim, so a
 Codex session gets its own tier-1 identity instead of inheriting a
 concurrent Claude session's episode:
@@ -565,10 +568,12 @@ Or add the equivalent user-level entry to `~/.codex/config.toml`:
 ```toml
 [mcp_servers.pseudolife-memory]
 url = "http://127.0.0.1:8765/mcp"
+bearer_token_env_var = "PSEUDOLIFE_MCP_TOKEN"
 ```
 
-If you ran the daemon with a `PSEUDOLIFE_MCP_TOKEN`, add a `headers` key:
-`"headers": { "Authorization": "Bearer <your-token>" }`.
+For that Codex HTTP configuration, export `PSEUDOLIFE_MCP_TOKEN` in the
+environment that launches Codex. The token stays out of `config.toml`, and
+Codex reads it when connecting. This is unnecessary for the default stdio shim.
 
 **Verify:** run `claude mcp list` or `codex mcp list` (the server should report
 connected), then ask the agent to *"store a memory that this install works"* and check it
@@ -619,6 +624,12 @@ off, injected at every session start). It backs up `~/.claude/settings.json`
 or `~/.codex/hooks.json` and is idempotent. The manual hook JSON,
 the briefing budget flags, and how session episodes open/close/resume
 without any hooks: [Episodes & sessions](docs/guide/episodes.md).
+
+**Codex hook trust:** Codex skips every new or changed hook until you review
+and trust its exact definition. After installing the Codex hook, start Codex,
+open `/hooks`, review the definition from `~/.codex/hooks.json`, and approve it.
+Until then, MCP tools still work and the server-level `instructions` still
+load, but the richer session briefing is not injected.
 
 ## Usage patterns
 
