@@ -22,6 +22,11 @@ on:
     branches: [master]
   pull_request:
 
+# Least-privilege GITHUB_TOKEN for every lane — CI only reads the repo
+# (CodeQL actions/missing-workflow-permissions; the default token can write).
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true

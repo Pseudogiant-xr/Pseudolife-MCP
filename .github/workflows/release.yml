@@ -34,6 +34,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Guards + build only read the repo; the write scopes live on the jobs
+    # that need them (publish: id-token, images: packages, registry: id-token).
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
