@@ -59,7 +59,10 @@ don't double up:
 
 1. Delete the `pseudolife-mcp briefing` SessionStart entry from
    `~/.claude/settings.json`
-2. Remove the "Memory — use it every session" block from `~/.claude/CLAUDE.md`
+2. Delete the `mid-session discipline` UserPromptSubmit entry from
+   `~/.claude/settings.json` (the plugin echoes the same line — keeping
+   both injects it twice per turn)
+3. Remove the "Memory — use it every session" block from `~/.claude/CLAUDE.md`
 
 (Keep your `claude mcp` registration — the plugin doesn't provide one.)
 
@@ -69,6 +72,10 @@ don't double up:
   the memory-loop instructions + briefing (lessons, unsure-abouts, world
   facts), and registers the session's episode identity. Needs `bash` on PATH
   (Git Bash on Windows) and `curl` — both ship with git / the OS.
+- **UserPromptSubmit hook** — echoes a one-line mid-session memory
+  discipline on every turn (recall before reviewing code/docs/PRs, then
+  compare memory against the files; status questions are memory questions;
+  log outcomes). Static — no daemon call, works offline.
 - **SessionEnd hook** — closes the session's episode and clears the
   active-session pointer when the session ends.
 - **`/dream`** — judgment session over the review queues (graph triage; manual fact extraction only where no extractor is configured)

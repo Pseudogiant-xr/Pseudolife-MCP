@@ -29,7 +29,10 @@ RECALL — at the start of any task:
   entry. Pass `verbose=true` only when debugging retrieval.
 - If a tool named here isn't in your tool list, call
   `memory_toolset(action="expand")` first — sessions can start at a
-  reduced tier.
+  reduced tier. A harness notice that some `mcp__pseudolife-memory__*`
+  tools were REMOVED means the same tier filtering (a resumed session
+  carries an older, larger roster), not an outage — make one
+  `memory_search` call before reporting memory as offline.
 
 RECALL AGAIN mid-session — once at the start is not enough. Search when:
 - the user refers to work you weren't part of ("last time…", "in another
@@ -38,7 +41,12 @@ RECALL AGAIN mid-session — once at the start is not enough. Search when:
   `polarity:-`; re-deriving a known dead-end is the common failure;
 - you are about to state a benchmark number, version, or "current" value →
   check for a prior record before asserting it;
-- you start a task in an area you haven't touched this session.
+- you start a task in an area you haven't touched this session;
+- you are about to review code, docs, or a PR → recall the target area
+  FIRST (`memory_search` + `memory_lesson_search`), then compare what
+  memory says against the files. Drift is a finding in both directions:
+  correct stale memory on the spot (`memory_fact_set` + `memory_outcome`)
+  and treat a memory-vs-file mismatch as review input, not noise.
 
 TRUST ORDER — memory tells you WHY; the repo tells you WHAT IS.
 For anything live (deployed version, config, what's running), read the

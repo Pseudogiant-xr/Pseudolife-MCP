@@ -426,3 +426,56 @@ def _reap_daemon(port: int) -> None:
              f"-ErrorAction SilentlyContinue }}"],
             capture_output=True,
         )
+
+
+def test_sdk_guard_passes_on_a_v2_environment():
+    from pseudolife_memory import shim
+
+    # The test venv satisfies pyproject's ``mcp>=2.1`` floor, so the guard
+    # must be a silent no-op there.
+    assert shim._require_mcp_sdk_v2() is None
+
+
+def test_sdk_guard_names_the_fix_and_exits_before_daemon_traffic(
+        monkeypatch, capsys):
+    """A pre-v2 SDK must die with the recovery command, not a traceback.
+
+    The registered shim command can live outside the repo venv (an editable
+    install runs the working copy's code against whatever SDK that env has),
+    so a dep-floor bump strands it on an SDK missing the modules ``_proxy``
+    imports. Seen live 2026-08-28: a global-env shim on mcp 1.28.1 crashed
+    with a raw ModuleNotFoundError at every session start, which the MCP
+    client log surfaced only as "Connection closed". The guard must fire
+    BEFORE any daemon probe or spawn, and its message must name the exact
+    interpreter and pip command that fix the environment.
+    """
+    from pseudolife_memory import shim
+
+    monkeypatch.setattr(
+        shim, "_SDK_V2_PROBE_MODULE", "pseudolife_test_absent_module",
+        raising=False)
+    monkeypatch.setattr(
+        shim, "probe_health",
+        lambda *a, **k: pytest.fail("guard must fire before daemon traffic"))
+    with pytest.raises(SystemExit) as exc:
+        shim.run_shim()
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "mcp>=2.1" in err
+    assert sys.executable in err
+
+def test_sdk_guard_survives_a_fully_absent_mcp(monkeypatch, capsys):
+    # find_spec RAISES (rather than returning None) when the probe module's
+    # parent package is absent or broken — mcp not installed at all, or a
+    # partial install whose parent import fails. The guard must land on the
+    # same recovery message, not propagate the ImportError it was built to
+    # replace.
+    from pseudolife_memory import shim
+
+    monkeypatch.setattr(
+        shim, "_SDK_V2_PROBE_MODULE", "pseudolife_test_absent_parent.sub",
+        raising=False)
+    with pytest.raises(SystemExit) as exc:
+        shim._require_mcp_sdk_v2()
+    assert exc.value.code == 1
+    assert "mcp>=2.1" in capsys.readouterr().err

@@ -1,6 +1,17 @@
 {
-  "description": "Pseudolife-MCP session hooks: start-of-session memory briefing + end-of-session episode close",
+  "description": "Pseudolife-MCP session hooks: start-of-session memory briefing + per-turn memory discipline + end-of-session episode close",
   "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-submit.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "hooks": [

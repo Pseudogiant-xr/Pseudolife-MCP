@@ -164,7 +164,71 @@ def test_plugin_hook_wiring_session_end():
     assert re.search(r"^exit 0\s*$", script, re.M)   # must never block session end
 
 
+def test_plugin_hook_wiring_user_prompt_submit():
+    """UserPromptSubmit must echo the static mid-session discipline line —
+    including the recall-before-review clause (recall the target area, then
+    compare memory against the files and correct drift both ways). Static by
+    design: the hook fires on every user turn, so no daemon round-trip and no
+    network dependency, and it must never block a turn."""
+    hooks = json.loads(_read("plugin/hooks/hooks.json"))
+    groups = hooks["hooks"]["UserPromptSubmit"]
+    commands = [h["command"] for g in groups for h in g["hooks"]]
+    assert any("${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-submit.sh" in c
+               for c in commands)
+
+    script = _read("plugin/hooks/user-prompt-submit.sh")
+    assert "curl" not in script       # static: every-turn, offline-safe
+    for phrase in ("reviewing code, docs, or a PR", "memory_search",
+                   "memory_lesson_search", "compare"):
+        assert phrase in script, f"discipline line lost: {phrase!r}"
+    assert re.search(r"^exit 0\s*$", script, re.M)   # must never block a turn
+
+
 # ── content sync ────────────────────────────────────────────────────────────
+
+def test_discipline_line_synced_across_plugin_and_installers():
+    """The per-turn discipline line ships in THREE copies — the plugin script
+    plus both installers. Drift means plugin users and installer users carry
+    different standing instructions forever, silently. Extract the literal
+    from each copy and pin: exactly one occurrence per file, all identical,
+    the installers' idempotency needle inside the line itself (a needle that
+    only matches the file would let a reworded line duplicate the hook on
+    every re-run), and a length budget — the line is injected on EVERY user
+    turn, so growth is a per-turn context tax."""
+    pat = re.compile(r"(Memory \(PseudoLife\) mid-session discipline:[^'\"\n]*)")
+    lines = {}
+    for rel in ("plugin/hooks/user-prompt-submit.sh",
+                "ops/install-hook.sh", "ops/install-hook.ps1"):
+        found = pat.findall(_read(rel))
+        assert len(found) == 1, f"{rel}: expected 1 discipline line, got {len(found)}"
+        lines[rel] = found[0]
+    assert len(set(lines.values())) == 1, f"discipline line drift: {lines}"
+    line = lines["plugin/hooks/user-prompt-submit.sh"]
+    assert "mid-session discipline" in line   # the installers' idempotency needle
+    assert len(line) <= 800                   # every-turn cost budget (~700 on 2026-08-28)
+
+
+def test_memory_loop_block_leaves_briefing_headroom():
+    """The session-start payload is instructions + briefing, sliced to
+    HOOK_CONTEXT_MAX_CHARS with the briefing LAST — every char the block
+    grows is silently cut from the briefing tail (lessons, unsure-abouts,
+    where-we-left-off). Reserve 2,000 chars for the briefing (the block
+    measured 6,663 on 2026-08-28; a truncated briefing has no other alarm)."""
+    from pseudolife_memory.web.session_hook import (HOOK_CONTEXT_MAX_CHARS,
+                                                    MEMORY_LOOP_BLOCK)
+    assert len(MEMORY_LOOP_BLOCK) <= HOOK_CONTEXT_MAX_CHARS - 2_000
+
+
+def test_memory_loop_block_carries_recall_before_review_trigger():
+    """Reviews recall memory FIRST, then compare against the files — codified
+    in the served instructions so every install gets the rule (2026-08-28):
+    drift found during a review is capture-worthy data in both directions
+    (stale memory gets corrected; a memory-vs-file mismatch is review input)."""
+    from pseudolife_memory.web.session_hook import MEMORY_LOOP_BLOCK
+    text = " ".join(MEMORY_LOOP_BLOCK.split())
+    assert "review code, docs, or a PR" in text
+    assert "compare what memory says against the files" in text
+
 
 def test_memory_loop_block_matches_examples():
     """The daemon serves the standing instructions the CLAUDE.md append used
@@ -173,6 +237,18 @@ def test_memory_loop_block_matches_examples():
     from pseudolife_memory.web.session_hook import MEMORY_LOOP_BLOCK
     examples = _strip_leading_html_comment(_read("examples/CLAUDE.memory.md"))
     assert MEMORY_LOOP_BLOCK.strip() == examples.strip()
+
+
+def test_memory_loop_block_explains_tier_removal_notices():
+    """A resumed session whose stale context carried full-tier tools sees a
+    harness notice that several memory tools were REMOVED; a live session
+    (2026-08-28) read exactly that as "the memory MCP is offline" and told
+    the user so, while the daemon was healthy and every core tool worked.
+    The briefing must pre-empt the misread: removed memory tools usually
+    mean tier filtering, and one live call settles it."""
+    from pseudolife_memory.web.session_hook import MEMORY_LOOP_BLOCK
+    assert "tier filtering" in MEMORY_LOOP_BLOCK
+    assert "not an outage" in MEMORY_LOOP_BLOCK
 
 
 def test_plugin_dream_command_matches_examples():
@@ -197,8 +273,12 @@ def test_instruction_blocks_reference_only_core_visible_tools():
     from pseudolife_memory.mcp_server import _TOOL_TIERS
     from pseudolife_memory.web.session_hook import (MEMORY_LOOP_BLOCK,
                                                     ONBOARDING_BLOCK)
+    # The UserPromptSubmit line is injected every turn — same visibility bar.
+    ups = re.findall(r"\b((?:memory|document)_[a-z_]+)",
+                     _read("plugin/hooks/user-prompt-submit.sh"))
     referenced = (_referenced_tools(MEMORY_LOOP_BLOCK)
-                  | _referenced_tools(ONBOARDING_BLOCK))
+                  | _referenced_tools(ONBOARDING_BLOCK)
+                  | set(ups))
     assert len(referenced) >= 10          # regex sanity — the block names many
 
     unknown = referenced - set(_TOOL_TIERS)

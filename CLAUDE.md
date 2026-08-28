@@ -72,6 +72,14 @@ or `set -o pipefail; ... | tee /tmp/pytest-last.log | tail -60`.
 
 ## Review discipline
 
+- **Recall precedes review.** Before reviewing code, docs, or a PR, search
+  the bank first (`memory_search` + `memory_lesson_search` on the target
+  area), then compare what memory says against the files and correct drift
+  in both directions — fix stale memory on the spot (`memory_fact_set` +
+  `memory_outcome`), and treat memory-vs-file mismatches as review
+  findings, not noise. The served session-start block and the
+  UserPromptSubmit hook (plugin + `ops/install-hook.*`, Claude client)
+  enforce the same rule for any install.
 - Every PR gets a review pass before the merge click — `/code-review` medium,
   or a reviewer subagent over the branch diff. The 2026-08-19 transcript audit
   found 1 of 59 merges across seven weeks carried any in-transcript review;

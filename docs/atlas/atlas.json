@@ -137,10 +137,24 @@
    ]
   },
   {
-   "id": "hookend",
+   "id": "hookups",
    "g": "plugin",
    "x": 40,
    "y": 790,
+   "t": "user-prompt-submit.sh",
+   "s": "UserPromptSubmit hook · static echo",
+   "p": "plugin/hooks/",
+   "d": [
+    "One-line memory discipline injected on every user turn",
+    "Recall-before-review: search the bank, then compare to the files",
+    "No daemon call — offline-safe, always exit 0"
+   ]
+  },
+  {
+   "id": "hookend",
+   "g": "plugin",
+   "x": 40,
+   "y": 885,
    "t": "session-end.sh",
    "s": "SessionEnd hook",
    "p": "plugin/hooks/",
@@ -153,7 +167,7 @@
    "id": "cmds",
    "g": "plugin",
    "x": 40,
-   "y": 885,
+   "y": 980,
    "t": "/dream · /memory-status",
    "s": "slash commands",
    "p": "plugin/commands/",
@@ -1153,6 +1167,12 @@
   {
    "f": "plugin",
    "t": "hookstart",
+   "l": "registers",
+   "k": "control"
+  },
+  {
+   "f": "plugin",
+   "t": "hookups",
    "l": "registers",
    "k": "control"
   },

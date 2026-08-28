@@ -67,6 +67,26 @@ def test_codex_http_auth_uses_supported_token_configuration() -> None:
     assert 'bearer_token_env_var = "PSEUDOLIFE_MCP_TOKEN"' in readme
 
 
+def test_hook_installers_wire_user_prompt_submit_for_claude() -> None:
+    """Non-plugin Claude installs get the every-turn mid-session discipline
+    line too (UserPromptSubmit), including the recall-before-review clause —
+    the one-shot session-start briefing loses salience over a long session
+    (2026-08-25 finding). Claude client only: Codex per-prompt hook support
+    is unverified, and every new Codex hook needs a manual trust review
+    (2026-08-28), so the installer must not silently write one there."""
+    ps = _read("ops/install-hook.ps1")
+    sh = _read("ops/install-hook.sh")
+    for text in (ps, sh):
+        assert "UserPromptSubmit" in text
+        assert "reviewing code, docs, or a PR" in text
+    # Pin the client gating itself — a refactor that hoists the wiring out of
+    # the guard would silently write an untrusted per-prompt hook into every
+    # Codex install. (Line identity + idempotency needle are pinned by
+    # test_plugin_packaging.py::test_discipline_line_synced_across_plugin_and_installers.)
+    assert 'if [ "$CLIENT" = claude ]' in sh
+    assert 'if ($Client -eq "claude")' in ps
+
+
 def test_installers_offer_dreamer_model_choice() -> None:
     """Claude-shim installs prompt for the dreamer model (2026-08-04): all
     four current Anthropic tiers are offered, Opus is the recommended
