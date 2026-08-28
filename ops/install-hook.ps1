@@ -100,6 +100,12 @@ if ($obj.hooks.PSObject.Properties.Name -contains 'SessionEnd') {
 
 $obj | ConvertTo-Json -Depth 30 | Set-Content -Path $SettingsPath -Encoding utf8
 
+if ($Client -eq "codex") {
+    Write-Host ""
+    Write-Warning "Codex will skip this new or changed hook until you review and trust its exact definition."
+    Write-Host "  Start Codex, open /hooks, review the definition from $SettingsPath, and approve it."
+}
+
 # The hooks wire the session lifecycle, but the memory LOOP only fires if a
 # standing instruction tells the agent to use the tools (issue #12: an install
 # with healthy hooks + daemon still never called memory_* because no standing

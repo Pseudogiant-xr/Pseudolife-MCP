@@ -16,6 +16,10 @@ def test_mcp_initialization_advertises_memory_workflow() -> None:
 
     instructions = mcp_server.mcp._lowlevel_server.instructions
     assert instructions
+    # Codex requires the first 512 characters to stand alone while deciding
+    # whether and how to use the server. Keeping the whole workflow inside that
+    # budget makes truncation impossible.
+    assert len(instructions) <= 512
     assert "task start" in instructions.lower()
     assert "memory_search" in instructions
     assert "memory_outcome" in instructions
