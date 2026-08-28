@@ -19,6 +19,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   proxy actually imports before touching the daemon, and on failure prints
   the interpreter path and the `pip install -U "mcp>=2.1,<3"` command that
   fixes it.
+- **The session briefing now explains tier-driven tool-removal notices, so
+  sessions stop reporting the memory MCP as "offline" when it is healthy.**
+  A session resumed from an older transcript can carry a larger tool roster
+  than the daemon's current toolset tier serves; the harness then announces
+  the difference as removed `mcp__pseudolife-memory__*` tools, and a live
+  session (2026-08-28) relayed that to the user as the memory MCP being
+  offline while every core tool worked. The briefing
+  (`session_hook.MEMORY_LOOP_BLOCK` and its pinned twin
+  `examples/CLAUDE.memory.md`) now says a removal notice means tier
+  filtering, not an outage, and to make one `memory_search` call before
+  reporting memory as offline.
 
 ### Fixed (2026-08-28 — Codex hook trust is an explicit install step)
 - **Codex now requires every new or changed lifecycle hook to be reviewed and
