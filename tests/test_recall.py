@@ -435,91 +435,6 @@ def _seed_recall_cap_fixture(svc, base_query: str) -> None:
                       source="bench")
 
 
-@pytest.fixture(scope="module")
-def recall_cap_service(tmp_path_factory):
-    """The cap fixture built ONCE for the two payload-cap tests below.
-
-    Each build was a `build_service` (reset_bench + a real embedder) plus 21
-    stores and 20 `graph_relate` calls through real dense search — the most
-    expensive setup in this file, and both tests need the identical corpus.
-    Neither consumer writes to the service: the first only calls
-    `svc.recall`, the second only monkeypatches `srv.service` (undone per
-    test), so one shared build is equivalent to two.
-
-    DO NOT insert a test between the two consumers below. Anything that
-    calls `build_service` runs evals' `reset_bench`, which reaps every
-    backend on the bench database and would terminate THIS service's
-    connection mid-module. The two are adjacent on purpose; every other
-    `build_service` user in this file sits strictly before or after them.
-    """
-    if not _pg_up():
-        pytest.skip("bench Postgres not reachable")
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    from ladder_sweep import build_service
-    svc = build_service(tmp_path_factory.mktemp("recall-caps"))
-    base_query = "what does root-svc connect to"
-    _seed_recall_cap_fixture(svc, base_query)
-    return svc, base_query
-
-
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_memory_recall_caps_payload_non_verbose(monkeypatch,
-                                                recall_cap_service):
-    import pseudolife_memory.mcp_server as srv
-    svc, base_query = recall_cap_service
-
-    # Sanity: the fixture really is big enough that the UNCAPPED service
-    # layer blows past every cap under test — otherwise the caps below
-    # would pass vacuously.
-    raw = svc.recall(base_query, hops=3, top_k=5)
-    assert len(raw["entities"]) > srv._RECALL_MAX_ENTITIES
-    assert len(raw["edges"]) > srv._RECALL_MAX_EDGES
-    assert len(raw["texts"]) > srv._RECALL_MAX_TEXTS
-    # The fixture's leaves are all hop 2 (root=hop0, svc-l1-*=hop1,
-    # svc-l1-*-*=hop2) — real service.recall() must tag them that way for
-    # the per-hop quota to have anything to preserve.
-    hop2_raw = {n for n, h in raw["entity_hop"].items() if h == 2}
-    assert hop2_raw, "fixture produced no hop-2 entities to preserve"
-
-    monkeypatch.setattr(srv, "service", svc, raising=False)
-    out = srv.memory_recall(base_query, hops=3, top_k=5)
-    assert len(out["entities"]) <= srv._RECALL_MAX_ENTITIES
-    assert len(out["edges"]) <= srv._RECALL_MAX_EDGES
-    assert len(out["texts"]) <= srv._RECALL_MAX_TEXTS
-    # Per-hop quota: the deep (hop-2) bridge must survive the cap, not just
-    # the seed and its immediate ring (issue #186 review finding 1).
-    kept = {e["entity"] for e in out["entities"]}
-    assert kept & hop2_raw, "hop-2 entities dropped by the entity cap"
-    # Compact text projection: each supporting text is truncated to the
-    # preview cap (+ 1 for the trailing ellipsis character).
-    assert all(len(t) <= srv._RECALL_TEXT_CHARS + 1 for t in out["texts"])
-    assert any(t.endswith("…") for t in out["texts"])  # cap actually bound
-    # Serialized-size regression guard (issue #186 finding 3): this
-    # fixture's uncapped response runs several KB (21 entities, 20 edges,
-    # 20+ full-length texts); assert the capped compact payload stays a
-    # small fraction of that rather than drifting back toward it.
-    assert len(json.dumps(out)) < len(json.dumps(raw)) // 2
-
-
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_memory_recall_verbose_keeps_full_texts(monkeypatch,
-                                                recall_cap_service):
-    # verbose=True is the escape hatch: entity/edge counts still cap the
-    # payload, but supporting text content must NOT be truncated.
-    # Shares the module-scoped corpus with the test directly above — keep the
-    # two adjacent (see the fixture's docstring).
-    import pseudolife_memory.mcp_server as srv
-    svc, base_query = recall_cap_service
-    monkeypatch.setattr(srv, "service", svc, raising=False)
-    out = srv.memory_recall(base_query, hops=3, top_k=5, verbose=True)
-    assert len(out["entities"]) <= srv._RECALL_MAX_ENTITIES
-    assert len(out["edges"]) <= srv._RECALL_MAX_EDGES
-    assert len(out["texts"]) <= srv._RECALL_MAX_TEXTS
-    assert any(len(t) > srv._RECALL_TEXT_CHARS for t in out["texts"])
-    # Facts per entity are capped even in verbose mode (issue #186 finding 3).
-    assert all(len(e.get("facts", [])) <= srv._RECALL_MAX_FACTS_PER_ENTITY
-              for e in out["entities"])
-    assert not any(t.endswith("…") for t in out["texts"])
 
 
 # ---------------------------------------------------------------------------
@@ -738,3 +653,91 @@ def test_reinforce_syncs_in_memory(tmp_path):
     assert resident().reinforcements == 1            # in-memory synced
     assert st.conn.execute(
         "SELECT reinforcements FROM entries WHERE id=%s", (eid,)).fetchone()[0] == 1
+
+@pytest.fixture(scope="module")
+def recall_cap_service(tmp_path_factory):
+    """The cap fixture built ONCE for the two payload-cap tests below.
+
+    Each build was a `build_service` (reset_bench + a real embedder) plus 21
+    stores and 20 `graph_relate` calls through real dense search — the most
+    expensive setup in this file, and both tests need the identical corpus.
+    Neither consumer writes to the service: the first only calls
+    `svc.recall`, the second only monkeypatches `srv.service` (undone per
+    test), so one shared build is equivalent to two.
+
+    This block sits LAST in the module, structurally: anything that calls
+    `build_service` runs evals' `reset_bench`, which reaps every backend
+    on the bench database and would terminate THIS service's connection
+    mid-module. With every other `build_service` user strictly before the
+    fixture is first built, no collection order can interleave one. Keep it
+    last; do not insert tests between or after the two consumers.
+    """
+    if not _pg_up():
+        pytest.skip("bench Postgres not reachable")
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
+    from ladder_sweep import build_service
+    svc = build_service(tmp_path_factory.mktemp("recall-caps"))
+    base_query = "what does root-svc connect to"
+    _seed_recall_cap_fixture(svc, base_query)
+    return svc, base_query
+
+
+@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
+def test_memory_recall_caps_payload_non_verbose(monkeypatch,
+                                                recall_cap_service):
+    import pseudolife_memory.mcp_server as srv
+    svc, base_query = recall_cap_service
+
+    # Sanity: the fixture really is big enough that the UNCAPPED service
+    # layer blows past every cap under test — otherwise the caps below
+    # would pass vacuously.
+    raw = svc.recall(base_query, hops=3, top_k=5)
+    assert len(raw["entities"]) > srv._RECALL_MAX_ENTITIES
+    assert len(raw["edges"]) > srv._RECALL_MAX_EDGES
+    assert len(raw["texts"]) > srv._RECALL_MAX_TEXTS
+    # The fixture's leaves are all hop 2 (root=hop0, svc-l1-*=hop1,
+    # svc-l1-*-*=hop2) — real service.recall() must tag them that way for
+    # the per-hop quota to have anything to preserve.
+    hop2_raw = {n for n, h in raw["entity_hop"].items() if h == 2}
+    assert hop2_raw, "fixture produced no hop-2 entities to preserve"
+
+    monkeypatch.setattr(srv, "service", svc, raising=False)
+    out = srv.memory_recall(base_query, hops=3, top_k=5)
+    assert len(out["entities"]) <= srv._RECALL_MAX_ENTITIES
+    assert len(out["edges"]) <= srv._RECALL_MAX_EDGES
+    assert len(out["texts"]) <= srv._RECALL_MAX_TEXTS
+    # Per-hop quota: the deep (hop-2) bridge must survive the cap, not just
+    # the seed and its immediate ring (issue #186 review finding 1).
+    kept = {e["entity"] for e in out["entities"]}
+    assert kept & hop2_raw, "hop-2 entities dropped by the entity cap"
+    # Compact text projection: each supporting text is truncated to the
+    # preview cap (+ 1 for the trailing ellipsis character).
+    assert all(len(t) <= srv._RECALL_TEXT_CHARS + 1 for t in out["texts"])
+    assert any(t.endswith("…") for t in out["texts"])  # cap actually bound
+    # Serialized-size regression guard (issue #186 finding 3): this
+    # fixture's uncapped response runs several KB (21 entities, 20 edges,
+    # 20+ full-length texts); assert the capped compact payload stays a
+    # small fraction of that rather than drifting back toward it.
+    assert len(json.dumps(out)) < len(json.dumps(raw)) // 2
+
+
+@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
+def test_memory_recall_verbose_keeps_full_texts(monkeypatch,
+                                                recall_cap_service):
+    # verbose=True is the escape hatch: entity/edge counts still cap the
+    # payload, but supporting text content must NOT be truncated.
+    # Shares the module-scoped corpus with the test directly above — keep the
+    # two adjacent (see the fixture's docstring).
+    import pseudolife_memory.mcp_server as srv
+    svc, base_query = recall_cap_service
+    monkeypatch.setattr(srv, "service", svc, raising=False)
+    out = srv.memory_recall(base_query, hops=3, top_k=5, verbose=True)
+    assert len(out["entities"]) <= srv._RECALL_MAX_ENTITIES
+    assert len(out["edges"]) <= srv._RECALL_MAX_EDGES
+    assert len(out["texts"]) <= srv._RECALL_MAX_TEXTS
+    assert any(len(t) > srv._RECALL_TEXT_CHARS for t in out["texts"])
+    # Facts per entity are capped even in verbose mode (issue #186 finding 3).
+    assert all(len(e.get("facts", [])) <= srv._RECALL_MAX_FACTS_PER_ENTITY
+              for e in out["entities"])
+    assert not any(t.endswith("…") for t in out["texts"])
+

@@ -265,7 +265,7 @@ class ContinuumMemorySystem:
         # turn had no callers and were removed, so nothing sets the flag and
         # the counter never advances. The rest of the seam is deliberately
         # intact — ``logical_turn_count`` rides the persisted state (pinned by
-        # tests/test_schema_v6.py), ``last_logical_turn`` is a live column in
+        # tests/test_cms_pt_schema.py), ``last_logical_turn`` is a live column in
         # storage/schema.py, and ``retrieve(min_logical_turn=...)`` still
         # filters on it. Re-adding the two setters re-activates the feature.
         self._logical_turn_count = 0
@@ -2360,3 +2360,4 @@ def _recency_weight(timestamp: float, half_life: float = 3600.0) -> float:
     """Exponential recency weight."""
     age = max(time.time() - timestamp, 0.0)
     return 2.0 ** (-age / half_life)
+

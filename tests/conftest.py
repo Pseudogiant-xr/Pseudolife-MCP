@@ -145,7 +145,7 @@ def pristine_service(warm_service: MemoryService) -> MemoryService:
     NOT cleared, deliberately: the world cortex and the lesson store have no
     equivalent reset — ``WorldCortexStore``/``LessonStore`` expose only
     per-entity ``forget()`` — and no test in the tree reads world or lesson
-    state it did not itself write (surveyed 2026-08-28 across the six
+    state it did not itself write (surveyed 2026-08-28 across all thirteen
     fixture-consuming files). Also not reset: ``svc.config``, which outlives
     the bank clear, so a test that flips a config knob must restore it.
     """

@@ -116,7 +116,7 @@ class ScenarioResult:
         path = self.dir / filename
         if not path.exists():
             return []
-        return [ln for ln in path.read_text(encoding="utf-8").splitlines()
+        return [ln for ln in path.read_text(encoding="utf-8-sig").splitlines()
                 if ln.strip()]
 
     def detail(self, log: str = "calls.log", n: int = 40) -> str:
@@ -244,12 +244,12 @@ def _collect(root: Path, scenarios: list[Scenario],
             for part in parts:
                 path = sdir / part
                 if path.exists():
-                    text += path.read_text(encoding="utf-8", errors="replace")
+                    text += path.read_text(encoding="utf-8-sig", errors="replace")
             return text
 
         results[sc.name] = ScenarioResult(
             name=sc.name,
-            returncode=int(rc_file.read_text(encoding="utf-8").strip() or 0),
+            returncode=int(rc_file.read_text(encoding="utf-8-sig").strip() or 0),
             stdout=_read(stdout_parts),
             stderr=_read(stderr_parts),
             dir=sdir,

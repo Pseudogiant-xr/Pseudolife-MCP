@@ -648,6 +648,16 @@ def test_clear_empties_every_mutable_attribute_and_leaves_a_usable_store():
     assert s.dirty_slots == set()
     assert s.meta_dirty is False
     assert s.dream_cursor == 0.0
+    # Self-noticing completeness check: every non-knob attribute must match a
+    # fresh store, so an attribute added to __init__ without a matching reset
+    # in clear() fails here instead of leaking state between tests.
+    fresh = CortexStore()
+    assert vars(s).keys() == vars(fresh).keys()
+    _KNOBS = {"supersede_confidence_margin", "reinforce_rate",
+              "protect_provenance"}
+    for k, v in vars(fresh).items():
+        if k not in _KNOBS:
+            assert vars(s)[k] == v, f"clear() missed {k}"
     # Reads go through the emptied indexes, not stale ones.
     assert s.lookup("server", "port") is None
     assert s.members("user", "tags") == []
