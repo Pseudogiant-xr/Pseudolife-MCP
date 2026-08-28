@@ -614,7 +614,13 @@ One command — `ops\install-hook.ps1 -Client codex` (Windows, PowerShell 7) or
 `ops/install-hook.sh --client codex` (Linux/macOS) — installs the
 **SessionStart briefing hook** for the selected client (what your memory is
 unsure about + lessons from past work + verified world facts + where we left
-off, injected at every session start). It backs up `~/.claude/settings.json`
+off, injected at every session start) and, for the Claude client, a
+**UserPromptSubmit discipline hook**: a static one-line memory reminder on
+every turn — recall before reviewing code, docs, or PRs, then compare memory
+against the files; status questions are memory questions; log outcomes.
+(Codex is excluded from the per-turn hook: its per-prompt hook support is
+unverified, and every new Codex hook needs a manual trust review.) The
+installer backs up `~/.claude/settings.json`
 or `~/.codex/hooks.json` and is idempotent. The manual hook JSON,
 the briefing budget flags, and how session episodes open/close/resume
 without any hooks: [Episodes & sessions](docs/guide/episodes.md).
@@ -851,7 +857,8 @@ docker volume rm pseudolife-mcp-bank pseudolife-mcp-state
 
 Host-process installs: also unregister the logon task
 (`Unregister-ScheduledTask -TaskName "Pseudolife-MCP Daemon"`) and remove
-the SessionStart briefing hook from `~/.claude/settings.json` and/or
+the SessionStart briefing hook — plus, Claude client, the UserPromptSubmit
+discipline hook — from `~/.claude/settings.json` and/or
 `~/.codex/hooks.json` (a timestamped `.bak-*` sits next to each edited file).
 
 ## Testing
