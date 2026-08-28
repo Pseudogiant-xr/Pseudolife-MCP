@@ -29,8 +29,27 @@ sys.path.insert(0, str(ROOT))
 # bench DB (same crossfire as pg_fixtures' per-run test DB — see its module
 # docstring). Pin a per-run name before any test imports ladder_sweep, and
 # drop the database at exit. Eval CLI runs are unaffected (env unset there).
-if "PSEUDOLIFE_BENCH_DB" not in os.environ:
-    os.environ["PSEUDOLIFE_BENCH_DB"] = f"pseudolife_memory_bench_{os.getpid()}"
+def bench_db_autopin(environ) -> str | None:
+    """The per-process bench-DB name to pin, or None to keep a user value.
+
+    Pins when the variable is unset, and RE-pins when the inherited value
+    is a parent process's own autopin (the ``_PSEUDOLIFE_BENCH_DB_AUTOPIN``
+    sentinel matches) — an xdist worker inherits the controller's pin, and
+    sharing it would put every worker's reset_bench() reaper on one
+    database. A value set without the sentinel is a deliberate operator
+    override and wins verbatim.
+    """
+    current = environ.get("PSEUDOLIFE_BENCH_DB")
+    if current is not None and current != environ.get(
+            "_PSEUDOLIFE_BENCH_DB_AUTOPIN"):
+        return None
+    return f"pseudolife_memory_bench_{os.getpid()}"
+
+
+_bench_pin = bench_db_autopin(os.environ)
+if _bench_pin is not None:
+    os.environ["PSEUDOLIFE_BENCH_DB"] = _bench_pin
+    os.environ["_PSEUDOLIFE_BENCH_DB_AUTOPIN"] = _bench_pin
 
     def _drop_run_bench_db() -> None:
         try:

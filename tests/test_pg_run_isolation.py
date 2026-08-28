@@ -25,11 +25,44 @@ def test_default_test_db_is_private_to_this_run(monkeypatch):
 
 
 def test_env_override_wins_verbatim(monkeypatch):
+    monkeypatch.delenv("PYTEST_XDIST_WORKER", raising=False)
     monkeypatch.setenv(
         "PSEUDOLIFE_TEST_DATABASE_URL",
         "postgresql://u:p@10.0.0.5:5432/ci_fixed_db",
     )
     assert pg_fixtures.resolve_test_db_url().endswith("/ci_fixed_db")
+
+
+def test_env_override_gets_a_worker_suffix_under_xdist(monkeypatch):
+    """A verbatim override under xdist would put every worker's reaper on
+    ONE database — the exact cross-run crossfire this module exists to
+    prevent, moved inside a single CI job. Under a worker, the override's
+    database name gets the worker id appended; single-process runs keep
+    the verbatim contract above."""
+    monkeypatch.setenv("PYTEST_XDIST_WORKER", "gw3")
+    monkeypatch.setenv(
+        "PSEUDOLIFE_TEST_DATABASE_URL",
+        "postgresql://u:p@10.0.0.5:5432/ci_fixed_db",
+    )
+    assert pg_fixtures.resolve_test_db_url().endswith("/ci_fixed_db_gw3")
+
+
+def test_bench_autopin_decision_covers_all_three_origins():
+    """The bench pin must re-pin in an xdist worker (the inherited value is
+    the CONTROLLER's autopin — sharing it puts every worker's reset_bench
+    reaper on one database) while leaving a user-set value alone."""
+    from tests.conftest import bench_db_autopin
+
+    # Unset: pin this process's name.
+    env: dict[str, str] = {}
+    assert bench_db_autopin(env) == f"pseudolife_memory_bench_{os.getpid()}"
+    # Inherited from a parent process's autopin (xdist worker): re-pin.
+    env = {"PSEUDOLIFE_BENCH_DB": "pseudolife_memory_bench_99999",
+           "_PSEUDOLIFE_BENCH_DB_AUTOPIN": "pseudolife_memory_bench_99999"}
+    assert bench_db_autopin(env) == f"pseudolife_memory_bench_{os.getpid()}"
+    # Deliberately user-set (no matching autopin sentinel): keep it.
+    env = {"PSEUDOLIFE_BENCH_DB": "my_bench"}
+    assert bench_db_autopin(env) is None
 
 
 def test_admin_url_targets_postgres_db(monkeypatch):
