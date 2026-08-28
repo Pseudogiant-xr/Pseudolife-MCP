@@ -234,13 +234,17 @@ def test_openai_extractor_raises_on_timeout():
     # genuine empty result and avoid advancing the cursor past these memories.
     from pseudolife_memory.memory.dream import ExtractorError, OpenAICompatExtractor
 
+    # The stub sleeps 6x the client's timeout: enough that the client always
+    # gives up first, short enough that _stub_server's shutdown — which blocks
+    # on the in-flight handler — does not hold the suite for the full sleep.
+    # Was sleep(1.0)/timeout 0.2, which cost ~0.8s of pure teardown wait.
     def slow():
-        time.sleep(1.0)
+        time.sleep(0.3)
         return (200, _chat_payload([]))
 
     with _stub_server(slow) as base_url:
-        ext = OpenAICompatExtractor(base_url, "m", timeout_seconds=0.2)
-        with pytest.raises(ExtractorError):
+        ext = OpenAICompatExtractor(base_url, "m", timeout_seconds=0.05)
+        with pytest.raises(ExtractorError, match="timed out"):
             ext.extract(["x"], vocab=[])
 
 

@@ -181,7 +181,10 @@ def pg_url() -> str:
 @pytest.fixture()
 def pg_conn(pg_url):
     """Per-test connection with schema ensured and all tables truncated."""
-    from pseudolife_memory.storage.schema import ensure_schema
+    from pseudolife_memory.storage.schema import (
+        SCHEMA_META_VERSION,
+        ensure_schema,
+    )
 
     with psycopg.connect(pg_url) as conn:
         # Pin to public BEFORE any schema/truncate work — mirrors
@@ -208,6 +211,18 @@ def pg_conn(pg_url):
                 "TRUNCATE " + ", ".join(_ALL_TABLES) + " RESTART IDENTITY CASCADE"
             )
         conn.commit()
-        # Re-seed meta (schema_version) that the truncate just wiped.
-        ensure_schema(conn)
+        # Re-seed the one meta row (schema_version) that the truncate wiped.
+        # This used to be a second full ensure_schema(conn) — the whole DDL
+        # script re-run for a single INSERT, 320+ times per suite (measured
+        # 5-16s, 2026-08-28). Mirrors the only INSERT INTO meta in
+        # storage/schema.py; the first ensure_schema above still runs per
+        # test, because tests deliberately break DDL it has to repair.
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO meta (key, value) "
+                "VALUES ('schema_version', %s::jsonb) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+                (str(SCHEMA_META_VERSION),),
+            )
+        conn.commit()
         yield conn

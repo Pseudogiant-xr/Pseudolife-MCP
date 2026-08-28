@@ -325,7 +325,10 @@ def test_apply_while_daemon_reachable_refuses(v24_bank, pg_url, monkeypatch, hea
 
 
 def test_daemon_reachable_treats_hung_socket_as_up(hung_health_server):
-    assert migrate_embeddings._daemon_reachable(hung_health_server, timeout=1.0) is True
+    # 0.2s is plenty: the fixture's socket accepts and never answers, so the
+    # probe can only end in the timeout branch — the duration is not the
+    # contract, "hung reads as up" is.
+    assert migrate_embeddings._daemon_reachable(hung_health_server, timeout=0.2) is True
 
 
 def test_apply_refuses_against_hung_daemon(v24_bank, pg_url, monkeypatch, hung_health_server):
@@ -374,8 +377,9 @@ def test_entries_is_last_in_the_migration_order():
 def test_lock_timeout_fires_on_queued_alter(v24_bank, pg_url):
     """A real competing transaction holding a lock on ``facts`` (the first
     table in migration order) makes the ALTER fail fast via lock_timeout
-    instead of hanging. Uses a short override (1s) so the test doesn't pay
-    the real 10s default."""
+    instead of hanging. Uses a short override (100ms) so the test doesn't pay
+    the real 10s default — the assertion is that the mechanism fires, not how
+    long it waits, and the blocker holds the lock for the whole test."""
     pg_conn = v24_bank
     pg_conn.commit()  # release any read locks left open by fixture setup
 
@@ -384,7 +388,7 @@ def test_lock_timeout_fires_on_queued_alter(v24_bank, pg_url):
     conn = psycopg.connect(pg_url, autocommit=True)
     try:
         conn.execute("SET search_path TO public")
-        migrate_embeddings._apply_lock_timeout(conn, "1s")
+        migrate_embeddings._apply_lock_timeout(conn, "100ms")
         register_vector(conn)
         with pytest.raises(psycopg.errors.LockNotAvailable):
             migrate_embeddings.migrate_table(conn, None, "facts")

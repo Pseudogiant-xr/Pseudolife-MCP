@@ -11,6 +11,8 @@
 #   ops/update.sh --force-rollback-tag # tag the rollback even when the version
 #                                      # tag is not the running daemon's image
 #
+# HEALTH_RETRIES / HEALTH_DELAY_MS (environment) size the step-4 health wait.
+#
 # Rebuilds + recreates ONLY the daemon container (`--no-deps`), so Postgres and
 # the extractor are never touched. The bank lives in EXTERNAL volumes; this never
 # runs `down -v`. Run after `git pull` (or local edits) to deploy daemon changes.
@@ -24,6 +26,13 @@ NO_CACHE_PRUNE=0
 # Override for the "a build already ran without a completed deploy" guard in
 # step 2 — see the comment there before reaching for it.
 FORCE_ROLLBACK_TAG=0
+# Health-wait budget (step 4). The defaults reproduce the previously
+# hard-coded loop exactly — 30 attempts, 1.5s apart, so ~45s before a deploy
+# is called unhealthy. Environment-overridable so the unhealthy branch can be
+# driven in a test without spending 45 seconds per scenario; there is no
+# reason to lower them on a real deploy.
+HEALTH_RETRIES="${HEALTH_RETRIES:-30}"
+HEALTH_DELAY_MS="${HEALTH_DELAY_MS:-1500}"
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -145,13 +154,16 @@ docker compose "${compose[@]}" up -d --no-deps --build pseudolife-daemon
 # 4. Wait for health.
 echo "==> Waiting for the daemon to report healthy..."
 healthy=""
-for _ in $(seq 1 30); do
+# `sleep` wants seconds; the knob is milliseconds, so render it with a
+# three-digit fraction (1500 -> "1.500", the same wait as the old `sleep 1.5`).
+health_delay_s="$((HEALTH_DELAY_MS / 1000)).$(printf '%03d' "$((HEALTH_DELAY_MS % 1000))")"
+for _ in $(seq 1 "$HEALTH_RETRIES"); do
     if curl -fsS --max-time 3 http://127.0.0.1:8765/health 2>/dev/null \
         | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"'; then
         healthy=1
         break
     fi
-    sleep 1.5
+    sleep "$health_delay_s"
 done
 if [ -n "$healthy" ]; then
     echo "==> Healthy."

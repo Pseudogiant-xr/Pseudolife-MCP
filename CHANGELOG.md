@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-08-28 — the deploy scripts' health wait is a parameter, not a constant)
+- **`ops/update.ps1` and `ops/update.sh` no longer hard-code the step-4
+  health wait.** The ps1 takes `-HealthRetries` / `-HealthDelayMs`; the sh
+  port reads `HEALTH_RETRIES` / `HEALTH_DELAY_MS` from the environment.
+  Defaults are unchanged (30 attempts, 1500ms apart, so ~45s before a deploy
+  is declared unhealthy) and a run that passes nothing behaves exactly as
+  before — there is no reason to lower them on a real deploy. The knob
+  exists so the tests that drive the UNHEALTHY branch can exhaust the retry
+  loop without spending the production budget: those three scenarios were
+  137s of the test suite (~46s each) and are now under 2s in total, with
+  the unhealthy-path contract (retries exhausted → honest rollback message,
+  build-cache retention never reached, exit 1) unchanged and re-verified
+  against a watched RED.
+
 ### Security (2026-08-28 — workflows drop the default-writable GITHUB_TOKEN)
 - **Explicit least-privilege `permissions` on both GitHub Actions
   workflows**, resolving the four open CodeQL

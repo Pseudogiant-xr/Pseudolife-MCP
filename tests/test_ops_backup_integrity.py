@@ -22,19 +22,28 @@ Two independent guards are pinned here:
 
 Harness style follows test_ops_backup_mirror.py: the real script runs with
 ``docker`` stubbed (PS function / exported bash function), so no Postgres is
-needed — ``docker cp`` materializes a prepared artifact instead.
+needed — ``docker cp`` materializes a prepared artifact instead. The three
+distinct dump states run as one batch per shell (``tests/ops_harness.py``),
+each with its own artifact and its own output directory.
 """
 
 from __future__ import annotations
 
 import gzip
-import os
 import re
-import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
+
+from tests.ops_harness import (
+    BASH,
+    PWSH,
+    Scenario,
+    hermetic_env,
+    run_ps1_batch,
+    run_sh_batch,
+    scenario_dir,
+)
 
 REPO = Path(__file__).resolve().parents[1]
 BACKUP_PS1 = REPO / "ops" / "backup.ps1"
@@ -43,7 +52,6 @@ BACKUP_SH = REPO / "ops" / "backup.sh"
 # check only — it has no end-of-dump marker check (the migration's exact
 # table-count verification is its completion guard).
 MIGRATE_PG18_PS1 = REPO / "ops" / "migrate-pg18.ps1"
-PWSH = shutil.which("pwsh") or shutil.which("powershell")
 
 # The last line PostgreSQL writes into a plain-format dump.
 MARKER = "PostgreSQL database dump complete"
@@ -62,36 +70,14 @@ TRUNCATED_DUMP = (
     "COPY entries (id) FROM stdin;\n1\n"
 )
 
-
-def _find_bash() -> str | None:
-    # Prefer Git Bash on Windows — System32 bash.exe launches WSL, where the
-    # C:-style script paths don't resolve.
-    for cand in (r"C:\Program Files\Git\bin\bash.exe",
-                 r"C:\Program Files\Git\usr\bin\bash.exe"):
-        if Path(cand).exists():
-            return cand
-    found = shutil.which("bash")
-    if found and "system32" not in found.lower():
-        return found
-    return None
-
-
-BASH = _find_bash()
-
-
-def _hermetic_env() -> dict[str, str]:
-    """The mirror knobs are real user settings; scrub them so a maintainer's
-    machine config cannot change what these tests exercise."""
-    env = os.environ.copy()
-    env.pop("PSEUDOLIFE_BACKUP_MIRROR", None)
-    env.pop("PSEUDOLIFE_BACKUP_MIRROR_KEEP", None)
-    return env
-
-
-def _fixture(tmp_path: Path, sql: str) -> Path:
-    art = tmp_path / "artifact.sql.gz"
-    art.write_bytes(gzip.compress(sql.encode("utf-8")))
-    return art
+# One entry per distinct dump state: (dump SQL, does the dump command fail).
+# ``truncated`` backs two tests, which read the same run rather than
+# repeating it.
+SCENARIOS: dict[str, tuple[str, bool]] = {
+    "failing_dump": (COMPLETE_DUMP, True),
+    "truncated": (TRUNCATED_DUMP, False),
+    "complete": (COMPLETE_DUMP, False),
+}
 
 
 # ----------------------------------------------------------------------
@@ -123,73 +109,84 @@ def test_artifact_is_checked_for_the_end_of_dump_marker(script):
 # Execution: a truncated dump must fail the backup
 # ----------------------------------------------------------------------
 
-def _run_ps1(tmp_path: Path, artifact: Path, out_dir: Path, fail_dump: bool):
-    driver = tmp_path / "driver.ps1"
-    # The dump stub fails the way a killed pg_dump does: non-zero status from
-    # the `docker exec sh -c "pg_dump ..."` call itself.
-    dump_stub = ('$global:LASTEXITCODE = 1; return' if fail_dump
-                 else '$global:LASTEXITCODE = 0; return')
-    driver.write_text(
-        f'''
+def _stage(root: Path, name: str, sql: str) -> tuple[Path, Path]:
+    sdir = scenario_dir(root, name)
+    artifact = sdir / "artifact.sql.gz"
+    artifact.write_bytes(gzip.compress(sql.encode("utf-8")))
+    return artifact, sdir / "out"
+
+
+def _ps1_scenarios(root: Path) -> list[Scenario]:
+    scenarios = []
+    for name, (sql, fail_dump) in SCENARIOS.items():
+        artifact, out_dir = _stage(root, name, sql)
+        # The dump stub fails the way a killed pg_dump does: non-zero status
+        # from the `docker exec sh -c "pg_dump ..."` call itself.
+        dump_stub = ('$global:LASTEXITCODE = 1; return' if fail_dump
+                     else '$global:LASTEXITCODE = 0; return')
+        setup = f'''
+$global:Artifact = "{artifact.as_posix()}"
 function global:docker {{
     $global:LASTEXITCODE = 0
     $a = @($args | ForEach-Object {{ "$_" }})
     if ($a[0] -eq "exec" -and (($a -join " ") -match "pg_dump")) {{ {dump_stub} }}
     if ($a[0] -eq "cp") {{
-        Copy-Item -LiteralPath "{artifact.as_posix()}" -Destination $a[2] -Force
+        Copy-Item -LiteralPath $global:Artifact -Destination $a[2] -Force
         return
     }}
     return
 }}
-& "{BACKUP_PS1}" -OutDir "{out_dir.as_posix()}"
-''',
-        encoding="utf-8",
-    )
-    return subprocess.run(
-        [PWSH, "-NoProfile", "-File", str(driver)],
-        capture_output=True, text=True, timeout=120, env=_hermetic_env(),
-    )
+'''
+        invoke = f'& "{BACKUP_PS1}" -OutDir "{out_dir.as_posix()}"'
+        scenarios.append(Scenario(name, setup, invoke))
+    return scenarios
 
 
-def _run_sh(tmp_path: Path, artifact: Path, out_dir: Path, fail_dump: bool):
-    driver = tmp_path / "driver.sh"
-    dump_rc = 1 if fail_dump else 0
-    driver.write_text(
-        f'''#!/usr/bin/env bash
-set -u
-ART="{artifact.as_posix()}"
+def _sh_scenarios(root: Path) -> list[Scenario]:
+    scenarios = []
+    for name, (sql, fail_dump) in SCENARIOS.items():
+        artifact, out_dir = _stage(root, name, sql)
+        setup = f'''
+export ART="{artifact.as_posix()}"
 docker() {{
-    case "$*" in *pg_dump*) return {dump_rc} ;; esac
+    case "$*" in *pg_dump*) return {1 if fail_dump else 0} ;; esac
     if [ "$1" = "cp" ]; then cp "$ART" "$3"; return 0; fi
     return 0
 }}
 export -f docker
-export ART
-bash "{BACKUP_SH.as_posix()}" --out-dir "{out_dir.as_posix()}"
-''',
-        encoding="utf-8", newline="\n")
-    return subprocess.run(
-        [BASH, str(driver)],
-        capture_output=True, text=True, timeout=120, env=_hermetic_env(),
-    )
+'''
+        invoke = f'bash "{BACKUP_SH.as_posix()}" --out-dir "{out_dir.as_posix()}"'
+        scenarios.append(Scenario(name, setup, invoke))
+    return scenarios
+
+
+@pytest.fixture(scope="module")
+def ps1_batch(tmp_path_factory):
+    if PWSH is None:
+        pytest.skip("PowerShell not on PATH")
+    root = tmp_path_factory.mktemp("backup_integrity_ps1")
+    return run_ps1_batch(root, _ps1_scenarios(root), env=hermetic_env())
+
+
+@pytest.fixture(scope="module")
+def sh_batch(tmp_path_factory):
+    if BASH is None:
+        pytest.skip("bash not available")
+    root = tmp_path_factory.mktemp("backup_integrity_sh")
+    return run_sh_batch(root, _sh_scenarios(root), env=hermetic_env())
 
 
 @pytest.fixture(params=["ps1", "sh"])
-def run_backup(request, tmp_path):
-    """Run a backup-script variant against a prepared artifact; returns
-    (proc, out_dir)."""
-    if request.param == "ps1" and PWSH is None:
-        pytest.skip("PowerShell not on PATH")
-    if request.param == "sh" and BASH is None:
-        pytest.skip("bash not available")
+def run_backup(request):
+    """Look up one dump state's run for the script variant under test.
+    Call as ``run_backup("truncated")``; returns (result, out_dir)."""
+    batch = request.getfixturevalue(f"{request.param}_batch")
 
-    def run(sql: str, fail_dump: bool = False):
-        out_dir = tmp_path / "out"
-        artifact = _fixture(tmp_path, sql)
-        runner = _run_ps1 if request.param == "ps1" else _run_sh
-        return runner(tmp_path, artifact, out_dir, fail_dump), out_dir
+    def get(name: str):
+        res = batch[name]
+        return res, res.dir / "out"
 
-    return run
+    return get
 
 
 def test_a_failing_dump_fails_the_backup(run_backup):
@@ -201,20 +198,20 @@ def test_a_failing_dump_fails_the_backup(run_backup):
     every other test in this file green, because they all pair a successful
     stub with a good artifact.
     """
-    proc, out_dir = run_backup(COMPLETE_DUMP, fail_dump=True)
-    out = proc.stdout + proc.stderr
-    assert proc.returncode != 0, (
+    res, out_dir = run_backup("failing_dump")
+    out = res.stdout + res.stderr
+    assert res.returncode != 0, (
         "a failed pg_dump was reported as a successful backup:\n" + out)
     assert "pg_dump failed" in out.lower(), out
     assert list(out_dir.glob("pseudolife_memory-*")) == [], (
-        "a failed dump still produced an artifact")
+        "a failed dump still produced an artifact:\n" + out)
 
 
 def test_truncated_dump_fails_the_backup(run_backup):
     """The reported defect: valid gzip, non-empty, silently truncated."""
-    proc, out_dir = run_backup(TRUNCATED_DUMP)
-    out = proc.stdout + proc.stderr
-    assert proc.returncode != 0, (
+    res, out_dir = run_backup("truncated")
+    out = res.stdout + res.stderr
+    assert res.returncode != 0, (
         "a truncated dump was accepted as a good backup:\n" + out)
     assert "truncated" in out.lower() or "incomplete" in out.lower(), out
 
@@ -222,8 +219,8 @@ def test_truncated_dump_fails_the_backup(run_backup):
 def test_truncated_dump_does_not_masquerade_as_the_newest_backup(run_backup):
     """``restore.ps1`` and the rotation both glob ``*.sql.gz``: a rejected
     artifact must not sit there looking like the newest good backup."""
-    proc, out_dir = run_backup(TRUNCATED_DUMP)
-    assert proc.returncode != 0
+    res, out_dir = run_backup("truncated")
+    assert res.returncode != 0
     left = list(out_dir.glob("pseudolife_memory-*.sql.gz"))
     assert left == [], (
         f"a rejected backup was left where restore would pick it up: {left}")
@@ -231,7 +228,7 @@ def test_truncated_dump_does_not_masquerade_as_the_newest_backup(run_backup):
 
 def test_complete_dump_still_succeeds(run_backup):
     """The happy path must keep working."""
-    proc, out_dir = run_backup(COMPLETE_DUMP)
-    out = proc.stdout + proc.stderr
-    assert proc.returncode == 0, out
+    res, out_dir = run_backup("complete")
+    out = res.stdout + res.stderr
+    assert res.returncode == 0, out
     assert len(list(out_dir.glob("pseudolife_memory-*.sql.gz"))) == 1, out

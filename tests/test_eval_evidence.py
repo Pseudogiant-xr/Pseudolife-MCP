@@ -20,6 +20,7 @@ import json
 import subprocess
 import sys
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Callable
 
@@ -108,6 +109,32 @@ def _abl_cmp(mode: str, arm: str) -> str:
             f"{mode}-{arm}.compare.json")
 
 
+@lru_cache(maxsize=None)
+def _load_artifact(rel: str):
+    """Parse one committed artifact — once per session, not once per claim.
+
+    The claim table cites the same files over and over: 415 artifact loads
+    resolve to a far smaller set of distinct files, and one 835KB rows JSONL
+    was re-parsed 8 times. Measured 2026-08-28: 0.73s of loading collapses
+    to 0.02s.
+
+    Sharing one parsed object across claims is safe because every
+    ``Claim.value`` accessor is a pure read — dict/list indexing, ``next``,
+    ``sum``, arithmetic. None of them mutates what it is handed. Keep it
+    that way when adding a claim, or this cache leaks state between them.
+    """
+    text = (REPO / rel).read_text(encoding="utf-8")
+    if rel.endswith(".jsonl"):
+        return [json.loads(line) for line in text.splitlines() if line.strip()]
+    return json.loads(text)
+
+
+@lru_cache(maxsize=None)
+def _read_doc(rel: str) -> str:
+    """Read one doc once. CHANGELOG.md was being re-read 160 times."""
+    return (REPO / rel).read_text(encoding="utf-8")
+
+
 @dataclass(frozen=True)
 class Claim:
     """One published number and the artifact(s) that justify it."""
@@ -121,15 +148,7 @@ class Claim:
     places: int          # decimals the doc rounds to
 
     def actual(self) -> float:
-        loaded = []
-        for a in self.artifacts:
-            text = (REPO / a).read_text(encoding="utf-8")
-            if a.endswith(".jsonl"):
-                loaded.append([json.loads(line) for line in text.splitlines()
-                               if line.strip()])
-            else:
-                loaded.append(json.loads(text))
-        return self.value(*loaded)
+        return self.value(*(_load_artifact(a) for a in self.artifacts))
 
 
 def _mean(arm: str) -> Callable[[dict], float]:
@@ -1997,9 +2016,9 @@ _BEAM_VERDICT_QUOTES = [
 def test_beam_range_quotes_match_the_committed_verdict():
     """The evals README quotes three sweep ranges; they must be the
     verdict file's, not a recollection of it."""
-    doc = (REPO / EVALS).read_text(encoding="utf-8")
+    doc = _read_doc(EVALS)
     for artifact, key, quoted in _BEAM_VERDICT_QUOTES:
-        verdict = json.loads((REPO / artifact).read_text(encoding="utf-8"))
+        verdict = _load_artifact(artifact)
         assert quoted in verdict["structural_findings"][key], (
             f"{artifact}:{key} no longer says {quoted!r}")
         assert quoted.replace("->", "→") in doc, (
@@ -2040,7 +2059,7 @@ def test_claim_text_still_appears_in_its_doc(claim: Claim):
     Without this, rewording a table would leave the row above asserting
     against a number no page still shows — green, and guarding nothing.
     """
-    text = (REPO / claim.doc).read_text(encoding="utf-8")
+    text = _read_doc(claim.doc)
     assert claim.needle in text, (
         f"{claim.id}: {claim.doc} no longer contains the guarded text\n  "
         f"{claim.needle!r}\nIf the number changed, update this table; if the "

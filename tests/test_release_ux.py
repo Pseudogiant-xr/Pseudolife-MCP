@@ -292,71 +292,132 @@ def test_readme_documents_supported_mcp_clients() -> None:
     assert ".codex/hooks.json" in text
 
 
-def test_tracked_tree_carries_no_maintainer_identifiers() -> None:
-    """The 2026-07-03 history scrub regressed within a week: a test fixture
-    re-asserted the maintainer's scrubbed email verbatim, and docs/eval
-    harnesses accumulated ``C:\\Users\\<username>`` paths. A history rewrite
-    is one-shot; keeping the tree clean is a treadmill — so guard the tracked
-    tree mechanically. The needles are assembled from fragments so this file
-    passes its own check.
+# ── tracked-tree guards: one shared pass over the tree ────────────────────
+#
+# The two guards below each used to run their own ``git ls-files`` and read
+# every tracked file (~1,500 files, ~429MB) — the identifier guard as decoded
+# lowercased text, the control-byte guard as raw bytes scanned one byte at a
+# time in Python. Measured 2026-08-28 on the maintainer's tree: 14.5s + 4.4s
+# per suite run. One fixture now lists and reads the tree once, matches on
+# raw bytes, and hands each guard its own hit list; the file contents are
+# never retained past the file being scanned.
+#
+# Detection is unchanged. Every needle and pattern is pure ASCII, so matching
+# against ``bytes.lower()`` (which lowercases ASCII A-Z and nothing else) is
+# equivalent to matching against the lowercased UTF-8 decoding, and cheap
+# substring prescreens run ahead of each regex without changing what matches.
+# No tracked file is excluded from the scan: the maintainer's homelab subnet
+# once leaked through eval-harness defaults precisely because a scan had a
+# blind spot.
 
-    The maintainer's homelab subnet is banned wholesale: synthetic RFC1918
-    fixtures must use ``192.168.1.x`` (or ``192.168.x.x`` placeholders),
-    never the real ``.0.x`` subnet that leaked via eval-harness defaults."""
-    needles = [("HAM" "O9").lower(), "pseudogiant" + "92", "192.168." + "0."]
-    # Pattern classes (2026-08-10 audit): the needle list only catches the
-    # identifiers that already leaked once — a differently-shaped future
-    # leak (another username, subnet, or a credential) sailed through. The
-    # classes below catch the shape, with the tree's sanctioned synthetic
-    # forms allowlisted. Generic email scanning is deliberately absent:
-    # the eval fixtures hold hundreds of synthetic addresses.
-    username_pat = re.compile(r"c:\\+users\\+(?!<|o'brien)[a-z0-9]")
-    rfc1918_pat = re.compile(
-        r"\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
-        r"|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
-        r"|192\.168\.\d{1,3}\.\d{1,3})\b")
-    allowed_ip_prefixes = ("10.0.0.", "192.168.1.", "172.17.0.1")
-    credential_pat = re.compile(
-        r"\b(?:ghp_[a-z0-9]{20,}|github_pat_[a-z0-9_]{20,}"
-        r"|akia[a-z0-9]{16}|xox[bpars]-[a-z0-9-]{10,}"
-        r"|sk-ant-[a-z0-9-]{8,})\b")
-    # BEAM's synthetic conversation corpus contains this documentation
-    # placeholder inside a code sample; the recorded serve/answer artifacts
-    # reproduce it verbatim and must stay byte-identical. Exact strings
-    # only — any other credential-shaped match still fails the guard.
-    allowed_credential_placeholders = ("xoxb-your-slack-token",)
+# The needles are assembled from fragments so this file passes its own check.
+_IDENT_NEEDLES = (("HAM" "O9").lower().encode(),
+                  ("pseudogiant" + "92").encode(),
+                  ("192.168." + "0.").encode())
+# Pattern classes (2026-08-10 audit): the needle list only catches the
+# identifiers that already leaked once — a differently-shaped future leak
+# (another username, subnet, or a credential) sailed through. The classes
+# below catch the shape, with the tree's sanctioned synthetic forms
+# allowlisted. Generic email scanning is deliberately absent: the eval
+# fixtures hold hundreds of synthetic addresses.
+_USERNAME_PAT = re.compile(rb"c:\\+users\\+(?!<|o'brien)[a-z0-9]")
+# Every match of _USERNAME_PAT starts with this literal, so it is an exact
+# superset prescreen (same for the two below).
+_USERNAME_PRESCREEN = (b"c:\\",)
+_RFC1918_PAT = re.compile(
+    rb"\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
+    rb"|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
+    rb"|192\.168\.\d{1,3}\.\d{1,3})\b")
+_RFC1918_PRESCREEN = (b"10.", b"172.", b"192.168.")
+_ALLOWED_IP_PREFIXES = (b"10.0.0.", b"192.168.1.", b"172.17.0.1")
+_CREDENTIAL_PAT = re.compile(
+    rb"\b(?:ghp_[a-z0-9]{20,}|github_pat_[a-z0-9_]{20,}"
+    rb"|akia[a-z0-9]{16}|xox[bpars]-[a-z0-9-]{10,}"
+    rb"|sk-ant-[a-z0-9-]{8,})\b")
+_CREDENTIAL_PRESCREEN = (b"ghp_", b"github_pat_", b"akia", b"xox", b"sk-ant-")
+# BEAM's synthetic conversation corpus contains this documentation
+# placeholder inside a code sample; the recorded serve/answer artifacts
+# reproduce it verbatim and must stay byte-identical. Exact strings only —
+# any other credential-shaped match still fails the guard.
+_ALLOWED_CREDENTIAL_PLACEHOLDERS = (b"xoxb-your-slack-token",)
+# C0 controls other than tab/LF/CR. NUL is excluded here because files
+# containing it are treated as binary and skipped before this runs.
+_CONTROL_BYTE_PAT = re.compile(rb"[\x01-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def _scan_identifiers(rel: str, low: bytes, hits: list) -> None:
+    """Record at most one identifier hit for ``low`` (lowercased bytes)."""
+    if any(n in low for n in _IDENT_NEEDLES):
+        hits.append((rel, "needle"))
+        return
+    if (any(p in low for p in _USERNAME_PRESCREEN)
+            and _USERNAME_PAT.search(low)):
+        hits.append((rel, "windows username path"))
+        return
+    if any(p in low for p in _CREDENTIAL_PRESCREEN):
+        cred_hits = [m.group(0) for m in _CREDENTIAL_PAT.finditer(low)
+                     if m.group(0) not in _ALLOWED_CREDENTIAL_PLACEHOLDERS]
+        if cred_hits:
+            hits.append((rel, "credential-shaped string"))
+            return
+    if any(p in low for p in _RFC1918_PRESCREEN):
+        for m in _RFC1918_PAT.finditer(low):
+            if not m.group(0).startswith(_ALLOWED_IP_PREFIXES):
+                ip = m.group(0).decode("ascii", "replace")
+                hits.append((rel, f"unsanctioned private IP {ip}"))
+                return
+
+
+def _scan_control_bytes(rel: str, data: bytes, hits: list) -> None:
+    if b"\x00" in data:  # binary file
+        return
+    if _CONTROL_BYTE_PAT.search(data) is None:
+        return
+    bad = sorted({b[0] for b in _CONTROL_BYTE_PAT.findall(data)})
+    hits.append((rel, [hex(b) for b in bad]))
+
+
+@pytest.fixture(scope="module")
+def tracked_tree_scan():
+    """One ``git ls-files`` + one read of every tracked file, for both guards.
+
+    Returns ``(identifier_hits, control_byte_hits)``.
+    """
     repo = Path(__file__).resolve().parents[1]
     try:
         proc = subprocess.run(["git", "ls-files"], cwd=repo, check=True,
                               capture_output=True, text=True, timeout=30)
     except (OSError, subprocess.SubprocessError):
         pytest.skip("not a git checkout")
-    hits = []
+    ident_hits: list = []
+    control_hits: list = []
     for rel in proc.stdout.splitlines():
         try:
-            text = (repo / rel).read_text(encoding="utf-8",
-                                          errors="ignore").lower()
+            data = (repo / rel).read_bytes()
         except OSError:
             continue
-        if any(n in text for n in needles):
-            hits.append((rel, "needle"))
-            continue
-        if username_pat.search(text):
-            hits.append((rel, "windows username path"))
-            continue
-        cred_hits = [m.group(0) for m in credential_pat.finditer(text)
-                     if m.group(0) not in allowed_credential_placeholders]
-        if cred_hits:
-            hits.append((rel, "credential-shaped string"))
-            continue
-        for m in rfc1918_pat.finditer(text):
-            if not m.group(0).startswith(allowed_ip_prefixes):
-                hits.append((rel, f"unsanctioned private IP {m.group(0)}"))
-                break
+        _scan_identifiers(rel, data.lower(), ident_hits)
+        _scan_control_bytes(rel, data, control_hits)
+    return ident_hits, control_hits
+
+
+def test_tracked_tree_carries_no_maintainer_identifiers(
+        tracked_tree_scan) -> None:
+    """The 2026-07-03 history scrub regressed within a week: a test fixture
+    re-asserted the maintainer's scrubbed email verbatim, and docs/eval
+    harnesses accumulated ``C:\\Users\\<username>`` paths. A history rewrite
+    is one-shot; keeping the tree clean is a treadmill — so guard the tracked
+    tree mechanically.
+
+    The maintainer's homelab subnet is banned wholesale: synthetic RFC1918
+    fixtures must use ``192.168.1.x`` (or ``192.168.x.x`` placeholders),
+    never the real ``.0.x`` subnet that leaked via eval-harness defaults."""
+    hits = tracked_tree_scan[0]
     assert hits == [], f"maintainer identifiers in tracked files: {hits}"
 
 
-def test_tracked_tree_carries_no_stray_control_bytes() -> None:
+def test_tracked_tree_carries_no_stray_control_bytes(
+        tracked_tree_scan) -> None:
     """A scripted 2026-08-02 rename edit wrote literal BEL (0x07) bytes into
     ``ops/install-shim-autostart.ps1`` — a ``\\a`` escape in a non-raw Python
     replacement string — which mangled the shim script path so the logon task
@@ -364,24 +425,7 @@ def test_tracked_tree_carries_no_stray_control_bytes() -> None:
     swallow BEL when printing, and substring greps fail across it. Ban raw C0
     control bytes (except tab/LF/CR) from every tracked text file; files
     containing NUL are treated as binary and skipped."""
-    allowed = {0x09, 0x0A, 0x0D}
-    repo = Path(__file__).resolve().parents[1]
-    try:
-        proc = subprocess.run(["git", "ls-files"], cwd=repo, check=True,
-                              capture_output=True, text=True, timeout=30)
-    except (OSError, subprocess.SubprocessError):
-        pytest.skip("not a git checkout")
-    hits = []
-    for rel in proc.stdout.splitlines():
-        try:
-            data = (repo / rel).read_bytes()
-        except OSError:
-            continue
-        if b"\x00" in data:
-            continue
-        bad = sorted({b for b in data if b < 0x20 and b not in allowed})
-        if bad:
-            hits.append((rel, [hex(b) for b in bad]))
+    hits = tracked_tree_scan[1]
     assert hits == [], f"stray control bytes in tracked files: {hits}"
 
 
