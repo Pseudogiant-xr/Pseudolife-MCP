@@ -31,6 +31,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   filtering, not an outage, and to make one `memory_search` call before
   reporting memory as offline.
 
+### Security (2026-08-28 — workflows drop the default-writable GITHUB_TOKEN)
+- **Explicit least-privilege `permissions` on both GitHub Actions
+  workflows**, resolving the four open CodeQL
+  `actions/missing-workflow-permissions` alerts: `ci.yml` gets a
+  workflow-level `contents: read` (all three test lanes only check out and
+  run tests), and `release.yml`'s `build` job gets `contents: read` to
+  match its siblings, which already declared their own write scopes
+  (`publish`/`registry`: `id-token`, `images`: `packages`). Previously
+  these jobs ran with the repository's default token, which can write
+  repo contents.
+
 ### Fixed (2026-08-28 — Codex hook trust is an explicit install step)
 - **Codex now requires every new or changed lifecycle hook to be reviewed and
   trusted before it runs, but the hook installers reported success without
