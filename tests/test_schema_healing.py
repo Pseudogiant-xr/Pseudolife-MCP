@@ -1,22 +1,27 @@
-"""Schema v26 -- set-valued slots groundwork.
+"""The duplicate-healing pass ``ensure_schema`` runs on every daemon start.
 
-Adds ``facts.kind`` (``scalar`` | ``member``, default ``scalar``) and
-``facts.value_norm`` (member identity; NULL on scalar rows), and splits the
-single per-slot current-uniqueness index by kind: scalar facts stay unique
-per (entity_norm, attribute_norm) as before, member facts are unique per
-(entity_norm, attribute_norm, value_norm) so a set-valued slot can hold
-multiple concurrently-current members. The old ``facts_slot_current_uq`` is
-dropped -- idempotent re-runs of ``ensure_schema`` must not recreate it.
+This is the one place where re-running ``ensure_schema`` can DESTROY data
+rather than no-op, so it is the one idempotence guard worth writing: the
+v19 healing pass demotes all-but-newest duplicate ``current`` facts on a
+slot, and since v26 a slot can legitimately hold many concurrent MEMBERS.
+Without a kind-aware predicate the pass would silently strip a set-valued
+slot down to one member on every restart.
 
-Skips without a PG server (mirrors test_pg_storage / test_schema_v16).
+The surrounding v26 machinery it depends on: ``facts.kind``
+(``scalar`` | ``member``, default ``scalar``) and ``facts.value_norm``
+(member identity; NULL on scalar rows), with the single per-slot
+current-uniqueness index split by kind — scalar facts unique per
+(entity_norm, attribute_norm) as before, member facts unique per
+(entity_norm, attribute_norm, value_norm). The old ``facts_slot_current_uq``
+is dropped and must not come back on a re-run.
+
+Skips without a PG server (mirrors test_pg_storage).
 """
 from __future__ import annotations
 
 import psycopg
 
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
-
-from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
 
 
 def _insert_fact(conn, *, entity, attribute, value, kind="scalar",
@@ -28,17 +33,6 @@ def _insert_fact(conn, *, entity, attribute, value, kind="scalar",
         "extract(epoch from now()), extract(epoch from now()), %s, %s)",
         (entity, attribute, entity, attribute, value, status, kind, value_norm),
     )
-
-
-def test_meta_version_is_26():
-    assert SCHEMA_META_VERSION >= 26  # set-valued slots landed at v26; persist into later schemas
-
-
-def test_facts_has_kind_and_value_norm(pg_conn):
-    cols = {r[0] for r in pg_conn.execute(
-        "SELECT column_name FROM information_schema.columns "
-        "WHERE table_name = 'facts'").fetchall()}
-    assert "kind" in cols and "value_norm" in cols
 
 
 def test_kind_defaults_to_scalar(pg_conn):

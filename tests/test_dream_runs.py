@@ -44,6 +44,59 @@ def _journal(svc, run_id):
     return svc._storage.dream_run_journal(run_id)
 
 
+# ── storage shape the journal depends on ─────────────────────────────────
+# Direct SQL rather than through the service: these pin the DDL contracts
+# rollback rests on (CASCADE, the JSONB tallies blob, the nullable
+# pre-image) independently of whether dream_run happens to exercise them.
+
+
+def test_run_delete_cascades_to_journal(pg_conn):  # noqa: F811
+    """Pruning a run must take its journal with it — the FK is ON DELETE
+    CASCADE precisely so pruning cannot orphan pre-images."""
+    pg_conn.execute(
+        "INSERT INTO dream_runs (started_at, cursor_before, pulled, status) "
+        "VALUES (1.0, 0.0, 3, 'committed')")
+    run_id = pg_conn.execute(
+        "SELECT id FROM dream_runs ORDER BY id DESC LIMIT 1").fetchone()[0]
+    pg_conn.execute(
+        "INSERT INTO dream_run_slots (run_id, seq, entity, attribute, "
+        "entity_norm, attribute_norm, kind, action, at) "
+        "VALUES (%s, 0, 'proj', 'lang', 'proj', 'lang', 'scalar', "
+        "'inserted', 1.0)", (run_id,))
+    pg_conn.commit()
+    pg_conn.execute("DELETE FROM dream_runs WHERE id = %s", (run_id,))
+    pg_conn.commit()
+    left = pg_conn.execute(
+        "SELECT count(*) FROM dream_run_slots WHERE run_id = %s",
+        (run_id,)).fetchone()[0]
+    assert left == 0
+
+
+def test_null_prev_status_and_jsonb_tallies_round_trip(pg_conn):  # noqa: F811
+    """``tallies`` must read back as a dict (JSONB, not text), and a slot
+    with no pre-image — an insert — must store NULL rather than a sentinel
+    string that rollback would then try to restore."""
+    pg_conn.execute(
+        "INSERT INTO dream_runs (started_at, cursor_before, pulled, status, "
+        "tallies) VALUES (1.0, 0.0, 2, 'committed', "
+        "'{\"inserted\": 2, \"literal_dropped\": 1}'::jsonb)")
+    run_id = pg_conn.execute(
+        "SELECT id FROM dream_runs ORDER BY id DESC LIMIT 1").fetchone()[0]
+    pg_conn.execute(
+        "INSERT INTO dream_run_slots (run_id, seq, entity, attribute, "
+        "entity_norm, attribute_norm, kind, prev_status, action, at) "
+        "VALUES (%s, 0, 'p', 'a', 'p', 'a', 'scalar', NULL, 'inserted', "
+        "1.0)", (run_id,))
+    pg_conn.commit()
+    tallies = pg_conn.execute(
+        "SELECT tallies FROM dream_runs WHERE id = %s", (run_id,)).fetchone()[0]
+    assert tallies == {"inserted": 2, "literal_dropped": 1}
+    prev = pg_conn.execute(
+        "SELECT prev_status FROM dream_run_slots WHERE run_id = %s",
+        (run_id,)).fetchone()[0]
+    assert prev is None
+
+
 # ── run rows ─────────────────────────────────────────────────────────────
 
 def test_dream_run_records_a_run_row(svc):

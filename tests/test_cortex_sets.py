@@ -589,7 +589,7 @@ def store_with_pg(pg_conn, pg_url):  # noqa: F811
     """A bare CortexStore paired with a ``reload_store()`` closure that
     write-throughs its dirty slots to Postgres and hydrates a brand new
     CortexStore from the facts table — the persistence-fixture idiom used by
-    ``tests/test_schema_v23.py::test_freshness_class_survives_a_write_read_round_trip``,
+    ``tests/test_entity_kind_inference.py::test_freshness_class_survives_a_write_read_round_trip``,
     generalised so callers don't need a full MemoryService."""
     from pseudolife_memory.storage import sync
     from pseudolife_memory.storage.postgres import PostgresStorage
@@ -640,7 +640,8 @@ def test_blocked_aggregate_contender_survives_pg_roundtrip(store_with_pg, emb):
 
 @pytest.fixture()
 def svc(pg_conn, pg_url):  # noqa: F811
-    """Same idiom as ``tests/test_schema_v23.py``'s ``svc`` fixture — a real
+    """Same idiom as ``tests/test_entity_kind_inference.py``'s ``svc``
+    fixture — a real
     MemoryService against the bench Postgres, torn down after the test."""
     from pseudolife_memory.service import MemoryService
 

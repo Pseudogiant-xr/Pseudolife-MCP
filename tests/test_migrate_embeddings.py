@@ -12,7 +12,8 @@ columns at vector(1024) after each test via ``ensure_schema``); each test
 narrows them back to 384 as its own setup step.
 
 The APPLY path uses the REAL Qwen3-Embedding-0.6B pipeline (not a stub).
-``test_schema_v25.py::test_service_round_trip_at_dim_1024`` already
+``test_embedding_dim_guard.py::test_service_round_trip_at_dim_1024``
+already
 establishes that the model loads offline from the HF cache in about a
 second and encodes CPU-fast; the synthetic bank here is a handful of rows
 across four tables, so the wall-clock cost is noise against the ~7-minute
@@ -62,10 +63,10 @@ def _vec(seed: int, dim: int = 384) -> np.ndarray:
     return v / np.linalg.norm(v)
 
 
-def _narrow_to_v24(pg_conn) -> None:  # noqa: F811 — fixture shadow, matches test_schema_v25.py style
+def _narrow_to_v24(pg_conn) -> None:  # noqa: F811 — fixture shadow, matches test_embedding_dim_guard.py style
     """Take the fixture's clean vector(1024) bank down to a synthetic v24
     shape: all four embedding columns at vector(384), NOT NULL dropped on
-    entries first (mirrors test_schema_v25.py's own setup)."""
+    entries first (mirrors test_embedding_dim_guard.py's own setup)."""
     pg_conn.execute("ALTER TABLE entries ALTER COLUMN embedding DROP NOT NULL")
     for table in ("entries", "facts", "world_facts", "lessons"):
         pg_conn.execute(
@@ -488,7 +489,7 @@ def test_apply_crash_after_two_tables_keeps_entries_armed_then_resumes(
         "SELECT value FROM meta WHERE key = 'schema_version'"
     ).fetchone()
     # Literal pin, bump alongside SCHEMA_META_VERSION -- see the other
-    # tests/test_schema_vNN.py files for the same convention.
+    # tests/test_schema_version.py CURRENT_SCHEMA pin, same convention.
     assert meta[0] == 34
 
 
@@ -595,7 +596,7 @@ def test_apply_migrates_all_four_tables(v24_bank, pg_url, monkeypatch):
     # (not a JSON string) — matches schema.py's own stamp exactly, same
     # cast, same param shape (str(SCHEMA_META_VERSION)).
     # Literal pin, bump alongside SCHEMA_META_VERSION -- see the other
-    # tests/test_schema_vNN.py files for the same convention.
+    # tests/test_schema_version.py CURRENT_SCHEMA pin, same convention.
     meta = pg_conn.execute(
         "SELECT value FROM meta WHERE key = 'schema_version'"
     ).fetchone()

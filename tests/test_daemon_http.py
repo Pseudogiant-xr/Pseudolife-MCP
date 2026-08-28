@@ -144,6 +144,39 @@ def test_health_unauthenticated(daemon):
     assert h["persist_errors"] == 0  # healthy: no swallowed save failures
 
 
+def test_health_flags_a_partial_legacy_import_without_going_degraded():
+    """Boot continues on a half-imported bank, so /health is the only place
+    an operator can see that the bank is short (#187). It must stay
+    ``status: "ok"`` while saying so: web/api.py serves any non-ok payload
+    as HTTP 503, which the Docker healthcheck and the install/update
+    scripts all treat as fatal — that would turn a deliberately non-fatal
+    partial import into a bricked deploy loop. The loudness lives in the
+    ERROR logs and this flag, not in the status field.
+
+    Payload-shape test against a stub, so it takes no ``daemon`` fixture —
+    it touches no migration code, which is why it does not live in
+    tests/test_migration.py."""
+    from pseudolife_memory.daemon import _build_health_payload
+
+    class _Stub:
+        _db_url = "postgresql://fake"
+        _persist_errors = 0
+        _init_refusal = None
+        _storage = None
+        _migration_partial = "import_failed: disk full mid-import"
+
+    payload = _build_health_payload(_Stub(), token_present=False)
+    assert payload["status"] == "ok"
+    assert payload["migration_partial"].startswith("import_failed")
+
+    class _Clean(_Stub):
+        _migration_partial = None
+
+    clean = _build_health_payload(_Clean(), token_present=False)
+    assert clean["status"] == "ok"
+    assert "migration_partial" not in clean
+
+
 def test_tool_call_requires_token(daemon):
     req = urllib.request.Request(
         daemon["url"] + "/mcp",

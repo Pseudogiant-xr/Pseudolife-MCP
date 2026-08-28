@@ -1,7 +1,13 @@
-"""Schema v6 — additive ``episode_id`` / ``episode_title`` / ``tags`` on
-``MemoryEntry`` (Tier C C-1).
+"""The ``cms_state.pt`` file format — ``cms.SCHEMA_VERSION``, currently 6.
 
-Three concerns covered here:
+NOTE: this is NOT the Postgres bank schema. ``cms.SCHEMA_VERSION`` versions
+the on-disk ``.pt`` save produced by ``ContinuumMemorySystem.save`` and is
+independent of ``storage.schema.SCHEMA_META_VERSION`` (pinned in
+tests/test_schema_version.py). ``cms.load`` branches on it for real, so the
+pre-v6 load tests below exercise live code, not documentation.
+
+v6 added ``episode_id`` / ``episode_title`` / ``tags`` on ``MemoryEntry``
+(Tier C C-1). Three concerns covered here:
 
 * The dataclass defaults are right (no surprise leakage into the rest of
   the system when callers omit the new fields).
@@ -83,8 +89,9 @@ def _append_entry(cms: ContinuumMemorySystem, **fields: object) -> MemoryEntry:
     return entry
 
 
-def test_schema_version_constant_is_v6() -> None:
-    """The bump itself — protects against regressions on the version field."""
+def test_pt_schema_version_constant_is_v6() -> None:
+    """The .pt file-format version — protects against regressions on the
+    version field ``cms.load`` branches on."""
     assert SCHEMA_VERSION == 6
 
 

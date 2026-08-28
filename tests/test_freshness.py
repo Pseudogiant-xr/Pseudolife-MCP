@@ -1,6 +1,15 @@
-"""Read-time freshness/decay — pure unit tests (no DB, no torch)."""
+"""Read-time freshness/decay — unit tests, no DB.
+
+Two layers: the ``freshness`` helpers themselves, then the thin
+``CortexRecord`` / ``CortexStore`` delegation over them (schema v23), where
+the personal cortex deliberately DIVERGES from the helper's own default.
+"""
 import time
 
+import pytest
+import torch
+
+from pseudolife_memory.memory.cortex import CortexRecord
 from pseudolife_memory.memory.freshness import (
     FRESHNESS_CLASSES,
     decay_factor,
@@ -66,3 +75,56 @@ def test_describe_age():
     assert describe_age(now - 3 * DAY, now=now) == "3d"
     assert describe_age(now - 100 * DAY, now=now).endswith("mo")
     assert describe_age(now - 800 * DAY, now=now).endswith("y")
+
+
+# ── CortexRecord / CortexStore delegation (schema v23) ────────────────────
+# Only the facts the delegation itself owns live here; the decay curves
+# above are the same code and are not re-tested through the 3-line hop.
+
+EMB = torch.zeros(1024)   # facts.embedding is vector(1024) — PG enforces it
+
+
+def test_new_record_defaults_to_evergreen():
+    """No behaviour change for a bank that never sets the field."""
+    rec = CortexRecord(entity="project", attribute="language", value="Python")
+    assert rec.freshness_class == "evergreen"
+
+
+def test_last_confirmed_is_the_decay_anchor_not_asserted_at():
+    """Re-confirming a fact should restore its trust — otherwise a
+    long-standing fact that is still true reads as rotten."""
+    now = time.time()
+    rec = CortexRecord(entity="deploy", attribute="status", value="green",
+                       confidence=0.9, asserted_at=now - 100 * DAY,
+                       last_confirmed=now, freshness_class="volatile")
+
+    assert rec.effective_confidence(now) == pytest.approx(0.9)
+    assert rec.is_stale(now) is False
+
+
+def test_unknown_class_falls_back_to_evergreen_not_volatile():
+    """`freshness.normalize_class` sends unknown values to *volatile* — right
+    for world facts, which rot by default. On the personal cortex that would
+    invert the whole design: a typo'd class would silently start a durable
+    fact decaying. The write path must land on evergreen instead."""
+    from pseudolife_memory.memory.cortex import CortexStore
+    from pseudolife_memory.memory.slots import Slot
+
+    assert normalize_class("nonsense") == "volatile"   # the helper
+
+    store = CortexStore()
+    store.write_fact(Slot("x", "y", "z"), EMB, freshness_class="nonsense")
+    assert store.lookup("x", "y").freshness_class == "evergreen"
+
+
+def test_a_valid_class_still_reaches_the_record():
+    """Guards the obvious over-correction: falling back to evergreen must not
+    swallow the classes a writer explicitly asked for."""
+    from pseudolife_memory.memory.cortex import CortexStore
+    from pseudolife_memory.memory.slots import Slot
+
+    store = CortexStore()
+    store.write_fact(Slot("a", "b", "c"), EMB, freshness_class="volatile")
+    store.write_fact(Slot("d", "e", "f"), EMB, freshness_class="SLOW")
+    assert store.lookup("a", "b").freshness_class == "volatile"
+    assert store.lookup("d", "e").freshness_class == "slow"

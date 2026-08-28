@@ -105,9 +105,12 @@ guard tests go red:
 - the capabilities table in `README.md`;
 - the DSN row *and* the schema version-history table in
   `docs/guide/configuration.md` (both pinned by `tests/test_release_ux.py`);
-- a new `tests/test_schema_vNN.py` pinning what the bump added (the existing
-  `test_schema_v*.py` files show the shape; relax the previous newest one
-  to `>=`);
+- the single `CURRENT_SCHEMA` literal in `tests/test_schema_version.py` — no
+  per-version file and no `>=` relaxation pass; the ladder is gap-checked by
+  `tests/test_release_ux.py` and `tests/test_atlas_currency.py`. Whatever
+  behaviour the bump adds gets a test **beside its consumer**, or a row in
+  `tests/test_schema_ddl_shape.py` if it is pure DDL shape — never a new
+  `tests/test_schema_vNN.py`;
 - a `CHANGELOG.md` entry that names `vNN`;
 - `docs/atlas/atlas.json` `meta.schema` (pinned by
   `tests/test_atlas_currency.py`) — re-verify the affected storage cards,

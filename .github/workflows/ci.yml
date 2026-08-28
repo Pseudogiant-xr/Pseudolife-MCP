@@ -230,4 +230,4 @@ jobs:
         # These start their own embedded instances (including the crash /
         # attach / lock paths) — no pre-started server, no service
         # container (unsupported on Windows runners), no HF download.
-        run: python -m pytest tests/test_embedded_pg.py tests/test_backup_cli.py tests/test_shim.py tests/test_schema_v29.py -q
+        run: python -m pytest tests/test_embedded_pg.py tests/test_backup_cli.py tests/test_shim.py tests/test_schema_version.py -q

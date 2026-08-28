@@ -32,6 +32,7 @@ import pytest
 
 from pseudolife_memory.service import MemoryService
 
+from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
 from tests.test_dream import _chat_payload, _stub_server
 
 
@@ -209,3 +210,50 @@ def test_serving_dict_includes_stance_only_when_set(svc):
     plain = svc._cortex.lookup("svc", "port")
     assert _cortex_record_to_dict(hedged)["stance"] == "probably"
     assert "stance" not in _cortex_record_to_dict(plain)
+
+
+# ── persistence in a live database (schema v29) ───────────────────────────
+# PG-backed; skips without the bench server.
+
+
+def test_stance_round_trips_through_storage(pg_url):  # noqa: F811
+    from pseudolife_memory.storage.postgres import PostgresStorage
+
+    storage = PostgresStorage(pg_url)
+    row = {
+        "entity": "user", "attribute": "database plan",
+        "entity_norm": "user", "attribute_norm": "database plan",
+        "value": "Postgres 18", "polarity": "+", "status": "current",
+        "confidence": 0.6, "origin": "agent", "support": ["agent"],
+        "provenance": [], "asserted_at": 1.0, "last_confirmed": 1.0,
+        "supersedes_value": None, "superseded_by_value": None,
+        "superseded_at": None, "embedding": None, "entity_id": None,
+        "object_entity_id": None, "freshness_class": "evergreen",
+        "kind": "scalar", "value_norm": None, "stance": "probably",
+    }
+    storage.upsert_fact(row)
+    facts = [f for f in storage.load_facts()
+             if f["attribute_norm"] == "database plan"]
+    assert facts and facts[-1]["stance"] == "probably"
+
+
+def test_stance_null_on_unhedged_insert(pg_url):  # noqa: F811
+    """A row inserted without the key stores NULL — pre-v29 writer code and
+    plainly asserted facts are indistinguishable, by design."""
+    from pseudolife_memory.storage.postgres import PostgresStorage
+
+    storage = PostgresStorage(pg_url)
+    row = {
+        "entity": "svc", "attribute": "port",
+        "entity_norm": "svc", "attribute_norm": "port",
+        "value": "8080", "polarity": "+", "status": "current",
+        "confidence": 0.9, "origin": "agent", "support": ["agent"],
+        "provenance": [], "asserted_at": 1.0, "last_confirmed": 1.0,
+        "supersedes_value": None, "superseded_by_value": None,
+        "superseded_at": None, "embedding": None, "entity_id": None,
+        "object_entity_id": None, "freshness_class": "evergreen",
+        "kind": "scalar", "value_norm": None,
+    }
+    storage.upsert_fact(row)
+    facts = [f for f in storage.load_facts() if f["attribute_norm"] == "port"]
+    assert facts and facts[-1]["stance"] is None
