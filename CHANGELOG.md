@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (2026-08-28 — recall-before-review is codified in the hooks)
+- **The served memory-loop instructions now carry an explicit
+  recall-before-review trigger**: before reviewing code, docs, or a PR,
+  search the bank first (`memory_search` + `memory_lesson_search`), then
+  compare what memory says against the files and correct drift in both
+  directions — stale memory gets fixed on the spot, and a memory-vs-file
+  mismatch is review input, not noise. Served by the daemon
+  (`/api/hook/session-start`), so existing installs pick the rule up on
+  daemon update; mirrored in `examples/CLAUDE.memory.md` (guard-tested).
+- **The plugin and `ops/install-hook.*` (Claude client) now install a
+  `UserPromptSubmit` hook** echoing a one-line mid-session memory
+  discipline on every turn, recall-before-review included. The one-shot
+  session-start briefing loses salience over a long session (2026-08-25
+  finding); a per-turn line keeps the loop mechanical for every install,
+  not just primed maintainers. Static echo — no daemon call, fail-open,
+  works offline. Codex is deliberately excluded: its per-prompt hook
+  support is unverified, and every new Codex hook needs a manual trust
+  review (2026-08-28).
+
 ### Security (2026-08-28 — workflows drop the default-writable GITHUB_TOKEN)
 - **Explicit least-privilege `permissions` on both GitHub Actions
   workflows**, resolving the four open CodeQL

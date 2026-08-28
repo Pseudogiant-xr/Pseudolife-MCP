@@ -29,6 +29,18 @@ fi
 SETTINGS_PATH="${1:-$default_settings}"
 COMMAND="${2:-pseudolife-mcp briefing --hook-json}"
 
+# Every-turn memory-discipline line (UserPromptSubmit), Claude client only:
+# Codex per-prompt hook support is unverified, and every new Codex hook
+# needs a manual trust review — don't silently write one there. Static echo
+# (no daemon call): the one-shot session-start briefing loses salience over
+# a long session; this keeps the loop — including recall-before-review —
+# mechanical. Keep the line free of quote characters (it nests in JSON+sh).
+DISCIPLINE_LINE="Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome."
+UPS_COMMAND=""
+if [ "$CLIENT" = claude ]; then
+  UPS_COMMAND="echo '$DISCIPLINE_LINE'"
+fi
+
 # Prefer python3 but accept python (verified runnable — Windows ships a
 # python3 Store stub that "exists" yet exits with an install nag).
 PYBIN=""
@@ -45,11 +57,13 @@ else
   mkdir -p "$(dirname "$SETTINGS_PATH")"
 fi
 
-SETTINGS_PATH="$SETTINGS_PATH" BRIEFING_COMMAND="$COMMAND" "$PYBIN" - <<'PY'
+SETTINGS_PATH="$SETTINGS_PATH" BRIEFING_COMMAND="$COMMAND" \
+  UPS_COMMAND="$UPS_COMMAND" "$PYBIN" - <<'PY'
 import json, os
 
 path = os.environ["SETTINGS_PATH"]
 briefing_cmd = os.environ["BRIEFING_COMMAND"]
+ups_cmd = os.environ.get("UPS_COMMAND", "")
 
 obj = {}
 if os.path.exists(path):
@@ -76,6 +90,14 @@ else:
     add_group(hooks["SessionStart"], briefing_cmd)
     print(f"Installed SessionStart briefing hook -> {path}")
     print(f"  command: {briefing_cmd}")
+
+if ups_cmd:
+    hooks.setdefault("UserPromptSubmit", [])
+    if has_command(hooks["UserPromptSubmit"], "mid-session discipline"):
+        print(f"Mid-session discipline hook already present in {path} - skipping.")
+    else:
+        add_group(hooks["UserPromptSubmit"], ups_cmd)
+        print(f"Installed UserPromptSubmit discipline hook -> {path}")
 
 # Episode hooks are OBSOLETE since the 2026-06-30 session-scoped episodes
 # rework: the daemon lazily opens/closes episodes keyed by mcp-session-id
