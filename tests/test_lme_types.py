@@ -70,8 +70,6 @@ def test_missing_question_type_falls_back_to_ku_judge():
     # "knowledge-update") — pin the fallback expression itself so a
     # refactor cannot silently re-judge old artifacts with the generic
     # prompt.
-    row = {}
-    assert row.get("question_type", "knowledge-update") == "knowledge-update"
     src = (Path(__file__).resolve().parents[1] / "evals"
            / "longmemeval_bench.py").read_text(encoding="utf-8")
     assert 'row.get("question_type", "knowledge-update")' in src

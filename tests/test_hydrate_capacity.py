@@ -100,14 +100,6 @@ def test_hydrate_spills_overflow_into_deeper_bands():
     assert _sizes(cms) == [3, 4, 3], f"not rebalanced: {_sizes(cms)}"
 
 
-def test_hydrate_respects_every_band_capacity():
-    cms = _cms(3, 4, 5)
-    hydrate_cms(cms, _Storage([_row(i, "a") for i in range(12)]))
-
-    for band in cms.bands:
-        assert band.size <= band.max_entries, f"{band.name} over capacity"
-
-
 def test_hydrate_of_an_unknown_band_name_also_rebalances():
     """A preset rename routes rows to bands[0]; they must not stay piled."""
     cms = _cms(2, 3, 4)

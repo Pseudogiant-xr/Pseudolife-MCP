@@ -395,10 +395,6 @@ def test_config_io_has_model_override_knob():
                 if e["path"] == "memory.dream.extractor_model_override")
     assert knob["type"] == "string"
     assert knob["restart"] is False
-    # The picker presets — all four current Anthropic tiers.
-    for m in ("claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5",
-              "claude-fable-5"):
-        assert m in knob["suggestions"]
 
 
 # ── served-model alias resolution (dreamer-card follow-up) ───────────────

@@ -38,18 +38,6 @@ def _write_jsonl(path: Path, rows: list[dict]) -> None:
                     encoding="utf-8")
 
 
-def test_module_imports_light():
-    # A clean subprocess: importing replicate must not pull heavy modules.
-    evals_dir = str(Path(__file__).resolve().parents[1] / "evals")
-    code = (
-        "import sys; sys.path.insert(0, sys.argv[1]); import replicate; "
-        "banned = {'torch', 'ladder_sweep', 'longmemeval_bench'}; "
-        "hit = sorted(banned & set(sys.modules)); "
-        "sys.exit('heavy imports: ' + ', '.join(hit) if hit else 0)"
-    )
-    subprocess.run([sys.executable, "-c", code, evals_dir], check=True)
-
-
 def test_result_file_matches_bench_convention(tmp_path):
     assert replicate.result_file("oracle", "e4b-ft", "arm1", tmp_path) == \
         tmp_path / "longmemeval-ku-oracle-e4b-ft-arm1.jsonl"

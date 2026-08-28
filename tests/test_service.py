@@ -112,10 +112,10 @@ class TestSearch:
     ) -> None:
         pristine_service.store("The sky is blue", source="test")
         result = pristine_service.search("what colour is the sky")
-        if result["entries"]:
-            entry = result["entries"][0]
-            assert "score" in entry
-            assert isinstance(entry["score"], float)
+        assert result["entries"]
+        entry = result["entries"][0]
+        assert "score" in entry
+        assert isinstance(entry["score"], float)
 
 
 # ---------------------------------------------------------------------------
@@ -215,10 +215,7 @@ class TestSupersede:
             "User likes Python more than Rust",
             "User uses Python but is open to Rust experiments",
         )
-        # Embedding fallback may or may not catch the paraphrase
-        # depending on cosine sim — assert non-negative either way and
-        # confirm the new memory landed regardless.
-        assert result["superseded_count"] >= 0
+        assert result["superseded_count"] >= 1
         assert result["new_memory_stored"] is True
 
     def test_supersede_empty_input_is_noop(
@@ -443,19 +440,6 @@ class TestDelete:
 
 
 class TestSearchOverrides:
-    def test_search_accepts_min_score_override(
-        self, pristine_service: MemoryService,
-    ) -> None:
-        """``min_score`` parameter should be accepted without error and
-        cap the result set at relevance >= the override.
-        """
-        pristine_service.store("Apples grow on trees", source="t")
-        # min_score=0.99 is effectively a "nothing passes" filter.
-        result = pristine_service.search(
-            "apples", top_k=5, min_score=0.99,
-        )
-        assert result["count"] == 0
-
     def test_search_disable_recency_boost(
         self, pristine_service: MemoryService,
     ) -> None:
@@ -471,15 +455,15 @@ class TestSearchOverrides:
         no_boost = pristine_service.search(
             "MIRAS continuum bands", top_k=3, disable_recency_boost=True,
         )
-        # Same entry should appear in both. Its no_boost score must not
-        # exceed its default score (recency only adds, never subtracts).
-        if default["count"] and no_boost["count"]:
-            d_text = default["entries"][0]["text"]
-            nb_match = next(
-                (e for e in no_boost["entries"] if e["text"] == d_text), None,
-            )
-            if nb_match is not None:
-                assert nb_match["score"] <= default["entries"][0]["score"] + 1e-4
+        # Same entry appears in both. Its no_boost score must not exceed its
+        # default score (recency only adds, never subtracts).
+        assert default["count"] and no_boost["count"]
+        d_text = default["entries"][0]["text"]
+        nb_match = next(
+            (e for e in no_boost["entries"] if e["text"] == d_text), None,
+        )
+        assert nb_match is not None
+        assert nb_match["score"] <= default["entries"][0]["score"] + 1e-4
 
 
 # ---------------------------------------------------------------------------
@@ -666,6 +650,7 @@ class TestBM25:
         )
         out = pristine_service.trace("process_chunk_v2")
         assert out["trace"]["bm25"]["fired"] is True
+        assert out["trace"]["bm25"]["candidates_scored"] >= 1
         assert any("process_chunk_v2" in e["text"] for e in out["entries"])
 
     def test_explicit_min_score_also_bounds_bm25_only_hits(
@@ -691,36 +676,6 @@ class TestBM25:
         )
         out = pristine_service.search("Jacque", top_k=5, min_score=0.99)
         assert out["count"] == 0
-
-    def test_default_floor_still_admits_bm25_only_hits(
-        self, pristine_service: MemoryService,
-    ) -> None:
-        """The guard above must not gut BM25 injection when no explicit
-        floor was given — injected scores sit below the default 0.25."""
-        pristine_service.store(
-            "the function process_chunk_v2 returns a tuple", source="code",
-        )
-        out = pristine_service.trace("process_chunk_v2")
-        assert out["trace"]["bm25"]["fired"] is True
-        assert any("process_chunk_v2" in e["text"] for e in out["entries"])
-
-    def test_search_with_bm25_true_fires_pool(
-        self, pristine_service: MemoryService,
-    ) -> None:
-        """bm25=True per-call enables the BM25 pool even when config is off."""
-        pristine_service.store(
-            "the function process_chunk_v2 returns a tuple of (chunks, metadata)",
-            source="code",
-        )
-        out = pristine_service.trace(
-            "process_chunk_v2", bm25=True,
-        )
-        assert out["trace"]["bm25"]["fired"] is True
-        assert out["trace"]["bm25"]["candidates_scored"] >= 1
-        # The exact-token query should surface the entry.
-        assert any(
-            "process_chunk_v2" in e["text"] for e in out["entries"]
-        )
 
     def test_bm25_false_disables_even_when_config_enabled(
         self, pristine_service: MemoryService,
@@ -847,8 +802,7 @@ class TestEpisodes:
     def test_episode_end_with_none_open_returns_empty(
         self, pristine_service: MemoryService,
     ) -> None:
-        out = pristine_service.episode_end()
-        assert out == {} or out is None or out.get("id") is None
+        assert pristine_service.episode_end() == {}
 
     def test_episode_list_returns_newest_first(
         self, pristine_service: MemoryService,

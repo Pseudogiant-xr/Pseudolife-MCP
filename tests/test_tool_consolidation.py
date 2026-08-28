@@ -51,7 +51,10 @@ def _invoke(tool_name: str, args: dict) -> dict:
 # ── memory_dream(action=...) ──────────────────────────────────────────────
 
 
-def test_dream_status_pull_commit_run_via_one_tool(tmp_path: Path, monkeypatch) -> None:
+def test_dream_status_pull_commit_via_one_tool(tmp_path: Path, monkeypatch) -> None:
+    # action="run" is dispatched in test_mcp_server.py::
+    # test_memory_dream_run_via_mcp_dispatch, which also carries the
+    # no-extractor assertion; this pins the manual status/pull/commit cycle.
     _reload(tmp_path, monkeypatch)
 
     _invoke("memory_store", {"text": "the beacon port is 7777", "source": "notes"})
@@ -61,9 +64,6 @@ def test_dream_status_pull_commit_run_via_one_tool(tmp_path: Path, monkeypatch) 
 
     pulled = _invoke("memory_dream", {"action": "pull"})
     assert "cursor" in pulled and "entries" in pulled
-
-    ran = _invoke("memory_dream", {"action": "run"})
-    assert "pulled" in ran and "cursor" in ran
 
     committed = _invoke("memory_dream", {"action": "commit", "cursor": pulled["cursor"]})
     assert "dream_cursor" in committed
@@ -296,36 +296,6 @@ def test_dream_deep_routes_snippets_param(tmp_path: Path, monkeypatch) -> None:
 
 
 # ── surface shape: removals + description budget ──────────────────────────
-
-_REMOVED = [
-    # dump/introspection tools -> Cortex Console / briefing CLI
-    "memory_facts", "memory_world_facts", "memory_lessons",
-    "memory_list_sources", "memory_list_tags", "memory_episode_list",
-    "memory_communities", "memory_digest", "memory_briefing",
-    # folded into surviving tools
-    "memory_path",             # memory_graph(to=...)
-    "memory_save",             # autosave loop + exit flush
-    "memory_delete", "memory_fact_forget", "memory_world_forget",
-    "memory_lesson_forget",    # -> memory_forget(scope=...)
-    "memory_dream_status", "memory_dream_pull", "memory_dream_commit",
-    "memory_dream_run", "memory_deep_dream",  # -> memory_dream(action=...)
-    "memory_graph_propose_links", "memory_graph_accept_proposal",
-    "memory_graph_reject_proposal", "memory_graph_accept_entity_merge",
-    "memory_graph_accept_entity_junk", "memory_graph_reject_entity_proposal",
-    # -> memory_graph_review(action=...)
-]
-
-
-def test_removed_tools_are_gone(tmp_path: Path, monkeypatch) -> None:
-    # Pin the FULL surface: in an env with PSEUDOLIFE_MCP_TOOLSET=core this
-    # test would otherwise pass vacuously against the 15-tool manifest.
-    monkeypatch.setenv("PSEUDOLIFE_MCP_TOOLSET", "full")
-    mod = _reload(tmp_path, monkeypatch)
-
-    names = {t.name for t in asyncio.run(mod.mcp.list_tools())}
-    still_there = sorted(names & set(_REMOVED))
-    assert still_there == [], f"tools that should have left the surface: {still_there}"
-
 
 def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
     """The manifest is eager agent context for non-deferring clients; each

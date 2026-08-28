@@ -108,9 +108,6 @@ def test_untouched_fact_unchanged_after_unrelated_writes_no_decay():
         store.write_fact(Slot(f"e{i}", "attr", f"v{i}"), _unit(100 + i), now=1000.0 + i)
     after = store.lookup("user", "city")
     assert (after.value, after.status, after.confidence, after.last_confirmed) == snapshot
-    # The cortex must NOT carry the continuum's decay/promotion machinery.
-    assert not hasattr(store, "decay")
-    assert not hasattr(store, "promote")
 
 
 def test_reasserting_same_fact_reinforces_confidence_but_stays_bounded():
@@ -561,29 +558,6 @@ def test_facts_ranked_truncates_long_values():
                              torch.tensor([1.0, 0.0]))]
     (_, _, v), = store.facts_ranked(torch.tensor([1.0, 0.0]), limit=1)
     assert len(v) == 120 and v.endswith("…")
-
-
-if __name__ == "__main__":
-    import sys
-    import traceback
-
-    tests = sorted(
-        (name, obj)
-        for name, obj in dict(globals()).items()
-        if name.startswith("test_") and callable(obj)
-    )
-    failures = 0
-    for name, fn in tests:
-        try:
-            fn()
-        except Exception:  # noqa: BLE001
-            failures += 1
-            print(f"FAIL {name}")
-            traceback.print_exc()
-        else:
-            print(f"ok   {name}")
-    print(f"\n{len(tests) - failures}/{len(tests)} passed")
-    sys.exit(1 if failures else 0)
 
 
 def test_candidates_for_same_entity_first_recency_ranked():

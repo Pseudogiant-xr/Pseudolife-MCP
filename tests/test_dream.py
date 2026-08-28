@@ -401,27 +401,6 @@ def test_run_sweep_once_prunes_retrieval_log():
     assert firing.retrieval_pruned == 1 and out["retrieval_pruned"] == 3
 
 
-class _NoRetrievalPruneFake(_FakeService):
-    """A fake predating ``prune_retrieval_log`` — the getattr guard's
-    "absent" branch, simulated by shadowing the inherited method with a
-    plain ``None`` class attribute (so ``getattr(svc, name, None)``
-    returns ``None`` exactly as it would for a real object with no such
-    attribute)."""
-    prune_retrieval_log = None
-
-
-def test_run_sweep_once_retrieval_pruned_none_without_prune_method():
-    """retrieval_pruned must be ``None`` (not ``0``) when the getattr guard
-    finds no ``prune_retrieval_log`` — ``None`` means "no reaper wired,"
-    ``0`` means "the reaper ran and found nothing." Conflating the two
-    would hide a future rename that silently dropped the guard's match."""
-    from pseudolife_memory.memory.dream import run_sweep_once
-
-    svc = _NoRetrievalPruneFake(enabled=False)
-    out = run_sweep_once(svc)
-    assert out["retrieval_pruned"] is None
-
-
 def test_run_sweep_once_below_threshold():
     from pseudolife_memory.memory.dream import run_sweep_once
 
@@ -1141,8 +1120,7 @@ def test_dream_relations_reject_lesson_only_predicates(svc):
 
 
 def test_traces_config_default():
-    from pseudolife_memory.utils.config import TracesConfig, MemoryConfig
-    assert TracesConfig().enabled is True
+    from pseudolife_memory.utils.config import MemoryConfig
     assert MemoryConfig().traces.enabled is True
 
 

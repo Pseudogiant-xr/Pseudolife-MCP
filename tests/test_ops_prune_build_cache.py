@@ -504,23 +504,16 @@ def test_update_sh_wires_cache_retention_in():
     assert "KEEP_CACHE_HOURS=168" in text
 
 
-def test_cache_prune_runs_after_the_health_check_not_beside_prune_rollbacks():
-    """Placement is load-bearing, in both directions:
+def test_rollback_retention_still_runs_before_the_build():
+    """Rollback retention is not cache retention and keeps its old slot: it
+    reaps old image tags, which the build about to run does not reuse.
 
-    * Before the build it would delete the cache that build reuses, making
-      every deploy a cold build.
-    * On the unhealthy path it would strip the cache an operator's rollback
-      rebuild needs — exactly when a slow build hurts most. The unhealthy
-      branch exits, so being after the health block skips it for free.
+    The mirror-image placement rules for prune-build-cache (after the build,
+    and unreachable on the unhealthy path) are proven by execution in
+    tests/test_ops_update_rollback.py, which drives the real scripts and
+    watches for the primitive's own `docker system df` — see the comment
+    block there for why a `.index()` assertion could not prove it.
     """
     ps1 = UPDATE_PS1.read_text(encoding="utf-8")
-    assert ps1.index("prune-build-cache.ps1") > ps1.index("Waiting for the daemon"), \
-        "cache prune must come after the health check"
-    assert ps1.index("prune-build-cache.ps1") > ps1.index("--build pseudolife-daemon"), \
-        "cache prune must come after the build"
     assert ps1.index("prune-rollbacks.ps1") < ps1.index("--build pseudolife-daemon"), \
         "rollback retention still belongs before the build"
-
-    sh = UPDATE_SH.read_text(encoding="utf-8")
-    assert sh.index("prune-build-cache.sh") > sh.index("Waiting for the daemon")
-    assert sh.index("prune-build-cache.sh") > sh.index("--build pseudolife-daemon")

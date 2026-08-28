@@ -7,17 +7,21 @@ from evals import apply_entity_kinds as A
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
 
 
-@pytest.mark.parametrize("attribute", [
-    "deploy-status", "deployment-status", "schema-version", "current-branch",
-    "live-url", "build-state", "deployment-date", "commit-hash", "language",
+@pytest.mark.parametrize("kind,attribute", [
+    ("system", "schema-version"),      # transient attr on a system -> volatile
+    ("artifact", "schema-version"),    # same attr elsewhere -> evergreen
 ])
-@pytest.mark.parametrize("kind", ["system", "artifact", "concept", None])
 def test_apply_uses_the_same_policy_as_the_write_path(kind, attribute):
     """The recompute delegates to the one canonical resolve_class. If this
     ever forks into a private copy, the backfill writes classes new writes
     would never reproduce, and nothing would surface the divergence."""
+    import sys
     from pseudolife_memory.memory import freshness
     assert A._resolve(kind, attribute) == freshness.resolve_class(kind, attribute)
+    # Loaded standalone by file path (the package __init__ pulls torch), so the
+    # module object is NOT the package-imported one -- same pin as the
+    # classifier's test_harness_loads_the_one_canonical_policy_without_torch.
+    assert A._freshness is not sys.modules.get("pseudolife_memory.memory.freshness")
 
 
 def test_plan_marks_only_system_transient_pairs_volatile():
@@ -107,14 +111,11 @@ def test_precondition_fails_clearly_on_a_pre_v24_bank(pg_conn):
     yet must get a named cause and remedy, not a raw UndefinedTable
     traceback -- and this check must run before the dry-run SELECT that
     would otherwise hit the missing table first."""
+    A._require_entity_kinds_table(pg_conn)  # migrated bank: passes silently
     pg_conn.execute("DROP TABLE entity_kinds")
     pg_conn.commit()
     with pytest.raises(SystemExit, match="schema v24"):
         A._require_entity_kinds_table(pg_conn)
-
-
-def test_precondition_passes_when_entity_kinds_exists(pg_conn):
-    A._require_entity_kinds_table(pg_conn)  # must not raise
 
 
 def test_user_set_kind_wins_over_a_disagreeing_artifact():

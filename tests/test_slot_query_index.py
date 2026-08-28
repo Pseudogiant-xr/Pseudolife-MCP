@@ -71,17 +71,6 @@ def test_slot_pool_finds_entry_stored_after_index_already_built() -> None:
     assert "I have a Siamese cat named Miso" in _hit_texts(cms, "Miso")
 
 
-def _pin_to_band0(cms: ContinuumMemorySystem) -> None:
-    """Stop band[0] promoting its contents away.
-
-    The default preset promotes a fresh entry out of ``working`` on the very
-    next store (surprise=1.0 on an empty band beats the 0.5 threshold),
-    which would leave band[0] empty and make a capacity eviction a no-op.
-    """
-    cms.bands[0].promotion_surprise = 2.0
-    cms.bands[0].promotion_access_count = 10**9
-
-
 def _two_band_cms(head_cap: int) -> ContinuumMemorySystem:
     """Two bands, consolidation disabled — so capacity eviction is the ONLY
     thing that can move an entry, and the only path that can invalidate the

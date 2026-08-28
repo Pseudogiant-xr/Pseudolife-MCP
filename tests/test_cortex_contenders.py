@@ -124,26 +124,3 @@ def test_cortex_search_flags_contested_entries():
         entries = svc.cortex_search("project language", top_k=5)["entries"]
         assert entries and entries[0]["contested"] is True
         assert entries[0]["contender_value"] == "rust"
-
-
-if __name__ == "__main__":
-    import sys
-    import traceback
-
-    tests = sorted(
-        (name, obj)
-        for name, obj in dict(globals()).items()
-        if name.startswith("test_") and callable(obj)
-    )
-    failures = 0
-    for name, fn in tests:
-        try:
-            fn()
-        except Exception:  # noqa: BLE001
-            failures += 1
-            print(f"FAIL {name}")
-            traceback.print_exc()
-        else:
-            print(f"ok   {name}")
-    print(f"\n{len(tests) - failures}/{len(tests)} passed")
-    sys.exit(1 if failures else 0)

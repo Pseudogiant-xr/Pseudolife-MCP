@@ -14,6 +14,8 @@ import dataclasses
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
 
 import band_ablation as abl  # noqa: E402
@@ -210,46 +212,39 @@ class TestEvidenceMetric:
         assert abl._paired_permutation_p([0.0] * 20) == 1.0
 
 
-class TestTagPrefixes:
-    def test_v25_prefix_never_collides_with_july_tags(self):
-        assert abl.abl_tag("arm1", "continuum", "off",
-                           prefix="abl25") == "arm1-abl25-continuum-off"
-        assert abl.wabl_tag("", "off", prefix="abl25") == "wabl25-flat-off"
-
-    def test_default_prefix_preserves_legacy_tags(self):
-        assert abl.abl_tag("arm1", "flat", "hist") == "arm1-abl-flat-hist"
-        assert abl.wabl_tag("", "hist") == "wabl-flat-hist"
-
-
 class TestNaming:
-    def test_out_file_supports_the_untagged_base_run(self):
-        assert abl.out_file("s", "qwen-27b", "").name == (
-            "longmemeval-ku-s-qwen-27b.jsonl")
+    """Every name these helpers mint is also a path or tag already written to
+    disk by past runs: the `oracle-e4b-ft-arm1-ablbands` band dumps and the
+    `abl`/`wabl` prefixes date from July, and renaming any of them orphans
+    those artifacts. The `abl25` prefix exists precisely so the v25 runs
+    could not collide with them.
+    """
 
-    def test_out_file_tagged_form_unchanged(self):
-        assert abl.out_file("oracle", "e4b-ft", "arm1").name == (
-            "longmemeval-ku-oracle-e4b-ft-arm1.jsonl")
-
-    def test_band_state_dir_continuum_form_unchanged(self):
-        """The oracle-arm1 dumps on disk were written under this name —
-        renaming would orphan them."""
-        assert abl.band_state_dir("oracle", "e4b-ft", "arm1").name == (
-            "oracle-e4b-ft-arm1-ablbands")
-
-    def test_band_state_dir_flat_and_untagged_forms(self):
-        assert abl.band_state_dir("s", "qwen-27b", "",
-                                  preset="flat").name == (
-            "s-qwen-27b-ablbands-flat")
-        assert abl.band_state_dir("s", "qwen-27b", "").name == (
-            "s-qwen-27b-ablbands")
-
-    def test_wabl_tag(self):
-        assert abl.wabl_tag("", "hist") == "wabl-flat-hist"
-        assert abl.wabl_tag("arm1", "wall") == "arm1-wabl-flat-wall"
-
-    def test_abl_tag_untagged_src_has_no_leading_dash(self):
-        assert abl.abl_tag("", "continuum", "wall") == "abl-continuum-wall"
-        assert abl.abl_tag("arm1", "flat", "hist") == "arm1-abl-flat-hist"
+    @pytest.mark.parametrize("call,expected", [
+        # tag prefixes
+        (lambda: abl.abl_tag("arm1", "continuum", "off", prefix="abl25"),
+         "arm1-abl25-continuum-off"),
+        (lambda: abl.wabl_tag("", "off", prefix="abl25"), "wabl25-flat-off"),
+        (lambda: abl.abl_tag("arm1", "flat", "hist"), "arm1-abl-flat-hist"),
+        (lambda: abl.wabl_tag("", "hist"), "wabl-flat-hist"),
+        (lambda: abl.wabl_tag("arm1", "wall"), "arm1-wabl-flat-wall"),
+        # untagged src must not leave a leading dash
+        (lambda: abl.abl_tag("", "continuum", "wall"), "abl-continuum-wall"),
+        # result files
+        (lambda: abl.out_file("s", "qwen-27b", "").name,
+         "longmemeval-ku-s-qwen-27b.jsonl"),
+        (lambda: abl.out_file("oracle", "e4b-ft", "arm1").name,
+         "longmemeval-ku-oracle-e4b-ft-arm1.jsonl"),
+        # band-state dirs
+        (lambda: abl.band_state_dir("oracle", "e4b-ft", "arm1").name,
+         "oracle-e4b-ft-arm1-ablbands"),
+        (lambda: abl.band_state_dir("s", "qwen-27b", "", preset="flat").name,
+         "s-qwen-27b-ablbands-flat"),
+        (lambda: abl.band_state_dir("s", "qwen-27b", "").name,
+         "s-qwen-27b-ablbands"),
+    ])
+    def test_names_are_unchanged(self, call, expected):
+        assert call() == expected
 
 
 class TestSurvivalStats:

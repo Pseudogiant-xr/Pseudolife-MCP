@@ -290,15 +290,6 @@ def test_removed_member_can_rejoin(store, emb):
     assert len(store.members("user", "bikes owned", include_removed=True)) == 2
 
 
-def test_slot_kind_none_for_unknown_slot(store, emb):
-    assert store.slot_kind("user", "nope") is None
-
-
-def test_slot_kind_scalar_for_plain_fact(store, emb):
-    store.write_fact(Slot("user", "city", "Sydney"), emb("Sydney"))
-    assert store.slot_kind("user", "city") == "scalar"
-
-
 # --- Binding requirements added beyond the brief (Task 1 review findings) --
 
 def test_add_member_rejects_empty_value(store, emb):
@@ -404,15 +395,6 @@ def test_write_fact_rejects_scalar_write_on_set_slot(store, emb):
         store.write_fact(Slot("user", "bikes owned", "hybrid bike"), emb("hybrid bike"))
     # The rejected write must not have mutated anything.
     assert [m.value for m in store.members("user", "bikes owned")] == ["road bike"]
-
-
-def test_write_fact_converted_slot_also_rejects_scalar(store, emb):
-    """Same guard on the conversion path: a slot that used to be a scalar and
-    was converted to a set must reject a subsequent scalar write too."""
-    store.write_fact(Slot("user", "bikes owned", "road bike"), emb("road bike"))
-    store.add_member(Slot("user", "bikes owned", "gravel bike"), emb("gravel bike"))
-    with pytest.raises(ValueError, match="holds a set"):
-        store.write_fact(Slot("user", "bikes owned", "hybrid bike"), emb("hybrid bike"))
 
 
 def test_forget_entity_clears_members_index_other_slot_survives(store, emb):

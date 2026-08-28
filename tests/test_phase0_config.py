@@ -15,14 +15,12 @@ def test_recency_base_default():
 def test_default_preset_is_the_flat_band():
     """2026-08-15: the default preset is one flat band (the flat-band
     verdict's measured tie); band specs carry only capacity / cadence /
-    promotion / eviction (no neural axes)."""
+    promotion / eviction."""
     cfg = MemoryConfig()
     assert cfg.miras.preset == "flat"
     assert len(cfg.miras.bands) == 1
     spec = cfg.miras.bands[0]
     assert spec.retention_policy in {"balanced", "recency_heavy", "surprise_heavy"}
-    assert not hasattr(spec, "objective")
-    assert not hasattr(spec, "memory_module")
 
 
 def test_continuum_preset_retained_yields_eight_cosine_bands():

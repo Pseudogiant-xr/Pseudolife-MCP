@@ -45,7 +45,26 @@ def test_module_level_tool_fns_stay_sync_callable() -> None:
 
 
 def test_all_tools_registered() -> None:
-    """The MCP server exposes exactly the documented tool set."""
+    """The MCP server exposes exactly the documented tool set.
+
+    Exact-set equality, so this is also the guard on what LEFT the surface.
+    What the 2026-07-02 consolidation removed, and where each verb went:
+
+    * dump/introspection -> Cortex Console / `pseudolife-mcp briefing` CLI:
+      memory_facts, memory_world_facts, memory_lessons, memory_list_sources,
+      memory_list_tags, memory_episode_list, memory_communities,
+      memory_digest, memory_briefing
+    * memory_path -> memory_graph(to=...); memory_save -> autosave loop +
+      exit flush
+    * memory_delete, memory_fact_forget, memory_world_forget,
+      memory_lesson_forget -> memory_forget(scope=...)
+    * memory_dream_status, memory_dream_pull, memory_dream_commit,
+      memory_dream_run, memory_deep_dream -> memory_dream(action=...)
+    * memory_graph_propose_links, memory_graph_accept_proposal,
+      memory_graph_reject_proposal, memory_graph_accept_entity_merge,
+      memory_graph_accept_entity_junk, memory_graph_reject_entity_proposal
+      -> memory_graph_review(action=...)
+    """
     from pseudolife_memory import mcp_server  # noqa: PLC0415 — lazy import.
 
     tools = asyncio.run(mcp_server.mcp.list_tools())
@@ -152,12 +171,6 @@ def test_search_explain_attaches_trace_and_default_does_not(tmp_path: Path, monk
     assert "trace" in explained and isinstance(explained["trace"], dict)
 
 
-def test_memory_trace_tool_is_gone() -> None:
-    from pseudolife_memory import mcp_server  # noqa: PLC0415
-    names = {t.name for t in asyncio.run(mcp_server.mcp.list_tools())}
-    assert "memory_trace" not in names
-
-
 def test_graph_relation_filter_keeps_only_matching_edges(monkeypatch) -> None:
     from pseudolife_memory import mcp_server  # noqa: PLC0415
     fake = {"found": True, "entity": "svc-a", "nodes": [], "paths": [],
@@ -168,12 +181,6 @@ def test_graph_relation_filter_keeps_only_matching_edges(monkeypatch) -> None:
     out = _invoke("memory_graph", {"entity": "svc-a", "relation_filter": "runs-on"})
     rels = {e["relation"] for e in out["edges"]}
     assert rels == {"runs-on"}
-
-
-def test_get_neighbors_tool_is_gone() -> None:
-    from pseudolife_memory import mcp_server  # noqa: PLC0415
-    names = {t.name for t in asyncio.run(mcp_server.mcp.list_tools())}
-    assert "get_neighbors" not in names
 
 
 _EXPECTED_MINIMAL = sorted([
@@ -322,7 +329,7 @@ def test_memory_store_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:
     assert "cortex_promoted" in out
 
 
-def test_memory_fact_set_get_forget_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:
+def test_memory_fact_set_get_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
     import importlib
     import pseudolife_memory.mcp_server as mod
@@ -336,15 +343,15 @@ def test_memory_fact_set_get_forget_via_mcp_dispatch(tmp_path: Path, monkeypatch
     got = _invoke("memory_fact_get", {"entity": "Project", "attribute": "language"})
     assert got["record"]["value"] == "rust"
     assert got["record"]["origin"] == "user"
-    # forget purges the slot
-    forget = _invoke("memory_forget", {"scope": "fact", "entity": "project"})
-    assert forget["removed"] == 1
-    assert _invoke("memory_fact_get", {"entity": "project", "attribute": "language"})["record"] is None
+    # memory_forget(scope="fact") on this same slot is covered in
+    # test_tool_consolidation.py::test_forget_scope_fact_purges_the_slot.
 
 
 def test_memory_set_add_remove_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> None:
-    """Task 5: the MCP call-through for the set tools — store two members,
-    confirm one, remove one, and read the set back via memory_fact_get."""
+    """Task 5: the MCP dispatch for the set tools reaches the service and
+    returns its result. Set semantics themselves — add/confirm/remove/
+    not-found, members_count, and the set-slot record shape read back through
+    fact_get — are pinned at the service level in test_cortex_sets.py."""
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
     import importlib
     import pseudolife_memory.mcp_server as mod
@@ -353,25 +360,10 @@ def test_memory_set_add_remove_via_mcp_dispatch(tmp_path: Path, monkeypatch) -> 
     added = _invoke("memory_set_add",
                     {"entity": "project", "attribute": "tags", "member": "rust"})
     assert added["action"] == "member_added"
-    assert added["members_count"] == 1
-    confirmed = _invoke("memory_set_add",
-                        {"entity": "project", "attribute": "tags", "member": "rust"})
-    assert confirmed["action"] == "member_confirmed"
-    _invoke("memory_set_add",
-           {"entity": "project", "attribute": "tags", "member": "python"})
-
-    got = _invoke("memory_fact_get", {"entity": "Project", "attribute": "tags"})
-    assert got["record"]["kind"] == "set"
-    assert {m["value"] for m in got["record"]["members"]} == {"rust", "python"}
 
     removed = _invoke("memory_set_remove",
                       {"entity": "project", "attribute": "tags", "member": "rust"})
     assert removed["action"] == "member_removed"
-    assert removed["members_count"] == 1
-
-    still_missing = _invoke("memory_set_remove",
-                            {"entity": "project", "attribute": "tags", "member": "rust"})
-    assert still_missing["action"] == "member_not_found"
 
 
 def test_memory_fact_set_on_a_set_slot_maps_to_the_set_tools(
@@ -497,26 +489,18 @@ def test_memory_episode_lifecycle_via_mcp_dispatch(
 def test_memory_episode_summary_via_mcp_dispatch(
     tmp_path: Path, monkeypatch,
 ) -> None:
+    """The MCP dispatch reaches the service and returns the summary for the
+    episode it was asked about. The summary's own contents (entry_count, tag
+    distribution, recent entries, the missing-id shape) are pinned at the
+    service level in test_service.py."""
     monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
     import importlib
     import pseudolife_memory.mcp_server as mod
     importlib.reload(mod)
 
     ep = _invoke("memory_episode_start", {"title": "summary session"})
-    _invoke(
-        "memory_store",
-        {"text": "fact one", "source": "claude", "tags": ["alpha"]},
-    )
-    _invoke(
-        "memory_store",
-        {"text": "fact two", "source": "claude", "tags": ["alpha", "beta"]},
-    )
     out = _invoke("memory_episode_summary", {"id": ep["id"]})
-    assert out["found"] is True
-    assert out["entry_count"] == 2
-    tags = {row["tag"]: row["count"] for row in out["tag_distribution"]}
-    assert tags["alpha"] == 2
-    assert tags["beta"] == 1
+    assert out["found"] is True and out["id"] == ep["id"]
 
 
 def test_memory_consolidation_candidates_via_mcp_dispatch(
@@ -1080,12 +1064,6 @@ def test_writer_fallback_scopes_tiers_without_tokens(tmp_path: Path, monkeypatch
     with _FakeReqCtx({"x-pl-writer": "other-box", "x-pl-session": "o1"}):
         names_o = {t.name for t in asyncio.run(_transport_list(mod))}
     assert names_o == mod._visible_tool_names("minimal")
-
-
-def test_memory_toolset_is_minimal_tier_and_registered() -> None:
-    from pseudolife_memory import mcp_server as mod
-    assert mod._TOOL_TIERS["memory_toolset"] == "minimal"
-    assert "memory_toolset" in {t.name for t in asyncio.run(mod.mcp.list_tools())}
 
 
 def test_list_changed_attempted_on_change_not_on_noop(tmp_path: Path, monkeypatch) -> None:

@@ -197,7 +197,7 @@ def test_run_all_arm_graph_beats_baseline_on_a_two_hop_case():
     import tempfile
     from ladder_sweep import build_service
     with tempfile.TemporaryDirectory(prefix="plmemcot_", ignore_cleanup_errors=True) as td:
-        svc = mb.build_service(Path(td)) if hasattr(mb, "build_service") else build_service(Path(td))
+        svc = build_service(Path(td))
         mb.seed_bench(svc)
         results = mb.run_all(svc)
     # structural (arms: baseline / recall_nogate / recall_gate — the hub-gating

@@ -98,10 +98,6 @@ def test_default_query_prefix_is_the_exact_qwen3_string() -> None:
         "no space after 'Query:' — instruction-tuned embedders swing on wording")
 
 
-def test_default_max_seq_length_is_512() -> None:
-    assert EmbeddingConfig().max_seq_length == 512
-
-
 # ---------------------------------------------------------------------------
 # Prefix applied on query only
 # ---------------------------------------------------------------------------

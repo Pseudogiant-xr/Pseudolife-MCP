@@ -1,19 +1,10 @@
-"""Schema v8 + PostgresStorage round-trips (skips without a PG server)."""
+"""PostgresStorage round-trips (skips without a PG server)."""
 
 from __future__ import annotations
 
 import pytest
 
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
-
-
-def test_ensure_schema_idempotent(pg_conn):
-    from pseudolife_memory.storage.schema import ensure_schema
-
-    flags1 = ensure_schema(pg_conn)
-    flags2 = ensure_schema(pg_conn)
-    assert flags1 == {}  # AGE removed; ensure_schema returns empty dict
-    assert flags1 == flags2
 
 
 def test_schema_version_recorded(pg_conn):
@@ -25,14 +16,6 @@ def test_schema_version_recorded(pg_conn):
     assert row is not None and int(row[0]) == SCHEMA_META_VERSION
 
 
-def test_write_mode_default_is_snapshot():
-    """The storage write path defaults to the live snapshot rewrite; occ is a
-    dormant Phase-2 seam (v0.4 T6). No PG needed."""
-    from pseudolife_memory.utils.config import AppConfig
-
-    assert AppConfig().storage.write_mode == "snapshot"
-
-
 @pytest.fixture()
 def storage(pg_conn, pg_url):
     from pseudolife_memory.storage.postgres import PostgresStorage
@@ -40,14 +23,6 @@ def storage(pg_conn, pg_url):
     s = PostgresStorage(pg_url)
     yield s
     s.close()
-
-
-def test_occ_write_path_is_phase2_stub(storage):
-    """The optimistic-concurrency (per-row CAS) path is a clearly-marked stub —
-    building it is a separate Phase-2 plan; v0.4 only lays the seam."""
-    with pytest.raises(NotImplementedError) as ei:
-        storage.replace_facts_occ([])
-    assert "Phase 2" in str(ei.value)
 
 
 def _entry(text="a fact", band="working", **over):

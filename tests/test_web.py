@@ -188,61 +188,42 @@ def test_graph_review_route(svc):
     assert any(f["action"] == "merge" for f in out["findings"])
 
 
-def test_assign_scope_and_unrelate_routes(svc):
-    r = ConsoleRoutes(svc)
-    a = r.dispatch("POST", "/api/graph/assign-scope", {}, {"entity": "x", "source": "p"})
-    assert a["assigned"] is True
-    u = r.dispatch("POST", "/api/graph/unrelate", {}, {"src": "a", "relation": "uses", "dst": "b"})
-    assert u["removed"] is True
-
-
-def test_bless_edge_route(svc):
-    r = ConsoleRoutes(svc)
-    out = r.dispatch("POST", "/api/graph/bless-edge", {},
-                     {"src": "a", "relation": "uses", "dst": "b"})
-    assert out["blessed"] is True
-
-
-def test_dismiss_duplicate_route(svc):
-    r = ConsoleRoutes(svc)
-    out = r.dispatch("POST", "/api/graph/dismiss-duplicate", {},
-                     {"a": "postgres", "b": "postgres.py"})
-    assert out["dismissed"] is True
-
-
-def test_delete_entity_route(svc):
-    r = ConsoleRoutes(svc)
-    out = r.dispatch("POST", "/api/graph/delete-entity", {}, {"entity": "junk"})
-    assert out["deleted"] is True
-
-
-def test_merge_route(svc):
-    r = ConsoleRoutes(svc)
-    out = r.dispatch("POST", "/api/graph/merge", {}, {"from": "dup", "into": "canonical"})
-    assert out["merged"] is True and out["into"] == "canonical"
-
-
-def test_relate_route(svc):
-    # Backs the duplicate finding's `relate` action (2026-07-26): a file and
-    # the concept it implements are neither a merge nor an unrelated pair, so
-    # the queue needs a way to record the edge instead of discarding the link.
-    r = ConsoleRoutes(svc)
-    out = r.dispatch("POST", "/api/graph/relate", {},
-                     {"src": "band.py", "relation": "implements", "dst": "band"})
-    assert out["src"] == "band.py" and out["relation"] == "implements"
-    assert out["dst"] == "band"
-
-
-def test_accept_reject_proposal_routes(svc):
-    r = ConsoleRoutes(svc)
-    assert r.dispatch("POST", "/api/graph/accept-proposal", {}, {"id": 1})["accepted"]
-    assert r.dispatch("POST", "/api/graph/reject-proposal", {}, {"id": 1})["rejected"]
-
-
-def test_routes_has(svc):
-    r = ConsoleRoutes(svc)
-    assert r.has("/api/facts")
-    assert not r.has("/api/bogus")
+@pytest.mark.parametrize("path,body,expected", [
+    ("/api/graph/bless-edge", {"src": "a", "relation": "uses", "dst": "b"},
+     {"blessed": True}),
+    ("/api/graph/dismiss-duplicate", {"a": "postgres", "b": "postgres.py"},
+     {"dismissed": True}),
+    ("/api/graph/delete-entity", {"entity": "junk"}, {"deleted": True}),
+    ("/api/graph/merge", {"from": "dup", "into": "canonical"},
+     {"merged": True, "into": "canonical"}),
+    # `relate` backs the duplicate finding's third verdict (2026-07-26): a file
+    # and the concept it implements are neither a merge nor an unrelated pair,
+    # so the queue needs a way to record the edge instead of discarding it.
+    ("/api/graph/relate",
+     {"src": "band.py", "relation": "implements", "dst": "band"},
+     {"src": "band.py", "relation": "implements", "dst": "band"}),
+    ("/api/graph/assign-scope", {"entity": "x", "source": "p"},
+     {"assigned": True}),
+    ("/api/graph/unrelate", {"src": "a", "relation": "uses", "dst": "b"},
+     {"removed": True}),
+    ("/api/graph/accept-proposal", {"id": 1}, {"accepted": True}),
+    ("/api/graph/reject-proposal", {"id": 1}, {"rejected": True}),
+    ("/api/graph/accept-entity-merge", {"id": 1}, {"accepted": True}),
+    ("/api/graph/accept-entity-junk", {"id": 2}, {"accepted": True}),
+    ("/api/graph/reject-entity-proposal", {"id": 3}, {"rejected": True}),
+    ("/api/curation/dismiss-duplicate",
+     {"store": "lesson", "a_entity": "deploy daemon", "a_attribute": "approach",
+      "b_entity": "deploy host", "b_attribute": "pitfall"},
+     {"dismissed": True}),
+])
+def test_post_verdict_route_dispatches_and_returns_the_service_result(
+        svc, path, body, expected):
+    """Every write verdict the Console can issue is registered and reaches the
+    service with its body intact. The values are whatever FixtureService
+    returns, so this pins routing and shape, not behaviour — the real
+    semantics live in the storage/service tests for each verb."""
+    out = ConsoleRoutes(svc).dispatch("POST", path, {}, body)
+    assert {k: out[k] for k in expected} == expected
 
 
 def test_routes_config_write_via_dispatch(svc):
@@ -551,13 +532,6 @@ def test_hook_session_start_unauthorized_no_onboarding(svc):
     assert b"memory bank is EMPTY" not in body
 
 
-def test_entity_proposal_routes(svc):
-    r = ConsoleRoutes(svc)
-    assert r.dispatch("POST", "/api/graph/accept-entity-merge", {}, {"id": 1})["accepted"]
-    assert r.dispatch("POST", "/api/graph/accept-entity-junk", {}, {"id": 2})["accepted"]
-    assert r.dispatch("POST", "/api/graph/reject-entity-proposal", {}, {"id": 3})["rejected"]
-
-
 def test_graph_entity_verdicts_pass_decided_by(svc):
     r = ConsoleRoutes(svc)
     out = r.dispatch("POST", "/api/graph/accept-entity-merge", {},
@@ -677,10 +651,3 @@ def test_curation_duplicates_route(svc):
     assert "lesson_duplicates" in out and "world_duplicates" in out
 
 
-def test_curation_dismiss_duplicate_route(svc):
-    r = ConsoleRoutes(svc)
-    out = r.dispatch("POST", "/api/curation/dismiss-duplicate", {},
-                     {"store": "lesson",
-                      "a_entity": "deploy daemon", "a_attribute": "approach",
-                      "b_entity": "deploy host", "b_attribute": "pitfall"})
-    assert out["dismissed"] is True

@@ -283,16 +283,13 @@ def test_update_sh_carries_the_same_guard():
 
 # --- Execution-based reachability: the build-cache retention hook ---------
 #
-# test_ops_prune_build_cache.py::
-# test_cache_prune_runs_after_the_health_check_not_beside_prune_rollbacks
-# asserts ordering with ``.index()`` on the raw file text — it proves
-# prune-build-cache.ps1/.sh appear textually after the health-check and
-# build anchors, not that the unhealthy branch can't reach them. A
+# test_ops_prune_build_cache.py::test_rollback_retention_still_runs_before_the_build
+# pins only prune-rollbacks' placement with ``.index()`` on the raw file
+# text. Textual ordering cannot prove the build-cache hook's placement: a
 # regression that moved the retention call inside the unhealthy
 # ``else { ...; exit 1 }`` branch (pruning the cache after a FAILED deploy —
-# exactly what the design doc warns against) would still satisfy every
-# ``.index()`` assertion there, because that branch's body is textually
-# after both anchors too.
+# exactly what the design doc warns against) would still sit textually after
+# both the health-check and build anchors.
 #
 # These tests instead run the real unhealthy path and prove the cache-prune
 # primitive's own signature docker call — ``docker system df``, issued only

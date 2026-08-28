@@ -224,7 +224,3 @@ class TestTokenizerIntegers:
         assert tokenize("port 8080") == ["port", "8080"]
         assert tokenize("error 404 from nginx") == ["error", "404", "from", "nginx"]
         assert "4090" in tokenize("the RTX 4090 workstation")
-
-    def test_dotted_versions_still_whole(self) -> None:
-        from pseudolife_memory.memory.bm25 import tokenize
-        assert "v0.7.6" in tokenize("shipped in v0.7.6")

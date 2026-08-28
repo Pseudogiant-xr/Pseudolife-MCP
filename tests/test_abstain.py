@@ -1,21 +1,17 @@
 """Unit tests for the pure abstention helper (no torch/PG)."""
+import pytest
+
 from pseudolife_memory.memory.abstain import low_confidence
 
 
-def test_empty_scores_is_low_confidence():
-    assert low_confidence([], floor=0.0) is True          # nothing found -> abstain
-
-
-def test_floor_off_only_empty_triggers():
-    assert low_confidence([0.05, 0.01], floor=0.0) is False  # floor 0 = off
-
-
-def test_top_below_floor_is_low_confidence():
-    assert low_confidence([0.30, 0.10], floor=0.35) is True   # best hit too weak
-
-
-def test_top_at_or_above_floor_is_confident():
-    assert low_confidence([0.42, 0.10], floor=0.35) is False
+@pytest.mark.parametrize("scores,floor,expected", [
+    ([], 0.0, True),                  # nothing found -> abstain
+    ([0.05, 0.01], 0.0, False),       # floor 0 = off, only empty triggers
+    ([0.30, 0.10], 0.35, True),       # best hit too weak
+    ([0.42, 0.10], 0.35, False),      # best hit clears the floor
+])
+def test_low_confidence_gates_on_the_top_score(scores, floor, expected):
+    assert low_confidence(scores, floor=floor) is expected
 
 
 # ---------------------------------------------------------------------------
