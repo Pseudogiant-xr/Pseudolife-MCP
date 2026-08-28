@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import pytest
 
+from tests.dream_helpers import StubExtractor as _Stub
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
 
 
@@ -19,16 +20,6 @@ def svc(pg_conn, pg_url, tmp_path):  # noqa: F811
     s = MemoryService(data_dir=tmp_path, database_url=pg_url)
     yield s
     s.flush()
-
-
-class _Stub:
-    """Fixed claims regardless of input (drives dream_run's claim loop)."""
-
-    def __init__(self, claims):
-        self._claims = claims
-
-    def extract(self, texts, vocab, known_facts=None):
-        return [dict(c) for c in self._claims]
 
 
 def _scalar(entity, attribute, value, source=0, **kw):
@@ -436,51 +427,3 @@ def test_rollback_requires_postgres(tmp_path):
 
     s = MemoryService(data_dir=tmp_path)          # file mode, no PG
     assert s.dream_rollback().get("error") == "requires_postgres"
-
-
-# ── memory_history as_of (per-slot point-in-time read) ───────────────────
-
-def test_history_as_of_filters_versions(svc):
-    import time as _t
-
-    svc.cortex_write("team", "mascot", "fox", confidence=0.9, support="user")
-    _t.sleep(0.02)
-    mid = _t.time()
-    _t.sleep(0.02)
-    svc.cortex_write("team", "mascot", "owl", confidence=0.9, support="user")
-
-    full = svc.history("team", "mascot")
-    assert full["count"] == 2 and "as_of" not in full
-
-    at_mid = svc.history("team", "mascot", as_of=mid)
-    assert at_mid["count"] == 1
-    assert at_mid["versions"][0]["value"] == "fox"
-    assert at_mid["as_of"] == mid
-
-    later = svc.history("team", "mascot", as_of=_t.time())
-    assert later["count"] == 2
-
-
-def test_history_as_of_accepts_iso_string(svc):
-    from datetime import datetime, timedelta
-
-    svc.cortex_write("team", "mascot", "fox", confidence=0.9, support="user")
-    tomorrow = (datetime.now() + timedelta(days=1)).isoformat()
-    out = svc.history("team", "mascot", as_of=tomorrow)
-    assert out["count"] == 1
-    yesterday = (datetime.now() - timedelta(days=1)).isoformat()
-    out = svc.history("team", "mascot", as_of=yesterday)
-    assert out["count"] == 0
-
-
-def test_history_as_of_set_slot(svc):
-    import time as _t
-
-    svc.set_add("user", "tags", "alpha")
-    _t.sleep(0.02)
-    mid = _t.time()
-    _t.sleep(0.02)
-    svc.set_add("user", "tags", "beta")
-    out = svc.history("user", "tags", as_of=mid)
-    assert out["kind"] == "set"
-    assert [v["value"] for v in out["versions"]] == ["alpha"]

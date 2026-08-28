@@ -93,6 +93,46 @@ def test_mismatched_qids_use_intersection(tmp_path):
     assert out["dropped_a"] == 1 and out["dropped_b"] == 1
 
 
+# ── cross-arm pairs and the question-type filter ─────────────────────────
+
+def _typed_row(qid, qtype, flags: dict) -> dict:
+    """A judged row carrying an arbitrary arm set and a question type — the
+    variant arms (``hybrid_ctg`` …) and the type field that ``_row`` above,
+    which pins the three fixed arms, does not."""
+    row = {"question_id": qid, "question_type": qtype,
+           "consolidation": {"superseded": 0},
+           "cortex_response": "I don't know.", "abstention": False}
+    for arm, ok in flags.items():
+        row[f"{arm}_correct"] = ok
+        row[f"{arm}_context_tokens"] = 100
+        row.setdefault(f"{arm}_response", "x")
+    return row
+
+
+def test_compare_arms_cross_arm_pairs_and_types_filter(tmp_path):
+    rows = [
+        _typed_row("q1", "multi-session", {"hybrid": False, "hybrid_ctg": True,
+                                           "rag": True, "cortex": False}),
+        _typed_row("q2", "multi-session", {"hybrid": False, "hybrid_ctg": True,
+                                           "rag": True, "cortex": False}),
+        _typed_row("q3", "temporal-reasoning",
+                   {"hybrid": True, "hybrid_ctg": False,
+                    "rag": True, "cortex": False}),
+        _typed_row("q4", "knowledge-update",
+                   {"hybrid": True, "hybrid_ctg": True,
+                    "rag": True, "cortex": True}),
+    ]
+    f = _write(tmp_path / "run.jsonl", rows)
+    got = compare_arms.compare(f, f, arm_pairs=[("hybrid_ctg", "hybrid")],
+                               types=("multi-session", "temporal-reasoning"))
+    assert got["n"] == 3  # KU row filtered out
+    pair = got["paired"]["a_vs_b"]["hybrid_ctg_vs_hybrid"]
+    assert pair["wins"] == 2 and pair["losses"] == 1
+    # Same-file same-arm sanity: rag vs rag pairs to zero delta.
+    got2 = compare_arms.compare(f, f, arm_pairs=[("rag", "rag")])
+    assert got2["paired"]["a_vs_b"]["rag_vs_rag"]["delta"] == 0.0
+
+
 # ── score metric (BEAM rows: float rubric means, no _correct booleans) ───
 
 def _beam_row(chat_id, qtype, index, **scores):

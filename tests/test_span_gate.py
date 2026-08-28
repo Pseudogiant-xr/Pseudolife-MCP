@@ -20,9 +20,9 @@ counted but not parked in v1, set writes have no contender path).
 
 Boundary honesty (same as the two-man rule spec): this checks
 fidelity-to-source, NOT trustworthiness-of-source — a poisoned note
-quotes itself perfectly. The composition test proving span-fidelity
-cannot launder trust past the quarantine lives in
-``test_span_quarantine_composition.py``.
+quotes itself perfectly. The composition tests proving span-fidelity
+cannot launder trust past the quarantine live in
+``test_dream_quarantine.py``.
 """
 from __future__ import annotations
 
@@ -31,16 +31,9 @@ import tempfile
 import pytest
 
 from pseudolife_memory.service import MemoryService
-
-from tests.test_dream import _chat_payload, _stub_server
-
-
-class _StubExtractor:
-    def __init__(self, claims):
-        self._claims = claims
-
-    def extract(self, texts, vocab):
-        return [dict(c) for c in self._claims]
+from tests.dream_helpers import (StubExtractor as _StubExtractor,
+                                 chat_payload as _chat_payload,
+                                 stub_server as _stub_server)
 
 
 @pytest.fixture()

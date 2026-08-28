@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import pytest
 
+from tests.dream_helpers import StubExtractor as _Stub
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
 
 from pseudolife_memory.memory.dream import events_from_parsed
@@ -28,16 +29,6 @@ def svc(pg_conn, pg_url, tmp_path):  # noqa: F811
     s = MemoryService(data_dir=tmp_path, database_url=pg_url)
     yield s
     s.flush()
-
-
-class _Stub:
-    """Fixed claims/events regardless of input."""
-
-    def __init__(self, items):
-        self._items = items
-
-    def extract(self, texts, vocab, known_facts=None):
-        return [dict(c) for c in self._items]
 
 
 def _event(description, date=None, phrase=None, source=0, actor="user"):

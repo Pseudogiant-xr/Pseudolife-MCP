@@ -22,13 +22,7 @@ import torch
 
 from pseudolife_memory.memory.cortex import CortexStore, CortexRecord
 from pseudolife_memory.memory.slots import Slot
-
-
-def _unit(seed: int, dim: int = 8) -> torch.Tensor:
-    """Deterministic unit vector for a given seed."""
-    g = torch.Generator().manual_seed(seed)
-    v = torch.randn(dim, generator=g)
-    return v / v.norm()
+from tests.helpers import unit_vec as _unit
 
 
 def test_backwards_wall_clock_still_supersedes():

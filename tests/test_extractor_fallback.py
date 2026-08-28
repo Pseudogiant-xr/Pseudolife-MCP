@@ -473,3 +473,39 @@ def test_config_io_has_fallback_knobs():
     mode = next(e for e in KNOBS if e["path"] == "memory.dream.extractor_mode")
     assert mode["type"] == "enum"
     assert mode["options"] == ["auto", "primary", "fallback"]
+
+
+# ── cache_prompt pin on every extractor the daemon builds ────────────────
+#
+# Deferred decision from the 2026-08-09 warm-cache root cause, resolved by
+# measurement. warm-cache-probe-0809 proved llama-server's default prompt
+# cache changes extractor OUTPUT once populated; sidecar-cache-latency-0809
+# measured the cost of pinning it off on the live sidecar at +7.25s/call
+# (3.4s -> 10.65s) — noise for a 600s background sweep with a 480s timeout
+# budget. The daemon therefore pins ``cache_prompt: false`` by default;
+# ``memory.dream.extractor_cache_prompt = None`` restores the server default
+# for deployments that prefer the latency.
+
+def _pin_cfg(**over) -> DreamConfig:
+    cfg = _cfg("http://127.0.0.1:9/v1")
+    for k, v in over.items():
+        setattr(cfg, k, v)
+    return cfg
+
+
+def test_daemon_extractor_pins_cache_off_by_default():
+    from pseudolife_memory.memory.dream import build_extractor
+    ex = build_extractor(_pin_cfg())
+    assert ex.extra_body == {"cache_prompt": False}
+
+
+def test_none_restores_the_server_default():
+    from pseudolife_memory.memory.dream import build_extractor
+    ex = build_extractor(_pin_cfg(extractor_cache_prompt=None))
+    assert ex.extra_body == {}
+
+
+def test_true_forces_the_cache_on_explicitly():
+    from pseudolife_memory.memory.dream import build_extractor
+    ex = build_extractor(_pin_cfg(extractor_cache_prompt=True))
+    assert ex.extra_body == {"cache_prompt": True}

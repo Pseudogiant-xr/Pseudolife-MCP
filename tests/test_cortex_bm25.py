@@ -14,7 +14,7 @@ normalised `bm25.min_score`, NOT by the caller's dense `min_score` floor,
 so a fact the dense channel scores below the floor can still be served
 when the query names it exactly.
 
-Like test_cortex_service.py this builds a real MemoryService (offline
+Like test_cortex_contenders.py this builds a real MemoryService (offline
 embedder) against a throwaway data dir.
 """
 from __future__ import annotations

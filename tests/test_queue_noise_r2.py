@@ -35,6 +35,7 @@ import pytest
 from pseudolife_memory.graph import norm_name
 from pseudolife_memory.memory import graph_consolidation as gc
 from pseudolife_memory.memory import graph_review as gr
+from tests.dream_helpers import StubExtractor as _Stub
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
 
 
@@ -45,14 +46,6 @@ def svc(pg_conn, pg_url, tmp_path):  # noqa: F811
     s = MemoryService(data_dir=tmp_path, database_url=pg_url)
     yield s
     s.flush()
-
-
-class _Stub:
-    def __init__(self, claims):
-        self._claims = claims
-
-    def extract(self, texts, vocab, known_facts=None):
-        return [dict(c) for c in self._claims]
 
 
 # ── 1. scan-fallback hub cap ─────────────────────────────────────────────

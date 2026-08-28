@@ -40,7 +40,6 @@ def _lesson_row(entity="deploy engine to host", attribute="approach",
 def test_schema_v10(pg_conn):
     from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
 
-    assert SCHEMA_META_VERSION >= 10              # lessons landed at v10
     row = pg_conn.execute(
         "SELECT value FROM meta WHERE key = 'schema_version'"
     ).fetchone()

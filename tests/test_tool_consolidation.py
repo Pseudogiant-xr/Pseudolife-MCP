@@ -20,32 +20,14 @@ These tests pin the consolidated contract:
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
 
 import pytest
 
-
-def _reload(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("PSEUDOLIFE_MCP_DATA_DIR", str(tmp_path))
-    import importlib
-    import pseudolife_memory.mcp_server as mod
-    importlib.reload(mod)
-    return mod
-
-
-def _invoke(tool_name: str, args: dict) -> dict:
-    from pseudolife_memory import mcp_server  # noqa: PLC0415
-
-    result = asyncio.run(mcp_server.mcp.call_tool(tool_name, args))
-    if isinstance(result, tuple):                     # SDK v1 shape
-        content, structured = result
-    else:                                             # v2 CallToolResult
-        content = result.content
-        structured = getattr(result, "structured_content", None)
-    if structured is not None:
-        return structured
-    return json.loads("".join(i.text for i in content if hasattr(i, "text")))
+from tests.helpers import (
+    invoke_tool as _invoke,
+    reload_mcp_filemode as _reload,
+)
 
 
 # ── memory_dream(action=...) ──────────────────────────────────────────────
@@ -67,6 +49,22 @@ def test_dream_status_pull_commit_via_one_tool(tmp_path: Path, monkeypatch) -> N
 
     committed = _invoke("memory_dream", {"action": "commit", "cursor": pulled["cursor"]})
     assert "dream_cursor" in committed
+
+
+def test_dream_run_passes_limit(tmp_path: Path, monkeypatch) -> None:
+    """``limit`` reaches the service verbatim on action="run" — the knob
+    that bounds how much backlog one server-side dream chews through."""
+    mod = _reload(tmp_path, monkeypatch)
+    seen = {}
+
+    def fake_dream_run(extractor, *, limit=None):
+        seen["limit"] = limit
+        return {"pulled": 0, "claims": 0, "inserted": 0, "confirmed": 0,
+                "contested": 0, "superseded": 0, "cursor": 0.0}
+
+    monkeypatch.setattr(mod.service, "dream_run", fake_dream_run)
+    mod.memory_dream(action="run", limit=500)
+    assert seen["limit"] == 500
 
 
 def test_dream_commit_requires_cursor(tmp_path: Path, monkeypatch) -> None:

@@ -11,9 +11,10 @@ import time
 import pytest
 
 from pseudolife_memory import shim as _shim
+from tests.helpers import free_port as _free_port, pg_reachable as _pg_reachable
 from tests.pg_fixtures import resolve_test_db_url
 
-psycopg = pytest.importorskip("psycopg")
+pytest.importorskip("psycopg")
 
 # Outer async guard for tests that may autostart a daemon. It must
 # DOMINATE the shim's own two-tier spawn wait (dead-child floor +
@@ -24,21 +25,6 @@ psycopg = pytest.importorskip("psycopg")
 # cannot silently re-open the gap between the test's patience and the
 # shim's contract.
 _OUTER_TIMEOUT_S = _shim._SPAWN_WAIT_ALIVE_S + 60
-
-
-def _free_port() -> int:
-    import socket
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
-def _pg_reachable(url: str) -> bool:
-    try:
-        with psycopg.connect(url, connect_timeout=3):
-            return True
-    except Exception:  # noqa: BLE001
-        return False
 
 
 def test_shim_autostarts_daemon_and_proxies(tmp_path):

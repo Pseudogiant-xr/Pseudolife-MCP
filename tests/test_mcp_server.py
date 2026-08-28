@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers import invoke_tool as _invoke
+
 
 # ---------------------------------------------------------------------------
 # Registration
@@ -130,32 +132,9 @@ def test_each_tool_has_non_empty_docstring() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Dispatch — invoke tools through the FastMCP machinery
+# Dispatch — invoke tools through the FastMCP machinery (``_invoke``, shared
+# with test_tool_consolidation.py, is imported at the top of this module)
 # ---------------------------------------------------------------------------
-
-
-def _invoke(tool_name: str, args: dict) -> dict:
-    """Call a registered tool and parse the JSON result."""
-    from pseudolife_memory import mcp_server  # noqa: PLC0415
-
-    result = asyncio.run(mcp_server.mcp.call_tool(tool_name, args))
-    # SDK v1 FastMCP returned (content_list, structured_dict) (or bare
-    # content); v2 MCPServer returns a CallToolResult. Handle all three.
-    if isinstance(result, tuple):
-        content, structured = result
-    elif hasattr(result, "content"):
-        content = result.content
-        structured = getattr(result, "structured_content", None)
-    else:
-        content, structured = result, None
-    # Structured payload is what an MCP client uses — prefer it when present.
-    if structured is not None:
-        return structured
-    # Fall back to text-content JSON parse.
-    text_parts = [
-        item.text for item in content if hasattr(item, "text")
-    ]
-    return json.loads("".join(text_parts))
 
 
 def test_search_explain_attaches_trace_and_default_does_not(tmp_path: Path, monkeypatch) -> None:
@@ -1082,3 +1061,55 @@ def test_list_changed_attempted_on_change_not_on_noop(tmp_path: Path, monkeypatc
         assert out["changed"] is True and calls == [True]
         noop = _invoke("memory_toolset", {"action": "expand"})  # already full
         assert noop["changed"] is False and calls == [True]     # no second send
+
+
+# ---------------------------------------------------------------------------
+# Transport security policy (#174) — pure in-process wiring, no daemon, no DB.
+# Lived in test_daemon_http.py, whose module-level importorskip("psycopg")
+# silently took this coverage with it on a psycopg-less machine.
+# ---------------------------------------------------------------------------
+
+
+def test_transport_security_policy_is_explicit_not_inherited():
+    """The Host allowlist must be OUR decision, not the SDK's heuristic (#174).
+
+    FastMCP auto-enables DNS-rebinding protection when it sees a loopback
+    `host=` and disables it entirely otherwise. We pass neither host nor
+    settings today, so the daemon inherits the loopback allowlist no matter
+    what it actually binds — and naively forwarding the container's 0.0.0.0
+    would flip the same heuristic to "no protection at all". Both directions
+    are wrong; the policy keys on whether a bearer token gates the endpoint.
+    """
+    from pseudolife_memory import mcp_server
+
+    tokenless = mcp_server.transport_security_for(auth_configured=False)
+    assert tokenless.enable_dns_rebinding_protection is True
+    assert "127.0.0.1:*" in tokenless.allowed_hosts
+
+    # The documented LAN recipe: PSEUDOLIFE_MCP_HOST=0.0.0.0 + a token.
+    authenticated = mcp_server.transport_security_for(auth_configured=True)
+    assert authenticated.enable_dns_rebinding_protection is False
+
+    # And the selected policy must actually reach the transport. SDK v2 takes
+    # the settings at streamable_http_app() build time, so the seam to pin is
+    # apply_transport_security() -> build_streamable_http_app(): capture the
+    # kwarg the builder hands the SDK and require it to be exactly the
+    # selected policy — asserting on the module global alone would stay green
+    # if a tidy-up rebuilt the app without forwarding it (review, 2026-08-25).
+    prior = mcp_server._TRANSPORT_SECURITY
+    seen = {}
+    orig_app = mcp_server.mcp.streamable_http_app
+
+    def _capture(**kwargs):
+        seen.update(kwargs)
+        return orig_app(**kwargs)
+
+    try:
+        selected = mcp_server.apply_transport_security(auth_configured=False)
+        mcp_server.mcp.streamable_http_app = _capture
+        mcp_server.build_streamable_http_app()
+        assert seen.get("transport_security") is selected
+        assert selected.enable_dns_rebinding_protection is True
+    finally:
+        mcp_server.mcp.streamable_http_app = orig_app
+        mcp_server._TRANSPORT_SECURITY = prior

@@ -6,6 +6,11 @@ floor was 0.0, and re-assertion revived edges a human had removed. These
 tests pin the write-time gate: junk names never become entities, the edge
 floor drops type-violations, and human supersession is sticky against
 agent re-assertion.
+
+The name rules the gate consults (``junk_name_reason``, ``variant_tokens``,
+``variant_conflict``) are unit-tested in ``test_graph_consolidation.py``
+beside the rest of that module; what lives here is the gate's behavior at
+the service and storage layers.
 """
 
 from __future__ import annotations
@@ -14,155 +19,16 @@ import tempfile
 
 import pytest
 
-from pseudolife_memory.memory.graph_consolidation import (
-    junk_name_reason, variant_tokens, variant_conflict)
 from pseudolife_memory.utils.config import DreamConfig
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
 
 
-# ── unit: write-time junk gate ────────────────────────────────────────────
-
-def test_junk_name_reason_blocks_known_junk_classes():
-    assert junk_name_reason("a<->b") == "concat-artifact"
-    assert junk_name_reason("memory_recall->recall.py") == "concat-artifact"
-    assert junk_name_reason("42") == "bare-number"
-    assert junk_name_reason("done") == "status-word"
-    assert junk_name_reason("  ") == "empty"
-
-
-def test_junk_name_reason_allows_legitimate_names():
-    # Short names are legitimate at write time (Go, uv) — they remain
-    # review-queue material, judged by degree, not write-blocked.
-    assert junk_name_reason("Go") is None
-    assert junk_name_reason("PostgreSQL") is None
-    assert junk_name_reason("RTX 4090") is None
-
-
-def test_junk_name_reason_blocks_2026_07_02_cleanup_classes():
-    # Every class below dominated the 612 hand-deleted entities of the
-    # 2026-07-02 live-cortex cleanup; the gate must stop the re-supply.
-    assert junk_name_reason("236 memories") == "count-prefix"
-    assert junk_name_reason("5 type-violation junk edges") == "count-prefix"
-    assert junk_name_reason("2026-07-02") == "bare-date"
-    assert junk_name_reason("pseudolife_memory-20260702-194002.sql.gz") == "dump-file"
-    assert junk_name_reason("data/backups/pseudolife_memory-20260624-200948.sql") == "dump-file"
-    assert junk_name_reason("pseudolife-daemon:0.2.0-pre-gi") == "image-tag"
-    assert junk_name_reason("docker compose -f ops/docker-compose.yml build x") == "command-string"
-    assert junk_name_reason("python -m pseudolife_memory.web.devserver") == "command-string"
-    assert junk_name_reason("LOCAL master = 8e2b992") == "hash-status"
-    assert junk_name_reason("Action: accept-link") == "action-prefix"
-    assert junk_name_reason(
-        "deploy a schema change to the live pseudolife-mcp daemon") == "sentence"
-    assert junk_name_reason("P3 SURFACE POLISH") == "status-shard"
-    assert junk_name_reason("P1_roadmap_item") == "status-shard"
-
-
-def test_junk_name_reason_new_rules_spare_legitimate_names():
-    # Near-misses for each new rule that must stay storable.
-    assert junk_name_reason("2026-07-02 review roadmap") is None    # dated title, not bare date
-    assert junk_name_reason("arXiv:2606.22844") is None             # 2-part id, not an image tag
-    assert junk_name_reason("3d-force-graph@1.73.6") is None        # versioned lib (@, not :)
-    assert junk_name_reason("8-band continuum") is None             # hyphenated, not count-prefix
-    assert junk_name_reason("docker compose") is None               # tool name, not a command line
-    assert junk_name_reason("backup.ps1 off-disk mirror") is None   # short noun phrase
-    assert junk_name_reason("Language Models Need Sleep") is None   # short paper name
-    assert junk_name_reason(
-        "Track A (graphify-derived recall hub-gating)") is None     # 5 tokens < sentence floor
-    assert junk_name_reason("AllowTelemetry=0 at both HKLM Policies") is None  # '=' but no hash
-    assert junk_name_reason("P2P protocol") is None                 # P<digit><letter>: no shard boundary
-
-
-def test_junk_name_reason_blocks_metric_readings_and_lists():
-    # 2026-07-11 curation classes: metric readings and captured enumerations
-    assert junk_name_reason("stale 0.8") == "metric-reading"
-    assert junk_name_reason("stale 0.0") == "metric-reading"
-    assert junk_name_reason("stale_leak 0.7-0.8") == "metric-reading"
-    assert junk_name_reason("data/, ops/.env, *.pt") == "list-artifact"
-
-
-def test_junk_name_reason_spares_metric_and_list_near_misses():
-    assert junk_name_reason("CUDA Toolkit 13.1") is None        # uppercase token
-    assert junk_name_reason("Gemma 4 E4B") is None              # non-decimal tail
-    assert junk_name_reason("User (jdoe, jdoe@example.com)") is None
-    assert junk_name_reason("8-band continuum") is None
-
-
-def test_junk_entities_flags_metric_readings_and_lists():
-    from pseudolife_memory.memory.graph_consolidation import junk_entities
-    ents = [{"id": 1, "display": "stale 0.8"},
-            {"id": 2, "display": "data/, ops/.env, *.pt"}]
-    out = junk_entities(ents, [], max_degree=1)
-    assert {(j["display"], j["reason"]) for j in out} == {
-        ("stale 0.8", "metric-reading"),
-        ("data/, ops/.env, *.pt", "list-artifact")}
-    # list-artifact is degree-agnostic (like concat-artifact); metric-reading
-    # respects the degree cap
-    out2 = junk_entities(ents, [], max_degree=-1)
-    assert [j["reason"] for j in out2] == ["list-artifact"]
-
-
-def test_junk_entities_flags_resolvable_compounds_only():
-    from pseudolife_memory.memory.graph_consolidation import junk_entities
-    ents = [{"id": 1, "display": "memory_lesson_search/world_search"},
-            {"id": 2, "display": "pg+extractor"},
-            {"id": 3, "display": "ops/backup.ps1"},       # extension-exempt
-            {"id": 4, "display": "C++"}]                  # empty right side
-    known = frozenset({"memory-lesson-search", "world-search", "pg",
-                       "extractor", "ops", "backup-ps1"})
-    out = junk_entities(ents, [], max_degree=1, known_norms=known)
-    reasons = {j["display"]: j["reason"] for j in out}
-    assert reasons.get("memory_lesson_search/world_search") == "compound-artifact"
-    assert reasons.get("pg+extractor") == "compound-artifact"
-    assert "ops/backup.ps1" not in reasons
-    assert "C++" not in reasons
-    # without known_norms (default) nothing is flagged as compound
-    out2 = junk_entities(ents, [], max_degree=1)
-    assert all(j["reason"] != "compound-artifact" for j in out2)
-
+# ── unit: the write-time edge floor ──────────────────────────
 
 def test_dream_edge_floor_drops_type_violations_by_default():
     # Hard type-violations score 0.1125-0.175; the shipped floor must
     # exceed that (pre-fix it was 0.0 = write everything).
     assert DreamConfig().min_relation_confidence >= 0.2
-
-
-# ── variant tokens & conflicts ────────────────────────────────────────────
-
-def test_variant_tokens_extract_size_quant_version():
-    assert variant_tokens("Gemma 4 E4B") == frozenset({"e4b"})
-    toks = variant_tokens("gemma-4-26B_q4_0-it.gguf")
-    assert "26b" in toks and "q4-0" in toks
-    assert variant_tokens("pseudolife-daemon:0.2.0") == frozenset({"0.2.0"})
-    assert variant_tokens("plain name") == frozenset()
-
-
-def test_variant_conflict_blocks_cross_model_pairs():
-    # the 9 merge proposals hand-rejected on 2026-07-11
-    assert variant_conflict("Gemma-4-E4B-QAT (UD-Q4_K_XL)",
-                            "gemma-4-E2B-it-qat-UD-Q4_K_XL")
-    assert variant_conflict("gemma-E4B Q4_K_M", "Gemma-4-E4B-QAT (UD-Q4_K_XL)")
-    assert variant_conflict("gemma-4-26B", "Gemma 4 E4B")
-    assert variant_conflict("Qwen3.5-4B", "Qwen3.6-27B")
-    # uppercase is the canonical GGUF quant spelling
-    assert variant_conflict("gemma Q4_0", "gemma Q8_0")
-
-
-def test_variant_conflict_allows_same_or_absent_variants():
-    assert not variant_conflict("Gemma 4 E4B", "gemma-4-E4B-it base")
-    assert not variant_conflict("update.ps1", "ops/update.ps1")
-    assert not variant_conflict("Claude shim", "evals/claude_shim.py")
-    # underscore vs hyphen quant forms are the SAME token (norm_name folds _ to -)
-    assert not variant_conflict("UD-Q4_K_XL quant", "ud-q4-k-xl quant")
-    # Q4 alone (quarter label) is NOT a variant token — it needs _K suffix
-    assert not variant_conflict("Q4 2026 roadmap", "Q1 2027 roadmap")
-
-
-def test_variant_tokens_quarter_labels_not_variants():
-    # Quarter labels (Q1, Q4 standalone) are NOT variant tokens; only Q<digit>_K*
-    assert variant_tokens("Q4 2026 roadmap") == frozenset()
-    assert variant_tokens("Q1 2027 roadmap") == frozenset()
-    # Q4_K forms ARE variants
-    assert "q4-k" in variant_tokens("Q4_K 2026 quant")
 
 
 # ── storage: revive semantics ─────────────────────────────────────────────

@@ -32,18 +32,10 @@ import pytest
 
 from pseudolife_memory.service import MemoryService
 
+from tests.dream_helpers import (StubExtractor as _StubExtractor,
+                                 chat_payload as _chat_payload,
+                                 stub_server as _stub_server)
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
-from tests.test_dream import _chat_payload, _stub_server
-
-
-class _StubExtractor:
-    """Returns a fixed claim list regardless of input (drives dream_run)."""
-
-    def __init__(self, claims):
-        self._claims = claims
-
-    def extract(self, texts, vocab):
-        return [dict(c) for c in self._claims]
 
 
 @pytest.fixture()

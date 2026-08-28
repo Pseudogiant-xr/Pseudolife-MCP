@@ -26,7 +26,10 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_tool_consolidation import _invoke, _reload
+from tests.helpers import (
+    invoke_tool as _invoke,
+    reload_mcp_filemode as _reload,
+)
 
 
 # ── memory_outcome: no silent coercion ────────────────────────────────────
