@@ -104,7 +104,8 @@ the higher value, as it always has. Kill switch:
 
 ## Installing the briefing hook
 
-One command installs the briefing hook:
+One command installs the briefing hook (and, for the Claude client, a
+static per-turn memory-discipline hook on `UserPromptSubmit`):
 
 ```powershell
 .\ops\install-hook.ps1     # Windows (PowerShell 7)
@@ -113,7 +114,7 @@ One command installs the briefing hook:
 ./ops/install-hook.sh      # Linux / macOS
 ```
 
-It backs up your `settings.json`, then adds the hook **alongside** any
+It backs up your `settings.json`, then adds the hooks **alongside** any
 existing ones (idempotent — safe to re-run; it installs only what's
 missing). Requires `pseudolife-mcp` on PATH — `pip install -e .` in the
 repo puts it there.

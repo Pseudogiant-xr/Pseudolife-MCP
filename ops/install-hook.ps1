@@ -69,6 +69,35 @@ if (-not $hasBriefing) {
     Write-Host "Briefing hook already present in $SettingsPath - skipping."
 }
 
+# Every-turn memory-discipline line (UserPromptSubmit), Claude client only:
+# Codex per-prompt hook support is unverified, and every new Codex hook
+# needs a manual trust review — don't silently write one there. Static echo
+# (no daemon call): the one-shot session-start briefing loses salience over
+# a long session; this keeps the loop — including recall-before-review —
+# mechanical. Keep the line free of quote characters (it nests in JSON+sh).
+if ($Client -eq "claude") {
+    $disciplineLine = "Memory (PseudoLife) mid-session discipline: before reviewing code, docs, or a PR -> memory_search + memory_lesson_search the target area FIRST, then compare memory against the files and correct drift both ways (fix stale memory via memory_fact_set + memory_outcome; treat memory-vs-file mismatches as review findings). Status or in-progress questions -> memory_search (include sources: status) before or alongside git. Starting work in a new area -> memory_search + memory_lesson_search first. Launching or finishing long-running work -> memory_store a status entry. Outcome landed -> memory_outcome."
+    if (-not ($obj.hooks.PSObject.Properties.Name -contains 'UserPromptSubmit')) {
+        $obj.hooks | Add-Member -NotePropertyName UserPromptSubmit -NotePropertyValue @()
+    }
+    $hasDiscipline = $false
+    foreach ($group in @($obj.hooks.UserPromptSubmit)) {
+        if ($null -eq $group) { continue }
+        foreach ($h in @($group.hooks)) {
+            if ($h.command -like "*mid-session discipline*") { $hasDiscipline = $true }
+        }
+    }
+    if (-not $hasDiscipline) {
+        $upsGroup = [pscustomobject]@{
+            hooks = @([pscustomobject]@{ type = 'command'; command = "echo '$disciplineLine'" })
+        }
+        $obj.hooks.UserPromptSubmit = @($obj.hooks.UserPromptSubmit) + $upsGroup
+        Write-Host "Installed UserPromptSubmit discipline hook -> $SettingsPath"
+    } else {
+        Write-Host "Mid-session discipline hook already present in $SettingsPath - skipping."
+    }
+}
+
 # Episode hooks are OBSOLETE since the 2026-06-30 session-scoped episodes
 # rework: the daemon lazily opens/closes episodes keyed by mcp-session-id
 # (see docs/guide/episodes.md). Earlier installer versions added
