@@ -133,6 +133,11 @@ if ($Client -eq "codex") {
     Write-Host ""
     Write-Warning "Codex will skip this new or changed hook until you review and trust its exact definition."
     Write-Host "  Start Codex, open /hooks, review the definition from $SettingsPath, and approve it."
+    Write-Host "NOTE: Codex hooks are experimental and OFF by default - enable the engine"
+    Write-Host "  first in ~/.codex/config.toml (and note hooks are not available on"
+    Write-Host "  Windows - use the standing AGENTS.md block there instead):"
+    Write-Host "    [features]"
+    Write-Host "    codex_hooks = true"
 }
 
 # The hooks wire the session lifecycle, but the memory LOOP only fires if a

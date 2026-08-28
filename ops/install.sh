@@ -1,14 +1,30 @@
 #!/usr/bin/env bash
+# >>> usage >>>
 # One-shot idempotent installer for the Pseudolife-MCP stack (issue #13
-# tier 2). Everything downstream of Docker: preflight -> volumes -> extractor
-# choice -> compose up -> client hooks -> standing instructions ->
+# tier 2). Everything downstream of Docker: provider selection -> preflight ->
+# extractor choice -> compose up -> client hooks -> standing instructions ->
 # MCP registration -> health. Re-running is safe; re-running with a different
 # --extractor is the supported way to switch modes.
 #
 #   ops/install.sh                                  # interactive
 #   ops/install.sh --extractor sidecar --client codex
-#   ops/install.sh --extractor sonnet-fallback --claude-md append
-#   ops/install.sh --extractor sonnet-only --claude-md skip
+#   ops/install.sh --extractor sonnet-only --client claude,gemini
+#   ops/install.sh --extractor sonnet-fallback --instructions append
+#
+# Providers (--client, comma- or space-separated list):
+#   claude    Claude Code    - MCP + SessionStart briefing + per-turn discipline
+#   codex     OpenAI Codex   - MCP + SessionStart briefing (opt-in, not Windows)
+#   gemini    Gemini CLI     - MCP + standing instructions (no hook system)
+#   generic   any MCP agent  - prints paste-ready config + standing block
+#   both = claude,codex      all = claude,codex,gemini
+#
+# Other flags:
+#   --instructions append|skip|auto  standing memory block (default: auto -
+#                                    prompts only where no briefing hook exists)
+#   --claude-md append|skip          compatibility alias for --instructions
+#   --agents-file <path>             standing-file target for generic agents
+#   --no-art                         plain output (no banner, no color)
+#   --model / --shim-port / --transport   as before
 #
 # Extractor modes (spec: docs/superpowers/specs/
 # 2026-07-14-installer-extractor-choice-design.md):
@@ -18,18 +34,22 @@
 #                    automatic fallback (needs a logged-in Max-plan CLI)
 #   sidecar          bundled local CPU extractor only (stock default; no
 #                    Claude Max plan needed)
+# <<< usage <<<
 set -euo pipefail
 
 EXTRACTOR=""
 MODEL=""
-CLIENT=claude
+CLIENT=""
 CLAUDE_MD=""
 INSTRUCTIONS=""
+AGENTS_FILE=""
 SHIM_PORT=8082
 TRANSPORT=shim
+NO_ART=""
 
 usage() {
-    sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '/^# >>> usage >>>$/,/^# <<< usage <<<$/p' "$0" \
+        | sed '1d;$d' | sed 's/^# \{0,1\}//'
     exit "${1:-2}"
 }
 
@@ -40,8 +60,10 @@ while [ $# -gt 0 ]; do
         --client) CLIENT="$2"; shift 2 ;;
         --claude-md) CLAUDE_MD="$2"; shift 2 ;;
         --instructions) INSTRUCTIONS="$2"; shift 2 ;;
+        --agents-file) AGENTS_FILE="$2"; shift 2 ;;
         --shim-port) SHIM_PORT="$2"; shift 2 ;;
         --transport) TRANSPORT="$2"; shift 2 ;;
+        --no-art) NO_ART=1; shift ;;
         -h|--help)   usage 0 ;;
         *) echo "unknown argument: $1" >&2; usage ;;
     esac
@@ -52,14 +74,11 @@ esac
 case "$MODEL" in ""|claude-opus-5|claude-sonnet-5|claude-haiku-4-5|claude-fable-5) ;; *)
     echo "invalid --model '$MODEL' (claude-opus-5|claude-sonnet-5|claude-haiku-4-5|claude-fable-5)" >&2; exit 2 ;;
 esac
-case "$CLIENT" in claude|codex|both) ;; *)
-    echo "invalid --client '$CLIENT' (claude|codex|both)" >&2; exit 2 ;;
-esac
 case "$CLAUDE_MD" in ""|append|skip) ;; *)
     echo "invalid --claude-md '$CLAUDE_MD' (append|skip)" >&2; exit 2 ;;
 esac
-case "$INSTRUCTIONS" in ""|append|skip) ;; *)
-    echo "invalid --instructions '$INSTRUCTIONS' (append|skip)" >&2; exit 2 ;;
+case "$INSTRUCTIONS" in ""|append|skip|auto) ;; *)
+    echo "invalid --instructions '$INSTRUCTIONS' (append|skip|auto)" >&2; exit 2 ;;
 esac
 case "$TRANSPORT" in shim|http) ;; *)
     echo "invalid --transport '$TRANSPORT' (shim|http)" >&2; exit 2 ;;
@@ -73,12 +92,162 @@ OVERRIDE_MARKER="# pseudolife-mcp install: managed override (sonnet-only) — do
 ENV_BEGIN="# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>"
 ENV_END="# <<< pseudolife-mcp install <<<"
 
-# ── 1. preflight ───────────────────────────────────────────────────────────
-echo "==> Preflight..."
-"$repo/ops/preflight.sh" --client "$CLIENT" || {
+# ── presentation helpers ───────────────────────────────────────────────────
+# Art and color are interactive sugar only: a real TTY, NO_COLOR unset,
+# TERM not dumb, and no --no-art. Escapes are generated (\033), never raw
+# ESC bytes — the tracked-tree control-byte guard bans those.
+art_ok() {
+    [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != "dumb" ] \
+        && [ -z "$NO_ART" ]
+}
+step() {
+    if art_ok; then printf '\033[1;36m==>\033[0m %s\n' "$*"
+    else echo "==> $*"; fi
+}
+
+# >>> banner >>>
+show_banner() {
+    art_ok || return 0
+    printf '\033[36m'
+    cat <<'PL_BANNER'
+        _.-~~-._                            .---------------------.
+      .'        '.                          |  .--.  .--.  .--.   |
+     /  .--.  .--. \                        | |    ||    ||    |  |
+    |  (    )(    ) |     ==============    | |____||____||____|  |
+    |   '--'  '--'  |     ==============    |                     |
+    |  .--.  .--.   |     ==============    |    P S E U D O      |
+    |  (    )(    ) |     ==============    |      L I F E        |
+     \  '--'  '--'  /     ==============    |       M C P         |
+      '._        _.'                        |_____________________|
+         '-.__.-'                             | |  | |  | |  | |
+PL_BANNER
+    printf '\033[0m\n'
+}
+# <<< banner <<<
+
+# >>> capability-matrix >>>
+show_matrix() {
+    cat <<'PL_MATRIX'
+  Agent         MCP          Briefing        Per-turn  Standing file
+  ------------  -----------  --------------  --------  ---------------------
+  Claude Code   shim / HTTP  hook or plugin  yes       ~/.claude/CLAUDE.md
+  OpenAI Codex  shim / HTTP  hook (see *)    no        ~/.codex/AGENTS.md
+  Gemini CLI    shim / HTTP  none            no        ~/.gemini/GEMINI.md
+  Other agent   stdio/HTTP   none            no        AGENTS.md (your path)
+
+  Every agent also gets, with no files touched: the memory tools, and the
+  MCP server `instructions` field - the memory loop delivered by the
+  protocol itself.
+
+  * Codex hooks are EXPERIMENTAL and off by default: set
+        [features]
+        codex_hooks = true
+    in ~/.codex/config.toml, then review and trust the hook in /hooks.
+    Codex hooks are NOT available on Windows - there the standing AGENTS.md
+    block is the briefing, which is why appending it is recommended.
+PL_MATRIX
+}
+# <<< capability-matrix <<<
+
+# >>> generic-snippets >>>
+show_generic_snippets() {
+    cat <<'PL_SNIPPETS'
+  Add pseudolife-memory to your agent's MCP config. Two ready-to-paste
+  shapes (pick ONE):
+
+  stdio shim (recommended - per-session identity; needs
+  `pip install pseudolife-mcp` or pipx):
+    { "mcpServers": { "pseudolife-memory": {
+        "command": "pseudolife-mcp",
+        "env": { "PSEUDOLIFE_WRITER_ID": "mcp-client" } } } }
+
+  HTTP (no local install; concurrent sessions share one identity):
+    { "mcpServers": { "pseudolife-memory": {
+        "type": "http", "url": "http://127.0.0.1:8765/mcp" } } }
+
+  Common config homes: Cursor ~/.cursor/mcp.json - Windsurf
+  ~/.codeium/windsurf/mcp_config.json - Zed settings.json
+  (context_servers) - Copilot CLI / others: see the tool's MCP docs.
+PL_SNIPPETS
+}
+# <<< generic-snippets <<<
+
+# Expand aliases, validate, dedupe, and emit the canonical provider order.
+normalize_clients() {
+    raw="$(printf '%s' "$1" | tr ',' ' ')"
+    expanded=""
+    for tok in $raw; do
+        case "$tok" in
+            both) expanded="$expanded claude codex" ;;
+            all) expanded="$expanded claude codex gemini" ;;
+            claude|codex|gemini|generic) expanded="$expanded $tok" ;;
+            *) echo "invalid --client '$tok' (claude|codex|gemini|generic|both|all)" >&2
+               exit 2 ;;
+        esac
+    done
+    canon=""
+    for tok in claude codex gemini generic; do
+        case " $expanded " in *" $tok "*) canon="$canon $tok" ;; esac
+    done
+    printf '%s' "${canon# }"
+}
+
+show_banner
+
+# ── 1. provider selection (before preflight, so it checks what you picked) ─
+if [ -z "$CLIENT" ]; then
+    if [ ! -t 0 ]; then
+        CLIENT=claude
+    else
+        echo ""
+        echo "Which coding agents should this install wire up?"
+        echo ""
+        echo "  1) Claude Code    full parity: MCP + SessionStart briefing + per-turn discipline"
+        echo "  2) OpenAI Codex   MCP + SessionStart briefing (opt-in, trust review, not on Windows)"
+        echo "  3) Gemini CLI     MCP + standing instructions (Gemini CLI has no hook system)"
+        echo "  4) Other MCP agent  Cursor / Windsurf / Zed / Copilot CLI / anything else:"
+        echo "                      prints ready-to-paste config, offers the standing block"
+        echo ""
+        while [ -z "$CLIENT" ]; do
+            printf 'Select one or more - e.g. "1 2" or "1,3" (Enter = 1): '
+            read -r selection
+            [ -z "$selection" ] && selection=1
+            picked=""
+            bad=""
+            for tok in $(printf '%s' "$selection" | tr ',' ' '); do
+                case "$tok" in
+                    1) picked="$picked claude" ;;
+                    2) picked="$picked codex" ;;
+                    3) picked="$picked gemini" ;;
+                    4) picked="$picked generic" ;;
+                    *) bad=1 ;;
+                esac
+            done
+            if [ -n "$bad" ] || [ -z "$picked" ]; then
+                echo "  please answer with numbers 1-4 (e.g. \"1 3\")"
+            else
+                CLIENT="$(printf '%s' "$picked" | tr ' ' ',')"
+            fi
+        done
+    fi
+fi
+CLIENTS="$(normalize_clients "$CLIENT")"
+CLIENT_LIST="$(printf '%s' "$CLIENTS" | tr ' ' ',')"
+step "Providers: $CLIENTS"
+if [ -t 0 ] && [ -t 1 ]; then
+    echo ""
+    echo "What each agent gets:"
+    echo ""
+    show_matrix
+    echo ""
+fi
+
+# ── 2. preflight ───────────────────────────────────────────────────────────
+step "Preflight..."
+"$repo/ops/preflight.sh" --client "$CLIENT_LIST" || {
     echo "Preflight failed — fix the line(s) above and re-run." >&2; exit 1; }
 
-# ── 2. extractor choice (explicit, no default) ─────────────────────────────
+# ── 3. extractor choice (explicit, no default) ─────────────────────────────
 if [ -z "$EXTRACTOR" ]; then
     if [ ! -t 0 ]; then
         echo "Non-interactive run: --extractor sidecar|sonnet-fallback|sonnet-only is required." >&2
@@ -100,9 +269,9 @@ if [ -z "$EXTRACTOR" ]; then
         esac
     done
 fi
-echo "==> Extractor mode: $EXTRACTOR"
+step "Extractor mode: $EXTRACTOR"
 
-# ── 2b. dreamer model choice (Claude-shim modes only) ──────────────────────
+# ── 3b. dreamer model choice (Claude-shim modes only) ──────────────────────
 # Opus is the recommended default per the 2026-08-02 same-harness comparison
 # (evals/results/dreamer-choice-verdict.json). The shim honours per-request
 # claude-* names, so this is only the launch default — switchable later from
@@ -129,18 +298,27 @@ if [ "$EXTRACTOR" != "sidecar" ] && [ -z "$MODEL" ]; then
     else
         MODEL=claude-opus-5
     fi
-    echo "==> Dreamer model: $MODEL"
+    step "Dreamer model: $MODEL"
 fi
 
-# ── 3. volumes (respect names overridden in an existing ops/.env) ─────────
+# ── 4. volumes (respect names overridden in an existing ops/.env) ─────────
 get_env() { [ -f "$env_file" ] && sed -n "s/^$1=//p" "$env_file" | tail -1 || true; }
 bank_vol="$(get_env PSEUDOLIFE_BANK_VOLUME)"; bank_vol="${bank_vol:-pseudolife-mcp-bank}"
 state_vol="$(get_env PSEUDOLIFE_STATE_VOLUME)"; state_vol="${state_vol:-pseudolife-mcp-state}"
 docker volume create "$bank_vol" >/dev/null
 docker volume create "$state_vol" >/dev/null
-echo "==> Volumes ready: $bank_vol, $state_vol"
+step "Volumes ready: $bank_vol, $state_vol"
 
-# ── 4. managed env block ───────────────────────────────────────────────────
+# ── 5. managed env block ───────────────────────────────────────────────────
+# Daemon-side writer default: a single first-class provider gets its own id;
+# any multi-provider or generic install falls back to the neutral id — the
+# per-provider ids then ride each MCP registration's env instead (stage 10).
+case "$CLIENTS" in
+    claude) WRITER_ID=claude-code ;;
+    codex)  WRITER_ID=codex ;;
+    gemini) WRITER_ID=gemini ;;
+    *)      WRITER_ID=mcp-client ;;
+esac
 [ -f "$env_file" ] || cp "$repo/ops/.env.example" "$env_file"
 # Drop any previous managed block, then append the new one.
 tmp="$(mktemp)"
@@ -165,16 +343,12 @@ awk -v b="$ENV_BEGIN" -v e="$ENV_END" '
             # keeps the auto-without-fallback startup warning silent.
             echo "PSEUDOLIFE_DREAM_EXTRACTOR_MODE=primary" ;;
     esac
-    case "$CLIENT" in
-        claude) echo "PSEUDOLIFE_WRITER_ID=claude-code" ;;
-        codex)  echo "PSEUDOLIFE_WRITER_ID=codex" ;;
-        both)   echo "PSEUDOLIFE_WRITER_ID=mcp-client" ;;
-    esac
+    echo "PSEUDOLIFE_WRITER_ID=$WRITER_ID"
     echo "$ENV_END"
 } >> "$env_file"
-echo "==> Wrote managed block in ops/.env"
+step "Wrote managed block in ops/.env"
 
-# ── 5. sidecar enable/disable via the compose override ────────────────────
+# ── 6. sidecar enable/disable via the compose override ────────────────────
 installer_owns_override() {
     [ -f "$override_file" ] && [ "$(head -1 "$override_file")" = "$OVERRIDE_MARKER" ]
 }
@@ -188,7 +362,7 @@ services:
   pseudolife-extractor:
     profiles: ["disabled"]
 EOF
-        echo "==> Sidecar disabled via ops/docker-compose.override.yml"
+        step "Sidecar disabled via ops/docker-compose.override.yml"
     else
         echo "NOTE: ops/docker-compose.override.yml exists and is not installer-managed."
         echo "      Add this to it yourself to disable the sidecar:"
@@ -200,27 +374,27 @@ EOF
     # no volumes; the image is kept for an easy switch back).
     if docker ps -a --format '{{.Names}}' | grep -qx pseudolife-mcp-extractor; then
         docker rm -f pseudolife-mcp-extractor >/dev/null
-        echo "==> Removed the running extractor container"
+        step "Removed the running extractor container"
     fi
 else
     if installer_owns_override; then
         rm "$override_file"
-        echo "==> Removed installer-managed override (sidecar re-enabled)"
+        step "Removed installer-managed override (sidecar re-enabled)"
     fi
 fi
 
-# ── 6. bring the stack up ──────────────────────────────────────────────────
+# ── 7. bring the stack up ──────────────────────────────────────────────────
 compose=(--env-file "$env_file" -f "$compose_file")
 [ -f "$override_file" ] && compose+=(-f "$override_file")
-echo "==> docker compose up -d --build (first build downloads images — grab a coffee)..."
+step "docker compose up -d --build (first build downloads images — grab a coffee)..."
 docker compose "${compose[@]}" up -d --build
 
-# ── 7. Sonnet shim autostart (Sonnet modes) ────────────────────────────────
+# ── 8. Sonnet shim autostart (Sonnet modes) ────────────────────────────────
 # Best-effort, like the .ps1: a host without systemd --user (macOS, some WSL)
 # must not abort the install between `compose up` and the hooks/mcp-add/health
 # steps — that strands a running stack that was never wired into Claude Code.
 if [ "$EXTRACTOR" != "sidecar" ]; then
-    echo "==> Registering the Claude shim autostart (systemd --user)..."
+    step "Registering the Claude shim autostart (systemd --user)..."
     if ! "$repo/ops/install-shim-autostart.sh" --port "$SHIM_PORT" --model "$MODEL"; then
         echo "WARNING: shim autostart registration failed (no systemd --user on this host?)" >&2
         echo "  Re-run later: ops/install-shim-autostart.sh --port $SHIM_PORT --model $MODEL" >&2
@@ -228,62 +402,133 @@ if [ "$EXTRACTOR" != "sidecar" ]; then
     fi
 fi
 
-# ── 8. session lifecycle hooks ─────────────────────────────────────────────
-if [ "$CLIENT" = both ]; then clients="claude codex"; else clients="$CLIENT"; fi
+# ── 9. session lifecycle hooks (hook-capable providers only) ───────────────
+# claude: unless the plugin already owns the hooks. codex: hooks exist but
+# are experimental and opt-in — install-hook prints the trust-review and
+# [features] codex_hooks guidance. gemini/generic: no hook system.
 if grep -q "pseudolife-memory@pseudolife-mcp" \
         "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null; then
     CLAUDE_PLUGIN_INSTALLED=1
-    if [ "$CLIENT" = claude ] || [ "$CLIENT" = both ]; then
-        echo "==> pseudolife-memory Claude Code plugin detected — skipping Claude"
+    case " $CLIENTS " in *" claude "*)
+        step "pseudolife-memory Claude Code plugin detected — skipping Claude"
         echo "    hook and CLAUDE.md block (the plugin provides both). The plugin no"
-        echo "    longer bundles an MCP server, so the transport is still wired below."
-    fi
+        echo "    longer bundles an MCP server, so the transport is still wired below." ;;
+    esac
 else
     CLAUDE_PLUGIN_INSTALLED=""
 fi
 
+HOOK_CLAUDE=""
+HOOK_CODEX=""
 briefing_command="docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json"
-for selected_client in $clients; do
-    if [ "$selected_client" = claude ] && [ -n "$CLAUDE_PLUGIN_INSTALLED" ]; then continue; fi
-    echo "==> Installing $selected_client session hook..."
-    "$repo/ops/install-hook.sh" --client "$selected_client" "" "$briefing_command"
-done
-
-# ── 9. CLAUDE.md memory block (consent; never edited without it) ──────────
-instruction_choice="${INSTRUCTIONS:-$CLAUDE_MD}"
-for selected_client in $clients; do
-    if [ "$selected_client" = claude ] && [ -n "$CLAUDE_PLUGIN_INSTALLED" ]; then continue; fi
-    if [ "$selected_client" = codex ]; then
-        instruction_path="$HOME/.codex/AGENTS.md"
-    else
-        instruction_path="$HOME/.claude/CLAUDE.md"
-    fi
-    if grep -q "pseudolife-memory" "$instruction_path" 2>/dev/null; then
-        echo "==> Memory block already present in $instruction_path — skipping."
+for selected_client in $CLIENTS; do
+    case "$selected_client" in claude|codex) ;; *) continue ;; esac
+    if [ "$selected_client" = claude ] && [ -n "$CLAUDE_PLUGIN_INSTALLED" ]; then
+        HOOK_CLAUDE=plugin
         continue
     fi
-    # No interactive prompt: the session hook briefing delivers the same
-    # block every session, so a standing-file copy would double-inject.
-    # Explicit opt-in only (--instructions append) — useful for subagent
-    # visibility and hook-less setups.
-    choice="${instruction_choice:-skip}"
-    if [ "$choice" = "append" ]; then
-        mkdir -p "$(dirname "$instruction_path")"
-        cat "$repo/examples/CLAUDE.memory.md" >> "$instruction_path"
-        echo "==> Appended memory block to $instruction_path"
+    step "Installing $selected_client session hook..."
+    "$repo/ops/install-hook.sh" --client "$selected_client" "" "$briefing_command"
+    if [ "$selected_client" = claude ]; then HOOK_CLAUDE=hook; else HOOK_CODEX=hook; fi
+done
+
+# ── 10. standing memory instructions (consent; never edited without it) ────
+# Default is `auto`: skip wherever a session-start briefing already delivers
+# the block (claude hook/plugin, codex hook), and offer an interactive append
+# where none exists (gemini, generic). `auto` never writes a standing file in
+# a non-interactive run; --instructions append behaves exactly as before.
+instruction_choice="${INSTRUCTIONS:-${CLAUDE_MD:-auto}}"
+INSTR_CLAUDE=""
+INSTR_CODEX=""
+INSTR_GEMINI=""
+INSTR_GENERIC=""
+
+record_instr() {
+    case "$1" in
+        claude)  INSTR_CLAUDE="$2" ;;
+        codex)   INSTR_CODEX="$2" ;;
+        gemini)  INSTR_GEMINI="$2" ;;
+        generic) INSTR_GENERIC="$2" ;;
+    esac
+}
+
+append_block() {  # $1 = target path, $2 = provider
+    mkdir -p "$(dirname "$1")"
+    cat "$repo/examples/CLAUDE.memory.md" >> "$1"
+    step "Appended memory block to $1"
+    record_instr "$2" "appended:$1"
+}
+
+for selected_client in $CLIENTS; do
+    if [ "$selected_client" = claude ] && [ -n "$CLAUDE_PLUGIN_INSTALLED" ]; then
+        record_instr claude "covered-by-plugin"
+        continue
+    fi
+    case "$selected_client" in
+        codex)   instruction_path="$HOME/.codex/AGENTS.md" ;;
+        gemini)  instruction_path="$HOME/.gemini/GEMINI.md" ;;
+        generic) instruction_path="$AGENTS_FILE" ;;
+        *)       instruction_path="$HOME/.claude/CLAUDE.md" ;;
+    esac
+    if [ -n "$instruction_path" ] \
+            && grep -q "pseudolife-memory" "$instruction_path" 2>/dev/null; then
+        step "Memory block already present in $instruction_path — skipping."
+        record_instr "$selected_client" "present:$instruction_path"
+        continue
+    fi
+    choice="$instruction_choice"
+    if [ "$choice" = auto ]; then
+        case "$selected_client" in
+            claude|codex)
+                # A session-start briefing hook already delivers the block —
+                # a standing-file copy would double-inject.
+                choice=skip ;;
+            gemini)
+                if [ -t 0 ]; then
+                    printf 'Gemini CLI has no hook system - append the standing memory block to %s? [Y/n] ' "$instruction_path"
+                    read -r yn
+                    case "$yn" in n|N|no|NO) choice=skip ;; *) choice=append ;; esac
+                else
+                    choice=skip
+                fi ;;
+            generic)
+                if [ -n "$AGENTS_FILE" ]; then
+                    choice=append
+                elif [ -t 0 ]; then
+                    printf 'Append the standing memory block to which file? (Enter = %s, "-" to skip) ' "$HOME/AGENTS.md"
+                    read -r answer
+                    if [ "$answer" = "-" ]; then
+                        choice=skip
+                    else
+                        instruction_path="${answer:-$HOME/AGENTS.md}"
+                        choice=append
+                    fi
+                else
+                    choice=skip
+                fi ;;
+        esac
+    fi
+    if [ "$choice" = append ] && [ "$selected_client" = generic ] \
+            && [ -z "$instruction_path" ]; then
+        echo "NOTE: generic append needs a target — pass --agents-file <path>." >&2
+        choice=skip
+    fi
+    if [ "$choice" = append ]; then
+        append_block "$instruction_path" "$selected_client"
     else
-        echo "==> Standing memory block not written (the session hook briefing already"
-        echo "    delivers the memory loop each session). To add it anyway:"
-        echo "  cat $repo/examples/CLAUDE.memory.md >> $instruction_path"
+        hint_path="${instruction_path:-<your AGENTS.md>}"
+        step "Standing memory block not written for $selected_client. To add it:"
+        echo "  cat $repo/examples/CLAUDE.memory.md >> $hint_path"
+        record_instr "$selected_client" "skipped:$hint_path"
     fi
 done
 
-# ── 10. wire into selected MCP clients ─────────────────────────────────────
+# ── 11. wire into selected MCP clients ─────────────────────────────────────
 # Runs even with the plugin installed: the plugin is the hooks/commands layer
 # only, so the MCP transport (shim by default) always comes from here.
 # The shim install itself is client-agnostic; memoize one attempt so
-# --client both doesn't run pipx/pip twice. Every install command runs as an
-# `if` condition so `set -e` is suspended around it: a failed pipx/pip —
+# multi-provider runs don't run pipx/pip twice. Every install command runs as
+# an `if` condition so `set -e` is suspended around it: a failed pipx/pip —
 # PEP 668 externally-managed-environment on Ubuntu 24.04 / Debian 12 /
 # Fedora 40 / Arch is the common case — leaves SHIM_OK unset so the
 # per-client HTTP fallback and its remediation text fire, instead of
@@ -308,48 +553,123 @@ ensure_shim() {
     return 0
 }
 
-for selected_client in $clients; do
+# Per-provider writer ids ride each registration's env (the shim forwards
+# PSEUDOLIFE_WRITER_ID as the X-PL-Writer header). CLI env-flag support is
+# probed, never assumed: a missing flag degrades to the flagless form plus a
+# printed manual config edit — never to a failed install. HTTP transport
+# cannot carry env, so there the daemon default (ops/.env) applies.
+cli_env_flag() {  # $1 = cli; echoes the supported env flag, or nothing
+    if "$1" mcp add --help 2>/dev/null | grep -q -- '--env'; then
+        echo "--env"
+    fi
+}
+
+MCP_CLAUDE=""
+MCP_CODEX=""
+MCP_GEMINI=""
+for selected_client in $CLIENTS; do
+    if [ "$selected_client" = generic ]; then
+        echo ""
+        step "Other MCP-capable agents — paste-ready config:"
+        echo ""
+        show_generic_snippets
+        echo ""
+        continue
+    fi
     if [ "$selected_client" = codex ]; then
         if codex mcp get pseudolife-memory >/dev/null 2>&1; then
-            echo "==> MCP server already wired into Codex — skipping."
+            step "MCP server already wired into Codex — skipping."
+            MCP_CODEX=present
         elif [ "$TRANSPORT" = "shim" ]; then
             ensure_shim
             if [ -n "$SHIM_OK" ]; then
-                codex mcp add pseudolife-memory -- pseudolife-mcp
-                echo "==> Wired into Codex via the pseudolife-mcp shim — per-session identity (a Codex session no longer inherits a concurrent Claude session's episode)."
+                env_flag="$(cli_env_flag codex)"
+                if [ -n "$env_flag" ]; then
+                    codex mcp add "$env_flag" PSEUDOLIFE_WRITER_ID=codex pseudolife-memory -- pseudolife-mcp
+                    MCP_CODEX=shim-env
+                else
+                    codex mcp add pseudolife-memory -- pseudolife-mcp
+                    echo "  (this codex CLI takes no env flag — for per-provider write attribution"
+                    echo "   add to the server's entry in ~/.codex/config.toml:"
+                    echo "     env = { PSEUDOLIFE_WRITER_ID = \"codex\" })"
+                    MCP_CODEX=shim
+                fi
+                step "Wired into Codex via the pseudolife-mcp shim — per-session identity (a Codex session no longer inherits a concurrent Claude session's episode)."
             else
                 echo "WARNING: shim unavailable for Codex (see warnings above) — falling back to HTTP." >&2
                 echo "  Without the shim, a Codex session running beside a Claude Code session shares its episode identity." >&2
                 codex mcp add pseudolife-memory --url http://127.0.0.1:8765/mcp
-                echo "==> Wired into Codex (codex mcp add, HTTP fallback)."
+                step "Wired into Codex (codex mcp add, HTTP fallback)."
+                MCP_CODEX=http
             fi
         else
             codex mcp add pseudolife-memory --url http://127.0.0.1:8765/mcp
-            echo "==> Wired into Codex (codex mcp add, HTTP)."
+            step "Wired into Codex (codex mcp add, HTTP)."
+            MCP_CODEX=http
+        fi
+    elif [ "$selected_client" = gemini ]; then
+        if gemini mcp list 2>/dev/null | grep -q pseudolife-memory; then
+            step "MCP server already wired into Gemini CLI — skipping."
+            MCP_GEMINI=present
+        elif [ "$TRANSPORT" = "shim" ]; then
+            ensure_shim
+            if [ -n "$SHIM_OK" ]; then
+                env_flag="$(cli_env_flag gemini)"
+                if [ -n "$env_flag" ]; then
+                    gemini mcp add -s user -e PSEUDOLIFE_WRITER_ID=gemini pseudolife-memory pseudolife-mcp
+                    MCP_GEMINI=shim-env
+                else
+                    gemini mcp add -s user pseudolife-memory pseudolife-mcp
+                    echo "  (this gemini CLI takes no env flag — for per-provider write attribution"
+                    echo "   add \"env\": {\"PSEUDOLIFE_WRITER_ID\": \"gemini\"} to the server's"
+                    echo "   entry in ~/.gemini/settings.json)"
+                    MCP_GEMINI=shim
+                fi
+                step "Wired into Gemini CLI via the pseudolife-mcp shim — per-session identity."
+            else
+                echo "WARNING: shim unavailable for Gemini CLI (see warnings above) — falling back to HTTP." >&2
+                gemini mcp add -s user -t http pseudolife-memory http://127.0.0.1:8765/mcp
+                step "Wired into Gemini CLI (gemini mcp add, HTTP fallback)."
+                MCP_GEMINI=http
+            fi
+        else
+            gemini mcp add -s user -t http pseudolife-memory http://127.0.0.1:8765/mcp
+            step "Wired into Gemini CLI (gemini mcp add, HTTP)."
+            MCP_GEMINI=http
         fi
     elif claude mcp get pseudolife-memory >/dev/null 2>&1; then
-        echo "==> MCP server already wired into Claude Code — skipping."
+        step "MCP server already wired into Claude Code — skipping."
+        MCP_CLAUDE=present
     elif [ "$TRANSPORT" = "shim" ]; then
         ensure_shim
         if [ -n "$SHIM_OK" ]; then
             claude mcp remove pseudolife-memory 2>/dev/null || true
-            claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
-            echo "==> Wired into Claude Code via the pseudolife-mcp shim — per-session identity (required for correct episodes with concurrent sessions)."
+            env_flag="$(cli_env_flag claude)"
+            if [ -n "$env_flag" ]; then
+                claude mcp add --scope user "$env_flag" PSEUDOLIFE_WRITER_ID=claude-code pseudolife-memory -- pseudolife-mcp
+                MCP_CLAUDE=shim-env
+            else
+                claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
+                MCP_CLAUDE=shim
+            fi
+            step "Wired into Claude Code via the pseudolife-mcp shim — per-session identity (required for correct episodes with concurrent sessions)."
         else
             echo "WARNING: the pseudolife-mcp shim is unavailable — tooling missing (pipx / python3 >=3.10) or the install failed (see the pip/pipx output above; on PEP 668 distros 'pip install --user' refuses with externally-managed-environment)." >&2
             echo "  Without the shim, concurrent Claude Code sessions share one episode identity." >&2
             echo "  Install pipx and re-run (pipx sidesteps externally-managed distros), or pass --transport http to silence this." >&2
             claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
-            echo "==> Wired into Claude Code via HTTP (fallback — shim tooling not found)."
+            step "Wired into Claude Code via HTTP (fallback — shim tooling not found)."
+            MCP_CLAUDE=http
         fi
     else
         claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
-        echo "==> Wired into Claude Code via HTTP (--transport http)."
+        step "Wired into Claude Code via HTTP (--transport http)."
+        MCP_CLAUDE=http
     fi
 done
 
-# ── 11. health ─────────────────────────────────────────────────────────────
-echo "==> Waiting for the daemon to report healthy..."
+# ── 12. health ─────────────────────────────────────────────────────────────
+step "Waiting for the daemon to report healthy..."
 healthy=""
 for _ in $(seq 1 40); do
     if curl -fsS --max-time 3 http://127.0.0.1:8765/health 2>/dev/null \
@@ -362,9 +682,72 @@ done
     echo "WARNING: daemon not healthy yet. Logs: docker logs pseudolife-mcp-daemon" >&2
     exit 1
 }
-echo "==> Healthy: http://127.0.0.1:8765/health (Console: http://127.0.0.1:8765/ui/)"
+step "Healthy: http://127.0.0.1:8765/health (Console: http://127.0.0.1:8765/ui/)"
 
-# ── 12. per-mode verify hints ──────────────────────────────────────────────
+# ── 13. per-provider wiring ladder + per-mode verify hints ─────────────────
+# [x] wired · [-] deliberately skipped · [!] unavailable, with remediation.
+describe_mcp() {  # $1 = state
+    case "$1" in
+        shim-env) echo "stdio shim (per-provider writer id set)" ;;
+        shim)     echo "stdio shim (writer id: daemon default in ops/.env)" ;;
+        http)     echo "HTTP (writer id: daemon default in ops/.env)" ;;
+        present)  echo "already wired (unchanged)" ;;
+        *)        echo "not wired" ;;
+    esac
+}
+describe_instr() {  # $1 = state
+    case "$1" in
+        appended:*|present:*) echo "[x] Standing file        ${1#*:}" ;;
+        covered-by-plugin)    echo "[-] Standing file        plugin briefing covers it" ;;
+        skipped:*) echo "[-] Standing file        skipped - append later: cat examples/CLAUDE.memory.md >> ${1#*:}" ;;
+        *)         echo "[-] Standing file        skipped" ;;
+    esac
+}
+echo ""
+step "What got wired, per agent:"
+for selected_client in $CLIENTS; do
+    echo ""
+    case "$selected_client" in
+        claude)
+            echo "  Claude Code"
+            echo "    [x] MCP transport        $(describe_mcp "$MCP_CLAUDE")"
+            echo "    [x] Server instructions  automatic (MCP instructions field)"
+            if [ "$HOOK_CLAUDE" = plugin ]; then
+                echo "    [x] Session briefing     Claude Code plugin"
+                echo "    [x] Per-turn discipline  Claude Code plugin"
+            else
+                echo "    [x] Session briefing     SessionStart hook -> ~/.claude/settings.json"
+                echo "    [x] Per-turn discipline  UserPromptSubmit hook"
+            fi
+            describe_instr "$INSTR_CLAUDE" | sed 's/^/    /' ;;
+        codex)
+            echo "  OpenAI Codex"
+            echo "    [x] MCP transport        $(describe_mcp "$MCP_CODEX")"
+            echo "    [x] Server instructions  automatic (MCP instructions field)"
+            if [ "$HOOK_CODEX" = hook ]; then
+                echo "    [x] Session briefing     hook written - enable codex_hooks = true, then trust it in /hooks"
+            else
+                echo "    [!] Session briefing     not installed - re-run: ops/install-hook.sh --client codex"
+            fi
+            echo "    [!] Per-turn discipline  unavailable - Codex has no per-prompt hook"
+            describe_instr "$INSTR_CODEX" | sed 's/^/    /' ;;
+        gemini)
+            echo "  Gemini CLI"
+            echo "    [x] MCP transport        $(describe_mcp "$MCP_GEMINI")"
+            echo "    [x] Server instructions  automatic (MCP instructions field)"
+            echo "    [!] Session briefing     unavailable - Gemini CLI has no hook system"
+            echo "    [!] Per-turn discipline  unavailable"
+            describe_instr "$INSTR_GEMINI" | sed 's/^/    /' ;;
+        generic)
+            echo "  Other MCP agent"
+            echo "    [-] MCP transport        paste the printed config into your agent"
+            echo "    [x] Server instructions  automatic once connected (MCP instructions field)"
+            echo "    [!] Session briefing     unavailable - no hook system to wire"
+            echo "    [!] Per-turn discipline  unavailable"
+            describe_instr "$INSTR_GENERIC" | sed 's/^/    /' ;;
+    esac
+done
+echo ""
 case "$EXTRACTOR" in
     sidecar)
         echo "Verify: memory_dream(action=\"status\") — primary_url should point at pseudolife-extractor:8081." ;;

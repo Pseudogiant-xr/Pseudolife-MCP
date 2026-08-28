@@ -96,6 +96,19 @@
    ]
   },
   {
+   "id": "gemini",
+   "g": "clients",
+   "x": 40,
+   "y": 370,
+   "t": "Gemini CLI",
+   "s": "MCP client · shim or HTTP",
+   "p": "",
+   "d": [
+    "Wired by ops/install --client gemini (-s user scope, -e writer id)",
+    "No hook system — standing ~/.gemini/GEMINI.md carries the loop"
+   ]
+  },
+  {
    "id": "browser",
    "g": "clients",
    "x": 40,
@@ -898,9 +911,11 @@
    "s": "one-shot idempotent installer",
    "p": "ops/",
    "d": [
-    "preflight → extractor mode → volumes → managed .env block",
-    "compose up --build → hooks → MCP registration → /health poll",
-    "Modes: sidecar / sonnet-fallback / sonnet-only (~11.8 GB lighter)"
+    "providers (multi-select + capability matrix) → preflight → extractor mode",
+    "volumes → managed .env → compose up --build → hooks → MCP registration",
+    "Providers: claude / codex / gemini / generic; per-provider writer ids",
+    "Modes: sidecar / sonnet-fallback / sonnet-only (~11.8 GB lighter)",
+    "Ends with a per-agent [x]/[-]/[!] wiring ladder; /health poll"
    ]
   },
   {
@@ -1148,6 +1163,12 @@
   },
   {
    "f": "desktop",
+   "t": "shim",
+   "l": "stdio",
+   "k": "data"
+  },
+  {
+   "f": "gemini",
    "t": "shim",
    "l": "stdio",
    "k": "data"

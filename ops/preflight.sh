@@ -4,7 +4,8 @@
 # each prerequisite and prints the exact remediation for anything missing;
 # never installs or changes anything. Exit 0 = ready to install.
 #
-#   ops/preflight.sh --client claude|codex|both
+#   ops/preflight.sh --client claude|codex|gemini|generic (comma/space list;
+#   aliases: both = claude,codex — all = claude,codex,gemini)
 set -u
 
 CLIENT=claude
@@ -12,9 +13,17 @@ if [ "${1:-}" = "--client" ]; then
     CLIENT="${2:-}"
     shift 2
 fi
-case "$CLIENT" in claude|codex|both) ;; *)
-    echo "invalid --client '$CLIENT' (claude|codex|both)" >&2; exit 2 ;;
-esac
+CHECKS=""
+for tok in $(printf '%s' "$CLIENT" | tr ',' ' '); do
+    case "$tok" in
+        both) CHECKS="$CHECKS claude codex" ;;
+        all) CHECKS="$CHECKS claude codex gemini" ;;
+        claude|codex|gemini) CHECKS="$CHECKS $tok" ;;
+        generic) ;;  # no CLI to probe — its MCP config is pasted by hand
+        *) echo "invalid --client '$tok' (claude|codex|gemini|generic|both|all)" >&2
+           exit 2 ;;
+    esac
+done
 [ "$#" -eq 0 ] || { echo "unknown argument: $1" >&2; exit 2; }
 
 fails=0
@@ -109,23 +118,31 @@ else
          "https://pipx.pypa.io/stable/installation/ (Debian/Ubuntu: sudo apt install pipx; Arch: sudo pacman -S python-pipx)"
 fi
 
-# ── claude CLI: installed + logged in ──────────────────────────────────────
-if [ "$CLIENT" = claude ] || [ "$CLIENT" = both ]; then
+# ── selected MCP client CLI(s) ─────────────────────────────────────────────
+case " $CHECKS " in *" claude "*)
     if ! command -v claude >/dev/null 2>&1; then
         fail "claude CLI not found" \
              "npm install -g @anthropic-ai/claude-code   (needs Node; see https://docs.anthropic.com/en/docs/claude-code)"
     else
         ok "claude CLI"
-    fi
-fi
-if [ "$CLIENT" = codex ] || [ "$CLIENT" = both ]; then
+    fi ;;
+esac
+case " $CHECKS " in *" codex "*)
     if ! command -v codex >/dev/null 2>&1; then
         fail "codex CLI not found" \
              "install Codex: https://developers.openai.com/codex/cli/"
     else
         ok "codex CLI"
-    fi
-fi
+    fi ;;
+esac
+case " $CHECKS " in *" gemini "*)
+    if ! command -v gemini >/dev/null 2>&1; then
+        fail "gemini CLI not found" \
+             "npm install -g @google/gemini-cli   (needs Node; see https://geminicli.com/docs/)"
+    else
+        ok "gemini CLI"
+    fi ;;
+esac
 
 echo
 if [ "$fails" -eq 0 ]; then

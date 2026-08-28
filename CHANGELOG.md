@@ -6,6 +6,58 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-29 — multi-provider installer: Gemini CLI, generic MCP agents, capability matrix)
+- **The installers wire any of four providers, together or alone.**
+  `--client` / `-Client` now takes a comma- or space-separated list of
+  `claude`, `codex`, `gemini`, `generic` (aliases `both` = claude,codex and
+  `all` = claude,codex,gemini keep every documented invocation working), with
+  an interactive multi-select when unset. Gemini CLI is first-class —
+  `gemini mcp add -s user` shim or `-t http` fallback, standing block offered
+  into `~/.gemini/GEMINI.md` (Gemini has no hook system; flags verified live
+  against gemini CLI 0.57.0) — and `generic` prints paste-ready `mcpServers`
+  config (stdio + HTTP) for Cursor/Windsurf/Zed/Copilot-class agents plus a
+  consent-gated `AGENTS.md` append (`--agents-file <path>`
+  non-interactively). Preflight takes the same list grammar, probes the
+  gemini CLI, and now checks pipx on Windows too.
+- **Per-provider writer ids ride each shim registration** (`--env` /`-e`
+  `PSEUDOLIFE_WRITER_ID=claude-code|codex|gemini`, forwarded by the shim as
+  `X-PL-Writer`), so a shared bank attributes writes per agent. Env-flag
+  support is probed per CLI with a flagless fallback plus printed manual
+  config — a missing flag never fails the install. The daemon-side default
+  in `ops/.env` stays the single selected provider's id, or `mcp-client`
+  for multi-provider/generic installs (the old `both` rule).
+- **A capability matrix and a per-agent wiring ladder.** Interactive runs
+  show what each provider gets (MCP transport, session briefing, per-turn
+  discipline, standing file) before wiring, and every run ends with a
+  per-agent `[x]`/`[-]`/`[!]` ladder including remediation one-liners.
+  Both blocks (and the new ASCII banner) are duplicated across
+  `ops/install.sh`/`ops/install.ps1` and pinned byte-identical by
+  marker-block sync guards in `tests/test_client_install_ux.py`.
+  New guide page: `docs/guide/providers.md` (matrix, the hook-equivalent
+  ladder, the AGENTS.md standard and the `@AGENTS.md` import bridge for
+  Claude Code, Codex `[features] codex_hooks = true` opt-in + no-Windows
+  limitation, writer ids).
+
+### Changed (2026-08-29 — installer UX: banner, colored steps, `--instructions auto`)
+- **The installers open with an ASCII banner and colored step lines** —
+  interactive TTY only, suppressed by `NO_COLOR`, `TERM=dumb`, or
+  `--no-art`/`-NoArt`; escapes are runtime-generated so no raw control
+  bytes enter the tree. Step lines keep the literal `==>` prefix, and
+  `install.sh --help` now prints the whole header via markers instead of a
+  fixed line range (which silently truncated as the header grew).
+- **`--instructions` default is now `auto`** (was: skip with a hint):
+  unchanged for providers whose session-start briefing already delivers the
+  block (Claude hook/plugin, Codex off-Windows), and an interactive
+  consent prompt to append the standing block where none exists (Gemini,
+  generic, Codex on Windows — there the standing file *is* the briefing).
+  `auto` never writes a standing file in a non-interactive run;
+  `--instructions append`/`skip` and the `--claude-md` alias behave exactly
+  as before. `install.ps1` now also skips the Codex hook install on Windows
+  (Codex hooks don't run there) instead of writing a hook that can never
+  fire, and `ops/install-hook.*` explain the experimental
+  `[features] codex_hooks = true` opt-in beside the existing trust-review
+  warning.
+
 ### Added (2026-08-28 — `CortexStore.clear()`, so test fixtures can reset the cortex)
 - **`CortexStore.clear()`** — a test-support reset that empties the store in
   memory: `records`, both slot indexes (`_current`, `_members`, rebuilt via

@@ -46,6 +46,17 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+# Colored step lines when on a TTY (NO_COLOR / TERM=dumb suppress; the
+# literal `==>` prefix survives either way for log greps). Escapes are
+# generated, never raw ESC bytes.
+step() {
+    if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != "dumb" ]; then
+        printf '\033[1;36m==>\033[0m %s\n' "$*"
+    else
+        echo "==> $*"
+    fi
+}
+
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 compose_file="$repo/ops/docker-compose.yml"
 env_file="$repo/ops/.env"
@@ -55,7 +66,7 @@ compose=(-f "$compose_file")
 # are discoverable — every line ships commented, so this changes nothing.
 if [ ! -f "$env_file" ] && [ -f "$repo/ops/.env.example" ]; then
     cp "$repo/ops/.env.example" "$env_file"
-    echo "==> Scaffolded ops/.env from ops/.env.example (all values commented)."
+    step "Scaffolded ops/.env from ops/.env.example (all values commented)."
 fi
 # Machine-local overrides (e.g. a fine-tuned GGUF mount) live in the gitignored
 # override file; explicit -f disables compose's auto-merge, so add it here.
@@ -64,7 +75,7 @@ fi
 
 # 1. Backup the bank (pg_dump inside the container) — the always-first rule.
 if [ "$NO_BACKUP" -eq 0 ]; then
-    echo "==> Backing up the bank (pg_dump)..."
+    step "Backing up the bank (pg_dump)..."
     "$(dirname "$0")/backup.sh"
 else
     echo "WARNING: skipping backup (--no-backup)." >&2
@@ -109,7 +120,7 @@ elif [ -n "$running_image_id" ] && [ "$running_image_id" != "$tag_image_id" ] \
 else
     docker tag "$image_tag" "$rollback"
     rollback_state=tagged
-    echo "==> Tagged rollback image: $rollback"
+    step "Tagged rollback image: $rollback"
     if [ "$FORCE_ROLLBACK_TAG" = "1" ] && [ -n "$running_image_id" ] \
         && [ "$running_image_id" != "$tag_image_id" ]; then
         echo "WARNING: --force-rollback-tag: tagged $image_tag even though the running daemon deployed a different image." >&2
@@ -148,11 +159,11 @@ fi
 
 # 3. Rebuild + recreate ONLY the daemon. `--no-deps` is what keeps Postgres and
 #    the extractor untouched (without it, `up --build <svc>` recreates all three).
-echo "==> Rebuilding the daemon only (Postgres + extractor untouched)..."
+step "Rebuilding the daemon only (Postgres + extractor untouched)..."
 docker compose "${compose[@]}" up -d --no-deps --build pseudolife-daemon
 
 # 4. Wait for health.
-echo "==> Waiting for the daemon to report healthy..."
+step "Waiting for the daemon to report healthy..."
 healthy=""
 # `sleep` wants seconds; the knob is milliseconds, so render it with a
 # three-digit fraction (1500 -> "1.500", the same wait as the old `sleep 1.5`).
@@ -166,7 +177,7 @@ for _ in $(seq 1 "$HEALTH_RETRIES"); do
     sleep "$health_delay_s"
 done
 if [ -n "$healthy" ]; then
-    echo "==> Healthy."
+    step "Healthy."
     echo "    Rolled-back deploy if ever needed:"
     print_rollback
 else

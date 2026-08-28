@@ -48,6 +48,9 @@ PAGES: list[tuple[str, str]] = [
     ("docs/guide/configuration.md",
      "Every configuration knob, the DSN, schema version history, and "
      "extractor setups"),
+    ("docs/guide/providers.md",
+     "Per-coding-agent capability matrix, the hook-equivalent ladder, "
+     "the AGENTS.md standard, and writer ids"),
     ("docs/guide/benchmarks.md",
      "LongMemEval methodology and results, with the committed evidence "
      "artifacts behind each number"),

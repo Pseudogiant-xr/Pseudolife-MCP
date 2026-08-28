@@ -426,8 +426,12 @@ attributed to Claude's session episode. The fix is the same as for
 concurrent sessions: give the second client a tier-1 identity (run it
 through the stdio shim) or pass explicit tier-2 `episode` handles on its
 writes. The installer's shim mode wires **Codex** through the shim by
-default (2026-07-19), so an installer-wired Codex doesn't hit this;
-ChatGPT connectors and other direct-HTTP clients still do.
+default (2026-07-19), and **Gemini CLI** the same way (2026-08-29); each
+first-class provider's registration also carries its own
+`PSEUDOLIFE_WRITER_ID` (`claude-code` / `codex` / `gemini`) so a shared
+bank attributes writes per agent (see
+[the providers guide](providers.md)). ChatGPT connectors and other
+direct-HTTP clients still hit the tier-3 leak.
 
 **Pointer TTL.** A client that crashes or is killed never fires SessionEnd,
 so without a bound its pointer would attribute every later tier-3 write to a

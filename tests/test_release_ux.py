@@ -286,13 +286,24 @@ def test_docs_guide_pages_are_linked_from_readme() -> None:
 
 
 def test_readme_documents_supported_mcp_clients() -> None:
-    """A newcomer must be able to wire either supported coding agent into the
+    """A newcomer must be able to wire any supported coding agent into the
     daemon from the README alone."""
     text = _README.read_text(encoding="utf-8")
     assert "claude mcp add" in text
     assert ".mcp.json" in text
     assert "codex mcp add" in text
     assert ".codex/hooks.json" in text
+    assert "gemini mcp add" in text
+    assert "docs/guide/providers.md" in text
+
+
+def test_readme_documents_the_agents_md_standard() -> None:
+    """AGENTS.md is the cross-vendor standing-instructions standard; the
+    README must name it and show the @AGENTS.md import that bridges Claude
+    Code (the CLAUDE.md holdout) to it."""
+    text = _README.read_text(encoding="utf-8")
+    assert "AGENTS.md" in text
+    assert "@AGENTS.md" in text
 
 
 # ── tracked-tree guards: one shared pass over the tree ────────────────────
