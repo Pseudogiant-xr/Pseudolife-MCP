@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-28 — `CortexStore.clear()`, so test fixtures can reset the cortex)
+- **`CortexStore.clear()`** — a test-support reset that empties the store in
+  memory: `records`, both slot indexes (`_current`, `_members`, rebuilt via
+  `_reindex_current`), the supersession log, the dirty-slot set, and
+  `dream_cursor`. The construction knobs (`supersede_confidence_margin`,
+  `reinforce_rate`, `protect_provenance`) are configuration, not state, and
+  survive. It exists because `tests/conftest.py`'s `pristine_service` cleared
+  the CMS and reference banks but not the cortex, so facts leaked between
+  tests sharing a module-scoped service and files compensated by hand-rolling
+  `cortex_forget` cleanup. No production behavior changes: nothing outside the
+  fixtures calls it. Deliberately in-memory only — it drops `dirty_slots`
+  rather than filling it, so a later `sync_cortex_slots` deletes nothing and a
+  PG-backed bank's rows survive; durable deletion remains `forget()`.
+
 ### Changed (2026-08-28 — the deploy scripts' health wait is a parameter, not a constant)
 - **`ops/update.ps1` and `ops/update.sh` no longer hard-code the step-4
   health wait.** The ps1 takes `-HealthRetries` / `-HealthDelayMs`; the sh

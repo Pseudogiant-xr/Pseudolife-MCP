@@ -11,7 +11,10 @@ import time
 import pytest
 
 from pseudolife_memory import shim as _shim
-from tests.helpers import free_port as _free_port, pg_reachable as _pg_reachable
+from tests.helpers import (free_port as _free_port,
+                           pg_reachable as _pg_reachable,
+                           spawn_serve as _spawn_serve,
+                           stop_daemon as _stop_daemon)
 from tests.pg_fixtures import resolve_test_db_url
 
 pytest.importorskip("psycopg")
@@ -27,21 +30,60 @@ pytest.importorskip("psycopg")
 _OUTER_TIMEOUT_S = _shim._SPAWN_WAIT_ALIVE_S + 60
 
 
-def test_shim_autostarts_daemon_and_proxies(tmp_path):
-    url = resolve_test_db_url()
-    if not _pg_reachable(url):
-        pytest.skip("no test Postgres reachable")
-
-    port = _free_port()
+def _shim_env(port: int, data_dir, **extra) -> dict:
+    """The environment a shim subprocess is driven with: point it at a daemon
+    URL/port and a data dir, and drop the token (loopback needs none)."""
     env = {
         **os.environ,
         "PSEUDOLIFE_MCP_DAEMON_URL": f"http://127.0.0.1:{port}",
         "PSEUDOLIFE_MCP_HOST": "127.0.0.1",
         "PSEUDOLIFE_MCP_PORT": str(port),
-        "PSEUDOLIFE_MCP_DATABASE_URL": url,
-        "PSEUDOLIFE_MCP_DATA_DIR": str(tmp_path),
+        "PSEUDOLIFE_MCP_DATA_DIR": str(data_dir),
+        **extra,
     }
     env.pop("PSEUDOLIFE_MCP_TOKEN", None)  # loopback, no token needed
+    return env
+
+
+@pytest.fixture(scope="module")
+def shared_daemon(tmp_path_factory):
+    """ONE already-running daemon for the shim tests that only need something
+    to proxy to.
+
+    ``shim.ensure_daemon`` probes /health before spawning and reuses a live
+    daemon, so a shim pointed at this port never starts its own — each test
+    still gets its own shim process and its own assertions, but pays for one
+    daemon boot per module instead of one per test (~7.7 s each). Same shape
+    as tests/test_daemon_http.py's module fixture.
+
+    ``test_shim_autostarts_daemon_and_proxies`` deliberately does NOT use
+    this: spawning is its subject. Neither does the ``TOOLSET=minimal`` test,
+    which needs a daemon booted with a different toolset tier.
+    """
+    url = resolve_test_db_url()
+    if not _pg_reachable(url):
+        pytest.skip("no test Postgres reachable")
+    port = _free_port()
+    data_dir = tmp_path_factory.mktemp("shim_daemon")
+    # Token removed rather than blanked: the shims below send no Authorization
+    # header, so a daemon that inherited PSEUDOLIFE_MCP_TOKEN would 401 them.
+    proc, _ = _spawn_serve(port, data_dir, url,
+                           env_extra={"PSEUDOLIFE_MCP_TOKEN": None})
+    try:
+        yield {"port": port, "data_dir": data_dir}
+    finally:
+        _stop_daemon(proc)
+
+
+def test_shim_autostarts_daemon_and_proxies(tmp_path):
+    """Keeps its own free port and lets the shim START the daemon — that
+    spawn is the subject, so this one must never see ``shared_daemon``."""
+    url = resolve_test_db_url()
+    if not _pg_reachable(url):
+        pytest.skip("no test Postgres reachable")
+
+    port = _free_port()
+    env = _shim_env(port, tmp_path, PSEUDOLIFE_MCP_DATABASE_URL=url)
 
     async def _drive():
         from mcp import ClientSession, StdioServerParameters
@@ -68,7 +110,7 @@ def test_shim_autostarts_daemon_and_proxies(tmp_path):
         _reap_daemon(port)
 
 
-def test_shim_survives_idle_gap(tmp_path):
+def test_shim_survives_idle_gap(shared_daemon):
     """Two calls separated by an idle gap must both succeed.
 
     Behavioural guard for the per-call upstream design. NOTE: this does NOT
@@ -80,23 +122,14 @@ def test_shim_survives_idle_gap(tmp_path):
     calls, so a future change can't reintroduce a session that wedges after
     idle even without the proxy. The real fix is structural — the shim no
     longer holds any long-lived upstream connection that *could* be reaped.
+
+    The 8 s idle sleep below is deliberate and stays — it IS the test. Only
+    the daemon is shared (see ``shared_daemon``); the shim is still this
+    test's own process.
     """
     import asyncio
 
-    url = resolve_test_db_url()
-    if not _pg_reachable(url):
-        pytest.skip("no test Postgres reachable")
-
-    port = _free_port()
-    env = {
-        **os.environ,
-        "PSEUDOLIFE_MCP_DAEMON_URL": f"http://127.0.0.1:{port}",
-        "PSEUDOLIFE_MCP_HOST": "127.0.0.1",
-        "PSEUDOLIFE_MCP_PORT": str(port),
-        "PSEUDOLIFE_MCP_DATABASE_URL": url,
-        "PSEUDOLIFE_MCP_DATA_DIR": str(tmp_path),
-    }
-    env.pop("PSEUDOLIFE_MCP_TOKEN", None)  # loopback, no token needed
+    env = _shim_env(shared_daemon["port"], shared_daemon["data_dir"])
 
     async def _drive():
         from mcp import ClientSession, StdioServerParameters
@@ -120,10 +153,7 @@ def test_shim_survives_idle_gap(tmp_path):
                 await asyncio.sleep(8.0)
                 assert _has_bands(await s.call_tool("memory_stats", {}))
 
-    try:
-        asyncio.run(asyncio.wait_for(_drive(), timeout=_OUTER_TIMEOUT_S))
-    finally:
-        _reap_daemon(port)
+    asyncio.run(asyncio.wait_for(_drive(), timeout=_OUTER_TIMEOUT_S))
 
 
 def test_shim_forwards_list_changed_on_toolset_expand(tmp_path):
@@ -140,17 +170,11 @@ def test_shim_forwards_list_changed_on_toolset_expand(tmp_path):
     if not _pg_reachable(url):
         pytest.skip("no test Postgres reachable")
 
+    # Its own daemon on purpose: the tier expansion needs one booted at the
+    # minimal toolset, which ``shared_daemon`` is not.
     port = _free_port()
-    env = {
-        **os.environ,
-        "PSEUDOLIFE_MCP_DAEMON_URL": f"http://127.0.0.1:{port}",
-        "PSEUDOLIFE_MCP_HOST": "127.0.0.1",
-        "PSEUDOLIFE_MCP_PORT": str(port),
-        "PSEUDOLIFE_MCP_DATABASE_URL": url,
-        "PSEUDOLIFE_MCP_DATA_DIR": str(tmp_path),
-        "PSEUDOLIFE_MCP_TOOLSET": "minimal",  # world tools start hidden
-    }
-    env.pop("PSEUDOLIFE_MCP_TOKEN", None)  # loopback, no token needed
+    env = _shim_env(port, tmp_path, PSEUDOLIFE_MCP_DATABASE_URL=url,
+                    PSEUDOLIFE_MCP_TOOLSET="minimal")  # world tools hidden
     env.pop("PSEUDOLIFE_MCP_TIER_MAP", None)
 
     async def _drive():
@@ -194,7 +218,7 @@ def test_shim_forwards_list_changed_on_toolset_expand(tmp_path):
         _reap_daemon(port)
 
 
-def test_shim_forwards_stringified_list_param(tmp_path):
+def test_shim_forwards_stringified_list_param(shared_daemon):
     """A JSON-in-a-string list param must survive the shim (#175).
 
     Claude Desktop/Code send `tags` as `'["decision"]'` rather than a real
@@ -210,20 +234,7 @@ def test_shim_forwards_stringified_list_param(tmp_path):
     """
     import asyncio
 
-    url = resolve_test_db_url()
-    if not _pg_reachable(url):
-        pytest.skip("no test Postgres reachable")
-
-    port = _free_port()
-    env = {
-        **os.environ,
-        "PSEUDOLIFE_MCP_DAEMON_URL": f"http://127.0.0.1:{port}",
-        "PSEUDOLIFE_MCP_HOST": "127.0.0.1",
-        "PSEUDOLIFE_MCP_PORT": str(port),
-        "PSEUDOLIFE_MCP_DATABASE_URL": url,
-        "PSEUDOLIFE_MCP_DATA_DIR": str(tmp_path),
-    }
-    env.pop("PSEUDOLIFE_MCP_TOKEN", None)  # loopback, no token needed
+    env = _shim_env(shared_daemon["port"], shared_daemon["data_dir"])
 
     async def _drive():
         from mcp import ClientSession, StdioServerParameters
@@ -249,13 +260,10 @@ def test_shim_forwards_stringified_list_param(tmp_path):
                 assert "validation error" not in text.lower()
                 assert '"stored":true' in text.replace(" ", "").lower()
 
-    try:
-        asyncio.run(asyncio.wait_for(_drive(), timeout=_OUTER_TIMEOUT_S))
-    finally:
-        _reap_daemon(port)
+    asyncio.run(asyncio.wait_for(_drive(), timeout=_OUTER_TIMEOUT_S))
 
 
-def test_shim_surfaces_the_daemons_real_error_message(tmp_path):
+def test_shim_surfaces_the_daemons_real_error_message(shared_daemon):
     """An upstream tool error must reach the client verbatim (#175 follow-up).
 
     Dropping the shim's own input validation means genuinely bad arguments —
@@ -273,20 +281,7 @@ def test_shim_surfaces_the_daemons_real_error_message(tmp_path):
     """
     import asyncio
 
-    url = resolve_test_db_url()
-    if not _pg_reachable(url):
-        pytest.skip("no test Postgres reachable")
-
-    port = _free_port()
-    env = {
-        **os.environ,
-        "PSEUDOLIFE_MCP_DAEMON_URL": f"http://127.0.0.1:{port}",
-        "PSEUDOLIFE_MCP_HOST": "127.0.0.1",
-        "PSEUDOLIFE_MCP_PORT": str(port),
-        "PSEUDOLIFE_MCP_DATABASE_URL": url,
-        "PSEUDOLIFE_MCP_DATA_DIR": str(tmp_path),
-    }
-    env.pop("PSEUDOLIFE_MCP_TOKEN", None)  # loopback, no token needed
+    env = _shim_env(shared_daemon["port"], shared_daemon["data_dir"])
 
     async def _drive():
         from mcp import ClientSession, StdioServerParameters
@@ -313,10 +308,7 @@ def test_shim_surfaces_the_daemons_real_error_message(tmp_path):
                     f"the daemon's real validation message should name the "
                     f"expected type: {text}")
 
-    try:
-        asyncio.run(asyncio.wait_for(_drive(), timeout=_OUTER_TIMEOUT_S))
-    finally:
-        _reap_daemon(port)
+    asyncio.run(asyncio.wait_for(_drive(), timeout=_OUTER_TIMEOUT_S))
 
 
 # ── Session identity + lifecycle (unit; no daemon) ────────────────────────────

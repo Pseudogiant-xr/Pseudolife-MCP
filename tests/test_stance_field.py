@@ -26,11 +26,7 @@ no ``stance`` parameter on the MCP ``memory_fact_set`` surface.
 """
 from __future__ import annotations
 
-import tempfile
-
 import pytest
-
-from pseudolife_memory.service import MemoryService
 
 from tests.dream_helpers import (StubExtractor as _StubExtractor,
                                  chat_payload as _chat_payload,
@@ -39,10 +35,12 @@ from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
 
 
 @pytest.fixture()
-def svc():
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        s = MemoryService(data_dir=d)
-        yield s
+def svc(pristine_service):
+    """Conftest's module-scoped service with the bank (CMS + cortex) cleared
+    per test — every test here writes the slots it reads, so the shared
+    service is equivalent to a private one at a seventh of the construction
+    cost."""
+    return pristine_service
 
 
 # ── parse boundary ────────────────────────────────────────────────────────

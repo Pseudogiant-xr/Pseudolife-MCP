@@ -607,18 +607,6 @@ def store_with_pg(pg_conn, pg_url):  # noqa: F811
     storage.close()
 
 
-def test_store_roundtrip_preserves_kind(store_with_pg, emb):
-    """This task's RED: the store-level persistence roundtrip through
-    Postgres. ``kind`` must appear in ``_FACT_COLS`` and be threaded through
-    ``upsert_fact``/``_record_to_row``/``hydrate_cortex`` for a member to
-    survive a fresh hydration as a member at all."""
-    store, reload_store = store_with_pg
-    store.add_member(Slot("user", "tags", "alpha"), emb("alpha", dim=1024))
-    fresh = reload_store()
-    assert fresh.slot_kind("user", "tags") == "set"
-    assert [m.value for m in fresh.members("user", "tags")] == ["alpha"]
-
-
 def test_blocked_aggregate_contender_survives_pg_roundtrip(store_with_pg, emb):
     """Regression pin: the guard's contender must survive persistence with
     status and kind intact — a hydration that dropped either would resurrect
@@ -654,70 +642,13 @@ def svc(pg_conn, pg_url):  # noqa: F811
                 s._storage.close()
 
 
-def test_kind_survives_pg_hydration(svc):
-    """The Postgres half of the coupling, at the storage layer directly
-    (not yet through the service API — svc.set_add/set_remove are Task 4).
-    Writes 2 members on one slot + 1 scalar on another straight through
-    ``CortexStore``, persists via ``svc.save()`` (PG mode + explicit save ->
-    ``sync.snapshot_cortex``'s full-resync path), and hydrates a FRESH
-    CortexStore from the facts table — exercising ``_FACT_COLS``,
-    ``upsert_fact``'s NOT NULL guard, ``_record_to_row``, and
-    ``hydrate_cortex`` together.
-
-    Also pins the Task 1 review finding this task's brief calls out
-    explicitly: a persisted member row's ``value_norm`` must be non-NULL,
-    since Postgres treats NULL as distinct in a unique index and a NULL
-    ``value_norm`` would silently bypass ``facts_member_current_uq``. F5
-    (review-caught): non-NULL alone doesn't pin the CONTENT — a row could
-    persist any non-null junk and the assertion would still pass. The
-    "alpha" member is written as ``" Alpha "`` (leading/trailing space,
-    mixed case) so the persisted ``value_norm`` is checked against
-    :func:`pseudolife_memory.memory.cortex._norm_value` applied to the
-    ORIGINAL text, not merely re-derived from the already-normalised value
-    stored in the record.
-    """
-    import torch
-
-    from pseudolife_memory.memory.cortex import CortexStore, _norm_value
-    from pseudolife_memory.memory.slots import Slot
-    from pseudolife_memory.storage import sync
-
-    EMB = torch.zeros(1024)
-
-    svc._ensure_init()
-    svc._cortex.add_member(Slot("user", "tags", " Alpha "), EMB)
-    svc._cortex.add_member(Slot("user", "tags", "beta"), EMB)
-    svc._cortex.write_fact(Slot("user", "city", "Sydney"), EMB)
-    svc.save()
-
-    rows = svc._storage.load_facts()
-    member_rows = [r for r in rows if r["kind"] == "member"]
-    scalar_rows = [r for r in rows if r["kind"] == "scalar"]
-    assert len(member_rows) == 2
-    assert len(scalar_rows) == 1
-    # Task 1's per-slot member-uniqueness index depends on this being non-NULL...
-    assert all(r["value_norm"] for r in member_rows)
-    assert all(r["value_norm"] is None for r in scalar_rows)
-    # ...and F5 pins the actual CONTENT, not just non-NULLness.
-    by_value = {r["value"]: r for r in member_rows}
-    assert by_value[" Alpha "]["value_norm"] == _norm_value(" Alpha ") == "alpha"
-    assert by_value["beta"]["value_norm"] == _norm_value("beta") == "beta"
-
-    fresh = CortexStore()
-    sync.hydrate_cortex(fresh, svc._storage)
-
-    assert fresh.slot_kind("user", "tags") == "set"
-    members = fresh.members("user", "tags")
-    assert sorted(m.value for m in members) == [" Alpha ", "beta"]  # verbatim, not normalised
-    assert all(m.status == "current" and m.kind == "member" for m in members)
-
-    scalar = fresh.lookup("user", "city")
-    assert scalar is not None and scalar.kind == "scalar" and scalar.value == "Sydney"
-
-
 def test_members_survive_restart(tmp_service_dir):
     """Service-level restart test — written now per the brief, unskipped in
-    Task 4 once ``svc.set_add``/``svc.set_remove`` exist."""
+    Task 4 once ``svc.set_add``/``svc.set_remove`` exist.
+
+    Own data dir: it re-opens a SECOND service on it, which is the subject.
+    Every other file-mode test below takes conftest's ``pristine_service``
+    (bank cleared per test) instead of building a service apiece."""
     from pseudolife_memory.service import MemoryService
 
     svc = MemoryService(data_dir=tmp_service_dir)
@@ -740,10 +671,8 @@ def tmp_service_dir(tmp_path):
 # --- Task 4: service surface --------------------------------------------
 
 
-def test_set_add_returns_documented_shape(tmp_service_dir):
-    from pseudolife_memory.service import MemoryService
-
-    svc = MemoryService(data_dir=tmp_service_dir)
+def test_set_add_returns_documented_shape(pristine_service):
+    svc = pristine_service
     out = svc.set_add("user", "bikes owned", "road bike")
     assert out == {
         "action": "member_added",
@@ -757,10 +686,8 @@ def test_set_add_returns_documented_shape(tmp_service_dir):
     assert out2["members_count"] == 1
 
 
-def test_set_remove_returns_documented_shape(tmp_service_dir):
-    from pseudolife_memory.service import MemoryService
-
-    svc = MemoryService(data_dir=tmp_service_dir)
+def test_set_remove_returns_documented_shape(pristine_service):
+    svc = pristine_service
     svc.set_add("user", "bikes owned", "road bike")
     out = svc.set_remove("user", "bikes owned", "road bike")
     assert out == {
@@ -775,32 +702,32 @@ def test_set_remove_returns_documented_shape(tmp_service_dir):
 
 
 def test_cortex_write_rejects_scalar_write_on_set_slot_with_actionable_message(
-        tmp_service_dir):
+        pristine_service):
     """Item 2 (tool-boundary mapping): cortex_write must translate the
     store's ValueError into a message naming the set tools, not the store's
     own add_member/remove_member names."""
-    from pseudolife_memory.service import MemoryService
-
-    svc = MemoryService(data_dir=tmp_service_dir)
+    svc = pristine_service
     svc.set_add("user", "bikes owned", "road bike")
     with pytest.raises(ValueError, match="memory_set_add"):
         svc.cortex_write("user", "bikes owned", "hybrid bike")
 
 
-def test_promote_slots_skips_set_slot_and_logs_info(tmp_service_dir, caplog):
+def test_promote_slots_skips_set_slot_and_logs_info(pristine_service, caplog):
     """Item 1 (extraction-path routing): a scalar candidate for a slot that
     already holds a set must not raise out of the auto-promote loop, must
     not mutate the set, and must be logged at INFO naming the slot (not
     silently dropped at debug like an unrelated write failure)."""
-    from pseudolife_memory.service import MemoryService
-
-    svc = MemoryService(data_dir=tmp_service_dir)
+    svc = pristine_service
     svc.set_add("user", "database", "postgres")
     before = sorted(m["value"] for m in svc.cortex_lookup("user", "database")["members"])
 
-    with caplog.at_level("INFO", logger="pseudolife_memory.service"):
-        svc.config.memory.cortex.auto_promote = True
-        out = svc.store("my database is mysql", source="conversation")
+    try:
+        with caplog.at_level("INFO", logger="pseudolife_memory.service"):
+            svc.config.memory.cortex.auto_promote = True
+            out = svc.store("my database is mysql", source="conversation")
+    finally:
+        # The shared service's config outlives the bank clear.
+        svc.config.memory.cortex.auto_promote = False
 
     assert out["cortex_promoted"] == 0
     after = sorted(m["value"] for m in svc.cortex_lookup("user", "database")["members"])
@@ -811,10 +738,8 @@ def test_promote_slots_skips_set_slot_and_logs_info(tmp_service_dir, caplog):
     )
 
 
-def test_cortex_lookup_on_set_slot(tmp_service_dir):
-    from pseudolife_memory.service import MemoryService
-
-    svc = MemoryService(data_dir=tmp_service_dir)
+def test_cortex_lookup_on_set_slot(pristine_service):
+    svc = pristine_service
     svc.set_add("user", "bikes owned", "road bike")
     svc.set_add("user", "bikes owned", "gravel bike")
     svc.set_remove("user", "bikes owned", "road bike")
@@ -825,15 +750,13 @@ def test_cortex_lookup_on_set_slot(tmp_service_dir):
     assert [m["value"] for m in got["removed"]] == ["road bike"]
 
 
-def test_history_on_set_slot_is_time_ordered(tmp_service_dir):
+def test_history_on_set_slot_is_time_ordered(pristine_service):
     # Flaked once in a full-suite run (2026-08-06): the version list is
     # built member-by-member and only the timestamp sort restores
     # chronology, so an equal-timestamp tie let a removal sort ahead of a
     # later member's add. The tie itself is pinned deterministically by
     # test_history_set_order_is_deterministic_under_timestamp_ties below.
-    from pseudolife_memory.service import MemoryService
-
-    svc = MemoryService(data_dir=tmp_service_dir)
+    svc = pristine_service
     svc.set_add("user", "bikes owned", "road bike")
     svc.set_add("user", "bikes owned", "gravel bike")
     svc.set_remove("user", "bikes owned", "road bike")
@@ -851,13 +774,12 @@ def test_history_on_set_slot_is_time_ordered(tmp_service_dir):
 
 
 def test_history_set_order_is_deterministic_under_timestamp_ties(
-        tmp_service_dir, monkeypatch):
+        pristine_service, monkeypatch):
     """Regression (2026-08-06 flake): with every write stamped at the SAME
     clock value, the set-history sort has no timestamp signal at all — the
     order must still come out adds-in-insertion-order with each removal
     after the adds of its instant, via the tie-break key, not sort luck."""
     import pseudolife_memory.memory.cortex as cortex_mod
-    from pseudolife_memory.service import MemoryService
 
     class _FrozenTime:
         @staticmethod
@@ -865,7 +787,7 @@ def test_history_set_order_is_deterministic_under_timestamp_ties(
             return 1_700_000_000.0
 
     monkeypatch.setattr(cortex_mod, "time", _FrozenTime)
-    svc = MemoryService(data_dir=tmp_service_dir)
+    svc = pristine_service
     svc.set_add("user", "bikes owned", "road bike")
     svc.set_add("user", "bikes owned", "gravel bike")
     svc.set_remove("user", "bikes owned", "road bike")
@@ -901,10 +823,8 @@ def test_resolve_refuses_when_slot_converted_to_set(store, emb):
     assert [c.value for c in store.contenders_for("user", "bikes owned")] == ["gravel bike"]
 
 
-def test_cortex_resolve_service_reports_slot_holds_set(tmp_service_dir):
-    from pseudolife_memory.service import MemoryService
-
-    svc = MemoryService(data_dir=tmp_service_dir)
+def test_cortex_resolve_service_reports_slot_holds_set(pristine_service):
+    svc = pristine_service
     svc.cortex_write("user", "bikes owned", "road bike", support="user")
     svc.cortex_write("user", "bikes owned", "gravel bike", support="agent")
     svc.set_add("user", "bikes owned", "hybrid bike")
@@ -913,67 +833,86 @@ def test_cortex_resolve_service_reports_slot_holds_set(tmp_service_dir):
                     "entity": "user", "attribute": "bikes owned"}
 
 
-# --- Task 5 review carry: the untested PG durability leg ------------------
+# --- PG durability of the member model, end to end ------------------------
 
 
-def test_set_add_remove_survive_pg_hydration_through_the_service(svc, pg_url):  # noqa: F811
-    """Task 4's PG coverage (``test_kind_survives_pg_hydration`` above) calls
-    ``svc._cortex.add_member`` directly and rehydrates a bare ``CortexStore``
-    — it never exercises ``svc.set_add``/``svc.set_remove`` themselves, so
-    the per-slot write-through those methods actually take on every write
-    (``_save_cortex`` -> ``sync.sync_cortex_slots`` ->
-    ``PostgresStorage.replace_slot_facts`` -> ``_txn``) — the exact path a
-    live ``memory_set_add``/``memory_set_remove`` MCP call uses — stayed
-    untested. Close that gap: two adds + one remove THROUGH THE SERVICE API
-    (each call persists on its own; no explicit ``svc.save()``), then
-    rehydrate a brand-new ``MemoryService`` against the same database and
-    read the slot back."""
-    import tempfile
+def test_set_writes_survive_pg_hydration_through_the_service(svc, pg_url):  # noqa: F811
+    """One sequence covering what four overlapping tests used to assert
+    separately (store-level roundtrip, kind through svc.save(), add+remove
+    through the service, and add-alone): every write goes through the
+    service API — the exact path a live ``memory_set_add`` /
+    ``memory_set_remove`` MCP call takes — and each stage rehydrates a
+    brand-new ``MemoryService`` against the same database.
 
+    Stage 1 is deliberately ONE add and nothing else. ``dirty_slots`` is
+    slot-keyed, not call-keyed, so a later write's flush would carry an
+    earlier add's dirty mark along for free: rehydrating before any other
+    write is what pins ``set_add``'s OWN ``_save_cortex`` write-through.
+    Verified red 2026-08-28 by commenting out that call — stage 1 fails
+    with the slot absent from the fresh service.
+
+    Stage 2 adds a second member, removes the first, and writes a scalar on
+    another slot, then checks BOTH the hydrated view and the persisted rows.
+    The row check is the Task-1 review finding: a member row's
+    ``value_norm`` must be non-NULL (Postgres treats NULL as distinct in a
+    unique index, so a NULL would silently bypass
+    ``facts_member_current_uq``) and must equal ``_norm_value`` of the
+    ORIGINAL text — the member is written as ``" Gravel Bike "`` so the
+    assertion cannot pass by re-deriving the normalisation from an
+    already-normalised stored value. Scalar rows keep ``value_norm`` NULL.
+    """
+    import tempfile as _tempfile
+
+    from pseudolife_memory.memory.cortex import _norm_value
     from pseudolife_memory.service import MemoryService
 
+    def _fresh():
+        """A brand-new service on the same database (own file dir)."""
+        d = _tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        return d, MemoryService(data_dir=d.name, database_url=pg_url)
+
+    # Stage 1 — ONE add, no other write of any kind on this service.
     svc.set_add("user", "bikes owned", "road bike")
-    svc.set_add("user", "bikes owned", "gravel bike")
+    d1, fresh = _fresh()
+    try:
+        got = fresh.cortex_lookup("user", "bikes owned")
+        assert got is not None and got["kind"] == "set"
+        assert [m["value"] for m in got["members"]] == ["road bike"]
+    finally:
+        if fresh._storage is not None:
+            fresh._storage.close()
+        d1.cleanup()
+
+    # Stage 2 — a second member (deliberately un-normalised text), a removal,
+    # and a scalar on a neighbouring slot.
+    svc.set_add("user", "bikes owned", " Gravel Bike ")
     svc.set_remove("user", "bikes owned", "road bike")
+    svc.cortex_write("user", "city", "Sydney", support="user")
 
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        fresh = MemoryService(data_dir=d, database_url=pg_url)
-        try:
-            got = fresh.cortex_lookup("user", "bikes owned")
-            assert got["kind"] == "set"
-            assert [m["value"] for m in got["members"]] == ["gravel bike"]
-            assert [m["value"] for m in got["removed"]] == ["road bike"]
-        finally:
-            if fresh._storage is not None:
-                fresh._storage.close()
+    rows = svc._storage.load_facts()
+    member_rows = [r for r in rows if r["kind"] == "member"]
+    scalar_rows = [r for r in rows if r["kind"] == "scalar"]
+    assert {r["value"] for r in member_rows} == {"road bike", " Gravel Bike "}
+    assert [r["value"] for r in scalar_rows] == ["Sydney"]
+    assert all(r["value_norm"] for r in member_rows)     # unique-index guard
+    by_value = {r["value"]: r for r in member_rows}
+    assert (by_value[" Gravel Bike "]["value_norm"]
+            == _norm_value(" Gravel Bike ") == "gravel bike")
+    assert all(r["value_norm"] is None for r in scalar_rows)
 
-
-def test_set_add_alone_survives_pg_hydration_through_the_service(svc, pg_url):  # noqa: F811
-    """Review finding on the test above: it calls set_add TWICE then
-    set_remove ONCE, so it does not actually pin set_add's own
-    ``_save_cortex()`` call — ``dirty_slots`` is slot-keyed, not
-    call-keyed, so the later set_remove's flush would carry an earlier
-    set_add's dirty mark along for free even if set_add never called
-    ``_save_cortex`` itself (verified empirically: commenting out just
-    set_add's ``_save_cortex()`` left the test above green). Pin set_add's
-    own write-through in isolation: ONE add, no other write of any kind on
-    this service, then rehydrate a fresh service and assert the member
-    survived."""
-    import tempfile
-
-    from pseudolife_memory.service import MemoryService
-
-    svc.set_add("user", "bikes owned", "road bike")
-
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        fresh = MemoryService(data_dir=d, database_url=pg_url)
-        try:
-            got = fresh.cortex_lookup("user", "bikes owned")
-            assert got is not None and got["kind"] == "set"
-            assert [m["value"] for m in got["members"]] == ["road bike"]
-        finally:
-            if fresh._storage is not None:
-                fresh._storage.close()
+    d2, fresh = _fresh()
+    try:
+        got = fresh.cortex_lookup("user", "bikes owned")
+        assert got["kind"] == "set"
+        # Verbatim member text survives; the removal does not come back.
+        assert [m["value"] for m in got["members"]] == [" Gravel Bike "]
+        assert [m["value"] for m in got["removed"]] == ["road bike"]
+        scalar = fresh.cortex_lookup("user", "city")
+        assert scalar["kind"] == "scalar" and scalar["value"] == "Sydney"
+    finally:
+        if fresh._storage is not None:
+            fresh._storage.close()
+        d2.cleanup()
 
 
 # --- Task 6: serving — one entry per set slot ------------------------------
@@ -992,28 +931,35 @@ def test_set_add_alone_survives_pg_hydration_through_the_service(svc, pg_url):  
 # for the other, with no dependence on how the real sentence-transformer
 # happens to score "road bike" against "gravel bike".
 
-def _service_with_deterministic_embedder(tmp_service_dir):
+def _basis_vectors(svc):
+    """Two orthogonal unit vectors in the service's embedding space.
+
+    Takes an existing service rather than building one (these tests run on
+    the shared ``pristine_service``), and the caller stubs ``encode_query``
+    through ``monkeypatch`` so the stub cannot outlive its test — the
+    embedder is NOT re-created by the bank clear.
+    """
     import torch
 
-    from pseudolife_memory.service import MemoryService
-
-    svc = MemoryService(data_dir=tmp_service_dir)
     svc._ensure_init()
     dim = svc._embedder.encode_single("probe").shape[0]
     v1 = torch.zeros(dim)
     v1[0] = 1.0
     v2 = torch.zeros(dim)
     v2[1] = 1.0
-    return svc, v1, v2
+    return v1, v2
 
 
-def test_cortex_search_groups_set_slot_into_one_entry(tmp_service_dir):
+def test_cortex_search_groups_set_slot_into_one_entry(pristine_service,
+                                                      monkeypatch):
     from pseudolife_memory.memory.slots import Slot
 
-    svc, v1, v2 = _service_with_deterministic_embedder(tmp_service_dir)
+    svc = pristine_service
+    v1, v2 = _basis_vectors(svc)
     svc._cortex.add_member(Slot("user", "bikes owned", "road bike"), v1)
     svc._cortex.add_member(Slot("user", "bikes owned", "gravel bike"), v2)
-    svc._embedder.encode_query = lambda text, normalize=True: v1.clone()
+    monkeypatch.setattr(svc._embedder, "encode_query",
+                        lambda text, normalize=True: v1.clone())
 
     entries = svc.cortex_search("road bike", top_k=5, min_score=0.0)["entries"]
     assert len(entries) == 1                     # ONE entry, not one per member
@@ -1044,17 +990,20 @@ def test_cortex_search_groups_set_slot_into_one_entry(tmp_service_dir):
     assert e["age"], "set entry must carry a human-readable age"
 
 
-def test_cortex_search_set_entry_orders_by_score_not_insertion(tmp_service_dir):
+def test_cortex_search_set_entry_orders_by_score_not_insertion(
+        pristine_service, monkeypatch):
     """Insertion order was road bike then gravel bike; the query names gravel
     bike, so the composed value must lead with gravel bike (score-descending,
     the order members "emerged from fusion") even though it was added
     second."""
     from pseudolife_memory.memory.slots import Slot
 
-    svc, v1, v2 = _service_with_deterministic_embedder(tmp_service_dir)
+    svc = pristine_service
+    v1, v2 = _basis_vectors(svc)
     svc._cortex.add_member(Slot("user", "bikes owned", "road bike"), v1)
     svc._cortex.add_member(Slot("user", "bikes owned", "gravel bike"), v2)
-    svc._embedder.encode_query = lambda text, normalize=True: v2.clone()
+    monkeypatch.setattr(svc._embedder, "encode_query",
+                        lambda text, normalize=True: v2.clone())
 
     entries = svc.cortex_search("gravel bike", top_k=5, min_score=0.0)["entries"]
     assert len(entries) == 1
@@ -1062,17 +1011,20 @@ def test_cortex_search_set_entry_orders_by_score_not_insertion(tmp_service_dir):
     assert entries[0]["score"] == 1.0
 
 
-def test_cortex_search_set_entry_lists_unranked_current_members(tmp_service_dir):
+def test_cortex_search_set_entry_lists_unranked_current_members(
+        pristine_service, monkeypatch):
     """A min_score floor that only "road bike" clears must not shrink the
     composed value to just that member — the slot's full current membership
     (fetched independently of what made it into the ranked hit list) is
     always shown, per the brief."""
     from pseudolife_memory.memory.slots import Slot
 
-    svc, v1, v2 = _service_with_deterministic_embedder(tmp_service_dir)
+    svc = pristine_service
+    v1, v2 = _basis_vectors(svc)
     svc._cortex.add_member(Slot("user", "bikes owned", "road bike"), v1)
     svc._cortex.add_member(Slot("user", "bikes owned", "gravel bike"), v2)
-    svc._embedder.encode_query = lambda text, normalize=True: v1.clone()
+    monkeypatch.setattr(svc._embedder, "encode_query",
+                        lambda text, normalize=True: v1.clone())
 
     # gravel bike is orthogonal to the query -> cosine 0.0, below the floor.
     entries = svc.cortex_search("road bike", top_k=5, min_score=0.5)["entries"]
@@ -1081,30 +1033,36 @@ def test_cortex_search_set_entry_lists_unranked_current_members(tmp_service_dir)
     assert entries[0]["score"] == 1.0
 
 
-def test_cortex_search_no_set_entry_when_no_member_ranks(tmp_service_dir):
+def test_cortex_search_no_set_entry_when_no_member_ranks(pristine_service,
+                                                         monkeypatch):
     """If every member of a slot scores below the floor, the slot must not
     appear at all — grouping only starts once at least one member ranks."""
     from pseudolife_memory.memory.slots import Slot
 
-    svc, v1, v2 = _service_with_deterministic_embedder(tmp_service_dir)
+    svc = pristine_service
+    v1, v2 = _basis_vectors(svc)
     svc._cortex.add_member(Slot("user", "bikes owned", "road bike"), v1)
     svc._cortex.add_member(Slot("user", "bikes owned", "gravel bike"), v2)
     import torch
-    svc._embedder.encode_query = lambda text, normalize=True: torch.zeros_like(v1)
+    monkeypatch.setattr(svc._embedder, "encode_query",
+                        lambda text, normalize=True: torch.zeros_like(v1))
 
     entries = svc.cortex_search("unrelated", top_k=5, min_score=0.5)["entries"]
     assert entries == []
 
 
-def test_cortex_search_mixed_scalar_and_set_entries(tmp_service_dir):
+def test_cortex_search_mixed_scalar_and_set_entries(pristine_service,
+                                                    monkeypatch):
     """Scalar facts and a set-slot entry can co-exist in one result list; the
     scalar path is untouched (still carries contested/source_entries shape)."""
-    svc, v1, v2 = _service_with_deterministic_embedder(tmp_service_dir)
+    svc = pristine_service
+    v1, v2 = _basis_vectors(svc)
     from pseudolife_memory.memory.slots import Slot
 
     svc._cortex.add_member(Slot("user", "bikes owned", "road bike"), v1)
     svc._cortex.write_fact(Slot("user", "city", "Sydney"), v2)
-    svc._embedder.encode_query = lambda text, normalize=True: (v1 + v2) / 2
+    monkeypatch.setattr(svc._embedder, "encode_query",
+                        lambda text, normalize=True: (v1 + v2) / 2)
 
     entries = svc.cortex_search("bikes and city", top_k=5, min_score=0.0)["entries"]
     kinds = {e.get("kind") for e in entries}

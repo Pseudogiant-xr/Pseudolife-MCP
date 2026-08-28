@@ -27,8 +27,9 @@ def test_detailed_no_context_returns_default_and_nones():
 # ── Service-side tier resolution + persistent active-session pointer
 # (PG-backed) ─────────────────────────────────────────────────────────
 
-from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401  (fixtures)
-from tests.test_outcome_inference import pg_service  # noqa: F401
+from tests.pg_fixtures import (  # noqa: F401  (fixtures)
+    pg_conn, pg_service, pg_url,
+)
 
 
 def test_resolver_prefers_header_then_pointer_then_transport(pg_service):

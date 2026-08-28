@@ -435,14 +435,38 @@ def _seed_recall_cap_fixture(svc, base_query: str) -> None:
                       source="bench")
 
 
-@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_memory_recall_caps_payload_non_verbose(monkeypatch, tmp_path):
+@pytest.fixture(scope="module")
+def recall_cap_service(tmp_path_factory):
+    """The cap fixture built ONCE for the two payload-cap tests below.
+
+    Each build was a `build_service` (reset_bench + a real embedder) plus 21
+    stores and 20 `graph_relate` calls through real dense search — the most
+    expensive setup in this file, and both tests need the identical corpus.
+    Neither consumer writes to the service: the first only calls
+    `svc.recall`, the second only monkeypatches `srv.service` (undone per
+    test), so one shared build is equivalent to two.
+
+    DO NOT insert a test between the two consumers below. Anything that
+    calls `build_service` runs evals' `reset_bench`, which reaps every
+    backend on the bench database and would terminate THIS service's
+    connection mid-module. The two are adjacent on purpose; every other
+    `build_service` user in this file sits strictly before or after them.
+    """
+    if not _pg_up():
+        pytest.skip("bench Postgres not reachable")
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
     from ladder_sweep import build_service
-    import pseudolife_memory.mcp_server as srv
-    svc = build_service(tmp_path)
+    svc = build_service(tmp_path_factory.mktemp("recall-caps"))
     base_query = "what does root-svc connect to"
     _seed_recall_cap_fixture(svc, base_query)
+    return svc, base_query
+
+
+@pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
+def test_memory_recall_caps_payload_non_verbose(monkeypatch,
+                                                recall_cap_service):
+    import pseudolife_memory.mcp_server as srv
+    svc, base_query = recall_cap_service
 
     # Sanity: the fixture really is big enough that the UNCAPPED service
     # layer blows past every cap under test — otherwise the caps below
@@ -478,15 +502,14 @@ def test_memory_recall_caps_payload_non_verbose(monkeypatch, tmp_path):
 
 
 @pytest.mark.skipif(not _pg_up(), reason="bench Postgres not reachable")
-def test_memory_recall_verbose_keeps_full_texts(monkeypatch, tmp_path):
+def test_memory_recall_verbose_keeps_full_texts(monkeypatch,
+                                                recall_cap_service):
     # verbose=True is the escape hatch: entity/edge counts still cap the
     # payload, but supporting text content must NOT be truncated.
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
-    from ladder_sweep import build_service
+    # Shares the module-scoped corpus with the test directly above — keep the
+    # two adjacent (see the fixture's docstring).
     import pseudolife_memory.mcp_server as srv
-    svc = build_service(tmp_path)
-    base_query = "what does root-svc connect to"
-    _seed_recall_cap_fixture(svc, base_query)
+    svc, base_query = recall_cap_service
     monkeypatch.setattr(srv, "service", svc, raising=False)
     out = srv.memory_recall(base_query, hops=3, top_k=5, verbose=True)
     assert len(out["entities"]) <= srv._RECALL_MAX_ENTITIES

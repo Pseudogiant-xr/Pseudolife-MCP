@@ -618,3 +618,55 @@ def test_retire_current_returns_none_when_no_current_scalar():
     s.add_member(Slot("user", "tags", "alpha"), _unit(3), now=100.0)
     assert s.retire_current("user", "tags") is None
     assert [m.value for m in s.members("user", "tags")] == ["alpha"]
+
+
+# ── clear (test-support reset; see CortexStore.clear docstring) ──────────
+
+def test_clear_empties_every_mutable_attribute_and_leaves_a_usable_store():
+    """``clear()`` must reset EVERY mutable attribute the write paths touch —
+    a half-reset store is worse than no reset, because the stale index would
+    point into a fresh ``records`` list."""
+    s = CortexStore()
+    s.write_fact(Slot("server", "port", "8080"), _unit(1), support="user",
+                 now=100.0)
+    s.write_fact(Slot("server", "port", "9090"), _unit(2), support="user",
+                 now=200.0)                      # supersession -> audit row + log
+    s.add_member(Slot("user", "tags", "alpha"), _unit(3), now=300.0)
+    s.add_member(Slot("user", "tags", "beta"), _unit(4), now=310.0)
+    s.dream_cursor = 999.0
+    s.meta_dirty = True
+    # Preconditions: every attribute clear() must reset is genuinely non-empty.
+    assert s.records and s._current and s._members
+    assert s.supersession_log and s.dirty_slots
+
+    s.clear()
+
+    assert s.records == []
+    assert s._current == {}
+    assert s._members == {}
+    assert s.supersession_log == []
+    assert s.dirty_slots == set()
+    assert s.meta_dirty is False
+    assert s.dream_cursor == 0.0
+    # Reads go through the emptied indexes, not stale ones.
+    assert s.lookup("server", "port") is None
+    assert s.members("user", "tags") == []
+    assert s.slot_kind("user", "tags") is None
+    assert s.search(_unit(1), top_k=5) == []
+    assert s.stats()["total_records"] == 0
+
+    # ...and the store still works: a full write/lookup round-trip after clear.
+    res = s.write_fact(Slot("server", "port", "7070"), _unit(5), support="user",
+                       now=400.0)
+    assert res.action == "inserted"
+    assert s.lookup("server", "port").value == "7070"
+    s.add_member(Slot("user", "tags", "gamma"), _unit(6), now=410.0)
+    assert [m.value for m in s.members("user", "tags")] == ["gamma"]
+    assert ("server", "port") in s.dirty_slots
+    # Config knobs are NOT state — clear() leaves them alone.
+    s2 = CortexStore(supersede_confidence_margin=0.42, reinforce_rate=0.11,
+                     protect_provenance=False)
+    s2.clear()
+    assert s2.supersede_confidence_margin == 0.42
+    assert s2.reinforce_rate == 0.11
+    assert s2.protect_provenance is False

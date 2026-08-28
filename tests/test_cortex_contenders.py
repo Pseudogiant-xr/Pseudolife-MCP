@@ -3,8 +3,12 @@ co-persistence, and contenders — the provenance guard surfaces a conflicting
 agent value as a contender against a user fact, and resolve() promotes/retires
 it.
 
-Constructs a real MemoryService (offline embedder) against a throwaway data dir,
-so it never touches production state.
+Runs against a real MemoryService (offline embedder), never production state.
+Most tests take conftest's shared ``pristine_service`` — the cortex is a
+slot-keyed store and the fixture empties it per test, so a private data dir
+buys nothing but a service construction. The three that DO build their own
+service say why at the call site: two re-open a second service on the same
+data dir, and one breaks the service's save path irreversibly.
 """
 from __future__ import annotations
 
@@ -13,32 +17,32 @@ import tempfile
 from pseudolife_memory.service import MemoryService
 
 
-def test_cortex_write_then_lookup_roundtrip_through_service():
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        svc = MemoryService(data_dir=d)
-        r = svc.cortex_write("grid", "size", "41", provenance=["ep1"])
-        assert r["action"] == "inserted"
-        assert r["value"] == "41"
-        got = svc.cortex_lookup("grid", "size")
-        assert got is not None
-        assert got["value"] == "41"
-        assert got["status"] == "current"
-        assert got["provenance"] == ["ep1"]
+def test_cortex_write_then_lookup_roundtrip_through_service(pristine_service):
+    svc = pristine_service
+    r = svc.cortex_write("grid", "size", "41", provenance=["ep1"])
+    assert r["action"] == "inserted"
+    assert r["value"] == "41"
+    got = svc.cortex_lookup("grid", "size")
+    assert got is not None
+    assert got["value"] == "41"
+    assert got["status"] == "current"
+    assert got["provenance"] == ["ep1"]
 
 
-def test_cortex_supersede_then_search_returns_current_only():
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        svc = MemoryService(data_dir=d)
-        svc.cortex_write("grid", "size", "40", provenance=["ep1"])
-        svc.cortex_write("grid", "size", "41", provenance=["ep2"])
-        assert svc.cortex_lookup("grid", "size")["value"] == "41"
-        entries = svc.cortex_search("grid size", top_k=10)["entries"]
-        values = [e["value"] for e in entries]
-        assert "41" in values
-        assert "40" not in values
+def test_cortex_supersede_then_search_returns_current_only(pristine_service):
+    svc = pristine_service
+    svc.cortex_write("grid", "size", "40", provenance=["ep1"])
+    svc.cortex_write("grid", "size", "41", provenance=["ep2"])
+    assert svc.cortex_lookup("grid", "size")["value"] == "41"
+    entries = svc.cortex_search("grid size", top_k=10)["entries"]
+    values = [e["value"] for e in entries]
+    assert "41" in values
+    assert "40" not in values
 
 
 def test_cortex_copersists_across_service_restart():
+    # Own data dir: re-opens a SECOND service on it — the restart is the
+    # subject, so the shared fixture cannot stand in.
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
         svc = MemoryService(data_dir=d)
         svc.cortex_write("user", "city", "Sydney", provenance=["epX"])
@@ -50,14 +54,13 @@ def test_cortex_copersists_across_service_restart():
         assert got["provenance"] == ["epX"]
 
 
-def test_cortex_read_includes_relative_age_and_stamp():
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        svc = MemoryService(data_dir=d)
-        svc.cortex_write("server", "port", "8080", support="user")
-        got = svc.cortex_lookup("server", "port")
-        assert got is not None
-        assert got.get("age") == "just now"          # written moments ago
-        assert got["tx_time"] and got["writer_id"]   # temporal stamp surfaced
+def test_cortex_read_includes_relative_age_and_stamp(pristine_service):
+    svc = pristine_service
+    svc.cortex_write("server", "port", "8080", support="user")
+    got = svc.cortex_lookup("server", "port")
+    assert got is not None
+    assert got.get("age") == "just now"          # written moments ago
+    assert got["tx_time"] and got["writer_id"]   # temporal stamp surfaced
 
 
 def test_failed_cortex_save_surfaces_as_persistence_error():
@@ -65,6 +68,9 @@ def test_failed_cortex_save_surfaces_as_persistence_error():
     and bumps the health-visible persist-error counter (F3)."""
     from pseudolife_memory.service import MemoryService, PersistenceError
 
+    # Own service: it replaces ``_cortex.save`` with a raising stub and bumps
+    # ``_persist_errors``, neither of which the bank clear undoes — on the
+    # shared service both would leak into every later test in the module.
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
         svc = MemoryService(data_dir=d)
         svc._ensure_init()
@@ -83,103 +89,98 @@ def test_failed_cortex_save_surfaces_as_persistence_error():
         assert svc._persist_errors >= 1
 
 
-def test_memory_history_returns_version_timeline():
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        svc = MemoryService(data_dir=d)
-        svc.cortex_write("server", "port", "8080", support="user", now=1000.0)
-        svc.cortex_write("server", "port", "9090", support="user", now=2000.0)
-        hist = svc.history("server", "port")
-        assert hist["count"] >= 2
-        values = [v["value"] for v in hist["versions"]]
-        assert "8080" in values and "9090" in values
-        for v in hist["versions"]:               # each version is attributed
-            assert "writer_id" in v and "tx_time" in v
-        txs = [v["tx_time"] for v in hist["versions"]]
-        assert txs == sorted(txs)                # oldest -> newest
+def test_memory_history_returns_version_timeline(pristine_service):
+    svc = pristine_service
+    svc.cortex_write("server", "port", "8080", support="user", now=1000.0)
+    svc.cortex_write("server", "port", "9090", support="user", now=2000.0)
+    hist = svc.history("server", "port")
+    assert hist["count"] >= 2
+    values = [v["value"] for v in hist["versions"]]
+    assert "8080" in values and "9090" in values
+    for v in hist["versions"]:               # each version is attributed
+        assert "writer_id" in v and "tx_time" in v
+    txs = [v["tx_time"] for v in hist["versions"]]
+    assert txs == sorted(txs)                # oldest -> newest
 
 
 # ── memory_history as_of (per-slot point-in-time read) ───────────────────
 
-def test_history_as_of_filters_versions():
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        svc = MemoryService(data_dir=d)
-        # Injected write times rather than sleeps — as_of compares against
-        # the stamp, so the ordering contract needs no wall-clock gap.
-        svc.cortex_write("team", "mascot", "fox", confidence=0.9,
-                         support="user", now=1000.0)
-        mid = 1500.0
-        svc.cortex_write("team", "mascot", "owl", confidence=0.9,
-                         support="user", now=2000.0)
+def test_history_as_of_filters_versions(pristine_service):
+    svc = pristine_service
+    # Injected write times rather than sleeps — as_of compares against
+    # the stamp, so the ordering contract needs no wall-clock gap.
+    svc.cortex_write("team", "mascot", "fox", confidence=0.9,
+                     support="user", now=1000.0)
+    mid = 1500.0
+    svc.cortex_write("team", "mascot", "owl", confidence=0.9,
+                     support="user", now=2000.0)
 
-        full = svc.history("team", "mascot")
-        assert full["count"] == 2 and "as_of" not in full
+    full = svc.history("team", "mascot")
+    assert full["count"] == 2 and "as_of" not in full
 
-        at_mid = svc.history("team", "mascot", as_of=mid)
-        assert at_mid["count"] == 1
-        assert at_mid["versions"][0]["value"] == "fox"
-        assert at_mid["as_of"] == mid
+    at_mid = svc.history("team", "mascot", as_of=mid)
+    assert at_mid["count"] == 1
+    assert at_mid["versions"][0]["value"] == "fox"
+    assert at_mid["as_of"] == mid
 
-        later = svc.history("team", "mascot", as_of=3000.0)
-        assert later["count"] == 2
+    later = svc.history("team", "mascot", as_of=3000.0)
+    assert later["count"] == 2
 
 
-def test_history_as_of_accepts_iso_string():
+def test_history_as_of_accepts_iso_string(pristine_service):
     from datetime import datetime, timedelta
 
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        svc = MemoryService(data_dir=d)
-        svc.cortex_write("team", "mascot", "fox", confidence=0.9,
-                         support="user")
-        tomorrow = (datetime.now() + timedelta(days=1)).isoformat()
-        out = svc.history("team", "mascot", as_of=tomorrow)
-        assert out["count"] == 1
-        yesterday = (datetime.now() - timedelta(days=1)).isoformat()
-        out = svc.history("team", "mascot", as_of=yesterday)
-        assert out["count"] == 0
+    svc = pristine_service
+    svc.cortex_write("team", "mascot", "fox", confidence=0.9,
+                     support="user")
+    tomorrow = (datetime.now() + timedelta(days=1)).isoformat()
+    out = svc.history("team", "mascot", as_of=tomorrow)
+    assert out["count"] == 1
+    yesterday = (datetime.now() - timedelta(days=1)).isoformat()
+    out = svc.history("team", "mascot", as_of=yesterday)
+    assert out["count"] == 0
 
 
-def test_history_as_of_set_slot():
+def test_history_as_of_set_slot(pristine_service):
     # set_add takes no injected clock, so this one keeps real gaps.
     import time as _t
 
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        svc = MemoryService(data_dir=d)
-        svc.set_add("user", "tags", "alpha")
-        _t.sleep(0.02)
-        mid = _t.time()
-        _t.sleep(0.02)
-        svc.set_add("user", "tags", "beta")
-        out = svc.history("user", "tags", as_of=mid)
-        assert out["kind"] == "set"
-        assert [v["value"] for v in out["versions"]] == ["alpha"]
+    svc = pristine_service
+    svc.set_add("user", "tags", "alpha")
+    _t.sleep(0.02)
+    mid = _t.time()
+    _t.sleep(0.02)
+    svc.set_add("user", "tags", "beta")
+    out = svc.history("user", "tags", as_of=mid)
+    assert out["kind"] == "set"
+    assert [v["value"] for v in out["versions"]] == ["alpha"]
 
 
-def test_fact_get_miss_returns_candidates():
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        svc = MemoryService(data_dir=d)
-        svc.cortex_write("server", "port", "8080", support="user")
-        got = svc.cortex_candidates("server", "nonexistent-attr")
-        assert got and got[0]["why"] == "same_entity"
-        assert got[0]["attribute"] == "port"
-        # A genuinely similar slot surfaces via embeddings too.
-        sim = svc.cortex_candidates("srv", "port number")
-        assert any(c["why"] == "similar_slot" and c["entity"] == "server"
-                   for c in sim)
+def test_fact_get_miss_returns_candidates(pristine_service):
+    svc = pristine_service
+    svc.cortex_write("server", "port", "8080", support="user")
+    got = svc.cortex_candidates("server", "nonexistent-attr")
+    assert got and got[0]["why"] == "same_entity"
+    assert got[0]["attribute"] == "port"
+    # A genuinely similar slot surfaces via embeddings too.
+    sim = svc.cortex_candidates("srv", "port number")
+    assert any(c["why"] == "similar_slot" and c["entity"] == "server"
+               for c in sim)
 
 
-def test_store_agent_fact_parks_contender_against_user_fact():
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        svc = MemoryService(data_dir=d)
-        svc.cortex_write("project", "language", "go", support="user")
-        out = svc.cortex_write("project", "language", "rust", support="agent")
-        assert out["action"] == "contested"
-        assert out["current"]["value"] == "go"      # user fact still current
-        assert out["value"] == "rust"               # the contender (flat record)
-        conts = svc.cortex_contenders("project", "language")["contenders"]
-        assert len(conts) == 1 and conts[0]["value"] == "rust"
+def test_store_agent_fact_parks_contender_against_user_fact(pristine_service):
+    svc = pristine_service
+    svc.cortex_write("project", "language", "go", support="user")
+    out = svc.cortex_write("project", "language", "rust", support="agent")
+    assert out["action"] == "contested"
+    assert out["current"]["value"] == "go"      # user fact still current
+    assert out["value"] == "rust"               # the contender (flat record)
+    conts = svc.cortex_contenders("project", "language")["contenders"]
+    assert len(conts) == 1 and conts[0]["value"] == "rust"
 
 
 def test_cortex_resolve_accept_then_lookup_returns_new_value_and_persists():
+    # Own data dir: the persistence half re-opens a second service on it.
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
         svc = MemoryService(data_dir=d)
         svc.cortex_write("project", "language", "go", support="user")
@@ -192,59 +193,55 @@ def test_cortex_resolve_accept_then_lookup_returns_new_value_and_persists():
         assert svc2.cortex_lookup("project", "language")["value"] == "rust"
 
 
-def test_cortex_resolve_reject_keeps_current():
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        svc = MemoryService(data_dir=d)
-        svc.cortex_write("project", "language", "go", support="user")
-        svc.cortex_write("project", "language", "rust", support="agent")
-        res = svc.cortex_resolve("project", "language", accept=False)
-        assert res["resolved"] is True and res["accepted"] is False
-        assert svc.cortex_lookup("project", "language")["value"] == "go"
-        assert svc.cortex_contenders("project", "language")["contenders"] == []
+def test_cortex_resolve_reject_keeps_current(pristine_service):
+    svc = pristine_service
+    svc.cortex_write("project", "language", "go", support="user")
+    svc.cortex_write("project", "language", "rust", support="agent")
+    res = svc.cortex_resolve("project", "language", accept=False)
+    assert res["resolved"] is True and res["accepted"] is False
+    assert svc.cortex_lookup("project", "language")["value"] == "go"
+    assert svc.cortex_contenders("project", "language")["contenders"] == []
 
 
-def test_cortex_resolve_no_contender():
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        svc = MemoryService(data_dir=d)
-        svc.cortex_write("project", "language", "go", support="user")
-        res = svc.cortex_resolve("project", "language", accept=True)
-        assert res["resolved"] is False and res["reason"] == "no_contender"
+def test_cortex_resolve_no_contender(pristine_service):
+    svc = pristine_service
+    svc.cortex_write("project", "language", "go", support="user")
+    res = svc.cortex_resolve("project", "language", accept=True)
+    assert res["resolved"] is False and res["reason"] == "no_contender"
 
 
-def test_compression_echo_confirms_instead_of_contesting():
+def test_compression_echo_confirms_instead_of_contesting(pristine_service):
     # The dream re-extracting a slot from the same status entry emits a
     # terser re-statement of the standing value; that is corroboration, not
     # a conflict, and must not park a contender (2026-08-05 audit: 4 of 7
     # contested slots were exactly this echo shape).
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        svc = MemoryService(data_dir=d)
-        svc.cortex_write(
-            "qwen-27b", "answerer-score",
-            "0.808/0.731/0.782 (3 replicates, SAME sonnet-5 v1 bank, temp 0)",
-            support="user")
-        out = svc.cortex_write(
-            "qwen-27b", "answerer-score",
-            "0.808/0.731/0.782 cortex (3 replicates)", support="agent")
-        assert out["action"] == "confirmed"
-        cur = svc.cortex_lookup("qwen-27b", "answerer-score")
-        assert cur["value"].startswith("0.808/0.731/0.782 (3 replicates, SAME")
-        assert svc.cortex_contenders("qwen-27b", "answerer-score")["contenders"] == []
+    svc = pristine_service
+    svc.cortex_write(
+        "qwen-27b", "answerer-score",
+        "0.808/0.731/0.782 (3 replicates, SAME sonnet-5 v1 bank, temp 0)",
+        support="user")
+    out = svc.cortex_write(
+        "qwen-27b", "answerer-score",
+        "0.808/0.731/0.782 cortex (3 replicates)", support="agent")
+    assert out["action"] == "confirmed"
+    cur = svc.cortex_lookup("qwen-27b", "answerer-score")
+    assert cur["value"].startswith("0.808/0.731/0.782 (3 replicates, SAME")
+    assert svc.cortex_contenders("qwen-27b", "answerer-score")["contenders"] == []
 
 
-def test_novel_number_is_never_treated_as_echo():
+def test_novel_number_is_never_treated_as_echo(pristine_service):
     # A shorter value that introduces a new digit-bearing token is new
     # information (a changed version/number), so the conflict path must be
     # preserved — the agent write parks as a contender against a user fact.
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        svc = MemoryService(data_dir=d)
-        svc.cortex_write("daemon", "deploy-state",
-                         "deployed at v25, verified live on the host",
-                         support="user")
-        out = svc.cortex_write("daemon", "deploy-state", "v26 verified live",
-                               support="agent")
-        assert out["action"] == "contested"
-        assert svc.cortex_lookup("daemon", "deploy-state")["value"].startswith(
-            "deployed at v25")
+    svc = pristine_service
+    svc.cortex_write("daemon", "deploy-state",
+                     "deployed at v25, verified live on the host",
+                     support="user")
+    out = svc.cortex_write("daemon", "deploy-state", "v26 verified live",
+                           support="agent")
+    assert out["action"] == "contested"
+    assert svc.cortex_lookup("daemon", "deploy-state")["value"].startswith(
+        "deployed at v25")
 
 
 def test_is_compression_echo_boundaries():
@@ -273,11 +270,10 @@ def test_is_compression_echo_boundaries():
         "probe failing", "unhealthy after the restart; healthy probe failing")
 
 
-def test_cortex_search_flags_contested_entries():
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
-        svc = MemoryService(data_dir=d)
-        svc.cortex_write("project", "language", "go", support="user")
-        svc.cortex_write("project", "language", "rust", support="agent")
-        entries = svc.cortex_search("project language", top_k=5)["entries"]
-        assert entries and entries[0]["contested"] is True
-        assert entries[0]["contender_value"] == "rust"
+def test_cortex_search_flags_contested_entries(pristine_service):
+    svc = pristine_service
+    svc.cortex_write("project", "language", "go", support="user")
+    svc.cortex_write("project", "language", "rust", support="agent")
+    entries = svc.cortex_search("project language", top_k=5)["entries"]
+    assert entries and entries[0]["contested"] is True
+    assert entries[0]["contender_value"] == "rust"

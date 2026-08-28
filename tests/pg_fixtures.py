@@ -179,6 +179,31 @@ def pg_url() -> str:
 
 
 @pytest.fixture()
+def pg_service(pg_url, pg_conn, tmp_path, monkeypatch):
+    """A ``MemoryService`` bound to the real bench Postgres (schema ensured
+    and tables truncated by ``pg_conn``).
+
+    Lives here, beside ``pg_conn``/``pg_url``, because three suites want it:
+    it used to be defined in tests/test_outcome_inference.py and imported
+    across into tests/test_session_identity.py, which made an unrelated
+    parser suite a load-bearing dependency of the session-identity suite.
+    Imported the same way its siblings are —
+    ``from tests.pg_fixtures import pg_conn, pg_service, pg_url``.
+
+    Function-scoped, and it must stay that way: ``pg_conn`` reaps every
+    other backend on the test database at each test setup, so a
+    module-scoped PG-backed service would have its connection terminated
+    mid-module.
+    """
+    from pseudolife_memory.service import MemoryService
+
+    monkeypatch.setenv("PSEUDOLIFE_MCP_DATABASE_URL", pg_url)
+    svc = MemoryService(data_dir=tmp_path)
+    svc._ensure_init()
+    return svc
+
+
+@pytest.fixture()
 def pg_conn(pg_url):
     """Per-test connection with schema ensured and all tables truncated."""
     from pseudolife_memory.storage.schema import (

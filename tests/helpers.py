@@ -62,6 +62,74 @@ def pg_reachable(url: str) -> bool:
         return False
 
 
+def spawn_serve(port: int, data_dir, database_url: str, *,
+                env_extra: dict | None = None, wait_s: float = 60.0):
+    """Start the real ``pseudolife-mcp serve`` daemon and wait for /health.
+
+    Returns ``(proc, health)``; raises ``RuntimeError`` if the process exits
+    early or never answers. The 60 s default matches the daemon suites: a
+    cold torch import is slow.
+
+    ``CREATE_NO_WINDOW`` is not optional on Windows — a child python.exe
+    launched from a hidden/detached parent otherwise allocates its own
+    console window and steals foreground focus (measured 2026-07-21).
+
+    An ``env_extra`` entry whose value is ``None`` REMOVES that variable from
+    the child's environment (how a caller runs a token-less daemon on a
+    machine that exports ``PSEUDOLIFE_MCP_TOKEN``).
+
+    Used by the module-scoped daemon fixtures whose tests only need *a* live
+    daemon to talk to; a test whose subject IS the spawn (the shim's
+    autostart) must not use this.
+    """
+    import os
+    import subprocess
+    import sys
+    import time
+    import urllib.request
+
+    no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+    env = {
+        **os.environ,
+        "PSEUDOLIFE_MCP_HOST": "127.0.0.1",
+        "PSEUDOLIFE_MCP_PORT": str(port),
+        "PSEUDOLIFE_MCP_DATABASE_URL": database_url,
+        "PSEUDOLIFE_MCP_DATA_DIR": str(data_dir),
+        **(env_extra or {}),
+    }
+    env = {k: v for k, v in env.items() if v is not None}
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "pseudolife_memory.cli", "serve"],
+        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        creationflags=no_window,
+    )
+    deadline = time.time() + wait_s
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{port}/health", timeout=1.0
+            ) as r:
+                return proc, json.loads(r.read().decode())
+        except Exception:  # noqa: BLE001 — not up yet
+            pass
+        if proc.poll() is not None:
+            raise RuntimeError(f"daemon exited early ({proc.returncode})")
+        time.sleep(0.5)
+    proc.terminate()
+    raise RuntimeError("daemon never became healthy")
+
+
+def stop_daemon(proc) -> None:
+    """Terminate a :func:`spawn_serve` daemon, killing it if it lingers."""
+    import subprocess
+
+    proc.terminate()
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+
+
 def invoke_tool(tool_name: str, args: dict) -> dict:
     """Call a registered MCP tool through FastMCP and parse the JSON result.
 
