@@ -54,7 +54,10 @@ RECALL — at the start of any task:
   entry. Pass `verbose=true` only when debugging retrieval.
 - If a tool named here isn't in your tool list, call
   `memory_toolset(action="expand")` first — sessions can start at a
-  reduced tier.
+  reduced tier. A harness notice that some `mcp__pseudolife-memory__*`
+  tools were REMOVED means the same tier filtering (a resumed session
+  carries an older, larger roster), not an outage — make one
+  `memory_search` call before reporting memory as offline.
 
 RECALL AGAIN mid-session — once at the start is not enough. Search when:
 - the user refers to work you weren't part of ("last time…", "in another

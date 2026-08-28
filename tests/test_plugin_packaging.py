@@ -239,6 +239,18 @@ def test_memory_loop_block_matches_examples():
     assert MEMORY_LOOP_BLOCK.strip() == examples.strip()
 
 
+def test_memory_loop_block_explains_tier_removal_notices():
+    """A resumed session whose stale context carried full-tier tools sees a
+    harness notice that several memory tools were REMOVED; a live session
+    (2026-08-28) read exactly that as "the memory MCP is offline" and told
+    the user so, while the daemon was healthy and every core tool worked.
+    The briefing must pre-empt the misread: removed memory tools usually
+    mean tier filtering, and one live call settles it."""
+    from pseudolife_memory.web.session_hook import MEMORY_LOOP_BLOCK
+    assert "tier filtering" in MEMORY_LOOP_BLOCK
+    assert "not an outage" in MEMORY_LOOP_BLOCK
+
+
 def test_plugin_dream_command_matches_examples():
     plugin = _read("plugin/commands/dream.md")
     examples = _strip_leading_html_comment(_read("examples/commands/dream.md"))
