@@ -3159,9 +3159,10 @@ each platform supports:
 3. **Standing instructions file** — the full memory-loop block
    (`examples/CLAUDE.memory.md`) appended to the agent's global context
    file. For hook-less providers this *is* the session briefing, which is
-   why the installer recommends the append there (and only prompts — it
-   never writes a standing file without consent, and never in a
-   non-interactive run).
+   why the installer recommends the append there — but it never writes a
+   standing file without consent: an interactive prompt, or an explicit
+   `--instructions append` / `--agents-file`. It never appends silently in
+   a non-interactive run.
 4. **SessionStart briefing hook** — the daemon-served briefing (memory-loop
    block + what your memory is unsure about + lessons + where you left
    off) injected at session start. Claude Code (hook or plugin), Codex

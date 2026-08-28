@@ -261,6 +261,14 @@ def test_generic_provider_prints_pasteable_mcp_config() -> None:
     assert "http://127.0.0.1:8765/mcp" in sh_block
     for rel in ("ops/install.sh", "ops/install.ps1"):
         assert "Append the standing memory block to which file?" in _read(rel), rel
+    # Idempotency: the presence check lives inside the single append choke
+    # point — the generic prompt resolves its target path only after the
+    # loop-top check already ran against an empty --agents-file, so a
+    # re-run would otherwise double-append (review finding, 2026-08-29).
+    sh_append = _read("ops/install.sh").split("append_block() {", 1)[1].split("\n}", 1)[0]
+    ps_append = _read("ops/install.ps1").split("function Add-MemoryBlock(", 1)[1].split("\n}", 1)[0]
+    assert "pseudolife-memory" in sh_append
+    assert "pseudolife-memory" in ps_append
 
 
 def test_installers_report_a_per_provider_wiring_ladder() -> None:
@@ -270,11 +278,15 @@ def test_installers_report_a_per_provider_wiring_ladder() -> None:
     they still get."""
     for rel in ("ops/install.sh", "ops/install.ps1"):
         text = _read(rel)
-        assert "[x] MCP transport" in text, rel
+        assert "MCP transport" in text, rel
         assert "[x] Server instructions" in text, rel
         assert "Session briefing" in text, rel
         assert "Per-turn discipline" in text, rel
         assert "[!]" in text, rel
+    # A failed registration must not render as wired (the .ps1 computes the
+    # transport marker from the exit-checked state; the .sh aborts loudly).
+    assert "Get-McpMarker" in _read("ops/install.ps1")
+    assert '"failed"' in _read("ops/install.ps1")
 
 
 def test_providers_guide_matches_installer_matrix() -> None:

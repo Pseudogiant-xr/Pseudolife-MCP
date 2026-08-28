@@ -416,7 +416,18 @@ foreach ($selectedClient in $clients) {
 $instructionChoice = if ($Instructions) { $Instructions } elseif ($ClaudeMd) { $ClaudeMd } else { "auto" }
 $instrState = @{}
 function Add-MemoryBlock($path, $provider) {
-    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $path) | Out-Null
+    # Presence check HERE, not only at the loop top: the generic prompt
+    # resolves its target path after that check ran against an empty
+    # -AgentsFile, and a re-run must never double-append.
+    if ((Test-Path $path) -and ((Get-Content $path -Raw) -match 'pseudolife-memory')) {
+        Step "Memory block already present in $path - skipping."
+        $instrState[$provider] = "present:$path"
+        return
+    }
+    # A bare filename has no parent — Split-Path returns "", and New-Item ""
+    # is a terminating binder error under EAP=Stop.
+    $parent = Split-Path -Parent $path
+    if ($parent) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
     Add-Content -Path $path -Value (Get-Content (Join-Path $repo "examples\CLAUDE.memory.md") -Raw)
     Step "Appended memory block to $path"
     $instrState[$provider] = "appended:$path"
@@ -557,6 +568,18 @@ function Get-EnvFlag($cli) {
 }
 
 $mcpState = @{}
+# EAP=Stop does not trap native exit codes: every `mcp add` must be
+# exit-checked, or the closing ladder can claim a transport that was never
+# registered (review finding, 2026-08-29).
+function Register-Result($provider, $okState, $okMessage) {
+    if ($LASTEXITCODE -eq 0) {
+        $mcpState[$provider] = $okState
+        if ($okMessage) { Step $okMessage }
+    } else {
+        Write-Warning "$provider MCP registration failed (exit $LASTEXITCODE) - see the error above."
+        $mcpState[$provider] = "failed"
+    }
+}
 foreach ($selectedClient in $clients) {
     if ($selectedClient -eq "generic") {
         Write-Host ""
@@ -574,24 +597,25 @@ foreach ($selectedClient in $clients) {
         } elseif (($Transport -eq "shim") -and (Install-ShimOnce)) {
             $envFlag = Get-EnvFlag "codex"
             if ($envFlag) {
-                codex mcp add $envFlag PSEUDOLIFE_WRITER_ID=codex pseudolife-memory -- pseudolife-mcp
-                $mcpState["codex"] = "shim-env"
+                # Name first, env after — the documented codex form (an env
+                # flag directly before the name risks the variadic-option
+                # parse that breaks claude's CLI).
+                codex mcp add pseudolife-memory $envFlag PSEUDOLIFE_WRITER_ID=codex -- pseudolife-mcp
+                Register-Result "codex" "shim-env" "Wired into Codex via the pseudolife-mcp shim - per-session identity (a Codex session no longer inherits a concurrent Claude session's episode)."
             } else {
                 codex mcp add pseudolife-memory -- pseudolife-mcp
                 Write-Host "  (this codex CLI takes no env flag - for per-provider write attribution"
                 Write-Host "   add to the server's entry in ~/.codex/config.toml:"
                 Write-Host "     env = { PSEUDOLIFE_WRITER_ID = `"codex`" })"
-                $mcpState["codex"] = "shim"
+                Register-Result "codex" "shim" "Wired into Codex via the pseudolife-mcp shim - per-session identity (a Codex session no longer inherits a concurrent Claude session's episode)."
             }
-            Step "Wired into Codex via the pseudolife-mcp shim - per-session identity (a Codex session no longer inherits a concurrent Claude session's episode)."
         } else {
             if ($Transport -eq "shim") {
                 Write-Warning "Shim unavailable for Codex (see warnings above) - falling back to HTTP."
                 Write-Host "  Without the shim, a Codex session running beside a Claude Code session shares its episode identity."
             }
             codex mcp add pseudolife-memory --url http://127.0.0.1:8765/mcp
-            Step "Wired into Codex (codex mcp add, HTTP)."
-            $mcpState["codex"] = "http"
+            Register-Result "codex" "http" "Wired into Codex (codex mcp add, HTTP)."
         }
     } elseif ($selectedClient -eq "gemini") {
         $geminiList = gemini mcp list 2>$null
@@ -602,22 +626,20 @@ foreach ($selectedClient in $clients) {
             $envFlag = Get-EnvFlag "gemini"
             if ($envFlag) {
                 gemini mcp add -s user -e PSEUDOLIFE_WRITER_ID=gemini pseudolife-memory pseudolife-mcp
-                $mcpState["gemini"] = "shim-env"
+                Register-Result "gemini" "shim-env" "Wired into Gemini CLI via the pseudolife-mcp shim - per-session identity."
             } else {
                 gemini mcp add -s user pseudolife-memory pseudolife-mcp
                 Write-Host "  (this gemini CLI takes no env flag - for per-provider write attribution"
                 Write-Host "   add `"env`": {`"PSEUDOLIFE_WRITER_ID`": `"gemini`"} to the server's"
                 Write-Host "   entry in ~/.gemini/settings.json)"
-                $mcpState["gemini"] = "shim"
+                Register-Result "gemini" "shim" "Wired into Gemini CLI via the pseudolife-mcp shim - per-session identity."
             }
-            Step "Wired into Gemini CLI via the pseudolife-mcp shim - per-session identity."
         } else {
             if ($Transport -eq "shim") {
                 Write-Warning "Shim unavailable for Gemini CLI (see warnings above) - falling back to HTTP."
             }
             gemini mcp add -s user -t http pseudolife-memory http://127.0.0.1:8765/mcp
-            Step "Wired into Gemini CLI (gemini mcp add, HTTP)."
-            $mcpState["gemini"] = "http"
+            Register-Result "gemini" "http" "Wired into Gemini CLI (gemini mcp add, HTTP)."
         }
     } else {
         claude mcp get pseudolife-memory *> $null
@@ -629,25 +651,26 @@ foreach ($selectedClient in $clients) {
                 claude mcp remove pseudolife-memory *> $null
                 $envFlag = Get-EnvFlag "claude"
                 if ($envFlag) {
-                    claude mcp add --scope user $envFlag PSEUDOLIFE_WRITER_ID=claude-code pseudolife-memory -- pseudolife-mcp
-                    $mcpState["claude"] = "shim-env"
+                    # --env is variadic: another option MUST sit between it
+                    # and the server name, or the name is read as a second
+                    # KEY=value pair and the add fails (verified live
+                    # 2026-08-29).
+                    claude mcp add $envFlag PSEUDOLIFE_WRITER_ID=claude-code --scope user pseudolife-memory -- pseudolife-mcp
+                    Register-Result "claude" "shim-env" "Wired into Claude Code via the pseudolife-mcp shim - per-session identity (required for correct episodes with concurrent sessions)."
                 } else {
                     claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
-                    $mcpState["claude"] = "shim"
+                    Register-Result "claude" "shim" "Wired into Claude Code via the pseudolife-mcp shim - per-session identity (required for correct episodes with concurrent sessions)."
                 }
-                Step "Wired into Claude Code via the pseudolife-mcp shim - per-session identity (required for correct episodes with concurrent sessions)."
             } else {
                 Write-Warning "Could not install the pseudolife-mcp shim - no working pipx or Python (>=3.10, py -3 or python) was found, or the shim install itself failed (see warnings above)."
                 Write-Host "  Without the shim, concurrent Claude Code sessions share one episode identity."
                 Write-Host "  Install pipx or Python >=3.10 and re-run, or pass -Transport http to silence this."
                 claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
-                Step "Wired into Claude Code via HTTP (fallback - shim tooling not found or shim install failed)."
-                $mcpState["claude"] = "http"
+                Register-Result "claude" "http" "Wired into Claude Code via HTTP (fallback - shim tooling not found or shim install failed)."
             }
         } else {
             claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
-            Step "Wired into Claude Code via HTTP (-Transport http)."
-            $mcpState["claude"] = "http"
+            Register-Result "claude" "http" "Wired into Claude Code via HTTP (-Transport http)."
         }
     }
 }
@@ -676,8 +699,12 @@ function Describe-Mcp($state) {
         "shim" { "stdio shim (writer id: daemon default in ops/.env)" }
         "http" { "HTTP (writer id: daemon default in ops/.env)" }
         "present" { "already wired (unchanged)" }
+        "failed" { "registration FAILED - see the warning above and re-run" }
         default { "not wired" }
     }
+}
+function Get-McpMarker($state) {
+    if ($state -in "shim-env", "shim", "http", "present") { "[x]" } else { "[!]" }
 }
 function Describe-Instr($state) {
     if (-not $state) { return "[-] Standing file        skipped" }
@@ -697,7 +724,7 @@ foreach ($selectedClient in $clients) {
     switch ($selectedClient) {
         "claude" {
             Write-Host "  Claude Code"
-            Write-Host "    [x] MCP transport        $(Describe-Mcp $mcpState['claude'])"
+            Write-Host "    $(Get-McpMarker $mcpState['claude']) MCP transport        $(Describe-Mcp $mcpState['claude'])"
             Write-Host "    [x] Server instructions  automatic (MCP instructions field)"
             if ($hookState["claude"] -eq "plugin") {
                 Write-Host "    [x] Session briefing     Claude Code plugin"
@@ -710,7 +737,7 @@ foreach ($selectedClient in $clients) {
         }
         "codex" {
             Write-Host "  OpenAI Codex"
-            Write-Host "    [x] MCP transport        $(Describe-Mcp $mcpState['codex'])"
+            Write-Host "    $(Get-McpMarker $mcpState['codex']) MCP transport        $(Describe-Mcp $mcpState['codex'])"
             Write-Host "    [x] Server instructions  automatic (MCP instructions field)"
             if ($hookState["codex"] -eq "hook") {
                 Write-Host "    [x] Session briefing     hook written - enable codex_hooks = true, then trust it in /hooks"
@@ -724,7 +751,7 @@ foreach ($selectedClient in $clients) {
         }
         "gemini" {
             Write-Host "  Gemini CLI"
-            Write-Host "    [x] MCP transport        $(Describe-Mcp $mcpState['gemini'])"
+            Write-Host "    $(Get-McpMarker $mcpState['gemini']) MCP transport        $(Describe-Mcp $mcpState['gemini'])"
             Write-Host "    [x] Server instructions  automatic (MCP instructions field)"
             Write-Host "    [!] Session briefing     unavailable - Gemini CLI has no hook system"
             Write-Host "    [!] Per-turn discipline  unavailable"

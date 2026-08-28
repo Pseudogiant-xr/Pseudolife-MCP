@@ -453,6 +453,14 @@ record_instr() {
 }
 
 append_block() {  # $1 = target path, $2 = provider
+    # Presence check HERE, not only at the loop top: the generic prompt
+    # resolves its target path after that check ran against an empty
+    # --agents-file, and a re-run must never double-append.
+    if grep -q "pseudolife-memory" "$1" 2>/dev/null; then
+        step "Memory block already present in $1 — skipping."
+        record_instr "$2" "present:$1"
+        return 0
+    fi
     mkdir -p "$(dirname "$1")"
     cat "$repo/examples/CLAUDE.memory.md" >> "$1"
     step "Appended memory block to $1"
@@ -585,7 +593,10 @@ for selected_client in $CLIENTS; do
             if [ -n "$SHIM_OK" ]; then
                 env_flag="$(cli_env_flag codex)"
                 if [ -n "$env_flag" ]; then
-                    codex mcp add "$env_flag" PSEUDOLIFE_WRITER_ID=codex pseudolife-memory -- pseudolife-mcp
+                    # Name first, env after — the documented codex form
+                    # (an env flag directly before the name risks the
+                    # variadic-option parse that breaks claude's CLI).
+                    codex mcp add pseudolife-memory "$env_flag" PSEUDOLIFE_WRITER_ID=codex -- pseudolife-mcp
                     MCP_CODEX=shim-env
                 else
                     codex mcp add pseudolife-memory -- pseudolife-mcp
@@ -646,7 +657,10 @@ for selected_client in $CLIENTS; do
             claude mcp remove pseudolife-memory 2>/dev/null || true
             env_flag="$(cli_env_flag claude)"
             if [ -n "$env_flag" ]; then
-                claude mcp add --scope user "$env_flag" PSEUDOLIFE_WRITER_ID=claude-code pseudolife-memory -- pseudolife-mcp
+                # --env is variadic: another option MUST sit between it and
+                # the server name, or the name is read as a second KEY=value
+                # pair and the add fails (verified live 2026-08-29).
+                claude mcp add "$env_flag" PSEUDOLIFE_WRITER_ID=claude-code --scope user pseudolife-memory -- pseudolife-mcp
                 MCP_CLAUDE=shim-env
             else
                 claude mcp add --scope user pseudolife-memory -- pseudolife-mcp

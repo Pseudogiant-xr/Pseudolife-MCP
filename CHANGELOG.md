@@ -50,7 +50,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   block (Claude hook/plugin, Codex off-Windows), and an interactive
   consent prompt to append the standing block where none exists (Gemini,
   generic, Codex on Windows — there the standing file *is* the briefing).
-  `auto` never writes a standing file in a non-interactive run;
+  `auto` never writes a standing file in a non-interactive run (an explicit
+  `--agents-file` or `--instructions append` is consent and still works);
   `--instructions append`/`skip` and the `--claude-md` alias behave exactly
   as before. `install.ps1` now also skips the Codex hook install on Windows
   (Codex hooks don't run there) instead of writing a hook that can never
