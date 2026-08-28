@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-08-28 — a too-old MCP SDK fails with the fix, not a traceback)
+- **A shim launched from an environment whose MCP SDK predates v2 now exits
+  with the exact recovery command instead of a raw `ModuleNotFoundError`.**
+  The shim's registered command can live outside the repo venv — an editable
+  install runs the working copy's current code against whatever SDK that
+  environment has — so the v2 migration's `mcp>=2.1` floor (PR #198) silently
+  broke such registrations: the import crash surfaced only as
+  "Connection closed" in the MCP client log, and every affected session
+  started without memory tools (seen live 2026-08-25 → 2026-08-28, global
+  Python env on mcp 1.28.1). `run_shim` now probes for the v2 module the
+  proxy actually imports before touching the daemon, and on failure prints
+  the interpreter path and the `pip install -U "mcp>=2.1,<3"` command that
+  fixes it.
+
 ### Fixed (2026-08-28 — Codex hook trust is an explicit install step)
 - **Codex now requires every new or changed lifecycle hook to be reviewed and
   trusted before it runs, but the hook installers reported success without

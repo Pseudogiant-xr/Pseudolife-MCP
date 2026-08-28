@@ -12,6 +12,7 @@ state, the v0.1 bug class).
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import subprocess
@@ -283,9 +284,54 @@ async def _proxy(url: str, token: str | None, session_uid: str) -> None:
         )
 
 
+# The capability :func:`_proxy` actually needs, probed as a module so the
+# guard tracks the code's real requirement rather than a version string.
+_SDK_V2_PROBE_MODULE = "mcp.server.subscriptions"
+
+
+def _require_mcp_sdk_v2() -> None:
+    """Exit with the recovery command when this env's MCP SDK predates v2.
+
+    The registered shim command can live outside the repo venv — an
+    editable install runs the working copy's current code against whatever
+    SDK that environment has installed — so a dep-floor bump in pyproject
+    strands such an env on an SDK missing the modules :func:`_proxy`
+    imports. Without this guard that surfaces as a raw ModuleNotFoundError
+    on the shim's stderr and "Connection closed" in the MCP client, with
+    no hint that the fix is one pip command (seen live 2026-08-28, mcp
+    1.28.1 in a global env crashing every session start since the v2
+    migration merged).
+    """
+    try:
+        present = importlib.util.find_spec(_SDK_V2_PROBE_MODULE) is not None
+    except ImportError:
+        # find_spec raises ModuleNotFoundError when a PARENT package is
+        # absent (mcp not installed at all), and a broken partial install
+        # can raise any ImportError from the parent's own import — same
+        # remedy either way.
+        present = False
+    if present:
+        return
+    try:
+        from importlib.metadata import version
+        installed = version("mcp")
+    except Exception:  # noqa: BLE001 - absence reads the same as too-old
+        installed = "not installed"
+    print(
+        f"[shim] this environment's MCP SDK (mcp {installed}) predates v2 — "
+        f"the shim needs mcp>=2.1 (no {_SDK_V2_PROBE_MODULE}).\n"
+        f'  Fix:  "{sys.executable}" -m pip install -U "mcp>=2.1,<3"\n'
+        f"  (or re-run the repo installer, which registers the project "
+        f"venv's shim)",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+
 def run_shim() -> None:
     import asyncio
 
+    _require_mcp_sdk_v2()
     url = _daemon_url()
     ensure_daemon(url)
     token = os.environ.get("PSEUDOLIFE_MCP_TOKEN") or None
