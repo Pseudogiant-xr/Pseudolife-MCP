@@ -2,9 +2,21 @@
 
 The first thing on master capable of catching a *ranking* regression: a
 fixed corpus of realistic memory-bank entries with one paraphrase query
-per entry, asserting recall@5 / MRR@5 floors on the dense path and a
-top-3 floor on the BM25-fused identifier queries. Unit tests elsewhere
-pin mechanisms (fusion math, recency, filters); this pins the outcome.
+per entry, asserting recall@5 / MRR@5 floors on the default retrieval
+path and a top-3 floor on the BM25-fused identifier queries. Unit tests
+elsewhere pin mechanisms (fusion math, recency, filters); this pins the
+outcome.
+
+The harness mirrors the production encode sides exactly: corpus entries
+go through document-side ``encode`` (what ``MemoryService.store`` does
+via ``encode_single``; the batch call is the same model with the same
+result, just one forward pass for 50 texts instead of 50), and every
+query goes through ``encode_query`` (what ``MemoryService.search`` does —
+the rule is pinned call site by call site in
+``tests/test_query_side_encoding.py``). This matters from schema v25 on:
+the default embedder Qwen/Qwen3-Embedding-0.6B is instruction-asymmetric,
+so ``encode_query`` prepends an instruct prefix and lands the probe in a
+different region of the space than a document encode of the same string.
 
 Floors are set with slack below the measured baseline so embedder or
 scoring *drift* passes but a real regression (fusion weight typo, filter
@@ -12,14 +24,14 @@ applied to the wrong pool, similarity math error) trips. If you improve
 ranking and a floor becomes slack-free, raise it — never delete it.
 
 Runs offline (HF_HUB_OFFLINE=1) on the cached default embedder; no
-Postgres needed (file-mode CMS). Floors were measured against
-all-MiniLM-L6-v2 (2026-07-02) and re-verified passing against
-Qwen/Qwen3-Embedding-0.6B after the schema v25 default swap — Qwen3
-measures higher recall on its own benchmark (see
-docs/superpowers/specs/2026-07-28-embedding-backbone-v25-design.md), so
-the existing slack-padded floors are not expected to need raising here,
-but the numbers below are the MiniLM baseline they were originally set
-against, not a live Qwen3 measurement.
+Postgres needed (file-mode CMS).
+
+Pre-2026-08-28 provenance, retired: the floors here used to be 0.92 /
+0.85 / 0.85, measured 2026-07-02 against all-MiniLM-L6-v2 with queries
+encoded *document-side* (``encode_single``) — a regime production has not
+run since the v25 Qwen3 swap made the embedder asymmetric. Those numbers
+described a retrieval path that no longer exists; see the floor block
+below for what replaced them and why.
 """
 
 from __future__ import annotations
@@ -133,11 +145,31 @@ GOLDEN: list[tuple[str, str]] = [
 
 _IDENTIFIER_START = 42  # index where the BM25-leg pairs begin
 
-# Floors: measured baseline minus slack. Measured 2026-07-02 with
-# all-MiniLM-L6-v2: recall@5=1.000, MRR=0.990, BM25 top3=1.000 (all rank-1).
-DENSE_RECALL_AT_5_FLOOR = 0.92   # tolerates 4 misses out of 50
-DENSE_MRR_FLOOR = 0.85
-BM25_TOP3_FLOOR = 0.85           # tolerates 1 of 8 slipping below top-3
+# Floors: measured baseline minus slack. Re-measured 2026-08-28 against
+# the current default embedder Qwen/Qwen3-Embedding-0.6B (torch backend,
+# CPU), 50-entry corpus, queries encoded query-side via `encode_query` —
+# i.e. the regime `MemoryService.search` actually runs. Measured, and
+# identical across 3 runs (no sampling anywhere on this path, so the
+# harness is bit-deterministic): recall@5=1.000, MRR=0.990,
+# BM25 top3=1.000 (all 8 at rank 1).
+#
+# Why the dense floors sit this HIGH (they were 0.92/0.85 before today):
+# `memory.bm25.enabled` has defaulted to True since 2026-07-25, so the
+# `bm25=None` leg below is BM25-*fused*, not dense-only. The 2026-08-28
+# degradation sweep (query embedding replaced with noise of increasing
+# scale) shows lexical fusion alone floors that leg at recall@5=0.960 /
+# MRR=0.915 — a totally dead dense path still scores that. Floors of
+# 0.92/0.85 were therefore unfailable: they sat BELOW what BM25 delivers
+# with no embedder at all. 0.98/0.96 sit above that lexical floor, so a
+# collapsed dense contribution now trips them, while still leaving slack
+# for drift (0.98 tolerates 1 miss in 50; 0.96 tolerates 3 targets
+# slipping from rank 1 to rank 2).
+DENSE_RECALL_AT_5_FLOOR = 0.98
+DENSE_MRR_FLOOR = 0.96
+# 8 identifier pairs, so the metric is quantised to 1/8: 0.87 is the
+# tightest floor that still tolerates exactly one of the 8 slipping below
+# top-3. Measured 1.000 (2026-08-28, as above).
+BM25_TOP3_FLOOR = 0.87
 
 
 @pytest.fixture(scope="module")
@@ -150,15 +182,21 @@ def golden():
     cfg.memory.surprise_threshold = 0.0     # store the whole corpus
     emb = EmbeddingPipeline(cfg.embedding)
     cms = ContinuumMemorySystem(cfg.memory)
-    for text, _ in GOLDEN:
-        stored, _s = cms.store(text, emb.encode_single(text), source="golden")
+    # Document-side, one batched forward pass for the whole corpus (same
+    # embeddings as 50 encode_single calls, ~1.5s cheaper in setup). Entries
+    # still go in one store() at a time, as production does.
+    texts = [text for text, _ in GOLDEN]
+    for text, vector in zip(texts, emb.encode(texts)):
+        stored, _s = cms.store(text, vector, source="golden")
         assert stored, f"corpus entry rejected: {text[:50]}"
     return cms, emb
 
 
 def _rank_of(cms, emb, query: str, target: str, *, bm25: bool | None = None,
              k: int = 5) -> int | None:
-    res = cms.retrieve(emb.encode_single(query), top_k=k,
+    # encode_query, not encode_single: the query side of the asymmetric
+    # default embedder, matching MemoryService.search.
+    res = cms.retrieve(emb.encode_query(query), top_k=k,
                        query_text=query, bm25=bm25)
     for i, e in enumerate(res.entries):
         if e.text == target:
@@ -167,6 +205,10 @@ def _rank_of(cms, emb, query: str, target: str, *, bm25: bool | None = None,
 
 
 def test_dense_recall_and_mrr_floors(golden):
+    """``bm25=None`` = the production default, which since 2026-07-25 means
+    dense fused with BM25 — not dense-only. See the floor block for what
+    that costs in sensitivity and why the floors are pitched above the
+    lexical-only ceiling."""
     cms, emb = golden
     ranks = [_rank_of(cms, emb, q, t) for t, q in GOLDEN]
     hits = [r for r in ranks if r is not None]
