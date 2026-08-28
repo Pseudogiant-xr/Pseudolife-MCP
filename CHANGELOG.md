@@ -6,6 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security (2026-08-28 — workflows drop the default-writable GITHUB_TOKEN)
+- **Explicit least-privilege `permissions` on both GitHub Actions
+  workflows**, resolving the four open CodeQL
+  `actions/missing-workflow-permissions` alerts: `ci.yml` gets a
+  workflow-level `contents: read` (all three test lanes only check out and
+  run tests), and `release.yml`'s `build` job gets `contents: read` to
+  match its siblings, which already declared their own write scopes
+  (`publish`/`registry`: `id-token`, `images`: `packages`). Previously
+  these jobs ran with the repository's default token, which can write
+  repo contents.
+
 ### Security (2026-08-27 — Dependabot triage: three chromadb server CVEs, all unreachable, no patched release)
 - Triaged the three open Dependabot alerts on `ops/requirements.lock.txt`,
   all against chromadb ≤ 1.5.9 with **no patched release** (1.5.9 is still
