@@ -170,6 +170,17 @@ DENSE_MRR_FLOOR = 0.96
 # tightest floor that still tolerates exactly one of the 8 slipping below
 # top-3. Measured 1.000 (2026-08-28, as above).
 BM25_TOP3_FLOOR = 0.87
+# Dense-ONLY (bm25=False) floors: the fused leg above cannot see a dense
+# regression that BM25 papers over (the 2026-08-28 sweep shows fusion
+# carries this corpus to 0.960/0.915 with the embedder replaced by
+# noise). This leg isolates the dense contribution: measured 2026-08-28
+# on Qwen/Qwen3-Embedding-0.6B (torch, CPU), encode_query side, all 50
+# targets at rank 1 (recall@5=1.000, MRR=1.000); the same sweep shows it
+# collapsing to ~0.08 at noise scale 0.1, so these floors trip on dense
+# degradation the fused leg structurally cannot detect. Same slack policy
+# as the fused floors: 1 miss in 50 / 3 rank-1->rank-2 slips.
+DENSE_ONLY_RECALL_AT_5_FLOOR = 0.98
+DENSE_ONLY_MRR_FLOOR = 0.96
 
 
 @pytest.fixture(scope="module")
@@ -219,6 +230,24 @@ def test_dense_recall_and_mrr_floors(golden):
         f"dense ranking regressed: recall@5={recall5:.3f} "
         f"(floor {DENSE_RECALL_AT_5_FLOOR}), MRR={mrr:.3f} "
         f"(floor {DENSE_MRR_FLOOR}); missed queries: {misses}")
+
+
+def test_dense_only_floors_isolate_the_embedder(golden):
+    """``bm25=False`` — not a production retrieval mode, but the only leg
+    that can catch a dense-path regression on this corpus: the fused leg's
+    lexical ceiling (0.960/0.915) masks anything subtler than a collapse.
+    See the DENSE_ONLY floor block for the measurement."""
+    cms, emb = golden
+    ranks = [_rank_of(cms, emb, q, t, bm25=False) for t, q in GOLDEN]
+    hits = [r for r in ranks if r is not None]
+    recall5 = len(hits) / len(GOLDEN)
+    mrr = sum(1.0 / r for r in hits) / len(GOLDEN)
+    misses = [GOLDEN[i][1] for i, r in enumerate(ranks) if r is None]
+    assert (recall5 >= DENSE_ONLY_RECALL_AT_5_FLOOR
+            and mrr >= DENSE_ONLY_MRR_FLOOR), (
+        f"dense-only ranking regressed: recall@5={recall5:.3f} "
+        f"(floor {DENSE_ONLY_RECALL_AT_5_FLOOR}), MRR={mrr:.3f} "
+        f"(floor {DENSE_ONLY_MRR_FLOOR}); missed queries: {misses}")
 
 
 def test_bm25_fusion_identifier_queries_hit_top3(golden):

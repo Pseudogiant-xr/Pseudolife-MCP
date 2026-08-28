@@ -276,6 +276,12 @@ def test_unhealthy_deploy_without_a_rollback_image_is_honest(deploys):
     instruction that cannot work is actively harmful."""
     out = _out(deploys["no_rollback_image_unhealthy"])
 
+    # Branch identity first: both exit paths print the honest no-rollback
+    # text, so without these two asserts this test passes on the HEALTHY
+    # branch too (found by the 2026-08-28 flip-the-stub RED probe) and the
+    # scenario's unhealthy staging would be decoration.
+    assert "did not report healthy" in out, out
+    assert "==> Healthy." not in out, out
     assert "docker tag pseudolife-daemon" not in out, (
         "handed the operator a failing rollback mid-incident:\n" + out)
     assert "no rollback image" in out.lower(), out
