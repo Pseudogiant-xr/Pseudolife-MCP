@@ -59,6 +59,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `[features] codex_hooks = true` opt-in beside the existing trust-review
   warning.
 
+### Changed (2026-08-28 — CI shards the full-suite lanes across two workers)
+- **Both full-suite CI lanes run `pytest -n 2 --dist loadfile`**
+  (pytest-xdist joins the dev extras). `--dist loadfile` keeps whole files
+  on one worker so module-scoped fixtures keep their semantics; isolation
+  is the per-process database naming that already guards concurrent local
+  runs, extended to cover workers: an explicit
+  `PSEUDOLIFE_TEST_DATABASE_URL` override now gets a per-worker suffix
+  (a verbatim override shared by N workers would put every worker's
+  backend reaper on one database), and the bench-DB autopin re-pins per
+  worker instead of letting workers inherit the controller's pin (same
+  reaper crossfire via `reset_bench()`). Both contracts are pinned in
+  `tests/test_pg_run_isolation.py`; a deliberate operator-set
+  `PSEUDOLIFE_BENCH_DB` still wins verbatim. Verified locally: full suite
+  green at `-n 2` and `-n 4`, and under a CI-shaped override URL.
+
 ### Added (2026-08-28 — `CortexStore.clear()`, so test fixtures can reset the cortex)
 - **`CortexStore.clear()`** — a test-support reset that empties the store in
   memory: `records`, both slot indexes (`_current`, `_members`, rebuilt via

@@ -52,20 +52,39 @@ def _admin_url() -> str:
     return _DEFAULT_ADMIN
 
 
+def _with_worker_suffix(db: str) -> str:
+    """Append the xdist worker id to an overridden database name.
+
+    A verbatim override shared by N workers would put every worker's
+    backend reaper on one database — the exact cross-run crossfire this
+    module's per-PID naming prevents, relocated inside a single CI job.
+    Applied by BOTH ``_target_db_name`` (what ``ensure_test_db`` creates)
+    and ``resolve_test_db_url`` (what tests connect to), so the two can
+    never disagree about which database the run means. Suffixed CI
+    databases are never dropped — the override contract leaves lifecycle
+    to the caller, and CI runners are discarded at job end.
+    """
+    worker = os.environ.get("PYTEST_XDIST_WORKER")
+    return f"{db}_{worker}" if worker else db
+
+
 def _target_db_name() -> str:
     url = os.environ.get("PSEUDOLIFE_TEST_DATABASE_URL")
     if url:
-        return url.rsplit("/", 1)[1].split("?")[0]
+        return _with_worker_suffix(url.rsplit("/", 1)[1].split("?")[0])
     return _TEST_DB
 
 
 def resolve_test_db_url() -> str:
     url = os.environ.get("PSEUDOLIFE_TEST_DATABASE_URL")
     if url:
-        # Explicit override: the URL is returned verbatim and provisioning
-        # stays pg_url's job (CI relies on that) — no connection attempts
-        # from a mere resolve.
-        return url
+        # Explicit override: returned verbatim (single-process) and
+        # provisioning stays pg_url's job (CI relies on that) — no
+        # connection attempts from a mere resolve. Under an xdist worker
+        # the database name gets the worker id appended; see
+        # _with_worker_suffix for why.
+        base, _, db = url.rpartition("/")
+        return f"{base}/{_with_worker_suffix(db)}"
     # Best-effort creation so direct consumers (daemon/shim fixtures,
     # single-file runs) get an existing per-run database without depending
     # on pg_url having run first; their own reachability probes handle the

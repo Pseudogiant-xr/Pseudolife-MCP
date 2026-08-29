@@ -123,11 +123,21 @@ jobs:
           path: ~/.cache/huggingface
           key: hf-minilm-l6-v2-qwen3-embedding-0.6b
 
-      - name: Tests (offline + deterministic — the documented invocation)
+      - name: Tests (offline + deterministic, 2 xdist workers)
+        # -n 2 --dist loadfile: whole files stay on one worker, so every
+        # module-scoped fixture (shared services, staged banks, daemons)
+        # keeps its semantics. Isolation is the per-process database naming
+        # in tests/pg_fixtures.py — the override URL gets a per-worker
+        # suffix, and conftest re-pins the bench DB per worker (both
+        # pinned by tests/test_pg_run_isolation.py). OMP_NUM_THREADS=2
+        # stops 2 workers x torch's intra-op threads oversubscribing the
+        # 4-vCPU runner. Verified locally 2026-08-28: full suite green at
+        # -n 2 and -n 4.
         env:
           HF_HUB_OFFLINE: "1"
           TRANSFORMERS_OFFLINE: "1"
-        run: python -m pytest -q
+          OMP_NUM_THREADS: "2"
+        run: python -m pytest -q -n 2 --dist loadfile
 
   test-lite-linux:
     runs-on: ubuntu-latest
@@ -199,11 +209,13 @@ jobs:
           print("embedded PG up:", base)
           PY
 
-      - name: Tests (full suite vs embedded PG 18)
+      - name: Tests (full suite vs embedded PG 18, 2 xdist workers)
+        # Same sharding rationale as the `test` lane above.
         env:
           HF_HUB_OFFLINE: "1"
           TRANSFORMERS_OFFLINE: "1"
-        run: python -m pytest -q
+          OMP_NUM_THREADS: "2"
+        run: python -m pytest -q -n 2 --dist loadfile
 
   test-lite-windows:
     runs-on: windows-latest
