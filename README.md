@@ -332,7 +332,7 @@ is agent context every session, so it stays lean.
 | `memory_graph(entity, depth?, include_facts?, to?, relation_filter?)` | Entity neighborhood (≤3 hops) with derived transitive/inverse edges and per-edge `EXTRACTED/INFERRED/AMBIGUOUS` provenance tags; `to` returns the shortest path between two entities |
 | `memory_recall(query, hops?, top_k?, verbose?)` | Multi-hop retrieval for relational questions; `low_confidence: true` → fall back to `memory_search` |
 | `memory_relation_define(name, description, ...)` | Grow the closed relation vocabulary (deliberate, rare act) |
-| `document_ingest(path, source?)` | Index a file (txt/md/pdf) in the reference bank |
+| `document_ingest(path, source?)` | Index a file (txt/md/pdf/html) verbatim in the reference bank — the lossless complement to agent-side distillation ([division of labor](docs/guide/memory-model.md#background-documents--the-reference-bank)) |
 | `document_search(query, top_k?)` | RAG search over the reference bank only |
 | `memory_toolset(action)` | Check or change this principal's visibility tier: `status` / `expand` / `collapse` |
 

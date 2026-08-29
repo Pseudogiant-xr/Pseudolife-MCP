@@ -338,7 +338,7 @@ is agent context every session, so it stays lean.
 | `memory_graph(entity, depth?, include_facts?, to?, relation_filter?)` | Entity neighborhood (≤3 hops) with derived transitive/inverse edges and per-edge `EXTRACTED/INFERRED/AMBIGUOUS` provenance tags; `to` returns the shortest path between two entities |
 | `memory_recall(query, hops?, top_k?, verbose?)` | Multi-hop retrieval for relational questions; `low_confidence: true` → fall back to `memory_search` |
 | `memory_relation_define(name, description, ...)` | Grow the closed relation vocabulary (deliberate, rare act) |
-| `document_ingest(path, source?)` | Index a file (txt/md/pdf) in the reference bank |
+| `document_ingest(path, source?)` | Index a file (txt/md/pdf/html) verbatim in the reference bank — the lossless complement to agent-side distillation ([division of labor](docs/guide/memory-model.md#background-documents--the-reference-bank)) |
 | `document_search(query, top_k?)` | RAG search over the reference bank only |
 | `memory_toolset(action)` | Check or change this principal's visibility tier: `status` / `expand` / `collapse` |
 
@@ -938,8 +938,9 @@ Apache-2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
 # The memory model — cortex, world facts, lessons, and time
 
 The canonical-fact layers in depth: the slot-keyed cortex, provenance
-contenders, the cited world cortex, procedural lessons, and the temporal /
-multi-writer stamp. Part of the [user guide](../../README.md#documentation).
+contenders, the cited world cortex, procedural lessons, the reference bank
+for background documents, and the temporal / multi-writer stamp. Part of
+the [user guide](../../README.md#documentation).
 
 ## Canonical facts — the cortex (schema v8)
 
@@ -1324,6 +1325,47 @@ graph edges power structured traversal.
 > lessons are **auto-injected at session start** by the
 > `pseudolife-mcp briefing` SessionStart hook (the "lessons from past work"
 > block) — see [Episodes & session lifecycle](episodes.md).
+
+## Background documents — the reference bank
+
+A fifth layer holds *source material* rather than memories: the **reference
+bank**, a ChromaDB chunk store for background documents (papers, manuals,
+specs, codebases). `document_ingest(path)` extracts the text of a `.txt` /
+`.md` / `.pdf` / `.html` file, chunks it, and indexes it;
+`document_search(query)` retrieves chunks by pure cosine similarity.
+It is deliberately kept apart from conversational memory — nothing ingested
+here feeds the cortex, the graph, or the dream pass, and `memory_search`
+surfaces document chunks alongside memories without mixing the stores.
+
+**Division of labor: agents extract meaning; the reference bank preserves
+the verbatim source.** These are complementary, not competing paths:
+
+- **Understanding is the agent's job.** A capable agent reading a PDF
+  through its own harness (vision, layout, tables, OCR of scanned pages,
+  judgment about what matters) will always beat the server's text-layer
+  extraction. The intended pattern is that the *agent* reads the document
+  and writes the load-bearing conclusions into memory — `memory_store` for
+  context, `memory_fact_set` for canonical values, `memory_world_set` for
+  cited external facts. That distillate is what future retrieval reasons
+  over.
+- **Verbatim recall is the reference bank's job.** Distillation is lossy at
+  ingest time: the agent keeps what looked relevant *that day*, and
+  everything else is gone. Ingesting the raw file as well means
+  `document_search` can still answer questions nobody anticipated — a
+  one-time local embedding pass instead of re-reading the document through
+  an agent's context window on every question.
+
+For an important document, do both: distil the key facts into memory *and*
+`document_ingest` the file itself.
+
+> **Scope of the server-side parser.** Extraction is intentionally minimal:
+> the embedded text layer only, via `pypdf` (always available) or
+> `pypdfium2` (the optional `pdf` extra — better quality, still
+> copyleft-free). There is **no OCR** — a scanned, image-only PDF ingests
+> as empty text; have the agent read it and store the distillate instead.
+> Paths resolve on the **server's** filesystem: with the Docker daemon,
+> `document_ingest` needs a path visible inside the container (a mounted
+> volume), not a host path.
 
 ## Sense of time + multi-writer attribution (schema v11)
 
