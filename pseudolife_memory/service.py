@@ -694,6 +694,76 @@ class MemoryService(DreamOps):
         if absent("embedding.backend") and _onnx_embedding_available():
             config.embedding.backend = "onnx"
 
+    def _refuse_on_stale_hydrated_dims(self) -> None:
+        """Refuse to serve a bank whose hydrated embeddings don't fit the
+        live embedder.
+
+        The Postgres path can't normally get here mismatched — schema.py's
+        ``_refuse_on_embedding_dim_mismatch`` rejects a wrong-dimensioned
+        bank before any DDL — but the v0.1 FILE mode hydrates ``.pt`` state
+        with no dimension check at all. In the 2026-08-29 incident a
+        shim-spawned fallback daemon served a retired 384-d (MiniLM-era)
+        file bank against the live 1024-d embedder, and every search/store
+        died with a bare torch shape error ("size mismatch, mat (12x384),
+        vec (1024)") that named neither the bank nor the fix. Refusing at
+        boot names both; like the schema-level guard, the remedy is a
+        deliberate migration, never an automatic re-embed of a bank this
+        daemon may be serving by mistake.
+
+        On refusal ``_cms`` is dropped, so every retry of ``_ensure_init``
+        rebuilds the cheap components and re-loads the ``.pt`` before
+        refusing again — costlier than the schema-level guard's early
+        raise, but harmless: the autosave/exit flush paths no-op on
+        ``_cms is None``, so the on-disk bank is never touched.
+        """
+        def _dim(emb) -> int:
+            return int(emb.shape[-1]) if hasattr(emb, "shape") else len(emb)
+
+        live = int(self._embedder.embedding_dim)
+        stale = 0
+        found: set[int] = set()
+        for band in self._cms.bands:
+            for e in band.entries:
+                if e.embedding is None:
+                    continue
+                d = _dim(e.embedding)
+                if d != live:
+                    stale += 1
+                    found.add(d)
+        for r in self._cortex.records:
+            if r.embedding is None:
+                continue
+            d = _dim(r.embedding)
+            if d != live:
+                stale += 1
+                found.add(d)
+        if not stale:
+            return
+        dims = ", ".join(str(d) for d in sorted(found))
+        msg = (
+            f"Refusing to serve: {stale} hydrated row(s) in the bank at "
+            f"{self.data_dir} are embedded at {dims} dims, but the live "
+            f"embedder ({self.config.embedding.model_name}) produces "
+            f"{live}-d vectors — every search/store would crash with a "
+            f"torch shape error. If this daemon was started by accident "
+            f"against an old or retired bank (e.g. a shim-spawned fallback "
+            f"while the real Docker daemon was still booting), stop it and "
+            f"point the client at the intended daemon. Otherwise migrate "
+            f"deliberately: a file-mode bank is re-embedded on import when "
+            f"the daemon is given Postgres storage (set "
+            f"PSEUDOLIFE_MCP_DATABASE_URL, or install "
+            f"pseudolife-mcp[lite]); a Postgres bank migrates with "
+            f"`python ops/migrate_embeddings.py`. Or configure the "
+            f"embedding model that produced these vectors."
+        )
+        # Surface at /health exactly like the schema-level refusal…
+        self._init_refusal = msg
+        # …and drop the half-built CMS: ``_ensure_init`` gates on
+        # ``_cms is not None``, so leaving it set would let the next tool
+        # call skip init and serve the mismatched band after all.
+        self._cms = None
+        raise RuntimeError(msg)
+
     def _ensure_init(self) -> None:
         if self._cms is not None:
             return
@@ -836,6 +906,8 @@ class MemoryService(DreamOps):
                 self._cortex.load(self._cortex_path())
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Cortex load skipped: %s", exc)
+
+        self._refuse_on_stale_hydrated_dims()
 
         # World-knowledge cortex (schema v9) — sibling slot store for sourced
         # EXTERNAL facts, persisted in its own world_facts table. Hydrated like
