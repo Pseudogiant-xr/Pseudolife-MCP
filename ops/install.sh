@@ -310,12 +310,23 @@ ensure_shim() {
 
 for selected_client in $clients; do
     if [ "$selected_client" = codex ]; then
-        if codex mcp get pseudolife-memory >/dev/null 2>&1; then
+        if existing_codex=$(codex mcp get pseudolife-memory 2>/dev/null); then
+            if [ "$TRANSPORT" = "shim" ] && ! printf '%s' "$existing_codex" | grep -q PSEUDOLIFE_MCP_NO_SPAWN; then
+                echo "WARNING: the existing Codex registration lacks PSEUDOLIFE_MCP_NO_SPAWN=1 — its shim can still spawn a fallback daemon that shadows the Docker bank after a reboot." >&2
+                echo "  Upgrade it (re-check any custom command first: codex mcp get pseudolife-memory):" >&2
+                echo "    codex mcp remove pseudolife-memory" >&2
+                echo "    codex mcp add pseudolife-memory --env PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp" >&2
+            fi
             echo "==> MCP server already wired into Codex — skipping."
         elif [ "$TRANSPORT" = "shim" ]; then
             ensure_shim
             if [ -n "$SHIM_OK" ]; then
-                codex mcp add pseudolife-memory -- pseudolife-mcp
+                # PSEUDOLIFE_MCP_NO_SPAWN: this is a Docker-tier install, so
+                # the daemon is the compose container — the shim must wait
+                # for it, never spawn a host-side fallback that can win the
+                # port-bind race against a still-booting Docker and shadow
+                # the real bank (2026-08-29 incident).
+                codex mcp add pseudolife-memory --env PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp
                 echo "==> Wired into Codex via the pseudolife-mcp shim — per-session identity (a Codex session no longer inherits a concurrent Claude session's episode)."
             else
                 echo "WARNING: shim unavailable for Codex (see warnings above) — falling back to HTTP." >&2
@@ -327,13 +338,25 @@ for selected_client in $clients; do
             codex mcp add pseudolife-memory --url http://127.0.0.1:8765/mcp
             echo "==> Wired into Codex (codex mcp add, HTTP)."
         fi
-    elif claude mcp get pseudolife-memory >/dev/null 2>&1; then
+    elif existing_claude=$(claude mcp get pseudolife-memory 2>/dev/null); then
+        if [ "$TRANSPORT" = "shim" ] && ! printf '%s' "$existing_claude" | grep -q PSEUDOLIFE_MCP_NO_SPAWN; then
+            echo "WARNING: the existing Claude Code registration lacks PSEUDOLIFE_MCP_NO_SPAWN=1 — its shim can still spawn a fallback daemon that shadows the Docker bank after a reboot (2026-08-29 incident)." >&2
+            echo "  Upgrade it (re-check any custom command first: claude mcp get pseudolife-memory):" >&2
+            echo "    claude mcp remove pseudolife-memory" >&2
+            echo "    claude mcp add --scope user pseudolife-memory --env PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp" >&2
+        fi
         echo "==> MCP server already wired into Claude Code — skipping."
     elif [ "$TRANSPORT" = "shim" ]; then
         ensure_shim
         if [ -n "$SHIM_OK" ]; then
             claude mcp remove pseudolife-memory 2>/dev/null || true
-            claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
+            # --env PSEUDOLIFE_MCP_NO_SPAWN=1: Docker-tier shims wait for the
+            # compose daemon instead of spawning a fallback (see the Codex
+            # registration above). The option must come AFTER the server
+            # name: --env is variadic and placed earlier it swallows the
+            # name, failing the whole registration (verified against the
+            # claude CLI 2026-08-29).
+            claude mcp add --scope user pseudolife-memory --env PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp
             echo "==> Wired into Claude Code via the pseudolife-mcp shim — per-session identity (required for correct episodes with concurrent sessions)."
         else
             echo "WARNING: the pseudolife-mcp shim is unavailable — tooling missing (pipx / python3 >=3.10) or the install failed (see the pip/pipx output above; on PEP 668 distros 'pip install --user' refuses with externally-managed-environment)." >&2

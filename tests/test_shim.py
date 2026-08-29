@@ -428,6 +428,247 @@ def _reap_daemon(port: int) -> None:
         )
 
 
+# ── Spawn hardening (2026-08-29 port-shadowing incident) ─────────────────────
+#
+# After a Windows reboot, Docker Desktop was still booting when the morning
+# session's shim probed the daemon port, so the shim spawned a host-side
+# fallback daemon. Its bind beat Docker's port proxy (which then failed its
+# publish silently), and the fallback served a retired 384-d file bank in
+# place of the real Docker bank. Later, two shims racing each spawned one
+# more daemon apiece. These tests pin the two shim-side defenses: the
+# Docker-tier no-spawn marker, and the cross-process spawn lock.
+
+
+def test_probe_health_returns_the_payload_of_a_degraded_daemon(monkeypatch):
+    """A 503 response IS a daemon. ``urlopen`` raises ``HTTPError`` on it,
+    and swallowing that as "no daemon" would make the shim spawn a second
+    daemon over a reachable-but-refusing one — whose bind then fails on the
+    held port, so the refusal diagnostic in the 503 body reaches no one."""
+    import io
+    import urllib.error
+
+    from pseudolife_memory import shim
+
+    body = json.dumps({"status": "degraded", "init_refusal": "dim mismatch"})
+
+    def fake_urlopen(url, timeout=0.25):
+        raise urllib.error.HTTPError(
+            url, 503, "Service Unavailable", None, io.BytesIO(body.encode()))
+
+    monkeypatch.setattr(shim.urllib.request, "urlopen", fake_urlopen)
+    health = shim.probe_health("http://127.0.0.1:8765")
+    assert health is not None
+    assert health["init_refusal"] == "dim mismatch"
+
+
+def test_shim_surfaces_a_boot_refusal_instead_of_spawning_over_it(
+        monkeypatch, capsys):
+    """A daemon that is up but refusing (``init_refusal`` in /health — the
+    hydrated-dim guard) holds the port, so spawning over it can only fail.
+    The shim must print the daemon's own diagnosis and exit."""
+    from pseudolife_memory import shim
+
+    monkeypatch.delenv("PSEUDOLIFE_MCP_NO_SPAWN", raising=False)
+    monkeypatch.setattr(
+        shim, "spawn_daemon",
+        lambda: pytest.fail("must not spawn over a refusing daemon"))
+    refusal = ("Refusing to serve: 12 hydrated row(s) are embedded at 384 "
+               "dims, but the live embedder produces 1024-d vectors")
+    monkeypatch.setattr(
+        shim, "probe_health",
+        lambda url, timeout=0.25: {"status": "degraded",
+                                   "init_refusal": refusal})
+    with pytest.raises(SystemExit) as exc:
+        shim.ensure_daemon("http://127.0.0.1:8765")
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "Refusing to serve" in err and "384" in err
+
+
+def test_shim_attaches_to_a_degraded_daemon_and_says_so(monkeypatch, capsys):
+    """Degraded WITHOUT a refusal (e.g. ``db: error`` while Postgres
+    restarts) still attaches — per-call upstream connections recover on
+    their own — but leaves one honest line about the state."""
+    from pseudolife_memory import shim
+
+    payload = {"status": "degraded", "db": "error: connection refused"}
+    monkeypatch.setattr(
+        shim, "probe_health", lambda url, timeout=0.25: dict(payload))
+    health = shim.ensure_daemon("http://127.0.0.1:8765")
+    assert health["status"] == "degraded"
+    assert "degraded" in capsys.readouterr().err
+
+
+def test_no_spawn_env_waits_for_the_daemon_instead_of_spawning(monkeypatch):
+    """With PSEUDOLIFE_MCP_NO_SPAWN set, the shim must wait for the real
+    daemon to come up (Docker starting slower than the session) and never
+    spawn a fallback whose bind would race Docker's port proxy."""
+    from pseudolife_memory import shim
+
+    monkeypatch.setenv("PSEUDOLIFE_MCP_NO_SPAWN", "1")
+    monkeypatch.setattr(
+        shim, "spawn_daemon",
+        lambda: pytest.fail("must never spawn under PSEUDOLIFE_MCP_NO_SPAWN"))
+    monkeypatch.setattr(shim.time, "sleep", lambda s: None)
+
+    calls = {"n": 0}
+
+    def fake_probe(url, timeout=0.25):
+        calls["n"] += 1
+        return {"status": "ok"} if calls["n"] >= 3 else None
+
+    monkeypatch.setattr(shim, "probe_health", fake_probe)
+    health = shim.ensure_daemon("http://127.0.0.1:8765")
+    assert health["status"] == "ok"
+
+
+def test_no_spawn_env_times_out_loudly_with_the_docker_remedy(
+        monkeypatch, capsys):
+    """When the daemon never appears, the no-spawn path must exit 1 with a
+    message that names the env var (so the reader knows why nothing was
+    spawned) and the Docker recovery command."""
+    from pseudolife_memory import shim
+
+    monkeypatch.setenv("PSEUDOLIFE_MCP_NO_SPAWN", "true")
+    monkeypatch.setattr(
+        shim, "spawn_daemon",
+        lambda: pytest.fail("must never spawn under PSEUDOLIFE_MCP_NO_SPAWN"))
+    monkeypatch.setattr(shim, "probe_health", lambda url, timeout=0.25: None)
+    monkeypatch.setattr(shim, "_NO_SPAWN_WAIT_S", 0.0, raising=False)
+    with pytest.raises(SystemExit) as exc:
+        shim.ensure_daemon("http://127.0.0.1:8765")
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "PSEUDOLIFE_MCP_NO_SPAWN" in err
+    assert "docker compose" in err
+
+
+def test_no_spawn_env_falsy_value_still_spawns(monkeypatch, tmp_path):
+    """`PSEUDOLIFE_MCP_NO_SPAWN=0` (and unset) must keep today's autostart
+    behavior — the marker is a Docker-tier opt-out, not a default change."""
+    from pseudolife_memory import shim
+
+    monkeypatch.setenv("PSEUDOLIFE_MCP_NO_SPAWN", "0")
+    # Never contend on the real %TEMP% lock a live shim may hold.
+    monkeypatch.setattr(
+        shim, "_spawn_lock_path", lambda url: tmp_path / "spawn.lock",
+        raising=False)
+    monkeypatch.setattr(shim.time, "sleep", lambda s: None)
+
+    spawned = []
+
+    class _Child:
+        returncode = None
+
+        def poll(self):
+            return None
+
+    def fake_spawn():
+        spawned.append(1)
+        return _Child()
+
+    monkeypatch.setattr(shim, "spawn_daemon", fake_spawn)
+    monkeypatch.setattr(
+        shim, "probe_health",
+        lambda url, timeout=0.25: {"status": "ok"} if spawned else None)
+    health = shim.ensure_daemon("http://127.0.0.1:8765")
+    assert health["status"] == "ok"
+    assert len(spawned) == 1
+
+
+def test_concurrent_shims_spawn_exactly_one_daemon(monkeypatch, tmp_path):
+    """Failure mode 3 of the incident: two shims racing at logon each
+    spawned a host daemon (one venv, one global Python311 — the package is
+    installed in both). The cross-process spawn lock must make the loser
+    wait for the winner's daemon instead of starting a second one."""
+    import threading
+
+    from pseudolife_memory import shim
+
+    monkeypatch.delenv("PSEUDOLIFE_MCP_NO_SPAWN", raising=False)
+    monkeypatch.setattr(
+        shim, "_spawn_lock_path", lambda url: tmp_path / "spawn.lock",
+        raising=False)
+
+    spawned: list[float] = []
+    guard = threading.Lock()
+
+    class _Child:
+        returncode = None
+
+        def poll(self):
+            return None
+
+    def fake_spawn():
+        with guard:
+            spawned.append(time.time())
+        return _Child()
+
+    def fake_probe(url, timeout=0.25):
+        # The "daemon" becomes healthy 1.5s after the first spawn — long
+        # enough that a second racing shim probes at least once while it
+        # is still down (the pre-fix double-spawn window).
+        with guard:
+            first = spawned[0] if spawned else None
+        if first is not None and time.time() - first > 1.5:
+            return {"status": "ok"}
+        return None
+
+    monkeypatch.setattr(shim, "spawn_daemon", fake_spawn)
+    monkeypatch.setattr(shim, "probe_health", fake_probe)
+
+    results: list[dict] = []
+
+    def run() -> None:
+        results.append(shim.ensure_daemon("http://127.0.0.1:18765"))
+
+    threads = [threading.Thread(target=run) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+    assert len(results) == 2
+    assert all(r["status"] == "ok" for r in results)
+    assert len(spawned) == 1, f"both racing shims spawned a daemon: {spawned}"
+
+
+def test_spawn_lock_is_released_after_the_daemon_is_up(monkeypatch, tmp_path):
+    """The lock guards only the spawn window — once ensure_daemon returns,
+    a later shim (say, after the daemon dies) must be able to take it."""
+    from pseudolife_memory import shim
+
+    monkeypatch.delenv("PSEUDOLIFE_MCP_NO_SPAWN", raising=False)
+    monkeypatch.setattr(
+        shim, "_spawn_lock_path", lambda url: tmp_path / "spawn.lock",
+        raising=False)
+    monkeypatch.setattr(shim.time, "sleep", lambda s: None)
+
+    spawned = []
+
+    class _Child:
+        returncode = None
+
+        def poll(self):
+            return None
+
+    def fake_spawn():
+        spawned.append(1)
+        return _Child()
+
+    monkeypatch.setattr(shim, "spawn_daemon", fake_spawn)
+    monkeypatch.setattr(
+        shim, "probe_health",
+        lambda url, timeout=0.25: {"status": "ok"} if spawned else None)
+    health = shim.ensure_daemon("http://127.0.0.1:18766")
+    assert health["status"] == "ok"
+    assert len(spawned) == 1
+
+    fh = shim._open_spawn_lock("http://127.0.0.1:18766")
+    assert fh is not None
+    assert shim._try_spawn_lock(fh), "spawn lock was not released"
+    shim._release_spawn_lock(fh, held=True)
+
+
 def test_sdk_guard_passes_on_a_v2_environment():
     from pseudolife_memory import shim
 

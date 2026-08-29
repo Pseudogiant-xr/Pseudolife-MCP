@@ -6,6 +6,48 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-08-29 — the shim's spawn fallback can no longer shadow a Docker bank)
+- **Hardened `shim.ensure_daemon` against the 2026-08-29 port-shadowing
+  incident.** After a Windows reboot, Docker Desktop was still booting when
+  the session's shim probed the daemon port, so the shim spawned a host-side
+  fallback daemon; its bind beat Docker's port proxy (whose publish then
+  failed silently — `HostConfig.PortBindings` declared,
+  `NetworkSettings.Ports` empty), and the fallback served a retired 384-d
+  file bank in place of the real Docker bank. Three defenses, one per
+  confirmed failure mode:
+  - **`PSEUDOLIFE_MCP_NO_SPAWN=1`** (new env var) disables the shim's
+    spawn fallback: it waits up to ~3 min for the external daemon instead,
+    then exits with the Docker recovery command. The Docker-tier installers
+    (`ops/install.ps1` / `ops/install.sh`) now set it on every shim
+    registration (both clients; for `claude mcp add` the `--env` must
+    follow the server name — the option is variadic and placed earlier it
+    swallows the name, verified live), and warn — with the exact upgrade
+    commands — when an already-registered shim lacks the marker, since the
+    add path is skipped for existing installs. Pip/lite installs keep the
+    spawn fallback.
+  - **`probe_health` now reads HTTP-error bodies** (`/health` serves
+    degraded payloads as 503, which `urlopen` raises on): a reachable but
+    degraded daemon is no longer mistaken for an absent one. A payload
+    carrying `init_refusal` makes the shim print the daemon's own
+    diagnosis and exit instead of spawning a doomed second daemon over the
+    held port; other degraded states attach as before with one honest
+    status line.
+  - **A cross-process spawn lock** (per-user temp file keyed on the daemon
+    URL) makes concurrent shims spawn at most one daemon — in the incident,
+    two shims racing at 13:39 each spawned one (venv + global env). The
+    loser waits for the winner's daemon; the lock is best-effort (a broken
+    lock file degrades to the old behavior, never bricks a session) and OS
+    locks die with their holder, so no stale-lock state exists.
+  - **A file-mode hydration guard** in `MemoryService._ensure_init`: a bank
+    whose hydrated entry/cortex embeddings don't match the live embedder's
+    dimension now refuses at boot with a diagnosis naming the bank path,
+    both dimensions, and the migration remedies — surfacing at `/health` as
+    `degraded` like the schema-level Postgres refusal — instead of crashing
+    every search/store with a bare torch shape error
+    (`size mismatch, mat (12x384), vec (1024)`). Postgres banks were
+    already guarded by `ensure_schema`'s `vector(N)` refusal; the v0.1 file
+    mode hydrated `.pt` state unchecked.
+
 ### Changed (2026-08-28 — CI shards the full-suite lanes across two workers)
 - **Both full-suite CI lanes run `pytest -n 2 --dist loadfile`**
   (pytest-xdist joins the dev extras). `--dist loadfile` keeps whole files

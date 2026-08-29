@@ -31,8 +31,28 @@ def test_installers_wire_codex_via_shim_by_default() -> None:
     ps = _read("ops/install.ps1")
     sh = _read("ops/install.sh")
     for text in (ps, sh):
-        assert "codex mcp add pseudolife-memory -- pseudolife-mcp" in text
+        assert ("codex mcp add pseudolife-memory "
+                "--env PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp") in text
         assert "codex mcp add pseudolife-memory --url" in text
+
+
+def test_docker_tier_shim_registrations_disable_the_spawn_fallback() -> None:
+    """The Docker-tier installers register every shim with
+    ``PSEUDOLIFE_MCP_NO_SPAWN=1`` (2026-08-29 incident): there the real
+    daemon is the compose container, and a shim-spawned host fallback can
+    win the port-bind race against a still-booting Docker Desktop and
+    shadow the real bank with a stale one. Both clients, both platforms."""
+    ps = _read("ops/install.ps1")
+    sh = _read("ops/install.sh")
+    for text in (ps, sh):
+        # NB flag order: claude's --env is variadic — placed before the
+        # server name it swallows it and the whole registration fails
+        # (verified against the live CLI 2026-08-29). Name first, then
+        # --env, then the `--` separator.
+        assert ("claude mcp add --scope user pseudolife-memory "
+                "--env PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp") in text
+        assert ("codex mcp add pseudolife-memory "
+                "--env PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp") in text
 
 
 def test_compose_writer_default_is_client_neutral() -> None:

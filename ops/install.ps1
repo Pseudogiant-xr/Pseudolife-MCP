@@ -307,11 +307,22 @@ function Install-ShimOnce {
 
 foreach ($selectedClient in $clients) {
     if ($selectedClient -eq "codex") {
-        codex mcp get pseudolife-memory *> $null
+        $existingCodex = codex mcp get pseudolife-memory 2>$null | Out-String
         if ($LASTEXITCODE -eq 0) {
+            if (($Transport -eq "shim") -and ($existingCodex -notmatch "PSEUDOLIFE_MCP_NO_SPAWN")) {
+                Write-Warning "The existing Codex registration lacks PSEUDOLIFE_MCP_NO_SPAWN=1 - its shim can still spawn a fallback daemon that shadows the Docker bank after a reboot."
+                Write-Host "  Upgrade it (re-check any custom command first: codex mcp get pseudolife-memory):"
+                Write-Host "    codex mcp remove pseudolife-memory"
+                Write-Host "    codex mcp add pseudolife-memory --env PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp"
+            }
             Write-Host "==> MCP server already wired into Codex - skipping."
         } elseif (($Transport -eq "shim") -and (Install-ShimOnce)) {
-            codex mcp add pseudolife-memory -- pseudolife-mcp
+            # PSEUDOLIFE_MCP_NO_SPAWN: this is a Docker-tier install, so the
+            # daemon is the compose container — the shim must wait for it,
+            # never spawn a host-side fallback that can win the port-bind
+            # race against a still-booting Docker Desktop and shadow the
+            # real bank (2026-08-29 incident).
+            codex mcp add pseudolife-memory --env PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp
             Write-Host "==> Wired into Codex via the pseudolife-mcp shim - per-session identity (a Codex session no longer inherits a concurrent Claude session's episode)."
         } else {
             if ($Transport -eq "shim") {
@@ -322,13 +333,25 @@ foreach ($selectedClient in $clients) {
             Write-Host "==> Wired into Codex (codex mcp add, HTTP)."
         }
     } else {
-        claude mcp get pseudolife-memory *> $null
+        $existingClaude = claude mcp get pseudolife-memory 2>$null | Out-String
         if ($LASTEXITCODE -eq 0) {
+            if (($Transport -eq "shim") -and ($existingClaude -notmatch "PSEUDOLIFE_MCP_NO_SPAWN")) {
+                Write-Warning "The existing Claude Code registration lacks PSEUDOLIFE_MCP_NO_SPAWN=1 - its shim can still spawn a fallback daemon that shadows the Docker bank after a reboot (2026-08-29 incident)."
+                Write-Host "  Upgrade it (re-check any custom command first: claude mcp get pseudolife-memory):"
+                Write-Host "    claude mcp remove pseudolife-memory"
+                Write-Host "    claude mcp add --scope user pseudolife-memory --env PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp"
+            }
             Write-Host "==> MCP server already wired into Claude Code - skipping."
         } elseif ($Transport -eq "shim") {
             if (Install-ShimOnce) {
                 claude mcp remove pseudolife-memory *> $null
-                claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
+                # --env PSEUDOLIFE_MCP_NO_SPAWN=1: Docker-tier shims wait for
+                # the compose daemon instead of spawning a fallback (see the
+                # Codex registration above). The option must come AFTER the
+                # server name: --env is variadic and placed earlier it
+                # swallows the name, failing the whole registration
+                # (verified against claude CLI 2026-08-29).
+                claude mcp add --scope user pseudolife-memory --env PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp
                 Write-Host "==> Wired into Claude Code via the pseudolife-mcp shim - per-session identity (required for correct episodes with concurrent sessions)."
             } else {
                 Write-Warning "Could not install the pseudolife-mcp shim - no working pipx or Python (>=3.10, py -3 or python) was found, or the shim install itself failed (see warnings above)."

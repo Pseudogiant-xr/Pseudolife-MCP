@@ -204,10 +204,13 @@ docker compose -f ops/docker-compose.yml -f ops/docker-compose.ghcr.yml up -d
 # Verify, then wire the transport into one or both clients.
 curl http://127.0.0.1:8765/health
 
-# Stdio shim (the installer's default — per-session episode identity):
+# Stdio shim (the installer's default — per-session episode identity).
+# PSEUDOLIFE_MCP_NO_SPAWN=1 makes the shim wait for the container instead
+# of spawning a host fallback that can shadow the Docker bank after a
+# reboot; set it on Docker-tier registrations like these.
 pip install pseudolife-mcp
-claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
-codex mcp add pseudolife-memory -- pseudolife-mcp
+claude mcp add --scope user pseudolife-memory --env PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp
+codex mcp add pseudolife-memory --env PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp
 
 # ...or direct HTTP (no pip package needed; fine for single-session setups):
 claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
@@ -512,8 +515,14 @@ session carries its own tier-1 identity. The same wiring by hand:
 
 ```bash
 pip install pseudolife-mcp    # daemon in Docker; add [lite] for the pip tier
-claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
+claude mcp add --scope user pseudolife-memory --env PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp
 ```
+
+`PSEUDOLIFE_MCP_NO_SPAWN=1` belongs on Docker-tier registrations: the shim
+then waits for the container instead of spawning a host-side fallback whose
+port bind can race a still-booting Docker and shadow the real bank. On the
+`[lite]` pip tier drop the `--env` — there the spawn fallback *is* the
+zero-config path.
 
 Direct HTTP works too — the daemon serves MCP over HTTP natively (no shim,
 no host command, nothing OS-specific; concurrent sessions then share one
@@ -548,8 +557,12 @@ concurrent Claude session's episode:
 
 ```bash
 pip install pseudolife-mcp
-codex mcp add pseudolife-memory -- pseudolife-mcp
+codex mcp add pseudolife-memory --env PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp
 ```
+
+(Same Docker-tier note as the Claude wiring above: keep
+`PSEUDOLIFE_MCP_NO_SPAWN=1` when the daemon runs in Docker; drop it on the
+`[lite]` pip tier.)
 
 The HTTP one-liner works too (no pip package needed):
 
