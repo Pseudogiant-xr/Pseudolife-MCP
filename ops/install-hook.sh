@@ -130,6 +130,11 @@ if [ "$CLIENT" = codex ]; then
   echo ""
   echo "IMPORTANT: Codex will skip this new or changed hook until you review and trust its exact definition."
   echo "  Start Codex, open /hooks, review the definition from $SETTINGS_PATH, and approve it."
+  echo "NOTE: Codex hooks are experimental and OFF by default - enable the engine"
+  echo "  first in ~/.codex/config.toml (and note hooks are not available on"
+  echo "  Windows - use the standing AGENTS.md block there instead):"
+  echo "    [features]"
+  echo "    codex_hooks = true"
 fi
 
 # The hooks wire the session lifecycle, but the memory LOOP only fires if a

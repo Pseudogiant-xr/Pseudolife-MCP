@@ -35,6 +35,18 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+# Colored step lines when interactive (NO_COLOR suppresses; the literal `==>`
+# prefix survives either way for log greps). Escapes are generated
+# ([char]27), never raw ESC bytes.
+$Esc = [char]27
+$stepColor = [Environment]::UserInteractive -and
+    -not [Console]::IsOutputRedirected -and -not $env:NO_COLOR
+function Step($msg) {
+    if ($stepColor) { Write-Host "${Esc}[1;36m==>${Esc}[0m $msg" }
+    else { Write-Host "==> $msg" }
+}
+
 $repo = Split-Path -Parent $PSScriptRoot
 $composeFile = Join-Path $repo "ops\docker-compose.yml"
 $envFile = Join-Path $repo "ops\.env"
@@ -45,7 +57,7 @@ $compose = @("-f", $composeFile)
 $exampleFile = Join-Path $repo "ops\.env.example"
 if (-not (Test-Path $envFile) -and (Test-Path $exampleFile)) {
     Copy-Item $exampleFile $envFile
-    Write-Host "==> Scaffolded ops/.env from ops/.env.example (all values commented)."
+    Step "Scaffolded ops/.env from ops/.env.example (all values commented)."
 }
 # Machine-local overrides (e.g. a fine-tuned GGUF mount) live in the gitignored
 # override file; explicit -f disables compose's auto-merge, so add it here.
@@ -54,7 +66,7 @@ if (Test-Path $envFile) { $compose = @("--env-file", $envFile) + $compose }
 
 # 1. Backup the bank (pg_dump inside the container) — the always-first rule.
 if (-not $NoBackup) {
-    Write-Host "==> Backing up the bank (pg_dump)..."
+    Step "Backing up the bank (pg_dump)..."
     & (Join-Path $PSScriptRoot "backup.ps1")
 } else {
     Write-Warning "Skipping backup (-NoBackup)."
@@ -103,7 +115,7 @@ if (-not $imagePresent) {
 } else {
     docker tag $imageTag $rollback
     $rollbackState = "tagged"
-    Write-Host "==> Tagged rollback image: $rollback"
+    Step "Tagged rollback image: $rollback"
     if ($ForceRollbackTag -and $runningImageId -and ($runningImageId -ne $tagImageId)) {
         Write-Warning "-ForceRollbackTag: tagged $imageTag even though the running daemon deployed a different image."
     }
@@ -145,12 +157,12 @@ try {
 
 # 3. Rebuild + recreate ONLY the daemon. `--no-deps` is what keeps Postgres and
 #    the extractor untouched (without it, `up --build <svc>` recreates all three).
-Write-Host "==> Rebuilding the daemon only (Postgres + extractor untouched)..."
+Step "Rebuilding the daemon only (Postgres + extractor untouched)..."
 docker compose @compose up -d --no-deps --build pseudolife-daemon
 if ($LASTEXITCODE -ne 0) { throw "daemon rebuild failed" }
 
 # 4. Wait for health.
-Write-Host "==> Waiting for the daemon to report healthy..."
+Step "Waiting for the daemon to report healthy..."
 $h = $null
 for ($i = 0; $i -lt $HealthRetries; $i++) {
     try {
@@ -160,7 +172,7 @@ for ($i = 0; $i -lt $HealthRetries; $i++) {
     $h = $null
 }
 if ($h) {
-    Write-Host "==> Healthy. schema=$($h.schema) persist_errors=$($h.persist_errors)"
+    Step "Healthy. schema=$($h.schema) persist_errors=$($h.persist_errors)"
     Write-Host "    Rolled-back deploy if ever needed:"
     $rollbackLines | ForEach-Object { Write-Host $_ }
 } else {

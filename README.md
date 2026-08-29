@@ -148,7 +148,10 @@ trade-offs: [Dreaming](docs/guide/dreaming.md).
 
 Everything above plus the bundled extractor, external volumes,
 health-checked services, and backup/rollback tooling. Requires Docker and
-Claude Code, Codex, or both; one command from clone to first memory:
+at least one MCP-capable coding agent — Claude Code, Codex, and Gemini CLI
+are wired end-to-end; anything else gets paste-ready config
+([provider matrix](docs/guide/providers.md)). One command from clone to
+first memory:
 
 ```bash
 git clone https://github.com/Pseudogiant-xr/Pseudolife-MCP.git
@@ -157,10 +160,15 @@ ops/install.sh          # Linux / macOS
 ops\install.ps1         # Windows (pwsh 7+)
 # Codex: add --client codex / -Client codex
 # Both:  add --client both  / -Client both
+# Gemini: add --client gemini — or several: --client claude,codex,gemini
+# Other MCP agents (Cursor, Windsurf, Zed, ...): --client generic
 ```
 
-The installer runs the preflight (one exact fix line per missing
-prerequisite), asks which **dream extractor** should consolidate memories —
+The installer asks which agents to wire (multi-select, with a capability
+matrix showing exactly what each one gets — session briefing, per-turn
+discipline, standing file), runs the preflight (one exact fix line per
+missing prerequisite), then asks which **dream extractor** should
+consolidate memories —
 
 - **sidecar** — the bundled local CPU model; no Claude plan needed, works
   for everyone, and keeps every memory on the box (~11.8 GB image);
@@ -171,14 +179,18 @@ prerequisite), asks which **dream extractor** should consolidate memories —
 - **sonnet-fallback** — the Claude shim primary, the bundled sidecar as
   automatic fallback (Max-plan CLI plus the ~11.8 GB image) —
 
-then brings the stack up, installs the selected clients' session hooks,
-registers the MCP transport (the stdio shim by default, direct HTTP via
-`--transport http`), and health-checks the daemon. The session-hook briefing
-delivers the memory-loop guidance every session, and the server also
-advertises the core loop through MCP `instructions` — so no standing-file
-edit is needed or offered. `--instructions append` additionally writes the
-block from `examples/CLAUDE.memory.md` into `~/.claude/CLAUDE.md` /
-`~/.codex/AGENTS.md` (useful for subagent visibility or hook-less setups).
+then brings the stack up, installs the selected clients' session hooks
+(where the client has a hook system), registers the MCP transport (the
+stdio shim by default, with a per-provider writer id; direct HTTP via
+`--transport http`), and health-checks the daemon — finishing with a
+per-agent ladder of what got wired and what that agent's platform cannot
+support. Where a session-hook briefing exists (Claude, Codex off-Windows)
+no standing-file edit is needed; for hook-less providers (Gemini CLI,
+generic agents, Codex on Windows) the installer offers to append the
+standing block instead — there it *is* the briefing. `--instructions
+append` always writes the block from `examples/CLAUDE.memory.md` into
+`~/.claude/CLAUDE.md` / `~/.codex/AGENTS.md` / `~/.gemini/GEMINI.md`
+(useful for subagent visibility even with hooks).
 Idempotent — re-run any time; `--extractor <mode>` switches extractor
 setups. Non-interactive example:
 `ops/install.sh --extractor sidecar --client codex`.
@@ -282,6 +294,7 @@ deep material lives in the user guide:
 | Page | What's in it |
 |---|---|
 | [Configuration](docs/guide/configuration.md) | Env vars, tuned defaults, toolset tiers, stdio shim, LAN sharing, data layout, backups, schema history |
+| [Providers](docs/guide/providers.md) | Capability matrix per coding agent, the hook-equivalent ladder, AGENTS.md standard, Codex hooks opt-in, writer ids |
 | [Retrieval](docs/guide/retrieval.md) | Reranker, BM25 hybrid, abstention floors, ranking-trace debugging, `memory_recall`, the knowledge graph |
 | [Dreaming](docs/guide/dreaming.md) | Extractor tiers, the bundled sidecar, upgrading the extractor, Sonnet-fallback, cadence, deep dream, consolidation |
 | [Episodes & sessions](docs/guide/episodes.md) | Daemon-owned session episodes, the briefing hook, nested sub-episodes, tags |
@@ -582,8 +595,45 @@ For that Codex HTTP configuration, export `PSEUDOLIFE_MCP_TOKEN` in the
 environment that launches Codex. The token stays out of `config.toml`, and
 Codex reads it when connecting. This is unnecessary for the default stdio shim.
 
-**Verify:** run `claude mcp list` or `codex mcp list` (the server should report
-connected), then ask the agent to *"store a memory that this install works"* and check it
+Gemini CLI — same shape (`-s user` matters: Gemini defaults to project
+scope; the `-e` env gives Gemini sessions their own write attribution, and
+the same Docker-tier `PSEUDOLIFE_MCP_NO_SPAWN=1` note as above applies):
+
+```bash
+pip install pseudolife-mcp
+gemini mcp add -s user -e PSEUDOLIFE_WRITER_ID=gemini -e PSEUDOLIFE_MCP_NO_SPAWN=1 pseudolife-memory pseudolife-mcp
+```
+
+Or HTTP, no pip package needed:
+
+```bash
+gemini mcp add -s user -t http pseudolife-memory http://127.0.0.1:8765/mcp
+```
+
+**Any other MCP-capable agent** (Cursor, Windsurf, Zed, Copilot CLI, …) —
+add the generic `mcpServers` entry to that tool's MCP config (`ops/install.sh
+--client generic` prints both shapes ready to paste):
+
+```json
+{
+  "mcpServers": {
+    "pseudolife-memory": {
+      "command": "pseudolife-mcp",
+      "env": {
+        "PSEUDOLIFE_WRITER_ID": "mcp-client",
+        "PSEUDOLIFE_MCP_NO_SPAWN": "1"
+      }
+    }
+  }
+}
+```
+
+What each agent gets — and what its platform can't support (hooks,
+per-turn discipline): [the provider matrix](docs/guide/providers.md).
+
+**Verify:** run `claude mcp list`, `codex mcp list`, or `gemini mcp list`
+(the server should report connected), then ask the agent to *"store a memory
+that this install works"* and check it
 appears in the Stream tab of the Console at <http://127.0.0.1:8765/ui/>.
 
 Preferring stdio (this is what the installer wires by default, for
@@ -602,17 +652,27 @@ command, below) delivers the full block every session — **plugin users and
 hook users need nothing more**. If you want it in a standing file instead —
 or additionally, for subagent visibility (subagents read `CLAUDE.md` but not
 hook output) — append it to Claude's global `~/.claude/CLAUDE.md`, Codex's
-global `~/.codex/AGENTS.md`, or a per-project `CLAUDE.md` / `AGENTS.md`:
+global `~/.codex/AGENTS.md`, Gemini's global `~/.gemini/GEMINI.md`, or a
+per-project `CLAUDE.md` / `AGENTS.md`:
 
 ```bash
 cat examples/CLAUDE.memory.md >> ~/.claude/CLAUDE.md
 cat examples/CLAUDE.memory.md >> ~/.codex/AGENTS.md
+cat examples/CLAUDE.memory.md >> ~/.gemini/GEMINI.md
 ```
 
 ```powershell
 Add-Content "$env:USERPROFILE\.claude\CLAUDE.md" (Get-Content examples\CLAUDE.memory.md -Raw)
 Add-Content "$env:USERPROFILE\.codex\AGENTS.md" (Get-Content examples\CLAUDE.memory.md -Raw)
 ```
+
+For hook-less providers this standing block is not a nice-to-have — it *is*
+the session briefing. `AGENTS.md` is the cross-vendor standard for standing
+agent instructions (Linux Foundation-governed; read by Codex, Copilot,
+Cursor, Gemini CLI, Zed, and 30+ others), so a per-project `AGENTS.md`
+carrying the block reaches almost every agent at once. Claude Code is the
+holdout — it reads `CLAUDE.md` — but a `CLAUDE.md` whose first line is
+`@AGENTS.md` imports the shared file, so one copy serves every tool.
 
 The block ([`examples/CLAUDE.memory.md`](examples/CLAUDE.memory.md)) teaches
 the loop: **RECALL at the start** (`memory_search` / `memory_lesson_search` /
@@ -638,11 +698,20 @@ or `~/.codex/hooks.json` and is idempotent. The manual hook JSON,
 the briefing budget flags, and how session episodes open/close/resume
 without any hooks: [Episodes & sessions](docs/guide/episodes.md).
 
-**Codex hook trust:** Codex skips every new or changed hook until you review
-and trust its exact definition. After installing the Codex hook, start Codex,
-open `/hooks`, review the definition from `~/.codex/hooks.json`, and approve it.
-Until then, MCP tools still work and the server-level `instructions` still
-load, but the richer session briefing is not injected.
+**Codex hooks are experimental and off by default** (and not available on
+Windows — use the standing AGENTS.md block there). Writing `hooks.json` is
+not enough on its own; first enable the hook engine in `~/.codex/config.toml`:
+
+```toml
+[features]
+codex_hooks = true
+```
+
+**Codex hook trust:** Codex also skips every new or changed hook until you
+review and trust its exact definition. After installing the Codex hook, start
+Codex, open `/hooks`, review the definition from `~/.codex/hooks.json`, and
+approve it. Until then, MCP tools still work and the server-level
+`instructions` still load, but the richer session briefing is not injected.
 
 ## Usage patterns
 
@@ -864,6 +933,7 @@ docker compose -f ops/docker-compose.yml down
 # 3. Remove the MCP registration.
 claude mcp remove pseudolife-memory
 codex mcp remove pseudolife-memory
+gemini mcp remove pseudolife-memory -s user
 # 4. Only when you're sure: delete the data volumes (THIS is the memory).
 docker volume rm pseudolife-mcp-bank pseudolife-mcp-state
 ```

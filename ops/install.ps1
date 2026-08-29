@@ -3,15 +3,22 @@
 #   garbles the first key of ops/.env and can break settings.json parsing —
 #   run this under pwsh 7+ (winget install Microsoft.PowerShell).
 # One-shot idempotent installer for the Pseudolife-MCP stack (issue #13
-# tier 2). Everything downstream of Docker: preflight -> volumes -> extractor
-# choice -> compose up -> client hooks -> standing instructions ->
+# tier 2). Everything downstream of Docker: provider selection -> preflight ->
+# extractor choice -> compose up -> client hooks -> standing instructions ->
 # MCP registration -> health. Re-running is safe; re-running with a different
 # -Extractor is the supported way to switch modes.
 #
 #   ops\install.ps1                                    # interactive
 #   ops\install.ps1 -Extractor sidecar -Client codex   # non-interactive
-#   ops\install.ps1 -Extractor sonnet-fallback -ClaudeMd append
-#   ops\install.ps1 -Extractor sonnet-only -ClaudeMd skip
+#   ops\install.ps1 -Extractor sonnet-only -Client claude,gemini
+#   ops\install.ps1 -Extractor sonnet-fallback -Instructions append
+#
+# Providers (-Client, comma- or space-separated list):
+#   claude    Claude Code    - MCP + SessionStart briefing + per-turn discipline
+#   codex     OpenAI Codex   - MCP + SessionStart briefing (opt-in, not Windows)
+#   gemini    Gemini CLI     - MCP + standing instructions (no hook system)
+#   generic   any MCP agent  - prints paste-ready config + standing block
+#   both = claude,codex      all = claude,codex,gemini
 #
 # Extractor modes (spec: docs/superpowers/specs/
 # 2026-07-14-installer-extractor-choice-design.md):
@@ -24,15 +31,19 @@ param(
     [ValidateSet("", "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5",
                  "claude-fable-5")]
     [string]$Model = "",
-    [ValidateSet("claude", "codex", "both")]
-    [string]$Client = "claude",
+    # Comma/space-separated provider list (claude|codex|gemini|generic, plus
+    # the both/all aliases) — validated by Get-ProviderList, not ValidateSet,
+    # which cannot express a list.
+    [string]$Client = "",
     [ValidateSet("", "append", "skip")]
     [string]$ClaudeMd = "",
-    [ValidateSet("", "append", "skip")]
+    [ValidateSet("", "append", "skip", "auto")]
     [string]$Instructions = "",
+    [string]$AgentsFile = "",
     [int]$ShimPort = 8082,
     [ValidateSet("shim", "http")]
-    [string]$Transport = "shim"
+    [string]$Transport = "shim",
+    [switch]$NoArt
 )
 $ErrorActionPreference = "Stop"
 
@@ -45,12 +56,164 @@ $EnvBegin = "# >>> pseudolife-mcp install (managed block — installer rewrites 
 $EnvEnd = "# <<< pseudolife-mcp install <<<"
 $interactive = [Environment]::UserInteractive -and -not [Console]::IsInputRedirected
 
-# -- 1. preflight --------------------------------------------------------------
-Write-Host "==> Preflight..."
-& (Join-Path $PSScriptRoot "preflight.ps1") -Client $Client
+# -- presentation helpers -------------------------------------------------------
+# Art and color are interactive sugar only: NO_COLOR unset, no -NoArt, and an
+# interactive session. Escapes are generated ([char]27), never raw ESC bytes —
+# the tracked-tree control-byte guard bans those.
+$Esc = [char]27
+function Test-ArtOk {
+    $interactive -and -not $env:NO_COLOR -and -not $NoArt -and
+        ($env:TERM -ne "dumb")
+}
+function Step($msg) {
+    if (Test-ArtOk) { Write-Host "${Esc}[1;36m==>${Esc}[0m $msg" }
+    else { Write-Host "==> $msg" }
+}
+
+# >>> banner >>>
+function Show-Banner {
+    if (-not (Test-ArtOk)) { return }
+    Write-Host -NoNewline "${Esc}[36m"
+    Write-Host @'
+        _.-~~-._                            .---------------------.
+      .'        '.                          |  .--.  .--.  .--.   |
+     /  .--.  .--. \                        | |    ||    ||    |  |
+    |  (    )(    ) |     ==============    | |____||____||____|  |
+    |   '--'  '--'  |     ==============    |                     |
+    |  .--.  .--.   |     ==============    |    P S E U D O      |
+    |  (    )(    ) |     ==============    |      L I F E        |
+     \  '--'  '--'  /     ==============    |       M C P         |
+      '._        _.'                        |_____________________|
+         '-.__.-'                             | |  | |  | |  | |
+'@
+    Write-Host "${Esc}[0m"
+}
+# <<< banner <<<
+
+# >>> capability-matrix >>>
+function Show-Matrix {
+    Write-Host @'
+  Agent         MCP          Briefing        Per-turn  Standing file
+  ------------  -----------  --------------  --------  ---------------------
+  Claude Code   shim / HTTP  hook or plugin  yes       ~/.claude/CLAUDE.md
+  OpenAI Codex  shim / HTTP  hook (see *)    no        ~/.codex/AGENTS.md
+  Gemini CLI    shim / HTTP  none            no        ~/.gemini/GEMINI.md
+  Other agent   stdio/HTTP   none            no        AGENTS.md (your path)
+
+  Every agent also gets, with no files touched: the memory tools, and the
+  MCP server `instructions` field - the memory loop delivered by the
+  protocol itself.
+
+  * Codex hooks are EXPERIMENTAL and off by default: set
+        [features]
+        codex_hooks = true
+    in ~/.codex/config.toml, then review and trust the hook in /hooks.
+    Codex hooks are NOT available on Windows - there the standing AGENTS.md
+    block is the briefing, which is why appending it is recommended.
+'@
+}
+# <<< capability-matrix <<<
+
+# >>> generic-snippets >>>
+function Show-GenericSnippets {
+    Write-Host @'
+  Add pseudolife-memory to your agent's MCP config. Two ready-to-paste
+  shapes (pick ONE):
+
+  stdio shim (recommended - per-session identity; needs
+  `pip install pseudolife-mcp` or pipx):
+    { "mcpServers": { "pseudolife-memory": {
+        "command": "pseudolife-mcp",
+        "env": { "PSEUDOLIFE_WRITER_ID": "mcp-client",
+                 "PSEUDOLIFE_MCP_NO_SPAWN": "1" } } } }
+
+  HTTP (no local install; concurrent sessions share one identity):
+    { "mcpServers": { "pseudolife-memory": {
+        "type": "http", "url": "http://127.0.0.1:8765/mcp" } } }
+
+  Common config homes: Cursor ~/.cursor/mcp.json - Windsurf
+  ~/.codeium/windsurf/mcp_config.json - Zed settings.json
+  (context_servers) - Copilot CLI / others: see the tool's MCP docs.
+'@
+}
+# <<< generic-snippets <<<
+
+# Expand aliases, validate, dedupe, and emit the canonical provider order.
+function Get-ProviderList([string]$Spec) {
+    $expanded = @()
+    foreach ($tok in ($Spec -split '[,\s]+' | Where-Object { $_ })) {
+        switch ($tok) {
+            "both" { $expanded += @("claude", "codex") }
+            "all" { $expanded += @("claude", "codex", "gemini") }
+            { $_ -in "claude", "codex", "gemini", "generic" } { $expanded += $_ }
+            default {
+                Write-Host "invalid -Client '$tok' (claude|codex|gemini|generic|both|all)"
+                exit 2
+            }
+        }
+    }
+    return @(@("claude", "codex", "gemini", "generic") |
+        Where-Object { $expanded -contains $_ })
+}
+
+Show-Banner
+
+# -- 1. provider selection (before preflight, so it checks what you picked) ------
+if (-not $Client) {
+    if (-not $interactive) {
+        $Client = "claude"
+    } else {
+        Write-Host ""
+        Write-Host "Which coding agents should this install wire up?"
+        Write-Host ""
+        Write-Host "  1) Claude Code    full parity: MCP + SessionStart briefing + per-turn discipline"
+        Write-Host "  2) OpenAI Codex   MCP + SessionStart briefing (opt-in, trust review, not on Windows)"
+        Write-Host "  3) Gemini CLI     MCP + standing instructions (Gemini CLI has no hook system)"
+        Write-Host "  4) Other MCP agent  Cursor / Windsurf / Zed / Copilot CLI / anything else:"
+        Write-Host "                      prints ready-to-paste config, offers the standing block"
+        Write-Host ""
+        while (-not $Client) {
+            $selection = Read-Host 'Select one or more - e.g. "1 2" or "1,3" (Enter = 1)'
+            if (-not $selection) { $selection = "1" }
+            $picked = @()
+            $bad = $false
+            foreach ($tok in ($selection -split '[,\s]+' | Where-Object { $_ })) {
+                switch ($tok) {
+                    "1" { $picked += "claude" }
+                    "2" { $picked += "codex" }
+                    "3" { $picked += "gemini" }
+                    "4" { $picked += "generic" }
+                    default { $bad = $true }
+                }
+            }
+            if ($bad -or -not $picked) {
+                Write-Host '  please answer with numbers 1-4 (e.g. "1 3")'
+            } else {
+                $Client = $picked -join ","
+            }
+        }
+    }
+}
+$clients = @(Get-ProviderList $Client)
+$clientList = $clients -join ","
+Step "Providers: $($clients -join ' ')"
+if ($interactive) {
+    Write-Host ""
+    Write-Host "What each agent gets:"
+    Write-Host ""
+    Show-Matrix
+    Write-Host ""
+}
+
+# -- 2. preflight --------------------------------------------------------------
+Step "Preflight..."
+# `&` on a .ps1 only refreshes $LASTEXITCODE when the script exits explicitly;
+# clear the stale value a prior native command may have left.
+$global:LASTEXITCODE = 0
+& (Join-Path $PSScriptRoot "preflight.ps1") -Client $clientList
 if ($LASTEXITCODE -ne 0) { throw "Preflight failed - fix the line(s) above and re-run." }
 
-# -- 2. extractor choice (explicit, no default) ---------------------------------
+# -- 3. extractor choice (explicit, no default) ---------------------------------
 if (-not $Extractor) {
     if (-not $interactive) {
         throw "Non-interactive run: -Extractor sidecar|sonnet-fallback|sonnet-only is required."
@@ -69,9 +232,9 @@ if (-not $Extractor) {
         }
     }
 }
-Write-Host "==> Extractor mode: $Extractor"
+Step "Extractor mode: $Extractor"
 
-# -- 2b. dreamer model choice (Claude-shim modes only) ---------------------------
+# -- 3b. dreamer model choice (Claude-shim modes only) ---------------------------
 # Opus is the recommended default per the 2026-08-02 same-harness comparison
 # (evals/results/dreamer-choice-verdict.json). The shim honours per-request
 # claude-* names, so this is only the launch default — switchable later from
@@ -96,10 +259,10 @@ if ($Extractor -ne "sidecar" -and -not $Model) {
     } else {
         $Model = "claude-opus-5"
     }
-    Write-Host "==> Dreamer model: $Model"
+    Step "Dreamer model: $Model"
 }
 
-# -- 3. volumes (respect names overridden in an existing ops/.env) --------------
+# -- 4. volumes (respect names overridden in an existing ops/.env) --------------
 function Get-EnvValue($name) {
     if (Test-Path $envFile) {
         $line = Get-Content $envFile | Where-Object { $_ -match "^$name=" } | Select-Object -Last 1
@@ -111,9 +274,20 @@ $bankVol = (Get-EnvValue "PSEUDOLIFE_BANK_VOLUME"); if (-not $bankVol) { $bankVo
 $stateVol = (Get-EnvValue "PSEUDOLIFE_STATE_VOLUME"); if (-not $stateVol) { $stateVol = "pseudolife-mcp-state" }
 docker volume create $bankVol | Out-Null
 docker volume create $stateVol | Out-Null
-Write-Host "==> Volumes ready: $bankVol, $stateVol"
+Step "Volumes ready: $bankVol, $stateVol"
 
-# -- 4. managed env block --------------------------------------------------------
+# -- 5. managed env block --------------------------------------------------------
+# Daemon-side writer default: a single first-class provider gets its own id;
+# any multi-provider or generic install falls back to the neutral id — the
+# per-provider ids then ride each MCP registration's env instead (stage 11).
+$writerId = if ($clients.Count -eq 1) {
+    switch ($clients[0]) {
+        "claude" { "claude-code" }
+        "codex" { "codex" }
+        "gemini" { "gemini" }
+        default { "mcp-client" }
+    }
+} else { "mcp-client" }
 if (-not (Test-Path $envFile)) { Copy-Item (Join-Path $repo "ops\.env.example") $envFile }
 $lines = @(Get-Content $envFile)
 $kept = New-Object System.Collections.Generic.List[string]
@@ -142,17 +316,12 @@ switch ($Extractor) {
         $block.Add("PSEUDOLIFE_DREAM_EXTRACTOR_MODE=primary")
     }
 }
-$writerId = switch ($Client) {
-    "claude" { "claude-code" }
-    "codex" { "codex" }
-    default { "mcp-client" }
-}
 $block.Add("PSEUDOLIFE_WRITER_ID=$writerId")
 $block.Add($EnvEnd)
 Set-Content -Path $envFile -Value (@($kept) + @($block)) -Encoding utf8
-Write-Host "==> Wrote managed block in ops/.env"
+Step "Wrote managed block in ops/.env"
 
-# -- 5. sidecar enable/disable via the compose override --------------------------
+# -- 6. sidecar enable/disable via the compose override --------------------------
 function InstallerOwnsOverride {
     (Test-Path $overrideFile) -and ((Get-Content $overrideFile -TotalCount 1) -eq $OverrideMarker)
 }
@@ -166,7 +335,7 @@ if ($Extractor -eq "sonnet-only") {
             "  pseudolife-extractor:"
             "    profiles: [`"disabled`"]"
         ) | Set-Content -Path $overrideFile -Encoding utf8
-        Write-Host "==> Sidecar disabled via ops/docker-compose.override.yml"
+        Step "Sidecar disabled via ops/docker-compose.override.yml"
     } else {
         Write-Host "NOTE: ops/docker-compose.override.yml exists and is not installer-managed."
         Write-Host "      Add this to it yourself to disable the sidecar:"
@@ -179,23 +348,23 @@ if ($Extractor -eq "sonnet-only") {
     $names = docker ps -a --format '{{.Names}}'
     if ($names -contains "pseudolife-mcp-extractor") {
         docker rm -f pseudolife-mcp-extractor | Out-Null
-        Write-Host "==> Removed the running extractor container"
+        Step "Removed the running extractor container"
     }
 } elseif (InstallerOwnsOverride) {
     Remove-Item $overrideFile
-    Write-Host "==> Removed installer-managed override (sidecar re-enabled)"
+    Step "Removed installer-managed override (sidecar re-enabled)"
 }
 
-# -- 6. bring the stack up --------------------------------------------------------
+# -- 7. bring the stack up --------------------------------------------------------
 $compose = @("--env-file", $envFile, "-f", $composeFile)
 if (Test-Path $overrideFile) { $compose += @("-f", $overrideFile) }
-Write-Host "==> docker compose up -d --build (first build downloads images - grab a coffee)..."
+Step "docker compose up -d --build (first build downloads images - grab a coffee)..."
 docker compose @compose up -d --build
 if ($LASTEXITCODE -ne 0) { throw "compose up failed" }
 
-# -- 7. Claude shim autostart (Sonnet modes) --------------------------------------
+# -- 8. Claude shim autostart (Sonnet modes) --------------------------------------
 if ($Extractor -ne "sidecar") {
-    Write-Host "==> Registering the Claude shim autostart (Task Scheduler; needs an ELEVATED pwsh)..."
+    Step "Registering the Claude shim autostart (Task Scheduler; needs an ELEVATED pwsh)..."
     try {
         & (Join-Path $PSScriptRoot "install-shim-autostart.ps1") -Port $ShimPort -Model $Model
     } catch {
@@ -205,61 +374,144 @@ if ($Extractor -ne "sidecar") {
     }
 }
 
-# -- 8. session lifecycle hooks -----------------------------------------------------
-$clients = if ($Client -eq "both") { @("claude", "codex") } else { @($Client) }
+# -- 9. session lifecycle hooks (hook-capable providers only) ---------------------
+# claude: unless the plugin already owns the hooks. codex: hooks exist but are
+# experimental, opt-in, and NOT available on Windows — there the standing
+# AGENTS.md block is the briefing (stage 10 offers it). gemini/generic: no
+# hook system.
 $installedPlugins = Join-Path $env:USERPROFILE ".claude\plugins\installed_plugins.json"
 $claudePluginInstalled = (Test-Path $installedPlugins) -and
     ((Get-Content $installedPlugins -Raw) -match 'pseudolife-memory@pseudolife-mcp')
 if ($claudePluginInstalled -and ($clients -contains "claude")) {
-    Write-Host "==> pseudolife-memory Claude Code plugin detected - skipping Claude"
+    Step "pseudolife-memory Claude Code plugin detected - skipping Claude"
     Write-Host "    hook and CLAUDE.md block (the plugin provides both). The plugin no"
     Write-Host "    longer bundles an MCP server, so the transport is still wired below."
 }
 
+$hookState = @{}
 $briefingCommand = "docker exec pseudolife-mcp-daemon pseudolife-mcp briefing --hook-json"
 foreach ($selectedClient in $clients) {
-    if (($selectedClient -eq "claude") -and $claudePluginInstalled) { continue }
-    Write-Host "==> Installing $selectedClient session hook..."
-    & (Join-Path $PSScriptRoot "install-hook.ps1") -Client $selectedClient -Command $briefingCommand
-}
-
-# -- 9. standing memory instructions (consent; never edited without it) -------------
-# -ClaudeMd remains a compatibility alias for existing automation.
-$instructionChoice = if ($Instructions) { $Instructions } else { $ClaudeMd }
-foreach ($selectedClient in $clients) {
-    if (($selectedClient -eq "claude") -and $claudePluginInstalled) { continue }
-    $instructionPath = if ($selectedClient -eq "codex") {
-        Join-Path $env:USERPROFILE ".codex\AGENTS.md"
-    } else {
-        Join-Path $env:USERPROFILE ".claude\CLAUDE.md"
-    }
-    $hasBlock = (Test-Path $instructionPath) -and
-        ((Get-Content $instructionPath -Raw) -match 'pseudolife-memory')
-    if ($hasBlock) {
-        Write-Host "==> Memory block already present in $instructionPath - skipping."
+    if ($selectedClient -notin "claude", "codex") { continue }
+    if (($selectedClient -eq "claude") -and $claudePluginInstalled) {
+        $hookState["claude"] = "plugin"
         continue
     }
-    # No interactive prompt: the session hook briefing delivers the same
-    # block every session, so a standing-file copy would double-inject.
-    # Explicit opt-in only (-Instructions append) — useful for subagent
-    # visibility and hook-less setups.
-    $choice = if ($instructionChoice) { $instructionChoice } else { "skip" }
+    if (($selectedClient -eq "codex") -and $IsWindows) {
+        Step "Skipping the Codex session hook: Codex hooks are not available on"
+        Write-Host "    Windows - the standing AGENTS.md block is the briefing there"
+        Write-Host "    (stage 10 offers to append it)."
+        $hookState["codex"] = "windows"
+        continue
+    }
+    Step "Installing $selectedClient session hook..."
+    & (Join-Path $PSScriptRoot "install-hook.ps1") -Client $selectedClient -Command $briefingCommand
+    $hookState[$selectedClient] = "hook"
+}
+
+# -- 10. standing memory instructions (consent; never edited without it) ----------
+# Default is `auto`: skip wherever a session-start briefing already delivers
+# the block (claude hook/plugin, codex hook), and offer an interactive append
+# where none exists (gemini, generic, codex on Windows). `auto` never writes
+# a standing file in a non-interactive run; -Instructions append behaves
+# exactly as before. -ClaudeMd remains a compatibility alias.
+$instructionChoice = if ($Instructions) { $Instructions } elseif ($ClaudeMd) { $ClaudeMd } else { "auto" }
+$instrState = @{}
+function Add-MemoryBlock($path, $provider) {
+    # Presence check HERE, not only at the loop top: the generic prompt
+    # resolves its target path after that check ran against an empty
+    # -AgentsFile, and a re-run must never double-append.
+    if ((Test-Path $path) -and ((Get-Content $path -Raw) -match 'pseudolife-memory')) {
+        Step "Memory block already present in $path - skipping."
+        $instrState[$provider] = "present:$path"
+        return
+    }
+    # A bare filename has no parent — Split-Path returns "", and New-Item ""
+    # is a terminating binder error under EAP=Stop.
+    $parent = Split-Path -Parent $path
+    if ($parent) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
+    Add-Content -Path $path -Value (Get-Content (Join-Path $repo "examples\CLAUDE.memory.md") -Raw)
+    Step "Appended memory block to $path"
+    $instrState[$provider] = "appended:$path"
+}
+foreach ($selectedClient in $clients) {
+    if (($selectedClient -eq "claude") -and $claudePluginInstalled) {
+        $instrState["claude"] = "covered-by-plugin"
+        continue
+    }
+    $instructionPath = switch ($selectedClient) {
+        "codex" { Join-Path $env:USERPROFILE ".codex\AGENTS.md" }
+        "gemini" { Join-Path $env:USERPROFILE ".gemini\GEMINI.md" }
+        "generic" { $AgentsFile }
+        default { Join-Path $env:USERPROFILE ".claude\CLAUDE.md" }
+    }
+    $hasBlock = $instructionPath -and (Test-Path $instructionPath) -and
+        ((Get-Content $instructionPath -Raw) -match 'pseudolife-memory')
+    if ($hasBlock) {
+        Step "Memory block already present in $instructionPath - skipping."
+        $instrState[$selectedClient] = "present:$instructionPath"
+        continue
+    }
+    $choice = $instructionChoice
+    if ($choice -eq "auto") {
+        switch ($selectedClient) {
+            "claude" {
+                # The SessionStart hook already delivers the block — a
+                # standing-file copy would double-inject.
+                $choice = "skip"
+            }
+            "codex" {
+                if ($IsWindows -and $interactive) {
+                    $yn = Read-Host "Codex hooks are unavailable on Windows - append the standing memory block to $instructionPath? [Y/n]"
+                    $choice = if ($yn -in "n", "N", "no", "NO") { "skip" } else { "append" }
+                } else {
+                    $choice = "skip"
+                }
+            }
+            "gemini" {
+                if ($interactive) {
+                    $yn = Read-Host "Gemini CLI has no hook system - append the standing memory block to $instructionPath? [Y/n]"
+                    $choice = if ($yn -in "n", "N", "no", "NO") { "skip" } else { "append" }
+                } else {
+                    $choice = "skip"
+                }
+            }
+            "generic" {
+                if ($AgentsFile) {
+                    $choice = "append"
+                } elseif ($interactive) {
+                    $default = Join-Path $env:USERPROFILE "AGENTS.md"
+                    $answer = Read-Host "Append the standing memory block to which file? (Enter = $default, `"-`" to skip)"
+                    if ($answer -eq "-") {
+                        $choice = "skip"
+                    } else {
+                        $instructionPath = if ($answer) { $answer } else { $default }
+                        $choice = "append"
+                    }
+                } else {
+                    $choice = "skip"
+                }
+            }
+        }
+    }
+    if (($choice -eq "append") -and ($selectedClient -eq "generic") -and -not $instructionPath) {
+        Write-Host "NOTE: generic append needs a target - pass -AgentsFile <path>."
+        $choice = "skip"
+    }
     if ($choice -eq "append") {
-        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $instructionPath) | Out-Null
-        Add-Content -Path $instructionPath -Value (Get-Content (Join-Path $repo "examples\CLAUDE.memory.md") -Raw)
-        Write-Host "==> Appended memory block to $instructionPath"
+        Add-MemoryBlock $instructionPath $selectedClient
     } else {
-        Write-Host "==> Standing memory block not written (the session hook briefing already"
-        Write-Host "    delivers the memory loop each session). To add it anyway:"
-        Write-Host "  Add-Content `"$instructionPath`" (Get-Content `"$repo\examples\CLAUDE.memory.md`" -Raw)"
+        $hintPath = if ($instructionPath) { $instructionPath } else { "<your AGENTS.md>" }
+        Step "Standing memory block not written for $selectedClient. To add it:"
+        Write-Host "  Add-Content `"$hintPath`" (Get-Content `"$repo\examples\CLAUDE.memory.md`" -Raw)"
+        $instrState[$selectedClient] = "skipped:$hintPath"
     }
 }
 
-# -- 10. wire into selected MCP clients ----------------------------------------------
+# -- 11. wire into selected MCP clients ----------------------------------------------
 # Runs even with the plugin installed: the plugin is the hooks/commands layer
 # only, so the MCP transport (shim by default) always comes from here.
 # The shim install itself is client-agnostic; memoize one attempt so
-# -Client both doesn't run pipx/pip twice.
+# multi-provider runs don't run pipx/pip twice.
 $script:shimInstallResult = $null
 function Install-ShimOnce {
     if ($null -ne $script:shimInstallResult) { return $script:shimInstallResult }
@@ -305,7 +557,41 @@ function Install-ShimOnce {
     return $shimInstalled
 }
 
+# Two env pairs ride each shim registration: PSEUDOLIFE_WRITER_ID (the shim
+# forwards it as the X-PL-Writer header — per-provider write attribution)
+# and PSEUDOLIFE_MCP_NO_SPAWN=1 (Docker-tier no-spawn guard, 2026-08-29
+# incident). CLI env-flag support is probed, never assumed: a missing flag
+# degrades to the flagless form plus a printed manual config edit — never
+# to a failed install. HTTP transport cannot carry env, so there the daemon
+# default (ops/.env) applies and no shim exists to spawn anything.
+function Get-EnvFlag($cli) {
+    $help = & $cli mcp add --help 2>$null
+    if ("$help" -match '--env') { return "--env" }
+    return $null
+}
+
+$mcpState = @{}
+# EAP=Stop does not trap native exit codes: every `mcp add` must be
+# exit-checked, or the closing ladder can claim a transport that was never
+# registered (review finding, 2026-08-29).
+function Register-Result($provider, $okState, $okMessage) {
+    if ($LASTEXITCODE -eq 0) {
+        $mcpState[$provider] = $okState
+        if ($okMessage) { Step $okMessage }
+    } else {
+        Write-Warning "$provider MCP registration failed (exit $LASTEXITCODE) - see the error above."
+        $mcpState[$provider] = "failed"
+    }
+}
 foreach ($selectedClient in $clients) {
+    if ($selectedClient -eq "generic") {
+        Write-Host ""
+        Step "Other MCP-capable agents - paste-ready config:"
+        Write-Host ""
+        Show-GenericSnippets
+        Write-Host ""
+        continue
+    }
     if ($selectedClient -eq "codex") {
         $existingCodex = codex mcp get pseudolife-memory 2>$null | Out-String
         if ($LASTEXITCODE -eq 0) {
@@ -315,22 +601,79 @@ foreach ($selectedClient in $clients) {
                 Write-Host "    codex mcp remove pseudolife-memory"
                 Write-Host "    codex mcp add pseudolife-memory --env PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp"
             }
-            Write-Host "==> MCP server already wired into Codex - skipping."
+            Step "MCP server already wired into Codex - skipping."
+            $mcpState["codex"] = "present"
         } elseif (($Transport -eq "shim") -and (Install-ShimOnce)) {
-            # PSEUDOLIFE_MCP_NO_SPAWN: this is a Docker-tier install, so the
-            # daemon is the compose container — the shim must wait for it,
-            # never spawn a host-side fallback that can win the port-bind
-            # race against a still-booting Docker Desktop and shadow the
-            # real bank (2026-08-29 incident).
-            codex mcp add pseudolife-memory --env PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp
-            Write-Host "==> Wired into Codex via the pseudolife-mcp shim - per-session identity (a Codex session no longer inherits a concurrent Claude session's episode)."
+            $envFlag = Get-EnvFlag "codex"
+            if ($envFlag) {
+                # Name first, env after — the documented codex form (an env
+                # flag directly before the name risks the variadic-option
+                # parse that breaks claude's CLI).
+                # PSEUDOLIFE_MCP_NO_SPAWN: Docker-tier install — the shim
+                # must wait for the compose container, never spawn a
+                # host-side fallback that can win the port-bind race against
+                # a still-booting Docker Desktop and shadow the real bank
+                # (2026-08-29 incident). Flag repeated per pair: codex's
+                # --env takes one KEY=VALUE per occurrence.
+                codex mcp add pseudolife-memory $envFlag PSEUDOLIFE_WRITER_ID=codex $envFlag PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp
+                Register-Result "codex" "shim-env" "Wired into Codex via the pseudolife-mcp shim - per-session identity (a Codex session no longer inherits a concurrent Claude session's episode)."
+            } else {
+                codex mcp add pseudolife-memory -- pseudolife-mcp
+                Write-Host "  (this codex CLI takes no env flag - for per-provider write attribution"
+                Write-Host "   and the Docker-tier no-spawn guard, add to the server's entry in"
+                Write-Host "   ~/.codex/config.toml:"
+                Write-Host "     env = { PSEUDOLIFE_WRITER_ID = `"codex`", PSEUDOLIFE_MCP_NO_SPAWN = `"1`" })"
+                Register-Result "codex" "shim" "Wired into Codex via the pseudolife-mcp shim - per-session identity (a Codex session no longer inherits a concurrent Claude session's episode)."
+            }
         } else {
             if ($Transport -eq "shim") {
                 Write-Warning "Shim unavailable for Codex (see warnings above) - falling back to HTTP."
                 Write-Host "  Without the shim, a Codex session running beside a Claude Code session shares its episode identity."
             }
             codex mcp add pseudolife-memory --url http://127.0.0.1:8765/mcp
-            Write-Host "==> Wired into Codex (codex mcp add, HTTP)."
+            Register-Result "codex" "http" "Wired into Codex (codex mcp add, HTTP)."
+        }
+    } elseif ($selectedClient -eq "gemini") {
+        $geminiList = gemini mcp list 2>$null
+        if ("$geminiList" -match "pseudolife-memory") {
+            if ($Transport -eq "shim") {
+                # `gemini mcp list` cannot show env, so unlike claude/codex
+                # there is no way to detect a registration that predates the
+                # no-spawn guard - say so instead of staying silent.
+                Write-Host "  (if this Gemini registration predates the Docker-tier no-spawn guard, re-add it:"
+                Write-Host "   gemini mcp remove pseudolife-memory, then"
+                Write-Host "   gemini mcp add -s user -e PSEUDOLIFE_WRITER_ID=gemini -e PSEUDOLIFE_MCP_NO_SPAWN=1 pseudolife-memory pseudolife-mcp)"
+            }
+            Step "MCP server already wired into Gemini CLI - skipping."
+            $mcpState["gemini"] = "present"
+        } elseif (($Transport -eq "shim") -and (Install-ShimOnce)) {
+            # Probe gemini's own spelling (`-e, --env`): the command below
+            # emits the short form, so a help listing only `-e` must still
+            # count as env support (Get-EnvFlag matches `--env` alone,
+            # which is claude/codex's spelling).
+            $geminiHelp = gemini mcp add --help 2>$null
+            $envFlag = if ("$geminiHelp" -match '--env|-e,') { "-e" } else { $null }
+            if ($envFlag) {
+                # -e repeated per pair (one KEY=VALUE each, verified on
+                # gemini CLI 0.57.0); PSEUDOLIFE_MCP_NO_SPAWN carries the
+                # same Docker-tier no-spawn guard as the claude and codex
+                # registrations (2026-08-29 incident).
+                gemini mcp add -s user -e PSEUDOLIFE_WRITER_ID=gemini -e PSEUDOLIFE_MCP_NO_SPAWN=1 pseudolife-memory pseudolife-mcp
+                Register-Result "gemini" "shim-env" "Wired into Gemini CLI via the pseudolife-mcp shim - per-session identity."
+            } else {
+                gemini mcp add -s user pseudolife-memory pseudolife-mcp
+                Write-Host "  (this gemini CLI takes no env flag - for per-provider write attribution"
+                Write-Host "   and the Docker-tier no-spawn guard, add `"env`": {`"PSEUDOLIFE_WRITER_ID`":"
+                Write-Host "   `"gemini`", `"PSEUDOLIFE_MCP_NO_SPAWN`": `"1`"} to the server's entry in"
+                Write-Host "   ~/.gemini/settings.json)"
+                Register-Result "gemini" "shim" "Wired into Gemini CLI via the pseudolife-mcp shim - per-session identity."
+            }
+        } else {
+            if ($Transport -eq "shim") {
+                Write-Warning "Shim unavailable for Gemini CLI (see warnings above) - falling back to HTTP."
+            }
+            gemini mcp add -s user -t http pseudolife-memory http://127.0.0.1:8765/mcp
+            Register-Result "gemini" "http" "Wired into Gemini CLI (gemini mcp add, HTTP)."
         }
     } else {
         $existingClaude = claude mcp get pseudolife-memory 2>$null | Out-String
@@ -341,33 +684,48 @@ foreach ($selectedClient in $clients) {
                 Write-Host "    claude mcp remove pseudolife-memory"
                 Write-Host "    claude mcp add --scope user pseudolife-memory --env PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp"
             }
-            Write-Host "==> MCP server already wired into Claude Code - skipping."
+            Step "MCP server already wired into Claude Code - skipping."
+            $mcpState["claude"] = "present"
         } elseif ($Transport -eq "shim") {
             if (Install-ShimOnce) {
                 claude mcp remove pseudolife-memory *> $null
-                # --env PSEUDOLIFE_MCP_NO_SPAWN=1: Docker-tier shims wait for
-                # the compose daemon instead of spawning a fallback (see the
-                # Codex registration above). The option must come AFTER the
-                # server name: --env is variadic and placed earlier it
-                # swallows the name, failing the whole registration
-                # (verified against claude CLI 2026-08-29).
-                claude mcp add --scope user pseudolife-memory --env PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp
-                Write-Host "==> Wired into Claude Code via the pseudolife-mcp shim - per-session identity (required for correct episodes with concurrent sessions)."
+                $envFlag = Get-EnvFlag "claude"
+                if ($envFlag) {
+                    # --env is variadic and must come AFTER the server name:
+                    # placed earlier it swallows the name as another
+                    # KEY=value pair and the whole add fails (verified
+                    # against the claude CLI 2026-08-29; the `--` separator
+                    # ends the value list).
+                    # PSEUDOLIFE_MCP_NO_SPAWN: Docker-tier shims wait for
+                    # the compose daemon instead of spawning a fallback that
+                    # can shadow the real bank (see the Codex registration
+                    # above).
+                    claude mcp add --scope user pseudolife-memory $envFlag PSEUDOLIFE_WRITER_ID=claude-code PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp
+                    Register-Result "claude" "shim-env" "Wired into Claude Code via the pseudolife-mcp shim - per-session identity (required for correct episodes with concurrent sessions)."
+                } else {
+                    claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
+                    Write-Host "  (this claude CLI takes no env flag - for per-provider write attribution"
+                    Write-Host "   and the Docker-tier no-spawn guard, add `"env`": {`"PSEUDOLIFE_WRITER_ID`":"
+                    Write-Host "   `"claude-code`", `"PSEUDOLIFE_MCP_NO_SPAWN`": `"1`"} to the server's entry"
+                    Write-Host "   in ~/.claude.json)"
+                    Register-Result "claude" "shim" "Wired into Claude Code via the pseudolife-mcp shim - per-session identity (required for correct episodes with concurrent sessions)."
+                }
             } else {
                 Write-Warning "Could not install the pseudolife-mcp shim - no working pipx or Python (>=3.10, py -3 or python) was found, or the shim install itself failed (see warnings above)."
                 Write-Host "  Without the shim, concurrent Claude Code sessions share one episode identity."
                 Write-Host "  Install pipx or Python >=3.10 and re-run, or pass -Transport http to silence this."
                 claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
-                Write-Host "==> Wired into Claude Code via HTTP (fallback - shim tooling not found or shim install failed)."
+                Register-Result "claude" "http" "Wired into Claude Code via HTTP (fallback - shim tooling not found or shim install failed)."
             }
         } else {
             claude mcp add --transport http --scope user pseudolife-memory http://127.0.0.1:8765/mcp
-            Write-Host "==> Wired into Claude Code via HTTP (-Transport http)."
+            Register-Result "claude" "http" "Wired into Claude Code via HTTP (-Transport http)."
         }
     }
 }
-# -- 11. health -----------------------------------------------------------------------
-Write-Host "==> Waiting for the daemon to report healthy..."
+
+# -- 12. health -----------------------------------------------------------------------
+Step "Waiting for the daemon to report healthy..."
 $h = $null
 for ($i = 0; $i -lt 40; $i++) {
     try {
@@ -380,9 +738,85 @@ if (-not $h) {
     Write-Warning "Daemon not healthy yet. Logs: docker logs pseudolife-mcp-daemon"
     exit 1
 }
-Write-Host "==> Healthy: http://127.0.0.1:8765/health (Console: http://127.0.0.1:8765/ui/)"
+Step "Healthy: http://127.0.0.1:8765/health (Console: http://127.0.0.1:8765/ui/)"
 
-# -- 12. per-mode verify hints -----------------------------------------------------------
+# -- 13. per-provider wiring ladder + per-mode verify hints ---------------------------
+# [x] wired · [-] deliberately skipped · [!] unavailable, with remediation.
+function Describe-Mcp($state) {
+    switch ($state) {
+        "shim-env" { "stdio shim (per-provider writer id set)" }
+        "shim" { "stdio shim (writer id: daemon default in ops/.env)" }
+        "http" { "HTTP (writer id: daemon default in ops/.env)" }
+        "present" { "already wired (unchanged)" }
+        "failed" { "registration FAILED - see the warning above and re-run" }
+        default { "not wired" }
+    }
+}
+function Get-McpMarker($state) {
+    if ($state -in "shim-env", "shim", "http", "present") { "[x]" } else { "[!]" }
+}
+function Describe-Instr($state) {
+    if (-not $state) { return "[-] Standing file        skipped" }
+    $tail = ($state -split ":", 2)[-1]
+    switch -Wildcard ($state) {
+        "appended:*" { "[x] Standing file        $tail" }
+        "present:*" { "[x] Standing file        $tail" }
+        "covered-by-plugin" { "[-] Standing file        plugin briefing covers it" }
+        "skipped:*" { "[-] Standing file        skipped - append later to $tail" }
+        default { "[-] Standing file        skipped" }
+    }
+}
+Write-Host ""
+Step "What got wired, per agent:"
+foreach ($selectedClient in $clients) {
+    Write-Host ""
+    switch ($selectedClient) {
+        "claude" {
+            Write-Host "  Claude Code"
+            Write-Host "    $(Get-McpMarker $mcpState['claude']) MCP transport        $(Describe-Mcp $mcpState['claude'])"
+            Write-Host "    [x] Server instructions  automatic (MCP instructions field)"
+            if ($hookState["claude"] -eq "plugin") {
+                Write-Host "    [x] Session briefing     Claude Code plugin"
+                Write-Host "    [x] Per-turn discipline  Claude Code plugin"
+            } else {
+                Write-Host "    [x] Session briefing     SessionStart hook -> ~/.claude/settings.json"
+                Write-Host "    [x] Per-turn discipline  UserPromptSubmit hook"
+            }
+            Write-Host "    $(Describe-Instr $instrState['claude'])"
+        }
+        "codex" {
+            Write-Host "  OpenAI Codex"
+            Write-Host "    $(Get-McpMarker $mcpState['codex']) MCP transport        $(Describe-Mcp $mcpState['codex'])"
+            Write-Host "    [x] Server instructions  automatic (MCP instructions field)"
+            if ($hookState["codex"] -eq "hook") {
+                Write-Host "    [x] Session briefing     hook written - enable codex_hooks = true, then trust it in /hooks"
+            } elseif ($hookState["codex"] -eq "windows") {
+                Write-Host "    [!] Session briefing     unavailable on Windows - the standing AGENTS.md block is the briefing"
+            } else {
+                Write-Host "    [!] Session briefing     not installed - re-run: ops\install-hook.ps1 -Client codex"
+            }
+            Write-Host "    [!] Per-turn discipline  unavailable - Codex has no per-prompt hook"
+            Write-Host "    $(Describe-Instr $instrState['codex'])"
+        }
+        "gemini" {
+            Write-Host "  Gemini CLI"
+            Write-Host "    $(Get-McpMarker $mcpState['gemini']) MCP transport        $(Describe-Mcp $mcpState['gemini'])"
+            Write-Host "    [x] Server instructions  automatic (MCP instructions field)"
+            Write-Host "    [!] Session briefing     unavailable - Gemini CLI has no hook system"
+            Write-Host "    [!] Per-turn discipline  unavailable"
+            Write-Host "    $(Describe-Instr $instrState['gemini'])"
+        }
+        "generic" {
+            Write-Host "  Other MCP agent"
+            Write-Host "    [-] MCP transport        paste the printed config into your agent"
+            Write-Host "    [x] Server instructions  automatic once connected (MCP instructions field)"
+            Write-Host "    [!] Session briefing     unavailable - no hook system to wire"
+            Write-Host "    [!] Per-turn discipline  unavailable"
+            Write-Host "    $(Describe-Instr $instrState['generic'])"
+        }
+    }
+}
+Write-Host ""
 switch ($Extractor) {
     "sidecar" {
         Write-Host "Verify: memory_dream(action=""status"") - primary_url should point at pseudolife-extractor:8081."

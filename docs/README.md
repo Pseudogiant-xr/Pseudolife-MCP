@@ -7,7 +7,7 @@ design history.
 
 | Directory | What's in it |
 |---|---|
-| `guide/` | **User-facing guides**: [configuration](guide/configuration.md), [retrieval](guide/retrieval.md), [dreaming](guide/dreaming.md), [episodes & sessions](guide/episodes.md), [the memory model](guide/memory-model.md), [benchmarks](guide/benchmarks.md), [comparison](guide/comparison.md), [security posture](guide/security-posture.md) |
+| `guide/` | **User-facing guides**: [configuration](guide/configuration.md), [providers](guide/providers.md), [retrieval](guide/retrieval.md), [dreaming](guide/dreaming.md), [episodes & sessions](guide/episodes.md), [the memory model](guide/memory-model.md), [benchmarks](guide/benchmarks.md), [comparison](guide/comparison.md), [security posture](guide/security-posture.md) |
 | `specs/` | Design documents for shipped features (problem → decision → shape) |
 | `plans/` | Implementation plans derived from those specs |
 | `runbooks/` | Operational procedures for the live deployment |
