@@ -3231,12 +3231,17 @@ MCP wiring is first-class and scriptable (flags verified against Gemini CLI
 0.57.0):
 
 ```bash
-gemini mcp add -s user -e PSEUDOLIFE_WRITER_ID=gemini pseudolife-memory pseudolife-mcp
+gemini mcp add -s user -e PSEUDOLIFE_WRITER_ID=gemini -e PSEUDOLIFE_MCP_NO_SPAWN=1 pseudolife-memory pseudolife-mcp
 # or HTTP:
 gemini mcp add -s user -t http pseudolife-memory http://127.0.0.1:8765/mcp
 ```
 
-`-s user` matters — Gemini defaults to *project* scope. Gemini CLI has no
+`-s user` matters — Gemini defaults to *project* scope.
+`PSEUDOLIFE_MCP_NO_SPAWN=1` belongs on Docker-tier shim registrations
+(every provider): it makes the shim wait for the compose container instead
+of spawning a host fallback that can shadow the real bank after a reboot —
+drop it only on the `[lite]` pip tier, where the spawn fallback is the
+zero-config path. Gemini CLI has no
 hook system that can inject session context, so the standing file is the
 briefing: the installer offers to append the block to `~/.gemini/GEMINI.md`
 (Gemini's default context file on a stock install; it also reads

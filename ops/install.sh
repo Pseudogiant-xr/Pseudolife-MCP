@@ -636,12 +636,27 @@ for selected_client in $CLIENTS; do
         fi
     elif [ "$selected_client" = gemini ]; then
         if gemini mcp list 2>/dev/null | grep -q pseudolife-memory; then
+            if [ "$TRANSPORT" = "shim" ]; then
+                # `gemini mcp list` cannot show env, so unlike claude/codex
+                # there is no way to detect a registration that predates the
+                # no-spawn guard — say so instead of staying silent.
+                echo "  (if this Gemini registration predates the Docker-tier no-spawn guard, re-add it:" >&2
+                echo "   gemini mcp remove pseudolife-memory, then" >&2
+                echo "   gemini mcp add -s user -e PSEUDOLIFE_WRITER_ID=gemini -e PSEUDOLIFE_MCP_NO_SPAWN=1 pseudolife-memory pseudolife-mcp)" >&2
+            fi
             step "MCP server already wired into Gemini CLI — skipping."
             MCP_GEMINI=present
         elif [ "$TRANSPORT" = "shim" ]; then
             ensure_shim
             if [ -n "$SHIM_OK" ]; then
-                env_flag="$(cli_env_flag gemini)"
+                # Probe gemini's own spelling (`-e, --env`): the command
+                # below emits the short form, so a help listing only `-e`
+                # must still count as env support (cli_env_flag greps
+                # `--env` alone, which is claude/codex's spelling).
+                env_flag=""
+                if gemini mcp add --help 2>/dev/null | grep -q -- '--env\|-e,'; then
+                    env_flag="-e"
+                fi
                 if [ -n "$env_flag" ]; then
                     # -e repeated per pair (one KEY=VALUE each, verified on
                     # gemini CLI 0.57.0); PSEUDOLIFE_MCP_NO_SPAWN carries
