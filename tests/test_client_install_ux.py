@@ -61,8 +61,50 @@ def test_installers_wire_codex_via_shim_by_default() -> None:
     ps = _read("ops/install.ps1")
     sh = _read("ops/install.sh")
     for text in (ps, sh):
-        assert "codex mcp add pseudolife-memory -- pseudolife-mcp" in text
+        assert ("codex mcp add pseudolife-memory "
+                "--env PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp") in text
         assert "codex mcp add pseudolife-memory --url" in text
+
+
+def test_docker_tier_shim_registrations_disable_the_spawn_fallback() -> None:
+    """The Docker-tier installers register every shim with
+    ``PSEUDOLIFE_MCP_NO_SPAWN=1`` (2026-08-29 incident): there the real
+    daemon is the compose container, and a shim-spawned host fallback can
+    win the port-bind race against a still-booting Docker Desktop and
+    shadow the real bank with a stale one. Every provider, both platforms:
+    fresh registrations carry the guard through the probed env flag, the
+    generic snippet embeds it, and pre-existing registrations get an
+    upgrade warning with paste-ready commands."""
+    ps = _read("ops/install.ps1")
+    sh = _read("ops/install.sh")
+    for text in (ps, sh):
+        # Upgrade commands for pre-existing registrations (paste-ready).
+        # NB flag order: claude's --env is variadic — placed before the
+        # server name it swallows it and the whole registration fails
+        # (verified against the live CLI 2026-08-29). Name first, then
+        # --env, then the `--` separator.
+        assert ("claude mcp add --scope user pseudolife-memory "
+                "--env PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp") in text
+        assert ("codex mcp add pseudolife-memory "
+                "--env PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp") in text
+        # Gemini registrations and the generic snippet carry the guard too.
+        assert ("gemini mcp add -s user -e PSEUDOLIFE_WRITER_ID=gemini "
+                "-e PSEUDOLIFE_MCP_NO_SPAWN=1 pseudolife-memory pseudolife-mcp") in text
+        assert '"PSEUDOLIFE_MCP_NO_SPAWN": "1"' in text
+    # Fresh registrations set the guard through the probed env flag — the
+    # spellings differ per script (the .sh quotes its variable).
+    assert ('claude mcp add --scope user pseudolife-memory "$env_flag" '
+            "PSEUDOLIFE_WRITER_ID=claude-code PSEUDOLIFE_MCP_NO_SPAWN=1 "
+            "-- pseudolife-mcp") in sh
+    assert ('codex mcp add pseudolife-memory "$env_flag" '
+            'PSEUDOLIFE_WRITER_ID=codex "$env_flag" '
+            "PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp") in sh
+    assert ("claude mcp add --scope user pseudolife-memory $envFlag "
+            "PSEUDOLIFE_WRITER_ID=claude-code PSEUDOLIFE_MCP_NO_SPAWN=1 "
+            "-- pseudolife-mcp") in ps
+    assert ("codex mcp add pseudolife-memory $envFlag "
+            "PSEUDOLIFE_WRITER_ID=codex $envFlag "
+            "PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp") in ps
 
 
 def test_compose_writer_default_is_client_neutral() -> None:
@@ -201,7 +243,7 @@ def test_installers_wire_gemini_via_shim_and_http() -> None:
     sh = _read("ops/install.sh")
     ps = _read("ops/install.ps1")
     for text in (sh, ps):
-        assert "gemini mcp add -s user -e PSEUDOLIFE_WRITER_ID=gemini pseudolife-memory pseudolife-mcp" in text
+        assert "gemini mcp add -s user -e PSEUDOLIFE_WRITER_ID=gemini -e PSEUDOLIFE_MCP_NO_SPAWN=1 pseudolife-memory pseudolife-mcp" in text
         assert "gemini mcp add -s user -t http pseudolife-memory http://127.0.0.1:8765/mcp" in text
         assert "gemini mcp list" in text  # idempotency: there is no `gemini mcp get`
 

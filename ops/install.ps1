@@ -124,7 +124,8 @@ function Show-GenericSnippets {
   `pip install pseudolife-mcp` or pipx):
     { "mcpServers": { "pseudolife-memory": {
         "command": "pseudolife-mcp",
-        "env": { "PSEUDOLIFE_WRITER_ID": "mcp-client" } } } }
+        "env": { "PSEUDOLIFE_WRITER_ID": "mcp-client",
+                 "PSEUDOLIFE_MCP_NO_SPAWN": "1" } } } }
 
   HTTP (no local install; concurrent sessions share one identity):
     { "mcpServers": { "pseudolife-memory": {
@@ -556,11 +557,13 @@ function Install-ShimOnce {
     return $shimInstalled
 }
 
-# Per-provider writer ids ride each registration's env (the shim forwards
-# PSEUDOLIFE_WRITER_ID as the X-PL-Writer header). CLI env-flag support is
-# probed, never assumed: a missing flag degrades to the flagless form plus a
-# printed manual config edit — never to a failed install. HTTP transport
-# cannot carry env, so there the daemon default (ops/.env) applies.
+# Two env pairs ride each shim registration: PSEUDOLIFE_WRITER_ID (the shim
+# forwards it as the X-PL-Writer header — per-provider write attribution)
+# and PSEUDOLIFE_MCP_NO_SPAWN=1 (Docker-tier no-spawn guard, 2026-08-29
+# incident). CLI env-flag support is probed, never assumed: a missing flag
+# degrades to the flagless form plus a printed manual config edit — never
+# to a failed install. HTTP transport cannot carry env, so there the daemon
+# default (ops/.env) applies and no shim exists to spawn anything.
 function Get-EnvFlag($cli) {
     $help = & $cli mcp add --help 2>$null
     if ("$help" -match '--env') { return "--env" }
@@ -590,8 +593,14 @@ foreach ($selectedClient in $clients) {
         continue
     }
     if ($selectedClient -eq "codex") {
-        codex mcp get pseudolife-memory *> $null
+        $existingCodex = codex mcp get pseudolife-memory 2>$null | Out-String
         if ($LASTEXITCODE -eq 0) {
+            if (($Transport -eq "shim") -and ($existingCodex -notmatch "PSEUDOLIFE_MCP_NO_SPAWN")) {
+                Write-Warning "The existing Codex registration lacks PSEUDOLIFE_MCP_NO_SPAWN=1 - its shim can still spawn a fallback daemon that shadows the Docker bank after a reboot."
+                Write-Host "  Upgrade it (re-check any custom command first: codex mcp get pseudolife-memory):"
+                Write-Host "    codex mcp remove pseudolife-memory"
+                Write-Host "    codex mcp add pseudolife-memory --env PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp"
+            }
             Step "MCP server already wired into Codex - skipping."
             $mcpState["codex"] = "present"
         } elseif (($Transport -eq "shim") -and (Install-ShimOnce)) {
@@ -600,13 +609,20 @@ foreach ($selectedClient in $clients) {
                 # Name first, env after — the documented codex form (an env
                 # flag directly before the name risks the variadic-option
                 # parse that breaks claude's CLI).
-                codex mcp add pseudolife-memory $envFlag PSEUDOLIFE_WRITER_ID=codex -- pseudolife-mcp
+                # PSEUDOLIFE_MCP_NO_SPAWN: Docker-tier install — the shim
+                # must wait for the compose container, never spawn a
+                # host-side fallback that can win the port-bind race against
+                # a still-booting Docker Desktop and shadow the real bank
+                # (2026-08-29 incident). Flag repeated per pair: codex's
+                # --env takes one KEY=VALUE per occurrence.
+                codex mcp add pseudolife-memory $envFlag PSEUDOLIFE_WRITER_ID=codex $envFlag PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp
                 Register-Result "codex" "shim-env" "Wired into Codex via the pseudolife-mcp shim - per-session identity (a Codex session no longer inherits a concurrent Claude session's episode)."
             } else {
                 codex mcp add pseudolife-memory -- pseudolife-mcp
                 Write-Host "  (this codex CLI takes no env flag - for per-provider write attribution"
-                Write-Host "   add to the server's entry in ~/.codex/config.toml:"
-                Write-Host "     env = { PSEUDOLIFE_WRITER_ID = `"codex`" })"
+                Write-Host "   and the Docker-tier no-spawn guard, add to the server's entry in"
+                Write-Host "   ~/.codex/config.toml:"
+                Write-Host "     env = { PSEUDOLIFE_WRITER_ID = `"codex`", PSEUDOLIFE_MCP_NO_SPAWN = `"1`" })"
                 Register-Result "codex" "shim" "Wired into Codex via the pseudolife-mcp shim - per-session identity (a Codex session no longer inherits a concurrent Claude session's episode)."
             }
         } else {
@@ -625,13 +641,18 @@ foreach ($selectedClient in $clients) {
         } elseif (($Transport -eq "shim") -and (Install-ShimOnce)) {
             $envFlag = Get-EnvFlag "gemini"
             if ($envFlag) {
-                gemini mcp add -s user -e PSEUDOLIFE_WRITER_ID=gemini pseudolife-memory pseudolife-mcp
+                # -e repeated per pair (one KEY=VALUE each, verified on
+                # gemini CLI 0.57.0); PSEUDOLIFE_MCP_NO_SPAWN carries the
+                # same Docker-tier no-spawn guard as the claude and codex
+                # registrations (2026-08-29 incident).
+                gemini mcp add -s user -e PSEUDOLIFE_WRITER_ID=gemini -e PSEUDOLIFE_MCP_NO_SPAWN=1 pseudolife-memory pseudolife-mcp
                 Register-Result "gemini" "shim-env" "Wired into Gemini CLI via the pseudolife-mcp shim - per-session identity."
             } else {
                 gemini mcp add -s user pseudolife-memory pseudolife-mcp
                 Write-Host "  (this gemini CLI takes no env flag - for per-provider write attribution"
-                Write-Host "   add `"env`": {`"PSEUDOLIFE_WRITER_ID`": `"gemini`"} to the server's"
-                Write-Host "   entry in ~/.gemini/settings.json)"
+                Write-Host "   and the Docker-tier no-spawn guard, add `"env`": {`"PSEUDOLIFE_WRITER_ID`":"
+                Write-Host "   `"gemini`", `"PSEUDOLIFE_MCP_NO_SPAWN`": `"1`"} to the server's entry in"
+                Write-Host "   ~/.gemini/settings.json)"
                 Register-Result "gemini" "shim" "Wired into Gemini CLI via the pseudolife-mcp shim - per-session identity."
             }
         } else {
@@ -642,8 +663,14 @@ foreach ($selectedClient in $clients) {
             Register-Result "gemini" "http" "Wired into Gemini CLI (gemini mcp add, HTTP)."
         }
     } else {
-        claude mcp get pseudolife-memory *> $null
+        $existingClaude = claude mcp get pseudolife-memory 2>$null | Out-String
         if ($LASTEXITCODE -eq 0) {
+            if (($Transport -eq "shim") -and ($existingClaude -notmatch "PSEUDOLIFE_MCP_NO_SPAWN")) {
+                Write-Warning "The existing Claude Code registration lacks PSEUDOLIFE_MCP_NO_SPAWN=1 - its shim can still spawn a fallback daemon that shadows the Docker bank after a reboot (2026-08-29 incident)."
+                Write-Host "  Upgrade it (re-check any custom command first: claude mcp get pseudolife-memory):"
+                Write-Host "    claude mcp remove pseudolife-memory"
+                Write-Host "    claude mcp add --scope user pseudolife-memory --env PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp"
+            }
             Step "MCP server already wired into Claude Code - skipping."
             $mcpState["claude"] = "present"
         } elseif ($Transport -eq "shim") {
@@ -651,14 +678,23 @@ foreach ($selectedClient in $clients) {
                 claude mcp remove pseudolife-memory *> $null
                 $envFlag = Get-EnvFlag "claude"
                 if ($envFlag) {
-                    # --env is variadic: another option MUST sit between it
-                    # and the server name, or the name is read as a second
-                    # KEY=value pair and the add fails (verified live
-                    # 2026-08-29).
-                    claude mcp add $envFlag PSEUDOLIFE_WRITER_ID=claude-code --scope user pseudolife-memory -- pseudolife-mcp
+                    # --env is variadic and must come AFTER the server name:
+                    # placed earlier it swallows the name as another
+                    # KEY=value pair and the whole add fails (verified
+                    # against the claude CLI 2026-08-29; the `--` separator
+                    # ends the value list).
+                    # PSEUDOLIFE_MCP_NO_SPAWN: Docker-tier shims wait for
+                    # the compose daemon instead of spawning a fallback that
+                    # can shadow the real bank (see the Codex registration
+                    # above).
+                    claude mcp add --scope user pseudolife-memory $envFlag PSEUDOLIFE_WRITER_ID=claude-code PSEUDOLIFE_MCP_NO_SPAWN=1 -- pseudolife-mcp
                     Register-Result "claude" "shim-env" "Wired into Claude Code via the pseudolife-mcp shim - per-session identity (required for correct episodes with concurrent sessions)."
                 } else {
                     claude mcp add --scope user pseudolife-memory -- pseudolife-mcp
+                    Write-Host "  (this claude CLI takes no env flag - for per-provider write attribution"
+                    Write-Host "   and the Docker-tier no-spawn guard, add `"env`": {`"PSEUDOLIFE_WRITER_ID`":"
+                    Write-Host "   `"claude-code`", `"PSEUDOLIFE_MCP_NO_SPAWN`": `"1`"} to the server's entry"
+                    Write-Host "   in ~/.claude.json)"
                     Register-Result "claude" "shim" "Wired into Claude Code via the pseudolife-mcp shim - per-session identity (required for correct episodes with concurrent sessions)."
                 }
             } else {

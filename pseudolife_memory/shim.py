@@ -12,14 +12,18 @@ state, the v0.1 bug class).
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
+import urllib.error
 import urllib.request
 import uuid
+from typing import NoReturn
 
 from pseudolife_memory.session_title import title_from_cwd
 
@@ -37,6 +41,13 @@ _SPAWN_WAIT_S = 25.0
 # of the 25 s floor on FAST hardware. 180 s gives slower disks/AV room;
 # the child-liveness check above keeps genuine failures fast.
 _SPAWN_WAIT_ALIVE_S = 180.0
+# How long the no-spawn path waits for an EXTERNAL daemon to appear. Sized
+# for the 2026-08-29 incident's scenario — a Claude session starting at
+# logon while Docker Desktop is still booting after a reboot: Docker's
+# port proxy arrived within seconds of the shim's failed probe there, and
+# a cold Docker Desktop start is typically tens of seconds to a couple of
+# minutes, so the spawn ceiling above is a comfortable cap for this too.
+_NO_SPAWN_WAIT_S = _SPAWN_WAIT_ALIVE_S
 
 
 def _daemon_url() -> str:
@@ -47,6 +58,16 @@ def probe_health(url: str, timeout: float = 0.25) -> dict | None:
     try:
         with urllib.request.urlopen(url + "/health", timeout=timeout) as r:
             return json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        # An HTTP response IS a daemon: /health serves degraded payloads as
+        # 503, and urlopen raises on those. Swallowing them as "no daemon"
+        # made the shim spawn a second daemon over a reachable-but-refusing
+        # one — whose bind then failed on the held port, so the refusal
+        # diagnostic in the 503 body reached no one (2026-08-29 review).
+        try:
+            return json.loads(e.read().decode())
+        except Exception:  # noqa: BLE001 — a non-JSON error page is not ours
+            return None
     except Exception:  # noqa: BLE001
         return None
 
@@ -106,38 +127,200 @@ def _notice_if_cortex_is_inert(health: dict) -> dict:
     return health
 
 
-def ensure_daemon(url: str) -> dict:
-    health = probe_health(url)
-    if health is not None:
-        return _notice_if_cortex_is_inert(health)
-    print(f"[shim] no daemon at {url} — starting one...", file=sys.stderr)
-    child = spawn_daemon()
-    start = time.time()
-    while True:
-        elapsed = time.time() - start
-        if elapsed >= _SPAWN_WAIT_ALIVE_S:
-            break
-        if elapsed >= _SPAWN_WAIT_S and child.poll() is not None:
-            # The spawned daemon exited without serving — waiting longer
-            # cannot help. (Before the floor, a poll() result can race
-            # the detach on some platforms, so only trust it after.)
-            print(
-                f"[shim] the spawned daemon exited (code {child.returncode}) "
-                f"before serving.", file=sys.stderr,
-            )
-            break
-        time.sleep(0.5)
-        health = probe_health(url, timeout=0.5)
-        if health is not None:
-            return _notice_if_cortex_is_inert(health)
+def _spawn_disabled() -> bool:
+    """True when this install opted out of the daemon-spawn fallback.
+
+    The Docker-tier installers set ``PSEUDOLIFE_MCP_NO_SPAWN=1`` on the
+    shim registration: there the real daemon is the compose container, and
+    a spawned host-side fallback is never right — after the 2026-08-29
+    reboot, Docker Desktop was still booting when the shim probed, the
+    fallback's bind beat Docker's port proxy (whose publish then failed
+    silently), and it served a retired file bank in place of the real one.
+    """
+    raw = os.environ.get("PSEUDOLIFE_MCP_NO_SPAWN", "")
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _spawn_lock_path(url: str):
+    """Lock file keyed on the daemon URL — every shim aiming at the same
+    daemon contends on the same file, whichever Python install it runs
+    from (the incident's double spawn was one venv shim plus one
+    global-env shim). Lives in the temp dir (per-user on Windows, shared
+    on POSIX); a foreign-owned file there just fails the open, which
+    degrades to the unlocked behavior rather than blocking anyone."""
+    from pathlib import Path
+
+    digest = hashlib.sha1(url.encode("utf-8")).hexdigest()[:10]
+    return Path(tempfile.gettempdir()) / f"pseudolife-mcp-spawn-{digest}.lock"
+
+
+def _open_spawn_lock(url: str):
+    """Open (never lock) the spawn-lock file; ``None`` if that fails.
+
+    The lock is best-effort protection against a concurrent shim's spawn —
+    a filesystem that can't even open the file must degrade to the old
+    unlocked behavior, not brick the session.
+    """
+    try:
+        return open(_spawn_lock_path(url), "a+b")
+    except OSError:
+        return None
+
+
+def _try_spawn_lock(fh) -> bool:
+    """Non-blocking exclusive lock. OS locks die with their holder, so a
+    crashed spawner never leaves a stale lock behind."""
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+        else:  # pragma: no cover - exercised on the Linux CI lane
+            import fcntl
+
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except OSError:
+        return False
+
+
+def _release_spawn_lock(fh, held: bool) -> None:
+    try:
+        if held:
+            if os.name == "nt":
+                import msvcrt
+
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+            else:  # pragma: no cover - exercised on the Linux CI lane
+                import fcntl
+
+                fcntl.flock(fh, fcntl.LOCK_UN)
+    except OSError:
+        pass
+    finally:
+        fh.close()
+
+
+def _accept_health(url: str, health: dict) -> dict:
+    """Vet a probed /health payload before the shim commits to this daemon.
+
+    ``init_refusal`` means the daemon booted but refuses to serve its bank
+    (the hydrated-dim guard, or schema.py's vector-dim refusal): it holds
+    the port, so spawning over it can only fail — print ITS diagnosis (the
+    only channel a shim-spawned daemon has: spawn_daemon devnulls stderr)
+    and exit. Any other degraded state still attaches — per-call upstream
+    connections recover on their own once e.g. Postgres is back — but
+    leaves one honest line so a failing session has a lead.
+    """
+    refusal = health.get("init_refusal")
+    if refusal:
+        print(
+            f"[shim] the daemon at {url} is up but refusing to serve:\n"
+            f"  {refusal}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if health.get("status") not in (None, "ok"):
+        print(
+            f"[shim] note: the daemon at {url} reports status="
+            f"{health.get('status')}"
+            + (f" (db: {health['db']})" if health.get("db") else ""),
+            file=sys.stderr,
+        )
+    return _notice_if_cortex_is_inert(health)
+
+
+def _exit_unreachable(url: str) -> NoReturn:
+    no_spawn_note = (
+        "  (PSEUDOLIFE_MCP_NO_SPAWN is set, so no fallback daemon was "
+        "spawned.)\n" if _spawn_disabled() else "")
     print(
         f"[shim] FAILED to reach the memory daemon at {url}.\n"
+        f"{no_spawn_note}"
         f"  Docker tier:  docker compose -f ops/docker-compose.yml up -d\n"
         f"  Pip tiers:    pseudolife-mcp serve   (run it in a terminal — "
         f"the daemon logs to its own stderr, so this shows why it died)",
         file=sys.stderr,
     )
     sys.exit(1)
+
+
+def ensure_daemon(url: str) -> dict:
+    health = probe_health(url)
+    if health is not None:
+        return _accept_health(url, health)
+    if _spawn_disabled():
+        # Docker-tier install: the daemon is external (compose), so wait
+        # for it instead of racing its port bind with a fallback spawn.
+        print(
+            f"[shim] no daemon at {url} and PSEUDOLIFE_MCP_NO_SPAWN is set — "
+            f"waiting up to {_NO_SPAWN_WAIT_S:.0f}s for it instead of "
+            f"spawning a fallback (Docker may still be starting)...",
+            file=sys.stderr,
+        )
+        start = time.time()
+        while time.time() - start < _NO_SPAWN_WAIT_S:
+            time.sleep(0.5)
+            health = probe_health(url, timeout=0.5)
+            if health is not None:
+                return _accept_health(url, health)
+        _exit_unreachable(url)
+    lock = _open_spawn_lock(url)
+    held = False
+    try:
+        if lock is not None:
+            waiting_announced = False
+            wait_start = time.time()
+            while not _try_spawn_lock(lock):
+                # Another shim holds the lock, i.e. is mid-spawn: wait for
+                # ITS daemon rather than racing it with a second one (the
+                # incident's 13:39 double spawn, venv + global env).
+                if not waiting_announced:
+                    print(
+                        f"[shim] no daemon at {url} — another shim is "
+                        f"already starting one; waiting for it...",
+                        file=sys.stderr,
+                    )
+                    waiting_announced = True
+                health = probe_health(url, timeout=0.5)
+                if health is not None:
+                    return _accept_health(url, health)
+                if time.time() - wait_start >= _SPAWN_WAIT_ALIVE_S:
+                    _exit_unreachable(url)
+                time.sleep(0.5)
+            held = True
+            # The previous holder may have brought the daemon up between
+            # our first probe and taking the lock — re-check before
+            # spawning over it.
+            health = probe_health(url)
+            if health is not None:
+                return _accept_health(url, health)
+        print(f"[shim] no daemon at {url} — starting one...", file=sys.stderr)
+        child = spawn_daemon()
+        start = time.time()
+        while True:
+            elapsed = time.time() - start
+            if elapsed >= _SPAWN_WAIT_ALIVE_S:
+                break
+            if elapsed >= _SPAWN_WAIT_S and child.poll() is not None:
+                # The spawned daemon exited without serving — waiting longer
+                # cannot help. (Before the floor, a poll() result can race
+                # the detach on some platforms, so only trust it after.)
+                print(
+                    f"[shim] the spawned daemon exited (code "
+                    f"{child.returncode}) before serving.", file=sys.stderr,
+                )
+                break
+            time.sleep(0.5)
+            health = probe_health(url, timeout=0.5)
+            if health is not None:
+                return _accept_health(url, health)
+        _exit_unreachable(url)
+    finally:
+        if lock is not None:
+            _release_spawn_lock(lock, held)
 
 
 def _session_headers(token: str | None, session_uid: str) -> dict[str, str]:
