@@ -1,0 +1,133 @@
+{
+  "category": "procedure",
+  "n": 74,
+  "arms": {
+    "rag": {
+      "eval_accuracy": 0.176,
+      "judge_accuracy": 0.068,
+      "context_tokens": 818.3,
+      "answer_seconds": 2.9
+    },
+    "cortex": {
+      "eval_accuracy": 0.108,
+      "judge_accuracy": 0.095,
+      "context_tokens": 1376.3,
+      "answer_seconds": 3.73
+    },
+    "hybrid": {
+      "eval_accuracy": 0.189,
+      "judge_accuracy": 0.095,
+      "context_tokens": 1780.4,
+      "answer_seconds": 4.13
+    }
+  },
+  "rescore": {
+    "issue": 173,
+    "date": "2026-08-30",
+    "scorer": "score_mc no-box fallback: anchored uppercase A-H (whole-response letter or explicit answer marker) instead of any standalone [A-Ha-h]",
+    "source": "evals/results/lme-v2-smoke-qwen38-slice.jsonl",
+    "supersedes": "evals/results/lme-v2-smoke-qwen38-slice.summary.json",
+    "eval_accuracy_before": {
+      "rag": 0.189,
+      "cortex": 0.162,
+      "hybrid": 0.257
+    },
+    "eval_accuracy_after": {
+      "rag": 0.176,
+      "cortex": 0.108,
+      "hybrid": 0.189
+    },
+    "flips": [
+      {
+        "question_id": "507a0fe8",
+        "arm": "hybrid",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "red for manual entry**\".\n\nThe context in step 8 says: \"Please provide: 1) User ID (user_name) 2) First name 3) Last name"
+      },
+      {
+        "question_id": "52dd33bb",
+        "arm": "cortex",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "cks the status of the expense management task and allows marking it as Closed - Complete\"\nThe question asks: \"Before the"
+      },
+      {
+        "question_id": "58c34839",
+        "arm": "hybrid",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "ng the two:\n*   Onboarding: 1 surface\n*   Offboarding: 2 surfaces\n\nOffboarding requires one more major work surface than"
+      },
+      {
+        "question_id": "73cbefdc",
+        "arm": "hybrid",
+        "eval_function": "mc_choice_match",
+        "gold": "E",
+        "was": true,
+        "now": false,
+        "response_tail": " 1 hour, honor risk-based durations.\n    *   F: ignore gap.\n\n    The memory explicitly states: \"There should not be more"
+      },
+      {
+        "question_id": "bfb3bcc4",
+        "arm": "cortex",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "**B**: Navigate to user profile -> Delete user -> Clear assets -> Close task. This puts Users first and deletes the user"
+      },
+      {
+        "question_id": "bfb3bcc4",
+        "arm": "hybrid",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "the effect is similar. However, the order is Hardware then Users.\n*   **D:** Starts with deleting the profile. Incorrect"
+      },
+      {
+        "question_id": "07fff330",
+        "arm": "rag",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "site and I am on the home page.\"\n\nThe context provided shows steps where the user is *already* on search result pages (`"
+      },
+      {
+        "question_id": "07fff330",
+        "arm": "cortex",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "anks, if a sort option isn't listed or supported, it might be considered impossible or not available. Given the explicit"
+      },
+      {
+        "question_id": "92642fe7",
+        "arm": "cortex",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "e preview. There isn't typically a \"Preview\" button in the list view itself, but rather you click the theme to \"View\" it"
+      },
+      {
+        "question_id": "92642fe7",
+        "arm": "hybrid",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "en its details/preview screen. The option \"View\" or \"Preview\" represents the final action. Let's look closely at the \"Re"
+      }
+    ]
+  }
+}

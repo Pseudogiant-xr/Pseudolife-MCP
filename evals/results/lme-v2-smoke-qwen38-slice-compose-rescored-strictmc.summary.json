@@ -1,0 +1,88 @@
+{
+  "category": "procedure",
+  "n": 74,
+  "arms": {
+    "rag": {
+      "eval_accuracy": 0.297,
+      "judge_accuracy": 0.122,
+      "context_tokens": 818.3,
+      "answer_seconds": 6.85
+    },
+    "cortex": {
+      "eval_accuracy": 0.257,
+      "judge_accuracy": 0.108,
+      "context_tokens": 1376.3,
+      "answer_seconds": 12.36
+    },
+    "hybrid": {
+      "eval_accuracy": 0.365,
+      "judge_accuracy": 0.135,
+      "context_tokens": 1780.4,
+      "answer_seconds": 11.86
+    }
+  },
+  "rescore": {
+    "issue": 173,
+    "date": "2026-08-30",
+    "scorer": "score_mc no-box fallback: anchored uppercase A-H (whole-response letter or explicit answer marker) instead of any standalone [A-Ha-h]",
+    "source": "evals/results/lme-v2-smoke-qwen38-slice-compose.jsonl",
+    "supersedes": "evals/results/lme-v2-smoke-qwen38-slice-compose.summary.json",
+    "eval_accuracy_before": {
+      "rag": 0.324,
+      "cortex": 0.257,
+      "hybrid": 0.405
+    },
+    "eval_accuracy_after": {
+      "rag": 0.297,
+      "cortex": 0.257,
+      "hybrid": 0.365
+    },
+    "flips": [
+      {
+        "question_id": "507a0fe8",
+        "arm": "rag",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "t in the form and typically required for manual entry\" in the specific context of the question's options.\n\nI don't know."
+      },
+      {
+        "question_id": "507a0fe8",
+        "arm": "hybrid",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "manual entry in the workflow. Therefore, I cannot determine the correct option from the provided context.\n\nI don't know."
+      },
+      {
+        "question_id": "58c34839",
+        "arm": "hybrid",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "       *   Does the offboarding workflow use a hardware record page? Yes, logically, to unassign hardware, you must open"
+      },
+      {
+        "question_id": "bfb3bcc4",
+        "arm": "rag",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "llows User -> Hardware -> Users.\n    \n    Is there a step in the memory for \"Navigate to user profile\"? No.\n    Is there"
+      },
+      {
+        "question_id": "92642fe7",
+        "arm": "hybrid",
+        "eval_function": "mc_choice_match",
+        "gold": "A",
+        "was": true,
+        "now": false,
+        "response_tail": "iew the available themes.\"\nIt doesn't show the next step.\nBut the \"Known facts\" workflow ends with \"Theme: Magento Blank"
+      }
+    ]
+  }
+}
