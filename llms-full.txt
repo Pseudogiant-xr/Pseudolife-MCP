@@ -2260,7 +2260,9 @@ apply or `auto_interval_days` (default 7) have passed; every apply,
 manual or tick, resets that clock (`auto_tick: false` disables). Step C
 (judgment) is autonomous too, in measured stages: each sweep also sends a
 bounded batch of pending merge proposals — with the same evidence pack the
-review surfaces show — to the configured model (`memory.deep_dream.judge_mode`,
+review surfaces show, plus a caution line on pairs stamped
+`low_differential` (whose snippets cannot tell the sides apart) — to the
+configured model (`memory.deep_dream.judge_mode`,
 default `shadow`; the dream extractor, or a dedicated `judge_url`), and
 records the verdict + confidence + note on the proposal row (schema v30),
 shown beside the evidence in every review surface. In `auto-reject` mode,

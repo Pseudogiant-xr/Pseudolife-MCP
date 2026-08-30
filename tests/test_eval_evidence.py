@@ -2003,6 +2003,29 @@ for _cid, _needle, _art, _val, _stated, _places in [
         id=_cid, doc=EVALS, needle=_needle, artifacts=(_art,),
         value=_val, stated=_stated, places=_places))
 
+# ── merge-proposal snippet differential (2026-08-30 live replay) ──────────
+# The CHANGELOG's before/after low-differential shares for the snippet-
+# attachment fix, pinned to the committed live-queue replay
+# (evals/snippet_differential_replay.py), plus the 2026-08-21 shadow
+# comparison's 37% defect share that motivated it.
+SNIPPET_DIFF = RESULTS + "snippet-differential-live-20260830.json"
+JUDGE_SHADOW = RESULTS + "judge-shadow-live-20260821.json"
+CLAIMS.append(Claim(
+    id="snippet-shadow-share", doc=CHANGELOG,
+    needle="merge proposals (37%) carried low-differential evidence",
+    artifacts=(JUDGE_SHADOW,),
+    value=lambda d: d["evidence_quality"]["share"], stated=0.37, places=2))
+for _cid, _half, _needle, _stated in [
+    ("snippet-diff-before", "before",
+     "evidence share on the live queue from 36% (55 of 152)", 0.36),
+    ("snippet-diff-after", "after",
+     "to 12% (18 of 152), with zero empty sides remaining", 0.12)]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle,
+        artifacts=(SNIPPET_DIFF,),
+        value=(lambda h: lambda d: d[h]["low_differential_share"])(_half),
+        stated=_stated, places=2))
+
 # ── 2026-08-30: the live shadow-judge record + the promoted 74-row slice ─
 # The shadow-vs-triage comparison that justified flipping the deployed
 # judge_mode, and the paired74 working copies promoted with the #173

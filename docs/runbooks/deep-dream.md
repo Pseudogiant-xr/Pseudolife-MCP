@@ -16,7 +16,14 @@ Call `memory_dream(action="deep")` (dry-run by default). Review:
   context snippets; `snippets=false` omits them).
 - `merge_proposals` — pending near-duplicate merges (write-time dedup +
   analyzer), each side enriched with display/etype/degree/scopes/snippets;
-  accept folds `from` into `into` as shown. The direction is re-derived
+  accept folds `from` into `into` as shown. Each side's snippets lead with
+  entries exclusive to that side (shared co-mentions only fill remaining
+  slots), and the row carries `evidence_overlap` (shared share of the shown
+  snippets) plus `low_differential: true` when a side has no snippets, the
+  sides share at least half, or one side's evidence pool is wholly
+  contained in the other's — evidence that cannot distinguish the
+  referents. (Both fields ride the snippets: `snippets=false` omits them
+  along with the evidence itself.) The direction is re-derived
   from CURRENT evidence (degree + fact count) at both display and accept
   time — insert-time orientation goes stale as the graph grows — so a
   batch of accepts can legitimately flip a later pair's direction between
@@ -74,6 +81,9 @@ subagents for large batches — reuse the
 snippets/scopes. A proposal a background sweep has already judged carries a
 `judge` block (verdict/confidence/note/model, schema v30) — treat it as a
 lead, never a decision: read the evidence yourself and disagree freely.
+A `low_differential: true` item warrants extra skepticism: its shown
+evidence cannot tell the two names apart, so a merge needs support beyond
+the snippets (name shape alone is not enough — rule 1 of the judge prompt).
 Items sharing a `group` value pivot on one entity (the
 write-dedup detector files up to three matches per mint) and are ONE
 where-does-it-belong decision — accept at most one; the first accept

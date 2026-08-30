@@ -2282,7 +2282,8 @@ class DreamOps:
                 mentions, scope_map, cfg.max_context_snippets,
                 cfg.snippet_max_chars, True, fact_counts=fact_counts)
             proposals = [{"n": i + 1, "from": e["from"], "into": e["into"],
-                          "reason": e.get("reason"), "score": e.get("score")}
+                          "reason": e.get("reason"), "score": e.get("score"),
+                          "low_differential": e.get("low_differential")}
                          for i, e in enumerate(enriched)]
             verdicts = ex.judge_merges(proposals)
             model = getattr(ex, "model", None) or type(ex).__name__
@@ -2358,25 +2359,107 @@ class DreamOps:
         disp = {x["id"]: x["display"] for x in entities}
         return [{"from": disp.get(f, str(f)), "into": disp.get(t, str(t))} for f, t in dups]
 
+    # Shown-evidence share at/above which a pair is stamped low_differential.
+    # 0.5 mirrors the 2026-08-21 live shadow comparison's metric
+    # (evals/results/judge-shadow-live-20260821.json: 40/109 pending merge
+    # proposals had an empty side or >=50% shared snippets, flagged
+    # independently by four of the six slice judges) — the flag reproduces
+    # exactly the measurement that defined the defect.
+    _LOW_DIFFERENTIAL_SHARE = 0.5
+    # Entries token-scanned into an evidence pool when an entity has neither
+    # usable traces nor a mentions entry. Bounded so a hub name contributes
+    # a sample, not a corpus dump (README.md subset-matched 300+ entries on
+    # the 2026-08-30 live bank); big enough that exclusive-first selection
+    # has room to look past a co-mention prefix.
+    _SNIPPET_SCAN_CAP = 12
+
     def _attach_candidate_snippets(self, candidates, entities, entries, traces, k,
-                                   mentions=None, max_chars=None):
+                                   mentions=None, max_chars=None,
+                                   differential=False):
         """Attach up to k context snippets per side (each truncated to
-        max_chars), for the Step-C agent prompt. Traces are the primary
-        evidence; entities without traces (most graph entities) fall back to
-        their token-mention entries — the same source entity_context_vectors
-        built their vectors from — so a candidate never ships as a bare
-        similarity score."""
+        max_chars), for the Step-C agent prompt and the merge judge. Traces
+        are the primary evidence; entities without USABLE traces (ids must
+        resolve to live entries) fall back to their token-mention entries,
+        and entities the vector pass excluded outright — below
+        min_entity_mentions, or over max_fallback_mentions, caps that guard
+        VECTORS, not display — fall back to a bounded token scan, so a
+        candidate never ships as a bare similarity score merely because it
+        was vector-ineligible (32 of 109 pending proposals shipped an empty
+        side on 2026-08-21).
+
+        ``differential=True`` (the MERGE path — "same referent?") makes each
+        side lead with entries EXCLUSIVE to it, shared entries only filling
+        remaining slots, and stamps ``evidence_overlap`` (shared share of the
+        SHOWN snippets) plus ``low_differential`` — an empty side, shown
+        overlap at/above ``_LOW_DIFFERENTIAL_SHARE``, or one side's evidence
+        pool wholly contained in the other's (exclusive-first ordering would
+        otherwise HIDE that a side has no evidence of its own — the
+        bare-vs-qualified name shape). LINK candidates keep pool order and
+        get no stamps: their question is "what relation holds?", which the
+        co-occurrence notes answer — demoting shared entries there would
+        strip the evidence (see shared_mention_entries)."""
+        from pseudolife_memory.memory.graph_review import _token_set
         by_id = {e["id"]: e for e in entries}
         canon = {e["id"]: e["canonical"] for e in entities}
-        def snippets(eid):
-            ids = traces.get(canon.get(eid, ""), [])[:k]
-            if not ids and mentions:
-                ids = sorted(mentions.get(eid, ()))[:k]
-            texts = [by_id[i]["text"] for i in ids if i in by_id][:k]
-            return [t[:max_chars] for t in texts] if max_chars else texts
+        disp = {e["id"]: e["display"] for e in entities}
+        entry_tokens = None      # built once, only if some side needs the scan
+
+        def pool(eid):
+            nonlocal entry_tokens
+            ids = [i for i in traces.get(canon.get(eid, ""), []) if i in by_id]
+            seen = set(ids)
+            for i in sorted(mentions.get(eid, ()) if mentions else ()):
+                if i in by_id and i not in seen:
+                    ids.append(i)
+                    seen.add(i)
+            if not ids:
+                want = _token_set(disp.get(eid, ""))
+                if want:
+                    if entry_tokens is None:
+                        entry_tokens = [(e["id"], _token_set(e.get("text", "")))
+                                        for e in entries]
+                    for i, toks in entry_tokens:
+                        if want <= toks:
+                            ids.append(i)
+                            if len(ids) >= self._SNIPPET_SCAN_CAP:
+                                break
+            return ids
+
+        def pick(own, other):
+            if differential:
+                ranked = ([i for i in own if i not in other]
+                          + [i for i in own if i in other])
+            else:
+                ranked = own
+            texts: list[str] = []
+            seen_text: set[str] = set()
+            for i in ranked:
+                if len(texts) >= k:
+                    break
+                t = by_id[i]["text"]
+                if max_chars:
+                    t = t[:max_chars]
+                if t in seen_text:
+                    continue
+                texts.append(t)
+                seen_text.add(t)
+            return texts
+
         for c in candidates:
-            c["src_snippets"] = snippets(c["src_id"])
-            c["dst_snippets"] = snippets(c["dst_id"])
+            src_pool, dst_pool = pool(c["src_id"]), pool(c["dst_id"])
+            src = pick(src_pool, set(dst_pool))
+            dst = pick(dst_pool, set(src_pool))
+            c["src_snippets"], c["dst_snippets"] = src, dst
+            if not differential:
+                continue
+            overlap = (len(set(src) & set(dst)) / min(len(src), len(dst))
+                       if src and dst else 0.0)
+            one_sided = bool(src_pool and dst_pool
+                             and (not set(src_pool) - set(dst_pool)
+                                  or not set(dst_pool) - set(src_pool)))
+            c["evidence_overlap"] = round(overlap, 2)
+            c["low_differential"] = (not src or not dst or one_sided
+                                     or overlap >= self._LOW_DIFFERENTIAL_SHARE)
         return candidates
 
     def _enrich_merge_proposals(self, pending, entities, edges, entries,
@@ -2411,7 +2494,7 @@ class DreamOps:
         if include_snippets:
             self._attach_candidate_snippets(
                 shaped, entities, entries, traces, k,
-                mentions=mentions, max_chars=max_chars)
+                mentions=mentions, max_chars=max_chars, differential=True)
         out = []
         for p, (frm, into), g, s in zip(rows, oriented, groups, shaped):
             def side(eid, snips):
@@ -2426,6 +2509,12 @@ class DreamOps:
                    if g is not None else None,
                    "from": side(frm, s.get("src_snippets", [])),
                    "into": side(into, s.get("dst_snippets", []))}
+            if include_snippets:
+                # Evidence-quality stamp (2026-08-21 shadow finding): the
+                # reviewer and the judge both need to know when the sides'
+                # shown evidence cannot differentiate the pair.
+                row["evidence_overlap"] = s.get("evidence_overlap")
+                row["low_differential"] = s.get("low_differential")
             # Shadow pre-judgment (v30): an opinion for the reviewer, shown
             # beside the evidence it judged from.
             if p.get("judge_verdict"):
