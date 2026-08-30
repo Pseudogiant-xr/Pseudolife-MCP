@@ -266,6 +266,23 @@ KNOBS: list[dict[str, Any]] = [
              "sessions split on line boundaries and map-reduce merge. 24000 "
              "≈ 6K tokens, sized for the bundled CPU sidecar — raise it on "
              "a large-context GPU endpoint to avoid the split."},
+    # ── Deep dream ─────────────────────────────────────────────────────────
+    # Read from service.config on every sweep batch (deep_dream_judge).
+    {"path": "memory.deep_dream.judge_mode", "group": "Deep dream",
+     "label": "Step-C merge judge", "type": "enum",
+     "options": ["off", "shadow", "auto-reject"], "default": "shadow",
+     "restart": False,
+     "help": "How the autonomous Step-C judge handles pending merge "
+             "proposals: \"shadow\" records verdicts without applying them; "
+             "\"auto-reject\" additionally applies reject verdicts at/above "
+             "the confidence gate (judge_reject_min_confidence, 0.8 — "
+             "accepts are never auto-applied). Caveat: auto-reject is only "
+             "measured-safe on an Opus-class judge endpoint (live precision "
+             "1.000, evals/results/judge-shadow-live-20260821.json); the "
+             "2026-08-16 judge ladder shows weaker judges mis-reject with "
+             "confident scores (local Qwen 0.918, confidence "
+             "uninformative), so leave \"shadow\" unless the dream "
+             "extractor or judge_url resolves to an Opus-class model."},
     # ── Extractor ──────────────────────────────────────────────────────────
     # All live: build_extractor() constructs the client fresh on every dream
     # invocation from service.config.

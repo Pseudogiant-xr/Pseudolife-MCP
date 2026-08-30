@@ -7,6 +7,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added (2026-08-30 — shadow-judge evidence committed; `judge_mode` surfaced in the Console)
+- **`memory.deep_dream.judge_mode` is now a Console knob** (new "Deep
+  dream" group, enum `off | shadow | auto-reject`, live — the sweep
+  re-reads config on every batch): flipping a live daemon no longer takes
+  a container exec into `/data/config.yaml`. The shipped default stays
+  `shadow`, and the knob's help text carries the caveat that gates the
+  flip: auto-reject is only measured-safe on an Opus-class judge endpoint
+  (the 2026-08-16 judge ladder shows weaker judges mis-rejecting with
+  confident scores).
 - **The 2026-08-21 live shadow-vs-triage comparison is committed**
   (`evals/results/judge-shadow-live-20260821.json`): the deployed Step-C
   judge scored against a fresh blind triage of all 109 then-pending merge
