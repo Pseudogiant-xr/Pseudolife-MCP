@@ -2003,6 +2003,47 @@ for _cid, _needle, _art, _val, _stated, _places in [
         id=_cid, doc=EVALS, needle=_needle, artifacts=(_art,),
         value=_val, stated=_stated, places=_places))
 
+# ── 2026-08-30: the live shadow-judge record + the promoted 74-row slice ─
+# The shadow-vs-triage comparison that justified flipping the deployed
+# judge_mode, and the paired74 working copies promoted with the #173
+# strict-MC re-score (the raw artifact's retired numbers pin too — the
+# CHANGELOG states them as the thing being retired).
+SHADOW_LIVE = RESULTS + "judge-shadow-live-20260821.json"
+PAIRED74 = RESULTS + "lme-v2-qwen38-vs-slice2-paired74.json"
+PAIRED74_RS = (RESULTS + "lme-v2-qwen38-vs-slice2-paired74" + RESCORE
+               + ".json")
+
+for _cid, _needle, _art, _val, _stated, _places in [
+    ("shadow-live-auto-reject-precision",
+     "auto-reject precision is **1.000**", SHADOW_LIVE,
+     lambda d: d["auto_reject_simulation"]["live_auto_reject_precision"],
+     1.000, 3),
+    ("shadow-live-auto-rejected",
+     "76/109 proposals cleared automatically", SHADOW_LIVE,
+     lambda d: d["auto_reject_simulation"]["would_have_applied"], 76, 0),
+    ("shadow-live-agreement",
+     "overall agreement 0.927", SHADOW_LIVE,
+     lambda d: d["metrics_overall"]["agreement_on_decided"], 0.927, 3),
+    ("shadow-live-accept-precision",
+     "accept precision is only 0.611", SHADOW_LIVE,
+     lambda d: d["metrics_overall"]["accept_precision"], 0.611, 3),
+    ("paired74-raw-cortex-delta",
+     "+0.0946 (8W/1L, sign-test p 0.0391)", PAIRED74,
+     lambda d: d["arms"]["cortex_correct"]["delta"], 0.0946, 4),
+    ("paired74-raw-cortex-p",
+     "+0.0946 (8W/1L, sign-test p 0.0391)", PAIRED74,
+     lambda d: d["arms"]["cortex_correct"]["sign_test_p"], 0.0391, 4),
+    ("paired74-corrected-cortex-delta",
+     "re-scored it is **+0.0405** (5W/2L, p 0.453)", PAIRED74_RS,
+     lambda d: d["arms"]["cortex_correct"]["delta"], 0.0405, 4),
+    ("paired74-corrected-cortex-p",
+     "re-scored it is **+0.0405** (5W/2L, p 0.453)", PAIRED74_RS,
+     lambda d: d["arms"]["cortex_correct"]["sign_test_p"], 0.453, 3),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(_art,),
+        value=_val, stated=_stated, places=_places))
+
 # The BEAM findings table also quotes three RANGES that live in a verdict
 # file as strings, not floats — the Claim machinery only compares numbers,
 # so they get their own check rather than going unguarded.
