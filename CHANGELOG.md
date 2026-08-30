@@ -47,6 +47,47 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   not shipped: evidence accrues after filing, so a filing-time verdict
   would go stale exactly like the stored fold direction already does.
 
+### Added (2026-08-30 — shadow-judge evidence committed; `judge_mode` surfaced in the Console)
+- **`memory.deep_dream.judge_mode` is now a Console knob** (new "Deep
+  dream" group, enum `off | shadow | auto-reject`, live — the sweep
+  re-reads config on every batch): flipping a live daemon no longer takes
+  a container exec into `/data/config.yaml`. The shipped default stays
+  `shadow`, and the knob's help text carries the caveat that gates the
+  flip: auto-reject is only measured-safe on an Opus-class judge endpoint
+  (the 2026-08-16 judge ladder shows weaker judges mis-rejecting with
+  confident scores).
+- **The 2026-08-21 live shadow-vs-triage comparison is committed**
+  (`evals/results/judge-shadow-live-20260821.json`): the deployed Step-C
+  judge scored against a fresh blind triage of all 109 then-pending merge
+  proposals. At the deployed 0.8 confidence gate the live
+  auto-reject precision is **1.000** — zero of the
+  76/109 proposals cleared automatically would have been wrong — with
+  overall agreement 0.927, and every one of the 8 disagreements sat at
+  confidence ≤ 0.7, strictly below the gate. The judge's
+  accept precision is only 0.611, so auto-accept remains unsafe and
+  nothing implements it. This artifact is the evidence behind flipping the
+  *deployed* daemon's `memory.deep_dream.judge_mode` to `auto-reject`; the
+  shipped default stays `shadow`, which the 2026-08-16 judge ladder showed
+  is the only safe default for arbitrary judge endpoints.
+- **The 74-row Qwen3.8 slice working copies are promoted with their
+  strict-MC re-score** — the condition the 2026-08-25 audit set before any
+  number from them could be quoted. Rows 57–74 complete
+  `lme-v2-smoke-qwen38-slice.jsonl`; its summary, the compose-prompt run,
+  and the uniform-judge-parse rescore (`…-fixjudge.*`) land exactly as the
+  runs left them, beside new `*-rescored-strictmc.*` correction artifacts
+  (originals untouched, per the canonical-file rule; the fixjudge run's
+  eval rows are identical to the base slice's — only the judge parse
+  differs — so it shares that correction summary). The
+  headline correction: the working copy's paired74 cortex delta
+  +0.0946 (8W/1L, sign-test p 0.0391) — briefly the first significant
+  3.8 > 3.6 result on this bench — does not survive the scorer fix:
+  re-scored it is **+0.0405** (5W/2L, p 0.453). It is retired here
+  without ever having been published.
+- **Two KU-oracle summaries for the `arm1-mtp` determinism runs**
+  (`longmemeval-ku-oracle-e4b-ft-arm1-mtp{,-r2}.summary.json`) — the runs
+  the committed `judge-determinism-check-qwen38-mtp.json` already
+  references.
+
 ### Added (2026-08-29 — multi-provider installer: Gemini CLI, generic MCP agents, capability matrix)
 - **The installers wire any of four providers, together or alone.**
   `--client` / `-Client` now takes a comma- or space-separated list of
@@ -806,7 +847,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   claim with no artifact a reader can check, which is the rule this repo
   wrote `tests/test_eval_evidence.py` to enforce. Whoever promotes those
   rows must re-score them with `evals/rescore_strict_mc.py` before
-  quoting any number from them.
+  quoting any number from them. *(Resolved 2026-08-30: those rows are now
+  committed with exactly that re-score — see the Unreleased entry above —
+  and the corrected comparison is not significant.)*
 
 ### Fixed (2026-08-25 — bench reset leaked FK-free tables between questions; #181)
 - **The eval harness's bench reset now truncates every table in the

@@ -105,6 +105,27 @@ def test_session_digest_knobs_surfaced_default_off():
     assert "memory.dream.digest_max_per_cycle" not in _BY_PATH
 
 
+def test_deep_dream_judge_mode_knob_surfaced_default_shadow():
+    # Surfaced 2026-08-30 (maintainer-directed), alongside the live
+    # deployment's opt-in to auto-reject on the 2026-08-21 shadow-vs-triage
+    # evidence (evals/results/judge-shadow-live-20260821.json): until now
+    # the only way to flip a live daemon was hand-editing /data/config.yaml
+    # inside the container. The shipped default stays "shadow" — the
+    # 2026-08-16 judge ladder measured auto-reject precision as
+    # judge-dependent (Opus-class 0.987+, local Qwen 0.918 with
+    # uninformative confidence), so the knob carries that caveat in its
+    # help text instead of the default changing.
+    knob = _knob("memory.deep_dream.judge_mode")
+    assert knob["type"] == "enum"
+    assert knob["options"] == ["off", "shadow", "auto-reject"]
+    assert knob["default"] == "shadow"
+    # deep_dream_judge re-reads service.config on every sweep batch.
+    assert knob["restart"] is False
+    # The caveat is load-bearing: auto-reject is only measured-safe on an
+    # Opus-class judge endpoint.
+    assert "Opus-class" in knob["help"]
+
+
 def test_gated_off_capabilities_stay_out_of_console():
     # known_facts_window failed its gate; the agg-recall search knobs
     # have not passed theirs. None may appear until a preregistered gate
