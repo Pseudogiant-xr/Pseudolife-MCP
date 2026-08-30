@@ -33,8 +33,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   number from them could be quoted. Rows 57–74 complete
   `lme-v2-smoke-qwen38-slice.jsonl`; its summary, the compose-prompt run,
   and the uniform-judge-parse rescore (`…-fixjudge.*`) land exactly as the
-  runs left them, each beside a new `*-rescored-strictmc.*` correction
-  artifact (originals untouched, per the canonical-file rule). The
+  runs left them, beside new `*-rescored-strictmc.*` correction artifacts
+  (originals untouched, per the canonical-file rule; the fixjudge run's
+  eval rows are identical to the base slice's — only the judge parse
+  differs — so it shares that correction summary). The
   headline correction: the working copy's paired74 cortex delta
   +0.0946 (8W/1L, sign-test p 0.0391) — briefly the first significant
   3.8 > 3.6 result on this bench — does not survive the scorer fix:

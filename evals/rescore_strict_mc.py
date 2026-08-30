@@ -70,7 +70,7 @@ def accuracies(rows: list[dict]) -> dict[str, float]:
             for a in ARMS}
 
 
-def summary(name: str) -> dict:
+def summary(name: str, date: str = "2026-08-25") -> dict:
     """report()'s summary shape, recomputed, plus the correction block."""
     rows = load(name)
     new_rows, flips = rescore(rows)
@@ -88,7 +88,7 @@ def summary(name: str) -> dict:
                 sum(r.get(f"{arm}_answer_seconds", 0.0) for r in rows) / n, 2),
         }
     out["rescore"] = {
-        "issue": 173, "date": "2026-08-25", "scorer": SCORER,
+        "issue": 173, "date": date, "scorer": SCORER,
         "source": f"evals/results/{name}.jsonl",
         "supersedes": f"evals/results/{name}.summary.json",
         "eval_accuracy_before": accuracies(rows),
@@ -108,10 +108,17 @@ def sign_test_p(wins: int, losses: int) -> float:
     return round(min(1.0, 2 * tail), 4)
 
 
-def paired(a_name: str, b_name: str) -> dict:
-    """Paired-by-question_id comparison, re-scored on both sides."""
+def paired(a_name: str, b_name: str, b_limit: int | None = None) -> dict:
+    """Paired-by-question_id comparison, re-scored on both sides.
+
+    ``b_limit`` keeps a comparison source-stable when its b-side JSONL has
+    since grown: the 2026-08-19 paired56 run's 56 rows are the FIRST 56 of
+    ``lme-v2-smoke-qwen38-slice.jsonl`` (rows 57-74 were appended by the
+    completion run, never re-run), so truncating after load reproduces the
+    original comparison exactly instead of overwriting it with a 74-row one.
+    """
     a_rows, a_flips = rescore(load(a_name))
-    b_rows, b_flips = rescore(load(b_name))
+    b_rows, b_flips = rescore(load(b_name)[:b_limit])
     a_by = {r["question_id"]: r for r in a_rows}
     b_by = {r["question_id"]: r for r in b_rows}
     shared = [q for q in a_by if q in b_by]
@@ -184,7 +191,11 @@ def main() -> int:
     write(RESULTS / f"lme-v2-smoke-slice1{TAG}.agg.json", agg)
 
     # ── the paired 3.6-vs-3.8 verdict the CHANGELOG states ──
-    p = paired("lme-v2-smoke-slice2", "lme-v2-smoke-qwen38-slice")
+    # b_limit pins this to the 56 rows the 2026-08-19 run produced; the
+    # JSONL has since grown to 74 (2026-08-30 promotion) and an unpinned
+    # re-run would overwrite this canonical file with different numbers.
+    p = paired("lme-v2-smoke-slice2", "lme-v2-smoke-qwen38-slice",
+               b_limit=56)
     p["supersedes"] = "evals/results/lme-v2-qwen38-vs-slice2-paired56.json"
     p["rescore"] = {"issue": 173, "date": "2026-08-25", "scorer": SCORER}
     p["note"] = ("Both sides re-scored. The judge arms are untouched by the "
@@ -195,6 +206,35 @@ def main() -> int:
         print(f"paired {key:<16} delta {v['delta']:+.4f} "
               f"{v['wins']}W/{v['losses']}L p={v['sign_test_p']}")
     write(RESULTS / f"lme-v2-qwen38-vs-slice2-paired56{TAG}.json", p)
+
+    # ── the 2026-08-30 promotion of the completed 74-row 3.8 slice ──
+    # (CHANGELOG, 2026-08-30). Same scorer fix, applied at promotion time.
+    for name in ("lme-v2-smoke-qwen38-slice",
+                 "lme-v2-smoke-qwen38-slice-compose"):
+        s = summary(name, date="2026-08-30")
+        print(f"{name}: {s['rescore']['eval_accuracy_before']} -> "
+              f"{s['rescore']['eval_accuracy_after']} "
+              f"({len(s['rescore']['flips'])} flips)")
+        write(RESULTS / f"{name}{TAG}.summary.json", s)
+
+    # The full-74 paired comparison. The b-side is the fixjudge variant to
+    # mirror the raw paired74 artifact; its eval rows are identical to the
+    # base slice's (only the judge parse differs), so the eval movement is
+    # attributable to the scorer fix alone.
+    p74 = paired("lme-v2-smoke-slice2", "lme-v2-smoke-qwen38-slice-fixjudge")
+    p74["a"] = "slice2 (Qwen3.6, 74 rows)"
+    p74["b"] = "qwen38-slice-fixjudge (Qwen3.8, 74 rows, uniform judge parse)"
+    p74["supersedes"] = "evals/results/lme-v2-qwen38-vs-slice2-paired74.json"
+    p74["rescore"] = {"issue": 173, "date": "2026-08-30", "scorer": SCORER}
+    p74["note"] = ("Both sides re-scored under the strict MC scorer (#173). "
+                   "The judge arms are untouched by the scorer and reproduce "
+                   "the superseded artifact exactly. Judge identity remains "
+                   "confounded with answerer; eval is the preregistered "
+                   "primary.")
+    for key, v in p74["arms"].items():
+        print(f"paired74 {key:<16} delta {v['delta']:+.4f} "
+              f"{v['wins']}W/{v['losses']}L p={v['sign_test_p']}")
+    write(RESULTS / f"lme-v2-qwen38-vs-slice2-paired74{TAG}.json", p74)
     return 0
 
 
