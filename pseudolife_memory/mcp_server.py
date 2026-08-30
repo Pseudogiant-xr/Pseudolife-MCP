@@ -2,7 +2,7 @@
 
 Built on the MCPServer decorator API from the official ``mcp`` Python SDK (v2).
 Each ``@_tool()`` becomes a JSON-RPC tool. The surface (consolidated
-2026-07-02, 55 → 32 tools; 35 as of v26's set-slot pair) spans the associative stream (``memory_store`` /
+2026-07-02, 55 → 32 tools; 36 as of the RE evidence pilot) spans the associative stream (``memory_store`` /
 ``memory_search`` / ``memory_recent``), the canonical-fact cortex
 (``memory_fact_*`` / ``memory_history``), the world cortex
 (``memory_world_*``), procedural lessons (``memory_outcome`` /
@@ -1739,6 +1739,91 @@ def memory_relation_define(
         name=name, description=description, transitive=transitive,
         inverse_of=inverse_of, src_type=src_type, dst_type=dst_type,
     )
+
+
+# ── Strict reverse-engineering evidence ───────────────────────────────────
+
+
+@_tool(tier="core")
+def re_evidence(
+    action: Annotated[Literal["ingest", "claim", "query", "export", "import", "stats"], Field(
+        description="Operation: ingest immutable Evidence Hub JSON; record an "
+                    "evidence-gated claim; query exact addresses/claims; export "
+                    "or import a portable archive; or return project counts.")],
+    project: Annotated[str, Field(
+        description="Stable project key, for example 'srfn-client'.")],
+    path: Annotated[str | None, Field(
+        description="For ingest: JSON input path. For export/import: archive "
+                    "path on the server filesystem.")] = None,
+    kind: Annotated[str, Field(
+        description="For ingest: evidence type such as 'ghidra-function'.")]
+        = "evidence-hub-json",
+    locator: Annotated[str | None, Field(
+        description="For ingest: optional primary hex address override.")] = None,
+    summary: Annotated[str | None, Field(
+        description="For ingest: short human-reviewed description; never proof.")] = None,
+    binary_id: Annotated[str | None, Field(
+        description="Required build identity for ingest/claim/query/export/import, "
+                    "preferably filename plus cryptographic hash. Optional stats filter.")] = None,
+    subject: Annotated[str | None, Field(
+        description="For claim/query: exact address or other stable subject.")] = None,
+    claim: Annotated[str | None, Field(
+        description="For claim: one behavioral assertion.")] = None,
+    status: Annotated[Literal["hypothesis", "todo", "observed", "verified", "rejected"] | None,
+                      Field(description="Claim status; observed, verified, and "
+                                        "rejected require evidence_ids.")] = None,
+    evidence_ids: Annotated[list[int] | None, Field(
+        description="For claim: immutable artifact ids supporting the status.")] = None,
+    confidence: Annotated[float | None, Field(
+        description="Optional claim confidence from 0 through 1; not proof.")] = None,
+    address: Annotated[str | None, Field(
+        description="For query: exact hex address from structured address/start/"
+                    "end/call fields; assembly/decompiler text is not indexed.")] = None,
+    text: Annotated[str | None, Field(
+        description="For query: substring over summaries, locators, paths, and claims.")] = None,
+    limit: Annotated[int, Field(
+        description="For query: maximum artifacts and claims, capped at 500.")] = 50,
+    include_payload: Annotated[bool, Field(
+        description="For query: include raw JSON payloads; false keeps context compact.")] = False,
+) -> dict[str, Any]:
+    """Work with strict reverse-engineering evidence kept outside associative
+    memory and dream consolidation. Evidence artifacts are immutable raw JSON
+    plus SHA-256; behavioral claims are separate and cannot become
+    observed/verified/rejected without links to existing project artifacts.
+    Treat returned memories or summaries only as leads; the linked artifact is
+    the proof. This feature requires the durable Postgres/lite tier.
+    """
+    if action != "stats" and not binary_id:
+        raise ValueError(f"re_evidence {action} requires binary_id")
+    if action == "ingest":
+        if not path:
+            raise ValueError("re_evidence ingest requires path")
+        return service.re_evidence_ingest(
+            path=path, project=project, kind=kind, locator=locator,
+            summary=summary, binary_id=binary_id)
+    if action == "claim":
+        if not subject or not claim or not status:
+            raise ValueError("re_evidence claim requires subject, claim, and status")
+        return service.re_claim_record(
+            project=project, binary_id=binary_id, subject=subject,
+            claim=claim, status=status,
+            evidence_ids=evidence_ids, confidence=confidence)
+    if action == "query":
+        return service.re_evidence_query(
+            project=project, binary_id=binary_id, address=address,
+            subject=subject, status=status,
+            text=text, limit=limit, include_payload=include_payload)
+    if action == "export":
+        if not path:
+            raise ValueError("re_evidence export requires path")
+        return service.re_evidence_export(
+            project=project, binary_id=binary_id, path=path)
+    if action == "import":
+        if not path:
+            raise ValueError("re_evidence import requires path")
+        return service.re_evidence_import(
+            project=project, binary_id=binary_id, path=path)
+    return service.re_evidence_stats(project=project, binary_id=binary_id)
 
 
 # ── Reference bank ────────────────────────────────────────────────────────

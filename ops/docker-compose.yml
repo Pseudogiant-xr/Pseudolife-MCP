@@ -136,8 +136,8 @@ services:
       # Writer identity stamped on every canonical write (schema v11).
       PSEUDOLIFE_WRITER_ID: ${PSEUDOLIFE_WRITER_ID:-mcp-client}
       # Default toolset tier: "minimal" (9 tools: recall/capture loop incl.
-      # the set-slot pair + the memory_toolset gate), "core" (22: + graph/
-      # recall/world/lessons/docs/episodes), or "full" (all 35). Since 2026-07-11 this sets per-session
+      # the set-slot pair + the memory_toolset gate), "core" (23: + graph/
+      # recall/world/lessons/docs/episodes/RE evidence), or "full" (all 36). Since 2026-07-11 this sets per-session
       # VISIBILITY, not registration — hidden tools stay callable, and any
       # session can step its own tier up/down via memory_toolset. Shipped
       # default: core.

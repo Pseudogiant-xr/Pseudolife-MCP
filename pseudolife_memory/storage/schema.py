@@ -15,7 +15,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 34
+SCHEMA_META_VERSION = 35
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -384,6 +384,7 @@ BENCH_RESET_TABLES = (
     # Declared by the additive-migration tail of ensure_schema, not SCHEMA_SQL.
     "merge_decisions", "dream_runs", "dream_run_slots", "chronicle_events",
     "retrieval_events", "retrieval_uses", "slot_reads",
+    "re_evidence_artifacts", "re_claims", "re_claim_evidence",
 )
 
 # The dimension every embedding column is declared at (schema v25). Not
@@ -847,6 +848,148 @@ def ensure_schema(conn) -> dict:
             "CREATE UNIQUE INDEX IF NOT EXISTS lessons_slot_current_uq "
             "ON lessons (entity_norm, attribute_norm) WHERE status = 'current'"
         )
+        # v35: isolated reverse-engineering proof store. Raw artifacts are
+        # immutable and hash-deduplicated; claims live separately and link to
+        # artifacts explicitly, so associative memory/dream consolidation can
+        # never promote an inference into evidence.
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS re_evidence_artifacts (
+              id BIGSERIAL PRIMARY KEY,
+              project TEXT NOT NULL,
+              kind TEXT NOT NULL,
+              locator TEXT NOT NULL,
+              source_path TEXT NOT NULL,
+              content_hash TEXT NOT NULL,
+              raw_bytes BYTEA NOT NULL,
+              payload JSONB NOT NULL,
+              payload_keys TEXT[] NOT NULL DEFAULT '{}',
+              summary TEXT,
+              binary_id TEXT NOT NULL,
+              addresses TEXT[] NOT NULL DEFAULT '{}',
+              ingested_at DOUBLE PRECISION NOT NULL,
+              UNIQUE (project, binary_id, content_hash, locator)
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS re_evidence_project_idx "
+            "ON re_evidence_artifacts (project, binary_id, locator)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS re_evidence_addresses_idx "
+            "ON re_evidence_artifacts USING GIN (addresses)"
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS re_claims (
+              id BIGSERIAL PRIMARY KEY,
+              project TEXT NOT NULL,
+              binary_id TEXT NOT NULL,
+              subject TEXT NOT NULL,
+              claim TEXT NOT NULL,
+              status TEXT NOT NULL CHECK (status IN
+                ('hypothesis','todo','observed','verified','rejected')),
+              confidence REAL,
+              created_at DOUBLE PRECISION NOT NULL,
+              updated_at DOUBLE PRECISION NOT NULL,
+              UNIQUE (project, binary_id, subject, claim)
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS re_claims_project_subject_idx "
+            "ON re_claims (project, binary_id, subject, status)"
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS re_claim_evidence (
+              claim_id BIGINT NOT NULL REFERENCES re_claims(id) ON DELETE CASCADE,
+              evidence_id BIGINT NOT NULL REFERENCES re_evidence_artifacts(id)
+                ON DELETE RESTRICT,
+              linked_at DOUBLE PRECISION NOT NULL,
+              PRIMARY KEY (claim_id, evidence_id)
+            )
+            """
+        )
+        # Deferred DB-level proof gate. Python validates before write for a
+        # useful error at the API boundary; these triggers protect the same
+        # invariant from maintenance SQL and future writer paths, including
+        # deletion of a claim's last evidence link.
+        cur.execute(
+            """
+            CREATE OR REPLACE FUNCTION check_re_claim_evidence(target_id BIGINT)
+            RETURNS VOID AS $$
+            DECLARE
+              target_status TEXT;
+              claim_project TEXT;
+              claim_binary_id TEXT;
+              link_count BIGINT;
+              matching_count BIGINT;
+            BEGIN
+              SELECT status, project, binary_id
+                INTO target_status, claim_project, claim_binary_id
+                FROM re_claims WHERE id = target_id;
+              IF NOT FOUND THEN
+                RETURN;
+              END IF;
+              SELECT count(*), count(*) FILTER (
+                WHERE a.project = claim_project
+                  AND a.binary_id = claim_binary_id)
+                INTO link_count, matching_count
+                FROM re_claim_evidence l
+                JOIN re_evidence_artifacts a ON a.id = l.evidence_id
+                WHERE l.claim_id = target_id;
+              IF link_count <> matching_count THEN
+                RAISE EXCEPTION
+                  'claim evidence must match claim project/binary scope'
+                  USING ERRCODE = '23514';
+              END IF;
+              IF target_status IN ('observed', 'verified', 'rejected') THEN
+                IF matching_count = 0 THEN
+                  RAISE EXCEPTION 'claim status % requires linked evidence',
+                    target_status USING ERRCODE = '23514';
+                END IF;
+              END IF;
+              RETURN;
+            END;
+            $$ LANGUAGE plpgsql
+            """
+        )
+        cur.execute(
+            """
+            CREATE OR REPLACE FUNCTION enforce_re_claim_evidence()
+            RETURNS TRIGGER AS $$
+            BEGIN
+              IF TG_TABLE_NAME = 're_claims' THEN
+                PERFORM check_re_claim_evidence(COALESCE(NEW.id, OLD.id));
+              ELSIF TG_OP = 'UPDATE' THEN
+                PERFORM check_re_claim_evidence(OLD.claim_id);
+                IF NEW.claim_id <> OLD.claim_id THEN
+                  PERFORM check_re_claim_evidence(NEW.claim_id);
+                END IF;
+              ELSE
+                PERFORM check_re_claim_evidence(
+                  CASE WHEN TG_OP = 'DELETE' THEN OLD.claim_id ELSE NEW.claim_id END);
+              END IF;
+              RETURN NULL;
+            END;
+            $$ LANGUAGE plpgsql
+            """
+        )
+        cur.execute(
+            "DROP TRIGGER IF EXISTS re_claim_gate_on_claim ON re_claims")
+        cur.execute(
+            "CREATE CONSTRAINT TRIGGER re_claim_gate_on_claim "
+            "AFTER INSERT OR UPDATE ON re_claims DEFERRABLE INITIALLY DEFERRED "
+            "FOR EACH ROW EXECUTE FUNCTION enforce_re_claim_evidence()")
+        cur.execute(
+            "DROP TRIGGER IF EXISTS re_claim_gate_on_link ON re_claim_evidence")
+        cur.execute(
+            "CREATE CONSTRAINT TRIGGER re_claim_gate_on_link "
+            "AFTER INSERT OR UPDATE OR DELETE ON re_claim_evidence "
+            "DEFERRABLE INITIALLY DEFERRED FOR EACH ROW "
+            "EXECUTE FUNCTION enforce_re_claim_evidence()")
         cur.execute(
             """
             INSERT INTO meta (key, value) VALUES ('schema_version', %s::jsonb)

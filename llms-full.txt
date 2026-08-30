@@ -321,8 +321,8 @@ Plus [`evals/README.md`](evals/README.md) (full benchmark methodology) and
 
 ## Tools exposed
 
-The surface was consolidated 2026-07-02 (55 → 32 tools; now 35 with
-`memory_toolset` and the set-slot pair): lifecycle families became verb-dispatched tools
+The surface was consolidated 2026-07-02 (55 → 32 tools; now 36 with
+`memory_toolset`, the set-slot pair, and strict RE evidence): lifecycle families became verb-dispatched tools
 (`memory_dream`, `memory_forget`, `memory_graph_review`), and
 dump/introspection views moved to the Cortex Console (REST) — the manifest
 is agent context every session, so it stays lean.
@@ -360,6 +360,7 @@ is agent context every session, so it stays lean.
 | `memory_relation_define(name, description, ...)` | Grow the closed relation vocabulary (deliberate, rare act) |
 | `document_ingest(path, source?)` | Index a file (txt/md/pdf/html) verbatim in the reference bank — the lossless complement to agent-side distillation ([division of labor](docs/guide/memory-model.md#background-documents--the-reference-bank)) |
 | `document_search(query, top_k?)` | RAG search over the reference bank only |
+| `re_evidence(action, project, binary_id?, ...)` | Keep immutable reverse-engineering JSON artifacts and evidence-gated behavioral claims outside associative memory; build-scoped exact address query + portable archive export/import ([guide](docs/guide/re-evidence.md)) |
 | `memory_toolset(action)` | Check or change this principal's visibility tier: `status` / `expand` / `collapse` |
 
 Each tool returns plain JSON. See `pseudolife_memory/mcp_server.py` for
@@ -370,7 +371,7 @@ metadata. Full-table dumps and topology views live in the **Cortex Console**
 (`/api/*`) and the `pseudolife-mcp briefing` CLI.
 
 **Toolset tiers.** Three visibility tiers — `minimal` (9 tools), `core`
-(22), `full` (35) — filtered per principal at
+(23), `full` (36) — filtered per principal at
 `tools/list`; a principal (the named bearer-token identity, or the writer
 id for single-token installs) steps its own tier up or down with
 `memory_toolset` before calling a hidden tool. Defaults, per-client mapping, and weak-model
@@ -881,6 +882,7 @@ renders the real frontend against canned data:
 | Fact currency | Every cortex fact is dated (`asserted_at` / `age`); `freshness_class` (`evergreen` / `slow` / `volatile`) decays `effective_confidence` and flags `stale`. Left `auto`, the class is inferred from the entity's kind (schema v24 `entity_kinds`) — only `system` entities can rot; artifacts and concepts stay evergreen |
 | Knowledge graph | Typed entities/edges, closed relation vocab, on-read closure (Postgres + NetworkX, no AGE/Cypher) |
 | World cortex | `memory_world_*` — cited external facts + age-decayed freshness (manual ingest) |
+| Reverse-engineering evidence | Immutable original-byte, SHA-256-deduplicated JSON artifacts + separately reviewed build-scoped claims; exact address lookup and hash-verified ZIP export/import; isolated from memory/dream consolidation |
 | Procedural memory | `memory_outcome` (signals) → dream-synthesised lessons via `memory_lesson_search`; `prefers`/`avoids` graph edges; single-writer |
 | Sense of time + multi-writer | Per-write stamp (tx/valid time, HLC ordering, writer/session); `memory_history`; relative `age` on reads; `write_mode` seam (snapshot live, occ Phase-2) |
 | Episodes + tags | Session episodes daemon-owned, keyed by a resolved five-tier session identity; hook/shim eager-open or lazy-open + idle reaper + prune-empty + resume-after-reap; nested sub-episodes with subtree-expanded recall; multi-valued `tags=[...]` |
@@ -888,7 +890,7 @@ renders the real frontend against canned data:
 | Consolidation | `memory_consolidation_candidates` + `memory_consolidate` |
 | Optional components | Cross-encoder reranker (`rerank=True`, ~80 MB); ONNX embedding backend (`pip install .[onnx]` — ~3x faster CPU encode, bit-identical, auto-enabled when installed; the default Qwen3-Embedding-0.6B has no ONNX export and falls back to torch, so this currently only speeds up MiniLM-family models); NLI contradiction scorer (`pip install .[nli]`, ~278 MB) |
 | Web console | Cortex Console at `/ui/` — health/stats, fact review + history, graph visualiser, search/trace, config editor (read-mostly, token-gated like `/mcp`) |
-| Schema version | v34 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
+| Schema version | v35 (Postgres meta version) — additive `ADD COLUMN IF NOT EXISTS` migrations on daemon start, **except v25**: the `vector(384)`→`vector(1024)` move is not additive, so the daemon refuses to start against an older-dimensioned bank until you run [`ops/migrate_embeddings.py`](docs/runbooks/embedding-v25-migration.md); legacy file-mode `.pt` banks auto-migrate into Postgres; [full version history](docs/guide/configuration.md#schema-version-history) |
 
 ## Troubleshooting
 
@@ -2644,7 +2646,7 @@ backups. Part of the [user guide](../../README.md#documentation).
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v34). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
+| `PSEUDOLIFE_MCP_DATABASE_URL` | _(unset → lite/file mode)_ | Postgres DSN; when set, PG is the source of truth (schema v35). Unset: with the `[lite]` extra installed the daemon auto-starts an embedded PostgreSQL and fills this in itself; otherwise v0.1 file-only mode (announced loudly at startup). |
 | `PSEUDOLIFE_MCP_STORAGE` | `auto` | `files` opts the daemon out of the `[lite]` embedded Postgres (file mode even when pg0-embedded is installed). Only consulted when no DSN is set. |
 | `PSEUDOLIFE_MCP_DAEMON_URL` | `http://127.0.0.1:8765` | Daemon the shim connects to (and auto-starts). |
 | `PSEUDOLIFE_MCP_NO_SPAWN` | _(unset)_ | Set `1` on the **shim** to disable its spawn-a-daemon fallback: when nothing answers at `PSEUDOLIFE_MCP_DAEMON_URL` it waits (up to ~3 min) for an external daemon instead. The Docker-tier installers set this on every shim registration — after a reboot the shim can probe before Docker Desktop has bound the port, and a spawned host fallback then wins the bind race and shadows the real bank with whatever stale local state it finds. Leave unset on pip/lite installs, where the spawn fallback is the intended zero-config path. |
@@ -2919,9 +2921,9 @@ dream-extractor variables (`PSEUDOLIFE_DREAM_*`) are covered in
 ## Toolset tiers
 
 Three visibility tiers — `minimal` (9 tools: the recall/capture loop, the
-set-slot pair, the gate), `core` (22: + graph/recall, world facts, lessons,
-documents, episodes, stats, `memory_get`, `memory_fact_resolve`),
-`full` (35) — filtered per principal at `tools/list` (the named principal
+set-slot pair, the gate), `core` (23: + graph/recall, world facts, lessons,
+documents, RE evidence, episodes, stats, `memory_get`, `memory_fact_resolve`),
+`full` (36) — filtered per principal at `tools/list` (the named principal
 from a `PSEUDOLIFE_MCP_TOKENS` bearer, else the writer id; sessions sharing
 a credential share a tier view). The filter is
 visibility, not auth (the bearer token is the security boundary) — but
@@ -3232,7 +3234,7 @@ one is the daemon's job.
 
 ## Schema version history
 
-The current Postgres meta version is **v34**; migrations are additive
+The current Postgres meta version is **v35**; migrations are additive
 `ADD COLUMN IF NOT EXISTS` on daemon start, and legacy file-mode `.pt`
 banks auto-migrate into Postgres. The one exception is v25 itself: a
 vector *dimension* change on an existing column is not additive, so
@@ -3272,6 +3274,7 @@ The milestones:
 | v32 | `retrieval_events.params` — the ranking knobs in force for the query (effective `top_k` / keep-threshold, the recency ramp, BM25 weight and scorer params, the reranker's fusion weight + margin gate and whether it actually fired, timeline/contiguity settings, and the call's filters), logged beside a widened `served` list whose per-entry `components` blob carries the fusion INPUTS: bi-encoder score, cross-encoder score (`null` when the margin gate skipped the pass — a distinction a learned head needs), BM25 boost, surprise, recency and the source/supersession multipliers. Phase 0 logged only the fused score, which is the output a Phase-1 learned head is supposed to predict; the inputs are not recoverable afterwards, because config is mutable at runtime and band recency, supersession flags and access counts all mutate on every serve. Nothing new is computed at serve time — these values were already in hand and were being discarded. `NULL` params = a v31-era row. Additive/idempotent |
 | v33 | `slot_reads` + `entries.explicit_reinforcements` — read telemetry. `slot_reads` counts how many times each cortex slot was *served as an answer* (`memory_fact_get` and `memory_search`'s cortex-first block), keyed on the stable `(entity_norm, attribute_norm)` slot like `memory_traces` so counters survive cortex snapshot saves; deliberately uncounted are internal verification lookups (e.g. the dream rollback's post-revert check) and the facts attached to `memory_recall`/`memory_graph` neighborhoods (context, not a direct answer), so never-read is a lower bound. `explicit_reinforcements` moves only on `memory_reinforce`, splitting the deliberate "this was useful" signal out of the shared `reinforcements` counter, which also counts dream-trace links (and still feeds the retention formula unchanged). Both feed the new `read_audit` section of `memory_stats` (never-read fractions by age and source, read/write balance, slot coverage) — motivated by the 2026-08-26 bank audit, where entry reads were measurable but the 4.6k fact slots had no read signal at all. Kill-switch: `memory.cortex.read_tracking`. Additive/idempotent |
 | v34 | `retrieval_events.served_facts` — the fact half of the reranker training tuple. The v31 event log recorded only served *entries*; the cortex-first block's facts, served above those entries in every `memory_search` response, were invisible to a future learned reranker. The search handler now attaches them (`[{entity_norm, attribute_norm, rank, score, kind, contested}]`) to the exact event row that search wrote, keyed by the event id `search(return_event_id=True)` hands back — no session-window guessing. `NULL` = a pre-v34 row or a search that served no facts. Also (no DDL): `memory_stats` `read_audit` gains `graduation_candidates` — entries served in ≥60% of the last 30 days' distinct sessions (once ≥8 sessions are on record), i.e. static-context ("promote to CLAUDE.md") candidates that retrieval keeps re-paying for per query. Additive/idempotent |
+| v35 | `re_evidence_artifacts` + `re_claims` + `re_claim_evidence` — an isolated reverse-engineering proof store. Evidence Hub JSON retains its original bytes and SHA-256 plus exact addresses and a required binary/build identity; behavioral claims live separately in that project/build scope and `observed`/`verified`/`rejected` states require linked evidence (enforced again by deferred database triggers). The store is never read or written by associative search, fact promotion, or dream consolidation. Additive/idempotent |
 
 After running the entity-kind backfill (`evals/apply_entity_kinds.py --apply`), the daemon must be restarted for inference to take effect — it caches the entity-kind map for the life of its process.
 
@@ -3478,6 +3481,116 @@ applies (the installer sets it to the single selected provider's id, or the
 neutral `mcp-client` for multi-provider and generic installs). Details:
 [session identity](configuration.md#session-identity) and
 [toolset tiers](configuration.md#toolset-tiers).
+
+---
+
+<!-- source: docs/guide/re-evidence.md -->
+
+# Reverse-engineering evidence
+
+`re_evidence` is an optional, strict proof store for native-client recreation
+and similar evidence-led work. It complements Pseudolife's ordinary memory; it
+does not turn memories, summaries, or model output into evidence.
+
+## Safety boundary
+
+The three schema-v35 tables are isolated from associative search, the document
+reference bank, cortex facts, and dream consolidation. An artifact is the raw
+JSON object read from disk plus the SHA-256 of its original bytes. Re-ingesting
+the same `(project, hash, locator)` returns the existing id. Artifacts are not
+updated in place.
+
+Claims are separate records. `hypothesis` and `todo` may be recorded without
+proof; `observed`, `verified`, and `rejected` require at least one artifact id
+from the same project. Confidence is metadata and never relaxes this rule.
+
+The authoritative sources remain the binary-analysis export, packet capture,
+runtime log, asset, or other artifact producer. Pseudolife indexes a copy and
+its relationships; it is not the source of truth.
+
+## Evidence Hub workflow
+
+First capture JSON using the project's existing terminal-only evidence helper.
+For the SRFN recreation repository, the checked-in wrapper is:
+
+```powershell
+.\tools\evidence.ps1 lookup 00b72870 -Assembly -Out .\build\evidence\world-step.json
+```
+
+The exact command depends on the project. When a repository exposes a Python
+Evidence Hub entry point instead, invoke it through `python`; do not launch a
+`.py` file through Windows file association.
+
+Ingest the resulting server-visible file:
+
+```text
+re_evidence(
+  action="ingest",
+  project="example-client",
+  path="X:\\work\\example-client\\build\\evidence\\world-step.json",
+  kind="ghidra-function",
+  binary_id="client.exe:sha256:<required-digest>",
+  summary="Movement step candidate"
+)
+```
+
+The response returns an immutable artifact id. A behavioral assertion can then
+be linked explicitly:
+
+```text
+re_evidence(
+  action="claim",
+  project="example-client",
+  binary_id="client.exe:sha256:<required-digest>",
+  subject="00b72870",
+  claim="calls 00b72510 before collision dispatch",
+  status="observed",
+  evidence_ids=[42]
+)
+```
+
+Query by an exact address extracted from structured address/range/call fields.
+Addresses mentioned only inside assembly or decompiler text are deliberately
+not indexed; ingest the relevant function artifact or search the authoritative
+Evidence Hub for those. Compact mode returns payload keys rather than injecting
+large decompiler/assembly bodies into agent context; set `include_payload=true`
+only when the raw artifact is needed:
+
+```text
+re_evidence(
+  action="query",
+  project="example-client",
+  binary_id="client.exe:sha256:<required-digest>",
+  address="00b72870"
+)
+```
+
+## Reversibility
+
+No repository build, test, or stage gate should depend on this tool. To stop
+using it, disable the MCP registration or service and continue with the
+original evidence workflow. Before removing its database, export a portable
+archive to a new server-visible path:
+
+```text
+re_evidence(
+  action="export",
+  project="example-client",
+  binary_id="client.exe:sha256:<required-digest>",
+  path="X:\\backups\\example-client-proof.zip"
+)
+```
+
+The ZIP preserves each artifact's original bytes and hash plus a portable
+manifest of claims. `action="import"` restores it atomically into an empty
+project/build scope after validating the entire archive and every artifact
+hash. Export refuses to overwrite an existing file. Artifact count, claim
+count, manifest size, aggregate uncompressed bytes, and compression ratio are
+bounded so an archive cannot monopolize the daemon indefinitely.
+
+The tool requires Postgres (the normal durable or lite tier). It deliberately
+does not fall back to the legacy file-only memory path because proof records
+must not silently lose relational constraints.
 
 ---
 

@@ -776,19 +776,7 @@ class MemoryService(DreamOps):
         # peak. A down database must cost a fast connect error, never a
         # model load.
         if self._db_url:
-            from pseudolife_memory.storage.postgres import PostgresStorage
-            try:
-                self._storage = PostgresStorage(self._db_url)
-            except RuntimeError as exc:
-                # schema.py's dim-mismatch refusal (schema v25) fires here —
-                # record it for /health, then let it propagate: this call
-                # (and every _ensure_init retry until the bank is migrated)
-                # must still fail loudly, not just silently degrade.
-                self._init_refusal = str(exc)
-                raise
-            self._init_refusal = None
-            logger.info("storage: postgres (%s)",
-                        self._db_url.rsplit("@", 1)[-1])
+            self._ensure_postgres_storage()
             # Invariant: unqualified tables MUST resolve to the real `public`
             # bank, never the role-named `pseudolife` shadow schema (v0.4
             # collision fix). PostgresStorage pins this; fail loud if regressed.
@@ -949,6 +937,131 @@ class MemoryService(DreamOps):
                         best = cand
         if best > (0, 0):
             self._hlc.observe(*best)
+
+    def _ensure_postgres_storage(self):
+        """Connect the durable store without loading an embedding model.
+
+        RE evidence is exact/hash-addressed and should stay cheap even when it
+        is the first tool used in a session.  ``_ensure_init`` reuses this same
+        connection when an embedding-backed memory tool is called later.
+        """
+        if self._storage is not None:
+            return self._storage
+        if not self._db_url:
+            raise RuntimeError(
+                "reverse-engineering evidence requires Postgres; configure "
+                "PSEUDOLIFE_MCP_DATABASE_URL or install the lite tier")
+        from pseudolife_memory.storage.postgres import PostgresStorage
+        try:
+            self._storage = PostgresStorage(self._db_url)
+        except RuntimeError as exc:
+            self._init_refusal = str(exc)
+            raise
+        self._init_refusal = None
+        logger.info("storage: postgres (%s)", self._db_url.rsplit("@", 1)[-1])
+        return self._storage
+
+    # ------------------------------------------------------------------
+    # Tool: strict reverse-engineering evidence
+    # ------------------------------------------------------------------
+
+    def re_evidence_ingest(
+        self, *, path: str, project: str, kind: str = "evidence-hub-json",
+        locator: str | None = None, summary: str | None = None,
+        binary_id: str,
+    ) -> dict[str, Any]:
+        from pseudolife_memory.re_evidence import (
+            EvidenceInputError, normalize_address, parse_evidence_file)
+
+        project = project.strip()
+        binary_id = binary_id.strip()
+        kind = kind.strip()
+        if not project or not binary_id or not kind:
+            raise EvidenceInputError("project, binary_id, and kind must be non-empty")
+        artifact = parse_evidence_file(path)
+        if locator:
+            artifact["locator"] = normalize_address(locator)
+            if artifact["locator"] not in artifact["addresses"]:
+                artifact["addresses"].append(artifact["locator"])
+                artifact["addresses"].sort()
+        artifact.update({
+            "project": project,
+            "kind": kind,
+            "summary": summary.strip() if summary else None,
+            "binary_id": binary_id,
+        })
+        with self._lock:
+            storage = self._ensure_postgres_storage()
+            artifact_id = storage.insert_re_evidence(artifact)
+        return {
+            "id": artifact_id,
+            "project": project,
+            "binary_id": binary_id,
+            "kind": kind,
+            "locator": artifact["locator"],
+            "addresses": artifact["addresses"],
+            "content_hash": artifact["content_hash"],
+            "immutable": True,
+        }
+
+    def re_claim_record(
+        self, *, project: str, binary_id: str, subject: str, claim: str, status: str,
+        evidence_ids: list[int] | None = None,
+        confidence: float | None = None,
+    ) -> dict[str, Any]:
+        with self._lock:
+            storage = self._ensure_postgres_storage()
+            claim_id = storage.upsert_re_claim(
+                project=project, binary_id=binary_id, subject=subject,
+                claim=claim, status=status,
+                evidence_ids=evidence_ids, confidence=confidence)
+        return {"id": claim_id, "project": project.strip(),
+                "binary_id": binary_id.strip(), "status": status.lower()}
+
+    def re_evidence_query(
+        self, *, project: str, binary_id: str, address: str | None = None,
+        subject: str | None = None, status: str | None = None,
+        text: str | None = None, limit: int = 50,
+        include_payload: bool = False,
+    ) -> dict[str, Any]:
+        with self._lock:
+            storage = self._ensure_postgres_storage()
+            artifacts = storage.query_re_evidence(
+                project=project, binary_id=binary_id, address=address,
+                text=text, limit=limit,
+                include_payload=include_payload)
+            claims = storage.query_re_claims(
+                project=project, binary_id=binary_id,
+                subject=subject or address, status=status, text=text, limit=limit)
+        return {"project": project.strip(), "binary_id": binary_id.strip(),
+                "artifacts": artifacts, "claims": claims}
+
+    def re_evidence_export(
+        self, *, project: str, binary_id: str, path: str,
+    ) -> dict[str, Any]:
+        from pseudolife_memory.re_evidence import export_evidence_archive
+
+        with self._lock:
+            storage = self._ensure_postgres_storage()
+            return export_evidence_archive(
+                storage, path=path, project=project, binary_id=binary_id)
+
+    def re_evidence_import(
+        self, *, project: str, binary_id: str, path: str,
+    ) -> dict[str, Any]:
+        from pseudolife_memory.re_evidence import import_evidence_archive
+
+        with self._lock:
+            storage = self._ensure_postgres_storage()
+            return import_evidence_archive(
+                storage, path=path, project=project, binary_id=binary_id)
+
+    def re_evidence_stats(
+        self, *, project: str, binary_id: str | None = None,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self._ensure_postgres_storage().re_evidence_stats(
+                project, binary_id=binary_id)
 
     # ------------------------------------------------------------------
     # Tool: store

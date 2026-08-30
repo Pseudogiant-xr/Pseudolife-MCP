@@ -515,7 +515,12 @@ def _assert_write_path_cosine_one(pipeline, text: str, stored_vec) -> None:
     # unpinned (``pgvector>=0.3``), so a local venv and a fresh CI install
     # legitimately differ -- which is exactly how this test passed here and
     # failed on the runner. _embedding_out already encodes that lesson.
-    stored = torch.from_numpy(_embedding_out(stored_vec))
+    # The verifier may choose CUDA while pgvector necessarily materializes on
+    # CPU. Align the database vector with the model output before comparing;
+    # the test is about encoding fidelity, not host-device placement.
+    stored = torch.from_numpy(_embedding_out(stored_vec)).to(
+        device=doc_vec.device, dtype=doc_vec.dtype)
+    qry_vec = qry_vec.to(device=doc_vec.device, dtype=doc_vec.dtype)
     cos_doc = torch.dot(stored, doc_vec).item()
     cos_qry = torch.dot(stored, qry_vec).item()
     # RELATIVE, because no absolute threshold is verifiable here. The
@@ -600,7 +605,7 @@ def test_apply_migrates_all_four_tables(v24_bank, pg_url, monkeypatch):
     meta = pg_conn.execute(
         "SELECT value FROM meta WHERE key = 'schema_version'"
     ).fetchone()
-    assert meta[0] == 34
+    assert meta[0] == 35
 
     # Write-path fidelity, at least one row per table (MINOR 4): the real
     # pipeline test above spent its cost without collecting this evidence

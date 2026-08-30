@@ -81,6 +81,7 @@ def test_all_tools_registered() -> None:
         "memory_toolset",
         "document_ingest",
         "document_search",
+        "re_evidence",
         # Episodes + consolidation.
         "memory_session_title",
         "memory_episode_start",
@@ -162,6 +163,38 @@ def test_graph_relation_filter_keeps_only_matching_edges(monkeypatch) -> None:
     assert rels == {"runs-on"}
 
 
+def test_re_evidence_dispatches_ingest_and_claim(monkeypatch) -> None:
+    from pseudolife_memory import mcp_server
+
+    seen = []
+    monkeypatch.setattr(
+        mcp_server.service, "re_evidence_ingest",
+        lambda **kw: seen.append(("ingest", kw)) or {"id": 7, "immutable": True})
+    monkeypatch.setattr(
+        mcp_server.service, "re_claim_record",
+        lambda **kw: seen.append(("claim", kw)) or {"id": 8, "status": kw["status"]})
+
+    ingested = _invoke("re_evidence", {
+        "action": "ingest", "project": "srfn-client",
+        "binary_id": "client:test", "path": "Z:/evidence/function.json",
+        "kind": "ghidra-function"})
+    claimed = _invoke("re_evidence", {
+        "action": "claim", "project": "srfn-client", "binary_id": "client:test",
+        "subject": "00b72870",
+        "claim": "calls 00b72510", "status": "observed", "evidence_ids": [7]})
+
+    assert ingested == {"id": 7, "immutable": True}
+    assert claimed == {"id": 8, "status": "observed"}
+    assert [call[0] for call in seen] == ["ingest", "claim"]
+    assert seen[1][1]["evidence_ids"] == [7]
+
+
+def test_get_neighbors_tool_is_gone() -> None:
+    from pseudolife_memory import mcp_server  # noqa: PLC0415
+    names = {t.name for t in asyncio.run(mcp_server.mcp.list_tools())}
+    assert "get_neighbors" not in names
+
+
 _EXPECTED_MINIMAL = sorted([
     # The 9-tool eager surface for minimal-tier clients (Claude Desktop).
     "memory_store", "memory_search", "memory_fact_get", "memory_fact_set",
@@ -174,6 +207,7 @@ _EXPECTED_CORE = sorted(_EXPECTED_MINIMAL + [
     "memory_graph_relate", "memory_world_search", "memory_world_set",
     "memory_lesson_search", "document_search", "document_ingest",
     "memory_stats", "memory_get", "memory_episode_start", "memory_episode_end",
+    "re_evidence",
 ])
 
 

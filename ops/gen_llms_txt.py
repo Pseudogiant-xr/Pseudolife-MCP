@@ -51,6 +51,9 @@ PAGES: list[tuple[str, str]] = [
     ("docs/guide/providers.md",
      "Per-coding-agent capability matrix, the hook-equivalent ladder, "
      "the AGENTS.md standard, and writer ids"),
+    ("docs/guide/re-evidence.md",
+     "Build-scoped reverse-engineering evidence, claims, portable archives, "
+     "and the optional SRFN workflow"),
     ("docs/guide/benchmarks.md",
      "LongMemEval methodology and results, with the committed evidence "
      "artifacts behind each number"),

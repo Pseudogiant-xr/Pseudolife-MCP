@@ -343,11 +343,11 @@ def test_descriptions_fit_tier_budgets(tmp_path: Path, monkeypatch) -> None:
                 for pn, p in props.items()
                 if len(p.get("description") or "") > 300]
         assert over == [], f"over-long param descriptions: {over}"
-    # Measured 2026-08-25 immediately after the migration above:
-    # minimal 1826, core 4304, full 7413. Caps are those plus ~775 of
-    # headroom each — room for a real contract to land without a bump,
-    # not room to drift.
-    param_budgets = {"minimal": 2600, "core": 5100, "full": 8200}
+    # Measured 2026-08-31 after the build-scoped RE evidence tool landed:
+    # minimal 1912, core 5871, full 8980. Caps retain roughly 600-800
+    # characters of headroom per tier while metering the evidence tool's
+    # deliberately explicit archive, scope, and address-query contracts.
+    param_budgets = {"minimal": 2600, "core": 6700, "full": 9800}
     for tier, cap in param_budgets.items():
         total = sum(param_sizes[n] for n in mod._visible_tool_names(tier))
         assert total <= cap, (

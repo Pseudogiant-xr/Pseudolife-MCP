@@ -425,7 +425,7 @@ async def _proxy(url: str, token: str | None, session_uid: str) -> None:
     async def _call_tool(ctx, params):
         async with _upstream() as remote:
             # Seed the output-schema cache: v2's call_tool otherwise fetches
-            # the full 35-tool manifest (list_tools) on every call to
+            # the full 36-tool manifest (list_tools) on every call to
             # revalidate structured output — and this session is fresh per
             # call by design. None = known, no schema, no validation; the
             # DAEMON is the validating authority, exactly as on v1.

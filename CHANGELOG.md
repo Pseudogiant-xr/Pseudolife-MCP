@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-31 — strict reverse-engineering evidence pilot)
+- **Added the schema-v35 reverse-engineering proof store and the core-tier
+  `re_evidence` tool.** Evidence Hub JSON artifacts are retained immutably with
+  an original-byte SHA-256, exact address index, project/build attribution, and
+  replay deduplication. Behavioral claims live separately and cannot be marked
+  `observed`, `verified`, or `rejected` without project-local evidence links.
+  Exact build-scoped query, compact/raw payload modes, project stats, and a
+  hash-verified portable ZIP export/import make the feature optional and
+  removable. These tables are outside
+  associative memory, the reference bank, cortex promotion, and dream
+  consolidation, so a remembered inference cannot silently become proof.
+
 ### Added (2026-08-31 — installer wiring for the Codex dreamer)
 - **`codex-only` / `codex-fallback` extractor modes** in `ops/install.sh`
   / `ops\install.ps1`: the one-shot installer now wires a ChatGPT-plan
@@ -416,7 +428,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`publish`/`registry`: `id-token`, `images`: `packages`). Previously
   these jobs ran with the repository's default token, which can write
   repo contents.
-
 ### Fixed (2026-08-28 — Codex hook trust is an explicit install step)
 - **Codex now requires every new or changed lifecycle hook to be reviewed and
   trusted before it runs, but the hook installers reported success without
