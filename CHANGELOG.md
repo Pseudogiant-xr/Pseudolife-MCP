@@ -6,6 +6,47 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-08-30 — merge-proposal evidence: no more empty sides, differential snippets, low-differential flag)
+- **Every merge-proposal side now ships evidence, and the two sides stop
+  showing each other's.** The 2026-08-21 live shadow comparison
+  (`evals/results/judge-shadow-live-20260821.json`) found 40 of 109 pending
+  merge proposals (37%) carried low-differential evidence — one side had no
+  snippets, or the sides shared at least half of them. Three causes, all in
+  `_attach_candidate_snippets`: the fallback read the vector-eligibility
+  `mentions` map, so entities below `min_entity_mentions` or over
+  `max_fallback_mentions` (caps that guard vectors, not display) shipped
+  "evidence: none"; trace ids pointing at pruned entries blocked the
+  fallback while resolving to nothing; and both sides took the same
+  sorted-first-k mention entries, which for co-mentioned merge candidates are
+  the same entries. Snippet pools now filter traces to live entries, fall
+  back to a bounded token scan when the mentions map has nothing, and each
+  side leads with entries exclusive to it, using shared entries only as
+  filler. Link candidates keep pool order untouched: their question is
+  "what relation holds?", which the co-occurrence notes answer, so demoting
+  shared entries there would strip the evidence. Replaying the 2026-08-30
+  live queue through the real enrichment path
+  (`evals/snippet_differential_replay.py`, artifact
+  `evals/results/snippet-differential-live-20260830.json`) drops the
+  low-differential evidence share on the live queue from 36% (55 of 152)
+  to 12% (18 of 152), with zero empty sides remaining.
+- **Merge pairs whose evidence genuinely cannot distinguish them now say
+  so.** Merge rows carry `evidence_overlap` plus `low_differential: true`
+  when a side is empty, the shown snippets overlap at or above 50% — the
+  shadow comparison's own metric — or one side's evidence pool is wholly
+  contained in the other's (the bare-vs-qualified shape, where
+  exclusive-first selection would otherwise hide that a side has no
+  evidence of its own; 54 of the 152 live rows carry the flag). The
+  Step-C judge prompt renders a caution line for flagged proposals.
+  An absent flag serializes byte-identically, so the frozen judge-ladder
+  fixtures and every published judge number keep their exact prompts —
+  but the flagged prompt variant itself is NOT covered by the 2026-08-16
+  ladder (which has no low-differential labels); the deployed judge runs
+  in shadow mode and accepts are never auto-applied, and a ladder slice
+  over flagged rows is deferred until the next judged run is asked for.
+  Filing-time routing of thin proposals was considered and deliberately
+  not shipped: evidence accrues after filing, so a filing-time verdict
+  would go stale exactly like the stored fold direction already does.
+
 ### Added (2026-08-29 — multi-provider installer: Gemini CLI, generic MCP agents, capability matrix)
 - **The installers wire any of four providers, together or alone.**
   `--client` / `-Client` now takes a comma- or space-separated list of

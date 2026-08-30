@@ -213,3 +213,48 @@ def test_review_payload_carries_the_shadow_verdict(svc):
     row = next(p for p in deep["merge_proposals"] if p["id"] == pid)
     assert row["judge"]["verdict"] == "reject"
     assert row["judge"]["model"] == "stub-judge"
+
+
+# ── evidence-quality signal in the judge payload (2026-08-21 shadow) ─────
+
+def test_format_judge_proposal_marks_low_differential():
+    from pseudolife_memory.memory.dream import format_judge_proposal
+
+    base = {"n": 1, "reason": "token-subset", "score": 0.9,
+            "from": {"display": "a", "degree": 0, "scopes": [],
+                     "snippets": ["shared evidence line"]},
+            "into": {"display": "a svc", "degree": 1, "scopes": [],
+                     "snippets": ["shared evidence line"]}}
+    plain = format_judge_proposal(dict(base))
+    flagged = format_judge_proposal({**base, "low_differential": True})
+    assert "low-differential" in flagged.lower()
+    # Absent key serializes exactly as before — the frozen ladder fixtures
+    # (and every published judge number) keep their byte-identical prompts.
+    assert "low-differential" not in plain.lower()
+    assert flagged != plain
+
+
+def test_judge_payload_carries_low_differential_flag(svc):
+    class _RecordingJudge:
+        model = "stub-judge"
+
+        def __init__(self):
+            self.proposals = []
+
+        def judge_merges(self, proposals):
+            self.proposals = proposals
+            return [{"n": p["n"], "verdict": "leave", "confidence": 0.1,
+                     "note": "stub"} for p in proposals]
+
+    # Only shared evidence exists for this pair -> the flag must reach the
+    # judge payload so the prompt can carry the caution line.
+    assert svc.store("beta gadget service exports the metrics feed",
+                     source="sq")["stored"]
+    assert svc.store("the beta gadget service restarts after deploys",
+                     source="sq")["stored"]
+    _propose(svc, "beta gadget", "beta gadget service")
+    svc.config.memory.deep_dream.judge_mode = "shadow"
+    judge = _RecordingJudge()
+    out = svc.deep_dream_judge(extractor=judge)
+    assert out["judged"] == 1
+    assert judge.proposals[0]["low_differential"] is True

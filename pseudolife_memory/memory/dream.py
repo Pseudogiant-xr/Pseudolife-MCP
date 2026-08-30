@@ -259,11 +259,21 @@ def format_judge_proposal(p: dict) -> str:
         return (f"'{s.get('display', '?')}' (degree {s.get('degree', 0)}, "
                 f"scopes {s.get('scopes') or []})"
                 + (f" evidence: {snips}" if snips else " evidence: none"))
-    return (f"[{p['n']}] FROM {_side(p.get('from') or {})}\n"
-            f"    INTO {_side(p.get('into') or {})}\n"
-            f"    detector: {p.get('reason') or '?'}"
-            + (f" (score {p.get('score')})" if p.get("score") is not None
-               else ""))
+    out = (f"[{p['n']}] FROM {_side(p.get('from') or {})}\n"
+           f"    INTO {_side(p.get('into') or {})}\n"
+           f"    detector: {p.get('reason') or '?'}"
+           + (f" (score {p.get('score')})" if p.get("score") is not None
+              else ""))
+    # Absent key -> byte-identical output: frozen ladder fixtures and every
+    # published judge number keep their exact prompts.
+    if p.get("low_differential"):
+        out += ("\n    caution: LOW-DIFFERENTIAL evidence — the shown "
+                "snippets cannot tell the sides apart (heavy overlap, one "
+                "side empty, or one side's evidence contained in the "
+                "other's). Judge from the name-shape rules (2-5), degrees "
+                "and scopes; \"leave\" is legitimate when those are "
+                "inconclusive (rule 6).")
+    return out
 
 
 def _vocab_hint(vocab: list[str]) -> str:

@@ -1,0 +1,208 @@
+{
+ "generated_for": "live shadow-vs-triage comparison, PseudoLife-MCP Step-C judge",
+ "date": "2026-08-21",
+ "source_snapshot": "shadow-snapshot-db.json (109 pending merge proposals, all judged)",
+ "deployed_config": {
+  "file": "/data/config.yaml in pseudolife-mcp-daemon",
+  "judge_mode": "shadow (default; no deep_dream section in the deployed file)",
+  "judge_reject_min_confidence": 0.8,
+  "judge_url": "empty -> uses the dream extractor",
+  "dream.extractor_model_override": "claude-opus-5",
+  "live_schema": 31
+ },
+ "ground_truth": "fresh blind Step-C triage, 6 parallel Opus judges over group-aligned slices, house merge rules, main-thread spot-verification of every accept",
+ "metrics_overall": {
+  "rows": 109,
+  "decided": 109,
+  "coverage": 1.0,
+  "agreement_on_decided": 0.9266,
+  "accept_precision": 0.6111,
+  "reject_precision": 0.989,
+  "false_reject_rate": 0.0833,
+  "false_rejects": 1,
+  "true_accepts": 12,
+  "auto_conf": 0.8,
+  "auto_rejected": 76,
+  "auto_reject_share_of_true_rejects": 0.7835,
+  "auto_false_rejects": 0,
+  "auto_reject_precision": 1.0
+ },
+ "metrics_opus_attributed_only": {
+  "rows": 108,
+  "decided": 108,
+  "coverage": 1.0,
+  "agreement_on_decided": 0.9259,
+  "accept_precision": 0.6111,
+  "reject_precision": 0.9889,
+  "false_reject_rate": 0.0833,
+  "false_rejects": 1,
+  "true_accepts": 12,
+  "auto_conf": 0.8,
+  "auto_rejected": 75,
+  "auto_reject_share_of_true_rejects": 0.7812,
+  "auto_false_rejects": 0,
+  "auto_reject_precision": 1.0
+ },
+ "confusion_judge_x_triage": {
+  "judge=accept,triage=accept": 11,
+  "judge=accept,triage=reject": 7,
+  "judge=reject,triage=accept": 1,
+  "judge=reject,triage=reject": 90
+ },
+ "auto_reject_simulation": {
+  "would_have_applied": 76,
+  "of_those_triage_accepted": 0,
+  "bad_ids": [],
+  "live_auto_reject_precision": 1.0,
+  "ladder_predicted_precision": 0.987,
+  "ladder_artifact": "evals/results/judge-ladder-20260816.json",
+  "wilson95_ci": [
+   0.9519,
+   1.0
+  ],
+  "max_conf_among_disagreements": 0.7,
+  "queue_reduction": "76/109 proposals cleared automatically (70%)"
+ },
+ "disagreements": [
+  {
+   "id": 1343,
+   "pair": "feat/queue-noise-r2 -> queue-noise-r2",
+   "reason": "dream-alias: 'queue-noise-r2' ~ 'feat/queue-noise-r2' (cosine 0.84)",
+   "judge": "accept",
+   "judge_conf": 0.7,
+   "judge_note": "Branch name vs slug for the same queue-noise round-2 work (PR #160); legitimate branch-vs-slug shape.",
+   "triage": "reject",
+   "triage_conf": 0.6,
+   "triage_reason": "'feat/queue-noise-r2' is the git branch and 'queue-noise-r2' the shipped round-2 work (PR #160 deploy); the snippets are mismatched (round-5 triage vs the deploy) so identity is plausible but unevidenced.",
+   "would_auto_reject": false
+  },
+  {
+   "id": 1348,
+   "pair": "evals/judge_ladder.py -> evals/judge_ladder.py (PR #161)",
+   "reason": "write-dedup: 'evals/judge_ladder.py' ~ 'evals/judge_ladder.py (PR #161)'",
+   "judge": "accept",
+   "judge_conf": 0.6,
+   "judge_note": "Same file path, one merely qualified with the PR that touched it; bare-vs-qualified name shape.",
+   "triage": "reject",
+   "triage_conf": 0.6,
+   "triage_reason": "The into side is a leak-shaped 'canonical + (PR #161)' alias with no scopes and no snippets; folding the clean path into the PR-annotated variant is the wrong direction, so reject without marking the pair permanently distinct.",
+   "would_auto_reject": false
+  },
+  {
+   "id": 1434,
+   "pair": "docs/runbooks/postgres-18-migration.md -> postgres-18-migration",
+   "reason": "write-dedup: 'docs/runbooks/postgres-18-migration.md' ~ 'postgres-18-migration'",
+   "judge": "accept",
+   "judge_conf": 0.55,
+   "judge_note": "Path vs basename of the same new pg16\u219218 runbook doc referenced in the release-cut evidence",
+   "triage": "reject",
+   "triage_conf": 0.85,
+   "triage_reason": "docs/runbooks/postgres-18-migration.md is the runbook file; postgres-18-migration is the migration itself \u2014 file is not its concept.",
+   "would_auto_reject": false
+  },
+  {
+   "id": 1474,
+   "pair": "PR #168 -> pr-168",
+   "reason": "write-dedup: 'PR #168' ~ 'pr-168'",
+   "judge": "reject",
+   "judge_conf": 0.5,
+   "judge_note": "FROM evidence describes a Hermes/GND relay deploy, not the retrieval-event-log PR; likely a different repo's PR #168",
+   "triage": "accept",
+   "triage_conf": 0.92,
+   "triage_reason": "Pure naming-convention duplicate of the same artifact: the 'pr-168' snippet is explicitly about 'PR #168 \"Retrieval event log (schema v31)\"' on branch feat/retrieval-event-log \u2014 same PR number, same repo, score 1.0.",
+   "would_auto_reject": false
+  },
+  {
+   "id": 1475,
+   "pair": "feat/retrieval-event-log -> retrieval-event-log",
+   "reason": "write-dedup: 'feat/retrieval-event-log' ~ 'retrieval-event-log'",
+   "judge": "accept",
+   "judge_conf": 0.6,
+   "judge_note": "Branch feat/retrieval-event-log is the slug of the same retrieval-event-log work named in INTO evidence",
+   "triage": "reject",
+   "triage_conf": 0.7,
+   "triage_reason": "'feat/retrieval-event-log' is the git branch (no snippets at all) and 'retrieval-event-log' is the feature it ships - a branch/PR is not its feature under the file-is-not-its-concept rule.",
+   "would_auto_reject": false
+  },
+  {
+   "id": 1477,
+   "pair": "ops/gen_llms_txt.py -> gen_llms_txt",
+   "reason": "write-dedup: 'ops/gen_llms_txt.py' ~ 'gen_llms_txt'",
+   "judge": "accept",
+   "judge_conf": 0.65,
+   "judge_note": "Path-vs-basename of the same docs generation script",
+   "triage": "reject",
+   "triage_conf": 0.55,
+   "triage_reason": "Plausibly the same generator, but the from-side has zero snippets and the into-side's only snippet is the general v0.14.0 release-cut record, so the pairing rests on name shape alone; leave re-proposable.",
+   "would_auto_reject": false
+  },
+  {
+   "id": 1489,
+   "pair": "nightly push -> nightly full push",
+   "reason": "write-dedup: 'nightly push' ~ 'nightly full push'",
+   "judge": "accept",
+   "judge_conf": 0.5,
+   "judge_note": "Identical evidence entries; bare-vs-qualified name of same nightly sync push, though 'full' could distinguish incremental.",
+   "triage": "reject",
+   "triage_conf": 0.62,
+   "triage_reason": "Both sides attach the identical two boilerplate snippets, so there is no evidence either way; 'full' may be a load-bearing qualifier distinguishing a full push from the incremental nightly one in the floating-primary sync design.",
+   "would_auto_reject": false
+  },
+  {
+   "id": 1490,
+   "pair": "warm-replica -> replica-104",
+   "reason": "dream-alias: 'replica-104' ~ 'warm-replica' (cosine 0.82)",
+   "judge": "accept",
+   "judge_conf": 0.55,
+   "judge_note": "Project has one replica, the .104 warm replica; FROM evidence generic but consistent.",
+   "triage": "reject",
+   "triage_conf": 0.65,
+   "triage_reason": "'warm-replica' may be the generic capability rather than the .104 instance, and its only snippet is the v0.14.0 four-surface publish record - no positive identity evidence, and the group's identity decision is already carried by 1488.",
+   "would_auto_reject": false
+  }
+ ],
+ "calibration_by_confidence_band": {
+  "0.7-0.8": {
+   "n": 9,
+   "agree": 8,
+   "agreement": 0.8889
+  },
+  "0.8-0.9": {
+   "n": 34,
+   "agree": 34,
+   "agreement": 1.0
+  },
+  "<0.7": {
+   "n": 20,
+   "agree": 13,
+   "agreement": 0.65
+  },
+  ">=0.9": {
+   "n": 46,
+   "agree": 46,
+   "agreement": 1.0
+  }
+ },
+ "high_conf_accepts": {
+  "n": 4,
+  "triage_agreed": 4,
+  "note": "accepts are never auto-applied in auto-reject mode"
+ },
+ "evidence_quality": {
+  "low_differential_evidence_proposals": 40,
+  "share": 0.37,
+  "detail": "one side had no snippets (32) or the two sides shared >=50% of their snippets (13, incl. 5 identical sets); all four slice judges independently flagged this"
+ },
+ "triage_execution": {
+  "rejected": 97,
+  "pair_dismissals": 83,
+  "accepted": 12,
+  "main_thread_overturns": [
+   1487,
+   1367
+  ],
+  "errors": 0,
+  "queue_after": "0 pending merge proposals",
+  "backup": "pre-triage-dump-20260821.sql (pg_dump, 86MB)"
+ }
+}

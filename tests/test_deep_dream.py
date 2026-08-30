@@ -232,6 +232,9 @@ def test_candidate_snippets_fall_back_to_mention_scan(svc):
     c = _find_candidate(out)
     assert c is not None, out["candidates"]
     assert c["src_snippets"] and c["dst_snippets"]     # evidence, not just a score
+    # LINK candidates keep pool order and get no differential stamps: their
+    # co-occurrence notes ARE the relation evidence (shared_mention_entries).
+    assert "low_differential" not in c and "evidence_overlap" not in c
 
 
 def test_candidates_respect_dismissed_pairs(svc):
@@ -410,6 +413,159 @@ def test_partition_candidates_variant_conflict_stays_link():
              {"id": 2, "display": "ops/update.ps1"}]
     merges2, links2 = partition_candidates(pairs2, ents2, [])
     assert len(merges2) == 1 and links2 == []
+
+
+# --- snippet evidence quality (2026-08-21 shadow comparison findings) ---------
+#
+# The live shadow-vs-triage comparison (evals/results/judge-shadow-live-
+# 20260821.json) found 37% of pending merge proposals carried low-differential
+# evidence: a side with no snippets, or both sides showing mostly the same
+# entries. These tests pin the fixes: snippet evidence is decoupled from
+# vector eligibility, per-side selection prefers exclusive entries, and rows
+# that remain low-differential say so.
+
+
+def _insert_merge(svc, frm_name, into_name):
+    import time as _t
+    st = svc._storage
+    st.ensure_entity(frm_name, display=frm_name)
+    st.ensure_entity(into_name, display=into_name)
+    a = st.find_entity(frm_name)["id"]
+    b = st.find_entity(into_name)["id"]
+    pid = st.insert_entity_proposal("merge", a, b, 0.9, "test", _t.time())
+    assert pid is not None
+    return pid
+
+
+def _merge_row(out, pid):
+    return next(m for m in out["merge_proposals"] if m["id"] == pid)
+
+
+def test_merge_snippets_attach_below_min_mentions(svc):
+    # A side mentioned in exactly ONE entry sits below min_entity_mentions
+    # (vector eligibility), but that entry is still its evidence — the judge
+    # must not see "evidence: none" for it.
+    assert svc.store("the epsilon parser handles rotated logs", source="sq")["stored"]
+    assert svc.store("epsilon reader scans the cold archive", source="sq")["stored"]
+    assert svc.store("an epsilon reader instance runs nightly", source="sq")["stored"]
+    pid = _insert_merge(svc, "epsilon parser", "epsilon reader")
+    row = _merge_row(svc.deep_dream(apply=False), pid)
+    assert row["from"]["snippets"] and row["into"]["snippets"]
+
+
+def test_merge_snippets_attach_beyond_fallback_cap(svc):
+    # max_fallback_mentions guards VECTORS against corpus-centroid entities;
+    # it must not strip their displayed evidence (22 of the 27 empty-sided
+    # entities on the 2026-08-30 live queue were exactly this class).
+    svc.config.memory.deep_dream.max_fallback_mentions = 1
+    assert svc.store("gamma hub node fans requests out", source="sq")["stored"]
+    assert svc.store("the gamma hub node keeps a routing table", source="sq")["stored"]
+    pid = _insert_merge(svc, "gamma hub", "gamma hub node")
+    row = _merge_row(svc.deep_dream(apply=False), pid)
+    assert row["from"]["snippets"] and row["into"]["snippets"]
+
+
+def test_merge_snippets_prefer_exclusive_evidence(svc):
+    # Both sides are co-mentioned in the earliest entry and each has entries
+    # of its own. Selection must lead with the exclusive evidence, not hand
+    # both sides the same first-k shared entries.
+    svc.config.memory.deep_dream.max_context_snippets = 2
+    sh1 = "alpha proc feeds the alpha runner work queue"
+    xd1 = "alpha proc parses incoming frames quickly"
+    xd2 = "restarting alpha proc hourly keeps memory usage flat"
+    xr1 = "the alpha runner restarts nightly after the sweep"
+    xr2 = "alpha runner drains its backlog before shutdown"
+    for text in (sh1, xd1, xd2, xr1, xr2):
+        assert svc.store(text, source="sq")["stored"]
+    pid = _insert_merge(svc, "alpha proc", "alpha runner")
+    row = _merge_row(svc.deep_dream(apply=False), pid)
+    frm = row["from"] if row["from"]["display"] == "alpha proc" else row["into"]
+    into = row["into"] if frm is row["from"] else row["from"]
+    assert set(frm["snippets"]) == {xd1, xd2}
+    assert set(into["snippets"]) == {xr1, xr2}
+    assert row["low_differential"] is False
+    assert row["evidence_overlap"] == 0.0
+
+
+def test_merge_row_flags_one_sided_evidence_pool(svc):
+    # The bare-vs-qualified shape: every entry mentioning the qualified name
+    # also token-matches the bare one, so the qualified side's pool is wholly
+    # contained in the bare side's. Exclusive-first selection makes the SHOWN
+    # snippets disjoint — the flag must still fire, or diversification would
+    # hide exactly the "no evidence of its own" case rule 1 exists for.
+    svc.config.memory.deep_dream.max_context_snippets = 2
+    for text in (
+        "beta gadget service exports the metrics feed",
+        "the beta gadget service restarts after deploys",
+        "beta gadget parses the wire format alone",
+        "a beta gadget instance runs on every host",
+        "beta gadget ships as a standalone binary",
+    ):
+        assert svc.store(text, source="sq")["stored"]
+    pid = _insert_merge(svc, "beta gadget", "beta gadget service")
+    row = _merge_row(svc.deep_dream(apply=False), pid)
+    assert row["evidence_overlap"] == 0.0          # shown snippets ARE disjoint
+    assert row["low_differential"] is True         # but one pool contains the other
+
+
+def test_merge_row_flags_identical_evidence(svc):
+    # No exclusive evidence exists for either side -> the row must say so
+    # instead of presenting the shared entries as two independent stories.
+    assert svc.store("beta gadget service exports the metrics feed", source="sq")["stored"]
+    assert svc.store("the beta gadget service restarts after deploys", source="sq")["stored"]
+    pid = _insert_merge(svc, "beta gadget", "beta gadget service")
+    row = _merge_row(svc.deep_dream(apply=False), pid)
+    assert row["low_differential"] is True
+    assert row["evidence_overlap"] == 1.0
+
+
+def test_merge_row_flags_empty_side(svc):
+    # An entity mentioned nowhere ships no snippets — the row must carry the
+    # low-differential flag rather than a bare similarity score.
+    assert svc.store("theta engine compiles the ruleset", source="sq")["stored"]
+    assert svc.store("the theta engine caches compiled rules", source="sq")["stored"]
+    pid = _insert_merge(svc, "zeta-orphan", "theta engine")
+    row = _merge_row(svc.deep_dream(apply=False), pid)
+    assert row["low_differential"] is True
+
+
+def _file_svc(tmp_path):
+    # File-mode service on purpose: these are pure-logic contracts that must
+    # stay in the always-green set (no silent skip without the bench PG).
+    from pseudolife_memory.service import MemoryService
+    return MemoryService(data_dir=tmp_path)
+
+
+def test_stale_trace_ids_fall_back_to_mentions(tmp_path):
+    # Trace rows pointing at pruned entries must not block the mention
+    # fallback: a non-empty-but-unresolvable trace list is not evidence.
+    svc = _file_svc(tmp_path)
+    entities = [{"id": 1, "canonical": "widget", "display": "widget"},
+                {"id": 2, "canonical": "gizmo", "display": "gizmo"}]
+    entries = [{"id": 10, "text": "widget does things"},
+               {"id": 11, "text": "gizmo spins"}]
+    traces = {"widget": [999]}                     # entry 999 was pruned
+    mentions = {1: frozenset({10}), 2: frozenset({11})}
+    out = svc._attach_candidate_snippets(
+        [{"src_id": 1, "dst_id": 2}], entities, entries, traces, 3,
+        mentions=mentions, max_chars=None)
+    assert out[0]["src_snippets"] == ["widget does things"]
+    assert out[0]["dst_snippets"] == ["gizmo spins"]
+
+
+def test_zero_snippet_budget_ships_no_snippets(tmp_path):
+    # k=0 must mean "no snippets", not "one snippet" — the stop check runs
+    # before the append.
+    svc = _file_svc(tmp_path)
+    entities = [{"id": 1, "canonical": "widget", "display": "widget"},
+                {"id": 2, "canonical": "gizmo", "display": "gizmo"}]
+    entries = [{"id": 10, "text": "widget does things"},
+               {"id": 11, "text": "gizmo spins"}]
+    mentions = {1: frozenset({10}), 2: frozenset({11})}
+    out = svc._attach_candidate_snippets(
+        [{"src_id": 1, "dst_id": 2}], entities, entries, {}, 0,
+        mentions=mentions, max_chars=None)
+    assert out[0]["src_snippets"] == [] and out[0]["dst_snippets"] == []
 
 
 # --- store curation: lesson / world cross-key near-duplicate REVIEW listings --

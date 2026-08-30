@@ -1,0 +1,30 @@
+{
+  "generated_for": "merge-proposal snippet attachment quality: before/after the differential-evidence fix",
+  "date": "2026-08-30",
+  "harness": "evals/snippet_differential_replay.py",
+  "method": "read-only replay of the bank's pending merge proposals; 'before' re-runs the frozen pre-fix per-side selection, 'after' runs the live _enrich_merge_proposals path; both count the two defect classes of evals/results/judge-shadow-live-20260821.json on the shown snippets (empty side; shared texts / min(side counts) >= 0.5), with deployed-default DeepDreamConfig",
+  "bank_snapshot": {
+    "entities": 4689,
+    "edges": 3271,
+    "entries": 1066,
+    "trace_norms": 1292
+  },
+  "before": {
+    "pending_merge_proposals": 152,
+    "empty_side_proposals": 37,
+    "shared_ge_50pct_proposals": 18,
+    "identical_snippet_sets": 9,
+    "low_differential_total": 55,
+    "low_differential_share": 0.362
+  },
+  "after": {
+    "pending_merge_proposals": 152,
+    "empty_side_proposals": 0,
+    "shared_ge_50pct_proposals": 18,
+    "identical_snippet_sets": 10,
+    "low_differential_total": 18,
+    "low_differential_share": 0.118,
+    "flagged_low_differential": 54
+  },
+  "notes": "after.flagged_low_differential counts rows the code stamps, a superset of after.low_differential_total: the pool-containment criterion also fires on pairs whose shown snippets diverge only because exclusive-first selection diversified a one-sided pool. identical_snippet_sets can RISE from before to after when a previously-empty side gains the same scan evidence as its partner."
+}
