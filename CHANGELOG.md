@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-31 — judge ladder measures the caution-line prompt variant)
+- **`evals/judge_ladder.py --caution`** re-runs the frozen merge-judge
+  fixture with `low_differential` computed on each row's shown snippets
+  (the two defect classes of the 2026-08-21 shadow comparison: an empty
+  side, or shown overlap at or above 50%), so the judge prompt carries the
+  production caution line that ships since the snippet-differential fix.
+  Flags reach the prompt only under `--caution`; every arm's record now
+  also reports paired `flagged_subset` / `clean_subset` metrics plus a
+  per-row `caution` marker, so a baseline arm slices directly against a
+  caution arm. Unflagged and baseline rows serialize byte-identically to
+  the frozen fixture (40 of its 129 rows flag).
+
 ### Fixed (2026-08-30 — merge-proposal evidence: no more empty sides, differential snippets, low-differential flag)
 - **Every merge-proposal side now ships evidence, and the two sides stop
   showing each other's.** The 2026-08-21 live shadow comparison
