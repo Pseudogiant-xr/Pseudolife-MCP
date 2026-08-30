@@ -16,7 +16,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   also reports paired `flagged_subset` / `clean_subset` metrics plus a
   per-row `caution` marker, so a baseline arm slices directly against a
   caution arm. Unflagged and baseline rows serialize byte-identically to
-  the frozen fixture (40 of its 129 rows flag).
+  the frozen fixture (40 of its 129 rows flag). A `--max-tokens` knob
+  (default unchanged at 400) raises the verdict budget for high
+  reasoning-effort arms: at xhigh the trace overflows the default budget
+  plus the +4096 thinking headroom and whole batches return truncated or
+  empty JSON — the 2026-08-31 xhigh run lost batches 0-3 (30 of the 30
+  true-accept rows) identically in both replicates.
 
 ### Fixed (2026-08-30 — merge-proposal evidence: no more empty sides, differential snippets, low-differential flag)
 - **Every merge-proposal side now ships evidence, and the two sides stop

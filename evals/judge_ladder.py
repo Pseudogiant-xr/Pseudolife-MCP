@@ -168,6 +168,14 @@ def main() -> None:
                          "snippets hit the shadow-comparison defect classes, "
                          "so the judge prompt carries the production caution "
                          "line (PR #217); baseline prompts stay byte-frozen")
+    ap.add_argument("--max-tokens", type=int, default=400,
+                    help="extractor max_tokens (default 400, the ladder's "
+                         "measured verdict budget). Raise for high reasoning "
+                         "effort: at xhigh the trace overflows the default "
+                         "budget plus judge_merges' +4096 thinking headroom "
+                         "and batches return truncated/empty JSON (both "
+                         "2026-08-31 xhigh replicates lost batches 0-3 "
+                         "identically)")
     args = ap.parse_args()
 
     rows = json.loads(DATA.read_text(encoding="utf-8"))["rows"]
@@ -177,7 +185,7 @@ def main() -> None:
                                # at 120*batch), decoupled from the extraction
                                # default so a default bump can never silently
                                # change this bench's config again.
-                               max_tokens=400,
+                               max_tokens=args.max_tokens,
                                timeout_seconds=args.timeout,
                                judge_thinking=(args.thinking_effort
                                                or args.thinking))
@@ -212,6 +220,7 @@ def main() -> None:
         # rerun of the same arm silently replaces the non-thinking numbers
         # with nothing distinguishing the two.
         "judge_thinking": args.thinking_effort or args.thinking or False,
+        "max_tokens": args.max_tokens,
         "caution": args.caution, "caution_rows": sum(flags),
         "flip_rows": flips, **score(rows, final), **subset,
         "per_row": [{"from": r["from"]["display"],
