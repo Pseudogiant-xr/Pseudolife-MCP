@@ -6,6 +6,40 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-31 — installer wiring for the Codex dreamer)
+- **`codex-only` / `codex-fallback` extractor modes** in `ops/install.sh`
+  / `ops\install.ps1`: the one-shot installer now wires a ChatGPT-plan
+  dreamer end to end — GPT-5.6 model prompt (Sol / Terra / Luna, Terra
+  default, menus honestly marked unmeasured), env triple at the Codex
+  shim's `:8086`, sidecar skip for `-only` (shared with `sonnet-only`;
+  the managed-override marker is generalized, with the legacy
+  `(sonnet-only)` text still recognized so pre-codex installs keep
+  switching modes cleanly), and autostart registration via the new
+  `ops/install-codex-shim-autostart.ps1` (Task Scheduler) /
+  `.sh` (systemd `--user`, docker-bridge bind). A `-Model`/`--model` from
+  the wrong family (e.g. `claude-*` with a codex mode) is rejected up
+  front instead of silently serving the shim's launch default.
+  `-ShimPort`/`--shim-port` default is now `0` = auto (8082 for Claude
+  modes, 8086 for Codex ones). A mode switch tears down the other
+  family's autostart task/unit (an abandoned shim would keep making real
+  CLI calls at every health refresh on a plan its owner believes is
+  off), and a shim mode whose CLI is missing now fails fast right after
+  the extractor choice instead of dying at the autostart stage with the
+  stack already up — preflight only knows `--client`, so
+  `--extractor codex-fallback --client claude` used to sail through.
+- **`codex_shim.py --health-ttl`** (default unchanged at 300 s; the
+  autostart passes 1800 s): every `/health` refresh is a real CLI call —
+  metered spend on a free ChatGPT tier (~288 calls/day at 300 s) — and a
+  stale-ok window only costs one failed primary attempt before fallback.
+  The shim also resolves the official Windows installer's `codex.exe`
+  on its own (`%LOCALAPPDATA%\OpenAI\Codex\bin\<hash>\`, off PATH,
+  rotating on auto-update — newest wins at every start; verified live
+  2026-08-31), and `ops/preflight.ps1`'s codex check accepts that layout
+  instead of failing a working install. Live smoke 2026-08-31 against
+  codex-cli 0.151.0-alpha on a free tier: health warm-up,
+  production-prompt extraction (Luna), and per-request model switch
+  (Terra) all pass.
+
 ### Added (2026-08-31 — Codex CLI shim: dream on a ChatGPT plan)
 - **`evals/codex_shim.py`** — the OpenAI-side twin of the Claude CLI shim:
   wraps headless `codex exec` (signed-in Codex CLI, ChatGPT-plan included

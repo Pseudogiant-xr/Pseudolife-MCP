@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 import threading
 import time
@@ -230,6 +231,60 @@ def test_resolve_cli_returns_a_launchable_path_for_a_bare_name(tmp_path,
                         lambda n: str(target) if n == "codex" else None)
     assert shim._resolve_cli(Path("codex")) == target
     assert shim._resolve_cli(Path("nope-not-here")) is None
+
+
+def test_official_install_glob_picks_the_newest_hash_dir(tmp_path,
+                                                         monkeypatch):
+    # The official Windows installer keeps codex.exe in a rotating
+    # %LOCALAPPDATA%\OpenAI\Codex\bin\<hash>\ dir and NOT on PATH (verified
+    # live 2026-08-31), so which() alone strands every such install. The
+    # fallback must pick the NEWEST hash dir — the auto-updater leaves old
+    # versions behind. (The glob helper is platform-free on purpose: faking
+    # os.name = "nt" makes pathlib build WindowsPath on POSIX and explode,
+    # which took down the CI xdist worker on the first version of this test.)
+    base = tmp_path / "OpenAI" / "Codex" / "bin"
+    old, new = base / "aaaa", base / "bbbb"
+    for d in (old, new):
+        d.mkdir(parents=True)
+        (d / "codex.exe").write_text("x", encoding="utf-8")
+    os.utime(old / "codex.exe", (1000, 1000))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    assert shim._official_install_glob() == new / "codex.exe"
+    monkeypatch.delenv("LOCALAPPDATA")
+    assert shim._official_install_glob() is None
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the os.name gate is Windows-only")
+def test_resolve_cli_bare_name_reaches_the_glob(tmp_path, monkeypatch):
+    # Only a BARE name falls through to the official-installer glob; an
+    # explicit path the caller passed is never second-guessed.
+    base = tmp_path / "OpenAI" / "Codex" / "bin" / "cafe"
+    base.mkdir(parents=True)
+    (base / "codex.exe").write_text("x", encoding="utf-8")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr(shim.shutil, "which", lambda n: None)
+    assert shim._resolve_cli(Path("codex")) == base / "codex.exe"
+    assert shim._resolve_cli(Path("C:/nope/codex.exe")) is None
+
+
+def test_health_ttl_is_configurable():
+    # Each /health refresh is a REAL CLI call — metered spend on a free
+    # ChatGPT tier (~288 calls/day at the 300s default). The autostart
+    # installer raises it via --health-ttl.
+    assert shim._parse_args([]).health_ttl == 300.0
+    assert shim._parse_args(["--health-ttl", "1800"]).health_ttl == 1800.0
+    cli = shim.CodexCli(Path("codex"), "m", 30.0, health_ttl=1800.0)
+    ok_calls = {"n": 0}
+
+    def _chat(s, u, model=None):
+        ok_calls["n"] += 1
+        return "OK"
+    cli.chat = _chat
+    assert cli.health()[0] is True           # warm: one real call
+    cli._health_at = time.monotonic() - 301  # stale under 300s, fresh under 1800s
+    cli.health()
+    time.sleep(0.1)
+    assert ok_calls["n"] == 1                # no refresh: the longer TTL held
 
 
 # --- HTTP layer ---------------------------------------------------------

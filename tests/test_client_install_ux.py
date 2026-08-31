@@ -188,6 +188,104 @@ def test_shim_autostart_scripts_accept_model_and_run_live_shim() -> None:
     assert "sonnet_shim.py" not in _read("ops/install.sh")
 
 
+def test_installers_offer_codex_extractor_modes() -> None:
+    """A ChatGPT-plan adopter gets the same one-shot path a Max-plan user has
+    (2026-08-31): codex-only / codex-fallback extractor modes with a GPT-5.6
+    dreamer-model prompt. Terra is the non-interactive default (the shim's
+    own default; nothing is quality-measured yet, and the menus must say so
+    rather than borrow the Claude modes' 'recommended')."""
+    ps = _read("ops/install.ps1")
+    sh = _read("ops/install.sh")
+    for text in (ps, sh):
+        for needle in ("codex-only", "codex-fallback", "gpt-5.6-sol",
+                       "gpt-5.6-terra", "gpt-5.6-luna", "unmeasured"):
+            assert needle in text, f"missing: {needle}"
+    # A model from the wrong family must be rejected up front, not passed
+    # through to a shim that would silently serve its launch default.
+    assert "does not match extractor mode" in ps
+    assert "does not match extractor mode" in sh
+
+
+def test_codex_shim_autostart_scripts_mirror_the_claude_pair() -> None:
+    """The Codex autostart twins launch codex_shim.py on :8086 with the
+    gpt-5.6-terra default and NO prompt-file override (the v2 extraction
+    prompt is Sonnet-tuned; the codex shim runs the production prompt until
+    a --rung terra ladder run measures a variant), and they raise the
+    health-probe TTL — each /health refresh is a real CLI call, which is
+    metered spend on a free ChatGPT tier."""
+    ps = _read("ops/install-codex-shim-autostart.ps1")
+    sh = _read("ops/install-codex-shim-autostart.sh")
+    assert 'Model = "gpt-5.6-terra"' in ps
+    assert 'MODEL="gpt-5.6-terra"' in sh
+    assert "8086" in ps and "8086" in sh
+    for text in (ps, sh):
+        assert "codex_shim.py" in text
+        assert "system-prompt-file" not in text
+        assert "health-ttl" in text.lower().replace("healthttl", "health-ttl")
+    # Windows: the official installer keeps codex.exe in a rotating
+    # %LOCALAPPDATA%\OpenAI\Codex\bin\<hash>\ dir off PATH — the script must
+    # know that layout to fail fast with a useful message, and must NOT bake
+    # the hash path into the task (the shim re-resolves at every start).
+    assert "OpenAI\\Codex\\bin" in ps
+    # Linux: systemd user units get a minimal PATH — pin the CLI via --cli.
+    assert "command -v codex" in sh
+    assert "--cli" in sh
+
+
+def test_installer_env_block_covers_codex_modes() -> None:
+    """codex-fallback / codex-only write the same env-triple shapes as the
+    sonnet pair (fallback => auto + sidecar pair; only => primary), and the
+    installer-managed override marker keeps recognizing files written by
+    pre-codex installs (legacy '(sonnet-only)' text) while writing the
+    generalized marker."""
+    ps = _read("ops/install.ps1")
+    sh = _read("ops/install.sh")
+    for text in (ps, sh):
+        assert "managed override (shim-only extractor)" in text
+        assert "managed override (sonnet-only)" in text     # legacy accepted
+    # codex modes reach the autostart stage with the codex script, not the
+    # claude one.
+    assert "install-codex-shim-autostart.ps1" in ps
+    assert "install-codex-shim-autostart.sh" in sh
+
+
+def test_mode_switch_tears_down_the_sibling_shim_autostart() -> None:
+    """Re-running with a different -Extractor is the documented way to switch
+    modes, so a cross-family switch (codex -> sonnet, any -> sidecar) must
+    remove the other family's autostart — an abandoned codex task keeps
+    burning real ChatGPT-tier CLI calls at every /health refresh, forever,
+    on a machine whose owner believes it is turned off (2026-08-31 review
+    finding)."""
+    ps = _read("ops/install.ps1")
+    sh = _read("ops/install.sh")
+    assert '"Pseudolife Codex Shim"' in ps
+    assert '"Pseudolife Claude Shim"' in ps
+    assert '"Pseudolife Sonnet Shim"' in ps       # pre-rename installs too
+    assert "pseudolife-codex-shim.service" in sh
+    assert "pseudolife-sonnet-shim.service" in sh
+
+
+def test_shim_modes_fail_fast_on_a_missing_cli() -> None:
+    """The shim family's CLI is checked right after the extractor choice,
+    BEFORE volumes/env/compose — preflight only knows -Client, so
+    `-Extractor codex-fallback -Client claude` used to sail through
+    preflight and die at stage 8 with the stack already up (2026-08-31
+    review finding; symmetric fix for the claude modes)."""
+    ps = _read("ops/install.ps1")
+    sh = _read("ops/install.sh")
+    for text in (ps, sh):
+        assert "needed by extractor mode" in text
+
+
+def test_preflight_codex_check_knows_the_official_installer_layout() -> None:
+    """Get-Command codex misses the official Windows installer entirely
+    (codex.exe lives in %LOCALAPPDATA%\\OpenAI\\Codex\\bin\\<hash>\\, off
+    PATH — verified live 2026-08-31), so preflight would FAIL a machine with
+    a working Codex. The check must accept that layout too."""
+    ps = _read("ops/preflight.ps1")
+    assert "OpenAI\\Codex\\bin" in ps
+
+
 def test_preflight_checks_the_selected_client_only() -> None:
     ps = _read("ops/preflight.ps1")
     sh = _read("ops/preflight.sh")

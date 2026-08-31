@@ -294,7 +294,20 @@ The same pattern works on an OpenAI subscription: `evals/codex_shim.py` is
 the ChatGPT-plan twin of the Claude shim. It wraps headless `codex exec`
 (the signed-in Codex CLI's included usage — no API key) as an
 OpenAI-compatible endpoint on `127.0.0.1:8086`, serving `gpt-5.6-terra` by
-default. Start it by hand (there is no autostart installer for it yet):
+default. The one-shot installer wires the whole mode:
+
+```bash
+ops/install.sh --extractor codex-fallback     # or codex-only; Windows: ops\install.ps1 -Extractor codex-fallback
+```
+
+which prompts for the GPT-5.6 dreamer (Sol / Terra / Luna), registers the
+shim to start automatically (`ops/install-codex-shim-autostart.ps1` — Task
+Scheduler, elevated pwsh; `.sh` — systemd `--user`, docker-bridge bind),
+and writes the env triple for you. The autostart raises the shim's
+health-probe interval to 1800 s (`--health-ttl`) because every `/health`
+refresh is a real CLI call — metered spend on a free ChatGPT tier; a
+stale-ok window only costs one failed primary attempt before the dream
+falls back. To run it by hand instead:
 
 ```bash
 python evals/codex_shim.py    # --model gpt-5.6-sol / gpt-5.6-luna to change the default
@@ -303,19 +316,24 @@ python evals/codex_shim.py    # --model gpt-5.6-sol / gpt-5.6-luna to change the
 then point the env triple at it exactly as in step 2 above, with
 `PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:8086/v1` (and, on
 Linux, the same docker-bridge bind note as the Claude shim — pass `--host`
-accordingly). The shim honours a concrete `gpt-*` or `codex-*` name per
-request, so the Console's **Dreamer** card switches between `gpt-5.6-sol`
-/ `gpt-5.6-terra` / `gpt-5.6-luna` live, exactly like the Claude presets.
+accordingly). Either way the shim honours a concrete `gpt-*` or `codex-*`
+name per request, so the Console's **Dreamer** card switches between
+`gpt-5.6-sol` / `gpt-5.6-terra` / `gpt-5.6-luna` live, exactly like the
+Claude presets. On Windows the shim finds the official installer's
+`codex.exe` on its own (the `%LOCALAPPDATA%\OpenAI\Codex\bin\<hash>\`
+layout is off PATH and rotates on auto-update — the shim re-resolves the
+newest at every start).
 
-Two honest caveats. First, extraction quality has only been
-ladder-measured on Claude models and the local sidecars; the `terra` rung
+One honest caveat: extraction quality has only been ladder-measured on
+Claude models and the local sidecars; the `terra` rung
 (`evals/ladder_sweep.py --rung terra`) exists to measure a Codex-served
-model before you trust it with consolidation. Second, the shim is
-verified against the documented `codex exec --json` contract and its own
-test suite, not yet against a live Codex install — treat the first run as
-a smoke test. And no shim is required for any endpoint that already
-speaks `/v1/chat/completions`: a hosted OpenAI API key or any local
-runtime works directly via the env triple in the previous sections.
+model before you trust it with consolidation. (The shim itself is
+live-verified — smoke-tested 2026-08-31 against codex-cli 0.151.0-alpha
+on a free ChatGPT tier: health warm-up, a production-prompt extraction,
+and a per-request model switch all pass.) And no shim is required for any
+endpoint that already speaks `/v1/chat/completions`: a hosted OpenAI API
+key or any local runtime works directly via the env triple in the
+previous sections.
 
 ## Cadence — quiescence-gated, daemon-only
 
