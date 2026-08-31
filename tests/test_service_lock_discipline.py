@@ -60,6 +60,7 @@ SERVICE_PY = SERVICE_FILES[0]
 CALLER_HOLDS_LOCK = {
     "_assert_public_search_path",
     "_ensure_init",
+    "_ensure_postgres_storage",
     "_ensure_subject_entity",
     "_persist_all",
     "_entity_kind_map",
