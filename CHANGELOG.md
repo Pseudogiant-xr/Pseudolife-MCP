@@ -75,6 +75,45 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   works (LM Studio/Ollama/vLLM names included), with `claude-*` /
   `gpt-*` per-request switching as the shim special cases.
   `docs/guide/dreaming.md` gains the matching "OpenAI primary" section.
+### Fixed (2026-08-31 — claude_shim: a timed-out call can no longer wedge the shim)
+- **`evals/claude_shim.py` now kills the whole process tree on a call
+  timeout.** The shim ran each call via `subprocess.run(..., timeout=...)`,
+  whose timeout path kills only the direct child and then reaps it with an
+  unbounded `communicate()`. The `claude` CLI is a node program behind a
+  wrapper (`claude.cmd` → `cmd.exe` → node on Windows; a shell shim on
+  POSIX), so a surviving descendant holding the stdout pipe made that reap
+  block forever — with the shim's serialization lock held, wedging every
+  later call, including the daemon's dream primary on :8082. Calls now go
+  through a `Popen`/`communicate` seam that detaches the child into its own
+  session on POSIX (`start_new_session`) and, on timeout, kills the tree
+  (`os.killpg` on POSIX, `taskkill /F /T` on Windows) before reaping — the
+  same structure as `codex_shim.py`. No behavior change outside the timeout
+  path. (`evals/claude_shim.py`, `tests/test_claude_shim_health.py`.)
+
+### Added (2026-08-31 — logical export/import: `pseudolife-mcp export` / `import`)
+- **The bank now has a logical transfer layer beside the physical backups.**
+  `pseudolife-mcp export` writes the whole bank as a portable ZIP — one
+  JSONL file per table plus a manifest (format version, schema version,
+  embedding dimension, per-table counts) — from a single read-only
+  REPEATABLE READ snapshot, safe against a live daemon.
+  `pseudolife-mcp import <archive.zip>` loads one into a **fresh, empty
+  bank** in a single transaction, preserving ids, HLC stamps, and
+  embeddings verbatim and advancing the id sequences past the imported
+  rows. Unlike a `pg_dump`, the artifact is deployment-tier- and
+  Postgres-version-independent and loads additively across schema
+  versions: an export missing a column takes the target's DDL default
+  (old export → new build), while an export carrying an unknown column is
+  refused (new export → old build would silently drop data). Import also
+  refuses a non-empty bank, refuses while other connections hold the
+  database (a running daemon; `--force` overrides), and refuses an
+  embedding-dimension mismatch. Every schema table is explicitly
+  classified exported or excluded (operational telemetry and the dream
+  run journal stay behind; the manifest lists them), and the roster is
+  guard-tested against `BENCH_RESET_TABLES` so a future table must pick
+  a side. Both commands are torch-free and resolve the bank the way
+  `backup` does (explicit DSN, else the lite tier's embedded instance).
+  (`pseudolife_memory/transfer_cli.py`, `tests/test_transfer_cli.py`;
+  docs in the configuration guide's Backups section.)
 
 ### Added (2026-08-31 — judge ladder measures the caution-line prompt variant)
 - **`evals/judge_ladder.py --caution`** re-runs the frozen merge-judge

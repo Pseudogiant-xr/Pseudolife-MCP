@@ -100,7 +100,10 @@ It is a real Postgres bank, not a cut-down one: `pseudolife-mcp backup`
 writes a standard owner-free `pg_dump` archive (plus a state archive, 7-day
 rotation) that restores into any PostgreSQL 18 target regardless of role —
 the Docker tier included — so outgrowing lite is a dump/restore, not a
-migration project ([backups](docs/guide/configuration.md#backups)).
+migration project ([backups](docs/guide/configuration.md#backups)). For a
+tier- and Postgres-version-independent copy, `pseudolife-mcp export` /
+`import` move the whole bank as portable JSONL
+([logical export / import](docs/guide/configuration.md#logical-export--import)).
 Windows needs an ASCII-only data path
 ([`PSEUDOLIFE_MCP_DATA_DIR`](docs/guide/configuration.md#connection--deployment-env-vars)).
 

@@ -106,7 +106,10 @@ It is a real Postgres bank, not a cut-down one: `pseudolife-mcp backup`
 writes a standard owner-free `pg_dump` archive (plus a state archive, 7-day
 rotation) that restores into any PostgreSQL 18 target regardless of role —
 the Docker tier included — so outgrowing lite is a dump/restore, not a
-migration project ([backups](docs/guide/configuration.md#backups)).
+migration project ([backups](docs/guide/configuration.md#backups)). For a
+tier- and Postgres-version-independent copy, `pseudolife-mcp export` /
+`import` move the whole bank as portable JSONL
+([logical export / import](docs/guide/configuration.md#logical-export--import)).
 Windows needs an ASCII-only data path
 ([`PSEUDOLIFE_MCP_DATA_DIR`](docs/guide/configuration.md#connection--deployment-env-vars)).
 
@@ -3192,6 +3195,40 @@ without either's rotation or restore-picker ever touching the other's
 files. A backup never initializes a bank that doesn't exist yet, a run
 that produced no dump never rotates dumps, and rotation only ever
 deletes files the tool itself wrote.
+
+### Logical export / import
+
+Beside the physical backups, `pseudolife-mcp export` writes the bank as a
+portable ZIP — one JSONL file per table plus a manifest (schema version,
+embedding dimension, per-table counts) — from a single read-only snapshot,
+so it is safe to run against a live daemon (the snapshot stays open for
+the duration, which delays autovacuum on busy tables — prefer a quiet
+moment for a very large bank). Unlike a `pg_dump`, the
+artifact is deployment-tier- and Postgres-version-independent,
+human-readable, and loads additively across schema versions: an export
+from an older build imports into a newer one, with new columns taking
+their DDL defaults. Embeddings travel verbatim (the manifest pins their
+dimension), so neither command needs the embedding model.
+
+`pseudolife-mcp import <archive.zip>` loads an export into a **fresh,
+empty bank** in one transaction. It refuses a non-empty bank, refuses
+while any other connection holds the database — stop the daemon first
+(Docker tier: `docker compose -f ops/docker-compose.yml stop
+pseudolife-daemon`); `--force` overrides for connections you know are
+inert — and refuses an export whose format version or embedding dimension
+it cannot honor. Operational telemetry (retrieval/read logs, the dream-run
+journal) deliberately stays behind, and the manifest lists exactly which
+tables were excluded. Ingested `document_ingest` files live on the state
+volume/data dir, not in Postgres — carry those with the physical backup's
+state archive.
+
+Both commands resolve the bank the way `backup` does: the explicit
+`PSEUDOLIFE_MCP_DATABASE_URL` first (for the Docker tier that is
+`postgresql://pseudolife:<POSTGRES_PASSWORD from
+ops/.env>@127.0.0.1:5433/pseudolife_memory`), else the lite tier's
+embedded instance, attached or started for the duration — never
+initialized: importing is how a fresh bank gets *filled*, but creating
+one is the daemon's job.
 
 ## Schema version history
 
