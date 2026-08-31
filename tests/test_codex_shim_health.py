@@ -233,13 +233,15 @@ def test_resolve_cli_returns_a_launchable_path_for_a_bare_name(tmp_path,
     assert shim._resolve_cli(Path("nope-not-here")) is None
 
 
-def test_resolve_cli_falls_back_to_the_official_installer_glob(tmp_path,
-                                                               monkeypatch):
+def test_official_install_glob_picks_the_newest_hash_dir(tmp_path,
+                                                         monkeypatch):
     # The official Windows installer keeps codex.exe in a rotating
     # %LOCALAPPDATA%\OpenAI\Codex\bin\<hash>\ dir and NOT on PATH (verified
     # live 2026-08-31), so which() alone strands every such install. The
     # fallback must pick the NEWEST hash dir — the auto-updater leaves old
-    # versions behind.
+    # versions behind. (The glob helper is platform-free on purpose: faking
+    # os.name = "nt" makes pathlib build WindowsPath on POSIX and explode,
+    # which took down the CI xdist worker on the first version of this test.)
     base = tmp_path / "OpenAI" / "Codex" / "bin"
     old, new = base / "aaaa", base / "bbbb"
     for d in (old, new):
@@ -247,10 +249,21 @@ def test_resolve_cli_falls_back_to_the_official_installer_glob(tmp_path,
         (d / "codex.exe").write_text("x", encoding="utf-8")
     os.utime(old / "codex.exe", (1000, 1000))
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    assert shim._official_install_glob() == new / "codex.exe"
+    monkeypatch.delenv("LOCALAPPDATA")
+    assert shim._official_install_glob() is None
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the os.name gate is Windows-only")
+def test_resolve_cli_bare_name_reaches_the_glob(tmp_path, monkeypatch):
+    # Only a BARE name falls through to the official-installer glob; an
+    # explicit path the caller passed is never second-guessed.
+    base = tmp_path / "OpenAI" / "Codex" / "bin" / "cafe"
+    base.mkdir(parents=True)
+    (base / "codex.exe").write_text("x", encoding="utf-8")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     monkeypatch.setattr(shim.shutil, "which", lambda n: None)
-    monkeypatch.setattr(shim.os, "name", "nt")
-    assert shim._resolve_cli(Path("codex")) == new / "codex.exe"
-    # A concrete path the user passed is never second-guessed into the glob.
+    assert shim._resolve_cli(Path("codex")) == base / "codex.exe"
     assert shim._resolve_cli(Path("C:/nope/codex.exe")) is None
 
 

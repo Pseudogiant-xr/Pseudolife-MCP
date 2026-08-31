@@ -114,13 +114,22 @@ def _resolve_cli(cli: Path) -> Path | None:
     # with the old hash dir. Bare-name lookups only — an explicit path the
     # caller passed is never second-guessed.
     if os.name == "nt" and str(cli) in ("codex", "codex.exe"):
-        base = os.environ.get("LOCALAPPDATA")
-        if base:
-            hits = sorted(Path(base, "OpenAI", "Codex", "bin").glob(
-                "*/codex.exe"), key=lambda p: p.stat().st_mtime)
-            if hits:
-                return hits[-1]
+        return _official_install_glob()
     return None
+
+
+def _official_install_glob() -> Path | None:
+    """Newest codex.exe under the official installer layout, or None.
+
+    Split from :func:`_resolve_cli` so tests can exercise the newest-wins
+    glob on any platform — patching ``os.name`` to fake Windows makes
+    ``pathlib.Path`` construct ``WindowsPath`` on POSIX and explode."""
+    base = os.environ.get("LOCALAPPDATA")
+    if not base:
+        return None
+    hits = sorted(Path(base, "OpenAI", "Codex", "bin").glob("*/codex.exe"),
+                  key=lambda p: p.stat().st_mtime)
+    return hits[-1] if hits else None
 
 
 def _kill_tree(proc: subprocess.Popen) -> None:
