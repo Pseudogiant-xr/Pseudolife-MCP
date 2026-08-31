@@ -21,6 +21,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   place of the "live" chip. The real daemon's payloads are unchanged — no
   marker, no new field; an absent key means a real bank
   (`tests/test_web.py` pins both directions plus the topbar wiring).
+
+### Added (2026-08-31 — judge ladder measures the caution-line prompt variant)
 - **`evals/judge_ladder.py --caution`** re-runs the frozen merge-judge
   fixture with `low_differential` computed on each row's shown snippets
   (the two defect classes of the 2026-08-21 shadow comparison: an empty
