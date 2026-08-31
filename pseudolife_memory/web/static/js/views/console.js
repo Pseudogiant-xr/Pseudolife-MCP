@@ -23,6 +23,13 @@ const DREAMER_MODELS = [
   { id: "claude-haiku-4-5", label: "Haiku 4.5",
     note: "fastest / lightest on plan usage" },
   { id: "claude-fable-5", label: "Fable 5", note: "most capable tier" },
+  // GPT-5.6 family: served per request by the Codex CLI shim
+  // (evals/codex_shim.py, :8085) or any OpenAI-compatible endpoint that
+  // knows these ids. Extraction quality unmeasured here — the ladder has
+  // only measured the Claude models and the local sidecars.
+  { id: "gpt-5.6-sol", label: "Sol", note: "OpenAI flagship — unmeasured here" },
+  { id: "gpt-5.6-terra", label: "Terra", note: "OpenAI balanced — unmeasured here" },
+  { id: "gpt-5.6-luna", label: "Luna", note: "OpenAI fastest — unmeasured here" },
 ];
 
 export async function renderConsole(root, ctx) {
@@ -103,7 +110,7 @@ function dreamerCard() {
     title: "clear the override — the endpoint's own default model serves",
     onclick: () => setDreamerModel(null),
   }, "Default"));
-  const customInput = el("input", { type: "text", placeholder: "claude-…",
+  const customInput = el("input", { type: "text", placeholder: "model id…",
     "aria-label": "custom dreamer model",
     value: override && !DREAMER_MODELS.some((m) => m.id === override) ? override : "" });
   customInput.addEventListener("keydown", (e) => {
@@ -126,8 +133,10 @@ function dreamerCard() {
           } }, "Apply"))),
       el("p", { class: "help", style: { margin: "8px 0 0" } },
         "Applies live to the next dream via the model-only override — endpoint "
-        + "wiring keeps its owner. The Claude CLI shim honours claude-* names "
-        + "per request; the local sidecar ignores model names.")));
+        + "wiring keeps its owner. Any model id the wired endpoint serves "
+        + "works here (LM Studio / Ollama / vLLM model names included). The "
+        + "Claude CLI shim honours claude-* names per request, the Codex CLI "
+        + "shim gpt-* names; the local sidecar ignores model names.")));
 }
 
 function healthChip() {

@@ -26,6 +26,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   its test suite against the documented `codex exec --json` contract, not
   yet against a live Codex install.
 
+### Changed (2026-08-31 — Dreamer presentation: non-Claude models are first-class)
+- **The Console no longer reads as Claude-only.** A real external adopter
+  on an OpenAI stack concluded from the Dreamer panel that other
+  providers' models "aren't an option" — the backend was always
+  provider-neutral (the override and extractor model knobs are plain
+  strings any OpenAI-compatible endpoint consumes). The custom-model
+  input's placeholder is now neutral (`model id…`, was `claude-…`), the
+  Dreamer card gains one-click GPT-5.6 presets (Sol / Terra / Luna,
+  honestly marked unmeasured), and the Dreamer help line plus the
+  `extractor_model_override` / `extractor_base_url` / `extractor_model`
+  knob help state plainly that any model id the wired endpoint serves
+  works (LM Studio/Ollama/vLLM names included), with `claude-*` /
+  `gpt-*` per-request switching as the shim special cases.
+  `docs/guide/dreaming.md` gains the matching "OpenAI primary" section.
+
 ### Added (2026-08-31 — judge ladder measures the caution-line prompt variant)
 - **`evals/judge_ladder.py --caution`** re-runs the frozen merge-judge
   fixture with `low_differential` computed on each row's shown snippets
