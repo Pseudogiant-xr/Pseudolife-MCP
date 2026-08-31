@@ -46,9 +46,13 @@ LOW_DIFFERENTIAL_SHARE = 0.5
 
 def caution_flag(row: dict) -> bool:
     """The shadow comparison's two defect classes, computed on the SHOWN
-    snippets (the frozen fixture carries no evidence pools): an empty side,
-    or shown overlap at/above ``LOW_DIFFERENTIAL_SHARE``. Set containment
-    is subsumed — a contained side overlaps 1.0."""
+    snippets: an empty side, or shown overlap at/above
+    ``LOW_DIFFERENTIAL_SHARE`` (containment of one shown set in the other
+    overlaps 1.0, so it needs no separate check). Production stamps one
+    further criterion the ladder cannot reproduce — pool containment,
+    computed on the pre-truncation evidence pools in
+    ``service_dream._attach_candidate_snippets`` — because the frozen
+    fixture stores only the shown snippets, not the pools."""
     src = set((row.get("from") or {}).get("snippets") or [])
     dst = set((row.get("into") or {}).get("snippets") or [])
     if not src or not dst:
@@ -66,6 +70,21 @@ def build_proposals(chunk: list[dict], caution: bool) -> list[dict]:
              **({"low_differential": True}
                 if caution and caution_flag(r) else {})}
             for i, r in enumerate(chunk)]
+
+
+def subset_scores(rows: list[dict], final: list, flags: list[bool],
+                  only_flagged: bool = False) -> dict:
+    """Paired flagged/clean subset metrics. Under ``--only-flagged`` the
+    split is meaningless — every row is flagged, so flagged_subset would
+    duplicate the top-level score and clean_subset would be an empty-list
+    degenerate (rows 0, every rate None) — so nothing is emitted."""
+    if only_flagged:
+        return {}
+    return {
+        name: score([r for r, f in zip(rows, flags) if f is want],
+                    [v for v, f in zip(final, flags) if f is want])
+        for name, want in (("flagged_subset", True), ("clean_subset", False))
+    }
 
 
 def run_replicate(ex: OpenAICompatExtractor, rows: list[dict],
@@ -214,11 +233,7 @@ def main() -> None:
     # subset metrics pair directly against a --caution arm's); they reach
     # the prompt only under --caution.
     flags = [caution_flag(r) for r in rows]
-    subset = {
-        name: score([r for r, f in zip(rows, flags) if f is want],
-                    [v for v, f in zip(final, flags) if f is want])
-        for name, want in (("flagged_subset", True), ("clean_subset", False))
-    }
+    subset = subset_scores(rows, final, flags, args.only_flagged)
     result = {
         "arm": args.arm, "model": args.model, "base_url": args.base_url,
         "replicates": args.replicates, "batch": args.batch,
@@ -241,6 +256,12 @@ def main() -> None:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     doc = (json.loads(args.out.read_text(encoding="utf-8"))
            if args.out.exists() else {"data": DATA.name, "arms": {}})
+    if args.arm in doc.get("arms", {}):
+        # Loud, not fatal: replacing an arm is legitimate on a deliberate
+        # rerun, but silently rewriting a canonical record is the named
+        # 2026-07-21 failure — surface it in the run log every time.
+        print(f"WARNING: arm '{args.arm}' already exists in {args.out} — "
+              "replacing its record")
     doc["arms"][args.arm] = result
     args.out.write_text(json.dumps(doc, indent=1, ensure_ascii=False),
                         encoding="utf-8")

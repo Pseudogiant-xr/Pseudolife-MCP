@@ -58,3 +58,32 @@ def test_fixture_flag_count_is_stable():
     # the flagged share must be substantial but not total, or the caution
     # arm measures nothing.
     assert 0 < n < len(rows)
+
+
+def test_threshold_locksteps_with_production():
+    # The ladder mirrors service_dream.DreamOps._LOW_DIFFERENTIAL_SHARE as
+    # a literal (importing the service stack would drag its heavy deps into
+    # the harness), so pin the mirror by source scan -- the same pattern
+    # the service-discipline tests use. A retuned production threshold must
+    # turn this red, not silently diverge the bench.
+    import re
+    src = (Path(JL.__file__).resolve().parents[1] / "pseudolife_memory"
+           / "service_dream.py").read_text(encoding="utf-8")
+    m = re.search(r"_LOW_DIFFERENTIAL_SHARE\s*=\s*([0-9.]+)", src)
+    assert m, "production threshold constant not found in service_dream.py"
+    assert float(m.group(1)) == JL.LOW_DIFFERENTIAL_SHARE
+
+
+def test_subset_scores_omitted_under_only_flagged():
+    # Under --only-flagged every row is flagged: flagged_subset would
+    # duplicate the top-level score and clean_subset would be the
+    # degenerate empty-list block, so the split is not emitted at all.
+    rows = [{**_row([], ["x"]), "label": "reject"},
+            {**_row(["x", "y"], ["p", "q"]), "label": "accept"}]
+    final = [("reject", 0.9), ("accept", 0.7)]
+    flags = [JL.caution_flag(r) for r in rows]          # [True, False]
+    assert JL.subset_scores(rows, final, flags, only_flagged=True) == {}
+    both = JL.subset_scores(rows, final, flags, only_flagged=False)
+    assert set(both) == {"flagged_subset", "clean_subset"}
+    assert both["flagged_subset"]["rows"] == 1
+    assert both["clean_subset"]["rows"] == 1

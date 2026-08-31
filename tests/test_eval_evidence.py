@@ -2067,6 +2067,27 @@ for _cid, _needle, _art, _val, _stated, _places in [
         id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(_art,),
         value=_val, stated=_stated, places=_places))
 
+# The 2026-08-31 judge-ladder night run: the CHANGELOG states how many
+# fixture rows the caution flag marks, and how many true-accept rows the
+# budget-truncated xhigh arm lost (the void that justified --max-tokens).
+JUDGE_CAUTION = RESULTS + "judge-ladder-caution-20260831.json"
+JUDGE_EFFORT = RESULTS + "judge-ladder-effort-20260831.json"
+
+for _cid, _needle, _art, _val, _stated in [
+    ("judge-caution-flagged-rows",
+     "40 of its 129 rows flag", JUDGE_CAUTION,
+     lambda d: d["arms"]["qwen-27b-thinklow"]["caution_rows"], 40),
+    ("judge-xhigh-truncated-accepts",
+     "truncated away 30 of the 30 true-accept rows (batches 0-3)",
+     JUDGE_EFFORT,
+     lambda d: sum(1 for r in d["arms"]["qwen-27b-xhigh"]["per_row"]
+                   if r["label"] == "accept"
+                   and all(v is None for v in r["votes"])), 30),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(_art,),
+        value=_val, stated=_stated, places=0))
+
 # The BEAM findings table also quotes three RANGES that live in a verdict
 # file as strings, not floats — the Claim machinery only compares numbers,
 # so they get their own check rather than going unguarded.
