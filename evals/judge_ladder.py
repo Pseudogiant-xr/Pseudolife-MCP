@@ -168,6 +168,11 @@ def main() -> None:
                          "snippets hit the shadow-comparison defect classes, "
                          "so the judge prompt carries the production caution "
                          "line (PR #217); baseline prompts stay byte-frozen")
+    ap.add_argument("--only-flagged", action="store_true",
+                    help="run only the fixture rows caution_flag() marks "
+                         "low-differential — the token-frugal subset for "
+                         "paired caution-line checks on a metered judge "
+                         "(40 of 129 rows; 22 accept / 18 reject labels)")
     ap.add_argument("--max-tokens", type=int, default=400,
                     help="extractor max_tokens (default 400, the ladder's "
                          "measured verdict budget). Raise for high reasoning "
@@ -179,6 +184,8 @@ def main() -> None:
     args = ap.parse_args()
 
     rows = json.loads(DATA.read_text(encoding="utf-8"))["rows"]
+    if args.only_flagged:
+        rows = [r for r in rows if caution_flag(r)]
     ex = OpenAICompatExtractor(args.base_url, args.model,
                                # The ladder's measured budget: verdict rows
                                # are ~120 tokens/proposal (judge_merges floors
@@ -221,6 +228,7 @@ def main() -> None:
         # with nothing distinguishing the two.
         "judge_thinking": args.thinking_effort or args.thinking or False,
         "max_tokens": args.max_tokens,
+        "only_flagged": args.only_flagged,
         "caution": args.caution, "caution_rows": sum(flags),
         "flip_rows": flips, **score(rows, final), **subset,
         "per_row": [{"from": r["from"]["display"],

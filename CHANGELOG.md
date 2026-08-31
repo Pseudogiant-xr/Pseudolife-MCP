@@ -21,7 +21,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   reasoning-effort arms: at xhigh the trace overflows the default budget
   plus the +4096 thinking headroom and whole batches return truncated or
   empty JSON — the 2026-08-31 xhigh run lost batches 0-3 (30 of the 30
-  true-accept rows) identically in both replicates.
+  true-accept rows) identically in both replicates. `--only-flagged`
+  restricts a run to the flagged rows — the token-frugal subset for
+  paired caution-line checks on a metered judge.
 
 ### Fixed (2026-08-30 — merge-proposal evidence: no more empty sides, differential snippets, low-differential flag)
 - **Every merge-proposal side now ships evidence, and the two sides stop
