@@ -34,9 +34,14 @@ def build_dev_app(token: str | None = None):
     from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
 
     def _health() -> dict:
-        return {"status": "ok", "schema": SCHEMA_META_VERSION,
-                "storage": "postgres (fixture)", "auth": token is not None,
-                "persist_errors": 0, "mode": "devserver"}
+        h = {"status": "ok", "schema": SCHEMA_META_VERSION,
+             "storage": "postgres (fixture)", "auth": token is not None,
+             "persist_errors": 0, "mode": "devserver"}
+        # Derived from the service marker (single source of truth), same as
+        # ConsoleRoutes._health — never hardcoded, so the two can't drift.
+        if getattr(service, "fixtures", False):
+            h["fixtures"] = True
+        return h
 
     return build_console_app(_stub_mcp_app, token, _health, service)
 

@@ -245,13 +245,19 @@ class ConsoleRoutes:
     def _health(self) -> dict:
         from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
         svc = self.svc
-        return {
+        out = {
             "status": "ok",
             "schema": SCHEMA_META_VERSION,
             "storage": "postgres" if getattr(svc, "_db_url", None) else "files",
             "writer_id": getattr(svc, "_writer_id", "unknown"),
             "persist_errors": getattr(svc, "_persist_errors", 0),
         }
+        # A fixture-backed service (devserver QA harness) must announce itself
+        # so the Console can render the demo-data banner; the real service
+        # declares no marker and its payload stays unchanged (absent = real).
+        if getattr(svc, "fixtures", False):
+            out["fixtures"] = True
+        return out
 
     def _facts(self, limit: int) -> dict:
         return self._limited(self.svc.cortex_dump, limit)

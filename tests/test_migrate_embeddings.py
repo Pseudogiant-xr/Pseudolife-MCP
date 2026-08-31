@@ -507,8 +507,12 @@ def _assert_write_path_cosine_one(pipeline, text: str, stored_vec) -> None:
     same weights), not the one internal to the script under test."""
     from pseudolife_memory.storage.postgres import _embedding_out
 
-    doc_vec = pipeline.encode_single(text)
-    qry_vec = pipeline.encode_query(text)
+    # Compare on CPU: the pipeline encodes on whatever device it picked
+    # (CUDA whenever the GPU is free, CPU otherwise), while ``from_numpy``
+    # below is always CPU -- ``torch.dot`` across devices raises. This is
+    # why full-suite runs passed while the GPU was busy and failed idle.
+    doc_vec = pipeline.encode_single(text).cpu()
+    qry_vec = pipeline.encode_query(text).cpu()
     # Reuse the storage layer's own reader instead of np.asarray: pgvector
     # <0.5 hands psycopg reads back as numpy arrays, 0.5+ returns ``Vector``
     # objects that np.asarray raises TypeError on. The dependency is

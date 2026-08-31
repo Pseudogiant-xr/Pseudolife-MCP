@@ -22,6 +22,40 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   time out — get the fix for free. No behavior change outside the timeout
   path. (`evals/beam_rejudge.py`, `tests/test_beam_rejudge.py`.)
 
+### Added (2026-09-01 — extension-schema seams, extracted from the RE Hub pilot)
+- **Extension schemas have a sanctioned pattern, and their markers no longer
+  travel in bank transfers.** A fork adding its own tables records lineage
+  under a namespaced `meta` key ending in `_schema_version` instead of
+  consuming upstream's next integer `schema_version`
+  ([convention](docs/guide/configuration.md#extension-schemas)); the logical
+  export/import now skips any such key exactly like `schema_version` itself,
+  so a marker can never land in a bank whose build lacks the extension
+  (`tests/test_transfer_cli.py` pins it). Extracted and generalized from the
+  RE Hub pilot (PR #226, @blacksheep25), which stays a downstream extension.
+- **`MemoryService._ensure_postgres_storage()` — connect the durable store
+  without loading the embedding model.** Split out of `_ensure_init` so
+  exact/hash-addressed paths that never embed can reach Postgres cheaply as
+  a session's first call; the connection is reused (never rebuilt on a
+  mid-init retry, extending the 2026-08-04 boot-balloon fix), and the
+  `public`-search-path shadow-schema invariant now runs on every connect
+  path rather than only the embedder-backed one.
+
+### Added (2026-08-31 — fixture dev server announces its demo data)
+- **The Console now shows a "DEMO DATA — fixture server, not a real bank"
+  banner when served by the fixture dev server.** The fixture bank
+  (`pseudolife_memory/web/devserver.py` + `FixtureService`) is visually
+  indistinguishable from a real daemon's Console — an external adopter
+  opened a fixture tab, read the 1,840 canned entries as his own bank, and
+  concluded the package shipped pre-populated with someone else's data
+  (2026-08-31); the only tell was the writer name in the System card.
+  Fixture payloads now self-announce: `FixtureService` declares a marker
+  the Console routes surface as `fixtures: true` on the overview health
+  object (and the devserver's top-level `/health` carries the same field),
+  and the topbar renders the flag as an always-visible warning chip in
+  place of the "live" chip. The real daemon's payloads are unchanged — no
+  marker, no new field; an absent key means a real bank
+  (`tests/test_web.py` pins both directions plus the topbar wiring).
+
 ### Added (2026-08-31 — installer wiring for the Codex dreamer)
 - **`codex-only` / `codex-fallback` extractor modes** in `ops/install.sh`
   / `ops\install.ps1`: the one-shot installer now wires a ChatGPT-plan

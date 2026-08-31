@@ -132,6 +132,15 @@ RUNGS: dict[str, dict] = {
               "label": "GPT-5.6 Terra (ChatGPT-plan Codex shim, ceiling probe)",
               "base_url": "http://127.0.0.1:8086/v1",
               "model": "extractor"},
+    # Luna rides the shim's per-request override (a concrete gpt-* name in
+    # the request wins over the launch default), so one shim serves both
+    # rungs without a restart. NOTE: neither Codex-shim rung pins
+    # model_reasoning_effort — calls inherit the host's ~/.codex/config.toml
+    # (the 2026-09-01 measurements ran at "high").
+    "luna": {"kind": "llm",
+             "label": "GPT-5.6 Luna (ChatGPT-plan Codex shim, ceiling probe)",
+             "base_url": "http://127.0.0.1:8086/v1",
+             "model": "gpt-5.6-luna"},
     # Smarter-teacher comparators (2026-07-26): same shim, dedicated ports so
     # the production sonnet shim on :8082 is never repurposed mid-run. Also
     # NOT in LADDER_ORDER — run with --rung opus-5 / --rung fable-5.

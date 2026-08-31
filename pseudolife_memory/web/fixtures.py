@@ -132,6 +132,10 @@ class FixtureService:
         self._db_url = "postgresql://pseudolife@localhost/pseudolife_memory"
         self._writer_id = "cortex-console-dev"
         self._persist_errors = 0
+        # Fixture marker: routes._health surfaces this as ``fixtures: true`` so
+        # the Console can announce demo data. The real MemoryService never
+        # declares it — an absent key means a real bank.
+        self.fixtures = True
 
     # health / stats — the flat default (2026-08-15): one band, one
     # capacity meter. The demo must show the shipped experience, not the

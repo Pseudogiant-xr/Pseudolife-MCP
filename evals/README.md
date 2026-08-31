@@ -57,7 +57,7 @@ disagree.
 | `qwen-a3b`       | Qwen3.6-35B-A3B (homelab 5800X3D)             | `$PSEUDOLIFE_BENCH_A3B_URL` (default `http://127.0.0.1:1236/v1`) |
 | `qwen-27b`       | Qwen3.8-27B (4090; migrated 2026-08-17, previously Qwen3.6-27B) | `$PSEUDOLIFE_BENCH_QWEN_URL` (default `http://127.0.0.1:1234/v1`) |
 
-Four further rungs are **registered but deliberately outside `LADDER_ORDER`**,
+Five further rungs are **registered but deliberately outside `LADDER_ORDER`**,
 so the default sweep is sovereign-only. They are runnable — `--rung sonnet-5`
 etc. — and are ceiling probes, not candidates:
 
@@ -67,11 +67,25 @@ etc. — and are ceiling probes, not candidates:
 | `opus-5`   | Claude Opus 5 (Max-plan CLI shim)                 | `http://127.0.0.1:8083/v1` |
 | `fable-5`  | Claude Fable 5 (Max-plan CLI shim)                | `http://127.0.0.1:8084/v1` |
 | `terra`    | GPT-5.6 Terra (ChatGPT-plan Codex CLI shim)       | `http://127.0.0.1:8086/v1` |
+| `luna`     | GPT-5.6 Luna (same shim, per-request override)    | `http://127.0.0.1:8086/v1` |
 
 The Claude three are served by `evals/claude_shim.py` (shells out to the
-`claude` CLI) and `terra` by `evals/codex_shim.py` (shells out to `codex
-exec`) — the only rungs that leave the machine. See "Everything runs
-locally" under the LongMemEval bench below for the same caveat.
+`claude` CLI) and the GPT two by `evals/codex_shim.py` (shells out to
+`codex exec`; `luna` names its model per request, so one shim launch
+serves both) — the only rungs that leave the machine. See "Everything
+runs locally" under the LongMemEval bench below for the same caveat.
+
+`terra` and `luna` were first measured 2026-09-01 (single runs, ChatGPT
+free tier, 3 batched extraction calls each): both score
+gold_recoverable 1.0 / stale_leak 0.0, matching the Claude ceiling rungs,
+at 13.1 tokens/query (`terra`, artifact `results/terra.json`) and
+14.6 tokens/query (`luna`, artifact `results/luna.json`) — inside the
+≤60%-of-naive gate but roughly 10× the Claude rungs' 1.4: both write
+wordier slot values. Reproducibility caveat: neither shim pins reasoning
+effort — the Codex shim inherits the host's `~/.codex/config.toml`
+(`model_reasoning_effort = "high"` for these runs) and the Claude shim
+the `claude` CLI's per-model default — so cross-machine reruns may
+measure a different effort setting.
 
 Every `:8081` rung shares that **one** endpoint: the operator swaps the served
 GGUF between runs (see below). Run one, then the next.
