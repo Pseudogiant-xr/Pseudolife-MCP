@@ -6,7 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Added (2026-08-31 — judge ladder measures the caution-line prompt variant)
+### Added (2026-08-31 — fixture dev server announces its demo data)
+- **The Console now shows a "DEMO DATA — fixture server, not a real bank"
+  banner when served by the fixture dev server.** The fixture bank
+  (`pseudolife_memory/web/devserver.py` + `FixtureService`) is visually
+  indistinguishable from a real daemon's Console — an external adopter
+  opened a fixture tab, read the 1,840 canned entries as his own bank, and
+  concluded the package shipped pre-populated with someone else's data
+  (2026-08-31); the only tell was the writer name in the System card.
+  Fixture payloads now self-announce: `FixtureService` declares a marker
+  the Console routes surface as `fixtures: true` on the overview health
+  object (and the devserver's top-level `/health` carries the same field),
+  and the topbar renders the flag as an always-visible warning chip in
+  place of the "live" chip. The real daemon's payloads are unchanged — no
+  marker, no new field; an absent key means a real bank
+  (`tests/test_web.py` pins both directions plus the topbar wiring).
 - **`evals/judge_ladder.py --caution`** re-runs the frozen merge-judge
   fixture with `low_differential` computed on each row's shown snippets
   (the two defect classes of the 2026-08-21 shadow comparison: an empty

@@ -282,6 +282,51 @@ def test_devserver_health_reports_real_schema():
     assert json.loads(body)["schema"] == SCHEMA_META_VERSION
 
 
+def test_fixture_health_carries_demo_flag_real_service_does_not(svc):
+    """2026-08-31: an external adopter opened a fixture-devserver tab, read the
+    canned demo bank as his own, and concluded the package shipped with someone
+    else's data. Fixture payloads must self-announce (``fixtures: true`` on the
+    health object the topbar polls, and on the devserver's ``/health``); the
+    real service declares no marker, so its payload must not grow the key at
+    all — absent means real."""
+    import json
+
+    from pseudolife_memory.web.devserver import build_dev_app
+
+    ov = ConsoleRoutes(svc).dispatch("GET", "/api/overview", {}, {})
+    assert ov["health"]["fixtures"] is True
+
+    st, body = call(build_dev_app(), "GET", "/health")
+    assert st == 200
+    assert json.loads(body)["fixtures"] is True
+
+    # Real-service path: MemoryService must not declare the marker, and a
+    # service without it must yield a health payload without the key.
+    from pseudolife_memory.service import MemoryService
+
+    assert not hasattr(MemoryService, "fixtures")
+
+    class _RealShaped:
+        _db_url = None
+        _writer_id = "writer"
+        _persist_errors = 0
+
+    assert "fixtures" not in ConsoleRoutes(_RealShaped())._health()
+
+
+def test_topbar_banner_keyed_on_fixture_flag():
+    """Source-level pin (no JS harness in this repo — see
+    test_console_static_js.py): the topbar must render the demo-data banner
+    from the ``fixtures`` health flag, or the backend flag is decoration."""
+    from pathlib import Path
+
+    app_js = (Path(__file__).resolve().parent.parent
+              / "pseudolife_memory" / "web" / "static" / "js" / "app.js")
+    src = app_js.read_text(encoding="utf-8")
+    assert "h.fixtures" in src, "topbar no longer reads the fixtures health flag"
+    assert "DEMO DATA" in src, "topbar demo-data banner text is gone"
+
+
 def test_asgi_api_overview(svc):
     st, body = call(_app(svc), "GET", "/api/overview")
     assert st == 200 and b"counts" in body

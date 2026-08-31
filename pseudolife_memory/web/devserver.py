@@ -36,7 +36,7 @@ def build_dev_app(token: str | None = None):
     def _health() -> dict:
         return {"status": "ok", "schema": SCHEMA_META_VERSION,
                 "storage": "postgres (fixture)", "auth": token is not None,
-                "persist_errors": 0, "mode": "devserver"}
+                "persist_errors": 0, "mode": "devserver", "fixtures": True}
 
     return build_console_app(_stub_mcp_app, token, _health, service)
 
