@@ -6,6 +6,41 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-31 — Codex CLI shim: dream on a ChatGPT plan)
+- **`evals/codex_shim.py`** — the OpenAI-side twin of the Claude CLI shim:
+  wraps headless `codex exec` (signed-in Codex CLI, ChatGPT-plan included
+  usage, no API key) as an OpenAI-compatible `/v1/chat/completions` on
+  `127.0.0.1:8086`, serving `gpt-5.6-terra` by default. The request's
+  system message rides `-c model_instructions_file=` (replacing Codex's
+  coding-agent persona), the reply is parsed from the `--json` event
+  stream so a failed turn raises instead of masquerading as an empty
+  extraction, and agent affordances are disabled (`--sandbox read-only`,
+  `--ephemeral`, no web search or shell tool). Honours a concrete `gpt-*`
+  / `codex-*` model named per request — the Console Dreamer card switches
+  it live, mirroring the Claude shim's `claude-*` handling. Registered as
+  the `terra` ladder rung (out of `LADDER_ORDER`, like `sonnet-5`).
+  Originates from the 2026-07-21 `feat/terra-shim` branch, updated for the
+  per-request model contract and moved off :8083 (now the opus-5 ceiling
+  rung's port) to :8086 (:8085 was already the events-teacher shim default
+  in `distill_datagen_events.py`). Not wired into the autostart installers, and extraction
+  quality is unmeasured pending a `--rung terra` ladder run; verified by
+  its test suite against the documented `codex exec --json` contract, not
+  yet against a live Codex install.
+
+### Changed (2026-08-31 — Dreamer presentation: non-Claude models are first-class)
+- **The Console no longer reads as Claude-only.** A real external adopter
+  on an OpenAI stack concluded from the Dreamer panel that other
+  providers' models "aren't an option" — the backend was always
+  provider-neutral (the override and extractor model knobs are plain
+  strings any OpenAI-compatible endpoint consumes). The custom-model
+  input's placeholder is now neutral (`model id…`, was `claude-…`), the
+  Dreamer card gains one-click GPT-5.6 presets (Sol / Terra / Luna,
+  honestly marked unmeasured), and the Dreamer help line plus the
+  `extractor_model_override` / `extractor_base_url` / `extractor_model`
+  knob help state plainly that any model id the wired endpoint serves
+  works (LM Studio/Ollama/vLLM names included), with `claude-*` /
+  `gpt-*` per-request switching as the shim special cases.
+  `docs/guide/dreaming.md` gains the matching "OpenAI primary" section.
 ### Fixed (2026-08-31 — claude_shim: a timed-out call can no longer wedge the shim)
 - **`evals/claude_shim.py` now kills the whole process tree on a call
   timeout.** The shim ran each call via `subprocess.run(..., timeout=...)`,

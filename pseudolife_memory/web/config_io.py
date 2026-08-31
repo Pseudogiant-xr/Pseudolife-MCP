@@ -290,12 +290,16 @@ KNOBS: list[dict[str, Any]] = [
      "label": "Dreamer model override", "type": "string", "default": None,
      "restart": False,
      "suggestions": ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5",
-                     "claude-fable-5"],
+                     "claude-fable-5", "gpt-5.6-sol", "gpt-5.6-terra",
+                     "gpt-5.6-luna"],
      "help": "Model-only override for the primary extractor — wins over BOTH "
              "env and config ownership, so the dreamer model can be switched "
-             "without re-owning the endpoint wiring. The Claude CLI shim "
-             "honours claude-* names per request; the fallback sidecar is "
-             "never affected. Empty = the endpoint's own default."},
+             "without re-owning the endpoint wiring. Any model id the wired "
+             "endpoint serves works here (LM Studio/Ollama/vLLM model names "
+             "included). The Claude CLI shim honours claude-* names per "
+             "request and the Codex CLI shim gpt-* names; the fallback "
+             "sidecar is never affected. Empty = the endpoint's own "
+             "default."},
     {"path": "memory.dream.extractor_source", "group": "Extractor",
      "label": "Settings source", "type": "enum", "default": "env",
      "options": ["env", "config"], "restart": False,
@@ -306,25 +310,28 @@ KNOBS: list[dict[str, Any]] = [
      "label": "Endpoint base URL", "type": "string", "format": "url",
      "default": None, "restart": False,
      "suggestions": ["http://host.docker.internal:8082/v1",
+                     "http://host.docker.internal:8086/v1",
                      "http://pseudolife-extractor:8081/v1",
                      "http://host.docker.internal:1234/v1",
                      "http://host.docker.internal:11434/v1",
                      "http://127.0.0.1:8081/v1"],
-     "help": "OpenAI-compatible /v1 endpoint. From inside the container the "
-             "host machine is host.docker.internal (Claude CLI shim = :8082; "
-             "sidecar = pseudolife-extractor:8081; LM Studio = :1234; "
-             "Ollama = :11434). Effective only when settings source = "
-             "config."},
+     "help": "OpenAI-compatible /v1 endpoint — any server speaking the "
+             "protocol works. From inside the container the host machine is "
+             "host.docker.internal (Claude CLI shim = :8082; Codex CLI "
+             "shim = :8086; sidecar = pseudolife-extractor:8081; LM "
+             "Studio = :1234; Ollama = :11434). Effective only when "
+             "settings source = config."},
     {"path": "memory.dream.extractor_model", "group": "Extractor",
      "label": "Model name", "type": "string", "default": None, "restart": False,
      "suggestions": ["extractor", "claude-opus-5", "claude-sonnet-5",
-                     "claude-haiku-4-5"],
-     "help": "Model id the endpoint expects (the bundled sidecar serves "
-             "\"extractor\"; LM Studio/Ollama use their loaded-model names). "
-             "Against the Claude CLI shim (:8082) a claude-* name switches "
-             "the served model per request — pick the dreamer here without "
-             "restarting anything. Effective only when settings source = "
-             "config."},
+                     "claude-haiku-4-5", "gpt-5.6-terra"],
+     "help": "Model id the endpoint expects — any name the endpoint serves "
+             "works (the bundled sidecar serves \"extractor\"; LM "
+             "Studio/Ollama use their loaded-model names). Against the "
+             "Claude CLI shim (:8082) a claude-* name — or the Codex CLI "
+             "shim (:8086) a gpt-* name — switches the served model per "
+             "request; pick the dreamer here without restarting anything. "
+             "Effective only when settings source = config."},
     {"path": "memory.dream.extractor_timeout_seconds", "group": "Extractor",
      "label": "Call timeout (s)", "type": "float", "default": 240.0,
      "min": 10.0, "max": 3600.0, "step": 10.0, "restart": False,

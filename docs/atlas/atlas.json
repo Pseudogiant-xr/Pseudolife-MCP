@@ -794,6 +794,20 @@
    ]
   },
   {
+   "id": "codexshim",
+   "g": "sidecar",
+   "x": 600,
+   "y": 1510,
+   "t": "Codex shim",
+   "s": "host · 127.0.0.1:8086",
+   "p": "evals/codex_shim.py",
+   "d": [
+    "Wraps the ChatGPT-plan codex CLI as an OpenAI-compatible endpoint",
+    "Manual launch — no autostart installer yet",
+    "Serves gpt-5.6-terra by default; gpt-*/codex-* honoured per request"
+   ]
+  },
+  {
    "id": "pgstorage",
    "g": "storage",
    "x": 1760,
@@ -1531,6 +1545,12 @@
    "f": "dream",
    "t": "sonnet",
    "l": "primary · host.docker.internal:8082",
+   "k": "data"
+  },
+  {
+   "f": "dream",
+   "t": "codexshim",
+   "l": "primary (opt-in) · host.docker.internal:8086",
    "k": "data"
   },
   {
