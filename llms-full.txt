@@ -3277,6 +3277,28 @@ limits: Codex hooks are **not available on Windows** — there the standing
 append it — and Codex has no per-prompt hook, so the per-turn discipline
 line has no Codex equivalent anywhere.
 
+Codex can also filter tools **client-side, per project**: a project-scoped
+`.codex/config.toml` (loaded for trusted projects only) may register the
+server with an `enabled_tools` allow-list, exposing just a subset of the
+memory tools to that one project (`disabled_tools` is the matching
+deny-list, applied after it):
+
+```toml
+# <project>/.codex/config.toml — trusted projects only
+[mcp_servers.pseudolife-memory]
+url = "http://127.0.0.1:8765/mcp"
+enabled_tools = ["memory_search", "memory_store", "memory_outcome"]
+startup_timeout_sec = 20
+tool_timeout_sec = 60
+```
+
+This complements the daemon's server-side
+[toolset tiers](configuration.md#toolset-tiers): tiers key the roster to
+the caller's identity for every session, while `enabled_tools` narrows it
+further for a single project without touching the daemon. One operational
+note (verified live 2026-08-31): Codex does not hot-reload newly added MCP
+servers — restart the session after registering one.
+
 ## Gemini CLI
 
 MCP wiring is first-class and scriptable (flags verified against Gemini CLI
