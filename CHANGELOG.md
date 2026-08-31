@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-01 — beam_rejudge: a timed-out judge call can no longer hang the run)
+- **`evals/beam_rejudge.py` now kills the whole process tree on a judge-call
+  timeout** — the same `subprocess.run(..., timeout=...)` gap fixed in
+  `claude_shim.py` and `codex_shim.py`: the timeout kills only the direct
+  child (`claude.cmd` → `cmd.exe` → node on Windows) and reaps it with an
+  unbounded `communicate()`, so a surviving node descendant holding the
+  stdout pipe blocks the reap forever. `CliJudge` is pooled rather than
+  serialized, so a wedged call permanently ate a worker slot and kept the
+  run from ever exiting instead of wedging a lock; the per-call fix is
+  identical — a `Popen`/`communicate` seam with `start_new_session` on
+  POSIX and a tree kill (`os.killpg` / `taskkill /F /T`) before the reap.
+  `evals/beam_reader_sweep.py` builds its answerer and judge from the same
+  `CliJudge`, so its long-generation answer calls — the likelier ones to
+  time out — get the fix for free. No behavior change outside the timeout
+  path. (`evals/beam_rejudge.py`, `tests/test_beam_rejudge.py`.)
+
 ### Added (2026-08-31 — installer wiring for the Codex dreamer)
 - **`codex-only` / `codex-fallback` extractor modes** in `ops/install.sh`
   / `ops\install.ps1`: the one-shot installer now wires a ChatGPT-plan
