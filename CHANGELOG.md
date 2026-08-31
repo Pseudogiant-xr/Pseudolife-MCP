@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-08-31 — claude_shim: a timed-out call can no longer wedge the shim)
+- **`evals/claude_shim.py` now kills the whole process tree on a call
+  timeout.** The shim ran each call via `subprocess.run(..., timeout=...)`,
+  whose timeout path kills only the direct child and then reaps it with an
+  unbounded `communicate()`. The `claude` CLI is a node program behind a
+  wrapper (`claude.cmd` → `cmd.exe` → node on Windows; a shell shim on
+  POSIX), so a surviving descendant holding the stdout pipe made that reap
+  block forever — with the shim's serialization lock held, wedging every
+  later call, including the daemon's dream primary on :8082. Calls now go
+  through a `Popen`/`communicate` seam that detaches the child into its own
+  session on POSIX (`start_new_session`) and, on timeout, kills the tree
+  (`os.killpg` on POSIX, `taskkill /F /T` on Windows) before reaping — the
+  same structure as `codex_shim.py`. No behavior change outside the timeout
+  path. (`evals/claude_shim.py`, `tests/test_claude_shim_health.py`.)
+
 ### Added (2026-08-31 — logical export/import: `pseudolife-mcp export` / `import`)
 - **The bank now has a logical transfer layer beside the physical backups.**
   `pseudolife-mcp export` writes the whole bank as a portable ZIP — one

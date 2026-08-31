@@ -4,9 +4,12 @@ answers 503 so the daemon's fallback probe sees primary-down)."""
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 import time
 from pathlib import Path
+
+import pytest
 
 REPO = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location(
@@ -89,6 +92,78 @@ def test_health_stale_cache_served_while_revalidating(monkeypatch):
     assert calls["n"] == 1                   # exactly one refresh, no stampede
 
 
+# ── timeout kill path (mirrors test_codex_shim_health) ─────────────────────
+
+
+def test_timeout_kills_the_whole_process_tree(monkeypatch):
+    # subprocess timeout kills only the DIRECT child, then reaps with an
+    # unbounded communicate(). The CLI is a node program behind a wrapper
+    # (claude.cmd -> cmd.exe -> node on Windows; a shell shim on POSIX), so
+    # the real claude survives holding the stdout pipe — the reap blocks
+    # forever with the serialization lock held, wedging every later call.
+    # The ORDER is the contract: kill the tree first, THEN reap — a reap
+    # before the kill is exactly the wedge being fixed.
+    seq = []
+
+    class _Proc:
+        pid = 4321
+
+        def communicate(self, payload=None, timeout=None):
+            if timeout is not None:
+                raise shim.subprocess.TimeoutExpired("claude", timeout)
+            seq.append("reap")
+            return b"", b""
+
+    monkeypatch.setattr(shim.subprocess, "Popen", lambda *a, **k: _Proc())
+    monkeypatch.setattr(shim, "_kill_tree",
+                        lambda p: seq.append(("kill", p.pid)))
+    cli = shim.ClaudeCli(Path("claude.exe"), "m", 0.01)
+    with pytest.raises(shim.subprocess.TimeoutExpired):
+        cli.chat("sys", "hi")
+    assert seq == [("kill", 4321), "reap"]
+
+
+def test_kill_tree_on_windows_taskkills_the_whole_pid_tree(monkeypatch):
+    # taskkill /F /T is the load-bearing kill on the production platform
+    # (the dream primary on :8082 runs on a Windows host), and its failures
+    # are swallowed (check=False) — so the argv is pinned here, where a
+    # wrong flag is a test failure instead of a silent re-wedge.
+    calls = []
+    monkeypatch.setattr(shim.os, "name", "nt")
+    monkeypatch.setattr(shim.subprocess, "run",
+                        lambda argv, **k: calls.append(argv))
+
+    class _Proc:
+        pid = 4321
+
+    shim._kill_tree(_Proc())
+    assert calls == [["taskkill", "/F", "/T", "/PID", "4321"]]
+
+
+def test_run_detaches_the_child_into_its_own_session_on_posix(monkeypatch):
+    # The POSIX kill path is os.killpg on the child's process group, which
+    # only takes the descendants if the child LEADS its own session —
+    # start_new_session is the enabling condition, and this repo develops
+    # on Windows where that branch otherwise never executes.
+    seen = {}
+
+    class _Proc:
+        pid = 1
+        returncode = 0
+
+        def communicate(self, payload=None, timeout=None):
+            return b"", b""
+
+    def _popen(*a, **k):
+        seen.update(k)
+        return _Proc()
+
+    monkeypatch.setattr(shim.subprocess, "Popen", _popen)
+    cli = shim.ClaudeCli(Path("claude.exe"), "m", 30.0)
+    cli._run(["claude", "-p"], b"hi")
+    assert seen["start_new_session"] == (os.name != "nt")
+
+
 # ── per-request model override (2026-08-02 dashboard switcher) ─────────────
 
 
@@ -106,20 +181,15 @@ def test_resolve_model_aliases_keep_launch_default():
     assert shim.resolve_model("", "claude-opus-5") == "claude-opus-5"
 
 
-def test_chat_passes_override_model_to_cli(monkeypatch):
+def test_chat_passes_override_model_to_cli():
     captured = {}
-
-    def fake_run(cmd, **kw):
-        captured["model"] = cmd[cmd.index("--model") + 1]
-
-        class R:
-            returncode = 0
-            stdout = b'{"result": "ok"}'
-            stderr = b""
-        return R()
-
-    monkeypatch.setattr(shim.subprocess, "run", fake_run)
     cli = shim.ClaudeCli(Path("claude.exe"), "claude-opus-5", 30.0)
+
+    def fake_run(cmd, payload):
+        captured["model"] = cmd[cmd.index("--model") + 1]
+        return 0, b'{"result": "ok"}', b""
+
+    cli._run = fake_run
     cli.chat("sys", "user", model="claude-sonnet-5")
     assert captured["model"] == "claude-sonnet-5"
     cli.chat("sys", "user")
