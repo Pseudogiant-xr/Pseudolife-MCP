@@ -20,7 +20,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the wrong family (e.g. `claude-*` with a codex mode) is rejected up
   front instead of silently serving the shim's launch default.
   `-ShimPort`/`--shim-port` default is now `0` = auto (8082 for Claude
-  modes, 8086 for Codex ones).
+  modes, 8086 for Codex ones). A mode switch tears down the other
+  family's autostart task/unit (an abandoned shim would keep making real
+  CLI calls at every health refresh on a plan its owner believes is
+  off), and a shim mode whose CLI is missing now fails fast right after
+  the extractor choice instead of dying at the autostart stage with the
+  stack already up — preflight only knows `--client`, so
+  `--extractor codex-fallback --client claude` used to sail through.
 - **`codex_shim.py --health-ttl`** (default unchanged at 300 s; the
   autostart passes 1800 s): every `/health` refresh is a real CLI call —
   metered spend on a free ChatGPT tier (~288 calls/day at 300 s) — and a

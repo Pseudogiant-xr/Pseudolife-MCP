@@ -249,6 +249,34 @@ def test_installer_env_block_covers_codex_modes() -> None:
     assert "install-codex-shim-autostart.sh" in sh
 
 
+def test_mode_switch_tears_down_the_sibling_shim_autostart() -> None:
+    """Re-running with a different -Extractor is the documented way to switch
+    modes, so a cross-family switch (codex -> sonnet, any -> sidecar) must
+    remove the other family's autostart — an abandoned codex task keeps
+    burning real ChatGPT-tier CLI calls at every /health refresh, forever,
+    on a machine whose owner believes it is turned off (2026-08-31 review
+    finding)."""
+    ps = _read("ops/install.ps1")
+    sh = _read("ops/install.sh")
+    assert '"Pseudolife Codex Shim"' in ps
+    assert '"Pseudolife Claude Shim"' in ps
+    assert '"Pseudolife Sonnet Shim"' in ps       # pre-rename installs too
+    assert "pseudolife-codex-shim.service" in sh
+    assert "pseudolife-sonnet-shim.service" in sh
+
+
+def test_shim_modes_fail_fast_on_a_missing_cli() -> None:
+    """The shim family's CLI is checked right after the extractor choice,
+    BEFORE volumes/env/compose — preflight only knows -Client, so
+    `-Extractor codex-fallback -Client claude` used to sail through
+    preflight and die at stage 8 with the stack already up (2026-08-31
+    review finding; symmetric fix for the claude modes)."""
+    ps = _read("ops/install.ps1")
+    sh = _read("ops/install.sh")
+    for text in (ps, sh):
+        assert "needed by extractor mode" in text
+
+
 def test_preflight_codex_check_knows_the_official_installer_layout() -> None:
     """Get-Command codex misses the official Windows installer entirely
     (codex.exe lives in %LOCALAPPDATA%\\OpenAI\\Codex\\bin\\<hash>\\, off

@@ -15,8 +15,10 @@
 #
 # --health-ttl default is 1800s (not the shim's own 300s): every /health
 # refresh is a real CLI call — metered spend on a free ChatGPT tier
-# (300s ≈ 288 calls/day; 1800s ≈ 48). A stale-ok window only costs one
-# failed primary attempt before the dream falls back.
+# (300s ≈ 288 calls/day; 1800s ≈ 48 — arithmetic, not a measured quota; no
+# free-tier limit has been measured, so revisit if one surfaces). A
+# stale-ok window only costs one failed primary attempt before the dream
+# falls back.
 set -euo pipefail
 
 PORT=8086

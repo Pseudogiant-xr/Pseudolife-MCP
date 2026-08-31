@@ -4102,10 +4102,11 @@ The precise claim: **your memory text never leaves the machine — on the
 sidecar extractor mode.** The Docker tier's default ships a local CPU
 extractor **sidecar**, so **dream** consolidation — the step that reads
 your memory stream and turns it into facts — runs on your box with no
-API key and no outbound request. The installer's `sonnet-only` and
-`sonnet-fallback` modes trade this away deliberately: they route dream
+API key and no outbound request. The installer's `sonnet-only` /
+`sonnet-fallback` modes trade this away deliberately — they route dream
 extraction through the Claude CLI, which sends the extracted stream to
-Anthropic.
+Anthropic — and the `codex-only` / `codex-fallback` modes trade it away
+the same way toward OpenAI (the Codex CLI carries the stream).
 Retrieval embeddings are local too, and the weights are baked into the
 image. (Not the same as "never touches the network": the first pip install
 downloads an embedding model, and image pulls are image pulls. Those carry

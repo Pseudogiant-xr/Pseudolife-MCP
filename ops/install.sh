@@ -324,6 +324,19 @@ case "$MODEL" in
     gpt-*) [ -z "$claude_shim_mode" ] || {
         echo "--model $MODEL does not match extractor mode $EXTRACTOR" >&2; exit 2; } ;;
 esac
+# Fail fast on a missing shim CLI: preflight only knows --client, so e.g.
+# --extractor codex-fallback --client claude would otherwise sail through
+# and die at the autostart stage with the stack already up.
+if [ -n "$claude_shim_mode" ] && ! command -v claude >/dev/null 2>&1; then
+    echo "claude CLI not found (needed by extractor mode $EXTRACTOR) —" >&2
+    echo "  npm install -g @anthropic-ai/claude-code, then log in" >&2
+    exit 1
+fi
+if [ -n "$codex_shim_mode" ] && ! command -v codex >/dev/null 2>&1; then
+    echo "codex CLI not found (needed by extractor mode $EXTRACTOR) —" >&2
+    echo "  install Codex and run \`codex login\`: https://developers.openai.com/codex/cli/" >&2
+    exit 1
+fi
 
 # ── 3b. dreamer model choice (Claude-shim modes only) ──────────────────────
 # Opus is the recommended default per the 2026-08-02 same-harness comparison
@@ -430,6 +443,7 @@ step "Wrote managed block in ops/.env"
 # ── 6. sidecar enable/disable via the compose override ────────────────────
 installer_owns_override() {
     [ -f "$override_file" ] || return 1
+    local first
     first="$(head -1 "$override_file")"
     [ "$first" = "$OVERRIDE_MARKER" ] || [ "$first" = "$LEGACY_OVERRIDE_MARKER" ]
 }
@@ -474,6 +488,19 @@ docker compose "${compose[@]}" up -d --build
 # Best-effort, like the .ps1: a host without systemd --user (macOS, some WSL)
 # must not abort the install between `compose up` and the hooks/mcp-add/health
 # steps — that strands a running stack that was never wired into Claude Code.
+# A mode switch must tear down the OTHER family's autostart: an abandoned
+# shim unit keeps making real CLI calls at every /health refresh, forever,
+# on a plan whose owner believes it is turned off.
+remove_shim_unit() {
+    command -v systemctl >/dev/null 2>&1 || return 0
+    if systemctl --user is-enabled "$1" >/dev/null 2>&1 \
+            || systemctl --user is-active "$1" >/dev/null 2>&1; then
+        systemctl --user disable --now "$1" >/dev/null 2>&1 || true
+        step "Removed autostart unit $1"
+    fi
+}
+[ -n "$codex_shim_mode" ] || remove_shim_unit pseudolife-codex-shim.service
+[ -n "$claude_shim_mode" ] || remove_shim_unit pseudolife-sonnet-shim.service
 if [ -n "$claude_shim_mode" ]; then
     step "Registering the Claude shim autostart (systemd --user)..."
     if ! "$repo/ops/install-shim-autostart.sh" --port "$SHIM_PORT" --model "$MODEL"; then

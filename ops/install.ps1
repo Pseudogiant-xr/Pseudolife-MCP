@@ -282,6 +282,19 @@ if (($claudeShimMode -and $Model -and -not $Model.StartsWith("claude-")) -or
     ($codexShimMode -and $Model -and -not $Model.StartsWith("gpt-"))) {
     throw "-Model $Model does not match extractor mode $Extractor"
 }
+# Fail fast on a missing shim CLI: preflight only knows -Client, so e.g.
+# -Extractor codex-fallback -Client claude would otherwise sail through and
+# die at the autostart stage with the stack already up.
+if ($claudeShimMode -and -not (Get-Command claude -ErrorAction SilentlyContinue)) {
+    throw ("claude CLI not found (needed by extractor mode $Extractor) - " +
+           "npm install -g @anthropic-ai/claude-code, then log in")
+}
+if ($codexShimMode -and
+    -not (Get-Command codex -ErrorAction SilentlyContinue) -and
+    -not (Get-ChildItem "$env:LOCALAPPDATA\OpenAI\Codex\bin\*\codex.exe" -ErrorAction SilentlyContinue)) {
+    throw ("codex CLI not found (needed by extractor mode $Extractor) - " +
+           "install Codex and run ``codex login``: https://developers.openai.com/codex/cli/")
+}
 
 # -- 3b. dreamer model choice (Claude-shim modes only) ---------------------------
 # Opus is the recommended default per the 2026-08-02 same-harness comparison
@@ -436,6 +449,24 @@ docker compose @compose up -d --build
 if ($LASTEXITCODE -ne 0) { throw "compose up failed" }
 
 # -- 8. CLI shim autostart (Claude / Codex modes) ---------------------------------
+# A mode switch must tear down the OTHER family's autostart: an abandoned
+# shim task keeps making real CLI calls at every /health refresh, forever,
+# on a plan whose owner believes it is turned off. Best-effort like the
+# registration below (unelevated removal fails; warn with the manual step).
+function Remove-ShimTask($name) {
+    if (-not (Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue)) { return }
+    Unregister-ScheduledTask -TaskName $name -Confirm:$false -ErrorAction SilentlyContinue
+    if (Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue) {
+        Write-Warning "could not remove autostart task '$name' (needs an ELEVATED pwsh) - its shim keeps starting at logon until you remove it"
+    } else {
+        Step "Removed autostart task '$name' (a running shim process, if any, persists until logoff)"
+    }
+}
+if (-not $codexShimMode) { Remove-ShimTask "Pseudolife Codex Shim" }
+if (-not $claudeShimMode) {
+    Remove-ShimTask "Pseudolife Claude Shim"
+    Remove-ShimTask "Pseudolife Sonnet Shim"   # pre-rename installs
+}
 if ($claudeShimMode) {
     Step "Registering the Claude shim autostart (Task Scheduler; needs an ELEVATED pwsh)..."
     try {
