@@ -1,0 +1,19 @@
+{
+  "rung": "luna",
+  "label": "GPT-5.6 Luna (ChatGPT-plan Codex shim, ceiling probe)",
+  "kind": "llm",
+  "extract_seconds": 71.3,
+  "consolidation": {
+    "pulled": 26,
+    "claims": 16,
+    "inserted": 16,
+    "superseded": 0,
+    "literal_flagged": 0,
+    "literal_dropped": 0
+  },
+  "gold_recoverable": 1.0,
+  "stale_leak": 0.0,
+  "tokens_per_query": 14.6,
+  "search_latency_ms": 305.1,
+  "status": "ok"
+}
