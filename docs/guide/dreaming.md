@@ -350,8 +350,9 @@ extractor request as `reasoning_effort`:
   (`low`/`medium`/`high`/`xhigh`/`max`),
 - the Codex CLI shim maps it to `-c model_reasoning_effort=`
   (`minimal`/`low`/`medium`/`high`/`xhigh`),
-- OpenAI-compatible servers read the field natively, and servers that
-  don't know it ignore it.
+- OpenAI-compatible servers read the field natively; most local runtimes
+  ignore the unknown field, though a hosted API may reject an unsupported
+  value with a clear 400 — the failure is loud, never silent.
 
 Empty (the default) means the field is never sent — exactly the pre-knob
 behavior. The fallback sidecar never receives it, same rule as the

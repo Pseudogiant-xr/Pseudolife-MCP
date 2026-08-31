@@ -17,7 +17,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   next dream): a set value rides every primary extractor request as
   `reasoning_effort` — the Claude shim maps it to `claude --effort`, the
   Codex shim to `-c model_reasoning_effort=`, OpenAI-compatible servers
-  read it natively, unknown-field servers ignore it. Empty (default) sends
+  read it natively, most local runtimes ignore the unknown field (a hosted
+  API may reject an unsupported value loudly). Empty (default) sends
   nothing — byte-identical to the old behavior — and the fallback sidecar
   never receives it (same rule as the model-only override). Both shims
   also grew a `--reasoning-effort` launch flag; a request's value wins.

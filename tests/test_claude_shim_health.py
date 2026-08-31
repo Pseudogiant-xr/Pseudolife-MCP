@@ -232,3 +232,34 @@ def test_no_effort_omits_the_flag():
     cli._run = fake_run
     cli.chat("sys", "user")
     assert "--effort" not in captured["cmd"]
+
+
+def test_chat_completions_thread_reasoning_effort(monkeypatch):
+    # Mirror of the codex shim's handler pin: the daemon's extra_body lands
+    # the field in the request JSON; the handler must hand it to chat() or
+    # the knob silently does nothing on the DEPLOYED primary (:8082).
+    import json
+    import threading
+    import urllib.request
+
+    cli = shim.ClaudeCli(Path("claude.exe"), "claude-opus-5", 30.0)
+    seen = {}
+
+    def _chat(system, user, model=None, effort=None):
+        seen["effort"] = effort
+        return "pong"
+    monkeypatch.setattr(cli, "chat", _chat)
+    srv = shim.ThreadingHTTPServer(("127.0.0.1", 0), shim.make_handler(cli))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{srv.server_address[1]}/v1/chat/completions",
+            data=json.dumps({"model": "extractor", "reasoning_effort": "low",
+                             "messages": [{"role": "user", "content": "hi"}]
+                             }).encode(),
+            headers={"content-type": "application/json"})
+        with urllib.request.urlopen(req):
+            pass
+    finally:
+        srv.shutdown()
+    assert seen["effort"] == "low"

@@ -137,6 +137,14 @@ function dreamerCard() {
       onclick: () => setDreamerEffort(lv),
     }, lv));
   }
+  if (effort && !DREAMER_EFFORTS.includes(effort)) {
+    // A provider extra ("minimal"/"max") set via the Extractor panel —
+    // surface it as the active state so the row never hides its own knob.
+    effortSegs.push(el("button", { class: "seg active",
+      "aria-pressed": "true", disabled: true,
+      title: "custom effort — set via the Extractor panel below",
+    }, effort));
+  }
 
   return el("div", { class: "panel dreamer reveal" },
     el("div", { class: "panel-head" },
@@ -163,7 +171,7 @@ function dreamerCard() {
         + "Claude CLI shim honours claude-* names per request, the Codex CLI "
         + "shim gpt-* names; the local sidecar ignores model names. Effort "
         + "rides each request as reasoning_effort — the CLI shims map it to "
-        + "their effort flag, servers that don't know the field ignore it, "
+        + "their effort flag, most local runtimes ignore the unknown field, "
         + "and the fallback sidecar is never affected (provider extras like "
         + "\"minimal\"/\"max\" via the Extractor panel below).")));
 }

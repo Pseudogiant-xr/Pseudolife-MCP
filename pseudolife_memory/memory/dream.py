@@ -1088,7 +1088,15 @@ class OpenAICompatExtractor:
         if self.api_key:
             headers["authorization"] = f"Bearer {self.api_key}"
         try:
-            payload = {**self.extra_body,
+            # The judge owns its thinking dimension (judge_thinking / the
+            # enable_thinking pin below) — the dreamer's effort knob rides
+            # extra_body on the shared primary extractor (judge_url unset)
+            # and must NOT reach this payload: the CLI shims honour a
+            # top-level reasoning_effort, which would silently override the
+            # pin the moment an operator tunes the dreamer.
+            extra = {k: v for k, v in self.extra_body.items()
+                     if k != "reasoning_effort"}
+            payload = {**extra,
                 "model": self.model,
                 "messages": [
                     {"role": "system", "content": _JUDGE_SYSTEM_PROMPT},

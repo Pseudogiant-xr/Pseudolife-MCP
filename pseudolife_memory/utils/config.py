@@ -318,7 +318,8 @@ class DreamConfig:
     # CLI config (the 2026-09-01 ladder artifacts ran that way, at the Codex
     # host's "high"). A set value is passed through verbatim: the CLI shims
     # map it to their effort flag per request, OpenAI-compatible servers read
-    # it natively, and servers that don't know the field ignore it. The
+    # it natively, and most local runtimes ignore the unknown field (a hosted
+    # API may instead reject an unsupported value with a clear 400). The
     # fallback sidecar never receives it (same rule as the model override).
     extractor_reasoning_effort: str | None = None
     # Output budget for the extractor call. Sized generously so a dense dream

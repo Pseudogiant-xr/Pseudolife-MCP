@@ -310,9 +310,10 @@ KNOBS: list[dict[str, Any]] = [
              "config). The Claude CLI shim maps it to claude --effort "
              "(low/medium/high/xhigh/max), the Codex CLI shim to "
              "model_reasoning_effort (minimal/low/medium/high/xhigh); "
-             "OpenAI-compatible servers read the field natively and servers "
-             "that don't know it ignore it. The fallback sidecar is never "
-             "affected."},
+             "OpenAI-compatible servers read the field natively; most local "
+             "runtimes ignore the unknown field, though a hosted API may "
+             "reject an unsupported value with a clear 400. The fallback "
+             "sidecar is never affected."},
     {"path": "memory.dream.extractor_source", "group": "Extractor",
      "label": "Settings source", "type": "enum", "default": "env",
      "options": ["env", "config"], "restart": False,
