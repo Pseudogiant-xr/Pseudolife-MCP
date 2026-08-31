@@ -293,7 +293,7 @@ existing single-extractor behavior.
 The same pattern works on an OpenAI subscription: `evals/codex_shim.py` is
 the ChatGPT-plan twin of the Claude shim. It wraps headless `codex exec`
 (the signed-in Codex CLI's included usage — no API key) as an
-OpenAI-compatible endpoint on `127.0.0.1:8085`, serving `gpt-5.6-terra` by
+OpenAI-compatible endpoint on `127.0.0.1:8086`, serving `gpt-5.6-terra` by
 default. Start it by hand (there is no autostart installer for it yet):
 
 ```bash
@@ -301,7 +301,7 @@ python evals/codex_shim.py    # --model gpt-5.6-sol / gpt-5.6-luna to change the
 ```
 
 then point the env triple at it exactly as in step 2 above, with
-`PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:8085/v1` (and, on
+`PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:8086/v1` (and, on
 Linux, the same docker-bridge bind note as the Claude shim — pass `--host`
 accordingly). The shim honours a concrete `gpt-*` or `codex-*` name per
 request, so the Console's **Dreamer** card switches between `gpt-5.6-sol`

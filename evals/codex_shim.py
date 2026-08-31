@@ -38,7 +38,7 @@ Notes:
 Endpoints: POST /v1/chat/completions, GET /health, GET /v1/models.
 
 Usage:
-    python evals/codex_shim.py [--port 8085] [--model gpt-5.6-terra]
+    python evals/codex_shim.py [--port 8086] [--model gpt-5.6-terra]
         [--cli PATH] [--call-timeout 300]
 """
 from __future__ import annotations
@@ -48,6 +48,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -119,7 +120,14 @@ def _kill_tree(proc: subprocess.Popen) -> None:
         subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
                        capture_output=True, check=False)
     else:
-        proc.kill()
+        # The child leads its own session (start_new_session in _run), so
+        # killing the group takes its descendants too. proc.kill() alone
+        # leaves a surviving grandchild holding the stdout pipe, and the
+        # reaping communicate() then blocks forever with the lock held.
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            proc.kill()
 
 
 def _parse_reply(stdout: str) -> str:
@@ -202,7 +210,8 @@ class CodexCli:
         lives (``subprocess.run``'s timeout kills only the direct child)."""
         proc = subprocess.Popen(argv, stdin=subprocess.PIPE,
                                 stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE)
+                                stderr=subprocess.PIPE,
+                                start_new_session=(os.name != "nt"))
         try:
             out, err = proc.communicate(payload, timeout=self.call_timeout)
         except subprocess.TimeoutExpired:
@@ -360,10 +369,11 @@ def _parse_args(argv=None):
                          "IP (host-gateway), so bind that (e.g. 172.17.0.1) "
                          "instead of loopback — 0.0.0.0 exposes the "
                          "unauthenticated shim to the LAN")
-    ap.add_argument("--port", type=int, default=8085,
+    ap.add_argument("--port", type=int, default=8086,
                     help="8082 is claude_shim's, 8083/8084 its opus-5/fable-5 "
-                         "ceiling-rung instances; side-by-side needs a free "
-                         "port")
+                         "ceiling-rung instances, 8085 the events-teacher "
+                         "shim default (distill_datagen_events.py); "
+                         "side-by-side needs a free port")
     ap.add_argument("--call-timeout", type=float, default=300.0)
     ap.add_argument("--system-prompt-file", type=Path, default=None,
                     help="replace the production _SYSTEM_PROMPT prefix with "

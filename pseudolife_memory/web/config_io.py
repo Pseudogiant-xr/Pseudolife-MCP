@@ -310,7 +310,7 @@ KNOBS: list[dict[str, Any]] = [
      "label": "Endpoint base URL", "type": "string", "format": "url",
      "default": None, "restart": False,
      "suggestions": ["http://host.docker.internal:8082/v1",
-                     "http://host.docker.internal:8085/v1",
+                     "http://host.docker.internal:8086/v1",
                      "http://pseudolife-extractor:8081/v1",
                      "http://host.docker.internal:1234/v1",
                      "http://host.docker.internal:11434/v1",
@@ -318,7 +318,7 @@ KNOBS: list[dict[str, Any]] = [
      "help": "OpenAI-compatible /v1 endpoint — any server speaking the "
              "protocol works. From inside the container the host machine is "
              "host.docker.internal (Claude CLI shim = :8082; Codex CLI "
-             "shim = :8085; sidecar = pseudolife-extractor:8081; LM "
+             "shim = :8086; sidecar = pseudolife-extractor:8081; LM "
              "Studio = :1234; Ollama = :11434). Effective only when "
              "settings source = config."},
     {"path": "memory.dream.extractor_model", "group": "Extractor",
@@ -329,7 +329,7 @@ KNOBS: list[dict[str, Any]] = [
              "works (the bundled sidecar serves \"extractor\"; LM "
              "Studio/Ollama use their loaded-model names). Against the "
              "Claude CLI shim (:8082) a claude-* name — or the Codex CLI "
-             "shim (:8085) a gpt-* name — switches the served model per "
+             "shim (:8086) a gpt-* name — switches the served model per "
              "request; pick the dreamer here without restarting anything. "
              "Effective only when settings source = config."},
     {"path": "memory.dream.extractor_timeout_seconds", "group": "Extractor",

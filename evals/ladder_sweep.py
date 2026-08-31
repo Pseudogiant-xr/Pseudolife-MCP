@@ -130,7 +130,7 @@ RUNGS: dict[str, dict] = {
     # sonnet-5 — NOT in LADDER_ORDER; run with --rung terra.
     "terra": {"kind": "llm",
               "label": "GPT-5.6 Terra (ChatGPT-plan Codex shim, ceiling probe)",
-              "base_url": "http://127.0.0.1:8085/v1",
+              "base_url": "http://127.0.0.1:8086/v1",
               "model": "extractor"},
     # Smarter-teacher comparators (2026-07-26): same shim, dedicated ports so
     # the production sonnet shim on :8082 is never repurposed mid-run. Also

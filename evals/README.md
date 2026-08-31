@@ -57,7 +57,7 @@ disagree.
 | `qwen-a3b`       | Qwen3.6-35B-A3B (homelab 5800X3D)             | `$PSEUDOLIFE_BENCH_A3B_URL` (default `http://127.0.0.1:1236/v1`) |
 | `qwen-27b`       | Qwen3.8-27B (4090; migrated 2026-08-17, previously Qwen3.6-27B) | `$PSEUDOLIFE_BENCH_QWEN_URL` (default `http://127.0.0.1:1234/v1`) |
 
-Three further rungs are **registered but deliberately outside `LADDER_ORDER`**,
+Four further rungs are **registered but deliberately outside `LADDER_ORDER`**,
 so the default sweep is sovereign-only. They are runnable — `--rung sonnet-5`
 etc. — and are ceiling probes, not candidates:
 
@@ -66,9 +66,11 @@ etc. — and are ceiling probes, not candidates:
 | `sonnet-5` | Claude Sonnet 5 (Max-plan CLI shim)               | `http://127.0.0.1:8082/v1` |
 | `opus-5`   | Claude Opus 5 (Max-plan CLI shim)                 | `http://127.0.0.1:8083/v1` |
 | `fable-5`  | Claude Fable 5 (Max-plan CLI shim)                | `http://127.0.0.1:8084/v1` |
+| `terra`    | GPT-5.6 Terra (ChatGPT-plan Codex CLI shim)       | `http://127.0.0.1:8086/v1` |
 
-These three are served by `evals/claude_shim.py`, which shells out to the
-`claude` CLI — the only rungs that leave the machine. See "Everything runs
+The Claude three are served by `evals/claude_shim.py` (shells out to the
+`claude` CLI) and `terra` by `evals/codex_shim.py` (shells out to `codex
+exec`) — the only rungs that leave the machine. See "Everything runs
 locally" under the LongMemEval bench below for the same caveat.
 
 Every `:8081` rung shares that **one** endpoint: the operator swaps the served

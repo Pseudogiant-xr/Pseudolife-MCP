@@ -24,7 +24,7 @@ const DREAMER_MODELS = [
     note: "fastest / lightest on plan usage" },
   { id: "claude-fable-5", label: "Fable 5", note: "most capable tier" },
   // GPT-5.6 family: served per request by the Codex CLI shim
-  // (evals/codex_shim.py, :8085) or any OpenAI-compatible endpoint that
+  // (evals/codex_shim.py, :8086) or any OpenAI-compatible endpoint that
   // knows these ids. Extraction quality unmeasured here — the ladder has
   // only measured the Claude models and the local sidecars.
   { id: "gpt-5.6-sol", label: "Sol", note: "OpenAI flagship — unmeasured here" },

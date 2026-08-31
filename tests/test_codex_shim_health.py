@@ -7,8 +7,11 @@ than bare stdout."""
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
+import threading
 import time
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -35,10 +38,11 @@ def _cli(monkeypatch, chat_ok: bool):
 # --- CLI contract -------------------------------------------------------
 
 def test_parse_args_defaults_to_terra_on_its_own_port():
-    # 8082 is the Claude shim's and 8083/8084 its opus-5/fable-5 ceiling-rung
-    # instances; the shims must be able to run side by side.
+    # 8082 is the Claude shim's, 8083/8084 its opus-5/fable-5 ceiling-rung
+    # instances, and 8085 the events-teacher shim default
+    # (distill_datagen_events.py); the shims must run side by side.
     args = shim._parse_args([])
-    assert args.port == 8085
+    assert args.port == 8086
     assert args.model == "gpt-5.6-terra"
     assert args.host == "127.0.0.1"
 
@@ -226,6 +230,57 @@ def test_resolve_cli_returns_a_launchable_path_for_a_bare_name(tmp_path,
                         lambda n: str(target) if n == "codex" else None)
     assert shim._resolve_cli(Path("codex")) == target
     assert shim._resolve_cli(Path("nope-not-here")) is None
+
+
+# --- HTTP layer ---------------------------------------------------------
+
+def _serve(cli):
+    """Real ThreadingHTTPServer on an ephemeral port; caller must shutdown()."""
+    srv = shim.ThreadingHTTPServer(("127.0.0.1", 0), shim.make_handler(cli))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, f"http://127.0.0.1:{srv.server_address[1]}"
+
+
+def test_models_listing_leads_with_the_launch_model():
+    # The daemon's served-model alias resolution takes the FIRST /v1/models
+    # entry as the shim's launch model — ordering is load-bearing, and the
+    # listing must dedup when the launch model is one of the suggested trio.
+    cli = shim.CodexCli(Path("codex"), "gpt-5.6-luna", 30.0)
+    srv, base = _serve(cli)
+    try:
+        with urllib.request.urlopen(f"{base}/v1/models") as r:
+            ids = [m["id"] for m in json.load(r)["data"]]
+    finally:
+        srv.shutdown()
+    assert ids[0] == "gpt-5.6-luna"
+    assert len(ids) == len(set(ids))
+    assert {"extractor", "bench"} <= set(ids)
+
+
+def test_chat_completions_round_trips_the_resolved_model(monkeypatch):
+    # A concrete gpt-* in the request must reach chat() AND be echoed in the
+    # response's model field (the Console card reads the echo).
+    cli = shim.CodexCli(Path("codex"), "gpt-5.6-terra", 30.0)
+    seen = {}
+
+    def _chat(system, user, model=None):
+        seen["model"] = model
+        return "pong"
+    monkeypatch.setattr(cli, "chat", _chat)
+    srv, base = _serve(cli)
+    try:
+        req = urllib.request.Request(
+            f"{base}/v1/chat/completions",
+            data=json.dumps({"model": "gpt-5.6-sol", "messages": [
+                {"role": "user", "content": "hi"}]}).encode(),
+            headers={"content-type": "application/json"})
+        with urllib.request.urlopen(req) as r:
+            out = json.load(r)
+    finally:
+        srv.shutdown()
+    assert seen["model"] == "gpt-5.6-sol"
+    assert out["model"] == "gpt-5.6-sol"
+    assert out["choices"][0]["message"]["content"] == "pong"
 
 
 # --- /health parity with sonnet_shim ------------------------------------

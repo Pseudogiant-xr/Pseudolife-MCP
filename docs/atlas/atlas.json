@@ -799,7 +799,7 @@
    "x": 600,
    "y": 1510,
    "t": "Codex shim",
-   "s": "host · 127.0.0.1:8085",
+   "s": "host · 127.0.0.1:8086",
    "p": "evals/codex_shim.py",
    "d": [
     "Wraps the ChatGPT-plan codex CLI as an OpenAI-compatible endpoint",
@@ -1550,7 +1550,7 @@
   {
    "f": "dream",
    "t": "codexshim",
-   "l": "primary (opt-in) · host.docker.internal:8085",
+   "l": "primary (opt-in) · host.docker.internal:8086",
    "k": "data"
   },
   {
