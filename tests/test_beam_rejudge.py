@@ -2,11 +2,14 @@
 
 The frontier re-judge replays recorded responses through an injected judge
 callable; everything below exercises the offline machinery — output naming,
-arm detection, row pairing, summary deltas, and the seeded stability
-sample — with fake judges.
+arm detection, row pairing, summary deltas, the seeded stability sample,
+and the CliJudge subprocess seam's timeout kill-tree — with fake judges
+and fake processes.
 """
 from __future__ import annotations
 
+import json
+import os
 import sys
 from pathlib import Path
 
@@ -170,3 +173,87 @@ def test_merge_stability_all_failed_is_none_not_perfect():
           "mean_abs_delta": None, "pairs": []}], expected_items=2)
     assert m["item_agreement"] is None and m["mean_abs_delta"] is None
     assert m["n_items"] == 0 and m["expected_items"] == 2
+
+
+# ── timeout kill-tree (the claude_shim/codex_shim fix, ported) ─────────────
+
+
+def test_timeout_kills_the_whole_process_tree(monkeypatch):
+    # subprocess timeout kills only the DIRECT child, then reaps with an
+    # unbounded communicate(). The CLI is a node program behind a wrapper
+    # (claude.cmd -> cmd.exe -> node on Windows; a shell shim on POSIX), so
+    # the real claude survives holding the stdout pipe — the reap blocks
+    # forever, and in this pooled judge each wedged call permanently eats a
+    # worker slot. The ORDER is the contract: kill the tree first, THEN
+    # reap — a reap before the kill is exactly the wedge being fixed.
+    seq = []
+
+    class _Proc:
+        pid = 4321
+
+        def communicate(self, payload=None, timeout=None):
+            if timeout is not None:
+                raise beam_rejudge.subprocess.TimeoutExpired("claude", timeout)
+            seq.append("reap")
+            return b"", b""
+
+    monkeypatch.setattr(beam_rejudge.subprocess, "Popen",
+                        lambda *a, **k: _Proc())
+    monkeypatch.setattr(beam_rejudge, "_kill_tree",
+                        lambda p: seq.append(("kill", p.pid)))
+    judge = beam_rejudge.CliJudge("claude", "m", 0.01)
+    assert judge("sys", "user") == ""       # both attempts degrade, no raise
+    assert seq == [("kill", 4321), "reap", ("kill", 4321), "reap"]
+    assert judge.errors == 1
+
+
+def test_kill_tree_on_windows_taskkills_the_whole_pid_tree(monkeypatch):
+    # taskkill /F /T is the load-bearing kill on the bench platform, and its
+    # failures are swallowed (check=False) — so the argv is pinned here,
+    # where a wrong flag is a test failure instead of a silent re-wedge.
+    calls = []
+    monkeypatch.setattr(beam_rejudge.os, "name", "nt")
+    monkeypatch.setattr(beam_rejudge.subprocess, "run",
+                        lambda argv, **k: calls.append(argv))
+
+    class _Proc:
+        pid = 4321
+
+    beam_rejudge._kill_tree(_Proc())
+    assert calls == [["taskkill", "/F", "/T", "/PID", "4321"]]
+
+
+def test_run_detaches_the_child_into_its_own_session_on_posix(monkeypatch):
+    # The POSIX kill path is os.killpg on the child's process group, which
+    # only takes the descendants if the child LEADS its own session —
+    # start_new_session is the enabling condition, and this repo develops
+    # on Windows where that branch otherwise never executes.
+    seen = {}
+
+    class _Proc:
+        pid = 1
+        returncode = 0
+
+        def communicate(self, payload=None, timeout=None):
+            return b"", b""
+
+    def _popen(*a, **k):
+        seen.update(k)
+        return _Proc()
+
+    monkeypatch.setattr(beam_rejudge.subprocess, "Popen", _popen)
+    judge = beam_rejudge.CliJudge("claude", "m", 30.0)
+    judge._run(["claude", "-p"], b"hi")
+    assert seen["start_new_session"] == (os.name != "nt")
+
+
+def test_cli_judge_success_path_through_run_seam(monkeypatch):
+    # The happy path rides the same seam; the fence-stripping and counter
+    # behavior must survive the subprocess.run -> Popen rewire.
+    payload = json.dumps(
+        {"result": "```json\n{\"score\": 1.0}\n```"}).encode("utf-8")
+    monkeypatch.setattr(beam_rejudge.CliJudge, "_run",
+                        lambda self, cmd, data: (0, payload, b""))
+    judge = beam_rejudge.CliJudge("claude", "m", 30.0)
+    assert judge("sys", "user") == '{"score": 1.0}'
+    assert judge.calls == 1 and judge.errors == 0
