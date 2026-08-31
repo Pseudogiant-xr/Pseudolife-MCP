@@ -73,6 +73,12 @@ The Claude three are served by `evals/claude_shim.py` (shells out to the
 exec`) — the only rungs that leave the machine. See "Everything runs
 locally" under the LongMemEval bench below for the same caveat.
 
+`terra` was first measured 2026-09-01 (single run, ChatGPT free tier —
+3 batched extraction calls; artifact `results/terra.json`):
+gold_recoverable 1.0 / stale_leak 0.0, matching the Claude ceiling rungs,
+at 13.1 tokens/query — inside the ≤60%-of-naive gate but ~9× the Claude
+rungs' 1.4, because Terra writes wordier slot values.
+
 Every `:8081` rung shares that **one** endpoint: the operator swaps the served
 GGUF between runs (see below). Run one, then the next.
 

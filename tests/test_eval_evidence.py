@@ -2088,6 +2088,23 @@ for _cid, _needle, _art, _val, _stated in [
         id=_cid, doc=CHANGELOG, needle=_needle, artifacts=(_art,),
         value=_val, stated=_stated, places=0))
 
+# The GPT-5.6 Terra ceiling probe's first measurement (2026-09-01, single
+# run on the ChatGPT-plan Codex shim): the evals README publishes its
+# gold/stale parity with the Claude ceiling rungs and its wordier slot
+# values (tokens/query well above the Claude rungs, still inside the gate).
+TERRA_LADDER = RESULTS + "terra.json"
+for _cid, _needle, _val, _stated, _places in [
+    ("terra-ladder-gold", "gold_recoverable 1.0 / stale_leak 0.0",
+     lambda d: d["gold_recoverable"], 1.0, 3),
+    ("terra-ladder-stale", "gold_recoverable 1.0 / stale_leak 0.0",
+     lambda d: d["stale_leak"], 0.0, 3),
+    ("terra-ladder-tokens", "13.1 tokens/query",
+     lambda d: d["tokens_per_query"], 13.1, 1),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS_README, needle=_needle, artifacts=(TERRA_LADDER,),
+        value=_val, stated=_stated, places=_places))
+
 # The BEAM findings table also quotes three RANGES that live in a verdict
 # file as strings, not floats — the Claim machinery only compares numbers,
 # so they get their own check rather than going unguarded.
