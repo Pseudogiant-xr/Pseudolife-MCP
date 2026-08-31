@@ -1,0 +1,6183 @@
+{
+ "data": "judge_eval_20260816.json",
+ "arms": {
+  "qwen-27b-medium": {
+   "arm": "qwen-27b-medium",
+   "model": "qwen",
+   "base_url": "http://127.0.0.1:1234/v1",
+   "replicates": 2,
+   "batch": 8,
+   "judge_thinking": "medium",
+   "caution": false,
+   "caution_rows": 40,
+   "flip_rows": 0,
+   "rows": 129,
+   "decided": 125,
+   "coverage": 0.969,
+   "agreement_on_decided": 0.888,
+   "accept_precision": 0.8421,
+   "reject_precision": 0.8962,
+   "false_reject_rate": 0.3667,
+   "false_rejects": 11,
+   "true_accepts": 30,
+   "auto_conf": 0.8,
+   "auto_rejected": 100,
+   "auto_reject_share_of_true_rejects": 0.9293,
+   "auto_false_rejects": 8,
+   "auto_reject_precision": 0.92,
+   "flagged_subset": {
+    "rows": 40,
+    "decided": 36,
+    "coverage": 0.9,
+    "agreement_on_decided": 0.7222,
+    "accept_precision": 0.8,
+    "reject_precision": 0.6667,
+    "false_reject_rate": 0.3182,
+    "false_rejects": 7,
+    "true_accepts": 22,
+    "auto_conf": 0.8,
+    "auto_rejected": 18,
+    "auto_reject_share_of_true_rejects": 0.7222,
+    "auto_false_rejects": 5,
+    "auto_reject_precision": 0.7222
+   },
+   "clean_subset": {
+    "rows": 89,
+    "decided": 89,
+    "coverage": 1.0,
+    "agreement_on_decided": 0.9551,
+    "accept_precision": 1.0,
+    "reject_precision": 0.9529,
+    "false_reject_rate": 0.5,
+    "false_rejects": 4,
+    "true_accepts": 8,
+    "auto_conf": 0.8,
+    "auto_rejected": 82,
+    "auto_reject_share_of_true_rejects": 0.9753,
+    "auto_false_rejects": 3,
+    "auto_reject_precision": 0.9634
+   },
+   "per_row": [
+    {
+     "from": "/api/graph/assign-scope",
+     "into": "assign-scope",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.92
+      ],
+      [
+       "accept",
+       0.92
+      ]
+     ]
+    },
+    {
+     "from": "<data_dir>/config.yaml",
+     "into": "/data/config.yaml",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "leave",
+       0.6
+      ],
+      [
+       "leave",
+       0.6
+      ]
+     ]
+    },
+    {
+     "from": "ForceGraph (graphview.js)",
+     "into": "graphview.js",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "GENERIC_HUB gate",
+     "into": "GENERIC_HUB_NORMS gate",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.82
+      ],
+      [
+       "reject",
+       0.82
+      ]
+     ]
+    },
+    {
+     "from": "PostgreSQL 16",
+     "into": "PostgreSQL 16.14",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.8
+      ],
+      [
+       "reject",
+       0.8
+      ]
+     ]
+    },
+    {
+     "from": "PostgreSQL 18",
+     "into": "embedded PostgreSQL 18",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.72
+      ],
+      [
+       "reject",
+       0.72
+      ]
+     ]
+    },
+    {
+     "from": "Qwen3-Embedding",
+     "into": "Qwen3-Embedding-0.6B",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "Security Remediation",
+     "into": "PseudoLife-MCP security remediation",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.93
+      ],
+      [
+       "accept",
+       0.93
+      ]
+     ]
+    },
+    {
+     "from": "casc-q8",
+     "into": "casc-q8-confirmation-run",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.92
+      ],
+      [
+       "accept",
+       0.92
+      ]
+     ]
+    },
+    {
+     "from": "chronicle-default-on-pr",
+     "into": "chronicle-default-on",
+     "label": "accept",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.82
+      ],
+      [
+       "reject",
+       0.82
+      ]
+     ]
+    },
+    {
+     "from": "embedding backbone",
+     "into": "v25-embedding-backbone",
+     "label": "accept",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.72
+      ],
+      [
+       "reject",
+       0.72
+      ]
+     ]
+    },
+    {
+     "from": "evals/regression_gate.ps1",
+     "into": "regression_gate.ps1",
+     "label": "accept",
+     "caution": false,
+     "votes": [
+      [
+       "accept",
+       0.9
+      ],
+      [
+       "accept",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "fact_get",
+     "into": "memory_fact_get",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.88
+      ],
+      [
+       "accept",
+       0.88
+      ]
+     ]
+    },
+    {
+     "from": "feat/chronicle-default-on",
+     "into": "chronicle-default-on",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.9
+      ],
+      [
+       "accept",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "feat/flat-band-migration",
+     "into": "flat-band-migration",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "leave",
+       0.6
+      ],
+      [
+       "leave",
+       0.6
+      ]
+     ]
+    },
+    {
+     "from": "feat/pg18-bump",
+     "into": "pg18-bump",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.93
+      ],
+      [
+       "accept",
+       0.93
+      ]
+     ]
+    },
+    {
+     "from": "feat/slot-index-shadow-check",
+     "into": "slot-index-shadow-check",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.95
+      ],
+      [
+       "accept",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "flat-band verdict rerun",
+     "into": "flat-band-rerun",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.72
+      ],
+      [
+       "accept",
+       0.72
+      ]
+     ]
+    },
+    {
+     "from": "gpu-box",
+     "into": "Windows box",
+     "label": "accept",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.92
+      ],
+      [
+       "reject",
+       0.92
+      ]
+     ]
+    },
+    {
+     "from": "ku_op_prompt_v10_stance_update.txt",
+     "into": "v10-stance-prompt",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.82
+      ],
+      [
+       "reject",
+       0.82
+      ]
+     ]
+    },
+    {
+     "from": "memory_recall mechanical seeder",
+     "into": "MECHANICAL seeder",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.93
+      ],
+      [
+       "accept",
+       0.93
+      ]
+     ]
+    },
+    {
+     "from": "pgvector/pgvector:pg16",
+     "into": "pgvector/pg16 service",
+     "label": "accept",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "primary extractor",
+     "into": "dream primary extractor",
+     "label": "accept",
+     "caution": false,
+     "votes": [
+      [
+       "accept",
+       0.9
+      ],
+      [
+       "accept",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "reject-proposal",
+     "into": "graph_reject_entity_proposal",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.78
+      ],
+      [
+       "reject",
+       0.78
+      ]
+     ]
+    },
+    {
+     "from": "slot-index shadow verification",
+     "into": "slot-index-shadow-check",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.95
+      ],
+      [
+       "accept",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "stance-span-gate",
+     "into": "feat/stance-span-gate",
+     "label": "accept",
+     "caution": false,
+     "votes": [
+      [
+       "accept",
+       0.9
+      ],
+      [
+       "accept",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "tests/conftest.py",
+     "into": "conftest.py",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.95
+      ],
+      [
+       "accept",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "v25+ backbone",
+     "into": "v25-embedding-backbone",
+     "label": "accept",
+     "caution": false,
+     "votes": [
+      [
+       "accept",
+       0.85
+      ],
+      [
+       "accept",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "valid_time population prereg",
+     "into": "valid-time-population",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "leave",
+       0.5
+      ],
+      [
+       "leave",
+       0.5
+      ]
+     ]
+    },
+    {
+     "from": "world facts",
+     "into": "memory_world_facts",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.8
+      ],
+      [
+       "accept",
+       0.8
+      ]
+     ]
+    },
+    {
+     "from": ".claude-plugin/marketplace.json",
+     "into": "plugin marketplace",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": ".claude-plugin/marketplace.json",
+     "into": "plugin.json",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": ".claude/launch.json",
+     "into": "claude-code-desktop-app",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "/api/dream/run",
+     "into": "memory_dream",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "2026-08-13-night-shift",
+     "into": "2026-07-19-missed-work-audit",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.97
+      ],
+      [
+       "reject",
+       0.97
+      ]
+     ]
+    },
+    {
+     "from": "AGE",
+     "into": "master",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.97
+      ],
+      [
+       "reject",
+       0.97
+      ]
+     ]
+    },
+    {
+     "from": "Brain",
+     "into": "cognee",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "GENERIC_HUB gate",
+     "into": "hub_gate",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.72
+      ],
+      [
+       "reject",
+       0.72
+      ]
+     ]
+    },
+    {
+     "from": "Gated Decision",
+     "into": "stance-span-gate-spec",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.93
+      ],
+      [
+       "reject",
+       0.93
+      ]
+     ]
+    },
+    {
+     "from": "Graphiti",
+     "into": "e4b-ft",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.97
+      ],
+      [
+       "reject",
+       0.97
+      ]
+     ]
+    },
+    {
+     "from": "HF dspark export",
+     "into": "dspark-drafter",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "LITE tier",
+     "into": "ci/lite-tier-lanes",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.82
+      ],
+      [
+       "reject",
+       0.82
+      ]
+     ]
+    },
+    {
+     "from": "Letta",
+     "into": "Hermes",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.97
+      ],
+      [
+       "reject",
+       0.97
+      ]
+     ]
+    },
+    {
+     "from": "ML-research brief deduplication method",
+     "into": "lesson-dedup-gate",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.88
+      ],
+      [
+       "reject",
+       0.88
+      ]
+     ]
+    },
+    {
+     "from": "Opus 5",
+     "into": "Opus-5 teacher",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.72
+      ],
+      [
+       "reject",
+       0.72
+      ]
+     ]
+    },
+    {
+     "from": "PR #153",
+     "into": "pr-31",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.99
+      ],
+      [
+       "reject",
+       0.99
+      ]
+     ]
+    },
+    {
+     "from": "PSEUDOLIFE_MCP_TOOLSET=core",
+     "into": "core toolset",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.8
+      ],
+      [
+       "reject",
+       0.8
+      ]
+     ]
+    },
+    {
+     "from": "PostgreSQL 18",
+     "into": "PostgreSQL 18.1",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.92
+      ],
+      [
+       "reject",
+       0.92
+      ]
+     ]
+    },
+    {
+     "from": "PostgreSQL 18.4",
+     "into": "PostgreSQL 18",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.92
+      ],
+      [
+       "reject",
+       0.92
+      ]
+     ]
+    },
+    {
+     "from": "Postgres database",
+     "into": "docker tier postgres",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.88
+      ],
+      [
+       "reject",
+       0.88
+      ]
+     ]
+    },
+    {
+     "from": "RFC 9955",
+     "into": "4090",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.99
+      ],
+      [
+       "reject",
+       0.99
+      ]
+     ]
+    },
+    {
+     "from": "Specs/plans",
+     "into": "install-floor-plan",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "Ternary-Bonsai-27B-Q2_g64.gguf",
+     "into": "bonsai-27b-ternary",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.87
+      ],
+      [
+       "reject",
+       0.87
+      ]
+     ]
+    },
+    {
+     "from": "Ternary-Bonsai-27B-dspark-dflash.gguf",
+     "into": "bonsai-27b-ternary",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "Zep",
+     "into": "SP-1",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.98
+      ],
+      [
+       "reject",
+       0.98
+      ]
+     ]
+    },
+    {
+     "from": "_SPAWN_WAIT_S",
+     "into": "_SPAWN_WAIT_ALIVE_S",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.93
+      ],
+      [
+       "reject",
+       0.93
+      ]
+     ]
+    },
+    {
+     "from": "agent-fabricated-completion",
+     "into": "v10-stance-prompt",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.97
+      ],
+      [
+       "reject",
+       0.97
+      ]
+     ]
+    },
+    {
+     "from": "analysis",
+     "into": "temporal-decay",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.93
+      ],
+      [
+       "reject",
+       0.93
+      ]
+     ]
+    },
+    {
+     "from": "band-ablation",
+     "into": "band-ablation-replicates",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.82
+      ],
+      [
+       "reject",
+       0.82
+      ]
+     ]
+    },
+    {
+     "from": "bank drift tripwire",
+     "into": "bank-drift",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "leave",
+       0.55
+      ],
+      [
+       "leave",
+       0.55
+      ]
+     ]
+    },
+    {
+     "from": "bonsai-server-build-20260717",
+     "into": "bonsai-server-win64-cuda",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "chronicle-deploy-build-hang",
+     "into": "chronicle-default-on",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.88
+      ],
+      [
+       "reject",
+       0.88
+      ]
+     ]
+    },
+    {
+     "from": "claude-mem",
+     "into": "claude-memory-system",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "combined events prompt",
+     "into": "events-prompt",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.8
+      ],
+      [
+       "reject",
+       0.8
+      ]
+     ]
+    },
+    {
+     "from": "competitor DX/docs survey 2026-08-14",
+     "into": "graph_review.py",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.97
+      ],
+      [
+       "reject",
+       0.97
+      ]
+     ]
+    },
+    {
+     "from": "config.yaml",
+     "into": "/data/config.yaml",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "configuration_file",
+     "into": "load_config",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.96
+      ],
+      [
+       "reject",
+       0.96
+      ]
+     ]
+    },
+    {
+     "from": "cortex supersession",
+     "into": "cortex supersession_log",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.82
+      ],
+      [
+       "reject",
+       0.82
+      ]
+     ]
+    },
+    {
+     "from": "cortex-hygiene-prune",
+     "into": "cortex-compaction",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "cortex-shadow-check",
+     "into": "Cortex Console",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.97
+      ],
+      [
+       "reject",
+       0.97
+      ]
+     ]
+    },
+    {
+     "from": "ct102",
+     "into": "RFC 10024",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.99
+      ],
+      [
+       "reject",
+       0.99
+      ]
+     ]
+    },
+    {
+     "from": "daemon image build",
+     "into": "pseudolife-daemon",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.88
+      ],
+      [
+       "reject",
+       0.88
+      ]
+     ]
+    },
+    {
+     "from": "deep-dream-judge-panel",
+     "into": "deep-dream-queue",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "deep-dream-scan-2026-08-16",
+     "into": "deep-dream-2026-08-11",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "draft-irtf-cfrg-hybrid-kems-12",
+     "into": "hybrid retrieval",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.98
+      ],
+      [
+       "reject",
+       0.98
+      ]
+     ]
+    },
+    {
+     "from": "dream path",
+     "into": "dream write path",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.82
+      ],
+      [
+       "reject",
+       0.82
+      ]
+     ]
+    },
+    {
+     "from": "dream path",
+     "into": "pseudolife dream path",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.92
+      ],
+      [
+       "accept",
+       0.92
+      ]
+     ]
+    },
+    {
+     "from": "dream sweep",
+     "into": "sweep tick",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.88
+      ],
+      [
+       "reject",
+       0.88
+      ]
+     ]
+    },
+    {
+     "from": "dream-run result",
+     "into": "memory_dream",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "dream_runs",
+     "into": "memory_dream",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.88
+      ],
+      [
+       "reject",
+       0.88
+      ]
+     ]
+    },
+    {
+     "from": "dspark_to_dflash.py",
+     "into": "dspark-drafter",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.92
+      ],
+      [
+       "reject",
+       0.92
+      ]
+     ]
+    },
+    {
+     "from": "embedding backbone",
+     "into": "embedding-backbone-decision",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.82
+      ],
+      [
+       "reject",
+       0.82
+      ]
+     ]
+    },
+    {
+     "from": "evals/regression_gate.ps1",
+     "into": "evals/regression_gate.ps1 + rebuild_contexts.py",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "evals/results/banks",
+     "into": "evals/results",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.93
+      ],
+      [
+       "reject",
+       0.93
+      ]
+     ]
+    },
+    {
+     "from": "feat/chronicle-default-on",
+     "into": "chronicle-default-on-pr",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "feat/stance-span-gate",
+     "into": "stance-span-gate-spec",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "flat-band-rerun",
+     "into": "flat-band-migration",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.88
+      ],
+      [
+       "reject",
+       0.88
+      ]
+     ]
+    },
+    {
+     "from": "hell-let-loose-freeze-bug",
+     "into": "Hell Let Loose: Vietnam",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.97
+      ],
+      [
+       "reject",
+       0.97
+      ]
+     ]
+    },
+    {
+     "from": "hpke crate",
+     "into": "hermes-live-shakedown",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.97
+      ],
+      [
+       "reject",
+       0.97
+      ]
+     ]
+    },
+    {
+     "from": "identity.rs",
+     "into": "identity",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.82
+      ],
+      [
+       "reject",
+       0.82
+      ]
+     ]
+    },
+    {
+     "from": "installers",
+     "into": "lite install tier",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.93
+      ],
+      [
+       "reject",
+       0.93
+      ]
+     ]
+    },
+    {
+     "from": "lite-to-docker-graduation",
+     "into": "Dockerfiles",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.92
+      ],
+      [
+       "reject",
+       0.92
+      ]
+     ]
+    },
+    {
+     "from": "live bank",
+     "into": "bank-drift",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.88
+      ],
+      [
+       "reject",
+       0.88
+      ]
+     ]
+    },
+    {
+     "from": "local Python 3.11 dev env",
+     "into": "PyPI",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.97
+      ],
+      [
+       "reject",
+       0.97
+      ]
+     ]
+    },
+    {
+     "from": "mcp_client",
+     "into": "hermes-mcp-client",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.8
+      ],
+      [
+       "reject",
+       0.8
+      ]
+     ]
+    },
+    {
+     "from": "mem0",
+     "into": "memory_forget",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.98
+      ],
+      [
+       "reject",
+       0.98
+      ]
+     ]
+    },
+    {
+     "from": "memory-bank",
+     "into": "supermemory",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "memory-servers",
+     "into": "superlocalmemory",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.93
+      ],
+      [
+       "reject",
+       0.93
+      ]
+     ]
+    },
+    {
+     "from": "memory_forget",
+     "into": "forgetting",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.88
+      ],
+      [
+       "reject",
+       0.88
+      ]
+     ]
+    },
+    {
+     "from": "milestone-slot",
+     "into": "pg18-bump",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.97
+      ],
+      [
+       "reject",
+       0.97
+      ]
+     ]
+    },
+    {
+     "from": "misleading-recall-probe",
+     "into": "distractor-scale probe",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "network.rs",
+     "into": "lm-network",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.96
+      ],
+      [
+       "reject",
+       0.96
+      ]
+     ]
+    },
+    {
+     "from": "ops/docker-compose.ghcr.yml",
+     "into": "ops/docker-compose.yml",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.92
+      ],
+      [
+       "reject",
+       0.92
+      ]
+     ]
+    },
+    {
+     "from": "ops/docker-compose.ghcr.yml",
+     "into": "docker-compose.override.yml",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.92
+      ],
+      [
+       "reject",
+       0.92
+      ]
+     ]
+    },
+    {
+     "from": "ops/install-shim-autostart.sh",
+     "into": "shim-autostart-test-flake",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "pr-31",
+     "into": "PR #152",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.99
+      ],
+      [
+       "reject",
+       0.99
+      ]
+     ]
+    },
+    {
+     "from": "primary extractor",
+     "into": "dream extractor",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "pseudolife-mcp[lite]",
+     "into": "pseudolife-mcp",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.82
+      ],
+      [
+       "reject",
+       0.82
+      ]
+     ]
+    },
+    {
+     "from": "pseudolife-pg",
+     "into": "Pseudolife",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.88
+      ],
+      [
+       "reject",
+       0.88
+      ]
+     ]
+    },
+    {
+     "from": "regression-gate",
+     "into": "regression-gate-baseline",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.92
+      ],
+      [
+       "reject",
+       0.92
+      ]
+     ]
+    },
+    {
+     "from": "regression-gate / evals",
+     "into": "evals/regression_gate.ps1",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.87
+      ],
+      [
+       "reject",
+       0.87
+      ]
+     ]
+    },
+    {
+     "from": "retention-policy-choice",
+     "into": "rollback-retention",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.93
+      ],
+      [
+       "reject",
+       0.93
+      ]
+     ]
+    },
+    {
+     "from": "rust-libp2p",
+     "into": "lm-network",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "shim",
+     "into": "slot-index-shadow-check",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.92
+      ],
+      [
+       "reject",
+       0.92
+      ]
+     ]
+    },
+    {
+     "from": "single-shot recall",
+     "into": "misleading-recall-probe",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.8
+      ],
+      [
+       "reject",
+       0.8
+      ]
+     ]
+    },
+    {
+     "from": "slow band capacity",
+     "into": "flat-band-migration",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.88
+      ],
+      [
+       "reject",
+       0.88
+      ]
+     ]
+    },
+    {
+     "from": "stance-span-gate",
+     "into": "span gate",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.82
+      ],
+      [
+       "accept",
+       0.82
+      ]
+     ]
+    },
+    {
+     "from": "stance-span-gate",
+     "into": "stance-span-gate-spec",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.78
+      ],
+      [
+       "reject",
+       0.78
+      ]
+     ]
+    },
+    {
+     "from": "supermemory",
+     "into": "superlocalmemory",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.97
+      ],
+      [
+       "reject",
+       0.97
+      ]
+     ]
+    },
+    {
+     "from": "sweep-agent",
+     "into": "evals/ladder_sweep.py",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "symbolic-contender-resolution",
+     "into": "merge_candidate",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.92
+      ],
+      [
+       "reject",
+       0.92
+      ]
+     ]
+    },
+    {
+     "from": "task_a60962c0",
+     "into": "release-procedure skill",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.97
+      ],
+      [
+       "reject",
+       0.97
+      ]
+     ]
+    },
+    {
+     "from": "transfer.rs",
+     "into": "transfer",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.88
+      ],
+      [
+       "accept",
+       0.88
+      ]
+     ]
+    },
+    {
+     "from": "user-machine",
+     "into": "dev-box",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "v10-stance-deploy",
+     "into": "v10-stance-prompt",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.82
+      ],
+      [
+       "reject",
+       0.82
+      ]
+     ]
+    },
+    {
+     "from": "v11 drift-iteration prompt work",
+     "into": "agent-fabricated-completion",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.97
+      ],
+      [
+       "reject",
+       0.97
+      ]
+     ]
+    },
+    {
+     "from": "valid-time-population",
+     "into": "live_verification",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.93
+      ],
+      [
+       "reject",
+       0.93
+      ]
+     ]
+    },
+    {
+     "from": "windows-auto-reboot-mitigation",
+     "into": "Windows Update",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "x-wing crate",
+     "into": "SP-1",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.97
+      ],
+      [
+       "reject",
+       0.97
+      ]
+     ]
+    }
+   ]
+  },
+  "qwen-27b-xhigh": {
+   "arm": "qwen-27b-xhigh",
+   "model": "qwen",
+   "base_url": "http://127.0.0.1:1234/v1",
+   "replicates": 2,
+   "batch": 8,
+   "judge_thinking": "xhigh",
+   "caution": false,
+   "caution_rows": 40,
+   "flip_rows": 0,
+   "rows": 129,
+   "decided": 97,
+   "coverage": 0.7519,
+   "agreement_on_decided": 0.9794,
+   "accept_precision": 0.0,
+   "reject_precision": 1.0,
+   "false_reject_rate": 0.0,
+   "false_rejects": 0,
+   "true_accepts": 30,
+   "auto_conf": 0.8,
+   "auto_rejected": 88,
+   "auto_reject_share_of_true_rejects": 0.8889,
+   "auto_false_rejects": 0,
+   "auto_reject_precision": 1.0,
+   "flagged_subset": {
+    "rows": 40,
+    "decided": 16,
+    "coverage": 0.4,
+    "agreement_on_decided": 0.875,
+    "accept_precision": 0.0,
+    "reject_precision": 1.0,
+    "false_reject_rate": 0.0,
+    "false_rejects": 0,
+    "true_accepts": 22,
+    "auto_conf": 0.8,
+    "auto_rejected": 7,
+    "auto_reject_share_of_true_rejects": 0.3889,
+    "auto_false_rejects": 0,
+    "auto_reject_precision": 1.0
+   },
+   "clean_subset": {
+    "rows": 89,
+    "decided": 81,
+    "coverage": 0.9101,
+    "agreement_on_decided": 1.0,
+    "accept_precision": null,
+    "reject_precision": 1.0,
+    "false_reject_rate": 0.0,
+    "false_rejects": 0,
+    "true_accepts": 8,
+    "auto_conf": 0.8,
+    "auto_rejected": 81,
+    "auto_reject_share_of_true_rejects": 1.0,
+    "auto_false_rejects": 0,
+    "auto_reject_precision": 1.0
+   },
+   "per_row": [
+    {
+     "from": "/api/graph/assign-scope",
+     "into": "assign-scope",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      null,
+      null
+     ]
+    },
+    {
+     "from": "<data_dir>/config.yaml",
+     "into": "/data/config.yaml",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      null,
+      null
+     ]
+    },
+    {
+     "from": "ForceGraph (graphview.js)",
+     "into": "graphview.js",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      null,
+      null
+     ]
+    },
+    {
+     "from": "GENERIC_HUB gate",
+     "into": "GENERIC_HUB_NORMS gate",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      null,
+      null
+     ]
+    },
+    {
+     "from": "PostgreSQL 16",
+     "into": "PostgreSQL 16.14",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      null,
+      null
+     ]
+    },
+    {
+     "from": "PostgreSQL 18",
+     "into": "embedded PostgreSQL 18",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      null,
+      null
+     ]
+    },
+    {
+     "from": "Qwen3-Embedding",
+     "into": "Qwen3-Embedding-0.6B",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      null,
+      null
+     ]
+    },
+    {
+     "from": "Security Remediation",
+     "into": "PseudoLife-MCP security remediation",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      null,
+      null
+     ]
+    },
+    {
+     "from": "casc-q8",
+     "into": "casc-q8-confirmation-run",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      null,
+      null
+     ]
+    },
+    {
+     "from": "chronicle-default-on-pr",
+     "into": "chronicle-default-on",
+     "label": "accept",
+     "caution": false,
+     "votes": [
+      null,
+      null
+     ]
+    },
+    {
+     "from": "embedding backbone",
+     "into": "v25-embedding-backbone",
+     "label": "accept",
+     "caution": false,
+     "votes": [
+      null,
+      null
+     ]
+    },
+    {
+     "from": "evals/regression_gate.ps1",
+     "into": "regression_gate.ps1",
+     "label": "accept",
+     "caution": false,
+     "votes": [
+      null,
+      null
+     ]
+    },
+    {
+     "from": "fact_get",
+     "into": "memory_fact_get",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      null,
+      null
+     ]
+    },
+    {
+     "from": "feat/chronicle-default-on",
+     "into": "chronicle-default-on",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      null,
+      null
+     ]
+    },
+    {
+     "from": "feat/flat-band-migration",
+     "into": "flat-band-migration",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      null,
+      null
+     ]
+    },
+    {
+     "from": "feat/pg18-bump",
+     "into": "pg18-bump",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      null,
+      null
+     ]
+    },
+    {
+     "from": "feat/slot-index-shadow-check",
+     "into": "slot-index-shadow-check",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      null,
+      null
+     ]
+    },
+    {
+     "from": "flat-band verdict rerun",
+     "into": "flat-band-rerun",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      null,
+      null
+     ]
+    },
+    {
+     "from": "gpu-box",
+     "into": "Windows box",
+     "label": "accept",
+     "caution": false,
+     "votes": [
+      null,
+      null
+     ]
+    },
+    {
+     "from": "ku_op_prompt_v10_stance_update.txt",
+     "into": "v10-stance-prompt",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      null,
+      null
+     ]
+    },
+    {
+     "from": "memory_recall mechanical seeder",
+     "into": "MECHANICAL seeder",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      null,
+      null
+     ]
+    },
+    {
+     "from": "pgvector/pgvector:pg16",
+     "into": "pgvector/pg16 service",
+     "label": "accept",
+     "caution": false,
+     "votes": [
+      null,
+      null
+     ]
+    },
+    {
+     "from": "primary extractor",
+     "into": "dream primary extractor",
+     "label": "accept",
+     "caution": false,
+     "votes": [
+      null,
+      null
+     ]
+    },
+    {
+     "from": "reject-proposal",
+     "into": "graph_reject_entity_proposal",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      null,
+      null
+     ]
+    },
+    {
+     "from": "slot-index shadow verification",
+     "into": "slot-index-shadow-check",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      null,
+      null
+     ]
+    },
+    {
+     "from": "stance-span-gate",
+     "into": "feat/stance-span-gate",
+     "label": "accept",
+     "caution": false,
+     "votes": [
+      null,
+      null
+     ]
+    },
+    {
+     "from": "tests/conftest.py",
+     "into": "conftest.py",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      null,
+      null
+     ]
+    },
+    {
+     "from": "v25+ backbone",
+     "into": "v25-embedding-backbone",
+     "label": "accept",
+     "caution": false,
+     "votes": [
+      null,
+      null
+     ]
+    },
+    {
+     "from": "valid_time population prereg",
+     "into": "valid-time-population",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      null,
+      null
+     ]
+    },
+    {
+     "from": "world facts",
+     "into": "memory_world_facts",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      null,
+      null
+     ]
+    },
+    {
+     "from": ".claude-plugin/marketplace.json",
+     "into": "plugin marketplace",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      null,
+      null
+     ]
+    },
+    {
+     "from": ".claude-plugin/marketplace.json",
+     "into": "plugin.json",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      null,
+      null
+     ]
+    },
+    {
+     "from": ".claude/launch.json",
+     "into": "claude-code-desktop-app",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.97
+      ],
+      [
+       "reject",
+       0.97
+      ]
+     ]
+    },
+    {
+     "from": "/api/dream/run",
+     "into": "memory_dream",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.93
+      ],
+      [
+       "reject",
+       0.93
+      ]
+     ]
+    },
+    {
+     "from": "2026-08-13-night-shift",
+     "into": "2026-07-19-missed-work-audit",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.98
+      ],
+      [
+       "reject",
+       0.98
+      ]
+     ]
+    },
+    {
+     "from": "AGE",
+     "into": "master",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.98
+      ],
+      [
+       "reject",
+       0.98
+      ]
+     ]
+    },
+    {
+     "from": "Brain",
+     "into": "cognee",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.98
+      ],
+      [
+       "reject",
+       0.98
+      ]
+     ]
+    },
+    {
+     "from": "GENERIC_HUB gate",
+     "into": "hub_gate",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.88
+      ],
+      [
+       "reject",
+       0.88
+      ]
+     ]
+    },
+    {
+     "from": "Gated Decision",
+     "into": "stance-span-gate-spec",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.97
+      ],
+      [
+       "reject",
+       0.97
+      ]
+     ]
+    },
+    {
+     "from": "Graphiti",
+     "into": "e4b-ft",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.98
+      ],
+      [
+       "reject",
+       0.98
+      ]
+     ]
+    },
+    {
+     "from": "HF dspark export",
+     "into": "dspark-drafter",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.92
+      ],
+      [
+       "reject",
+       0.92
+      ]
+     ]
+    },
+    {
+     "from": "LITE tier",
+     "into": "ci/lite-tier-lanes",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.78
+      ],
+      [
+       "reject",
+       0.78
+      ]
+     ]
+    },
+    {
+     "from": "Letta",
+     "into": "Hermes",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.97
+      ],
+      [
+       "reject",
+       0.97
+      ]
+     ]
+    },
+    {
+     "from": "ML-research brief deduplication method",
+     "into": "lesson-dedup-gate",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.86
+      ],
+      [
+       "reject",
+       0.86
+      ]
+     ]
+    },
+    {
+     "from": "Opus 5",
+     "into": "Opus-5 teacher",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.8
+      ],
+      [
+       "reject",
+       0.8
+      ]
+     ]
+    },
+    {
+     "from": "PR #153",
+     "into": "pr-31",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.99
+      ],
+      [
+       "reject",
+       0.99
+      ]
+     ]
+    },
+    {
+     "from": "PSEUDOLIFE_MCP_TOOLSET=core",
+     "into": "core toolset",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.72
+      ],
+      [
+       "reject",
+       0.72
+      ]
+     ]
+    },
+    {
+     "from": "PostgreSQL 18",
+     "into": "PostgreSQL 18.1",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "PostgreSQL 18.4",
+     "into": "PostgreSQL 18",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "Postgres database",
+     "into": "docker tier postgres",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.8
+      ],
+      [
+       "reject",
+       0.8
+      ]
+     ]
+    },
+    {
+     "from": "RFC 9955",
+     "into": "4090",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.98
+      ],
+      [
+       "reject",
+       0.98
+      ]
+     ]
+    },
+    {
+     "from": "Specs/plans",
+     "into": "install-floor-plan",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "Ternary-Bonsai-27B-Q2_g64.gguf",
+     "into": "bonsai-27b-ternary",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.93
+      ],
+      [
+       "reject",
+       0.93
+      ]
+     ]
+    },
+    {
+     "from": "Ternary-Bonsai-27B-dspark-dflash.gguf",
+     "into": "bonsai-27b-ternary",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.93
+      ],
+      [
+       "reject",
+       0.93
+      ]
+     ]
+    },
+    {
+     "from": "Zep",
+     "into": "SP-1",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "_SPAWN_WAIT_S",
+     "into": "_SPAWN_WAIT_ALIVE_S",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.65
+      ],
+      [
+       "reject",
+       0.65
+      ]
+     ]
+    },
+    {
+     "from": "agent-fabricated-completion",
+     "into": "v10-stance-prompt",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.98
+      ],
+      [
+       "reject",
+       0.98
+      ]
+     ]
+    },
+    {
+     "from": "analysis",
+     "into": "temporal-decay",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "band-ablation",
+     "into": "band-ablation-replicates",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "bank drift tripwire",
+     "into": "bank-drift",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.6
+      ],
+      [
+       "reject",
+       0.6
+      ]
+     ]
+    },
+    {
+     "from": "bonsai-server-build-20260717",
+     "into": "bonsai-server-win64-cuda",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.97
+      ],
+      [
+       "reject",
+       0.97
+      ]
+     ]
+    },
+    {
+     "from": "chronicle-deploy-build-hang",
+     "into": "chronicle-default-on",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "claude-mem",
+     "into": "claude-memory-system",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "combined events prompt",
+     "into": "events-prompt",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "competitor DX/docs survey 2026-08-14",
+     "into": "graph_review.py",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.98
+      ],
+      [
+       "reject",
+       0.98
+      ]
+     ]
+    },
+    {
+     "from": "config.yaml",
+     "into": "/data/config.yaml",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "configuration_file",
+     "into": "load_config",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.97
+      ],
+      [
+       "reject",
+       0.97
+      ]
+     ]
+    },
+    {
+     "from": "cortex supersession",
+     "into": "cortex supersession_log",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.92
+      ],
+      [
+       "reject",
+       0.92
+      ]
+     ]
+    },
+    {
+     "from": "cortex-hygiene-prune",
+     "into": "cortex-compaction",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.94
+      ],
+      [
+       "reject",
+       0.94
+      ]
+     ]
+    },
+    {
+     "from": "cortex-shadow-check",
+     "into": "Cortex Console",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.96
+      ],
+      [
+       "reject",
+       0.96
+      ]
+     ]
+    },
+    {
+     "from": "ct102",
+     "into": "RFC 10024",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.99
+      ],
+      [
+       "reject",
+       0.99
+      ]
+     ]
+    },
+    {
+     "from": "daemon image build",
+     "into": "pseudolife-daemon",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.93
+      ],
+      [
+       "reject",
+       0.93
+      ]
+     ]
+    },
+    {
+     "from": "deep-dream-judge-panel",
+     "into": "deep-dream-queue",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "deep-dream-scan-2026-08-16",
+     "into": "deep-dream-2026-08-11",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.98
+      ],
+      [
+       "reject",
+       0.98
+      ]
+     ]
+    },
+    {
+     "from": "draft-irtf-cfrg-hybrid-kems-12",
+     "into": "hybrid retrieval",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.99
+      ],
+      [
+       "reject",
+       0.99
+      ]
+     ]
+    },
+    {
+     "from": "dream path",
+     "into": "dream write path",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "dream path",
+     "into": "pseudolife dream path",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.85
+      ],
+      [
+       "accept",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "dream sweep",
+     "into": "sweep tick",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "dream-run result",
+     "into": "memory_dream",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "dream_runs",
+     "into": "memory_dream",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "dspark_to_dflash.py",
+     "into": "dspark-drafter",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "embedding backbone",
+     "into": "embedding-backbone-decision",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "evals/regression_gate.ps1",
+     "into": "evals/regression_gate.ps1 + rebuild_contexts.py",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "evals/results/banks",
+     "into": "evals/results",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "feat/chronicle-default-on",
+     "into": "chronicle-default-on-pr",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.8
+      ],
+      [
+       "reject",
+       0.8
+      ]
+     ]
+    },
+    {
+     "from": "feat/stance-span-gate",
+     "into": "stance-span-gate-spec",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "flat-band-rerun",
+     "into": "flat-band-migration",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "hell-let-loose-freeze-bug",
+     "into": "Hell Let Loose: Vietnam",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.98
+      ],
+      [
+       "reject",
+       0.98
+      ]
+     ]
+    },
+    {
+     "from": "hpke crate",
+     "into": "hermes-live-shakedown",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "identity.rs",
+     "into": "identity",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.8
+      ],
+      [
+       "reject",
+       0.8
+      ]
+     ]
+    },
+    {
+     "from": "installers",
+     "into": "lite install tier",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "lite-to-docker-graduation",
+     "into": "Dockerfiles",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "live bank",
+     "into": "bank-drift",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "local Python 3.11 dev env",
+     "into": "PyPI",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "mcp_client",
+     "into": "hermes-mcp-client",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "mem0",
+     "into": "memory_forget",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "memory-bank",
+     "into": "supermemory",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "memory-servers",
+     "into": "superlocalmemory",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "memory_forget",
+     "into": "forgetting",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "milestone-slot",
+     "into": "pg18-bump",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.98
+      ],
+      [
+       "reject",
+       0.98
+      ]
+     ]
+    },
+    {
+     "from": "misleading-recall-probe",
+     "into": "distractor-scale probe",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "network.rs",
+     "into": "lm-network",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "ops/docker-compose.ghcr.yml",
+     "into": "ops/docker-compose.yml",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "ops/docker-compose.ghcr.yml",
+     "into": "docker-compose.override.yml",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "ops/install-shim-autostart.sh",
+     "into": "shim-autostart-test-flake",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "pr-31",
+     "into": "PR #152",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.99
+      ],
+      [
+       "reject",
+       0.99
+      ]
+     ]
+    },
+    {
+     "from": "primary extractor",
+     "into": "dream extractor",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "pseudolife-mcp[lite]",
+     "into": "pseudolife-mcp",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "pseudolife-pg",
+     "into": "Pseudolife",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "regression-gate",
+     "into": "regression-gate-baseline",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "regression-gate / evals",
+     "into": "evals/regression_gate.ps1",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.8
+      ],
+      [
+       "reject",
+       0.8
+      ]
+     ]
+    },
+    {
+     "from": "retention-policy-choice",
+     "into": "rollback-retention",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "rust-libp2p",
+     "into": "lm-network",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "shim",
+     "into": "slot-index-shadow-check",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "single-shot recall",
+     "into": "misleading-recall-probe",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.78
+      ],
+      [
+       "reject",
+       0.78
+      ]
+     ]
+    },
+    {
+     "from": "slow band capacity",
+     "into": "flat-band-migration",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.92
+      ],
+      [
+       "reject",
+       0.92
+      ]
+     ]
+    },
+    {
+     "from": "stance-span-gate",
+     "into": "span gate",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.78
+      ],
+      [
+       "reject",
+       0.78
+      ]
+     ]
+    },
+    {
+     "from": "stance-span-gate",
+     "into": "stance-span-gate-spec",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.62
+      ],
+      [
+       "accept",
+       0.62
+      ]
+     ]
+    },
+    {
+     "from": "supermemory",
+     "into": "superlocalmemory",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.96
+      ],
+      [
+       "reject",
+       0.96
+      ]
+     ]
+    },
+    {
+     "from": "sweep-agent",
+     "into": "evals/ladder_sweep.py",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.93
+      ],
+      [
+       "reject",
+       0.93
+      ]
+     ]
+    },
+    {
+     "from": "symbolic-contender-resolution",
+     "into": "merge_candidate",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.92
+      ],
+      [
+       "reject",
+       0.92
+      ]
+     ]
+    },
+    {
+     "from": "task_a60962c0",
+     "into": "release-procedure skill",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.97
+      ],
+      [
+       "reject",
+       0.97
+      ]
+     ]
+    },
+    {
+     "from": "transfer.rs",
+     "into": "transfer",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.78
+      ],
+      [
+       "reject",
+       0.78
+      ]
+     ]
+    },
+    {
+     "from": "user-machine",
+     "into": "dev-box",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "v10-stance-deploy",
+     "into": "v10-stance-prompt",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.93
+      ],
+      [
+       "reject",
+       0.93
+      ]
+     ]
+    },
+    {
+     "from": "v11 drift-iteration prompt work",
+     "into": "agent-fabricated-completion",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.96
+      ],
+      [
+       "reject",
+       0.96
+      ]
+     ]
+    },
+    {
+     "from": "valid-time-population",
+     "into": "live_verification",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.93
+      ],
+      [
+       "reject",
+       0.93
+      ]
+     ]
+    },
+    {
+     "from": "windows-auto-reboot-mitigation",
+     "into": "Windows Update",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.92
+      ],
+      [
+       "reject",
+       0.92
+      ]
+     ]
+    },
+    {
+     "from": "x-wing crate",
+     "into": "SP-1",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    }
+   ]
+  },
+  "qwen-27b-xhigh-hr": {
+   "arm": "qwen-27b-xhigh-hr",
+   "model": "qwen",
+   "base_url": "http://127.0.0.1:1234/v1",
+   "replicates": 2,
+   "batch": 8,
+   "judge_thinking": "xhigh",
+   "max_tokens": 12288,
+   "caution": false,
+   "caution_rows": 40,
+   "flip_rows": 0,
+   "rows": 129,
+   "decided": 128,
+   "coverage": 0.9922,
+   "agreement_on_decided": 0.8203,
+   "accept_precision": 0.8,
+   "reject_precision": 0.822,
+   "false_reject_rate": 0.7,
+   "false_rejects": 21,
+   "true_accepts": 30,
+   "auto_conf": 0.8,
+   "auto_rejected": 98,
+   "auto_reject_share_of_true_rejects": 0.9091,
+   "auto_false_rejects": 8,
+   "auto_reject_precision": 0.9184,
+   "flagged_subset": {
+    "rows": 40,
+    "decided": 39,
+    "coverage": 0.975,
+    "agreement_on_decided": 0.5897,
+    "accept_precision": 0.7778,
+    "reject_precision": 0.5333,
+    "false_reject_rate": 0.6364,
+    "false_rejects": 14,
+    "true_accepts": 22,
+    "auto_conf": 0.8,
+    "auto_rejected": 14,
+    "auto_reject_share_of_true_rejects": 0.5,
+    "auto_false_rejects": 5,
+    "auto_reject_precision": 0.6429
+   },
+   "clean_subset": {
+    "rows": 89,
+    "decided": 89,
+    "coverage": 1.0,
+    "agreement_on_decided": 0.9213,
+    "accept_precision": 1.0,
+    "reject_precision": 0.9205,
+    "false_reject_rate": 0.875,
+    "false_rejects": 7,
+    "true_accepts": 8,
+    "auto_conf": 0.8,
+    "auto_rejected": 84,
+    "auto_reject_share_of_true_rejects": 1.0,
+    "auto_false_rejects": 3,
+    "auto_reject_precision": 0.9643
+   },
+   "per_row": [
+    {
+     "from": "/api/graph/assign-scope",
+     "into": "assign-scope",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.62
+      ],
+      [
+       "reject",
+       0.62
+      ]
+     ]
+    },
+    {
+     "from": "<data_dir>/config.yaml",
+     "into": "/data/config.yaml",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.58
+      ],
+      [
+       "reject",
+       0.58
+      ]
+     ]
+    },
+    {
+     "from": "ForceGraph (graphview.js)",
+     "into": "graphview.js",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.88
+      ],
+      [
+       "reject",
+       0.88
+      ]
+     ]
+    },
+    {
+     "from": "GENERIC_HUB gate",
+     "into": "GENERIC_HUB_NORMS gate",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.82
+      ],
+      [
+       "reject",
+       0.82
+      ]
+     ]
+    },
+    {
+     "from": "PostgreSQL 16",
+     "into": "PostgreSQL 16.14",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "PostgreSQL 18",
+     "into": "embedded PostgreSQL 18",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.72
+      ],
+      [
+       "reject",
+       0.72
+      ]
+     ]
+    },
+    {
+     "from": "Qwen3-Embedding",
+     "into": "Qwen3-Embedding-0.6B",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.92
+      ],
+      [
+       "reject",
+       0.92
+      ]
+     ]
+    },
+    {
+     "from": "Security Remediation",
+     "into": "PseudoLife-MCP security remediation",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.92
+      ],
+      [
+       "accept",
+       0.92
+      ]
+     ]
+    },
+    {
+     "from": "casc-q8",
+     "into": "casc-q8-confirmation-run",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.8
+      ],
+      [
+       "accept",
+       0.8
+      ]
+     ]
+    },
+    {
+     "from": "chronicle-default-on-pr",
+     "into": "chronicle-default-on",
+     "label": "accept",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "embedding backbone",
+     "into": "v25-embedding-backbone",
+     "label": "accept",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.75
+      ],
+      [
+       "reject",
+       0.75
+      ]
+     ]
+    },
+    {
+     "from": "evals/regression_gate.ps1",
+     "into": "regression_gate.ps1",
+     "label": "accept",
+     "caution": false,
+     "votes": [
+      [
+       "accept",
+       0.7
+      ],
+      [
+       "accept",
+       0.7
+      ]
+     ]
+    },
+    {
+     "from": "fact_get",
+     "into": "memory_fact_get",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.65
+      ],
+      [
+       "reject",
+       0.65
+      ]
+     ]
+    },
+    {
+     "from": "feat/chronicle-default-on",
+     "into": "chronicle-default-on",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.9
+      ],
+      [
+       "accept",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "feat/flat-band-migration",
+     "into": "flat-band-migration",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.75
+      ],
+      [
+       "reject",
+       0.75
+      ]
+     ]
+    },
+    {
+     "from": "feat/pg18-bump",
+     "into": "pg18-bump",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.9
+      ],
+      [
+       "accept",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "feat/slot-index-shadow-check",
+     "into": "slot-index-shadow-check",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.72
+      ],
+      [
+       "accept",
+       0.72
+      ]
+     ]
+    },
+    {
+     "from": "flat-band verdict rerun",
+     "into": "flat-band-rerun",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.68
+      ],
+      [
+       "reject",
+       0.68
+      ]
+     ]
+    },
+    {
+     "from": "gpu-box",
+     "into": "Windows box",
+     "label": "accept",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "ku_op_prompt_v10_stance_update.txt",
+     "into": "v10-stance-prompt",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.82
+      ],
+      [
+       "reject",
+       0.82
+      ]
+     ]
+    },
+    {
+     "from": "memory_recall mechanical seeder",
+     "into": "MECHANICAL seeder",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.92
+      ],
+      [
+       "accept",
+       0.92
+      ]
+     ]
+    },
+    {
+     "from": "pgvector/pgvector:pg16",
+     "into": "pgvector/pg16 service",
+     "label": "accept",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.8
+      ],
+      [
+       "reject",
+       0.8
+      ]
+     ]
+    },
+    {
+     "from": "primary extractor",
+     "into": "dream primary extractor",
+     "label": "accept",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.7
+      ],
+      [
+       "reject",
+       0.7
+      ]
+     ]
+    },
+    {
+     "from": "reject-proposal",
+     "into": "graph_reject_entity_proposal",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.75
+      ],
+      [
+       "reject",
+       0.75
+      ]
+     ]
+    },
+    {
+     "from": "slot-index shadow verification",
+     "into": "slot-index-shadow-check",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.7
+      ],
+      [
+       "reject",
+       0.7
+      ]
+     ]
+    },
+    {
+     "from": "stance-span-gate",
+     "into": "feat/stance-span-gate",
+     "label": "accept",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.7
+      ],
+      [
+       "reject",
+       0.7
+      ]
+     ]
+    },
+    {
+     "from": "tests/conftest.py",
+     "into": "conftest.py",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.95
+      ],
+      [
+       "accept",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "v25+ backbone",
+     "into": "v25-embedding-backbone",
+     "label": "accept",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.65
+      ],
+      [
+       "reject",
+       0.65
+      ]
+     ]
+    },
+    {
+     "from": "valid_time population prereg",
+     "into": "valid-time-population",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "leave",
+       0.6
+      ],
+      [
+       "leave",
+       0.6
+      ]
+     ]
+    },
+    {
+     "from": "world facts",
+     "into": "memory_world_facts",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.6
+      ],
+      [
+       "reject",
+       0.6
+      ]
+     ]
+    },
+    {
+     "from": ".claude-plugin/marketplace.json",
+     "into": "plugin marketplace",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": ".claude-plugin/marketplace.json",
+     "into": "plugin.json",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": ".claude/launch.json",
+     "into": "claude-code-desktop-app",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.97
+      ],
+      [
+       "reject",
+       0.97
+      ]
+     ]
+    },
+    {
+     "from": "/api/dream/run",
+     "into": "memory_dream",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.93
+      ],
+      [
+       "reject",
+       0.93
+      ]
+     ]
+    },
+    {
+     "from": "2026-08-13-night-shift",
+     "into": "2026-07-19-missed-work-audit",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.98
+      ],
+      [
+       "reject",
+       0.98
+      ]
+     ]
+    },
+    {
+     "from": "AGE",
+     "into": "master",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.98
+      ],
+      [
+       "reject",
+       0.98
+      ]
+     ]
+    },
+    {
+     "from": "Brain",
+     "into": "cognee",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.98
+      ],
+      [
+       "reject",
+       0.98
+      ]
+     ]
+    },
+    {
+     "from": "GENERIC_HUB gate",
+     "into": "hub_gate",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.88
+      ],
+      [
+       "reject",
+       0.88
+      ]
+     ]
+    },
+    {
+     "from": "Gated Decision",
+     "into": "stance-span-gate-spec",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.97
+      ],
+      [
+       "reject",
+       0.97
+      ]
+     ]
+    },
+    {
+     "from": "Graphiti",
+     "into": "e4b-ft",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.98
+      ],
+      [
+       "reject",
+       0.98
+      ]
+     ]
+    },
+    {
+     "from": "HF dspark export",
+     "into": "dspark-drafter",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.92
+      ],
+      [
+       "reject",
+       0.92
+      ]
+     ]
+    },
+    {
+     "from": "LITE tier",
+     "into": "ci/lite-tier-lanes",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.78
+      ],
+      [
+       "reject",
+       0.78
+      ]
+     ]
+    },
+    {
+     "from": "Letta",
+     "into": "Hermes",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.97
+      ],
+      [
+       "reject",
+       0.97
+      ]
+     ]
+    },
+    {
+     "from": "ML-research brief deduplication method",
+     "into": "lesson-dedup-gate",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.86
+      ],
+      [
+       "reject",
+       0.86
+      ]
+     ]
+    },
+    {
+     "from": "Opus 5",
+     "into": "Opus-5 teacher",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.8
+      ],
+      [
+       "reject",
+       0.8
+      ]
+     ]
+    },
+    {
+     "from": "PR #153",
+     "into": "pr-31",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.99
+      ],
+      [
+       "reject",
+       0.99
+      ]
+     ]
+    },
+    {
+     "from": "PSEUDOLIFE_MCP_TOOLSET=core",
+     "into": "core toolset",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.72
+      ],
+      [
+       "reject",
+       0.72
+      ]
+     ]
+    },
+    {
+     "from": "PostgreSQL 18",
+     "into": "PostgreSQL 18.1",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "PostgreSQL 18.4",
+     "into": "PostgreSQL 18",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "Postgres database",
+     "into": "docker tier postgres",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.8
+      ],
+      [
+       "reject",
+       0.8
+      ]
+     ]
+    },
+    {
+     "from": "RFC 9955",
+     "into": "4090",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.98
+      ],
+      [
+       "reject",
+       0.98
+      ]
+     ]
+    },
+    {
+     "from": "Specs/plans",
+     "into": "install-floor-plan",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "Ternary-Bonsai-27B-Q2_g64.gguf",
+     "into": "bonsai-27b-ternary",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.93
+      ],
+      [
+       "reject",
+       0.93
+      ]
+     ]
+    },
+    {
+     "from": "Ternary-Bonsai-27B-dspark-dflash.gguf",
+     "into": "bonsai-27b-ternary",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.93
+      ],
+      [
+       "reject",
+       0.93
+      ]
+     ]
+    },
+    {
+     "from": "Zep",
+     "into": "SP-1",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "_SPAWN_WAIT_S",
+     "into": "_SPAWN_WAIT_ALIVE_S",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.65
+      ],
+      [
+       "reject",
+       0.65
+      ]
+     ]
+    },
+    {
+     "from": "agent-fabricated-completion",
+     "into": "v10-stance-prompt",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.98
+      ],
+      [
+       "reject",
+       0.98
+      ]
+     ]
+    },
+    {
+     "from": "analysis",
+     "into": "temporal-decay",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "band-ablation",
+     "into": "band-ablation-replicates",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "bank drift tripwire",
+     "into": "bank-drift",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.6
+      ],
+      [
+       "reject",
+       0.6
+      ]
+     ]
+    },
+    {
+     "from": "bonsai-server-build-20260717",
+     "into": "bonsai-server-win64-cuda",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.97
+      ],
+      [
+       "reject",
+       0.97
+      ]
+     ]
+    },
+    {
+     "from": "chronicle-deploy-build-hang",
+     "into": "chronicle-default-on",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "claude-mem",
+     "into": "claude-memory-system",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "combined events prompt",
+     "into": "events-prompt",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "competitor DX/docs survey 2026-08-14",
+     "into": "graph_review.py",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.98
+      ],
+      [
+       "reject",
+       0.98
+      ]
+     ]
+    },
+    {
+     "from": "config.yaml",
+     "into": "/data/config.yaml",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "configuration_file",
+     "into": "load_config",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.97
+      ],
+      [
+       "reject",
+       0.97
+      ]
+     ]
+    },
+    {
+     "from": "cortex supersession",
+     "into": "cortex supersession_log",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.92
+      ],
+      [
+       "reject",
+       0.92
+      ]
+     ]
+    },
+    {
+     "from": "cortex-hygiene-prune",
+     "into": "cortex-compaction",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.94
+      ],
+      [
+       "reject",
+       0.94
+      ]
+     ]
+    },
+    {
+     "from": "cortex-shadow-check",
+     "into": "Cortex Console",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.96
+      ],
+      [
+       "reject",
+       0.96
+      ]
+     ]
+    },
+    {
+     "from": "ct102",
+     "into": "RFC 10024",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.99
+      ],
+      [
+       "reject",
+       0.99
+      ]
+     ]
+    },
+    {
+     "from": "daemon image build",
+     "into": "pseudolife-daemon",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.93
+      ],
+      [
+       "reject",
+       0.93
+      ]
+     ]
+    },
+    {
+     "from": "deep-dream-judge-panel",
+     "into": "deep-dream-queue",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "deep-dream-scan-2026-08-16",
+     "into": "deep-dream-2026-08-11",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.98
+      ],
+      [
+       "reject",
+       0.98
+      ]
+     ]
+    },
+    {
+     "from": "draft-irtf-cfrg-hybrid-kems-12",
+     "into": "hybrid retrieval",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.99
+      ],
+      [
+       "reject",
+       0.99
+      ]
+     ]
+    },
+    {
+     "from": "dream path",
+     "into": "dream write path",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "dream path",
+     "into": "pseudolife dream path",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.85
+      ],
+      [
+       "accept",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "dream sweep",
+     "into": "sweep tick",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "dream-run result",
+     "into": "memory_dream",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "dream_runs",
+     "into": "memory_dream",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "dspark_to_dflash.py",
+     "into": "dspark-drafter",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "embedding backbone",
+     "into": "embedding-backbone-decision",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "evals/regression_gate.ps1",
+     "into": "evals/regression_gate.ps1 + rebuild_contexts.py",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "evals/results/banks",
+     "into": "evals/results",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "feat/chronicle-default-on",
+     "into": "chronicle-default-on-pr",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.8
+      ],
+      [
+       "reject",
+       0.8
+      ]
+     ]
+    },
+    {
+     "from": "feat/stance-span-gate",
+     "into": "stance-span-gate-spec",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "flat-band-rerun",
+     "into": "flat-band-migration",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "hell-let-loose-freeze-bug",
+     "into": "Hell Let Loose: Vietnam",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.98
+      ],
+      [
+       "reject",
+       0.98
+      ]
+     ]
+    },
+    {
+     "from": "hpke crate",
+     "into": "hermes-live-shakedown",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "identity.rs",
+     "into": "identity",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.8
+      ],
+      [
+       "reject",
+       0.8
+      ]
+     ]
+    },
+    {
+     "from": "installers",
+     "into": "lite install tier",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "lite-to-docker-graduation",
+     "into": "Dockerfiles",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "live bank",
+     "into": "bank-drift",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "local Python 3.11 dev env",
+     "into": "PyPI",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "mcp_client",
+     "into": "hermes-mcp-client",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "mem0",
+     "into": "memory_forget",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "memory-bank",
+     "into": "supermemory",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "memory-servers",
+     "into": "superlocalmemory",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "memory_forget",
+     "into": "forgetting",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "milestone-slot",
+     "into": "pg18-bump",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.98
+      ],
+      [
+       "reject",
+       0.98
+      ]
+     ]
+    },
+    {
+     "from": "misleading-recall-probe",
+     "into": "distractor-scale probe",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "network.rs",
+     "into": "lm-network",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "ops/docker-compose.ghcr.yml",
+     "into": "ops/docker-compose.yml",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "ops/docker-compose.ghcr.yml",
+     "into": "docker-compose.override.yml",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "ops/install-shim-autostart.sh",
+     "into": "shim-autostart-test-flake",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "pr-31",
+     "into": "PR #152",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.99
+      ],
+      [
+       "reject",
+       0.99
+      ]
+     ]
+    },
+    {
+     "from": "primary extractor",
+     "into": "dream extractor",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "pseudolife-mcp[lite]",
+     "into": "pseudolife-mcp",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "pseudolife-pg",
+     "into": "Pseudolife",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.85
+      ],
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "regression-gate",
+     "into": "regression-gate-baseline",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "regression-gate / evals",
+     "into": "evals/regression_gate.ps1",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.8
+      ],
+      [
+       "reject",
+       0.8
+      ]
+     ]
+    },
+    {
+     "from": "retention-policy-choice",
+     "into": "rollback-retention",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "rust-libp2p",
+     "into": "lm-network",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "shim",
+     "into": "slot-index-shadow-check",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    },
+    {
+     "from": "single-shot recall",
+     "into": "misleading-recall-probe",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.78
+      ],
+      [
+       "reject",
+       0.78
+      ]
+     ]
+    },
+    {
+     "from": "slow band capacity",
+     "into": "flat-band-migration",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.92
+      ],
+      [
+       "reject",
+       0.92
+      ]
+     ]
+    },
+    {
+     "from": "stance-span-gate",
+     "into": "span gate",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.78
+      ],
+      [
+       "reject",
+       0.78
+      ]
+     ]
+    },
+    {
+     "from": "stance-span-gate",
+     "into": "stance-span-gate-spec",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.62
+      ],
+      [
+       "accept",
+       0.62
+      ]
+     ]
+    },
+    {
+     "from": "supermemory",
+     "into": "superlocalmemory",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.96
+      ],
+      [
+       "reject",
+       0.96
+      ]
+     ]
+    },
+    {
+     "from": "sweep-agent",
+     "into": "evals/ladder_sweep.py",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.93
+      ],
+      [
+       "reject",
+       0.93
+      ]
+     ]
+    },
+    {
+     "from": "symbolic-contender-resolution",
+     "into": "merge_candidate",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.92
+      ],
+      [
+       "reject",
+       0.92
+      ]
+     ]
+    },
+    {
+     "from": "task_a60962c0",
+     "into": "release-procedure skill",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.97
+      ],
+      [
+       "reject",
+       0.97
+      ]
+     ]
+    },
+    {
+     "from": "transfer.rs",
+     "into": "transfer",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.78
+      ],
+      [
+       "reject",
+       0.78
+      ]
+     ]
+    },
+    {
+     "from": "user-machine",
+     "into": "dev-box",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ],
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "v10-stance-deploy",
+     "into": "v10-stance-prompt",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.93
+      ],
+      [
+       "reject",
+       0.93
+      ]
+     ]
+    },
+    {
+     "from": "v11 drift-iteration prompt work",
+     "into": "agent-fabricated-completion",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.96
+      ],
+      [
+       "reject",
+       0.96
+      ]
+     ]
+    },
+    {
+     "from": "valid-time-population",
+     "into": "live_verification",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.93
+      ],
+      [
+       "reject",
+       0.93
+      ]
+     ]
+    },
+    {
+     "from": "windows-auto-reboot-mitigation",
+     "into": "Windows Update",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.92
+      ],
+      [
+       "reject",
+       0.92
+      ]
+     ]
+    },
+    {
+     "from": "x-wing crate",
+     "into": "SP-1",
+     "label": "reject",
+     "caution": false,
+     "votes": [
+      [
+       "reject",
+       0.95
+      ],
+      [
+       "reject",
+       0.95
+      ]
+     ]
+    }
+   ]
+  }
+ }
+}
