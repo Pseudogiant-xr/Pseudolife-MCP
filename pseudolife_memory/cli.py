@@ -27,6 +27,9 @@ modes:
                  --hook-json emits Claude Code/Codex hook JSON)
   backup         back up the bank: pg_dump + state archive with rotation
                  (pip tiers; the Docker tier keeps ops/backup.ps1)
+  export         write a portable logical export of the bank (ZIP of JSONL
+                 tables + manifest; tier- and PG-version-independent)
+  import         load a logical export into a fresh, empty bank
   episode-start  open a session episode (legacy hook helper)
   episode-end    close it
   help           show this message (also -h / --help)
@@ -55,6 +58,9 @@ def main() -> None:
     elif mode == "backup":
         from pseudolife_memory.backup_cli import run_backup
         run_backup()
+    elif mode in ("export", "import"):
+        from pseudolife_memory import transfer_cli
+        transfer_cli.run_transfer(mode)
     elif mode in ("episode-start", "episode-end"):
         from pseudolife_memory.episode_cli import run_episode
         run_episode(mode)

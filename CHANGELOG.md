@@ -6,6 +6,31 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-31 — logical export/import: `pseudolife-mcp export` / `import`)
+- **The bank now has a logical transfer layer beside the physical backups.**
+  `pseudolife-mcp export` writes the whole bank as a portable ZIP — one
+  JSONL file per table plus a manifest (format version, schema version,
+  embedding dimension, per-table counts) — from a single read-only
+  REPEATABLE READ snapshot, safe against a live daemon.
+  `pseudolife-mcp import <archive.zip>` loads one into a **fresh, empty
+  bank** in a single transaction, preserving ids, HLC stamps, and
+  embeddings verbatim and advancing the id sequences past the imported
+  rows. Unlike a `pg_dump`, the artifact is deployment-tier- and
+  Postgres-version-independent and loads additively across schema
+  versions: an export missing a column takes the target's DDL default
+  (old export → new build), while an export carrying an unknown column is
+  refused (new export → old build would silently drop data). Import also
+  refuses a non-empty bank, refuses while other connections hold the
+  database (a running daemon; `--force` overrides), and refuses an
+  embedding-dimension mismatch. Every schema table is explicitly
+  classified exported or excluded (operational telemetry and the dream
+  run journal stay behind; the manifest lists them), and the roster is
+  guard-tested against `BENCH_RESET_TABLES` so a future table must pick
+  a side. Both commands are torch-free and resolve the bank the way
+  `backup` does (explicit DSN, else the lite tier's embedded instance).
+  (`pseudolife_memory/transfer_cli.py`, `tests/test_transfer_cli.py`;
+  docs in the configuration guide's Backups section.)
+
 ### Fixed (2026-08-30 — merge-proposal evidence: no more empty sides, differential snippets, low-differential flag)
 - **Every merge-proposal side now ships evidence, and the two sides stop
   showing each other's.** The 2026-08-21 live shadow comparison
