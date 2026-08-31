@@ -13,7 +13,8 @@ the contract:
 * import refuses a non-empty bank, a bank other connections hold (a running
   daemon), an unknown column (export from a newer build), and an embedding
   dimension mismatch;
-* transient meta (schema_version, the active-session pointer) never travels.
+* build-owned/transient meta (schema_version, extension lineage markers,
+  the active-session pointer) never travels.
 """
 
 from __future__ import annotations
@@ -365,6 +366,13 @@ def test_export_skips_transient_meta_and_telemetry(pg_url, tmp_path):
             "INSERT INTO dream_runs (started_at, cursor_before, status) "
             "VALUES (171.0, 0.0, 'running')"
         )
+        # An extension schema marker (the `*_schema_version` convention) is
+        # build-owned like schema_version itself and must not travel.
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES "
+            "('sampleext_schema_version', '\"v34-sampleext\"'::jsonb) "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+        )
         conn.commit()
 
     out = tmp_path / "bank.zip"
@@ -379,6 +387,7 @@ def test_export_skips_transient_meta_and_telemetry(pg_url, tmp_path):
             for line in zf.read("meta.jsonl").decode().split("\n") if line
         }
         assert "schema_version" not in meta_keys
+        assert "sampleext_schema_version" not in meta_keys
         assert "active_session_pointer" not in meta_keys
         assert "cortex_dream_cursor" in meta_keys
         manifest = json.loads(zf.read("manifest.json"))
@@ -387,6 +396,36 @@ def test_export_skips_transient_meta_and_telemetry(pg_url, tmp_path):
         assert manifest["embedding_dim"] == _DIM
         assert manifest["counts"]["entries"] == 2
         assert set(manifest["excluded_tables"]) == set(EXCLUDED_TABLES)
+
+
+def test_import_skips_extension_markers_injected_into_the_archive(pg_url, tmp_path):
+    """The import-side guard is load-bearing on its own: an archive carrying
+    a build-owned extension marker (hand-edited, or exported by a build that
+    predates the suffix rule) must not plant it in the target bank."""
+    with _bank(pg_url) as conn:
+        _seed_bank(conn)
+    out = tmp_path / "bank.zip"
+    perform_export(pg_url, out)
+
+    hacked = tmp_path / "hacked.zip"
+
+    def add_marker(blobs):
+        row = json.dumps(
+            {"key": "sampleext_schema_version", "value": "v34-sampleext"})
+        blobs["meta.jsonl"] = blobs["meta.jsonl"] + (row + "\n").encode()
+
+    _rewrite_zip(out, hacked, add_marker)
+
+    with _bank(pg_url):
+        pass  # truncate back to empty, then release the connection
+
+    perform_import(pg_url, hacked)
+
+    with psycopg.connect(pg_url) as conn:
+        conn.execute("SET search_path TO public")
+        cur = conn.execute(
+            "SELECT count(*) FROM meta WHERE key = 'sampleext_schema_version'")
+        assert cur.fetchone()[0] == 0
 
 
 def test_import_refuses_a_nonempty_bank(pg_url, tmp_path):

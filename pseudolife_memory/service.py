@@ -764,6 +764,49 @@ class MemoryService(DreamOps):
         self._cms = None
         raise RuntimeError(msg)
 
+    def _ensure_postgres_storage(self):
+        """Connect the durable store without loading an embedding model.
+
+        Exact/hash-addressed paths that never embed can call this directly
+        and stay cheap even as the first tool used in a session;
+        ``_ensure_init`` reuses the same connection when an embedding-backed
+        tool is called later. Reused across failed attempts too: a retry
+        after a mid-init failure must never rebuild the connection.
+        """
+        if self._storage is not None:
+            return self._storage
+        if not self._db_url:
+            raise RuntimeError(
+                "this operation requires the durable Postgres tier; "
+                "configure PSEUDOLIFE_MCP_DATABASE_URL or install the "
+                "lite tier")
+        from pseudolife_memory.storage.postgres import PostgresStorage
+        try:
+            self._storage = PostgresStorage(self._db_url)
+        except RuntimeError as exc:
+            # schema.py's dim-mismatch refusal (schema v25) fires here —
+            # record it for /health, then let it propagate: this call
+            # (and every retry until the bank is migrated) must still
+            # fail loudly, not just silently degrade.
+            self._init_refusal = str(exc)
+            raise
+        self._init_refusal = None
+        logger.info("storage: postgres (%s)",
+                    self._db_url.rsplit("@", 1)[-1])
+        # Invariant: unqualified tables MUST resolve to the real `public`
+        # bank, never the role-named `pseudolife` shadow schema (v0.4
+        # collision fix). PostgresStorage pins this; fail loud if regressed.
+        # Lives here, not in _ensure_init, so every connect path is covered.
+        # A failed check must not leave a connection the reuse guard would
+        # return — that would skip the invariant on every retry.
+        try:
+            self._assert_public_search_path()
+        except Exception:
+            self._storage.close()
+            self._storage = None
+            raise
+        return self._storage
+
     def _ensure_init(self) -> None:
         if self._cms is not None:
             return
@@ -776,23 +819,7 @@ class MemoryService(DreamOps):
         # peak. A down database must cost a fast connect error, never a
         # model load.
         if self._db_url:
-            from pseudolife_memory.storage.postgres import PostgresStorage
-            try:
-                self._storage = PostgresStorage(self._db_url)
-            except RuntimeError as exc:
-                # schema.py's dim-mismatch refusal (schema v25) fires here —
-                # record it for /health, then let it propagate: this call
-                # (and every _ensure_init retry until the bank is migrated)
-                # must still fail loudly, not just silently degrade.
-                self._init_refusal = str(exc)
-                raise
-            self._init_refusal = None
-            logger.info("storage: postgres (%s)",
-                        self._db_url.rsplit("@", 1)[-1])
-            # Invariant: unqualified tables MUST resolve to the real `public`
-            # bank, never the role-named `pseudolife` shadow schema (v0.4
-            # collision fix). PostgresStorage pins this; fail loud if regressed.
-            self._assert_public_search_path()
+            self._ensure_postgres_storage()
             from pseudolife_memory.memory.graph_store import PostgresNetworkxGraphStore
             self._graph = PostgresNetworkxGraphStore(self._storage)
             # Identity tier 3: hydrate the active-session pointer left by a

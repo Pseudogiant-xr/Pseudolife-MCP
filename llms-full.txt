@@ -3277,6 +3277,35 @@ After running the entity-kind backfill (`evals/apply_entity_kinds.py --apply`), 
 
 A kind you set by hand is locked against later classifier runs — `evals/apply_entity_kinds.py --apply` overlays the model's labels onto the existing table rather than replacing it, so a deliberate marking is never reverted by a re-apply. The R@10 figures behind the v25 swap, and the rest of the shootout, are in [Benchmarks — embedding backbone](benchmarks.md#embedding-backbone--chosen-on-our-own-corpus).
 
+### Extension schemas
+
+A fork or downstream customization that adds its own tables should not
+consume the next integer `schema_version` — that number belongs to this
+repository's migration ladder, and claiming it guarantees a collision with
+the next upstream release. The sanctioned pattern instead:
+
+- **A namespaced marker key**: store the extension's lineage under its own
+  `meta` key ending in `_schema_version` (for example
+  `myext_schema_version = "v34-myext"`), leaving the integer
+  `schema_version` untouched. Keys with this suffix are build-owned:
+  the logical export/import skips them exactly like `schema_version`
+  itself, so a marker never travels into a bank whose build does not
+  provide the extension.
+- **Additive, idempotent DDL** (`CREATE TABLE IF NOT EXISTS`, `CREATE OR
+  REPLACE FUNCTION`, `DROP TRIGGER IF EXISTS` + `CREATE TRIGGER`) applied
+  after upstream's `ensure_schema` tail, so daemon startup converges on
+  the same shape regardless of what version it last ran.
+- **Explicit enumeration**: add the extension's tables to
+  `BENCH_RESET_TABLES` (so bench tooling can reset them) and to the
+  transfer CLI's `EXCLUDED_TABLES` (so ordinary bank transfer neither
+  moves nor blocks on them); give them their own portable format if their
+  data needs to travel.
+
+Upstream migrations stay unaware of extensions by construction — an
+extension that follows this pattern rebases cleanly across upstream
+schema bumps, and an upstream bank that has never seen the extension
+simply carries no marker.
+
 ---
 
 <!-- source: docs/guide/providers.md -->
