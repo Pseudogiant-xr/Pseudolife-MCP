@@ -112,14 +112,17 @@ function paintStatus(overview) {
   // A fixture-backed server (health.fixtures) must never claim "live": the
   // demo bank is visually indistinguishable from a real one, so the state
   // chip becomes the always-visible demo-data banner instead.
-  const state = overview
-    ? (h.fixtures
-      ? el("span", {
-        class: "chip warn",
-        title: "This Console is serving canned FixtureService demo data (the dev server), not a real memory bank.",
-      }, "DEMO DATA — fixture server, not a real bank")
-      : el("span", { class: "chip ok" }, el("span", { class: "pulse-dot" }), " live"))
-    : el("span", { class: "chip bad" }, "offline");
+  let state;
+  if (!overview) {
+    state = el("span", { class: "chip bad" }, "offline");
+  } else if (h.fixtures) {
+    state = el("span", {
+      class: "chip warn",
+      title: "This Console is serving canned FixtureService demo data (the dev server), not a real memory bank.",
+    }, "DEMO DATA — fixture server, not a real bank");
+  } else {
+    state = el("span", { class: "chip ok" }, el("span", { class: "pulse-dot" }), " live");
+  }
   chips.unshift(state);
   mount(statusEl, chips);
 }
