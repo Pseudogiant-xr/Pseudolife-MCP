@@ -109,9 +109,20 @@ function paintStatus(overview) {
   if (h.persist_errors) chips.push(el("span", { class: "chip bad" }, "persist errors: " + h.persist_errors));
   if (dream.would_fire) chips.push(el("span", { class: "chip warn" }, el("span", { class: "pulse-dot" }), " dream ready"));
   // No overview means the fetch failed — say so instead of claiming "live".
-  const state = overview
-    ? el("span", { class: "chip ok" }, el("span", { class: "pulse-dot" }), " live")
-    : el("span", { class: "chip bad" }, "offline");
+  // A fixture-backed server (health.fixtures) must never claim "live": the
+  // demo bank is visually indistinguishable from a real one, so the state
+  // chip becomes the always-visible demo-data banner instead.
+  let state;
+  if (!overview) {
+    state = el("span", { class: "chip bad" }, "offline");
+  } else if (h.fixtures) {
+    state = el("span", {
+      class: "chip warn",
+      title: "This Console is serving canned FixtureService demo data (the dev server), not a real memory bank.",
+    }, "DEMO DATA — fixture server, not a real bank");
+  } else {
+    state = el("span", { class: "chip ok" }, el("span", { class: "pulse-dot" }), " live");
+  }
   chips.unshift(state);
   mount(statusEl, chips);
 }
