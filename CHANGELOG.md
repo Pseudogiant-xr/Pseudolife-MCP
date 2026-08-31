@@ -31,6 +31,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`pseudolife_memory/transfer_cli.py`, `tests/test_transfer_cli.py`;
   docs in the configuration guide's Backups section.)
 
+### Added (2026-08-31 — judge ladder measures the caution-line prompt variant)
+- **`evals/judge_ladder.py --caution`** re-runs the frozen merge-judge
+  fixture with `low_differential` computed on each row's shown snippets
+  (the two defect classes of the 2026-08-21 shadow comparison: an empty
+  side, or shown overlap at or above 50%), so the judge prompt carries the
+  production caution line that ships since the snippet-differential fix.
+  Production's third stamping criterion — pool containment, computed on
+  pre-truncation evidence pools — is deliberately out of the ladder's
+  reach: the frozen fixture stores only the shown snippets, so the flag
+  mirrors exactly the metric the shadow comparison measured.
+  Flags reach the prompt only under `--caution`; every arm's record now
+  also reports paired `flagged_subset` / `clean_subset` metrics plus a
+  per-row `caution` marker, so a baseline arm slices directly against a
+  caution arm. Unflagged and baseline rows serialize byte-identically to
+  the frozen fixture (40 of its 129 rows flag). A `--max-tokens` knob
+  (default unchanged at 400) raises the verdict budget for high
+  reasoning-effort arms: at xhigh the trace overflows the default budget
+  plus the +4096 thinking headroom and whole batches return truncated or
+  empty JSON — the 2026-08-31 xhigh run truncated away 30 of the 30 true-accept rows (batches 0-3)
+  identically in both replicates. `--only-flagged` restricts a run to the
+  flagged rows — the token-frugal subset for paired caution-line checks
+  on a metered judge (the subset split is omitted there: every row is
+  flagged, so the top-level metrics ARE the flagged subset).
+
 ### Fixed (2026-08-30 — merge-proposal evidence: no more empty sides, differential snippets, low-differential flag)
 - **Every merge-proposal side now ships evidence, and the two sides stop
   showing each other's.** The 2026-08-21 live shadow comparison

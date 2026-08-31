@@ -37,16 +37,64 @@ from pseudolife_memory.memory.dream import (  # noqa: E402
 DATA = Path(__file__).parent / "data" / "judge_eval_20260816.json"
 DEFAULT_OUT = Path(__file__).parent / "results" / "judge-ladder-20260816.json"
 
+# Shown-snippet share at/above which a row counts low-differential. Mirrors
+# service_dream.DreamOps._LOW_DIFFERENTIAL_SHARE (0.5, the 2026-08-21 shadow
+# comparison's metric); kept as a literal so the harness never imports the
+# service stack.
+LOW_DIFFERENTIAL_SHARE = 0.5
+
+
+def caution_flag(row: dict) -> bool:
+    """The shadow comparison's two defect classes, computed on the SHOWN
+    snippets: an empty side, or shown overlap at/above
+    ``LOW_DIFFERENTIAL_SHARE`` (containment of one shown set in the other
+    overlaps 1.0, so it needs no separate check). Production stamps one
+    further criterion the ladder cannot reproduce — pool containment,
+    computed on the pre-truncation evidence pools in
+    ``service_dream._attach_candidate_snippets`` — because the frozen
+    fixture stores only the shown snippets, not the pools."""
+    src = set((row.get("from") or {}).get("snippets") or [])
+    dst = set((row.get("into") or {}).get("snippets") or [])
+    if not src or not dst:
+        return True
+    return len(src & dst) / min(len(src), len(dst)) >= LOW_DIFFERENTIAL_SHARE
+
+
+def build_proposals(chunk: list[dict], caution: bool) -> list[dict]:
+    """Proposal dicts for one judge batch. With ``caution``, flagged rows
+    gain ``low_differential`` so ``format_judge_proposal`` renders the
+    production caution line; the key stays ABSENT otherwise — unflagged and
+    baseline rows serialize byte-identically to the frozen fixture."""
+    return [{"n": i + 1, "from": r["from"], "into": r["into"],
+             "reason": r.get("reason"), "score": r.get("score"),
+             **({"low_differential": True}
+                if caution and caution_flag(r) else {})}
+            for i, r in enumerate(chunk)]
+
+
+def subset_scores(rows: list[dict], final: list, flags: list[bool],
+                  only_flagged: bool = False) -> dict:
+    """Paired flagged/clean subset metrics. Under ``--only-flagged`` the
+    split is meaningless — every row is flagged, so flagged_subset would
+    duplicate the top-level score and clean_subset would be an empty-list
+    degenerate (rows 0, every rate None) — so nothing is emitted."""
+    if only_flagged:
+        return {}
+    return {
+        name: score([r for r, f in zip(rows, flags) if f is want],
+                    [v for v, f in zip(final, flags) if f is want])
+        for name, want in (("flagged_subset", True), ("clean_subset", False))
+    }
+
 
 def run_replicate(ex: OpenAICompatExtractor, rows: list[dict],
-                  batch: int) -> list[tuple[str, float] | None]:
+                  batch: int, caution: bool = False,
+                  ) -> list[tuple[str, float] | None]:
     """One full pass; one (verdict, confidence) — or None — per row."""
     verdicts: list[tuple[str, float] | None] = [None] * len(rows)
     for start in range(0, len(rows), batch):
         chunk = rows[start:start + batch]
-        proposals = [{"n": i + 1, "from": r["from"], "into": r["into"],
-                      "reason": r.get("reason"), "score": r.get("score")}
-                     for i, r in enumerate(chunk)]
+        proposals = build_proposals(chunk, caution)
         try:
             out = ex.judge_merges(proposals)
         except ExtractorError as exc:
@@ -134,23 +182,43 @@ def main() -> None:
     ap.add_argument("--thinking-effort", choices=("low", "medium", "xhigh"),
                     help="like --thinking but pins an explicit per-request "
                          "reasoning_effort level")
+    ap.add_argument("--caution", action="store_true",
+                    help="pass low_differential on fixture rows whose shown "
+                         "snippets hit the shadow-comparison defect classes, "
+                         "so the judge prompt carries the production caution "
+                         "line (PR #217); baseline prompts stay byte-frozen")
+    ap.add_argument("--only-flagged", action="store_true",
+                    help="run only the fixture rows caution_flag() marks "
+                         "low-differential — the token-frugal subset for "
+                         "paired caution-line checks on a metered judge "
+                         "(40 of 129 rows; 22 accept / 18 reject labels)")
+    ap.add_argument("--max-tokens", type=int, default=400,
+                    help="extractor max_tokens (default 400, the ladder's "
+                         "measured verdict budget). Raise for high reasoning "
+                         "effort: at xhigh the trace overflows the default "
+                         "budget plus judge_merges' +4096 thinking headroom "
+                         "and batches return truncated/empty JSON (both "
+                         "2026-08-31 xhigh replicates lost batches 0-3 "
+                         "identically)")
     args = ap.parse_args()
 
     rows = json.loads(DATA.read_text(encoding="utf-8"))["rows"]
+    if args.only_flagged:
+        rows = [r for r in rows if caution_flag(r)]
     ex = OpenAICompatExtractor(args.base_url, args.model,
                                # The ladder's measured budget: verdict rows
                                # are ~120 tokens/proposal (judge_merges floors
                                # at 120*batch), decoupled from the extraction
                                # default so a default bump can never silently
                                # change this bench's config again.
-                               max_tokens=400,
+                               max_tokens=args.max_tokens,
                                timeout_seconds=args.timeout,
                                judge_thinking=(args.thinking_effort
                                                or args.thinking))
     reps: list[list[str | None]] = []
     for i in range(args.replicates):
         t0 = time.time()
-        reps.append(run_replicate(ex, rows, args.batch))
+        reps.append(run_replicate(ex, rows, args.batch, args.caution))
         n = sum(1 for v in reps[-1] if v)
         print(f"replicate {i + 1}/{args.replicates}: {n}/{len(rows)} "
               f"verdicts in {time.time() - t0:.0f}s")
@@ -161,6 +229,11 @@ def main() -> None:
         for i in range(len(rows)):
             got = {rep[i][0] for rep in reps if rep[i]}
             flips += len(got) > 1
+    # Flags are computed for REPORTING in every arm (so a baseline arm's
+    # subset metrics pair directly against a --caution arm's); they reach
+    # the prompt only under --caution.
+    flags = [caution_flag(r) for r in rows]
+    subset = subset_scores(rows, final, flags, args.only_flagged)
     result = {
         "arm": args.arm, "model": args.model, "base_url": args.base_url,
         "replicates": args.replicates, "batch": args.batch,
@@ -169,9 +242,13 @@ def main() -> None:
         # rerun of the same arm silently replaces the non-thinking numbers
         # with nothing distinguishing the two.
         "judge_thinking": args.thinking_effort or args.thinking or False,
-        "flip_rows": flips, **score(rows, final),
+        "max_tokens": args.max_tokens,
+        "only_flagged": args.only_flagged,
+        "caution": args.caution, "caution_rows": sum(flags),
+        "flip_rows": flips, **score(rows, final), **subset,
         "per_row": [{"from": r["from"]["display"],
                      "into": r["into"]["display"], "label": r["label"],
+                     "caution": flags[i],
                      "votes": [list(rep[i]) if rep[i] else None
                                for rep in reps]}
                     for i, r in enumerate(rows)],
@@ -179,6 +256,12 @@ def main() -> None:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     doc = (json.loads(args.out.read_text(encoding="utf-8"))
            if args.out.exists() else {"data": DATA.name, "arms": {}})
+    if args.arm in doc.get("arms", {}):
+        # Loud, not fatal: replacing an arm is legitimate on a deliberate
+        # rerun, but silently rewriting a canonical record is the named
+        # 2026-07-21 failure — surface it in the run log every time.
+        print(f"WARNING: arm '{args.arm}' already exists in {args.out} — "
+              "replacing its record")
     doc["arms"][args.arm] = result
     args.out.write_text(json.dumps(doc, indent=1, ensure_ascii=False),
                         encoding="utf-8")

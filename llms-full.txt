@@ -619,6 +619,14 @@ Or HTTP, no pip package needed:
 gemini mcp add -s user -t http pseudolife-memory http://127.0.0.1:8765/mcp
 ```
 
+Note: since 2026-06-18 Google no longer serves individual-tier accounts
+(free, AI Pro, AI Ultra) through Gemini CLI — OAuth sign-in fails and
+points at Antigravity. The wiring above stays correct, but individual
+accounts need API-key auth (`GEMINI_API_KEY`) to actually run sessions —
+or use Google Antigravity itself, which connects to the same bank via
+`~/.gemini/config/mcp_config.json`; both are covered in
+[the providers guide](docs/guide/providers.md#gemini-cli).
+
 **Any other MCP-capable agent** (Cursor, Windsurf, Zed, Copilot CLI, …) —
 add the generic `mcpServers` entry to that tool's MCP config (`ops/install.sh
 --client generic` prints both shapes ready to paste):
@@ -3306,6 +3314,28 @@ limits: Codex hooks are **not available on Windows** — there the standing
 append it — and Codex has no per-prompt hook, so the per-turn discipline
 line has no Codex equivalent anywhere.
 
+Codex can also filter tools **client-side, per project**: a project-scoped
+`.codex/config.toml` (loaded for trusted projects only) may register the
+server with an `enabled_tools` allow-list, exposing just a subset of the
+memory tools to that one project (`disabled_tools` is the matching
+deny-list, applied after it):
+
+```toml
+# <project>/.codex/config.toml — trusted projects only
+[mcp_servers.pseudolife-memory]
+url = "http://127.0.0.1:8765/mcp"
+enabled_tools = ["memory_search", "memory_store", "memory_outcome"]
+startup_timeout_sec = 20
+tool_timeout_sec = 60
+```
+
+This complements the daemon's server-side
+[toolset tiers](configuration.md#toolset-tiers): tiers key the roster to
+the caller's identity for every session, while `enabled_tools` narrows it
+further for a single project without touching the daemon. One operational
+note (verified live 2026-08-31): Codex does not hot-reload newly added MCP
+servers — restart the session after registering one.
+
 ## Gemini CLI
 
 MCP wiring is first-class and scriptable (flags verified against Gemini CLI
@@ -3318,6 +3348,39 @@ gemini mcp add -s user -t http pseudolife-memory http://127.0.0.1:8765/mcp
 ```
 
 `-s user` matters — Gemini defaults to *project* scope.
+
+> **Auth caveat:** since 2026-06-18 Google no longer serves individual-tier
+> accounts (free, Google AI Pro, AI Ultra) through Gemini CLI — OAuth
+> sign-in fails with `IneligibleTierError`, pointing at Antigravity as the
+> migration path. The wiring above is auth-independent and stays correct,
+> but to actually run sessions an individual account needs API-key auth
+> (set `GEMINI_API_KEY`); enterprise Gemini Code Assist licenses keep
+> working unchanged.
+
+If you migrated to **Google Antigravity** (where that error points), it can
+use the same bank. Its global MCP config is
+`~/.gemini/config/mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "pseudolife-memory": {
+      "command": "pseudolife-mcp",
+      "args": [],
+      "env": {
+        "PSEUDOLIFE_WRITER_ID": "antigravity",
+        "PSEUDOLIFE_MCP_NO_SPAWN": "1"
+      }
+    }
+  }
+}
+```
+
+A running Antigravity picks the file up from the refresh button in
+Settings → Customizations → Installed MCP Servers, and asks per-tool
+approval on first use. Verified live 2026-08-31: tools discovered, search
+and fact writes round-tripped, writes attributed as writer `antigravity`.
+
 `PSEUDOLIFE_MCP_NO_SPAWN=1` belongs on Docker-tier shim registrations
 (every provider): it makes the shim wait for the compose container instead
 of spawning a host fallback that can shadow the real bank after a reboot —

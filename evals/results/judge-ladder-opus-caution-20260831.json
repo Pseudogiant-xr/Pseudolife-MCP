@@ -1,0 +1,1087 @@
+{
+ "data": "judge_eval_20260816.json",
+ "arms": {
+  "opus-flagged-base": {
+   "arm": "opus-flagged-base",
+   "model": "claude-opus-5",
+   "base_url": "http://127.0.0.1:8082/v1",
+   "replicates": 1,
+   "batch": 8,
+   "judge_thinking": false,
+   "max_tokens": 400,
+   "only_flagged": true,
+   "caution": false,
+   "caution_rows": 40,
+   "flip_rows": 0,
+   "rows": 40,
+   "decided": 39,
+   "coverage": 0.975,
+   "agreement_on_decided": 0.7949,
+   "accept_precision": 0.8889,
+   "reject_precision": 0.7143,
+   "false_reject_rate": 0.2727,
+   "false_rejects": 6,
+   "true_accepts": 22,
+   "auto_conf": 0.8,
+   "auto_rejected": 8,
+   "auto_reject_share_of_true_rejects": 0.4444,
+   "auto_false_rejects": 0,
+   "auto_reject_precision": 1.0,
+   "flagged_subset": {
+    "rows": 40,
+    "decided": 39,
+    "coverage": 0.975,
+    "agreement_on_decided": 0.7949,
+    "accept_precision": 0.8889,
+    "reject_precision": 0.7143,
+    "false_reject_rate": 0.2727,
+    "false_rejects": 6,
+    "true_accepts": 22,
+    "auto_conf": 0.8,
+    "auto_rejected": 8,
+    "auto_reject_share_of_true_rejects": 0.4444,
+    "auto_false_rejects": 0,
+    "auto_reject_precision": 1.0
+   },
+   "clean_subset": {
+    "rows": 0,
+    "decided": 0,
+    "coverage": null,
+    "agreement_on_decided": null,
+    "accept_precision": null,
+    "reject_precision": null,
+    "false_reject_rate": null,
+    "false_rejects": 0,
+    "true_accepts": 0,
+    "auto_conf": 0.8,
+    "auto_rejected": 0,
+    "auto_reject_share_of_true_rejects": null,
+    "auto_false_rejects": 0,
+    "auto_reject_precision": null
+   },
+   "per_row": [
+    {
+     "from": "/api/graph/assign-scope",
+     "into": "assign-scope",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.72
+      ]
+     ]
+    },
+    {
+     "from": "<data_dir>/config.yaml",
+     "into": "/data/config.yaml",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.53
+      ]
+     ]
+    },
+    {
+     "from": "ForceGraph (graphview.js)",
+     "into": "graphview.js",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.52
+      ]
+     ]
+    },
+    {
+     "from": "GENERIC_HUB gate",
+     "into": "GENERIC_HUB_NORMS gate",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.7
+      ]
+     ]
+    },
+    {
+     "from": "PostgreSQL 16",
+     "into": "PostgreSQL 16.14",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.6
+      ]
+     ]
+    },
+    {
+     "from": "PostgreSQL 18",
+     "into": "embedded PostgreSQL 18",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.5
+      ]
+     ]
+    },
+    {
+     "from": "Qwen3-Embedding",
+     "into": "Qwen3-Embedding-0.6B",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.62
+      ]
+     ]
+    },
+    {
+     "from": "Security Remediation",
+     "into": "PseudoLife-MCP security remediation",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.8
+      ]
+     ]
+    },
+    {
+     "from": "casc-q8",
+     "into": "casc-q8-confirmation-run",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.62
+      ]
+     ]
+    },
+    {
+     "from": "fact_get",
+     "into": "memory_fact_get",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.68
+      ]
+     ]
+    },
+    {
+     "from": "feat/chronicle-default-on",
+     "into": "chronicle-default-on",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.8
+      ]
+     ]
+    },
+    {
+     "from": "feat/flat-band-migration",
+     "into": "flat-band-migration",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.55
+      ]
+     ]
+    },
+    {
+     "from": "feat/pg18-bump",
+     "into": "pg18-bump",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.78
+      ]
+     ]
+    },
+    {
+     "from": "feat/slot-index-shadow-check",
+     "into": "slot-index-shadow-check",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.7
+      ]
+     ]
+    },
+    {
+     "from": "flat-band verdict rerun",
+     "into": "flat-band-rerun",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.62
+      ]
+     ]
+    },
+    {
+     "from": "ku_op_prompt_v10_stance_update.txt",
+     "into": "v10-stance-prompt",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.58
+      ]
+     ]
+    },
+    {
+     "from": "memory_recall mechanical seeder",
+     "into": "MECHANICAL seeder",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.8
+      ]
+     ]
+    },
+    {
+     "from": "reject-proposal",
+     "into": "graph_reject_entity_proposal",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.55
+      ]
+     ]
+    },
+    {
+     "from": "slot-index shadow verification",
+     "into": "slot-index-shadow-check",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.65
+      ]
+     ]
+    },
+    {
+     "from": "tests/conftest.py",
+     "into": "conftest.py",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "valid_time population prereg",
+     "into": "valid-time-population",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.6
+      ]
+     ]
+    },
+    {
+     "from": "world facts",
+     "into": "memory_world_facts",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.5
+      ]
+     ]
+    },
+    {
+     "from": ".claude-plugin/marketplace.json",
+     "into": "plugin marketplace",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.75
+      ]
+     ]
+    },
+    {
+     "from": ".claude-plugin/marketplace.json",
+     "into": "plugin.json",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "LITE tier",
+     "into": "ci/lite-tier-lanes",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.82
+      ]
+     ]
+    },
+    {
+     "from": "PSEUDOLIFE_MCP_TOOLSET=core",
+     "into": "core toolset",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.6
+      ]
+     ]
+    },
+    {
+     "from": "PostgreSQL 18",
+     "into": "PostgreSQL 18.1",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "PostgreSQL 18.4",
+     "into": "PostgreSQL 18",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.8
+      ]
+     ]
+    },
+    {
+     "from": "_SPAWN_WAIT_S",
+     "into": "_SPAWN_WAIT_ALIVE_S",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "bank drift tripwire",
+     "into": "bank-drift",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "leave",
+       0.5
+      ]
+     ]
+    },
+    {
+     "from": "dream path",
+     "into": "pseudolife dream path",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.83
+      ]
+     ]
+    },
+    {
+     "from": "embedding backbone",
+     "into": "embedding-backbone-decision",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.55
+      ]
+     ]
+    },
+    {
+     "from": "evals/regression_gate.ps1",
+     "into": "evals/regression_gate.ps1 + rebuild_contexts.py",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.8
+      ]
+     ]
+    },
+    {
+     "from": "identity.rs",
+     "into": "identity",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.65
+      ]
+     ]
+    },
+    {
+     "from": "ops/docker-compose.ghcr.yml",
+     "into": "ops/docker-compose.yml",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.88
+      ]
+     ]
+    },
+    {
+     "from": "ops/docker-compose.ghcr.yml",
+     "into": "docker-compose.override.yml",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.9
+      ]
+     ]
+    },
+    {
+     "from": "single-shot recall",
+     "into": "misleading-recall-probe",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.7
+      ]
+     ]
+    },
+    {
+     "from": "stance-span-gate",
+     "into": "span gate",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.65
+      ]
+     ]
+    },
+    {
+     "from": "stance-span-gate",
+     "into": "stance-span-gate-spec",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.5
+      ]
+     ]
+    },
+    {
+     "from": "transfer.rs",
+     "into": "transfer",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.6
+      ]
+     ]
+    }
+   ]
+  },
+  "opus-flagged-caution": {
+   "arm": "opus-flagged-caution",
+   "model": "claude-opus-5",
+   "base_url": "http://127.0.0.1:8082/v1",
+   "replicates": 1,
+   "batch": 8,
+   "judge_thinking": false,
+   "max_tokens": 400,
+   "only_flagged": true,
+   "caution": true,
+   "caution_rows": 40,
+   "flip_rows": 0,
+   "rows": 40,
+   "decided": 40,
+   "coverage": 1.0,
+   "agreement_on_decided": 0.8,
+   "accept_precision": 0.8889,
+   "reject_precision": 0.7273,
+   "false_reject_rate": 0.2727,
+   "false_rejects": 6,
+   "true_accepts": 22,
+   "auto_conf": 0.8,
+   "auto_rejected": 8,
+   "auto_reject_share_of_true_rejects": 0.4444,
+   "auto_false_rejects": 0,
+   "auto_reject_precision": 1.0,
+   "flagged_subset": {
+    "rows": 40,
+    "decided": 40,
+    "coverage": 1.0,
+    "agreement_on_decided": 0.8,
+    "accept_precision": 0.8889,
+    "reject_precision": 0.7273,
+    "false_reject_rate": 0.2727,
+    "false_rejects": 6,
+    "true_accepts": 22,
+    "auto_conf": 0.8,
+    "auto_rejected": 8,
+    "auto_reject_share_of_true_rejects": 0.4444,
+    "auto_false_rejects": 0,
+    "auto_reject_precision": 1.0
+   },
+   "clean_subset": {
+    "rows": 0,
+    "decided": 0,
+    "coverage": null,
+    "agreement_on_decided": null,
+    "accept_precision": null,
+    "reject_precision": null,
+    "false_reject_rate": null,
+    "false_rejects": 0,
+    "true_accepts": 0,
+    "auto_conf": 0.8,
+    "auto_rejected": 0,
+    "auto_reject_share_of_true_rejects": null,
+    "auto_false_rejects": 0,
+    "auto_reject_precision": null
+   },
+   "per_row": [
+    {
+     "from": "/api/graph/assign-scope",
+     "into": "assign-scope",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.7
+      ]
+     ]
+    },
+    {
+     "from": "<data_dir>/config.yaml",
+     "into": "/data/config.yaml",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.6
+      ]
+     ]
+    },
+    {
+     "from": "ForceGraph (graphview.js)",
+     "into": "graphview.js",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.52
+      ]
+     ]
+    },
+    {
+     "from": "GENERIC_HUB gate",
+     "into": "GENERIC_HUB_NORMS gate",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.7
+      ]
+     ]
+    },
+    {
+     "from": "PostgreSQL 16",
+     "into": "PostgreSQL 16.14",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.55
+      ]
+     ]
+    },
+    {
+     "from": "PostgreSQL 18",
+     "into": "embedded PostgreSQL 18",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.6
+      ]
+     ]
+    },
+    {
+     "from": "Qwen3-Embedding",
+     "into": "Qwen3-Embedding-0.6B",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.72
+      ]
+     ]
+    },
+    {
+     "from": "Security Remediation",
+     "into": "PseudoLife-MCP security remediation",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.75
+      ]
+     ]
+    },
+    {
+     "from": "casc-q8",
+     "into": "casc-q8-confirmation-run",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.6
+      ]
+     ]
+    },
+    {
+     "from": "fact_get",
+     "into": "memory_fact_get",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.8
+      ]
+     ]
+    },
+    {
+     "from": "feat/chronicle-default-on",
+     "into": "chronicle-default-on",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.82
+      ]
+     ]
+    },
+    {
+     "from": "feat/flat-band-migration",
+     "into": "flat-band-migration",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.5
+      ]
+     ]
+    },
+    {
+     "from": "feat/pg18-bump",
+     "into": "pg18-bump",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.8
+      ]
+     ]
+    },
+    {
+     "from": "feat/slot-index-shadow-check",
+     "into": "slot-index-shadow-check",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.7
+      ]
+     ]
+    },
+    {
+     "from": "flat-band verdict rerun",
+     "into": "flat-band-rerun",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.6
+      ]
+     ]
+    },
+    {
+     "from": "ku_op_prompt_v10_stance_update.txt",
+     "into": "v10-stance-prompt",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.5
+      ]
+     ]
+    },
+    {
+     "from": "memory_recall mechanical seeder",
+     "into": "MECHANICAL seeder",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.82
+      ]
+     ]
+    },
+    {
+     "from": "reject-proposal",
+     "into": "graph_reject_entity_proposal",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.55
+      ]
+     ]
+    },
+    {
+     "from": "slot-index shadow verification",
+     "into": "slot-index-shadow-check",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.6
+      ]
+     ]
+    },
+    {
+     "from": "tests/conftest.py",
+     "into": "conftest.py",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "valid_time population prereg",
+     "into": "valid-time-population",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.65
+      ]
+     ]
+    },
+    {
+     "from": "world facts",
+     "into": "memory_world_facts",
+     "label": "accept",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.5
+      ]
+     ]
+    },
+    {
+     "from": ".claude-plugin/marketplace.json",
+     "into": "plugin marketplace",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.8
+      ]
+     ]
+    },
+    {
+     "from": ".claude-plugin/marketplace.json",
+     "into": "plugin.json",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.88
+      ]
+     ]
+    },
+    {
+     "from": "LITE tier",
+     "into": "ci/lite-tier-lanes",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.8
+      ]
+     ]
+    },
+    {
+     "from": "PSEUDOLIFE_MCP_TOOLSET=core",
+     "into": "core toolset",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.6
+      ]
+     ]
+    },
+    {
+     "from": "PostgreSQL 18",
+     "into": "PostgreSQL 18.1",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.82
+      ]
+     ]
+    },
+    {
+     "from": "PostgreSQL 18.4",
+     "into": "PostgreSQL 18",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.7
+      ]
+     ]
+    },
+    {
+     "from": "_SPAWN_WAIT_S",
+     "into": "_SPAWN_WAIT_ALIVE_S",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "bank drift tripwire",
+     "into": "bank-drift",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.72
+      ]
+     ]
+    },
+    {
+     "from": "dream path",
+     "into": "pseudolife dream path",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.75
+      ]
+     ]
+    },
+    {
+     "from": "embedding backbone",
+     "into": "embedding-backbone-decision",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.55
+      ]
+     ]
+    },
+    {
+     "from": "evals/regression_gate.ps1",
+     "into": "evals/regression_gate.ps1 + rebuild_contexts.py",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.75
+      ]
+     ]
+    },
+    {
+     "from": "identity.rs",
+     "into": "identity",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.6
+      ]
+     ]
+    },
+    {
+     "from": "ops/docker-compose.ghcr.yml",
+     "into": "ops/docker-compose.yml",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "ops/docker-compose.ghcr.yml",
+     "into": "docker-compose.override.yml",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.88
+      ]
+     ]
+    },
+    {
+     "from": "single-shot recall",
+     "into": "misleading-recall-probe",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.85
+      ]
+     ]
+    },
+    {
+     "from": "stance-span-gate",
+     "into": "span gate",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.7
+      ]
+     ]
+    },
+    {
+     "from": "stance-span-gate",
+     "into": "stance-span-gate-spec",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "accept",
+       0.5
+      ]
+     ]
+    },
+    {
+     "from": "transfer.rs",
+     "into": "transfer",
+     "label": "reject",
+     "caution": true,
+     "votes": [
+      [
+       "reject",
+       0.6
+      ]
+     ]
+    }
+   ]
+  }
+ }
+}
