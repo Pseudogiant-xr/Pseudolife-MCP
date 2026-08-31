@@ -2061,6 +2061,35 @@ use the fallback; the Console's Observatory shows which extractor is
 active. Leave `PSEUDOLIFE_DREAM_FALLBACK_BASE_URL` unset to keep the
 existing single-extractor behavior.
 
+## OpenAI primary — the Codex CLI shim
+
+The same pattern works on an OpenAI subscription: `evals/codex_shim.py` is
+the ChatGPT-plan twin of the Claude shim. It wraps headless `codex exec`
+(the signed-in Codex CLI's included usage — no API key) as an
+OpenAI-compatible endpoint on `127.0.0.1:8085`, serving `gpt-5.6-terra` by
+default. Start it by hand (there is no autostart installer for it yet):
+
+```bash
+python evals/codex_shim.py    # --model gpt-5.6-sol / gpt-5.6-luna to change the default
+```
+
+then point the env triple at it exactly as in step 2 above, with
+`PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:8085/v1` (and, on
+Linux, the same docker-bridge bind note as the Claude shim — pass `--host`
+accordingly). The shim honours a concrete `gpt-*` or `codex-*` name per
+request, so the Console's **Dreamer** card switches between `gpt-5.6-sol`
+/ `gpt-5.6-terra` / `gpt-5.6-luna` live, exactly like the Claude presets.
+
+Two honest caveats. First, extraction quality has only been
+ladder-measured on Claude models and the local sidecars; the `terra` rung
+(`evals/ladder_sweep.py --rung terra`) exists to measure a Codex-served
+model before you trust it with consolidation. Second, the shim is
+verified against the documented `codex exec --json` contract and its own
+test suite, not yet against a live Codex install — treat the first run as
+a smoke test. And no shim is required for any endpoint that already
+speaks `/v1/chat/completions`: a hosted OpenAI API key or any local
+runtime works directly via the env triple in the previous sections.
+
 ## Cadence — quiescence-gated, daemon-only
 
 What gets consolidated and when is configurable under `memory.dream`

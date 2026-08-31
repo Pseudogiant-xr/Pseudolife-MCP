@@ -125,6 +125,13 @@ RUNGS: dict[str, dict] = {
                  "label": "Claude Sonnet 5 (Max-plan CLI shim, ceiling probe)",
                  "base_url": "http://127.0.0.1:8082/v1",
                  "model": "extractor"},
+    # OpenAI-side twin (2026-07-21, user-requested): GPT-5.6 Terra via the
+    # ChatGPT-plan Codex CLI, served by evals/codex_shim.py. Same posture as
+    # sonnet-5 — NOT in LADDER_ORDER; run with --rung terra.
+    "terra": {"kind": "llm",
+              "label": "GPT-5.6 Terra (ChatGPT-plan Codex shim, ceiling probe)",
+              "base_url": "http://127.0.0.1:8085/v1",
+              "model": "extractor"},
     # Smarter-teacher comparators (2026-07-26): same shim, dedicated ports so
     # the production sonnet shim on :8082 is never repurposed mid-run. Also
     # NOT in LADDER_ORDER — run with --rung opus-5 / --rung fable-5.

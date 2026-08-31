@@ -6,6 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-08-31 — Codex CLI shim: dream on a ChatGPT plan)
+- **`evals/codex_shim.py`** — the OpenAI-side twin of the Claude CLI shim:
+  wraps headless `codex exec` (signed-in Codex CLI, ChatGPT-plan included
+  usage, no API key) as an OpenAI-compatible `/v1/chat/completions` on
+  `127.0.0.1:8085`, serving `gpt-5.6-terra` by default. The request's
+  system message rides `-c model_instructions_file=` (replacing Codex's
+  coding-agent persona), the reply is parsed from the `--json` event
+  stream so a failed turn raises instead of masquerading as an empty
+  extraction, and agent affordances are disabled (`--sandbox read-only`,
+  `--ephemeral`, no web search or shell tool). Honours a concrete `gpt-*`
+  / `codex-*` model named per request — the Console Dreamer card switches
+  it live, mirroring the Claude shim's `claude-*` handling. Registered as
+  the `terra` ladder rung (out of `LADDER_ORDER`, like `sonnet-5`).
+  Originates from the 2026-07-21 `feat/terra-shim` branch, updated for the
+  per-request model contract and moved off :8083 (now the opus-5 ceiling
+  rung's port). Not wired into the autostart installers, and extraction
+  quality is unmeasured pending a `--rung terra` ladder run; verified by
+  its test suite against the documented `codex exec --json` contract, not
+  yet against a live Codex install.
+
 ### Added (2026-08-31 — judge ladder measures the caution-line prompt variant)
 - **`evals/judge_ladder.py --caution`** re-runs the frozen merge-judge
   fixture with `low_differential` computed on each row's shown snippets
