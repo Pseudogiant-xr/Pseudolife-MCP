@@ -10,6 +10,7 @@
 #   ops/install.sh --extractor sidecar --client codex
 #   ops/install.sh --extractor sonnet-only --client claude,gemini
 #   ops/install.sh --extractor sonnet-fallback --instructions append
+#   ops/install.sh --extractor codex-fallback --client codex
 #
 # Providers (--client, comma- or space-separated list):
 #   claude    Claude Code    - MCP + SessionStart briefing + per-turn discipline
@@ -32,6 +33,9 @@
 #                    or pulled; dreams pause while the shim is down
 #   sonnet-fallback  Claude Sonnet primary via the CLI shim, sidecar as
 #                    automatic fallback (needs a logged-in Max-plan CLI)
+#   codex-only       Codex (ChatGPT-plan) shim only — sidecar never built;
+#                    extraction quality unmeasured (docs/guide/dreaming.md)
+#   codex-fallback   Codex shim primary, sidecar as automatic fallback
 #   sidecar          bundled local CPU extractor only (stock default; no
 #                    Claude Max plan needed)
 # <<< usage <<<
@@ -43,7 +47,8 @@ CLIENT=""
 CLAUDE_MD=""
 INSTRUCTIONS=""
 AGENTS_FILE=""
-SHIM_PORT=8082
+# 0 = auto: 8082 for the Claude shim modes, 8086 for the Codex ones.
+SHIM_PORT=0
 TRANSPORT=shim
 NO_ART=""
 
@@ -68,11 +73,11 @@ while [ $# -gt 0 ]; do
         *) echo "unknown argument: $1" >&2; usage ;;
     esac
 done
-case "$EXTRACTOR" in ""|sidecar|sonnet-fallback|sonnet-only) ;; *)
-    echo "invalid --extractor '$EXTRACTOR' (sidecar|sonnet-fallback|sonnet-only)" >&2; exit 2 ;;
+case "$EXTRACTOR" in ""|sidecar|sonnet-fallback|sonnet-only|codex-fallback|codex-only) ;; *)
+    echo "invalid --extractor '$EXTRACTOR' (sidecar|sonnet-fallback|sonnet-only|codex-fallback|codex-only)" >&2; exit 2 ;;
 esac
-case "$MODEL" in ""|claude-opus-5|claude-sonnet-5|claude-haiku-4-5|claude-fable-5) ;; *)
-    echo "invalid --model '$MODEL' (claude-opus-5|claude-sonnet-5|claude-haiku-4-5|claude-fable-5)" >&2; exit 2 ;;
+case "$MODEL" in ""|claude-opus-5|claude-sonnet-5|claude-haiku-4-5|claude-fable-5|gpt-5.6-sol|gpt-5.6-terra|gpt-5.6-luna) ;; *)
+    echo "invalid --model '$MODEL' (claude-opus-5|claude-sonnet-5|claude-haiku-4-5|claude-fable-5|gpt-5.6-sol|gpt-5.6-terra|gpt-5.6-luna)" >&2; exit 2 ;;
 esac
 case "$CLAUDE_MD" in ""|append|skip) ;; *)
     echo "invalid --claude-md '$CLAUDE_MD' (append|skip)" >&2; exit 2 ;;
@@ -88,7 +93,10 @@ repo="$(cd "$(dirname "$0")/.." && pwd)"
 compose_file="$repo/ops/docker-compose.yml"
 env_file="$repo/ops/.env"
 override_file="$repo/ops/docker-compose.override.yml"
-OVERRIDE_MARKER="# pseudolife-mcp install: managed override (sonnet-only) — do not edit; installer rewrites/removes this file"
+OVERRIDE_MARKER="# pseudolife-mcp install: managed override (shim-only extractor) — do not edit; installer rewrites/removes this file"
+# Pre-codex installs wrote the mode-specific text; keep recognizing it so a
+# mode switch still removes/rewrites their override file.
+LEGACY_OVERRIDE_MARKER="# pseudolife-mcp install: managed override (sonnet-only) — do not edit; installer rewrites/removes this file"
 ENV_BEGIN="# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>"
 ENV_END="# <<< pseudolife-mcp install <<<"
 
@@ -278,7 +286,7 @@ step "Preflight..."
 # ── 3. extractor choice (explicit, no default) ─────────────────────────────
 if [ -z "$EXTRACTOR" ]; then
     if [ ! -t 0 ]; then
-        echo "Non-interactive run: --extractor sidecar|sonnet-fallback|sonnet-only is required." >&2
+        echo "Non-interactive run: --extractor sidecar|sonnet-fallback|sonnet-only|codex-fallback|codex-only is required." >&2
         exit 2
     fi
     echo ""
@@ -286,25 +294,43 @@ if [ -z "$EXTRACTOR" ]; then
     echo "  1) sonnet-only      — lightest: Claude shim only; sidecar never built (~11.8 GB lighter; needs logged-in Max-plan CLI; dreams pause when the shim is down)"
     echo "  2) sonnet-fallback  — Claude shim primary, sidecar auto-fallback (Max-plan CLI plus the ~11.8 GB image)"
     echo "  3) sidecar          — bundled local CPU model (no Claude plan needed, works for everyone; ~11.8 GB image)"
+    echo "  4) codex-fallback   — Codex (ChatGPT-plan) shim primary, sidecar auto-fallback (extraction quality unmeasured — see docs/guide/dreaming.md)"
+    echo "  5) codex-only       — Codex shim only; sidecar never built (quality unmeasured; dreams pause when the shim is down)"
     while [ -z "$EXTRACTOR" ]; do
-        printf "Choose 1/2/3: "
+        printf "Choose 1/2/3/4/5: "
         read -r choice
         case "$choice" in
             1) EXTRACTOR=sonnet-only ;;
             2) EXTRACTOR=sonnet-fallback ;;
             3) EXTRACTOR=sidecar ;;
-            *) echo "  please answer 1, 2 or 3" ;;
+            4) EXTRACTOR=codex-fallback ;;
+            5) EXTRACTOR=codex-only ;;
+            *) echo "  please answer 1-5" ;;
         esac
     done
 fi
 step "Extractor mode: $EXTRACTOR"
+claude_shim_mode=""; codex_shim_mode=""
+case "$EXTRACTOR" in sonnet-only|sonnet-fallback) claude_shim_mode=1 ;; esac
+case "$EXTRACTOR" in codex-only|codex-fallback) codex_shim_mode=1 ;; esac
+if [ "$SHIM_PORT" = 0 ]; then
+    if [ -n "$codex_shim_mode" ]; then SHIM_PORT=8086; else SHIM_PORT=8082; fi
+fi
+# A model from the wrong family would silently serve the shim's launch
+# default (the per-request override only honours its own prefixes).
+case "$MODEL" in
+    claude-*) [ -z "$codex_shim_mode" ] || {
+        echo "--model $MODEL does not match extractor mode $EXTRACTOR" >&2; exit 2; } ;;
+    gpt-*) [ -z "$claude_shim_mode" ] || {
+        echo "--model $MODEL does not match extractor mode $EXTRACTOR" >&2; exit 2; } ;;
+esac
 
 # ── 3b. dreamer model choice (Claude-shim modes only) ──────────────────────
 # Opus is the recommended default per the 2026-08-02 same-harness comparison
 # (evals/results/dreamer-choice-verdict.json). The shim honours per-request
 # claude-* names, so this is only the launch default — switchable later from
 # the Console's Extractor panel without a reinstall.
-if [ "$EXTRACTOR" != "sidecar" ] && [ -z "$MODEL" ]; then
+if [ -n "$claude_shim_mode" ] && [ -z "$MODEL" ]; then
     if [ -t 0 ]; then
         echo ""
         echo "Which Claude model should extract memories (the 'dreamer')?"
@@ -325,6 +351,31 @@ if [ "$EXTRACTOR" != "sidecar" ] && [ -z "$MODEL" ]; then
         done
     else
         MODEL=claude-opus-5
+    fi
+    step "Dreamer model: $MODEL"
+fi
+# GPT-5.6 menu: no 'recommended' — extraction quality is unmeasured for all
+# three (the ladder's terra rung exists to measure it); Terra is only the
+# shim's balanced default.
+if [ -n "$codex_shim_mode" ] && [ -z "$MODEL" ]; then
+    if [ -t 0 ]; then
+        echo ""
+        echo "Which GPT-5.6 model should extract memories (the 'dreamer')?"
+        echo "  1) gpt-5.6-terra — balanced default (extraction quality unmeasured)"
+        echo "  2) gpt-5.6-sol   — flagship (unmeasured)"
+        echo "  3) gpt-5.6-luna  — fastest / lightest on plan usage (unmeasured)"
+        while [ -z "$MODEL" ]; do
+            printf "Choose 1/2/3 (Enter = 1): "
+            read -r choice
+            case "$choice" in
+                ""|1) MODEL=gpt-5.6-terra ;;
+                2) MODEL=gpt-5.6-sol ;;
+                3) MODEL=gpt-5.6-luna ;;
+                *) echo "  please answer 1, 2 or 3" ;;
+            esac
+        done
+    else
+        MODEL=gpt-5.6-terra
     fi
     step "Dreamer model: $MODEL"
 fi
@@ -358,13 +409,13 @@ awk -v b="$ENV_BEGIN" -v e="$ENV_END" '
     case "$EXTRACTOR" in
         sidecar)
             echo "# extractor: sidecar (stock defaults — nothing to set)" ;;
-        sonnet-fallback)
+        sonnet-fallback|codex-fallback)
             echo "PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:$SHIM_PORT/v1"
             echo "PSEUDOLIFE_DREAM_MODEL=extractor"
             echo "PSEUDOLIFE_DREAM_FALLBACK_BASE_URL=http://pseudolife-extractor:8081/v1"
             echo "PSEUDOLIFE_DREAM_FALLBACK_MODEL=extractor"
             echo "PSEUDOLIFE_DREAM_EXTRACTOR_MODE=auto" ;;
-        sonnet-only)
+        sonnet-only|codex-only)
             echo "PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:$SHIM_PORT/v1"
             echo "PSEUDOLIFE_DREAM_MODEL=extractor"
             # `primary` (not `auto`): states the single-extractor intent and
@@ -378,9 +429,11 @@ step "Wrote managed block in ops/.env"
 
 # ── 6. sidecar enable/disable via the compose override ────────────────────
 installer_owns_override() {
-    [ -f "$override_file" ] && [ "$(head -1 "$override_file")" = "$OVERRIDE_MARKER" ]
+    [ -f "$override_file" ] || return 1
+    first="$(head -1 "$override_file")"
+    [ "$first" = "$OVERRIDE_MARKER" ] || [ "$first" = "$LEGACY_OVERRIDE_MARKER" ]
 }
-if [ "$EXTRACTOR" = "sonnet-only" ]; then
+if [ "$EXTRACTOR" = "sonnet-only" ] || [ "$EXTRACTOR" = "codex-only" ]; then
     if [ ! -f "$override_file" ] || installer_owns_override; then
         cat > "$override_file" <<EOF
 $OVERRIDE_MARKER
@@ -417,16 +470,23 @@ compose=(--env-file "$env_file" -f "$compose_file")
 step "docker compose up -d --build (first build downloads images — grab a coffee)..."
 docker compose "${compose[@]}" up -d --build
 
-# ── 8. Sonnet shim autostart (Sonnet modes) ────────────────────────────────
+# ── 8. CLI shim autostart (Claude / Codex modes) ───────────────────────────
 # Best-effort, like the .ps1: a host without systemd --user (macOS, some WSL)
 # must not abort the install between `compose up` and the hooks/mcp-add/health
 # steps — that strands a running stack that was never wired into Claude Code.
-if [ "$EXTRACTOR" != "sidecar" ]; then
+if [ -n "$claude_shim_mode" ]; then
     step "Registering the Claude shim autostart (systemd --user)..."
     if ! "$repo/ops/install-shim-autostart.sh" --port "$SHIM_PORT" --model "$MODEL"; then
         echo "WARNING: shim autostart registration failed (no systemd --user on this host?)" >&2
         echo "  Re-run later: ops/install-shim-autostart.sh --port $SHIM_PORT --model $MODEL" >&2
         echo "  Or start it manually: python evals/claude_shim.py --port $SHIM_PORT --model $MODEL --system-prompt-file evals/prompts/sonnet_extractor_v2.md" >&2
+    fi
+elif [ -n "$codex_shim_mode" ]; then
+    step "Registering the Codex shim autostart (systemd --user)..."
+    if ! "$repo/ops/install-codex-shim-autostart.sh" --port "$SHIM_PORT" --model "$MODEL"; then
+        echo "WARNING: shim autostart registration failed (no systemd --user on this host?)" >&2
+        echo "  Re-run later: ops/install-codex-shim-autostart.sh --port $SHIM_PORT --model $MODEL" >&2
+        echo "  Or start it manually: python evals/codex_shim.py --port $SHIM_PORT --model $MODEL" >&2
     fi
 fi
 
@@ -842,10 +902,13 @@ echo ""
 case "$EXTRACTOR" in
     sidecar)
         echo "Verify: memory_dream(action=\"status\") — primary_url should point at pseudolife-extractor:8081." ;;
-    sonnet-fallback)
+    sonnet-fallback|codex-fallback)
         echo "Verify: memory_dream(action=\"status\") — fallback_url set and primary_healthy: true (shim up)." ;;
-    sonnet-only)
+    sonnet-only|codex-only)
         echo "Verify: memory_dream(action=\"status\") — primary_url on :$SHIM_PORT, extractor_mode: primary."
         echo "Note: dreams pause (and retry next sweep) whenever the shim is down or the CLI is logged out." ;;
 esac
+if [ -n "$codex_shim_mode" ]; then
+    echo "Note: Codex-served extraction quality is unmeasured — see the 'OpenAI primary' section of docs/guide/dreaming.md."
+fi
 echo "Done. First session: tell your coding agent to remember something."

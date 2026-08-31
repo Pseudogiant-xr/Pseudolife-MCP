@@ -105,7 +105,22 @@ def _resolve_cli(cli: Path) -> Path | None:
     if cli.exists():
         return cli
     found = shutil.which(str(cli))
-    return Path(found) if found else None
+    if found:
+        return Path(found)
+    # Official Windows installer: codex.exe lives in a rotating
+    # %LOCALAPPDATA%\OpenAI\Codex\bin\<hash>\ dir and is NOT on PATH
+    # (verified live 2026-08-31). Globbing the newest at every startup keeps
+    # an at-logon task working across auto-updates, where a baked path dies
+    # with the old hash dir. Bare-name lookups only — an explicit path the
+    # caller passed is never second-guessed.
+    if os.name == "nt" and str(cli) in ("codex", "codex.exe"):
+        base = os.environ.get("LOCALAPPDATA")
+        if base:
+            hits = sorted(Path(base, "OpenAI", "Codex", "bin").glob(
+                "*/codex.exe"), key=lambda p: p.stat().st_mtime)
+            if hits:
+                return hits[-1]
+    return None
 
 
 def _kill_tree(proc: subprocess.Popen) -> None:
@@ -169,11 +184,16 @@ class CodexCli:
     """One ``codex exec`` subprocess per call, serialized."""
 
     def __init__(self, cli: Path, model: str, call_timeout: float,
-                 system_override: str | None = None):
+                 system_override: str | None = None,
+                 health_ttl: float = 300.0):
         self.cli = cli
         self.model = model
         self.call_timeout = call_timeout
         self.system_override = system_override
+        # Refresh cadence for /health — every refresh is a REAL CLI call, so
+        # on a metered/free ChatGPT tier the default (300s ≈ 288 calls/day)
+        # is real spend; the autostart installer raises it via --health-ttl.
+        self._health_ttl = health_ttl
         self.lock = threading.Lock()
         self.calls = 0
         self._instr: Path | None = None
@@ -254,8 +274,6 @@ class CodexCli:
               flush=True)
         return reply
 
-    _HEALTH_TTL = 300.0  # one trivial CLI call per 5 min keeps /health honest
-
     def health(self) -> tuple[bool, str]:
         """Real usability check: a trivial completion so a logged-out or
         broken CLI turns /health into 503 (the daemon's fallback probe treats
@@ -270,7 +288,7 @@ class CodexCli:
         if self._health_ok is None:
             return self._health_refresh()
         ok, detail = self._health_ok, self._health_detail  # pre-refresh verdict
-        if (now - self._health_at >= self._HEALTH_TTL
+        if (now - self._health_at >= self._health_ttl
                 and not self._health_refreshing):
             self._health_refreshing = True
             threading.Thread(target=self._health_refresh, daemon=True).start()
@@ -375,6 +393,10 @@ def _parse_args(argv=None):
                          "shim default (distill_datagen_events.py); "
                          "side-by-side needs a free port")
     ap.add_argument("--call-timeout", type=float, default=300.0)
+    ap.add_argument("--health-ttl", type=float, default=300.0,
+                    help="seconds between /health refreshes; every refresh "
+                         "is a real CLI call (metered spend on a free "
+                         "ChatGPT tier), so autostart installs raise this")
     ap.add_argument("--system-prompt-file", type=Path, default=None,
                     help="replace the production _SYSTEM_PROMPT prefix with "
                          "this file's body (text after the first '---' line, "
@@ -397,7 +419,7 @@ def main():
         print(f"codex_shim: system prompt override from "
               f"{args.system_prompt_file} ({len(override)} chars)", flush=True)
     cli = CodexCli(args.cli, args.model, args.call_timeout,
-                   system_override=override)
+                   system_override=override, health_ttl=args.health_ttl)
     # Warm the health cache before serving: the only blocking health path is
     # an empty cache, and this guarantees no request ever hits it.
     ok, detail = cli.health()

@@ -12,6 +12,7 @@
 #   ops\install.ps1 -Extractor sidecar -Client codex   # non-interactive
 #   ops\install.ps1 -Extractor sonnet-only -Client claude,gemini
 #   ops\install.ps1 -Extractor sonnet-fallback -Instructions append
+#   ops\install.ps1 -Extractor codex-fallback -Client codex
 #
 # Providers (-Client, comma- or space-separated list):
 #   claude    Claude Code    - MCP + SessionStart briefing + per-turn discipline
@@ -24,12 +25,16 @@
 # 2026-07-14-installer-extractor-choice-design.md):
 #   sonnet-only      Claude shim only — the ~11.8 GB sidecar image is never built
 #   sonnet-fallback  Claude Sonnet primary via the CLI shim, sidecar fallback
+#   codex-only       Codex (ChatGPT-plan) shim only — sidecar never built
+#   codex-fallback   Codex shim primary, sidecar fallback
 #   sidecar          bundled local CPU extractor only (no Max plan needed)
 param(
-    [ValidateSet("", "sidecar", "sonnet-fallback", "sonnet-only")]
+    [ValidateSet("", "sidecar", "sonnet-fallback", "sonnet-only",
+                 "codex-fallback", "codex-only")]
     [string]$Extractor = "",
     [ValidateSet("", "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5",
-                 "claude-fable-5")]
+                 "claude-fable-5", "gpt-5.6-sol", "gpt-5.6-terra",
+                 "gpt-5.6-luna")]
     [string]$Model = "",
     # Comma/space-separated provider list (claude|codex|gemini|generic, plus
     # the both/all aliases) — validated by Get-ProviderList, not ValidateSet,
@@ -40,7 +45,8 @@ param(
     [ValidateSet("", "append", "skip", "auto")]
     [string]$Instructions = "",
     [string]$AgentsFile = "",
-    [int]$ShimPort = 8082,
+    # 0 = auto: 8082 for the Claude shim modes, 8086 for the Codex ones.
+    [int]$ShimPort = 0,
     [ValidateSet("shim", "http")]
     [string]$Transport = "shim",
     [switch]$NoArt
@@ -51,7 +57,10 @@ $repo = Split-Path -Parent $PSScriptRoot
 $composeFile = Join-Path $repo "ops\docker-compose.yml"
 $envFile = Join-Path $repo "ops\.env"
 $overrideFile = Join-Path $repo "ops\docker-compose.override.yml"
-$OverrideMarker = "# pseudolife-mcp install: managed override (sonnet-only) — do not edit; installer rewrites/removes this file"
+$OverrideMarker = "# pseudolife-mcp install: managed override (shim-only extractor) — do not edit; installer rewrites/removes this file"
+# Pre-codex installs wrote the mode-specific text; keep recognizing it so a
+# mode switch still removes/rewrites their override file.
+$LegacyOverrideMarker = "# pseudolife-mcp install: managed override (sonnet-only) — do not edit; installer rewrites/removes this file"
 $EnvBegin = "# >>> pseudolife-mcp install (managed block — installer rewrites between markers) >>>"
 $EnvEnd = "# <<< pseudolife-mcp install <<<"
 $interactive = [Environment]::UserInteractive -and -not [Console]::IsInputRedirected
@@ -243,30 +252,43 @@ if ($LASTEXITCODE -ne 0) { throw "Preflight failed - fix the line(s) above and r
 # -- 3. extractor choice (explicit, no default) ---------------------------------
 if (-not $Extractor) {
     if (-not $interactive) {
-        throw "Non-interactive run: -Extractor sidecar|sonnet-fallback|sonnet-only is required."
+        throw "Non-interactive run: -Extractor sidecar|sonnet-fallback|sonnet-only|codex-fallback|codex-only is required."
     }
     Write-Host ""
     Write-Host "Which dream extractor should consolidate memories?"
     Write-Host "  1) sonnet-only      - lightest: Claude shim only; sidecar never built (~11.8 GB lighter; needs logged-in Max-plan CLI; dreams pause when the shim is down)"
     Write-Host "  2) sonnet-fallback  - Claude shim primary, sidecar auto-fallback (Max-plan CLI plus the ~11.8 GB image)"
     Write-Host "  3) sidecar          - bundled local CPU model (no Claude plan needed, works for everyone; ~11.8 GB image)"
+    Write-Host "  4) codex-fallback   - Codex (ChatGPT-plan) shim primary, sidecar auto-fallback (extraction quality unmeasured - see docs/guide/dreaming.md)"
+    Write-Host "  5) codex-only       - Codex shim only; sidecar never built (quality unmeasured; dreams pause when the shim is down)"
     while (-not $Extractor) {
-        switch (Read-Host "Choose 1/2/3") {
+        switch (Read-Host "Choose 1/2/3/4/5") {
             "1" { $Extractor = "sonnet-only" }
             "2" { $Extractor = "sonnet-fallback" }
             "3" { $Extractor = "sidecar" }
-            default { Write-Host "  please answer 1, 2 or 3" }
+            "4" { $Extractor = "codex-fallback" }
+            "5" { $Extractor = "codex-only" }
+            default { Write-Host "  please answer 1-5" }
         }
     }
 }
 Step "Extractor mode: $Extractor"
+$claudeShimMode = $Extractor -in "sonnet-only", "sonnet-fallback"
+$codexShimMode = $Extractor -in "codex-only", "codex-fallback"
+if ($ShimPort -eq 0) { $ShimPort = $codexShimMode ? 8086 : 8082 }
+# A model from the wrong family would silently serve the shim's launch
+# default (the per-request override only honours its own prefixes).
+if (($claudeShimMode -and $Model -and -not $Model.StartsWith("claude-")) -or
+    ($codexShimMode -and $Model -and -not $Model.StartsWith("gpt-"))) {
+    throw "-Model $Model does not match extractor mode $Extractor"
+}
 
 # -- 3b. dreamer model choice (Claude-shim modes only) ---------------------------
 # Opus is the recommended default per the 2026-08-02 same-harness comparison
 # (evals/results/dreamer-choice-verdict.json). The shim honours per-request
 # claude-* names, so this is only the launch default — switchable later from
 # the Console's Extractor panel without a reinstall.
-if ($Extractor -ne "sidecar" -and -not $Model) {
+if ($claudeShimMode -and -not $Model) {
     if ($interactive) {
         Write-Host ""
         Write-Host "Which Claude model should extract memories (the 'dreamer')?"
@@ -285,6 +307,29 @@ if ($Extractor -ne "sidecar" -and -not $Model) {
         }
     } else {
         $Model = "claude-opus-5"
+    }
+    Step "Dreamer model: $Model"
+}
+# GPT-5.6 menu: no 'recommended' — extraction quality is unmeasured for all
+# three (the ladder's terra rung exists to measure it); Terra is only the
+# shim's balanced default.
+if ($codexShimMode -and -not $Model) {
+    if ($interactive) {
+        Write-Host ""
+        Write-Host "Which GPT-5.6 model should extract memories (the 'dreamer')?"
+        Write-Host "  1) gpt-5.6-terra - balanced default (extraction quality unmeasured)"
+        Write-Host "  2) gpt-5.6-sol   - flagship (unmeasured)"
+        Write-Host "  3) gpt-5.6-luna  - fastest / lightest on plan usage (unmeasured)"
+        while (-not $Model) {
+            switch (Read-Host "Choose 1/2/3 (Enter = 1)") {
+                { $_ -in "", "1" } { $Model = "gpt-5.6-terra" }
+                "2" { $Model = "gpt-5.6-sol" }
+                "3" { $Model = "gpt-5.6-luna" }
+                default { Write-Host "  please answer 1, 2 or 3" }
+            }
+        }
+    } else {
+        $Model = "gpt-5.6-terra"
     }
     Step "Dreamer model: $Model"
 }
@@ -328,14 +373,14 @@ $block = New-Object System.Collections.Generic.List[string]
 $block.Add($EnvBegin)
 switch ($Extractor) {
     "sidecar" { $block.Add("# extractor: sidecar (stock defaults - nothing to set)") }
-    "sonnet-fallback" {
+    { $_ -in "sonnet-fallback", "codex-fallback" } {
         $block.Add("PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:$ShimPort/v1")
         $block.Add("PSEUDOLIFE_DREAM_MODEL=extractor")
         $block.Add("PSEUDOLIFE_DREAM_FALLBACK_BASE_URL=http://pseudolife-extractor:8081/v1")
         $block.Add("PSEUDOLIFE_DREAM_FALLBACK_MODEL=extractor")
         $block.Add("PSEUDOLIFE_DREAM_EXTRACTOR_MODE=auto")
     }
-    "sonnet-only" {
+    { $_ -in "sonnet-only", "codex-only" } {
         $block.Add("PSEUDOLIFE_DREAM_BASE_URL=http://host.docker.internal:$ShimPort/v1")
         $block.Add("PSEUDOLIFE_DREAM_MODEL=extractor")
         # `primary` (not `auto`): states the single-extractor intent and
@@ -350,9 +395,10 @@ Step "Wrote managed block in ops/.env"
 
 # -- 6. sidecar enable/disable via the compose override --------------------------
 function InstallerOwnsOverride {
-    (Test-Path $overrideFile) -and ((Get-Content $overrideFile -TotalCount 1) -eq $OverrideMarker)
+    (Test-Path $overrideFile) -and
+        ((Get-Content $overrideFile -TotalCount 1) -in $OverrideMarker, $LegacyOverrideMarker)
 }
-if ($Extractor -eq "sonnet-only") {
+if ($Extractor -in "sonnet-only", "codex-only") {
     if (-not (Test-Path $overrideFile) -or (InstallerOwnsOverride)) {
         @(
             $OverrideMarker
@@ -389,8 +435,8 @@ Step "docker compose up -d --build (first build downloads images - grab a coffee
 docker compose @compose up -d --build
 if ($LASTEXITCODE -ne 0) { throw "compose up failed" }
 
-# -- 8. Claude shim autostart (Sonnet modes) --------------------------------------
-if ($Extractor -ne "sidecar") {
+# -- 8. CLI shim autostart (Claude / Codex modes) ---------------------------------
+if ($claudeShimMode) {
     Step "Registering the Claude shim autostart (Task Scheduler; needs an ELEVATED pwsh)..."
     try {
         & (Join-Path $PSScriptRoot "install-shim-autostart.ps1") -Port $ShimPort -Model $Model
@@ -398,6 +444,15 @@ if ($Extractor -ne "sidecar") {
         Write-Warning "Shim autostart registration failed (usually elevation): $_"
         Write-Host "  Re-run later from an admin pwsh: ops\install-shim-autostart.ps1 -Port $ShimPort -Model $Model"
         Write-Host "  Or start it manually: python evals\claude_shim.py --port $ShimPort --model $Model --system-prompt-file evals\prompts\sonnet_extractor_v2.md"
+    }
+} elseif ($codexShimMode) {
+    Step "Registering the Codex shim autostart (Task Scheduler; needs an ELEVATED pwsh)..."
+    try {
+        & (Join-Path $PSScriptRoot "install-codex-shim-autostart.ps1") -Port $ShimPort -Model $Model
+    } catch {
+        Write-Warning "Shim autostart registration failed (usually elevation): $_"
+        Write-Host "  Re-run later from an admin pwsh: ops\install-codex-shim-autostart.ps1 -Port $ShimPort -Model $Model"
+        Write-Host "  Or start it manually: python evals\codex_shim.py --port $ShimPort --model $Model"
     }
 }
 
@@ -848,12 +903,15 @@ switch ($Extractor) {
     "sidecar" {
         Write-Host "Verify: memory_dream(action=""status"") - primary_url should point at pseudolife-extractor:8081."
     }
-    "sonnet-fallback" {
+    { $_ -in "sonnet-fallback", "codex-fallback" } {
         Write-Host "Verify: memory_dream(action=""status"") - fallback_url set and primary_healthy: true (shim up)."
     }
-    "sonnet-only" {
+    { $_ -in "sonnet-only", "codex-only" } {
         Write-Host "Verify: memory_dream(action=""status"") - primary_url on :$ShimPort, extractor_mode: primary."
         Write-Host "Note: dreams pause (and retry next sweep) whenever the shim is down or the CLI is logged out."
     }
+}
+if ($codexShimMode) {
+    Write-Host "Note: Codex-served extraction quality is unmeasured - see the 'OpenAI primary' section of docs/guide/dreaming.md."
 }
 Write-Host "Done. First session: tell your coding agent to remember something."

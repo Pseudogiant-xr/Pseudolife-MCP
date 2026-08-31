@@ -177,7 +177,11 @@ consolidate memories —
   logged-in Max-plan `claude` CLI); the sidecar image is **never built or
   pulled** (~11.8 GB lighter; dreams pause while the shim is down);
 - **sonnet-fallback** — the Claude shim primary, the bundled sidecar as
-  automatic fallback (Max-plan CLI plus the ~11.8 GB image) —
+  automatic fallback (Max-plan CLI plus the ~11.8 GB image);
+- **codex-only / codex-fallback** — the same two shapes on an OpenAI
+  subscription: a GPT-5.6 model (Sol / Terra / Luna) via the Codex CLI
+  shim on a signed-in ChatGPT plan (extraction quality unmeasured — see
+  the [dreaming guide](docs/guide/dreaming.md)) —
 
 then brings the stack up, installs the selected clients' session hooks
 (where the client has a hook system), registers the MCP transport (the
