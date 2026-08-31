@@ -300,6 +300,19 @@ KNOBS: list[dict[str, Any]] = [
              "request and the Codex CLI shim gpt-* names; the fallback "
              "sidecar is never affected. Empty = the endpoint's own "
              "default."},
+    {"path": "memory.dream.extractor_reasoning_effort", "group": "Extractor",
+     "label": "Dreamer reasoning effort", "type": "string", "default": None,
+     "restart": False,
+     "suggestions": ["low", "medium", "high", "xhigh"],
+     "help": "Reasoning effort for the primary extractor, sent per request "
+             "as reasoning_effort. Empty = never sent — the endpoint's own "
+             "default serves (for the CLI shims that is the host CLI "
+             "config). The Claude CLI shim maps it to claude --effort "
+             "(low/medium/high/xhigh/max), the Codex CLI shim to "
+             "model_reasoning_effort (minimal/low/medium/high/xhigh); "
+             "OpenAI-compatible servers read the field natively and servers "
+             "that don't know it ignore it. The fallback sidecar is never "
+             "affected."},
     {"path": "memory.dream.extractor_source", "group": "Extractor",
      "label": "Settings source", "type": "enum", "default": "env",
      "options": ["env", "config"], "restart": False,

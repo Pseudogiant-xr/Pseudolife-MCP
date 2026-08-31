@@ -324,16 +324,40 @@ Claude presets. On Windows the shim finds the official installer's
 layout is off PATH and rotates on auto-update — the shim re-resolves the
 newest at every start).
 
-One honest caveat: extraction quality has only been ladder-measured on
-Claude models and the local sidecars; the `terra` rung
-(`evals/ladder_sweep.py --rung terra`) exists to measure a Codex-served
-model before you trust it with consolidation. (The shim itself is
-live-verified — smoke-tested 2026-08-31 against codex-cli 0.151.0-alpha
-on a free ChatGPT tier: health warm-up, a production-prompt extraction,
-and a per-request model switch all pass.) And no shim is required for any
-endpoint that already speaks `/v1/chat/completions`: a hosted OpenAI API
-key or any local runtime works directly via the env triple in the
-previous sections.
+Extraction quality: the `terra` and `luna` ladder rungs
+(`evals/ladder_sweep.py --rung terra` / `--rung luna`, first measured
+2026-09-01) score GPT-5.6 Terra and Luna at parity with the Claude
+ceiling rungs on the extraction bench — see the ceiling-probe table in
+`evals/README.md` for the numbers and the single-run caveats. (The shim
+is also live-verified — smoke-tested 2026-08-31 against codex-cli
+0.151.0-alpha on a free ChatGPT tier: health warm-up, a
+production-prompt extraction, and a per-request model switch all pass.)
+And no shim is required for any endpoint that already speaks
+`/v1/chat/completions`: a hosted OpenAI API key or any local runtime
+works directly via the env triple in the previous sections.
+
+## Reasoning effort — the dreamer's thinking budget
+
+By default neither CLI shim sets a reasoning effort: the Claude shim runs
+at the `claude` CLI's per-model default and the Codex shim inherits the
+host's `~/.codex/config.toml`, so what the dreamer actually spends is
+decided outside this repo. To pin it, set
+`memory.dream.extractor_reasoning_effort` (Console → Extractor panel, or
+the **Effort** row on the Dreamer card). A set value rides every primary
+extractor request as `reasoning_effort`:
+
+- the Claude CLI shim maps it to `claude --effort`
+  (`low`/`medium`/`high`/`xhigh`/`max`),
+- the Codex CLI shim maps it to `-c model_reasoning_effort=`
+  (`minimal`/`low`/`medium`/`high`/`xhigh`),
+- OpenAI-compatible servers read the field natively, and servers that
+  don't know it ignore it.
+
+Empty (the default) means the field is never sent — exactly the pre-knob
+behavior. The fallback sidecar never receives it, same rule as the
+model-only override. Both shims also take a `--reasoning-effort` launch
+flag for a pinned default without touching daemon config; a request's
+value wins over the launch flag either way.
 
 ## Cadence — quiescence-gated, daemon-only
 

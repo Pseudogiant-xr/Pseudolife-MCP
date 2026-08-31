@@ -194,3 +194,41 @@ def test_chat_passes_override_model_to_cli():
     assert captured["model"] == "claude-sonnet-5"
     cli.chat("sys", "user")
     assert captured["model"] == "claude-opus-5"
+
+
+# ── per-request reasoning effort (2026-09-01 dreamer effort knob) ──────────
+
+
+def test_chat_threads_reasoning_effort_into_argv():
+    # Request effort wins over the launch default; maps to the claude CLI's
+    # --effort flag.
+    captured = {}
+    cli = shim.ClaudeCli(Path("claude.exe"), "claude-opus-5", 30.0,
+                         reasoning_effort="medium")
+
+    def fake_run(cmd, payload):
+        captured["cmd"] = list(cmd)
+        return 0, b'{"result": "ok"}', b""
+
+    cli._run = fake_run
+    cli.chat("sys", "user", effort="high")
+    cmd = captured["cmd"]
+    assert cmd[cmd.index("--effort") + 1] == "high"
+    cli.chat("sys", "user")
+    cmd = captured["cmd"]
+    assert cmd[cmd.index("--effort") + 1] == "medium"
+
+
+def test_no_effort_omits_the_flag():
+    # Unset everywhere == pre-knob behavior: the CLI's own per-model default
+    # serves, exactly as before.
+    captured = {}
+    cli = shim.ClaudeCli(Path("claude.exe"), "claude-opus-5", 30.0)
+
+    def fake_run(cmd, payload):
+        captured["cmd"] = list(cmd)
+        return 0, b'{"result": "ok"}', b""
+
+    cli._run = fake_run
+    cli.chat("sys", "user")
+    assert "--effort" not in captured["cmd"]

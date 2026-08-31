@@ -92,11 +92,15 @@ class ClaudeCli:
     """One ``claude -p`` subprocess per call, serialized."""
 
     def __init__(self, cli: Path, model: str, call_timeout: float,
-                 system_override: str | None = None):
+                 system_override: str | None = None,
+                 reasoning_effort: str | None = None):
         self.cli = cli
         self.model = model
         self.call_timeout = call_timeout
         self.system_override = system_override
+        # Launch-default reasoning effort (claude --effort); a per-request
+        # value wins. None = never pass the flag — the pre-knob behavior.
+        self.reasoning_effort = reasoning_effort
         self.lock = threading.Lock()
         self.calls = 0
         self._health_ok: bool | None = None
@@ -119,7 +123,8 @@ class ClaudeCli:
             raise
         return proc.returncode, out, err
 
-    def chat(self, system: str, user: str, model: str | None = None) -> str:
+    def chat(self, system: str, user: str, model: str | None = None,
+             effort: str | None = None) -> str:
         if self.system_override and system.startswith(_SYSTEM_PROMPT):
             # Swap the claims-extraction prompt prefix for the variant,
             # PRESERVING whatever the harness appended after it (vocab hint
@@ -130,6 +135,11 @@ class ClaudeCli:
                "--output-format", "json",
                "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
                "--tools", ""]
+        if effort or self.reasoning_effort:
+            # Per-request effort wins over the launch default (mirrors the
+            # model precedence); unset everywhere = no flag, the CLI's own
+            # per-model default serves.
+            cmd += ["--effort", effort or self.reasoning_effort]
         if system and len(system) <= _MAX_ARGV_SYSTEM:
             cmd += ["--system-prompt", system]
         elif system:
@@ -237,7 +247,13 @@ def make_handler(cli: ClaudeCli):
                                    if m.get("role") != "system"
                                    and m.get("content"))
                 model = resolve_model(req.get("model"), cli.model)
-                reply = cli.chat(system, user, model=model)
+                # Per-request effort (the daemon's effort knob rides the
+                # request body); non-string/blank means unset.
+                effort = req.get("reasoning_effort")
+                effort = (effort.strip()
+                          if isinstance(effort, str) and effort.strip()
+                          else None)
+                reply = cli.chat(system, user, model=model, effort=effort)
                 self._json(200, {
                     "id": f"claude-shim-{int(time.time() * 1000)}",
                     "object": "chat.completion",
@@ -270,6 +286,11 @@ def _parse_args(argv=None):
                          "unauthenticated shim to the LAN")
     ap.add_argument("--port", type=int, default=8082)
     ap.add_argument("--call-timeout", type=float, default=300.0)
+    ap.add_argument("--reasoning-effort", default=None,
+                    help="launch-default claude --effort level "
+                         "(low/medium/high/xhigh/max); a request's "
+                         "reasoning_effort wins per call. Unset = the CLI's "
+                         "own per-model default")
     ap.add_argument("--system-prompt-file", type=Path, default=None,
                     help="replace the production _SYSTEM_PROMPT prefix with "
                          "this file's body (text after the first '---' line, "
@@ -290,7 +311,8 @@ def main():
         print(f"claude_shim: system prompt override from "
               f"{args.system_prompt_file} ({len(override)} chars)", flush=True)
     cli = ClaudeCli(args.cli, args.model, args.call_timeout,
-                    system_override=override)
+                    system_override=override,
+                    reasoning_effort=args.reasoning_effort)
     # Warm the health cache before serving: the only blocking health path is
     # an empty cache, and this guarantees no request ever hits it.
     ok, detail = cli.health()

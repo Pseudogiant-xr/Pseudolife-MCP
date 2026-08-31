@@ -6,6 +6,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-01 — dreamer reasoning effort is now a knob)
+- **The dreamer's reasoning effort can be pinned from the Console.** What
+  the dream extractor spent on thinking was previously decided outside the
+  repo (the Claude CLI shim ran at the `claude` CLI's per-model default,
+  the Codex CLI shim inherited the host's `~/.codex/config.toml` — where
+  the desktop app had silently written `model_reasoning_effort = "high"`).
+  New `memory.dream.extractor_reasoning_effort` knob (Console → Extractor
+  panel, plus an **Effort** seg-row on the Dreamer card, applies at the
+  next dream): a set value rides every primary extractor request as
+  `reasoning_effort` — the Claude shim maps it to `claude --effort`, the
+  Codex shim to `-c model_reasoning_effort=`, OpenAI-compatible servers
+  read it natively, unknown-field servers ignore it. Empty (default) sends
+  nothing — byte-identical to the old behavior — and the fallback sidecar
+  never receives it (same rule as the model-only override). Both shims
+  also grew a `--reasoning-effort` launch flag; a request's value wins.
+  (`pseudolife_memory/memory/dream.py`, `pseudolife_memory/utils/config.py`,
+  `pseudolife_memory/web/config_io.py`, `evals/claude_shim.py`,
+  `evals/codex_shim.py`, Console `views/console.js`.)
+
 ### Added (2026-09-01 — extension-schema seams, extracted from the RE Hub pilot)
 - **Extension schemas have a sanctioned pattern, and their markers no longer
   travel in bank transfers.** A fork adding its own tables records lineage
