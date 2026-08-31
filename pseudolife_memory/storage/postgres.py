@@ -970,7 +970,7 @@ class PostgresStorage:
                 (key, json.dumps(value)),
             )
 
-    # ── reverse-engineering evidence (schema v35) ─────────────────────
+    # ── reverse-engineering evidence (v34-rehub extension) ────────────
 
     def insert_re_evidence(self, artifact: dict) -> int:
         """Insert one immutable artifact, returning the existing id on replay."""

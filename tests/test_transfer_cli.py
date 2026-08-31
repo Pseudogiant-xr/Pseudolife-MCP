@@ -13,7 +13,8 @@ the contract:
 * import refuses a non-empty bank, a bank other connections hold (a running
   daemon), an unknown column (export from a newer build), and an embedding
   dimension mismatch;
-* transient meta (schema_version, the active-session pointer) never travels.
+* build-owned/transient meta (base/extension schema versions and the
+  active-session pointer) never travels.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ import pytest
 
 from pseudolife_memory.storage.schema import (
     BENCH_RESET_TABLES,
+    REHUB_SCHEMA_VERSION,
     SCHEMA_META_VERSION,
     ensure_schema,
 )
@@ -264,6 +266,7 @@ def _seed_bank(conn) -> None:
     cur.execute(
         "INSERT INTO meta (key, value) VALUES "
         "('cortex_dream_cursor', '160.5'::jsonb), "
+        "('rehub_schema_version', '\"v34-rehub\"'::jsonb), "
         "('active_session_pointer', '{\"session\": \"sess-1\"}'::jsonb) "
         "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
     )
@@ -326,10 +329,13 @@ def test_export_import_roundtrip_preserves_every_table(pg_url, tmp_path):
     with psycopg.connect(pg_url) as conn:
         conn.execute("SET search_path TO public")
         after = _dump_all(conn)
-        # schema_version belongs to the TARGET build, and the transient
+        # Schema versions belong to the TARGET build, and the transient
         # active-session pointer must not travel.
         cur = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'")
         assert cur.fetchone()[0] == SCHEMA_META_VERSION
+        cur = conn.execute(
+            "SELECT value FROM meta WHERE key = 'rehub_schema_version'")
+        assert cur.fetchone()[0] == REHUB_SCHEMA_VERSION
         cur = conn.execute(
             "SELECT count(*) FROM meta WHERE key = 'active_session_pointer'")
         assert cur.fetchone()[0] == 0
@@ -379,6 +385,7 @@ def test_export_skips_transient_meta_and_telemetry(pg_url, tmp_path):
             for line in zf.read("meta.jsonl").decode().split("\n") if line
         }
         assert "schema_version" not in meta_keys
+        assert "rehub_schema_version" not in meta_keys
         assert "active_session_pointer" not in meta_keys
         assert "cortex_dream_cursor" in meta_keys
         manifest = json.loads(zf.read("manifest.json"))

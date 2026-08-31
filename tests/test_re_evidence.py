@@ -349,6 +349,12 @@ def test_database_rejects_cross_build_link_and_link_reassignment(pg_conn):
                 "UPDATE re_claim_evidence SET claim_id = %s WHERE claim_id = %s",
                 (claim_b, claim_a))
 
+    with pytest.raises(psycopg.errors.CheckViolation, match="immutable"):
+        with pg_conn.transaction():
+            pg_conn.execute(
+                "UPDATE re_evidence_artifacts SET binary_id = 'build:b' "
+                "WHERE id = %s", (evidence_a,))
+
 
 def test_portable_archive_round_trip_preserves_original_bytes(pg_url, pg_conn, tmp_path):
     import hashlib
@@ -376,6 +382,12 @@ def test_portable_archive_round_trip_preserves_original_bytes(pg_url, pg_conn, t
             binary_id="client:test")
         assert exported["sha256"] == hashlib.sha256(archive_path.read_bytes()).hexdigest()
         from pseudolife_memory.re_evidence import EvidenceInputError
+        with pytest.raises(
+                EvidenceInputError,
+                match="project and binary_id must be non-empty"):
+            import_evidence_archive(
+                storage, path=archive_path, project=" ",
+                binary_id="client:test")
         with pytest.raises(EvidenceInputError, match="empty project/build"):
             import_evidence_archive(
                 storage, path=archive_path, project="srfn-client",

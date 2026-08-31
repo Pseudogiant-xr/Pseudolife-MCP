@@ -15,7 +15,13 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_META_VERSION = 35
+SCHEMA_META_VERSION = 34
+
+# Optional RE Hub extension lineage. This is deliberately independent from the
+# upstream integer schema_version: Pseudolife can add v35/v36 without colliding
+# with this customization or forcing the RE evidence tables to masquerade as
+# an upstream migration.
+REHUB_SCHEMA_VERSION = "v34-rehub"
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -848,10 +854,11 @@ def ensure_schema(conn) -> dict:
             "CREATE UNIQUE INDEX IF NOT EXISTS lessons_slot_current_uq "
             "ON lessons (entity_norm, attribute_norm) WHERE status = 'current'"
         )
-        # v35: isolated reverse-engineering proof store. Raw artifacts are
-        # immutable and hash-deduplicated; claims live separately and link to
-        # artifacts explicitly, so associative memory/dream consolidation can
-        # never promote an inference into evidence.
+        # v34-rehub extension: isolated reverse-engineering proof store. Raw
+        # artifacts are immutable and hash-deduplicated; claims live separately
+        # and link to artifacts explicitly, so associative memory/dream
+        # consolidation can never promote an inference into evidence. This DDL
+        # is idempotent and does not consume the next upstream integer version.
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS re_evidence_artifacts (
@@ -912,6 +919,32 @@ def ensure_schema(conn) -> dict:
             )
             """
         )
+        # A linked proof artifact cannot be moved into another project/build by
+        # maintenance SQL. Keeping scope immutable also makes the uniqueness
+        # and claim-link invariants stable for the artifact's lifetime.
+        cur.execute(
+            """
+            CREATE OR REPLACE FUNCTION enforce_re_artifact_scope_immutable()
+            RETURNS TRIGGER AS $$
+            BEGIN
+              IF NEW.project IS DISTINCT FROM OLD.project
+                  OR NEW.binary_id IS DISTINCT FROM OLD.binary_id THEN
+                RAISE EXCEPTION
+                  'RE evidence artifact project/binary_id is immutable'
+                  USING ERRCODE = '23514';
+              END IF;
+              RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql
+            """
+        )
+        cur.execute(
+            "DROP TRIGGER IF EXISTS re_artifact_scope_immutable "
+            "ON re_evidence_artifacts")
+        cur.execute(
+            "CREATE TRIGGER re_artifact_scope_immutable "
+            "BEFORE UPDATE OF project, binary_id ON re_evidence_artifacts "
+            "FOR EACH ROW EXECUTE FUNCTION enforce_re_artifact_scope_immutable()")
         # Deferred DB-level proof gate. Python validates before write for a
         # useful error at the API boundary; these triggers protect the same
         # invariant from maintenance SQL and future writer paths, including
@@ -990,6 +1023,14 @@ def ensure_schema(conn) -> dict:
             "AFTER INSERT OR UPDATE OR DELETE ON re_claim_evidence "
             "DEFERRABLE INITIALLY DEFERRED FOR EACH ROW "
             "EXECUTE FUNCTION enforce_re_claim_evidence()")
+        cur.execute(
+            """
+            INSERT INTO meta (key, value)
+            VALUES ('rehub_schema_version', to_jsonb(%s::text))
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+            """,
+            (REHUB_SCHEMA_VERSION,),
+        )
         cur.execute(
             """
             INSERT INTO meta (key, value) VALUES ('schema_version', %s::jsonb)

@@ -7,7 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added (2026-08-31 — strict reverse-engineering evidence pilot)
-- **Added the schema-v35 reverse-engineering proof store and the core-tier
+- **Added the independently versioned `v34-rehub` reverse-engineering proof
+  store and the core-tier
   `re_evidence` tool.** Evidence Hub JSON artifacts are retained immutably with
   an original-byte SHA-256, exact address index, project/build attribution, and
   replay deduplication. Behavioral claims live separately and cannot be marked
@@ -16,7 +17,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   hash-verified portable ZIP export/import make the feature optional and
   removable. These tables are outside
   associative memory, the reference bank, cortex promotion, and dream
-  consolidation, so a remembered inference cannot silently become proof.
+  consolidation, so a remembered inference cannot silently become proof. The
+  extension records `rehub_schema_version` separately and leaves upstream's
+  integer `schema_version` at v34, avoiding collisions with future upstream
+  migrations. General memory transfer explicitly excludes these proof tables;
+  they travel only through the feature's hash-validated archive format.
 - **The Cortex Console now has a read-only RE Evidence view.** It exposes
   project/build scopes, artifact and claim totals, claim-status breakdowns,
   search and status filters, immutable hashes, structured addresses, source

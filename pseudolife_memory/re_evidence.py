@@ -266,6 +266,8 @@ def import_evidence_archive(
 ) -> dict[str, Any]:
     """Restore an exported archive after validating every original-byte hash."""
     project, binary_id = project.strip(), binary_id.strip()
+    if not project or not binary_id:
+        raise EvidenceInputError("project and binary_id must be non-empty")
     source = Path(path).expanduser().resolve()
     if not source.is_file():
         raise EvidenceInputError(f"evidence archive not found: {source}")

@@ -24,8 +24,9 @@ Contract, pinned by ``tests/test_transfer_cli.py``:
   column loads fine (the target's DDL default applies — old export, new
   build), while an export *carrying* an unknown column refuses (new
   export, old build — importing would silently drop data).
-* ``meta`` transients never travel: ``schema_version`` belongs to the
-  target build, and the active-session pointer is session state.
+* Build-owned and transient ``meta`` keys never travel: ``schema_version``
+  and extension versions belong to the target build, while the active-session
+  pointer is session state.
 
 The module stays torch-free: embeddings move verbatim as pgvector text (the
 manifest pins the dimension; import refuses a mismatch), so neither command
@@ -67,17 +68,20 @@ EXPORTED_TABLES = (
     "chronicle_events",
 )
 
-# Operational, not knowledge: the dream pre-image journal only exists to
-# roll back runs against THIS bank's row ids, and the retrieval/read
-# telemetry is training signal tied to this deployment's serving history.
+# Operational or independently portable, not transferable memory: the dream
+# pre-image journal only exists to roll back runs against THIS bank's row ids,
+# retrieval/read telemetry is tied to this deployment's serving history, and
+# strict RE proof records travel only through re_evidence's hash-checked archive.
 EXCLUDED_TABLES = (
     "dream_runs", "dream_run_slots", "retrieval_events", "retrieval_uses",
-    "slot_reads",
+    "slot_reads", "re_evidence_artifacts", "re_claims", "re_claim_evidence",
 )
 
-# meta keys that must not travel: the target build owns its schema_version,
-# and the active-session pointer is transient session state.
-_META_SKIP_KEYS = {"schema_version", "active_session_pointer"}
+# meta keys that must not travel: the target build owns its base and extension
+# schema versions, and the active-session pointer is transient session state.
+_META_SKIP_KEYS = {
+    "schema_version", "rehub_schema_version", "active_session_pointer",
+}
 
 # The freshness check import runs. Derived, not listed: every exported
 # table must be empty except the two a daemon-initialized bank legitimately

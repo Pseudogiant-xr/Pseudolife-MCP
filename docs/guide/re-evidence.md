@@ -6,7 +6,7 @@ does not turn memories, summaries, or model output into evidence.
 
 ## Safety boundary
 
-The three schema-v35 tables are isolated from associative search, the document
+The three `v34-rehub` extension tables are isolated from associative search, the document
 reference bank, cortex facts, and dream consolidation. An artifact is the raw
 JSON object read from disk plus the SHA-256 of its original bytes. Re-ingesting
 the same `(project, hash, locator)` returns the existing id. Artifacts are not

@@ -1,17 +1,22 @@
-"""Schema v35 — isolated reverse-engineering evidence and claim tables."""
+"""RE Hub extension schema — independent from upstream's integer version."""
 
 from __future__ import annotations
 
 from tests.pg_fixtures import pg_conn, pg_url  # noqa: F401
 
-from pseudolife_memory.storage.schema import SCHEMA_META_VERSION
+from pseudolife_memory.storage.schema import (
+    REHUB_SCHEMA_VERSION,
+    SCHEMA_META_VERSION,
+    ensure_schema,
+)
 
 
-def test_meta_version_is_35():
-    assert SCHEMA_META_VERSION == 35
+def test_rehub_schema_has_an_independent_namespaced_version():
+    assert REHUB_SCHEMA_VERSION == "v34-rehub"
+    assert SCHEMA_META_VERSION >= 34
 
 
-def test_re_evidence_tables_and_address_index_exist(pg_conn):
+def test_rehub_evidence_tables_and_address_index_exist(pg_conn):
     tables = {
         row[0] for row in pg_conn.execute(
             "SELECT table_name FROM information_schema.tables "
@@ -37,6 +42,14 @@ def test_re_evidence_tables_and_address_index_exist(pg_conn):
         ).fetchall()
     }
     assert triggers == {"re_claim_gate_on_claim", "re_claim_gate_on_link"}
-    meta = pg_conn.execute(
+
+    # pg_conn truncates and manually re-seeds only upstream's schema_version
+    # after ensuring DDL. Re-run the idempotent startup path to prove the RE Hub
+    # marker is restored independently on an already-created database.
+    ensure_schema(pg_conn)
+    base_meta = pg_conn.execute(
         "SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
-    assert meta is not None and int(meta[0]) == SCHEMA_META_VERSION
+    extension_meta = pg_conn.execute(
+        "SELECT value FROM meta WHERE key = 'rehub_schema_version'").fetchone()
+    assert base_meta is not None and int(base_meta[0]) == SCHEMA_META_VERSION
+    assert extension_meta is not None and extension_meta[0] == REHUB_SCHEMA_VERSION
