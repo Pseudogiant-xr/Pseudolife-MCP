@@ -100,7 +100,10 @@ It is a real Postgres bank, not a cut-down one: `pseudolife-mcp backup`
 writes a standard owner-free `pg_dump` archive (plus a state archive, 7-day
 rotation) that restores into any PostgreSQL 18 target regardless of role —
 the Docker tier included — so outgrowing lite is a dump/restore, not a
-migration project ([backups](docs/guide/configuration.md#backups)).
+migration project ([backups](docs/guide/configuration.md#backups)). For a
+tier- and Postgres-version-independent copy, `pseudolife-mcp export` /
+`import` move the whole bank as portable JSONL
+([logical export / import](docs/guide/configuration.md#logical-export--import)).
 Windows needs an ASCII-only data path
 ([`PSEUDOLIFE_MCP_DATA_DIR`](docs/guide/configuration.md#connection--deployment-env-vars)).
 
@@ -177,7 +180,11 @@ consolidate memories —
   logged-in Max-plan `claude` CLI); the sidecar image is **never built or
   pulled** (~11.8 GB lighter; dreams pause while the shim is down);
 - **sonnet-fallback** — the Claude shim primary, the bundled sidecar as
-  automatic fallback (Max-plan CLI plus the ~11.8 GB image) —
+  automatic fallback (Max-plan CLI plus the ~11.8 GB image);
+- **codex-only / codex-fallback** — the same two shapes on an OpenAI
+  subscription: a GPT-5.6 model (Sol / Terra / Luna) via the Codex CLI
+  shim on a signed-in ChatGPT plan (extraction quality unmeasured — see
+  the [dreaming guide](docs/guide/dreaming.md)) —
 
 then brings the stack up, installs the selected clients' session hooks
 (where the client has a hook system), registers the MCP transport (the

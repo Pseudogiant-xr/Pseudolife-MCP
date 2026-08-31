@@ -794,6 +794,20 @@
    ]
   },
   {
+   "id": "codexshim",
+   "g": "sidecar",
+   "x": 600,
+   "y": 1510,
+   "t": "Codex shim",
+   "s": "host · 127.0.0.1:8086",
+   "p": "evals/codex_shim.py",
+   "d": [
+    "Wraps the ChatGPT-plan codex CLI as an OpenAI-compatible endpoint",
+    "Autostart via install-codex-shim-autostart (codex-* installer modes)",
+    "Serves gpt-5.6-terra by default; gpt-*/codex-* honoured per request"
+   ]
+  },
+  {
    "id": "pgstorage",
    "g": "storage",
    "x": 1760,
@@ -914,7 +928,7 @@
     "providers (multi-select + capability matrix) → preflight → extractor mode",
     "volumes → managed .env → compose up --build → hooks → MCP registration",
     "Providers: claude / codex / gemini / generic; per-provider writer ids",
-    "Modes: sidecar / sonnet-fallback / sonnet-only (~11.8 GB lighter)",
+    "Modes: sidecar / sonnet-fallback / sonnet-only / codex-fallback / codex-only (-only = ~11.8 GB lighter)",
     "Ends with a per-agent [x]/[-]/[!] wiring ladder; /health poll"
    ]
   },
@@ -1531,6 +1545,12 @@
    "f": "dream",
    "t": "sonnet",
    "l": "primary · host.docker.internal:8082",
+   "k": "data"
+  },
+  {
+   "f": "dream",
+   "t": "codexshim",
+   "l": "primary (opt-in) · host.docker.internal:8086",
    "k": "data"
   },
   {

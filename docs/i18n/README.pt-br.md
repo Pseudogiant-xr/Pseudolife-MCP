@@ -1,8 +1,8 @@
-<!-- i18n-sync: v8 -->
+<!-- i18n-sync: v9 -->
 
 # Pseudolife-MCP
 
-[README original em inglês](../../README.md) — sincronizado: v8 (2026-08-20)
+[README original em inglês](../../README.md) — sincronizado: v9 (2026-08-31)
 
 **Memória de longo prazo persistente para Claude Code, Codex e outros clientes MCP.**
 
@@ -48,8 +48,9 @@ ops\install.ps1         # Windows (pwsh 7+)
 O instalador verifica os pré-requisitos (imprimindo uma linha exata de
 correção para qualquer item ausente) e pergunta qual extrator de sonhos
 usar — um modelo Claude via seu plano Max (a instalação mais leve), o
-shim do Claude com o modelo local incluído como fallback automático, ou
-apenas o modelo local incluído, que não precisa de nenhum plano. Em
+shim do Claude com o modelo local incluído como fallback automático, as
+mesmas duas formas com um modelo GPT-5.6 em um plano ChatGPT (via Codex
+CLI), ou apenas o modelo local incluído, que não precisa de nenhum plano. Em
 seguida, ele sobe a stack, conecta os clientes selecionados (o hook de
 briefing no início da sessão, que entrega a orientação do loop de memória
 a cada sessão, e o registro do transporte MCP), e faz o health-check do

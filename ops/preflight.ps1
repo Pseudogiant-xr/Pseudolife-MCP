@@ -110,8 +110,13 @@ if ($checks -contains "claude") {
     }
 }
 if ($checks -contains "codex") {
-    if (Get-Command codex -ErrorAction SilentlyContinue) { Ok "codex CLI" }
-    else {
+    # The official Windows installer keeps codex.exe in a rotating
+    # %LOCALAPPDATA%\OpenAI\Codex\bin\<hash>\ dir and NOT on PATH (verified
+    # live 2026-08-31) — Get-Command alone would fail a working install.
+    if ((Get-Command codex -ErrorAction SilentlyContinue) -or
+        (Get-ChildItem "$env:LOCALAPPDATA\OpenAI\Codex\bin\*\codex.exe" -ErrorAction SilentlyContinue)) {
+        Ok "codex CLI"
+    } else {
         Fail "codex CLI not found" `
              "install Codex: https://developers.openai.com/codex/cli/"
     }

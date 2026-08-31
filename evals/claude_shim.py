@@ -34,6 +34,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -52,6 +53,28 @@ DEFAULT_CLI = Path(os.environ.get("PSEUDOLIFE_SHIM_CLAUDE_CLI")
 _FENCE_RE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL)
 # Windows CreateProcess caps the command line at 32767 chars; leave margin.
 _MAX_ARGV_SYSTEM = 24000
+
+
+def _kill_tree(proc: subprocess.Popen) -> None:
+    """Kill a timed-out call and its descendants.
+
+    ``Popen.kill()`` on Windows is ``TerminateProcess`` on the DIRECT child
+    only. The CLI is a node program behind a wrapper (``claude.cmd`` →
+    ``cmd.exe`` → node), so the real claude survives holding the stdout
+    pipe — and the reaping ``communicate()`` then blocks forever with the
+    serialization lock held, wedging every later call.
+    """
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                       capture_output=True, check=False)
+    else:
+        # The child leads its own session (start_new_session in _run), so
+        # killing the group takes its descendants too. proc.kill() alone
+        # leaves a surviving grandchild holding the stdout pipe.
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            proc.kill()
 
 
 def resolve_model(requested: str | None, default: str) -> str:
@@ -81,6 +104,21 @@ class ClaudeCli:
         self._health_at = 0.0
         self._health_refreshing = False
 
+    def _run(self, cmd: list[str], payload: bytes) -> tuple[int, bytes, bytes]:
+        """Spawn one call. Seam for tests, and the place the timeout kill-tree
+        lives (``subprocess.run``'s timeout kills only the direct child)."""
+        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
+                                start_new_session=(os.name != "nt"))
+        try:
+            out, err = proc.communicate(payload, timeout=self.call_timeout)
+        except subprocess.TimeoutExpired:
+            _kill_tree(proc)
+            proc.communicate()          # reap, so no zombie holds the pipes
+            raise
+        return proc.returncode, out, err
+
     def chat(self, system: str, user: str, model: str | None = None) -> str:
         if self.system_override and system.startswith(_SYSTEM_PROMPT):
             # Swap the claims-extraction prompt prefix for the variant,
@@ -102,14 +140,12 @@ class ClaudeCli:
             self.calls += 1
             n = self.calls
             t0 = time.monotonic()
-            proc = subprocess.run(cmd, input=user.encode("utf-8"),
-                                  capture_output=True,
-                                  timeout=self.call_timeout)
-        if proc.returncode != 0:
+            rc, stdout, stderr = self._run(cmd, user.encode("utf-8"))
+        if rc != 0:
             raise RuntimeError(
-                f"claude -p rc={proc.returncode}: "
-                f"{proc.stderr.decode('utf-8', 'replace')[:400]}")
-        out = json.loads(proc.stdout.decode("utf-8", "replace"))
+                f"claude -p rc={rc}: "
+                f"{stderr.decode('utf-8', 'replace')[:400]}")
+        out = json.loads(stdout.decode("utf-8", "replace"))
         if out.get("is_error"):
             raise RuntimeError(
                 f"claude -p error result: {str(out.get('result'))[:400]}")

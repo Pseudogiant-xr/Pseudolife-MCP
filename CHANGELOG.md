@@ -22,6 +22,115 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   marker, no new field; an absent key means a real bank
   (`tests/test_web.py` pins both directions plus the topbar wiring).
 
+### Added (2026-08-31 — installer wiring for the Codex dreamer)
+- **`codex-only` / `codex-fallback` extractor modes** in `ops/install.sh`
+  / `ops\install.ps1`: the one-shot installer now wires a ChatGPT-plan
+  dreamer end to end — GPT-5.6 model prompt (Sol / Terra / Luna, Terra
+  default, menus honestly marked unmeasured), env triple at the Codex
+  shim's `:8086`, sidecar skip for `-only` (shared with `sonnet-only`;
+  the managed-override marker is generalized, with the legacy
+  `(sonnet-only)` text still recognized so pre-codex installs keep
+  switching modes cleanly), and autostart registration via the new
+  `ops/install-codex-shim-autostart.ps1` (Task Scheduler) /
+  `.sh` (systemd `--user`, docker-bridge bind). A `-Model`/`--model` from
+  the wrong family (e.g. `claude-*` with a codex mode) is rejected up
+  front instead of silently serving the shim's launch default.
+  `-ShimPort`/`--shim-port` default is now `0` = auto (8082 for Claude
+  modes, 8086 for Codex ones). A mode switch tears down the other
+  family's autostart task/unit (an abandoned shim would keep making real
+  CLI calls at every health refresh on a plan its owner believes is
+  off), and a shim mode whose CLI is missing now fails fast right after
+  the extractor choice instead of dying at the autostart stage with the
+  stack already up — preflight only knows `--client`, so
+  `--extractor codex-fallback --client claude` used to sail through.
+- **`codex_shim.py --health-ttl`** (default unchanged at 300 s; the
+  autostart passes 1800 s): every `/health` refresh is a real CLI call —
+  metered spend on a free ChatGPT tier (~288 calls/day at 300 s) — and a
+  stale-ok window only costs one failed primary attempt before fallback.
+  The shim also resolves the official Windows installer's `codex.exe`
+  on its own (`%LOCALAPPDATA%\OpenAI\Codex\bin\<hash>\`, off PATH,
+  rotating on auto-update — newest wins at every start; verified live
+  2026-08-31), and `ops/preflight.ps1`'s codex check accepts that layout
+  instead of failing a working install. Live smoke 2026-08-31 against
+  codex-cli 0.151.0-alpha on a free tier: health warm-up,
+  production-prompt extraction (Luna), and per-request model switch
+  (Terra) all pass.
+
+### Added (2026-08-31 — Codex CLI shim: dream on a ChatGPT plan)
+- **`evals/codex_shim.py`** — the OpenAI-side twin of the Claude CLI shim:
+  wraps headless `codex exec` (signed-in Codex CLI, ChatGPT-plan included
+  usage, no API key) as an OpenAI-compatible `/v1/chat/completions` on
+  `127.0.0.1:8086`, serving `gpt-5.6-terra` by default. The request's
+  system message rides `-c model_instructions_file=` (replacing Codex's
+  coding-agent persona), the reply is parsed from the `--json` event
+  stream so a failed turn raises instead of masquerading as an empty
+  extraction, and agent affordances are disabled (`--sandbox read-only`,
+  `--ephemeral`, no web search or shell tool). Honours a concrete `gpt-*`
+  / `codex-*` model named per request — the Console Dreamer card switches
+  it live, mirroring the Claude shim's `claude-*` handling. Registered as
+  the `terra` ladder rung (out of `LADDER_ORDER`, like `sonnet-5`).
+  Originates from the 2026-07-21 `feat/terra-shim` branch, updated for the
+  per-request model contract and moved off :8083 (now the opus-5 ceiling
+  rung's port) to :8086 (:8085 was already the events-teacher shim default
+  in `distill_datagen_events.py`). Not wired into the autostart installers, and extraction
+  quality is unmeasured pending a `--rung terra` ladder run; verified by
+  its test suite against the documented `codex exec --json` contract, not
+  yet against a live Codex install.
+
+### Changed (2026-08-31 — Dreamer presentation: non-Claude models are first-class)
+- **The Console no longer reads as Claude-only.** A real external adopter
+  on an OpenAI stack concluded from the Dreamer panel that other
+  providers' models "aren't an option" — the backend was always
+  provider-neutral (the override and extractor model knobs are plain
+  strings any OpenAI-compatible endpoint consumes). The custom-model
+  input's placeholder is now neutral (`model id…`, was `claude-…`), the
+  Dreamer card gains one-click GPT-5.6 presets (Sol / Terra / Luna,
+  honestly marked unmeasured), and the Dreamer help line plus the
+  `extractor_model_override` / `extractor_base_url` / `extractor_model`
+  knob help state plainly that any model id the wired endpoint serves
+  works (LM Studio/Ollama/vLLM names included), with `claude-*` /
+  `gpt-*` per-request switching as the shim special cases.
+  `docs/guide/dreaming.md` gains the matching "OpenAI primary" section.
+### Fixed (2026-08-31 — claude_shim: a timed-out call can no longer wedge the shim)
+- **`evals/claude_shim.py` now kills the whole process tree on a call
+  timeout.** The shim ran each call via `subprocess.run(..., timeout=...)`,
+  whose timeout path kills only the direct child and then reaps it with an
+  unbounded `communicate()`. The `claude` CLI is a node program behind a
+  wrapper (`claude.cmd` → `cmd.exe` → node on Windows; a shell shim on
+  POSIX), so a surviving descendant holding the stdout pipe made that reap
+  block forever — with the shim's serialization lock held, wedging every
+  later call, including the daemon's dream primary on :8082. Calls now go
+  through a `Popen`/`communicate` seam that detaches the child into its own
+  session on POSIX (`start_new_session`) and, on timeout, kills the tree
+  (`os.killpg` on POSIX, `taskkill /F /T` on Windows) before reaping — the
+  same structure as `codex_shim.py`. No behavior change outside the timeout
+  path. (`evals/claude_shim.py`, `tests/test_claude_shim_health.py`.)
+
+### Added (2026-08-31 — logical export/import: `pseudolife-mcp export` / `import`)
+- **The bank now has a logical transfer layer beside the physical backups.**
+  `pseudolife-mcp export` writes the whole bank as a portable ZIP — one
+  JSONL file per table plus a manifest (format version, schema version,
+  embedding dimension, per-table counts) — from a single read-only
+  REPEATABLE READ snapshot, safe against a live daemon.
+  `pseudolife-mcp import <archive.zip>` loads one into a **fresh, empty
+  bank** in a single transaction, preserving ids, HLC stamps, and
+  embeddings verbatim and advancing the id sequences past the imported
+  rows. Unlike a `pg_dump`, the artifact is deployment-tier- and
+  Postgres-version-independent and loads additively across schema
+  versions: an export missing a column takes the target's DDL default
+  (old export → new build), while an export carrying an unknown column is
+  refused (new export → old build would silently drop data). Import also
+  refuses a non-empty bank, refuses while other connections hold the
+  database (a running daemon; `--force` overrides), and refuses an
+  embedding-dimension mismatch. Every schema table is explicitly
+  classified exported or excluded (operational telemetry and the dream
+  run journal stay behind; the manifest lists them), and the roster is
+  guard-tested against `BENCH_RESET_TABLES` so a future table must pick
+  a side. Both commands are torch-free and resolve the bank the way
+  `backup` does (explicit DSN, else the lite tier's embedded instance).
+  (`pseudolife_memory/transfer_cli.py`, `tests/test_transfer_cli.py`;
+  docs in the configuration guide's Backups section.)
+
 ### Added (2026-08-31 — judge ladder measures the caution-line prompt variant)
 - **`evals/judge_ladder.py --caution`** re-runs the frozen merge-judge
   fixture with `low_differential` computed on each row's shown snippets
