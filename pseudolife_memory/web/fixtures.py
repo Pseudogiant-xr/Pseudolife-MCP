@@ -147,6 +147,72 @@ class FixtureService:
                 "weights_reset": False,
                 "reference": {"count": 3}}
 
+    def re_evidence_dashboard(
+        self, *, project=None, binary_id=None, text=None, status=None, limit=100,
+    ) -> dict[str, Any]:
+        """Representative strict-proof data for offline Console development."""
+        scope = {
+            "project": "example-client",
+            "binary_id": "client.exe:sha256:0123456789abcdef",
+            "artifacts": 2,
+            "claims": {"verified": 1, "hypothesis": 1},
+            "last_activity": _NOW - 8 * 60,
+        }
+        artifacts = [
+            {"id": 42, "project": scope["project"],
+             "binary_id": scope["binary_id"], "kind": "ghidra-function",
+             "locator": "00b72870", "source_path": "evidence/world-step.json",
+             "content_hash": "a" * 64, "summary": "World-step candidate",
+             "addresses": ["004cad10", "00b72510", "00b72870", "00b729ab"],
+             "ingested_at": _NOW - 8 * 60,
+             "payload_keys": ["function", "relationships"]},
+            {"id": 41, "project": scope["project"],
+             "binary_id": scope["binary_id"], "kind": "packet-capture",
+             "locator": "login-handshake", "source_path": "evidence/login.json",
+             "content_hash": "b" * 64, "summary": "Login handshake capture",
+             "addresses": [], "ingested_at": _NOW - 2 * _H,
+             "payload_keys": ["packets", "session"]},
+        ]
+        claims = [
+            {"id": 7, "project": scope["project"],
+             "binary_id": scope["binary_id"], "subject": "00b72870",
+             "claim": "The function calls the collision step before dispatch.",
+             "status": "verified", "confidence": 1.0,
+             "created_at": _NOW - _H, "updated_at": _NOW - 8 * 60,
+             "evidence_ids": [42]},
+            {"id": 6, "project": scope["project"],
+             "binary_id": scope["binary_id"], "subject": "login-handshake",
+             "claim": "The second packet may select the title gateway.",
+             "status": "hypothesis", "confidence": 0.55,
+             "created_at": _NOW - 2 * _H, "updated_at": _NOW - 2 * _H,
+             "evidence_ids": []},
+        ]
+        if ((project and project != scope["project"])
+                or (binary_id and binary_id != scope["binary_id"])):
+            return {"read_only": True, "scopes": [scope], "selection": None,
+                    "totals": {"artifacts": 0, "claims": {}},
+                    "artifacts": [], "claims": []}
+        if text:
+            needle = text.lower()
+            artifacts = [item for item in artifacts if needle in " ".join(
+                str(item.get(key, "")) for key in
+                ("locator", "source_path", "summary", "binary_id")).lower()]
+            claims = [item for item in claims if needle in
+                      f"{item['subject']} {item['claim']}".lower()]
+        if status:
+            claims = [item for item in claims if item["status"] == status]
+        limit = max(1, min(int(limit), 500))
+        return {
+            "read_only": True,
+            "scopes": [scope],
+            "selection": {"project": scope["project"],
+                          "binary_id": scope["binary_id"]},
+            "totals": {"artifacts": scope["artifacts"],
+                       "claims": scope["claims"]},
+            "artifacts": artifacts[:limit],
+            "claims": claims[:limit],
+        }
+
     # cortex
     def cortex_dump(self) -> dict[str, Any]:
         return {"count": len(_FACTS), "entries": [_fact_dict(t) for t in _FACTS]}

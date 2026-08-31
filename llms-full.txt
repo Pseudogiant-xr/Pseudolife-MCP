@@ -3508,6 +3508,19 @@ The authoritative sources remain the binary-analysis export, packet capture,
 runtime log, asset, or other artifact producer. Pseudolife indexes a copy and
 its relationships; it is not the source of truth.
 
+## Console visibility
+
+Open the Cortex Console and select **RE Evidence** to inspect the proof store.
+The read-only view lists every project/build scope, artifact and claim totals,
+claim-status counts, recent records, immutable hashes, structured addresses,
+source paths, and explicit evidence links. Search matches artifact locators,
+structured addresses, summaries, paths, build ids, claim subjects, and claim
+text; claim status can be filtered independently.
+
+This view reads the isolated proof tables directly. Its records deliberately
+do not appear in the Console's Stream, Cortex, World, Lessons, Episodes, or
+Graph views, and the Console cannot create or mutate RE evidence.
+
 ## Evidence Hub workflow
 
 First capture JSON using the project's existing terminal-only evidence helper.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 
 import pytest
 
@@ -78,8 +79,92 @@ def test_storage_deduplicates_artifacts_and_queries_exact_address(pg_url, pg_con
             address="0x00B72870")
         assert [row["id"] for row in rows] == [first]
         assert rows[0]["addresses"] == ["00b72510", "00b72870"]
+
+        text_rows = storage.query_re_evidence(
+            project="srfn-client", binary_id="decomp_sro_client.exe:sha256:test",
+            text="00b72510")
+        assert [row["id"] for row in text_rows] == [first]
     finally:
         storage.close()
+
+
+def test_storage_lists_re_evidence_scopes_with_counts(pg_url, pg_conn):
+    from pseudolife_memory.storage.postgres import PostgresStorage
+
+    storage = PostgresStorage(pg_url)
+    try:
+        def add(project: str, binary_id: str, locator: str, digest: str) -> int:
+            return storage.insert_re_evidence({
+                "project": project, "kind": "ghidra-function",
+                "locator": locator, "source_path": f"evidence/{locator}.json",
+                "content_hash": digest * 64, "payload": {"address": locator},
+                "summary": f"Function {locator}", "binary_id": binary_id,
+                "addresses": [locator], "raw_bytes": b"{}",
+                "payload_keys": ["address"],
+            })
+
+        old_id = add("srfn-client", "client:old", "00100000", "1")
+        add("srfn-client", "client:new", "00200000", "2")
+        storage.upsert_re_claim(
+            project="srfn-client", binary_id="client:old", subject="00100000",
+            claim="old build behavior", status="verified",
+            evidence_ids=[old_id], confidence=1.0)
+        storage.conn.execute(
+            "UPDATE re_evidence_artifacts SET ingested_at = 1 "
+            "WHERE project = 'srfn-client' AND binary_id = 'client:old'")
+        storage.conn.execute(
+            "UPDATE re_claims SET created_at = 1, updated_at = 1 "
+            "WHERE project = 'srfn-client' AND binary_id = 'client:old'")
+
+        scopes = storage.re_evidence_scopes()
+
+        selected = [s for s in scopes if s["project"] == "srfn-client"]
+        assert [s["binary_id"] for s in selected] == ["client:new", "client:old"]
+        assert selected[0]["artifacts"] == 1
+        assert selected[0]["claims"] == {}
+        assert selected[1]["artifacts"] == 1
+        assert selected[1]["claims"] == {"verified": 1}
+    finally:
+        storage.close()
+
+
+def test_service_re_evidence_dashboard_uses_latest_scope_and_filters():
+    from pseudolife_memory.service import MemoryService
+
+    class Storage:
+        def re_evidence_scopes(self):
+            return [{
+                "project": "srfn-client", "binary_id": "client:test",
+                "artifacts": 2, "claims": {"verified": 1},
+                "last_activity": 123.0,
+            }]
+
+        def query_re_evidence(self, **kwargs):
+            assert kwargs == {
+                "project": "srfn-client", "binary_id": "client:test",
+                "text": "login", "limit": 25, "include_payload": False,
+            }
+            return [{"id": 7, "locator": "00abcdef"}]
+
+        def query_re_claims(self, **kwargs):
+            assert kwargs == {
+                "project": "srfn-client", "binary_id": "client:test",
+                "status": "verified", "text": "login", "limit": 25,
+            }
+            return [{"id": 3, "status": "verified"}]
+
+    service = MemoryService.__new__(MemoryService)
+    service._lock = threading.RLock()
+    service._ensure_postgres_storage = lambda: Storage()
+
+    out = service.re_evidence_dashboard(
+        text="login", status="verified", limit=25)
+
+    assert out["selection"] == {
+        "project": "srfn-client", "binary_id": "client:test"}
+    assert out["totals"] == {"artifacts": 2, "claims": {"verified": 1}}
+    assert out["artifacts"] == [{"id": 7, "locator": "00abcdef"}]
+    assert out["claims"] == [{"id": 3, "status": "verified"}]
 
 
 def test_verified_claim_requires_existing_linked_evidence(pg_url, pg_conn):

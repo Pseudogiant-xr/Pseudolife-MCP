@@ -17,6 +17,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   removable. These tables are outside
   associative memory, the reference bank, cortex promotion, and dream
   consolidation, so a remembered inference cannot silently become proof.
+- **The Cortex Console now has a read-only RE Evidence view.** It exposes
+  project/build scopes, artifact and claim totals, claim-status breakdowns,
+  search and status filters, immutable hashes, structured addresses, source
+  paths, and evidence links without copying proof records into ordinary
+  memory, cortex, the graph, or dream consolidation.
 
 ### Added (2026-08-31 — installer wiring for the Codex dreamer)
 - **`codex-only` / `codex-fallback` extractor modes** in `ops/install.sh`

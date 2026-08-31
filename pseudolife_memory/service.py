@@ -1063,6 +1063,63 @@ class MemoryService(DreamOps):
             return self._ensure_postgres_storage().re_evidence_stats(
                 project, binary_id=binary_id)
 
+    def re_evidence_dashboard(
+        self, *, project: str | None = None, binary_id: str | None = None,
+        text: str | None = None, status: str | None = None, limit: int = 100,
+    ) -> dict[str, Any]:
+        """Read-only Console projection over the isolated RE proof store."""
+        project = project.strip() if project else None
+        binary_id = binary_id.strip() if binary_id else None
+        text = text.strip() if text else None
+        status = status.strip().lower() if status else None
+        limit = max(1, min(int(limit), 500))
+        with self._lock:
+            storage = self._ensure_postgres_storage()
+            scopes = storage.re_evidence_scopes()
+            selected = None
+            if project and binary_id:
+                selected = next((scope for scope in scopes
+                                 if scope["project"] == project
+                                 and scope["binary_id"] == binary_id), None)
+            elif project:
+                selected = next((scope for scope in scopes
+                                 if scope["project"] == project), None)
+            elif scopes:
+                selected = scopes[0]
+
+            if selected is None:
+                return {
+                    "read_only": True,
+                    "scopes": scopes,
+                    "selection": None,
+                    "totals": {"artifacts": 0, "claims": {}},
+                    "artifacts": [],
+                    "claims": [],
+                }
+
+            selected_project = selected["project"]
+            selected_binary = selected["binary_id"]
+            artifacts = storage.query_re_evidence(
+                project=selected_project, binary_id=selected_binary,
+                text=text, limit=limit, include_payload=False)
+            claims = storage.query_re_claims(
+                project=selected_project, binary_id=selected_binary,
+                status=status, text=text, limit=limit)
+            return {
+                "read_only": True,
+                "scopes": scopes,
+                "selection": {
+                    "project": selected_project,
+                    "binary_id": selected_binary,
+                },
+                "totals": {
+                    "artifacts": selected["artifacts"],
+                    "claims": selected["claims"],
+                },
+                "artifacts": artifacts,
+                "claims": claims,
+            }
+
     # ------------------------------------------------------------------
     # Tool: store
     # ------------------------------------------------------------------

@@ -9,6 +9,7 @@ so these tests require torch installed and run under ``.venv``.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 import yaml
@@ -130,6 +131,9 @@ def test_routes_dispatch_reads(svc):
     assert "entries" in r.dispatch("GET", "/api/facts", {}, {})
     assert "nodes" in r.dispatch("GET", "/api/graph", {}, {})
     assert "would_fire" in r.dispatch("GET", "/api/dream/status", {}, {})
+    evidence = r.dispatch("GET", "/api/re-evidence", {}, {})
+    assert evidence["read_only"] is True
+    assert evidence["artifacts"] and evidence["claims"]
 
 
 def test_overview_has_facts_by_origin(svc):
@@ -141,6 +145,36 @@ def test_overview_has_facts_by_origin(svc):
 def test_routes_search_params(svc):
     out = ConsoleRoutes(svc).dispatch("GET", "/api/search", {"q": "recall"}, {})
     assert "entries" in out and "count" in out
+
+
+def test_re_evidence_dashboard_route_threads_read_filters():
+    class EvidenceService:
+        def re_evidence_dashboard(self, **kwargs):
+            return {"received": kwargs}
+
+    out = ConsoleRoutes(EvidenceService()).dispatch(
+        "GET", "/api/re-evidence",
+        {"project": "srfn-client", "binary_id": "client:test",
+         "q": "00b72870", "status": "verified", "limit": "75"}, {})
+
+    assert out["received"] == {
+        "project": "srfn-client", "binary_id": "client:test",
+        "text": "00b72870", "status": "verified", "limit": 75,
+    }
+
+
+def test_re_evidence_console_assets_are_wired():
+    static = Path(__file__).resolve().parents[1] / "pseudolife_memory" / "web" / "static"
+    app = (static / "js" / "app.js").read_text(encoding="utf-8")
+    view = (static / "js" / "views" / "re_evidence.js")
+
+    assert view.is_file()
+    assert 'id: "re-evidence"' in app
+    assert 'label: "RE Evidence"' in app
+    assert 'from "./views/re_evidence.js"' in app
+    text = view.read_text(encoding="utf-8")
+    assert 'api.get("/api/re-evidence"' in text
+    assert "Read-only proof index" in text
 
 
 def test_routes_graph_insight_dispatch(svc):

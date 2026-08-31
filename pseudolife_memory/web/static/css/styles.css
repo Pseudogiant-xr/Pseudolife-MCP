@@ -35,6 +35,7 @@
   --c-lessons:#b083f0; /* procedural lessons  (violet)  */
   --c-graph:#5b9dff;   /* knowledge graph     (azure)   */
   --c-episode:#8a93a8; /* episodes            (slate)   */
+  --c-proof:#f08a5d;   /* immutable RE proof  (coral)   */
   --c-danger:#f0726a;
   --c-warn:#e8b341;
   --c-ok:#5fcf80;
@@ -86,6 +87,7 @@
   --c-lessons:#7a4fc0;
   --c-graph:#2f6fd6;
   --c-episode:#6b7280;
+  --c-proof:#c7542d;
   --glow:.16;
   --shadow:0 14px 40px -24px rgba(60,50,30,.5);
   --shadow-pop:0 22px 50px -22px rgba(60,50,30,.55);
@@ -411,6 +413,47 @@ input:focus, select:focus, textarea:focus { outline:none; border-color:color-mix
 .facet.on { color:var(--ink); background:color-mix(in srgb,var(--accent) 20%,var(--bg-2));
   border-color:color-mix(in srgb,var(--accent) 50%,transparent); }
 .count-note { font-size:.8rem; color:var(--ink-3); white-space:nowrap; }
+
+/* ── RE Evidence (read-only proof store) ──────────────────────────────── */
+.proof-banner {
+  display:flex; align-items:flex-start; gap:14px; padding:15px 17px; margin-bottom:18px;
+  border:1px solid color-mix(in srgb,var(--c-proof) 30%,var(--line));
+  border-left:3px solid var(--c-proof); border-radius:var(--radius-sm);
+  background:color-mix(in srgb,var(--c-proof) 7%,var(--bg-1)); color:var(--ink-2);
+}
+.proof-banner strong { color:var(--ink); display:block; margin-bottom:2px; }
+.proof-banner .mark { width:9px; height:9px; margin-top:7px; flex:none; border-radius:50%;
+  background:var(--c-proof); box-shadow:0 0 14px color-mix(in srgb,var(--c-proof) 70%,transparent); }
+.proof-controls { display:grid; grid-template-columns:minmax(150px,.7fr) minmax(260px,1.3fr) minmax(220px,1fr) 150px;
+  align-items:end; gap:10px; margin-bottom:18px; }
+.proof-control label { display:block; margin:0 0 5px 2px; font-family:var(--font-mono);
+  font-size:.66rem; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-3); }
+.proof-layout { display:grid; grid-template-columns:minmax(0,1.08fr) minmax(0,.92fr); gap:16px; align-items:start; }
+.proof-stack { display:flex; flex-direction:column; gap:10px; }
+.proof-card { padding:14px 16px; border:1px solid var(--line); border-radius:var(--radius-sm);
+  background:var(--bg-1); transition:border-color .16s, transform .16s; }
+.proof-card[role=button] { cursor:pointer; }
+.proof-card[role=button]:hover, .proof-card[role=button]:focus-visible {
+  border-color:color-mix(in srgb,var(--c-proof) 44%,var(--line)); transform:translateY(-1px); outline:none; }
+.proof-card-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.proof-card-head .locator { font-family:var(--font-mono); color:var(--c-proof); font-weight:600; }
+.proof-card-head .spacer { margin-left:auto; }
+.proof-summary { margin-top:8px; color:var(--ink); line-height:1.48; overflow-wrap:anywhere; }
+.proof-meta { display:flex; align-items:center; gap:7px 12px; flex-wrap:wrap; margin-top:10px;
+  color:var(--ink-3); font-family:var(--font-mono); font-size:.7rem; }
+.proof-meta .hash { max-width:23ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.proof-addresses { display:flex; gap:5px; flex-wrap:wrap; margin-top:10px; }
+.proof-address { padding:2px 7px; border:1px solid var(--line); border-radius:99px;
+  color:var(--ink-2); background:var(--bg-inset); font-family:var(--font-mono); font-size:.66rem; }
+.proof-claim { border-left:3px solid var(--c-proof); }
+.proof-linked { color:var(--c-proof); }
+@media (max-width:980px) {
+  .proof-controls { grid-template-columns:1fr 1fr; }
+  .proof-layout { grid-template-columns:1fr; }
+}
+@media (max-width:620px) {
+  .proof-controls { grid-template-columns:1fr; }
+}
 
 /* ── Entity / fact cards (Cortex) ───────────────────────────────────────── */
 .entity-card { margin-bottom:14px; }

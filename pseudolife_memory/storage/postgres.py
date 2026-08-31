@@ -1048,9 +1048,10 @@ class PostgresStorage:
         if text:
             where.append(
                 "(locator ILIKE %s OR source_path ILIKE %s OR "
-                "COALESCE(summary, '') ILIKE %s OR COALESCE(binary_id, '') ILIKE %s)")
+                "COALESCE(summary, '') ILIKE %s OR COALESCE(binary_id, '') ILIKE %s "
+                "OR array_to_string(addresses, ' ') ILIKE %s)")
             needle = f"%{text.strip()}%"
-            values.extend([needle] * 4)
+            values.extend([needle] * 5)
         limit_sql = ""
         if limit is not None:
             values.append(max(1, min(int(limit), 500)))
@@ -1180,6 +1181,44 @@ class PostgresStorage:
             "artifacts": int(artifacts),
             "claims": {status: int(count) for status, count in rows},
         }
+
+    def re_evidence_scopes(self) -> list[dict]:
+        """Return every project/build scope with read-only dashboard totals."""
+        scopes: dict[tuple[str, str], dict] = {}
+        artifact_rows = self.conn.execute(
+            "SELECT project, binary_id, count(*), max(ingested_at) "
+            "FROM re_evidence_artifacts GROUP BY project, binary_id",
+        ).fetchall()
+        for project, binary_id, count, last_activity in artifact_rows:
+            scopes[(project, binary_id)] = {
+                "project": project,
+                "binary_id": binary_id,
+                "artifacts": int(count),
+                "claims": {},
+                "last_activity": float(last_activity or 0),
+            }
+
+        claim_rows = self.conn.execute(
+            "SELECT project, binary_id, status, count(*), max(updated_at) "
+            "FROM re_claims GROUP BY project, binary_id, status",
+        ).fetchall()
+        for project, binary_id, status, count, last_activity in claim_rows:
+            scope = scopes.setdefault((project, binary_id), {
+                "project": project,
+                "binary_id": binary_id,
+                "artifacts": 0,
+                "claims": {},
+                "last_activity": 0.0,
+            })
+            scope["claims"][status] = int(count)
+            scope["last_activity"] = max(
+                scope["last_activity"], float(last_activity or 0))
+
+        return sorted(
+            scopes.values(),
+            key=lambda item: (
+                -item["last_activity"], item["project"], item["binary_id"]),
+        )
 
     def re_evidence_export_ids(self, *, project: str, binary_id: str) -> list[int]:
         rows = self.conn.execute(

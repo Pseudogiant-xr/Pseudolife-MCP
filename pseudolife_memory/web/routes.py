@@ -106,6 +106,12 @@ class ConsoleRoutes:
         g("/api/stats", lambda q, b: svc.stats())
         g("/api/overview", lambda q, b: self._overview())
 
+        # ---- reverse-engineering proof store (strictly read-only) ----
+        g("/api/re-evidence", lambda q, b: svc.re_evidence_dashboard(
+            project=_s(q, "project"), binary_id=_s(q, "binary_id"),
+            text=_s(q, "q"), status=_s(q, "status"),
+            limit=_i(q, "limit", 100)))
+
         # ---- cortex (canonical facts) ----
         g("/api/facts", lambda q, b: self._facts(_i(q, "limit", 500)))
         g("/api/facts/history",

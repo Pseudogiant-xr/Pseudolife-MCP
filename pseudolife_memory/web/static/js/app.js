@@ -12,6 +12,7 @@ import { renderGraph } from "./views/graph.js";
 import { renderInsight } from "./views/insight.js";
 import { renderEpisodes } from "./views/episodes.js";
 import { renderConsole } from "./views/console.js";
+import { renderReEvidence } from "./views/re_evidence.js";
 
 const ROUTES = [
   { id: "observatory", label: "Observatory", group: "Overview", accent: "var(--c-assoc)", view: renderObservatory, countKey: null },
@@ -26,6 +27,7 @@ const ROUTES = [
   { id: "atlas", label: "Graph", group: "Structure", accent: "var(--c-graph)", view: renderGraph, countKey: null, hidden: true, navAs: "graph" },
   { id: "insight", label: "Insight", group: "Structure", accent: "var(--c-graph)", view: renderInsight, countKey: null },
   { id: "episodes", label: "Episodes", group: "Operations", accent: "var(--c-episode)", view: renderEpisodes, countKey: "episodes" },
+  { id: "re-evidence", label: "RE Evidence", group: "Operations", accent: "var(--c-proof)", view: renderReEvidence, countKey: null },
   { id: "console", label: "Console", group: "Operations", accent: "var(--c-assoc)", view: renderConsole, countKey: null },
 ];
 const byId = Object.fromEntries(ROUTES.map((r) => [r.id, r]));
