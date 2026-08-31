@@ -610,6 +610,14 @@ Or HTTP, no pip package needed:
 gemini mcp add -s user -t http pseudolife-memory http://127.0.0.1:8765/mcp
 ```
 
+Note: since 2026-06-18 Google no longer serves individual-tier accounts
+(free, AI Pro, AI Ultra) through Gemini CLI — OAuth sign-in fails and
+points at Antigravity. The wiring above stays correct, but individual
+accounts need API-key auth (`GEMINI_API_KEY`) to actually run sessions —
+or use Google Antigravity itself, which connects to the same bank via
+`~/.gemini/config/mcp_config.json`; both are covered in
+[the providers guide](docs/guide/providers.md#gemini-cli).
+
 **Any other MCP-capable agent** (Cursor, Windsurf, Zed, Copilot CLI, …) —
 add the generic `mcpServers` entry to that tool's MCP config (`ops/install.sh
 --client generic` prints both shapes ready to paste):

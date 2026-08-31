@@ -94,6 +94,39 @@ gemini mcp add -s user -t http pseudolife-memory http://127.0.0.1:8765/mcp
 ```
 
 `-s user` matters — Gemini defaults to *project* scope.
+
+> **Auth caveat:** since 2026-06-18 Google no longer serves individual-tier
+> accounts (free, Google AI Pro, AI Ultra) through Gemini CLI — OAuth
+> sign-in fails with `IneligibleTierError`, pointing at Antigravity as the
+> migration path. The wiring above is auth-independent and stays correct,
+> but to actually run sessions an individual account needs API-key auth
+> (set `GEMINI_API_KEY`); enterprise Gemini Code Assist licenses keep
+> working unchanged.
+
+If you migrated to **Google Antigravity** (where that error points), it can
+use the same bank. Its global MCP config is
+`~/.gemini/config/mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "pseudolife-memory": {
+      "command": "pseudolife-mcp",
+      "args": [],
+      "env": {
+        "PSEUDOLIFE_WRITER_ID": "antigravity",
+        "PSEUDOLIFE_MCP_NO_SPAWN": "1"
+      }
+    }
+  }
+}
+```
+
+A running Antigravity picks the file up from the refresh button in
+Settings → Customizations → Installed MCP Servers, and asks per-tool
+approval on first use. Verified live 2026-08-31: tools discovered, search
+and fact writes round-tripped, writes attributed as writer `antigravity`.
+
 `PSEUDOLIFE_MCP_NO_SPAWN=1` belongs on Docker-tier shim registrations
 (every provider): it makes the shim wait for the compose container instead
 of spawning a host fallback that can shadow the real bank after a reboot —
