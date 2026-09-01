@@ -333,6 +333,52 @@ rag 0.321±0.027, commit precision 0.76±0.05).
 > measured with. See
 > [the benchmarks guide](../docs/guide/benchmarks.md#the-knowledge-update-slice-78-of-the-500).
 
+### Comparator arms — `--refind` and `--nomem` (added 2026-09-01, smoke-run)
+
+The same two arms the BEAM adapter grew, wired into this harness as well
+(they share one implementation — `serve_comparator_arms` in
+`longmemeval_bench.py`, which the BEAM adapter calls too, so the harnesses
+cannot drift into serving them differently). Smoke-run 2026-09-01 on 5
+oracle questions — see "First smoke" in the BEAM section for what that
+does and does not establish:
+
+| arm | flag | context |
+|-----|------|---------|
+| `refind` | `--refind` | an agentic **lexical** loop over the same haystack turns the bank ingested, budget-matched to the rag control ([ReFind](https://arxiv.org/abs/2608.12888)) |
+| `nomem` | `--nomem` | nothing — the question, its date, and this harness's own task framing, including its one-sentence answer cap ([MemTrapBench](https://arxiv.org/abs/2608.20202)) |
+
+Both contexts are **persisted like every other arm**, so the split
+extract/answer flow still works: `--phase extract` builds them once,
+`--phase answer` (and a later `rebuild_contexts.py` re-answer) replays
+them without re-paying extraction. One caveat the split does not survive
+untouched — `--refind` plans its searches with the **answerer** model, so
+an extract phase carrying that arm needs the Qwen endpoint up as well
+(probed up front, rather than dying mid-question after paying an ingest).
+`--phase answer --refind` is rejected outright: it would silently do
+nothing, since that phase only answers what is already persisted. `replicate.py agg` and
+`replicate.py compare --arm refind` read the arms off the rows, so a
+five-arm run cannot aggregate into a three-arm table.
+
+```bash
+PYTHONPATH=. python evals/longmemeval_bench.py --dataset oracle \
+    --extractor qwen-27b --tag refind --refind --nomem --limit 5
+```
+
+The rag arm's ReFind counterpart searches the *identical* stored turn
+text — `archive_from_lme_question` and `ingest_and_dream` are pinned
+turn-for-turn against each other by
+`test_archive_mirrors_what_ingest_stores_turn_for_turn`, because both
+format and order the haystack independently.
+
+Run over the committed `ceiling-e2e` artifact (78 knowledge-update
+questions), the leak check finds **0 leaked rows**; its 27 untestable
+rows are **all `trivial_gold`** — LongMemEval always has a gold string,
+so unlike BEAM there is no `no_gold` class here, and what it cannot test
+is short numeric-or-yes/no answers (`25`, `Yes.`, `six`). The arm means
+it recomputes reproduce that run's published table exactly (rag 0.859,
+hybrid 0.8333, cortex 0.6667). Artifact:
+`longmemeval-ku-oracle-qwen-27b-ceiling-e2e.leakcheck.json`.
+
 Model roles are split so extraction quality is the **only** variable:
 
 - **Extractor** (varies): `gemma-e2b` (the smallest ladder-verified sidecar
@@ -714,6 +760,134 @@ paper-faithful float, `score_intfaithful` = code-faithful).
 (Cognee, Mem0, Hindsight): those are GPT-judged, and the runs below are
 judged locally or by an Opus-class CLI judge. Cognee's 0.79 is also a
 20-question single-conversation protocol. Compare within a row.
+
+## Comparator arms — ReFind and no-memory (added 2026-09-01)
+
+Two opt-in arms, both adopted from the 2026-09-01 briefing-backlog triage.
+Both have been **smoke-run only** (below): the plumbing is validated, and
+**no arm comparison from either harness is a measurement yet**.
+
+| arm | flag | context | measures |
+|-----|------|---------|----------|
+| `refind` | `--refind` | an **agentic lexical loop** over the same formatted turns the bank holds: the answerer model plans BM25 queries for up to `--refind-rounds` rounds, narrowing by date range, never re-reading a turn it already inspected, with session-aware rank fusion; the surviving turns are budget-matched to the rag control | the honest lexical baseline ([ReFind, arXiv 2608.12888](https://arxiv.org/abs/2608.12888)) — single-shot BM25 badly understates it, and without it a claim about the structural stack (bands, cortex, graph) has no floor to beat |
+| `nomem` | `--nomem` | nothing — the question and this harness's own task framing, answer-length policy included | the memory-off floor ([MemTrapBench, arXiv 2608.20202](https://arxiv.org/abs/2608.20202), where all five frameworks tested scored *below* it). If memory-on does not beat memory-off, the win is imaginary |
+
+The ReFind loop only **retrieves**; its context is answered by the
+harness's own answerer and graded by the harness's own judge, so the arm
+is instrument-matched to `rag`/`cortex`/`hybrid` (the same rule the Cognee
+adapter follows — retrieval modes, never completion modes). It searches
+the *identical* formatted turns that were stored into the bank, so a
+`refind` − `rag` delta is about the retrieval loop and nothing else. Cost
+per question is `--refind-rounds` extra planner calls (default 3) on top
+of the arm's own answer + judge calls; `--nomem` costs one answer + its
+judge items.
+
+The loop's knobs — session fusion weight 0.3, 3 rounds, 3 queries per
+round, 8 turns inspected per query — are **declared defaults, not
+measured values**: ReFind publishes no fusion weight and no sweep has been
+run here. Every one of them is a flag (`--refind-session-weight`,
+`--refind-rounds`, `--refind-max-queries`, `--refind-per-round-k`, plus
+`--refind-top-k` to break the budget match deliberately) so they can be
+measured before anything is claimed from a number this arm produces. The
+one constant that is not a flag is the 400-character snippet the planner
+sees per turn, which is display width, not retrieval.
+
+Ranking runs the fusion twice, and the second pass is the one that
+decides what is served: once inside a query, to choose what that query
+inspects, and again over the **union of everything inspected** at serve
+time. Normalising per query would put every query's best hit at exactly
+1.0, so a lone weak hit from a late round would tie the strongest hit of
+the first and win on tie-break — caught in review before the arm ever
+ran, and pinned by
+`test_serve_ranking_fuses_across_rounds_not_per_query`.
+
+```bash
+# both comparator arms alongside the usual three, one chat first
+PYTHONPATH=. python evals/beam_adapter.py --beam-root <path-to-BEAM> \
+    --tier 100K --extractor qwen-27b --out-tag refind-smoke \
+    --refind --nomem --limit-chats 1
+# the comparison proper: full tier, all five arms
+PYTHONPATH=. python evals/beam_adapter.py --beam-root <path-to-BEAM> \
+    --tier 100K --extractor qwen-27b --out-tag refind-100k --refind --nomem
+```
+
+### First smoke, 2026-09-01 — plumbing only, not a measurement
+
+Both arms ran for the first time on the reproducible Qwen3.8 server
+(stock `llama-server`, `--cache-type-k/v q8_0`, verified by process
+inspection): BEAM 100K chat 1 (20 questions, all five arms) and
+LongMemEval oracle (5 knowledge-update questions, all five arms).
+Artifacts: `beam-100K-qwen-27b-refind-smoke.jsonl(.summary.json)` and
+`longmemeval-ku-oracle-qwen-27b-refind-smoke.jsonl(.summary.json)`.
+
+**No accuracy from these runs is quoted anywhere, here or in the
+CHANGELOG, and none should be.** One chat and five questions cannot
+separate arms — read the committed summaries if you want to see them, and
+treat them as plumbing receipts.
+
+What the smoke *does* establish, from the per-row `refind_trace`:
+
+- The loop behaves like a loop. On BEAM it used 2.9 of its 3 rounds on
+  average, issued 7.4 distinct queries per question (cap 9), and
+  accumulated 49 inspected turns per question (cap 72) — reformulating
+  between rounds rather than repeating itself, which is what
+  skip-already-inspected is for.
+- It served **exactly 6 turns on every question of both runs**, the rag
+  control's budget.
+- **0 plan failures and 0 fallbacks** across 25 questions: the local model
+  returned parseable JSON plans every time, and no window emptied the
+  search.
+- Temporal narrowing fires but is not the main channel: 7 of 49 BEAM
+  rounds proposed a date window, and one LongMemEval question narrowed to
+  a 3-day range and answered correctly.
+- The no-memory arm was served a genuinely empty context on every row and
+  abstained on the LongMemEval questions, as its prompt tells it to.
+
+One asymmetry worth carrying into any real run: the arms are matched by
+**turn count, not characters**. ReFind's 6 turns averaged ~17.4k chars
+against the rag control's ~14.2k (hybrid sits at ~16.1k), because the loop
+tends to select longer turns. A future run reading a refind-vs-rag delta
+should say so, or add a character-matched variant.
+
+### Gold-answer leak check (`leak_check.py`)
+
+The [SR-TTT retraction](https://arxiv.org/abs/2603.06642) came down to the
+gold answer already sitting in the context the model was handed, so the
+reported win measured nothing. Every BEAM row now records
+`gold_in_question` at answer time, `--report` carries a `leak_check` block
+(how many rows named their own gold answer, and every arm's mean with
+those rows excluded), and the same check runs standalone over any judged
+artifact — BEAM `*_score` rows or LongMemEval `*_correct` rows:
+
+```bash
+python evals/leak_check.py --in evals/results/<artifact>.jsonl
+```
+
+It always writes its report (`<artifact>.leakcheck.json`) and exits 1 when
+any row leaked, so it can gate a promotion. Rows whose gold answer is too
+short or generic to test (`yes`, a bare number) are reported as
+**untestable** rather than counted clean. It also flags a context-free arm
+that was served a context — a `nomem` row with content in it would flatter
+memory-off in exactly the comparison the arm exists to make.
+
+Run over the committed 2026-08-21 BEAM run (400 rows), it finds
+**0 leaked rows**. Its untestable rows split
+**200 `no_gold`** and **10 `trivial_gold`**: five of BEAM's ten question
+types are rubric-judged and carry no gold string at all, so this check
+cannot speak to half of that benchmark — and says so rather than
+reporting those rows clean. The arm means it recomputes reproduce the
+run's committed summary exactly
+(rag 0.5005, cortex 0.2918, hybrid 0.4682), which is what makes the
+recomputation trustworthy as a leak-free comparator. Artifact:
+`beam-100K-qwen-27b-beam100k-qwen38.leakcheck.json`.
+
+Beside those, the report carries each arm's mean over only the 190 rows
+the check could examine: **rag 0.4789, cortex 0.1759, hybrid 0.4229**.
+That is a different slice of the same run, not a correction to it — and
+the gap is a fact about where each arm earns its score, not about
+leakage. The rubric-only types it drops include abstention, which is the
+cortex arm's one decisive win (0.950 above), so removing them costs that
+arm the most.
 
 ## Findings — 2026-08-03 to 2026-08-24
 

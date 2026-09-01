@@ -6,6 +6,102 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (2026-09-01 — two eval arms that decide whether a memory win is real)
+- **The BEAM adapter can now run an agentic lexical arm and a no-memory
+  control arm.** Both come from the 2026-09-01 briefing-backlog triage,
+  and both are measurement instruments only — no engine, daemon, or
+  serving behaviour changes. Both have been **smoke-run** (BEAM 100K chat
+  1, 20 questions; LongMemEval oracle, 5 questions; artifacts committed
+  under `evals/results/*-refind-smoke.*`) to validate the plumbing: the
+  loop used 2.9 of 3 rounds and 7.4 queries per question, served exactly
+  the rag control's 6 turns on every row, and hit 0 plan failures and 0
+  fallbacks across 25 questions. **No accuracy from those runs is quoted
+  or claimed** — one chat and five questions cannot separate arms.
+  - `--refind` (ReFind, [arXiv 2608.12888](https://arxiv.org/abs/2608.12888))
+    answers from an agentic **lexical** search loop over the same
+    formatted turns the bank holds: the answerer model plans BM25 queries
+    for up to `--refind-rounds` rounds, may narrow the search to a date
+    range, never re-reads a turn an earlier round inspected, and ranks
+    with session-aware fusion (a weak hit inside a session that already
+    yielded strong evidence outranks an equally weak hit standing alone).
+    That fusion runs twice — once inside a query to choose what it
+    inspects, then again over the union of everything inspected to choose
+    what is served, because per-query normalisation puts every query's
+    best hit at exactly 1.0 and would let a lone weak hit from a late
+    round tie the strongest hit of the first.
+    The paper reports this loop beating most structured memory systems;
+    single-shot BM25 is not that baseline and understates it, so without
+    this arm no ladder claim about the structural stack has a floor to
+    beat. The loop only *retrieves* — its context is answered and judged
+    by the harness's own answerer and judge, so it stays
+    instrument-matched to `rag`/`cortex`/`hybrid` — and its served turn
+    budget is matched to the rag control by default, so any win comes
+    from the loop rather than a wider window. It reuses the engine's own
+    BM25 (`pseudolife_memory/memory/bm25.py`) rather than a second
+    scorer. The index is built over the temporal window and exclusion is
+    applied to its results, so IDF does not drift as rounds accumulate;
+    undated turns stay eligible in every window, because narrowing must
+    not hide evidence it cannot place. `--refind-session-weight`,
+    `--refind-rounds`, `--refind-max-queries`, `--refind-per-round-k` and
+    `--refind-top-k` are flags precisely because their defaults are
+    declared, not measured.
+  - `--nomem` (MemTrapBench,
+    [arXiv 2608.20202](https://arxiv.org/abs/2608.20202)) answers from the
+    question alone under the same task framing, with the context clauses
+    removed rather than emptied. Its prompt is built PER HARNESS from that
+    harness's own answer-length policy: BEAM's rubric judge scores
+    multi-part answers and its answerer is told to answer completely,
+    while LongMemEval's judge grades on containment and caps answers at
+    one sentence. A single shared prompt would have left the arm verbose
+    in the harness whose judge rewards verbosity — more shots at
+    containing the gold than the arms it exists to bound, inflating the
+    memory-off floor in the one direction that matters.
+    All five frameworks that paper tested scored
+    *below* their no-memory arm on trap tasks; if memory-on does not beat
+    memory-off, the win is imaginary, and a harness that never asks
+    cannot tell.
+- **Both arms are wired into the LongMemEval harness too**
+  (`longmemeval_bench.py --refind --nomem`), sharing ONE implementation
+  with the BEAM adapter (`serve_comparator_arms`) so the two harnesses
+  cannot drift into serving them differently. LongMemEval splits
+  extraction from answering, so both contexts are persisted like every
+  other arm: `--phase extract` builds them once and `--phase answer` (or
+  a later `rebuild_contexts.py` re-answer) replays them without re-paying
+  extraction. The ReFind archive is built from the same haystack turns
+  the bank ingests, in the same order and the same stored text — pinned
+  turn-for-turn against the ingest path, since both format the haystack
+  independently. The memory arms' answer prompt is reproduced byte for
+  byte (the regression gate re-answers pinned contexts with it) and the
+  no-memory arm keeps the question-date prefix so the framing stays
+  shared. `replicate.py` now reads the arms off the rows rather than a
+  fixed tuple: `agg` reports comparator arms instead of silently omitting
+  them, `compare --arm refind` works and names the available arms when it
+  does not, and `strip_judged` clears EVERY arm's verdict rather than
+  leaving a stale comparator verdict beside freshly answered ones.
+- **Gold-answer leak check (`evals/leak_check.py`).** After the
+  [SR-TTT retraction](https://arxiv.org/abs/2603.06642) — where the gold
+  answer was already in the injected context, so the reported win measured
+  nothing — every BEAM row records `gold_in_question` at answer time,
+  `--report` carries a `leak_check` block (leaked-row count plus every
+  arm's mean with those rows excluded), and the check also runs standalone
+  over any judged artifact, BEAM `*_score` rows or LongMemEval
+  `*_correct` rows alike. It always writes its report and exits 1 when any
+  row leaked, so it can gate a promotion; answers too short or generic to
+  test for containment — or absent entirely — are reported as untestable
+  and broken down by reason rather than counted clean, each arm gets a
+  testable-only mean beside the leak-free one (untestable rows are not
+  leaked, so they would otherwise ride along inside it), and a
+  context-free arm that was served a context is flagged too.
+  First runs, committed with their claims. Over the 2026-08-21 BEAM
+  artifact: 0 of 400 rows leak, untestable splits 200 no-gold / 10
+  trivial-gold (five of BEAM's ten question types are rubric-judged and
+  carry no gold string, so the check cannot speak to half of it and says
+  so). Over the committed LongMemEval `ceiling-e2e` run: 0 of 78 leak,
+  and all 27 untestable rows are trivial-gold — LongMemEval always has a
+  gold string, so its blind spot is short numeric/yes-no answers rather
+  than missing ones. Both recomputations reproduce their run's published
+  arm means exactly, which is what makes the leak-free reads trustworthy.
+
 ### Changed (2026-09-01 — daemon maintenance passes get named pauses and lose their biggest one)
 - **Slow service-lock holds and waits now name themselves in the log.** The
   coarse service lock is a `MonitoredLock` (`utils/locks.py`): any hold or

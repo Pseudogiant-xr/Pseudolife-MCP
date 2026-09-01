@@ -34,8 +34,10 @@ from pathlib import Path
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 ARMS = ("rag", "cortex", "hybrid")
-_JUDGE_FIELDS = {f"{arm}_{s}" for arm in ARMS
-                 for s in ("response", "correct", "context_tokens")}
+# The per-arm fields the answer phase writes. Any key ending in one of
+# these suffixes is a verdict for SOME arm, which is how strip_judged
+# clears comparator arms it was never told about.
+_JUDGE_SUFFIXES = ("response", "correct", "context_tokens")
 _REPLICA_SUFFIX = re.compile(r"-r\d+$")
 BASELINE_FLOOR = 0.03
 DEFAULT_BASELINE = RESULTS_DIR / "regression_gate.baseline.json"
@@ -79,8 +81,47 @@ def is_judged(row: dict) -> bool:
     return all(f"{arm}_correct" in row for arm in ARMS)
 
 
+def row_arms(row: dict) -> tuple[str, ...]:
+    """Every arm this row carries a verdict for, canonical three first.
+
+    Runs may add comparator arms (refind, nomem — 2026-09-01) or serving
+    variants (hybrid_ev, ...). Reading them off the row rather than a
+    fixed tuple is what keeps a five-arm run from aggregating into a
+    three-arm table that reads as if the extra arms never ran.
+    """
+    found = {k.removesuffix("_correct") for k in row if k.endswith("_correct")}
+    return ARMS + tuple(sorted(found - set(ARMS)))
+
+
+def judged_arms(rows: list[dict]) -> tuple[str, ...]:
+    """The arms a set of rows can be aggregated or compared on, in report
+    order: the canonical three, the derived cascade, then whatever extra
+    arms EVERY judged row carries (an arm present in only some rows would
+    silently average over a different question set)."""
+    judged = [r for r in rows if is_judged(r)]
+    if not judged:
+        return ARMS + (CASCADE_ARM,)
+    extra = set(row_arms(judged[0])) - set(ARMS)
+    for row in judged[1:]:
+        extra &= set(row_arms(row))
+    return ARMS + (CASCADE_ARM,) + tuple(sorted(extra))
+
+
+def is_judge_field(key: str) -> bool:
+    """Is this row key one arm's verdict? The single rule every stripper
+    uses (here and in rebuild_contexts.py), so no stripper can be taught
+    about a new arm while another is not. Verified against all 236
+    committed longmemeval-*.jsonl artifacts: every key with one of these
+    suffixes is a per-arm verdict, and none of the lookalikes
+    (answer_in_current_fact, gold_in_question, refind_top_k) matches."""
+    return any(key.endswith(f"_{s}") for s in _JUDGE_SUFFIXES)
+
+
 def strip_judged(rows: list[dict]) -> list[dict]:
-    return [{k: v for k, v in r.items() if k not in _JUDGE_FIELDS}
+    """Drop every arm's verdict, not just the canonical three: a stripped
+    replicate that kept a comparator arm's judged fields would ship a
+    stale verdict beside freshly answered ones."""
+    return [{k: v for k, v in r.items() if not is_judge_field(k)}
             for r in rows]
 
 
@@ -156,7 +197,11 @@ def aggregate(rows_by_tag: dict[str, list[dict]]) -> dict:
         "n_questions": len(judged[tags[0]]) if tags else 0,
         "arms": {},
     }
-    for arm in ARMS + (CASCADE_ARM,):
+    # Arms come off the rows (canonical three, cascade, then any
+    # comparator/variant arm every replicate carries) so a five-arm run
+    # cannot aggregate into a three-arm table.
+    all_rows = [r for rows in judged.values() for r in rows]
+    for arm in judged_arms(all_rows):
         accs = [round(accuracy(judged[t], arm), 4) for t in tags]
         out["arms"][arm] = {
             "accuracies": accs,
@@ -242,7 +287,17 @@ def nondeterminism_warnings(agg: dict) -> list[str]:
 def gate_verdict(agg: dict, baseline: dict) -> list[str]:
     failures = []
     for arm, b in baseline["arms"].items():
-        cur = agg["arms"][arm]["mean"]
+        # A baseline inherits whatever arms its establishing run carried,
+        # comparator arms included. A later run without one is a config
+        # mismatch, and must say so rather than raising a KeyError that
+        # reads like a regression.
+        current = agg["arms"].get(arm)
+        if current is None:
+            failures.append(
+                f"{arm}: baseline arm absent from this run (available: "
+                f"{', '.join(agg['arms'])}) — re-establish the baseline")
+            continue
+        cur = current["mean"]
         if cur is None or cur < b["mean"] - b["margin"]:
             failures.append(
                 f"{arm}: mean {cur} < baseline {b['mean']} - "
@@ -294,6 +349,14 @@ def cmd_compare(args) -> int:
                                     n=args.permutations, seed=args.seed)
     except ValueError as e:
         sys.exit(f"compare: {e}")
+    except KeyError:
+        # --arm takes any judged arm (comparator arms included), so an
+        # unknown one is caught here rather than by argparse. Name what IS
+        # available: the alternative is a bare KeyError traceback.
+        rows = load_rows(result_file(args.dataset, args.extractor, args.tag,
+                                     args.results_dir))
+        sys.exit(f"compare: no judged '{args.arm}' arm in these results "
+                 f"(available: {', '.join(judged_arms(rows))})")
     result.update({
         "arm": args.arm,
         "a": f"{args.extractor}/{args.tag or '(untagged)'}",
@@ -428,8 +491,7 @@ def cmd_agg(args) -> int:
     print(f"\n{args.dataset} / {label} — {agg['n_replicates']} replicates, "
           f"{agg['n_questions']} questions")
     print(f"{'arm':<10}{'mean':>8}{'std':>8}  accuracies")
-    for arm in ARMS + (CASCADE_ARM,):
-        a = agg["arms"][arm]
+    for arm, a in agg["arms"].items():
         std = f"{a['std']:.4f}" if a["std"] is not None else "-"
         print(f"{arm:<10}{a['mean']:>8.4f}{std:>8}  {a['accuracies']}")
     print(f"wrote {_agg_path(base).name}")
@@ -471,7 +533,10 @@ def main(argv: list[str] | None = None) -> int:
     _common(p)
     p.add_argument("--b-extractor", default=None)
     p.add_argument("--b-tag", default="")
-    p.add_argument("--arm", choices=ARMS + (CASCADE_ARM,), default="cortex")
+    p.add_argument("--arm", default="cortex",
+                   help="arm to compare: rag / cortex / hybrid / cascade, "
+                        "or any comparator arm the rows carry (refind, "
+                        "nomem, hybrid_*). Validated against the results.")
     p.add_argument("--permutations", type=int, default=10000)
     p.add_argument("--seed", type=int, default=0)
     # Any comparison whose p-value gets published needs an artifact behind

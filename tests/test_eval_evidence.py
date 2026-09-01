@@ -2110,6 +2110,78 @@ for _rung, _tok_needle, _tok in [
             id=_cid, doc=EVALS_README, needle=_needle, artifacts=(_art,),
             value=_val, stated=_stated, places=_places))
 
+# The gold-answer leak check's first run (2026-09-01, evals/leak_check.py
+# over the committed 2026-08-21 BEAM artifact). It is CPU-only re-parsing
+# — no model calls — so the numbers regenerate exactly. The recomputed arm
+# means are pinned too: they are the reason the leak-free comparator can
+# be trusted, and they must keep reproducing the run's own summary.
+BEAM38_LEAKCHECK = (RESULTS
+                    + "beam-100K-qwen-27b-beam100k-qwen38.leakcheck.json")
+_SPLIT_NEEDLE = "**200 `no_gold`** and **10 `trivial_gold`**"
+for _cid, _needle, _val, _stated in [
+    ("beam38-leakcheck-leaked", "**0 leaked rows**",
+     lambda d: d["n_leaked"], 0),
+    ("beam38-leakcheck-rows", "committed 2026-08-21 BEAM run (400 rows)",
+     lambda d: d["n_rows"], 400),
+    ("beam38-leakcheck-no-gold", _SPLIT_NEEDLE,
+     lambda d: d["untestable_reasons"]["no_gold"], 200),
+    ("beam38-leakcheck-trivial-gold", _SPLIT_NEEDLE,
+     lambda d: d["untestable_reasons"]["trivial_gold"], 10),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS_README, needle=_needle,
+        artifacts=(BEAM38_LEAKCHECK,), value=_val, stated=_stated, places=0))
+for _arm, _stated in (("rag", 0.5005), ("cortex", 0.2918),
+                      ("hybrid", 0.4682)):
+    CLAIMS.append(Claim(
+        id=f"beam38-leakcheck-{_arm}-leak-free", doc=EVALS_README,
+        needle="(rag 0.5005, cortex 0.2918, hybrid 0.4682)",
+        artifacts=(BEAM38_LEAKCHECK,),
+        value=(lambda a: lambda d: d["arms"][a]["leak_free"])(_arm),
+        stated=_stated, places=4))
+# The testable-only slice published beside them (190 of the 400 rows).
+_TESTABLE_NEEDLE = "**rag 0.4789, cortex 0.1759, hybrid 0.4229**"
+for _arm, _stated in (("rag", 0.4789), ("cortex", 0.1759),
+                      ("hybrid", 0.4229)):
+    CLAIMS.append(Claim(
+        id=f"beam38-leakcheck-{_arm}-testable", doc=EVALS_README,
+        needle=_TESTABLE_NEEDLE, artifacts=(BEAM38_LEAKCHECK,),
+        value=(lambda a: lambda d: d["arms"][a]["leak_free_testable"])(_arm),
+        stated=_stated, places=4))
+CLAIMS.append(Claim(
+    id="beam38-leakcheck-testable-n", doc=EVALS_README,
+    needle="over only the 190 rows", artifacts=(BEAM38_LEAKCHECK,),
+    value=lambda d: d["arms"]["rag"]["n_testable"], stated=190, places=0))
+
+# The same check over the committed LongMemEval ceiling-e2e run
+# (2026-09-01). Its recomputed rag mean is pinned against the e2e table's
+# own 0.859 above: two independent readings of one artifact, so a drift in
+# either goes red.
+LME_E2E_LEAKCHECK = (RESULTS
+                     + "longmemeval-ku-oracle-qwen-27b-ceiling-e2e"
+                     + ".leakcheck.json")
+for _cid, _needle, _val, _stated, _places in [
+    ("lme-leakcheck-leaked", "the leak check finds **0 leaked rows**",
+     lambda d: d["n_leaked"], 0, 0),
+    ("lme-leakcheck-rows", "(78 knowledge-update\nquestions)",
+     lambda d: d["n_rows"], 78, 0),
+    ("lme-leakcheck-trivial-gold", "its 27 untestable\nrows are **all `trivial_gold`**",
+     lambda d: d["untestable_reasons"]["trivial_gold"], 27, 0),
+    ("lme-leakcheck-no-gold-class-absent",
+     "there is no `no_gold` class here",
+     lambda d: d["untestable_reasons"].get("no_gold", 0), 0, 0),
+    ("lme-leakcheck-rag", "(rag 0.859,\nhybrid 0.8333, cortex 0.6667)",
+     lambda d: d["arms"]["rag"]["all"], 0.859, 3),
+    ("lme-leakcheck-hybrid", "(rag 0.859,\nhybrid 0.8333, cortex 0.6667)",
+     lambda d: d["arms"]["hybrid"]["all"], 0.8333, 4),
+    ("lme-leakcheck-cortex", "(rag 0.859,\nhybrid 0.8333, cortex 0.6667)",
+     lambda d: d["arms"]["cortex"]["all"], 0.6667, 4),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS_README, needle=_needle,
+        artifacts=(LME_E2E_LEAKCHECK,), value=_val, stated=_stated,
+        places=_places))
+
 # The BEAM findings table also quotes three RANGES that live in a verdict
 # file as strings, not floats — the Claim machinery only compares numbers,
 # so they get their own check rather than going unguarded.

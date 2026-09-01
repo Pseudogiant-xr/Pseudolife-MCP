@@ -453,3 +453,214 @@ def test_ingest_chat_without_digest_touches_no_episodes():
     tally = beam_adapter.ingest_chat(svc, None, _TWO_BATCH_TURNS)
     assert all(e[0] == "store" for e in svc.events)
     assert "digests" not in tally
+
+
+def test_ingest_chat_counts_what_the_bank_actually_accepted():
+    """The ReFind arm indexes every turn; the bank only holds the turns
+    `store` accepted. The bench service disables the meta filter and sets
+    surprise_threshold 0, so the two corpora match — but "match" is a
+    claim, so the tally records the accepted count and the artifact can be
+    checked instead of trusted."""
+    class _RejectingSvc(_EpisodeIngestSvc):
+        def store(self, text, source):
+            self.events.append(("store", source))
+            return {"stored": "b" not in text, "surprise": 0.0}
+
+    tally = beam_adapter.ingest_chat(_RejectingSvc(), None, _TWO_BATCH_TURNS)
+    assert tally["turns"] == 3 and tally["stored"] == 2
+    # A stub that returns nothing must not be counted as a rejection.
+    assert beam_adapter.ingest_chat(
+        _EpisodeIngestSvc(), None, _TWO_BATCH_TURNS)["stored"] == 3
+
+
+# ── ReFind + no-memory arms (2026-09-01 briefing-backlog adoptions) ──────────
+
+
+def test_arms_for_appends_refind_and_nomem_in_canonical_order():
+    assert arms_for(False, refind=True) == ("rag", "cortex", "hybrid",
+                                            "refind")
+    assert arms_for(False, nomem=True) == ("rag", "cortex", "hybrid", "nomem")
+    assert arms_for(True, digest=True, refind=True, nomem=True) == (
+        "rag", "cortex", "hybrid", "hybrid_ev", "hybrid_digest", "refind",
+        "nomem")
+    assert arms_for(False) == ("rag", "cortex", "hybrid")
+
+
+def test_arms_for_rejects_refind_and_nomem_without_their_flags():
+    with pytest.raises(SystemExit):
+        arms_for(False, only="refind")
+    with pytest.raises(SystemExit):
+        arms_for(False, only="nomem")
+    assert arms_for(False, only="nomem", nomem=True) == ("nomem",)
+
+
+def test_answer_call_for_nomem_carries_no_context():
+    """The no-memory arm must see the question and the shared task framing
+    and nothing else — that is the whole control."""
+    from nomem_arm import NOMEM_ANSWER_SYSTEM
+    system, prompt = beam_adapter.answer_call("nomem", "Where?", "ignored ctx")
+    # built with THIS harness's length policy — equal to the module
+    # default, which is the BEAM-shaped one
+    assert system == NOMEM_ANSWER_SYSTEM
+    assert "ignored ctx" not in prompt and "Memory context" not in prompt
+    sys_m, prompt_m = beam_adapter.answer_call("rag", "Where?", "some ctx")
+    assert sys_m is beam_adapter._BEAM_ANSWER_SYSTEM
+    assert "Memory context:\nsome ctx" in prompt_m
+    assert "(empty)" in beam_adapter.answer_call("rag", "Where?", "")[1]
+
+
+def test_archive_from_beam_turns_reads_the_stored_turn_text():
+    """The ReFind arm searches exactly the material the rag arm's bank
+    holds — same formatted turns, same ordinals — so a refind-vs-rag delta
+    is about the retrieval loop, not about a different corpus."""
+    turns = [{"batch": 1, "time_anchor": "March-15-2024", "role": "user",
+              "content": "hello"},
+             {"batch": 2, "time_anchor": None, "role": "assistant",
+              "content": "hi"}]
+    archive = beam_adapter.archive_from_beam_turns(turns)
+    assert len(archive) == 2
+    first = archive.records[0]
+    assert first.text == beam_adapter.format_turn(turns[0], 1)
+    assert (first.session, first.ordinal, first.date) == (
+        "1", 1, "2024-03-15")
+    assert archive.records[1].date is None
+
+
+def test_refind_budget_is_read_at_call_time():
+    """The ReFind arm is budget-matched to the rag control, so it must
+    read the width where the hybrid arm reads it — at call time, after
+    --rag-top-k has been applied. Resolving it earlier would leave the arm
+    on 6 turns against a widened rag control while every row cheerfully
+    recorded the number it never served."""
+    import longmemeval_bench as lme
+    archive = beam_adapter.archive_from_beam_turns([
+        {"batch": 1, "time_anchor": None, "role": "user",
+         "content": f"turn {i} about bikes"} for i in range(10)])
+
+    def fake_chat(system, user, *, max_tokens=256, **_):
+        return '{"queries": ["bikes"], "done": true}'
+
+    arms = arms_for(False, refind=True)
+    old = lme.RAG_TOP_K
+    try:
+        lme.RAG_TOP_K = 3
+        _, _, trace = beam_adapter.serve_contexts(
+            _ServeSvc(), "bikes?", arms, archive=archive,
+            refind_kwargs={"top_k": None}, chat=fake_chat)
+        assert trace["top_k"] == 3 and trace["served"] == 3
+        lme.RAG_TOP_K = 5
+        _, _, wider = beam_adapter.serve_contexts(
+            _ServeSvc(), "bikes?", arms, archive=archive,
+            refind_kwargs={"top_k": None}, chat=fake_chat)
+        assert wider["top_k"] == 5 and wider["served"] == 5
+        # an explicit budget still wins
+        _, _, pinned = beam_adapter.serve_contexts(
+            _ServeSvc(), "bikes?", arms, archive=archive,
+            refind_kwargs={"top_k": 2}, chat=fake_chat)
+        assert pinned["top_k"] == 2
+    finally:
+        lme.RAG_TOP_K = old
+
+
+def test_refind_knob_validation_is_loud_and_fires_before_any_global_moves():
+    """A bad ReFind flag must die before the bench globals are touched —
+    the same contract the rag/hybrid budget knobs carry."""
+    from pathlib import Path
+    import longmemeval_bench as lme
+    before = (lme.RAG_TOP_K, lme.HYBRID_TOP_K, lme.CHRONICLE, lme.DIGEST_ARM)
+    for kwargs, match in (({"refind_top_k": 0}, "positive"),
+                          ({"refind_rounds": 0}, "positive"),
+                          ({"refind_per_round_k": 0}, "positive"),
+                          ({"refind_max_queries": 0}, "positive"),
+                          ({"refind_session_weight": 1.5}, r"\[0, 1\]"),
+                          # the pre-existing knobs hold the same line
+                          ({"hybrid_top_k": 99}, "exceeds")):
+        with pytest.raises(SystemExit, match=match):
+            beam_adapter.run(Path("nowhere"), "100K", "qwen-27b", "t",
+                             None, None, rag_top_k=16, refind=True,
+                             chronicle=True, digest=True, **kwargs)
+    assert (lme.RAG_TOP_K, lme.HYBRID_TOP_K, lme.CHRONICLE,
+            lme.DIGEST_ARM) == before
+
+
+def test_serve_contexts_wires_the_new_arms_and_leaves_the_old_ones_alone():
+    """The per-question serve path: the ReFind arm gets a context from its
+    own loop over the raw archive, the no-memory arm gets an explicitly
+    empty one, and the memory arms are untouched."""
+    turns = [{"batch": 1, "time_anchor": None, "role": "user",
+              "content": "I bought a Trek Domane"},
+             {"batch": 1, "time_anchor": None, "role": "assistant",
+              "content": "nice bike"}]
+    archive = beam_adapter.archive_from_beam_turns(turns)
+    calls = []
+
+    def fake_chat(system, user, *, max_tokens=256, **_):
+        calls.append(user)
+        return '{"queries": ["Trek Domane"], "done": false}'
+
+    arms = arms_for(False, refind=True, nomem=True)
+    contexts, parts, trace = beam_adapter.serve_contexts(
+        _ServeSvc(), "which bike?", arms, archive=archive,
+        refind_kwargs={"rounds": 1, "top_k": 2}, chat=fake_chat)
+    assert "Trek Domane" in contexts["refind"]
+    assert contexts["nomem"] == ""
+    assert contexts["rag"].startswith("t0")          # memory arms unchanged
+    assert parts["raw"] and trace["queries"] == ["Trek Domane"]
+    assert len(calls) == 1
+
+
+def test_serve_contexts_refuses_the_refind_arm_without_an_archive():
+    """Better a loud stop than a silently empty ReFind context, which
+    would look like a genuine 0.0 for the arm."""
+    with pytest.raises(SystemExit, match="needs an archive"):
+        beam_adapter.serve_contexts(_ServeSvc(), "q?",
+                                    arms_for(False, refind=True))
+
+
+def test_serve_contexts_without_the_new_arms_calls_no_planner():
+    """A vanilla run must not pay a single extra model call — the ReFind
+    loop only runs when its arm is on."""
+    def boom(*a, **kw):                               # pragma: no cover
+        raise AssertionError("planner called on a vanilla run")
+
+    contexts, _, trace = beam_adapter.serve_contexts(
+        _ServeSvc(), "q?", arms_for(False), chat=boom)
+    assert trace is None
+    assert "refind" not in contexts and "nomem" not in contexts
+
+
+def test_report_derives_refind_and_nomem_arms_from_rows(tmp_path, monkeypatch):
+    import json
+    monkeypatch.setattr(beam_adapter, "RESULTS_DIR", tmp_path)
+    rows = [{"chat_id": "1", "type": "recall", "index": 0,
+             "rag_score": 1.0, "rag_score_intfaithful": 1.0,
+             "refind_score": 0.5, "refind_score_intfaithful": 0.0,
+             "nomem_score": 0.0, "nomem_score_intfaithful": 0.0}]
+    out = tmp_path / "beam-100K-qwen-27b-rf.jsonl"
+    out.write_text(json.dumps(rows[0]), encoding="utf-8")
+    beam_adapter.report("100K", "qwen-27b", "rf")
+    summary = json.loads(
+        (tmp_path / "beam-100K-qwen-27b-rf.summary.json").read_text(
+            encoding="utf-8"))
+    assert summary["arms"]["refind"]["score"] == 0.5
+    assert summary["arms"]["nomem"]["score"] == 0.0
+    assert summary["types"]["recall"]["nomem"] == 0.0
+
+
+def test_report_carries_the_leak_check_when_rows_do(tmp_path, monkeypatch):
+    """A judged BEAM summary states how many of its rows had the gold
+    answer sitting in the question — the SR-TTT retraction's failure —
+    so a retrieval win is never read without it."""
+    import json
+    monkeypatch.setattr(beam_adapter, "RESULTS_DIR", tmp_path)
+    rows = [{"chat_id": "1", "type": "recall", "index": i,
+             "gold_in_question": bool(i), "rag_score": 1.0,
+             "rag_score_intfaithful": 1.0} for i in range(2)]
+    out = tmp_path / "beam-100K-qwen-27b-lk.jsonl"
+    out.write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
+    beam_adapter.report("100K", "qwen-27b", "lk")
+    summary = json.loads(
+        (tmp_path / "beam-100K-qwen-27b-lk.summary.json").read_text(
+            encoding="utf-8"))
+    assert summary["leak_check"]["n_leaked"] == 1
+    assert summary["leak_check"]["arms"]["rag"]["leak_free"] == 1.0

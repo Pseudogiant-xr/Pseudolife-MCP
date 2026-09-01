@@ -48,7 +48,10 @@ os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 from ladder_sweep import build_service, probe  # noqa: E402
+import leak_check  # noqa: E402
 import longmemeval_bench as lme  # noqa: E402
+import nomem_arm  # noqa: E402
+import refind_arm  # noqa: E402
 from longmemeval_bench import (  # noqa: E402
     _chat, ARMS, EXTRACTORS, QWEN_URL, RESULTS_DIR,
     _make_extractor, build_contexts, load_rows,
@@ -56,11 +59,14 @@ from longmemeval_bench import (  # noqa: E402
 
 
 def arms_for(chronicle: bool, only: str | None = None,
-             digest: bool = False) -> tuple[str, ...]:
+             digest: bool = False, refind: bool = False,
+             nomem: bool = False) -> tuple[str, ...]:
     """The answered/judged arms: --chronicle adds hybrid_ev (vanilla
     hybrid + the served events block, same pinned search call — the LME
     ev2 arm contract); --digest adds hybrid_digest (spec 2026-08-24: the
-    digest-eligible mem block, char-budget-matched to hybrid). ``only``
+    digest-eligible mem block, char-budget-matched to hybrid); --refind
+    adds the agentic-lexical arm and --nomem the memory-off control (both
+    2026-09-01, see refind_arm.py / nomem_arm.py). ``only``
     (--arms) keeps a comma-separated subset in canonical order — a
     partial rerun (e.g. rag,hybrid for the budget-matched arm, with rag
     as the identical-input control) skips arms whose answers the question
@@ -68,6 +74,10 @@ def arms_for(chronicle: bool, only: str | None = None,
     arms = (*ARMS, "hybrid_ev") if chronicle else ARMS
     if digest:
         arms = (*arms, "hybrid_digest")
+    if refind:
+        arms = (*arms, "refind")
+    if nomem:
+        arms = (*arms, "nomem")
     if only:
         keep = {a.strip() for a in only.split(",") if a.strip()}
         unknown = keep - set(arms)
@@ -75,7 +85,7 @@ def arms_for(chronicle: bool, only: str | None = None,
             raise SystemExit(
                 f"--arms names {sorted(unknown)} not in {arms} "
                 "(hybrid_ev needs --chronicle; hybrid_digest needs "
-                "--digest)")
+                "--digest; refind needs --refind; nomem needs --nomem)")
         arms = tuple(a for a in arms if a in keep)
     return arms
 
@@ -98,6 +108,55 @@ _BEAM_ANSWER_SYSTEM = (
 )
 
 TIERS = ("100K", "500K", "1M", "10M")
+
+
+def answer_call(arm: str, question: str, ctx: str) -> tuple[str, str]:
+    """The (system, prompt) pair for one arm's answer call.
+
+    Every memory arm shares the BEAM answerer and the same context block.
+    The no-memory arm shares the task framing and drops the context
+    clauses entirely — not an "(empty)" block, which is itself a framing
+    the other arms do not see (see nomem_arm.py)."""
+    if arm == "nomem":
+        # This harness's length policy (rubric judge, multi-part answers).
+        return (nomem_arm.nomem_system(nomem_arm.LENGTH_COMPLETE),
+                nomem_arm.nomem_prompt(question))
+    return _BEAM_ANSWER_SYSTEM, (f"Question: {question}\n\n"
+                                 f"Memory context:\n{ctx or '(empty)'}")
+
+
+def serve_contexts(svc, question: str, arms: tuple[str, ...], *,
+                   archive=None, refind_kwargs: dict | None = None,
+                   chat=None) -> tuple[dict, dict, dict | None]:
+    """Every arm's served context for one question, plus the structured
+    serve state and the ReFind trace (None when that arm is not running).
+
+    The memory arms come from the bank; the ReFind arm runs its own loop
+    over the raw archive; the no-memory arm is served nothing at all —
+    its empty context is recorded so the artifact shows it was empty
+    (leak_check.py checks exactly that)."""
+    contexts = build_contexts(svc, question, with_parts=True)
+    parts = contexts.pop("parts")
+    # One implementation, both harnesses (lme.serve_comparator_arms):
+    # budget matching, the empty no-memory context and the missing-archive
+    # guard are decided in exactly one place, so BEAM and LongMemEval
+    # cannot drift into serving these arms differently.
+    trace = lme.serve_comparator_arms(
+        contexts, question, archive=archive, refind="refind" in arms,
+        nomem="nomem" in arms, refind_kwargs=refind_kwargs, chat=chat)
+    return contexts, parts, trace
+
+
+def archive_from_beam_turns(turns: list[dict]) -> refind_arm.LexicalArchive:
+    """The ReFind arm's lexical archive, built from the SAME formatted
+    turn texts and ordinals that were stored into the bank — so a
+    refind-vs-rag delta is about the retrieval loop over identical
+    material, never about a different corpus."""
+    return refind_arm.LexicalArchive(
+        refind_arm.ArchiveRecord(
+            text=format_turn(turn, i), session=str(turn["batch"]), ordinal=i,
+            date=refind_arm.parse_anchor(turn.get("time_anchor")))
+        for i, turn in enumerate(turns, 1))
 
 
 def load_judge_prompt(beam_root: Path) -> str:
@@ -255,8 +314,8 @@ def ingest_chat(svc, extractor, turns: list[dict],
     count reads 0 here and cannot drive the drain). Episode header dates
     are ingest-time wall clock; the chat's own time anchors ride the turn
     texts inside the digest body."""
-    tally = {"turns": 0, "dreams": 0, "claims": 0, "superseded": 0,
-             "literal_dropped": 0, "events_inserted": 0,
+    tally = {"turns": 0, "stored": 0, "dreams": 0, "claims": 0,
+             "superseded": 0, "literal_dropped": 0, "events_inserted": 0,
              "events_pass_failures": 0}
     current_batch = None
     for i, turn in enumerate(turns, 1):
@@ -269,8 +328,17 @@ def ingest_chat(svc, extractor, turns: list[dict],
             svc.episode_start_session(f"beam-{turn['batch']}",
                                       f"session {turn['batch']}")
         current_batch = turn["batch"]
-        svc.store(format_turn(turn, i), source="beam")
+        # ``stored`` vs ``turns``: the ReFind arm indexes every turn while
+        # the bank holds only what store() accepted. The bench service
+        # disables the meta filter and sets surprise_threshold 0
+        # (MemoryService._apply_mcp_defaults), so the two corpora should
+        # match exactly — recorded rather than assumed, so a config that
+        # re-enables either filter shows up in the artifact instead of
+        # quietly making the refind-vs-rag comparison unfair.
+        result = svc.store(format_turn(turn, i), source="beam")
         tally["turns"] += 1
+        tally["stored"] += int(
+            result.get("stored", True) if isinstance(result, dict) else True)
     if digest and current_batch is not None:
         svc.episode_end_session(f"beam-{current_batch}", run_dream=False)
     _dream_until_drained(svc, extractor, tally)
@@ -320,9 +388,14 @@ def run(beam_root: Path, tier: str, extractor_name: str, tag: str,
         chronicle: bool = False, arms_only: str | None = None,
         hybrid_top_k: int | None = None,
         rag_top_k: int | None = None,
-        digest: bool = False) -> None:
-    lme.CHRONICLE = chronicle          # build_contexts reads its module global
-    lme.DIGEST_ARM = digest            # same module-global contract
+        digest: bool = False,
+        refind: bool = False, nomem: bool = False,
+        refind_rounds: int = refind_arm.DEFAULT_ROUNDS,
+        refind_top_k: int | None = None,
+        refind_per_round_k: int = refind_arm.DEFAULT_PER_ROUND_K,
+        refind_session_weight: float = refind_arm.SESSION_FUSION_WEIGHT,
+        refind_max_queries: int = refind_arm.DEFAULT_MAX_QUERIES
+        ) -> None:
     # Validate BOTH budget knobs before mutating EITHER module global:
     # build_contexts slices the hybrid turns from a top_k=RAG_TOP_K
     # search, so a hybrid budget wider than the effective rag width would
@@ -332,6 +405,18 @@ def run(beam_root: Path, tier: str, extractor_name: str, tag: str,
     effective_rag = rag_top_k if rag_top_k is not None else lme.RAG_TOP_K
     if rag_top_k is not None and rag_top_k < 1:
         raise SystemExit("--rag-top-k must be positive")
+    # Same rule for the ReFind knobs: validated before any global moves,
+    # so a bad flag cannot leave a half-applied bench config behind.
+    if refind_top_k is not None and refind_top_k < 1:
+        raise SystemExit("--refind-top-k must be positive")
+    if refind_rounds < 1:
+        raise SystemExit("--refind-rounds must be positive")
+    if refind_per_round_k < 1:
+        raise SystemExit("--refind-per-round-k must be positive")
+    if refind_max_queries < 1:
+        raise SystemExit("--refind-max-queries must be positive")
+    if not 0.0 <= refind_session_weight <= 1.0:
+        raise SystemExit("--refind-session-weight must be in [0, 1]")
     if hybrid_top_k is not None:
         if hybrid_top_k < 1:
             raise SystemExit("--hybrid-top-k must be positive")
@@ -340,6 +425,11 @@ def run(beam_root: Path, tier: str, extractor_name: str, tag: str,
                 f"--hybrid-top-k {hybrid_top_k} exceeds the effective "
                 f"rag width {effective_rag}; the hybrid arm cannot serve "
                 "more turns than the search returns")
+    # Only now that EVERY flag is validated do the bench globals move.
+    # These two used to be assigned first, which left a half-applied bench
+    # config behind on any bad flag (2026-09-01 review).
+    lme.CHRONICLE = chronicle          # build_contexts reads its module global
+    lme.DIGEST_ARM = digest            # same module-global contract
     if rag_top_k is not None:
         # Both arms widen together (the pinned search serves rag AND the
         # hybrid raw block), so budget-matching survives the knob. The
@@ -352,7 +442,7 @@ def run(beam_root: Path, tier: str, extractor_name: str, tag: str,
         # test_hybrid_top_k_is_read_at_call_time). Default None keeps every
         # prior artifact's hybrid budget byte-identical.
         lme.HYBRID_TOP_K = hybrid_top_k
-    arms = arms_for(chronicle, arms_only, digest)
+    arms = arms_for(chronicle, arms_only, digest, refind=refind, nomem=nomem)
     ex_url = EXTRACTORS[extractor_name]
     if not probe(ex_url):
         sys.exit(f"no extractor server at {ex_url} — start it first")
@@ -379,14 +469,16 @@ def run(beam_root: Path, tier: str, extractor_name: str, tag: str,
         if not pending:
             continue
         t0 = time.perf_counter()
+        chat_turns = load_chat_turns(chat_dir)
+        archive = (archive_from_beam_turns(chat_turns)
+                   if "refind" in arms else None)
         tmp = Path(tempfile.mkdtemp(prefix="beam_"))
         svc = build_service(tmp)
         svc.config.memory.dream.extract_relations = False
         svc.config.memory.dream.chronicle = chronicle
         svc.config.memory.dream.digest_enabled = digest
         extractor = _make_extractor(ex_url, None)
-        tally = ingest_chat(svc, extractor, load_chat_turns(chat_dir),
-                            digest=digest)
+        tally = ingest_chat(svc, extractor, chat_turns, digest=digest)
         # Per-chat over-fetch width for build_contexts: the exact digest
         # population of THIS bank (see lme.DIGEST_COUNT for the why).
         lme.DIGEST_COUNT = tally.get("digests", 0) if digest else 0
@@ -399,8 +491,12 @@ def run(beam_root: Path, tier: str, extractor_name: str, tag: str,
                        / f"chat{chat_id}.json.gz")
         for q in pending:
             t1 = time.perf_counter()
-            contexts = build_contexts(svc, q["question"], with_parts=True)
-            parts = contexts.pop("parts")
+            contexts, parts, refind_trace = serve_contexts(
+                svc, q["question"], arms, archive=archive, refind_kwargs={
+                    "rounds": refind_rounds, "top_k": refind_top_k,
+                    "per_round_k": refind_per_round_k,
+                    "max_queries": refind_max_queries,
+                    "session_weight": refind_session_weight})
             row = {"chat_id": chat_id, "tier": tier, "type": q["type"],
                    "index": q["index"], "question": q["question"],
                    "reference_answer": q["answer"],
@@ -411,6 +507,20 @@ def run(beam_root: Path, tier: str, extractor_name: str, tag: str,
                    # Self-describing rows: only digest runs carry the key,
                    # so legacy artifacts stay byte-shape-identical.
                    **({"digest_arm": True} if digest else {}),
+                   # The budget comes off the TRACE, not the flag: the row
+                   # records the width the arm actually served.
+                   **({"refind_trace": refind_trace,
+                       "refind_top_k": refind_trace["top_k"],
+                       "refind_rounds": refind_rounds}
+                      if refind_trace is not None else {}),
+                   # SR-TTT guard (arXiv 2603.06642): a question that
+                   # already names its gold answer scores on every arm and
+                   # measures no retrieval. Recorded per row at answer
+                   # time; leak_check.py reports the arm means with these
+                   # rows excluded. None = the gold is too short/generic
+                   # to test.
+                   "gold_in_question": leak_check.answer_present(
+                       q["question"], q["answer"]),
                    "consolidation": tally, "ingest_seconds": ingest_s,
                    # Served contexts + structured serve state (2026-08-21):
                    # serving-knob reruns and re-judges recompose from these
@@ -419,10 +529,8 @@ def run(beam_root: Path, tier: str, extractor_name: str, tag: str,
             for arm in arms:
                 ctx = contexts.get(arm, "")
                 row["contexts"][arm] = ctx
-                prompt = (f"Question: {q['question']}\n\n"
-                          f"Memory context:\n{ctx or '(empty)'}")
-                response = _chat(_BEAM_ANSWER_SYSTEM, prompt,
-                                 max_tokens=1024)
+                system, prompt = answer_call(arm, q["question"], ctx)
+                response = _chat(system, prompt, max_tokens=1024)
                 verdict = judge_response(judge_prompt, q["question"],
                                          q["rubric"], response)
                 row[f"{arm}_response"] = response
@@ -448,7 +556,7 @@ def report(tier: str, extractor_name: str, tag: str) -> None:
         sys.exit(f"no results in {out_path}")
     # Arms come off the rows, not a static tuple: a --chronicle run's
     # summary carries hybrid_ev, a vanilla run's does not.
-    arms = [a for a in arms_for(True, digest=True)
+    arms = [a for a in arms_for(True, digest=True, refind=True, nomem=True)
             if f"{a}_score" in rows[0]]
     summary = {"benchmark": "BEAM", "tier": tier, "extractor": extractor_name,
                "n_questions": len(rows),
@@ -462,6 +570,15 @@ def report(tier: str, extractor_name: str, tag: str) -> None:
         summary["hybrid_top_k"] = rows[0]["hybrid_top_k"]
     if "rag_top_k" in rows[0]:
         summary["rag_top_k"] = rows[0]["rag_top_k"]
+    if "refind_top_k" in rows[0]:
+        summary["refind_top_k"] = rows[0]["refind_top_k"]
+        summary["refind_rounds"] = rows[0].get("refind_rounds")
+    # Runs that recorded the per-row SR-TTT flag carry the leak check in
+    # their summary: how many rows named their own gold answer, and every
+    # arm's mean with those rows excluded. Legacy artifacts have no flag
+    # and their summaries stay unchanged.
+    if any(leak_check.FLAG_KEY in r for r in rows):
+        summary["leak_check"] = leak_check.check_rows(rows)
     for arm in arms:
         summary["arms"][arm] = {
             "score": round(sum(r[f"{arm}_score"] for r in rows)
@@ -517,6 +634,32 @@ def main() -> int:
                          "(one episode per BEAM batch, digested at ingest) "
                          "and answer/judge the hybrid_digest arm — "
                          "char-budget-matched to hybrid (spec 2026-08-24)")
+    ap.add_argument("--refind", action="store_true",
+                    help="answer/judge the ReFind arm: an agentic LEXICAL "
+                         "search loop over the same raw turns (temporal "
+                         "narrowing, skip-inspected, session-aware "
+                         "fusion), budget-matched to the rag control "
+                         "(ReFind, arXiv 2608.12888)")
+    ap.add_argument("--nomem", action="store_true",
+                    help="answer/judge the no-memory control arm: the "
+                         "question alone, same task framing, no context "
+                         "(MemTrapBench, arXiv 2608.20202)")
+    ap.add_argument("--refind-rounds", type=int,
+                    default=refind_arm.DEFAULT_ROUNDS,
+                    help="search rounds the ReFind agent may take")
+    ap.add_argument("--refind-top-k", type=int, default=None,
+                    help="raw-turn budget the ReFind arm serves (default: "
+                         "the effective rag width — budget-matched)")
+    ap.add_argument("--refind-per-round-k", type=int,
+                    default=refind_arm.DEFAULT_PER_ROUND_K,
+                    help="turns each ReFind query may inspect")
+    ap.add_argument("--refind-max-queries", type=int,
+                    default=refind_arm.DEFAULT_MAX_QUERIES,
+                    help="searches the ReFind agent may issue per round")
+    ap.add_argument("--refind-session-weight", type=float,
+                    default=refind_arm.SESSION_FUSION_WEIGHT,
+                    help="weight of the session-aware fusion term "
+                         "(0 = pure lexical ranking)")
     ap.add_argument("--report", action="store_true")
     args = ap.parse_args()
     if args.report:
@@ -525,7 +668,12 @@ def main() -> int:
     run(Path(args.beam_root), args.tier, args.extractor, args.out_tag,
         args.chats, args.limit_chats, chronicle=args.chronicle,
         arms_only=args.arms, hybrid_top_k=args.hybrid_top_k,
-        rag_top_k=args.rag_top_k, digest=args.digest)
+        rag_top_k=args.rag_top_k, digest=args.digest,
+        refind=args.refind, nomem=args.nomem,
+        refind_rounds=args.refind_rounds, refind_top_k=args.refind_top_k,
+        refind_per_round_k=args.refind_per_round_k,
+        refind_max_queries=args.refind_max_queries,
+        refind_session_weight=args.refind_session_weight)
     report(args.tier, args.extractor, args.out_tag)
     return 0
 
