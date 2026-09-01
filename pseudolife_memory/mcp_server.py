@@ -242,7 +242,13 @@ def memory_store(
         description="Episode handle for attribution.")] = None,
 ) -> dict[str, Any]:
     """Store one durable fact, decision, or observation. Use proactively
-    for anything worth keeping — one claim per call. Near-duplicates are
+    for anything worth keeping — one claim per call, and decide which
+    kind it is: PERSIST what stays true and will be wanted back; leave
+    task-scoped detail in CONTEXT ONLY; RE-VERIFY a fast-changing value
+    at its source, parking it with ``memory_fact_set(...,
+    freshness_class="volatile")`` rather than persisting a stale one;
+    ASK when the claim is ambiguous instead of
+    persisting the guess. Near-duplicates are
     dropped, not erred (``stored=False``,
     ``reason="below_surprise_threshold"``). For canonical NOW use
     ``memory_fact_set``.
@@ -399,7 +405,10 @@ def memory_search(
                     "when set.")] = False,
 ) -> dict[str, Any]:
     """Retrieve memories for a query — associative recall plus canonical
-    facts. Call at task start or when context may apply. ``cortex``
+    facts. Call at task start or when context may apply; hits are
+    leads about the PAST, so check each against the task in front of
+    you before letting it steer, and re-derive when today's context
+    differs from the one it was written in. ``cortex``
     facts arrive AHEAD of ``entries`` — the current, deduped answer
     (``contested: true`` awaits ``memory_fact_resolve``).
     ``low_confidence=True``: no confident match, prefer abstaining. On a
@@ -986,10 +995,14 @@ def memory_lesson_search(
 ) -> dict[str, Any]:
     """Search learned lessons (procedural memory) by similarity to the task
     at hand. Call at the START of a task: what worked, what to avoid, what
-    the user corrected before. Heed polarity ``-`` entries — known dead-ends.
+    the user corrected before. Heed polarity ``-`` entries — known
+    dead-ends. A lesson describes the run it came from, not this one:
+    apply it where today's specifics match, or it anchors you on a
+    stale framing — ``re_verify: true`` marks one whose subject facts
+    have changed since, so re-derive that one.
 
     Returns: ``{count, entries: [{task, aspect, lesson, about, polarity,
-    outcome, confidence, score}]}``.
+    outcome, confidence, score, re_verify, re_verify_reason}]}``.
     """
     result = service.lesson_search(query, top_k=top_k)
     if not verbose:
