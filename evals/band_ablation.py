@@ -111,13 +111,16 @@ os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")                # CPU only
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
+from context_format import MEMS_HEADER  # noqa: E402
+
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 
 # Bench constants mirrored from longmemeval_bench.py (not imported at module
 # level — that module pulls in torch/ladder_sweep; replay imports it lazily).
+# The served-context headers are NOT mirrored: context_format above is the
+# one definition, stdlib-only so it is safe to import here.
 RAG_TOP_K = 6
 HYBRID_TOP_K = 3
-_HYBRID_SPLIT = "\n\nRelevant memories:\n"
 ARMS = ("rag", "cortex", "hybrid")
 
 # ── CMS ranking constants, mirrored with line cites (v29 tree) ────────────
@@ -827,8 +830,8 @@ def cmd_rebuild(args) -> int:
                 # Hybrid: cortex fact block verbatim from the served row
                 # (rebuild_contexts.py precedent), new top-3 raw spliced in.
                 facts_block = row["contexts"]["hybrid"].split(
-                    _HYBRID_SPLIT, 1)[0]
-                contexts["hybrid"] = (facts_block + _HYBRID_SPLIT
+                    MEMS_HEADER, 1)[0]
+                contexts["hybrid"] = (facts_block + MEMS_HEADER
                                       + "\n\n".join(sel[:HYBRID_TOP_K]))
                 new["contexts"] = contexts
                 new["ablation"] = {"policy": policy, "mode": tag_mode(mode),

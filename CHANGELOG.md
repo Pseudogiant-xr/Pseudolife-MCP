@@ -6,6 +6,57 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (2026-09-01 — the answerability probe's text matching)
+- **Four bug classes in `evals/answerability_probe.py`'s containment
+  ladder biased what it called answerable.** All four came out of the
+  post-merge review of the probe and were reproduced by execution before
+  being fixed; **none moved a published number** — all four committed
+  `*.answerability.json` artifacts regenerate byte-identically (pinned by
+  `test_committed_probe_artifacts_regenerate_exactly`), because the 503
+  rows the probe has been run over happen not to exercise the triggering
+  token shapes. The fixes remove latent measurement bias, not a wrong
+  result; the per-class scan behind that reading is in the PR.
+  - The stopword set was built by running the tokenizer over the
+    stopword list, so folded function words collided with real content
+    words: `does` folds to `doe`, which then excluded the genuine noun
+    *doe* from the required-coverage set and scored a context that never
+    mentioned it answerable. Membership is now tested on the raw token
+    and on its depluralized stem, never on the folded token — the stem
+    half matters because the folded set was also correctly absorbing
+    inflected function words (`theirs` folded onto `their`), and dropping
+    that would have pushed rows into `unanswerable` and inflated the
+    red-flag cell in the same edit that fixed the opposite bias.
+  - The spelled-number table was a re-typed subset stopping at *twenty*,
+    while `dream.py`'s reaches *ninety* plus hundred/thousand — so
+    "thirty minutes" scored unanswerable against a context saying "30
+    minutes". The full table is mirrored (importing `dream.py` would
+    pull torch into a CPU-only diagnostic) with a test asserting
+    equality against `dream.py`'s.
+  - Number words were folded to digits *before* the plural-s strip, so
+    `sevens` stayed `seven` while a bare `seven` became `7` and the two
+    spellings of one number stopped matching. The strip now runs first.
+  - The cortex context splitter was dispatched on an exact `arm ==
+    "cortex"` match while the hybrid one beside it used a prefix, so any
+    cortex variant arm would collapse to a single block and lose its
+    pathway attribution. It matches by prefix now. No probed artifact
+    carries such an arm today, so this one is a latent asymmetry closed
+    rather than a live miscount fixed.
+- **`report_block` no longer publishes an answerability block whose arms
+  disagree with the accuracy table beside it.** It discovers arms across
+  all rows while both harnesses derive theirs from row 0; a file resumed
+  with different arm flags silently produced a block covering arms the
+  table omitted. It now fails with the same message shape
+  `longmemeval_bench.report()` already used. `probe_rows` stays tolerant
+  — a per-row diagnostic should still read on a mixed file.
+- **The hybrid arm's served-context headers have one home.** The two
+  header literals had five uncoordinated copies across the producers,
+  the rebuilders and the probe's splitter; they now live in
+  `evals/context_format.py` (stdlib-only, so the CPU-only probe can
+  import it) and are pinned byte-identical to the strings they replaced,
+  so no persisted context shifts. `answerability_probe.JUDGE_SUFFIX` is
+  likewise tied to `replicate._JUDGE_SUFFIXES` by assertion rather than
+  by comment.
+
 ### Added (2026-09-01 — failure attribution: was the right answer ever in memory?)
 - **`evals/answerability_probe.py` — memory-only answerability + pathway
   evidence over judged artifacts.** AWM (arXiv 2608.25618) found 42.5%

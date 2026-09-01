@@ -37,9 +37,8 @@ from longmemeval_bench import (  # noqa: E402
     CORTEX_MIN_SCORE, CORTEX_TOP_K, bank_dir, load_rows, out_file,
     rewrite_rows,
 )
+from context_format import FACTS_HEADER, MEMS_HEADER  # noqa: E402
 from replicate import is_judge_field  # noqa: E402
-
-_HYBRID_SPLIT = "\n\nRelevant memories:\n"
 
 
 def strip_verdicts(row: dict) -> dict:
@@ -196,10 +195,10 @@ def main() -> int:
         fact_lines = rebuild_fact_lines(bank, emb, args.top_k,
                                         args.min_score,
                                         bm25=args.bm25)
-        raw_block = row["contexts"]["hybrid"].split(_HYBRID_SPLIT, 1)[-1]
+        raw_block = row["contexts"]["hybrid"].split(MEMS_HEADER, 1)[-1]
         row["contexts"]["cortex"] = "\n".join(fact_lines)
-        row["contexts"]["hybrid"] = ("Known facts:\n" + "\n".join(fact_lines)
-                                     + _HYBRID_SPLIT + raw_block)
+        row["contexts"]["hybrid"] = (FACTS_HEADER + "\n".join(fact_lines)
+                                     + MEMS_HEADER + raw_block)
         strip_verdicts(row)              # every arm -> answer phase re-runs
         out_rows.append(row)
 

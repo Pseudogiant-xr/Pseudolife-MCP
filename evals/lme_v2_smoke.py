@@ -73,6 +73,7 @@ os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")               # embedder on 
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
+from context_format import hybrid_context  # noqa: E402
 import lme_v2_adapter as A  # noqa: E402 — light module, no heavy imports
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
@@ -674,9 +675,7 @@ def build_contexts_v2(svc, question: str,
     contexts = {
         "rag": "\n\n".join(raw_texts),
         "cortex": "\n".join(fact_lines),
-        "hybrid": ("Known facts:\n" + "\n".join(fact_lines) +
-                   "\n\nRelevant memories:\n" +
-                   "\n\n".join(raw_texts[:HYBRID_TOP_K])),
+        "hybrid": hybrid_context(fact_lines, raw_texts[:HYBRID_TOP_K]),
     }
     return contexts, dump
 

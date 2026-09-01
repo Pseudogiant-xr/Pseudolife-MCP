@@ -61,6 +61,20 @@ def test_cortex_enum_render_keeps_continuation_lines_with_their_fact():
     assert "BMC Roadmachine" in blocks[0]
 
 
+def test_cortex_variant_arms_split_per_fact_line_too():
+    """The cortex splitter was dispatched on an exact ``arm == "cortex"``
+    match while the hybrid one beside it used a prefix, so any cortex
+    VARIANT arm would fall through to the blank-line splitter and
+    collapse to one block, silently gutting its pathway attribution. No
+    such arm exists in a probed artifact today (``cortex_orig`` in the
+    rejudge summary is a display key, not an arm), so this pins the
+    symmetry for the next variant rather than a live miscount
+    (2026-09-01 review of PR #236, scope corrected in its fix-pass)."""
+    ctx = "fact one line\nfact two line\nfact three line"
+    assert len(ap.context_blocks("cortex", ctx)) == 3
+    assert len(ap.context_blocks("cortex_orig", ctx)) == 3
+
+
 def test_hybrid_context_splits_facts_and_memories_sections():
     ctx = ("Known facts:\nuser — bike: Trek Domane\nuser — city: Sydney"
            "\n\nRelevant memories:\n[d1] user: mem one\n\n[d2] user: mem two")
@@ -68,6 +82,51 @@ def test_hybrid_context_splits_facts_and_memories_sections():
     assert len(blocks) == 4
     assert blocks[0] == "user — bike: Trek Domane"
     assert blocks[2] == "[d1] user: mem one"
+
+
+def test_context_blocks_splits_what_the_canonical_hybrid_join_produces():
+    """The splitter and the producers must agree by construction, not by
+    two people typing the same literal (2026-09-01 post-merge review of
+    PR #236: the header literals had five uncoordinated copies)."""
+    import context_format
+    facts = ["user — bike: Trek Domane", "user — city: Sydney"]
+    mems = ["[t1] user: I bought a Trek Domane",
+            "[t2] user: I moved to Sydney"]
+    ctx = context_format.hybrid_context(facts, mems)
+    assert ap.context_blocks("hybrid", ctx) == facts + mems
+
+
+def test_hybrid_join_is_byte_identical_to_the_literals_it_replaced():
+    """The extraction has to be serving-inert: the producers must emit the
+    same string the five copied literals built, character for character.
+    Anything else shifts every persisted context and makes the committed
+    accuracies incomparable — which is why this is pinned rather than
+    checked by eye (the judged regression gate cannot run on this chip)."""
+    import context_format
+    facts, mems = ["user — bike: Trek", "user — city: Sydney"], ["m1", "m2"]
+    assert context_format.FACTS_HEADER == "Known facts:\n"
+    assert context_format.MEMS_HEADER == "\n\nRelevant memories:\n"
+    assert context_format.hybrid_context(facts, mems) == (
+        "Known facts:\n" + "\n".join(facts)
+        + "\n\nRelevant memories:\n" + "\n\n".join(mems))
+
+
+def test_hybrid_header_literals_have_exactly_one_home():
+    """No module under ``evals/`` re-types the headers — the drift guard
+    the five copies needed. Scoped to production modules on purpose:
+    TESTS that hardcode the literal (this file's byte-identity pin,
+    test_beam_adapter's served-format assertion) are independent checks
+    of the format and would be worth less written against the constant
+    they are checking."""
+    import context_format
+    evals_dir = Path(__file__).resolve().parents[1] / "evals"
+    offenders = sorted(
+        p.name for p in evals_dir.glob("*.py")
+        if p.name != "context_format.py"
+        and any(h.strip() in p.read_text(encoding="utf-8")
+                for h in (context_format.FACTS_HEADER,
+                          context_format.MEMS_HEADER)))
+    assert offenders == []
 
 
 def test_empty_context_has_no_blocks():
@@ -128,13 +187,103 @@ def test_gold_variants_are_screened_for_triviality():
     assert ap.answerable_in("you have a road bike too", gold) == "span"
 
 
-def test_stopwords_are_folded_like_the_tokens_they_filter():
-    """_tokens strips a plural-s ("this" -> "thi", "does" -> "doe")
-    BEFORE the stopword test; an unfolded stopword set silently turns
-    those into required content tokens, tightening the tokens rung on
-    sentence-shaped golds (2026-09-01 review)."""
+def test_stopwords_are_dropped_from_the_content_token_set():
+    """The tokens rung requires only CONTENT tokens, so a gold's function
+    words must not be demanded of the context."""
     assert ap.answerable_in("user — trip-booking-month: March, booked",
                             "This trip was booked in March.") == "tokens"
+
+
+def test_stopword_exclusion_cannot_swallow_a_content_word():
+    """The stopword set is matched against the RAW token, before folding.
+    Folding it first collides function words with real nouns — "does"
+    folds to "doe", which then excludes the genuine noun "doe" from the
+    required-coverage set and scores a context that never mentions it
+    answerable (2026-09-01 post-merge review of PR #236)."""
+    assert ap.answerable_in(
+        "user: I saw something on the trail yesterday",
+        "You saw a doe on the trail") is None
+    # the same context DOES answer a gold whose content it carries: only
+    # the noun is missing above, not the function words around it
+    assert ap.answerable_in(
+        "user: I saw something on the trail yesterday",
+        "You saw something on the trail") == "tokens"
+
+
+@pytest.mark.parametrize("word, gold, ctx", [
+    # "does" -> "doe": the folded stopword is itself a common noun
+    ("doe", "A doe crossed the road", "user: something crossed the road"),
+    # "this" -> "thi": guards the whole collision class, not one word
+    ("thi", "The thi rating was high", "user: the rating was high"),
+    # "always" is NOT a stopword, so its fold ("alway") must stay required
+    ("alway", "The gate is always locked", "user: the gate is locked"),
+])
+def test_folded_stopword_collisions_do_not_relax_coverage(word, gold, ctx):
+    assert word not in ap._STOPWORDS
+    assert ap.answerable_in(ctx, gold) is None
+
+
+def test_stopword_set_holds_raw_words_not_folded_ones():
+    """A structural guard over the whole class: every entry is the word as
+    written, so a future addition cannot re-introduce the collision."""
+    assert {"does", "this", "has"} <= ap._STOPWORDS
+    assert not ({"doe", "thi"} & ap._STOPWORDS)
+
+
+@pytest.mark.parametrize("gold, ctx", [
+    ("The decision is theirs", "user: they made the decision"),
+    ("The choice was yours", "user: you made the choice"),
+    ("The fault is ours", "user: we caused the fault"),
+])
+def test_inflected_function_words_stay_out_of_the_content_set(gold, ctx):
+    """Matching the stopword set on the raw token fixes the "doe"
+    collision, but the folded set it replaced was also absorbing
+    INFLECTED function words — "theirs" folded onto the stopword "their".
+    Requiring those instead moves rows into `unanswerable`, which inflates
+    the AWM red-flag cell with exactly the surface mismatches the ladder
+    exists to keep out of it. So the exclusion tests the raw token AND its
+    depluralized stem (2026-09-01 review of the chip 2.1 fix-pass)."""
+    assert ap.answerable_in(ctx, gold) == "tokens"
+
+
+def test_the_stem_test_still_keeps_real_content_words():
+    """The stem test must not become a second swallowing mechanism: a word
+    is only dropped when the STEM is a function word, so "doe"/"thi"
+    (whose stems are themselves) and "always" (stem "alway") all stay
+    required."""
+    assert ap.answerable_in("user: something crossed the road",
+                            "A doe crossed the road") is None
+    assert ap.answerable_in("user: the gate is locked",
+                            "The gate is always locked") is None
+
+
+def test_number_words_cover_the_full_dream_table():
+    """The probe mirrors dream.py's _SPELLED_NUMBERS rather than importing
+    it (importing pseudolife_memory.memory.dream pulls torch through the
+    package __init__, and the probe must stay CPU-only). Re-typed, it
+    stopped at twenty while dream.py reaches ninety plus hundred/thousand
+    — so "thirty minutes" scored unanswerable against a context saying
+    "30 minutes" (2026-09-01 post-merge review of PR #236). This is the
+    sync guard the mirror needs."""
+    from pseudolife_memory.memory.dream import _SPELLED_NUMBERS
+    assert ap._NUMBER_WORDS == _SPELLED_NUMBERS
+
+
+def test_answerable_in_normalizes_number_words_above_twenty():
+    assert ap.answerable_in("note: the ride took 30 minutes",
+                            "thirty minutes") == "span"
+    assert ap.answerable_in("note: a 1000 word draft",
+                            "thousand word draft") == "span"
+
+
+def test_answerable_in_folds_plural_number_words():
+    """The plural-s strip must run BEFORE the number-word fold: folded
+    first, "sevens" becomes "seven" while a bare "seven" becomes "7", so
+    the two spellings of the same number stopped matching each other
+    (2026-09-01 post-merge review of PR #236)."""
+    assert ap._tokens("sevens") == ap._tokens("seven") == ["7"]
+    assert ap.answerable_in("he rolled two sevens in a row",
+                            "Seven") == "span"
 
 
 def test_gold_variants_strip_punctuated_ie_and_eg():
@@ -412,6 +561,33 @@ def test_report_block_is_none_when_no_row_has_contexts():
     assert ap.report_block(rows) is None
 
 
+def test_report_block_fails_loudly_when_the_arm_set_disagrees_with_row_0():
+    """report_block discovers arms by unioning across ALL rows, while both
+    harnesses' accuracy tables derive theirs from rows[0]. A file resumed
+    with different arm flags would then publish an answerability block
+    covering arms the accuracy table beside it omits, silently. report()
+    already exits on that disagreement; the block must not be quieter
+    (2026-09-01 post-merge review of PR #236)."""
+    rows = [_lme_row("a", "user: a Trek Domane", "Trek Domane", True),
+            _lme_row("b", "user: a Trek Domane", "Trek Domane", True)]
+    rows[1]["hybrid_correct"] = True
+    rows[1]["contexts"]["hybrid"] = "Known facts:\nuser — bike: Trek Domane"
+    with pytest.raises(SystemExit) as excinfo:
+        ap.report_block(rows)
+    assert "hybrid" in str(excinfo.value)
+
+
+def test_report_block_accepts_an_artifact_whose_rows_agree_on_arms():
+    """The guard must not fire on the legitimate resumed-artifact shape.
+    The context-less row goes FIRST, which is the case that could trip
+    the guard: rows[0] carries no `contexts` at all, so the arm set has
+    to be recovered from its `rag_correct` verdict alone."""
+    rows = [{"question_id": "old", "question": "which bike?",
+             "answer": "Trek Domane", "rag_correct": True},
+            _lme_row("a", "user: a Trek Domane", "Trek Domane", True)]
+    assert ap.report_block(rows)["arms"]["rag"]["n_testable"] == 1
+
+
 # ── the judge-based level: wired, never run here ────────────────────────
 
 def test_judge_fields_are_registered_judged_fields():
@@ -421,6 +597,17 @@ def test_judge_fields_are_registered_judged_fields():
     assert replicate.is_judge_field("rag_answerable_judge")
     assert replicate.is_judge_field("hybrid_ctg_answerable_judge")
     assert not replicate.is_judge_field("answerable_share")
+
+
+def test_judge_suffix_is_the_one_replicate_registered():
+    """The suffix was hardcoded independently in the probe, in
+    replicate._JUDGE_SUFFIXES and in the tests, tied only by a comment —
+    so a rename in one place would leave the strippers blind to the field
+    they are supposed to clear (2026-09-01 post-merge review of PR #236).
+    This is the assertion that links them."""
+    import replicate
+    assert ap.JUDGE_SUFFIX in replicate._JUDGE_SUFFIXES
+    assert replicate.is_judge_field(f"rag_{ap.JUDGE_SUFFIX}")
 
 
 def test_annotate_judge_writes_verdicts_and_is_resumable():

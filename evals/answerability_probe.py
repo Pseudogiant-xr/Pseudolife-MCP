@@ -73,6 +73,7 @@ import urllib.request
 from pathlib import Path
 
 import leak_check
+from context_format import FACTS_HEADER, MEMS_HEADER
 from leak_check import (answer_present, gold_answer, load_rows, normalize,
                         row_id, untestable_reason)
 
@@ -96,43 +97,76 @@ _JUDGE_ANSWERABLE_SYSTEM = (
     "- no if the context does not contain it, or only hints at it."
 )
 
-_FACTS_HEADER = "Known facts:\n"
-_MEMS_HEADER = "\n\nRelevant memories:\n"
-
 # ── the containment ladder ──────────────────────────────────────────────
-# Small number words fold to digits so "seven" matches a stored "7".
+# Spelled numbers fold to digits so "seven" matches a stored "7". MIRRORS
+# pseudolife_memory.memory.dream._SPELLED_NUMBERS, which cannot be
+# imported here: the package __init__ pulls torch, and this module must
+# stay importable on CPU-only machines. A re-typed subset stopping at
+# twenty is what shipped, so "thirty minutes" scored unanswerable against
+# a context saying "30 minutes"; tests/test_answerability_probe.py
+# asserts equality with dream.py's table (2026-09-01 review of PR #236).
 _NUMBER_WORDS = {
     "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
     "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
     "ten": "10", "eleven": "11", "twelve": "12", "thirteen": "13",
     "fourteen": "14", "fifteen": "15", "sixteen": "16", "seventeen": "17",
-    "eighteen": "18", "nineteen": "19", "twenty": "20",
+    "eighteen": "18", "nineteen": "19", "twenty": "20", "thirty": "30",
+    "forty": "40", "fifty": "50", "sixty": "60", "seventy": "70",
+    "eighty": "80", "ninety": "90", "hundred": "100", "thousand": "1000",
 }
+
+
+def _deplural(token: str) -> str:
+    """The plural-s strip, on its own so the stopword test can reuse it."""
+    return token[:-1] if len(token) > 3 and token.endswith("s") else token
+
+
+def _fold(token: str) -> str:
+    """One normalized token, folded for comparison: plural-s stripped
+    FIRST, then the spelled number mapped. The other order leaves
+    "sevens" at "seven" while a bare "seven" becomes "7", so the two
+    spellings of one number stop matching (2026-09-01 review)."""
+    token = _deplural(token)
+    return _NUMBER_WORDS.get(token, token)
+
+
 def _tokens(text) -> list[str]:
-    """Comparison tokens: leak_check's normalization, then number words
-    folded to digits and a plural-s stripped (both sides get the same
-    fold, so the comparison stays symmetric)."""
-    out = []
-    for t in normalize(text).split():
-        t = _NUMBER_WORDS.get(t, t)
-        if len(t) > 3 and t.endswith("s"):
-            t = t[:-1]
-        out.append(t)
-    return out
+    """Comparison tokens: leak_check's normalization, then the fold above
+    (both sides get the same fold, so the comparison stays symmetric)."""
+    return [_fold(t) for t in normalize(text).split()]
 
 
 # Function words dropped for the token-coverage step. Frozen and small on
 # purpose: every word here loosens what "the gold's information is
 # present" requires, so additions belong in review, not in tuning.
-# Folded through _tokens because membership is tested against FOLDED
-# tokens — unfolded, "this"/"does" fold to "thi"/"doe", miss the set, and
-# silently become required content tokens (2026-09-01 review).
-_STOPWORDS = frozenset(_tokens("""
+# Stored RAW — membership is tested on the raw token and on its
+# depluralized stem, never on the fully folded token (see
+# _content_tokens). Folding the set first collides function words with
+# real ones: "does" folds to "doe", which then excluded the genuine noun
+# "doe" from the required-coverage set (2026-09-01 review of PR #236).
+_STOPWORDS = frozenset(normalize("""
 a about an and approximately are around as at be been by did do does
 exactly for from had has have i in into is it its just my of on only or
 our roughly that the their there they this to was were will with you
 your
-"""))
+""").split())
+
+
+def _content_tokens(text) -> list[str]:
+    """The folded tokens of ``text`` minus its function words.
+
+    A token is dropped when the RAW word is a function word, or when its
+    depluralized STEM is — the second half matters because the folded set
+    this replaced was also absorbing inflected function words ("theirs"
+    folded onto "their"), and requiring those instead pushes rows into
+    ``unanswerable`` and inflates the red-flag cell with the same surface
+    mismatches the ladder exists to keep out of it. Neither test can
+    swallow a content word, because a word is only dropped when the raw
+    form or the stem is ITSELF a listed function word: "doe" and "thi"
+    are their own stems and stay required (2026-09-01 reviews of PR #236
+    and of this fix-pass)."""
+    return [_fold(t) for t in normalize(text).split()
+            if t not in _STOPWORDS and _deplural(t) not in _STOPWORDS]
 
 
 def gold_variants(gold) -> list[str]:
@@ -171,23 +205,34 @@ def _seq_contained(needle: list[str], hay: list[str]) -> bool:
                for i in range(len(hay) - n + 1))
 
 
+def _contained(hay: list[str], variants: list[list[str]],
+               content: list[str]) -> str | None:
+    """The ladder itself, over pre-tokenized inputs, so a caller testing
+    many contexts against ONE gold folds that gold once."""
+    if not hay:
+        return None
+    if any(_seq_contained(v, hay) for v in variants):
+        return "span"
+    hay_set = set(hay)
+    if content and all(t in hay_set for t in content):
+        return "tokens"
+    return None
+
+
+def _block_answers(block: str, variants: list[list[str]],
+                   content: list[str]) -> bool:
+    return _contained(_tokens(block), variants, content) is not None
+
+
 def answerable_in(ctx, gold) -> str | None:
     """How the gold is contained in the context: ``span`` (some variant
     is a contiguous token sequence), ``tokens`` (every content token
     appears somewhere — the coverage reading for sentence-shaped golds),
     or None. The caller must have ruled the gold testable first
     (leak_check.untestable_reason)."""
-    hay = _tokens(ctx)
-    if not hay:
-        return None
-    for v in gold_variants(gold):
-        if _seq_contained(_tokens(v), hay):
-            return "span"
-    hay_set = set(hay)
-    content = [t for t in _tokens(gold) if t not in _STOPWORDS]
-    if content and all(t in hay_set for t in content):
-        return "tokens"
-    return None
+    return _contained(_tokens(ctx),
+                      [_tokens(v) for v in gold_variants(gold)],
+                      _content_tokens(gold))
 
 
 def _group_lines(text: str) -> list[str]:
@@ -213,15 +258,25 @@ def context_blocks(arm: str, ctx: str) -> list[str]:
     surfaces instead of corrupting a count."""
     if not ctx:
         return []
-    if arm == "cortex":
-        # "\n".join(fact_lines) — one fact per non-indented line.
+    if arm.startswith("cortex"):
+        # "\n".join(fact_lines) — one fact per non-indented line. Prefix
+        # match for symmetry with the hybrid branch below: under the
+        # exact "cortex" test this used to carry, any future cortex
+        # VARIANT arm would fall through to the blank-line splitter and
+        # collapse to a single block, silently gutting its pathway
+        # attribution. No such arm exists today — the ``cortex_orig`` key
+        # in the committed rejudge summary is a display key
+        # (beam_rejudge.py builds ``f"{arm}_orig"``), not an arm, and
+        # nothing reaches context_blocks with it — so this guards the
+        # next variant rather than fixing a live miscount
+        # (2026-09-01 review of PR #236, corrected in its fix-pass).
         return _group_lines(ctx)
     if arm.startswith("hybrid"):
-        # "Known facts:\n" + facts + "\n\nRelevant memories:\n" + mems
-        # (+ any appended section, e.g. hybrid_ev's events block, which
-        # stays in the double-newline split).
-        body = ctx.removeprefix(_FACTS_HEADER)
-        facts_part, sep, rest = body.partition(_MEMS_HEADER)
+        # The canonical hybrid join (context_format.hybrid_context), read
+        # backwards (+ any appended section, e.g. hybrid_ev's events
+        # block, which stays in the double-newline split).
+        body = ctx.removeprefix(FACTS_HEADER)
+        facts_part, sep, rest = body.partition(MEMS_HEADER)
         blocks = _group_lines(facts_part)
         if sep:
             blocks.extend(b for b in rest.split("\n\n") if b.strip())
@@ -296,19 +351,30 @@ def _question_leak(row: dict) -> bool:
     return bool(answer_present(row.get("question", ""), gold_answer(row)))
 
 
-def pathway(row: dict, arm: str, *, position: int = 0) -> dict | None:
+def pathway(row: dict, arm: str, *, position: int = 0,
+            verdict: dict | None = None) -> dict | None:
     """PAST-Bench per-row pathway evidence: which served entries carry
     the gold. Only computed for correct answers — the pathway question is
     whether a WIN is memory-supported. Returns None for wrong/unjudged
     rows and for rows whose gold or context is untestable (those are
-    counted, with reasons, on the answerability side)."""
-    v = classify(row, arm, position=position)
+    counted, with reasons, on the answerability side). ``verdict`` passes
+    an already-computed ``classify`` result back in; probe_rows has one
+    per row-arm already."""
+    v = verdict if verdict is not None else classify(row, arm,
+                                                     position=position)
+    # A verdict for a DIFFERENT arm would be read as this arm's and then
+    # index this arm's context on the strength of it — silently, so the
+    # invariant is asserted rather than trusted.
+    assert v["arm"] == arm, f"verdict for {v['arm']!r} passed as {arm!r}"
     if v["correct"] is not True or not v["testable"]:
         return None
     blocks = context_blocks(arm, (row.get("contexts") or {})[arm])
     gold = gold_answer(row)
+    # Hoisted: gold_variants(gold) is the same list for every block.
+    variants = [_tokens(x) for x in gold_variants(gold)]
+    content = _content_tokens(gold)
     gold_entries = [i for i, b in enumerate(blocks)
-                    if answerable_in(b, gold) is not None]
+                    if _block_answers(b, variants, content)]
     if gold_entries:
         outcome = "supported"
     elif v["answerable"]:
@@ -341,9 +407,10 @@ def probe_rows(rows: list[dict], source: str | None = None) -> dict:
     }
     if source:
         summary["source"] = source
-    if any(f"{arm}_score" in row for row in rows for arm in _arms(rows)):
+    arms = _arms(rows)
+    if any(f"{arm}_score" in row for row in rows for arm in arms):
         summary["beam_correct_threshold"] = BEAM_CORRECT_THRESHOLD
-    for arm in _arms(rows):
+    for arm in arms:
         verdicts = [classify(r, arm, position=i)
                     for i, r in enumerate(rows)]
         testable = [v for v in verdicts if v["testable"]]
@@ -363,8 +430,9 @@ def probe_rows(rows: list[dict], source: str | None = None) -> dict:
         n_partial = sum(
             1 for r in rows if f"{arm}_score" in r
             and 0.0 < float(r[f"{arm}_score"]) < BEAM_CORRECT_THRESHOLD)
-        evidence = [e for e in (pathway(r, arm, position=i)
-                                for i, r in enumerate(rows))
+        evidence = [e for e in (pathway(r, arm, position=i, verdict=v)
+                                for i, (r, v) in enumerate(zip(rows,
+                                                               verdicts)))
                     if e is not None]
         n_correct = sum(1 for v in verdicts if v["correct"] is True)
         supported = sum(1 for e in evidence if e["verdict"] == "supported")
@@ -422,6 +490,24 @@ def report_block(rows: list[dict]) -> dict | None:
     persisted contexts, so legacy summaries stay unchanged."""
     if not any(r.get("contexts") for r in rows):
         return None
+    # This block is printed BESIDE an accuracy table whose arms both
+    # harnesses derive from rows[0], while _arms unions over every row. A
+    # file resumed with different arm flags would publish an
+    # answerability block covering arms the table omits, and say nothing
+    # about it. longmemeval_bench.report() already exits on that
+    # disagreement; the block must not be quieter (2026-09-01 review of
+    # PR #236). probe_rows itself stays tolerant — a per-row diagnostic
+    # is exactly where a mixed file should still be readable.
+    arms, first = _arms(rows), _arms(rows[:1])
+    if arms != first:
+        raise SystemExit(
+            "answerability block: the rows disagree about their arms — "
+            f"{', '.join(arms)} across the file against "
+            f"{', '.join(first) or '(none)'} on the first row. The file "
+            "mixes runs with different arm flags, so the block would "
+            "cover arms the accuracy table beside it omits. Re-run the "
+            "answer phase over the whole file, or report the runs "
+            "separately.")
     return {k: v for k, v in probe_rows(rows).items()
             if k != "pathway_evidence"}
 
@@ -434,8 +520,12 @@ def _judge_url() -> str:
 
 
 def _server_alive(url: str, timeout: float = 4.0) -> bool:
-    # ladder_sweep.probe's contract, restated locally so this module stays
-    # importable without the bench (and torch) on CPU-only test machines.
+    # ladder_sweep.probe's contract, restated locally: importing
+    # ladder_sweep would run its module-level CUDA_VISIBLE_DEVICES=-1
+    # (ladder_sweep.py:38), a process-wide side effect this CPU-only
+    # diagnostic has no business imposing on whatever imports it. (Its
+    # heavy imports are lazy, so weight is NOT the reason — the previous
+    # comment claimed it was; 2026-09-01 review of PR #236.)
     try:
         req = urllib.request.Request(url.rstrip("/") + "/models",
                                      method="GET")
