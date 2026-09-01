@@ -27,6 +27,22 @@ def _read(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8")
 
 
+def _assert_curl_fits_hook_budget(script: str, hook_groups: list) -> None:
+    """The curl retry schedule must finish inside the hooks.json timeout —
+    otherwise the harness kills the hook before the ``||`` fallback runs and
+    the session gets NO message at all (the 'installed but silent' state).
+    Worst case: every attempt runs to --max-time, plus the --retry-delay
+    sleeps between attempts, plus 1s margin for bash/curl spawn."""
+    max_time = int(re.search(r"--max-time\s+(\d+)", script).group(1))
+    retries = int(re.search(r"--retry\s+(\d+)", script).group(1))
+    delay = int(re.search(r"--retry-delay\s+(\d+)", script).group(1))
+    budget = min(h["timeout"] for g in hook_groups for h in g["hooks"])
+    worst = (retries + 1) * max_time + retries * delay
+    assert worst + 1 <= budget, (
+        f"curl worst case {worst}s + 1s spawn margin exceeds the "
+        f"hooks.json timeout of {budget}s")
+
+
 # ── manifests ───────────────────────────────────────────────────────────────
 
 def test_marketplace_manifest_points_at_plugin_dir():
@@ -133,7 +149,25 @@ def test_plugin_hook_wiring():
     script = _read("plugin/hooks/session-start.sh")
     assert "/api/hook/session-start" in script
     assert "curl" in script and "--max-time" in script
-    assert "not reachable" in script          # the fallback guidance
+    # A single attempt turns a transient daemon stall (autosave/sweep lock
+    # hold) into a false "daemon down" for the whole session — the curl
+    # must carry an explicit retry count (plain --retry already classes a
+    # timeout as transient; --retry-all-errors is banned below because it
+    # breaks option parsing outright on curl < 7.71, common on LTS hosts).
+    assert re.search(r"--retry\s+\d+", script), \
+        "retry count must be set; retry flags without --retry <n> are no-ops"
+    assert "--retry-delay" in script
+    # Banned on the command itself (comments may name it to explain why):
+    # it breaks option parsing outright on curl < 7.71, common on LTS hosts.
+    assert not any("--retry-all-errors" in ln for ln in script.splitlines()
+                   if not ln.lstrip().startswith("#"))
+    assert "did not answer" in script         # the fallback guidance
+    # The fallback must instruct verification, not assert the MCP tools are
+    # dead: a hook timeout proves nothing about the separate MCP transport.
+    assert "memory_stats" in script
+    assert "before treating memory as offline" in script
+    assert re.search(r"^exit 0\s*$", script, re.M)  # must never block session start
+    _assert_curl_fits_hook_budget(script, hooks["hooks"]["SessionStart"])
     # Pin bearer-token forwarding in the actual curl call
     assert '"${AUTH[@]}"' in script
     # Pin query-string construction and forwarding to curl (session_id/source)
@@ -154,6 +188,15 @@ def test_plugin_hook_wiring_session_end():
     script = _read("plugin/hooks/session-end.sh")
     assert "/api/hook/session-end" in script
     assert "curl" in script and "--max-time" in script
+    # Same transient-stall retry contract as session-start.sh.
+    assert re.search(r"--retry\s+\d+", script), \
+        "retry count must be set; retry flags without --retry <n> are no-ops"
+    assert "--retry-delay" in script
+    # Banned on the command itself (comments may name it to explain why):
+    # it breaks option parsing outright on curl < 7.71, common on LTS hosts.
+    assert not any("--retry-all-errors" in ln for ln in script.splitlines()
+                   if not ln.lstrip().startswith("#"))
+    _assert_curl_fits_hook_budget(script, hooks["hooks"]["SessionEnd"])
     assert "-X POST" in script
     # Pin bearer-token forwarding in the actual curl invocation
     assert '"${AUTH[@]}"' in script
