@@ -16,6 +16,10 @@ let viewCtx = null;      // the render ctx (for refresh) — module-scoped so th
                          // save bar can be rebuilt on edit without losing it.
 
 const OVERRIDE_PATH = "memory.dream.extractor_model_override";
+const EFFORT_PATH = "memory.dream.extractor_reasoning_effort";
+// Common levels every provider understands; the Extractor panel's knob takes
+// the provider-specific extras (codex "minimal", claude "max") as free text.
+const DREAMER_EFFORTS = ["low", "medium", "high", "xhigh"];
 const DREAMER_MODELS = [
   { id: "claude-opus-5", label: "Opus 5",
     note: "recommended — best measured extraction quality" },
@@ -117,6 +121,31 @@ function dreamerCard() {
     if (e.key === "Enter" && customInput.value.trim()) setDreamerModel(customInput.value.trim());
   });
 
+  const effort = dream.reasoning_effort || null;
+  const effortSegs = [el("button", {
+    class: "seg" + (!effort ? " active" : ""),
+    "aria-pressed": String(!effort),
+    title: "clear — the endpoint's own default effort serves "
+      + "(for the CLI shims, the host CLI config)",
+    onclick: () => setDreamerEffort(null),
+  }, "Default")];
+  for (const lv of DREAMER_EFFORTS) {
+    effortSegs.push(el("button", {
+      class: "seg" + (effort === lv ? " active" : ""),
+      "aria-pressed": String(effort === lv),
+      title: `pin reasoning_effort=${lv} on every primary extractor call`,
+      onclick: () => setDreamerEffort(lv),
+    }, lv));
+  }
+  if (effort && !DREAMER_EFFORTS.includes(effort)) {
+    // A provider extra ("minimal"/"max") set via the Extractor panel —
+    // surface it as the active state so the row never hides its own knob.
+    effortSegs.push(el("button", { class: "seg active",
+      "aria-pressed": "true", disabled: true,
+      title: "custom effort — set via the Extractor panel below",
+    }, effort));
+  }
+
   return el("div", { class: "panel dreamer reveal" },
     el("div", { class: "panel-head" },
       el("h2", {}, "Dreamer"),
@@ -131,12 +160,20 @@ function dreamerCard() {
             const v = customInput.value.trim();
             if (v) setDreamerModel(v);
           } }, "Apply"))),
+      el("div", { class: "dreamer-pick" },
+        el("span", { class: "lbl" }, "Effort"),
+        el("div", { class: "seg-row", role: "group", "aria-label": "dreamer reasoning effort" },
+          effortSegs)),
       el("p", { class: "help", style: { margin: "8px 0 0" } },
         "Applies live to the next dream via the model-only override — endpoint "
         + "wiring keeps its owner. Any model id the wired endpoint serves "
         + "works here (LM Studio / Ollama / vLLM model names included). The "
         + "Claude CLI shim honours claude-* names per request, the Codex CLI "
-        + "shim gpt-* names; the local sidecar ignores model names.")));
+        + "shim gpt-* names; the local sidecar ignores model names. Effort "
+        + "rides each request as reasoning_effort — the CLI shims map it to "
+        + "their effort flag, most local runtimes ignore the unknown field, "
+        + "and the fallback sidecar is never affected (provider extras like "
+        + "\"minimal\"/\"max\" via the Extractor panel below).")));
 }
 
 function healthChip() {
@@ -157,6 +194,22 @@ async function setDreamerModel(value) {
     toast(value
       ? `Saved · next dream extracts with ${value}`
       : "Saved · override cleared — endpoint default serves", "ok", 6000);
+    viewCtx?.refresh();
+  } catch (e) { toast("Save failed: " + e.message, "bad"); }
+}
+
+async function setDreamerEffort(value) {
+  if (edits.size) {
+    toast("Save or discard the pending edits below first", "warn");
+    return;
+  }
+  const current = dream?.reasoning_effort || null;
+  if ((value || null) === current) return;
+  try {
+    await api.post("/api/config", { patch: { [EFFORT_PATH]: value } });
+    toast(value
+      ? `Saved · next dream extracts at ${value} effort`
+      : "Saved · effort cleared — endpoint default serves", "ok", 6000);
     viewCtx?.refresh();
   } catch (e) { toast("Save failed: " + e.message, "bad"); }
 }

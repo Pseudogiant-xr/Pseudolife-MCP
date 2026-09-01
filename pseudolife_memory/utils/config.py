@@ -312,6 +312,16 @@ class DreamConfig:
     # endpoint/fallback wiring. None (default) = inert; the fallback model
     # is never overridden (the sidecar serves one fixed model).
     extractor_model_override: str | None = None
+    # Reasoning effort for the PRIMARY extractor, sent as ``reasoning_effort``
+    # in the request body. None/"" (default) = the field is never sent, so the
+    # endpoint's own default serves — for the CLI shims that means the host
+    # CLI config (the 2026-09-01 ladder artifacts ran that way, at the Codex
+    # host's "high"). A set value is passed through verbatim: the CLI shims
+    # map it to their effort flag per request, OpenAI-compatible servers read
+    # it natively, and most local runtimes ignore the unknown field (a hosted
+    # API may instead reject an unsupported value with a clear 400). The
+    # fallback sidecar never receives it (same rule as the model override).
+    extractor_reasoning_effort: str | None = None
     # Output budget for the extractor call. Sized generously so a dense dream
     # batch can emit all its claim JSON without truncation (a truncated response
     # parses to fewer/zero claims). 2048 ≈ 40-80 claims. Override per-deploy with

@@ -1088,7 +1088,15 @@ class OpenAICompatExtractor:
         if self.api_key:
             headers["authorization"] = f"Bearer {self.api_key}"
         try:
-            payload = {**self.extra_body,
+            # The judge owns its thinking dimension (judge_thinking / the
+            # enable_thinking pin below) — the dreamer's effort knob rides
+            # extra_body on the shared primary extractor (judge_url unset)
+            # and must NOT reach this payload: the CLI shims honour a
+            # top-level reasoning_effort, which would silently override the
+            # pin the moment an operator tunes the dreamer.
+            extra = {k: v for k, v in self.extra_body.items()
+                     if k != "reasoning_effort"}
+            payload = {**extra,
                 "model": self.model,
                 "messages": [
                     {"role": "system", "content": _JUDGE_SYSTEM_PROMPT},
@@ -1419,6 +1427,21 @@ def _cache_extra_body(cfg) -> dict | None:
     return None if v is None else {"cache_prompt": bool(v)}
 
 
+def _primary_extra_body(cfg) -> dict | None:
+    """extra_body for the PRIMARY extractor: the cache pin plus, when the
+    effort knob is set, an explicit ``reasoning_effort``. The CLI shims map
+    the field to their CLI's effort flag per request; OpenAI-compatible
+    servers read it natively; servers that don't know it ignore it. The
+    fallback sidecar deliberately never receives it — same rule as the
+    model-only override: primary-side tuning never perturbs the measured
+    sidecar config, so fallback sites keep :func:`_cache_extra_body`."""
+    body = dict(_cache_extra_body(cfg) or {})
+    effort = getattr(cfg, "extractor_reasoning_effort", None)
+    if effort:
+        body["reasoning_effort"] = effort
+    return body or None
+
+
 def build_extractor_with_fallback(cfg) -> tuple["DreamExtractor", str]:
     """Selection step for the LIVE dream path: returns (extractor, which)
     with which in {"primary", "fallback"}. Fallback unset => exactly
@@ -1476,6 +1499,8 @@ def _status_extractor_fields(cfg, last_dream_extractor) -> dict:
         "fallback_model": r["fallback_model"] if has_fallback else None,
         "extractor_source": getattr(cfg, "extractor_source", "env"),
         "model_override": getattr(cfg, "extractor_model_override", None),
+        "reasoning_effort": getattr(cfg, "extractor_reasoning_effort",
+                                    None) or None,
         "primary_healthy": (probe_endpoint(r["primary_url"], timeout=2.0)
                             if has_fallback and r["primary_url"] else None),
         "last_dream_extractor": last_dream_extractor,
@@ -1509,7 +1534,7 @@ def build_extractor(cfg) -> DreamExtractor:
         return OpenAICompatExtractor(
             r["primary_url"], r["primary_model"], api_key=api_key,
             max_tokens=r["max_tokens"], timeout_seconds=r["timeout"],
-            extra_body=_cache_extra_body(cfg),
+            extra_body=_primary_extra_body(cfg),
         )
     return NoOpExtractor()
 

@@ -158,3 +158,16 @@ def test_registry_paths_all_resolve_against_appconfig():
             assert hasattr(cur, part), (
                 f"{knob['path']}: AppConfig has no attribute {part!r}")
             cur = getattr(cur, part)
+
+
+def test_extractor_reasoning_effort_knob():
+    # Applies at the next dream (build_extractor constructs fresh from
+    # config per invocation), hence restart False; provider-specific extras
+    # (codex "minimal", claude "max") ride the suggestions, not an enum.
+    k = _knob("memory.dream.extractor_reasoning_effort")
+    assert k["group"] == "Extractor"
+    assert k["type"] == "string"
+    assert k["default"] is None
+    assert k["restart"] is False
+    for v in ("low", "medium", "high", "xhigh"):
+        assert v in k["suggestions"]
