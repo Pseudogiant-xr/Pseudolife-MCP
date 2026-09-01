@@ -24,10 +24,15 @@ enforce it:
   verifies each listed helper is only ever reached with the lock held
   (directly, or via callers that are themselves always lock-held).
 
-Known, accepted blind spots (each latent — no such code in service.py
-today; noted so nobody mistakes a green run for proof against them):
-lambdas inherit the lock state of their definition site even if invoked
-later; a nested ``def`` resets to unlocked and flags under the inner
+Known, accepted blind spots (noted so nobody mistakes a green run for
+proof against them): lambdas inherit the lock state of their definition
+site even if invoked later — as of 2026-09-01 this shape EXISTS in
+``_persist_all`` (timing lambdas closing over ``self._storage``); it is
+safe there because ``_timed`` invokes them inline and ``_persist_all``
+is in ``CALLER_HOLDS_LOCK``, but a lambda whose invocation is DEFERRED
+past the lock would pass this guard unseen — treat any lambda that
+escapes its defining scope as unverified;
+a nested ``def`` resets to unlocked and flags under the inner
 name; allowlist matching is by bare function name; manual
 ``self._lock.acquire()``/``release()`` is not recognized as locking; the
 scan covers ``service.py`` plus the ``DreamOps`` mixin in

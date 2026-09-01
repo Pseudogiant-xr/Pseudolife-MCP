@@ -398,6 +398,35 @@ def test_run_sweep_once_prunes_dream_runs():
     assert out["runs_pruned"] == 2 and firing.pruned == 1
 
 
+def test_run_sweep_once_reports_phase_timings(caplog):
+    """Every sweep tick reports per-phase durations and logs one ledger
+    line (2026-09-01). The 2026-08-31 hook-timeout forensics misattributed
+    a stall to the judging tick precisely because only phase COMPLETIONS
+    are logged — with no tick start/duration in the ledger, a completion
+    timestamp invites reading the whole preceding window as that phase.
+    Timings ride every branch (disabled/below-threshold/fired) so the
+    ledger has no silent tick shapes."""
+    import logging
+
+    from pseudolife_memory.memory.dream import run_sweep_once
+
+    for svc in (_FakeService(enabled=False),
+                _FakeService(would_fire=False),
+                _FakeService(would_fire=True)):
+        with caplog.at_level(logging.INFO):
+            out = run_sweep_once(svc)
+        t = out["timings"]
+        assert set(t) >= {"compact", "prune_runs", "prune_retrieval",
+                          "total"}, f"missing phases: {t}"
+        assert all(isinstance(v, float) and v >= 0.0 for v in t.values())
+        assert t["total"] >= max(v for k, v in t.items() if k != "total")
+        assert any("sweep tick" in r.message for r in caplog.records), (
+            "each tick must leave one ledger line")
+        caplog.clear()
+    # The fired branch additionally times the dream itself.
+    assert "dream" in out["timings"]
+
+
 # ── driver / status (PG-backed; real embedder) ───────────────────────────
 
 @pytest.fixture()

@@ -187,9 +187,14 @@ def build_console_app(
 
         # 1) open liveness probe. A degraded payload (e.g. DB unreachable)
         # surfaces as 503 so orchestration/healthchecks can actually see it.
+        # Off the event loop like every other blocking handler: the payload
+        # includes a blocking Postgres ping, and inline it would freeze the
+        # whole web surface for the ping's timeout on a DB stall
+        # (2026-09-01 review).
         if path == "/health":
             try:
-                payload = health_payload()
+                payload = await asyncio.get_running_loop().run_in_executor(
+                    None, health_payload)
                 ok = payload.get("status", "ok") == "ok"
                 await _send_json(send, 200 if ok else 503, payload)
             except Exception as exc:  # noqa: BLE001

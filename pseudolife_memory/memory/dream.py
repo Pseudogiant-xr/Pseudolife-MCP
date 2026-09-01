@@ -1549,7 +1549,31 @@ def run_sweep_once(service) -> dict:
     enabled. Returns ``{"fired": bool, "compacted": int, "runs_pruned": int,
     "retrieval_pruned": int | None, ...}``; never raises into the daemon's
     timer."""
+    import time as _t
+
     cfg = service.config.memory.dream
+    # Per-phase durations + one ledger line per tick (2026-09-01): the
+    # 2026-08-31 hook-timeout forensics misattributed a stall to the
+    # judging tick because only phase COMPLETIONS were logged — with no
+    # tick start or duration in the ledger, a completion timestamp
+    # invites reading the whole preceding window as that phase.
+    t_start = _t.perf_counter()
+    timings: dict[str, float] = {}
+
+    def _timed(key, fn):
+        t0 = _t.perf_counter()
+        out = fn()
+        timings[key] = round(_t.perf_counter() - t0, 3)
+        return out
+
+    def _done(result):
+        timings["total"] = round(_t.perf_counter() - t_start, 3)
+        result["timings"] = timings
+        logger.info("sweep tick done in %.2fs (%s): %s", timings["total"],
+                    result.get("reason") or ("fired" if result.get("fired")
+                                             else "quiet"), timings)
+        return result
+
     # Superseded-row compaction (spec 2026-07-14), the v27 dream-run
     # journal, and the v31 retrieval-event log all run BEFORE the
     # dream.enabled check below — none of the three is actually fed only
@@ -1564,22 +1588,27 @@ def run_sweep_once(service) -> dict:
     # unbounded with nothing else to prune them (issue #178, previously
     # true only for the retrieval log because this whole block used to sit
     # after the disabled-return).
-    compacted = service.compact_superseded().get("total", 0)
-    runs_pruned = service.prune_dream_runs()
+    compacted = _timed("compact",
+                       lambda: service.compact_superseded().get("total", 0))
+    runs_pruned = _timed("prune_runs", service.prune_dream_runs)
     # getattr-guarded for older fakes/tests, like deep_dream_tick below.
     # retrieval_pruned stays None (not 0) when the fake/service predates
     # prune_retrieval_log, so the two "nothing to prune" and "no reaper
     # wired at all" cases stay distinguishable in the sweep result.
     prune_retrieval = getattr(service, "prune_retrieval_log", None)
-    retrieval_pruned = prune_retrieval() if prune_retrieval is not None else None
+    retrieval_pruned = _timed(
+        "prune_retrieval",
+        lambda: prune_retrieval() if prune_retrieval is not None else None)
     if not cfg.enabled:
-        return {"fired": False, "reason": "disabled", "compacted": compacted,
-                "runs_pruned": runs_pruned, "retrieval_pruned": retrieval_pruned}
+        return _done({"fired": False, "reason": "disabled",
+                      "compacted": compacted, "runs_pruned": runs_pruned,
+                      "retrieval_pruned": retrieval_pruned})
     # Need-based deep-dream tick (mechanical Steps A/B only) rides the same
     # timer, independent of the shallow trigger — a quiet bank can still be
     # overdue for consolidation. getattr-guarded for older fakes/tests.
     deep_tick = getattr(service, "deep_dream_tick", None)
-    deep = deep_tick() if deep_tick is not None else None
+    deep = _timed("deep_tick",
+                  lambda: deep_tick() if deep_tick is not None else None)
     if deep and deep.get("fired"):
         logger.info("deep-dream tick fired: %s", deep)
     extra = {"deep_tick": deep} if deep is not None else {}
@@ -1588,18 +1617,20 @@ def run_sweep_once(service) -> dict:
     # auto-applying only what the configured mode allows. getattr-guarded
     # like the tick; never raises into the sweep.
     judge = getattr(service, "deep_dream_judge", None)
-    judged = judge() if judge is not None else None
+    judged = _timed("judge",
+                    lambda: judge() if judge is not None else None)
     if judged and judged.get("judged"):
         logger.info("deep-dream judge: %s", judged)
     if judged is not None:
         extra["deep_judge"] = judged
     status = service.dream_status()
     if not status["would_fire"]:
-        return {"fired": False, "reason": "below_threshold",
-                "backlog": status["backlog"], "compacted": compacted,
-                "runs_pruned": runs_pruned, "retrieval_pruned": retrieval_pruned,
-                **extra}
-    result = service.dream_run_auto()
+        return _done({"fired": False, "reason": "below_threshold",
+                      "backlog": status["backlog"], "compacted": compacted,
+                      "runs_pruned": runs_pruned,
+                      "retrieval_pruned": retrieval_pruned, **extra})
+    result = _timed("dream", service.dream_run_auto)
     logger.info("dream sweep fired: %s", result)
-    return {"fired": True, "compacted": compacted, "runs_pruned": runs_pruned,
-            "retrieval_pruned": retrieval_pruned, **extra, **result}
+    return _done({"fired": True, "compacted": compacted,
+                  "runs_pruned": runs_pruned,
+                  "retrieval_pruned": retrieval_pruned, **extra, **result})
