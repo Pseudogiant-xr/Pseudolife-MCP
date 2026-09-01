@@ -10,7 +10,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **The BEAM adapter can now run an agentic lexical arm and a no-memory
   control arm.** Both come from the 2026-09-01 briefing-backlog triage,
   and both are measurement instruments only — no engine, daemon, or
-  serving behaviour changes, and neither arm has been run yet.
+  serving behaviour changes. Both have been **smoke-run** (BEAM 100K chat
+  1, 20 questions; LongMemEval oracle, 5 questions; artifacts committed
+  under `evals/results/*-refind-smoke.*`) to validate the plumbing: the
+  loop used 2.9 of 3 rounds and 7.4 queries per question, served exactly
+  the rag control's 6 turns on every row, and hit 0 plan failures and 0
+  fallbacks across 25 questions. **No accuracy from those runs is quoted
+  or claimed** — one chat and five questions cannot separate arms.
   - `--refind` (ReFind, [arXiv 2608.12888](https://arxiv.org/abs/2608.12888))
     answers from an agentic **lexical** search loop over the same
     formatted turns the bank holds: the answerer model plans BM25 queries

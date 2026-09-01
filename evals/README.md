@@ -333,12 +333,14 @@ rag 0.321±0.027, commit precision 0.76±0.05).
 > measured with. See
 > [the benchmarks guide](../docs/guide/benchmarks.md#the-knowledge-update-slice-78-of-the-500).
 
-### Comparator arms — `--refind` and `--nomem` (added 2026-09-01, unrun)
+### Comparator arms — `--refind` and `--nomem` (added 2026-09-01, smoke-run)
 
 The same two arms the BEAM adapter grew, wired into this harness as well
 (they share one implementation — `serve_comparator_arms` in
 `longmemeval_bench.py`, which the BEAM adapter calls too, so the harnesses
-cannot drift into serving them differently):
+cannot drift into serving them differently). Smoke-run 2026-09-01 on 5
+oracle questions — see "First smoke" in the BEAM section for what that
+does and does not establish:
 
 | arm | flag | context |
 |-----|------|---------|
@@ -759,13 +761,11 @@ paper-faithful float, `score_intfaithful` = code-faithful).
 judged locally or by an Opus-class CLI judge. Cognee's 0.79 is also a
 20-question single-conversation protocol. Compare within a row.
 
-## Comparator arms — ReFind and no-memory (added 2026-09-01, unrun)
+## Comparator arms — ReFind and no-memory (added 2026-09-01)
 
 Two opt-in arms, both adopted from the 2026-09-01 briefing-backlog triage.
-Neither has been run: they are harness code with unit coverage, and no arm
-score exists for either of them yet. (The leak-check numbers further down
-are a different thing — CPU-only re-parsing of an artifact that already
-existed.)
+Both have been **smoke-run only** (below): the plumbing is validated, and
+**no arm comparison from either harness is a measurement yet**.
 
 | arm | flag | context | measures |
 |-----|------|---------|----------|
@@ -810,6 +810,44 @@ PYTHONPATH=. python evals/beam_adapter.py --beam-root <path-to-BEAM> \
 PYTHONPATH=. python evals/beam_adapter.py --beam-root <path-to-BEAM> \
     --tier 100K --extractor qwen-27b --out-tag refind-100k --refind --nomem
 ```
+
+### First smoke, 2026-09-01 — plumbing only, not a measurement
+
+Both arms ran for the first time on the reproducible Qwen3.8 server
+(stock `llama-server`, `--cache-type-k/v q8_0`, verified by process
+inspection): BEAM 100K chat 1 (20 questions, all five arms) and
+LongMemEval oracle (5 knowledge-update questions, all five arms).
+Artifacts: `beam-100K-qwen-27b-refind-smoke.jsonl(.summary.json)` and
+`longmemeval-ku-oracle-qwen-27b-refind-smoke.jsonl(.summary.json)`.
+
+**No accuracy from these runs is quoted anywhere, here or in the
+CHANGELOG, and none should be.** One chat and five questions cannot
+separate arms — read the committed summaries if you want to see them, and
+treat them as plumbing receipts.
+
+What the smoke *does* establish, from the per-row `refind_trace`:
+
+- The loop behaves like a loop. On BEAM it used 2.9 of its 3 rounds on
+  average, issued 7.4 distinct queries per question (cap 9), and
+  accumulated 49 inspected turns per question (cap 72) — reformulating
+  between rounds rather than repeating itself, which is what
+  skip-already-inspected is for.
+- It served **exactly 6 turns on every question of both runs**, the rag
+  control's budget.
+- **0 plan failures and 0 fallbacks** across 25 questions: the local model
+  returned parseable JSON plans every time, and no window emptied the
+  search.
+- Temporal narrowing fires but is not the main channel: 7 of 49 BEAM
+  rounds proposed a date window, and one LongMemEval question narrowed to
+  a 3-day range and answered correctly.
+- The no-memory arm was served a genuinely empty context on every row and
+  abstained on the LongMemEval questions, as its prompt tells it to.
+
+One asymmetry worth carrying into any real run: the arms are matched by
+**turn count, not characters**. ReFind's 6 turns averaged ~17.4k chars
+against the rag control's ~14.2k (hybrid sits at ~16.1k), because the loop
+tends to select longer turns. A future run reading a refind-vs-rag delta
+should say so, or add a character-matched variant.
 
 ### Gold-answer leak check (`leak_check.py`)
 

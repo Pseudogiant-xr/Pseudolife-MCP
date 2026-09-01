@@ -1,0 +1,182 @@
+{
+  "benchmark": "BEAM",
+  "tier": "100K",
+  "extractor": "qwen-27b",
+  "n_questions": 20,
+  "n_chats": 1,
+  "scoring_note": "paper-faithful float mean; _intfaithful mirrors upstream int() flooring of 0.5",
+  "arms": {
+    "rag": {
+      "score": 0.5342,
+      "score_intfaithful": 0.4867
+    },
+    "cortex": {
+      "score": 0.335,
+      "score_intfaithful": 0.3
+    },
+    "hybrid": {
+      "score": 0.5717,
+      "score_intfaithful": 0.5617
+    },
+    "refind": {
+      "score": 0.55,
+      "score_intfaithful": 0.49
+    },
+    "nomem": {
+      "score": 0.175,
+      "score_intfaithful": 0.15
+    }
+  },
+  "types": {
+    "abstention": {
+      "n": 2,
+      "rag": 0.5,
+      "cortex": 0.5,
+      "hybrid": 0.0,
+      "refind": 0.5,
+      "nomem": 1.0
+    },
+    "contradiction_resolution": {
+      "n": 2,
+      "rag": 0.125,
+      "cortex": 0.0,
+      "hybrid": 0.125,
+      "refind": 0.0,
+      "nomem": 0.0
+    },
+    "event_ordering": {
+      "n": 2,
+      "rag": 0.5666,
+      "cortex": 0.0,
+      "hybrid": 0.5666,
+      "refind": 0.1,
+      "nomem": 0.0
+    },
+    "information_extraction": {
+      "n": 2,
+      "rag": 0.75,
+      "cortex": 0.5,
+      "hybrid": 1.0,
+      "refind": 1.0,
+      "nomem": 0.0
+    },
+    "instruction_following": {
+      "n": 2,
+      "rag": 0.5,
+      "cortex": 0.75,
+      "hybrid": 1.0,
+      "refind": 0.75,
+      "nomem": 0.0
+    },
+    "knowledge_update": {
+      "n": 2,
+      "rag": 0.0,
+      "cortex": 0.5,
+      "hybrid": 0.5,
+      "refind": 1.0,
+      "nomem": 0.0
+    },
+    "multi_session_reasoning": {
+      "n": 2,
+      "rag": 0.625,
+      "cortex": 0.0,
+      "hybrid": 0.625,
+      "refind": 0.375,
+      "nomem": 0.0
+    },
+    "preference_following": {
+      "n": 2,
+      "rag": 1.0,
+      "cortex": 1.0,
+      "hybrid": 1.0,
+      "refind": 0.875,
+      "nomem": 0.75
+    },
+    "summarization": {
+      "n": 2,
+      "rag": 0.4,
+      "cortex": 0.1,
+      "hybrid": 0.4,
+      "refind": 0.4,
+      "nomem": 0.0
+    },
+    "temporal_reasoning": {
+      "n": 2,
+      "rag": 0.875,
+      "cortex": 0.0,
+      "hybrid": 0.5,
+      "refind": 0.5,
+      "nomem": 0.0
+    }
+  },
+  "hybrid_top_k": 6,
+  "rag_top_k": 6,
+  "refind_top_k": 6,
+  "refind_rounds": 3,
+  "leak_check": {
+    "check": "gold-answer leak (SR-TTT arXiv 2603.06642)",
+    "n_rows": 20,
+    "n_leaked": 0,
+    "n_untestable": 10,
+    "untestable_reasons": {
+      "no_gold": 10
+    },
+    "leaked": [],
+    "untestable": [
+      "1/abstention[0]",
+      "1/abstention[1]",
+      "1/contradiction_resolution[0]",
+      "1/contradiction_resolution[1]",
+      "1/instruction_following[0]",
+      "1/instruction_following[1]",
+      "1/preference_following[0]",
+      "1/preference_following[1]",
+      "1/summarization[0]",
+      "1/summarization[1]"
+    ],
+    "sites": {},
+    "min_answer_chars": 4,
+    "arms": {
+      "cortex": {
+        "n": 20,
+        "all": 0.335,
+        "n_leak_free": 20,
+        "leak_free": 0.335,
+        "n_testable": 10,
+        "leak_free_testable": 0.2
+      },
+      "hybrid": {
+        "n": 20,
+        "all": 0.5717,
+        "n_leak_free": 20,
+        "leak_free": 0.5717,
+        "n_testable": 10,
+        "leak_free_testable": 0.6383
+      },
+      "nomem": {
+        "n": 20,
+        "all": 0.175,
+        "n_leak_free": 20,
+        "leak_free": 0.175,
+        "n_testable": 10,
+        "leak_free_testable": 0.0
+      },
+      "rag": {
+        "n": 20,
+        "all": 0.5342,
+        "n_leak_free": 20,
+        "leak_free": 0.5342,
+        "n_testable": 10,
+        "leak_free_testable": 0.5633
+      },
+      "refind": {
+        "n": 20,
+        "all": 0.55,
+        "n_leak_free": 20,
+        "leak_free": 0.55,
+        "n_testable": 10,
+        "leak_free_testable": 0.595
+      }
+    }
+  }
+}

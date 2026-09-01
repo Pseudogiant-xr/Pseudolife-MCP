@@ -1,0 +1,89 @@
+{
+  "dataset": "oracle",
+  "extractor": "qwen-27b",
+  "n": 5,
+  "bench_env": {
+    "thinking": null,
+    "sampler": null
+  },
+  "arms": {
+    "rag": {
+      "accuracy": 0.8,
+      "context_tokens": 1650.6
+    },
+    "cortex": {
+      "accuracy": 1.0,
+      "context_tokens": 68.4
+    },
+    "hybrid": {
+      "accuracy": 1.0,
+      "context_tokens": 1727.8
+    },
+    "nomem": {
+      "accuracy": 0.0,
+      "context_tokens": 1.0
+    },
+    "refind": {
+      "accuracy": 0.4,
+      "context_tokens": 1682.2
+    },
+    "cascade": {
+      "accuracy": 1.0,
+      "context_tokens": 68.4
+    }
+  },
+  "superseded_total": 4,
+  "leak_check": {
+    "check": "gold-answer leak (SR-TTT arXiv 2603.06642)",
+    "n_rows": 5,
+    "n_leaked": 0,
+    "n_untestable": 0,
+    "untestable_reasons": {},
+    "leaked": [],
+    "untestable": [],
+    "sites": {},
+    "min_answer_chars": 4,
+    "arms": {
+      "cortex": {
+        "n": 5,
+        "all": 1.0,
+        "n_leak_free": 5,
+        "leak_free": 1.0,
+        "n_testable": 5,
+        "leak_free_testable": 1.0
+      },
+      "hybrid": {
+        "n": 5,
+        "all": 1.0,
+        "n_leak_free": 5,
+        "leak_free": 1.0,
+        "n_testable": 5,
+        "leak_free_testable": 1.0
+      },
+      "nomem": {
+        "n": 5,
+        "all": 0.0,
+        "n_leak_free": 5,
+        "leak_free": 0.0,
+        "n_testable": 5,
+        "leak_free_testable": 0.0
+      },
+      "rag": {
+        "n": 5,
+        "all": 0.8,
+        "n_leak_free": 5,
+        "leak_free": 0.8,
+        "n_testable": 5,
+        "leak_free_testable": 0.8
+      },
+      "refind": {
+        "n": 5,
+        "all": 0.4,
+        "n_leak_free": 5,
+        "leak_free": 0.4,
+        "n_testable": 5,
+        "leak_free_testable": 0.4
+      }
+    }
+  }
+}
