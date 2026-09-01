@@ -48,6 +48,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   ping's timeout during a DB stall
   (`tests/test_web.py::test_asgi_health_runs_off_the_event_loop`).
 
+### Fixed (2026-09-01 — session hooks stop mistaking a busy daemon for a dead one)
+- **The plugin's SessionStart/SessionEnd hooks retry before declaring the
+  daemon down, and the fallback no longer claims the MCP tools are
+  unavailable.** A session start on 2026-09-01 hit the single 5s curl
+  attempt and the hook then told the whole session the
+  `mcp__pseudolife-memory__*` tools were unavailable — falsely, since the
+  MCP transport was fine and steady-state hook latency is ~0.1s. (The
+  incident was initially attributed to the dream-sweep judging tick;
+  same-day follow-up measurements showed no sweep was running at that
+  moment and the sweep's lock holds total ≤0.43s — the retry still
+  correctly bridges the real short stalls, e.g. the ~1.5s CMS autosave
+  measured against a 1,123-entry bank, and whatever timed out the
+  original attempt.) Both hook curls now carry `--retry 1 --retry-delay 1`
+  (plain `--retry` classes a timeout as transient, which is exactly the
+  measured failure; `--retry-all-errors` was deliberately rejected — it
+  breaks option parsing outright on curl < 7.71, still common on LTS
+  hosts, which would turn the intermittent false alarm into a permanent
+  one). Registration is idempotent per session_id so the retry is safe,
+  and the schedules sit inside their hooks.json budgets (5+1+5=11s < 15s
+  start; 3+1+3=7s < 10s end). The session-start fallback now says the
+  daemon "did not answer", tells the agent to make one `memory_stats`-style
+  call before treating memory as offline, and only then points at the
+  docker-compose quickstart. `tests/test_plugin_packaging.py` pins the
+  retry count by regex (a bare retry flag with no count is a no-op), the
+  `--retry-all-errors` ban, the verify-first guidance, and — parsed from
+  both sides — that each script's worst-case curl schedule plus spawn
+  margin fits its hooks.json timeout, so a future bump on either side
+  goes RED instead of silently producing a killed, message-less hook.
+
 ### Added (2026-09-01 — dreamer reasoning effort is now a knob)
 - **The dreamer's reasoning effort can be pinned from the Console.** What
   the dream extractor spent on thinking was previously decided outside the
