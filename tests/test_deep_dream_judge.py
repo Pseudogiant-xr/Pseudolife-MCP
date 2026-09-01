@@ -110,6 +110,25 @@ def test_shadow_mode_records_and_applies_nothing(svc):
     assert row["judge_model"] == "stub-judge"
 
 
+def test_judge_logs_batch_start(svc, caplog):
+    """The judge must announce a batch BEFORE calling the model, not only
+    log the completed verdicts (2026-09-01). The 2026-08-31 hook-timeout
+    forensics misplaced a ~50s incident window inside the judge because
+    the completion line was the only trace the tick left — a start line
+    brackets the long lock-free LLM wait in the ledger."""
+    import logging
+
+    svc.config.memory.deep_dream.judge_mode = "shadow"
+    _propose(svc, "beta svc", "beta service")
+    judge = _StubJudge({("beta svc", "beta service"): ("leave", 0.5)})
+    with caplog.at_level(logging.INFO):
+        out = svc.deep_dream_judge(judge)
+    assert out["judged"] == 1
+    starts = [r.message for r in caplog.records
+              if "judging" in r.message and "1" in r.message]
+    assert starts, "the judge must log the batch size before the model call"
+
+
 def test_auto_reject_applies_only_confident_rejects(svc):
     svc.config.memory.deep_dream.judge_mode = "auto-reject"
     svc.config.memory.deep_dream.judge_reject_min_confidence = 0.8

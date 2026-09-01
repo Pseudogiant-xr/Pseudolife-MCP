@@ -256,6 +256,31 @@ def test_asgi_health_open(svc):
     assert st == 200
 
 
+def test_asgi_health_runs_off_the_event_loop(svc):
+    """/health composes its payload with a blocking Postgres ping. Run
+    inline on the asyncio loop, a stalled DB would freeze the entire web
+    surface — hooks, console, MCP — for the ping's timeout, turning a DB
+    stall into a total daemon outage (2026-09-01 review of the 03:07
+    hook-timeout incident). The payload builder must execute on an
+    executor thread, like every other blocking handler in this app."""
+    import threading
+
+    seen = {}
+
+    def payload():
+        seen["thread"] = threading.current_thread()
+        return {"status": "ok"}
+
+    app = build_console_app(stub_mcp, None, payload, svc)
+    st, _ = call(app, "GET", "/health")
+    assert st == 200
+    # asgi_helpers.call runs the loop on the calling thread, so an inline
+    # (loop-blocking) call would land exactly there.
+    assert seen["thread"] is not threading.current_thread(), (
+        "health_payload ran on the event-loop thread — a stalled DB ping "
+        "would block every request in the daemon")
+
+
 def test_asgi_health_degraded_returns_503(svc):
     """2026-07-02 review fix: /health said 200 'ok' while the DB was
     unreachable and every memory tool failed. A degraded payload must

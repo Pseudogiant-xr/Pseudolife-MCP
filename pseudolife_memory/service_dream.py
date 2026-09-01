@@ -2266,6 +2266,11 @@ class DreamOps:
                 return {"judged": 0, "skipped": "no_judge_extractor"}
             cap = int(limit if limit is not None else cfg.judge_batch)
             pending = pending[:max(1, cap)]
+            # Announce the batch BEFORE the enrichment + model call: the
+            # completion line alone let the 2026-08-31 forensics misplace
+            # a ~50s window inside this (mostly lock-free) phase.
+            logger.info("deep-dream judge: judging %d pending merge "
+                        "proposal(s) (mode %s)", len(pending), cfg.judge_mode)
             with self._lock:
                 g = self._storage.load_graph()
                 scope_map = self._storage.entity_sources_map()
