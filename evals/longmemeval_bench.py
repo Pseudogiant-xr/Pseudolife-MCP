@@ -65,6 +65,7 @@ os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 from ladder_sweep import approx_tokens, build_service, probe  # noqa: E402
 from replicate import cascade_correct, cascade_context_tokens  # noqa: E402
+import answerability_probe  # noqa: E402
 import leak_check  # noqa: E402
 import nomem_arm  # noqa: E402
 import refind_arm  # noqa: E402
@@ -998,6 +999,19 @@ def report(dataset: str, extractor_name: str, tag: str = "",
         print(f"gold-answer leaks: {n_leaked} of {n} questions"
               + (" (arm means beside them exclude these rows)"
                  if n_leaked else ""))
+    # Rows with persisted contexts carry the answerability + pathway
+    # cross-tab (AWM/PAST-Bench); legacy context-less artifacts report
+    # unchanged. One implementation, shared with the BEAM adapter.
+    ans_block = answerability_probe.report_block(rows)
+    if ans_block:
+        summary["answerability"] = ans_block
+        for arm, a in ans_block["arms"].items():
+            pw = a["pathway"]
+            examined = pw["supported"] + pw["unsupported"] + pw["spanning"]
+            print(f"answerability {arm}: red-flag "
+                  f"{a['cells']['unanswerable_correct']}"
+                  f"/{a['n_testable']} testable, pathway supported "
+                  f"{pw['supported']}/{examined} of correct")
     # Per-type breakdown, only when the run spans more than one type.
     by_type: dict[str, list[dict]] = {}
     for r in rows:

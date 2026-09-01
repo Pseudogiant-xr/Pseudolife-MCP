@@ -1,0 +1,324 @@
+{
+  "check": "memory-only answerability + pathway evidence (AWM arXiv 2608.25618, PAST-Bench arXiv 2608.04003)",
+  "n_rows": 5,
+  "arms": {
+    "cortex": {
+      "n": 5,
+      "n_testable": 5,
+      "untestable_reasons": {},
+      "n_unjudged": 0,
+      "n_partial": 0,
+      "cells": {
+        "answerable_correct": 5,
+        "answerable_wrong": 0,
+        "unanswerable_correct": 0,
+        "unanswerable_wrong": 0
+      },
+      "answerable_share": 1.0,
+      "answerable_by": {
+        "span": 4,
+        "tokens": 1
+      },
+      "unanswerable_correct_ids": [],
+      "red_flag_leak_explained": 0,
+      "pathway": {
+        "n_correct": 5,
+        "untestable": 0,
+        "supported": 5,
+        "unsupported": 0,
+        "spanning": 0,
+        "supported_share": 1.0,
+        "unsupported_ids": [],
+        "spanning_ids": []
+      }
+    },
+    "hybrid": {
+      "n": 5,
+      "n_testable": 5,
+      "untestable_reasons": {},
+      "n_unjudged": 0,
+      "n_partial": 0,
+      "cells": {
+        "answerable_correct": 5,
+        "answerable_wrong": 0,
+        "unanswerable_correct": 0,
+        "unanswerable_wrong": 0
+      },
+      "answerable_share": 1.0,
+      "answerable_by": {
+        "span": 5,
+        "tokens": 0
+      },
+      "unanswerable_correct_ids": [],
+      "red_flag_leak_explained": 0,
+      "pathway": {
+        "n_correct": 5,
+        "untestable": 0,
+        "supported": 5,
+        "unsupported": 0,
+        "spanning": 0,
+        "supported_share": 1.0,
+        "unsupported_ids": [],
+        "spanning_ids": []
+      }
+    },
+    "nomem": {
+      "n": 5,
+      "n_testable": 0,
+      "untestable_reasons": {
+        "context_free_arm": 5
+      },
+      "n_unjudged": 0,
+      "n_partial": 0,
+      "cells": {
+        "answerable_correct": 0,
+        "answerable_wrong": 0,
+        "unanswerable_correct": 0,
+        "unanswerable_wrong": 0
+      },
+      "answerable_share": null,
+      "answerable_by": {
+        "span": 0,
+        "tokens": 0
+      },
+      "unanswerable_correct_ids": [],
+      "red_flag_leak_explained": 0,
+      "pathway": {
+        "n_correct": 0,
+        "untestable": 0,
+        "supported": 0,
+        "unsupported": 0,
+        "spanning": 0,
+        "supported_share": null,
+        "unsupported_ids": [],
+        "spanning_ids": []
+      }
+    },
+    "rag": {
+      "n": 5,
+      "n_testable": 5,
+      "untestable_reasons": {},
+      "n_unjudged": 0,
+      "n_partial": 0,
+      "cells": {
+        "answerable_correct": 4,
+        "answerable_wrong": 1,
+        "unanswerable_correct": 0,
+        "unanswerable_wrong": 0
+      },
+      "answerable_share": 1.0,
+      "answerable_by": {
+        "span": 5,
+        "tokens": 0
+      },
+      "unanswerable_correct_ids": [],
+      "red_flag_leak_explained": 0,
+      "pathway": {
+        "n_correct": 4,
+        "untestable": 0,
+        "supported": 4,
+        "unsupported": 0,
+        "spanning": 0,
+        "supported_share": 1.0,
+        "unsupported_ids": [],
+        "spanning_ids": []
+      }
+    },
+    "refind": {
+      "n": 5,
+      "n_testable": 5,
+      "untestable_reasons": {},
+      "n_unjudged": 0,
+      "n_partial": 0,
+      "cells": {
+        "answerable_correct": 2,
+        "answerable_wrong": 3,
+        "unanswerable_correct": 0,
+        "unanswerable_wrong": 0
+      },
+      "answerable_share": 1.0,
+      "answerable_by": {
+        "span": 4,
+        "tokens": 1
+      },
+      "unanswerable_correct_ids": [],
+      "red_flag_leak_explained": 0,
+      "pathway": {
+        "n_correct": 2,
+        "untestable": 0,
+        "supported": 2,
+        "unsupported": 0,
+        "spanning": 0,
+        "supported_share": 1.0,
+        "unsupported_ids": [],
+        "spanning_ids": []
+      }
+    }
+  },
+  "pathway_evidence": [
+    {
+      "id": "6a1eabeb",
+      "arm": "cortex",
+      "n_context_entries": 3,
+      "gold_entries": [
+        0
+      ],
+      "verdict": "supported"
+    },
+    {
+      "id": "6aeb4375",
+      "arm": "cortex",
+      "n_context_entries": 3,
+      "gold_entries": [
+        0
+      ],
+      "verdict": "supported"
+    },
+    {
+      "id": "830ce83f",
+      "arm": "cortex",
+      "n_context_entries": 1,
+      "gold_entries": [
+        0
+      ],
+      "verdict": "supported"
+    },
+    {
+      "id": "852ce960",
+      "arm": "cortex",
+      "n_context_entries": 10,
+      "gold_entries": [
+        1
+      ],
+      "verdict": "supported"
+    },
+    {
+      "id": "945e3d21",
+      "arm": "cortex",
+      "n_context_entries": 6,
+      "gold_entries": [
+        0
+      ],
+      "verdict": "supported"
+    },
+    {
+      "id": "6a1eabeb",
+      "arm": "hybrid",
+      "n_context_entries": 39,
+      "gold_entries": [
+        0,
+        4,
+        6,
+        15,
+        25,
+        35
+      ],
+      "verdict": "supported"
+    },
+    {
+      "id": "6aeb4375",
+      "arm": "hybrid",
+      "n_context_entries": 20,
+      "gold_entries": [
+        0,
+        8,
+        17
+      ],
+      "verdict": "supported"
+    },
+    {
+      "id": "830ce83f",
+      "arm": "hybrid",
+      "n_context_entries": 10,
+      "gold_entries": [
+        0,
+        9
+      ],
+      "verdict": "supported"
+    },
+    {
+      "id": "852ce960",
+      "arm": "hybrid",
+      "n_context_entries": 45,
+      "gold_entries": [
+        1,
+        25
+      ],
+      "verdict": "supported"
+    },
+    {
+      "id": "945e3d21",
+      "arm": "hybrid",
+      "n_context_entries": 37,
+      "gold_entries": [
+        0,
+        17
+      ],
+      "verdict": "supported"
+    },
+    {
+      "id": "6a1eabeb",
+      "arm": "rag",
+      "n_context_entries": 36,
+      "gold_entries": [
+        1,
+        3,
+        12,
+        22,
+        32
+      ],
+      "verdict": "supported"
+    },
+    {
+      "id": "6aeb4375",
+      "arm": "rag",
+      "n_context_entries": 17,
+      "gold_entries": [
+        5,
+        14
+      ],
+      "verdict": "supported"
+    },
+    {
+      "id": "830ce83f",
+      "arm": "rag",
+      "n_context_entries": 9,
+      "gold_entries": [
+        8
+      ],
+      "verdict": "supported"
+    },
+    {
+      "id": "945e3d21",
+      "arm": "rag",
+      "n_context_entries": 31,
+      "gold_entries": [
+        11
+      ],
+      "verdict": "supported"
+    },
+    {
+      "id": "6a1eabeb",
+      "arm": "refind",
+      "n_context_entries": 38,
+      "gold_entries": [
+        1,
+        2,
+        12,
+        25,
+        34
+      ],
+      "verdict": "supported"
+    },
+    {
+      "id": "830ce83f",
+      "arm": "refind",
+      "n_context_entries": 9,
+      "gold_entries": [
+        8
+      ],
+      "verdict": "supported"
+    }
+  ],
+  "source": "longmemeval-ku-oracle-qwen-27b-refind-smoke.jsonl"
+}

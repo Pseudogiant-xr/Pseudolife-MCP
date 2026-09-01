@@ -37,7 +37,10 @@ ARMS = ("rag", "cortex", "hybrid")
 # The per-arm fields the answer phase writes. Any key ending in one of
 # these suffixes is a verdict for SOME arm, which is how strip_judged
 # clears comparator arms it was never told about.
-_JUDGE_SUFFIXES = ("response", "correct", "context_tokens")
+_JUDGE_SUFFIXES = ("response", "correct", "context_tokens",
+                   # answerability_probe.py --judge writes this per arm;
+                   # a rebuilt/replicated row must not carry a stale one.
+                   "answerable_judge")
 _REPLICA_SUFFIX = re.compile(r"-r\d+$")
 BASELINE_FLOOR = 0.03
 DEFAULT_BASELINE = RESULTS_DIR / "regression_gate.baseline.json"
