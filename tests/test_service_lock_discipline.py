@@ -77,6 +77,8 @@ CALLER_HOLDS_LOCK = {
     "_record_retrieval_use",
     "_track_slot_reads",
     "_persist_episodes",
+    "_persist_tombstones",
+    "_persist_deferred_empty",
     "_load_infer_cursor",
     "_save_infer_cursor",
     "_pending_inference_candidates",

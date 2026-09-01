@@ -2020,7 +2020,9 @@ _session_reaper_started = False
 def start_session_reaper() -> None:
     """Idempotent: close session episodes idle past a threshold. The direct-HTTP
     transport gives no session-end signal, so this is how a session episode
-    closes (fires the end-of-session dream / prunes if empty). Daemon-only."""
+    closes (fires the end-of-session dream; an empty one is kept until past
+    the resume window, then swept with a tombstone so its briefing handle
+    stays honorable). Daemon-only."""
     global _session_reaper_started
     if _session_reaper_started:
         return

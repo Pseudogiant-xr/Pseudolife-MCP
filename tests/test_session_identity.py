@@ -391,25 +391,150 @@ def test_reaped_handle_does_not_hijack_current_pointer(pg_service):
     assert svc._cms.episodes.current_id == other["id"]
 
 
-def test_reaped_handle_past_resume_window_still_warns(pg_service):
+def test_reaped_handle_resumes_past_session_key_window(pg_service):
+    """A presented handle is an explicit identity claim — only that session's
+    briefing could have carried it — so it resumes under its own, much longer
+    window (``PSEUDOLIFE_HANDLE_RESUME_SECONDS``, default 30 d), not the 6 h
+    session-key window. A deferred task returning days later must still
+    attribute (2026-09-02 incident)."""
     svc = pg_service
     ep = svc.episode_start_session("keyU", "session U")
     svc.store("seed keyU", source="t", episode=ep["id"][:12])
     svc.episode_end_session("keyU")   # close survives: episode is non-empty
     root = svc._cms.episodes.episodes[ep["id"]]
-    root.ended_at = _time.time() - 30_000    # beyond the 6 h window
+    root.ended_at = _time.time() - 30_000    # beyond 6 h, inside the handle window
+    res = svc.store("back after a long break", source="t", episode=ep["id"][:12])
+    assert "episode_warning" not in res
+    assert root.ended_at is None             # resumed
+
+
+def test_reaped_handle_past_handle_window_warns(pg_service, monkeypatch):
+    monkeypatch.setenv("PSEUDOLIFE_HANDLE_RESUME_SECONDS", "3600")
+    svc = pg_service
+    ep = svc.episode_start_session("keyU2", "session U2")
+    svc.store("seed keyU2", source="t", episode=ep["id"][:12])
+    svc.episode_end_session("keyU2")   # close survives: episode is non-empty
+    root = svc._cms.episodes.episodes[ep["id"]]
+    root.ended_at = _time.time() - 7_200     # beyond the shrunk handle window
     res = svc.store("too old", source="t", episode=ep["id"][:12])
     assert res["episode_warning"] == "unknown or closed episode handle"
 
 
 def test_reaped_handle_resume_disabled_warns(pg_service, monkeypatch):
-    monkeypatch.setenv("PSEUDOLIFE_SESSION_RESUME_SECONDS", "0")
+    monkeypatch.setenv("PSEUDOLIFE_HANDLE_RESUME_SECONDS", "0")
     svc = pg_service
     ep = svc.episode_start_session("keyV", "session V")
     svc.store("seed keyV", source="t", episode=ep["id"][:12])
     svc.episode_end_session("keyV")   # close survives: episode is non-empty
     res = svc.store("resume off", source="t", episode=ep["id"][:12])
     assert res["episode_warning"] == "unknown or closed episode handle"
+
+
+# ── tombstone recreation (empty roots swept during a long break) ─────────────
+# A session that only reads (searches, fact_gets) before a multi-day break has
+# an EMPTY root: the reaper closes it, and the sweep deletes it once past the
+# session resume window. The always-pass briefing handle must survive even
+# that — a tombstone lets the resolver recreate the episode under its
+# original id (2026-09-02 incident).
+
+
+def test_reap_keeps_empty_root_within_retention(pg_service):
+    svc = pg_service
+    ep = svc.episode_start_session("keyE", "session E")     # open, 0 entries
+    out = svc.reap_idle_sessions(idle_seconds=0, now=_time.time() + 10_000)
+    assert out["reaped"] == 1
+    root = svc._cms.episodes.episodes[ep["id"]]             # closed, kept
+    assert root.ended_at is not None
+
+
+def test_swept_empty_root_handle_recreates_from_tombstone(pg_service):
+    svc = pg_service
+    ep = svc.episode_start_session("keyT2", "session T2")   # open, 0 entries
+    svc.reap_idle_sessions(idle_seconds=0, now=_time.time() + 10_000)
+    out = svc.reap_idle_sessions(idle_seconds=0, now=_time.time() + 30_000)
+    assert out["swept"] == 1
+    assert ep["id"] not in svc._cms.episodes.episodes       # row deleted
+    res = svc.store("deferred work resumed", source="t", episode=ep["id"][:12])
+    assert "episode_warning" not in res
+    root = svc._cms.episodes.episodes[ep["id"]]             # recreated, same id
+    assert root.ended_at is None and root.session_key == "keyT2"
+    found = [e for band in svc._cms.bands for e in band.entries
+             if e.text == "deferred work resumed"]
+    assert found and found[0].episode_id == ep["id"]
+
+
+def test_tombstone_survives_daemon_restart(pg_service, tmp_path):
+    """The tombstone map must reach storage meta — without write-through a
+    daemon restart during the break silently loses the handle anyway (the
+    same failure shape as the PR #134 storage finding)."""
+    svc = pg_service
+    ep = svc.episode_start_session("keyP", "session P")     # open, 0 entries
+    svc.reap_idle_sessions(idle_seconds=0, now=_time.time() + 30_000)
+    assert ep["id"] not in svc._cms.episodes.episodes       # close+sweep, one pass
+    from pseudolife_memory.service import MemoryService
+    svc2 = MemoryService(data_dir=tmp_path / "restart")
+    svc2._ensure_init()
+    res = svc2.store("write after restart", source="t", episode=ep["id"][:12])
+    assert "episode_warning" not in res
+    root = svc2._cms.episodes.episodes[ep["id"]]
+    assert root.ended_at is None and root.session_key == "keyP"
+
+
+def test_tombstone_recreation_preserves_agent_title(pg_service):
+    """An agent-set session title must ride the tombstone — recreating the
+    episode with a generic stamp would discard the one human-meaningful
+    label the session deliberately left (review finding, 2026-09-02)."""
+    svc = pg_service
+    ep = svc.episode_start_session("keyTT", "session TT")   # open, 0 entries
+    svc.set_session_title("PseudoLife - deferred benchmark",
+                          episode=ep["id"][:12])
+    svc.reap_idle_sessions(idle_seconds=0, now=_time.time() + 10_000)
+    out = svc.reap_idle_sessions(idle_seconds=0, now=_time.time() + 30_000)
+    assert out["swept"] == 1
+    res = svc.store("back after the break", source="t", episode=ep["id"][:12])
+    assert "episode_warning" not in res
+    root = svc._cms.episodes.episodes[ep["id"]]
+    assert root.title == "PseudoLife - deferred benchmark"
+
+
+def test_tombstone_recreation_respects_handle_window(pg_service, monkeypatch):
+    svc = pg_service
+    ep = svc.episode_start_session("keyTW", "session TW")   # open, 0 entries
+    svc.reap_idle_sessions(idle_seconds=0, now=_time.time() + 30_000)
+    assert ep["id"] not in svc._cms.episodes.episodes       # close+sweep, one pass
+    monkeypatch.setenv("PSEUDOLIFE_HANDLE_RESUME_SECONDS", "3600")
+    t = svc._episode_tombstones[ep["id"]]                   # age the tombstone
+    svc._episode_tombstones[ep["id"]] = (
+        (t[0], _time.time() - 7_200) + tuple(t[2:]))
+    res = svc.store("too late", source="t", episode=ep["id"][:12])
+    assert res["episode_warning"] == "unknown or closed episode handle"
+
+
+def test_tombstone_expiry_and_cap(pg_service):
+    """Window expiry and the 200 cap are only reachable through a sweep —
+    exercise them directly so a regression there is visible."""
+    svc = pg_service
+    now = _time.time()
+    svc._episode_tombstones = {
+        f"{i:032x}": ("k", now - i, "") for i in range(250)}
+    svc._episode_tombstones["f" * 32] = ("k", now - 3_000_000, "")  # > 30 d
+    svc._expire_tombstones_locked(now)
+    assert "f" * 32 not in svc._episode_tombstones          # expired
+    assert len(svc._episode_tombstones) == 200              # capped, newest kept
+    assert f"{0:032x}" in svc._episode_tombstones
+    assert f"{249:032x}" not in svc._episode_tombstones
+
+
+def test_deferred_empty_close_fires_no_dream(pg_service, monkeypatch):
+    """An empty root closed-but-kept by the reaper must not fire a dream —
+    empties never did (they were pruned), and deferral must not change that."""
+    svc = pg_service
+    calls = []
+    monkeypatch.setattr(svc, "_fire_and_forget_dream",
+                        lambda: calls.append(1))
+    svc.episode_start_session("keyD", "session D")          # open, 0 entries
+    svc.reap_idle_sessions(idle_seconds=0, now=_time.time() + 10_000)
+    assert calls == []
 
 
 def test_handle_touch_survives_the_next_reaper_sweep(pg_service):
