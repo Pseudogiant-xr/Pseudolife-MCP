@@ -1,0 +1,68 @@
+{
+  "check": "gold-answer leak (SR-TTT arXiv 2603.06642)",
+  "n_rows": 78,
+  "n_leaked": 0,
+  "n_untestable": 27,
+  "untestable_reasons": {
+    "trivial_gold": 27
+  },
+  "leaked": [],
+  "untestable": [
+    "d7c942c3",
+    "89941a93",
+    "184da446",
+    "4d6b87c8",
+    "0f05491a",
+    "b6019101",
+    "45dc21b6",
+    "618f13b2",
+    "72e3ee87",
+    "c4ea545c",
+    "01493427",
+    "6a27ffc2",
+    "1cea1afa",
+    "ed4ddc30",
+    "b01defab",
+    "7e974930",
+    "603deb26",
+    "5831f84d",
+    "affe2881",
+    "0ddfec37",
+    "69fee5aa",
+    "7401057b",
+    "c7dc5443",
+    "06db6396",
+    "10e09553",
+    "ba61f0b9",
+    "42ec0761"
+  ],
+  "sites": {},
+  "min_answer_chars": 4,
+  "arms": {
+    "cortex": {
+      "n": 78,
+      "all": 0.6667,
+      "n_leak_free": 78,
+      "leak_free": 0.6667,
+      "n_testable": 51,
+      "leak_free_testable": 0.6471
+    },
+    "hybrid": {
+      "n": 78,
+      "all": 0.8333,
+      "n_leak_free": 78,
+      "leak_free": 0.8333,
+      "n_testable": 51,
+      "leak_free_testable": 0.8039
+    },
+    "rag": {
+      "n": 78,
+      "all": 0.859,
+      "n_leak_free": 78,
+      "leak_free": 0.859,
+      "n_testable": 51,
+      "leak_free_testable": 0.8235
+    }
+  },
+  "source": "longmemeval-ku-oracle-qwen-27b-ceiling-e2e.jsonl"
+}

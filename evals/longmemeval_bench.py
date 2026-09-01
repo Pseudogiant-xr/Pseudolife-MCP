@@ -23,6 +23,8 @@ Phases (``--phase``) decouple GPU tenancy: ``extract`` ingests + dreams +
 persists the retrieval contexts per question (only the extractor endpoint is
 needed); ``answer`` fills in answers + judgements from the persisted contexts
 (only the Qwen endpoint is needed); ``full`` (default) does both in one pass.
+One exception: ``--refind`` plans its search with the ANSWERER model, so an
+extract phase carrying that arm needs the Qwen endpoint too (probed up front).
 
 Dataset: HuggingFace ``xiaowu0162/longmemeval-cleaned`` JSONs downloaded into
 ``evals/data/`` (gitignored): ``longmemeval_oracle.json`` (evidence sessions
@@ -63,6 +65,9 @@ os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 from ladder_sweep import approx_tokens, build_service, probe  # noqa: E402
 from replicate import cascade_correct, cascade_context_tokens  # noqa: E402
+import leak_check  # noqa: E402
+import nomem_arm  # noqa: E402
+import refind_arm  # noqa: E402
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
@@ -377,6 +382,66 @@ def rewrite_rows(path: Path, rows: list[dict]) -> None:
     tmp.replace(path)
 
 
+def _chronological_sessions(q: dict) -> list[tuple[str, list]]:
+    """The haystack in ingest order. Both the ingest path and the ReFind
+    archive read it through here so their turn ordering cannot drift."""
+    return sorted(zip(q["haystack_dates"], q["haystack_sessions"]),
+                  key=lambda pair: _parse_date(pair[0]))
+
+
+def archive_from_lme_question(q: dict) -> refind_arm.LexicalArchive:
+    """The ReFind arm's lexical archive for one question, built from the
+    SAME haystack turns, in the same order and the same stored text as
+    ``ingest_and_dream`` writes into the bank — so a refind-vs-rag delta
+    is about the retrieval loop and not a different corpus. Pinned
+    turn-for-turn against the ingest path by
+    ``test_archive_mirrors_what_ingest_stores_turn_for_turn``."""
+    records, ordinal = [], 0
+    for index, (date, session) in enumerate(_chronological_sessions(q), 1):
+        for turn in session:
+            content = (turn.get("content") or "").strip()
+            if not content:
+                continue
+            ordinal += 1
+            records.append(refind_arm.ArchiveRecord(
+                text=f"[{date}] {turn['role']}: {content}",
+                session=str(index), ordinal=ordinal,
+                date=refind_arm.parse_anchor(date)))
+    return refind_arm.LexicalArchive(records)
+
+
+def serve_comparator_arms(contexts: dict, question: str, *, archive=None,
+                          refind: bool = False, nomem: bool = False,
+                          refind_kwargs: dict | None = None,
+                          chat=None) -> dict | None:
+    """Add the comparator arms to a context dict; returns the ReFind trace
+    (None when that arm is off).
+
+    Shared by both harnesses — the BEAM adapter calls it too, so the two
+    cannot drift into serving these arms differently. Off by default and
+    inert when off: no new context keys and not one extra model call, so
+    every pre-existing artifact stays byte-identical.
+    """
+    trace = None
+    if refind:
+        if archive is None:
+            raise SystemExit("the refind arm needs an archive — "
+                             "build one from the question's raw turns first")
+        kwargs = dict(refind_kwargs or {})
+        if kwargs.get("top_k") is None:
+            # Budget-matched to the rag control, read HERE rather than at
+            # flag-parse time — the same call-time contract HYBRID_TOP_K
+            # carries, so --rag-top-k style widening reaches both arms.
+            kwargs["top_k"] = RAG_TOP_K
+        contexts["refind"], trace = refind_arm.refind_search(
+            archive, question, chat=chat or _chat, **kwargs)
+    if nomem:
+        # Recorded as an explicit empty context: the artifact has to show
+        # the arm was served nothing (leak_check.py checks exactly that).
+        contexts["nomem"] = ""
+    return trace
+
+
 def ingest_and_dream(svc, extractor, q: dict, ex_url: str) -> dict:
     """Store every turn session-by-session in chronological order, dreaming
     after each session — the product cadence (consolidation fires between
@@ -384,10 +449,7 @@ def ingest_and_dream(svc, extractor, q: dict, ex_url: str) -> dict:
     tally = {"turns": 0, "claims": 0, "inserted": 0, "superseded": 0,
              "extract_seconds": 0.0}
     held = 0
-    sessions = sorted(
-        zip(q["haystack_dates"], q["haystack_sessions"]),
-        key=lambda pair: _parse_date(pair[0]))
-    for date, session in sessions:
+    for date, session in _chronological_sessions(q):
         for turn in session:
             content = (turn.get("content") or "").strip()
             if not content:
@@ -690,6 +752,28 @@ def build_contexts(svc, question: str, variants: bool = False,
     return ctx
 
 
+def answer_call(arm: str, question: str, question_date, ctx: str
+                ) -> tuple[str, str]:
+    """The (system, prompt) pair for one arm's answer call.
+
+    Every memory arm shares the answerer and context block, and that
+    prompt text is a CONTRACT — the regression gate re-answers pinned
+    contexts with it, so it is reproduced here byte for byte. The
+    no-memory arm shares the question framing (date prefix included) and
+    drops the context clauses entirely rather than serving an "(empty)"
+    block, which is itself a framing the other arms do not see.
+    """
+    if arm == "nomem":
+        # Built with THIS harness's length policy: its judge grades on
+        # containment, so a no-memory arm told to answer completely would
+        # get more shots at the gold than the one-sentence arms it bounds.
+        return (nomem_arm.nomem_system(nomem_arm.LENGTH_ONE_SENTENCE),
+                nomem_arm.nomem_prompt(question, question_date))
+    return _ANSWER_SYSTEM, (f"Question date: {question_date}\n"
+                            f"Question: {question}\n\n"
+                            f"Memory context:\n{ctx or '(empty)'}")
+
+
 def answer_and_judge(row: dict) -> dict:
     """Fill the answer/judge fields on a row from its persisted contexts."""
     # Missing question_type (pre---types files) falls back to the KU judge
@@ -703,9 +787,9 @@ def answer_and_judge(row: dict) -> dict:
     # hybrid_* arms.
     for arm in row["contexts"]:
         ctx = row["contexts"].get(arm, "")
-        prompt = (f"Question date: {row['question_date']}\n"
-                  f"Question: {row['question']}\n\nMemory context:\n{ctx or '(empty)'}")
-        response = _chat(_ANSWER_SYSTEM, prompt)
+        system, prompt = answer_call(arm, row["question"],
+                                     row["question_date"], ctx)
+        response = _chat(system, prompt)
         verdict = _chat(judge_system, (
             f"Question: {row['question']}\n"
             f"Correct answer: {row['answer']}\n"
@@ -740,12 +824,21 @@ def run_extract(dataset: str, limit: int | None, extractor_name: str,
                 events_prompt_file: str | None = None,
                 qids: str | None = None,
                 types: tuple[str, ...] = DEFAULT_TYPES,
-                variants: bool = False) -> None:
+                variants: bool = False,
+                refind: bool = False, nomem: bool = False,
+                refind_kwargs: dict | None = None) -> None:
     ex_url = EXTRACTORS[extractor_name]
     if not probe(ex_url):
         sys.exit(f"no extractor server at {ex_url} — start it first")
-    if do_answer and not probe(QWEN_URL):
-        sys.exit(f"no answer/judge server at {QWEN_URL} — start it first")
+    # --refind drives the ANSWERER model during the EXTRACT phase (its
+    # search loop is planned by that model), so the phase split's usual
+    # "extractor endpoint only" no longer holds for it. Probing here is
+    # what stops a run dying mid-question after paying a full ingest and
+    # writing no row to resume from.
+    if (do_answer or refind) and not probe(QWEN_URL):
+        why = "" if do_answer else " (the --refind search loop plans on it)"
+        sys.exit(f"no answer/judge server at {QWEN_URL}{why} "
+                 "— start it first")
     from pseudolife_memory.memory.dream import OpenAICompatExtractor
 
     slug = types_slug(types)
@@ -776,6 +869,15 @@ def run_extract(dataset: str, limit: int | None, extractor_name: str,
                                     events_prompt_file)
         tally = ingest_and_dream(svc, extractor, q, ex_url)
         contexts = build_contexts(svc, q["question"], variants=variants)
+        # Comparator arms (off by default): the ReFind loop searches the
+        # same haystack turns the bank just ingested; the no-memory arm is
+        # served nothing. Both contexts are PERSISTED like every other
+        # arm, so the answer phase (and a later rebuild_contexts re-answer)
+        # replays them without re-paying extraction.
+        refind_trace = serve_comparator_arms(
+            contexts, q["question"],
+            archive=archive_from_lme_question(q) if refind else None,
+            refind=refind, nomem=nomem, refind_kwargs=refind_kwargs)
         facts = dump_bank(svc, q, bank_dir(dataset, extractor_name, tag,
                                            slug)
                           / f"{q['question_id']}.json.gz")
@@ -793,6 +895,19 @@ def run_extract(dataset: str, limit: int | None, extractor_name: str,
             "contexts": contexts,
             "consolidation": tally,
             "wall_seconds": round(time.perf_counter() - t_start, 1),
+            # SR-TTT guard (arXiv 2603.06642): a question that already
+            # names its gold answer scores on every arm and measures no
+            # retrieval. leak_check.py reads this to report each arm's
+            # mean with those rows excluded; None = gold too short or
+            # generic to test.
+            "gold_in_question": leak_check.answer_present(q["question"],
+                                                          q["answer"]),
+            # Self-describing rows: only ReFind runs carry these, so every
+            # legacy artifact keeps its exact shape.
+            **({"refind_trace": refind_trace,
+                "refind_top_k": refind_trace["top_k"],
+                "refind_rounds": refind_trace["rounds_budget"]}
+               if refind_trace is not None else {}),
             **diagnose_bank(facts, q["answer"]),
         }
         marks = "extracted"
@@ -844,6 +959,18 @@ def report(dataset: str, extractor_name: str, tag: str = "",
     extra_arms = tuple(sorted(
         {k.removesuffix("_correct") for k in rows[0] if k.endswith("_correct")}
         - set(ARMS)))
+    # Rows must agree on their arms. A file resumed with different arm
+    # flags than it started with would otherwise either KeyError below or
+    # (if arms were intersected) quietly drop an arm from the table.
+    for r in rows:
+        missing = [a for a in extra_arms if f"{a}_correct" not in r]
+        if missing:
+            sys.exit(
+                f"{out_path.name}: row {r.get('question_id')} is missing "
+                f"the {', '.join(missing)} arm(s) that other rows carry — "
+                "the file mixes runs with different arm flags. Re-run the "
+                "answer phase over the whole file, or report the runs "
+                "separately.")
     for arm in ARMS + extra_arms + ("cascade",):
         if arm == "cascade":
             # Derived commit-gated cascade — cortex answer when that arm
@@ -861,6 +988,16 @@ def report(dataset: str, extractor_name: str, tag: str = "",
     sup = sum(r["consolidation"]["superseded"] for r in rows)
     print(f"supersessions across runs: {sup}")
     summary["superseded_total"] = sup
+    # Runs that recorded the per-row SR-TTT flag carry the leak check:
+    # how many questions named their own gold answer, and every arm's
+    # mean with those rows excluded. Legacy artifacts have no flag and
+    # their summaries stay unchanged.
+    if any(leak_check.FLAG_KEY in r for r in rows):
+        summary["leak_check"] = leak_check.check_rows(rows)
+        n_leaked = summary["leak_check"]["n_leaked"]
+        print(f"gold-answer leaks: {n_leaked} of {n} questions"
+              + (" (arm means beside them exclude these rows)"
+                 if n_leaked else ""))
     # Per-type breakdown, only when the run spans more than one type.
     by_type: dict[str, list[dict]] = {}
     for r in rows:
@@ -939,6 +1076,32 @@ def main() -> int:
                          "bench service (pair with --system-prompt-file "
                          "ku_op_prompt_v7_events.txt) and add the hybrid_ev "
                          "context arm (hybrid + served events block)")
+    ap.add_argument("--refind", action="store_true",
+                    help="add the ReFind comparator arm: an agentic "
+                         "LEXICAL search loop over the same haystack turns "
+                         "(temporal narrowing, skip-inspected, "
+                         "session-aware fusion), budget-matched to the rag "
+                         "control (arXiv 2608.12888)")
+    ap.add_argument("--nomem", action="store_true",
+                    help="add the no-memory control arm: the question "
+                         "alone, same task framing, no context "
+                         "(MemTrapBench, arXiv 2608.20202)")
+    ap.add_argument("--refind-rounds", type=int,
+                    default=refind_arm.DEFAULT_ROUNDS,
+                    help="search rounds the ReFind agent may take")
+    ap.add_argument("--refind-top-k", type=int, default=None,
+                    help="raw-turn budget the ReFind arm serves (default: "
+                         "RAG_TOP_K — budget-matched to the control)")
+    ap.add_argument("--refind-per-round-k", type=int,
+                    default=refind_arm.DEFAULT_PER_ROUND_K,
+                    help="turns each ReFind query may inspect")
+    ap.add_argument("--refind-max-queries", type=int,
+                    default=refind_arm.DEFAULT_MAX_QUERIES,
+                    help="searches the ReFind agent may issue per round")
+    ap.add_argument("--refind-session-weight", type=float,
+                    default=refind_arm.SESSION_FUSION_WEIGHT,
+                    help="weight of the session-aware fusion term "
+                         "(0 = pure lexical ranking)")
     ap.add_argument("--ev-variants", action="store_true",
                     help="aggregation-serving variants (2026-08-06 design): "
                          "add hybrid_ev_agg (events on either cue, full "
@@ -947,6 +1110,27 @@ def main() -> int:
     args = ap.parse_args()
     if args.ev_variants and not args.chronicle:
         ap.error("--ev-variants requires --chronicle")
+    if args.phase == "answer" and (args.refind or args.nomem):
+        # The answer phase only replays PERSISTED contexts, so these flags
+        # would do nothing at all — silently, and the user would read the
+        # resulting table as if the arms had run.
+        ap.error("--refind/--nomem build contexts, so they belong to the "
+                 "extract phase; --phase answer only answers what was "
+                 "already persisted")
+    if args.refind_top_k is not None and args.refind_top_k < 1:
+        ap.error("--refind-top-k must be positive")
+    for _flag, _value in (("--refind-rounds", args.refind_rounds),
+                          ("--refind-per-round-k", args.refind_per_round_k),
+                          ("--refind-max-queries", args.refind_max_queries)):
+        if _value < 1:
+            ap.error(f"{_flag} must be positive")
+    if not 0.0 <= args.refind_session_weight <= 1.0:
+        ap.error("--refind-session-weight must be in [0, 1]")
+    refind_kwargs = {"rounds": args.refind_rounds,
+                     "top_k": args.refind_top_k,
+                     "per_round_k": args.refind_per_round_k,
+                     "max_queries": args.refind_max_queries,
+                     "session_weight": args.refind_session_weight}
     global FACT_RENDER, HYBRID_CONTIG, HYBRID_TIMELINE, CHRONICLE, EV_VARIANTS
     FACT_RENDER = args.fact_render
     HYBRID_CONTIG = args.contiguity
@@ -967,7 +1151,9 @@ def main() -> int:
                     window=args.window,
                     system_prompt_file=args.system_prompt_file,
                     events_prompt_file=args.events_prompt_file,
-                    qids=args.qids, types=types, variants=args.variants)
+                    qids=args.qids, types=types, variants=args.variants,
+                    refind=args.refind, nomem=args.nomem,
+                    refind_kwargs=refind_kwargs)
     if args.phase != "extract":
         report(args.dataset, args.extractor, args.tag, types)
     return 0

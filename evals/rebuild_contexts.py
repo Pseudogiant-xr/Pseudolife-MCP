@@ -8,7 +8,9 @@ chains), and cortex search is plain cosine over
 ``encode_single(f"{entity} {attribute} {value}")`` — so the cortex arm's
 context can be rebuilt EXACTLY offline. The rag context is copied verbatim;
 the hybrid arm reuses its original raw-memories block verbatim and splices in
-the rebuilt fact lines. Judge fields are stripped so the answer phase re-runs.
+the rebuilt fact lines. EVERY arm's judge fields are stripped (comparator arms
+included) so the answer phase re-runs the whole row, never a mix of fresh and
+carried-over verdicts.
 
     python evals/rebuild_contexts.py                  # s/qwen-27b diag -> diag-knobs
     python evals/rebuild_contexts.py --top-k 24 --min-score 0.1
@@ -32,11 +34,26 @@ os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 from longmemeval_bench import (  # noqa: E402
-    ARMS, CORTEX_MIN_SCORE, CORTEX_TOP_K, bank_dir, load_rows, out_file,
+    CORTEX_MIN_SCORE, CORTEX_TOP_K, bank_dir, load_rows, out_file,
     rewrite_rows,
 )
+from replicate import is_judge_field  # noqa: E402
 
 _HYBRID_SPLIT = "\n\nRelevant memories:\n"
+
+
+def strip_verdicts(row: dict) -> dict:
+    """Clear EVERY arm's verdict in place so the answer phase re-runs.
+
+    Not just the canonical three: a rebuilt row that kept a comparator
+    arm's verdict would carry a stale judgement beside freshly rebuilt
+    contexts, and an interrupted answer phase would then leave a file
+    whose arms are judged over different row sets — which leak_check.py,
+    unlike report(), does not filter out (2026-09-01 review).
+    """
+    for key in [k for k in row if is_judge_field(k)]:
+        row.pop(key)
+    return row
 
 
 def rebuild_fact_lines(bank: dict, emb, top_k: int, min_score: float,
@@ -183,9 +200,7 @@ def main() -> int:
         row["contexts"]["cortex"] = "\n".join(fact_lines)
         row["contexts"]["hybrid"] = ("Known facts:\n" + "\n".join(fact_lines)
                                      + _HYBRID_SPLIT + raw_block)
-        for arm in ARMS:                 # strip verdicts -> answer phase re-runs
-            for field in ("response", "correct", "context_tokens"):
-                row.pop(f"{arm}_{field}", None)
+        strip_verdicts(row)              # every arm -> answer phase re-runs
         out_rows.append(row)
 
     rewrite_rows(dst, out_rows)

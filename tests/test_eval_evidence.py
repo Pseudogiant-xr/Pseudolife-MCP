@@ -2153,6 +2153,35 @@ CLAIMS.append(Claim(
     needle="over only the 190 rows", artifacts=(BEAM38_LEAKCHECK,),
     value=lambda d: d["arms"]["rag"]["n_testable"], stated=190, places=0))
 
+# The same check over the committed LongMemEval ceiling-e2e run
+# (2026-09-01). Its recomputed rag mean is pinned against the e2e table's
+# own 0.859 above: two independent readings of one artifact, so a drift in
+# either goes red.
+LME_E2E_LEAKCHECK = (RESULTS
+                     + "longmemeval-ku-oracle-qwen-27b-ceiling-e2e"
+                     + ".leakcheck.json")
+for _cid, _needle, _val, _stated, _places in [
+    ("lme-leakcheck-leaked", "the leak check finds **0 leaked rows**",
+     lambda d: d["n_leaked"], 0, 0),
+    ("lme-leakcheck-rows", "(78 knowledge-update\nquestions)",
+     lambda d: d["n_rows"], 78, 0),
+    ("lme-leakcheck-trivial-gold", "its 27 untestable\nrows are **all `trivial_gold`**",
+     lambda d: d["untestable_reasons"]["trivial_gold"], 27, 0),
+    ("lme-leakcheck-no-gold-class-absent",
+     "there is no `no_gold` class here",
+     lambda d: d["untestable_reasons"].get("no_gold", 0), 0, 0),
+    ("lme-leakcheck-rag", "(rag 0.859,\nhybrid 0.8333, cortex 0.6667)",
+     lambda d: d["arms"]["rag"]["all"], 0.859, 3),
+    ("lme-leakcheck-hybrid", "(rag 0.859,\nhybrid 0.8333, cortex 0.6667)",
+     lambda d: d["arms"]["hybrid"]["all"], 0.8333, 4),
+    ("lme-leakcheck-cortex", "(rag 0.859,\nhybrid 0.8333, cortex 0.6667)",
+     lambda d: d["arms"]["cortex"]["all"], 0.6667, 4),
+]:
+    CLAIMS.append(Claim(
+        id=_cid, doc=EVALS_README, needle=_needle,
+        artifacts=(LME_E2E_LEAKCHECK,), value=_val, stated=_stated,
+        places=_places))
+
 # The BEAM findings table also quotes three RANGES that live in a verdict
 # file as strings, not floats — the Claim machinery only compares numbers,
 # so they get their own check rather than going unguarded.

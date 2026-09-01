@@ -108,6 +108,62 @@ def test_aggregate_math():
             statistics.stdev([1.0, 0.5]))
 
 
+def _with_arm(row: dict, arm: str, correct: bool = True) -> dict:
+    row = dict(row)
+    row["contexts"] = {**row["contexts"], arm: "x"}
+    row[f"{arm}_response"] = "resp"
+    row[f"{arm}_correct"] = correct
+    row[f"{arm}_context_tokens"] = 10
+    return row
+
+
+def test_aggregate_reports_comparator_arms_found_in_the_rows():
+    """A run with --refind/--nomem must not aggregate to a table that
+    silently omits them — the numbers would look like the arms never ran."""
+    r1 = [_with_arm(_with_arm(_row(f"q{i}"), "refind"), "nomem", correct=False)
+          for i in range(4)]
+    agg = replicate.aggregate({"arm1": r1})
+    assert agg["arms"]["refind"]["accuracies"] == [1.0]
+    assert agg["arms"]["nomem"]["accuracies"] == [0.0]
+    # canonical arms keep their order and come first
+    assert list(agg["arms"])[:4] == ["rag", "cortex", "hybrid", "cascade"]
+
+
+def test_aggregate_is_unchanged_for_legacy_three_arm_rows():
+    agg = replicate.aggregate({"arm1": [_row("q0"), _row("q1")]})
+    assert list(agg["arms"]) == ["rag", "cortex", "hybrid", "cascade"]
+
+
+def test_strip_judged_strips_every_arms_verdict_not_just_the_canonical_three():
+    """A stripped replicate must carry NO verdicts: leaving a comparator
+    arm's judged fields behind would ship a stale verdict beside freshly
+    answered ones."""
+    stripped = replicate.strip_judged([_with_arm(_row("q1"), "refind")])[0]
+    assert "refind_correct" not in stripped
+    assert "refind_response" not in stripped
+    assert "refind_context_tokens" not in stripped
+    assert stripped["contexts"]["refind"] == "x"      # the context stays
+
+
+def test_gate_verdict_names_a_baseline_arm_the_run_does_not_carry():
+    """A baseline established from a run WITH comparator arms records
+    them; a later gate-check on a three-arm slice must fail with a
+    readable message, not a bare KeyError that reads like a regression."""
+    baseline = {"arms": {"rag": {"mean": 0.5, "margin": 0.03},
+                         "refind": {"mean": 0.4, "margin": 0.03}}}
+    agg = {"arms": {"rag": {"mean": 0.6}}}
+    failures = replicate.gate_verdict(agg, baseline)
+    assert len(failures) == 1
+    assert "refind" in failures[0] and "re-establish" in failures[0]
+
+
+def test_judged_arms_lists_what_a_row_can_be_compared_on():
+    assert replicate.judged_arms([_with_arm(_row("q0"), "refind")]) == (
+        "rag", "cortex", "hybrid", "cascade", "refind")
+    assert replicate.judged_arms([_row("q0")]) == (
+        "rag", "cortex", "hybrid", "cascade")
+
+
 def test_aggregate_skips_unjudged_replicate():
     r1 = [_row("q0"), _row("q1")]
     pending = [_row("q0", judged=False), _row("q1", judged=False)]
@@ -298,6 +354,34 @@ def test_cli_compare_persists_result_to_out(tmp_path):
     assert saved["a"] == "e4b-ft/a" and saved["b"] == "e4b-ft/b"
     assert "delta" in saved and "p_value" in saved
     assert saved["n_questions"] == 3
+
+
+def test_cli_compare_works_on_a_comparator_arm(tmp_path):
+    """refind-vs-rag is the comparison the ReFind arm exists to make, so
+    `compare` has to accept an arm outside the canonical three."""
+    for tag, correct in (("a", True), ("b", False)):
+        for t in (tag, f"{tag}-r2"):
+            _write_jsonl(
+                replicate.result_file("oracle", "e4b-ft", t, tmp_path),
+                [_with_arm(_row(f"q{i}"), "refind", correct=correct)
+                 for i in range(3)])
+    out = tmp_path / "refind.compare.json"
+    rc = replicate.main(["compare", "--extractor", "e4b-ft", "--tag", "a",
+                         "--b-tag", "b", "--arm", "refind",
+                         "--out", str(out), "--results-dir", str(tmp_path)])
+    assert rc == 0
+    saved = json.loads(out.read_text(encoding="utf-8"))
+    assert saved["arm"] == "refind" and saved["delta"] == 1.0
+
+
+def test_cli_compare_names_the_available_arms_when_one_is_missing(tmp_path):
+    _seed_two_judged(tmp_path, "a")
+    _seed_two_judged(tmp_path, "b", correct=False)
+    with pytest.raises(SystemExit) as e:
+        replicate.main(["compare", "--extractor", "e4b-ft", "--tag", "a",
+                        "--b-tag", "b", "--arm", "refind",
+                        "--results-dir", str(tmp_path)])
+    assert "refind" in str(e.value) and "cascade" in str(e.value)
 
 
 def test_cli_compare_records_its_own_reproducibility_knobs(tmp_path):

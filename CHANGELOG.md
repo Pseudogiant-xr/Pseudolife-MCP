@@ -41,12 +41,37 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     declared, not measured.
   - `--nomem` (MemTrapBench,
     [arXiv 2608.20202](https://arxiv.org/abs/2608.20202)) answers from the
-    question alone under the same task framing — same completeness
-    instruction, same exact abstention string, context clauses removed
-    rather than emptied. All five frameworks that paper tested scored
+    question alone under the same task framing, with the context clauses
+    removed rather than emptied. Its prompt is built PER HARNESS from that
+    harness's own answer-length policy: BEAM's rubric judge scores
+    multi-part answers and its answerer is told to answer completely,
+    while LongMemEval's judge grades on containment and caps answers at
+    one sentence. A single shared prompt would have left the arm verbose
+    in the harness whose judge rewards verbosity — more shots at
+    containing the gold than the arms it exists to bound, inflating the
+    memory-off floor in the one direction that matters.
+    All five frameworks that paper tested scored
     *below* their no-memory arm on trap tasks; if memory-on does not beat
     memory-off, the win is imaginary, and a harness that never asks
     cannot tell.
+- **Both arms are wired into the LongMemEval harness too**
+  (`longmemeval_bench.py --refind --nomem`), sharing ONE implementation
+  with the BEAM adapter (`serve_comparator_arms`) so the two harnesses
+  cannot drift into serving them differently. LongMemEval splits
+  extraction from answering, so both contexts are persisted like every
+  other arm: `--phase extract` builds them once and `--phase answer` (or
+  a later `rebuild_contexts.py` re-answer) replays them without re-paying
+  extraction. The ReFind archive is built from the same haystack turns
+  the bank ingests, in the same order and the same stored text — pinned
+  turn-for-turn against the ingest path, since both format the haystack
+  independently. The memory arms' answer prompt is reproduced byte for
+  byte (the regression gate re-answers pinned contexts with it) and the
+  no-memory arm keeps the question-date prefix so the framing stays
+  shared. `replicate.py` now reads the arms off the rows rather than a
+  fixed tuple: `agg` reports comparator arms instead of silently omitting
+  them, `compare --arm refind` works and names the available arms when it
+  does not, and `strip_judged` clears EVERY arm's verdict rather than
+  leaving a stale comparator verdict beside freshly answered ones.
 - **Gold-answer leak check (`evals/leak_check.py`).** After the
   [SR-TTT retraction](https://arxiv.org/abs/2603.06642) — where the gold
   answer was already in the injected context, so the reported win measured
@@ -61,11 +86,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   testable-only mean beside the leak-free one (untestable rows are not
   leaked, so they would otherwise ride along inside it), and a
   context-free arm that was served a context is flagged too.
-  First run, committed with the claim: over the 2026-08-21 BEAM artifact,
-  0 of 400 rows leak, untestable splits 200 no-gold / 10 trivial-gold
-  (five of BEAM's ten question types are rubric-judged and carry no gold
-  string, so the check cannot speak to half of it and says so), and the
-  recomputed arm means reproduce that run's committed summary exactly.
+  First runs, committed with their claims. Over the 2026-08-21 BEAM
+  artifact: 0 of 400 rows leak, untestable splits 200 no-gold / 10
+  trivial-gold (five of BEAM's ten question types are rubric-judged and
+  carry no gold string, so the check cannot speak to half of it and says
+  so). Over the committed LongMemEval `ceiling-e2e` run: 0 of 78 leak,
+  and all 27 untestable rows are trivial-gold — LongMemEval always has a
+  gold string, so its blind spot is short numeric/yes-no answers rather
+  than missing ones. Both recomputations reproduce their run's published
+  arm means exactly, which is what makes the leak-free reads trustworthy.
 
 ### Changed (2026-09-01 — daemon maintenance passes get named pauses and lose their biggest one)
 - **Slow service-lock holds and waits now name themselves in the log.** The

@@ -118,7 +118,9 @@ def answer_call(arm: str, question: str, ctx: str) -> tuple[str, str]:
     clauses entirely — not an "(empty)" block, which is itself a framing
     the other arms do not see (see nomem_arm.py)."""
     if arm == "nomem":
-        return nomem_arm.NOMEM_ANSWER_SYSTEM, nomem_arm.nomem_prompt(question)
+        # This harness's length policy (rubric judge, multi-part answers).
+        return (nomem_arm.nomem_system(nomem_arm.LENGTH_COMPLETE),
+                nomem_arm.nomem_prompt(question))
     return _BEAM_ANSWER_SYSTEM, (f"Question: {question}\n\n"
                                  f"Memory context:\n{ctx or '(empty)'}")
 
@@ -135,22 +137,13 @@ def serve_contexts(svc, question: str, arms: tuple[str, ...], *,
     (leak_check.py checks exactly that)."""
     contexts = build_contexts(svc, question, with_parts=True)
     parts = contexts.pop("parts")
-    trace = None
-    if "refind" in arms:
-        if archive is None:
-            raise SystemExit("the refind arm needs an archive — "
-                             "archive_from_beam_turns(turns) was not built")
-        kwargs = dict(refind_kwargs or {})
-        if kwargs.get("top_k") is None:
-            # Budget-matched to the rag control, read HERE rather than at
-            # flag-parse time — the same call-time contract HYBRID_TOP_K
-            # carries, so --rag-top-k widens both arms together however
-            # the run() preamble is later reordered.
-            kwargs["top_k"] = lme.RAG_TOP_K
-        contexts["refind"], trace = refind_arm.refind_search(
-            archive, question, chat=chat or _chat, **kwargs)
-    if "nomem" in arms:
-        contexts["nomem"] = ""
+    # One implementation, both harnesses (lme.serve_comparator_arms):
+    # budget matching, the empty no-memory context and the missing-archive
+    # guard are decided in exactly one place, so BEAM and LongMemEval
+    # cannot drift into serving these arms differently.
+    trace = lme.serve_comparator_arms(
+        contexts, question, archive=archive, refind="refind" in arms,
+        nomem="nomem" in arms, refind_kwargs=refind_kwargs, chat=chat)
     return contexts, parts, trace
 
 

@@ -499,7 +499,9 @@ def test_answer_call_for_nomem_carries_no_context():
     and nothing else — that is the whole control."""
     from nomem_arm import NOMEM_ANSWER_SYSTEM
     system, prompt = beam_adapter.answer_call("nomem", "Where?", "ignored ctx")
-    assert system is NOMEM_ANSWER_SYSTEM
+    # built with THIS harness's length policy — equal to the module
+    # default, which is the BEAM-shaped one
+    assert system == NOMEM_ANSWER_SYSTEM
     assert "ignored ctx" not in prompt and "Memory context" not in prompt
     sys_m, prompt_m = beam_adapter.answer_call("rag", "Where?", "some ctx")
     assert sys_m is beam_adapter._BEAM_ANSWER_SYSTEM
