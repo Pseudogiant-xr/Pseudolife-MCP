@@ -57,12 +57,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     contract rather than a surprise. `derived_flagged`, named once at the
     moment of correction, is the half that does not evaporate.
   - **Set-valued slots carry the flag too.** The grouped set payload has no
-    scalar record behind it, so it had neither `source_entries` nor a
-    slot-level confirmation stamp and could never be flagged — while
-    `slots_for_entries` is kind-agnostic and named set slots in
-    `derived_flagged` regardless. Both the lookup and the search surface now
-    resolve the slot's traces (the cross-index is slot-keyed, so one lookup
-    answers for the whole set) against the newest member's `last_confirmed`.
+    scalar record behind it, so it carried no `source_entries` and could
+    never be flagged — while `slots_for_entries` is kind-agnostic and named
+    set slots in `derived_flagged` regardless (the lookup payload also had
+    no confirmation stamp; the search entry has carried `last_confirmed`
+    since the Task-6 review). Both surfaces now resolve the slot's traces —
+    the cross-index is slot-keyed, so one lookup answers for the whole set —
+    against the newest member's `last_confirmed`. Bluntly, and stated in the
+    docstring: adding a member also stamps the slot, so an unrelated add
+    silences the caution for members nobody re-checked. A set slot is one
+    served answer and a per-member flag on a grouped payload has nowhere to
+    render; `memory_recall`, where members ARE served individually, matches
+    per member instead.
   - **`memory_recall` is annotated as well.** It serves canonical facts
     through the graph projection rather than the cortex block, so the same
     fact read as cautioned via `memory_search` and clean via `memory_recall`.
@@ -71,7 +77,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     down into `graph_neighborhood`, which also backs the Console's Atlas and
     whole-graph views where facts label a node rather than answer a
     question. The entity dossier stays unannotated by the same reasoning,
-    stated in its docstring.
+    stated in its docstring. Facts are matched back to their slot on
+    `(entity, attribute, value)`: the graph and the cortex fold different
+    separator classes — `norm_name` folds `:`, `_norm_key` folds `-` and
+    leaves `:` alone — so `host:port` and `host-port` are two cortex slots
+    hanging off ONE graph node, and matching on entity and attribute alone
+    annotated both against whichever slot won the tie.
   - **Verification lookups do not pay for it.** `cortex_lookup(track=False)`
     already declares a lookup a verification rather than an answer; the
     dream rollback makes one per journal row and reads only `value`, so the
@@ -80,12 +91,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     `derived_flagged_truncated` / `derived_flagged_total` alongside — one
     verbose memory can seed many slots and the whole list lands inline in an
     MCP response.
-  - **Downstream surfaces.** The Cortex Console's search view renders the
-    flag as a `re-verify` badge carrying its reason — it is the one surface
-    where a human acts on the caution, and it was receiving the field and
-    dropping it. The LME and BEAM bank dumps pop `re_verify` /
-    `re_verify_reason` beside `source_entries`, so regenerated bank
-    artifacts do not churn on a read-time key the offline replay never uses.
+  - **`derived_flagged` reports the CURRENT slot vocabulary.** It took
+    display names from every version of every slot, oldest wins, so a slot
+    written as "Payments DB / Host" and re-asserted as "payments-db / host"
+    came back under a name the reader can no longer look up. Current records
+    now supply the naming. Trace rows also outlive the fact they formed, so
+    each row carries a new `has_current_value` — a slot with no current
+    value is still blast radius worth seeing, just not a fact to go
+    re-check — and the list is ordered live-slots-first so the cap keeps the
+    rows a reader can act on.
+  - **Downstream surfaces.** All three Cortex Console views that render
+    canonical facts — the search block, the Cortex view and Recall — now
+    show a shared `re-verify` badge carrying its reason. All three receive
+    the flag (Recall only because of this change), and a caution that shows
+    on one fact list and not the next is worse than none. The LME and BEAM
+    bank dumps pop `re_verify` / `re_verify_reason` beside `source_entries`,
+    so regenerated bank artifacts do not churn on a read-time key the
+    offline replay never uses.
   - **The durable column is the single authority.** An earlier draft also
     scanned the live band entries, because `consolidate` stamped its marks
     in RAM without writing them through. The `Fixed` entry below closed

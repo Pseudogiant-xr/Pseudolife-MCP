@@ -488,6 +488,34 @@ def test_recall_facts_carry_the_flag(svc):
     assert "source_entries" not in flagged[0]   # annotation only, no bulk
 
 
+def test_recall_does_not_confuse_slots_that_share_a_graph_node(svc):
+    """The graph and the cortex normalize names differently — ``graph``
+    folds ``:`` and ``\\`` to a separator, ``cortex._norm_key`` folds ``-``
+    and does not touch ``:`` — so ``host:port`` and ``host-port`` are TWO
+    cortex slots under ONE graph node, and ``graph_neighborhood`` hangs both
+    slots' facts on that single node. Resolving a recalled fact by entity
+    and attribute alone therefore annotates both against whichever slot won
+    the tie, which either misses a real correction or reports one from the
+    wrong slot's evidence."""
+    svc.graph_relate("host-port", "runs-on", "prod")
+    svc.cortex_write("host:port", "role", "colon-slot", support="agent")
+    svc.cortex_write("host-port", "role", "hyphen-slot", support="agent")
+    svc.store("host-port role notes", source="pseudolife")
+    eid = _entry(svc, "host-port role evidence")
+    # Cited by the HYPHEN slot only.
+    svc._storage.add_trace("host-port", "role", eid, 1234.0)
+    svc._storage.conn.commit()
+    svc._storage.update_entry(eid, superseded_at=_time.time() + 60,
+                              superseded_by_text="corrected")
+
+    facts = {f["value"]: f
+             for e in svc.recall("host-port role")["entities"]
+             for f in e["facts"]}
+    assert set(facts) >= {"colon-slot", "hyphen-slot"}, facts
+    assert facts["hyphen-slot"].get("re_verify") is True
+    assert "re_verify" not in facts["colon-slot"]
+
+
 # ── derived_flagged is a bounded, current-vocabulary report ───────────────
 
 def test_derived_flagged_is_capped_with_a_truncation_marker(svc):
@@ -554,12 +582,23 @@ def test_bank_dumps_drop_the_read_time_annotation(tmp_path):
     assert "re_verify" not in facts[0] and "re_verify_reason" not in facts[0]
 
 
-def test_the_console_renders_the_flag_it_is_served(tmp_path):
-    """The Console's search view receives raw cortex entries. It is the one
-    surface where a HUMAN acts on the caution, so the flag is rendered rather
-    than passed through unread."""
+def test_the_console_renders_the_flag_on_every_fact_view():
+    """Three Console views render canonical facts and all three receive the
+    flag: the search block (raw cortex entries), the Cortex view
+    (``cortex_dump``, which annotates), and Recall (annotated by this
+    change). A caution that shows on one fact list and not the next is worse
+    than none, so one shared badge serves all three.
+
+    Asserted on the badge helper and its CALL SITES, not on the string
+    ``re_verify`` — that appears in prose comments too, so a grep for it
+    would stay green with the rendering deleted."""
     from pathlib import Path
-    src = (Path(__file__).resolve().parents[1] / "pseudolife_memory" / "web"
-           / "static" / "js" / "views" / "stream.js").read_text(encoding="utf-8")
-    assert "re_verify" in src
-    assert "re_verify_reason" in src
+    js = (Path(__file__).resolve().parents[1] / "pseudolife_memory" / "web"
+          / "static" / "js")
+    shared = (js / "components.js").read_text(encoding="utf-8")
+    assert "export function reVerifyBadge" in shared
+    assert "f.re_verify" in shared and "f.re_verify_reason" in shared
+    for view in ("stream.js", "cortex.js", "recall.js"):
+        src = (js / "views" / view).read_text(encoding="utf-8")
+        assert "reVerifyBadge" in src.split("import", 1)[-1], view
+        assert "reVerifyBadge(f)" in src, view

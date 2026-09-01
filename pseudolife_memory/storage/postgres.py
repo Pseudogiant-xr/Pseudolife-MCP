@@ -1803,8 +1803,14 @@ class PostgresStorage:
         nodes at once, so the per-slot form would put an unbounded query
         count on a single call. Keys are the normalized ``(entity,
         attribute)`` pairs, unnested into a join rather than an ``IN`` list
-        of tuples so one plan serves any batch size."""
-        keys = [(str(e), str(a)) for e, a in (slot_keys or [])]
+        of tuples so one plan serves any batch size.
+
+        Input keys are de-duplicated first: a repeated pair would join N×M
+        and hand the caller the same ``entry_id`` several times, which for
+        a caller that COUNTS the hits (the ``re_verify`` reason names how
+        many source memories moved) is a wrong answer rather than a slow
+        one."""
+        keys = list(dict.fromkeys((str(e), str(a)) for e, a in (slot_keys or [])))
         if not keys:
             return {}
         out: dict[tuple[str, str], list[int]] = {}

@@ -284,10 +284,10 @@ _CURATION_STORES = ("lesson", "world")
 # memory can seed many slots, so the report is unbounded by construction and
 # lands whole in an MCP response. 50 is a review-batch bound, not a measured
 # one: a correction whose blast radius runs past it is a case for
-# ``memory_derived_from`` rather than a longer inline list, and
-# ``MemoryService.derived_from_entries`` (uncapped, no MCP surface) rather
-# than a longer inline list, and ``derived_flagged_truncated`` says when that
-# happened.
+# ``MemoryService.derived_from_entries``, the uncapped service-level form
+# (no MCP surface), and ``derived_flagged_truncated`` says when that
+# happened. The list is ordered live-slots-first so the cap keeps the rows a
+# reader can actually act on.
 DERIVED_FLAGGED_CAP = 50
 
 
@@ -2245,13 +2245,16 @@ class MemoryService(DreamOps):
         closed that: all three entry-level supersession sites —
         :meth:`supersede`, ``cms.store``'s contradiction decay, and
         :meth:`consolidate` — now write through inside the same locked call
-        that sets the mark, so no window exists in which RAM and the column
-        disagree. The scan was therefore paying an O(bank) pass on every
-        annotated read to cover a state no live path can produce, and it
-        went. The consequence is recorded, not hidden: a future site that
-        marks in RAM without writing through is a known miss for this flag,
-        pinned by
-        ``test_a_mark_that_never_reached_postgres_does_not_flag``.
+        that sets the mark, so normal operation opens no window in which
+        RAM and the column disagree. The scan was therefore paying an
+        O(bank) pass on every annotated read to cover a state no live path
+        produces, and it went. The consequence is recorded, not hidden:
+        anything that leaves a mark in RAM only is a known miss for this
+        flag — a future site that forgets the write-through, all three
+        existing loops' ``if e.db_id is not None`` guard if an entry could
+        ever reach them unpersisted, and a write-through that raises after
+        the marks are set (loud, but the RAM marks are not rolled back).
+        Pinned by ``test_a_mark_that_never_reached_postgres_does_not_flag``.
 
         No cached index — the same no-stored-state rule as
         :meth:`_cortex_change_index`. Caller holds the lock."""
@@ -2329,19 +2332,26 @@ class MemoryService(DreamOps):
         """Carry the flag onto a set-valued slot's payload.
 
         A set slot is served as ONE grouped dict with no scalar record
-        behind it, so it has neither the ``source_entries`` the scalar path
-        fetches nor a slot-level confirmation stamp — which meant a set slot
-        could never carry ``re_verify``, while ``slots_for_entries`` (which
-        is kind-agnostic) happily named set slots in ``derived_flagged`` and
+        behind it, so this lookup payload carried neither the
+        ``source_entries`` the scalar path fetches nor a confirmation stamp
+        (``cortex_search``'s grouped entry has carried ``last_confirmed``
+        since the Task-6 review; it lacked only the traces). Either way no
+        set slot could carry ``re_verify``, while ``slots_for_entries``
+        (kind-agnostic) named set slots in ``derived_flagged`` and
         ``memory_fact_get`` promised the flag without qualification.
 
         The cross-index is keyed on the SLOT, not the member, so one
         ``traces_for_slot`` answers for the whole set. The slot's
-        confirmation stamp is the newest member's: a set is re-verified
-        member by member, and the flag has to clear once the reader has
-        touched it — the same clearability the scalar path gets from
-        ``last_confirmed``. Only the flag keys are merged out, so the set
-        payload does not otherwise change shape. Caller holds the lock."""
+        confirmation stamp is the newest member's, which makes the flag
+        clearable the way the scalar path's ``last_confirmed`` does — but
+        bluntly: ADDING a member also stamps the slot, so an unrelated add
+        silences the caution for members nobody re-checked. Accepted rather
+        than keyed to confirmations only, because a set slot is a single
+        served answer and a per-member flag on a grouped payload has
+        nowhere to render. ``_annotate_recalled_facts``, where members ARE
+        served individually, matches per member instead. Only the flag keys
+        are merged out, so the set payload does not otherwise change shape.
+        Caller holds the lock."""
         from pseudolife_memory.memory.cortex import _norm_key
         probe = {
             "source_entries": self._storage.traces_for_slot(
@@ -2375,7 +2385,14 @@ class MemoryService(DreamOps):
         slot-keyed, rows are never deleted, and a slot can end up with no
         current value at all), so slots are MARKED with
         ``has_current_value`` rather than filtered: a dead slot is still
-        blast radius worth seeing, it is just not a fact to go re-check."""
+        blast radius worth seeing, it is just not a fact to go re-check.
+
+        Ordered live slots first, then by normalized key. The order is what
+        ``supersede``'s cap slices, and alphabetical order alone would let a
+        correction touching many dead slots spend the whole cap on rows
+        nobody can act on while truncating away the live ones. Note the
+        rows are SORTED on the normalized key but RENDERED with display
+        names, so the result can look unsorted to a reader."""
         ids = [int(i) for i in (entry_ids or []) if i is not None]
         if (not ids or self._storage is None
                 or not self.config.memory.traces.enabled):
@@ -2399,7 +2416,8 @@ class MemoryService(DreamOps):
         return [{"entity": disp.get(k, k)[0], "attribute": disp.get(k, k)[1],
                  "has_current_value": k in live,
                  "source_entry_ids": sorted(set(src))}
-                for k, src in sorted(by_slot.items())]
+                for k, src in sorted(by_slot.items(),
+                                     key=lambda kv: (kv[0] not in live, kv[0]))]
 
     def derived_from_entries(self, entry_ids) -> dict[str, Any]:
         """What the dream derived FROM these source memories — the retract
@@ -2613,6 +2631,9 @@ class MemoryService(DreamOps):
                     # above already pays, and without it the grouped entry is
                     # the one served fact shape that can never carry
                     # ``re_verify`` (the annotation below reads this key).
+                    # Ungated on ``traces.enabled`` to match that branch:
+                    # ``source_entries`` is served provenance in its own
+                    # right, and the knob gates the FLAG, not the display.
                     set_traces = []
                     if self._storage is not None:
                         from pseudolife_memory.memory.cortex import _norm_key
@@ -5733,30 +5754,45 @@ class MemoryService(DreamOps):
         hundreds. Scoping the work to recall keeps it to one batched trace
         query plus one evidence query per call, whatever the graph's size.
 
-        Slots are resolved through the cortex RECORD, not by re-normalizing
-        the display name — the graph keys facts by ``graph.norm_name`` and
-        the cross-index by ``cortex._norm_key``, and going via the record
-        means the two never have to agree. Only the flag keys are written
-        onto the served fact; the ``source_entries`` the traversal needs
-        stay on a probe, since a recalled fact is a label and would double
-        in size carrying them. ``recall`` holds no lock of its own, so this
-        takes it."""
-        if not entity_facts:
+        Facts are matched back to their slot on ``(entity, attribute,
+        VALUE)``, and the value is what makes it sound. The graph normalizes
+        names with ``graph.norm_name`` and the cross-index with
+        ``cortex._norm_key``, and the two fold DIFFERENT separator classes —
+        ``norm_name`` folds ``:``, ``_norm_key`` folds ``-`` and leaves
+        ``:`` alone — so ``host:port`` and ``host-port`` are two distinct
+        cortex slots hanging off ONE graph node, and
+        ``graph_neighborhood`` puts both slots' facts on it. Matching on
+        entity and attribute alone therefore annotates both against
+        whichever slot won the tie: a missed correction on one, a
+        correction from the wrong slot's evidence on the other. The value
+        separates them, and where it does not (two records identical in all
+        three) the slots are interchangeable for this purpose anyway. A set
+        slot's members each match on their own value, so a member is
+        cleared by ITS own re-confirmation rather than the slot's newest.
+
+        Only the flag keys are written onto the served fact; the
+        ``source_entries`` the traversal needs stay on a probe, since a
+        recalled fact is a label and would double in size carrying them.
+
+        Cost: one batched trace query plus one evidence query per call —
+        and one pass over ``current_records()`` with two normalizations per
+        record, which is the same sweep ``graph_neighborhood`` has already
+        made to assemble these facts. ``recall`` holds no lock of its own,
+        so this takes it."""
+        if not entity_facts or not self.config.memory.traces.enabled:
             return
         from pseudolife_memory import graph as G
         from pseudolife_memory.memory.cortex import _norm_key
         with self._lock:
             self._ensure_init()
-            if (self._storage is None or self._cortex is None
-                    or not self.config.memory.traces.enabled):
+            if self._storage is None or self._cortex is None:
                 return
-            # (graph-normalized entity, verbatim attribute) -> slot key +
-            # newest confirmation. A set slot has several current records at
-            # one key; the newest stamp is the slot's, as it is everywhere
-            # else a set is served.
-            resolved: dict[tuple[str, str], tuple[tuple[str, str], float]] = {}
+            # (graph-normalized entity, attribute, value) -> slot key +
+            # confirmation stamp. ``max`` on the stamp only settles records
+            # identical in all three.
+            resolved: dict[tuple[str, str, str], tuple[tuple[str, str], float]] = {}
             for rec in self._cortex.current_records():
-                node_key = (G.norm_name(rec.entity), rec.attribute)
+                node_key = (G.norm_name(rec.entity), rec.attribute, rec.value)
                 seen = rec.last_confirmed or rec.asserted_at
                 prev = resolved.get(node_key)
                 if prev is None or (seen or 0) > (prev[1] or 0):
@@ -5765,8 +5801,9 @@ class MemoryService(DreamOps):
             targets: list[tuple[dict, tuple[str, str], float]] = []
             for entity, facts in entity_facts.items():
                 for fact in facts or []:
-                    hit = resolved.get(
-                        (G.norm_name(entity), fact.get("attribute")))
+                    hit = resolved.get((G.norm_name(entity),
+                                        fact.get("attribute"),
+                                        fact.get("value")))
                     if hit is not None:
                         targets.append((fact, hit[0], hit[1]))
             if not targets:
