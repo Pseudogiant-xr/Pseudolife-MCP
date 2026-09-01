@@ -9,14 +9,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed (2026-09-01 — session hooks stop mistaking a busy daemon for a dead one)
 - **The plugin's SessionStart/SessionEnd hooks retry before declaring the
   daemon down, and the fallback no longer claims the MCP tools are
-  unavailable.** A session starting while the daemon held its service lock
-  for maintenance (the ~10-minute dream-sweep tick — an opus judge pass
-  plus entity-context embedding can stall the hook endpoint for tens of
-  seconds — or the ~1.5s CMS autosave, both measured 2026-09-01 against a
-  1,123-entry bank) hit the single 5s curl attempt, and the hook then told
-  the whole session the `mcp__pseudolife-memory__*` tools were unavailable
-  — falsely, since the MCP transport was fine and steady-state hook
-  latency is ~0.1s. Both hook curls now carry `--retry 1 --retry-delay 1`
+  unavailable.** A session start on 2026-09-01 hit the single 5s curl
+  attempt and the hook then told the whole session the
+  `mcp__pseudolife-memory__*` tools were unavailable — falsely, since the
+  MCP transport was fine and steady-state hook latency is ~0.1s. (The
+  incident was initially attributed to the dream-sweep judging tick;
+  same-day follow-up measurements showed no sweep was running at that
+  moment and the sweep's lock holds total ≤0.43s — the retry still
+  correctly bridges the real short stalls, e.g. the ~1.5s CMS autosave
+  measured against a 1,123-entry bank, and whatever timed out the
+  original attempt.) Both hook curls now carry `--retry 1 --retry-delay 1`
   (plain `--retry` classes a timeout as transient, which is exactly the
   measured failure; `--retry-all-errors` was deliberately rejected — it
   breaks option parsing outright on curl < 7.71, still common on LTS
@@ -32,6 +34,40 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   both sides — that each script's worst-case curl schedule plus spawn
   margin fits its hooks.json timeout, so a future bump on either side
   goes RED instead of silently producing a killed, message-less hook.
+
+### Fixed (2026-09-01 — beam_rejudge: a timed-out judge call can no longer hang the run)
+- **`evals/beam_rejudge.py` now kills the whole process tree on a judge-call
+  timeout** — the same `subprocess.run(..., timeout=...)` gap fixed in
+  `claude_shim.py` and `codex_shim.py`: the timeout kills only the direct
+  child (`claude.cmd` → `cmd.exe` → node on Windows) and reaps it with an
+  unbounded `communicate()`, so a surviving node descendant holding the
+  stdout pipe blocks the reap forever. `CliJudge` is pooled rather than
+  serialized, so a wedged call permanently ate a worker slot and kept the
+  run from ever exiting instead of wedging a lock; the per-call fix is
+  identical — a `Popen`/`communicate` seam with `start_new_session` on
+  POSIX and a tree kill (`os.killpg` / `taskkill /F /T`) before the reap.
+  `evals/beam_reader_sweep.py` builds its answerer and judge from the same
+  `CliJudge`, so its long-generation answer calls — the likelier ones to
+  time out — get the fix for free. No behavior change outside the timeout
+  path. (`evals/beam_rejudge.py`, `tests/test_beam_rejudge.py`.)
+
+### Added (2026-09-01 — extension-schema seams, extracted from the RE Hub pilot)
+- **Extension schemas have a sanctioned pattern, and their markers no longer
+  travel in bank transfers.** A fork adding its own tables records lineage
+  under a namespaced `meta` key ending in `_schema_version` instead of
+  consuming upstream's next integer `schema_version`
+  ([convention](docs/guide/configuration.md#extension-schemas)); the logical
+  export/import now skips any such key exactly like `schema_version` itself,
+  so a marker can never land in a bank whose build lacks the extension
+  (`tests/test_transfer_cli.py` pins it). Extracted and generalized from the
+  RE Hub pilot (PR #226, @blacksheep25), which stays a downstream extension.
+- **`MemoryService._ensure_postgres_storage()` — connect the durable store
+  without loading the embedding model.** Split out of `_ensure_init` so
+  exact/hash-addressed paths that never embed can reach Postgres cheaply as
+  a session's first call; the connection is reused (never rebuilt on a
+  mid-init retry, extending the 2026-08-04 boot-balloon fix), and the
+  `public`-search-path shadow-schema invariant now runs on every connect
+  path rather than only the embedder-backed one.
 
 ### Added (2026-08-31 — fixture dev server announces its demo data)
 - **The Console now shows a "DEMO DATA — fixture server, not a real bank"
